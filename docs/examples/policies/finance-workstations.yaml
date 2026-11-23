@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/jusso-dev/palisade/main/schemas/policy/v1.json
+#
+# Finance workstations: allow one line-of-business suite by publisher,
+# product and minimum version, and keep PowerShell in audit while scripts
+# are reviewed.
+#
+# Quote values that are text but look like other types: versions ("12.0"),
+# and words such as "yes", "no", "on" and "off". Unquoted, the reader
+# rejects them rather than guess what they mean.
+schema_version: "1.0.0"
+policy:
+  id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4f00
+  name: Finance workstations
+  revision: 3
+  mode: enforce
+  settings:
+    script_control_by_kind:
+      powershell: audit
+  rule_sets:
+    - 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4f10
+  metadata:
+    ticket_ref: CHG-1042
+    tags: [env.prod, finance]
+
+rule_sets:
+  - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4f10
+    name: Finance applications
+    kind: allowlist
+    rules:
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4f11
+        name: Example Ledger 12 and later
+        object_types: [executable, library]
+        match:
+          all:
+            - criterion:
+                field: signer.publisher
+                operator: equals
+                values:
+                  - "CN=Example Accounting Pty Ltd, O=Example Accounting Pty Ltd, C=AU"
+            - criterion:
+                field: meta.product_name
+                operator: equals
+                values: [Example Ledger]
+            - criterion:
+                field: meta.product_version
+                operator: version_ge
+                values: ["12.0.0.0"]
+        action: {type: allow}
+        metadata:
+          justification: Core line-of-business application.
+          ticket_ref: CHG-1042

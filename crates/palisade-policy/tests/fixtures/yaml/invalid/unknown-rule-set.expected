@@ -1,0 +1,4 @@
+invalid_name /policy/name 4:9
+unknown_rule_set /policy/rule_sets/0 8:7
+unknown_rule_set /policy/rule_sets/1 9:7
+duplicate_rule_set_ref /policy/rule_sets/1 9:7
