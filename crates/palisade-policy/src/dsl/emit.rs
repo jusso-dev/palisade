@@ -142,6 +142,7 @@ fn write_scalar(text: &mut String, value: &Out) {
 /// Text made only of digits and the characters of numbers, dates and times
 /// (`1.0.0`, `2027-06-30`, `12:30`) is always quoted: the YAML 1.1 type
 /// definitions read some of these as floats, timestamps or base-60 numbers.
+/// So is anything the reader rejects as a possible number, such as `0X1F`.
 fn is_plain_safe(s: &str) -> bool {
     let mut chars = s.chars();
     let Some(first) = chars.next() else {

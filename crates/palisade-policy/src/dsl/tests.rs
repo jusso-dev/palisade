@@ -254,7 +254,8 @@ fn norway_problem_scalars_are_rejected() {
 #[test]
 fn non_json_numbers_are_rejected() {
     for number in [
-        "010", "+1", "0x1f", "0o17", "0b11", "1_000", "1:30", ".5", "1.", "-.inf", ".NaN",
+        "010", "+1", "0x1f", "0o17", "0b11", "1_000", "1:30", ".5", "1.", "-.inf", ".NaN", "0X1F",
+        "0O17", "0B11",
     ] {
         let e = err(&minimal_with(&format!("  description: {number}\n")));
         assert!(
@@ -316,6 +317,26 @@ fn values_are_never_coerced_to_the_field_type() {
 }
 
 #[test]
+fn quote_hint_is_given_only_where_text_is_expected() {
+    for (from, to, hint) in [
+        ("name: Minimal", "name: 12", true),
+        ("mode: audit", "mode: 1", true),
+        ("id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f", "id: 1", true),
+        ("revision: 1", "revision: 1.0", false),
+        ("revision: 1", "revision: true", false),
+        (
+            "mode: audit",
+            "mode: audit\n  settings: {capture_command_line: 1}",
+            false,
+        ),
+        ("mode: audit", "mode: audit\n  metadata: {tags: 1}", false),
+    ] {
+        let e = err(&MINIMAL.replace(from, to));
+        assert_eq!(e.message().contains("quote the value"), hint, "{to}: {e}");
+    }
+}
+
+#[test]
 fn keys_must_be_text() {
     for input in [
         "1: a\n",
@@ -357,6 +378,10 @@ fn control_characters_in_the_text_are_rejected() {
         ("a: b # c\u{85}d: e\n", 1, 9),
         ("a: b # c\u{2028}d: e\n", 1, 9),
         ("a: 'x\u{2029}'\n", 1, 6),
+        // A byte order mark is only allowed as the first character.
+        ("a: \u{feff}x\n", 1, 4),
+        ("\u{feff}\u{feff}a: 1\n", 1, 1),
+        ("a: 1\n...\n\u{feff}--- b\n", 3, 1),
     ] {
         let e = err(input);
         assert_eq!(e.kind(), YamlErrorKind::Syntax, "{input:?}: {e}");
@@ -686,6 +711,8 @@ fn writer_quotes_every_ambiguous_string() {
         "1e3",
         "010",
         "0x1f",
+        "0X1F",
+        "0B1",
         "1_000",
         "1:30",
         ".inf",

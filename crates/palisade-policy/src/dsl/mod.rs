@@ -241,7 +241,9 @@ impl YamlError {
         self.location
     }
 
-    /// The JSON Pointer (RFC 6901) of the value, for model mismatches.
+    /// The JSON Pointer (RFC 6901) of the value, when known: for model
+    /// mismatches inside the document and for `unsupported_schema_version`.
+    /// Errors in the text itself, and a root that is not a map, have none.
     #[must_use]
     pub fn pointer(&self) -> Option<&str> {
         self.pointer.as_deref()

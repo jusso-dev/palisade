@@ -57,12 +57,13 @@ impl DeError {
         if self.location.is_none() {
             self.location = Some(node.location);
             self.pointer = Some(path.pointer());
-            // Plain scalars that are not text were typed by the loader; the
-            // usual fix is to quote them.
+            // Plain scalars that are not text were typed by the loader. When
+            // text was expected, the usual fix is to quote them.
             if !matches!(
                 node.value,
                 Value::Str(_) | Value::Seq(_) | Value::Map(_) | Value::Null
             ) && self.message.starts_with("invalid type")
+                && expects_text(&self.message)
             {
                 self.message
                     .push_str("; quote the value if it is meant to be text");
@@ -78,6 +79,22 @@ impl DeError {
         }
         self
     }
+}
+
+/// Whether a serde "invalid type" message says that text was expected.
+/// Model types that read text say so: `a string`, `a UUIDv7 ...`, a
+/// version, or one of the enum's variant names.
+fn expects_text(message: &str) -> bool {
+    let Some((_, expected)) = message.split_once(", expected ") else {
+        return false;
+    };
+    !(expected.starts_with('u')
+        || expected.starts_with('i')
+        || expected.starts_with("a boolean")
+        || expected.starts_with("a sequence")
+        || expected.starts_with("a map")
+        || expected.starts_with("struct ")
+        || expected.starts_with("a map with"))
 }
 
 impl fmt::Display for DeError {
@@ -290,9 +307,17 @@ impl<'de> de::Deserializer<'de> for KeyDe<'de> {
         visitor.visit_enum(self.key.into_deserializer())
     }
 
+    fn deserialize_newtype_struct<V: Visitor<'de>>(
+        self,
+        _name: &'static str,
+        visitor: V,
+    ) -> Result<V::Value, DeError> {
+        visitor.visit_newtype_struct(self)
+    }
+
     serde::forward_to_deserialize_any! {
         bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
-        bytes byte_buf option unit unit_struct newtype_struct seq tuple
+        bytes byte_buf option unit unit_struct seq tuple
         tuple_struct map struct identifier ignored_any
     }
 }

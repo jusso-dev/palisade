@@ -167,8 +167,9 @@ fn properties(anchor: usize, tagged: bool, at: Location) -> Result<(), YamlError
 
 /// Whether a character may appear unescaped in the text.
 ///
-/// This is the YAML 1.2 printable set (section 5.1) without U+0085,
-/// U+2028 and U+2029. YAML 1.1 readers treat those as line breaks and
+/// This is the YAML 1.2 printable set (section 5.1, which excludes the
+/// byte order mark U+FEFF) without U+0085, U+2028 and U+2029. A byte order
+/// mark at the very start of the input is removed before this check. YAML 1.1 readers treat those as line breaks and
 /// YAML 1.2 readers do not, so in a comment they would hide or reveal the
 /// rest of the line depending on the reader. They can still be written as
 /// escapes in double-quoted strings. The parser stops silently at U+0000,
@@ -176,7 +177,8 @@ fn properties(anchor: usize, tagged: bool, at: Location) -> Result<(), YamlError
 const fn is_allowed(c: char) -> bool {
     matches!(c,
         '\t' | '\n' | '\r' | '\u{20}'..='\u{7e}'
-        | '\u{a0}'..='\u{2027}' | '\u{202a}'..='\u{d7ff}' | '\u{e000}'..='\u{fffd}'
+        | '\u{a0}'..='\u{2027}' | '\u{202a}'..='\u{d7ff}' | '\u{e000}'..='\u{fefe}'
+        | '\u{ff00}'..='\u{fffd}'
         | '\u{10000}'..='\u{10ffff}')
 }
 
@@ -615,8 +617,13 @@ fn is_number_like(text: &str) -> bool {
     if matches!(rest, ".inf" | ".Inf" | ".INF" | ".nan" | ".NaN" | ".NAN") {
         return true;
     }
+    // Some readers also accept upper-case radix prefixes.
     for (prefix, radix) in [("0x", 16), ("0o", 8), ("0b", 2)] {
-        if let Some(digits) = rest.strip_prefix(prefix) {
+        let digits = rest
+            .get(..2)
+            .filter(|p| p.eq_ignore_ascii_case(prefix))
+            .and_then(|_| rest.get(2..));
+        if let Some(digits) = digits {
             if !digits.is_empty() && digits.chars().all(|c| c == '_' || c.is_digit(radix)) {
                 return true;
             }
