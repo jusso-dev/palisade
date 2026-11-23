@@ -248,38 +248,86 @@ pub enum Action {
     Audit {},
 }
 
+/// Reads an [`Action`] key by key, as a derived struct reader does.
+///
+/// The derived reader for an internally tagged enum buffers the whole map
+/// before it looks at the keys. That accepts a sequence (`["deny"]`, read as
+/// its first item), takes the tag by variant index (`type: 1` as `deny`),
+/// and reports an unknown key only after the map is read, without that
+/// key's location. This reader checks each key as it reads it.
 impl<'de> Deserialize<'de> for Action {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        /// The derived reader. On its own it also accepts a sequence and
-        /// reads its first item as the tag (`["deny"]`), so it is only
-        /// given a map.
+        /// The keys an action may have. `type` is the only one for now; #34
+        /// adds options as optional keys.
         #[derive(Deserialize)]
-        #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-        enum Tagged {
-            Allow {},
-            Deny {},
-            Audit {},
+        #[serde(field_identifier, rename_all = "snake_case")]
+        enum Key {
+            Type,
         }
 
-        struct MapOnly;
+        /// The action names. Read only from a string: serde's derived
+        /// identifiers also accept an integer as a variant index.
+        enum Kind {
+            Allow,
+            Deny,
+            Audit,
+        }
 
-        impl<'de> serde::de::Visitor<'de> for MapOnly {
-            type Value = Tagged;
+        impl<'de> Deserialize<'de> for Kind {
+            fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                const NAMES: &[&str] = &["allow", "deny", "audit"];
+                struct Name;
+                impl serde::de::Visitor<'_> for Name {
+                    type Value = Kind;
+                    fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                        f.write_str("one of `allow`, `deny`, `audit`")
+                    }
+                    fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Kind, E> {
+                        match v {
+                            "allow" => Ok(Kind::Allow),
+                            "deny" => Ok(Kind::Deny),
+                            "audit" => Ok(Kind::Audit),
+                            other => Err(E::unknown_variant(other, NAMES)),
+                        }
+                    }
+                }
+                d.deserialize_str(Name)
+            }
+        }
+
+        struct ActionVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for ActionVisitor {
+            type Value = Action;
 
             fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 f.write_str("a map with a `type` key naming the action")
             }
 
-            fn visit_map<A: serde::de::MapAccess<'de>>(self, map: A) -> Result<Tagged, A::Error> {
-                Tagged::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Action, A::Error> {
+                let mut kind = None;
+                while let Some(key) = map.next_key::<Key>()? {
+                    match key {
+                        Key::Type => {
+                            if kind.is_some() {
+                                return Err(serde::de::Error::duplicate_field("type"));
+                            }
+                            kind = Some(map.next_value::<Kind>()?);
+                        }
+                    }
+                }
+                match kind.ok_or_else(|| serde::de::Error::missing_field("type"))? {
+                    Kind::Allow => Ok(Action::Allow {}),
+                    Kind::Deny => Ok(Action::Deny {}),
+                    Kind::Audit => Ok(Action::Audit {}),
+                }
             }
         }
 
-        Ok(match deserializer.deserialize_map(MapOnly)? {
-            Tagged::Allow {} => Self::Allow {},
-            Tagged::Deny {} => Self::Deny {},
-            Tagged::Audit {} => Self::Audit {},
-        })
+        deserializer.deserialize_map(ActionVisitor)
     }
 }
 

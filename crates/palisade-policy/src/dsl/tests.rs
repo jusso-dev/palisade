@@ -398,12 +398,16 @@ fn control_characters_in_the_text_are_rejected() {
         // A byte order mark is only allowed as the first character.
         ("a: \u{feff}x\n", 1, 4),
         ("\u{feff}\u{feff}a: 1\n", 1, 1),
-        ("a: 1\n...\n\u{feff}--- b\n", 3, 1),
     ] {
         let e = err(input);
         assert_eq!(e.kind(), YamlErrorKind::Syntax, "{input:?}: {e}");
         assert_eq!(at(&e), (line, column), "{input:?}: {e}");
     }
+    // A byte order mark before a later document's `---`, after a valid
+    // first document.
+    let e = from_str_all(&format!("{MINIMAL}...\n\u{feff}--- b\n"), &Limits::DEFAULT).unwrap_err();
+    assert_eq!(e.kind(), YamlErrorKind::Syntax, "{e}");
+    assert_eq!(at(&e), (8, 1));
     // Escapes are fine; validation then decides whether the value is allowed.
     let doc = PolicyDocument::from_yaml(&minimal_with("  description: \"a\\u0007b\"\n")).unwrap();
     assert_eq!(doc.policy.description.as_deref(), Some("a\u{7}b"));
@@ -1164,7 +1168,7 @@ fn lookahead_limit_bounds_memory_before_the_node_limit() {
     // With the default limits, a 64 MB YAML flow sequence (32 million
     // items, 8 times the node limit) fails after reading at most
     // `max_lookahead` characters, rather than queueing every token first.
-    let wide = format!("[{}]", vec!["x"; 32_000_000].join(","));
+    let wide = format!("[{}x]", "x,".repeat(31_999_999));
     let started = std::time::Instant::now();
     let e = to_json_value(&wide, &Limits::DEFAULT).unwrap_err();
     assert_eq!(e.kind(), YamlErrorKind::LimitExceeded, "{e}");
@@ -1190,7 +1194,7 @@ fn json_input_is_streamed_with_the_same_rules() {
         serde_json::from_str::<serde_json::Value>(&big).unwrap()
     );
     // The node limit applies while streaming: 32 million items.
-    let wide = format!("[{}]", vec!["1"; 32_000_000].join(","));
+    let wide = format!("[{}1]", "1,".repeat(31_999_999));
     let e = to_json_value(&wide, &Limits::DEFAULT).unwrap_err();
     assert_eq!(e.kind(), YamlErrorKind::LimitExceeded, "{e}");
     assert!(e.message().contains("nodes"), "{e}");
@@ -1244,7 +1248,7 @@ proptest! {
     #[test]
     fn json_reader_and_yaml_parser_agree(doc in arbitrary::document()) {
         for text in [doc.to_json_pretty().unwrap(), serde_json::to_string(&doc).unwrap()] {
-            prop_assert!(parse::is_json(&text));
+            prop_assert!(parse::is_json(&text, Limits::DEFAULT.max_depth));
             prop_assert_eq!(tree(&text, true).unwrap(), tree(&text, false).unwrap());
         }
     }
@@ -1283,4 +1287,207 @@ fn json_value() -> impl Strategy<Value = serde_json::Value> {
                 .prop_map(|m| serde_json::Value::Object(m.into_iter().collect())),
         ]
     })
+}
+
+// Review round 3 (PR #237) regression tests.
+
+#[test]
+fn large_numbers_are_resolved_as_serde_json_resolves_them() {
+    // The JSON view keeps a too-large integer as the nearest float, as
+    // serde_json does, so a schema can inspect it.
+    for (text, expected) in [
+        (
+            "{\"n\":18446744073709551616}",
+            "{\"n\":18446744073709551616}",
+        ),
+        (
+            "{\"n\":-9223372036854775809}",
+            "{\"n\":-9223372036854775809}",
+        ),
+        (
+            "n2: 18446744073709551616\n",
+            "{\"n2\":18446744073709551616}",
+        ),
+    ] {
+        let expected: serde_json::Value = serde_json::from_str(expected).unwrap();
+        assert_eq!(
+            to_json_value(text, &Limits::DEFAULT).unwrap(),
+            expected,
+            "{text}"
+        );
+    }
+    // In-range integers stay exact.
+    let v = to_json_value(
+        "{\"a\":18446744073709551615,\"b\":-9223372036854775808}",
+        &Limits::DEFAULT,
+    )
+    .unwrap();
+    assert_eq!(v["a"].as_u64(), Some(u64::MAX));
+    assert_eq!(v["b"].as_i64(), Some(i64::MIN));
+    // A number too large even for a float is an error, as in serde_json.
+    assert!(serde_json::from_str::<serde_json::Value>("{\"n\":1e400}").is_err());
+    let e = to_json_value("{\"n\":1e400}", &Limits::DEFAULT).unwrap_err();
+    assert_eq!(e.pointer(), Some("/n"));
+    // An integer field still rejects an out-of-range integer, with its path.
+    let e = err(&MINIMAL.replace("revision: 1", "revision: 18446744073709551616"));
+    assert_eq!(e.kind(), YamlErrorKind::Mismatch);
+    assert_eq!(e.pointer(), Some("/policy/revision"));
+    assert!(e.message().contains("expected u64"), "{e}");
+}
+
+#[test]
+fn action_keys_are_checked_where_they_are() {
+    // An unknown key is reported at the key, with its pointer, whether it
+    // comes before or after `type`, in block or flow style.
+    for (action, line, column) in [
+        ("\n          type: deny\n          extra: true", 18, 11),
+        ("\n          extra: true\n          type: deny", 17, 11),
+        ("{type: deny, extra: true}", 16, 30),
+    ] {
+        let e = err(&with_action(action));
+        assert_eq!(e.kind(), YamlErrorKind::Mismatch, "{action}: {e}");
+        assert_eq!(
+            e.pointer(),
+            Some("/rule_sets/0/rules/0/action/extra"),
+            "{action}"
+        );
+        assert_eq!(at(&e), (line, column), "{action}: {e}");
+        assert!(e.message().contains("unknown field `extra`"), "{e}");
+    }
+    // `type` is required, must be one of the three names, and is a name,
+    // not a variant index.
+    let e = err(&with_action("{}"));
+    assert!(e.message().contains("missing field `type`"), "{e}");
+    assert_eq!(e.pointer(), Some("/rule_sets/0/rules/0/action"));
+    for bad in ["{type: 1}", "{type: nope}", "{type: [deny]}"] {
+        let e = err(&with_action(bad));
+        assert_eq!(
+            e.pointer(),
+            Some("/rule_sets/0/rules/0/action/type"),
+            "{bad}: {e}"
+        );
+    }
+    for (name, action) in [
+        ("allow", crate::model::Action::Allow {}),
+        ("deny", crate::model::Action::Deny {}),
+        ("audit", crate::model::Action::Audit {}),
+    ] {
+        let loaded = from_str(&with_action(&format!("{{type: {name}}}"))).unwrap();
+        assert_eq!(loaded.document().rule_sets[0].rules[0].action, action);
+    }
+    // The JSON reader gets the same rules.
+    for bad in [
+        r#"["deny"]"#,
+        r#"{"type":1}"#,
+        r#"{"type":"deny","extra":1}"#,
+        r#"{}"#,
+    ] {
+        assert!(
+            serde_json::from_str::<crate::model::Action>(bad).is_err(),
+            "{bad}"
+        );
+    }
+    let e = serde_json::from_str::<crate::model::Action>(r#"{"type":"deny","type":"allow"}"#)
+        .unwrap_err();
+    assert!(e.to_string().contains("duplicate field `type`"), "{e}");
+}
+
+#[test]
+fn json_probe_respects_the_depth_limit() {
+    let limits = Limits {
+        max_depth: 2,
+        ..Limits::DEFAULT
+    };
+    // Too deep for the limit: not probed as JSON, and the YAML parser
+    // reports the first level over the limit.
+    let deep = format!("{}{}", "[".repeat(100_000), "]".repeat(100_000));
+    assert!(!parse::is_json(&deep, limits.max_depth));
+    let e = to_json_value(&deep, &limits).unwrap_err();
+    assert_eq!(e.kind(), YamlErrorKind::LimitExceeded, "{e}");
+    assert_eq!(at(&e).0, 1);
+    // Just over the limit, the first level too deep is reported.
+    let e = to_json_value("[[[1]]]", &limits).unwrap_err();
+    assert_eq!(e.kind(), YamlErrorKind::LimitExceeded, "{e}");
+    assert_eq!(at(&e), (1, 3));
+    // Brackets inside strings do not count, and escaped quotes do not end
+    // a string.
+    let text = r#"{"a": "[[[[\"[[[[", "b": [1]}"#;
+    assert!(parse::is_json(text, 2));
+    assert_eq!(
+        to_json_value(text, &limits).unwrap(),
+        serde_json::json!({"a": "[[[[\"[[[[", "b": [1]})
+    );
+    assert!(!parse::is_json("[[[1]]]", 2));
+    assert!(parse::is_json("[[1]]", 2));
+}
+
+#[test]
+fn disallowed_characters_are_reported_in_source_order() {
+    // An invalid first document, then a disallowed character later: the
+    // first document's error comes first.
+    for bad in ["\0", "\u{7}", "\u{85}", "\u{feff}"] {
+        let text = format!("a: 1\n---\na: x{bad}y\n");
+        let e = from_str_all(&text, &Limits::DEFAULT).unwrap_err();
+        assert_eq!(
+            e.kind(),
+            YamlErrorKind::MissingSchemaVersion,
+            "{bad:?}: {e}"
+        );
+        assert_eq!(at(&e), (1, 1), "{bad:?}");
+        // The single-document reader reports the second `---` first.
+        let e = err(&text);
+        assert_eq!(
+            e.kind(),
+            YamlErrorKind::MissingSchemaVersion,
+            "{bad:?}: {e}"
+        );
+    }
+    // A valid first document: the character is the first problem.
+    for bad in ["\0", "\u{7}", "\u{85}", "\u{feff}"] {
+        let text = format!("{MINIMAL}---\na: x{bad}y\n");
+        let e = from_str_all(&text, &Limits::DEFAULT).unwrap_err();
+        assert_eq!(e.kind(), YamlErrorKind::Syntax, "{bad:?}: {e}");
+        assert!(e.message().contains("not allowed unescaped"), "{e}");
+        assert_eq!(at(&e), (8, 5), "{bad:?}");
+    }
+    // A character inside the first document is reported even though the
+    // document would also be invalid after it: it comes first in the text.
+    let e = from_str_all("a: x\0y\n---\nb: 1\n", &Limits::DEFAULT).unwrap_err();
+    assert_eq!(e.kind(), YamlErrorKind::Syntax, "{e}");
+    assert_eq!(at(&e), (1, 5));
+    // An error before the character in the same document comes first.
+    let e = from_str_all("a: &x 1\nb: \0\n", &Limits::DEFAULT).unwrap_err();
+    assert_eq!(e.kind(), YamlErrorKind::UnsupportedFeature, "{e}");
+    // The NUL safeguard still holds: nothing after U+0000 is ever accepted.
+    let e = err("schema_version: 1.0.0\0policy: x\n");
+    assert_eq!(e.kind(), YamlErrorKind::Syntax);
+    assert_eq!(at(&e), (1, 22));
+    let valid_then_nul = format!("{MINIMAL}\0");
+    assert!(from_str(&valid_then_nul).is_err());
+    assert!(from_str_all(&valid_then_nul, &Limits::DEFAULT).is_err());
+}
+
+proptest! {
+    #![proptest_config(cases(512))]
+
+    // A disallowed character anywhere makes reading fail, at the earliest
+    // problem: never success, and never a problem after the character.
+    #[test]
+    fn a_disallowed_character_always_fails_at_or_before_it(
+        doc in arbitrary::document(),
+        at_fraction in 0.0f64..1.0,
+        bad in proptest::sample::select(vec!['\0', '\u{7}', '\u{1b}', '\u{85}', '\u{2028}', '\u{feff}']),
+    ) {
+        let yaml = to_string(&doc).unwrap();
+        let text = format!("{yaml}---\n{yaml}");
+        let chars: Vec<char> = text.chars().collect();
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss)]
+        let index = ((chars.len() as f64) * at_fraction) as usize;
+        let mut broken: String = chars[..index].iter().collect();
+        broken.push(bad);
+        broken.extend(&chars[index..]);
+        let bad_at = parse::first_disallowed(&broken).and_then(|e| e.location()).unwrap();
+        let e = from_str_all(&broken, &Limits::DEFAULT).unwrap_err();
+        prop_assert!(e.location().is_some_and(|l| l <= bad_at), "{} after {:?}", e, bad_at);
+    }
 }

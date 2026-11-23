@@ -130,9 +130,15 @@ impl<'de> De<'de, '_> {
             Value::UInt(n) => visitor.visit_u64(*n),
             Value::NegInt(n) => visitor.visit_i64(*n),
             Value::Float(f) => visitor.visit_f64(*f),
-            Value::OutOfRange(text) => Err(de::Error::custom(format_args!(
-                "the number `{text}` is out of range; quote the value if it is meant to be text"
-            ))),
+            // As serde_json does: an integer too large for 64 bits is read
+            // as the nearest float, which an integer field then rejects as
+            // a float, and a number too large for a float is an error.
+            Value::OutOfRange(text) => match text.parse::<f64>() {
+                Ok(f) if f.is_finite() => visitor.visit_f64(f),
+                _ => Err(de::Error::custom(format_args!(
+                    "the number `{text}` is out of range; quote the value if it is meant to be text"
+                ))),
+            },
             Value::Str(s) => visitor.visit_borrowed_str(s),
             Value::Seq(items) => {
                 let mut access = SeqAccess {

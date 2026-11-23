@@ -45,7 +45,9 @@
 //!   that wants text needs text, and the error says to quote the value.
 //! - **No characters outside the YAML 1.2 printable set**, and no raw
 //!   U+0085, U+2028 or U+2029, which YAML 1.1 reads as line breaks. All of
-//!   them can be written as escapes in double-quoted strings.
+//!   them can be written as escapes in double-quoted strings. In a stream,
+//!   a document that ends before such a character is still checked first,
+//!   so errors are reported in source order.
 //! - **Limits** on input size, nesting depth, node count and parser
 //!   lookahead ([`Limits`]), so memory use is bounded by the input size and
 //!   the node count, and stack use by the depth.

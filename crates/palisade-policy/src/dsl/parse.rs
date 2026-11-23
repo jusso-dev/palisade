@@ -30,8 +30,9 @@ pub(crate) enum Value {
     NegInt(i64),
     /// A finite number with a fraction or an exponent.
     Float(f64),
-    /// A JSON number too large for the types above. Kept, so the error is
-    /// reported with the field's path when the value is used.
+    /// A JSON number too large for the types above, as written. It is
+    /// resolved when used, as serde_json resolves it: the nearest float if
+    /// it has one, otherwise an error with the field's path.
     OutOfRange(String),
     Str(String),
     Seq(Vec<Node>),
@@ -96,17 +97,55 @@ pub(crate) fn parse_with(
     // A byte order mark may start the stream (YAML 1.2 section 5.2). The
     // parser would otherwise read it as part of the first key.
     let input = input.strip_prefix('\u{feff}').unwrap_or(input);
-    // The parser stops silently at U+0000, so this must cover the whole
-    // input before parsing starts.
-    check_characters(input)?;
+    // The parser stops silently at U+0000, so it must never see a
+    // disallowed character. If the input has one, the parser is given a copy
+    // with every such character replaced by a space, which keeps every line
+    // and column. The input is still read document by document, so a problem
+    // that comes before the first such character in the source is reported,
+    // and otherwise the character is. Only documents that end before the
+    // character are checked against the model, since the copy is not what
+    // the author wrote.
+    let Some(bad) = first_disallowed(input) else {
+        return parse_clean(
+            input,
+            limits,
+            single,
+            json_fast_path,
+            None,
+            &mut on_document,
+        );
+    };
+    let Some(bad_at) = bad.location else {
+        return Err(bad);
+    };
+    let copy: String = input
+        .chars()
+        .map(|c| if is_allowed(c) { c } else { ' ' })
+        .collect();
+    match parse_clean(&copy, limits, single, false, Some(bad_at), &mut on_document) {
+        Err(e) if e.location.is_some_and(|at| at < bad_at) => Err(e),
+        _ => Err(bad),
+    }
+}
 
+/// [`parse_with`] on text that holds no disallowed character. With
+/// `bad_at`, the text is a copy of an input that had one there, and only
+/// the documents that end before it are handed on.
+fn parse_clean(
+    input: &str,
+    limits: &Limits,
+    single: bool,
+    json_fast_path: bool,
+    bad_at: Option<Location>,
+    on_document: &mut dyn FnMut(Node) -> Result<(), YamlError>,
+) -> Result<(), YamlError> {
     let mut builder = Builder {
         limits,
         stack: Vec::new(),
         roots: Vec::new(),
         nodes: 0,
     };
-    if json_fast_path && is_json(input) {
+    if json_fast_path && bad_at.is_none() && is_json(input, limits.max_depth) {
         json::read(input, &mut builder)?;
         let mut finished = 0usize;
         for root in builder.roots.drain(..) {
@@ -128,6 +167,15 @@ pub(crate) fn parse_with(
     let mut documents = 0usize;
     let mut finished = 0usize;
     let mut last = Location { line: 1, column: 1 };
+    // A finished document and where it ends. It is handed on when the next
+    // document starts or the stream ends, and with `bad_at` only if it ends
+    // before that position.
+    let mut held: Option<Node> = None;
+    let mut held_end = Location { line: 1, column: 1 };
+    let mut hand_on = |held: &mut Option<Node>, end: Location| match held.take() {
+        Some(root) if bad_at.is_none_or(|bad| end <= bad) => on_document(root),
+        _ => Ok(()),
+    };
     loop {
         // The parser may queue many tokens before it returns an event (see
         // `Budgeted`), so the characters it reads for one event are bounded.
@@ -142,6 +190,7 @@ pub(crate) fn parse_with(
         match event {
             Event::StreamEnd => break,
             Event::DocumentStart => {
+                hand_on(&mut held, held_end)?;
                 prefix.check(mark.line())?;
                 documents += 1;
                 if single && documents > 1 {
@@ -152,7 +201,10 @@ pub(crate) fn parse_with(
                     .at(at));
                 }
             }
-            Event::DocumentEnd => prefix.skip_to(mark.line()),
+            Event::DocumentEnd => {
+                held_end = at;
+                prefix.skip_to(mark.line());
+            }
             Event::Nothing | Event::StreamStart => {}
             Event::Alias(_) => {
                 return Err(YamlError::new(
@@ -184,10 +236,12 @@ pub(crate) fn parse_with(
         }
         for root in builder.roots.drain(..) {
             finished += 1;
-            on_document(root)?;
+            held = Some(root);
         }
     }
-    if finished == 0 {
+    hand_on(&mut held, held_end)?;
+    // With `bad_at`, the disallowed character is reported instead.
+    if finished == 0 && bad_at.is_none() {
         return Err(YamlError::new(
             YamlErrorKind::Syntax,
             "the input holds no YAML document; expected a policy document",
@@ -206,16 +260,54 @@ pub(crate) fn parse_with(
 /// every object in a JSON array. Valid JSON is read with a streaming
 /// tokenizer instead, through the same [`Builder`], so the same limits,
 /// duplicate-key and typing rules apply. The check is a full JSON parse
-/// that keeps nothing (`serde_json`'s recursion limit bounds it), so a text
-/// that only starts like JSON goes to the YAML parser as before.
-pub(crate) fn is_json(input: &str) -> bool {
+/// that keeps nothing, so a text that only starts like JSON goes to the
+/// YAML parser as before.
+///
+/// Before that parse, the nesting depth is counted outside strings and
+/// checked against `max_depth`: serde_json's own check of an ignored value
+/// keeps one byte per open collection and does not use its recursion
+/// limit. Too deep an input is left to the YAML parser, which reports it
+/// at the first level over the limit.
+pub(crate) fn is_json(input: &str, max_depth: usize) -> bool {
     matches!(
         input
             .trim_start_matches([' ', '\t', '\n', '\r'])
             .as_bytes()
             .first(),
         Some(b'{' | b'[')
-    ) && serde_json::from_str::<serde::de::IgnoredAny>(input).is_ok()
+    ) && json_depth_within(input, max_depth)
+        && serde_json::from_str::<serde::de::IgnoredAny>(input).is_ok()
+}
+
+/// Whether `[` and `{` outside JSON strings never nest deeper than
+/// `max_depth`. Brackets need not balance; the full parse checks that.
+fn json_depth_within(input: &str, max_depth: usize) -> bool {
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for b in input.bytes() {
+        if in_string {
+            match (escaped, b) {
+                (true, _) => escaped = false,
+                (false, b'\\') => escaped = true,
+                (false, b'"') => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_string = true,
+            b'[' | b'{' => {
+                depth += 1;
+                if depth > max_depth {
+                    return false;
+                }
+            }
+            b']' | b'}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    true
 }
 
 /// Reads a JSON text that is known to be valid, as [`Builder`] events.
@@ -388,7 +480,15 @@ fn location(mark: Marker) -> Location {
 }
 
 fn scan_error(e: &ScanError) -> YamlError {
-    YamlError::new(YamlErrorKind::Syntax, e.info().to_owned()).at(location(*e.marker()))
+    // The scanner's own cap on flow nesting (255 levels) is a limit, not a
+    // syntax error. It can only be reached when [`Limits::max_depth`] is
+    // higher, or before the first event of a deep collection reaches it.
+    let kind = if e.info() == "recursion limit exceeded" {
+        YamlErrorKind::LimitExceeded
+    } else {
+        YamlErrorKind::Syntax
+    };
+    YamlError::new(kind, e.info().to_owned()).at(location(*e.marker()))
 }
 
 /// Anchors and tags are rejected wherever they appear. The error points at
@@ -430,18 +530,19 @@ const fn is_allowed(c: char) -> bool {
         | '\u{10000}'..='\u{10ffff}')
 }
 
-fn check_characters(input: &str) -> Result<(), YamlError> {
-    match input.char_indices().find(|&(_, c)| !is_allowed(c)) {
-        None => Ok(()),
-        Some((index, c)) => Err(YamlError::new(
+/// The error for the first disallowed character, if there is one.
+pub(crate) fn first_disallowed(input: &str) -> Option<YamlError> {
+    let (index, c) = input.char_indices().find(|&(_, c)| !is_allowed(c))?;
+    Some(
+        YamlError::new(
             YamlErrorKind::Syntax,
             format!(
                 "character U+{:04X} is not allowed unescaped; write it as an escape in a double-quoted string",
                 u32::from(c)
             ),
         )
-        .at(location_of(input, index))),
-    }
+        .at(location_of(input, index)),
+    )
 }
 
 /// The line and column of a byte offset, counting line breaks as the
