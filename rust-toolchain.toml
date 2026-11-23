@@ -1,0 +1,7 @@
+# Pinned stable toolchain for development and CI. The MSRV lives in
+# `rust-version` in the root Cargo.toml and is checked by the `msrv` CI job.
+[toolchain]
+channel = "1.100.0"
+profile = "minimal"
+components = ["rustfmt", "clippy", "llvm-tools-preview"]
+targets = ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc", "x86_64-unknown-linux-gnu"]

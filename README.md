@@ -42,6 +42,17 @@
                                          └─────────────────────────────┘
 ```
 
+## Repository layout
+
+The Cargo workspace holds one crate per component under `crates/`, plus `xtask` for repository checks. Each crate's README gives its purpose, allowed dependencies and platform support. Windows-only crates build as stubs on other platforms, so the whole workspace checks and tests anywhere.
+
+```sh
+cargo test --workspace     # toolchain is pinned in rust-toolchain.toml
+cargo xtask help           # repository checks
+```
+
+CI and how to run every check locally: [docs/ci.md](docs/ci.md).
+
 ## Disclaimer
 
 This software is provided as-is for educational purposes, without warranty of any kind. It is not a supported product, comes with no support commitment, and is not intended to replace commercial or enterprise security solutions.

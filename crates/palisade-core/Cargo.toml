@@ -1,0 +1,18 @@
+[package]
+name = "palisade-core"
+description = "Shared Palisade types with no I/O; no_std compatible."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[features]
+default = ["std"]
+# Standard library support. Off for `no_std` users such as the driver.
+std = []
+
+[lints]
+workspace = true

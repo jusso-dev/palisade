@@ -1,0 +1,107 @@
+# Continuous integration
+
+CI is defined in `.github/workflows/`. It runs on **GitHub-hosted runners
+only**. Self-hosted runners, third-party runner services and cloud-managed
+build or pipeline services are permanently prohibited: self-hosted runners on
+a public repository can be taken over by pull requests from forks, and paid
+build services have caused surprise bills. The `runner-guard` job enforces
+this on every PR (see below). If a job cannot run on a hosted runner, it
+becomes a documented local-only step; it is never moved to another runner
+type.
+
+## Workflows
+
+### `ci.yml` (every pull request and every push to `main`)
+
+| Job | Runners | What it runs |
+|---|---|---|
+| `fmt` | ubuntu-latest | `cargo fmt --all --check` |
+| `clippy` | ubuntu-latest, windows-latest | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, then the same for `palisade-core` and `palisade-driver` with `--no-default-features` (the `no_std` build) |
+| `test` | ubuntu-latest, windows-latest, macos-latest | `cargo test --workspace --all-features --locked` |
+| `msrv` | ubuntu-latest | `cargo +1.85.0 check --workspace --all-targets --all-features --locked`, after checking that the version matches `rust-version` in `Cargo.toml` |
+| `docs` | ubuntu-latest | `cargo doc --workspace --no-deps --all-features --locked` with `RUSTDOCFLAGS=-D warnings` |
+| `deps` | ubuntu-latest | `cargo xtask check-deps`, `cargo xtask check-manifests`, `cargo deny --locked check` |
+| `runner-guard` | ubuntu-latest | `cargo xtask check-workflows` |
+| `workflow-lint` | ubuntu-latest | `actionlint` (checksum-verified release) and `zizmor --offline` |
+| `ci-ok` | ubuntu-latest | Passes only if every job above succeeded |
+
+**Branch protection should require the single check `ci-ok`.** It depends on
+every other job and fails if any of them failed, was cancelled or was
+skipped, so new jobs are covered without changing the branch rules.
+
+### `audit.yml` (daily at 03:17 UTC, and on demand)
+
+Runs `cargo deny check advisories` and `cargo audit` against `main`. A new
+advisory can affect `main` without any change here, which is why this is
+scheduled. On failure, a second job opens an issue titled "Scheduled advisory
+audit is failing" with the `area:security` label, or comments on the open
+one. That job is the only place with `issues: write`.
+
+### Dependabot (`.github/dependabot.yml`)
+
+Weekly updates for Cargo dependencies and for the pinned action SHAs, with
+minor and patch bumps grouped into one PR per ecosystem. Dependabot PRs run
+the full CI like any other PR.
+
+## Runner and action policy
+
+`cargo xtask check-workflows` (the `runner-guard` job) checks every workflow
+file against allowlists in `xtask/src/workflows.rs`:
+
+- `runs-on` must be one of `ubuntu-latest`, `ubuntu-24.04`, `windows-latest`,
+  `windows-2025`, `windows-11-arm`, `macos-latest`, `macos-15`. The only
+  expression allowed is `${{ matrix.<key> }}`, and every value of that key
+  must be an allowed label. Matrix keys are matched case-insensitively, as
+  GitHub does, and a matrix or `include:` entry built from an expression
+  fails. Label lists, runner groups, and labels read from inputs or variables
+  fail.
+- Every action is on the allowlist (`actions/checkout`, `Swatinem/rust-cache`,
+  `taiki-e/install-action`) and pinned to a full 40-character commit SHA, with
+  the version in a trailing comment. Container actions fail.
+- No job calls a reusable workflow (`jobs.<id>.uses`), local or remote. None
+  are needed yet.
+- The workflow has a top-level `permissions:` block that is read-only:
+  `read-all`, `{}`, or scopes set only to `read` or `none`. Jobs that need
+  more ask for it themselves.
+- `pull_request_target` is never used, so fork PRs never run with secrets or
+  a write token.
+- `actions/checkout` sets `persist-credentials: false`.
+
+Because the check allowlists runners and actions rather than blocklisting
+services, an unapproved build service fails by default. Adding a runner label
+or an action is a reviewed change to `xtask/src/workflows.rs`.
+
+Other hardening:
+
+- Rust caches are written only from `main` (`save-if`), so PR builds,
+  including forks, cannot poison them.
+- Superseded PR runs are cancelled; pushes to `main` always finish.
+- Every job has a `timeout-minutes` (30, or 60 for the test matrix).
+- CI sets `CARGO_TERM_COLOR=always`, `CARGO_INCREMENTAL=0` and
+  `RUST_BACKTRACE=1`.
+- Every Cargo command uses `--locked`, so CI builds exactly `Cargo.lock`.
+
+## Running the checks locally
+
+The toolchain is pinned in `rust-toolchain.toml`, so rustup picks it up
+automatically.
+
+```sh
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo clippy -p palisade-core -p palisade-driver --no-default-features --all-targets --locked -- -D warnings
+cargo test --workspace --all-features --locked
+cargo xtask check-deps
+cargo xtask check-manifests
+cargo xtask check-workflows
+cargo deny --locked check          # needs cargo-deny 0.22
+```
+
+To check Windows-only code from Linux or another desktop OS:
+
+```sh
+rustup target add x86_64-pc-windows-gnu
+cargo check --workspace --all-targets --target x86_64-pc-windows-gnu
+```
+
+A single `cargo xtask ci` command that runs all of these is planned in #29.

@@ -1,0 +1,56 @@
+# Daily advisory scan. A new RustSec advisory can affect main without any
+# change in this repository, so this runs on a schedule as well as in CI.
+name: Advisory audit
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  advisories:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: cargo-deny@0.22.0,cargo-audit@0.23.0
+      - run: cargo deny --locked check advisories
+      - run: cargo audit
+
+  # Opens a tracking issue when the scan fails, or comments on the open one.
+  # Only this job can write issues; it runs no repository code.
+  report:
+    needs: advisories
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TITLE: "Scheduled advisory audit is failing"
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Open or update the tracking issue
+        run: |
+          body="The scheduled advisory audit failed: $RUN_URL"
+          number=$(gh api "repos/$GITHUB_REPOSITORY/issues?state=open&labels=area:security&per_page=100" \
+            --jq '[.[] | select(.pull_request == null and .title == env.TITLE)][0].number // empty')
+          if [ -n "$number" ]; then
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$number/comments" -f body="$body" > /dev/null
+            echo "Commented on #$number"
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues" -f title="$TITLE" -f body="$body" \
+              -f 'labels[]=area:security' --jq '"Opened #\(.number)"'
+          fi
