@@ -15,11 +15,13 @@
 
 #![forbid(unsafe_code)]
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use super::read::{align4, bytes, to_u64, u16_at, u32_at, utf16_until_nul};
 
-/// Language blocks (`StringTable`s) kept at most.
+/// Language blocks (`StringTable`s) kept at most in
+/// [`VersionInfo::all_langs`]. The selected block is always among them.
 pub const MAX_STRING_TABLES: usize = 64;
 /// Strings kept at most per language block.
 pub const MAX_STRINGS_PER_TABLE: usize = 256;
@@ -181,7 +183,7 @@ pub struct FixedFileInfo {
 }
 
 /// A `Translation` entry: a language and code page pair.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Translation {
     /// Language ID, such as `0x0409`.
     pub language: u16,
@@ -329,10 +331,11 @@ pub struct EffectiveFileName<'a> {
 pub struct VersionInfo {
     /// `VS_FIXEDFILEINFO`, if present and valid.
     pub fixed: Option<FixedFileInfo>,
-    /// The language blocks of the first `StringFileInfo`, in file order: the
-    /// first [`MAX_STRING_TABLES`], plus the selected block if it comes
-    /// later. (Later `StringFileInfo` blocks are unreachable through the OS
-    /// version API and are reported as [`VersionIssueKind::DuplicateBlock`].)
+    /// The language blocks of the first `StringFileInfo`, in file order, at
+    /// most [`MAX_STRING_TABLES`]. These are the first blocks, except that
+    /// when the selected block lies past the cap it takes the last slot.
+    /// (Later `StringFileInfo` blocks are unreachable through the OS version
+    /// API and are reported as [`VersionIssueKind::DuplicateBlock`].)
     pub all_langs: Vec<StringTable>,
     /// The first [`MAX_TRANSLATIONS`] `VarFileInfo\Translation` entries, in
     /// file order. Language selection considers every entry, not only
@@ -636,21 +639,32 @@ pub fn parse_version_info(data: &[u8]) -> Result<VersionInfo, VersionInfoIssue> 
     let keys: Vec<Option<Translation>> = tables.iter().map(|t| parse_table_key(&t.key)).collect();
     let (winner, selection) = select_language(&keys, &all_translations);
 
-    // Pass 2: decode the reported tables, plus the winner if it lies past
-    // the cap.
+    // Pass 2: decode the kept tables, at most `MAX_STRING_TABLES`. If the
+    // winner lies past the cap it takes the last slot, so the selected table
+    // is always kept and the bound always holds.
+    let winner_past_cap = winner.is_some_and(|w| w >= MAX_STRING_TABLES);
+    let leading = if winner_past_cap {
+        MAX_STRING_TABLES - 1
+    } else {
+        MAX_STRING_TABLES
+    };
+    let keep = |index: usize| index < leading || winner == Some(index);
     let mut all_langs = Vec::new();
     let mut selected = None;
     for (index, (block, translation)) in tables.iter().zip(&keys).enumerate() {
-        let is_winner = winner == Some(index);
-        if index >= MAX_STRING_TABLES && !is_winner {
+        if !keep(index) {
             continue;
         }
-        if is_winner {
+        if winner == Some(index) {
             selected = Some(all_langs.len());
         }
         all_langs.push(decode_table(data, block, *translation, &mut issues));
     }
-    if let Some(first_dropped) = tables.get(MAX_STRING_TABLES) {
+    // Report the first table actually dropped, if any.
+    if let Some(first_dropped) = (0..tables.len())
+        .find(|i| !keep(*i))
+        .and_then(|i| tables.get(i))
+    {
         issues.push(VersionInfoIssue {
             offset: to_u64(first_dropped.start),
             kind: VersionIssueKind::TooManyStringTables,
@@ -813,7 +827,16 @@ fn select_language(
     keys: &[Option<Translation>],
     translations: &[Translation],
 ) -> (Option<usize>, Option<LanguageSelection>) {
-    let find = |want: Translation| keys.iter().position(|k| *k == Some(want));
+    // The first block for each key, so each lookup is logarithmic. Both
+    // lists are bounded by the 64 KiB resource, and a linear search per
+    // pair would make selection quadratic.
+    let mut first_index = BTreeMap::new();
+    for (index, key) in keys.iter().enumerate() {
+        if let Some(key) = key {
+            first_index.entry(*key).or_insert(index);
+        }
+    }
+    let find = |want: Translation| first_index.get(&want).copied();
     if let Some(i) = translations.iter().find_map(|t| find(*t)) {
         return (Some(i), Some(LanguageSelection::Translation));
     }

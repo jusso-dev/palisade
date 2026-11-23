@@ -1098,7 +1098,8 @@ fn translation_match_past_the_table_cap_is_selected() {
         Some(pe::version::LanguageSelection::Translation)
     );
     assert_eq!(v.get(VersionField::OriginalFileName), Some("french.exe"));
-    assert_eq!(v.all_langs.len(), pe::version::MAX_STRING_TABLES + 1);
+    assert_eq!(v.all_langs.len(), pe::version::MAX_STRING_TABLES);
+    assert_eq!(v.selected, Some(pe::version::MAX_STRING_TABLES - 1));
     assert!(
         v.issues
             .iter()
@@ -1165,4 +1166,95 @@ fn string_values_stay_within_their_declared_length() {
     );
     let v = pe::version::parse_version_info(&data).unwrap();
     assert_eq!(v.get(VersionField::OriginalFileName), Some("AB"));
+}
+
+// ---- Table cap with the winner past it (council round 7) ------------------
+
+fn tables_with_winner_at(winner: usize, total: usize) -> Vec<u8> {
+    let tables: Vec<Vec<u8>> = (0..total)
+        .map(|i| {
+            if i == winner {
+                lang_table("040C04B0", "french.exe")
+            } else {
+                lang_table("040904B0", "english.exe")
+            }
+        })
+        .collect();
+    block(
+        "VS_VERSION_INFO",
+        &[],
+        0,
+        0,
+        &[
+            block("StringFileInfo", &[], 0, 1, &tables),
+            translation_block(&[(0x040c, 0x04b0)]),
+        ],
+    )
+}
+
+/// The kept list never exceeds the cap, and the dropped-table warning
+/// points at a table that was actually dropped.
+#[test]
+fn table_cap_holds_with_winner_past_it() {
+    let cap = pe::version::MAX_STRING_TABLES;
+    for (winner, total) in [
+        (cap, cap + 1),
+        (cap, cap + 3),
+        (cap + 2, cap + 3),
+        (3, cap + 3),
+    ] {
+        let data = tables_with_winner_at(winner, total);
+        let v = pe::version::parse_version_info(&data).unwrap();
+        assert_eq!(v.all_langs.len(), cap, "winner {winner} of {total}");
+        assert_eq!(v.get(VersionField::OriginalFileName), Some("french.exe"));
+        let dropped: Vec<_> = v
+            .issues
+            .iter()
+            .filter(|i| i.kind == pe::version::VersionIssueKind::TooManyStringTables)
+            .collect();
+        assert_eq!(dropped.len(), 1, "winner {winner} of {total}");
+        // No kept table starts at the reported offset.
+        assert!(
+            v.all_langs.iter().all(|t| t.offset != dropped[0].offset),
+            "warning points at a kept table (winner {winner} of {total})"
+        );
+    }
+    // Exactly the cap: nothing dropped, no warning.
+    let data = tables_with_winner_at(cap - 1, cap);
+    let v = pe::version::parse_version_info(&data).unwrap();
+    assert_eq!(v.all_langs.len(), cap);
+    assert!(
+        !v.issues
+            .iter()
+            .any(|i| i.kind == pe::version::VersionIssueKind::TooManyStringTables)
+    );
+}
+
+/// Indexed language lookup keeps first-match semantics at scale: the first
+/// matching pair wins, and within it the first table with that key. (The
+/// lookup is a map, so this is not quadratic in tables times pairs.)
+#[test]
+fn indexed_language_lookup_keeps_first_match() {
+    // 1,900 tables with distinct keys, then a second table with the key the
+    // first matching pair names; and 4,000 pairs where only #3,500 and
+    // #3,900 match anything.
+    let mut tables: Vec<Vec<u8>> = (0..1_900_u32)
+        .map(|i| block(&format!("{:04X}04B0", 0x1000 + i), &[], 0, 1, &[]))
+        .collect();
+    tables[1_200] = lang_table("14B004B0", "first.exe");
+    tables.push(lang_table("14B004B0", "second.exe"));
+    tables[1_300] = lang_table("151404B0", "later-pair.exe");
+    let mut pairs: Vec<(u16, u16)> = (0..4_000_u16).map(|i| (0x9000 + i, 0x04b0)).collect();
+    pairs[3_500] = (0x14b0, 0x04b0);
+    pairs[3_900] = (0x1514, 0x04b0);
+    let sfi = block("StringFileInfo", &[], 0, 1, &tables);
+    let vfi = translation_block(&pairs);
+    assert!(sfi.len() + vfi.len() < 0x1_0000);
+    let data = block("VS_VERSION_INFO", &[], 0, 0, &[sfi, vfi]);
+    let v = pe::version::parse_version_info(&data).unwrap();
+    assert_eq!(
+        v.selection,
+        Some(pe::version::LanguageSelection::Translation)
+    );
+    assert_eq!(v.get(VersionField::OriginalFileName), Some("first.exe"));
 }
