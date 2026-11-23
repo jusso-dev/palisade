@@ -1,0 +1,77 @@
+# cargo-deny policy: licences, bans, sources and advisories.
+# Run locally with `cargo deny check`. CI runs it on every PR (ci.yml) and
+# the advisory check daily (audit.yml). Reference for every key:
+# https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+# Check the dependency graph for every platform we ship on, not just the host,
+# so Windows-only dependencies are covered when CI runs on Linux.
+targets = [
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+]
+all-features = true
+
+[advisories]
+# Vulnerabilities and unsound crates are always errors. Yanked versions are
+# errors too. Unmaintained crates are reported only for direct dependencies of
+# workspace crates, where we can act on them.
+yanked = "deny"
+unmaintained = "workspace"
+# Each ignore needs the advisory ID and a reason, for example:
+# { id = "RUSTSEC-0000-0000", reason = "not reachable: ...; revisit by YYYY-MM-DD" }
+ignore = []
+
+[licenses]
+# Every licence here is compatible with distributing Palisade under
+# Apache-2.0 OR MIT. Copyleft licences (GPL, AGPL, LGPL) are not listed, so
+# they fail unless an exception with a reason is added below.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "CC0-1.0",
+    # File-level copyleft only: modified MPL files stay MPL, the rest of the
+    # program is unaffected.
+    "MPL-2.0",
+]
+confidence-threshold = 0.9
+# The allow list is policy, not an inventory, so unused entries are fine.
+unused-allowed-license = "allow"
+# Each exception needs a comment with the reason.
+exceptions = []
+
+[licenses.private]
+# Workspace crates are unpublished (`publish = false`); their own licence is
+# checked by review, not here.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+# `*` version requirements are never allowed. Workspace path dependencies are
+# exempt because they carry no version.
+wildcards = "deny"
+allow-wildcard-paths = true
+highlight = "all"
+deny = [
+    # Use rustls, not a system TLS library.
+    { crate = "openssl", reason = "use rustls" },
+    { crate = "openssl-sys", reason = "use rustls" },
+]
+# Each skip needs a comment with the reason.
+skip = []
+skip-tree = []
+
+[sources]
+# crates.io only. Git dependencies and other registries are not allowed.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

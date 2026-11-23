@@ -1,0 +1,81 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask"]
+# The kernel driver is built separately (#8, #22), so plain `cargo build` and
+# `cargo test` at the root leave it out. `--workspace` still includes it.
+default-members = [
+    "crates/palisade-core",
+    "crates/palisade-fileid",
+    "crates/palisade-policy",
+    "crates/palisade-proto",
+    "crates/palisade-agent",
+    "crates/palisade-tray",
+    "crates/palisade-server",
+    "crates/palisade-console",
+    "crates/palisade-cli",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# MSRV. CI checks the workspace on this exact version (the `msrv` job).
+rust-version = "1.85"
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/jusso-dev/palisade"
+authors = ["Palisade contributors"]
+# Nothing is ready for crates.io yet.
+publish = false
+
+# The single source of every dependency version. Member crates must use
+# `{ workspace = true }` only; `cargo xtask check-manifests` enforces this.
+[workspace.dependencies]
+# Workspace crates are added here, as `{ path = "crates/<name>" }`, when a
+# crate first needs another. The allowed directions are enforced by
+# `cargo xtask check-deps`.
+#
+# Third-party crates. Justify every new entry in the PR description.
+serde_json = { version = "1.0.154", default-features = false, features = ["std"] }
+toml = { version = "1.2.2", default-features = false, features = ["std", "parse", "serde"] }
+yaml-rust2 = { version = "0.13.2", default-features = false }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+# Restriction lints. `clippy.toml` allows unwrap/expect inside tests.
+unwrap_used = "deny"
+expect_used = "warn"
+undocumented_unsafe_blocks = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+# Selected pedantic lints: silent numeric truncation is a classic parser bug.
+cast_possible_truncation = "warn"
+cast_possible_wrap = "warn"
+cast_sign_loss = "warn"
+checked_conversions = "warn"
+
+[profile.dev]
+overflow-checks = true
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+debug = "line-tables-only"
+# Symbols are stripped and published separately by the release pipeline (#22).
+strip = "none"
+
+# Decision logic and the parsers of untrusted input keep overflow checks
+# even in release builds.
+[profile.release.package.palisade-policy]
+overflow-checks = true
+
+[profile.release.package.palisade-fileid]
+overflow-checks = true
+
+[profile.release.package.palisade-proto]
+overflow-checks = true

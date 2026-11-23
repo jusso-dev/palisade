@@ -1,0 +1,27 @@
+# Weekly dependency updates, with minor and patch bumps grouped into one PR per
+# ecosystem. Security updates are raised as soon as an advisory is published
+# (enable "Dependabot security updates" in the repository settings).
+# Every Dependabot PR runs the full CI, including cargo-deny.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      cargo-minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "chore(deps)"
+
+  # Bumps the pinned action SHAs and their version comments.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions-minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "chore(ci)"
