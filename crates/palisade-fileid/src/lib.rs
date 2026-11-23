@@ -4,5 +4,6 @@
 #![warn(clippy::indexing_slicing)]
 #![cfg_attr(test, allow(clippy::indexing_slicing))]
 
+pub mod authenticode;
 pub mod hash;
 pub mod pe;

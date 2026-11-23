@@ -4,6 +4,7 @@
 #
 #   cargo +nightly fuzz run pe_parse            # from crates/palisade-fileid
 #   cargo +nightly fuzz run version_info_parse
+#   cargo +nightly fuzz run authenticode_ranges
 [package]
 name = "palisade-fileid-fuzz"
 version = "0.0.0"
@@ -30,6 +31,13 @@ bench = false
 [[bin]]
 name = "version_info_parse"
 path = "fuzz_targets/version_info_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "authenticode_ranges"
+path = "fuzz_targets/authenticode_ranges.rs"
 test = false
 doc = false
 bench = false

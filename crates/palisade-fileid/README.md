@@ -2,7 +2,7 @@
 
 File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes), signature and certificate chain extraction, and version-info metadata.
 
-**Status:** early. PE header and version-resource parsing and flat hashing work; the rest of [#3](https://github.com/jusso-dev/palisade/issues/3) is still to come.
+**Status:** early. PE header and version-resource parsing, flat hashing and the Authenticode image hash work; the rest of [#3](https://github.com/jusso-dev/palisade/issues/3) is still to come.
 
 ## What is here
 
@@ -18,6 +18,18 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   SHA-256 is the primary identity. SHA-1 and MD5 are not collision resistant
   and are computed only for interop; they must never be the sole basis of an
   allow decision ([ADR 0008](../../docs/adr/0008-cryptographic-algorithms.md)).
+- `authenticode`: the Authenticode PE image hash
+  ([#47](https://github.com/jusso-dev/palisade/issues/47)), which stays the
+  same when a file is signed, re-signed or stripped. `HashRanges::from_pe`
+  lists the bytes hashed (the whole file minus the `CheckSum` field, the
+  certificate table entry and the certificate table, zero-padded to 8 bytes
+  when unsigned), and `RangeHasher` streams the file through them in one
+  pass, alongside the flat hashes if wanted. SHA-256 and SHA-1 are always
+  computed. Images whose layout departs from the specification (gaps or
+  overlaps between sections, data after or a misaligned certificate table,
+  and so on) are reported as `AuthenticodeStatus::NonConformant`, and their
+  flat hash is the identity to use. Page hashes and signature checks are
+  still to come (#47, #48).
 
 ## Handling untrusted input
 
@@ -58,12 +70,13 @@ workspace that needs a nightly toolchain:
 ```sh
 cd crates/palisade-fileid
 # Seed the corpora from the synthetic fixtures.
-for t in pe_parse version_info_parse; do
+for t in pe_parse version_info_parse authenticode_ranges; do
   PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/$t" \
     cargo test -p palisade-fileid --test properties -- --ignored write_fuzz_seeds
 done
 cargo +nightly fuzz run pe_parse -- -dict=fuzz/pe.dict -max_total_time=60
 cargo +nightly fuzz run version_info_parse -- -dict=fuzz/pe.dict -max_total_time=60
+cargo +nightly fuzz run authenticode_ranges -- -dict=fuzz/pe.dict -max_total_time=60
 ```
 
 Running the fuzz targets in CI is part of [#25](https://github.com/jusso-dev/palisade/issues/25).
