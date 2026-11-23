@@ -1,0 +1,32 @@
+# Architecture decision records
+
+This directory holds Palisade's architecture decision records (ADRs). Each ADR records one
+significant design decision: its context, the options considered, the choice and its
+consequences, including its security impact.
+
+- How to write, number, accept and supersede an ADR: [PROCESS.md](PROCESS.md)
+- Template for new ADRs: [0000-template.md](0000-template.md)
+
+## Index
+
+<!-- adr-index:start -->
+| ADR | Title | Status |
+|---|---|---|
+| [0001](0001-record-architecture-decisions.md) | Record architecture decisions | accepted |
+| [0002](0002-enforcement-strategy.md) | Enforcement strategy: OS-native policy first, optional own driver | accepted |
+| [0003](0003-crate-boundaries-and-dependency-direction.md) | Crate boundaries and dependency direction | accepted |
+| [0004](0004-default-rule-precedence-model.md) | Default rule precedence model | accepted |
+| [0005](0005-agent-server-protocol.md) | Agent-server protocol | accepted |
+| [0006](0006-server-database.md) | Server database and tenant isolation | accepted |
+| [0007](0007-agent-local-store.md) | Agent local store | proposed |
+| [0008](0008-cryptographic-algorithms.md) | Cryptographic algorithms and libraries | accepted |
+| [0009](0009-async-runtime-and-concurrency.md) | Async runtime and concurrency model | accepted |
+| [0010](0010-licence.md) | Licence | accepted |
+| [0011](0011-msrv-and-unsafe-code-policy.md) | MSRV and unsafe code policy | accepted |
+| [0012](0012-fail-open-vs-fail-closed-defaults.md) | Fail-open versus fail-closed defaults | accepted |
+| [0013](0013-protected-process-light-feasibility.md) | Protected process light feasibility | proposed |
+| [0014](0014-educational-scope-statement.md) | Educational scope statement | accepted |
+<!-- adr-index:end -->
+
+The table between the `adr-index` markers is maintained by hand until `cargo xtask adr index`
+(#29) generates it and CI checks it (#21).
