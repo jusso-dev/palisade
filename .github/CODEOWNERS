@@ -1,0 +1,38 @@
+# Code owners. GitHub requests a review from the owner of every changed path,
+# and the `main` ruleset requires that review (docs/repo-settings.md).
+# The last matching pattern wins, so the catch-all comes first.
+#
+# Palisade has one maintainer, who owns everything. The entries below the
+# catch-all name the paths whose review is mandatory even if more maintainers
+# join later: CI, supply-chain policy, unsafe code, the driver and signing.
+# Some paths do not exist yet; they are listed so the rule is in place before
+# the first file lands.
+
+*                               @jusso-dev
+
+# CI, repository automation and these governance files.
+/.github/                       @jusso-dev
+/SECURITY.md                    @jusso-dev
+
+# Build and supply-chain policy.
+/Cargo.toml                     @jusso-dev
+/Cargo.lock                     @jusso-dev
+/rust-toolchain.toml            @jusso-dev
+/.cargo/                        @jusso-dev
+/deny.toml                      @jusso-dev
+/supply-chain/                  @jusso-dev
+/xtask/src/deps.rs              @jusso-dev
+/xtask/src/manifests.rs         @jusso-dev
+/xtask/src/workflows.rs         @jusso-dev
+/xtask/src/dist*                @jusso-dev
+
+# Unsafe code.
+/unsafe-allowlist.txt           @jusso-dev
+/crates/palisade-agent/src/ffi/ @jusso-dev
+/crates/palisade-tray/src/ffi/  @jusso-dev
+/crates/palisade-fileid/src/win/ @jusso-dev
+/crates/palisade-driver/        @jusso-dev
+
+# Release signing.
+/xtask/src/sign*                @jusso-dev
+**/signing/                     @jusso-dev

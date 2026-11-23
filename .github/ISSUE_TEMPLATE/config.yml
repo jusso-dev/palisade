@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/jusso-dev/palisade/security/advisories/new
+    about: Report vulnerabilities, including policy bypasses, privately. Never in a public issue. See SECURITY.md.
+  - name: Ask a question
+    url: https://github.com/jusso-dev/palisade/discussions/categories/q-a
+    about: Questions and help are community best-effort, in GitHub Discussions. See SUPPORT.md.

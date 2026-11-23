@@ -1,0 +1,35 @@
+# Fails a pull request whose title does not follow Conventional Commits.
+# Squash merges use the PR title as the commit message on `main`, so this keeps
+# history and the generated changelog consistent. See CONTRIBUTING.md.
+# Branch protection requires the `PR title` check (docs/repo-settings.md).
+# It is a separate workflow from ci.yml because it must rerun when the title
+# is edited, which should not rerun the whole build.
+name: PR title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pr-title:
+    name: PR title
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test the title checker
+        run: bash .github/scripts/check-pr-title.test.sh
+      - name: Check the title
+        env:
+          # Passed through the environment, never interpolated into the script.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: bash .github/scripts/check-pr-title.sh "$PR_TITLE"

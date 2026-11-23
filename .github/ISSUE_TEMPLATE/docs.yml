@@ -1,0 +1,39 @@
+name: Documentation
+description: Something in the docs is wrong, missing or unclear.
+labels: [documentation]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve the docs. Small fixes are welcome as a pull request directly.
+  - type: input
+    id: location
+    attributes:
+      label: Where
+      description: The file path or URL of the page.
+      placeholder: "docs/ci.md, or a link"
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind of problem
+      options:
+        - Incorrect
+        - Missing
+        - Unclear
+        - Out of date
+        - Broken link or formatting
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong?
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested change
+      description: What it should say instead, if you know.
