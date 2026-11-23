@@ -1,0 +1,50 @@
+name: Feature request
+description: Suggest a new capability or an improvement to an existing one.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Palisade is an educational project with one maintainer, so not every idea will be taken up. For open-ended ideas, a [discussion](https://github.com/jusso-dev/palisade/discussions/categories/ideas) is a good first step.
+
+        To propose a new kind of rule or condition, use the **Rule type request** template instead.
+
+        Please do not name commercial products or vendors ([naming guide](https://github.com/jusso-dev/palisade/blob/main/docs/NAMING.md)). Describe the behaviour instead.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and why is it hard or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What you would like Palisade to do.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches, and why they fall short.
+  - type: textarea
+    id: security
+    attributes:
+      label: Security impact
+      description: Could this make it easier to run code that should be blocked, or to tamper with Palisade? How would that be prevented?
+  - type: textarea
+    id: context
+    attributes:
+      label: Related issues or epics
+      description: Link any related issues, the epic this belongs to, or an ADR.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and discussions and this is not a duplicate.
+          required: true
+        - label: This does not add offensive tooling, real malware or bypass weaponisation ([responsible use](https://github.com/jusso-dev/palisade/blob/main/docs/responsible-use.md)).
+          required: true

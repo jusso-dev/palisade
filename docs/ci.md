@@ -25,9 +25,23 @@ type.
 | `workflow-lint` | ubuntu-latest | `actionlint` (checksum-verified release) and `zizmor --offline` |
 | `ci-ok` | ubuntu-latest | Passes only if every job above succeeded |
 
-**Branch protection should require the single check `ci-ok`.** It depends on
-every other job and fails if any of them failed, was cancelled or was
-skipped, so new jobs are covered without changing the branch rules.
+**Branch protection requires `ci-ok`** (and the `PR title` check below). It
+depends on every other job and fails if any of them failed, was cancelled or
+was skipped, so new jobs are covered without changing the branch rules. The
+ruleset is in [repo-settings.md](repo-settings.md#branch-protection-for-main).
+
+### `pr-title.yml` (pull requests, including title edits)
+
+| Job | Runners | What it runs |
+|---|---|---|
+| `PR title` | ubuntu-latest | `bash .github/scripts/check-pr-title.test.sh`, then `.github/scripts/check-pr-title.sh` on the pull request title |
+
+Pull requests are squash-merged with the PR title as the commit message, so
+the title must be a Conventional Commit ([CONTRIBUTING.md](../CONTRIBUTING.md#conventional-commits)).
+This is a separate workflow because it reruns when the title is edited,
+which should not rerun the whole build. The title reaches the script through
+an environment variable, never by expression interpolation into the shell.
+It is also a required check.
 
 ### `audit.yml` (daily at 03:17 UTC, and on demand)
 
@@ -91,10 +105,13 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo clippy -p palisade-core -p palisade-driver --no-default-features --all-targets --locked -- -D warnings
 cargo test --workspace --all-features --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked
 cargo xtask check-deps
 cargo xtask check-manifests
 cargo xtask check-workflows
 cargo deny --locked check          # needs cargo-deny 0.22
+bash .github/scripts/check-pr-title.test.sh
+bash .github/scripts/check-pr-title.sh "docs: example title"
 ```
 
 To check Windows-only code from Linux or another desktop OS:

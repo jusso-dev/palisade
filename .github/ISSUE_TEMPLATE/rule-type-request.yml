@@ -1,0 +1,56 @@
+name: Rule type request
+description: Propose a new rule type or condition for Palisade policy.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template to propose a new way of identifying files or processes in policy, for example a new file attribute, a new condition on the parent process, or a new trust source.
+
+        New rule and condition types need property tests and snapshot tests, and any new parser needs a fuzz target ([CONTRIBUTING.md](https://github.com/jusso-dev/palisade/blob/main/CONTRIBUTING.md#testing-expectations)). Rule types that change precedence or the security model also need an ADR.
+
+        Please do not name commercial products or vendors ([naming guide](https://github.com/jusso-dev/palisade/blob/main/docs/NAMING.md)).
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: What should be allowed or blocked that existing rule types cannot express?
+    validations:
+      required: true
+  - type: textarea
+    id: matching
+    attributes:
+      label: What the rule matches
+      description: The attribute or condition it checks, where that value comes from (file contents, signature, file system, process, user), and how matching works (exact, prefix, pattern, version range).
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Example policy
+      description: How you would like to write the rule.
+      render: yaml
+  - type: textarea
+    id: spoofing
+    attributes:
+      label: Can the value be spoofed?
+      description: Who controls the value the rule checks? Could a standard user change it, rename a file, or race the check to get a different result?
+    validations:
+      required: true
+  - type: textarea
+    id: native
+    attributes:
+      label: OS-native policy support
+      description: Can the rule be compiled to the OS-native code integrity or rule-collection policy formats, or does it need the agent or the optional driver? Say so if you do not know.
+  - type: textarea
+    id: precedence
+    attributes:
+      label: Precedence and conflicts
+      description: How should this rule interact with other allow and deny rules that match the same file?
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and this rule type has not been requested already.
+          required: true

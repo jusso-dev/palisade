@@ -1,0 +1,98 @@
+name: Bug report
+description: Something in Palisade does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Palisade is an educational project, supported on a best-effort basis ([SUPPORT.md](https://github.com/jusso-dev/palisade/blob/main/SUPPORT.md)).
+
+        **Security problems, including any way to run code that policy should block, go to [private vulnerability reporting](https://github.com/jusso-dev/palisade/security/advisories/new), not here.** See [SECURITY.md](https://github.com/jusso-dev/palisade/blob/main/SECURITY.md).
+
+        > [!WARNING]
+        > This issue is public. **Do not paste secrets, enrolment tokens, override codes, API keys, private keys or passwords.** Also remove host names, user names and anything else you would not want published.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Palisade version or commit
+      description: The release version, or the commit SHA if you built from source.
+      placeholder: "0.1.0, or a commit SHA"
+    validations:
+      required: true
+  - type: input
+    id: os-build
+    attributes:
+      label: OS and build
+      description: For Windows, the edition and full build number (`winver`). For other platforms, the OS and version.
+      placeholder: "Windows 11 Pro 24H2, build 26100.1234"
+    validations:
+      required: true
+  - type: dropdown
+    id: architecture
+    attributes:
+      label: Architecture
+      options:
+        - x64
+        - ARM64
+        - Other (say which in the description)
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      description: The enforcement mode in use when the bug happened, if it involves the agent.
+      options:
+        - Not applicable
+        - Audit
+        - Enforce
+        - Learning
+        - Other (say which in the description)
+    validations:
+      required: true
+  - type: textarea
+    id: policy
+    attributes:
+      label: Policy excerpt
+      description: The smallest part of the policy that reproduces the problem. Remove secrets and identifying details first.
+      render: yaml
+  - type: textarea
+    id: decision-trace
+    attributes:
+      label: Decision trace output
+      description: If the bug is about a decision (allowed, blocked or audited), paste the decision trace for the affected file or process.
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant agent, server or CLI log lines. Remove secrets and identifying details first.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I removed secrets, enrolment tokens and other sensitive data from everything above.
+          required: true
+        - label: This is not a security vulnerability (those go to private vulnerability reporting).
+          required: true
