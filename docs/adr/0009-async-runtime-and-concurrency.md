@@ -87,3 +87,5 @@ its inputs for audit (#41), and fuzzing covers the code that makes decisions.
 
 - Issues #20, #29 (developer environment and platform traits, including `Clock`), #41 (decision trace), #42 (performance budget),
   #56 (service host), #61 (policy cache and lazy lookup), #65 (budgets). Epics #2, #4.
+- [ADR 0015](0015-agent-server-protocol-fallback-triggers.md) supersedes ADR 0005, and
+  [ADR 0016](0016-server-database-and-tenant-scope.md) supersedes ADR 0006.

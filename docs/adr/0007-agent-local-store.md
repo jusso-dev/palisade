@@ -59,12 +59,39 @@ Event queue and hash cache:
 **Policy cache: option 2, decided.** The policy cache is a set of files (`active`, `previous`,
 `pending`) under the agent's SYSTEM-only store directory. Each holds one signed envelope from
 #225. The agent reads a file whole into private memory, verifies its signature before parsing
-anything beyond the envelope, and only then decodes it. Memory mapping is not used. Activation
-follows #61: write `pending`, flush, verify, then copy `active` to `previous` (written to a
-temporary file, flushed, then renamed), and only then atomically rename `pending` over `active`.
-At every point a verified `active` exists, so a power loss mid-swap never leaves the agent
-without its current policy. The anti-rollback
-record is kept separately, as #225 describes.
+anything beyond the envelope, and only then decodes it. Memory mapping is not used.
+
+The anti-rollback record (#225) is kept separately from the cache files, but it is ordered
+against them. Its **floor** is the highest bundle version the agent has made `active`. The rule is
+that the floor never exceeds the version of the bundle in `active`, so a crash can never leave
+every bundle on disk below the floor. Activation follows #61, in this order:
+
+1. Write `pending`, flush, and verify it, including that its version is above both the floor and
+   the version of `active`. Otherwise reject it and keep `active` (`PolicyRejected`).
+2. Copy `active` to `previous` (written to a temporary file, flushed, then renamed).
+3. Atomically rename `pending` over `active`, with write-through, so the rename is durable
+   before the next step.
+4. Only then raise the floor to the new version, in every copy of the record (#225).
+
+A power loss before step 3 leaves the old `active` in place with the old floor. A power loss
+between steps 3 and 4 leaves the new bundle in `active` with a floor below it. At every point a
+verified `active` exists that the floor accepts, so a power loss mid-swap never leaves the agent
+without its current policy.
+
+At startup the agent:
+
+- deletes any leftover `pending`. It was never activated, and the agent fetches it again;
+- loads `active` if it verifies and its version is at or above the floor, then raises the floor
+  to that version if it is lower (completing an interrupted step 4). If the record's copies
+  differ only because step 4 raised some of them and not others, and the highest copy equals the
+  verified `active` version, the agent raises the rest to match and does not raise
+  `tamper.policy.rollback_suspected`. Any other mismatch raises it (#225);
+- otherwise follows the failure rows of [ADR 0018](0018-fail-open-vs-fail-closed-defaults-revised.md):
+  `previous` may load below the floor only under its bounded one-step N-1 exception;
+- if no bundle on disk can load, even with that exception (for example, both files were
+  replaced with older, validly signed bundles), treats that as both bundles failing: it loads the built-in emergency
+  policy, raises `tamper.policy.rollback_suspected`, and starts a rapid check-in. It never
+  lowers the floor to make an old bundle load.
 
 **Event queue and hash cache: proposed, leaning to `redb`, pending a spike.** The lean is `redb`,
 because it keeps C code out of the privileged service and keeps the dependency tree pure Rust.
@@ -103,13 +130,15 @@ events carry their own hash chain (#220).
 
 Verify-then-parse on a private copy means a bundle that changes on disk after verification can
 never reach the evaluator. That closes a policy substitution route for anyone who can write to
-the cache directory. The store directory is SYSTEM-only (#220), and the policy cache is
+the cache directory. Raising the anti-rollback floor only after the rename means a power loss
+cannot leave the agent with no bundle it may load, and a floor that rejects every bundle on disk
+leads to the stricter emergency policy, never to a lowered floor. The store directory is SYSTEM-only (#220), and the policy cache is
 authenticated by signature, not by file permissions alone. The event queue and the hash cache
 are not trusted inputs to a decision without verification: a tampered hash cache entry must not
 turn a deny into an allow. Binding entries to file ID and change stamp only detects that the
 *file* changed; it does not protect the cache *store*. So each hash cache record is also
 authenticated with an agent-held key (HMAC-SHA-256 over volume ID, file ID, change stamp and
-hashes, [ADR 0008](0008-cryptographic-algorithms.md)), and a record that fails is discarded and
+hashes, [ADR 0017](0017-cryptographic-algorithms-and-nonces.md)), and a record that fails is discarded and
 the file re-hashed (#46). The spike measures the cost of that MAC. The choice of store also changes how much C code runs in the
 privileged service, which is why it is part of the spike criteria.
 
@@ -118,3 +147,5 @@ privileged service, which is why it is part of the spike criteria.
 - Issues #20, #43 (bundle encoding), #46 (hash cache), #60, #61 (policy cache), #63 (event
   pipeline), #65 (budgets), #220 (tamper), #225 (signing and encryption), #26 (VM harness),
   #23 (dependency policy). Epics #4, #18.
+- [ADR 0018](0018-fail-open-vs-fail-closed-defaults-revised.md) (failure behaviour when bundles
+  fail to load).

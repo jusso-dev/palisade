@@ -14,7 +14,11 @@ use this. It needs three things:
 1. an early-launch antimalware (ELAM) driver that declares the service's signing certificate in
    its certificate-info resource;
 2. that ELAM driver signed through the OS vendor's antimalware partner program; and
-3. the service binaries, and every DLL they load, signed with the declared certificate.
+3. the service executable signed with the declared certificate (page hashes, SHA-256). Every
+   DLL loaded into the service must either be signed as part of Windows, or be signed with the
+   declared certificate, or be listed in a catalog file that is signed with the declared
+   certificate and installed with the service. Third-party DLLs can be covered by that catalog
+   without re-signing them.
 
 The partner program has membership criteria that an educational open-source project probably
 cannot meet. Test-signing mode allows experiments, but it is not a deployable protection. The
@@ -67,7 +71,9 @@ This ADR becomes `accepted` (or is revised) when the #221 spike has produced:
   captured results showing administrator `taskkill /f`, `OpenProcess(PROCESS_TERMINATE)` and
   debugger attach all fail with PPL on and succeed with it off;
 - confirmation that the Rust agent binaries and their dependencies load under the PPL signing
-  rules (static CRT, no unsigned DLLs), and that the agent's `tracing` and ETW use still works;
+  rules: the agent's own binaries signed with the declared certificate, every other DLL either
+  signed as part of Windows or listed in a signed catalog, and no DLL outside those three cases;
+  and that the agent's `tracing` and ETW use still works;
 - measured startup and boot-time impact;
 - a working clean-uninstall and update path, with the service stopping itself on a signed command;
 - notes on Server Core, ARM64 and hypervisor-enforced code integrity.
@@ -86,6 +92,9 @@ final choice.
 ### Negative
 
 - Until the spike is done, Palisade makes no claim of protection against administrators or SYSTEM.
+- Devices without a signed native policy and Secure Boot have no protection of the baseline
+  against an administrator, under any option here. Closing that gap is a deployment choice (#85),
+  not something PPL or the driver can provide.
 - Option (c) adds a build flavour and a signing input that CI can only exercise with test
   certificates.
 - If PPL is adopted, the agent has to be split into a small protected part and an unprotected
@@ -96,13 +105,26 @@ final choice.
 This decision sets how strongly the agent resists an attacker who already has administrator or
 SYSTEM rights. Under the provisional direction, standard users and user-level malware cannot stop
 the agent (through #220), but an administrator who can disable the driver can. Because of
-[ADR 0002](0002-enforcement-strategy.md) and [ADR 0012](0012-fail-open-vs-fail-closed-defaults.md),
-stopping the agent does not stop the kernel-enforced native policy, and a signed native policy
-resists removal. So the residual risk is loss of reporting and of driver-only rules, not loss of
-baseline enforcement. That residual risk is recorded in #219. Test signing is only ever enabled
+[ADR 0002](0002-enforcement-strategy.md) and [ADR 0018](0018-fail-open-vs-fail-closed-defaults-revised.md),
+stopping the agent does not stop the kernel-enforced native policy. How much of the baseline
+survives an administrator then depends on how the native policy is deployed:
+
+- **Signed native policy on a Secure Boot device** (#85). The administrator cannot remove or
+  replace the policy, so the residual risk is loss of reporting and of driver-only rules, not
+  loss of baseline enforcement.
+- **Unsigned native policy, or Secure Boot off.** An administrator can delete or replace the
+  policy, so the residual risk also includes **loss of baseline enforcement**. Palisade layers
+  cannot prevent this, because the same administrator can disable the driver too.
+
+Signing and Secure Boot are **not required**. A signed policy that is wrong can leave a device
+unbootable, with recovery only by turning Secure Boot off (#85), so signing stays an opt-in per
+deployment, recommended once a policy is stable. The unsigned case is an accepted risk. To keep
+it visible, the agent reports `secure_boot_enabled` and `signed_policy_active` (#85), and the
+console shows a device without both as "baseline removable by an administrator". Both residual
+risks are recorded in #219. Test signing is only ever enabled
 on throwaway VMs, never on runner hosts.
 
 ## Links
 
-- Issues #20, #221 (PPL spike), #220 (tamper protection), #112 (driver signing), #219 (threat
-  model), #224 (key custody). Epics #8, #18.
+- Issues #20, #221 (PPL spike), #220 (tamper protection), #112 (driver signing), #85 (signed
+  native policies), #219 (threat model), #224 (key custody). Epics #8, #18.

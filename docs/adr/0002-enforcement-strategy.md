@@ -113,4 +113,5 @@ removes a false sense of protection.
 ## Links
 
 - Issue #20. Epics #4, #6, #8. Issues #81, #85, #112, #113, #219, #220.
-- Failure behaviour of each layer: [ADR 0012](0012-fail-open-vs-fail-closed-defaults.md).
+- Failure behaviour of each layer: [ADR 0012](0012-fail-open-vs-fail-closed-defaults.md), superseded by
+  [ADR 0018](0018-fail-open-vs-fail-closed-defaults-revised.md).

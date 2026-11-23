@@ -1,6 +1,6 @@
 # 0012. Fail-open versus fail-closed defaults
 
-- Status: accepted
+- Status: superseded by 0018
 - Date: 2026-11-23
 - Deciders: Palisade maintainer
 
@@ -188,3 +188,4 @@ regression suite (#230).
 - [ADR 0002](0002-enforcement-strategy.md) (enforcement layers),
   [ADR 0005](0005-agent-server-protocol.md) (authenticated server time),
   [ADR 0007](0007-agent-local-store.md) (cache files).
+- Superseded by [ADR 0018](0018-fail-open-vs-fail-closed-defaults-revised.md).

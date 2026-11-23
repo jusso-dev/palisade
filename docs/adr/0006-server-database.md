@@ -1,6 +1,6 @@
 # 0006. Server database and tenant isolation
 
-- Status: accepted
+- Status: superseded by 0016
 - Date: 2026-11-23
 - Deciders: Palisade maintainer
 
@@ -96,3 +96,4 @@ and #229.
 
 - Issues #20, #127 (schema, migrations, isolation), #128 (multi-tenancy), #227 (secrets),
   #229 (server hardening). Epic #10.
+- Superseded by [ADR 0016](0016-server-database-and-tenant-scope.md).

@@ -1,6 +1,6 @@
 # 0008. Cryptographic algorithms and libraries
 
-- Status: accepted
+- Status: superseded by 0017
 - Date: 2026-11-23
 - Deciders: Palisade maintainer
 
@@ -140,3 +140,4 @@ under the supply-chain advisory scan (#23).
 ## Links
 
 - Issues #20, #3, #43, #46, #47, #62, #81, #85, #113, #222, #223, #224, #225, #226. Epic #18.
+- Superseded by [ADR 0017](0017-cryptographic-algorithms-and-nonces.md).
