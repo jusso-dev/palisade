@@ -638,3 +638,107 @@ fn standard_manifests_are_looked_up() {
     );
     assert_eq!(res.manifest_entries.len(), 4);
 }
+
+// ---- Null RVAs and version block values (round 3) ------------------------
+
+/// A resource or debug directory at RVA 0 is absent for the loader, even
+/// with a non-zero size; it must not be read from the DOS header.
+#[test]
+fn null_rva_directories_are_not_mapped() {
+    let builder = PeBuilder::default();
+    let mut image = builder.build();
+    // Make the DOS header look like a resource directory with one RT_VERSION
+    // entry, and like a REPRO debug entry.
+    put16(&mut image, 0x0e, 1);
+    put32(&mut image, 0x10, u32::from(resource_type::VERSION));
+    put32(&mut image, 0x14, DIR | 0x80);
+    put32(&mut image, 0x0c, 16);
+    for (index, size) in [(2, 0x100), (6, 28)] {
+        let at = builder.data_directory_offset(index);
+        put32(&mut image, at, 0);
+        put32(&mut image, at + 4, size);
+    }
+    let info = pe::parse(&image).unwrap();
+    assert!(info.resources.is_none());
+    assert!(info.version_info.is_none());
+    assert!(info.debug.entries.is_empty());
+    assert!(!info.debug.has_repro);
+    for kind in [DataDirectoryKind::Resource, DataDirectoryKind::Debug] {
+        assert!(has(&info, |k| *k == WarningKind::DirectoryNotMapped(kind)));
+    }
+}
+
+/// Bytes hidden inside a block's value are skipped, as the OS version API
+/// skips them, so decoy blocks there cannot replace the real ones.
+#[test]
+fn decoys_inside_values_are_skipped() {
+    let decoy_table = block(
+        "040904B0",
+        &[],
+        0,
+        1,
+        &[string("OriginalFilename", "decoy.exe")],
+    );
+    let real_table = block(
+        "040904B0",
+        &[],
+        0,
+        1,
+        &[string("OriginalFilename", "real.exe")],
+    );
+    // StringFileInfo whose binary value is a whole decoy StringTable.
+    let sfi = block(
+        "StringFileInfo",
+        &decoy_table,
+        decoy_table.len() as u16,
+        0,
+        std::slice::from_ref(&real_table),
+    );
+    let data = block(
+        "VS_VERSION_INFO",
+        &fixed_info((1, 0, 0, 0), (1, 0, 0, 0)),
+        52,
+        0,
+        &[sfi],
+    );
+    let v = pe::version::parse_version_info(&data).unwrap();
+    assert_eq!(v.all_langs.len(), 1);
+    assert_eq!(v.get(VersionField::OriginalFileName), Some("real.exe"));
+
+    // A text-typed StringTable counts its value in UTF-16 units.
+    let hidden = string("OriginalFilename", "decoy.exe");
+    assert_eq!(hidden.len() % 2, 0);
+    let table = block(
+        "040904B0",
+        &hidden,
+        (hidden.len() / 2) as u16,
+        1,
+        &[string("OriginalFilename", "real.exe")],
+    );
+    let data = block(
+        "VS_VERSION_INFO",
+        &[],
+        0,
+        0,
+        &[block("StringFileInfo", &[], 0, 1, &[table])],
+    );
+    let v = pe::version::parse_version_info(&data).unwrap();
+    assert_eq!(v.get(VersionField::OriginalFileName), Some("real.exe"));
+
+    // A text-typed root: wValueLength 26 units covers the 52-byte fixed
+    // info plus a 52-byte decoy, and both are skipped.
+    let mut value = fixed_info((2, 0, 0, 0), (2, 0, 0, 0));
+    let decoy = block("StringFileInfo", &[], 0, 1, &[decoy_table]);
+    value.extend_from_slice(&decoy[..52.min(decoy.len())]);
+    value.resize(104, 0);
+    let data = block(
+        "VS_VERSION_INFO",
+        &value,
+        52,
+        1,
+        &[block("StringFileInfo", &[], 0, 1, &[real_table])],
+    );
+    let v = pe::version::parse_version_info(&data).unwrap();
+    assert_eq!(v.get(VersionField::OriginalFileName), Some("real.exe"));
+    assert_eq!(v.file_version(), Some(FileVersionQuad(2, 0, 0, 0)));
+}

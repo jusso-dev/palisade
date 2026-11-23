@@ -428,7 +428,11 @@ struct Block {
     start: usize,
     /// End of the block, cut to the parent's end.
     end: usize,
+    /// `wValueLength`: in bytes for binary values (`wType` 0), in UTF-16
+    /// code units for text values (`wType` 1).
     value_len: u16,
+    /// `wType`: 0 for binary data, 1 for text.
+    w_type: u16,
     key: String,
     /// Start of the value, after the key and padding.
     value_start: usize,
@@ -441,9 +445,23 @@ impl Block {
         data.get(self.value_start..end).unwrap_or_default()
     }
 
-    /// Start of the children, after the value and padding.
-    fn children_start(&self, value_bytes: usize) -> usize {
-        align4(self.value_start.saturating_add(value_bytes))
+    /// The value's length in bytes, as the OS version API computes it:
+    /// `wValueLength`, doubled for text values.
+    fn value_bytes(&self) -> usize {
+        let len = usize::from(self.value_len);
+        if self.w_type == 0 {
+            len
+        } else {
+            len.saturating_mul(2)
+        }
+    }
+
+    /// Start of the children: after the value, whatever block this is, and
+    /// 4-byte aligned. Skipping the value the same way for every block, as
+    /// the OS does, means bytes hidden inside a value are never read as
+    /// child blocks.
+    fn children_start(&self) -> usize {
+        align4(self.value_start.saturating_add(self.value_bytes()))
             .unwrap_or(usize::MAX)
             .min(self.end)
     }
@@ -495,6 +513,7 @@ fn read_block(
         start,
         end,
         value_len: u16_at(header, 2).unwrap_or(0),
+        w_type: u16_at(header, 4).unwrap_or(0),
         key: key.text,
         value_start,
     }))
@@ -556,7 +575,7 @@ pub fn parse_version_info(data: &[u8]) -> Result<VersionInfo, VersionInfoIssue> 
         });
     }
 
-    let value_bytes = usize::from(root.value_len);
+    let value_bytes = root.value_bytes();
     let fixed = if value_bytes == 0 {
         None
     } else {
@@ -574,7 +593,7 @@ pub fn parse_version_info(data: &[u8]) -> Result<VersionInfo, VersionInfoIssue> 
     let mut translations = Vec::new();
     for_each_child(
         data,
-        root.children_start(value_bytes),
+        root.children_start(),
         root.end,
         &mut issues,
         |child, issues| {
@@ -625,7 +644,7 @@ fn string_file_info(
     // `StringFileInfo` has no value; its children start after the key.
     for_each_child(
         data,
-        block.children_start(0),
+        block.children_start(),
         block.end,
         issues,
         |table, issues| {
@@ -650,7 +669,7 @@ fn string_file_info(
             }
             let mut strings = Vec::new();
             let mut overflow = false;
-            for_each_child(data, table.children_start(0), table.end, issues, |s, _| {
+            for_each_child(data, table.children_start(), table.end, issues, |s, _| {
                 if strings.len() >= MAX_STRINGS_PER_TABLE {
                     overflow = true;
                     return;
@@ -688,30 +707,24 @@ fn var_file_info(
     translations: &mut Vec<Translation>,
     issues: &mut Vec<VersionInfoIssue>,
 ) {
-    for_each_child(
-        data,
-        block.children_start(0),
-        block.end,
-        issues,
-        |var, _| {
-            if !var.key.eq_ignore_ascii_case("Translation") {
-                return;
+    for_each_child(data, block.children_start(), block.end, issues, |var, _| {
+        if !var.key.eq_ignore_ascii_case("Translation") {
+            return;
+        }
+        let value = var.value(data, var.value_bytes());
+        for pair in value.chunks_exact(4) {
+            if translations.len() >= MAX_TRANSLATIONS {
+                break;
             }
-            let value = var.value(data, usize::from(var.value_len));
-            for pair in value.chunks_exact(4) {
-                if translations.len() >= MAX_TRANSLATIONS {
-                    break;
-                }
-                let (Some(language), Some(code_page)) = (u16_at(pair, 0), u16_at(pair, 2)) else {
-                    break;
-                };
-                translations.push(Translation {
-                    language,
-                    code_page,
-                });
-            }
-        },
-    );
+            let (Some(language), Some(code_page)) = (u16_at(pair, 0), u16_at(pair, 2)) else {
+                break;
+            };
+            translations.push(Translation {
+                language,
+                code_page,
+            });
+        }
+    });
 }
 
 /// Decodes a `StringTable` key such as `"040904B0"`.

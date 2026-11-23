@@ -135,7 +135,12 @@ pub(super) fn parse(
     warnings: &mut Warnings,
 ) -> DebugInfo {
     let mut info = DebugInfo::default();
-    let Some(start) = layout.rva_to_offset(dir.virtual_address, dir.size) else {
+    // RVA 0 is the null address: the loader treats the directory as absent
+    // whatever its size, so it must not map to the DOS header.
+    let mapped = (dir.virtual_address != 0)
+        .then(|| layout.rva_to_offset(dir.virtual_address, dir.size))
+        .flatten();
+    let Some(start) = mapped else {
         warnings.push(
             usize::try_from(dir.entry_offset).unwrap_or(usize::MAX),
             WarningKind::DirectoryNotMapped(DataDirectoryKind::Debug),

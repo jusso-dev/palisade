@@ -455,7 +455,12 @@ pub(super) fn walk(
     // some linkers record a directory size that is too small, so the tree is
     // bounded by the file-backed part of the section holding the root, found
     // by RVA as the loader does.
-    let Some((start, available)) = layout.backed_extent(dir.virtual_address) else {
+    // RVA 0 is the null address: the loader treats the directory as absent
+    // whatever its size, so it must not map to the DOS header.
+    let mapped = (dir.virtual_address != 0)
+        .then(|| layout.backed_extent(dir.virtual_address))
+        .flatten();
+    let Some((start, available)) = mapped else {
         warnings.push(
             entry_offset,
             WarningKind::DirectoryNotMapped(DataDirectoryKind::Resource),
