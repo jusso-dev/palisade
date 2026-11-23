@@ -911,3 +911,258 @@ fn small_size_of_headers_does_not_expose_the_headers() {
     let overlay = info.overlay.unwrap();
     assert_eq!(overlay.offset, builder.section_table_offset() as u64);
 }
+
+// ---- External review round 2 ----------------------------------------------
+
+/// A section that declares more raw data than the file holds never maps an
+/// RVA to an offset at or past the end of the input.
+#[test]
+fn rva_mapping_stops_at_end_of_input() {
+    let image = PeBuilder::default().build();
+    // `.text` data starts at 0x400; keep 0x10 bytes of it.
+    let cut = &image[..0x410];
+    let info = pe::parse(cut).unwrap();
+    assert_eq!(info.rva_to_offset(0x100f, 1), Some(0x40f));
+    assert_eq!(info.rva_to_offset(0x1000, 0x10), Some(0x400));
+    assert_eq!(info.rva_to_offset(0x1010, 1), None);
+    assert_eq!(info.rva_to_offset(0x1000, 0x11), None);
+    assert_eq!(info.rva_to_offset(0x1010, 0), None);
+    // The header branch is bounded too.
+    let tiny = &image[..0x300];
+    let info = pe::parse(tiny).unwrap();
+    assert_eq!(info.rva_to_offset(0x2ff, 1), Some(0x2ff));
+    assert_eq!(info.rva_to_offset(0x300, 0), None);
+    assert_eq!(info.rva_to_offset(0x2f0, 0x20), None);
+}
+
+/// A section whose mapped range would run past the 32-bit RVA space is not
+/// used to map RVAs; one that ends exactly at 2^32 is.
+#[test]
+fn sections_past_the_rva_space_are_ignored() {
+    let builder = PeBuilder::default();
+    let mut image = builder.build();
+    let header = builder.section_table_offset();
+    // VirtualAddress 0xffff_f000, VirtualSize 0x2000: ends past 2^32.
+    put32(&mut image, header + 12, 0xffff_f000);
+    put32(&mut image, header + 8, 0x2000);
+    let info = pe::parse(&image).unwrap();
+    assert!(info.section_for_rva(0xffff_f000).is_none());
+    assert_eq!(info.rva_to_offset(0xffff_f000, 1), None);
+    // VirtualSize 0x1000: ends exactly at 2^32.
+    put32(&mut image, header + 8, 0x1000);
+    let info = pe::parse(&image).unwrap();
+    assert_eq!(info.section_for_rva(0xffff_ffff).unwrap().name, ".text");
+    // Its first 0x200 bytes are file-backed, from offset 0x400.
+    assert_eq!(info.rva_to_offset(0xffff_f000, 0x200), Some(0x400));
+}
+
+/// A certificate table inside a section's file data is not a certificate
+/// table; one appended after the sections still is.
+#[test]
+fn certificate_table_inside_a_section_is_rejected() {
+    let builder = PeBuilder {
+        certificate: Some(vec![0x30; 16]),
+        ..PeBuilder::default()
+    };
+    let mut image = builder.build();
+    assert!(pe::parse(&image).unwrap().certificate_table.is_some());
+    let at = builder.data_directory_offset(4);
+    put32(&mut image, at, 0x408);
+    put32(&mut image, at + 4, 0x10);
+    let info = pe::parse(&image).unwrap();
+    assert!(info.certificate_table.is_none());
+    assert!(has(&info, |k| *k
+        == WarningKind::CertificateTableOverlapsSection));
+}
+
+/// A section entirely past the end of the file does not hide a trailer
+/// after the sections that are present.
+#[test]
+fn sections_past_eof_do_not_hide_the_overlay() {
+    let builder = PeBuilder {
+        overlay: vec![0xee; 48],
+        ..PeBuilder::default()
+    }
+    .section(".far", vec![1; 0x200], IMAGE_SCN_MEM_READ);
+    let mut image = builder.build();
+    let len = image.len();
+    // Move `.far` beyond the end of the file.
+    let header = builder.section_table_offset() + 40;
+    put32(&mut image, header + 20, 0x10_0000);
+    let info = pe::parse(&image).unwrap();
+    assert!(has(&info, |k| matches!(
+        k,
+        WarningKind::SectionDataOutOfFile { index: 1 }
+    )));
+    let overlay = info.overlay.unwrap();
+    // `.text` ends at 0x600; `.far`'s original bytes and the trailer follow.
+    assert_eq!(overlay.offset, 0x600);
+    assert_eq!(overlay.offset + overlay.size, len as u64);
+}
+
+/// A leaf whose data entry lies outside the tree records nothing.
+#[test]
+fn missing_data_entry_records_no_leaf() {
+    let mut tree = Vec::new();
+    put_dir(
+        &mut tree,
+        0,
+        0,
+        &[(u32::from(resource_type::GROUP_ICON), DIR | 0x100)],
+    );
+    put_dir(&mut tree, 0x100, 0, &[(1, DIR | 0x200)]);
+    // The language entry points far past the end of the tree.
+    put_dir(&mut tree, 0x200, 0, &[(0x0407, 0x7fff_0000)]);
+    let info = pe::parse(&image_with_tree(tree)).unwrap();
+    let res = info.resources.as_ref().unwrap();
+    assert!(!res.has_icons);
+    assert!(res.languages.is_empty());
+    assert!(has(&info, |k| *k == WarningKind::ResourceOutOfBounds));
+}
+
+/// A language-neutral leaf still wins when, in an unsorted directory, it
+/// comes after more leaves than are kept. Leaves past the cap that cannot
+/// win are not mapped.
+#[test]
+fn neutral_language_past_the_cap_is_chosen() {
+    let langs = pe::MAX_KEPT_RESOURCES + 10;
+    let mut tree = Vec::new();
+    put_dir(
+        &mut tree,
+        0,
+        0,
+        &[(u32::from(resource_type::VERSION), DIR | 0x100)],
+    );
+    put_dir(&mut tree, 0x100, 0, &[(1, DIR | 0x200)]);
+    // `langs` numeric languages, then neutral (0) last: unsorted on purpose.
+    let mut entries: Vec<(u32, u32)> = (1..=langs as u32).map(|l| (0x0400 + l, 0x1010)).collect();
+    entries.push((0, 0x1000));
+    put_dir(&mut tree, 0x200, 0, &entries);
+    put_blob(
+        &mut tree,
+        0x1000,
+        0x2000,
+        &version_blob("neutral.exe", (1, 0, 0, 0)),
+    );
+    put_blob(
+        &mut tree,
+        0x1010,
+        0x3000,
+        &version_blob("other.exe", (2, 0, 0, 0)),
+    );
+    let info = pe::parse(&image_with_tree(tree)).unwrap();
+    let res = info.resources.as_ref().unwrap();
+    assert!(has(&info, |k| *k == WarningKind::ResourceDirectoryNotSorted));
+    assert_eq!(res.version_languages.len(), pe::MAX_KEPT_RESOURCES);
+    assert_eq!(
+        res.version_resource.as_ref().unwrap().language,
+        ResourceId::Id(0)
+    );
+    assert_eq!(original_name(&info), Some("neutral.exe"));
+}
+
+fn lang_table(key: &str, name: &str) -> Vec<u8> {
+    block(key, &[], 0, 1, &[string("OriginalFilename", name)])
+}
+
+fn translation_block(pairs: &[(u16, u16)]) -> Vec<u8> {
+    let value: Vec<u8> = pairs
+        .iter()
+        .flat_map(|(l, c)| l.to_le_bytes().into_iter().chain(c.to_le_bytes()))
+        .collect();
+    let t = block("Translation", &value, value.len() as u16, 0, &[]);
+    block("VarFileInfo", &[], 0, 1, &[t])
+}
+
+/// The table named by `Translation` is selected even when more tables than
+/// are reported come before it.
+#[test]
+fn translation_match_past_the_table_cap_is_selected() {
+    let mut tables: Vec<Vec<u8>> = (0..pe::version::MAX_STRING_TABLES + 1)
+        .map(|_| lang_table("040904B0", "english.exe"))
+        .collect();
+    tables.push(lang_table("040C04B0", "french.exe"));
+    let data = block(
+        "VS_VERSION_INFO",
+        &[],
+        0,
+        0,
+        &[
+            block("StringFileInfo", &[], 0, 1, &tables),
+            translation_block(&[(0x040c, 0x04b0)]),
+        ],
+    );
+    let v = pe::version::parse_version_info(&data).unwrap();
+    assert_eq!(
+        v.selection,
+        Some(pe::version::LanguageSelection::Translation)
+    );
+    assert_eq!(v.get(VersionField::OriginalFileName), Some("french.exe"));
+    assert_eq!(v.all_langs.len(), pe::version::MAX_STRING_TABLES + 1);
+    assert!(
+        v.issues
+            .iter()
+            .any(|i| i.kind == pe::version::VersionIssueKind::TooManyStringTables)
+    );
+}
+
+/// A matching `Translation` pair after the first 64 still selects its
+/// table; only the reported list is capped.
+#[test]
+fn translation_pairs_past_the_cap_are_considered() {
+    let mut pairs: Vec<(u16, u16)> = (0..pe::version::MAX_TRANSLATIONS as u16)
+        .map(|i| (0x0500 + i, 0x04b0))
+        .collect();
+    pairs.push((0x040c, 0x04b0));
+    let data = block(
+        "VS_VERSION_INFO",
+        &[],
+        0,
+        0,
+        &[
+            block(
+                "StringFileInfo",
+                &[],
+                0,
+                1,
+                &[
+                    lang_table("040904B0", "english.exe"),
+                    lang_table("040C04B0", "french.exe"),
+                ],
+            ),
+            translation_block(&pairs),
+        ],
+    );
+    let v = pe::version::parse_version_info(&data).unwrap();
+    assert_eq!(v.translations.len(), pe::version::MAX_TRANSLATIONS);
+    assert_eq!(
+        v.selection,
+        Some(pe::version::LanguageSelection::Translation)
+    );
+    assert_eq!(v.get(VersionField::OriginalFileName), Some("french.exe"));
+}
+
+/// A string value is read within its declared length, not to the next NUL
+/// in the block.
+#[test]
+fn string_values_stay_within_their_declared_length() {
+    let units: Vec<u16> = "ABC\0".encode_utf16().collect();
+    let encoded: Vec<u8> = units.iter().flat_map(|u| u.to_le_bytes()).collect();
+    // Two units declared, four present.
+    let s = block("OriginalFilename", &encoded, 2, 1, &[]);
+    let data = block(
+        "VS_VERSION_INFO",
+        &[],
+        0,
+        0,
+        &[block(
+            "StringFileInfo",
+            &[],
+            0,
+            1,
+            &[block("040904B0", &[], 0, 1, &[s])],
+        )],
+    );
+    let v = pe::version::parse_version_info(&data).unwrap();
+    assert_eq!(v.get(VersionField::OriginalFileName), Some("AB"));
+}

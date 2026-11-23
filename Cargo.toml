@@ -37,6 +37,7 @@ palisade-core = { path = "crates/palisade-core", default-features = false }
 #
 # Third-party crates. Justify every new entry in the PR description.
 boon = { version = "0.6.1" }
+libc = { version = "0.2.191", default-features = false }
 md-5 = { version = "0.11.0", default-features = false }
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 schemars = { version = "1.2.3", default-features = false, features = ["derive"] }

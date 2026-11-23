@@ -631,12 +631,11 @@ pub fn hash_reader<R: Read>(mut reader: R, options: &HashOptions) -> Result<Hash
 /// Hashes the file at `path` (its default data stream).
 ///
 /// Anything that is not a regular file (a directory, pipe or device) returns
-/// [`HashError::NotAFile`], checked before the file is opened so a pipe with
-/// no writer cannot block the call. If the path is swapped for a pipe in the
-/// moment between that check and the open, the open can still block; the
-/// Windows backend (#46) will close that gap by opening without following
-/// such objects. A file whose metadata length is over the limit returns
-/// [`HashStatus::TooLarge`] without reading any content. The limit is also
+/// [`HashError::NotAFile`]. The opened handle is what is checked and hashed,
+/// and it is opened without blocking, so replacing the path with a pipe,
+/// even after the path check, cannot stall the call. A file whose metadata
+/// length is over the limit returns [`HashStatus::TooLarge`] without reading
+/// any content. The limit is also
 /// enforced while reading, in case the file grows.
 ///
 /// The file is opened with [`File::open`]. On Windows its default share mode
@@ -647,13 +646,14 @@ pub fn hash_reader<R: Read>(mut reader: R, options: &HashOptions) -> Result<Hash
 pub fn hash_file(path: &Path, options: &HashOptions) -> Result<HashStatus, HashError> {
     options.validate()?;
     // Pipes, devices and directories have no stable content to identify.
-    // Check before opening: opening a pipe with no writer blocks, and on
-    // Windows a directory cannot be opened as a file at all.
+    // The path is checked first, for a clear error (on Windows a directory
+    // cannot be opened as a file at all). It can be replaced after this
+    // check, so the open itself must not block and the opened handle is
+    // checked again: only the handle decides what is hashed.
     if !std::fs::metadata(path)?.is_file() {
         return Err(HashError::NotAFile);
     }
-    let file = File::open(path)?;
-    // Check the opened handle again, in case the path changed in between.
+    let file = open_without_blocking(path)?;
     let metadata = file.metadata()?;
     if !metadata.is_file() {
         return Err(HashError::NotAFile);
@@ -664,6 +664,24 @@ pub fn hash_file(path: &Path, options: &HashOptions) -> Result<HashStatus, HashE
         });
     }
     hash_reader(file, options)
+}
+
+/// Opens `path` for reading without waiting on a FIFO.
+///
+/// On Unix, opening a FIFO for reading blocks until a writer appears unless
+/// `O_NONBLOCK` is set. The flag has no effect on reads from a regular file,
+/// which is the only kind of handle [`hash_file`] goes on to read. Opening a
+/// named pipe on Windows does not wait for the server, so no flag is needed
+/// there.
+fn open_without_blocking(path: &Path) -> io::Result<File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    options.open(path)
 }
 
 #[cfg(test)]
@@ -705,6 +723,45 @@ mod tests {
         assert_eq!(hex_value(b'f'), Some(15));
         assert_eq!(hex_value(b'F'), Some(15));
         assert_eq!(hex_value(b'g'), None);
+    }
+
+    /// The state just after a path that passed the file check is swapped for
+    /// a FIFO: the open must return at once, and the handle check must then
+    /// reject it.
+    #[cfg(unix)]
+    #[test]
+    fn open_does_not_block_on_a_swapped_in_fifo() {
+        let dir = std::env::temp_dir().join(format!("palisade-fileid-race-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fifo = dir.join("pipe");
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&fifo)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let (tx, rx) = std::sync::mpsc::channel();
+        let path = fifo.clone();
+        std::thread::spawn(move || {
+            let opened = open_without_blocking(&path).and_then(|f| f.metadata());
+            let _ = tx.send(opened.map(|m| m.is_file()));
+        });
+        let is_file = rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("opening a FIFO blocked")
+            .unwrap();
+        assert!(!is_file);
+        // A regular file still opens and reads normally.
+        let file = dir.join("data");
+        std::fs::write(&file, b"abc").unwrap();
+        let mut text = String::new();
+        open_without_blocking(&file)
+            .unwrap()
+            .read_to_string(&mut text)
+            .unwrap();
+        assert_eq!(text, "abc");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

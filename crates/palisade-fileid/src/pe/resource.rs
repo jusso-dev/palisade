@@ -263,6 +263,14 @@ impl<'a> Tree<'a> {
         name
     }
 
+    /// Whether the full 16-byte data entry an entry points at is inside the
+    /// tree.
+    fn has_data_entry(&self, entry: &Entry) -> bool {
+        to_usize(entry.target_offset())
+            .and_then(|at| bytes(self.bytes, at, DATA_ENTRY_SIZE))
+            .is_some()
+    }
+
     /// Reads the data entry an entry points at.
     fn leaf(
         &self,
@@ -383,6 +391,15 @@ impl<'a> Tree<'a> {
                 );
                 continue;
             };
+            // Once the list is full, only a first language-neutral leaf can
+            // still change the result, so other leaves are not mapped. The
+            // ID scan itself continues, so ordering is still checked and a
+            // later neutral entry can still win.
+            let keep = languages.len() < MAX_KEPT_RESOURCES;
+            let could_be_neutral = lang == LANG_NEUTRAL && neutral.is_none();
+            if !keep && !could_be_neutral {
+                continue;
+            }
             let path = [
                 ResourceId::Id(type_id),
                 ResourceId::Id(name_id),
@@ -391,10 +408,10 @@ impl<'a> Tree<'a> {
             let Some(leaf) = self.leaf(&entry, path, warnings) else {
                 continue;
             };
-            if lang == LANG_NEUTRAL && neutral.is_none() {
+            if could_be_neutral {
                 neutral = Some(leaf.clone());
             }
-            if languages.len() < MAX_KEPT_RESOURCES {
+            if keep {
                 languages.push(leaf);
             }
         }
@@ -557,8 +574,16 @@ impl General<'_, '_> {
             path.push(id);
             if entry.is_directory() {
                 self.directory(entry.target_offset(), path, summary, warnings);
-            } else {
+            } else if self.tree.has_data_entry(&entry) {
                 record_leaf(path, summary);
+            } else {
+                // A clear directory bit says the target is a data entry; it
+                // does not say one exists. A missing one records nothing.
+                warnings.push(
+                    self.tree
+                        .file_offset(to_usize(entry.target_offset()).unwrap_or(usize::MAX)),
+                    WarningKind::ResourceOutOfBounds,
+                );
             }
             path.pop();
         }

@@ -329,11 +329,14 @@ pub struct EffectiveFileName<'a> {
 pub struct VersionInfo {
     /// `VS_FIXEDFILEINFO`, if present and valid.
     pub fixed: Option<FixedFileInfo>,
-    /// Every language block of the first `StringFileInfo`, in file order.
-    /// (Later `StringFileInfo` blocks are unreachable through the OS
+    /// The language blocks of the first `StringFileInfo`, in file order: the
+    /// first [`MAX_STRING_TABLES`], plus the selected block if it comes
+    /// later. (Later `StringFileInfo` blocks are unreachable through the OS
     /// version API and are reported as [`VersionIssueKind::DuplicateBlock`].)
     pub all_langs: Vec<StringTable>,
-    /// The `VarFileInfo\Translation` entries, in file order.
+    /// The first [`MAX_TRANSLATIONS`] `VarFileInfo\Translation` entries, in
+    /// file order. Language selection considers every entry, not only
+    /// these.
     pub translations: Vec<Translation>,
     /// Index into [`all_langs`](Self::all_langs) of the selected block.
     pub selected: Option<usize>,
@@ -429,6 +432,7 @@ fn mismatch(fixed: Option<FileVersionQuad>, text: Option<&str>) -> bool {
 }
 
 /// One block header: `wLength`, `wValueLength`, `wType`, `szKey`.
+#[derive(Clone)]
 struct Block {
     start: usize,
     /// End of the block, cut to the parent's end.
@@ -594,39 +598,69 @@ pub fn parse_version_info(data: &[u8]) -> Result<VersionInfo, VersionInfoIssue> 
         parsed
     };
 
-    let mut all_langs = Vec::new();
-    let mut translations = Vec::new();
-    let mut seen_string_file_info = false;
-    let mut seen_var_file_info = false;
+    // Pass 1: find the first `StringFileInfo` and `VarFileInfo`. The OS
+    // version API resolves a path one segment at a time and takes the first
+    // child with a matching key, so later ones are unreachable; they are
+    // reported and ignored rather than merged.
+    let mut string_file_info = None;
+    let mut var_file_info = None;
     for_each_child(
         data,
         root.children_start(),
         root.end,
         &mut issues,
         |child, issues| {
-            // The OS version API resolves a path one segment at a time and
-            // takes the first child with a matching key, so only the first
-            // `StringFileInfo` and `VarFileInfo` are reachable. Later ones
-            // are reported and ignored rather than merged.
-            if child.key.eq_ignore_ascii_case("StringFileInfo") {
-                if seen_string_file_info {
-                    issues.push(duplicate(child));
-                } else {
-                    seen_string_file_info = true;
-                    string_file_info(data, child, &mut all_langs, issues);
-                }
+            let slot = if child.key.eq_ignore_ascii_case("StringFileInfo") {
+                &mut string_file_info
             } else if child.key.eq_ignore_ascii_case("VarFileInfo") {
-                if seen_var_file_info {
-                    issues.push(duplicate(child));
-                } else {
-                    seen_var_file_info = true;
-                    var_file_info(data, child, &mut translations, issues);
-                }
+                &mut var_file_info
+            } else {
+                return;
+            };
+            if slot.is_some() {
+                issues.push(duplicate(child));
+            } else {
+                *slot = Some(child.clone());
             }
         },
     );
 
-    let (selected, selection) = select_language(&all_langs, &translations);
+    // Every `Translation` pair and every table key, so that selection is not
+    // affected by the caps on what is reported.
+    let all_translations = var_file_info
+        .map(|b| translation_pairs(data, &b, &mut issues))
+        .unwrap_or_default();
+    let tables = string_file_info
+        .map(|b| string_tables(data, &b, &mut issues))
+        .unwrap_or_default();
+    let keys: Vec<Option<Translation>> = tables.iter().map(|t| parse_table_key(&t.key)).collect();
+    let (winner, selection) = select_language(&keys, &all_translations);
+
+    // Pass 2: decode the reported tables, plus the winner if it lies past
+    // the cap.
+    let mut all_langs = Vec::new();
+    let mut selected = None;
+    for (index, (block, translation)) in tables.iter().zip(&keys).enumerate() {
+        let is_winner = winner == Some(index);
+        if index >= MAX_STRING_TABLES && !is_winner {
+            continue;
+        }
+        if is_winner {
+            selected = Some(all_langs.len());
+        }
+        all_langs.push(decode_table(data, block, *translation, &mut issues));
+    }
+    if let Some(first_dropped) = tables.get(MAX_STRING_TABLES) {
+        issues.push(VersionInfoIssue {
+            offset: to_u64(first_dropped.start),
+            kind: VersionIssueKind::TooManyStringTables,
+        });
+    }
+    let translations = all_translations
+        .into_iter()
+        .take(MAX_TRANSLATIONS)
+        .collect();
+
     Ok(VersionInfo {
         fixed,
         all_langs,
@@ -656,78 +690,70 @@ fn parse_fixed(value: &[u8], offset: usize) -> Option<FixedFileInfo> {
     })
 }
 
-fn string_file_info(
-    data: &[u8],
-    block: &Block,
-    tables: &mut Vec<StringTable>,
-    issues: &mut Vec<VersionInfoIssue>,
-) {
-    // `StringFileInfo` has no value; its children start after the key.
+/// The `StringTable` blocks of a `StringFileInfo`, in file order. Bounded
+/// by the block size (at most 64 KiB) and the child limit.
+fn string_tables(data: &[u8], block: &Block, issues: &mut Vec<VersionInfoIssue>) -> Vec<Block> {
+    let mut tables = Vec::new();
     for_each_child(
         data,
         block.children_start(),
         block.end,
         issues,
-        |table, issues| {
-            if tables.len() >= MAX_STRING_TABLES {
-                if !issues
-                    .iter()
-                    .any(|i| i.kind == VersionIssueKind::TooManyStringTables)
-                {
-                    issues.push(VersionInfoIssue {
-                        offset: to_u64(table.start),
-                        kind: VersionIssueKind::TooManyStringTables,
-                    });
-                }
-                return;
-            }
-            let translation = parse_table_key(&table.key);
-            if translation.is_none() {
-                issues.push(VersionInfoIssue {
-                    offset: to_u64(table.start),
-                    kind: VersionIssueKind::BadStringTableKey(table.key.clone()),
-                });
-            }
-            let mut strings = Vec::new();
-            let mut overflow = false;
-            for_each_child(data, table.children_start(), table.end, issues, |s, _| {
-                if strings.len() >= MAX_STRINGS_PER_TABLE {
-                    overflow = true;
-                    return;
-                }
-                // `wValueLength` counts UTF-16 units for text values, but some
-                // linkers store a byte count or omit the NUL. Reading to the
-                // first NUL inside the block handles all of these; a zero
-                // `wValueLength` means an empty value.
-                let value = if s.value_len == 0 {
-                    String::new()
-                } else {
-                    utf16_until_nul(s.value(data, s.end.saturating_sub(s.value_start))).text
-                };
-                strings.push((s.key.clone(), value));
-            });
-            if overflow {
-                issues.push(VersionInfoIssue {
-                    offset: to_u64(table.start),
-                    kind: VersionIssueKind::TooManyStrings,
-                });
-            }
-            tables.push(StringTable {
-                offset: to_u64(table.start),
-                key: table.key.clone(),
-                translation,
-                strings,
-            });
-        },
+        |table, _| tables.push(table.clone()),
     );
+    tables
 }
 
-fn var_file_info(
+/// Decodes one `StringTable`.
+fn decode_table(
+    data: &[u8],
+    table: &Block,
+    translation: Option<Translation>,
+    issues: &mut Vec<VersionInfoIssue>,
+) -> StringTable {
+    if translation.is_none() {
+        issues.push(VersionInfoIssue {
+            offset: to_u64(table.start),
+            kind: VersionIssueKind::BadStringTableKey(table.key.clone()),
+        });
+    }
+    let mut strings = Vec::new();
+    let mut overflow = false;
+    for_each_child(data, table.children_start(), table.end, issues, |s, _| {
+        if strings.len() >= MAX_STRINGS_PER_TABLE {
+            overflow = true;
+            return;
+        }
+        // A `String` value's length is in UTF-16 code units, whatever
+        // `wType` says. The value is read within that length, cut to the
+        // block end (which also covers linkers that store a byte count), and
+        // then up to the first NUL.
+        let declared = usize::from(s.value_len).saturating_mul(2);
+        let value = utf16_until_nul(s.value(data, declared)).text;
+        strings.push((s.key.clone(), value));
+    });
+    if overflow {
+        issues.push(VersionInfoIssue {
+            offset: to_u64(table.start),
+            kind: VersionIssueKind::TooManyStrings,
+        });
+    }
+    StringTable {
+        offset: to_u64(table.start),
+        key: table.key.clone(),
+        translation,
+        strings,
+    }
+}
+
+/// Every pair of the first `Translation` in a `VarFileInfo`, in file order.
+/// Bounded by the block size (at most 64 KiB, so 16,384 pairs).
+fn translation_pairs(
     data: &[u8],
     block: &Block,
-    translations: &mut Vec<Translation>,
     issues: &mut Vec<VersionInfoIssue>,
-) {
+) -> Vec<Translation> {
+    let mut pairs = Vec::new();
     let mut seen = false;
     for_each_child(
         data,
@@ -738,7 +764,8 @@ fn var_file_info(
             if !var.key.eq_ignore_ascii_case("Translation") {
                 return;
             }
-            // Only the first `Translation` is reachable, as for the blocks above.
+            // Only the first `Translation` is reachable, as for the blocks
+            // above.
             if seen {
                 issues.push(duplicate(var));
                 return;
@@ -746,19 +773,17 @@ fn var_file_info(
             seen = true;
             let value = var.value(data, var.value_bytes());
             for pair in value.chunks_exact(4) {
-                if translations.len() >= MAX_TRANSLATIONS {
-                    break;
-                }
                 let (Some(language), Some(code_page)) = (u16_at(pair, 0), u16_at(pair, 2)) else {
                     break;
                 };
-                translations.push(Translation {
+                pairs.push(Translation {
                     language,
                     code_page,
                 });
             }
         },
     );
+    pairs
 }
 
 fn duplicate(block: &Block) -> VersionInfoIssue {
@@ -781,11 +806,14 @@ fn parse_table_key(key: &str) -> Option<Translation> {
     })
 }
 
+/// Picks the language block: the first `Translation` pair, in order, that
+/// has a matching block (the first such block), then US English Unicode,
+/// then the first block. `keys` holds each block's decoded key.
 fn select_language(
-    tables: &[StringTable],
+    keys: &[Option<Translation>],
     translations: &[Translation],
 ) -> (Option<usize>, Option<LanguageSelection>) {
-    let find = |want: Translation| tables.iter().position(|t| t.translation == Some(want));
+    let find = |want: Translation| keys.iter().position(|k| *k == Some(want));
     if let Some(i) = translations.iter().find_map(|t| find(*t)) {
         return (Some(i), Some(LanguageSelection::Translation));
     }
@@ -796,7 +824,7 @@ fn select_language(
     if let Some(i) = find(english) {
         return (Some(i), Some(LanguageSelection::EnglishUnicode));
     }
-    if tables.is_empty() {
+    if keys.is_empty() {
         (None, None)
     } else {
         (Some(0), Some(LanguageSelection::First))

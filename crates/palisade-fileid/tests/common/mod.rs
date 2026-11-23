@@ -203,6 +203,15 @@ impl PeBuilder {
             });
         }
 
+        // Every section header must fit in the fixed header area, or the
+        // table would be written over the first section's data.
+        let table_end = self.section_table_offset() + specs.len() * 40;
+        assert!(
+            table_end <= SIZE_OF_HEADERS as usize,
+            "{} sections need {table_end:#x} bytes of headers; the fixture has {SIZE_OF_HEADERS:#x}",
+            specs.len()
+        );
+
         let mut out = vec![0_u8; SIZE_OF_HEADERS as usize];
         out[0] = b'M';
         out[1] = b'Z';

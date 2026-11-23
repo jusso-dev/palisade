@@ -13,6 +13,8 @@ pub const MAX_PDB_PATH: usize = 4096;
 
 const DEBUG_ENTRY_SIZE: usize = 28;
 const RSDS_SIGNATURE: u32 = 0x5344_5352; // "RSDS"
+/// The older CodeView format. Valid, but its metadata is not extracted.
+const NB10_SIGNATURE: u32 = 0x3031_424e; // "NB10"
 const RSDS_FIXED: usize = 24; // signature + GUID + age
 
 /// The `Type` of a debug directory entry (`IMAGE_DEBUG_TYPE_*`).
@@ -175,12 +177,15 @@ pub(super) fn parse(
             DebugType::Repro => info.has_repro = true,
             DebugType::Pogo => info.has_pogo = true,
             DebugType::CodeView if info.codeview.is_none() => {
-                info.codeview = parse_rsds(data, layout, &entry);
-                if info.codeview.is_none() {
-                    warnings.push(
+                match parse_rsds(data, layout, &entry) {
+                    CodeView::Rsds(pdb) => info.codeview = Some(pdb),
+                    // A recognised older format: skipped, not malformed. A later
+                    // RSDS entry can still be used.
+                    CodeView::Unsupported => {}
+                    CodeView::Malformed => warnings.push(
                         usize::try_from(entry.entry_offset).unwrap_or(usize::MAX),
                         WarningKind::DebugDirectoryMalformed,
-                    );
+                    ),
                 }
             }
             _ => {}
@@ -190,9 +195,29 @@ pub(super) fn parse(
     info
 }
 
-/// Reads a CodeView RSDS record. The record is found by its file offset
+/// What a CodeView debug entry holds.
+#[derive(Debug, PartialEq, Eq)]
+enum CodeView {
+    /// A valid RSDS record.
+    Rsds(CodeViewPdb),
+    /// A recognised format whose metadata is not extracted (NB10).
+    Unsupported,
+    /// Unreadable, out of bounds, unknown, or an RSDS record whose path has
+    /// no NUL terminator.
+    Malformed,
+}
+
+/// Reads a CodeView record. The record is found by its file offset
 /// (`PointerToRawData`), or by its RVA when the file offset is zero.
-fn parse_rsds(data: &[u8], layout: Layout<'_>, entry: &DebugEntry) -> Option<CodeViewPdb> {
+///
+/// An RSDS path must end with a NUL inside the record, as PDB readers
+/// require. A path is cut at [`MAX_PDB_PATH`] bytes without failing when
+/// the record continues past that point.
+fn parse_rsds(data: &[u8], layout: Layout<'_>, entry: &DebugEntry) -> CodeView {
+    read_codeview(data, layout, entry).unwrap_or(CodeView::Malformed)
+}
+
+fn read_codeview(data: &[u8], layout: Layout<'_>, entry: &DebugEntry) -> Option<CodeView> {
     let offset = if entry.pointer_to_raw_data != 0 {
         to_usize(entry.pointer_to_raw_data)?
     } else if entry.address_of_raw_data != 0 {
@@ -202,26 +227,30 @@ fn parse_rsds(data: &[u8], layout: Layout<'_>, entry: &DebugEntry) -> Option<Cod
     };
     let len = to_usize(entry.size_of_data)?;
     let record = bytes(data, offset, len)?;
-    if u32_at(record, 0)? != RSDS_SIGNATURE {
-        return None;
+    match u32_at(record, 0)? {
+        RSDS_SIGNATURE => {}
+        NB10_SIGNATURE => return Some(CodeView::Unsupported),
+        _ => return None,
     }
     let mut guid = [0_u8; 16];
     guid.copy_from_slice(bytes(record, 4, 16)?);
     let age = u32_at(record, 20)?;
     let path_area = record.get(RSDS_FIXED..)?;
-    // Only the first MAX_PDB_PATH bytes are ever scanned for the NUL.
-    let path_area = path_area.get(..path_area.len().min(MAX_PDB_PATH))?;
-    let path_len = path_area
-        .iter()
-        .position(|b| *b == 0)
-        .unwrap_or(path_area.len());
-    let path = String::from_utf8_lossy(path_area.get(..path_len)?).into_owned();
-    Some(CodeViewPdb {
+    let scanned = path_area.get(..path_area.len().min(MAX_PDB_PATH))?;
+    let path_len = match scanned.iter().position(|b| *b == 0) {
+        Some(nul) => nul,
+        // The scan reached the record's end without a NUL: unterminated.
+        None if scanned.len() == path_area.len() => return None,
+        // The scan stopped at the cap with more record left: truncate.
+        None => scanned.len(),
+    };
+    let path = String::from_utf8_lossy(scanned.get(..path_len)?).into_owned();
+    Some(CodeView::Rsds(CodeViewPdb {
         offset: to_u64(offset),
         guid,
         age,
         path,
-    })
+    }))
 }
 
 #[cfg(test)]
@@ -247,6 +276,7 @@ mod tests {
         size_of_headers: 0,
         section_alignment: 0x1000,
         file_alignment: 0x200,
+        file_len: usize::MAX,
     };
 
     fn record() -> Vec<u8> {
@@ -270,43 +300,85 @@ mod tests {
         }
     }
 
+    fn rsds(data: &[u8], entry: &DebugEntry) -> CodeViewPdb {
+        match parse_rsds(data, NO_SECTIONS, entry) {
+            CodeView::Rsds(pdb) => pdb,
+            other => panic!("expected RSDS, got {other:?}"),
+        }
+    }
+
     #[test]
     fn rsds_needs_signature_and_bounds() {
         let data = record();
         let entry = entry(&data);
-        let pdb = parse_rsds(&data, NO_SECTIONS, &entry).unwrap();
+        let pdb = rsds(&data, &entry);
         assert_eq!(
             (pdb.age, pdb.path.as_str(), pdb.offset),
             (7, "C:\\build\\app.pdb", 8)
         );
 
+        let malformed = |data: &[u8], entry: &DebugEntry| {
+            parse_rsds(data, NO_SECTIONS, entry) == CodeView::Malformed
+        };
         let short = DebugEntry {
             size_of_data: 10,
             ..entry.clone()
         };
-        assert!(parse_rsds(&data, NO_SECTIONS, &short).is_none());
+        assert!(malformed(&data, &short));
         let past_end = DebugEntry {
             size_of_data: u32::MAX,
             ..entry.clone()
         };
-        assert!(parse_rsds(&data, NO_SECTIONS, &past_end).is_none());
+        assert!(malformed(&data, &past_end));
         let nowhere = DebugEntry {
             pointer_to_raw_data: 0,
             ..entry.clone()
         };
-        assert!(parse_rsds(&data, NO_SECTIONS, &nowhere).is_none());
+        assert!(malformed(&data, &nowhere));
         let mut bad = data.clone();
         bad[8] = b'X';
-        assert!(parse_rsds(&bad, NO_SECTIONS, &entry).is_none());
+        assert!(malformed(&bad, &entry));
+    }
+
+    #[test]
+    fn nb10_is_unsupported_not_malformed() {
+        let mut data = record();
+        data[8..12].copy_from_slice(b"NB10");
+        assert_eq!(
+            parse_rsds(&data, NO_SECTIONS, &entry(&data)),
+            CodeView::Unsupported
+        );
+    }
+
+    #[test]
+    fn rsds_path_must_be_terminated() {
+        // The record ends inside the path, before any NUL.
+        let mut data = record();
+        data.truncate(8 + RSDS_FIXED + 5);
+        assert_eq!(
+            parse_rsds(&data, NO_SECTIONS, &entry(&data)),
+            CodeView::Malformed
+        );
+        // A NUL as the very last byte is fine.
+        data.push(0);
+        assert_eq!(rsds(&data, &entry(&data)).path, "C:\\bu");
     }
 
     #[test]
     fn rsds_path_scan_is_capped() {
+        // More record bytes remain past the cap, so the path is truncated
+        // rather than rejected.
         let mut data = record();
         data.truncate(8 + RSDS_FIXED);
         data.extend(std::iter::repeat_n(b'a', MAX_PDB_PATH * 4));
-        let pdb = parse_rsds(&data, NO_SECTIONS, &entry(&data)).unwrap();
-        assert_eq!(pdb.path.len(), MAX_PDB_PATH);
+        assert_eq!(rsds(&data, &entry(&data)).path.len(), MAX_PDB_PATH);
+        // A path exactly MAX_PDB_PATH long with no NUL and nothing after it
+        // is unterminated.
+        data.truncate(8 + RSDS_FIXED + MAX_PDB_PATH);
+        assert_eq!(
+            parse_rsds(&data, NO_SECTIONS, &entry(&data)),
+            CodeView::Malformed
+        );
     }
 
     #[test]

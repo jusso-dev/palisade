@@ -176,6 +176,9 @@ pub enum WarningKind {
     /// The certificate table entry has a zero offset or size, or points into
     /// the headers. It is ignored.
     CertificateTableInvalid,
+    /// The certificate table range overlaps a section's file data. The
+    /// table always lies outside the mapped image, so it is ignored.
+    CertificateTableOverlapsSection,
     /// The file is too large (over 4 GiB) for the PE checksum.
     ChecksumUnavailable,
     /// A resource directory or entry is out of bounds.
@@ -490,6 +493,7 @@ impl PeInfo {
             size_of_headers: self.optional.size_of_headers,
             section_alignment: self.optional.section_alignment,
             file_alignment: self.optional.file_alignment,
+            file_len: usize::try_from(self.file_size).unwrap_or(usize::MAX),
         }
     }
 }
@@ -529,14 +533,18 @@ pub(crate) struct Layout<'a> {
     pub(crate) size_of_headers: u32,
     pub(crate) section_alignment: u32,
     pub(crate) file_alignment: u32,
+    /// Length of the input. File offsets at or past it are never returned.
+    pub(crate) file_len: usize,
 }
 
 impl<'a> Layout<'a> {
     /// The section whose mapped virtual range contains `rva`.
     fn section_for(&self, rva: u32) -> Option<&'a Section> {
         self.sections.iter().find(|s| {
-            rva.checked_sub(s.virtual_address)
-                .is_some_and(|delta| delta < mapped_span(s, self.section_alignment))
+            fits_rva_space(s, self.section_alignment)
+                && rva
+                    .checked_sub(s.virtual_address)
+                    .is_some_and(|delta| delta < mapped_span(s, self.section_alignment))
         })
     }
 
@@ -559,7 +567,7 @@ impl<'a> Layout<'a> {
                 return None;
             }
             let offset = to_usize(start.checked_add(delta)?)?;
-            return Some((offset, backed - delta));
+            return clamp_to_file(offset, backed - delta, self.file_len);
         }
         let limit = self
             .sections
@@ -570,7 +578,7 @@ impl<'a> Layout<'a> {
                 first.min(self.size_of_headers)
             });
         if rva < limit {
-            Some((to_usize(rva)?, limit - rva))
+            clamp_to_file(to_usize(rva)?, limit - rva, self.file_len)
         } else {
             None
         }
@@ -582,6 +590,36 @@ impl<'a> Layout<'a> {
     pub(crate) fn rva_to_offset(&self, rva: u32, len: u32) -> Option<usize> {
         let (offset, available) = self.backed_extent(rva)?;
         (len <= available).then_some(offset)
+    }
+}
+
+/// Cuts an extent of `available` bytes at file offset `offset` so it ends at
+/// the end of the input. `None` if it starts at or past the end.
+fn clamp_to_file(offset: usize, available: u32, file_len: usize) -> Option<(usize, u32)> {
+    let in_file = file_len.checked_sub(offset).filter(|n| *n > 0)?;
+    let in_file = u32::try_from(in_file).unwrap_or(u32::MAX);
+    Some((offset, available.min(in_file)))
+}
+
+/// Whether a section's mapped range ends within the 32-bit RVA space (an
+/// end of exactly 2^32 is allowed). A section past it is malformed and is
+/// never used to map RVAs.
+fn fits_rva_space(s: &Section, section_alignment: u32) -> bool {
+    u64::from(s.virtual_address) + mapped_span_u64(s, section_alignment) <= 1_u64 << 32
+}
+
+/// [`mapped_span`] in 64-bit arithmetic, so rounding near `u32::MAX` is
+/// exact instead of saturating.
+fn mapped_span_u64(s: &Section, section_alignment: u32) -> u64 {
+    let size = u64::from(if s.virtual_size == 0 {
+        s.size_of_raw_data
+    } else {
+        s.virtual_size
+    });
+    if section_alignment.is_power_of_two() {
+        size.next_multiple_of(u64::from(section_alignment))
+    } else {
+        size
     }
 }
 
@@ -753,8 +791,20 @@ pub fn parse_with(data: &[u8], options: &ParseOptions) -> Result<PeInfo, PeError
                 .is_some_and(|end| end <= to_u64(data.len()));
             if !fits {
                 warnings.push(entry, WarningKind::CertificateTableOutOfFile);
+                return None;
             }
-            fits.then_some(range)
+            // The certificate table lies outside the image's mapped data, so
+            // a range overlapping any section's file data is not one.
+            let end = range.offset.saturating_add(range.size);
+            let overlaps = sections
+                .iter()
+                .filter_map(|s| in_file_data(s, optional.file_alignment, data.len()))
+                .any(|(s_start, s_end)| range.offset < s_end && s_start < end);
+            if overlaps {
+                warnings.push(entry, WarningKind::CertificateTableOverlapsSection);
+                return None;
+            }
+            Some(range)
         });
 
     let overlay = find_overlay(
@@ -770,6 +820,7 @@ pub fn parse_with(data: &[u8], options: &ParseOptions) -> Result<PeInfo, PeError
         size_of_headers,
         section_alignment: optional.section_alignment,
         file_alignment: optional.file_alignment,
+        file_len: data.len(),
     };
     let debug = data_directories
         .get(DataDirectoryKind::Debug.index())
@@ -1016,6 +1067,17 @@ fn section_raw_data<'a>(
         .filter(|raw| !raw.is_empty())
 }
 
+/// The part of a section's file data that is actually in the input, as a
+/// `(start, end)` file range, or `None` if none of it is. A section that
+/// starts past the end of the input contributes nothing; one that runs past
+/// the end is cut there.
+fn in_file_data(s: &Section, file_alignment: u32, file_len: usize) -> Option<(u64, u64)> {
+    let (start, size) = s.file_data(file_alignment)?;
+    let start = u64::from(start);
+    let file_len = to_u64(file_len);
+    (start < file_len).then(|| (start, start.saturating_add(u64::from(size)).min(file_len)))
+}
+
 fn find_overlay(
     file_len: usize,
     headers_end: usize,
@@ -1023,14 +1085,14 @@ fn find_overlay(
     sections: &[Section],
     certificate_table: Option<FileRange>,
 ) -> Option<FileRange> {
-    let file_len = to_u64(file_len);
     let sections_end = sections
         .iter()
-        .filter_map(|s| s.file_data(file_alignment))
-        .map(|(start, size)| u64::from(start).saturating_add(u64::from(size)))
+        .filter_map(|s| in_file_data(s, file_alignment, file_len))
+        .map(|(_, end)| end)
         .max()
         .unwrap_or(0)
         .max(to_u64(headers_end));
+    let file_len = to_u64(file_len);
     let cert_end = certificate_table.map_or(0, |c| c.offset.saturating_add(c.size));
     let start = sections_end.max(cert_end);
     (start < file_len).then(|| FileRange {

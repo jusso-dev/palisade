@@ -401,6 +401,7 @@ version = "0.1.0"
 name = "palisade-fileid"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "md-5",
  "proptest",
  "sha1",

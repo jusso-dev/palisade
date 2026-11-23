@@ -337,16 +337,34 @@ fn malformed_version_resources() {
     );
     assert_eq!(v.get(VersionField::ProductName), Some("X"));
 
-    // A child whose length overruns its parent is cut, and reported.
+    // A child whose length overruns its parent is cut to the parent, and
+    // reported at the child. The root's own length stays valid.
     let mut data = standard().build();
     let total = data.len();
-    data[0..2].copy_from_slice(&((total + 100) as u16).to_le_bytes());
-    let v = version::parse_version_info(&data).unwrap();
-    assert!(
-        v.issues
-            .iter()
-            .any(|i| i.kind == VersionIssueKind::BlockOverrun)
+    let root_len = u16::from_le_bytes([data[0], data[1]]) as usize;
+    assert_eq!(root_len, total);
+    // The root's children start after its 52-byte fixed info.
+    let key = "VS_VERSION_INFO".encode_utf16().count() * 2 + 2;
+    let child = (6 + key).next_multiple_of(4) + 52;
+    let child = child.next_multiple_of(4);
+    let child_key: Vec<u8> = "StringFileInfo"
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    assert_eq!(
+        &data[child + 6..child + 6 + child_key.len()],
+        &child_key[..]
     );
+    let child_len = u16::from_le_bytes([data[child], data[child + 1]]) as usize;
+    data[child..child + 2].copy_from_slice(&((child_len + 0x200) as u16).to_le_bytes());
+    let v = version::parse_version_info(&data).unwrap();
+    let overruns: Vec<_> = v
+        .issues
+        .iter()
+        .filter(|i| i.kind == VersionIssueKind::BlockOverrun)
+        .collect();
+    assert_eq!(overruns.len(), 1);
+    assert_eq!(overruns[0].offset, child as u64);
     assert_eq!(v.get(VersionField::OriginalFileName), Some("extool.exe"));
 
     // Every truncation point parses or fails without panicking.
