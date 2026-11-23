@@ -131,6 +131,39 @@ fn directives_are_checked_before_every_document_only() {
         );
         assert_eq!(at(&e), (line, 1), "{input:?}: {e}");
     }
+    // The parser's character index drifts after a long block-scalar line
+    // of multi-byte text; directives after it are still found.
+    let long = "\u{e9}".repeat(50);
+    for (input, line) in [
+        (
+            format!("description: |\n  {long}\n...\n%YAML 1.1\n---\n{MINIMAL}"),
+            4,
+        ),
+        (
+            format!("description: |\n  {long}\n...\r\n%TAG ! x:\r\n---\n{MINIMAL}"),
+            4,
+        ),
+        (
+            format!("description: |\n  {long}\n...\n\n%FOO\n--- {MINIMAL}"),
+            5,
+        ),
+    ] {
+        let e = from_str_all(&input, &Limits::DEFAULT).unwrap_err();
+        assert_eq!(
+            e.kind(),
+            YamlErrorKind::UnsupportedFeature,
+            "{input:?}: {e}"
+        );
+        assert_eq!(at(&e), (line, 1), "{input:?}: {e}");
+    }
+    // And a `%` line inside a later document's content is not a directive.
+    let input = format!("a: |\n  {long}\n--- \"x\n%not a directive\n y\"\n");
+    let roots = parse::parse(&input, &Limits::DEFAULT).unwrap();
+    assert_eq!(roots.len(), 2);
+    assert_eq!(
+        roots[1].value,
+        parse::Value::Str("x %not a directive y".to_owned())
+    );
     // Comments and `%YAML 1.2` with a comment are fine; a `%` inside a
     // document's content is not a directive.
     assert!(from_str(&format!("# c\n%YAML 1.2 # c\n---\n{MINIMAL}")).is_ok());

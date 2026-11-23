@@ -89,8 +89,8 @@ pub(crate) fn parse(input: &str, limits: &Limits) -> Result<Vec<Node>, YamlError
         let at = location(mark);
         match event {
             Event::StreamEnd => break,
-            Event::DocumentStart => prefix.check(mark.index())?,
-            Event::DocumentEnd => prefix.skip_to(mark.index()),
+            Event::DocumentStart => prefix.check(mark.line())?,
+            Event::DocumentEnd => prefix.skip_to(mark.line()),
             Event::Nothing | Event::StreamStart => {}
             Event::Alias(_) => {
                 return Err(YamlError::new(
@@ -218,61 +218,45 @@ fn location_of(input: &str, offset: usize) -> Location {
 /// allowed, so `%TAG`, other versions and reserved directives are rejected.
 ///
 /// The parser applies directives without reporting them. They can only
-/// appear in a document's prefix, between the end of the previous document
-/// (or the start of the stream) and the `---` that starts the document, and
-/// only at the start of a line. This reads those prefixes from the source
-/// text as document events arrive, so the input is read once more in total
-/// and nothing is scanned that the parser's own limits have not reached.
+/// appear in a document's prefix: the lines from the end of the previous
+/// document (or the start of the stream) up to the line of the `---` that
+/// starts the document, and only at the start of a line. This reads those
+/// lines from the source as document events arrive, so the input is read
+/// once more in total and never ahead of the parser's own limits.
+///
+/// Positions are tracked by line. The parser's line numbers are exact,
+/// but its character index is not: after a long block-scalar line it
+/// counts that line in bytes.
 struct Prefix<'a> {
-    input: &'a str,
-    /// Byte offset of the start of the unchecked prefix.
-    start: usize,
-    /// The parser's markers count characters; this maps them to bytes.
-    chars: core::str::CharIndices<'a>,
-    char_pos: usize,
-    byte_pos: usize,
+    lines: Lines<'a>,
+    /// The 1-based number of the next line `lines` yields.
+    next_line: usize,
 }
 
 impl<'a> Prefix<'a> {
     fn new(input: &'a str) -> Self {
         Self {
-            input,
-            start: 0,
-            chars: input.char_indices(),
-            char_pos: 0,
-            byte_pos: 0,
+            lines: Lines(input),
+            next_line: 1,
         }
     }
 
-    /// The byte offset of a character offset at or after the last one.
-    fn byte_of(&mut self, char_index: usize) -> usize {
-        while self.char_pos < char_index {
-            match self.chars.next() {
-                Some((_, c)) => {
-                    self.byte_pos += c.len_utf8();
-                    self.char_pos += 1;
-                }
-                None => break,
-            }
+    /// A document ended on `line`; the next prefix starts there.
+    fn skip_to(&mut self, line: usize) {
+        while self.next_line < line && self.lines.next().is_some() {
+            self.next_line += 1;
         }
-        self.byte_pos
     }
 
-    /// A document ended at this character offset; its prefix starts there.
-    fn skip_to(&mut self, char_index: usize) {
-        self.start = self.byte_of(char_index);
-    }
-
-    /// A document starts at this character offset: check its prefix.
-    fn check(&mut self, char_index: usize) -> Result<(), YamlError> {
-        let end = self.byte_of(char_index).max(self.start);
-        let prefix = self.input.get(self.start..end).unwrap_or("");
-        let mut offset = self.start;
-        self.start = end;
-        for line in prefix.split_inclusive(['\n', '\r']) {
-            let at = offset;
-            offset += line.len();
-            let Some(directive) = line.strip_prefix('%') else {
+    /// A document starts on `line`: check the lines before it.
+    fn check(&mut self, line: usize) -> Result<(), YamlError> {
+        while self.next_line < line {
+            let Some(text) = self.lines.next() else {
+                break;
+            };
+            let number = self.next_line;
+            self.next_line += 1;
+            let Some(directive) = text.strip_prefix('%') else {
                 continue;
             };
             let mut words = directive
@@ -288,10 +272,41 @@ impl<'a> Prefix<'a> {
                     directive.trim_end()
                 ),
             };
-            return Err(YamlError::new(YamlErrorKind::UnsupportedFeature, message)
-                .at(location_of(self.input, at)));
+            return Err(
+                YamlError::new(YamlErrorKind::UnsupportedFeature, message).at(Location {
+                    line: number,
+                    column: 1,
+                }),
+            );
         }
         Ok(())
+    }
+}
+
+/// The lines of a text without their breaks, splitting at LF, CRLF or a
+/// lone CR, as the parser and [`location_of`] count them.
+struct Lines<'a>(&'a str);
+
+impl<'a> Iterator for Lines<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<&'a str> {
+        if self.0.is_empty() {
+            return None;
+        }
+        let (line, rest) = match self.0.find(['\n', '\r']) {
+            None => (self.0, ""),
+            Some(i) => {
+                let rest = self.0.get(i..).unwrap_or("");
+                let skip = if rest.starts_with("\r\n") { 2 } else { 1 };
+                (
+                    self.0.get(..i).unwrap_or(""),
+                    rest.get(skip..).unwrap_or(""),
+                )
+            }
+        };
+        self.0 = rest;
+        Some(line)
     }
 }
 
