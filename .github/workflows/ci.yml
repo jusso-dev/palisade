@@ -154,7 +154,7 @@ jobs:
           tool: zizmor@1.33.1
       - run: zizmor --offline .github/workflows
 
-  # The single required check for branch protection.
+  # The single required check from this workflow for branch protection.
   ci-ok:
     if: always()
     needs: [fmt, clippy, test, msrv, docs, deps, runner-guard, workflow-lint]

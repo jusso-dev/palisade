@@ -91,10 +91,10 @@ warning fails CI**, including the lints set to `warn`.
 ### Unsafe code
 
 - Today `unsafe_code` is `forbid` for the whole workspace, so no crate may contain `unsafe`.
-- The policy for when unsafe code is allowed is proposed in ADR 0011 (PR [#232](https://github.com/jusso-dev/palisade/pull/232), under [#20](https://github.com/jusso-dev/palisade/issues/20)). In
-  short: `unsafe` only in a few named FFI modules and the driver, every file that allows it listed
-  in an allowlist that needs maintainer review, and an automated check that the allowlist matches
-  the code ([#23](https://github.com/jusso-dev/palisade/issues/23)).
+- When unsafe code is allowed is decided in
+  [ADR 0011](docs/adr/0011-msrv-and-unsafe-code-policy.md). In short: `unsafe` only in a few named
+  FFI modules and the driver, every file that allows it listed in `unsafe-allowlist.txt`, which
+  needs maintainer review, and an automated check that the allowlist matches the code ([#23](https://github.com/jusso-dev/palisade/issues/23)).
 - Every `unsafe` block needs a `// SAFETY:` comment that explains why it is sound. Clippy's
   `undocumented_unsafe_blocks` lint is already denied.
 
@@ -142,10 +142,13 @@ The full admission policy is tracked in [#23](https://github.com/jusso-dev/palis
 
 ## Architecture decisions
 
-Significant decisions are recorded as Architecture Decision Records (ADRs) in `docs/adr/`. The
-process, the template and the initial ADRs are tracked in [#20](https://github.com/jusso-dev/palisade/issues/20) and proposed in PR [#232](https://github.com/jusso-dev/palisade/pull/232). Until that
-merges, ask in the issue whether your change needs an ADR. If a PR contradicts an accepted ADR,
-it must link a new ADR that supersedes it.
+Significant decisions are recorded as Architecture Decision Records (ADRs) in
+[`docs/adr/`](docs/adr/README.md). [PROCESS.md](docs/adr/PROCESS.md) says when a change needs an
+ADR, and how to write, number, accept and supersede one, starting from the
+[template](docs/adr/0000-template.md). If you are not sure whether your change needs one, ask in
+the issue. If a PR contradicts an accepted ADR, it must link a new ADR that supersedes it.
+Tooling to scaffold, index and lint ADRs is planned in
+[#29](https://github.com/jusso-dev/palisade/issues/29).
 
 ## Commits and pull requests
 
@@ -173,13 +176,15 @@ Edit the title to fix it; the check reruns.
 
 ### Sign-off and licensing of contributions
 
-There is no Contributor Licence Agreement. Unless you explicitly state otherwise, any contribution
-you intentionally submit for inclusion in Palisade, as defined in the Apache-2.0 licence, is
-dual-licensed as `Apache-2.0 OR MIT`, without any additional terms or conditions.
+There is no Contributor Licence Agreement. Contributions are accepted under the project licence,
+inbound = outbound ([ADR 0010](docs/adr/0010-licence.md)): unless you explicitly state otherwise,
+any contribution you intentionally submit for inclusion in Palisade, as defined in the Apache-2.0
+licence, is dual-licensed as `Apache-2.0 OR MIT`, without any additional terms or conditions.
 
 Whether commits must also carry a Developer Certificate of Origin sign-off (`Signed-off-by:`,
-added by `git commit -s`) is an open decision. It will be recorded in an ADR under [#20](https://github.com/jusso-dev/palisade/issues/20), and
-enforced by a CI check if the ADR requires it. Until then, sign-off is welcome but not required.
+added by `git commit -s`) is an open decision. ADR 0010 leaves it to a separate ADR, to be written
+under [#20](https://github.com/jusso-dev/palisade/issues/20) and enforced by a CI check if it requires sign-off. Until then,
+sign-off is welcome but not required.
 
 ### Pull request size
 

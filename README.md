@@ -107,7 +107,7 @@ A quick start that installs Palisade on a disposable Windows virtual machine arr
 - [docs/ci.md](docs/ci.md): CI jobs and the runner policy
 - [docs/repo-settings.md](docs/repo-settings.md): the repository settings the project relies on
 - [docs/NAMING.md](docs/NAMING.md): vendor-neutral terminology
-- Architecture decision records: proposed under [#20](https://github.com/jusso-dev/palisade/issues/20), in `docs/adr/` once merged
+- [docs/adr/](docs/adr/README.md): architecture decision records, and the process for proposing one
 
 ## Disclaimer
 
