@@ -88,7 +88,7 @@ Typos may be fixed if the meaning does not change.
 
 To change an accepted decision:
 
-1. Write a new ADR that explains what changed, links the old one under "Supersedes", and is
+1. Write a new ADR that explains what changed, links the old one with a `Supersedes: NNNN` bullet in its Links section, and is
    accepted through the normal process.
 2. In the same PR, set the old ADR's status to `superseded by NNNN` and add a link back.
 

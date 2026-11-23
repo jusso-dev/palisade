@@ -97,10 +97,14 @@ Libraries:
 
 - **`ring`** provides signatures, AES-GCM, HMAC and the rustls crypto provider. It replaces the
   wider candidate crate list in #225. Access goes through a thin `crypto` module, so call sites
-  never use `ring` directly.
+  never use `ring` directly. This covers user-mode crates only. `ring` cannot link into the
+  `no_std` kernel driver, so `palisade-driver` verifies the boot cache MAC with the kernel's own
+  cryptography API or `no_std` RustCrypto crates (`hmac`, `sha2`). That choice is made in #113,
+  using the same algorithm (HMAC-SHA-256) and the same test vectors.
 - **FIPS (future work).** A FIPS-validated provider can be swapped in later through rustls's
-  provider interface and the same `crypto` module. Adopting one needs a superseding ADR. Palisade
-  makes no FIPS claim until then (#18 lists certification as out of scope).
+  provider interface and the same `crypto` module. Adopting one needs a superseding ADR, which must
+  also decide whether file-identity hashing (done by `sha2`, outside the provider) is in FIPS
+  scope. Palisade makes no FIPS claim until then (#18 lists certification as out of scope).
 
 ## Consequences
 

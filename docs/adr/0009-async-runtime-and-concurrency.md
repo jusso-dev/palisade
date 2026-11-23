@@ -44,8 +44,8 @@ Option 2.
 - **`tokio`** (multi-threaded runtime) is the only async runtime in `palisade-agent`,
   `palisade-server` and `palisade-cli`. No other runtime is added to those crates.
 - **`palisade-policy` is synchronous and deterministic.** It does no I/O and reads no clock and
-  no randomness itself. Time and other context arrive as inputs (the `Clock` abstraction in
-  #29). It does not depend on `tokio` ([ADR 0003](0003-crate-boundaries-and-dependency-direction.md)).
+  no randomness itself. Time and other context arrive as inputs (the `Clock` trait in
+  `palisade-core::platform`, specified by #29). It does not depend on `tokio` ([ADR 0003](0003-crate-boundaries-and-dependency-direction.md)).
   `palisade-core` and `palisade-fileid` are synchronous too.
 - **The enforcement hot path never awaits the network.** In the agent, decision requests (from
   the driver, from ETW handling, from script hosts) run synchronously against the in-memory
@@ -54,7 +54,9 @@ Option 2.
 - **Server lookups are asynchronous follow-ups, never part of the verdict.** When #61's "lazy
   approval lookup" applies (the 2 s timeout bounds the background request, not the verdict), the agent returns the local verdict immediately and sends the lookup
   in the background. If the server has an approval, it lands in the local cache and the *next*
-  attempt is allowed. A verdict is never delayed waiting for the server.
+  attempt is allowed. A verdict is never delayed waiting for the server. Lookups are
+  de-duplicated by file identity and rate-limited, so a loop of denied executions cannot flood
+  the server or exhaust the agent's connections.
 - Heavy file identity work (hashing a large file) runs on a bounded blocking pool and is
   cancellable. The CPU and I/O budgets are in #65.
 
@@ -83,5 +85,5 @@ its inputs for audit (#41), and fuzzing covers the code that makes decisions.
 
 ## Links
 
-- Issues #20, #29 (`Clock` and platform traits), #41 (decision trace), #42 (performance budget),
+- Issues #20, #29 (developer environment and platform traits, including `Clock`), #41 (decision trace), #42 (performance budget),
   #56 (service host), #61 (policy cache and lazy lookup), #65 (budgets). Epics #2, #4.

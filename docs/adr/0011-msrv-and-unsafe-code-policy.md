@@ -71,12 +71,15 @@ MSRV:
 - Every `unsafe` block has a `// SAFETY:` comment. Clippy's `undocumented_unsafe_blocks` lint is
   set to `deny`.
 - `unsafe-allowlist.txt` lists the files that allow unsafe code. An xtask check lists the actual
-  files and fails CI if they differ from the allowlist. Changing the allowlist needs CODEOWNERS
+  files and fails CI if they differ from the allowlist. The check matches every way of relaxing
+  the lint: `allow(unsafe_code)` and `expect(unsafe_code)`, as inner (`#![...]`) or outer
+  (`#[...]`) attributes, including inside `cfg_attr`. Changing the allowlist needs CODEOWNERS
   review (#28).
 
 **Related lints** (from #19, in `[workspace.lints]`): `clippy.all = "deny"`,
 `rust.unused_must_use = "deny"`, `rust.missing_docs = "warn"` for library crates,
-`clippy.unwrap_used = "deny"` outside tests, `clippy.expect_used = "warn"`, and
+`clippy.unwrap_used = "deny"` outside tests (with `allow-unwrap-in-tests = true` in
+`clippy.toml`, because workspace lints also apply to test code), `clippy.expect_used = "warn"`, and
 `clippy.indexing_slicing = "warn"` in the parser crates.
 
 ## Consequences

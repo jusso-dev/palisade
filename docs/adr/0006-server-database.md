@@ -55,6 +55,8 @@ Multi-tenancy:
 - **Tenancy is a shared schema with row-level `tenant_id` plus RLS.**
   - Every tenant-owned table has `tenant_id uuid not null` and an RLS policy keyed on a
     per-transaction setting that the server sets from the caller's resolved scope.
+  - Tenant tables use `FORCE ROW LEVEL SECURITY`, so the policies apply even to the table owner.
+    The policy expression fails closed: when the tenant setting is unset or empty, no rows match.
   - The server connects as a non-owner role with `NOBYPASSRLS`. Migrations run as a separate
     owner role.
   - Foreign keys include `tenant_id`, so a row can never reference another tenant's row.

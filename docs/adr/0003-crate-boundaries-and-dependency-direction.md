@@ -62,17 +62,35 @@ Option 3. The workspace has exactly these members:
   braces are siblings and never depend on each other (in particular, `agent` never depends on
   `server`). They talk over IPC or the network using `proto` types.
 - `console` may depend only on `proto` (generated types).
-- `driver` may depend only on `core`, built `no_std`.
+- Among workspace crates, `driver` may depend only on `core`, built `no_std`.
 - `agent` never depends on `server`, `axum`, `sqlx` or any HTTP server stack.
 - `policy` never depends on `tokio`, `reqwest`, `windows` or `windows-sys`.
 - No product crate depends on `xtask`.
 
 These rules are enforced by `cargo xtask check-deps` (#19) for edges inside the workspace, and by
-cargo-deny bans (#23) for third-party crates.
+cargo-deny bans (#23) for third-party crates. A ban such as "`policy` never depends on `windows`"
+applies to the crate's **own resolved graph**: its declared dependencies and the features it
+enables on them, for every supported target, as `cargo tree -p palisade-policy --target <t>`
+reports. Cargo's feature unification in a combined workspace build can compile extra code into a
+shared dependency. That does not count as a dependency of `policy`, and it cannot be relied on:
+CI also builds and tests each portable crate on its own (`-p`), where unified features are absent.
 
 **`palisade-fileid` stays one crate.** The OS trust API backend (signature verification and
-catalog lookups) lives in a `#[cfg(windows)]` module, `palisade_fileid::win`. The pure-Rust
-parser is the default and is what Linux builds use. This keeps the crate list as #19 defines it,
+catalog lookups) lives in a module `palisade_fileid::win` that is compiled only when **both** the
+target is Windows **and** the off-by-default Cargo feature `os-trust` is enabled
+(`#[cfg(all(windows, feature = "os-trust"))]`). The `windows` dependency is optional and is
+enabled only by that feature. The pure-Rust parser is always built and is what every other
+consumer uses.
+
+- Only `palisade-agent` enables `os-trust`, for cross-checking its pure-Rust results against the
+  OS (#3). `palisade-cli` may enable it for local diagnostics on Windows.
+- `palisade-policy`, `palisade-proto` and `palisade-server` never enable it, so their own graphs
+  contain no `windows` crate on any target, and `policy` code cannot call `fileid::win` (it does
+  not compile when `policy` is built on its own).
+- The feature is additive: enabling it adds cross-check results, and never changes what the
+  pure-Rust parser reports or how policy decides. It joins the feature flags listed in #19 and
+  follows the same conventions (documented in the crate README, covered by `cargo hack
+  --each-feature`). This keeps the crate list as #19 defines it,
 and matches the unsafe allowlist in [ADR 0011](0011-msrv-and-unsafe-code-policy.md). A split is
 reconsidered, through a superseding ADR, if the `win` module's dependencies start reaching
 non-Windows builds or the module grows its own release cadence.
@@ -90,14 +108,16 @@ non-Windows builds or the module grows its own release cadence.
 
 - Sharing code between sibling binaries means moving it down a layer (usually into `proto` or
   `core`). Sometimes that feels heavier than a direct dependency.
-- `palisade-fileid` carries Windows-only code behind a cfg gate, so Windows-only bugs in that
-  module are only caught by the Windows CI job.
+- `palisade-fileid` carries Windows-only code behind a cfg and feature gate, so bugs in that
+  module are only caught by a Windows CI job that enables `os-trust`.
 
 ## Security impact
 
 The layering keeps the trusted computing base small. The code that decides "may this run"
-(`policy`, `fileid`, `core`) has no network or OS-specific dependencies, so it can be audited and
-fuzzed in isolation. Banning server stacks from the agent removes a whole class of remotely
+(`policy`, plus the pure-Rust parts of `fileid` and `core` that it uses) has no network or
+OS-specific dependencies in its own graph, so it can be audited and fuzzed in isolation. The only
+OS trust code in `fileid` is opt-in, compiled only for the agent (and optionally the CLI) on
+Windows, and is one of the allowlisted unsafe modules in ADR 0011. Banning server stacks from the agent removes a whole class of remotely
 reachable code from the privileged endpoint service. The `no_std` `core` lets the kernel driver
 share decision types without duplicating them, which avoids drift between user mode and kernel
 mode decision encodings.

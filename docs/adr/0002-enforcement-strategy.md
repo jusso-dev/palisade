@@ -99,7 +99,13 @@ Option (c), delivered in stages:
 This choice decides what an attacker has to defeat. With (a) and (c), stopping the Palisade
 agent does not stop enforcement, because the kernel keeps enforcing the native policy, and
 signed native policies on Secure Boot devices resist removal by an administrator (#85). With (c), the driver only
-adds denies, so a driver fault cannot widen what is allowed. The residual risks are the
+adds restrictions, so a driver fault cannot widen what is allowed beyond the OS-native baseline.
+It can narrow the gap back to that baseline: a rule such as "allow this tool only when its parent
+is the installer" needs a native allow for the tool (the layers intersect), with the driver
+enforcing the parent condition. If the driver fails open (`fail_safe`, [ADR 0012](0012-fail-open-vs-fail-closed-defaults.md)),
+that rule degrades to the broader native allow. The compile report (#81) marks every such rule as
+`requires_driver` and names the broader native allow it falls back to, so the risk is visible
+and can be removed with `fail_secure`. The residual risks are the
 conditions only the driver can enforce (open until #8 ships) and the service dependency of the
 rule-collection format. Both are recorded in the threat model (#219). Rejecting kill-after-start
 removes a false sense of protection.

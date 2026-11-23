@@ -103,8 +103,11 @@ never reach the evaluator. That closes a policy substitution route for anyone wh
 the cache directory. The store directory is SYSTEM-only (#220), and the policy cache is
 authenticated by signature, not by file permissions alone. The event queue and the hash cache
 are not trusted inputs to a decision without verification: a tampered hash cache entry must not
-turn a deny into an allow, so cache entries are bound to file ID and change stamp and are
-invalidated on doubt (#46). The choice of store also changes how much C code runs in the
+turn a deny into an allow. Binding entries to file ID and change stamp only detects that the
+*file* changed; it does not protect the cache *store*. So each hash cache record is also
+authenticated with an agent-held key (HMAC-SHA-256 over volume ID, file ID, change stamp and
+hashes, [ADR 0008](0008-cryptographic-algorithms.md)), and a record that fails is discarded and
+the file re-hashed (#46). The spike measures the cost of that MAC. The choice of store also changes how much C code runs in the
 privileged service, which is why it is part of the spike criteria.
 
 ## Links
