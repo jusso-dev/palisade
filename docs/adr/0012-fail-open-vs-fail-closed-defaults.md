@@ -92,15 +92,21 @@ policy bundle):
    in the redeemed-code list are kept until the code's end is at or before the floor; after that,
    the floor check alone rejects the code.
 4. **Opt-in offline scheduling.** A group may set `offline_scheduled_grants = allow`. Then, while
-   offline-started, rule 1 applies with *session time* in place of anchored time. Session time is
-   the wall clock recorded at session start plus the monotonic time since, so wall-clock changes
-   during the session do not move it. The console marks groups using this option.
-5. **Skew.** `tamper.clock.skew` is raised when the wall clock differs from anchored time by more
-   than 5 minutes, when the wall clock at session start is more than 60 s behind the floor, or
-   when the wall clock drifts from session time by more than 60 s backwards or 5 minutes forwards
-   (measured cumulatively, so small steps add up). The alert sets a skew latch in protected
-   storage. Only an authenticated check-in clears it. While the latch is set, rule 4 is off and
-   rule 2 applies.
+   offline-started, rule 1 applies with *session time* in place of anchored time. An *offline
+   session* starts each time the agent becomes offline-started: at agent start, and on resume
+   from an uncounted sleep. Session time is the wall clock recorded when the offline session
+   started, plus the monotonic time since, so wall-clock changes during the session do not move
+   it. Session time is discarded when the agent becomes anchored. The console marks groups using
+   this option.
+5. **Skew.** `tamper.clock.skew` is raised, depending on the state:
+   - while anchored: when the wall clock differs from anchored time by more than 5 minutes;
+   - when an offline session starts: when the wall clock is more than 60 s behind the floor;
+   - during an offline session: when the wall clock drifts from session time by more than 60 s
+     backwards or 5 minutes forwards, measured cumulatively, so small steps add up.
+
+   The alert sets a skew latch in protected storage. Only an authenticated check-in clears it,
+   and the offline-session checks stop once the agent is anchored, so a corrected clock does not
+   re-set the latch. While the latch is set, rule 4 is off and rule 2 applies.
 
 #220 implements these rules as one pure function of (wall clock, monotonic clock, stored state),
 with a property-test table covering anchored, offline-started, service restart, uncounted sleep,
@@ -115,7 +121,11 @@ cannot forge a code or reuse a redeemed one. The same applies to unlock tokens.
 
 With `offline_scheduled_grants = allow`, someone who sets the clock while the agent is not running (with physical access, administrator rights, or a spoofed time source at boot) can,
 until the next check-in, start a scheduled grant early or use a grant whose end the floor has not
-reached. Both are detected at the next authenticated check-in.
+reached. An authenticated check-in ends this: from then on rule 1 uses server time, and a clock
+that is still wrong raises `tamper.clock.skew`. Check-in cannot always *detect* that it happened.
+If the clock is put back right before the device reconnects, a grant used inside the time the
+device was powered off looks the same as a legitimate offline run. The uploaded events still show
+the grant was used offline, which is why the console marks groups with this option.
 
 **"A policy was ever accepted".** The device is treated as having had a policy if the
 anti-rollback record (#225) shows a version above zero, or an `active` or `previous` cache file
