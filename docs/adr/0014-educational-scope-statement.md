@@ -87,7 +87,8 @@ only" means users must upgrade to receive fixes, and SECURITY.md has to state th
 ## Links
 
 - Issues #20, #18, #26, #27, #28. README "About this project" and "Disclaimer".
-- Security reporting path: `SECURITY.md`, added under #28, which sends reports to GitHub private
-  vulnerability reporting for this repository. Turning that repository setting on is a maintainer
-  action tracked in #28 (`docs/repo-settings.md`). Until it is on, `SECURITY.md` tells reporters
-  to ask for a private channel in GitHub Discussions without giving any details.
+- Security reporting path: [SECURITY.md](../../SECURITY.md) (#28). Reports go through GitHub
+  private vulnerability reporting for this repository, which is enabled; the setting and how to
+  verify it are in [docs/repo-settings.md](../repo-settings.md). If the form cannot be used,
+  SECURITY.md tells reporters to ask for a private channel in GitHub Discussions without giving
+  any details.
