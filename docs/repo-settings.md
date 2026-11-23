@@ -91,6 +91,15 @@ gh api -X PUT repos/jusso-dev/palisade/actions/permissions/fork-pr-contributor-a
   -f approval_policy=first_time_contributors
 ```
 
+To check them:
+
+```sh
+gh api repos/jusso-dev/palisade/actions/permissions                   # allowed_actions "selected", sha_pinning_required true
+gh api repos/jusso-dev/palisade/actions/permissions/selected-actions
+gh api repos/jusso-dev/palisade/actions/permissions/workflow          # "read", false
+gh api repos/jusso-dev/palisade/actions/permissions/fork-pr-contributor-approval
+```
+
 When an action is added to `ALLOWED_ACTIONS`, add it to `patterns_allowed` too, or its workflow
 will not run.
 
@@ -162,7 +171,12 @@ gh api -X POST repos/jusso-dev/palisade/rulesets --input - <<'EOF'
 EOF
 ```
 
-To change the ruleset later, list it with `gh api repos/jusso-dev/palisade/rulesets`, then update
+`strict_required_status_checks_policy` is `false`, so a pull request does not have to be updated
+with the latest `main` before it merges. That keeps a single maintainer's queue moving. The cost
+is that a branch can merge without rerunning checks that changed on `main` since it was last
+tested. `main` runs the full CI again after every merge, so a failure shows up there at once.
+
+To check the ruleset, and to change it later, list it with `gh api repos/jusso-dev/palisade/rulesets`, then update
 it with `gh api -X PUT repos/jusso-dev/palisade/rulesets/<id> --input <file>`.
 
 ## Merging and general settings
@@ -180,6 +194,13 @@ gh api -X PATCH repos/jusso-dev/palisade --input - <<'EOF'
   "has_discussions": true
 }
 EOF
+```
+
+To check them:
+
+```sh
+gh api repos/jusso-dev/palisade \
+  -q '{allow_squash_merge, allow_merge_commit, allow_rebase_merge, squash_merge_commit_title, delete_branch_on_merge, has_discussions}'
 ```
 
 `squash_merge_commit_title` must be `PR_TITLE`. The default uses the commit title instead when a

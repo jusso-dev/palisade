@@ -32,8 +32,9 @@ Only you and the maintainer can see the report. It becomes a draft security advi
 discussion, any fix and the final advisory all happen in one private place.
 
 GitHub private vulnerability reporting is the only private channel. The project does not offer
-an email address or an encryption key for reports. If you cannot use the form, open a public
-issue that asks for a private channel and contains **no details** of the vulnerability.
+an email address or an encryption key for reports. If you cannot use the form, start a
+[discussion](https://github.com/jusso-dev/palisade/discussions/categories/q-a) that asks the
+maintainer for a private channel and contains **no details** of the vulnerability.
 
 A useful report includes:
 

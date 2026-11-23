@@ -6,6 +6,8 @@
 # Usage: check-pr-title.sh "<title>"
 # Exit 0 if the title is valid, 1 if not, 2 on a usage error.
 set -euo pipefail
+# Byte-wise matching: under other locales `[a-z]` can match uppercase letters.
+export LC_ALL=C
 
 if [ "$#" -ne 1 ]; then
   echo "usage: $0 \"<pull request title>\"" >&2
@@ -14,8 +16,10 @@ fi
 title=$1
 
 types='feat|fix|security|docs|ci|build|refactor|test|chore|revert'
-# <type>(<optional scope>)<optional !>: <summary that does not start with a space>
-pattern="^(${types})(\([a-z0-9][a-z0-9._-]*\))?!?: [^[:space:]].*$"
+# <type>(<optional scope>)<optional !>: <summary>. The summary must not start
+# with a space and must not contain control characters (newline, CR, tab), so
+# the squash commit subject is always a single clean line.
+pattern="^(${types})(\([a-z0-9][a-z0-9._-]*\))?!?: [^[:space:][:cntrl:]][^[:cntrl:]]*$"
 
 if [[ "$title" =~ $pattern ]]; then
   echo "PR title OK: $title"

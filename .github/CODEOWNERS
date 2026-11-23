@@ -1,6 +1,9 @@
-# Code owners. GitHub requests a review from the owner of every changed path,
-# and the `main` ruleset requires that review (docs/repo-settings.md).
+# Code owners. GitHub requests a review from the owner of every changed path.
 # The last matching pattern wins, so the catch-all comes first.
+# While there is one maintainer, the `main` ruleset does not require code
+# owner review, because GitHub does not let authors approve their own pull
+# requests. It is turned on when a second maintainer joins
+# (docs/repo-settings.md#branch-protection-for-main).
 #
 # Palisade has one maintainer, who owns everything. The entries below the
 # catch-all name the paths whose review is mandatory even if more maintainers
@@ -21,10 +24,10 @@
 /.cargo/                        @jusso-dev
 /deny.toml                      @jusso-dev
 /supply-chain/                  @jusso-dev
-/xtask/src/deps.rs              @jusso-dev
-/xtask/src/manifests.rs         @jusso-dev
-/xtask/src/workflows.rs         @jusso-dev
-/xtask/src/dist*                @jusso-dev
+/clippy.toml                    @jusso-dev
+# All of xtask: the repository checks, how they are run and their exit codes,
+# and the planned release commands (xtask/src/dist*, xtask/src/sign*).
+/xtask/                         @jusso-dev
 
 # Unsafe code.
 /unsafe-allowlist.txt           @jusso-dev
@@ -33,6 +36,5 @@
 /crates/palisade-fileid/src/win/ @jusso-dev
 /crates/palisade-driver/        @jusso-dev
 
-# Release signing.
-/xtask/src/sign*                @jusso-dev
+# Release signing (the xtask commands are covered by /xtask/ above).
 **/signing/                     @jusso-dev

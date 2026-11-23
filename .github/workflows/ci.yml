@@ -1,6 +1,6 @@
 # Palisade CI. Runs on GitHub-hosted runners only; `runner-guard` enforces
-# that for every workflow. Branch protection should require only `ci-ok`,
-# which passes when every other job passed.
+# that for every workflow. Branch protection requires `ci-ok`, which passes
+# when every other job passed, plus `PR title` from pr-title.yml.
 name: CI
 
 on:

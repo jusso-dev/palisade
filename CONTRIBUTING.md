@@ -61,6 +61,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo clippy -p palisade-core -p palisade-driver --no-default-features --all-targets --locked -- -D warnings
 cargo test --workspace --all-features --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked
 cargo xtask check-deps
 cargo xtask check-manifests
 cargo xtask check-workflows
@@ -156,7 +157,8 @@ Commit messages and PR titles follow [Conventional Commits](https://www.conventi
 <type>(<optional scope>): <summary>
 ```
 
-- **Types**: `feat`, `fix`, `security`, `docs`, `ci`, `build`, `refactor`, `test`, `chore`.
+- **Types**: `feat`, `fix`, `security`, `docs`, `ci`, `build`, `refactor`, `test`, `chore`, and
+  `revert` for reverting an earlier change.
 - **Scope**: a crate name without the `palisade-` prefix (`core`, `fileid`, `policy`, `agent`,
   `server`, `cli` and so on) or an area (`adr`, `deps`, `xtask`). Lowercase letters, digits and
   `-`, `.` or `_`.
