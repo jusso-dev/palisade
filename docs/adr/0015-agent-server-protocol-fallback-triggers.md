@@ -64,23 +64,33 @@ Transport option 1, **gRPC over HTTP/2 with tonic and rustls**, as the primary t
   RPCs.
 - **Fallback triggers.** The agent switches to the fallback after either:
   - 3 consecutive gRPC handshake failures (TCP connect, TLS or HTTP/2 negotiation); or
-  - 3 consecutive calls **to the same RPC method** that fail with a **gRPC protocol failure**
-    after a successful handshake. A protocol failure is a response without a valid
+  - 3 consecutive calls **to the same unary RPC method** that the fallback carries (check-in,
+    policy fetch, event upload) that fail with a **gRPC protocol failure** after a successful
+    handshake. A protocol failure is a response without a valid
     `grpc-status` (missing or stripped trailers), a response that is not HTTP/2 or not
     `application/grpc`, or an HTTP/2 stream reset or connection close before the call
     completes.
 
-  **Counters.** The handshake counter resets only on a successful handshake. Each RPC method has
-  its own protocol-failure counter, which resets only when a call *to that method* returns a
+  **Counters.** The handshake counter resets only on a successful handshake. Each unary RPC
+  method has its own protocol-failure counter, which resets only when a call *to that method* returns a
   complete gRPC response. A success on another method does not reset it, so a proxy that breaks
   `GetPolicy` but lets `CheckIn` through still triggers the fallback. A complete response with a
   non-OK `grpc-status` from the server (for example `PERMISSION_DENIED`, `INVALID_ARGUMENT` or
   `UNAVAILABLE`) is an application error, not a protocol failure. It does not count towards any
-  trigger, and it resets that method's counter, because the framing worked. When any trigger
+  trigger, and it resets that method's counter, because the framing worked. When a trigger
   fires, the agent moves every call the fallback carries to the fallback and raises a
-  `comms.grpc.protocol_failure` health alert naming the method. This includes a trigger on a
-  method the fallback does not carry (for example `UploadInventory`); that method then waits
-  for gRPC to return.
+  `comms.grpc.protocol_failure` health alert naming the method. A unary method the fallback does
+  not carry (for example `UploadInventory`) cannot trigger the switch, because switching would
+  not help it. Three consecutive protocol failures on such a method raise the same alert, and
+  the method keeps retrying on gRPC with the normal backoff (#62).
+- **Server streaming (`StreamPush`) is never a fallback trigger.** A healthy push stream stays
+  open and has no trailers until it ends, so a network drop, a sleep or an idle timeout closes it
+  in a way that looks like a protocol failure. Stream closes therefore count for nothing towards
+  the transport triggers. The agent reopens a closed stream with backoff, capped at the retry
+  interval below. If the stream closes 3 times in a row within 60 s of opening, push is marked
+  degraded (`comms.push.degraded`) and the agent polls at the check-in interval, while unary RPCs
+  stay on gRPC. Push is restored once a stream stays open for more than 60 s or delivers a
+  message.
 - **TLS failures never trigger anything weaker.** A certificate, pinning or client-identity
   failure is a handshake failure. It may move the agent to the fallback, but the fallback
   applies the same checks and fails in the same way. No trigger relaxes TLS.
@@ -88,8 +98,9 @@ Transport option 1, **gRPC over HTTP/2 with tonic and rustls**, as the primary t
   protobuf JSON mapping), over HTTP/1.1. It covers check-in, policy fetch and event upload.
   Push falls back to polling at the check-in interval. While on the fallback, the agent probes
   gRPC at agent start and then every 15 minutes (`comms.grpc_retry_interval_s`, default 900,
-  range 300 to 86,400, delivered by policy and implemented in #62). The probe calls the method
-  that tripped the trigger (`CheckIn` for a handshake trigger). The agent returns to gRPC after one
+  range 300 to 86,400, delivered by policy and implemented in #62). The probe calls the unary
+  method that tripped the trigger (`CheckIn` for a handshake trigger), so it always completes
+  against a healthy server. The agent returns to gRPC after one
   probe completes with a valid gRPC response, and resets all counters when it does.
 - Both paths use the same mTLS identity, the same server pinning, and the same signed payloads.
   Policy bundles and commands are signed end to end ([ADR 0017](0017-cryptographic-algorithms-and-nonces.md)),
@@ -110,9 +121,10 @@ Transport option 1, **gRPC over HTTP/2 with tonic and rustls**, as the primary t
 ### Negative
 
 - Two encodings of the same messages must stay in step. Contract tests are needed for both.
-- The agent must classify failures (handshake, protocol, application) and keep a counter per
-  RPC method. #62 needs tests that simulate each kind, including a proxy that strips trailers
-  on one method only.
+- The agent must classify failures (handshake, protocol, application), keep a counter per
+  unary RPC method, and handle push-stream health separately. #62 needs tests that simulate each
+  kind, including a proxy that strips trailers on one method only, and repeated push-stream
+  drops that must not move unary RPCs off gRPC.
 - A broken proxy is only noticed after the next probe, so returning to gRPC can take up to the
   retry interval.
 - tonic and hyper add to the agent's dependency tree. That is accepted, but they are reviewed

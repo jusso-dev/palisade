@@ -97,9 +97,11 @@ Binding the scope to the caller (new):
     transaction (#127). A CI check rejects any other code that writes it.
   - #127 has a cross-tenant test suite: two tenants, every API route, and each principal type,
     asserting that no response contains the other tenant's rows. For every attempted
-    cross-tenant insert, update and delete, the suite also reads the stored rows directly (as the
-    owner role) and asserts that the other tenant's data is unchanged, because an empty
-    response does not prove that nothing was written.
+    cross-tenant insert, update and delete, the suite also reads the stored rows directly and
+    asserts that the other tenant's data is unchanged, because an empty
+    response does not prove that nothing was written. The verifier uses a test-only role with
+    `BYPASSRLS`, never the application role or the owner role, because `FORCE ROW LEVEL
+    SECURITY` would otherwise hide a wrongly written row from it too.
 - High-volume event tables are partitioned by month (#127).
 
 ## Consequences
