@@ -17,7 +17,7 @@
 - **Self-service requests and approvals**
 - **Just-in-time elevation** without giving users local admin
 - **Trusted developer workstations** with scoped, audited exemptions
-- **Ringfencing**: limit what allowed apps can touch (files, registry, network, child processes)
+- **Application containment**: limit what allowed apps can touch (files, registry, network, child processes)
 - **Central management**: groups, policy inheritance, RBAC, multi-tenancy
 - **REST API**, `pal` CLI, **policy-as-code** with GitOps and CI/CD gates
 - **Audit logging and SIEM** export (syslog/CEF, HTTP event collectors, OTLP)
