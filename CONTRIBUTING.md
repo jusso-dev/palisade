@@ -183,7 +183,7 @@ licence, is dual-licensed as `Apache-2.0 OR MIT`, without any additional terms o
 
 Whether commits must also carry a Developer Certificate of Origin sign-off (`Signed-off-by:`,
 added by `git commit -s`) is an open decision. ADR 0010 leaves it to a separate ADR, to be written
-under [#20](https://github.com/jusso-dev/palisade/issues/20) and enforced by a CI check if it requires sign-off. Until then,
+under [#28](https://github.com/jusso-dev/palisade/issues/28) and enforced by a CI check if it requires sign-off. Until then,
 sign-off is welcome but not required.
 
 ### Pull request size

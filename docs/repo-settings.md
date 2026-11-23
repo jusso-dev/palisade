@@ -212,5 +212,5 @@ These are planned and will be documented here when they land:
 
 - the label set and the milestone titles, kept in files under `.github/` and synced by a workflow
   ([#28](https://github.com/jusso-dev/palisade/issues/28));
-- a required Developer Certificate of Origin check, if the sign-off decision under [#20](https://github.com/jusso-dev/palisade/issues/20) requires one
+- a required Developer Certificate of Origin check, if the sign-off ADR under [#28](https://github.com/jusso-dev/palisade/issues/28) requires one
   ([CONTRIBUTING.md](../CONTRIBUTING.md#sign-off-and-licensing-of-contributions)).
