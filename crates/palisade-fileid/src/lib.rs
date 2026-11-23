@@ -5,3 +5,4 @@
 #![cfg_attr(test, allow(clippy::indexing_slicing))]
 
 pub mod hash;
+pub mod pe;
