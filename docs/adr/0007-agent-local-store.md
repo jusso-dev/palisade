@@ -66,9 +66,14 @@ against them. Its **floor** is the highest bundle version the agent has made `ac
 that the floor never exceeds the version of the bundle in `active`, so a crash can never leave
 every bundle on disk below the floor. Activation follows #61, in this order:
 
-1. Write `pending`, flush, and verify it, including that its version is above both the floor and
-   the version of `active`. Otherwise reject it and keep `active` (`PolicyRejected`).
-2. Copy `active` to `previous` (written to a temporary file, flushed, then renamed).
+1. Write `pending`, flush, and verify it. Its version must be at or above the floor. If `active`
+   verifies, the version must also be above `active`'s version. Otherwise reject it and keep
+   what is loaded (`PolicyRejected`). So while the agent runs `previous` (N-1) or the emergency
+   policy because `active` (N) failed, a re-fetched copy of N is accepted, as
+   [ADR 0018](0018-fail-open-vs-fail-closed-defaults-revised.md) requires.
+2. If `active` verifies, copy it to `previous` (written to a temporary file, flushed, then
+   renamed). If `active` is missing or fails verification, leave `previous` untouched, so a
+   verified last-known-good bundle is never overwritten by a bad one.
 3. Atomically rename `pending` over `active`, with write-through, so the rename is durable
    before the next step.
 4. Only then raise the floor to the new version, in every copy of the record (#225).
@@ -81,11 +86,13 @@ without its current policy.
 At startup the agent:
 
 - deletes any leftover `pending`. It was never activated, and the agent fetches it again;
+- reads the floor as the highest value among the record's intact copies;
 - loads `active` if it verifies and its version is at or above the floor, then raises the floor
-  to that version if it is lower (completing an interrupted step 4). If the record's copies
-  differ only because step 4 raised some of them and not others, and the highest copy equals the
-  verified `active` version, the agent raises the rest to match and does not raise
-  `tamper.policy.rollback_suspected`. Any other mismatch raises it (#225);
+  to that version if it is lower (completing an interrupted step 4). If the record's copies are
+  all intact and differ only because step 4 raised some of them and not others, and the highest
+  copy equals the verified `active` version, the agent raises the rest to match and does not
+  raise `tamper.policy.rollback_suspected`. Any other mismatch, and any missing or corrupt copy
+  once a bundle has been activated, raises it (#225) and is not treated as an interrupted step 4;
 - otherwise follows the failure rows of [ADR 0018](0018-fail-open-vs-fail-closed-defaults-revised.md):
   `previous` may load below the floor only under its bounded one-step N-1 exception;
 - if no bundle on disk can load, even with that exception (for example, both files were

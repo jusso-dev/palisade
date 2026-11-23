@@ -107,8 +107,11 @@ Libraries:
   - It generates each nonce from the OS cryptographically secure random number generator and
     never accepts a nonce from call sites. The seal API takes no nonce parameter.
   - Each data key seals at most 2^32 messages, the limit for random 96-bit GCM nonces. The module
-    counts seals per key, persists the count before a sealed record is written, and rotates the
-    data key before the limit. On load, an unknown or missing count is treated as "rotate now".
+    counts seals per key and rotates the data key before the limit. The persisted count must
+    never be below the number of seals actually made: the module may reserve a block of K seals
+    by persisting `count + K` before using them, so a high-rate store (such as an encrypted
+    event queue) does not need a synchronous write per record. A crash wastes at most the rest of
+    the block. On load, an unknown or missing count is treated as "rotate now".
   - No counter-based nonce scheme is used, because a counter restored from an older copy of
     protected storage would repeat nonces.
   - A known-answer test and a test that seals many records and checks for repeated nonces run

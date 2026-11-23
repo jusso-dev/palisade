@@ -127,14 +127,17 @@ policy bundle):
 3. **Offline override codes and unlock tokens** (#222). A code or token is accepted only if it is authenticated by its
    secret, its ID is not in the redeemed-code list, its end is after the floor, and its validity
    window contains anchored time (when anchored) or the wall clock (when offline-started).
-   - **Redeem before use.** The ID is written durably to the redeemed-code list before the
-     session opens. A crash after redemption therefore leaves the code redeemed, never reusable.
+   - **Redeem before use.** The ID is written durably to the redeemed-code list, together with
+     the open-session marker below, before the session takes effect. A crash after redemption
+     therefore leaves the code redeemed, never reusable, and the session is still reported as
+     ended at the next start.
    - **Session timing.** The session is timed on the monotonic clock, not by `s` and `e`, and it
      lasts at most the code's duration. It **ends** at the first event after which the agent can
      no longer count elapsed time itself: the agent process stopping (service stop, crash or
      restart), a reboot, or a resume from a sleep the monotonic clock did not count (the same
      events that end anchored time). A session is never resumed after such an event. The agent
-     marks the session open in protected storage, and if it finds an open session at start it
+     marks the session open in protected storage (written with the redeemed ID, before the session
+     takes effect), and if it finds an open session at start it
      records it as ended and raises an event, so the end is reported even after a crash. Time
      the agent cannot count is therefore never credited to a session, and the access period can
      only be shorter than the code's duration, never longer. Work that needs a restart or reboot
