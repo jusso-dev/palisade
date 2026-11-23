@@ -114,6 +114,61 @@ fn directives_other_than_yaml_1_2_are_rejected() {
 }
 
 #[test]
+fn directives_are_checked_before_every_document_only() {
+    for (input, line) in [
+        (format!("a: 1\n...\n%YAML 1.1\n---\n{MINIMAL}"), 3),
+        (
+            format!("{MINIMAL}...\n# note\n%TAG ! tag:example.org,2026:\n---\n{MINIMAL}"),
+            9,
+        ),
+        (format!("%FOO bar\n---\n{MINIMAL}"), 1),
+    ] {
+        let e = from_str_all(&input, &Limits::DEFAULT).unwrap_err();
+        assert_eq!(
+            e.kind(),
+            YamlErrorKind::UnsupportedFeature,
+            "{input:?}: {e}"
+        );
+        assert_eq!(at(&e), (line, 1), "{input:?}: {e}");
+    }
+    // Comments and `%YAML 1.2` with a comment are fine; a `%` inside a
+    // document's content is not a directive.
+    assert!(from_str(&format!("# c\n%YAML 1.2 # c\n---\n{MINIMAL}")).is_ok());
+    let v = to_json_value("--- |\n%not a directive\n", &Limits::DEFAULT).unwrap();
+    assert_eq!(v, serde_json::json!("%not a directive\n"));
+}
+
+#[test]
+fn deep_input_before_a_directive_is_bounded_by_the_limits() {
+    // A directive line after deep nesting must not make the reader scan or
+    // buffer the whole input before the depth limit applies.
+    for tail in ["\n%", "\n...\n%YAML 1.1\n---\na: 1\n"] {
+        let input = format!("{}x{tail}", "- ".repeat(200_000));
+        let e = err(&input);
+        assert_eq!(e.kind(), YamlErrorKind::LimitExceeded, "{e}");
+        assert_eq!(at(&e).0, 1);
+    }
+}
+
+#[test]
+fn source_locations_scale_linearly_with_findings() {
+    // Every `advanced` key is a finding; locating them must not take time
+    // proportional to the map size for each one.
+    let keys: String = (0..200_000).map(|i| format!("      k{i}: 1\n")).collect();
+    let text = minimal_with(&format!("  settings:\n    advanced:\n{keys}"));
+    let started = std::time::Instant::now();
+    let errors = from_str(&text).unwrap().validate().unwrap_err();
+    assert_eq!(errors.len(), 200_001);
+    let last = errors.last().unwrap();
+    assert_eq!(last.error.path, "/policy/settings/advanced/k99999");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(60),
+        "took {:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
 fn duplicate_keys_are_rejected_in_every_map() {
     for (input, line, column) in [
         (minimal_with("  name: Again\n"), 7, 3),
@@ -216,6 +271,15 @@ fn values_are_never_coerced_to_the_field_type() {
     assert_eq!(e.pointer(), Some("/policy/revision"));
     let e = err(&MINIMAL.replace("revision: 1", "revision: -1"));
     assert_eq!(e.pointer(), Some("/policy/revision"));
+    // `-0` is a float, as it is to the JSON reader.
+    let e = err(&MINIMAL.replace("revision: 1", "revision: -0"));
+    assert_eq!(e.pointer(), Some("/policy/revision"));
+    let json = r#"{"schema_version": "1.0.0", "policy": {"id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f", "name": "M", "revision": -0, "mode": "audit"}}"#;
+    assert!(PolicyDocument::from_json(json).is_err());
+    assert_eq!(
+        to_json_value("a: -0\n", &Limits::DEFAULT).unwrap(),
+        serde_json::from_str::<serde_json::Value>(r#"{"a": -0}"#).unwrap()
+    );
 }
 
 #[test]
@@ -256,6 +320,10 @@ fn control_characters_in_the_text_are_rejected() {
         ("schema_version: 1.0.0\0policy: x\n", 1, 22),
         ("a: b\nc: x\u{7}y\n", 2, 5),
         ("a: 'x\u{1b}'\n", 1, 6),
+        // Line breaks to YAML 1.1 but not to YAML 1.2.
+        ("a: b # c\u{85}d: e\n", 1, 9),
+        ("a: b # c\u{2028}d: e\n", 1, 9),
+        ("a: 'x\u{2029}'\n", 1, 6),
     ] {
         let e = err(input);
         assert_eq!(e.kind(), YamlErrorKind::Syntax, "{input:?}: {e}");
@@ -645,6 +713,21 @@ fn writer_quotes_every_ambiguous_string() {
         let yaml = to_string(&doc).unwrap();
         assert!(yaml.contains(&format!("  description: {s}\n")), "{yaml}");
     }
+}
+
+#[test]
+fn writer_handles_keys_longer_than_yaml_implicit_keys_allow() {
+    // Not a valid document (advanced keys are at most 128 bytes), but the
+    // writer must still produce YAML that reads back.
+    let mut doc = PolicyDocument::from_yaml(MINIMAL).unwrap();
+    let key = format!("k{}", "\u{e9}".repeat(1500));
+    doc.policy
+        .settings
+        .advanced
+        .insert(key.clone(), crate::model::AdvancedValue::Int(1));
+    let yaml = to_string(&doc).unwrap();
+    assert!(yaml.contains("? "), "{yaml}");
+    assert_eq!(PolicyDocument::from_yaml(&yaml).unwrap(), doc);
 }
 
 #[test]

@@ -27,8 +27,8 @@
 //! Reading is strict, so a file means the same thing to every tool that
 //! reads it, and hostile input cannot exhaust memory or the stack:
 //!
-//! - **YAML 1.2 only.** A `%YAML` directive for another version, and `%TAG`
-//!   directives, are rejected.
+//! - **YAML 1.2 only.** A `%YAML` directive for another version, `%TAG`
+//!   and reserved directives are rejected.
 //! - **No anchors, aliases, tags or merge keys** (`&a`, `*a`, `!t`, `<<`).
 //!   Without aliases a document cannot expand ("billion laughs"), and
 //!   without tags no value is typed by a directive in the file.
@@ -43,6 +43,9 @@
 //! - **Plain scalars are never converted to the field's type.** `revision:
 //!   "1"` and `values: [1.0]` are type errors, as they are in JSON: a field
 //!   that wants text needs text, and the error says to quote the value.
+//! - **No characters outside the YAML 1.2 printable set**, and no raw
+//!   U+0085, U+2028 or U+2029, which YAML 1.1 reads as line breaks. All of
+//!   them can be written as escapes in double-quoted strings.
 //! - **Limits** on input size, nesting depth and node count ([`Limits`]),
 //!   so memory use is bounded by the node count and the input size, and
 //!   stack use by the depth.
@@ -305,9 +308,7 @@ impl SourceMap {
         for token in tokens.into_iter().flatten() {
             let token = token.replace("~1", "/").replace("~0", "~");
             let child = match &node.value {
-                parse::Value::Map(entries) => {
-                    entries.iter().find(|e| e.key == token).map(|e| &e.value)
-                }
+                parse::Value::Map(map) => map.get(&token).map(|e| &e.value),
                 parse::Value::Seq(items) => token.parse::<usize>().ok().and_then(|i| items.get(i)),
                 _ => None,
             };
@@ -430,14 +431,14 @@ pub fn to_json_value(input: &str, limits: &Limits) -> Result<serde_json::Value, 
 /// Builds the document from its tree, checking `schema_version` first as
 /// [`PolicyDocument::from_json`] does.
 fn document(root: parse::Node) -> Result<YamlDocument, YamlError> {
-    let parse::Value::Map(entries) = &root.value else {
+    let parse::Value::Map(map) = &root.value else {
         return Err(YamlError::new(
             YamlErrorKind::Mismatch,
             "a policy document is a map with `schema_version` and `policy`",
         )
         .at(root.location));
     };
-    let version = entries.iter().find(|e| e.key == "schema_version");
+    let version = map.get("schema_version");
     let parsed = version.and_then(|e| match &e.value.value {
         parse::Value::Str(s) => s.parse::<SchemaVersion>().ok(),
         _ => None,

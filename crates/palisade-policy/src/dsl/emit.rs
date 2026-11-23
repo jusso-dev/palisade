@@ -73,11 +73,23 @@ fn write_map(text: &mut String, entries: &[(String, Out)], level: usize, lead: O
             Some(lead) if i == 0 => text.push_str(lead),
             _ => indent(text, level),
         }
+        let start = text.len();
         write_str(text, key);
+        if text.len() - start > MAX_IMPLICIT_KEY_BYTES {
+            // YAML limits an implicit key to 1024 characters; write a long
+            // key as an explicit `? key` line instead.
+            text.insert_str(start, "? ");
+            text.push('\n');
+            indent(text, level);
+        }
         text.push(':');
         write_value(text, value, level + 2);
     }
 }
+
+/// Keys longer than this, as written, use the explicit `? key` form. YAML
+/// allows 1024 characters in an implicit key; bytes are a safe bound.
+const MAX_IMPLICIT_KEY_BYTES: usize = 1000;
 
 fn write_seq(text: &mut String, items: &[Out], level: usize) {
     for item in items {

@@ -129,9 +129,9 @@ impl<'de> De<'de, '_> {
                     Err(de::Error::invalid_length(items.len(), &"fewer elements"))
                 }
             }
-            Value::Map(entries) => {
+            Value::Map(map) => {
                 let mut access = MapAccess {
-                    entries: entries.iter(),
+                    entries: map.entries.iter(),
                     current: None,
                     path: self.path,
                 };
@@ -179,12 +179,12 @@ impl<'de> de::Deserializer<'de> for De<'de, '_> {
             // A unit variant, written as its name.
             Value::Str(s) => visitor.visit_enum(de::value::BorrowedStrDeserializer::new(s)),
             // Any other variant: a map with exactly one key, the variant name.
-            Value::Map(entries) => match entries.as_slice() {
+            Value::Map(map) => match map.entries.as_slice() {
                 [entry] => visitor.visit_enum(EnumAccess {
                     entry,
                     path: self.path,
                 }),
-                _ => Err(de::Error::invalid_length(
+                entries => Err(de::Error::invalid_length(
                     entries.len(),
                     &"a map with exactly one key",
                 )),

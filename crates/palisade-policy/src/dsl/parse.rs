@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry as Slot;
 
 use yaml_rust2::parser::{Event, Parser};
-use yaml_rust2::scanner::{Marker, ScanError, Scanner, TScalarStyle, Token, TokenType};
+use yaml_rust2::scanner::{Marker, ScanError, TScalarStyle};
 
 use super::{Limits, Location, YamlError, YamlErrorKind};
 
@@ -33,7 +33,22 @@ pub(crate) enum Value {
     OutOfRange(String),
     Str(String),
     Seq(Vec<Node>),
-    Map(Vec<Entry>),
+    Map(Map),
+}
+
+/// A map's entries in source order, with an index by key.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Map {
+    pub(crate) entries: Vec<Entry>,
+    /// The position in `entries` of each key, so looking a key up does not
+    /// depend on the size of the map.
+    index: HashMap<String, usize>,
+}
+
+impl Map {
+    pub(crate) fn get(&self, key: &str) -> Option<&Entry> {
+        self.index.get(key).and_then(|&i| self.entries.get(i))
+    }
 }
 
 /// One key and value of a map. Keys are always text.
@@ -60,7 +75,6 @@ pub(crate) fn parse(input: &str, limits: &Limits) -> Result<Vec<Node>, YamlError
     // parser would otherwise read it as part of the first key.
     let input = input.strip_prefix('\u{feff}').unwrap_or(input);
     check_characters(input)?;
-    check_directives(input)?;
 
     let mut builder = Builder {
         limits,
@@ -68,13 +82,16 @@ pub(crate) fn parse(input: &str, limits: &Limits) -> Result<Vec<Node>, YamlError
         roots: Vec::new(),
         nodes: 0,
     };
+    let mut prefix = Prefix::new(input);
     let mut parser = Parser::new_from_str(input);
     loop {
         let (event, mark) = parser.next_token().map_err(|e| scan_error(&e))?;
         let at = location(mark);
         match event {
             Event::StreamEnd => break,
-            Event::Nothing | Event::StreamStart | Event::DocumentStart | Event::DocumentEnd => {}
+            Event::DocumentStart => prefix.check(mark.index())?,
+            Event::DocumentEnd => prefix.skip_to(mark.index()),
+            Event::Nothing | Event::StreamStart => {}
             Event::Alias(_) => {
                 return Err(YamlError::new(
                     YamlErrorKind::UnsupportedFeature,
@@ -148,21 +165,28 @@ fn properties(anchor: usize, tagged: bool, at: Location) -> Result<(), YamlError
     Ok(())
 }
 
-/// Whether YAML 1.2 allows the character in a stream (section 5.1). The
-/// parser stops silently at U+0000, so this check must run first.
-const fn is_printable(c: char) -> bool {
+/// Whether a character may appear unescaped in the text.
+///
+/// This is the YAML 1.2 printable set (section 5.1) without U+0085,
+/// U+2028 and U+2029. YAML 1.1 readers treat those as line breaks and
+/// YAML 1.2 readers do not, so in a comment they would hide or reveal the
+/// rest of the line depending on the reader. They can still be written as
+/// escapes in double-quoted strings. The parser stops silently at U+0000,
+/// so this check must run before it.
+const fn is_allowed(c: char) -> bool {
     matches!(c,
-        '\t' | '\n' | '\r' | '\u{20}'..='\u{7e}' | '\u{85}'
-        | '\u{a0}'..='\u{d7ff}' | '\u{e000}'..='\u{fffd}' | '\u{10000}'..='\u{10ffff}')
+        '\t' | '\n' | '\r' | '\u{20}'..='\u{7e}'
+        | '\u{a0}'..='\u{2027}' | '\u{202a}'..='\u{d7ff}' | '\u{e000}'..='\u{fffd}'
+        | '\u{10000}'..='\u{10ffff}')
 }
 
 fn check_characters(input: &str) -> Result<(), YamlError> {
-    match input.char_indices().find(|&(_, c)| !is_printable(c)) {
+    match input.char_indices().find(|&(_, c)| !is_allowed(c)) {
         None => Ok(()),
         Some((index, c)) => Err(YamlError::new(
             YamlErrorKind::Syntax,
             format!(
-                "character U+{:04X} is not allowed in YAML text; write it as an escape in a double-quoted string",
+                "character U+{:04X} is not allowed unescaped; write it as an escape in a double-quoted string",
                 u32::from(c)
             ),
         )
@@ -190,39 +214,85 @@ fn location_of(input: &str, offset: usize) -> Location {
     Location { line, column }
 }
 
-/// Rejects `%TAG` directives and any `%YAML` version other than 1.2, before
-/// any document of the stream. The parser does not report directives, so
-/// this runs the scanner over the input, only when a line starts with `%`.
-fn check_directives(input: &str) -> Result<(), YamlError> {
-    if !(input.starts_with('%') || input.contains("\n%") || input.contains("\r%")) {
-        return Ok(());
-    }
-    let mut scanner = Scanner::new(input.chars());
-    // Scan errors are left for the parser to report.
-    while let Ok(Some(Token(mark, token))) = scanner.next_token() {
-        match token {
-            TokenType::VersionDirective(1, 2) => {}
-            TokenType::VersionDirective(major, minor) => {
-                return Err(YamlError::new(
-                    YamlErrorKind::UnsupportedFeature,
-                    format!(
-                        "only YAML 1.2 is supported; this document declares %YAML {major}.{minor}"
-                    ),
-                )
-                .at(location(mark)));
-            }
-            TokenType::TagDirective(..) => {
-                return Err(YamlError::new(
-                    YamlErrorKind::UnsupportedFeature,
-                    "tag directives (`%TAG`) are not supported",
-                )
-                .at(location(mark)));
-            }
-            TokenType::StreamEnd => break,
-            _ => {}
+/// Checks the directives before each document: only `%YAML 1.2` is
+/// allowed, so `%TAG`, other versions and reserved directives are rejected.
+///
+/// The parser applies directives without reporting them. They can only
+/// appear in a document's prefix, between the end of the previous document
+/// (or the start of the stream) and the `---` that starts the document, and
+/// only at the start of a line. This reads those prefixes from the source
+/// text as document events arrive, so the input is read once more in total
+/// and nothing is scanned that the parser's own limits have not reached.
+struct Prefix<'a> {
+    input: &'a str,
+    /// Byte offset of the start of the unchecked prefix.
+    start: usize,
+    /// The parser's markers count characters; this maps them to bytes.
+    chars: core::str::CharIndices<'a>,
+    char_pos: usize,
+    byte_pos: usize,
+}
+
+impl<'a> Prefix<'a> {
+    fn new(input: &'a str) -> Self {
+        Self {
+            input,
+            start: 0,
+            chars: input.char_indices(),
+            char_pos: 0,
+            byte_pos: 0,
         }
     }
-    Ok(())
+
+    /// The byte offset of a character offset at or after the last one.
+    fn byte_of(&mut self, char_index: usize) -> usize {
+        while self.char_pos < char_index {
+            match self.chars.next() {
+                Some((_, c)) => {
+                    self.byte_pos += c.len_utf8();
+                    self.char_pos += 1;
+                }
+                None => break,
+            }
+        }
+        self.byte_pos
+    }
+
+    /// A document ended at this character offset; its prefix starts there.
+    fn skip_to(&mut self, char_index: usize) {
+        self.start = self.byte_of(char_index);
+    }
+
+    /// A document starts at this character offset: check its prefix.
+    fn check(&mut self, char_index: usize) -> Result<(), YamlError> {
+        let end = self.byte_of(char_index).max(self.start);
+        let prefix = self.input.get(self.start..end).unwrap_or("");
+        let mut offset = self.start;
+        self.start = end;
+        for line in prefix.split_inclusive(['\n', '\r']) {
+            let at = offset;
+            offset += line.len();
+            let Some(directive) = line.strip_prefix('%') else {
+                continue;
+            };
+            let mut words = directive
+                .split('#')
+                .next()
+                .unwrap_or("")
+                .split_ascii_whitespace();
+            let message = match (words.next(), words.next(), words.next()) {
+                (Some("YAML"), Some("1.2"), None) => continue,
+                (Some("TAG"), ..) => "tag directives (`%TAG`) are not supported".to_owned(),
+                _ => format!(
+                    "only the `%YAML 1.2` directive is supported; found `%{}`",
+                    directive.trim_end()
+                ),
+            };
+            return Err(YamlError::new(YamlErrorKind::UnsupportedFeature, message)
+                .at(location_of(self.input, at)));
+        }
+        Ok(())
+    }
 }
 
 enum Frame {
@@ -235,8 +305,8 @@ enum Frame {
         entries: Vec<Entry>,
         /// The key whose value is being read.
         key: Option<(String, Location)>,
-        /// Every key so far, and where it is.
-        seen: HashMap<String, Location>,
+        /// The position in `entries` of every key so far.
+        index: HashMap<String, usize>,
         /// An anchor or tag on the map, reported at the map's start.
         pending: Option<YamlError>,
     },
@@ -271,7 +341,7 @@ impl Builder<'_> {
             location,
             entries,
             key,
-            seen,
+            index,
             pending,
         }) = self.stack.last_mut()
         {
@@ -283,19 +353,17 @@ impl Builder<'_> {
                     return Err(error.relocate(*location));
                 }
                 check_key(&text, plain, at)?;
-                match seen.entry(text.clone()) {
+                match index.entry(text.clone()) {
                     Slot::Occupied(first) => {
+                        let first = entries.get(*first.get()).map_or(at, |e| e.key_location);
                         return Err(YamlError::new(
                             YamlErrorKind::DuplicateKey,
-                            format!(
-                                "duplicate key `{text}`; it is first used at {}",
-                                first.get()
-                            ),
+                            format!("duplicate key `{text}`; it is first used at {first}"),
                         )
                         .at(at));
                     }
                     Slot::Vacant(slot) => {
-                        slot.insert(at);
+                        slot.insert(entries.len());
                     }
                 }
                 *key = Some((text, at));
@@ -337,7 +405,7 @@ impl Builder<'_> {
                 location: at,
                 entries: Vec::new(),
                 key: None,
-                seen: HashMap::new(),
+                index: HashMap::new(),
                 pending: None,
             }
         } else {
@@ -363,10 +431,11 @@ impl Builder<'_> {
             Some(Frame::Map {
                 location,
                 entries,
+                index,
                 key: None,
                 ..
             }) => Node {
-                value: Value::Map(entries),
+                value: Value::Map(Map { entries, index }),
                 location,
             },
             // A key with no value, or an end with nothing open.
@@ -507,7 +576,10 @@ fn json_number(text: &str) -> Option<Result<Value, YamlError>> {
         return None;
     }
     let out_of_range = || Value::OutOfRange(text.to_owned());
-    Some(Ok(if integer {
+    Some(Ok(if text == "-0" {
+        // serde_json reads `-0` as the float -0.0, which integer fields reject.
+        Value::Float(-0.0)
+    } else if integer {
         if text.starts_with('-') {
             text.parse().map_or_else(|_| out_of_range(), Value::NegInt)
         } else {
