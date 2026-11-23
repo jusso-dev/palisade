@@ -57,26 +57,51 @@ Option 3. Case by case:
 | **No policy yet (first install, before the first bundle)** | Run the built-in safe defaults from #61: audit mode, with the mandatory blocklists (#87) enforced if the agent ships them. Report `PolicyMissing`. | Nothing has been approved yet, so there is nothing to protect by locking down. Blocking everything at install time would make deployment fail. |
 | **Policy stale or past `expires_at`** | Keep enforcing the current policy. Report `PolicyStale`. Never relax automatically (#61, #225). | Staleness is not evidence that the policy is wrong. |
 | **Driver absent, disconnected, timed out or version-mismatched** | Follow `driver_failure_mode` (#113). Default `fail_safe` (pass-through with audit) for early rollout rings; `fail_secure` recommended once stable. The native layer keeps enforcing either way. | The driver only adds restrictions on top of the native policy (ADR 0002), so failing it open loses the extra rules but keeps the baseline. |
-| **Clock skew, rollback or forward jump** | Time-bounded grants (exceptions, override codes, maintenance windows, tokens) are checked against both the wall clock and *trusted time*, each in the closed direction (defined below). Skew over 5 minutes between them, or a backward wall-clock jump over 60 s, raises `tamper.clock.skew` (#220). | Moving the wall clock in either direction can only end a grant early or delay its start. It can never start a grant early or revive an expired one. |
+| **Clock skew, rollback or forward jump** | Time-bounded grants (exceptions, override codes, maintenance windows, tokens) are checked against the wall clock and Palisade's own time sources, using the rules in "Time rules" below. | Rolling the clock back can never revive an expired grant. Rolling it forward while the agent runs can never start a grant early. The remaining gap (a clock changed while the machine is off) is bounded and listed as an accepted risk. |
 
-**Trusted time.** The agent keeps a *trusted-time anchor*: the server time from the most recent
-authenticated check-in reply (mTLS with server pinning, [ADR 0005](0005-agent-server-protocol.md)),
-paired with the monotonic clock reading when it arrived. Trusted time is the anchor plus the
-monotonic time elapsed since. The agent persists the current trusted-time value (never the wall
-clock) to protected storage (#220) periodically and at shutdown. After a reboot the persisted
-value becomes the anchor, so trusted time is a lower bound on real time until the next check-in
-re-anchors it. The wall clock never moves the anchor. Until the first authenticated check-in
-there is no anchor, and no time-bounded grant is honoured. A grant with start `s` and end `e` is active
-only when `s <= min(wall_clock, trusted_time)` and `max(wall_clock, trusted_time) < e`.
-Consequences:
+**Time rules.** The agent keeps two time sources besides the wall clock:
 
-- Rolling the wall clock back cannot revive an expired grant, because trusted time still passes `e`.
-- Rolling the wall clock forward cannot start a future maintenance window or exception early,
-  because trusted time has not reached `s`.
-- A forward jump of the wall clock (a spoofed time source, a bad hardware clock) cannot push the
-  anchor into the future, so it cannot cause a lasting denial of service across reboots.
-- After a reboot while offline, trusted time lags real time, so a scheduled window may start late
-  until the agent checks in. That is the closed direction, and it is accepted.
+- **Anchored time**: the server time from an authenticated check-in reply (mTLS with server
+  pinning, [ADR 0005](0005-agent-server-protocol.md)) received *in the current boot session*,
+  plus the time elapsed since on a monotonic clock that keeps counting through sleep and
+  hibernate. The wall clock never moves it. If the platform cannot guarantee that the monotonic
+  clock counted through a resume, the resume is treated like a reboot.
+- **The time floor**: a value persisted to protected storage (#220), plus the monotonic time
+  elapsed since this boot. While anchored, the agent writes the current anchored time to it
+  periodically and at shutdown. The floor only ever increases. It is a lower bound on real time,
+  because it does not count time spent powered off. The wall clock never moves it.
+
+The agent is **anchored** when it has anchored time for this boot session, and **floor-only**
+otherwise (after a reboot, before the first check-in). The rules for a grant with start `s`
+and end `e`:
+
+1. **Expiry.** A grant is expired once `max(wall_clock, T) >= e`, where `T` is anchored time
+   when anchored and the floor when floor-only. A grant whose end is at or before the floor is
+   expired for good, whatever the wall clock says. Rolling the clock back cannot revive it.
+2. **Start of a pre-scheduled grant** (a maintenance window or exception in the cached bundle
+   with a future start). When anchored: `s <= min(wall_clock, anchored_time)`. When floor-only:
+   `s <= wall_clock`, provided the wall clock is at or after the floor and has not jumped this
+   session (see 4). A floor-only device therefore runs scheduled windows on time after an
+   offline reboot, rather than skipping them.
+3. **Offline override codes** (#222). A code is accepted only if its own validity window
+   contains the wall clock, its end is after the floor, and its ID has not been redeemed before
+   (anti-replay, recorded in protected storage). The override session it opens is timed on the
+   monotonic clock, not the wall clock. A forward clock change cannot forge a code, because
+   codes are authenticated by a secret (#222). It can only make a valid code fail early.
+4. **Skew and jumps.**
+   - Anchored: `|wall_clock - anchored_time| > 5 min` raises `tamper.clock.skew`.
+   - Floor-only: `wall_clock < floor - 60 s` raises `tamper.clock.skew`. A wall clock ahead of
+     the floor is normal (the machine was off), so it raises nothing.
+   - In any state, a wall-clock jump relative to the monotonic clock while the agent runs, of more
+     than 60 s backwards or more than 5 minutes forwards, raises `tamper.clock.skew`.
+     Until the next authenticated check-in, pre-scheduled grants that had not started are kept
+     closed, and grants already running keep their expiry.
+
+**Accepted risk.** Someone who can set the firmware clock while the machine is off, or change
+the time before the agent starts (both need physical access or administrator rights), can make a
+floor-only device start a pre-scheduled window early. They cannot extend an expired grant or
+forge an override code. The change is detected at the next authenticated check-in, when the wall
+clock is compared with server time.
 
 **"A policy was ever accepted".** The device is treated as having had a policy if the
 anti-rollback record (#225) shows a version above zero, or an `active` or `previous` cache file
@@ -89,7 +114,7 @@ path. The mismatch between record copies raises `tamper.policy.rollback_suspecte
 ### Positive
 
 - One rule covers almost every case: if Palisade has ever enforced a policy, failures keep it
-  enforced or make it stricter. The one bounded exception is the one-step N-1 fallback.
+  enforced or make it stricter. The bounded exceptions are listed in Security impact.
 - The `#61` and `#225` behaviours are reconciled. Each applies to a different, testable state.
 - A crafted file cannot use a parser panic to stop the agent reporting or to trip a subsystem
   circuit breaker.
@@ -105,16 +130,17 @@ path. The mismatch between record copies raises `tamper.policy.rollback_suspecte
   them.
 - A device whose caches are both corrupted after enrolment becomes very restrictive until it gets a
   new bundle. Users will notice, which is intended.
-- Trusted time needs protected storage for its persisted anchor and an authenticated server reply
-  to re-anchor. A device that never checks in after a reboot can only start scheduled grants late.
+- The time rules need protected storage for the persisted floor and the redeemed-code list, and a
+  monotonic clock that counts through sleep. They are more rules to test, so #220 needs a
+  property-test table covering anchored, floor-only, rollback and forward-jump cases.
 
 ## Security impact
 
 This ADR decides whether crashing, corrupting or confusing Palisade is a bypass. With these
 defaults it is not: the kernel-enforced native layer survives agent failure, losing both cached
 bundles leads to the stricter emergency policy, a stale policy keeps enforcing, crafted files
-cannot disable a subsystem, and clock manipulation in either direction can only shorten or delay
-grants. There are three deliberate, bounded weak points:
+cannot disable a subsystem, a clock rollback cannot revive an expired grant, and a clock change
+while the agent runs cannot start one early. There are four deliberate, bounded weak points:
 
 1. the first-install audit window (built-in mandatory blocklists still enforce, and it ends at the
    first verified bundle);
@@ -123,9 +149,12 @@ grants. There are three deliberate, bounded weak points:
    SYSTEM can write the cache directory (#220), so an attacker who can trigger this already has
    stronger options; and
 3. the driver's default `fail_safe` (the native layer still enforces, and it is configurable to
-   `fail_secure`).
+   `fail_secure`); and
+4. a clock changed while the machine is off can start a pre-scheduled window early on a device
+   that has not yet checked in (it needs physical access or administrator rights, and it is
+   detected at the next check-in).
 
-All three are listed in the threat model as accepted risks (#219) and are exercised by the bypass
+All four are listed in the threat model as accepted risks (#219) and are exercised by the bypass
 regression suite (#230).
 
 ## Links

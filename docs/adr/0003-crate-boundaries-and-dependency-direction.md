@@ -34,8 +34,9 @@ For `palisade-fileid`:
 
 - **Split** into `palisade-fileid` (pure) and `palisade-fileid-win` (OS trust APIs). This gives a
   clean crate boundary, but an eleventh crate and a more complex graph.
-- **Keep one crate** with a `#[cfg(windows)]` `win` module. Fewer crates. The cfg gate keeps
-  Windows dependencies out of other builds.
+- **Keep one crate** with a `win` module gated by `#[cfg(all(windows, feature = "os-trust"))]`,
+  where the feature is off by default. Fewer crates. The cfg and feature gate keep Windows
+  dependencies out of every crate that does not opt in.
 
 ## Decision
 

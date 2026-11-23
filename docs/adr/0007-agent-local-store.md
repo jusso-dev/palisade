@@ -60,7 +60,10 @@ Event queue and hash cache:
 `pending`) under the agent's SYSTEM-only store directory. Each holds one signed envelope from
 #225. The agent reads a file whole into private memory, verifies its signature before parsing
 anything beyond the envelope, and only then decodes it. Memory mapping is not used. Activation
-follows #61: write `pending`, flush, verify, then atomic rename to `active`. The anti-rollback
+follows #61: write `pending`, flush, verify, then copy `active` to `previous` (written to a
+temporary file, flushed, then renamed), and only then atomically rename `pending` over `active`.
+At every point a verified `active` exists, so a power loss mid-swap never leaves the agent
+without its current policy. The anti-rollback
 record is kept separately, as #225 describes.
 
 **Event queue and hash cache: proposed, leaning to `redb`, pending a spike.** The lean is `redb`,
