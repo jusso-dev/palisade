@@ -1,7 +1,9 @@
 //! PE header, section, directory and debug parsing on synthetic images.
 
-// Fixture sizes are small constants, so narrowing casts cannot truncate.
-#![allow(clippy::cast_possible_truncation)]
+// Test code: fixture sizes are small constants, so narrowing casts cannot
+// truncate, and helpers outside `#[test]` functions may unwrap, since a
+// failure there should fail the test loudly.
+#![allow(clippy::cast_possible_truncation, clippy::unwrap_used)]
 
 mod common;
 

@@ -7,8 +7,10 @@
 //! overwrites) of valid synthetic images, which reach much deeper into the
 //! parser than random bytes do.
 
-// Fixture sizes are small constants, so narrowing casts cannot truncate.
-#![allow(clippy::cast_possible_truncation)]
+// Test code: fixture sizes are small constants, so narrowing casts cannot
+// truncate, and helpers outside `#[test]` functions may unwrap, since a
+// failure there should fail the test loudly.
+#![allow(clippy::cast_possible_truncation, clippy::unwrap_used)]
 
 mod common;
 
@@ -39,7 +41,9 @@ fn check_bounds(data: &[u8], info: &PeInfo) {
         // An RVA that maps does so through the section that contains it,
         // which may be an earlier, overlapping one.
         if let Some(off) = info.rva_to_offset(s.virtual_address, 1) {
-            let owner = info.section_for_rva(s.virtual_address).unwrap();
+            let Some(owner) = info.section_for_rva(s.virtual_address) else {
+                panic!("mapped RVA {:#x} has no section", s.virtual_address);
+            };
             let delta = s.virtual_address - owner.virtual_address;
             assert_eq!(off, u64::from(owner.pointer_to_raw_data) + u64::from(delta));
         }

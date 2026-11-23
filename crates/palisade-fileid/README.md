@@ -29,11 +29,11 @@ Every file this crate reads may be hostile, so the parser:
   the input length or a fixed `MAX_*` limit, and resource loops are not
   followed;
 - reads what the OS loader reads: RVAs map through each section's aligned
-  virtual size, so oversized raw data cannot shadow the next section; the
-  version and manifest resources are found by direct lookup along the
-  type → name → language path, so the rest of the tree cannot hide them; and
-  the version resource reported is the one the OS loads (`VS_VERSION_INFO`,
-  ID 1);
+  virtual size, so oversized raw data cannot shadow the next section; and the
+  version resource (`VS_VERSION_INFO`, ID 1) and standard manifests (IDs 1 to
+  3) are found by loader-style lookup, which, like the OS, searches only a
+  directory's numeric-ID entries, so named entries, decoys, floods or loops
+  elsewhere in the tree cannot hide or replace them;
 - fails with a typed `PeError` (with the file offset) only when the headers are
   unreadable, and otherwise returns everything it could read plus a list of
   `ParseWarning`s, each with an offset;

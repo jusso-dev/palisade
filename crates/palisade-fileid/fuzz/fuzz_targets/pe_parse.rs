@@ -29,6 +29,11 @@ fuzz_target!(|data: &[u8]| {
         if let Some(res) = &info.resources {
             assert!(res.entry_count <= pe::MAX_RESOURCE_ENTRIES);
             assert!(res.version_entries.len() <= pe::MAX_KEPT_RESOURCES);
+            assert!(res.version_languages.len() <= pe::MAX_KEPT_RESOURCES);
+            assert!(res.standard_manifests.len() <= 3);
+            if let Some(v) = &res.version_resource {
+                assert_eq!(v.name, pe::ResourceId::Id(1));
+            }
         }
         if let Some(pdb) = &info.debug.codeview {
             assert!(pdb.path.len() <= pe::MAX_PDB_PATH * 3);

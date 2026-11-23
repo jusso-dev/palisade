@@ -2,8 +2,10 @@
 //! could make this parser read something other than what the OS loader
 //! reads, or hide a structure from it.
 
-// Fixture sizes are small constants, so narrowing casts cannot truncate.
-#![allow(clippy::cast_possible_truncation)]
+// Test code: fixture sizes are small constants, so narrowing casts cannot
+// truncate, and helpers outside `#[test]` functions may unwrap, since a
+// failure there should fail the test loudly.
+#![allow(clippy::cast_possible_truncation, clippy::unwrap_used)]
 
 mod common;
 
@@ -32,8 +34,9 @@ fn put_dir(buf: &mut Vec<u8>, at: usize, named: u16, entries: &[(u32, u32)]) {
     if buf.len() < end {
         buf.resize(end, 0);
     }
+    let ids = entries.len() - usize::from(named);
     put16(buf, at + 12, named);
-    put16(buf, at + 14, entries.len() as u16 - named);
+    put16(buf, at + 14, u16::try_from(ids).unwrap());
     for (i, (name, target)) in entries.iter().enumerate() {
         put32(buf, at + 16 + 8 * i, *name);
         put32(buf, at + 20 + 8 * i, *target);
@@ -420,4 +423,218 @@ fn codeview_by_rva() {
     put32(&mut image, entry + 24, 0); // PointerToRawData
     let info = pe::parse(&image).unwrap();
     assert_eq!(info.debug.codeview.unwrap().path, "rva.pdb");
+}
+
+// ---- Loader-style lookups (round 2) ---------------------------------------
+
+/// Writes a length-prefixed UTF-16 resource name at `at`.
+fn put_name(buf: &mut Vec<u8>, at: usize, name: &str) {
+    let units: Vec<u16> = name.encode_utf16().collect();
+    let end = at + 2 + 2 * units.len();
+    if buf.len() < end {
+        buf.resize(end, 0);
+    }
+    put16(buf, at, units.len() as u16);
+    for (i, u) in units.iter().enumerate() {
+        put16(buf, at + 2 + 2 * i, *u);
+    }
+}
+
+/// Writes `blob` at `at` and a data entry for it at `entry_at`.
+fn put_blob(buf: &mut Vec<u8>, entry_at: usize, at: usize, blob: &[u8]) {
+    if buf.len() < at + blob.len() {
+        buf.resize(at + blob.len(), 0);
+    }
+    buf[at..at + blob.len()].copy_from_slice(blob);
+    put_data_entry(buf, entry_at, RSRC_RVA + at as u32, blob.len() as u32);
+}
+
+fn original_name(info: &pe::PeInfo) -> Option<&str> {
+    info.version_info
+        .as_ref()?
+        .get(VersionField::OriginalFileName)
+}
+
+/// More decoy names and languages than the enumeration keeps, all sorting
+/// before ID 1, cannot hide the real version resource.
+#[test]
+fn decoys_before_id_1_do_not_hide_version() {
+    let decoys = pe::MAX_KEPT_RESOURCES + 6;
+    let mut tree = Vec::new();
+    // Root: RT_VERSION -> 0x100.
+    put_dir(
+        &mut tree,
+        0,
+        0,
+        &[(u32::from(resource_type::VERSION), DIR | 0x100)],
+    );
+    // Name directory: `decoys` named entries, then Id(0) and Id(1).
+    let mut names: Vec<(u32, u32)> = (0..decoys).map(|_| (DIR | 0x8000, DIR | 0x9000)).collect();
+    names.push((0, DIR | 0x9000));
+    names.push((1, DIR | 0xa000));
+    put_dir(&mut tree, 0x100, decoys as u16, &names);
+    put_name(&mut tree, 0x8000, "AAA");
+    // Decoy language directory: `decoys` leaves, all the decoy blob.
+    let langs: Vec<(u32, u32)> = (0..decoys as u32).map(|l| (l, 0x9800)).collect();
+    put_dir(&mut tree, 0x9000, 0, &langs);
+    put_blob(
+        &mut tree,
+        0x9800,
+        0xc000,
+        &version_blob("decoy.exe", (9, 9, 9, 9)),
+    );
+    // Real: Id(1) -> 0x0409 -> real blob.
+    put_dir(&mut tree, 0xa000, 0, &[(0x0409, 0xa800)]);
+    put_blob(
+        &mut tree,
+        0xa800,
+        0xe000,
+        &version_blob("real.exe", (1, 2, 3, 4)),
+    );
+
+    let info = pe::parse(&image_with_tree(tree)).unwrap();
+    let res = info.resources.as_ref().unwrap();
+    assert_eq!(res.version_entries.len(), pe::MAX_KEPT_RESOURCES);
+    assert!(
+        res.version_entries
+            .iter()
+            .all(|e| e.name != ResourceId::Id(1))
+    );
+    assert_eq!(
+        res.version_resource.as_ref().unwrap().name,
+        ResourceId::Id(1)
+    );
+    assert_eq!(original_name(&info), Some("real.exe"));
+}
+
+/// A root directory with 65,535 named entries cannot starve the numeric
+/// type lookup: the loader skips straight to the ID entries.
+#[test]
+fn named_entry_flood_at_root_does_not_hide_version() {
+    let flood = u16::MAX as usize;
+    let root_end = 16 + 8 * (flood + 1);
+    let sub = root_end.next_multiple_of(0x100);
+    let mut tree = Vec::new();
+    let mut root: Vec<(u32, u32)> = (0..flood)
+        .map(|_| (DIR | (sub + 0x300) as u32, DIR | (sub + 0x400) as u32))
+        .collect();
+    root.push((u32::from(resource_type::VERSION), DIR | sub as u32));
+    put_dir(&mut tree, 0, flood as u16, &root);
+    put_dir(&mut tree, sub, 0, &[(1, DIR | (sub + 0x100) as u32)]);
+    put_dir(&mut tree, sub + 0x100, 0, &[(0x0409, (sub + 0x200) as u32)]);
+    put_name(&mut tree, sub + 0x300, "X");
+    put_dir(&mut tree, sub + 0x400, 0, &[]);
+    put_blob(
+        &mut tree,
+        sub + 0x200,
+        sub + 0x800,
+        &version_blob("real.exe", (1, 0, 0, 0)),
+    );
+
+    let info = pe::parse(&image_with_tree(tree)).unwrap();
+    assert!(has(&info, |k| *k == WarningKind::ResourceEntryLimit));
+    assert_eq!(original_name(&info), Some("real.exe"));
+}
+
+/// A numeric ID written into a named-entry slot is not an ID entry for the
+/// loader, so it must not be found by a numeric lookup.
+#[test]
+fn numeric_id_in_named_slot_is_not_matched() {
+    let tree = {
+        let mut t = version_tree(&[(u32::from(resource_type::VERSION), DIR | 0x100)]);
+        put16(&mut t, 12, 1); // the only entry is counted as named
+        put16(&mut t, 14, 0);
+        t
+    };
+    let info = pe::parse(&image_with_tree(tree)).unwrap();
+    assert!(info.version_info.is_none());
+    assert!(info.resources.unwrap().version_resource.is_none());
+}
+
+/// A named entry at the language level is never chosen over a numeric
+/// language.
+#[test]
+fn named_language_is_not_chosen() {
+    let mut tree = Vec::new();
+    put_dir(
+        &mut tree,
+        0,
+        0,
+        &[(u32::from(resource_type::VERSION), DIR | 0x100)],
+    );
+    put_dir(&mut tree, 0x100, 0, &[(1, DIR | 0x200)]);
+    put_dir(
+        &mut tree,
+        0x200,
+        1,
+        &[(DIR | 0x300, 0x400), (0x0409, 0x500)],
+    );
+    put_name(&mut tree, 0x300, "A");
+    put_blob(
+        &mut tree,
+        0x400,
+        0x1000,
+        &version_blob("decoy.exe", (9, 9, 9, 9)),
+    );
+    put_blob(
+        &mut tree,
+        0x500,
+        0x2000,
+        &version_blob("real.exe", (1, 0, 0, 0)),
+    );
+    let info = pe::parse(&image_with_tree(tree)).unwrap();
+    let res = info.resources.as_ref().unwrap();
+    assert_eq!(res.version_languages.len(), 1);
+    assert_eq!(original_name(&info), Some("real.exe"));
+}
+
+/// Unsorted or duplicate IDs on a lookup path are flagged.
+#[test]
+fn unsorted_id_entries_are_flagged() {
+    let tree = version_tree(&[
+        (u32::from(resource_type::VERSION), DIR | 0x100),
+        (u32::from(resource_type::ICON), DIR | 0x100),
+    ]);
+    let info = pe::parse(&image_with_tree(tree)).unwrap();
+    assert!(has(&info, |k| *k == WarningKind::ResourceDirectoryNotSorted));
+    assert_eq!(original_name(&info), Some("tree.exe"));
+
+    let sorted = version_tree(&[(u32::from(resource_type::VERSION), DIR | 0x100)]);
+    let info = pe::parse(&image_with_tree(sorted)).unwrap();
+    assert!(!has(&info, |k| *k == WarningKind::ResourceDirectoryNotSorted));
+}
+
+/// The standard manifests (IDs 1 to 3) are found by lookup, whatever other
+/// manifest entries exist.
+#[test]
+fn standard_manifests_are_looked_up() {
+    let manifest = |name_id, body: &str| Leaf {
+        type_id: resource_type::MANIFEST,
+        name_id,
+        lang: 0x0409,
+        data: body.as_bytes().to_vec(),
+    };
+    let builder = PeBuilder {
+        resources: vec![
+            manifest(0, "<decoy/>"),
+            manifest(2, "<dll/>"),
+            manifest(1, "<exe/>"),
+            manifest(7, "<other/>"),
+        ],
+        ..PeBuilder::default()
+    };
+    let image = builder.build();
+    let info = pe::parse(&image).unwrap();
+    let res = info.resources.unwrap();
+    let ids: Vec<_> = res
+        .standard_manifests
+        .iter()
+        .map(|m| m.name.clone())
+        .collect();
+    assert_eq!(ids, [ResourceId::Id(1), ResourceId::Id(2)]);
+    assert_eq!(
+        res.standard_manifests[0].bytes(&image),
+        Some(&b"<exe/>"[..])
+    );
+    assert_eq!(res.manifest_entries.len(), 4);
 }

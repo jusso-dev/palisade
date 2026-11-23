@@ -1,13 +1,21 @@
 //! The resource tree.
 //!
-//! The tree is three levels deep: type, name, language. Two passes read it:
+//! The tree is three levels deep: type, name, language. It is read three
+//! ways:
 //!
-//! 1. **Direct lookups** for the resources that identity depends on,
-//!    `RT_VERSION` and `RT_MANIFEST`. Each follows the exact type → name →
-//!    language path the OS loader follows, with its own entry budget, so no
-//!    other part of the tree can hide them: not a shared subdirectory, not a
-//!    loop, and not thousands of dummy entries under another type.
-//! 2. **A bounded general walk** for the summary (types, languages, icons).
+//! 1. **Loader-style lookups** for the resources identity depends on: the
+//!    version resource (`RT_VERSION`, ID 1) and the standard manifests
+//!    (`RT_MANIFEST`, IDs 1 to 3). Like the OS loader, a numeric lookup
+//!    searches only a directory's ID entries, which follow its named
+//!    entries, so no named entry, decoy, flood or loop anywhere else in the
+//!    tree can hide or replace the result. A directory on that path whose ID
+//!    entries are not strictly ascending is flagged
+//!    ([`WarningKind::ResourceDirectoryNotSorted`]), because the loader's
+//!    binary search gives no defined answer for it.
+//! 2. **Enumeration** of every `RT_VERSION` and `RT_MANIFEST` leaf, for
+//!    reporting. It is capped, so it may be incomplete; nothing is selected
+//!    from it.
+//! 3. **A bounded general walk** for the summary (types, languages, icons).
 //!    It allows [`MAX_RESOURCE_DEPTH`] directory levels and
 //!    [`MAX_RESOURCE_ENTRIES`] entries in total, and does not follow a
 //!    directory that refers back to one of its own ancestors.
@@ -40,6 +48,9 @@ const DATA_ENTRY_SIZE: usize = 16;
 const HIGH_BIT: u32 = 0x8000_0000;
 /// The resource ID of the version resource the OS loads (`VS_VERSION_INFO`).
 const VS_VERSION_INFO_ID: u16 = 1;
+/// The standard manifest IDs: process, isolation-aware DLL, and
+/// isolation-aware DLL without static imports.
+const STANDARD_MANIFEST_IDS: [u16; 3] = [1, 2, 3];
 /// `LANG_NEUTRAL`.
 const LANG_NEUTRAL: u16 = 0;
 
@@ -103,18 +114,29 @@ pub struct ResourceSummary {
     pub types: BTreeSet<ResourceId>,
     /// Distinct numeric language IDs of all leaves the general walk reached.
     pub languages: BTreeSet<u16>,
-    /// Every `RT_VERSION` leaf (type 16 → any name → any language), in tree
-    /// order, at most [`MAX_KEPT_RESOURCES`].
+    /// `RT_VERSION` leaves (type 16 → any name → any language) in tree
+    /// order, for reporting. Capped at [`MAX_KEPT_RESOURCES`] and by the
+    /// entry budget, so it may be incomplete; use
+    /// [`version_resource`](Self::version_resource) for identity.
     pub version_entries: Vec<ResourceData>,
-    /// The version resource the OS loads: type 16, name ID 1
-    /// (`VS_VERSION_INFO`), preferring the language-neutral leaf and
-    /// otherwise the first language. When an image carries several
-    /// languages the OS may pick another by UI language; all of them are in
-    /// [`version_entries`](Self::version_entries).
+    /// The version resource the OS loads, found by loader-style lookup:
+    /// type 16 → name ID 1 (`VS_VERSION_INFO`) → the language-neutral leaf
+    /// if there is one, otherwise the first numeric language. Named
+    /// languages are never chosen. When an image carries several languages
+    /// the OS may pick another by UI language; all of them are in
+    /// [`version_languages`](Self::version_languages).
     pub version_resource: Option<ResourceData>,
-    /// Every `RT_MANIFEST` leaf, in tree order, at most
-    /// [`MAX_KEPT_RESOURCES`]. Parsing them is deferred.
+    /// Every numeric-language leaf under type 16 → name ID 1, in directory
+    /// order, at most [`MAX_KEPT_RESOURCES`].
+    pub version_languages: Vec<ResourceData>,
+    /// `RT_MANIFEST` leaves in tree order, for reporting. Capped like
+    /// [`version_entries`](Self::version_entries).
     pub manifest_entries: Vec<ResourceData>,
+    /// The standard manifests (`RT_MANIFEST` IDs 1, 2 and 3) found by
+    /// loader-style lookup, in ID order, with the language chosen as for
+    /// [`version_resource`](Self::version_resource). Parsing them is
+    /// deferred.
+    pub standard_manifests: Vec<ResourceData>,
     /// An `RT_ICON` or `RT_GROUP_ICON` resource exists.
     pub has_icons: bool,
 }
@@ -267,6 +289,119 @@ impl<'a> Tree<'a> {
         })
     }
 
+    /// The numeric-ID entries of the directory at `offset`: the slice after
+    /// its named entries, which is all the loader searches for a numeric ID.
+    /// Bounded by the directory's own `u16` count and the tree length, with
+    /// no shared budget. Warns when the IDs are not strictly ascending.
+    fn id_entries(&self, offset: u32, warnings: &mut Warnings) -> Vec<Entry> {
+        let Some(offset) = to_usize(offset) else {
+            return Vec::new();
+        };
+        let (Some(named), Some(ids)) = (
+            u16_at(self.bytes, offset.saturating_add(12)),
+            u16_at(self.bytes, offset.saturating_add(14)),
+        ) else {
+            warnings.push(self.file_offset(offset), WarningKind::ResourceOutOfBounds);
+            return Vec::new();
+        };
+        let first = offset
+            .saturating_add(DIRECTORY_SIZE)
+            .saturating_add(usize::from(named).saturating_mul(ENTRY_SIZE));
+        let fits = self.bytes.len().saturating_sub(first) / ENTRY_SIZE;
+        let mut out = Vec::with_capacity(usize::from(ids).min(fits));
+        let mut previous: Option<u32> = None;
+        let mut sorted = true;
+        for i in 0..usize::from(ids) {
+            let at = first.saturating_add(i.saturating_mul(ENTRY_SIZE));
+            let (Some(name_field), Some(target)) = (
+                u32_at(self.bytes, at),
+                u32_at(self.bytes, at.saturating_add(4)),
+            ) else {
+                warnings.push(self.file_offset(at), WarningKind::ResourceOutOfBounds);
+                break;
+            };
+            if previous.is_some_and(|p| name_field <= p) {
+                sorted = false;
+            }
+            previous = Some(name_field);
+            out.push(Entry {
+                at,
+                name_field,
+                target,
+            });
+        }
+        if !sorted {
+            warnings.push(
+                self.file_offset(offset),
+                WarningKind::ResourceDirectoryNotSorted,
+            );
+        }
+        out
+    }
+
+    /// The ID entry `id` of the directory at `offset`, if it has the
+    /// expected kind (a subdirectory or a leaf). The first match wins.
+    fn find_id(
+        &self,
+        offset: u32,
+        id: u16,
+        want_directory: bool,
+        warnings: &mut Warnings,
+    ) -> Option<Entry> {
+        self.id_entries(offset, warnings)
+            .into_iter()
+            .find(|e| e.name_field == u32::from(id))
+            .filter(|e| e.is_directory() == want_directory)
+    }
+
+    /// Loader-style lookup of type `type_id` → name ID `name_id`. Returns
+    /// the chosen leaf (language-neutral first, otherwise the first numeric
+    /// language) and the numeric-language leaves, at most
+    /// [`MAX_KEPT_RESOURCES`].
+    fn lookup_standard(
+        &self,
+        type_id: u16,
+        name_id: u16,
+        warnings: &mut Warnings,
+    ) -> (Option<ResourceData>, Vec<ResourceData>) {
+        let Some(type_dir) = self.find_id(0, type_id, true, warnings) else {
+            return (None, Vec::new());
+        };
+        let Some(name_dir) = self.find_id(type_dir.target_offset(), name_id, true, warnings) else {
+            return (None, Vec::new());
+        };
+        let mut languages = Vec::new();
+        let mut neutral = None;
+        for entry in self.id_entries(name_dir.target_offset(), warnings) {
+            if entry.is_directory() {
+                continue;
+            }
+            let Ok(lang) = u16::try_from(entry.name_field) else {
+                warnings.push(
+                    self.file_offset(entry.at),
+                    WarningKind::ResourceIdInvalid(entry.name_field),
+                );
+                continue;
+            };
+            let path = [
+                ResourceId::Id(type_id),
+                ResourceId::Id(name_id),
+                ResourceId::Id(lang),
+            ];
+            let Some(leaf) = self.leaf(&entry, path, warnings) else {
+                continue;
+            };
+            if lang == LANG_NEUTRAL && neutral.is_none() {
+                neutral = Some(leaf.clone());
+            }
+            if languages.len() < MAX_KEPT_RESOURCES {
+                languages.push(leaf);
+            }
+        }
+        let chosen = neutral.or_else(|| languages.first().cloned());
+        (chosen, languages)
+    }
+
     /// Every leaf on the standard path type `type_id` → any name → any
     /// language, in tree order, at most [`MAX_KEPT_RESOURCES`]. Entries that
     /// do not have the standard shape (a directory where a leaf belongs, or
@@ -274,11 +409,7 @@ impl<'a> Tree<'a> {
     fn lookup_type(&self, type_id: u16, warnings: &mut Warnings) -> Vec<ResourceData> {
         let mut budget = Budget::new();
         let mut found = Vec::new();
-        let root = self.entries(0, &mut budget, warnings);
-        let type_dir = root
-            .iter()
-            .find(|e| e.is_directory() && e.name_field == u32::from(type_id));
-        let Some(type_dir) = type_dir else {
+        let Some(type_dir) = self.find_id(0, type_id, true, warnings) else {
             return found;
         };
         'names: for name_entry in self.entries(type_dir.target_offset(), &mut budget, warnings) {
@@ -347,23 +478,23 @@ pub(super) fn walk(
 
     let version_entries = tree.lookup_type(resource_type::VERSION, warnings);
     let manifest_entries = tree.lookup_type(resource_type::MANIFEST, warnings);
-    let version_resource = {
-        let standard = || {
-            version_entries
-                .iter()
-                .filter(|e| e.name == ResourceId::Id(VS_VERSION_INFO_ID))
-        };
-        standard()
-            .find(|e| e.language == ResourceId::Id(LANG_NEUTRAL))
-            .or_else(|| standard().next())
-            .cloned()
-    };
+    let (version_resource, version_languages) =
+        tree.lookup_standard(resource_type::VERSION, VS_VERSION_INFO_ID, warnings);
+    let standard_manifests = STANDARD_MANIFEST_IDS
+        .iter()
+        .filter_map(|id| {
+            tree.lookup_standard(resource_type::MANIFEST, *id, warnings)
+                .0
+        })
+        .collect();
 
     let mut summary = ResourceSummary {
         offset: to_u64(start),
         version_entries,
         version_resource,
+        version_languages,
         manifest_entries,
+        standard_manifests,
         ..ResourceSummary::default()
     };
     let mut general = General {

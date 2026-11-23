@@ -187,6 +187,11 @@ pub enum WarningKind {
     /// (`VS_VERSION_INFO`, ID 1, at the language level), so no version
     /// information is reported.
     NoStandardVersionResource,
+    /// A resource directory on a loader lookup path has ID entries that are
+    /// not strictly ascending (unsorted or duplicated). The OS loader
+    /// binary-searches them, so which entry it finds is not well defined;
+    /// the first match was used.
+    ResourceDirectoryNotSorted,
     /// The resource tree is deeper than allowed; deeper levels were skipped.
     ResourceTooDeep,
     /// More than [`MAX_RESOURCE_ENTRIES`] resource entries; the
