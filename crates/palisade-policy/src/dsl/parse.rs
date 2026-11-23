@@ -97,55 +97,24 @@ pub(crate) fn parse_with(
     // A byte order mark may start the stream (YAML 1.2 section 5.2). The
     // parser would otherwise read it as part of the first key.
     let input = input.strip_prefix('\u{feff}').unwrap_or(input);
-    // The parser stops silently at U+0000, so it must never see a
-    // disallowed character. If the input has one, the parser is given a copy
-    // with every such character replaced by a space, which keeps every line
-    // and column. The input is still read document by document, so a problem
-    // that comes before the first such character in the source is reported,
-    // and otherwise the character is. Only documents that end before the
-    // character are checked against the model, since the copy is not what
-    // the author wrote.
-    let Some(bad) = first_disallowed(input) else {
-        return parse_clean(
-            input,
-            limits,
-            single,
-            json_fast_path,
-            None,
-            &mut on_document,
-        );
-    };
-    let Some(bad_at) = bad.location else {
-        return Err(bad);
-    };
-    let copy: String = input
-        .chars()
-        .map(|c| if is_allowed(c) { c } else { ' ' })
-        .collect();
-    match parse_clean(&copy, limits, single, false, Some(bad_at), &mut on_document) {
-        Err(e) if e.location.is_some_and(|at| at < bad_at) => Err(e),
-        _ => Err(bad),
-    }
-}
+    // The whole input is checked for disallowed characters before any of it
+    // is parsed, and the first one is reported ahead of every other problem.
+    // The check cannot be made per document: the parser stops silently at
+    // U+0000, as if the input ended there, so text after a NUL would never
+    // be seen, and a document cut short by one could look complete. Nor can
+    // the parser be given a copy with the character replaced, because any
+    // replacement is YAML syntax to it (`---\0` would become `--- `). The
+    // cost is that, in a stream, a disallowed character in a later document
+    // is reported before a model error in an earlier one.
+    check_characters(input)?;
 
-/// [`parse_with`] on text that holds no disallowed character. With
-/// `bad_at`, the text is a copy of an input that had one there, and only
-/// the documents that end before it are handed on.
-fn parse_clean(
-    input: &str,
-    limits: &Limits,
-    single: bool,
-    json_fast_path: bool,
-    bad_at: Option<Location>,
-    on_document: &mut dyn FnMut(Node) -> Result<(), YamlError>,
-) -> Result<(), YamlError> {
     let mut builder = Builder {
         limits,
         stack: Vec::new(),
         roots: Vec::new(),
         nodes: 0,
     };
-    if json_fast_path && bad_at.is_none() && is_json(input, limits.max_depth) {
+    if json_fast_path && is_json(input, limits.max_depth) {
         json::read(input, &mut builder)?;
         let mut finished = 0usize;
         for root in builder.roots.drain(..) {
@@ -167,15 +136,6 @@ fn parse_clean(
     let mut documents = 0usize;
     let mut finished = 0usize;
     let mut last = Location { line: 1, column: 1 };
-    // A finished document and where it ends. It is handed on when the next
-    // document starts or the stream ends, and with `bad_at` only if it ends
-    // before that position.
-    let mut held: Option<Node> = None;
-    let mut held_end = Location { line: 1, column: 1 };
-    let mut hand_on = |held: &mut Option<Node>, end: Location| match held.take() {
-        Some(root) if bad_at.is_none_or(|bad| end <= bad) => on_document(root),
-        _ => Ok(()),
-    };
     loop {
         // The parser may queue many tokens before it returns an event (see
         // `Budgeted`), so the characters it reads for one event are bounded.
@@ -190,7 +150,6 @@ fn parse_clean(
         match event {
             Event::StreamEnd => break,
             Event::DocumentStart => {
-                hand_on(&mut held, held_end)?;
                 prefix.check(mark.line())?;
                 documents += 1;
                 if single && documents > 1 {
@@ -201,10 +160,7 @@ fn parse_clean(
                     .at(at));
                 }
             }
-            Event::DocumentEnd => {
-                held_end = at;
-                prefix.skip_to(mark.line());
-            }
+            Event::DocumentEnd => prefix.skip_to(mark.line()),
             Event::Nothing | Event::StreamStart => {}
             Event::Alias(_) => {
                 return Err(YamlError::new(
@@ -236,12 +192,10 @@ fn parse_clean(
         }
         for root in builder.roots.drain(..) {
             finished += 1;
-            held = Some(root);
+            on_document(root)?;
         }
     }
-    hand_on(&mut held, held_end)?;
-    // With `bad_at`, the disallowed character is reported instead.
-    if finished == 0 && bad_at.is_none() {
+    if finished == 0 {
         return Err(YamlError::new(
             YamlErrorKind::Syntax,
             "the input holds no YAML document; expected a policy document",
@@ -530,19 +484,21 @@ const fn is_allowed(c: char) -> bool {
         | '\u{10000}'..='\u{10ffff}')
 }
 
-/// The error for the first disallowed character, if there is one.
-pub(crate) fn first_disallowed(input: &str) -> Option<YamlError> {
-    let (index, c) = input.char_indices().find(|&(_, c)| !is_allowed(c))?;
-    Some(
-        YamlError::new(
+/// Rejects the input if it holds a character that may not appear
+/// unescaped ([`is_allowed`]), at the first one. See [`parse_with`] for why
+/// this covers the whole input.
+fn check_characters(input: &str) -> Result<(), YamlError> {
+    match input.char_indices().find(|&(_, c)| !is_allowed(c)) {
+        None => Ok(()),
+        Some((index, c)) => Err(YamlError::new(
             YamlErrorKind::Syntax,
             format!(
                 "character U+{:04X} is not allowed unescaped; write it as an escape in a double-quoted string",
                 u32::from(c)
             ),
         )
-        .at(location_of(input, index)),
-    )
+        .at(location_of(input, index))),
+    }
 }
 
 /// The line and column of a byte offset, counting line breaks as the

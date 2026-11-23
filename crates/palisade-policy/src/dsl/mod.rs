@@ -45,9 +45,12 @@
 //!   that wants text needs text, and the error says to quote the value.
 //! - **No characters outside the YAML 1.2 printable set**, and no raw
 //!   U+0085, U+2028 or U+2029, which YAML 1.1 reads as line breaks. All of
-//!   them can be written as escapes in double-quoted strings. In a stream,
-//!   a document that ends before such a character is still checked first,
-//!   so errors are reported in source order.
+//!   them can be written as escapes in double-quoted strings. The whole
+//!   input is checked for these before anything is parsed, and the first
+//!   one is reported before any other problem. That cannot be done per
+//!   document, because the parser stops silently at U+0000 as if the input
+//!   ended there; so in a stream, such a character in a later document is
+//!   reported ahead of a model error in an earlier one.
 //! - **Limits** on input size, nesting depth, node count and parser
 //!   lookahead ([`Limits`]), so memory use is bounded by the input size and
 //!   the node count, and stack use by the depth.
@@ -175,7 +178,8 @@ impl fmt::Display for Location {
 pub enum YamlErrorKind {
     /// The text is not well-formed YAML.
     Syntax,
-    /// The input is larger, deeper or has more nodes than [`Limits`] allows.
+    /// The input is larger or deeper, has more nodes, or needs more parser
+    /// lookahead than [`Limits`] allows.
     LimitExceeded,
     /// An anchor, alias, tag, merge key, `%TAG` directive or a YAML version
     /// other than 1.2.
@@ -486,11 +490,14 @@ fn single<T>(
 ///
 /// Each document is checked against the model as soon as it ends, so the
 /// error returned is the first one in source order: a model error in one
-/// document comes before a syntax error in a later one.
+/// document comes before a syntax error in a later one. The one exception is
+/// a character that may not appear unescaped (see [the module docs](self)):
+/// the whole input is checked for those first, so one is reported ahead of
+/// any other problem, wherever it is.
 ///
 /// # Errors
 ///
-/// Returns the first [`YamlError`], in source order.
+/// Returns the first [`YamlError`], in source order, except as above.
 pub fn from_str_all(input: &str, limits: &Limits) -> Result<Vec<YamlDocument>, YamlError> {
     let mut documents = Vec::new();
     parse::parse(input, limits, false, |root| {

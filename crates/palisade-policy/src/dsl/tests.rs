@@ -1042,6 +1042,10 @@ fn single_document_readers_stop_at_the_second_document() {
     let e = err(&format!("{MINIMAL}---\na: [\n"));
     assert_eq!(e.kind(), YamlErrorKind::UnsupportedFeature, "{e}");
     assert_eq!(at(&e).0, 7);
+    // A valid first document: the second `---` is the error, at line 7.
+    let e = err(&format!("{MINIMAL}---\n{MINIMAL}"));
+    assert_eq!(e.kind(), YamlErrorKind::UnsupportedFeature, "{e}");
+    assert_eq!(at(&e), (7, 1));
     // A model error in the first document comes before the second `---`.
     let e = err(&format!("a: 1\n---\n{MINIMAL}"));
     assert_eq!(e.kind(), YamlErrorKind::MissingSchemaVersion, "{e}");
@@ -1422,58 +1426,69 @@ fn json_probe_respects_the_depth_limit() {
 }
 
 #[test]
-fn disallowed_characters_are_reported_in_source_order() {
-    // An invalid first document, then a disallowed character later: the
-    // first document's error comes first.
-    for bad in ["\0", "\u{7}", "\u{85}", "\u{feff}"] {
-        let text = format!("a: 1\n---\na: x{bad}y\n");
-        let e = from_str_all(&text, &Limits::DEFAULT).unwrap_err();
-        assert_eq!(
-            e.kind(),
-            YamlErrorKind::MissingSchemaVersion,
-            "{bad:?}: {e}"
-        );
-        assert_eq!(at(&e), (1, 1), "{bad:?}");
-        // The single-document reader reports the second `---` first.
-        let e = err(&text);
-        assert_eq!(
-            e.kind(),
-            YamlErrorKind::MissingSchemaVersion,
-            "{bad:?}: {e}"
-        );
+fn disallowed_characters_are_reported_before_anything_else() {
+    // The whole input is checked before parsing (the parser stops silently
+    // at U+0000), so a disallowed character is reported first, even when an
+    // earlier document has a model error. This is the documented trade-off.
+    for bad in ["\0", "\u{7}", "\u{85}", "\u{2028}", "\u{feff}"] {
+        for text in [
+            format!("a: 1\n---\na: x{bad}y\n"),
+            format!("{MINIMAL}---\na: x{bad}y\n"),
+        ] {
+            let e = from_str_all(&text, &Limits::DEFAULT).unwrap_err();
+            assert_eq!(e.kind(), YamlErrorKind::Syntax, "{bad:?}: {e}");
+            assert!(e.message().contains("not allowed unescaped"), "{e}");
+            assert_eq!(
+                at(&e),
+                (text.lines().position(|l| l.contains('x')).unwrap() + 1, 5)
+            );
+            let e = err(&text);
+            assert!(e.message().contains("not allowed unescaped"), "{e}");
+        }
     }
-    // A valid first document: the character is the first problem.
-    for bad in ["\0", "\u{7}", "\u{85}", "\u{feff}"] {
-        let text = format!("{MINIMAL}---\na: x{bad}y\n");
-        let e = from_str_all(&text, &Limits::DEFAULT).unwrap_err();
-        assert_eq!(e.kind(), YamlErrorKind::Syntax, "{bad:?}: {e}");
+    // Characters that a replacement would have turned into YAML syntax are
+    // reported at the character, not as a document marker or a key.
+    for (text, line, column) in [
+        ("a: 1\n---\0b\n", 2, 4),
+        (
+            "policy:\n  id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f\n...\0\nschema_version: \"1.0.0\"\n",
+            3,
+            4,
+        ),
+        ("a: 1\nname\u{feff}: x\n", 2, 5),
+        ("a: no\0\n", 1, 6),
+    ] {
+        let e = from_str_all(text, &Limits::DEFAULT).unwrap_err();
+        assert_eq!(e.kind(), YamlErrorKind::Syntax, "{text:?}: {e}");
         assert!(e.message().contains("not allowed unescaped"), "{e}");
-        assert_eq!(at(&e), (8, 5), "{bad:?}");
+        assert_eq!(at(&e), (line, column), "{text:?}: {e}");
     }
-    // A character inside the first document is reported even though the
-    // document would also be invalid after it: it comes first in the text.
-    let e = from_str_all("a: x\0y\n---\nb: 1\n", &Limits::DEFAULT).unwrap_err();
-    assert_eq!(e.kind(), YamlErrorKind::Syntax, "{e}");
-    assert_eq!(at(&e), (1, 5));
-    // An error before the character in the same document comes first.
-    let e = from_str_all("a: &x 1\nb: \0\n", &Limits::DEFAULT).unwrap_err();
-    assert_eq!(e.kind(), YamlErrorKind::UnsupportedFeature, "{e}");
-    // The NUL safeguard still holds: nothing after U+0000 is ever accepted.
-    let e = err("schema_version: 1.0.0\0policy: x\n");
-    assert_eq!(e.kind(), YamlErrorKind::Syntax);
-    assert_eq!(at(&e), (1, 22));
+    // The NUL safeguard: nothing after U+0000 is ever read.
     let valid_then_nul = format!("{MINIMAL}\0");
     assert!(from_str(&valid_then_nul).is_err());
     assert!(from_str_all(&valid_then_nul, &Limits::DEFAULT).is_err());
+    // The property test below inserts at position 1 or later. At position
+    // 0, a disallowed character other than U+FEFF is still the error.
+    for bad in ['\0', '\u{7}', '\u{85}', '\u{2028}'] {
+        let e = err(&format!("{bad}{MINIMAL}"));
+        assert_eq!(at(&e), (1, 1), "{bad:?}: {e}");
+        assert!(e.message().contains("not allowed unescaped"), "{e}");
+    }
+    // A single byte order mark at the very start is a valid stream prefix,
+    // not a disallowed character.
+    assert!(from_str(&format!("\u{feff}{MINIMAL}")).is_ok());
+    let e = err(&format!("\u{feff}\u{feff}{MINIMAL}"));
+    assert_eq!(at(&e), (1, 1));
 }
 
 proptest! {
     #![proptest_config(cases(512))]
 
-    // A disallowed character anywhere makes reading fail, at the earliest
-    // problem: never success, and never a problem after the character.
+    // A disallowed character inserted anywhere in a valid stream is always
+    // the error, at its own line and column. U+FEFF is never inserted at
+    // position 0, where a single one is a valid byte order mark.
     #[test]
-    fn a_disallowed_character_always_fails_at_or_before_it(
+    fn a_disallowed_character_is_always_the_error_at_its_place(
         doc in arbitrary::document(),
         at_fraction in 0.0f64..1.0,
         bad in proptest::sample::select(vec!['\0', '\u{7}', '\u{1b}', '\u{85}', '\u{2028}', '\u{feff}']),
@@ -1482,12 +1497,18 @@ proptest! {
         let text = format!("{yaml}---\n{yaml}");
         let chars: Vec<char> = text.chars().collect();
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss)]
-        let index = ((chars.len() as f64) * at_fraction) as usize;
-        let mut broken: String = chars[..index].iter().collect();
+        let index = (((chars.len() as f64) * at_fraction) as usize).clamp(1, chars.len());
+        let before: String = chars[..index].iter().collect();
+        let mut broken = before.clone();
         broken.push(bad);
         broken.extend(&chars[index..]);
-        let bad_at = parse::first_disallowed(&broken).and_then(|e| e.location()).unwrap();
+        // Where the character is: after `before`, counting lines as the
+        // parser does (every line break here is LF).
+        let line = before.matches('\n').count() + 1;
+        let column = before.rsplit('\n').next().unwrap_or("").chars().count() + 1;
         let e = from_str_all(&broken, &Limits::DEFAULT).unwrap_err();
-        prop_assert!(e.location().is_some_and(|l| l <= bad_at), "{} after {:?}", e, bad_at);
+        prop_assert_eq!(e.kind(), YamlErrorKind::Syntax, "{}", e);
+        prop_assert!(e.message().contains("not allowed unescaped"), "{}", e);
+        prop_assert_eq!(e.location(), Some(Location { line, column }), "{}", e);
     }
 }
