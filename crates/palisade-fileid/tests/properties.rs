@@ -45,7 +45,13 @@ fn check_bounds(data: &[u8], info: &PeInfo) {
                 panic!("mapped RVA {:#x} has no section", s.virtual_address);
             };
             let delta = s.virtual_address - owner.virtual_address;
-            assert_eq!(off, u64::from(owner.pointer_to_raw_data) + u64::from(delta));
+            let Some((start, _)) = owner.file_data(info.optional.file_alignment) else {
+                panic!(
+                    "RVA {:#x} mapped into a section with no file data",
+                    s.virtual_address
+                );
+            };
+            assert_eq!(off, u64::from(start) + u64::from(delta));
         }
     }
     if let Some(res) = &info.resources {
@@ -286,8 +292,9 @@ fn overlapping_sections_are_bounded() {
     image[COFF_OFFSET + 2..COFF_OFFSET + 4].copy_from_slice(&(count as u16).to_le_bytes());
     for i in 0..count {
         let at = table + i * 40;
-        image[at + 16..at + 20].copy_from_slice(&0x8000_u32.to_le_bytes());
-        image[at + 20..at + 24].copy_from_slice(&0_u32.to_le_bytes());
+        // Every section covers the file from 0x200 to the end.
+        image[at + 16..at + 20].copy_from_slice(&0x7e00_u32.to_le_bytes());
+        image[at + 20..at + 24].copy_from_slice(&0x200_u32.to_le_bytes());
     }
     let info = pe::parse(&image).unwrap();
     assert_eq!(info.sections.len(), count);

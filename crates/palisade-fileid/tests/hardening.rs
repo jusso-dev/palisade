@@ -742,3 +742,172 @@ fn decoys_inside_values_are_skipped() {
     assert_eq!(v.get(VersionField::OriginalFileName), Some("real.exe"));
     assert_eq!(v.file_version(), Some(FileVersionQuad(2, 0, 0, 0)));
 }
+
+// ---- Section file data and header bounds (round 5) ------------------------
+
+/// With `FileAlignment` 0x200, the loader rounds `PointerToRawData` down to
+/// a 512-byte boundary; a decoy at the unrounded offset must not be read.
+#[test]
+fn section_pointer_is_rounded_down_to_a_sector() {
+    let builder = with_version(&VersionSpec {
+        fixed: Some(fixed_info((1, 0, 0, 0), (1, 0, 0, 0))),
+        tables: vec![("040904B0", vec![string("OriginalFilename", "real.exe")])],
+        translations: vec![(0x0409, 0x04b0)],
+    });
+    let mut image = builder.build();
+    let info = pe::parse(&image).unwrap();
+    let rsrc_index = info
+        .sections
+        .iter()
+        .position(|s| s.name == ".rsrc")
+        .unwrap();
+    let rsrc = info.sections[rsrc_index].clone();
+    assert_eq!(rsrc.pointer_to_raw_data % 0x200, 0);
+    // Point `.rsrc` 0x80 bytes in. The loader still reads from the sector
+    // start, so the real tree stays in effect.
+    let header = rsrc.header_offset as usize;
+    put32(&mut image, header + 20, rsrc.pointer_to_raw_data + 0x80);
+    let info = pe::parse(&image).unwrap();
+    assert_eq!(
+        info.rva_to_offset(rsrc.virtual_address, 16),
+        Some(u64::from(rsrc.pointer_to_raw_data))
+    );
+    assert_eq!(
+        info.version_info
+            .as_ref()
+            .and_then(|v| v.get(VersionField::OriginalFileName)),
+        Some("real.exe")
+    );
+    assert_eq!(
+        info.sections[rsrc_index].file_data(FILE_ALIGNMENT),
+        Some((rsrc.pointer_to_raw_data, rsrc.size_of_raw_data))
+    );
+    // Below 0x200 alignment, no rounding.
+    assert_eq!(
+        info.sections[rsrc_index].file_data(0x80),
+        Some((rsrc.pointer_to_raw_data + 0x80, rsrc.size_of_raw_data))
+    );
+}
+
+/// `PointerToRawData` 0 with a non-zero `SizeOfRawData` is zero-filled for
+/// the loader: no file offset, no entropy over the headers, no effect on
+/// the overlay.
+#[test]
+fn zero_pointer_section_has_no_file_data() {
+    let builder = PeBuilder {
+        overlay: vec![0xdd; 40],
+        ..PeBuilder::default()
+    };
+    let mut image = builder.build();
+    let header = builder.section_table_offset();
+    let clean = pe::parse(&image).unwrap();
+    put32(&mut image, header + 20, 0);
+    put32(&mut image, header + 16, 0x2000);
+    let info = pe::parse(&image).unwrap();
+    let text = &info.sections[0];
+    assert_eq!(text.file_data(FILE_ALIGNMENT), None);
+    assert_eq!(text.entropy, None);
+    assert_eq!(info.rva_to_offset(0x1000, 1), None);
+    assert!(info.section_for_rva(0x1000).is_some());
+    // The overlay now starts at the end of the headers, since no section
+    // has file data.
+    assert_eq!(info.overlay.unwrap().offset, u64::from(SIZE_OF_HEADERS));
+    assert!(clean.overlay.is_some());
+}
+
+/// With `VirtualSize` 0, the section spans `SizeOfRawData` rounded up to
+/// `SectionAlignment`, so the zero-filled tail still belongs to it.
+#[test]
+fn zero_virtual_size_span_is_aligned() {
+    let builder = PeBuilder::default();
+    let mut image = builder.build();
+    let header = builder.section_table_offset();
+    put32(&mut image, header + 8, 0);
+    let info = pe::parse(&image).unwrap();
+    // `.text`: 0x200 bytes of raw data at RVA 0x1000, aligned to 0x1000.
+    assert_eq!(info.section_for_rva(0x1fff).unwrap().name, ".text");
+    assert_eq!(info.rva_to_offset(0x11ff, 1), Some(0x5ff));
+    assert_eq!(info.rva_to_offset(0x1200, 1), None);
+}
+
+/// Only the first `StringFileInfo`, `VarFileInfo` and `Translation` are
+/// reachable through the OS version API; later ones are reported, not
+/// merged.
+#[test]
+fn duplicate_version_blocks_are_not_merged() {
+    let german = block(
+        "040704B0",
+        &[],
+        0,
+        1,
+        &[string("OriginalFilename", "real.exe")],
+    );
+    let english = block(
+        "040904B0",
+        &[],
+        0,
+        1,
+        &[string("OriginalFilename", "decoy.exe")],
+    );
+    let translation = |lang: u16| {
+        let value: Vec<u8> = lang
+            .to_le_bytes()
+            .into_iter()
+            .chain(0x04b0_u16.to_le_bytes())
+            .collect();
+        block("Translation", &value, 4, 0, &[])
+    };
+    let data = block(
+        "VS_VERSION_INFO",
+        &[],
+        0,
+        0,
+        &[
+            block("StringFileInfo", &[], 0, 1, &[german]),
+            block("StringFileInfo", &[], 0, 1, &[english]),
+            block(
+                "VarFileInfo",
+                &[],
+                0,
+                1,
+                &[translation(0x0407), translation(0x0409)],
+            ),
+            block("VarFileInfo", &[], 0, 1, &[translation(0x0409)]),
+        ],
+    );
+    let v = pe::version::parse_version_info(&data).unwrap();
+    assert_eq!(v.all_langs.len(), 1);
+    assert_eq!(v.translations.len(), 1);
+    assert_eq!(v.translations[0].language, 0x0407);
+    assert_eq!(v.get(VersionField::OriginalFileName), Some("real.exe"));
+    let duplicates = v
+        .issues
+        .iter()
+        .filter(|i| matches!(i.kind, pe::version::VersionIssueKind::DuplicateBlock(_)))
+        .count();
+    assert_eq!(duplicates, 3);
+}
+
+/// `SizeOfHeaders` is untrusted: a certificate table or overlay may not
+/// start inside the headers actually parsed, whatever it says.
+#[test]
+fn small_size_of_headers_does_not_expose_the_headers() {
+    let builder = PeBuilder::default();
+    let mut image = builder.build();
+    put32(&mut image, OPT_OFFSET + 60, 0);
+    let at = builder.data_directory_offset(4);
+    put32(&mut image, at, 0x40);
+    put32(&mut image, at + 4, 0x80);
+    let info = pe::parse(&image).unwrap();
+    assert!(info.certificate_table.is_none());
+    assert!(has(&info, |k| *k == WarningKind::CertificateTableInvalid));
+
+    // No sections, no SizeOfHeaders: the overlay still starts after the
+    // headers that were parsed.
+    let mut bare = PeBuilder::default().build();
+    put16(&mut bare, COFF_OFFSET + 2, 0);
+    put32(&mut bare, OPT_OFFSET + 60, 0);
+    let info = pe::parse(&bare).unwrap();
+    let overlay = info.overlay.unwrap();
+    assert_eq!(overlay.offset, builder.section_table_offset() as u64);
+}

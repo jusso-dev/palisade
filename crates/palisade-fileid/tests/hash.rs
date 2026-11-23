@@ -235,7 +235,7 @@ fn hashes_a_file_on_disk() {
         HashStatus::TooLarge { limit: 100 }
     );
 
-    // A directory is not a file.
+    // A directory is not a file, on every platform.
     assert!(matches!(
         hash_file(&dir, &options),
         Err(palisade_fileid::hash::HashError::NotAFile)
@@ -321,4 +321,32 @@ fn digest_parse_rejects_bad_input() {
     assert!(Digest::parse(HashAlgorithm::Md5, "0x").is_err());
     assert!(Digest::new(HashAlgorithm::Sha1, &[0; 19]).is_err());
     assert!(!DigestError::InvalidHex { index: 1 }.to_string().is_empty());
+}
+
+/// A named pipe with no writer is refused before it is opened, so the call
+/// returns instead of blocking.
+#[cfg(unix)]
+#[test]
+fn fifo_is_refused_without_blocking() {
+    let dir = std::env::temp_dir().join(format!("palisade-fileid-fifo-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let fifo = dir.join("pipe");
+    let status = std::process::Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let (tx, rx) = std::sync::mpsc::channel();
+    let path = fifo.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send(hash_file(&path, &HashOptions::default()));
+    });
+    let result = rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("hash_file blocked on a FIFO");
+    assert!(matches!(
+        result,
+        Err(palisade_fileid::hash::HashError::NotAFile)
+    ));
+    std::fs::remove_dir_all(&dir).unwrap();
 }

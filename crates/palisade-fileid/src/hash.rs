@@ -630,7 +630,12 @@ pub fn hash_reader<R: Read>(mut reader: R, options: &HashOptions) -> Result<Hash
 
 /// Hashes the file at `path` (its default data stream).
 ///
-/// A file whose metadata length is over the limit returns
+/// Anything that is not a regular file (a directory, pipe or device) returns
+/// [`HashError::NotAFile`], checked before the file is opened so a pipe with
+/// no writer cannot block the call. If the path is swapped for a pipe in the
+/// moment between that check and the open, the open can still block; the
+/// Windows backend (#46) will close that gap by opening without following
+/// such objects. A file whose metadata length is over the limit returns
 /// [`HashStatus::TooLarge`] without reading any content. The limit is also
 /// enforced while reading, in case the file grows.
 ///
@@ -641,10 +646,15 @@ pub fn hash_reader<R: Read>(mut reader: R, options: &HashOptions) -> Result<Hash
 /// to the Windows backend (#46).
 pub fn hash_file(path: &Path, options: &HashOptions) -> Result<HashStatus, HashError> {
     options.validate()?;
+    // Pipes, devices and directories have no stable content to identify.
+    // Check before opening: opening a pipe with no writer blocks, and on
+    // Windows a directory cannot be opened as a file at all.
+    if !std::fs::metadata(path)?.is_file() {
+        return Err(HashError::NotAFile);
+    }
     let file = File::open(path)?;
+    // Check the opened handle again, in case the path changed in between.
     let metadata = file.metadata()?;
-    // Pipes, devices and directories have no stable content to identify,
-    // and reading a pipe could block forever.
     if !metadata.is_file() {
         return Err(HashError::NotAFile);
     }

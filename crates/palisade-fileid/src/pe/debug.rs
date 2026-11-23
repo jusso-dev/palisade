@@ -246,6 +246,7 @@ mod tests {
         sections: &[],
         size_of_headers: 0,
         section_alignment: 0x1000,
+        file_alignment: 0x200,
     };
 
     fn record() -> Vec<u8> {

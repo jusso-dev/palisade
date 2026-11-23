@@ -58,6 +58,9 @@ pub const MAX_SECTIONS: usize = 1024;
 pub const LARGE_VIRTUAL_SIZE: u32 = 64 * 1024;
 
 const DOS_SIGNATURE: u16 = 0x5a4d; // "MZ"
+/// The loader rounds section file pointers down to this boundary when
+/// `FileAlignment` is at least this large.
+const SECTOR_SIZE: u32 = 0x200;
 const PE_SIGNATURE: u32 = 0x0000_4550; // "PE\0\0"
 const COFF_HEADER_SIZE: usize = 20;
 const SECTION_HEADER_SIZE: usize = 40;
@@ -362,11 +365,32 @@ impl Section {
             .contains(SectionCharacteristics::MEM_WRITE | SectionCharacteristics::MEM_EXECUTE)
     }
 
-    /// No raw data, but a virtual size of at least [`LARGE_VIRTUAL_SIZE`]:
-    /// typical of unpacking stubs that fill memory at run time.
+    /// No file data (a zero `SizeOfRawData` or `PointerToRawData`), but a
+    /// virtual size of at least [`LARGE_VIRTUAL_SIZE`]: typical of unpacking
+    /// stubs that fill memory at run time.
     #[must_use]
     pub const fn is_virtual_only(&self) -> bool {
-        self.size_of_raw_data == 0 && self.virtual_size >= LARGE_VIRTUAL_SIZE
+        (self.size_of_raw_data == 0 || self.pointer_to_raw_data == 0)
+            && self.virtual_size >= LARGE_VIRTUAL_SIZE
+    }
+
+    /// Where the loader reads this section's data from in the file, as
+    /// `(offset, size)`, or `None` when it maps the section zero-filled.
+    ///
+    /// Like the loader, a zero `PointerToRawData` or `SizeOfRawData` means
+    /// no file data, and when `FileAlignment` is at least 0x200 the pointer
+    /// is rounded down to a 512-byte boundary.
+    #[must_use]
+    pub const fn file_data(&self, file_alignment: u32) -> Option<(u32, u32)> {
+        if self.pointer_to_raw_data == 0 || self.size_of_raw_data == 0 {
+            return None;
+        }
+        let start = if file_alignment >= SECTOR_SIZE {
+            self.pointer_to_raw_data & !(SECTOR_SIZE - 1)
+        } else {
+            self.pointer_to_raw_data
+        };
+        Some((start, self.size_of_raw_data))
     }
 }
 
@@ -408,9 +432,10 @@ pub struct PeInfo {
     /// Stored and computed checksums.
     pub checksum: Checksum,
     /// The certificate table (security directory), if present. Its location
-    /// is a file offset. Parsing it is #48.
+    /// is a file offset, always after the headers (the later of
+    /// `SizeOfHeaders` and the end of the section table). Parsing it is #48.
     pub certificate_table: Option<FileRange>,
-    /// Bytes after the end of the last section's raw data and after the
+    /// Bytes after the headers, the last section's file data and the
     /// certificate table, if any.
     pub overlay: Option<FileRange>,
     /// The debug directory.
@@ -444,8 +469,8 @@ impl PeInfo {
     }
 
     /// The section whose mapped range contains `rva`: `VirtualAddress` up
-    /// to `VirtualSize` rounded up to `SectionAlignment` (or `SizeOfRawData`
-    /// when `VirtualSize` is zero), as the loader maps it.
+    /// to `VirtualSize` (or `SizeOfRawData` when `VirtualSize` is zero)
+    /// rounded up to `SectionAlignment`, as the loader maps it.
     #[must_use]
     pub fn section_for_rva(&self, rva: u32) -> Option<&Section> {
         self.layout().section_for(rva)
@@ -464,6 +489,7 @@ impl PeInfo {
             sections: &self.sections,
             size_of_headers: self.optional.size_of_headers,
             section_alignment: self.optional.section_alignment,
+            file_alignment: self.optional.file_alignment,
         }
     }
 }
@@ -502,6 +528,7 @@ pub(crate) struct Layout<'a> {
     pub(crate) sections: &'a [Section],
     pub(crate) size_of_headers: u32,
     pub(crate) section_alignment: u32,
+    pub(crate) file_alignment: u32,
 }
 
 impl<'a> Layout<'a> {
@@ -516,23 +543,22 @@ impl<'a> Layout<'a> {
     /// The file offset of `rva`, and how many file-backed bytes follow it
     /// before the end of its section (or of the headers).
     ///
-    /// A section is mapped over `VirtualSize` rounded up to
-    /// `SectionAlignment` (or `SizeOfRawData` when `VirtualSize` is zero), so
-    /// raw bytes beyond that are not part of the image and cannot shadow the
-    /// next section. Only the first `min(SizeOfRawData, span)` bytes come
-    /// from the file; the rest is zero-filled and has no file offset. The
-    /// headers are mapped below both `SizeOfHeaders` and the lowest section
-    /// RVA.
+    /// A section is mapped over `VirtualSize` (or `SizeOfRawData` when
+    /// `VirtualSize` is zero) rounded up to `SectionAlignment`, so raw bytes
+    /// beyond that are not part of the image and cannot shadow the next
+    /// section. Only the first `min(SizeOfRawData, span)` bytes come from
+    /// the file, starting at [`Section::file_data`]; the rest is zero-filled
+    /// and has no file offset. The headers are mapped below both
+    /// `SizeOfHeaders` and the lowest section RVA.
     pub(crate) fn backed_extent(&self, rva: u32) -> Option<(usize, u32)> {
         if let Some(s) = self.section_for(rva) {
             let delta = rva.checked_sub(s.virtual_address)?;
-            let backed = s
-                .size_of_raw_data
-                .min(mapped_span(s, self.section_alignment));
+            let (start, raw_size) = s.file_data(self.file_alignment)?;
+            let backed = raw_size.min(mapped_span(s, self.section_alignment));
             if delta >= backed {
                 return None;
             }
-            let offset = to_usize(s.pointer_to_raw_data.checked_add(delta)?)?;
+            let offset = to_usize(start.checked_add(delta)?)?;
             return Some((offset, backed - delta));
         }
         let limit = self
@@ -559,17 +585,19 @@ impl<'a> Layout<'a> {
     }
 }
 
-/// The size of a section's mapped virtual range.
+/// The size of a section's mapped virtual range: `VirtualSize`, or
+/// `SizeOfRawData` when that is zero, rounded up to `SectionAlignment`.
 fn mapped_span(s: &Section, section_alignment: u32) -> u32 {
-    if s.virtual_size == 0 {
-        return s.size_of_raw_data;
-    }
-    if section_alignment.is_power_of_two() {
-        s.virtual_size
-            .checked_next_multiple_of(section_alignment)
-            .unwrap_or(u32::MAX)
+    let size = if s.virtual_size == 0 {
+        s.size_of_raw_data
     } else {
         s.virtual_size
+    };
+    if section_alignment.is_power_of_two() {
+        size.checked_next_multiple_of(section_alignment)
+            .unwrap_or(u32::MAX)
+    } else {
+        size
     }
 }
 
@@ -661,7 +689,9 @@ pub fn parse_with(data: &[u8], options: &ParseOptions) -> Result<PeInfo, PeError
     let mut entropy_budget = options.section_entropy.then_some(data.len());
     for (index, section) in sections.iter_mut().enumerate() {
         let index = u16::try_from(index).unwrap_or(u16::MAX);
-        let Some(raw) = section_raw_data(data, section, index, &mut warnings) else {
+        let Some(raw) =
+            section_raw_data(data, section, optional.file_alignment, index, &mut warnings)
+        else {
             continue;
         };
         let Some(budget) = entropy_budget else {
@@ -695,6 +725,11 @@ pub fn parse_with(data: &[u8], options: &ParseOptions) -> Result<PeInfo, PeError
     };
 
     let size_of_headers = optional.size_of_headers;
+    // `SizeOfHeaders` is untrusted, so the headers are taken to end at the
+    // later of it and the end of the section table actually parsed.
+    let headers_end = section_table
+        .saturating_add(sections.len().saturating_mul(SECTION_HEADER_SIZE))
+        .max(to_usize(size_of_headers).unwrap_or(0));
     let certificate_table = data_directories
         .get(DataDirectoryKind::Security.index())
         .filter(|d| d.is_present())
@@ -703,7 +738,8 @@ pub fn parse_with(data: &[u8], options: &ParseOptions) -> Result<PeInfo, PeError
             // A half-zero entry, or one pointing into the headers, is not a
             // certificate table. Rejecting it also stops a zero-size entry
             // at the end of the file from hiding the overlay.
-            if d.size == 0 || d.virtual_address == 0 || d.virtual_address < size_of_headers {
+            let start = to_usize(d.virtual_address).unwrap_or(usize::MAX);
+            if d.size == 0 || d.virtual_address == 0 || start < headers_end {
                 warnings.push(entry, WarningKind::CertificateTableInvalid);
                 return None;
             }
@@ -721,12 +757,19 @@ pub fn parse_with(data: &[u8], options: &ParseOptions) -> Result<PeInfo, PeError
             fits.then_some(range)
         });
 
-    let overlay = find_overlay(data.len(), &optional, &sections, certificate_table);
+    let overlay = find_overlay(
+        data.len(),
+        headers_end,
+        optional.file_alignment,
+        &sections,
+        certificate_table,
+    );
 
     let layout = Layout {
         sections: &sections,
         size_of_headers,
         section_alignment: optional.section_alignment,
+        file_alignment: optional.file_alignment,
     };
     let debug = data_directories
         .get(DataDirectoryKind::Debug.index())
@@ -959,14 +1002,13 @@ fn parse_sections(
 fn section_raw_data<'a>(
     data: &'a [u8],
     section: &Section,
+    file_alignment: u32,
     index: u16,
     warnings: &mut Warnings,
 ) -> Option<&'a [u8]> {
-    if section.size_of_raw_data == 0 {
-        return None;
-    }
-    let start = to_usize(section.pointer_to_raw_data)?;
-    let end = start.saturating_add(to_usize(section.size_of_raw_data)?);
+    let (start, size) = section.file_data(file_alignment)?;
+    let start = to_usize(start)?;
+    let end = start.saturating_add(to_usize(size)?);
     if end > data.len() {
         warnings.push(start, WarningKind::SectionDataOutOfFile { index });
     }
@@ -976,18 +1018,19 @@ fn section_raw_data<'a>(
 
 fn find_overlay(
     file_len: usize,
-    optional: &OptionalHeader,
+    headers_end: usize,
+    file_alignment: u32,
     sections: &[Section],
     certificate_table: Option<FileRange>,
 ) -> Option<FileRange> {
     let file_len = to_u64(file_len);
     let sections_end = sections
         .iter()
-        .filter(|s| s.size_of_raw_data != 0)
-        .map(|s| u64::from(s.pointer_to_raw_data).saturating_add(u64::from(s.size_of_raw_data)))
+        .filter_map(|s| s.file_data(file_alignment))
+        .map(|(start, size)| u64::from(start).saturating_add(u64::from(size)))
         .max()
         .unwrap_or(0)
-        .max(u64::from(optional.size_of_headers));
+        .max(to_u64(headers_end));
     let cert_end = certificate_table.map_or(0, |c| c.offset.saturating_add(c.size));
     let start = sections_end.max(cert_end);
     (start < file_len).then(|| FileRange {

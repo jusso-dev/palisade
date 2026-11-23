@@ -71,6 +71,9 @@ pub enum VersionIssueKind {
     TooManyStrings,
     /// More child blocks than the walker examines in one parent.
     TooManyChildren,
+    /// A second `StringFileInfo`, `VarFileInfo` or `Translation` block. The
+    /// OS version API only reaches the first, so this one was ignored.
+    DuplicateBlock(String),
 }
 
 impl fmt::Display for VersionInfoIssue {
@@ -326,7 +329,9 @@ pub struct EffectiveFileName<'a> {
 pub struct VersionInfo {
     /// `VS_FIXEDFILEINFO`, if present and valid.
     pub fixed: Option<FixedFileInfo>,
-    /// Every `StringFileInfo` language block, in file order.
+    /// Every language block of the first `StringFileInfo`, in file order.
+    /// (Later `StringFileInfo` blocks are unreachable through the OS
+    /// version API and are reported as [`VersionIssueKind::DuplicateBlock`].)
     pub all_langs: Vec<StringTable>,
     /// The `VarFileInfo\Translation` entries, in file order.
     pub translations: Vec<Translation>,
@@ -591,16 +596,32 @@ pub fn parse_version_info(data: &[u8]) -> Result<VersionInfo, VersionInfoIssue> 
 
     let mut all_langs = Vec::new();
     let mut translations = Vec::new();
+    let mut seen_string_file_info = false;
+    let mut seen_var_file_info = false;
     for_each_child(
         data,
         root.children_start(),
         root.end,
         &mut issues,
         |child, issues| {
+            // The OS version API resolves a path one segment at a time and
+            // takes the first child with a matching key, so only the first
+            // `StringFileInfo` and `VarFileInfo` are reachable. Later ones
+            // are reported and ignored rather than merged.
             if child.key.eq_ignore_ascii_case("StringFileInfo") {
-                string_file_info(data, child, &mut all_langs, issues);
+                if seen_string_file_info {
+                    issues.push(duplicate(child));
+                } else {
+                    seen_string_file_info = true;
+                    string_file_info(data, child, &mut all_langs, issues);
+                }
             } else if child.key.eq_ignore_ascii_case("VarFileInfo") {
-                var_file_info(data, child, &mut translations, issues);
+                if seen_var_file_info {
+                    issues.push(duplicate(child));
+                } else {
+                    seen_var_file_info = true;
+                    var_file_info(data, child, &mut translations, issues);
+                }
             }
         },
     );
@@ -707,24 +728,44 @@ fn var_file_info(
     translations: &mut Vec<Translation>,
     issues: &mut Vec<VersionInfoIssue>,
 ) {
-    for_each_child(data, block.children_start(), block.end, issues, |var, _| {
-        if !var.key.eq_ignore_ascii_case("Translation") {
-            return;
-        }
-        let value = var.value(data, var.value_bytes());
-        for pair in value.chunks_exact(4) {
-            if translations.len() >= MAX_TRANSLATIONS {
-                break;
+    let mut seen = false;
+    for_each_child(
+        data,
+        block.children_start(),
+        block.end,
+        issues,
+        |var, issues| {
+            if !var.key.eq_ignore_ascii_case("Translation") {
+                return;
             }
-            let (Some(language), Some(code_page)) = (u16_at(pair, 0), u16_at(pair, 2)) else {
-                break;
-            };
-            translations.push(Translation {
-                language,
-                code_page,
-            });
-        }
-    });
+            // Only the first `Translation` is reachable, as for the blocks above.
+            if seen {
+                issues.push(duplicate(var));
+                return;
+            }
+            seen = true;
+            let value = var.value(data, var.value_bytes());
+            for pair in value.chunks_exact(4) {
+                if translations.len() >= MAX_TRANSLATIONS {
+                    break;
+                }
+                let (Some(language), Some(code_page)) = (u16_at(pair, 0), u16_at(pair, 2)) else {
+                    break;
+                };
+                translations.push(Translation {
+                    language,
+                    code_page,
+                });
+            }
+        },
+    );
+}
+
+fn duplicate(block: &Block) -> VersionInfoIssue {
+    VersionInfoIssue {
+        offset: to_u64(block.start),
+        kind: VersionIssueKind::DuplicateBlock(block.key.clone()),
+    }
 }
 
 /// Decodes a `StringTable` key such as `"040904B0"`.
