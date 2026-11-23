@@ -170,11 +170,21 @@ fn rule(mandatory: bool) -> impl Strategy<Value = Rule> {
         (
             proptest::option::of(any::<u32>()),
             proptest::option::of(any::<i32>()),
-            prop_oneof![
-                Just(EnforcementOverride::Inherit),
-                Just(EnforcementOverride::AlwaysEnforce),
-                Just(EnforcementOverride::NeverEnforce)
-            ],
+            if mandatory {
+                // Mandatory rules always block (ADR 0004).
+                prop_oneof![
+                    Just(EnforcementOverride::Inherit),
+                    Just(EnforcementOverride::AlwaysEnforce)
+                ]
+                .boxed()
+            } else {
+                prop_oneof![
+                    Just(EnforcementOverride::Inherit),
+                    Just(EnforcementOverride::AlwaysEnforce),
+                    Just(EnforcementOverride::NeverEnforce)
+                ]
+                .boxed()
+            },
             metadata(),
         ),
     )
@@ -272,7 +282,7 @@ fn settings() -> impl Strategy<Value = PolicySettings> {
             1u8..=16,
         ),
         btree_map(
-            "[a-z][a-z0-9_.]{0,20}",
+            "[a-z][a-z0-9_.-]{0,20}",
             prop_oneof![
                 any::<bool>().prop_map(AdvancedValue::Bool),
                 any::<i64>().prop_map(AdvancedValue::Int),

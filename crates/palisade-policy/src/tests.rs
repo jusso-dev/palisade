@@ -352,7 +352,18 @@ fn mandatory_is_only_for_blocklists_of_denies() {
     );
     doc.rule_sets[0].kind = RuleSetKind::Blocklist;
     doc.rule_sets[0].rules[0].action = Action::Deny {};
-    assert!(doc.validate().is_ok());
+    assert!(doc.clone().validate().is_ok());
+    // A mandatory deny cannot be turned into a report-only rule.
+    doc.rule_sets[0].rules[0].enforcement_override =
+        crate::model::EnforcementOverride::NeverEnforce;
+    let errors = doc.validate().unwrap_err();
+    assert_eq!(
+        codes(&errors),
+        vec![(
+            ErrorCode::MandatoryRuleNotEnforced,
+            "/rule_sets/0/rules/0/enforcement_override"
+        )]
+    );
 }
 
 #[test]
@@ -370,20 +381,299 @@ fn allow_wins_is_a_warning_not_an_error() {
 #[test]
 fn advanced_keys_need_the_registry_or_the_opt_in() {
     let mut doc = minimal();
-    doc.policy
-        .settings
-        .advanced
-        .insert("a/b~c".to_owned(), crate::model::AdvancedValue::Bool(true));
+    doc.policy.settings.advanced.insert(
+        "engine.flag".to_owned(),
+        crate::model::AdvancedValue::Bool(true),
+    );
     let errors = doc.clone().validate().unwrap_err();
     assert_eq!(
         codes(&errors),
         vec![(
             ErrorCode::UnknownAdvancedKey,
-            "/policy/settings/advanced/a~1b~0c"
+            "/policy/settings/advanced/engine.flag"
         )]
     );
     doc.policy.settings.allow_unknown_advanced = true;
     assert!(doc.validate().is_ok());
+}
+
+#[test]
+fn text_limits_and_control_characters() {
+    let mut doc = minimal();
+    doc.policy.description = Some("x".repeat(4096));
+    assert!(doc.clone().validate().is_ok());
+    doc.policy.description = Some("x".repeat(4097));
+    doc.policy.metadata.justification = Some("line one\nline two\ttab".to_owned());
+    doc.policy.metadata.comment = Some("bell\u{7}".to_owned());
+    let errors = doc.validate().unwrap_err();
+    assert_eq!(
+        codes(&errors),
+        vec![
+            (ErrorCode::InvalidText, "/policy/description"),
+            (ErrorCode::InvalidText, "/policy/metadata/comment"),
+        ]
+    );
+}
+
+#[test]
+fn rule_count_limit_is_over_all_rule_sets() {
+    let mut doc = with_rule(
+        leaf(Field::HashSha256, Operator::Equals, &[&sha256('2')]),
+        Action::Deny {},
+    );
+    let template = doc.rule_sets[0].rules[0].clone();
+    let mut second = doc.rule_sets[0].clone();
+    second.id = crate::model::RuleSetId("01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e90".parse().unwrap());
+    doc.policy.rule_sets.push(second.id);
+    doc.rule_sets.push(second);
+    // Give every rule a distinct, valid UUIDv7.
+    let id =
+        |n: u32| crate::model::RuleId(format!("01936b2e-8c4a-7b3d-9f21-{n:012x}").parse().unwrap());
+    let half = crate::model::limits::MAX_RULES_PER_POLICY / 2;
+    for (s, set) in doc.rule_sets.iter_mut().enumerate() {
+        set.rules = (0..half)
+            .map(|i| {
+                let mut r = template.clone();
+                r.id = id(u32::try_from(s * half + i).unwrap());
+                r
+            })
+            .collect();
+    }
+    assert!(doc.clone().validate().is_ok());
+    let mut extra = template;
+    extra.id = id(0xffff_fff0);
+    doc.rule_sets[1].rules.push(extra);
+    let errors = doc.validate().unwrap_err();
+    assert_eq!(
+        codes(&errors),
+        vec![(ErrorCode::TooManyRules, "/rule_sets")]
+    );
+}
+
+#[test]
+fn rule_shape_errors_have_codes_and_paths() {
+    let mut doc = with_rule(
+        Match::All(vec![
+            leaf(Field::HashSha256, Operator::Equals, &[&sha256('3')]),
+            Match::Any(Vec::new()),
+        ]),
+        Action::Deny {},
+    );
+    let rule = &mut doc.rule_sets[0].rules[0];
+    rule.display_id = Some("R-12".to_owned());
+    rule.object_types = vec![
+        crate::model::ObjectType::Executable,
+        crate::model::ObjectType::Library,
+        crate::model::ObjectType::Executable,
+    ];
+    let errors = doc.validate().unwrap_err();
+    assert_eq!(
+        codes(&errors),
+        vec![
+            (
+                ErrorCode::InvalidDisplayId,
+                "/rule_sets/0/rules/0/display_id"
+            ),
+            (
+                ErrorCode::DuplicateObjectType,
+                "/rule_sets/0/rules/0/object_types/2"
+            ),
+            (
+                ErrorCode::EmptyGroup,
+                "/rule_sets/0/rules/0/match/all/1/any"
+            ),
+        ]
+    );
+}
+
+#[test]
+fn validate_rejects_another_major_version() {
+    let mut doc = minimal();
+    doc.schema_version = crate::model::SchemaVersion::new(2, 0, 0);
+    let errors = doc.validate().unwrap_err();
+    assert_eq!(
+        codes(&errors),
+        vec![(ErrorCode::UnsupportedSchemaVersion, "/schema_version")]
+    );
+}
+
+#[test]
+fn setting_ranges_are_checked() {
+    let mut doc = minimal();
+    let s = &mut doc.policy.settings;
+    s.decision_cache_ttl_secs = 86_401;
+    s.max_ancestor_depth = 0;
+    s.override_durations = vec![15, 10_081, 0, 1, 2, 3];
+    let errors = doc.clone().validate().unwrap_err();
+    assert_eq!(
+        codes(&errors),
+        vec![
+            (
+                ErrorCode::SettingOutOfRange,
+                "/policy/settings/decision_cache_ttl_secs"
+            ),
+            (
+                ErrorCode::SettingOutOfRange,
+                "/policy/settings/max_ancestor_depth"
+            ),
+            (
+                ErrorCode::SettingOutOfRange,
+                "/policy/settings/override_durations"
+            ),
+            (
+                ErrorCode::SettingOutOfRange,
+                "/policy/settings/override_durations/1"
+            ),
+        ]
+    );
+    doc.policy.settings.max_ancestor_depth = 17;
+    doc.policy.settings.decision_cache_ttl_secs = 0;
+    doc.policy.settings.override_durations = vec![10_080];
+    let errors = doc.validate().unwrap_err();
+    assert_eq!(
+        codes(&errors),
+        vec![(
+            ErrorCode::SettingOutOfRange,
+            "/policy/settings/max_ancestor_depth"
+        )]
+    );
+}
+
+#[test]
+fn advanced_keys_and_values_are_bounded() {
+    use crate::model::AdvancedValue;
+    let mut doc = minimal();
+    let s = &mut doc.policy.settings;
+    s.allow_unknown_advanced = true;
+    s.advanced
+        .insert("ok.key".to_owned(), AdvancedValue::Int(1));
+    s.advanced.insert(String::new(), AdvancedValue::Bool(true));
+    s.advanced
+        .insert("bad\nkey".to_owned(), AdvancedValue::Bool(true));
+    // The reported path uses JSON Pointer escaping (RFC 6901).
+    s.advanced
+        .insert("a/b~c".to_owned(), AdvancedValue::Bool(true));
+    s.advanced
+        .insert("k".repeat(129), AdvancedValue::Bool(true));
+    s.advanced.insert(
+        "text.tab".to_owned(),
+        AdvancedValue::Text("a\tb".to_owned()),
+    );
+    s.advanced.insert(
+        "text.long".to_owned(),
+        AdvancedValue::Text("x".repeat(2049)),
+    );
+    let errors = doc.clone().validate().unwrap_err();
+    let long_key = format!("/policy/settings/advanced/{}", "k".repeat(129));
+    assert_eq!(
+        codes(&errors),
+        vec![
+            (ErrorCode::InvalidAdvancedKey, "/policy/settings/advanced/"),
+            (
+                ErrorCode::InvalidAdvancedKey,
+                "/policy/settings/advanced/a~1b~0c"
+            ),
+            (
+                ErrorCode::InvalidAdvancedKey,
+                "/policy/settings/advanced/bad\nkey"
+            ),
+            (ErrorCode::InvalidAdvancedKey, long_key.as_str()),
+            (
+                ErrorCode::InvalidValue,
+                "/policy/settings/advanced/text.long"
+            ),
+            (
+                ErrorCode::InvalidValue,
+                "/policy/settings/advanced/text.tab"
+            ),
+        ]
+    );
+    let mut doc = minimal();
+    doc.policy.settings.allow_unknown_advanced = true;
+    for i in 0..257 {
+        doc.policy
+            .settings
+            .advanced
+            .insert(format!("k{i}"), AdvancedValue::Bool(true));
+    }
+    let errors = doc.validate().unwrap_err();
+    assert_eq!(
+        codes(&errors),
+        vec![(ErrorCode::SettingOutOfRange, "/policy/settings/advanced")]
+    );
+}
+
+#[test]
+fn tags_are_trimmed_and_unique() {
+    let mut doc = minimal();
+    doc.policy.metadata.tags = vec!["prod".to_owned(), " prod ".to_owned(), "prod".to_owned()];
+    let errors = doc.validate().unwrap_err();
+    assert_eq!(
+        codes(&errors),
+        vec![
+            (ErrorCode::InvalidTag, "/policy/metadata/tags/1"),
+            (ErrorCode::InvalidTag, "/policy/metadata/tags/2"),
+        ]
+    );
+}
+
+#[test]
+fn duplicate_map_keys_are_rejected() {
+    for settings in [
+        r#"{"script_control_by_kind": {"powershell": "enforce", "powershell": "off"}}"#,
+        r#"{"allow_unknown_advanced": true, "advanced": {"a": 1, "a": 2}}"#,
+    ] {
+        let text = MINIMAL.replace(
+            "\"mode\": \"audit\"",
+            &format!("\"mode\": \"audit\", \"settings\": {settings}"),
+        );
+        let err = PolicyDocument::from_json(&text).unwrap_err();
+        assert!(err.to_string().contains("duplicate key"), "{err}");
+    }
+}
+
+#[test]
+fn rule_set_count_is_bounded() {
+    let mut doc = minimal();
+    let id = |n: usize| {
+        crate::model::RuleSetId(format!("01936b2e-8c4a-7b3d-9f21-{n:012x}").parse().unwrap())
+    };
+    doc.policy.rule_sets = (0..1001).map(id).collect();
+    let errors = doc.validate().unwrap_err();
+    // Also reported: each reference is unknown, since the sets are not in the document.
+    assert!(
+        codes(&errors).contains(&(ErrorCode::TooManyRuleSets, "/policy/rule_sets")),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn names_reject_bidirectional_formatting() {
+    let mut doc = minimal();
+    doc.policy.name = "invoice\u{202e}fdp.exe".to_owned();
+    doc.policy.metadata.tags = vec!["a\u{2066}b".to_owned()];
+    let errors = doc.validate().unwrap_err();
+    assert_eq!(
+        codes(&errors),
+        vec![
+            (ErrorCode::InvalidName, "/policy/name"),
+            (ErrorCode::InvalidTag, "/policy/metadata/tags/0"),
+        ]
+    );
+}
+
+#[test]
+fn deep_trees_drop_without_overflow() {
+    let mut tree = leaf(Field::HashSha256, Operator::Equals, &[&sha256('4')]);
+    for i in 0..200_000 {
+        tree = if i % 2 == 0 {
+            Match::Not(Box::new(tree))
+        } else {
+            Match::All(vec![tree])
+        };
+    }
+    assert!(tree.depth() > 100_000);
+    drop(tree);
 }
 
 #[test]

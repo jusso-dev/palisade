@@ -42,6 +42,8 @@ pub struct PolicySettings {
     pub script_control: ControlLevel,
     /// Control level per script kind, overriding `script_control`.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(deserialize_with = "unique_keys")]
+    #[schemars(transform = script_kind_keys)]
     pub script_control_by_kind: BTreeMap<ScriptKind, ControlLevel>,
     /// Control level for libraries.
     pub dll_control: ControlLevel,
@@ -70,10 +72,86 @@ pub struct PolicySettings {
     /// registry is empty in this version, so any key is rejected unless
     /// `allow_unknown_advanced` is set.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    #[schemars(length(max = ADVANCED_KEYS_MAX))]
+    #[serde(deserialize_with = "unique_keys")]
+    #[schemars(transform = advanced_keys)]
     pub advanced: BTreeMap<String, AdvancedValue>,
     /// Accept keys in `advanced` that the registry does not know.
     pub allow_unknown_advanced: bool,
+}
+
+/// Most bytes in an `advanced` key.
+pub const ADVANCED_KEY_MAX_BYTES: usize = 128;
+
+/// The schema of `advanced` keys: printable ASCII identifiers. Validation
+/// checks the same rule ([`is_valid_advanced_key`]).
+pub const ADVANCED_KEY_PATTERN: &str = "^[a-z][a-z0-9_.-]{0,127}$";
+
+/// Whether `key` is a well-formed `advanced` key: a lowercase ASCII letter,
+/// then up to 127 lowercase letters, digits, `_`, `.` or `-`.
+#[must_use]
+pub fn is_valid_advanced_key(key: &str) -> bool {
+    let mut bytes = key.bytes();
+    bytes.next().is_some_and(|b| b.is_ascii_lowercase())
+        && key.len() <= ADVANCED_KEY_MAX_BYTES
+        && bytes.all(|b| {
+            b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'_' | b'.' | b'-')
+        })
+}
+
+/// Reads a map and rejects repeated keys. serde's own map reader keeps the
+/// last value, which would let two tools disagree about one document.
+fn unique_keys<'de, D, K, V>(deserializer: D) -> Result<BTreeMap<K, V>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    K: Deserialize<'de> + Ord + core::fmt::Debug,
+    V: Deserialize<'de>,
+{
+    struct Visitor<K, V>(core::marker::PhantomData<(K, V)>);
+    impl<'de, K, V> serde::de::Visitor<'de> for Visitor<K, V>
+    where
+        K: Deserialize<'de> + Ord + core::fmt::Debug,
+        V: Deserialize<'de>,
+    {
+        type Value = BTreeMap<K, V>;
+        fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            f.write_str("a map with unique keys")
+        }
+        fn visit_map<A: serde::de::MapAccess<'de>>(
+            self,
+            mut map: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut out = BTreeMap::new();
+            while let Some((key, value)) = map.next_entry::<K, V>()? {
+                if out.contains_key(&key) {
+                    return Err(serde::de::Error::custom(format_args!(
+                        "duplicate key {key:?}"
+                    )));
+                }
+                out.insert(key, value);
+            }
+            Ok(out)
+        }
+    }
+    deserializer.deserialize_map(Visitor(core::marker::PhantomData))
+}
+
+// schemars describes a map's values but not its keys, and its `length`
+// attribute does not apply to maps, so these add the missing constraints.
+
+fn script_kind_keys(schema: &mut schemars::Schema) {
+    let names: Vec<&str> = ScriptKind::ALL.iter().map(|k| k.as_str()).collect();
+    schema.insert(
+        "propertyNames".to_owned(),
+        serde_json::json!({ "enum": names }),
+    );
+}
+
+fn advanced_keys(schema: &mut schemars::Schema) {
+    schema.insert("maxProperties".to_owned(), ADVANCED_KEYS_MAX.into());
+    schema.insert(
+        "propertyNames".to_owned(),
+        serde_json::json!({ "pattern": ADVANCED_KEY_PATTERN }),
+    );
 }
 
 impl Default for PolicySettings {
@@ -125,6 +203,6 @@ pub enum AdvancedValue {
     Bool(bool),
     /// A signed integer.
     Int(i64),
-    /// A string of at most 2048 bytes.
+    /// A string of at most 2048 bytes, with no control characters.
     Text(#[schemars(length(max = 2048))] String),
 }

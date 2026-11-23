@@ -59,7 +59,7 @@
           "type": "integer"
         },
         {
-          "description": "A string of at most 2048 bytes.",
+          "description": "A string of at most 2048 bytes, with no control characters.",
           "maxLength": 2048,
           "type": "string"
         }
@@ -514,6 +514,7 @@
           "items": {
             "$ref": "#/$defs/RuleSetId"
           },
+          "maxItems": 1000,
           "type": "array"
         },
         "settings": {
@@ -553,6 +554,10 @@
             "$ref": "#/$defs/AdvancedValue"
           },
           "description": "Engineering settings, checked against a registry of known keys. The\nregistry is empty in this version, so any key is rejected unless\n`allow_unknown_advanced` is set.",
+          "maxProperties": 256,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_.-]{0,127}$"
+          },
           "type": "object"
         },
         "allow_unknown_advanced": {
@@ -620,6 +625,21 @@
             "$ref": "#/$defs/ControlLevel"
           },
           "description": "Control level per script kind, overriding `script_control`.",
+          "propertyNames": {
+            "enum": [
+              "powershell",
+              "batch",
+              "cmd",
+              "vbscript",
+              "jscript",
+              "wsf",
+              "wsc",
+              "python",
+              "java",
+              "reg",
+              "other"
+            ]
+          },
           "type": "object"
         },
         "time_zone_basis": {
@@ -907,6 +927,7 @@
       "items": {
         "$ref": "#/$defs/RuleSet"
       },
+      "maxItems": 1000,
       "type": "array"
     },
     "schema_version": {

@@ -53,6 +53,28 @@ impl Match {
     }
 }
 
+// The derived `Drop` would recurse through `Box` and `Vec`. JSON input is
+// bounded by serde_json's recursion limit, but trees built in code or by
+// other deserialisers are not, so drop iteratively.
+impl Drop for Match {
+    fn drop(&mut self) {
+        let mut stack = Vec::new();
+        take_children(self, &mut stack);
+        while let Some(mut node) = stack.pop() {
+            take_children(&mut node, &mut stack);
+        }
+    }
+}
+
+/// Moves a node's children onto `stack`, leaving the node childless.
+fn take_children(node: &mut Match, stack: &mut Vec<Match>) {
+    match node {
+        Match::All(children) | Match::Any(children) => stack.append(children),
+        Match::Not(child) => stack.push(core::mem::replace(child.as_mut(), Match::All(Vec::new()))),
+        Match::Criterion(_) => {}
+    }
+}
+
 /// A test of one fact about the object: `field operator values`.
 ///
 /// Values are combined with OR for positive operators and with AND for

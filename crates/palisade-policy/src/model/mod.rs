@@ -30,6 +30,8 @@ use serde::{Deserialize, Serialize};
 pub mod limits {
     /// Most rules in one document, over all rule sets.
     pub const MAX_RULES_PER_POLICY: usize = 100_000;
+    /// Most rule sets in one document, and most references to them.
+    pub const MAX_RULE_SETS_PER_POLICY: usize = 1_000;
     /// Most values in one criterion.
     pub const MAX_VALUES_PER_CRITERION: usize = 25;
     /// Longest criterion value, in UTF-8 bytes.
@@ -58,6 +60,7 @@ pub struct PolicyDocument {
     /// The rule sets the policy references, in any order. The policy's
     /// `rule_sets` list gives the order that applies.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = 1000))]
     pub rule_sets: Vec<RuleSet>,
 }
 
@@ -87,6 +90,7 @@ pub struct Policy {
     pub settings: PolicySettings,
     /// The rule sets that apply, in order, by ID.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = 1000))]
     pub rule_sets: Vec<RuleSetId>,
     /// Governance metadata (#40).
     #[serde(default, skip_serializing_if = "Metadata::is_empty")]

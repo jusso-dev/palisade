@@ -52,6 +52,8 @@ jobs:
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       # palisade-core without `std` is what the no_std driver links against.
       - run: cargo clippy -p palisade-core -p palisade-driver --no-default-features --all-targets --locked -- -D warnings
+      # The same, with the optional serde and JSON Schema support, which must also build without `std`.
+      - run: cargo clippy -p palisade-core --no-default-features --features schema --all-targets --locked -- -D warnings
 
   test:
     strategy:

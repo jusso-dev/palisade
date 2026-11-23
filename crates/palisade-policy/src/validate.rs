@@ -10,13 +10,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::model::limits::{
-    MAX_CRITERIA_PER_RULE, MAX_NAME_CHARS, MAX_RULES_PER_POLICY, MAX_TAGS, MAX_TEXT_CHARS,
-    MAX_TREE_DEPTH, MAX_VALUE_BYTES, MAX_VALUES_PER_CRITERION,
+    MAX_CRITERIA_PER_RULE, MAX_NAME_CHARS, MAX_RULE_SETS_PER_POLICY, MAX_RULES_PER_POLICY,
+    MAX_TAGS, MAX_TEXT_CHARS, MAX_TREE_DEPTH, MAX_VALUE_BYTES, MAX_VALUES_PER_CRITERION,
 };
-use crate::model::settings::ranges;
+use crate::model::settings::{ADVANCED_KEY_MAX_BYTES, is_valid_advanced_key, ranges};
 use crate::model::{
-    Action, Criterion, FieldClass, Match, Metadata, PolicyDocument, PrecedenceModel, Rule,
-    RuleSetKind,
+    Action, Criterion, EnforcementOverride, FieldClass, Match, Metadata, PolicyDocument,
+    PrecedenceModel, Rule, RuleSetKind,
 };
 use crate::schema;
 
@@ -48,6 +48,8 @@ pub enum ErrorCode {
     DuplicateRuleSetRef,
     /// The document holds more than the allowed number of rules.
     TooManyRules,
+    /// The document holds or references more than the allowed number of rule sets.
+    TooManyRuleSets,
     /// A rule's match tree holds more than the allowed number of criteria.
     TooManyCriteria,
     /// A rule's match tree is nested too deeply.
@@ -66,10 +68,14 @@ pub enum ErrorCode {
     SettingOutOfRange,
     /// An `advanced` key is not in the registry of known keys.
     UnknownAdvancedKey,
+    /// An `advanced` key is not a well-formed identifier.
+    InvalidAdvancedKey,
     /// `mandatory` is set on a rule set that is not a blocklist.
     MandatoryNotBlocklist,
     /// A mandatory blocklist contains a rule that does not deny.
     MandatoryRuleNotDeny,
+    /// A rule in a mandatory blocklist is set never to be enforced.
+    MandatoryRuleNotEnforced,
     /// A rule's `display_id` is not `R-` followed by 6 to 12 digits.
     InvalidDisplayId,
     /// An object type is listed twice in one rule.
@@ -96,6 +102,7 @@ impl ErrorCode {
             Self::UnknownRuleSet => "unknown_rule_set",
             Self::DuplicateRuleSetRef => "duplicate_rule_set_ref",
             Self::TooManyRules => "too_many_rules",
+            Self::TooManyRuleSets => "too_many_rule_sets",
             Self::TooManyCriteria => "too_many_criteria",
             Self::TreeTooDeep => "tree_too_deep",
             Self::EmptyGroup => "empty_group",
@@ -105,8 +112,10 @@ impl ErrorCode {
             Self::CaseSensitivityNotApplicable => "case_sensitivity_not_applicable",
             Self::SettingOutOfRange => "setting_out_of_range",
             Self::UnknownAdvancedKey => "unknown_advanced_key",
+            Self::InvalidAdvancedKey => "invalid_advanced_key",
             Self::MandatoryNotBlocklist => "mandatory_not_blocklist",
             Self::MandatoryRuleNotDeny => "mandatory_rule_not_deny",
+            Self::MandatoryRuleNotEnforced => "mandatory_rule_not_enforced",
             Self::InvalidDisplayId => "invalid_display_id",
             Self::DuplicateObjectType => "duplicate_object_type",
             Self::InvalidTag => "invalid_tag",
@@ -159,6 +168,8 @@ impl fmt::Display for ValidationError {
         )
     }
 }
+
+impl std::error::Error for ValidationError {}
 
 /// A policy document that passed validation. It can only be built by
 /// [`PolicyDocument::validate`].
@@ -292,6 +303,19 @@ impl Validator {
             }
         }
 
+        for (path, count) in [
+            ("/rule_sets", doc.rule_sets.len()),
+            ("/policy/rule_sets", policy.rule_sets.len()),
+        ] {
+            if count > MAX_RULE_SETS_PER_POLICY {
+                self.push(
+                    ErrorCode::TooManyRuleSets,
+                    path,
+                    format!("{count} rule sets; at most {MAX_RULE_SETS_PER_POLICY} are allowed"),
+                );
+            }
+        }
+
         let total_rules: usize = doc.rule_sets.iter().map(|s| s.rules.len()).sum();
         if total_rules > MAX_RULES_PER_POLICY {
             self.push(
@@ -331,6 +355,13 @@ impl Validator {
                         ErrorCode::MandatoryRuleNotDeny,
                         &format!("{path}/action"),
                         "every rule in a mandatory rule set must deny",
+                    );
+                }
+                if set.mandatory && rule.enforcement_override == EnforcementOverride::NeverEnforce {
+                    self.push(
+                        ErrorCode::MandatoryRuleNotEnforced,
+                        &format!("{path}/enforcement_override"),
+                        "rules in a mandatory rule set block under every mode (ADR 0004) and cannot be `never_enforce`",
                     );
                 }
                 self.rule(&path, rule);
@@ -541,7 +572,16 @@ impl Validator {
         }
         for (key, value) in &s.advanced {
             let path = format!("{base}/advanced/{}", pointer_token(key));
-            if !s.allow_unknown_advanced && !KNOWN_ADVANCED_KEYS.contains(&key.as_str()) {
+            if !is_valid_advanced_key(key) {
+                self.push(
+                    ErrorCode::InvalidAdvancedKey,
+                    &path,
+                    format!(
+                        "keys are a lowercase letter, then up to {} lowercase letters, digits, `_`, `.` or `-`",
+                        ADVANCED_KEY_MAX_BYTES - 1
+                    ),
+                );
+            } else if !s.allow_unknown_advanced && !KNOWN_ADVANCED_KEYS.contains(&key.as_str()) {
                 self.push(
                     ErrorCode::UnknownAdvancedKey,
                     &path,
@@ -549,7 +589,7 @@ impl Validator {
                 );
             }
             if let crate::model::AdvancedValue::Text(text) = value {
-                if text.len() > MAX_VALUE_BYTES || has_control(text) {
+                if text.len() > MAX_VALUE_BYTES || text.chars().any(char::is_control) {
                     self.push(
                         ErrorCode::InvalidValue,
                         &path,
@@ -572,8 +612,8 @@ impl Validator {
             ))
         } else if name.trim() != name {
             Some("must not start or end with whitespace".to_owned())
-        } else if has_control(name) || name.contains(['\n', '\r', '\t']) {
-            Some("must not contain control characters".to_owned())
+        } else if name.chars().any(|c| c.is_control() || is_bidi_control(c)) {
+            Some("must not contain control or bidirectional formatting characters".to_owned())
         } else {
             None
         };
@@ -617,12 +657,17 @@ impl Validator {
         for (i, tag) in m.tags.iter().enumerate() {
             let path = format!("{base}/tags/{i}");
             let chars = tag.chars().count();
-            if tag.trim().is_empty() || chars > MAX_NAME_CHARS || tag.chars().any(char::is_control)
+            if tag.trim().is_empty()
+                || tag.trim() != tag
+                || chars > MAX_NAME_CHARS
+                || tag.chars().any(|c| c.is_control() || is_bidi_control(c))
             {
                 self.push(
                     ErrorCode::InvalidTag,
                     &path,
-                    format!("tags are 1 to {MAX_NAME_CHARS} characters with no control characters"),
+                    format!(
+                        "tags are 1 to {MAX_NAME_CHARS} characters, trimmed, with no control or bidirectional formatting characters"
+                    ),
                 );
             } else if !seen.insert(tag.as_str()) {
                 self.push(
@@ -673,6 +718,12 @@ fn guaranteed_identity(node: &Match) -> Identity {
 /// Keys accepted in `settings.advanced`. None are defined yet; each will be
 /// added here with its type when a feature needs one.
 const KNOWN_ADVANCED_KEYS: &[&str] = &[];
+
+/// Unicode bidirectional formatting characters, which can make a name read
+/// differently from what it contains.
+const fn is_bidi_control(c: char) -> bool {
+    matches!(c, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+}
 
 /// Control characters other than tab, line feed and carriage return.
 fn has_control(s: &str) -> bool {

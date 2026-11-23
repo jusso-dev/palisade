@@ -109,6 +109,20 @@ macro_rules! typed_id {
         #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
         pub struct $name(pub Uuid7);
 
+        impl From<Uuid7> for $name {
+            fn from(id: Uuid7) -> Self {
+                Self(id)
+            }
+        }
+
+        impl FromStr for $name {
+            type Err = ParseError;
+
+            fn from_str(s: &str) -> Result<Self, ParseError> {
+                s.parse().map(Self)
+            }
+        }
+
         impl core::fmt::Display for $name {
             fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 self.0.fmt(f)

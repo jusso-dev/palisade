@@ -9,8 +9,9 @@
 //!   but validation reports exactly the findings in its `.expected` file
 //!   (one `code path` per line).
 //! - Every fixture in `tests/fixtures/malformed/` is rejected by the schema,
-//!   with an error at each JSON Pointer in its `.expected` file, and is also
-//!   rejected by loading or by validation.
+//!   with an error at each JSON Pointer in its `.expected` file (or, for map
+//!   keys, `propertyName:<key>`), and is also rejected by loading or by
+//!   validation.
 
 // `clippy.toml` allows unwrap inside `#[test]` functions only; the helpers
 // here are test code too.
@@ -85,6 +86,11 @@ impl CompiledSchema {
                 let mut out = Vec::new();
                 let mut stack = vec![&e];
                 while let Some(err) = stack.pop() {
+                    // boon checks a `propertyNames` rule against the key on
+                    // its own, so the location is empty; name the key instead.
+                    if let boon::ErrorKind::PropertyName { prop } = &err.kind {
+                        out.push(format!("propertyName:{prop}"));
+                    }
                     out.push(err.instance_location.to_string());
                     stack.extend(&err.causes);
                 }
