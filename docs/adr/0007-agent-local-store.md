@@ -67,13 +67,14 @@ that the floor never exceeds the version of the bundle in `active`, so a crash c
 every bundle on disk below the floor. Activation follows #61, in this order:
 
 1. Write `pending`, flush, and verify it. Its version must be at or above the floor. If `active`
-   verifies, the version must also be above `active`'s version. Otherwise reject it and keep
+   is *loadable* (its signature verifies and its version is at or above the floor, the same test
+   as at startup), the version must also be above `active`'s version. Otherwise reject it and keep
    what is loaded (`PolicyRejected`). So while the agent runs `previous` (N-1) or the emergency
    policy because `active` (N) failed, a re-fetched copy of N is accepted, as
    [ADR 0018](0018-fail-open-vs-fail-closed-defaults-revised.md) requires.
-2. If `active` verifies, copy it to `previous` (written to a temporary file, flushed, then
-   renamed). If `active` is missing or fails verification, leave `previous` untouched, so a
-   verified last-known-good bundle is never overwritten by a bad one.
+2. If `active` is loadable, copy it to `previous` (written to a temporary file, flushed, then
+   renamed). If `active` is missing, fails verification or is below the floor, leave `previous`
+   untouched, so a verified last-known-good bundle is never overwritten by a bad or stale one.
 3. Atomically rename `pending` over `active`, with write-through, so the rename is durable
    before the next step.
 4. Only then raise the floor to the new version, in every copy of the record (#225).

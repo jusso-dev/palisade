@@ -71,8 +71,9 @@ Transport option 1, **gRPC over HTTP/2 with tonic and rustls**, as the primary t
 
   A complete gRPC response with a non-OK `grpc-status` from the server (for example
   `PERMISSION_DENIED`, `INVALID_ARGUMENT` or `UNAVAILABLE`) is an application error, not a
-  protocol failure. It does not count towards either trigger. A success on either path resets
-  both counters.
+  protocol failure. It does not count towards either trigger. Because the handshake and gRPC
+  framing worked, it resets both counters, as does a success on either path. So the triggers
+  only fire on failures that are truly consecutive.
 - **TLS failures never trigger anything weaker.** A certificate, pinning or client-identity
   failure is a handshake failure. It may move the agent to the fallback, but the fallback
   applies the same checks and fails in the same way. No trigger relaxes TLS.
