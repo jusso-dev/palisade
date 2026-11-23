@@ -57,51 +57,74 @@ Option 3. Case by case:
 | **No policy yet (first install, before the first bundle)** | Run the built-in safe defaults from #61: audit mode, with the mandatory blocklists (#87) enforced if the agent ships them. Report `PolicyMissing`. | Nothing has been approved yet, so there is nothing to protect by locking down. Blocking everything at install time would make deployment fail. |
 | **Policy stale or past `expires_at`** | Keep enforcing the current policy. Report `PolicyStale`. Never relax automatically (#61, #225). | Staleness is not evidence that the policy is wrong. |
 | **Driver absent, disconnected, timed out or version-mismatched** | Follow `driver_failure_mode` (#113). Default `fail_safe` (pass-through with audit) for early rollout rings; `fail_secure` recommended once stable. The native layer keeps enforcing either way. | The driver only adds restrictions on top of the native policy (ADR 0002), so failing it open loses the extra rules but keeps the baseline. |
-| **Clock skew, rollback or forward jump** | Time-bounded grants (exceptions, override codes, maintenance windows, tokens) are checked against the wall clock and Palisade's own time sources, using the rules in "Time rules" below. | Rolling the clock back can never revive an expired grant. Rolling it forward while the agent runs can never start a grant early. The remaining gap (a clock changed while the machine is off) is bounded and listed as an accepted risk. |
+| **Clock skew, rollback or forward jump** | Time-bounded grants (exceptions, override codes, maintenance windows, tokens) are checked against the wall clock and Palisade's own time sources, using the rules in "Time rules" below. | While the agent runs, no clock change can revive an expired grant or start one early. The remaining gap (a clock set while the agent is not running) is bounded and listed as an accepted risk. |
 
-**Time rules.** The agent keeps two time sources besides the wall clock:
+**Time rules.** Two clocks are involved. The *wall clock* can be changed by an administrator or
+a spoofed time source. The *monotonic clock* only counts forwards while the agent process runs.
+Some platforms also count it through sleep. From these the agent derives three values:
 
-- **Anchored time**: the server time from an authenticated check-in reply (mTLS with server
-  pinning, [ADR 0005](0005-agent-server-protocol.md)) received *in the current boot session*,
-  plus the time elapsed since on a monotonic clock that keeps counting through sleep and
-  hibernate. The wall clock never moves it. If the platform cannot guarantee that the monotonic
-  clock counted through a resume, the resume is treated like a reboot.
-- **The time floor**: a value persisted to protected storage (#220), plus the monotonic time
-  elapsed since this boot. While anchored, the agent writes the current anchored time to it
-  periodically and at shutdown. The floor only ever increases. It is a lower bound on real time,
-  because it does not count time spent powered off. The wall clock never moves it.
+- **Anchored time.** Set from the server time in an authenticated check-in reply (mTLS with
+  server pinning, [ADR 0005](0005-agent-server-protocol.md)), then advanced by the monotonic
+  clock. It is valid until the agent process stops or the machine resumes from a sleep the
+  monotonic clock did not count. The wall clock never moves it.
+- **Session time.** At the start of each *session* the agent records the wall clock and the
+  monotonic clock. Session time is that wall-clock value plus the monotonic time elapsed since.
+  A session starts when the agent process starts, and on resume from an uncounted sleep. Session
+  time is never persisted.
+- **The floor.** A lower bound on real time, held in protected storage (#220). When the agent
+  loads it, at session start, it advances it by the monotonic time elapsed since the load (never
+  by the boot uptime, so a service restart within one boot is not double-counted). While
+  anchored, the floor is raised to anchored time if that is higher. The agent writes it back
+  every minute and at shutdown, in every state, so offline running time is kept across reboots.
+  Writes only ever raise the stored value. The wall clock never moves it. The floor does not
+  count time spent powered off, which is why it is only a lower bound.
 
-The agent is **anchored** when it has anchored time for this boot session, and **floor-only**
-otherwise (after a reboot, before the first check-in). The rules for a grant with start `s`
-and end `e`:
+The agent is **anchored** while anchored time is valid, and **floor-only** otherwise. Let `T` be
+anchored time when anchored, and `max(floor, session time)` when floor-only. The agent also keeps
+an **expired-grant list** in protected storage: the ID of every grant it has seen expire. The
+agent checks every held grant for expiry at least every minute, alongside the floor write, so
+expiries are recorded promptly. An entry, and likewise an entry in the redeemed-code list (rule
+3), can be pruned once the grant's end is at or before the floor, because rule 1 then covers it.
+For a grant with start `s` and end `e`:
 
-1. **Expiry.** A grant is expired once `max(wall_clock, T) >= e`, where `T` is anchored time
-   when anchored and the floor when floor-only. A grant whose end is at or before the floor is
-   expired for good, whatever the wall clock says. Rolling the clock back cannot revive it.
+1. **Expiry.** A grant is expired when `max(wall_clock, T) >= e`, when `e <= floor`, or when its
+   ID is in the expired-grant list. Once the agent has seen a grant expire it cannot come back:
+   within a session `T` keeps counting whatever the wall clock does, and the list and the floor survive reboots and
+   the switch from floor-only to anchored (when `T` may drop to the real time).
 2. **Start of a pre-scheduled grant** (a maintenance window or exception in the cached bundle
-   with a future start). When anchored: `s <= min(wall_clock, anchored_time)`. When floor-only:
-   `s <= wall_clock`, provided the wall clock is at or after the floor and has not jumped this
-   session (see 4). A floor-only device therefore runs scheduled windows on time after an
-   offline reboot, rather than skipping them.
-3. **Offline override codes** (#222). A code is accepted only if its own validity window
-   contains the wall clock, its end is after the floor, and its ID has not been redeemed before
-   (anti-replay, recorded in protected storage). The override session it opens is timed on the
-   monotonic clock, not the wall clock. A forward clock change cannot forge a code, because
-   codes are authenticated by a secret (#222). It can only make a valid code fail early.
-4. **Skew and jumps.**
-   - Anchored: `|wall_clock - anchored_time| > 5 min` raises `tamper.clock.skew`.
-   - Floor-only: `wall_clock < floor - 60 s` raises `tamper.clock.skew`. A wall clock ahead of
-     the floor is normal (the machine was off), so it raises nothing.
-   - In any state, a wall-clock jump relative to the monotonic clock while the agent runs, of more
-     than 60 s backwards or more than 5 minutes forwards, raises `tamper.clock.skew`.
-     Until the next authenticated check-in, pre-scheduled grants that had not started are kept
-     closed, and grants already running keep their expiry.
+   with a future start). It starts when `s <= min(wall_clock, T)`. Because `T` does not follow
+   the wall clock within a session, moving the wall clock forward while the agent runs cannot
+   start a grant early. After an offline reboot, session time starts from the current wall
+   clock, so scheduled windows still open on time rather than being skipped. The start condition
+   is re-checked continuously, not once: if a later check-in shows that `s` has not really been
+   reached, the grant closes again until it has.
+3. **Offline override codes** (#222). A code is accepted only when its own validity window
+   contains the wall clock, its end is after `T`, and its ID has not been redeemed before (the
+   redeemed list is in protected storage). The override session it opens is timed on the
+   monotonic clock. Codes are authenticated by a secret (#222), so no clock change can forge one.
+4. **Skew and drift.** The agent compares the wall clock with `T` continuously, as a cumulative
+   difference rather than step by step, so many small adjustments add up:
+   - when anchored, a difference over 5 minutes in either direction;
+   - when floor-only, the wall clock more than 60 s behind `T`, or more than 5 minutes ahead of
+     session time;
+   - at session start, a wall clock more than 60 s behind the floor.
 
-**Accepted risk.** Someone who can set the firmware clock while the machine is off, or change
-the time before the agent starts (both need physical access or administrator rights), can make a
-floor-only device start a pre-scheduled window early. They cannot extend an expired grant or
-forge an override code. The change is detected at the next authenticated check-in, when the wall
-clock is compared with server time.
+   Each raises `tamper.clock.skew`. Until the next authenticated check-in, pre-scheduled grants
+   that had not started stay closed, and grants already running keep their expiry.
+
+**Accepted risk.** Only one gap remains. Someone who can set the clock while the agent is not
+running (with the machine powered off, before the service starts, or during an uncounted sleep)
+starts the next session from a false wall clock. They need physical access or administrator
+rights. Until that device's next authenticated check-in, they can:
+
+- start a pre-scheduled window early; and
+- use a grant, or redeem an unused override code, whose end had not been reached when the agent
+  last ran. A grant then lasts at most its remaining running time (`e` minus the floor), because
+  `T` starts at or above the floor and keeps rising while the agent runs.
+
+They cannot revive a grant the agent has seen expire, use anything whose end is at or before the
+floor, or forge or replay an override code. The next authenticated check-in compares the wall
+clock with server time, raises `tamper.clock.skew`, and closes any window that opened early.
 
 **"A policy was ever accepted".** The device is treated as having had a policy if the
 anti-rollback record (#225) shows a version above zero, or an `active` or `previous` cache file
@@ -130,17 +153,19 @@ path. The mismatch between record copies raises `tamper.policy.rollback_suspecte
   them.
 - A device whose caches are both corrupted after enrolment becomes very restrictive until it gets a
   new bundle. Users will notice, which is intended.
-- The time rules need protected storage for the persisted floor and the redeemed-code list, and a
-  monotonic clock that counts through sleep. They are more rules to test, so #220 needs a
-  property-test table covering anchored, floor-only, rollback and forward-jump cases.
+- The time rules need protected storage for the floor, the expired-grant list and the
+  redeemed-code list. They are subtle, so #220 must implement them as one pure function of
+  (wall clock, monotonic clock, stored state) with a property-test table covering anchored,
+  floor-only, service restart, uncounted sleep, offline reboot, rollback, forward jump and slow
+  drift.
 
 ## Security impact
 
 This ADR decides whether crashing, corrupting or confusing Palisade is a bypass. With these
 defaults it is not: the kernel-enforced native layer survives agent failure, losing both cached
 bundles leads to the stricter emergency policy, a stale policy keeps enforcing, crafted files
-cannot disable a subsystem, a clock rollback cannot revive an expired grant, and a clock change
-while the agent runs cannot start one early. There are four deliberate, bounded weak points:
+cannot disable a subsystem, a grant the agent has seen expire never comes back, and a clock change
+while the agent runs cannot start a grant early or extend one. There are four deliberate, bounded weak points:
 
 1. the first-install audit window (built-in mandatory blocklists still enforce, and it ends at the
    first verified bundle);
@@ -150,9 +175,9 @@ while the agent runs cannot start one early. There are four deliberate, bounded 
    stronger options; and
 3. the driver's default `fail_safe` (the native layer still enforces, and it is configurable to
    `fail_secure`); and
-4. a clock changed while the machine is off can start a pre-scheduled window early on a device
-   that has not yet checked in (it needs physical access or administrator rights, and it is
-   detected at the next check-in).
+4. a clock set while the agent is not running can, until the next check-in, start a pre-scheduled
+   window early or stretch a grant that had not yet expired by its remaining running time (it
+   needs physical access or administrator rights, and it is detected at the next check-in).
 
 All four are listed in the threat model as accepted risks (#219) and are exercised by the bypass
 regression suite (#230).
