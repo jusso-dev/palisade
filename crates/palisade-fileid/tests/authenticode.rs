@@ -622,6 +622,48 @@ fn certificate_table_inside_unaligned_section_data() {
 }
 
 #[test]
+fn sections_out_of_table_order_are_sorted_by_pointer() {
+    // Swap the raw data pointers of sections 1 and 2 (same raw size), so the
+    // section table lists them in a different order from the file. The data
+    // is still contiguous, so the image is conformant and the spec's sort
+    // gives the same bytes.
+    let builder = PeBuilder::default()
+        .section(".a", vec![0x11; 0x200], IMAGE_SCN_MEM_READ)
+        .section(".b", vec![0x22; 0x200], IMAGE_SCN_MEM_READ);
+    let mut image = builder.build();
+    let table = builder.section_table_offset();
+    let (p1, p2) = (
+        get32(&image, table + 40 + 20),
+        get32(&image, table + 80 + 20),
+    );
+    put32(&mut image, table + 40 + 20, p2);
+    put32(&mut image, table + 80 + 20, p1);
+    assert_matches_spec(&image);
+}
+
+#[test]
+fn section_with_zero_pointer_and_raw_data() {
+    // `PointerToRawData` 0 with a non-zero size: the loader maps no file
+    // data, but the spec's steps would hash the file from offset 0.
+    let builder = PeBuilder::default().section(".z", vec![0x33; 0x200], IMAGE_SCN_MEM_READ);
+    let mut image = builder.build();
+    let table = builder.section_table_offset();
+    put32(&mut image, table + 40 + 20, 0);
+    let r = reasons(&image);
+    assert!(
+        matches!(
+            r.as_slice(),
+            [NonConformance::SectionNotContiguous {
+                index: 1,
+                pointer_to_raw_data: 0,
+                ..
+            }]
+        ),
+        "{r:?}"
+    );
+}
+
+#[test]
 fn gap_between_headers_and_sections() {
     // `SizeOfHeaders` says 0x200, but the first section starts at 0x400.
     let mut image = three_sections().build();

@@ -16,7 +16,7 @@ fuzz_target!(|data: &[u8]| {
     };
     let ranges = HashRanges::from_pe(&info);
     let mut cursor = 0;
-    let mut covered = 0;
+    let mut covered = 0_u64;
     for r in ranges.included() {
         assert!(r.size > 0 && r.offset >= cursor);
         cursor = r.offset + r.size;
@@ -29,19 +29,26 @@ fuzz_target!(|data: &[u8]| {
     }
 
     let mut excluded = vec![(info.optional.checksum_offset, 4)];
-    if let Some(d) = info.data_directories.get(DataDirectoryKind::Security.index()) {
+    if let Some(d) = info
+        .data_directories
+        .get(DataDirectoryKind::Security.index())
+    {
         excluded.push((d.entry_offset, 8));
     }
     if let Some(c) = info.certificate_table {
         excluded.push((c.offset, c.size));
     }
-    let mut outside = 0;
+    // Exactly the bytes outside the three regions are hashed.
     for i in 0..len {
-        if !excluded.iter().any(|(o, s)| (*o..o + s).contains(&i)) {
-            outside += 1;
-        }
+        let is_excluded = excluded
+            .iter()
+            .any(|(o, s)| (*o..o.saturating_add(*s)).contains(&i));
+        let is_included = ranges
+            .included()
+            .iter()
+            .any(|r| (r.offset..r.offset + r.size).contains(&i));
+        assert_ne!(is_excluded, is_included, "byte {i:#x}");
     }
-    assert_eq!(covered, outside);
 
     let whole = authenticode_hashes(data, &info, AlgorithmSet::EMPTY).unwrap();
     assert_eq!(whole.hashed_bytes, covered + ranges.padding());
