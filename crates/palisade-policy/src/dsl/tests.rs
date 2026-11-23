@@ -346,6 +346,11 @@ fn quote_hint_is_given_only_where_text_is_expected() {
         let e = err(&MINIMAL.replace(from, to));
         assert_eq!(e.message().contains("quote the value"), hint, "{to}: {e}");
     }
+    // A match tree is a map, so a number there gets no quoting hint.
+    let e = err(&with_action("{type: deny}")
+        .replace("match: {criterion", "match: 1\n        x: {criterion"));
+    assert!(e.message().contains("expected enum Match"), "{e}");
+    assert!(!e.message().contains("quote the value"), "{e}");
 }
 
 #[test]

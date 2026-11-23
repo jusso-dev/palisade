@@ -88,13 +88,14 @@ fn expects_text(message: &str) -> bool {
     let Some((_, expected)) = message.split_once(", expected ") else {
         return false;
     };
+    // `enum Match` is a tree node, always a one-key map, never a name.
     !(expected.starts_with('u')
         || expected.starts_with('i')
         || expected.starts_with("a boolean")
         || expected.starts_with("a sequence")
         || expected.starts_with("a map")
         || expected.starts_with("struct ")
-        || expected.starts_with("a map with"))
+        || expected == "enum Match")
 }
 
 impl fmt::Display for DeError {
