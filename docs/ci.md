@@ -16,7 +16,7 @@ type.
 | Job | Runners | What it runs |
 |---|---|---|
 | `fmt` | ubuntu-latest | `cargo fmt --all --check` |
-| `clippy` | ubuntu-latest, windows-latest | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, then the same for `palisade-core` and `palisade-driver` with `--no-default-features` (the `no_std` build) |
+| `clippy` | ubuntu-latest, windows-latest | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, then the same for `palisade-core` and `palisade-driver` with `--no-default-features` (the `no_std` build), and for `palisade-core` with `--no-default-features --features schema` (`no_std` with serde and JSON Schema support) |
 | `test` | ubuntu-latest, windows-latest, macos-latest | `cargo test --workspace --all-features --locked` |
 | `msrv` | ubuntu-latest | `cargo +1.85.0 check --workspace --all-targets --all-features --locked`, after checking that the version matches `rust-version` in `Cargo.toml` |
 | `docs` | ubuntu-latest | `cargo doc --workspace --no-deps --all-features --locked` with `RUSTDOCFLAGS=-D warnings` |
@@ -104,6 +104,7 @@ automatically.
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo clippy -p palisade-core -p palisade-driver --no-default-features --all-targets --locked -- -D warnings
+cargo clippy -p palisade-core --no-default-features --features schema --all-targets --locked -- -D warnings
 cargo test --workspace --all-features --locked
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked
 cargo xtask check-deps

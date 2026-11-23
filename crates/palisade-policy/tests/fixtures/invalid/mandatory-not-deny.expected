@@ -1,0 +1,2 @@
+mandatory_not_blocklist /rule_sets/0/mandatory
+mandatory_rule_not_deny /rule_sets/0/rules/0/action

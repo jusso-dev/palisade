@@ -1,0 +1,945 @@
+{
+  "$defs": {
+    "Action": {
+      "description": "The action of a rule (#34).\n\nEach action is an object with a `type`, so options can be added later as\noptional fields without a breaking change.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Permit execution.",
+          "properties": {
+            "type": {
+              "const": "allow",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Block execution.",
+          "properties": {
+            "type": {
+              "const": "deny",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Record the match without changing the outcome.",
+          "properties": {
+            "type": {
+              "const": "audit",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AdvancedValue": {
+      "anyOf": [
+        {
+          "description": "A boolean.",
+          "type": "boolean"
+        },
+        {
+          "description": "A signed integer.",
+          "format": "int64",
+          "type": "integer"
+        },
+        {
+          "description": "A string of at most 2048 bytes, with no control characters.",
+          "maxLength": 2048,
+          "type": "string"
+        }
+      ],
+      "description": "A scalar value in `advanced`."
+    },
+    "ControlLevel": {
+      "description": "Whether a class of object is controlled.",
+      "oneOf": [
+        {
+          "const": "off",
+          "description": "Not evaluated.",
+          "type": "string"
+        },
+        {
+          "const": "audit",
+          "description": "Evaluated, and would-block decisions are reported only.",
+          "type": "string"
+        },
+        {
+          "const": "enforce",
+          "description": "Evaluated and enforced.",
+          "type": "string"
+        }
+      ]
+    },
+    "Criterion": {
+      "additionalProperties": false,
+      "description": "A test of one fact about the object: `field operator values`.\n\nValues are combined with OR for positive operators and with AND for\nnegative ones (#32): `not_in [a, b]` means neither `a` nor `b`.",
+      "properties": {
+        "case_sensitive": {
+          "description": "Compare strings case-sensitively. Unset means the field's default\n(#32), which is case-insensitive for every field defined so far.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "field": {
+          "$ref": "#/$defs/Field",
+          "description": "The fact being tested."
+        },
+        "operator": {
+          "$ref": "#/$defs/Operator",
+          "description": "How it is compared."
+        },
+        "values": {
+          "description": "1 to 25 values. Each is at most 2048 bytes of UTF-8; the schema can\nonly bound the length in characters, so validation checks the bytes.",
+          "items": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 25,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "field",
+        "operator",
+        "values"
+      ],
+      "type": "object"
+    },
+    "EnforcementOverride": {
+      "description": "How one rule relates to the policy mode (#36).",
+      "oneOf": [
+        {
+          "const": "inherit",
+          "description": "Follow the effective mode. The default.",
+          "type": "string"
+        },
+        {
+          "const": "always_enforce",
+          "description": "Enforce this rule even in audit or learning mode.",
+          "type": "string"
+        },
+        {
+          "const": "never_enforce",
+          "description": "Never enforce this rule: it only reports what it would block.",
+          "type": "string"
+        }
+      ]
+    },
+    "Field": {
+      "description": "The identity facts a criterion can test. This is the subset of #31\nneeded to express hash, publisher and path rules (ISM-0955); #31 adds the\nrest.",
+      "oneOf": [
+        {
+          "const": "hash.sha256",
+          "description": "SHA-256 of the whole file. The primary identity (ADR 0008).",
+          "type": "string"
+        },
+        {
+          "const": "hash.authenticode_sha256",
+          "description": "SHA-256 Authenticode image hash.",
+          "type": "string"
+        },
+        {
+          "const": "hash.sha1",
+          "description": "SHA-1 of the whole file. Compatibility only (ADR 0008).",
+          "type": "string"
+        },
+        {
+          "const": "hash.md5",
+          "description": "MD5 of the whole file. Compatibility only (ADR 0008).",
+          "type": "string"
+        },
+        {
+          "const": "signer.publisher",
+          "description": "The leaf signer's subject.",
+          "type": "string"
+        },
+        {
+          "const": "signer.issuer",
+          "description": "The leaf signer's issuer.",
+          "type": "string"
+        },
+        {
+          "const": "path.full",
+          "description": "The normalised full path.",
+          "type": "string"
+        },
+        {
+          "const": "path.directory",
+          "description": "The parent directory.",
+          "type": "string"
+        },
+        {
+          "const": "path.file_name",
+          "description": "The on-disk file name.",
+          "type": "string"
+        },
+        {
+          "const": "path.extension",
+          "description": "The file extension.",
+          "type": "string"
+        },
+        {
+          "const": "meta.original_filename",
+          "description": "The original file name from the version resource.",
+          "type": "string"
+        },
+        {
+          "const": "meta.product_name",
+          "description": "The product name from the version resource.",
+          "type": "string"
+        },
+        {
+          "const": "meta.company_name",
+          "description": "The company name from the version resource.",
+          "type": "string"
+        },
+        {
+          "const": "meta.file_version",
+          "description": "The file version from the version resource.",
+          "type": "string"
+        },
+        {
+          "const": "meta.product_version",
+          "description": "The product version from the version resource.",
+          "type": "string"
+        }
+      ]
+    },
+    "Match": {
+      "description": "A condition tree (#33).\n\nEach node is an object with exactly one key: `all`, `any`, `not` or\n`criterion`.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Matches when every child matches. Needs at least one child.",
+          "properties": {
+            "all": {
+              "items": {
+                "$ref": "#/$defs/Match"
+              },
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "all"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Matches when any child matches. Needs at least one child.",
+          "properties": {
+            "any": {
+              "items": {
+                "$ref": "#/$defs/Match"
+              },
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "any"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Matches when the child does not.",
+          "properties": {
+            "not": {
+              "$ref": "#/$defs/Match"
+            }
+          },
+          "required": [
+            "not"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One test of one fact.",
+          "properties": {
+            "criterion": {
+              "$ref": "#/$defs/Criterion"
+            }
+          },
+          "required": [
+            "criterion"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Metadata": {
+      "additionalProperties": false,
+      "description": "Governance metadata (#40). More fields arrive with #40.",
+      "properties": {
+        "comment": {
+          "description": "A free-text comment.",
+          "maxLength": 4096,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "justification": {
+          "description": "Why the object exists.",
+          "maxLength": 4096,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tags": {
+          "description": "Free-form labels, each 1 to 128 characters, at most 64.",
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "ticket_ref": {
+          "description": "A change or ticket reference.",
+          "maxLength": 128,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Mode": {
+      "description": "How a policy's decisions take effect (#36).\n\nThe variants are declared from weakest to strongest, so the derived\nordering ranks them. The \"strictest\" merge in #36 treats `learning` and\n`audit` as equally strong; that rule belongs to the merge code, not to this\nordering.",
+      "oneOf": [
+        {
+          "const": "disabled",
+          "description": "The engine is not consulted. The device is reported as unprotected.",
+          "type": "string"
+        },
+        {
+          "const": "monitor",
+          "description": "Evaluate fully, allow everything, and report would-block decisions.",
+          "type": "string"
+        },
+        {
+          "const": "audit",
+          "description": "Like `monitor`, with a full event for every decision.",
+          "type": "string"
+        },
+        {
+          "const": "learning",
+          "description": "Audit, and report every would-block object as a learning candidate.",
+          "type": "string"
+        },
+        {
+          "const": "enforce",
+          "description": "Decisions take effect: blocked means blocked.",
+          "type": "string"
+        }
+      ]
+    },
+    "ObjectType": {
+      "description": "The class of object being evaluated. Scripts are `script.<kind>`.",
+      "enum": [
+        "executable",
+        "library",
+        "driver",
+        "script.powershell",
+        "script.batch",
+        "script.cmd",
+        "script.vbscript",
+        "script.jscript",
+        "script.wsf",
+        "script.wsc",
+        "script.python",
+        "script.java",
+        "script.reg",
+        "script.other",
+        "installer",
+        "compiled_html",
+        "html_application",
+        "control_panel_applet",
+        "packaged_app",
+        "command",
+        "com_object"
+      ],
+      "type": "string"
+    },
+    "Operator": {
+      "description": "How a criterion compares the fact with its values (#32). Regular\nexpressions arrive with #32, together with their size limits.",
+      "oneOf": [
+        {
+          "const": "equals",
+          "description": "Equal to any value.",
+          "type": "string"
+        },
+        {
+          "const": "not_equals",
+          "description": "Equal to none of the values.",
+          "type": "string"
+        },
+        {
+          "const": "starts_with",
+          "description": "Starts with any value.",
+          "type": "string"
+        },
+        {
+          "const": "ends_with",
+          "description": "Ends with any value.",
+          "type": "string"
+        },
+        {
+          "const": "contains",
+          "description": "Contains any value.",
+          "type": "string"
+        },
+        {
+          "const": "not_contains",
+          "description": "Contains none of the values.",
+          "type": "string"
+        },
+        {
+          "const": "wildcard",
+          "description": "Matches any wildcard pattern.",
+          "type": "string"
+        },
+        {
+          "const": "not_wildcard",
+          "description": "Matches none of the wildcard patterns.",
+          "type": "string"
+        },
+        {
+          "const": "version_eq",
+          "description": "Version equal to any value.",
+          "type": "string"
+        },
+        {
+          "const": "version_gt",
+          "description": "Version greater than the value.",
+          "type": "string"
+        },
+        {
+          "const": "version_ge",
+          "description": "Version greater than or equal to the value.",
+          "type": "string"
+        },
+        {
+          "const": "version_lt",
+          "description": "Version less than the value.",
+          "type": "string"
+        },
+        {
+          "const": "version_le",
+          "description": "Version less than or equal to the value.",
+          "type": "string"
+        }
+      ]
+    },
+    "Os": {
+      "description": "The operating system a rule set targets. Other systems are reserved and\nwill be added in a minor version.",
+      "oneOf": [
+        {
+          "const": "windows",
+          "description": "Windows.",
+          "type": "string"
+        }
+      ]
+    },
+    "Policy": {
+      "additionalProperties": false,
+      "description": "The decision part of a policy: which rule sets apply, and how.",
+      "properties": {
+        "description": {
+          "description": "Free-text description, at most 4096 characters.",
+          "maxLength": 4096,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/PolicyId",
+          "description": "Stable ID. Renaming the policy never changes it."
+        },
+        "metadata": {
+          "$ref": "#/$defs/Metadata",
+          "description": "Governance metadata (#40)."
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode",
+          "description": "The base enforcement mode (#36)."
+        },
+        "name": {
+          "description": "Display name: 1 to 128 characters, trimmed, no control characters.\nUniqueness within a tenant is checked by the server (#10).",
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        "precedence_model": {
+          "$ref": "#/$defs/PrecedenceModel",
+          "default": "deny_wins",
+          "description": "How matching rules are combined (#35, ADR 0004)."
+        },
+        "revision": {
+          "description": "Monotonic revision, raised by the server on every change (#10).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rule_sets": {
+          "description": "The rule sets that apply, in order, by ID.",
+          "items": {
+            "$ref": "#/$defs/RuleSetId"
+          },
+          "maxItems": 1000,
+          "type": "array"
+        },
+        "settings": {
+          "$ref": "#/$defs/PolicySettings",
+          "default": {
+            "allow_unknown_advanced": false,
+            "capture_command_line": false,
+            "decision_cache_ttl_secs": 300,
+            "dll_control": "enforce",
+            "driver_control": "enforce",
+            "max_ancestor_depth": 8,
+            "poll_interval_secs": 900,
+            "script_control": "enforce",
+            "time_zone_basis": "device_local"
+          },
+          "description": "Typed settings. Every field has a documented default."
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "revision",
+        "mode"
+      ],
+      "type": "object"
+    },
+    "PolicyId": {
+      "$ref": "#/$defs/Uuid7",
+      "description": "The stable ID of a policy."
+    },
+    "PolicySettings": {
+      "additionalProperties": false,
+      "description": "Settings that apply to the whole policy. Every field is optional in a\ndocument and has the default shown in the schema.",
+      "properties": {
+        "advanced": {
+          "additionalProperties": {
+            "$ref": "#/$defs/AdvancedValue"
+          },
+          "description": "Engineering settings, checked against a registry of known keys. The\nregistry is empty in this version, so any key is rejected unless\n`allow_unknown_advanced` is set.",
+          "maxProperties": 256,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_.-]{0,127}$"
+          },
+          "type": "object"
+        },
+        "allow_unknown_advanced": {
+          "default": false,
+          "description": "Accept keys in `advanced` that the registry does not know.",
+          "type": "boolean"
+        },
+        "capture_command_line": {
+          "default": false,
+          "description": "Whether the agent records process command lines. Off by default for\nprivacy (#18).",
+          "type": "boolean"
+        },
+        "decision_cache_ttl_secs": {
+          "default": 300,
+          "description": "How long a decision may be cached, in seconds. `0` disables the cache.",
+          "format": "uint32",
+          "maximum": 86400,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "dll_control": {
+          "$ref": "#/$defs/ControlLevel",
+          "default": "enforce",
+          "description": "Control level for libraries."
+        },
+        "driver_control": {
+          "$ref": "#/$defs/ControlLevel",
+          "default": "enforce",
+          "description": "Control level for drivers."
+        },
+        "max_ancestor_depth": {
+          "default": 8,
+          "description": "How many ancestors process criteria may inspect (#31).",
+          "format": "uint8",
+          "maximum": 16,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "override_durations": {
+          "description": "Durations, in minutes, offered for override sessions (#9). At most 5\nslots, each at most 10080. `0` marks a disabled slot.",
+          "items": {
+            "format": "uint32",
+            "maximum": 10080,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 5,
+          "type": "array"
+        },
+        "poll_interval_secs": {
+          "default": 900,
+          "description": "Agent check-in interval, in seconds.",
+          "format": "uint32",
+          "maximum": 604800,
+          "minimum": 60,
+          "type": "integer"
+        },
+        "script_control": {
+          "$ref": "#/$defs/ControlLevel",
+          "default": "enforce",
+          "description": "Control level for scripts of a kind not listed in `script_control_by_kind`."
+        },
+        "script_control_by_kind": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ControlLevel"
+          },
+          "description": "Control level per script kind, overriding `script_control`.",
+          "propertyNames": {
+            "enum": [
+              "powershell",
+              "batch",
+              "cmd",
+              "vbscript",
+              "jscript",
+              "wsf",
+              "wsc",
+              "python",
+              "java",
+              "reg",
+              "other"
+            ]
+          },
+          "type": "object"
+        },
+        "time_zone_basis": {
+          "$ref": "#/$defs/TimeZoneBasis",
+          "default": "device_local",
+          "description": "Which clock schedules use."
+        }
+      },
+      "type": "object"
+    },
+    "PrecedenceModel": {
+      "description": "How the matching rules of the ordinary rule sets are combined (#35).\n\nThe mandatory-deny tier and the implicit deny for unmatched files apply\nunder every model (ADR 0004).",
+      "oneOf": [
+        {
+          "const": "deny_wins",
+          "description": "Any matching deny blocks; otherwise any matching allow allows. The default.",
+          "type": "string"
+        },
+        {
+          "const": "allow_wins",
+          "description": "Any matching allow allows. Not recommended for Essential Eight.",
+          "type": "string"
+        },
+        {
+          "const": "specificity",
+          "description": "The rule with the most specific identity wins.",
+          "type": "string"
+        },
+        {
+          "const": "first_match",
+          "description": "Rules are ordered, and the first match decides.",
+          "type": "string"
+        },
+        {
+          "const": "priority",
+          "description": "The rule with the winning numeric priority decides.",
+          "type": "string"
+        }
+      ]
+    },
+    "Rule": {
+      "additionalProperties": false,
+      "description": "One rule: a match tree and the action taken when it matches.",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/Action",
+          "description": "What happens when it matches (#34)."
+        },
+        "description": {
+          "description": "Free-text description, at most 4096 characters.",
+          "maxLength": 4096,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "display_id": {
+          "description": "Human short ID from the tenant's sequence, `R-` and 6 to 12 digits.",
+          "pattern": "^R-[0-9]{6,12}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "default": true,
+          "description": "Disabled rules are kept, but never decide.",
+          "type": "boolean"
+        },
+        "enforcement_override": {
+          "$ref": "#/$defs/EnforcementOverride",
+          "default": "inherit",
+          "description": "Per-rule enforcement override (#36)."
+        },
+        "id": {
+          "$ref": "#/$defs/RuleId",
+          "description": "Stable ID, never reused."
+        },
+        "match": {
+          "$ref": "#/$defs/Match",
+          "description": "When the rule matches (#33)."
+        },
+        "metadata": {
+          "$ref": "#/$defs/Metadata",
+          "description": "Governance metadata (#40)."
+        },
+        "name": {
+          "description": "Display name, with the same rules as a policy name.",
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        "object_types": {
+          "description": "The object classes the rule applies to. Empty means every class.",
+          "items": {
+            "$ref": "#/$defs/ObjectType"
+          },
+          "type": "array"
+        },
+        "order": {
+          "description": "Position for the `first_match` model (#35).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "priority": {
+          "description": "Priority for the `priority` model (#35).",
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "match",
+        "action"
+      ],
+      "type": "object"
+    },
+    "RuleId": {
+      "$ref": "#/$defs/Uuid7",
+      "description": "The stable ID of a rule. It is never reused, even after the rule is deleted."
+    },
+    "RuleSet": {
+      "additionalProperties": false,
+      "description": "A named, reusable, ordered collection of rules.",
+      "properties": {
+        "description": {
+          "description": "Free-text description, at most 4096 characters.",
+          "maxLength": 4096,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hidden": {
+          "default": false,
+          "description": "Hidden from default console views (staging).",
+          "type": "boolean"
+        },
+        "id": {
+          "$ref": "#/$defs/RuleSetId",
+          "description": "Stable ID."
+        },
+        "kind": {
+          "$ref": "#/$defs/RuleSetKind",
+          "description": "What the rule set is for."
+        },
+        "mandatory": {
+          "default": false,
+          "description": "Only for `blocklist`: evaluated in the non-overridable mandatory-deny\ntier (#35, ADR 0004).",
+          "type": "boolean"
+        },
+        "metadata": {
+          "$ref": "#/$defs/Metadata",
+          "description": "Governance metadata (#40)."
+        },
+        "name": {
+          "description": "Display name, with the same rules as a policy name.",
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        "os": {
+          "$ref": "#/$defs/Os",
+          "default": "windows",
+          "description": "The operating system the rules are written for."
+        },
+        "read_only": {
+          "default": false,
+          "description": "Curated sets are read-only: edit a duplicate instead.",
+          "type": "boolean"
+        },
+        "rules": {
+          "description": "The rules, in order.",
+          "items": {
+            "$ref": "#/$defs/Rule"
+          },
+          "type": "array"
+        },
+        "version": {
+          "description": "The content version of this rule set, for display (for example `3.0`).",
+          "maxLength": 128,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "RuleSetId": {
+      "$ref": "#/$defs/Uuid7",
+      "description": "The stable ID of a rule set."
+    },
+    "RuleSetKind": {
+      "description": "The purpose of a rule set.",
+      "oneOf": [
+        {
+          "const": "allowlist",
+          "description": "Rules that allow.",
+          "type": "string"
+        },
+        {
+          "const": "blocklist",
+          "description": "Rules that deny.",
+          "type": "string"
+        },
+        {
+          "const": "baseline",
+          "description": "A baseline of what was present at a point in time.",
+          "type": "string"
+        },
+        {
+          "const": "trust",
+          "description": "Trusted sources (#9).",
+          "type": "string"
+        },
+        {
+          "const": "elevation",
+          "description": "Elevation rules (#12).",
+          "type": "string"
+        },
+        {
+          "const": "containment",
+          "description": "Containment rules (#14).",
+          "type": "string"
+        },
+        {
+          "const": "mixed",
+          "description": "Any mix of actions.",
+          "type": "string"
+        }
+      ]
+    },
+    "SchemaVersion": {
+      "description": "A semantic version MAJOR.MINOR.PATCH, without pre-release or build suffixes.",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "type": "string"
+    },
+    "TimeZoneBasis": {
+      "description": "The clock that schedules are interpreted in.",
+      "oneOf": [
+        {
+          "const": "device_local",
+          "description": "The device's local time zone.",
+          "type": "string"
+        },
+        {
+          "const": "utc",
+          "description": "Coordinated Universal Time.",
+          "type": "string"
+        }
+      ]
+    },
+    "Uuid7": {
+      "description": "A UUID version 7 in canonical lowercase form.",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    }
+  },
+  "$id": "https://github.com/jusso-dev/palisade/schemas/policy/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A versioned policy document: one policy and the rule sets it uses.",
+  "properties": {
+    "policy": {
+      "$ref": "#/$defs/Policy",
+      "description": "The policy."
+    },
+    "rule_sets": {
+      "description": "The rule sets the policy references, in any order. The policy's\n`rule_sets` list gives the order that applies.",
+      "items": {
+        "$ref": "#/$defs/RuleSet"
+      },
+      "maxItems": 1000,
+      "type": "array"
+    },
+    "schema_version": {
+      "$ref": "#/$defs/SchemaVersion",
+      "description": "The version of this schema the document was written for. A reader\naccepts the same major version and any minor version."
+    }
+  },
+  "required": [
+    "schema_version",
+    "policy"
+  ],
+  "title": "Palisade policy document",
+  "type": "object",
+  "x-schema-version": "1.0.0"
+}

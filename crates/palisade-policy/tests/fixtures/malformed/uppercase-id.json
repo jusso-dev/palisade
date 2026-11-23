@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0.0",
+  "policy": {
+    "id": "01936B2E-8C4A-7B3D-9F21-0A1B2C3D4E5F",
+    "name": "Fixture",
+    "revision": 1,
+    "mode": "enforce",
+    "rule_sets": [
+      "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60"
+    ]
+  },
+  "rule_sets": [
+    {
+      "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60",
+      "name": "Set",
+      "kind": "mixed",
+      "rules": []
+    }
+  ]
+}

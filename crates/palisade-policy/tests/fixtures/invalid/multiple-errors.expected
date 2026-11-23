@@ -1,0 +1,6 @@
+invalid_name /policy/name
+invalid_tag /policy/metadata/tags/1
+unknown_advanced_key /policy/settings/advanced/engine.flag
+duplicate_rule_set_ref /policy/rule_sets/1
+case_sensitivity_not_applicable /rule_sets/0/rules/0/match/criterion/case_sensitive
+invalid_value_count /rule_sets/0/rules/0/match/criterion/values

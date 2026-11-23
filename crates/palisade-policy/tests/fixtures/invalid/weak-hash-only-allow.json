@@ -1,0 +1,66 @@
+{
+  "schema_version": "1.0.0",
+  "policy": {
+    "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+    "name": "Fixture",
+    "revision": 1,
+    "mode": "enforce",
+    "rule_sets": [
+      "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60"
+    ]
+  },
+  "rule_sets": [
+    {
+      "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60",
+      "name": "Set",
+      "kind": "mixed",
+      "rules": [
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e61",
+          "name": "Rule 0",
+          "match": {
+            "criterion": {
+              "field": "hash.md5",
+              "operator": "equals",
+              "values": [
+                "d41d8cd98f00b204e9800998ecf8427e"
+              ]
+            }
+          },
+          "action": {
+            "type": "allow"
+          }
+        },
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e62",
+          "name": "Rule 1",
+          "match": {
+            "any": [
+              {
+                "criterion": {
+                  "field": "hash.sha1",
+                  "operator": "equals",
+                  "values": [
+                    "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+                  ]
+                }
+              },
+              {
+                "criterion": {
+                  "field": "signer.publisher",
+                  "operator": "equals",
+                  "values": [
+                    "Example Software Ltd"
+                  ]
+                }
+              }
+            ]
+          },
+          "action": {
+            "type": "allow"
+          }
+        }
+      ]
+    }
+  ]
+}
