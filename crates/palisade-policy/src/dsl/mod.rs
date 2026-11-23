@@ -17,9 +17,9 @@
 //!   mode: audit
 //! ";
 //! let loaded = dsl::from_str(yaml).unwrap();
-//! assert_eq!(loaded.document.policy.name, "Example");
-//! let written = dsl::to_string(&loaded.document).unwrap();
-//! assert_eq!(dsl::from_str(&written).unwrap().document, loaded.document);
+//! assert_eq!(loaded.document().policy.name, "Example");
+//! let written = dsl::to_string(loaded.document()).unwrap();
+//! assert_eq!(dsl::from_str(&written).unwrap().document(), loaded.document());
 //! ```
 //!
 //! # Reading untrusted input
@@ -46,17 +46,17 @@
 //! - **No characters outside the YAML 1.2 printable set**, and no raw
 //!   U+0085, U+2028 or U+2029, which YAML 1.1 reads as line breaks. All of
 //!   them can be written as escapes in double-quoted strings.
-//! - **Limits** on input size, nesting depth and node count ([`Limits`]),
-//!   so memory use is bounded by the node count and the input size, and
-//!   stack use by the depth.
+//! - **Limits** on input size, nesting depth, node count and parser
+//!   lookahead ([`Limits`]), so memory use is bounded by the input size and
+//!   the node count, and stack use by the depth.
 //!
 //! Plain scalars are typed as follows: `null`, `Null`, `NULL`, `~` and the
 //! empty scalar are null; `true` and `false` (also `True`, `TRUE`, `False`,
 //! `FALSE`) are booleans; JSON numbers are numbers (integers if they have no
 //! fraction or exponent); `yes`, `no`, `on`, `off`, `y`, `n` in any of their
 //! YAML 1.1 spellings, and numbers in non-JSON forms (`+1`, `010`, `0x1f`,
-//! `0o17`, `1_000`, `1:30`, `.5`, `1.`, `.inf`, `.nan`), are errors; anything
-//! else is text. That includes dotted versions (`1.0.0`) and dates
+//! `0o17`, `1_000`, `.5`, `1.`, `.inf`, `.nan`, and YAML 1.1 base-60 such as
+//! `1:30`), are errors; anything else is text (`1:60` is not base-60). That includes dotted versions (`1.0.0`) and dates
 //! (`2027-06-30`): the YAML 1.2 core schema has no timestamp type, and the
 //! model has no date or floating-point fields, so a reader that typed these
 //! differently would fail schema validation rather than silently read
@@ -79,7 +79,19 @@
 //! Unicode scalar values (an input that is too large has no location). Load errors ([`YamlError`]) also carry the JSON
 //! Pointer of the value when one is known. Validation findings keep their
 //! stable [`ErrorCode`](crate::validate::ErrorCode) and JSON Pointer, and
-//! [`YamlDocument::validate`] adds the location of the value they point to.
+//! [`YamlDocument::validate`] adds the location of the value they point to,
+//! for errors and warnings alike.
+//!
+//! # JSON input
+//!
+//! An input that is a valid JSON object or array is read by a streaming JSON
+//! tokenizer rather than the YAML parser. It gives the same tree, through the
+//! same limits and strictness rules (duplicate keys, typing, locations), and
+//! the same meaning, since JSON is a subset of YAML 1.2. It also reads what
+//! the YAML parser gets wrong or slowly: surrogate-pair escapes
+//! (`"\uD83D\uDEE1"`), a tab after `:`, and large documents, which the YAML
+//! parser would read whole before reporting their first value (see
+//! [`Limits::max_lookahead`]). Text that is not valid JSON is read as YAML.
 
 mod de;
 mod emit;
@@ -108,17 +120,28 @@ pub struct Limits {
     pub max_depth: usize,
     /// Most nodes (scalars, sequences and maps, including keys).
     pub max_nodes: usize,
+    /// Most characters the YAML parser may read to produce one event. It
+    /// reads a flow collection (`[...]`, `{...}`) that starts a line, or
+    /// follows `[` or `,`, to its end before it reports the first value, and
+    /// holds all of its tokens in memory meanwhile (roughly 100 bytes per
+    /// input character). This bounds that memory before the node limit can
+    /// apply. One scalar must also fit. JSON input is read without
+    /// lookahead and is not limited by this.
+    pub max_lookahead: usize,
 }
 
 impl Limits {
     /// The defaults: 64 MiB, depth 128 (the JSON reader's recursion limit),
-    /// and 4 million nodes. These fit 100,000 single-criterion rules, the
-    /// model's rule limit, as [`to_string`] writes them (about 37 MB and 2.2
-    /// million nodes); documents with larger rules need higher limits.
+    /// 4 million nodes, and 1 MiB of lookahead (roughly 110 MB of queued
+    /// tokens at most). These fit 100,000 single-criterion rules, the model's
+    /// rule limit, as [`to_string`] writes them (about 37 MB and 2.2 million
+    /// nodes), because block style needs almost no lookahead; documents with
+    /// larger rules need higher limits.
     pub const DEFAULT: Self = Self {
         max_bytes: 64 * 1024 * 1024,
         max_depth: 128,
         max_nodes: 4_000_000,
+        max_lookahead: 1024 * 1024,
     };
 }
 
@@ -336,29 +359,84 @@ impl SourceMap {
 }
 
 /// A document read from YAML, with the source locations of its values.
+///
+/// The two parts are read-only, so the source map always describes the
+/// document it came with. To edit the document, take it with
+/// [`into_document`](Self::into_document); the edited document no longer has
+/// source locations.
 #[derive(Clone, Debug)]
 pub struct YamlDocument {
-    /// The document.
-    pub document: PolicyDocument,
-    /// Where each value is in the source.
-    pub source_map: SourceMap,
+    document: PolicyDocument,
+    source_map: SourceMap,
 }
 
 impl YamlDocument {
+    /// The document.
+    #[must_use]
+    pub const fn document(&self) -> &PolicyDocument {
+        &self.document
+    }
+
+    /// Where each value of the document is in the source.
+    #[must_use]
+    pub const fn source_map(&self) -> &SourceMap {
+        &self.source_map
+    }
+
+    /// Gives the document back, without its source locations.
+    #[must_use]
+    pub fn into_document(self) -> PolicyDocument {
+        self.document
+    }
+
     /// Validates the document, as [`PolicyDocument::validate`] does, and
     /// adds the source location of every finding.
     ///
     /// # Errors
     ///
-    /// Returns every finding if any has `error` severity.
-    pub fn validate(self) -> Result<ValidatedPolicy, Vec<Located<ValidationError>>> {
+    /// Returns every finding, located, if any has `error` severity.
+    pub fn validate(self) -> Result<LocatedPolicy, Vec<Located<ValidationError>>> {
         let Self {
             document,
             source_map,
         } = self;
-        document
-            .validate()
-            .map_err(|errors| source_map.locate_all(errors))
+        match document.validate() {
+            Ok(policy) => {
+                let warnings = source_map.locate_all(policy.warnings().to_vec());
+                Ok(LocatedPolicy { policy, warnings })
+            }
+            Err(errors) => Err(source_map.locate_all(errors)),
+        }
+    }
+}
+
+/// A policy that passed validation, with the source location of each of its
+/// warnings.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LocatedPolicy {
+    policy: ValidatedPolicy,
+    warnings: Vec<Located<ValidationError>>,
+}
+
+impl LocatedPolicy {
+    /// The validated policy. Its own [`warnings`](ValidatedPolicy::warnings)
+    /// are the same findings, without locations.
+    #[must_use]
+    pub const fn policy(&self) -> &ValidatedPolicy {
+        &self.policy
+    }
+
+    /// Findings below `error` severity, located, in the same order as
+    /// [`ValidatedPolicy::warnings`].
+    #[must_use]
+    pub fn warnings(&self) -> &[Located<ValidationError>] {
+        &self.warnings
+    }
+
+    /// The validated policy, without the locations.
+    #[must_use]
+    pub fn into_policy(self) -> ValidatedPolicy {
+        self.policy
     }
 }
 
@@ -380,37 +458,44 @@ pub fn from_str(input: &str) -> Result<YamlDocument, YamlError> {
 /// Returns [`YamlError`] if the input is not exactly one document that this
 /// reader understands.
 pub fn from_str_with_limits(input: &str, limits: &Limits) -> Result<YamlDocument, YamlError> {
-    document(single(parse::parse(input, limits)?)?)
+    single(input, limits, document)
 }
 
-/// The only document of a stream. `parse` never returns an empty stream.
-fn single(roots: Vec<parse::Node>) -> Result<parse::Node, YamlError> {
-    let mut roots = roots.into_iter();
-    match (roots.next(), roots.next()) {
-        (Some(root), None) => Ok(root),
-        (_, Some(second)) => Err(YamlError::new(
-            YamlErrorKind::UnsupportedFeature,
-            "a second document starts here; use `from_str_all` to read a stream of documents",
-        )
-        .at(second.location)),
-        (None, None) => Err(YamlError::new(
-            YamlErrorKind::Syntax,
-            "the input holds no YAML document",
-        )
-        .at(Location { line: 1, column: 1 })),
-    }
+/// Reads the only document of the input with `read`. The document is read
+/// as soon as it ends, so its errors come before a second document's `---`.
+fn single<T>(
+    input: &str,
+    limits: &Limits,
+    mut read: impl FnMut(parse::Node) -> Result<T, YamlError>,
+) -> Result<T, YamlError> {
+    let mut out = None;
+    parse::parse(input, limits, true, |root| {
+        out = Some(read(root)?);
+        Ok(())
+    })?;
+    // `parse` reports an input with no document.
+    out.ok_or_else(|| {
+        YamlError::new(YamlErrorKind::Syntax, "the input holds no YAML document")
+            .at(Location { line: 1, column: 1 })
+    })
 }
 
 /// Reads every document of a YAML stream (documents separated by `---`).
+///
+/// Each document is checked against the model as soon as it ends, so the
+/// error returned is the first one in source order: a model error in one
+/// document comes before a syntax error in a later one.
 ///
 /// # Errors
 ///
 /// Returns the first [`YamlError`], in source order.
 pub fn from_str_all(input: &str, limits: &Limits) -> Result<Vec<YamlDocument>, YamlError> {
-    parse::parse(input, limits)?
-        .into_iter()
-        .map(document)
-        .collect()
+    let mut documents = Vec::new();
+    parse::parse(input, limits, false, |root| {
+        documents.push(document(root)?);
+        Ok(())
+    })?;
+    Ok(documents)
 }
 
 /// Reads one YAML document into the JSON data model, with the same strict
@@ -422,12 +507,13 @@ pub fn from_str_all(input: &str, limits: &Limits) -> Result<Vec<YamlDocument>, Y
 /// Returns [`YamlError`] if the input is not exactly one well-formed
 /// document within the limits.
 pub fn to_json_value(input: &str, limits: &Limits) -> Result<serde_json::Value, YamlError> {
-    let root = single(parse::parse(input, limits)?)?;
-    let path = de::Path::Root;
-    Ok(serde_json::Value::deserialize(de::De {
-        node: &root,
-        path: &path,
-    })?)
+    single(input, limits, |root| {
+        let path = de::Path::Root;
+        Ok(serde_json::Value::deserialize(de::De {
+            node: &root,
+            path: &path,
+        })?)
+    })
 }
 
 /// Builds the document from its tree, checking `schema_version` first as
@@ -497,7 +583,7 @@ impl PolicyDocument {
     /// Returns [`YamlError`] if the input is not a document this reader
     /// understands.
     pub fn from_yaml(input: &str) -> Result<Self, YamlError> {
-        from_str(input).map(|d| d.document)
+        from_str(input).map(YamlDocument::into_document)
     }
 
     /// Writes the document as canonical YAML. See [`to_string`].

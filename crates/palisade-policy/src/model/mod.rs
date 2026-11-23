@@ -237,7 +237,7 @@ const fn default_true() -> bool {
 ///
 /// Each action is an object with a `type`, so options can be added later as
 /// optional fields without a breaking change.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
     /// Permit execution.
@@ -246,6 +246,41 @@ pub enum Action {
     Deny {},
     /// Record the match without changing the outcome.
     Audit {},
+}
+
+impl<'de> Deserialize<'de> for Action {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        /// The derived reader. On its own it also accepts a sequence and
+        /// reads its first item as the tag (`["deny"]`), so it is only
+        /// given a map.
+        #[derive(Deserialize)]
+        #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+        enum Tagged {
+            Allow {},
+            Deny {},
+            Audit {},
+        }
+
+        struct MapOnly;
+
+        impl<'de> serde::de::Visitor<'de> for MapOnly {
+            type Value = Tagged;
+
+            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                f.write_str("a map with a `type` key naming the action")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(self, map: A) -> Result<Tagged, A::Error> {
+                Tagged::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+            }
+        }
+
+        Ok(match deserializer.deserialize_map(MapOnly)? {
+            Tagged::Allow {} => Self::Allow {},
+            Tagged::Deny {} => Self::Deny {},
+            Tagged::Audit {} => Self::Audit {},
+        })
+    }
 }
 
 /// How one rule relates to the policy mode (#36).

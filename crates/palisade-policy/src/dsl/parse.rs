@@ -1,8 +1,10 @@
 //! Reads YAML text into a tree of located nodes, applying the strict rules
 //! described in [the module docs](super).
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry as Slot;
+use std::rc::Rc;
 
 use yaml_rust2::parser::{Event, Parser};
 use yaml_rust2::scanner::{Marker, ScanError, TScalarStyle};
@@ -59,8 +61,28 @@ pub(crate) struct Entry {
     pub(crate) value: Node,
 }
 
-/// Parses a YAML stream: one or more documents separated by `---`.
-pub(crate) fn parse(input: &str, limits: &Limits) -> Result<Vec<Node>, YamlError> {
+/// Parses a YAML stream of one or more documents separated by `---`, and
+/// passes each document's root to `on_document` as soon as the document
+/// ends, so an error in an earlier document is reported before any problem
+/// in a later one. With `single`, a second document is an error.
+pub(crate) fn parse(
+    input: &str,
+    limits: &Limits,
+    single: bool,
+    on_document: impl FnMut(Node) -> Result<(), YamlError>,
+) -> Result<(), YamlError> {
+    parse_with(input, limits, single, true, on_document)
+}
+
+/// [`parse`], with the JSON fast path optional, so tests can compare both
+/// readers on the same JSON text.
+pub(crate) fn parse_with(
+    input: &str,
+    limits: &Limits,
+    single: bool,
+    json_fast_path: bool,
+    mut on_document: impl FnMut(Node) -> Result<(), YamlError>,
+) -> Result<(), YamlError> {
     if input.len() > limits.max_bytes {
         return Err(YamlError::new(
             YamlErrorKind::LimitExceeded,
@@ -74,6 +96,8 @@ pub(crate) fn parse(input: &str, limits: &Limits) -> Result<Vec<Node>, YamlError
     // A byte order mark may start the stream (YAML 1.2 section 5.2). The
     // parser would otherwise read it as part of the first key.
     let input = input.strip_prefix('\u{feff}').unwrap_or(input);
+    // The parser stops silently at U+0000, so this must cover the whole
+    // input before parsing starts.
     check_characters(input)?;
 
     let mut builder = Builder {
@@ -82,14 +106,52 @@ pub(crate) fn parse(input: &str, limits: &Limits) -> Result<Vec<Node>, YamlError
         roots: Vec::new(),
         nodes: 0,
     };
+    if json_fast_path && is_json(input) {
+        json::read(input, &mut builder)?;
+        let mut finished = 0usize;
+        for root in builder.roots.drain(..) {
+            finished += 1;
+            on_document(root)?;
+        }
+        return if finished == 1 {
+            Ok(())
+        } else {
+            Err(internal(Location { line: 1, column: 1 }))
+        };
+    }
     let mut prefix = Prefix::new(input);
-    let mut parser = Parser::new_from_str(input);
+    let budget = Rc::new(Cell::new(0usize));
+    let mut parser = Parser::new(Budgeted {
+        chars: input.chars(),
+        budget: Rc::clone(&budget),
+    });
+    let mut documents = 0usize;
+    let mut finished = 0usize;
+    let mut last = Location { line: 1, column: 1 };
     loop {
-        let (event, mark) = parser.next_token().map_err(|e| scan_error(&e))?;
+        // The parser may queue many tokens before it returns an event (see
+        // `Budgeted`), so the characters it reads for one event are bounded.
+        budget.set(limits.max_lookahead.saturating_add(1));
+        let next = parser.next_token();
+        if budget.get() == 0 {
+            return Err(lookahead_exceeded(limits, last));
+        }
+        let (event, mark) = next.map_err(|e| scan_error(&e))?;
         let at = location(mark);
+        last = at;
         match event {
             Event::StreamEnd => break,
-            Event::DocumentStart => prefix.check(mark.line())?,
+            Event::DocumentStart => {
+                prefix.check(mark.line())?;
+                documents += 1;
+                if single && documents > 1 {
+                    return Err(YamlError::new(
+                        YamlErrorKind::UnsupportedFeature,
+                        "a second document starts here; this reads one document (use `from_str_all` for a stream)",
+                    )
+                    .at(at));
+                }
+            }
             Event::DocumentEnd => prefix.skip_to(mark.line()),
             Event::Nothing | Event::StreamStart => {}
             Event::Alias(_) => {
@@ -120,15 +182,201 @@ pub(crate) fn parse(input: &str, limits: &Limits) -> Result<Vec<Node>, YamlError
             }
             Event::SequenceEnd | Event::MappingEnd => builder.close()?,
         }
+        for root in builder.roots.drain(..) {
+            finished += 1;
+            on_document(root)?;
+        }
     }
-    if builder.roots.is_empty() {
+    if finished == 0 {
         return Err(YamlError::new(
             YamlErrorKind::Syntax,
             "the input holds no YAML document; expected a policy document",
         )
         .at(Location { line: 1, column: 1 }));
     }
-    Ok(builder.roots)
+    Ok(())
+}
+
+/// Whether the input is a JSON object or array, which [`json::read`] reads
+/// instead of the YAML parser.
+///
+/// Every JSON text is also YAML 1.2 with the same meaning, but the YAML
+/// parser reads a flow collection that starts a line, or follows `[` or
+/// `,`, whole before it reports anything (see [`Budgeted`]), and that is
+/// every object in a JSON array. Valid JSON is read with a streaming
+/// tokenizer instead, through the same [`Builder`], so the same limits,
+/// duplicate-key and typing rules apply. The check is a full JSON parse
+/// that keeps nothing (`serde_json`'s recursion limit bounds it), so a text
+/// that only starts like JSON goes to the YAML parser as before.
+pub(crate) fn is_json(input: &str) -> bool {
+    matches!(
+        input
+            .trim_start_matches([' ', '\t', '\n', '\r'])
+            .as_bytes()
+            .first(),
+        Some(b'{' | b'[')
+    ) && serde_json::from_str::<serde::de::IgnoredAny>(input).is_ok()
+}
+
+/// Reads a JSON text that is known to be valid, as [`Builder`] events.
+mod json {
+    use super::{Builder, Location, YamlError, internal};
+
+    /// Reads `input`, which [`super::is_json`] accepted.
+    pub(super) fn read(input: &str, builder: &mut Builder<'_>) -> Result<(), YamlError> {
+        let mut cursor = Cursor {
+            rest: input,
+            line: 1,
+            column: 1,
+            after_cr: false,
+        };
+        loop {
+            cursor.skip_whitespace();
+            let at = cursor.location();
+            let Some(c) = cursor.rest.chars().next() else {
+                return Ok(());
+            };
+            match c {
+                '{' | '[' => {
+                    cursor.advance(1);
+                    builder.open(c == '{', at)?;
+                }
+                '}' | ']' => {
+                    cursor.advance(1);
+                    builder.close()?;
+                }
+                ',' | ':' => cursor.advance(1),
+                '"' => {
+                    let len = string_len(cursor.rest).ok_or_else(|| internal(at))?;
+                    let literal = cursor.rest.get(..len).ok_or_else(|| internal(at))?;
+                    // serde_json decodes escapes, including surrogate pairs.
+                    let text: String = serde_json::from_str(literal).map_err(|_| internal(at))?;
+                    cursor.advance(len);
+                    builder.scalar(text, false, at)?;
+                }
+                _ => {
+                    // A number, `true`, `false` or `null`, typed as a plain
+                    // scalar, as the YAML parser would.
+                    let len = cursor
+                        .rest
+                        .find([',', ']', '}', ' ', '\t', '\n', '\r'])
+                        .unwrap_or(cursor.rest.len());
+                    let text = cursor.rest.get(..len).ok_or_else(|| internal(at))?;
+                    let text = text.to_owned();
+                    cursor.advance(len);
+                    builder.scalar(text, true, at)?;
+                }
+            }
+        }
+    }
+
+    /// The byte length of the string literal at the start of `s`, quotes
+    /// included.
+    fn string_len(s: &str) -> Option<usize> {
+        let bytes = s.as_bytes();
+        let mut i = 1;
+        while let Some(&b) = bytes.get(i) {
+            match b {
+                b'"' => return Some(i + 1),
+                b'\\' => i += 2,
+                _ => i += 1,
+            }
+        }
+        None
+    }
+
+    struct Cursor<'a> {
+        rest: &'a str,
+        line: usize,
+        column: usize,
+        after_cr: bool,
+    }
+
+    impl Cursor<'_> {
+        const fn location(&self) -> Location {
+            Location {
+                line: self.line,
+                column: self.column,
+            }
+        }
+
+        /// Moves past `len` bytes, counting lines as the YAML parser does.
+        fn advance(&mut self, len: usize) {
+            let (done, rest) = self.rest.split_at(len.min(self.rest.len()));
+            for c in done.chars() {
+                match c {
+                    '\n' if self.after_cr => {}
+                    '\n' | '\r' => {
+                        self.line += 1;
+                        self.column = 1;
+                    }
+                    _ => self.column += 1,
+                }
+                self.after_cr = c == '\r';
+            }
+            self.rest = rest;
+        }
+
+        fn skip_whitespace(&mut self) {
+            let len = self.rest.len() - self.rest.trim_start_matches([' ', '\t', '\n', '\r']).len();
+            self.advance(len);
+        }
+    }
+}
+
+/// The characters of the input, metered for one parser event at a time.
+///
+/// `yaml-rust2` 0.13.2 reads a flow collection that starts a line, or that
+/// follows `[` or `,`, to its end before it reports the collection's first
+/// value, because the collection might still turn out to be a mapping key.
+/// It does not give up on that possibility after 1024 characters inside a
+/// flow collection, so without a bound one wide collection (`[1,1,1,...]`)
+/// is queued as tokens, roughly 100 bytes per input character, before
+/// [`Builder`] counts a single node. The tokens queued at any time come
+/// from at most one such read, so the budget bounds their memory. When the budget runs out the
+/// parser sees the end of the input, and [`parse`] reports
+/// `yaml_limit_exceeded` instead of whatever the parser makes of that.
+struct Budgeted<'a> {
+    chars: core::str::Chars<'a>,
+    /// Characters left for the current event, plus one. Zero means the
+    /// budget ran out.
+    budget: Rc<Cell<usize>>,
+}
+
+impl Iterator for Budgeted<'_> {
+    type Item = char;
+
+    fn next(&mut self) -> Option<char> {
+        // The real end of the input never uses up the budget, so an event
+        // that ends exactly at the limit is not misreported.
+        if self.chars.as_str().is_empty() {
+            return None;
+        }
+        match self.budget.get() {
+            0 => None,
+            1 => {
+                self.budget.set(0);
+                None
+            }
+            n => {
+                self.budget.set(n - 1);
+                self.chars.next()
+            }
+        }
+    }
+}
+
+fn lookahead_exceeded(limits: &Limits, after: Location) -> YamlError {
+    YamlError::new(
+        YamlErrorKind::LimitExceeded,
+        format!(
+            "the parser read more than {} characters to find the next value. A scalar this \
+             long, or a flow collection (`[...]` or `{{...}}`) that starts a line or follows \
+             `[` or `,`, is read whole first; write large collections in block style",
+            limits.max_lookahead
+        ),
+    )
+    .at(after)
 }
 
 /// The parser's marker as a 1-based line and column.
@@ -629,12 +877,43 @@ fn is_number_like(text: &str) -> bool {
             }
         }
     }
-    is_decimal_like(rest)
+    is_sexagesimal(rest) || is_decimal_like(rest)
+}
+
+/// YAML 1.1 base-60 numbers, after the sign: the integer form
+/// `[1-9][0-9_]*(:[0-5]?[0-9])+` (`1:30`, `190:20:30`) and the float form
+/// `[0-9][0-9_]*(:[0-5]?[0-9])+\.[0-9_]*` (`1:30.5`). Anything else with a
+/// colon, such as `1:60` or `0:30`, is text in YAML 1.1 and 1.2 alike.
+fn is_sexagesimal(s: &str) -> bool {
+    let (whole, fraction) = match s.split_once('.') {
+        Some((whole, fraction)) => (whole, Some(fraction)),
+        None => (s, None),
+    };
+    let mut parts = whole.split(':');
+    let first = parts.next().unwrap_or("");
+    let first_ok = first.bytes().next().is_some_and(|b| b.is_ascii_digit())
+        && first.bytes().all(|b| b.is_ascii_digit() || b == b'_');
+    let mut sexagesimal_parts = 0usize;
+    let rest_ok = parts.all(|part| {
+        sexagesimal_parts += 1;
+        match part.as_bytes() {
+            [d] => d.is_ascii_digit(),
+            [tens, units] => (b'0'..=b'5').contains(tens) && units.is_ascii_digit(),
+            _ => false,
+        }
+    });
+    if !(first_ok && rest_ok && sexagesimal_parts > 0) {
+        return false;
+    }
+    match fraction {
+        None => !first.starts_with('0'),
+        Some(fraction) => fraction.bytes().all(|b| b.is_ascii_digit() || b == b'_'),
+    }
 }
 
 /// Decimal integers and floats in their YAML 1.1 and 1.2 forms: digits with
-/// optional underscores, base-60 parts (`1:30`), a fraction that may be
-/// empty, and an exponent. Dotted versions such as `1.0.0` are not numbers.
+/// optional underscores, a fraction that may be empty, and an exponent.
+/// Dotted versions such as `1.0.0` are not numbers.
 fn is_decimal_like(s: &str) -> bool {
     let b = s.as_bytes();
     let mut i = 0;
@@ -651,12 +930,6 @@ fn is_decimal_like(s: &str) -> bool {
     let has_int = run(&mut i, true) > 0;
     if has_int && !b.first().is_some_and(u8::is_ascii_digit) {
         return false;
-    }
-    while has_int && b.get(i) == Some(&b':') {
-        i += 1;
-        if !(1..=2).contains(&run(&mut i, false)) {
-            return false;
-        }
     }
     if b.get(i) == Some(&b'.') {
         i += 1;

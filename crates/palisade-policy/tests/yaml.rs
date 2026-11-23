@@ -98,7 +98,7 @@ fn examples_have_the_header_pass_the_schema_and_validate() {
             panic!("{}: schema errors {e}", path.display());
         }
         let loaded = dsl::from_str(&text).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-        let doc = loaded.document.clone();
+        let doc = loaded.document().clone();
         if let Err(errors) = loaded.validate() {
             panic!("{}: {errors:#?}", path.display());
         }

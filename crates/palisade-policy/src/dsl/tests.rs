@@ -116,7 +116,7 @@ fn directives_other_than_yaml_1_2_are_rejected() {
 #[test]
 fn directives_are_checked_before_every_document_only() {
     for (input, line) in [
-        (format!("a: 1\n...\n%YAML 1.1\n---\n{MINIMAL}"), 3),
+        (format!("{MINIMAL}...\n%YAML 1.1\n---\n{MINIMAL}"), 8),
         (
             format!("{MINIMAL}...\n# note\n%TAG ! tag:example.org,2026:\n---\n{MINIMAL}"),
             9,
@@ -136,16 +136,16 @@ fn directives_are_checked_before_every_document_only() {
     let long = "\u{e9}".repeat(50);
     for (input, line) in [
         (
-            format!("description: |\n  {long}\n...\n%YAML 1.1\n---\n{MINIMAL}"),
-            4,
+            format!("{MINIMAL}  description: |\n    {long}\n...\n%YAML 1.1\n---\n{MINIMAL}"),
+            10,
         ),
         (
-            format!("description: |\n  {long}\n...\r\n%TAG ! x:\r\n---\n{MINIMAL}"),
-            4,
+            format!("{MINIMAL}  description: |\n    {long}\n...\r\n%TAG ! x:\r\n---\n{MINIMAL}"),
+            10,
         ),
         (
-            format!("description: |\n  {long}\n...\n\n%FOO\n--- {MINIMAL}"),
-            5,
+            format!("{MINIMAL}  description: |\n    {long}\n...\n\n%FOO\n--- {MINIMAL}"),
+            11,
         ),
     ] {
         let e = from_str_all(&input, &Limits::DEFAULT).unwrap_err();
@@ -158,7 +158,12 @@ fn directives_are_checked_before_every_document_only() {
     }
     // And a `%` line inside a later document's content is not a directive.
     let input = format!("a: |\n  {long}\n--- \"x\n%not a directive\n y\"\n");
-    let roots = parse::parse(&input, &Limits::DEFAULT).unwrap();
+    let mut roots = Vec::new();
+    parse::parse(&input, &Limits::DEFAULT, false, |root| {
+        roots.push(root);
+        Ok(())
+    })
+    .unwrap();
     assert_eq!(roots.len(), 2);
     assert_eq!(
         roots[1].value,
@@ -257,14 +262,21 @@ fn non_json_numbers_are_rejected() {
         "010", "+1", "0x1f", "0o17", "0b11", "1_000", "1:30", ".5", "1.", "-.inf", ".NaN", "0X1F",
         "0O17", "0B11",
     ] {
-        let e = err(&minimal_with(&format!("  description: {number}\n")));
-        assert!(
-            matches!(
+        // Rejected while typing the scalar, not later as a type mismatch,
+        // so a numeric field cannot accept the same spelling either.
+        for field in ["description", "revision"] {
+            let text = if field == "revision" {
+                MINIMAL.replace("revision: 1", &format!("revision: {number}"))
+            } else {
+                minimal_with(&format!("  description: {number}\n"))
+            };
+            let e = err(&text);
+            assert_eq!(
                 e.kind(),
-                YamlErrorKind::AmbiguousScalar | YamlErrorKind::Mismatch
-            ),
-            "{number}: {e}"
-        );
+                YamlErrorKind::AmbiguousScalar,
+                "{field}: {number}: {e}"
+            );
+        }
     }
     // These look numeric but are text in every YAML version.
     for text in [
@@ -410,6 +422,7 @@ fn input_size_depth_and_node_count_are_bounded() {
         max_bytes: 64,
         max_depth: 4,
         max_nodes: 10,
+        max_lookahead: 1024,
     };
     let e = from_str_with_limits(MINIMAL, &limits).unwrap_err();
     assert_eq!(e.kind(), YamlErrorKind::LimitExceeded);
@@ -456,7 +469,7 @@ rule_sets:
     );
     let loaded = std::thread::Builder::new()
         .stack_size(512 * 1024)
-        .spawn(move || from_str(&text).map(|d| d.document.rule_sets[0].rules[0].match_.depth()))
+        .spawn(move || from_str(&text).map(|d| d.document().rule_sets[0].rules[0].match_.depth()))
         .unwrap()
         .join()
         .unwrap();
@@ -523,10 +536,11 @@ fn empty_and_multi_document_input() {
     let two = format!("{MINIMAL}---\n{MINIMAL}");
     let e = err(&two);
     assert_eq!(e.kind(), YamlErrorKind::UnsupportedFeature);
-    assert_eq!(at(&e).0, 8);
+    // The `---` that starts the second document.
+    assert_eq!(at(&e).0, 7);
     let all = from_str_all(&two, &Limits::DEFAULT).unwrap();
     assert_eq!(all.len(), 2);
-    assert_eq!(all[0].document, all[1].document);
+    assert_eq!(all[0].document(), all[1].document());
     // The second document's errors point into the second document.
     let bad = format!("{MINIMAL}---\n{}", minimal_with("  colour: red\n"));
     let e = from_str_all(&bad, &Limits::DEFAULT).unwrap_err();
@@ -615,7 +629,8 @@ fn validation_findings_keep_codes_and_paths_and_gain_locations() {
         located.iter().map(|l| l.error.clone()).collect::<Vec<_>>(),
         json_errors
     );
-    let source_map = from_str(&yaml).unwrap().source_map;
+    let loaded = from_str(&yaml).unwrap();
+    let source_map = loaded.source_map();
     for l in &located {
         assert_eq!(source_map.locate(&l.error.path), l.location);
     }
@@ -635,7 +650,8 @@ fn validation_findings_keep_codes_and_paths_and_gain_locations() {
 
 #[test]
 fn locate_falls_back_to_the_nearest_present_value() {
-    let map = from_str(MINIMAL).unwrap().source_map;
+    let loaded = from_str(MINIMAL).unwrap();
+    let map = loaded.source_map();
     assert_eq!(map.locate(""), Location { line: 1, column: 1 });
     assert_eq!(map.locate("/policy"), Location { line: 3, column: 3 });
     assert_eq!(map.locate("/policy/name"), Location { line: 4, column: 9 });
@@ -868,4 +884,398 @@ proptest! {
             }
         }
     }
+}
+
+// Review round 2 (PR #237) regression tests.
+
+/// A document with one rule, whose `action:` line is `action`.
+fn with_action(action: &str) -> String {
+    format!(
+        "{MINIMAL}  rule_sets: [01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60]
+rule_sets:
+  - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60
+    name: Set
+    kind: mixed
+    rules:
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e61
+        name: R
+        match: {{criterion: {{field: path.extension, operator: equals, values: [ps1]}}}}
+        action: {action}
+"
+    )
+}
+
+#[test]
+fn structs_are_only_read_from_maps() {
+    // A sequence would otherwise bind to fields by position.
+    let e = err(&minimal_with(
+        "  settings: [enforce, {}, enforce, enforce, true, 900, 300, [], device_local, 8, {}, false]\n",
+    ));
+    assert_eq!(e.kind(), YamlErrorKind::Mismatch);
+    assert_eq!(e.pointer(), Some("/policy/settings"));
+    assert_eq!(at(&e), (7, 13));
+    assert!(e.message().contains("invalid type: sequence"), "{e}");
+    let e =
+        err("schema_version: 1.0.0\npolicy: [01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f, M, null, 1]\n");
+    assert_eq!(e.pointer(), Some("/policy"));
+    let e = err(&minimal_with("  metadata: [a, b]\n"));
+    assert_eq!(e.pointer(), Some("/policy/metadata"));
+    // A map field (`script_control_by_kind`) too.
+    let e = err(&minimal_with(
+        "  settings:\n    script_control_by_kind: [[powershell, audit]]\n",
+    ));
+    assert_eq!(e.pointer(), Some("/policy/settings/script_control_by_kind"));
+    // The named form still loads.
+    let doc =
+        PolicyDocument::from_yaml(&minimal_with("  settings: {capture_command_line: true}\n"))
+            .unwrap();
+    assert!(doc.policy.settings.capture_command_line);
+}
+
+#[test]
+fn actions_are_only_read_from_maps() {
+    for action in ["[deny]", "[deny, extra]", "deny"] {
+        let e = err(&with_action(action));
+        assert_eq!(e.kind(), YamlErrorKind::Mismatch, "{action}: {e}");
+        assert_eq!(e.pointer(), Some("/rule_sets/0/rules/0/action"), "{action}");
+        assert_eq!(at(&e), (16, 17), "{action}");
+    }
+    assert!(from_str(&with_action("{type: deny}")).is_ok());
+    let e = err(&with_action("{type: deny, kill_running: true}"));
+    assert!(e.message().contains("unknown field"), "{e}");
+    // The JSON reader uses the same type, so it agrees.
+    let json = serde_json::json!({"type": "deny"});
+    assert!(serde_json::from_value::<crate::model::Action>(json).is_ok());
+    let json = serde_json::json!(["deny"]);
+    assert!(serde_json::from_value::<crate::model::Action>(json).is_err());
+}
+
+#[test]
+fn unit_enum_variants_are_only_read_as_names() {
+    for mode in ["{audit: null}", "{audit: ~}", "{audit: 1}", "{audit: {}}"] {
+        let e = err(&MINIMAL.replace("mode: audit", &format!("mode: {mode}")));
+        assert_eq!(e.kind(), YamlErrorKind::Mismatch, "{mode}: {e}");
+        assert_eq!(e.pointer(), Some("/policy/mode/audit"), "{mode}");
+        assert!(e.message().contains("plain name `audit`"), "{e}");
+    }
+    // A variant with content is still a one-key map.
+    assert!(from_str(&with_action("{type: deny}")).is_ok());
+}
+
+#[test]
+fn source_map_cannot_drift_from_its_document() {
+    let loaded = from_str(MINIMAL).unwrap();
+    let doc = loaded.document().clone();
+    assert_eq!(loaded.source_map().locate("/policy/name").line, 4);
+    // Editing needs the document by value, which drops the source map.
+    let mut owned = loaded.into_document();
+    owned.policy.name = "Edited".to_owned();
+    assert_ne!(owned, doc);
+}
+
+#[test]
+fn warnings_on_a_valid_policy_have_locations() {
+    let text = MINIMAL.replace("mode: audit", "mode: audit\n  precedence_model: allow_wins");
+    let validated = from_str(&text).unwrap().validate().unwrap();
+    assert_eq!(validated.warnings().len(), 1);
+    let warning = &validated.warnings()[0];
+    assert_eq!(warning.error.code, ErrorCode::AllowWinsNotRecommended);
+    assert_eq!(warning.error.path, "/policy/precedence_model");
+    assert_eq!(
+        warning.location,
+        Location {
+            line: 7,
+            column: 21
+        }
+    );
+    // The same findings as the unlocated ones, in the same order.
+    assert_eq!(
+        validated.policy().warnings(),
+        validated
+            .warnings()
+            .iter()
+            .map(|w| w.error.clone())
+            .collect::<Vec<_>>()
+            .as_slice()
+    );
+    assert!(
+        from_str(MINIMAL)
+            .unwrap()
+            .validate()
+            .unwrap()
+            .warnings()
+            .is_empty()
+    );
+}
+
+#[test]
+fn stream_errors_are_reported_in_source_order() {
+    // The first document has no `schema_version`; the second is broken
+    // YAML. The first problem in the text wins.
+    let e = from_str_all("a: 1\n---\na: [\n", &Limits::DEFAULT).unwrap_err();
+    assert_eq!(e.kind(), YamlErrorKind::MissingSchemaVersion, "{e}");
+    assert_eq!(at(&e).0, 1);
+    // A later error is still reported when every earlier document loads.
+    let e = from_str_all(&format!("{MINIMAL}---\na: [\n"), &Limits::DEFAULT).unwrap_err();
+    assert_eq!(e.kind(), YamlErrorKind::Syntax, "{e}");
+    assert_eq!(at(&e).0, 9);
+    // And a strictness error in a later document.
+    let e = from_str_all(&format!("{MINIMAL}---\na: &x 1\n"), &Limits::DEFAULT).unwrap_err();
+    assert_eq!(e.kind(), YamlErrorKind::UnsupportedFeature, "{e}");
+    let e = from_str_all(&format!("a: 1\n---\n{MINIMAL}"), &Limits::DEFAULT).unwrap_err();
+    assert_eq!(e.kind(), YamlErrorKind::MissingSchemaVersion, "{e}");
+}
+
+#[test]
+fn single_document_readers_stop_at_the_second_document() {
+    // The second document is not read at all: its syntax error is not the
+    // error reported.
+    let e = err(&format!("{MINIMAL}---\na: [\n"));
+    assert_eq!(e.kind(), YamlErrorKind::UnsupportedFeature, "{e}");
+    assert_eq!(at(&e).0, 7);
+    // A model error in the first document comes before the second `---`.
+    let e = err(&format!("a: 1\n---\n{MINIMAL}"));
+    assert_eq!(e.kind(), YamlErrorKind::MissingSchemaVersion, "{e}");
+    assert_eq!(at(&e).0, 1);
+}
+
+#[test]
+fn json_surrogate_pair_escapes_are_decoded() {
+    let json = |name: &str| {
+        format!(
+            r#"{{"schema_version": "1.0.0", "policy": {{"id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f", "name": "{name}", "revision": 1, "mode": "audit"}}}}"#
+        )
+    };
+    let literal = PolicyDocument::from_yaml(&json("Shield \u{1F6E1} \u{1D11E}")).unwrap();
+    for escaped in [
+        r"Shield \ud83d\udee1 \uD834\uDD1E",
+        r"Shield \uD83D\uDEE1 \ud834\udd1e",
+    ] {
+        let text = json(escaped);
+        assert_eq!(
+            PolicyDocument::from_yaml(&text).unwrap(),
+            literal,
+            "{escaped}"
+        );
+        assert_eq!(
+            PolicyDocument::from_json(&text).unwrap(),
+            literal,
+            "{escaped}"
+        );
+    }
+    // Locations after the decoded string are unchanged.
+    let text = json(r"\ud83d\udee1\ud83d\udee1\ud83d\udee1\nx")
+        .replace(", \"mode\"", ",\n\"colour\": 1, \"mode\"");
+    let e = err(&text);
+    assert_eq!(e.pointer(), Some("/policy/colour"));
+    let line2 = text.lines().nth(1).unwrap();
+    assert_eq!(at(&e), (2, line2.find("\"colour\"").unwrap() + 1));
+    // A lone or reversed surrogate is still an error, in both readers.
+    for bad in [r"\ud83d", r"\udee1", r"\udee1\ud83d", r"\ud83dx"] {
+        let text = json(bad);
+        assert!(PolicyDocument::from_json(&text).is_err(), "{bad}");
+        let e = err(&text);
+        assert_eq!(e.kind(), YamlErrorKind::Syntax, "{bad}: {e}");
+    }
+    // An escaped backslash before `u` is not an escape.
+    let text = json(r"C:\\ud83d\\udee1");
+    let doc = PolicyDocument::from_yaml(&text).unwrap();
+    assert_eq!(doc.policy.name, r"C:\ud83d\udee1");
+    // YAML text is not rewritten.
+    let e = err(&minimal_with("  description: \"\\ud83d\\udee1\"\n"));
+    assert_eq!(e.kind(), YamlErrorKind::Syntax, "{e}");
+    assert!(PolicyDocument::from_yaml(&minimal_with("  description: \"\\U0001F6E1\"\n")).is_ok());
+}
+
+#[test]
+fn only_yaml_1_1_base_60_numbers_are_ambiguous() {
+    for number in [
+        "1:30",
+        "190:20:30",
+        "1:5",
+        "-1:30",
+        "+1:30",
+        "1_0:00",
+        "1:30.5",
+        "0:30.5",
+        "1:30.",
+    ] {
+        let e = err(&minimal_with(&format!("  description: {number}\n")));
+        assert_eq!(e.kind(), YamlErrorKind::AmbiguousScalar, "{number}: {e}");
+    }
+    // Text in YAML 1.1 and 1.2: a part over 59, a three-digit part, a
+    // leading zero on an integer, or a part that is not digits.
+    for text in [
+        "1:60",
+        "1:99",
+        "1:300",
+        "0:30",
+        "01:30",
+        "1:3a",
+        "1::30",
+        "12:30.5.1",
+    ] {
+        let doc = PolicyDocument::from_yaml(&minimal_with(&format!("  description: {text}\n")))
+            .unwrap_or_else(|e| panic!("{text}: {e}"));
+        assert_eq!(doc.policy.description.as_deref(), Some(text));
+    }
+}
+
+#[test]
+fn wide_flow_collections_are_bounded_by_the_lookahead_limit() {
+    let limits = Limits {
+        max_lookahead: 10_000,
+        ..Limits::DEFAULT
+    };
+    // YAML flow collections (not JSON, so the YAML parser reads them) that
+    // start a line are read whole before the first value is reported.
+    let items = vec!["x"; 100_000].join(",");
+    for wide in [
+        format!("[{items}]"),
+        format!("---\n[{items}]"),
+        format!("- [{items}]"),
+        format!("[[{items}]]"),
+        format!(
+            "{{{}}}",
+            (0..20_000)
+                .map(|i| format!("k{i}: 1"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    ] {
+        let e = to_json_value(&wide, &limits).unwrap_err();
+        assert_eq!(e.kind(), YamlErrorKind::LimitExceeded, "{e}");
+        assert!(e.message().contains("characters to find"), "{e}");
+    }
+    // After `key: `, the same collection streams within a small budget.
+    assert!(to_json_value(&format!("a: [{items}]\n"), &limits).is_ok());
+    // An input that ends exactly at the budget is not misreported.
+    let exact = "a".repeat(9_999);
+    assert!(to_json_value(&exact, &limits).is_ok());
+}
+
+#[test]
+fn lookahead_limit_bounds_memory_before_the_node_limit() {
+    // With the default limits, a 64 MB YAML flow sequence (32 million
+    // items, 8 times the node limit) fails after reading at most
+    // `max_lookahead` characters, rather than queueing every token first.
+    let wide = format!("[{}]", vec!["x"; 32_000_000].join(","));
+    let started = std::time::Instant::now();
+    let e = to_json_value(&wide, &Limits::DEFAULT).unwrap_err();
+    assert_eq!(e.kind(), YamlErrorKind::LimitExceeded, "{e}");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(20),
+        "took {:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn json_input_is_streamed_with_the_same_rules() {
+    // A large JSON document whose objects each start a line inside an
+    // array: the YAML parser would read each one whole before reporting it.
+    let big = serde_json::to_string(&serde_json::json!({
+        "a": (0..300_000).map(|i| serde_json::json!({"k": i})).collect::<Vec<_>>()
+    }))
+    .unwrap();
+    assert!(big.len() > Limits::DEFAULT.max_lookahead);
+    let value = to_json_value(&big, &Limits::DEFAULT).unwrap();
+    assert_eq!(
+        value,
+        serde_json::from_str::<serde_json::Value>(&big).unwrap()
+    );
+    // The node limit applies while streaming: 32 million items.
+    let wide = format!("[{}]", vec!["1"; 32_000_000].join(","));
+    let e = to_json_value(&wide, &Limits::DEFAULT).unwrap_err();
+    assert_eq!(e.kind(), YamlErrorKind::LimitExceeded, "{e}");
+    assert!(e.message().contains("nodes"), "{e}");
+    // So do the depth limit, duplicate keys and typing, with locations.
+    let deep = format!("{}{}", "[".repeat(200), "]".repeat(200));
+    assert_eq!(err(&deep).kind(), YamlErrorKind::LimitExceeded);
+    let e = to_json_value("{\n  \"a\": 1,\n  \"a\": 2\n}", &Limits::DEFAULT).unwrap_err();
+    assert_eq!(e.kind(), YamlErrorKind::DuplicateKey);
+    assert_eq!(at(&e), (3, 3));
+    let e = to_json_value("[1, \"x\", 1.5e400]", &Limits::DEFAULT);
+    assert!(e.is_err(), "out of range float");
+    let v = to_json_value(
+        "{\"a\":\t[true, null, -0.5, \"\\u00e9\"]}",
+        &Limits::DEFAULT,
+    )
+    .unwrap();
+    assert_eq!(v, serde_json::json!({"a": [true, null, -0.5, "\u{e9}"]}));
+    // Text that is not valid JSON goes to the YAML parser as before.
+    assert_eq!(
+        to_json_value("[a, b]", &Limits::DEFAULT).unwrap(),
+        serde_json::json!(["a", "b"])
+    );
+    // A JSON document loads as a policy, with locations from the JSON text.
+    let text = include_str!("../../tests/fixtures/valid/workstation-baseline.json");
+    assert!(from_str(text).unwrap().validate().is_ok());
+    let e = err(&text.replacen("\"revision\": 42", "\"revision\": 42, \"colour\": 1", 1));
+    assert_eq!(e.pointer(), Some("/policy/colour"));
+    let line = text
+        .lines()
+        .position(|l| l.contains("\"revision\": 42"))
+        .unwrap()
+        + 1;
+    assert_eq!(at(&e).0, line);
+}
+
+/// The tree `parse` builds, with the JSON reader or the YAML parser.
+fn tree(input: &str, json_fast_path: bool) -> Result<Vec<parse::Node>, YamlError> {
+    let mut roots = Vec::new();
+    parse::parse_with(input, &Limits::DEFAULT, false, json_fast_path, |root| {
+        roots.push(root);
+        Ok(())
+    })?;
+    Ok(roots)
+}
+
+proptest! {
+    #![proptest_config(cases(512))]
+
+    // The JSON reader is an optimisation: on JSON the YAML parser can read,
+    // both build the same tree, with the same locations.
+    #[test]
+    fn json_reader_and_yaml_parser_agree(doc in arbitrary::document()) {
+        for text in [doc.to_json_pretty().unwrap(), serde_json::to_string(&doc).unwrap()] {
+            prop_assert!(parse::is_json(&text));
+            prop_assert_eq!(tree(&text, true).unwrap(), tree(&text, false).unwrap());
+        }
+    }
+
+    #[test]
+    fn json_reader_and_yaml_parser_agree_on_any_json(value in json_value()) {
+        let text = serde_json::to_string_pretty(&value).unwrap();
+        let json = tree(&text, true);
+        let yaml = tree(&text, false);
+        match (&json, &yaml) {
+            (Ok(a), Ok(b)) => prop_assert_eq!(a, b),
+            // Both reject (for example a key the typing rules refuse), at
+            // the same place.
+            (Err(a), Err(b)) => {
+                prop_assert_eq!(a.kind(), b.kind());
+                prop_assert_eq!(a.location(), b.location());
+            }
+            _ => prop_assert!(false, "{:?} vs {:?}\n{}", json, yaml, text),
+        }
+    }
+}
+
+/// Small JSON values with keys and strings that exercise typing and escapes.
+fn json_value() -> impl Strategy<Value = serde_json::Value> {
+    let leaf = prop_oneof![
+        Just(serde_json::Value::Null),
+        any::<bool>().prop_map(serde_json::Value::from),
+        any::<i64>().prop_map(serde_json::Value::from),
+        (-1e6f64..1e6).prop_map(serde_json::Value::from),
+        "[a-z0-9 .:\\-\"\\\\\u{e9}\u{1F6E1}]{0,12}".prop_map(serde_json::Value::from),
+    ];
+    leaf.prop_recursive(4, 32, 6, |inner| {
+        prop_oneof![
+            proptest::collection::vec(inner.clone(), 0..6).prop_map(serde_json::Value::from),
+            proptest::collection::btree_map("[a-z][a-z0-9_.]{0,8}", inner, 0..6)
+                .prop_map(|m| serde_json::Value::Object(m.into_iter().collect())),
+        ]
+    })
 }

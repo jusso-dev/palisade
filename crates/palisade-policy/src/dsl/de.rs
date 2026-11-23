@@ -211,10 +211,38 @@ impl<'de> de::Deserializer<'de> for De<'de, '_> {
         result.map_err(|e| e.locate(self.node, self.path))
     }
 
+    // A struct or map is only read from a map. serde's derived struct
+    // readers also accept a sequence and bind its items to fields by
+    // position, which neither the JSON Schema nor the documented form allows.
+    fn deserialize_struct<V: Visitor<'de>>(
+        self,
+        _name: &'static str,
+        _fields: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, DeError> {
+        self.map_only(visitor)
+    }
+
+    fn deserialize_map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, DeError> {
+        self.map_only(visitor)
+    }
+
     serde::forward_to_deserialize_any! {
         bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
-        bytes byte_buf unit unit_struct seq tuple tuple_struct map struct
+        bytes byte_buf unit unit_struct seq tuple tuple_struct
         identifier ignored_any
+    }
+}
+
+impl<'de> De<'de, '_> {
+    fn map_only<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, DeError> {
+        let result = match &self.node.value {
+            Value::Map(_) => self.any(visitor),
+            Value::Seq(_) => Err(de::Error::invalid_type(de::Unexpected::Seq, &visitor)),
+            // Scalars give serde's usual message for the visitor.
+            _ => self.any(visitor),
+        };
+        result.map_err(|e| e.locate(self.node, self.path))
     }
 }
 
@@ -371,8 +399,14 @@ impl<'de> VariantAccess<'de, '_> {
 impl<'de> de::VariantAccess<'de> for VariantAccess<'de, '_> {
     type Error = DeError;
 
+    // A variant reached through a one-key map has a value. A unit variant
+    // is only written as its name (`mode: audit`), not `mode: {audit: null}`.
     fn unit_variant(self) -> Result<(), DeError> {
-        self.value(|de| de::Deserialize::deserialize(de))
+        let message = format!(
+            "`{}` takes no value; write it as the plain name `{}`, not as a map",
+            self.entry.key, self.entry.key
+        );
+        self.value(|_| Err(de::Error::custom(message)))
     }
 
     fn newtype_variant_seed<T: DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value, DeError> {
