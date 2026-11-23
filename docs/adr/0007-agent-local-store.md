@@ -62,9 +62,19 @@ Event queue and hash cache:
 anything beyond the envelope, and only then decodes it. Memory mapping is not used.
 
 The anti-rollback record (#225) is kept separately from the cache files, but it is ordered
-against them. Its **floor** is the highest bundle version the agent has made `active`. The rule is
-that the floor never exceeds the version of the bundle in `active`, so a crash can never leave
-every bundle on disk below the floor. Activation follows #61, in this order:
+against them. It holds two values:
+
+- the **floor**: the highest bundle version the agent has made `active`. The rule is that the
+  floor never exceeds the version of the bundle in `active`, so a crash can never leave every
+  bundle on disk below the floor;
+- the **fallback**: the version of the bundle in `previous` that the current `active` directly
+  replaced, or *none*. Only that bundle may be loaded under the one-step N-1 exception of
+  [ADR 0018](0018-fail-open-vs-fail-closed-defaults-revised.md). This keeps the exception to one
+  step even when `active` was already corrupt at the last activation. For example, if `active`
+  (10) was corrupt when 11 arrived, `previous` still holds 9, and the fallback is *none*, so a
+  later failure of 11 leads to the emergency policy, not to 9.
+
+Activation follows #61, in this order:
 
 1. Write `pending`, flush, and verify it. Its version must be at or above the floor. If `active`
    is *loadable* (its signature verifies and its version is at or above the floor, the same test
@@ -75,27 +85,35 @@ every bundle on disk below the floor. Activation follows #61, in this order:
 2. If `active` is loadable, copy it to `previous` (written to a temporary file, flushed, then
    renamed). If `active` is missing, fails verification or is below the floor, leave `previous`
    untouched, so a verified last-known-good bundle is never overwritten by a bad or stale one.
-3. Atomically rename `pending` over `active`, with write-through, so the rename is durable
+3. Set the fallback to *none* in every copy of the record, so that no crash from here on can
+   leave a fallback that points at a bundle the new `active` did not replace.
+4. Atomically rename `pending` over `active`, with write-through, so the rename is durable
    before the next step.
-4. Only then raise the floor to the new version, in every copy of the record (#225).
+5. Only then, in one write per copy of the record (#225), raise the floor to the new version and
+   set the fallback to the version copied in step 2, or leave it *none* if step 2 copied
+   nothing.
 
-A power loss before step 3 leaves the old `active` in place with the old floor. A power loss
-between steps 3 and 4 leaves the new bundle in `active` with a floor below it. At every point a
+A power loss before step 4 leaves the old `active` in place with the old floor. A power loss
+between steps 4 and 5 leaves the new bundle in `active` with a floor below it. At every point a
 verified `active` exists that the floor accepts, so a power loss mid-swap never leaves the agent
-without its current policy.
+without its current policy. An interrupted activation can only leave the fallback at *none*, which
+removes the N-1 exception until the next activation; it never widens it.
 
 At startup the agent:
 
 - deletes any leftover `pending`. It was never activated, and the agent fetches it again;
 - reads the floor as the highest value among the record's intact copies;
+- reads the fallback as *none* unless every intact copy records the same fallback;
 - loads `active` if it verifies and its version is at or above the floor, then raises the floor
-  to that version if it is lower (completing an interrupted step 4). If the record's copies are
-  all intact and differ only because step 4 raised some of them and not others, and the highest
-  copy equals the verified `active` version, the agent raises the rest to match and does not
-  raise `tamper.policy.rollback_suspected`. Any other mismatch, and any missing or corrupt copy
-  once a bundle has been activated, raises it (#225) and is not treated as an interrupted step 4;
+  to that version if it is lower, leaving the fallback at *none* (completing an interrupted
+  step 5). If the record's copies are all intact and differ only because step 3 or step 5
+  updated some of them and not others, and the highest floor equals the verified `active`
+  version, the agent writes the reconciled values to every copy and does not raise
+  `tamper.policy.rollback_suspected`. Any other mismatch, and any missing or corrupt copy once a
+  bundle has been activated, raises it (#225) and is not treated as an interrupted activation;
 - otherwise follows the failure rows of [ADR 0018](0018-fail-open-vs-fail-closed-defaults-revised.md):
-  `previous` may load below the floor only under its bounded one-step N-1 exception;
+  `previous` may load below the floor only if it verifies and its version equals the recorded
+  fallback (the one-step N-1 exception);
 - if no bundle on disk can load, even with that exception (for example, both files were
   replaced with older, validly signed bundles), treats that as both bundles failing: it loads the built-in emergency
   policy, raises `tamper.policy.rollback_suspected`, and starts a rapid check-in. It never

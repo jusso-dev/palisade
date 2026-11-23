@@ -24,6 +24,11 @@ decision and its failure table, and closes three gaps found in review:
   again. The same gap exists if the agent crashes after opening a session but before the ID is
   written.
 
+A later review found two more gaps, also closed here: the one-step N-1 fallback could reach
+further back than one step after a corrupt `active` was replaced (fixed in
+[ADR 0007](0007-agent-local-store.md), and referenced in the table below), and in `native_only`
+mode nothing enforced the emergency policy.
+
 The rest of the context is unchanged.
 
 Every enforcement component can fail. When one does, Palisade either **fails open** (allows,
@@ -72,7 +77,7 @@ Option 3. Case by case:
 | **Panic while parsing one file** | The agent is built with `panic = "unwind"`. Each file parse runs inside its own `catch_unwind` boundary. A panic there marks that file's identity as unparseable, raises a `fileid.parse_panic` event (rate-limited, with the file's hash if one was computed), and the subsystem carries on with the next file. Any decision the agent itself makes treats an unparseable file as an unknown file (implicit deny in enforce mode, #39). Per-file panics do **not** count towards the subsystem circuit breaker below. | With `abort`, one crafted file that triggers a parser panic would crash the whole agent on every scan, blinding it in a loop. Counting per-file panics towards the breaker would let a standard user disable a subsystem by dropping three crafted files. Treating the file as unknown keeps the decision closed. |
 | **Panic in a subsystem outside a per-file boundary** | The subsystem task is wrapped with `catch_unwind` and restarted (#56). After 3 such panics in 10 minutes the subsystem is marked `Failed` and a critical health alert is raised. If the failed subsystem is the one that answers driver verdict requests, the driver sees the agent as disconnected, and the driver row below applies. Aborts that unwinding cannot catch (stack overflow, out of memory) fall back to the first row (agent process crash). | A real bug, not a crafted input, is the likely cause, so it is surfaced loudly. The native layer keeps enforcing whatever the subsystem state. |
 | **New bundle (`pending`) fails verification or activation** | Keep `active`. Report `PolicyRejected(reason)` (#61). | Nothing was rolled back: the device stays on the policy it already had. |
-| **Active bundle (N) corrupt or fails verification at load** | Load `previous` (N-1) if it verifies, as #225 specifies. This is a **bounded, one-step exception to anti-rollback**: the anti-rollback record keeps N, so only bundles at N or above are accepted from the server. The agent raises a critical `policy.lkg_loaded` tamper event at once (not only when both bundles fail) and starts a rapid check-in to fetch a fresh bundle. | Availability: disk corruption must not lock a machine down when a verified, previously approved policy exists. N-1 may be weaker than N (for example, if N added a deny), so this is recorded as an accepted risk below. |
+| **Active bundle (N) corrupt or fails verification at load** | Load `previous` (N-1) if it verifies and the anti-rollback record names it as the bundle N directly replaced ([ADR 0007](0007-agent-local-store.md)), as #225 specifies. Otherwise the next row applies. This is a **bounded, one-step exception to anti-rollback**: the anti-rollback record keeps N, so only bundles at N or above are accepted from the server. The agent raises a critical `policy.lkg_loaded` tamper event at once (not only when both bundles fail) and starts a rapid check-in to fetch a fresh bundle. | Availability: disk corruption must not lock a machine down when a verified, previously approved policy exists. N-1 may be weaker than N (for example, if N added a deny), so this is recorded as an accepted risk below. |
 | **Active and previous bundles both fail, after a policy was ever accepted** (including when the anti-rollback floor rejects every bundle on disk, [ADR 0007](0007-agent-local-store.md)) | Load the built-in **emergency policy** from #225 in enforce mode: allow OS-signed binaries and Palisade itself, block the rest. Raise a critical event. The emergency policy is an extra restriction in Palisade's own layer. It never removes, replaces or relaxes the installed OS-native policies: see "Emergency policy and the native layer" below. | Corruption after enrolment is a possible attack, so it must not relax anything. |
 | **No policy yet (first install, before the first bundle)** | Run the built-in safe defaults from #61: audit mode, with the mandatory blocklists (#87) enforced if the agent ships them. Report `PolicyMissing`. | Nothing has been approved yet, so there is nothing to protect by locking down. Blocking everything at install time would make deployment fail. |
 | **Policy stale or past `expires_at`** | Keep enforcing the current policy. Report `PolicyStale`. Never relax automatically (#61, #225). | Staleness is not evidence that the policy is wrong. |
@@ -95,6 +100,26 @@ enforced by the kernel and do not depend on the agent's bundle cache
   present, and the agent's own evaluation and reporting). A file must pass both layers, so the
   effective result is the native policy *and* the emergency policy. The emergency policy's
   "allow OS-signed binaries" can never override a native deny.
+
+**Who enforces the emergency policy.** It depends on the `enforcement_strategy`
+([ADR 0002](0002-enforcement-strategy.md)):
+
+- `layered` or `driver_only`: the Palisade driver enforces it before execution. If the driver is
+  absent or failing, the driver row of the table applies (`driver_failure_mode`).
+- `native_only` (the M2 default): there is no Palisade pre-execution enforcer, so the emergency
+  policy is **not enforced**. Enforcement stays at the installed native policy, which was compiled
+  from the last verified bundle the device activated, so it is no weaker than a policy that was
+  already approved. Rules that only the agent or driver could enforce were already reported as
+  "not enforced" in this mode, and stay so. The agent applies the emergency policy to its own
+  audit evaluation, so events show what it *would* block. It reports the degraded state as
+  `PolicyEmergencyUnenforced` in health, with a critical `policy.emergency_loaded` event that
+  says the emergency policy has no enforcer. The console shows the device as degraded until a
+  verified bundle arrives.
+
+A native emergency policy for `native_only` devices (a separate, pre-built base policy that
+allows only OS-signed binaries and Palisade, and intersects with the installed one) is not part
+of this decision. It would need signing inputs and possibly a reboot, so it is left to #225 and
+#6.
 
 The emergency policy itself is defined in #225. When the agent next receives a verified bundle,
 it leaves emergency mode and normal activation (#61, #6) resumes.
@@ -224,15 +249,19 @@ path. The mismatch between record copies raises `tamper.policy.rollback_suspecte
 - While in emergency mode, no native policy change reaches the device, including one that would
   have added a deny. The device keeps its last installed native policy until a verified bundle
   arrives.
+- On `native_only` devices the emergency policy has no pre-execution enforcer. Losing both
+  caches leaves the device on its last installed native policy, reported as degraded, not on
+  the stricter emergency policy.
 
 ## Security impact
 
 This ADR decides whether crashing, corrupting or confusing Palisade is a bypass. With these
 defaults it is not: the kernel-enforced native layer survives agent failure, losing both cached
-bundles leads to the stricter emergency policy (which only adds restrictions on top of the
-installed native policy, never replacing it), a stale policy keeps enforcing, crafted files
+bundles leads to the stricter emergency policy where a Palisade driver can enforce it (it only
+adds restrictions on top of the installed native policy, never replacing it) and to the
+unchanged, last-approved native policy on `native_only` devices, a stale policy keeps enforcing, crafted files
 cannot disable a subsystem, and by default a clock change cannot start, extend or revive a scheduled grant.
-There are four deliberate, bounded weak points:
+There are five deliberate, bounded weak points:
 
 1. the first-install audit window (built-in mandatory blocklists still enforce, and it ends at the
    first verified bundle);
@@ -241,14 +270,17 @@ There are four deliberate, bounded weak points:
    SYSTEM can write the cache directory (#220), so an attacker who can trigger this already has
    stronger options;
 3. the driver's default `fail_safe` (the native layer still enforces, and it is configurable to
-   `fail_secure`); and
-4. the clock risks in "Accepted risk" above: using an unredeemed override code or token outside its window
+   `fail_secure`);
+4. on `native_only` devices, no enforcement of the emergency policy when both caches fail (the
+   last installed native policy, compiled from a verified bundle, keeps enforcing, and the device
+   is reported as degraded); and
+5. the clock risks in "Accepted risk" above: using an unredeemed override code or token outside its window
    (each code still opens one session, which ends at the next agent restart, reboot or uncounted
    sleep),
    and, only for groups that opt in to offline scheduling, starting or stretching scheduled
    grants until the next check-in.
 
-All four are listed in the threat model as accepted risks (#219) and are exercised by the bypass
+All five are listed in the threat model as accepted risks (#219) and are exercised by the bypass
 regression suite (#230).
 
 ## Links

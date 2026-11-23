@@ -110,10 +110,13 @@ stopping the agent does not stop the kernel-enforced native policy. How much of 
 survives an administrator then depends on how the native policy is deployed:
 
 - **Signed native policy on a Secure Boot device** (#85). The administrator cannot remove or
-  replace the policy, so the residual risk is loss of reporting and of driver-only rules, not
-  loss of baseline enforcement.
+  replace the code integrity policy, so the kernel-enforced code integrity baseline is kept. The
+  residual risk is loss of reporting, of driver-only rules, and of per-user rules in the
+  rule-collection format, which depend on a service the administrator can stop
+  ([ADR 0002](0002-enforcement-strategy.md)). Signing does not protect that service.
 - **Unsigned native policy, or Secure Boot off.** An administrator can delete or replace the
-  policy, so the residual risk also includes **loss of baseline enforcement**. Palisade layers
+  code integrity policy, so the residual risk also includes **loss of the code integrity
+  baseline**. Palisade layers
   cannot prevent this, because the same administrator can disable the driver too.
 
 Signing and Secure Boot are **not required**. A signed policy that is wrong can leave a device

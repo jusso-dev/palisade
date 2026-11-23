@@ -11,8 +11,9 @@ are unchanged. It corrects one wrong statement and adds the rule that replaces i
 that `ring` handles AEAD nonce generation inside the library. It does not. `ring`'s AEAD API
 takes a nonce, or a caller-supplied nonce sequence, for every seal operation. Reusing a nonce
 under the same AES-GCM key reveals the XOR of the two plaintexts and lets an attacker forge
-authentication tags for that key. So Palisade's own code must make every nonce unique, including
-across agent restarts and reboots.
+authentication tags for that key. So Palisade's own code must keep nonces unique under each key,
+including across agent restarts and reboots. With random nonces that is a probability bound, not
+an absolute guarantee, and this ADR states the bound.
 
 Palisade uses cryptography in five places:
 
@@ -102,11 +103,14 @@ Libraries:
 - AES-256-GCM for data at rest (#225). HMAC-SHA-256 for MACs (the driver boot cache, #113) and
   for one-time override codes (#222).
 - **AES-GCM nonces are the `crypto` module's responsibility.** `ring` takes the nonce from the
-  caller, so the `crypto` module guarantees that no 96-bit nonce is ever used twice under one key,
-  including across restarts, reboots and crashes:
+  caller, so the `crypto` module keeps the chance that any 96-bit nonce repeats under one key at
+  or below **2^-33**, including across restarts, reboots and crashes. Two random draws can
+  collide, so this is a bound, not a guarantee. With `q` seals under one key the chance of any
+  repeat is at most about `q^2 / 2^97`, which is 2^-33 at the 2^32 seal limit. That is the
+  limit NIST SP 800-38D sets for random 96-bit nonces:
   - It generates each nonce from the OS cryptographically secure random number generator and
     never accepts a nonce from call sites. The seal API takes no nonce parameter.
-  - Each data key seals at most 2^32 messages, the limit for random 96-bit GCM nonces. The module
+  - Each data key seals at most 2^32 messages, which is what keeps the bound above. The module
     counts seals per key and rotates the data key before the limit. The persisted count must
     never be below the number of seals actually made: the module may reserve a block of K seals
     by persisting `count + K` before using them, so a high-rate store (such as an encrypted
@@ -163,9 +167,11 @@ algorithm downgrade, and domain separation prevents cross-protocol signature reu
 verification always on in TLS means a misconfigured proxy fails closed rather than silently
 exposing traffic. AES-GCM fails badly on nonce reuse: two records sealed with the same key and
 nonce leak the XOR of their plaintexts and allow forged tags under that key. Random nonces from
-the OS generator, a per-key seal limit with rotation, and no caller-supplied nonces keep the
-probability of a repeat negligible, including after a restart or a restored backup of protected
-storage. A flaw in `ring` would affect TLS and signatures at once, so it is tracked
+the OS generator, a per-key seal limit of 2^32 with rotation, and no caller-supplied nonces keep
+the probability of any repeat under one key at or below 2^-33, including after a restart or a
+restored backup of protected storage. A deterministic counter could make repeats impossible in
+principle, but restoring an old counter would repeat nonces in practice, so it is not used.
+A flaw in `ring` would affect TLS and signatures at once, so it is tracked
 under the supply-chain advisory scan (#23).
 
 ## Links

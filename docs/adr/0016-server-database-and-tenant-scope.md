@@ -79,8 +79,12 @@ Binding the scope to the caller (new):
     per-transaction setting that the server sets from the caller's resolved scope.
   - Tenant tables use `FORCE ROW LEVEL SECURITY`, so the policies apply even to the table owner.
     The policy expression fails closed: when the tenant setting is unset or empty, no rows match.
-  - The server connects as a non-owner role with `NOBYPASSRLS`. Migrations run as a separate
-    owner role.
+  - The server connects as a non-owner application role with `NOSUPERUSER`, `NOBYPASSRLS` and
+    `NOCREATEROLE`. `NOBYPASSRLS` alone is not enough, because a superuser bypasses RLS whatever
+    that attribute says. The application role is not a member of any role that is a superuser,
+    has `BYPASSRLS` or owns tenant tables, so `SET ROLE` cannot leave RLS behind. At startup the
+    server checks these attributes and memberships for its own role, and refuses to start if
+    any is wrong. Migrations run as a separate owner role.
   - Foreign keys include `tenant_id`, so a row can never reference another tenant's row.
   - Shared rows (built-in permissions, seeded content) belong to a root tenant and are exposed
     through explicit read-only policies.
@@ -92,7 +96,10 @@ Binding the scope to the caller (new):
   - The same function is the only code that writes the tenant setting, at the start of each
     transaction (#127). A CI check rejects any other code that writes it.
   - #127 has a cross-tenant test suite: two tenants, every API route, and each principal type,
-    asserting that no response contains the other tenant's rows.
+    asserting that no response contains the other tenant's rows. For every attempted
+    cross-tenant insert, update and delete, the suite also reads the stored rows directly (as the
+    owner role) and asserts that the other tenant's data is unchanged, because an empty
+    response does not prove that nothing was written.
 - High-volume event tables are partitioned by month (#127).
 
 ## Consequences
@@ -124,8 +131,8 @@ RLS trusts the scope the server sets. The trust boundary for tenant isolation is
 scope resolver, and the threat model (#219) records it as such. A resolver bug that maps a caller
 to the wrong tenant crosses tenants, and RLS does not stop it. SQL injection is countered by
 compile-time checked, parameterised queries, not by RLS, because injected SQL could change the
-session's tenant setting. `NOBYPASSRLS` on the application role means a compromised server
-process cannot simply turn RLS off, but it can set any scope, so a compromised server is not
+session's tenant setting. `NOSUPERUSER` and `NOBYPASSRLS` on the application role, with no route to a
+role that bypasses RLS, mean a compromised server process cannot simply turn RLS off, but it can set any scope, so a compromised server is not
 contained by RLS either. The owner role used for migrations is a separate secret (#227). Event
 tables are the evidence trail for ISM-1660, so their append-only protection and retention live
 in #127 and #229.
