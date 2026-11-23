@@ -438,6 +438,13 @@ pub struct PeInfo {
     /// is a file offset, always after the headers (the later of
     /// `SizeOfHeaders` and the end of the section table). Parsing it is #48.
     pub certificate_table: Option<FileRange>,
+    /// Why a non-zero security directory entry was not accepted as the
+    /// certificate table: [`WarningKind::CertificateTableInvalid`],
+    /// [`WarningKind::CertificateTableOutOfFile`] or
+    /// [`WarningKind::CertificateTableOverlapsSection`]. Kept here as well as
+    /// in [`PeInfo::parse_warnings`], which can be truncated, so the
+    /// Authenticode image hash can always report it.
+    pub certificate_table_issue: Option<WarningKind>,
     /// Bytes after the headers, the last section's file data and the
     /// certificate table, if any.
     pub overlay: Option<FileRange>,
@@ -768,43 +775,45 @@ pub fn parse_with(data: &[u8], options: &ParseOptions) -> Result<PeInfo, PeError
     let headers_end = section_table
         .saturating_add(sections.len().saturating_mul(SECTION_HEADER_SIZE))
         .max(to_usize(size_of_headers).unwrap_or(0));
+    let mut certificate_table_issue = None;
     let certificate_table = data_directories
         .get(DataDirectoryKind::Security.index())
         .filter(|d| d.is_present())
         .and_then(|d| {
             let entry = usize::try_from(d.entry_offset).unwrap_or(usize::MAX);
-            // A half-zero entry, or one pointing into the headers, is not a
-            // certificate table. Rejecting it also stops a zero-size entry
-            // at the end of the file from hiding the overlay.
-            let start = to_usize(d.virtual_address).unwrap_or(usize::MAX);
-            if d.size == 0 || d.virtual_address == 0 || start < headers_end {
-                warnings.push(entry, WarningKind::CertificateTableInvalid);
-                return None;
-            }
             let range = FileRange {
                 offset: u64::from(d.virtual_address),
                 size: u64::from(d.size),
             };
-            let fits = range
-                .offset
-                .checked_add(range.size)
-                .is_some_and(|end| end <= to_u64(data.len()));
-            if !fits {
-                warnings.push(entry, WarningKind::CertificateTableOutOfFile);
-                return None;
-            }
-            // The certificate table lies outside the image's mapped data, so
-            // a range overlapping any section's file data is not one.
             let end = range.offset.saturating_add(range.size);
-            let overlaps = sections
+            // A half-zero entry, or one pointing into the headers, is not a
+            // certificate table. Rejecting it also stops a zero-size entry
+            // at the end of the file from hiding the overlay.
+            let start = to_usize(d.virtual_address).unwrap_or(usize::MAX);
+            let rejection = if d.size == 0 || d.virtual_address == 0 || start < headers_end {
+                Some(WarningKind::CertificateTableInvalid)
+            } else if end > to_u64(data.len()) {
+                Some(WarningKind::CertificateTableOutOfFile)
+            } else if sections
                 .iter()
                 .filter_map(|s| in_file_data(s, optional.file_alignment, data.len()))
-                .any(|(s_start, s_end)| range.offset < s_end && s_start < end);
-            if overlaps {
-                warnings.push(entry, WarningKind::CertificateTableOverlapsSection);
-                return None;
+                .any(|(s_start, s_end)| range.offset < s_end && s_start < end)
+            {
+                // The certificate table lies outside the image's mapped
+                // data, so a range overlapping any section's file data is
+                // not one.
+                Some(WarningKind::CertificateTableOverlapsSection)
+            } else {
+                None
+            };
+            match rejection {
+                Some(kind) => {
+                    warnings.push(entry, kind.clone());
+                    certificate_table_issue = Some(kind);
+                    None
+                }
+                None => Some(range),
             }
-            Some(range)
         });
 
     let overlay = find_overlay(
@@ -849,6 +858,7 @@ pub fn parse_with(data: &[u8], options: &ParseOptions) -> Result<PeInfo, PeError
         sections,
         checksum,
         certificate_table,
+        certificate_table_issue,
         overlay,
         debug,
         resources,
