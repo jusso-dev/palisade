@@ -81,7 +81,7 @@ pub enum PeErrorKind {
     /// The input does not start with `MZ`.
     NoDosSignature,
     /// `e_lfanew` is above [`MAX_E_LFANEW`] or leaves no room for the PE
-    /// signature and COFF header before the end of the input.
+    /// signature before the end of the input.
     LfanewOutOfRange(u32),
     /// There is no `PE\0\0` signature at `e_lfanew`.
     NoPeSignature,
@@ -170,13 +170,23 @@ pub enum WarningKind {
     DirectoryNotMapped(DataDirectoryKind),
     /// The certificate table range lies outside the input.
     CertificateTableOutOfFile,
+    /// The certificate table entry has a zero offset or size, or points into
+    /// the headers. It is ignored.
+    CertificateTableInvalid,
     /// The file is too large (over 4 GiB) for the PE checksum.
     ChecksumUnavailable,
     /// A resource directory or entry is out of bounds.
     ResourceOutOfBounds,
-    /// A resource directory is reachable twice (a loop or shared subtree);
-    /// it was walked once.
+    /// A resource directory refers back to one of its own ancestors. The
+    /// loop was not followed.
     ResourceLoop,
+    /// A resource entry has a numeric ID with bits 16 to 30 set. The OS
+    /// compares the full field, so it matches no resource; it was skipped.
+    ResourceIdInvalid(u32),
+    /// `RT_VERSION` resources exist, but none is the one the OS loads
+    /// (`VS_VERSION_INFO`, ID 1, at the language level), so no version
+    /// information is reported.
+    NoStandardVersionResource,
     /// The resource tree is deeper than allowed; deeper levels were skipped.
     ResourceTooDeep,
     /// More than [`MAX_RESOURCE_ENTRIES`] resource entries; the
@@ -184,6 +194,9 @@ pub enum WarningKind {
     ResourceEntryLimit,
     /// A debug directory entry or its data is out of bounds or malformed.
     DebugDirectoryMalformed,
+    /// More than [`MAX_DEBUG_ENTRIES`] debug directory entries; the rest
+    /// were skipped.
+    TooManyDebugEntries,
     /// The version resource could not be parsed, or parsed only in part.
     VersionInfo(version::VersionInfoIssue),
 }
@@ -212,6 +225,7 @@ pub struct CoffHeader {
 
 /// The optional header format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum PeFormat {
     /// PE32, magic `0x10b` (32-bit images).
     Pe32,
@@ -424,20 +438,28 @@ impl PeInfo {
         self.debug.has_repro
     }
 
-    /// The section containing `rva`, if any.
+    /// The section whose mapped range contains `rva`: `VirtualAddress` up
+    /// to `VirtualSize` rounded up to `SectionAlignment` (or `SizeOfRawData`
+    /// when `VirtualSize` is zero), as the loader maps it.
     #[must_use]
     pub fn section_for_rva(&self, rva: u32) -> Option<&Section> {
-        self.sections.iter().find(|s| {
-            let span = s.virtual_size.max(s.size_of_raw_data);
-            rva >= s.virtual_address && rva - s.virtual_address < span
-        })
+        self.layout().section_for(rva)
     }
 
-    /// Maps the RVA range `rva..rva + len` to a file offset. The whole range
-    /// must lie in the headers or in one section's raw data.
+    /// Maps the RVA range `rva..rva + len` to a file offset, as the loader
+    /// would. The range must lie in the file-backed part of one section, or
+    /// in the headers; zero-filled memory has no file offset.
     #[must_use]
     pub fn rva_to_offset(&self, rva: u32, len: u32) -> Option<u64> {
-        rva_to_offset(&self.sections, self.optional.size_of_headers, rva, len).map(to_u64)
+        self.layout().rva_to_offset(rva, len).map(to_u64)
+    }
+
+    fn layout(&self) -> Layout<'_> {
+        Layout {
+            sections: &self.sections,
+            size_of_headers: self.optional.size_of_headers,
+            section_alignment: self.optional.section_alignment,
+        }
     }
 }
 
@@ -468,38 +490,81 @@ fn fatal(offset: usize, kind: PeErrorKind) -> PeError {
     }
 }
 
-/// Maps an RVA range to a file offset.
-///
-/// Sections are tried first, and the whole range must lie inside one
-/// section's raw data. Otherwise the range maps one to one into the headers,
-/// but only below both `SizeOfHeaders` and the lowest section RVA, as the
-/// loader maps them, so an inflated `SizeOfHeaders` cannot redirect lookups.
-pub(crate) fn rva_to_offset(
-    sections: &[Section],
-    size_of_headers: u32,
-    rva: u32,
-    len: u32,
-) -> Option<usize> {
-    let end = rva.checked_add(len)?;
-    let in_section = sections.iter().find_map(|s| {
-        let delta = rva.checked_sub(s.virtual_address)?;
-        if delta.checked_add(len)? > s.size_of_raw_data {
-            return None;
-        }
-        to_usize(s.pointer_to_raw_data.checked_add(delta)?)
-    });
-    if in_section.is_some() {
-        return in_section;
+/// How the loader lays out the image in memory: enough to map RVAs to file
+/// offsets the way the OS does.
+#[derive(Clone, Copy)]
+pub(crate) struct Layout<'a> {
+    pub(crate) sections: &'a [Section],
+    pub(crate) size_of_headers: u32,
+    pub(crate) section_alignment: u32,
+}
+
+impl<'a> Layout<'a> {
+    /// The section whose mapped virtual range contains `rva`.
+    fn section_for(&self, rva: u32) -> Option<&'a Section> {
+        self.sections.iter().find(|s| {
+            rva.checked_sub(s.virtual_address)
+                .is_some_and(|delta| delta < mapped_span(s, self.section_alignment))
+        })
     }
-    let header_limit = sections
-        .iter()
-        .map(|s| s.virtual_address)
-        .min()
-        .map_or(size_of_headers, |first| first.min(size_of_headers));
-    if end <= header_limit {
-        to_usize(rva)
+
+    /// The file offset of `rva`, and how many file-backed bytes follow it
+    /// before the end of its section (or of the headers).
+    ///
+    /// A section is mapped over `VirtualSize` rounded up to
+    /// `SectionAlignment` (or `SizeOfRawData` when `VirtualSize` is zero), so
+    /// raw bytes beyond that are not part of the image and cannot shadow the
+    /// next section. Only the first `min(SizeOfRawData, span)` bytes come
+    /// from the file; the rest is zero-filled and has no file offset. The
+    /// headers are mapped below both `SizeOfHeaders` and the lowest section
+    /// RVA.
+    pub(crate) fn backed_extent(&self, rva: u32) -> Option<(usize, u32)> {
+        if let Some(s) = self.section_for(rva) {
+            let delta = rva.checked_sub(s.virtual_address)?;
+            let backed = s
+                .size_of_raw_data
+                .min(mapped_span(s, self.section_alignment));
+            if delta >= backed {
+                return None;
+            }
+            let offset = to_usize(s.pointer_to_raw_data.checked_add(delta)?)?;
+            return Some((offset, backed - delta));
+        }
+        let limit = self
+            .sections
+            .iter()
+            .map(|s| s.virtual_address)
+            .min()
+            .map_or(self.size_of_headers, |first| {
+                first.min(self.size_of_headers)
+            });
+        if rva < limit {
+            Some((to_usize(rva)?, limit - rva))
+        } else {
+            None
+        }
+    }
+
+    /// Maps the RVA range `rva..rva + len` to a file offset. The range must
+    /// start inside the file-backed part of one section (or the headers) and
+    /// end inside it too. A zero-length range must still start inside.
+    pub(crate) fn rva_to_offset(&self, rva: u32, len: u32) -> Option<usize> {
+        let (offset, available) = self.backed_extent(rva)?;
+        (len <= available).then_some(offset)
+    }
+}
+
+/// The size of a section's mapped virtual range.
+fn mapped_span(s: &Section, section_alignment: u32) -> u32 {
+    if s.virtual_size == 0 {
+        return s.size_of_raw_data;
+    }
+    if section_alignment.is_power_of_two() {
+        s.virtual_size
+            .checked_next_multiple_of(section_alignment)
+            .unwrap_or(u32::MAX)
     } else {
-        None
+        s.virtual_size
     }
 }
 
@@ -560,10 +625,7 @@ pub fn parse_with(data: &[u8], options: &ParseOptions) -> Result<PeInfo, PeError
     let e_lfanew = u32_at(data, 0x3c).ok_or_else(|| fatal(0x3c, PeErrorKind::TooSmall))?;
     let pe_offset = to_usize(e_lfanew)
         .filter(|_| e_lfanew <= MAX_E_LFANEW)
-        .filter(|off| {
-            off.checked_add(4 + COFF_HEADER_SIZE)
-                .is_some_and(|end| end <= data.len())
-        })
+        .filter(|off| off.checked_add(4).is_some_and(|end| end <= data.len()))
         .ok_or_else(|| fatal(0x3c, PeErrorKind::LfanewOutOfRange(e_lfanew)))?;
     if u32_at(data, pe_offset) != Some(PE_SIGNATURE) {
         return Err(fatal(pe_offset, PeErrorKind::NoPeSignature));
@@ -586,29 +648,30 @@ pub fn parse_with(data: &[u8], options: &ParseOptions) -> Result<PeInfo, PeError
     let section_table = opt_offset.saturating_add(opt_size);
     let mut sections = parse_sections(data, section_table, coff.number_of_sections, &mut warnings);
 
-    // Legitimate sections do not overlap, so their raw data adds up to at
-    // most the file length. Bounding the bytes scanned by that keeps crafted
-    // overlapping sections from making entropy quadratic.
-    let mut entropy_budget = data.len();
-    let entropy_sections = if options.section_entropy {
-        sections.len()
-    } else {
-        0
-    };
-    for (index, section) in sections.iter_mut().enumerate().take(entropy_sections) {
+    // Every section's raw range is checked against the file, whatever the
+    // options. Entropy, when wanted, is bounded by a budget: legitimate
+    // sections do not overlap, so their raw data adds up to at most the file
+    // length, and crafted overlapping sections cannot make the work
+    // quadratic.
+    let mut entropy_budget = options.section_entropy.then_some(data.len());
+    for (index, section) in sections.iter_mut().enumerate() {
         let index = u16::try_from(index).unwrap_or(u16::MAX);
         let Some(raw) = section_raw_data(data, section, index, &mut warnings) else {
             continue;
         };
-        let Some(left) = entropy_budget.checked_sub(raw.len()) else {
+        let Some(budget) = entropy_budget else {
+            continue;
+        };
+        if let Some(left) = budget.checked_sub(raw.len()) {
+            entropy_budget = Some(left);
+            section.entropy = Some(analysis::shannon_entropy(raw));
+        } else {
             warnings.push(
                 to_usize(section.pointer_to_raw_data).unwrap_or(usize::MAX),
                 WarningKind::EntropyBudgetExhausted { index },
             );
-            break;
-        };
-        entropy_budget = left;
-        section.entropy = Some(analysis::shannon_entropy(raw));
+            entropy_budget = None;
+        }
     }
 
     let checksum_offset = usize::try_from(optional.checksum_offset).unwrap_or(usize::MAX);
@@ -626,10 +689,19 @@ pub fn parse_with(data: &[u8], options: &ParseOptions) -> Result<PeInfo, PeError
         computed,
     };
 
+    let size_of_headers = optional.size_of_headers;
     let certificate_table = data_directories
         .get(DataDirectoryKind::Security.index())
         .filter(|d| d.is_present())
         .and_then(|d| {
+            let entry = usize::try_from(d.entry_offset).unwrap_or(usize::MAX);
+            // A half-zero entry, or one pointing into the headers, is not a
+            // certificate table. Rejecting it also stops a zero-size entry
+            // at the end of the file from hiding the overlay.
+            if d.size == 0 || d.virtual_address == 0 || d.virtual_address < size_of_headers {
+                warnings.push(entry, WarningKind::CertificateTableInvalid);
+                return None;
+            }
             let range = FileRange {
                 offset: u64::from(d.virtual_address),
                 size: u64::from(d.size),
@@ -639,21 +711,22 @@ pub fn parse_with(data: &[u8], options: &ParseOptions) -> Result<PeInfo, PeError
                 .checked_add(range.size)
                 .is_some_and(|end| end <= to_u64(data.len()));
             if !fits {
-                warnings.push(
-                    usize::try_from(d.entry_offset).unwrap_or(usize::MAX),
-                    WarningKind::CertificateTableOutOfFile,
-                );
+                warnings.push(entry, WarningKind::CertificateTableOutOfFile);
             }
             fits.then_some(range)
         });
 
     let overlay = find_overlay(data.len(), &optional, &sections, certificate_table);
 
-    let size_of_headers = optional.size_of_headers;
+    let layout = Layout {
+        sections: &sections,
+        size_of_headers,
+        section_alignment: optional.section_alignment,
+    };
     let debug = data_directories
         .get(DataDirectoryKind::Debug.index())
         .filter(|d| d.is_present())
-        .map(|d| debug::parse(data, &sections, size_of_headers, *d, &mut warnings))
+        .map(|d| debug::parse(data, layout, *d, &mut warnings))
         .unwrap_or_default();
 
     let mut resources = None;
@@ -662,15 +735,9 @@ pub fn parse_with(data: &[u8], options: &ParseOptions) -> Result<PeInfo, PeError
         .get(DataDirectoryKind::Resource.index())
         .filter(|d| d.is_present())
     {
-        match resource::walk(data, &sections, size_of_headers, *dir, &mut warnings) {
-            Some(summary) => {
-                version_info = version_from_resources(data, &summary, &mut warnings);
-                resources = Some(summary);
-            }
-            None => warnings.push(
-                usize::try_from(dir.entry_offset).unwrap_or(usize::MAX),
-                WarningKind::DirectoryNotMapped(DataDirectoryKind::Resource),
-            ),
+        if let Some(summary) = resource::walk(data, layout, *dir, &mut warnings) {
+            version_info = version_from_resources(data, &summary, &mut warnings);
+            resources = Some(summary);
         }
     }
 
@@ -929,7 +996,15 @@ fn version_from_resources(
     summary: &ResourceSummary,
     warnings: &mut Warnings,
 ) -> Option<VersionInfo> {
-    let entry = summary.version_entries.first()?;
+    let Some(entry) = &summary.version_resource else {
+        if !summary.version_entries.is_empty() {
+            warnings.push(
+                usize::try_from(summary.offset).unwrap_or(usize::MAX),
+                WarningKind::NoStandardVersionResource,
+            );
+        }
+        return None;
+    };
     let resource_root = usize::try_from(summary.offset).unwrap_or(usize::MAX);
     let base = entry
         .file_offset

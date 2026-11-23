@@ -6,6 +6,7 @@ use std::fmt;
 
 /// The COFF `Machine` field: the CPU an image targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Machine {
     /// `0x0000`: unknown or any machine.
     Unknown,
@@ -79,6 +80,7 @@ impl Machine {
 
 /// The optional header `Subsystem` field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Subsystem {
     /// `0`: unknown.
     Unknown,

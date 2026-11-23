@@ -31,7 +31,23 @@ fn check_bounds(data: &[u8], info: &PeInfo) {
         }
     }
     if let Some(cert) = info.certificate_table {
+        assert!(cert.size > 0);
+        assert!(cert.offset >= u64::from(info.optional.size_of_headers));
         assert!(cert.offset + cert.size <= data.len() as u64);
+    }
+    for s in &info.sections {
+        // An RVA that maps does so through the section that contains it,
+        // which may be an earlier, overlapping one.
+        if let Some(off) = info.rva_to_offset(s.virtual_address, 1) {
+            let owner = info.section_for_rva(s.virtual_address).unwrap();
+            let delta = s.virtual_address - owner.virtual_address;
+            assert_eq!(off, u64::from(owner.pointer_to_raw_data) + u64::from(delta));
+        }
+    }
+    if let Some(res) = &info.resources {
+        if let Some(v) = &res.version_resource {
+            assert_eq!(v.name, pe::ResourceId::Id(1));
+        }
     }
     if let Some(overlay) = info.overlay {
         assert_eq!(overlay.offset + overlay.size, data.len() as u64);

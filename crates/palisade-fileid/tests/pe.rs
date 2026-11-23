@@ -309,9 +309,17 @@ fn fatal_errors_carry_offsets() {
     assert_eq!(e.kind, PeErrorKind::LfanewOutOfRange(pe::MAX_E_LFANEW + 4));
     assert_eq!(e.offset, 0x3c);
 
+    // No room for the PE signature.
     let mut bad = good.clone();
-    bad[0x3c..0x40].copy_from_slice(&(good.len() as u32 - 8).to_le_bytes());
+    bad[0x3c..0x40].copy_from_slice(&(good.len() as u32 - 2).to_le_bytes());
     assert!(matches!(err(&bad).kind, PeErrorKind::LfanewOutOfRange(_)));
+
+    // A PE signature followed by a cut-off COFF header.
+    let e = err(&good[..COFF_OFFSET + 10]);
+    assert_eq!(
+        (e.kind, e.offset),
+        (PeErrorKind::TruncatedCoffHeader, COFF_OFFSET as u64)
+    );
 
     let mut bad = good.clone();
     bad[E_LFANEW] = b'X';

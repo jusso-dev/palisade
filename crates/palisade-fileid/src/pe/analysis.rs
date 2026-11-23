@@ -7,7 +7,8 @@
 /// The file is summed as little-endian 16-bit words with end-around carry,
 /// with the 4-byte `CheckSum` field at `checksum_offset` read as zeros. An
 /// odd final byte is treated as if followed by a zero byte. The 16-bit sum
-/// is then added to the file length.
+/// is then added to the file length, wrapping at 32 bits as the OS's
+/// `DWORD` arithmetic does.
 ///
 /// Returns `None` when the file length does not fit in 32 bits, because the
 /// algorithm is undefined there.
@@ -35,7 +36,7 @@ pub fn compute_checksum(data: &[u8], checksum_offset: usize) -> Option<u32> {
         sum = (sum & 0xffff) + (sum >> 16);
     }
     sum = (sum & 0xffff) + (sum >> 16);
-    (sum & 0xffff).checked_add(file_len)
+    Some((sum & 0xffff).wrapping_add(file_len))
 }
 
 /// Shannon entropy of `data` in bits per byte, from 0.0 (one repeated value)

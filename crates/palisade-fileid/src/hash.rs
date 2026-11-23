@@ -227,11 +227,10 @@ impl Digest {
             .unwrap_or(text);
         let expected = alg.digest_len().saturating_mul(2);
         if hex.len() != expected {
-            return Err(DigestError::WrongLength {
+            return Err(DigestError::WrongHexLength {
                 alg,
-                expected: alg.digest_len(),
-                // Bytes the text would encode, rounded down.
-                actual: hex.len() / 2,
+                expected,
+                actual: hex.len(),
             });
         }
         let mut bytes = Vec::with_capacity(alg.digest_len());
@@ -290,13 +289,23 @@ const fn hex_value(c: u8) -> Option<u8> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DigestError {
-    /// The input does not encode exactly [`HashAlgorithm::digest_len`] bytes.
+    /// Raw digest bytes of the wrong length were given to [`Digest::new`].
     WrongLength {
         /// The algorithm the digest was for.
         alg: HashAlgorithm,
         /// The expected length in bytes.
         expected: usize,
-        /// The length supplied, in bytes (hex length divided by two).
+        /// The length supplied, in bytes.
+        actual: usize,
+    },
+    /// Hex text of the wrong length was given to [`Digest::parse`]. Lengths
+    /// count hex characters (bytes of the text), after any `0x` prefix.
+    WrongHexLength {
+        /// The algorithm the digest was for.
+        alg: HashAlgorithm,
+        /// The expected number of hex characters.
+        expected: usize,
+        /// The number supplied.
         actual: usize,
     },
     /// A character that is not a hex digit, at this index of the hex text
@@ -314,10 +323,14 @@ impl fmt::Display for DigestError {
                 alg,
                 expected,
                 actual,
+            } => write!(f, "{alg} digest must be {expected} bytes, got {actual}"),
+            Self::WrongHexLength {
+                alg,
+                expected,
+                actual,
             } => write!(
                 f,
-                "{alg} digest must be {expected} bytes ({} hex digits), got {actual} bytes",
-                expected.saturating_mul(2)
+                "{alg} digest must be {expected} hex digits, got {actual} characters"
             ),
             Self::InvalidHex { index } => write!(f, "invalid hex digit at index {index}"),
         }
@@ -542,6 +555,8 @@ pub enum HashError {
     InvalidBufferSize(usize),
     /// [`HashOptions::algorithms`] is empty.
     NoAlgorithms,
+    /// The path is not a regular file (a directory, pipe or device).
+    NotAFile,
     /// Reading the input failed.
     Io(io::Error),
 }
@@ -554,6 +569,7 @@ impl fmt::Display for HashError {
                 "hash buffer size {size} is outside {MIN_BUFFER_SIZE}..={MAX_BUFFER_SIZE} bytes"
             ),
             Self::NoAlgorithms => f.write_str("no hash algorithms selected"),
+            Self::NotAFile => f.write_str("not a regular file"),
             Self::Io(e) => write!(f, "read failed while hashing: {e}"),
         }
     }
@@ -598,7 +614,11 @@ pub fn hash_reader<R: Read>(mut reader: R, options: &HashOptions) -> Result<Hash
             ))
         })?;
         let len = u64::try_from(n).unwrap_or(u64::MAX);
-        if hasher.bytes_hashed().saturating_add(len) > options.max_hash_size {
+        let over = hasher
+            .bytes_hashed()
+            .checked_add(len)
+            .is_none_or(|total| total > options.max_hash_size);
+        if over {
             return Ok(HashStatus::TooLarge {
                 limit: options.max_hash_size,
             });
@@ -622,7 +642,13 @@ pub fn hash_reader<R: Read>(mut reader: R, options: &HashOptions) -> Result<Hash
 pub fn hash_file(path: &Path, options: &HashOptions) -> Result<HashStatus, HashError> {
     options.validate()?;
     let file = File::open(path)?;
-    if file.metadata()?.len() > options.max_hash_size {
+    let metadata = file.metadata()?;
+    // Pipes, devices and directories have no stable content to identify,
+    // and reading a pipe could block forever.
+    if !metadata.is_file() {
+        return Err(HashError::NotAFile);
+    }
+    if metadata.len() > options.max_hash_size {
         return Ok(HashStatus::TooLarge {
             limit: options.max_hash_size,
         });

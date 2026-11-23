@@ -26,8 +26,14 @@ Every file this crate reads may be hostile, so the parser:
 - never panics: all reads are bounds-checked and all offset arithmetic is
   checked (`unwrap`, unchecked indexing and lossy casts are linted);
 - never allocates from a size the file declares: every collection is bounded by
-  the input length or a fixed `MAX_*` limit, and repeated or looping resource
-  directories are visited once;
+  the input length or a fixed `MAX_*` limit, and resource loops are not
+  followed;
+- reads what the OS loader reads: RVAs map through each section's aligned
+  virtual size, so oversized raw data cannot shadow the next section; the
+  version and manifest resources are found by direct lookup along the
+  type → name → language path, so the rest of the tree cannot hide them; and
+  the version resource reported is the one the OS loads (`VS_VERSION_INFO`,
+  ID 1);
 - fails with a typed `PeError` (with the file offset) only when the headers are
   unreadable, and otherwise returns everything it could read plus a list of
   `ParseWarning`s, each with an offset;

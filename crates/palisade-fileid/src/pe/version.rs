@@ -301,6 +301,7 @@ impl VersionField {
 
 /// How [`VersionInfo::selected`] was chosen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum LanguageSelection {
     /// The block matches a `Translation` entry (the first such entry wins).
     Translation,
@@ -546,7 +547,9 @@ pub fn parse_version_info(data: &[u8]) -> Result<VersionInfo, VersionInfoIssue> 
         offset: 0,
         kind: VersionIssueKind::Truncated,
     })?;
-    if root.key != ROOT_KEY {
+    // Block keys compare ASCII case-insensitively, as the OS version API
+    // does.
+    if !root.key.eq_ignore_ascii_case(ROOT_KEY) {
         return Err(VersionInfoIssue {
             offset: 0,
             kind: VersionIssueKind::BadRootKey(root.key),
@@ -574,10 +577,12 @@ pub fn parse_version_info(data: &[u8]) -> Result<VersionInfo, VersionInfoIssue> 
         root.children_start(value_bytes),
         root.end,
         &mut issues,
-        |child, issues| match child.key.as_str() {
-            "StringFileInfo" => string_file_info(data, child, &mut all_langs, issues),
-            "VarFileInfo" => var_file_info(data, child, &mut translations, issues),
-            _ => {}
+        |child, issues| {
+            if child.key.eq_ignore_ascii_case("StringFileInfo") {
+                string_file_info(data, child, &mut all_langs, issues);
+            } else if child.key.eq_ignore_ascii_case("VarFileInfo") {
+                var_file_info(data, child, &mut translations, issues);
+            }
         },
     );
 

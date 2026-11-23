@@ -186,6 +186,15 @@ fn size_limit_stops_reading() {
             limit: (MIN_BUFFER_SIZE * 2) as u64
         }
     );
+    // A limit of u64::MAX never overflows.
+    let unlimited = HashOptions {
+        max_hash_size: u64::MAX,
+        ..options
+    };
+    assert!(matches!(
+        hash_reader(&data[..], &unlimited).unwrap(),
+        HashStatus::Complete(_)
+    ));
     // Exactly at the limit is fine.
     let status = hash_reader(&data[..MIN_BUFFER_SIZE * 2], &options).unwrap();
     assert!(matches!(status, HashStatus::Complete(h) if h.size == (MIN_BUFFER_SIZE * 2) as u64));
@@ -224,6 +233,12 @@ fn hashes_a_file_on_disk() {
         HashStatus::TooLarge { limit: 100 }
     );
 
+    // A directory is not a file.
+    assert!(matches!(
+        hash_file(&dir, &options),
+        Err(palisade_fileid::hash::HashError::NotAFile)
+    ));
+
     std::fs::remove_dir_all(&dir).unwrap();
     assert!(hash_file(&path, &options).is_err());
 }
@@ -254,15 +269,38 @@ fn digest_parse_rejects_bad_input() {
     let hex = "900150983cd24fb0d6963f7d28e17f72";
     assert!(matches!(
         Digest::parse(HashAlgorithm::Md5, &hex[..30]),
-        Err(DigestError::WrongLength {
-            expected: 16,
-            actual: 15,
+        Err(DigestError::WrongHexLength {
+            expected: 32,
+            actual: 30,
             ..
         })
     ));
     assert!(matches!(
         Digest::parse(HashAlgorithm::Sha256, hex),
-        Err(DigestError::WrongLength { expected: 32, .. })
+        Err(DigestError::WrongHexLength { expected: 64, .. })
+    ));
+    // One character too many (a trailing digit or newline) is reported as
+    // such, not as a contradictory byte count.
+    let err = Digest::parse(HashAlgorithm::Md5, &format!("{hex}\n")).unwrap_err();
+    assert_eq!(
+        err,
+        DigestError::WrongHexLength {
+            alg: HashAlgorithm::Md5,
+            expected: 32,
+            actual: 33
+        }
+    );
+    assert_eq!(
+        err.to_string(),
+        "md5 digest must be 32 hex digits, got 33 characters"
+    );
+    assert!(matches!(
+        Digest::new(HashAlgorithm::Md5, &[0; 15]),
+        Err(DigestError::WrongLength {
+            expected: 16,
+            actual: 15,
+            ..
+        })
     ));
     let mut bad = hex.to_owned();
     bad.replace_range(5..6, "g");
