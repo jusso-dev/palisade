@@ -1,0 +1,114 @@
+{
+  "schema_version": "1.0.0",
+  "policy": {
+    "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+    "name": "Workstation baseline",
+    "description": "Hash, publisher and path rules for standard workstations.",
+    "revision": 42,
+    "precedence_model": "deny_wins",
+    "mode": "enforce",
+    "settings": {
+      "script_control": "audit",
+      "script_control_by_kind": {
+        "powershell": "enforce",
+        "vbscript": "enforce"
+      },
+      "dll_control": "enforce",
+      "driver_control": "enforce",
+      "capture_command_line": false,
+      "poll_interval_secs": 900,
+      "decision_cache_ttl_secs": 300,
+      "override_durations": [15, 60, 240, 0, 1440],
+      "time_zone_basis": "utc",
+      "max_ancestor_depth": 8,
+      "allow_unknown_advanced": false
+    },
+    "rule_sets": [
+      "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60",
+      "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e70"
+    ],
+    "metadata": {
+      "justification": "Essential Eight application control baseline.",
+      "ticket_ref": "CHG-1001",
+      "tags": ["e8", "workstation"]
+    }
+  },
+  "rule_sets": [
+    {
+      "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60",
+      "name": "Recommended block rules",
+      "version": "3.0",
+      "kind": "blocklist",
+      "mandatory": true,
+      "read_only": true,
+      "rules": [
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e61",
+          "display_id": "R-000001",
+          "name": "Block a known bypass binary",
+          "object_types": ["executable"],
+          "match": {
+            "all": [
+              { "criterion": { "field": "meta.original_filename", "operator": "equals", "values": ["example-bypass.exe"] } },
+              { "criterion": { "field": "meta.file_version", "operator": "version_lt", "values": ["10.0.2"] } }
+            ]
+          },
+          "action": { "type": "deny" },
+          "enforcement_override": "always_enforce"
+        }
+      ]
+    },
+    {
+      "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e70",
+      "name": "Approved applications",
+      "kind": "allowlist",
+      "rules": [
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e71",
+          "display_id": "R-000002",
+          "name": "Line-of-business tool by hash",
+          "object_types": ["executable", "library"],
+          "match": {
+            "criterion": {
+              "field": "hash.sha256",
+              "operator": "equals",
+              "values": [
+                "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+                "60303ae22b998861bce3b28f33eec1be758a213c86c93c076dbe9f558c11c752"
+              ]
+            }
+          },
+          "action": { "type": "allow" },
+          "metadata": { "justification": "Approved in CHG-0991.", "ticket_ref": "CHG-0991" }
+        },
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e72",
+          "name": "Publisher and product",
+          "match": {
+            "all": [
+              { "criterion": { "field": "signer.publisher", "operator": "equals", "values": ["Example Software Ltd"] } },
+              { "criterion": { "field": "meta.product_name", "operator": "equals", "values": ["Example Editor"], "case_sensitive": true } },
+              { "not": { "criterion": { "field": "path.directory", "operator": "wildcard", "values": ["%TEMP%\\**"] } } }
+            ]
+          },
+          "action": { "type": "allow" }
+        },
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e73",
+          "name": "Audit scripts in the shared tools folder",
+          "enabled": false,
+          "object_types": ["script.powershell", "script.batch"],
+          "match": {
+            "any": [
+              { "criterion": { "field": "path.directory", "operator": "starts_with", "values": ["%PROGRAMDATA%\\Tools\\"] } },
+              { "criterion": { "field": "path.extension", "operator": "equals", "values": ["ps1"] } }
+            ]
+          },
+          "action": { "type": "audit" },
+          "order": 100500,
+          "priority": -5
+        }
+      ]
+    }
+  ]
+}

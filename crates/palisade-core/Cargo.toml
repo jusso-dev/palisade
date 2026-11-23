@@ -13,6 +13,18 @@ publish.workspace = true
 default = ["std"]
 # Standard library support. Off for `no_std` users such as the driver.
 std = []
+# serde (de)serialisation of the shared types. Works without `std`.
+serde = ["dep:serde"]
+# JSON Schema descriptions of the shared types, for `palisade-policy`'s schema.
+schema = ["serde", "dep:schemars"]
+
+[dependencies]
+schemars = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true
