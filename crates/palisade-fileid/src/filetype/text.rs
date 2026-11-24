@@ -20,7 +20,9 @@ use std::io::{Read, Seek};
 
 use super::name::NameInfo;
 use super::source::{HEAD_LEN, Source};
-use super::{Classification, Confidence, ExtensionKind, FileKind, ScriptKind, TextEncoding};
+use super::{
+    Classification, Confidence, ExtensionKind, FileKind, ParseError, ScriptKind, TextEncoding,
+};
 
 /// How much of the end of the file is searched for a signature block
 /// marker, when the file is longer than the head.
@@ -81,8 +83,12 @@ pub(super) fn classify_within<R: Read + Seek + ?Sized>(
             return;
         }
         // A signature block may still be at the end of a long file.
-        if is_text && whole_head && tail_signature(src, encoding, bom_len, guessed).is_some() {
-            out.flags.script_signature_block = true;
+        if is_text && whole_head {
+            match tail_signature(src, encoding, bom_len, guessed) {
+                Ok(Some(_)) => out.flags.script_signature_block = true,
+                Ok(None) => {}
+                Err(e) => out.parse_error = Some(e),
+            }
         }
         return;
     }
@@ -107,8 +113,13 @@ pub(super) fn classify_within<R: Read + Seek + ?Sized>(
     out.confidence = Confidence::High;
     // Only for the whole head: a disc image's system area is classified
     // alone, without the image's contents.
+    // A tail that could not be read is reported: a signature block there
+    // would have named the language, so the result is not established.
     let tail = if whole_head {
-        tail_signature(src, encoding, bom_len, guessed)
+        tail_signature(src, encoding, bom_len, guessed).unwrap_or_else(|e| {
+            out.parse_error = Some(e);
+            None
+        })
     } else {
         None
     };
@@ -132,22 +143,22 @@ pub(super) fn classify_within<R: Read + Seek + ?Sized>(
 
 /// A signature block marker in the last [`TAIL_LEN`] bytes of a file longer
 /// than the head, in the detected encoding or, after a UTF-16 guess, in the
-/// eight-bit view.
+/// eight-bit view. An error if the tail could not be read.
 fn tail_signature<R: Read + Seek + ?Sized>(
     src: &mut Source<'_, R>,
     encoding: TextEncoding,
     bom_len: usize,
     guessed: bool,
-) -> Option<ScriptKind> {
+) -> Result<Option<ScriptKind>, ParseError> {
     if src.len() <= u64::try_from(HEAD_LEN).unwrap_or(u64::MAX) {
-        return None;
+        return Ok(None);
     }
     let raw = read_tail(src, encoding, bom_len)?;
-    signature_marker(&decode(&raw, encoding)).or_else(|| {
+    Ok(signature_marker(&decode(&raw, encoding)).or_else(|| {
         guessed
             .then(|| signature_marker(&eight_bit_view(&raw)))
             .flatten()
-    })
+    }))
 }
 
 /// Records what [`definite_in_binary`], [`script_prefix`] or
@@ -476,20 +487,19 @@ fn read_tail<R: Read + Seek + ?Sized>(
     src: &mut Source<'_, R>,
     encoding: TextEncoding,
     bom_len: usize,
-) -> Option<Vec<u8>> {
+) -> Result<Vec<u8>, ParseError> {
     let unit: u64 = match encoding {
         TextEncoding::EightBit | TextEncoding::Utf8Bom => 1,
         TextEncoding::Utf32Le | TextEncoding::Utf32Be => 4,
         _ => 2,
     };
-    let bom = u64::try_from(bom_len).ok()?;
-    let start = src
-        .len()
-        .saturating_sub(u64::try_from(TAIL_LEN).ok()?)
-        .max(bom);
+    // Both fit in a `u64` on every supported target.
+    let bom = u64::try_from(bom_len).unwrap_or(u64::MAX);
+    let tail = u64::try_from(TAIL_LEN).unwrap_or(u64::MAX);
+    let start = src.len().saturating_sub(tail).max(bom);
     // Align to a code unit boundary counted from the end of the mark.
     let start = start + (unit - (start - bom) % unit) % unit;
-    src.read_at(start, TAIL_LEN).ok()
+    Ok(src.read_at(start, TAIL_LEN)?)
 }
 
 /// Script signature block markers, and the language each one is for.
@@ -515,7 +525,13 @@ fn markers(text: &str, lower: &str, name: &NameInfo) -> Option<(FileKind, Confid
         .next()
         .unwrap_or_default()
         .trim_start_matches('\u{feff}');
-    if let Some(interpreter) = first_line.strip_prefix("#!") {
+    // `#![` starts a Rust inner attribute, which the Rust reference does
+    // not take as a shebang line. As a shebang it would name a relative
+    // interpreter path starting with `[`, which no real script does. Such
+    // a file still goes through the keyword and name rules below.
+    if let Some(interpreter) = first_line.strip_prefix("#!")
+        && !interpreter.trim_start().starts_with('[')
+    {
         return high(FileKind::Script(shebang(interpreter)));
     }
     let start = lower.trim_start();
@@ -524,23 +540,6 @@ fn markers(text: &str, lower: &str, name: &NameInfo) -> Option<(FileKind, Confid
     }
     if lower.contains("<hta:application") {
         return high(FileKind::Hta);
-    }
-    let html = [
-        "<html",
-        "<!doctype html",
-        "<head",
-        "<body",
-        "<script",
-        "<svg",
-        "<iframe",
-        "<object",
-        "<embed",
-        "<img",
-    ]
-    .iter()
-    .any(|tag| lower.contains(tag));
-    if html && name.is_ext(&["hta"]) {
-        return Some((FileKind::Hta, Confidence::Medium));
     }
     if lower.contains("<?php") {
         return high(FileKind::Script(ScriptKind::Php));
@@ -567,7 +566,23 @@ fn markers(text: &str, lower: &str, name: &NameInfo) -> Option<(FileKind, Confid
     {
         return high(FileKind::Script(ScriptKind::Inf));
     }
-    None
+    // Last: HTML is an HTML application only because of its `.hta` name,
+    // so every marker above, which the content defines, comes first.
+    let html = [
+        "<html",
+        "<!doctype html",
+        "<head",
+        "<body",
+        "<script",
+        "<svg",
+        "<iframe",
+        "<object",
+        "<embed",
+        "<img",
+    ]
+    .iter()
+    .any(|tag| lower.contains(tag));
+    (html && name.is_ext(&["hta"])).then_some((FileKind::Hta, Confidence::Medium))
 }
 
 /// The script kind a shebang line's interpreter names. The interpreter is
@@ -586,11 +601,7 @@ fn shebang(line: &str) -> ScriptKind {
     };
     let mut base = file(program);
     if base == "env" {
-        base = file(
-            words
-                .find(|w| !w.starts_with('-') && !w.contains('='))
-                .unwrap_or_default(),
-        );
+        base = file(env_command(words).unwrap_or_default());
     }
     let stem = base.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.');
     match stem {
@@ -602,6 +613,52 @@ fn shebang(line: &str) -> ScriptKind {
         "node" | "nodejs" | "deno" | "bun" => ScriptKind::JScript,
         _ => ScriptKind::Shell,
     }
+}
+
+/// The command `env` runs, given its arguments: the first word that is not
+/// an option, an option's operand or a `NAME=VALUE` assignment. `-u`, `-C`,
+/// `-P` and `-a` (and `--unset`, `--chdir` and `--argv0`) take an operand,
+/// in the same word or the next. `-S` takes the rest of the line, already
+/// split into words here, so the command follows it as for any option; a
+/// command written in the same word (`-Spython3`, `--split-string=python3`)
+/// is that command.
+fn env_command<'a>(mut words: impl Iterator<Item = &'a str>) -> Option<&'a str> {
+    const SHORT_WITH_OPERAND: [char; 4] = ['u', 'C', 'P', 'a'];
+    const LONG_WITH_OPERAND: [&str; 3] = ["unset", "chdir", "argv0"];
+    while let Some(word) = words.next() {
+        if word == "--" {
+            return words.find(|w| !w.contains('='));
+        }
+        if let Some(long) = word.strip_prefix("--") {
+            if let Some(command) = long.strip_prefix("split-string=") {
+                return Some(command);
+            }
+            if LONG_WITH_OPERAND.contains(&long) {
+                words.next();
+            }
+            continue;
+        }
+        if let Some(cluster) = word.strip_prefix('-') {
+            for (i, c) in cluster.char_indices() {
+                let rest = cluster.get(i + c.len_utf8()..).unwrap_or_default();
+                if c == 'S' && !rest.is_empty() {
+                    return Some(rest);
+                }
+                if SHORT_WITH_OPERAND.contains(&c) {
+                    // The operand is the rest of this word, or the next.
+                    if rest.is_empty() {
+                        words.next();
+                    }
+                    break;
+                }
+            }
+            continue;
+        }
+        if !word.contains('=') {
+            return Some(word);
+        }
+    }
+    None
 }
 
 /// Keywords per language. Each counts once however often it appears.
@@ -766,6 +823,41 @@ mod tests {
         assert_eq!(shebang("/usr/bin/env"), ScriptKind::Shell);
         assert_eq!(shebang(r"C:\Python312\python.exe"), ScriptKind::Python);
         assert_eq!(shebang(r"C:\tools\PWSH.EXE -File"), ScriptKind::PowerShell);
+    }
+
+    #[test]
+    fn env_option_operands_are_skipped() {
+        // Review round 15: the operand of `-u` was taken for the command.
+        assert_eq!(
+            shebang("/usr/bin/env -S -u PYTHONPATH python3"),
+            ScriptKind::Python
+        );
+        assert_eq!(
+            shebang("/usr/bin/env -uPYTHONPATH python3"),
+            ScriptKind::Python
+        );
+        assert_eq!(shebang("/usr/bin/env -iu X perl"), ScriptKind::Perl);
+        assert_eq!(shebang("/usr/bin/env -C /tmp ruby"), ScriptKind::Ruby);
+        assert_eq!(
+            shebang("/usr/bin/env -P /opt/bin node"),
+            ScriptKind::JScript
+        );
+        assert_eq!(
+            shebang("/usr/bin/env --unset PERL5LIB perl"),
+            ScriptKind::Perl
+        );
+        assert_eq!(
+            shebang("/usr/bin/env --unset=PERL5LIB perl"),
+            ScriptKind::Perl
+        );
+        assert_eq!(shebang("/usr/bin/env -Spython3 -u"), ScriptKind::Python);
+        assert_eq!(
+            shebang("/usr/bin/env --split-string=pwsh -NoProfile"),
+            ScriptKind::PowerShell
+        );
+        assert_eq!(shebang("/usr/bin/env -i -- A=1 php"), ScriptKind::Php);
+        assert_eq!(shebang("/usr/bin/env -S python3"), ScriptKind::Python);
+        assert_eq!(shebang("/usr/bin/env -u"), ScriptKind::Shell);
     }
 
     #[test]

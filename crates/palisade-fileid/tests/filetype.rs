@@ -1446,32 +1446,81 @@ fn large_sparse_files_are_read_in_bounded_amounts() {
     assert_eq!(r.file_size, GIB);
 }
 
-#[test]
-fn oversized_zip_directory_is_truncated() {
-    // A directory of 200,000 tiny entries (over 4 MiB), all names "a".
-    let entry = {
-        let mut e = b"PK\x01\x02".to_vec();
-        e.extend_from_slice(&[0; 24]);
-        e.extend_from_slice(&1_u16.to_le_bytes());
-        e.extend_from_slice(&[0; 16]);
-        e.push(b'a');
-        e
+/// Classifies `data` through a counting reader, checks the read bound and
+/// returns the result.
+fn classify_counted(data: &[u8], name: Option<&str>) -> Classification {
+    let mut reader = Virtual {
+        len: data.len() as u64,
+        pos: 0,
+        byte: |o: u64| data[o as usize],
+        read: 0,
     };
-    let count = 200_000_usize;
+    let c = filetype::classify(&mut reader, name.map(OsStr::new));
+    assert!(reader.read <= READ_BOUND, "read {}", reader.read);
+    c
+}
+
+#[test]
+fn zip_directory_byte_cap() {
+    // 70 entries of 64 KiB each (a long comment): over the 4 MiB byte cap
+    // long before the 65,536-entry cap. Without the byte cap, the read
+    // would go over the targeted read budget instead.
     let mut data = b"PK\x03\x04".to_vec();
     data.resize(64, 0);
     let dir_at = data.len();
+    let count = 70_u16;
+    for _ in 0..count {
+        data.extend(dir_entry(b"a", 0, 65_489));
+    }
+    let size = data.len() - dir_at;
+    assert!(size > filetype::MAX_ZIP_DIRECTORY);
+    data.extend(end_record(count, size as u32, dir_at as u32, b""));
+    let c = classify_counted(&data, None);
+    assert_eq!(c.content_kind, FileKind::Zip);
+    assert_fails_closed(&c, ParseError::ZipDirectoryTruncated);
+}
+
+/// A consistent ZIP64 archive of `count` directory entries named `a`.
+fn zip64_of(count: u64) -> Vec<u8> {
+    let mut data = b"PK\x03\x04".to_vec();
+    data.resize(64, 0);
+    let dir_at = data.len() as u64;
+    let entry = dir_entry(b"a", 0, 0);
     for _ in 0..count {
         data.extend_from_slice(&entry);
     }
-    let size = (data.len() - dir_at) as u32;
-    data.extend_from_slice(b"PK\x05\x06\0\0\0\0\xff\xff\xff\xff");
+    let size = data.len() as u64 - dir_at;
+    let record_at = data.len() as u64;
+    data.extend_from_slice(b"PK\x06\x06");
+    data.extend_from_slice(&44_u64.to_le_bytes());
+    data.extend_from_slice(&[45, 0, 45, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    data.extend_from_slice(&count.to_le_bytes());
+    data.extend_from_slice(&count.to_le_bytes());
     data.extend_from_slice(&size.to_le_bytes());
-    data.extend_from_slice(&(dir_at as u32).to_le_bytes());
+    data.extend_from_slice(&dir_at.to_le_bytes());
+    data.extend_from_slice(b"PK\x06\x07\0\0\0\0");
+    data.extend_from_slice(&record_at.to_le_bytes());
+    data.extend_from_slice(&1_u32.to_le_bytes());
+    data.extend_from_slice(b"PK\x05\x06\0\0\0\0");
+    data.extend_from_slice(&[0xff; 12]);
     data.extend_from_slice(&[0, 0]);
-    let c = classify(&data, None);
+    data
+}
+
+#[test]
+fn zip_directory_entry_cap() {
+    // One entry more than the cap, in a consistent ZIP64 archive whose
+    // directory (about 3 MiB) is under the byte cap: without the entry
+    // cap, it would read cleanly.
+    let over = zip64_of(filetype::MAX_ZIP_ENTRIES as u64 + 1);
+    assert!(over.len() < filetype::MAX_ZIP_DIRECTORY);
+    let c = classify_counted(&over, None);
     assert_eq!(c.content_kind, FileKind::Zip);
-    assert_eq!(c.parse_error, Some(ParseError::ZipDirectoryTruncated));
+    assert_fails_closed(&c, ParseError::ZipDirectoryTruncated);
+    // At the cap it is read cleanly, so the cap, not the layout, is what
+    // is reported above.
+    let at = classify_counted(&zip64_of(filetype::MAX_ZIP_ENTRIES as u64), None);
+    assert_eq!((at.content_kind, at.parse_error), (FileKind::Zip, None));
 }
 
 #[test]
@@ -2926,12 +2975,16 @@ fn unicode_path_floods_are_linear() {
     // Round 9: a directory of entries whose extra fields are packed with
     // tiny Unicode path subfields (some percent-encoded) once allocated
     // for every subfield.
+    // Whole subfields only, up to the 65,535-byte extra field limit: a
+    // cut subfield is malformed (round 15).
     let mut sub = Vec::new();
-    for i in 0..6_500 {
+    for i in 0.. {
         let name: &[u8] = if i % 2 == 0 { b"a" } else { b"%41" };
+        if sub.len() + 9 + name.len() > 65_535 {
+            break;
+        }
         flood_entry(&mut sub, name);
     }
-    sub.truncate(65_535);
     assert_linear_flood(&sub, None);
     // Round 10: subfields as long as a target name, nearly matching it,
     // with and without an escape, plain and behind a shebang with a
@@ -2983,9 +3036,22 @@ fn assert_linear_flood(sub: &[u8], shebang: Option<&[u8]>) {
     let started = std::time::Instant::now();
     for name in [None, Some("a.exe"), Some("a.pyz")] {
         let c = classify(&data, name);
-        assert!(!c.is_executable_content() || shebang.is_some(), "{c:?}");
-        if shebang.is_none() {
-            assert_eq!((c.content_kind, c.parse_error), (FileKind::Zip, None));
+        if shebang.is_some() {
+            // The script the `#!/bin/sh` line names, not a zip
+            // application.
+            assert_eq!(
+                c.content_kind,
+                FileKind::Script(ScriptKind::Shell),
+                "{name:?}"
+            );
+            assert!(!c.flags.python_zipapp, "{name:?}");
+        } else {
+            assert!(!c.is_executable_content(), "{name:?}");
+            assert_eq!(
+                (c.content_kind, c.parse_error),
+                (FileKind::Zip, None),
+                "{name:?}"
+            );
         }
     }
     // Generous: debug builds on slow CI runners.
@@ -3147,6 +3213,238 @@ fn parse_errors_display() {
     );
     let e: &dyn std::error::Error = &ParseError::CfbHeader;
     assert!(!e.to_string().is_empty());
+    assert!(!ParseError::PeHeadersTruncated.to_string().is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Review round 15: short reads and markers
+// ---------------------------------------------------------------------------
+
+#[test]
+fn compound_file_root_entry_cut_after_its_clsid() {
+    // The file ends 20 bytes before the end of the root entry, after the
+    // CLSID: the CLSID still decides the kind, and the cut is reported.
+    let msi = cfb(installer_clsid(0x000c_1084));
+    let c = classify(&msi[..512 + 108], None);
+    assert_eq!(
+        (c.content_kind, c.parse_error),
+        (FileKind::Msi, Some(ParseError::CfbDirectory))
+    );
+    let c = classify(&cfb([0; 16])[..512 + 108], None);
+    assert_eq!(
+        (c.content_kind, c.parse_error),
+        (FileKind::OtherCfb, Some(ParseError::CfbDirectory))
+    );
+    // A whole entry is clean.
+    let c = classify(&msi[..512 + 128], None);
+    assert_eq!((c.content_kind, c.parse_error), (FileKind::Msi, None));
+}
+
+#[test]
+fn pe_cut_inside_its_section_table_stays_executable() {
+    // One executable section, no directories and no entry point: with the
+    // section header cut off, it once looked resource-only.
+    let b = PeBuilder {
+        entry_point: 0,
+        ..PeBuilder::default()
+    };
+    let image = b.build();
+    let table = b.section_table_offset();
+    // Inside the section header, and inside the data directories.
+    for cut in [table + 20, table + 39, table - 8] {
+        let c = classify(&image[..cut], None);
+        assert_eq!(
+            (c.content_kind, c.parse_error.clone()),
+            (FileKind::Mz16, Some(ParseError::PeHeadersTruncated)),
+            "cut at {cut}"
+        );
+        assert!(c.pe.is_none() && c.is_executable_content(), "{c:?}");
+    }
+    // The whole section table is enough.
+    let d = pe_details(&image[..table + 40], None);
+    assert_eq!(d.sub_kind, PeSubKind::Exe);
+    // A complete resource-only image is still resource-only.
+    let mut ro = PeBuilder::dll();
+    ro.sections[0].characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ;
+    let ro = ro.build();
+    assert_eq!(pe_details(&ro, None).sub_kind, PeSubKind::ResourceOnly);
+    assert_eq!(classify(&ro, None).parse_error, None);
+}
+
+/// A reader that fails every read from offset `.1` on.
+struct FailFrom(Cursor<Vec<u8>>, u64);
+
+impl Read for FailFrom {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.0.position() >= self.1 {
+            return Err(io::ErrorKind::PermissionDenied.into());
+        }
+        self.0.read(buf)
+    }
+}
+
+impl Seek for FailFrom {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        self.0.seek(pos)
+    }
+}
+
+#[test]
+fn unreadable_signature_tail_is_reported() {
+    let denied = Some(ParseError::Io(io::ErrorKind::PermissionDenied));
+    let fail_tail = |data: &[u8]| {
+        filetype::classify(
+            &mut FailFrom(Cursor::new(data.to_vec()), HEAD_LEN as u64),
+            None,
+        )
+    };
+    // Plain text whose signature block marker would be in the tail.
+    let mut text = b"just some words\n".repeat(HEAD_LEN / 8);
+    text.extend_from_slice(b"# SIG # Begin signature block\n");
+    let c = fail_tail(&text);
+    assert_eq!(
+        (c.content_kind, c.parse_error),
+        (FileKind::Text, denied.clone())
+    );
+    // Read in full, the marker names the language.
+    let c = classify(&text, None);
+    assert_eq!(
+        (c.content_kind, c.parse_error),
+        (FileKind::Script(ScriptKind::PowerShell), None)
+    );
+    // A definite marker in the head keeps its kind; the error is reported.
+    let mut shell = b"#!/bin/sh\n".to_vec();
+    shell.extend(b"echo hi\n".repeat(HEAD_LEN / 4));
+    let c = fail_tail(&shell);
+    assert_eq!(
+        (c.content_kind, c.parse_error),
+        (FileKind::Script(ScriptKind::Shell), denied)
+    );
+    // A tail read in full with no marker is a clean negative.
+    let c = classify(&shell, None);
+    assert!(!c.flags.script_signature_block);
+    assert_eq!(
+        (c.content_kind, c.parse_error),
+        (FileKind::Script(ScriptKind::Shell), None)
+    );
+}
+
+#[test]
+fn rust_inner_attributes_are_not_shebangs() {
+    for src in [
+        &b"#![allow(dead_code)]\nfn main() {}\n"[..],
+        b"#! [forbid(unsafe_code)]\n\nmod a;\n",
+    ] {
+        let c = classify(src, None);
+        assert_ne!(c.content_kind, FileKind::Script(ScriptKind::Shell), "{c:?}");
+        assert!(!c.is_executable_content(), "{c:?}");
+    }
+    // Shebangs, including one naming an unknown interpreter, are scripts.
+    assert_eq!(
+        kind(b"#!/opt/tool/runner\nx\n", None),
+        FileKind::Script(ScriptKind::Shell)
+    );
+    assert_eq!(
+        kind(b"#!python3\nprint(1)\n", None),
+        FileKind::Script(ScriptKind::Python)
+    );
+    // Named as a shell script, it is one whatever the first line says.
+    assert_eq!(
+        kind(b"#![allow(dead_code)]\n", Some("build.sh")),
+        FileKind::Script(ScriptKind::Shell)
+    );
+}
+
+#[test]
+fn definite_markers_win_over_the_hta_name() {
+    let wsf = b"<job id=\"a\"><script language=\"VBScript\">x</script></job>";
+    let c = classify(wsf, Some("app.hta"));
+    assert_eq!(
+        (c.content_kind, c.confidence),
+        (FileKind::Script(ScriptKind::Wsf), Confidence::High)
+    );
+    assert!(!c.extension_assisted && c.mismatch, "{c:?}");
+    let php = b"<html><body><?php echo 1; ?></body></html>";
+    assert_eq!(
+        kind(php, Some("app.hta")),
+        FileKind::Script(ScriptKind::Php)
+    );
+    // Plain HTML still takes the name.
+    let c = classify(b"<html><body>hi</body></html>", Some("app.hta"));
+    assert_eq!(
+        (c.content_kind, c.confidence),
+        (FileKind::Hta, Confidence::Medium)
+    );
+    assert!(c.extension_assisted && !c.mismatch);
+}
+
+#[test]
+fn env_shebang_options_with_operands() {
+    let c = classify(b"#!/usr/bin/env -S -u PYTHONPATH python3\nprint(1)\n", None);
+    assert_eq!(c.content_kind, FileKind::Script(ScriptKind::Python));
+    assert_eq!(
+        kind(b"#!/usr/bin/env -i A=1 -u B perl\n", None),
+        FileKind::Script(ScriptKind::Perl)
+    );
+}
+
+/// A clean one-entry archive whose entry has `extra` as its extra field.
+fn zip_with_extra(name: &[u8], extra: &[u8]) -> Vec<u8> {
+    let mut entry = dir_entry(name, 0, 0);
+    put16(&mut entry, 30, extra.len() as u16);
+    entry.extend_from_slice(extra);
+    let mut data = b"PK\x03\x04".to_vec();
+    data.resize(30, 0);
+    data.extend_from_slice(&entry);
+    data.extend(end_record(1, entry.len() as u32, 30, b""));
+    data
+}
+
+#[test]
+fn cut_extra_subfields_are_malformed() {
+    let cut_header = [0x01, 0x00, 0x04];
+    let cut_body = [0xfe, 0xca, 0x0a, 0x00, b'x', b'y'];
+    let whole_then_cut = [0xfe, 0xca, 0x01, 0x00, b'x', 0x01];
+    for extra in [&cut_header[..], &cut_body, &whole_then_cut] {
+        let c = classify(&zip_with_extra(b"readme.txt", extra), None);
+        assert_eq!(c.content_kind, FileKind::Zip);
+        assert_fails_closed(&c, ParseError::ZipDirectoryMalformed);
+        // The entry's own name still counts.
+        let c = classify(&zip_with_extra(b"AppxManifest.xml", extra), None);
+        assert_eq!(c.content_kind, FileKind::Msix);
+        assert_fails_closed(&c, ParseError::ZipDirectoryMalformed);
+    }
+    // Complete unknown subfields, and an empty one, are fine.
+    let whole = [0xfe, 0xca, 0x02, 0x00, b'x', b'y', 0x01, 0x00, 0x00, 0x00];
+    let c = classify(&zip_with_extra(b"readme.txt", &whole), None);
+    assert_eq!((c.content_kind, c.parse_error), (FileKind::Zip, None));
+}
+
+#[test]
+fn zip_application_entry_names_are_exact() {
+    for name in ["__MAIN__.PY", "__Main__.py", "__main__.PYC"] {
+        // Python's zip importer finds `__main__` by its exact name.
+        let c = classify(&zip(b"#!/bin/sh\n", &[name]), None);
+        assert_eq!(
+            c.content_kind,
+            FileKind::Script(ScriptKind::Shell),
+            "{name}"
+        );
+        assert!(!c.flags.python_zipapp, "{name}");
+        let c = classify(&zip(b"", &[name]), Some("tool.pyz"));
+        assert!(!c.flags.python_zipapp, "{name}");
+    }
+    for name in ["__main__.py", "__main__.pyc"] {
+        let c = classify(&zip(b"#!/bin/sh\n", &[name]), None);
+        assert_eq!(
+            c.content_kind,
+            FileKind::Script(ScriptKind::Python),
+            "{name}"
+        );
+        assert!(c.flags.python_zipapp, "{name}");
+    }
+    // Package names still ignore case.
+    assert_eq!(kind(&zip(b"", &["APPXMANIFEST.XML"]), None), FileKind::Msix);
 }
 
 /// Seed inputs for the property tests and the fuzz target.

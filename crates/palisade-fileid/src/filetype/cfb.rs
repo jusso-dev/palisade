@@ -62,13 +62,19 @@ pub(super) fn classify<R: Read + Seek + ?Sized>(
     // A compound file is never anything else, even if broken.
     out.content_kind = FileKind::OtherCfb;
     out.confidence = Confidence::High;
-    let clsid = match root_clsid(src) {
-        Ok(clsid) => clsid,
+    let (clsid, complete) = match root_clsid(src) {
+        Ok(found) => found,
         Err(e) => {
             out.parse_error = Some(e);
             return;
         }
     };
+    // A root entry cut short by the end of the file is reported, but the
+    // CLSID it does hold still decides the kind, so a truncated installer
+    // stays an installer.
+    if !complete {
+        out.parse_error = Some(ParseError::CfbDirectory);
+    }
     out.content_kind = if clsid == MSI_CLSID {
         // Merge modules share the database CLSID.
         if name.is_ext(&["msm"]) {
@@ -87,8 +93,11 @@ pub(super) fn classify<R: Read + Seek + ?Sized>(
     };
 }
 
-/// The CLSID of the root storage entry.
-fn root_clsid<R: Read + Seek + ?Sized>(src: &mut Source<'_, R>) -> Result<[u8; 16], ParseError> {
+/// The CLSID of the root storage entry, and whether the whole entry was
+/// read (`false` when the file ends inside it, after the CLSID).
+fn root_clsid<R: Read + Seek + ?Sized>(
+    src: &mut Source<'_, R>,
+) -> Result<([u8; 16], bool), ParseError> {
     let head = src.head();
     // Byte order mark, then the sector shift: 9 (512-byte sectors, major
     // version 3) or 12 (4,096-byte sectors, major version 4).
@@ -110,9 +119,10 @@ fn root_clsid<R: Read + Seek + ?Sized>(src: &mut Source<'_, R>) -> Result<[u8; 1
     if u8_at(&entry, 0x42) != Some(ROOT_STORAGE) {
         return Err(ParseError::CfbDirectory);
     }
-    bytes(&entry, 0x50, 16)
+    let clsid = bytes(&entry, 0x50, 16)
         .and_then(|b| b.try_into().ok())
-        .ok_or(ParseError::CfbDirectory)
+        .ok_or(ParseError::CfbDirectory)?;
+    Ok((clsid, entry.len() == DIRECTORY_ENTRY_LEN))
 }
 
 #[cfg(test)]

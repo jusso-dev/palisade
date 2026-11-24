@@ -476,8 +476,11 @@ fails closed. PE imports are read up to 256 descriptors and exports up to
 4,096 names.
 It never fails: a file it cannot make sense of is `Unknown`, and a broken
 structure behind a recognised magic keeps the outer kind, with the reason
-in `parse_error`. A PE whose headers do not parse stays executable
-(`Mz16`).
+in `parse_error`. A PE whose headers do not parse, or that ends inside its
+optional header or section table, stays executable (`Mz16`). A read that
+fails or comes up short is reported in `parse_error` (a compound file root
+entry cut short, a ZIP extra subfield cut short, an unreadable text tail),
+never taken as a clean negative.
 
 Signature data gets the same treatment. Its ASN.1 is read by one small
 DER-only module (`authenticode/asn1.rs`), which rejects BER indefinite

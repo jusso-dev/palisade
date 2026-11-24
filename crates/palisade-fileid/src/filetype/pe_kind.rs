@@ -154,7 +154,16 @@ fn parse_headers<R: Read + Seek + ?Sized>(
     // At most 1 MiB + 4 + 20 + 65,535 + 40,960 bytes.
     let len = usize::try_from(end).map_err(|_| ParseError::ReadBudgetExceeded)?;
     let headers = src.read_at(0, len)?;
-    pe::parse_headers_only(&headers, src.len()).map_err(|e| ParseError::Pe(e.kind))
+    let info = pe::parse_headers_only(&headers, src.len()).map_err(|e| ParseError::Pe(e.kind))?;
+    // The file ends inside the optional header or the section table. The
+    // parser returns the headers that are there, with a warning, but a
+    // missing section or data directory would make the image look like
+    // less than it is (resource-only, or not a driver). The loader does
+    // not map such a file, so it stays `Mz16`, with the reason.
+    if headers.len() < len {
+        return Err(ParseError::PeHeadersTruncated);
+    }
+    Ok(info)
 }
 
 /// Bounded reads of the PE directories, through the loader's RVA mapping.

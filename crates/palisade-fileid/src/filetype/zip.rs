@@ -67,12 +67,19 @@ impl Entries {
     /// instead; its checksum is not checked, so a mismatch over-counts).
     /// `scratch` is reused for decoding, so no entry allocates. The work is
     /// linear in the entry's length.
-    fn note_entry(&mut self, name: &[u8], extra: &[u8], scratch: &mut Vec<u8>) {
+    ///
+    /// Returns whether the extra field is a whole number of subfields, each
+    /// a 4-byte header and the data it declares, as the APPNOTE requires.
+    /// The names seen before a cut subfield still count.
+    fn note_entry(&mut self, name: &[u8], extra: &[u8], scratch: &mut Vec<u8>) -> bool {
         self.note_name(name, scratch);
         let mut rest = extra;
-        while let (Some(id), Some(len)) = (u16_at(rest, 0), u16_at(rest, 2)) {
+        while !rest.is_empty() {
+            let (Some(id), Some(len)) = (u16_at(rest, 0), u16_at(rest, 2)) else {
+                return false;
+            };
             let Some(body) = bytes(rest, 4, usize::from(len)) else {
-                break;
+                return false;
             };
             if id == UNICODE_PATH {
                 // A version byte and the checksum, then the name.
@@ -82,6 +89,7 @@ impl Entries {
             }
             rest = rest.get(4 + usize::from(len)..).unwrap_or_default();
         }
+        true
     }
 
     /// Notes `name`, its part before a NUL byte if it has one, and its
@@ -105,12 +113,14 @@ impl Entries {
 
     /// Matches one name. Each length has at most one candidate name, so a
     /// name is compared with at most two targets (one name, and the macro
-    /// project suffix).
+    /// project suffix). Package and archive names are matched as
+    /// [`same_name`] does; `__main__.py` and `__main__.pyc` exactly, as
+    /// Python's zip importer looks them up.
     fn note(&mut self, name: &[u8]) {
         let is = |want: &[u8]| same_name(name, want);
         match name.len() {
-            11 => self.python_main |= is(b"__main__.py"),
-            12 => self.python_main |= is(b"__main__.pyc"),
+            11 => self.python_main |= name == b"__main__.py",
+            12 => self.python_main |= name == b"__main__.pyc",
             16 => self.appx_manifest |= is(b"AppxManifest.xml"),
             17 => self.appx_signature |= is(b"AppxSignature.p7x"),
             20 => self.jar_manifest |= is(b"META-INF/MANIFEST.MF"),
@@ -347,7 +357,7 @@ fn walk<R: Read + Seek + ?Sized>(
             .checked_add(name_len)
             .and_then(|e| bytes(&data, e, extra_len));
         // Names that fit count even if the entry's tail does not.
-        entries.note_entry(name, extra.unwrap_or_default(), &mut scratch);
+        let whole_extra = entries.note_entry(name, extra.unwrap_or_default(), &mut scratch);
         let next = name_at
             .checked_add(name_len)
             .and_then(|n| n.checked_add(extra_len))
@@ -356,6 +366,11 @@ fn walk<R: Read + Seek + ?Sized>(
         let Some(next) = next else {
             break Some(cut(ParseError::ZipDirectoryMalformed));
         };
+        // An extra subfield cut short inside an entry that fits: readers
+        // may stop, skip it or read past it into the comment.
+        if !whole_extra {
+            break Some(ParseError::ZipDirectoryMalformed);
+        }
         seen = seen.saturating_add(1);
         at = next;
     };

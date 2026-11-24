@@ -418,15 +418,21 @@ pub enum ParseError {
     /// The file has a PE signature, but its headers could not be read, so
     /// it is classified as [`FileKind::Mz16`].
     Pe(PeErrorKind),
+    /// The file ends inside the PE optional header or section table that
+    /// its COFF header declares, so it is classified as
+    /// [`FileKind::Mz16`].
+    PeHeadersTruncated,
     /// The compound file header is invalid.
     CfbHeader,
-    /// The compound file's root directory entry could not be read.
+    /// The compound file's root directory entry could not be read, or the
+    /// file ends inside it. When the CLSID itself was read, it still
+    /// decides the kind.
     CfbDirectory,
     /// No ZIP end of central directory record was found.
     ZipDirectoryMissing,
     /// The ZIP central directory is malformed: an entry runs past the
-    /// directory, the directory runs past the file, or the end records are
-    /// broken.
+    /// directory, an entry's extra field ends inside a subfield, the
+    /// directory runs past the file, or the end records are broken.
     ZipDirectoryMalformed,
     /// The ZIP central directory is larger than [`MAX_ZIP_DIRECTORY`] or
     /// has more than [`MAX_ZIP_ENTRIES`] entries; only part was examined.
@@ -447,6 +453,9 @@ impl std::fmt::Display for ParseError {
             Self::Io(kind) => write!(f, "read failed: {kind}"),
             Self::ReadBudgetExceeded => f.write_str("targeted read budget exceeded"),
             Self::Pe(kind) => write!(f, "PE headers could not be read: {kind:?}"),
+            Self::PeHeadersTruncated => {
+                f.write_str("file ends inside the PE optional header or section table")
+            }
             Self::CfbHeader => f.write_str("compound file header is invalid"),
             Self::CfbDirectory => f.write_str("compound file root entry could not be read"),
             Self::ZipDirectoryMissing => f.write_str("no ZIP end of central directory record"),
