@@ -64,6 +64,36 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   RSA signers up to 4096 bits, so `os_ci_compatible()` is false, with the
   reasons, for ECC signers, larger RSA keys and MD2 or MD5.
 
+- `fsctx`: file-system context
+  ([#54](https://github.com/jusso-dev/palisade/issues/54)), the attributes
+  that come from where a file is stored rather than from its content. All of
+  it is pure and runs on every OS:
+  - `fsctx::path`: one canonical form for every way of naming a file, so a
+    file cannot dodge or borrow a path rule by being named differently
+    (threat model T-engine-04, AT-04). It handles `\\?\`, `\??\`, `\\.\`,
+    `GLOBALROOT`, NT device paths, volume GUID paths, UNC, `.` and `..`,
+    trailing dots and spaces, reserved device names, alternate data stream
+    syntax, NTFS-style case folding and paths up to 32,767 UTF-16 units.
+    Possible 8.3 short names must be expanded through the
+    `ShortNameResolver` hook before a path yields a match key.
+  - `fsctx::acl`: a hardened self-relative security descriptor parser, and
+    the writability decision: which write-type rights any non-administrator
+    may hold on a file and on each ancestor folder. Deny ACEs, ACE order,
+    inherit-only ACEs, generic rights and the owner's implicit rights are
+    handled; anything the model cannot decide is reported as possibly
+    writable. It also reports the rights that rule out owner-based trust,
+    because NTFS keeps a file's owner when its content is overwritten in
+    place (T-engine-11, AT-03.3, AT-19.5b). The administrator SID list
+    defaults to the one the OS uses for path-rule protection.
+  - `fsctx::sid`, `fsctx::volume`, `fsctx::vars`, `fsctx::motw`: SIDs,
+    volume and location classification, path variables (`%WINDIR%` and so
+    on) and the `Zone.Identifier` mark-of-the-web parser. A mark may make a
+    file less trusted, never more.
+  - `win::fsctx` (Windows, `os-trust` feature): reads a file's final path
+    (links resolved, short names expanded) and its `Zone.Identifier` stream.
+    Owner and DACL reads, drive and bus type, volume GUIDs, DFS and the OS
+    access check are still to come (#54).
+
 ## Handling untrusted input
 
 Every file this crate reads may be hostile, so the parser:
@@ -92,6 +122,9 @@ borrows from the input instead of allocating, so no declared length sizes an
 allocation. Fixed limits bound everything else: 16 `WIN_CERTIFICATE` entries,
 a 16 MiB table, nesting 8 deep, 32 signatures in total, 64 certificates and 8
 timestamps per signature, and 32 warnings per signature.
+
+The same rules apply to the path normaliser, the security descriptor parser
+and the `Zone.Identifier` parser, which are also fuzzed (`fsctx_parse`).
 
 The parser has no `unsafe` code, and its modules say `#![forbid(unsafe_code)]`.
 
@@ -126,6 +159,7 @@ cargo +nightly fuzz run pe_parse -- -dict=fuzz/pe.dict -max_total_time=60
 cargo +nightly fuzz run version_info_parse -- -dict=fuzz/pe.dict -max_total_time=60
 cargo +nightly fuzz run authenticode_ranges -- -dict=fuzz/pe.dict -max_total_time=60
 cargo +nightly fuzz run authenticode_pkcs7 -- -dict=fuzz/pkcs7.dict -max_total_time=60
+cargo +nightly fuzz run fsctx_parse -- -max_total_time=60
 ```
 
 Running the fuzz targets in CI is part of [#25](https://github.com/jusso-dev/palisade/issues/25).
@@ -147,11 +181,19 @@ the provider is a one-module change.
 
 ## Platform support
 
-Portable parsing, hashing and signature verification on all platforms. OS trust APIs (including the cross-check against the OS trust-verification API that #48 describes) will live in a `win` module compiled only on Windows with the `os-trust` feature ([ADR 0003](../../docs/adr/0003-crate-boundaries-and-dependency-direction.md)).
+Portable parsing, hashing, signature verification and file-system context
+logic on all platforms. OS-backed reads live in the `win` module, compiled
+only on Windows with the `os-trust` feature
+([ADR 0003](../../docs/adr/0003-crate-boundaries-and-dependency-direction.md)).
+It holds the file-system context reads so far; the cross-check against the
+OS trust-verification API that #48 describes will live there too.
 
 ## Feature flags
 
-None yet.
+- `os-trust` (off by default): builds `palisade_fileid::win` on Windows. It
+  adds OS-backed reads and never changes what the portable code reports. It
+  has no effect on other targets. Only the agent, and the CLI for local
+  diagnostics, turn it on.
 
 ## Stability
 

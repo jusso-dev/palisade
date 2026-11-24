@@ -12,6 +12,11 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# OS-backed reads on Windows (`palisade_fileid::win`, ADR 0003). Off by
+# default; only the agent, and the CLI for diagnostics, turn it on.
+os-trust = []
+
 [dependencies]
 md-5 = { workspace = true }
 ring = { workspace = true }
