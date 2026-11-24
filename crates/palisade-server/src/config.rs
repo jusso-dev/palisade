@@ -350,17 +350,18 @@ fn read_config_file(path: &Path) -> Result<String, String> {
     use std::io::Read;
     let file = std::fs::File::open(path)
         .map_err(|e| format!("cannot open config file {}: {e}", path.display()))?;
-    let mut text = String::new();
+    let mut bytes = Vec::new();
     file.take(MAX_CONFIG_BYTES + 1)
-        .read_to_string(&mut text)
+        .read_to_end(&mut bytes)
         .map_err(|e| format!("cannot read config file {}: {e}", path.display()))?;
-    if text.len() as u64 > MAX_CONFIG_BYTES {
+    if bytes.len() as u64 > MAX_CONFIG_BYTES {
         return Err(format!(
             "config file {} is larger than {MAX_CONFIG_BYTES} bytes",
             path.display()
         ));
     }
-    Ok(text)
+    String::from_utf8(bytes)
+        .map_err(|_| format!("config file {} is not valid UTF-8", path.display()))
 }
 
 /// [`load`] without the file read. `origin` names the source in messages.
@@ -415,10 +416,21 @@ fn apply_env(
         ["TLS", "MIN_VERSION"] => raw.tls.min_version = text(),
         ["TLS", "PROFILE"] => raw.tls.profile = text(),
         ["SHUTDOWN", "GRACE_SECS"] => {
-            raw.shutdown.grace_secs = parse_env_int(name, value, errors);
+            set_env_int(&mut raw.shutdown.grace_secs, name, value, errors);
         }
         ["LOG", "LEVEL"] => raw.log.level = text(),
         ["LISTEN", which, key] => {
+            // The key is checked before the listener section is created, so
+            // an unknown variable never enables a listener.
+            const KEYS: [&str; 7] = [
+                "BIND",
+                "PORT",
+                "PUBLIC_URL",
+                "BODY_LIMIT_BYTES",
+                "REQUEST_TIMEOUT_SECS",
+                "MAX_CONNECTIONS",
+                "CLIENT_CA_FILE",
+            ];
             let slot = match *which {
                 "ADMIN" => &mut raw.listen.admin,
                 "AGENT" => &mut raw.listen.agent,
@@ -428,41 +440,45 @@ fn apply_env(
                     return;
                 }
             };
+            if !KEYS.contains(key) {
+                warnings.push(format!("ignoring unknown environment variable {name}"));
+                return;
+            }
             let listener = slot.get_or_insert_with(RawListener::default);
             match *key {
                 "BIND" => listener.bind = text(),
-                "PORT" => listener.port = parse_env_int(name, value, errors),
+                "PORT" => set_env_int(&mut listener.port, name, value, errors),
                 "PUBLIC_URL" => listener.public_url = text(),
                 "BODY_LIMIT_BYTES" => {
-                    listener.body_limit_bytes = parse_env_int(name, value, errors);
+                    set_env_int(&mut listener.body_limit_bytes, name, value, errors);
                 }
                 "REQUEST_TIMEOUT_SECS" => {
-                    listener.request_timeout_secs = parse_env_int(name, value, errors);
+                    set_env_int(&mut listener.request_timeout_secs, name, value, errors);
                 }
                 "MAX_CONNECTIONS" => {
-                    listener.max_connections = parse_env_int(name, value, errors);
+                    set_env_int(&mut listener.max_connections, name, value, errors);
                 }
-                "CLIENT_CA_FILE" => listener.client_ca_file = path(),
-                _ => warnings.push(format!("ignoring unknown environment variable {name}")),
+                _ => listener.client_ca_file = path(),
             }
         }
         _ => warnings.push(format!("ignoring unknown environment variable {name}")),
     }
 }
 
-fn parse_env_int<T: std::str::FromStr>(
+/// Parses an integer override into `slot`. On failure the error is
+/// recorded and `slot` keeps its value from the file, so validation does not
+/// report a second, misleading "is required" error.
+fn set_env_int<T: std::str::FromStr>(
+    slot: &mut Option<T>,
     name: &str,
     value: &str,
     errors: &mut Vec<String>,
-) -> Option<T> {
+) {
     match value.trim().parse::<T>() {
-        Ok(v) => Some(v),
-        Err(_) => {
-            errors.push(format!(
-                "{name}: expected a non-negative integer in range, got `{value}`"
-            ));
-            None
-        }
+        Ok(v) => *slot = Some(v),
+        Err(_) => errors.push(format!(
+            "{name}: expected a non-negative integer in range, got `{value}`"
+        )),
     }
 }
 
@@ -979,7 +995,39 @@ mod tests {
     #[test]
     fn bad_env_integers_are_errors() {
         let e = load_err(MINIMAL, &[("PALISADE_LISTEN__ADMIN__PORT", "70000")]);
+        assert_eq!(e.len(), 1, "no second 'is required' error: {e:?}");
         assert!(e[0].contains("PALISADE_LISTEN__ADMIN__PORT"), "{e:?}");
+    }
+
+    #[test]
+    fn unknown_listener_env_var_does_not_enable_the_listener() {
+        let l = load_ok(MINIMAL, &[("PALISADE_LISTEN__METRICS__NOPE", "1")]);
+        assert_eq!(l.warnings.len(), 1);
+        assert!(
+            l.config
+                .listeners
+                .iter()
+                .all(|x| x.kind != ListenerKind::Metrics),
+            "metrics must stay disabled"
+        );
+    }
+
+    #[test]
+    fn oversized_and_non_utf8_files_are_rejected() {
+        let dir = std::env::temp_dir().join(format!("palisade-config-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let big = dir.join("big.toml");
+        std::fs::write(
+            &big,
+            vec![b'#'; usize::try_from(MAX_CONFIG_BYTES).unwrap() + 1],
+        )
+        .unwrap();
+        let e = load(&big, &[]).unwrap_err();
+        assert!(e.0[0].contains("larger than"), "{e}");
+        let bad = dir.join("bad.toml");
+        std::fs::write(&bad, [0xff, 0xfe]).unwrap();
+        let e = load(&bad, &[]).unwrap_err();
+        assert!(e.0[0].contains("not valid UTF-8"), "{e}");
     }
 
     #[test]

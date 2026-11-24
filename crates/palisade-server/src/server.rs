@@ -10,12 +10,18 @@
 //!   exponential backoff, and health shows `listener_unbound:<name>` until
 //!   it succeeds;
 //! - a named interface that gains or loses addresses while the server runs
-//!   is followed: new addresses are bound, vanished ones stop accepting.
+//!   is followed: new addresses are bound, vanished ones stop accepting;
+//! - two listeners whose targets resolve to the same address (an interface
+//!   and a literal) are rejected before start by [`prepare`].
 //!
-//! Connections are TLS only. ALPN offers `h2` and `http/1.1`, and each
-//! connection is served as HTTP/2 or HTTP/1.1 depending on the preface the
-//! client sends. A listener accepts at most `max_connections` at a
-//! time; further clients wait in the TCP backlog.
+//! Connections are TLS only. ALPN offers `h2` and `http/1.1`; a connection
+//! that negotiated `h2` is served as HTTP/2 only, and every other connection
+//! (including one with no ALPN) as HTTP/1.1 only. A client must send its
+//! first complete request within the request-head timeout (30 s) of the
+//! handshake, or the connection is closed, so an idle or stalled client
+//! cannot hold a connection slot. A listener serves at most
+//! `max_connections` connections at a time; further clients wait in the
+//! TCP backlog.
 //!
 //! Shutdown has two phases. **Draining**: listeners stop accepting,
 //! readiness fails, and every open connection is asked to finish its
@@ -26,6 +32,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use axum::Router;
@@ -48,8 +55,8 @@ use crate::tls::{self, Identity};
 
 /// Time allowed for a client to complete the TLS handshake.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-/// Time allowed for an HTTP/1.1 client to send a complete request head.
-const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(30);
+/// HTTP/1.1 read buffer, which bounds the size of a request head.
+const H1_MAX_BUF: usize = 64 * 1024;
 /// HTTP/2 limits.
 const H2_MAX_STREAMS: u32 = 128;
 const H2_MAX_HEADER_LIST: u32 = 64 * 1024;
@@ -74,6 +81,10 @@ pub struct Tuning {
     pub retry_max: Duration,
     /// How often a fully bound listener re-checks its interface addresses.
     pub poll: Duration,
+    /// Time allowed for a client to send a complete request head: the first
+    /// one after the TLS handshake (HTTP/1.1 and HTTP/2), and each later one
+    /// on a kept-alive HTTP/1.1 connection.
+    pub request_head_timeout: Duration,
 }
 
 impl Default for Tuning {
@@ -82,6 +93,7 @@ impl Default for Tuning {
             retry_min: Duration::from_secs(1),
             retry_max: Duration::from_secs(30),
             poll: Duration::from_secs(5),
+            request_head_timeout: Duration::from_secs(30),
         }
     }
 }
@@ -128,6 +140,7 @@ pub fn prepare(config: &Config, host: &[HostAddr]) -> Result<Prepared, Vec<Strin
             }
         }
     }
+    errors.extend(resolved_overlaps(config, host));
     if !errors.is_empty() {
         return Err(errors);
     }
@@ -135,6 +148,29 @@ pub fn prepare(config: &Config, host: &[HostAddr]) -> Result<Prepared, Vec<Strin
         tls: tls_configs,
         warnings: placement_warnings(config, host),
     })
+}
+
+/// Listeners whose bind targets resolve to the same socket address on this
+/// host, for example `bind = "lo"` and `bind = "127.0.0.1"` on one port. The
+/// static check in the configuration catches literal clashes; this one needs
+/// the interface list.
+fn resolved_overlaps(config: &Config, host: &[HostAddr]) -> Vec<String> {
+    let mut seen: BTreeMap<SocketAddr, ListenerKind> = BTreeMap::new();
+    let mut errors = Vec::new();
+    for l in &config.listeners {
+        for addr in net::resolve(&l.bind, l.port, host) {
+            match seen.get(&addr) {
+                Some(other) if *other != l.kind => errors.push(format!(
+                    "listen.{other} and listen.{} both resolve to {addr}; give each listener its own address or port",
+                    l.kind
+                )),
+                _ => {
+                    seen.insert(addr, l.kind);
+                }
+            }
+        }
+    }
+    errors
 }
 
 /// Placement warnings for `deployment.profile = "overlay"`: a listener that
@@ -270,12 +306,15 @@ impl Server {
                 router = router.merge(extra);
             }
             let router = http::apply_stack(router, &settings);
+            let (h1, h2) = http_builders(self.tuning.request_head_timeout);
             let ctx = Arc::new(ListenerCtx {
                 conn_limit: Arc::new(Semaphore::new(settings.max_connections)),
                 settings,
                 acceptor: TlsAcceptor::from(tls),
                 router,
-                http: http_builder(),
+                h1,
+                h2,
+                request_head_timeout: self.tuning.request_head_timeout,
             });
             supervisors.spawn(supervise(Supervisor {
                 ctx,
@@ -298,18 +337,23 @@ impl Server {
     }
 }
 
-fn http_builder() -> auto::Builder<TokioExecutor> {
-    let mut b = auto::Builder::new(TokioExecutor::new());
-    b.http1()
+/// The HTTP/1.1-only and HTTP/2-only connection builders.
+fn http_builders(
+    head_timeout: Duration,
+) -> (auto::Builder<TokioExecutor>, auto::Builder<TokioExecutor>) {
+    let mut h1 = auto::Builder::new(TokioExecutor::new()).http1_only();
+    h1.http1()
         .timer(TokioTimer::new())
-        .header_read_timeout(HEADER_READ_TIMEOUT);
-    b.http2()
+        .header_read_timeout(head_timeout)
+        .max_buf_size(H1_MAX_BUF);
+    let mut h2 = auto::Builder::new(TokioExecutor::new()).http2_only();
+    h2.http2()
         .timer(TokioTimer::new())
         .max_concurrent_streams(H2_MAX_STREAMS)
         .max_header_list_size(H2_MAX_HEADER_LIST)
         .keep_alive_interval(H2_KEEPALIVE_INTERVAL)
         .keep_alive_timeout(H2_KEEPALIVE_TIMEOUT);
-    b
+    (h1, h2)
 }
 
 /// How shutdown ended.
@@ -376,7 +420,9 @@ struct ListenerCtx {
     settings: ListenerSettings,
     acceptor: TlsAcceptor,
     router: Router,
-    http: auto::Builder<TokioExecutor>,
+    h1: auto::Builder<TokioExecutor>,
+    h2: auto::Builder<TokioExecutor>,
+    request_head_timeout: Duration,
     conn_limit: Arc<Semaphore>,
 }
 
@@ -399,7 +445,12 @@ async fn supervise(mut sv: Supervisor) {
     let kind = sv.ctx.settings.kind;
     let bind = sv.ctx.settings.bind.clone();
     let port = sv.ctx.settings.port;
-    let needs_host = matches!(bind, BindTarget::Interface(_)) || sv.profile == Profile::Overlay;
+    // The interface list is only needed to resolve an interface name, or to
+    // see what a wildcard is reachable on under the overlay profile.
+    let needs_host = match &bind {
+        BindTarget::Interface(_) => true,
+        BindTarget::Ip(ip) => sv.profile == Profile::Overlay && ip.is_unspecified(),
+    };
     let mut loops: BTreeMap<SocketAddr, AbortHandle> = BTreeMap::new();
     let mut tasks = JoinSet::new();
     let mut last_failures: Vec<String> = Vec::new();
@@ -503,7 +554,7 @@ async fn supervise(mut sv: Supervisor) {
             sv.tuning.poll
         } else {
             let d = delay;
-            delay = (delay * 2).min(sv.tuning.retry_max);
+            delay = delay.saturating_mul(2).min(sv.tuning.retry_max);
             d
         };
         tokio::select! {
@@ -519,7 +570,10 @@ async fn supervise(mut sv: Supervisor) {
 
 /// Binds a listening socket. IPv6 sockets are IPv6-only, so `::` never
 /// silently covers IPv4 too. On Windows, `SO_REUSEADDR` is left off because
-/// there it lets another process take over the port.
+/// there it lets another process take over the port. Setting
+/// `SO_EXCLUSIVEADDRUSE`, which also stops another process from binding a
+/// more specific address on the same port, is part of the server hardening
+/// in #229.
 fn bind_socket(addr: SocketAddr) -> std::io::Result<TcpListener> {
     use socket2::{Domain, Protocol, Socket, Type};
     let socket = Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::TCP))?;
@@ -534,6 +588,11 @@ fn bind_socket(addr: SocketAddr) -> std::io::Result<TcpListener> {
     TcpListener::from_std(socket.into())
 }
 
+/// Accepts connections on one socket. A connection is accepted first and a
+/// connection slot acquired second, so an idle socket never holds a slot.
+/// While no slot is free the loop holds at most that one accepted
+/// connection, untouched, and stops accepting; other clients wait in the
+/// TCP backlog.
 async fn accept_loop(
     listener: TcpListener,
     ctx: Arc<ListenerCtx>,
@@ -542,24 +601,24 @@ async fn accept_loop(
 ) {
     let kind = ctx.settings.kind;
     loop {
-        let permit = tokio::select! {
-            p = ctx.conn_limit.clone().acquire_owned() => match p {
-                Ok(p) => p,
-                Err(_) => return,
-            },
-            () = wait_not_running(&mut phase) => return,
-        };
         let (stream, peer) = tokio::select! {
             r = listener.accept() => match r {
                 Ok(v) => v,
                 Err(e) => {
-                    // Usually a client that went away mid-handshake, or a
-                    // descriptor limit; pause briefly so a persistent error
-                    // cannot spin.
+                    // Usually a client that went away before it was
+                    // accepted, or a descriptor limit; pause briefly so a
+                    // persistent error cannot spin.
                     tracing::debug!(listener = %kind, error = %e, "accept failed");
                     tokio::time::sleep(Duration::from_millis(50)).await;
                     continue;
                 }
+            },
+            () = wait_not_running(&mut phase) => return,
+        };
+        let permit = tokio::select! {
+            p = ctx.conn_limit.clone().acquire_owned() => match p {
+                Ok(p) => p,
+                Err(_) => return,
             },
             () = wait_not_running(&mut phase) => return,
         };
@@ -598,14 +657,27 @@ async fn serve_connection(
         },
         () = wait_not_running(&mut phase) => return,
     };
+    // The protocol follows ALPN (RFC 7301): `h2` means HTTP/2, anything
+    // else HTTP/1.1. The client cannot switch by sending another preface.
+    let builder = if tls.get_ref().1.alpn_protocol() == Some(b"h2") {
+        &ctx.h2
+    } else {
+        &ctx.h1
+    };
+    // Set when the first request reaches the router. Until then the
+    // connection is on a deadline, which also covers the HTTP/2 preface and
+    // settings exchange that hyper does not time.
+    let started = Arc::new(AtomicBool::new(false));
+    let seen = started.clone();
     let service = ctx.router.clone().map_request(move |mut req: Request<_>| {
+        seen.store(true, Ordering::Relaxed);
         req.extensions_mut().insert(Peer(peer));
         req
     });
-    let conn = ctx
-        .http
-        .serve_connection(TokioIo::new(tls), TowerToHyperService::new(service));
+    let conn = builder.serve_connection(TokioIo::new(tls), TowerToHyperService::new(service));
     tokio::pin!(conn);
+    let first_request = tokio::time::sleep(ctx.request_head_timeout);
+    tokio::pin!(first_request);
     let mut draining = false;
     match *phase.borrow_and_update() {
         Phase::Running => {}
@@ -622,6 +694,12 @@ async fn serve_connection(
                     tracing::debug!(listener = %kind, peer = %peer, error = %e, "connection ended with an error");
                 }
                 break;
+            }
+            () = &mut first_request, if !started.load(Ordering::Relaxed) => {
+                if !started.load(Ordering::Relaxed) {
+                    tracing::debug!(listener = %kind, peer = %peer, "no request before the request-head timeout; closing");
+                    break;
+                }
             }
             changed = phase.changed() => {
                 if changed.is_err() {

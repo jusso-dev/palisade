@@ -108,9 +108,16 @@ Each listener has a supervisor that keeps it bound:
 - A named interface is re-resolved every 5 s. New addresses are bound; addresses that vanish stop
   accepting.
 
-Connections: a TLS handshake must finish within 10 s, an HTTP/1.1 request head within 30 s.
+Connections: the TLS handshake must finish within 10 s. The protocol follows ALPN: a connection
+that negotiated `h2` is served as HTTP/2 only, and any other (including one with no ALPN) as
+HTTP/1.1 only, so a client cannot switch protocols by sending another preface. The first request
+must arrive within 30 s of the handshake, whatever the protocol, and each later HTTP/1.1 request
+head within 30 s of the previous response; otherwise the connection is closed, so an idle or
+stalled client cannot hold a connection slot. HTTP/1.1 request heads are limited to 64 KiB.
 HTTP/2 allows 128 concurrent streams and 64 KiB of headers per request, with keep-alive pings.
-A listener holds at most `max_connections` connections; further clients wait in the TCP backlog.
+A listener serves at most `max_connections` connections; a connection is accepted before it takes
+a slot, so a socket with no clients never holds one, and while every slot is taken further
+clients wait in the TCP backlog.
 
 ## HTTP stack
 
@@ -195,15 +202,17 @@ mandatory over it.
 ## Logs
 
 `serve` writes one JSON object per line to standard error: `timestamp`, `level`, `target`,
-`fields` (including `message`) and `span` (the current request span's fields). The level comes
+`fields` (including `message`), `span` (the current span) and `spans` (every enclosing span, so
+the request span's fields stay on the line when a handler opens a child span). The level comes
 from `log.level`. No secret value is passed to the logger: the configuration holds only secret
 paths, and the secret reader's errors never contain file contents. Tenant and principal fields
 join the request span with the API work.
 
 ## Shutdown
 
-On SIGTERM or Ctrl-C (on Windows also Ctrl-Break and the console close, logoff and shutdown
-events): readiness fails, every listener stops accepting, and open connections are asked to
+On SIGTERM or SIGINT (Ctrl-C), or on Windows Ctrl-C, Ctrl-Break and the console close, logoff
+and shutdown events (the handlers are registered before any socket is bound, so an early signal is
+never lost): readiness fails, every listener stops accepting, and open connections are asked to
 finish their in-flight requests and close (HTTP/1.1 after the current response, HTTP/2 with
 GOAWAY). If any remain after `shutdown.grace_secs`, they are dropped. The process exits `0`
 either way. A second signal during the drain exits `1` immediately.

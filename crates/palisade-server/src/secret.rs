@@ -32,19 +32,28 @@ pub fn read_secret_file(path: &Path, max_len: usize) -> Result<Zeroizing<Vec<u8>
             "secret file {shown} is larger than {max_len} bytes"
         ));
     }
-    // Reserve the whole buffer up front, so the contents are never copied
-    // into a reallocated buffer that would not be zeroised.
-    let mut buf = Zeroizing::new(Vec::with_capacity(max_len.saturating_add(1)));
-    let limit = u64::try_from(max_len).unwrap_or(u64::MAX).saturating_add(1);
-    (&mut file)
-        .take(limit)
-        .read_to_end(&mut buf)
-        .map_err(|e| format!("cannot read secret file {shown}: {e}"))?;
-    if buf.len() > max_len {
+    // Read into a buffer allocated once at its final size and never grown,
+    // so the contents are never copied into a buffer that is not zeroised.
+    let mut buf = Zeroizing::new(vec![0u8; max_len.saturating_add(1)]);
+    let mut filled = 0;
+    while let Some(spare) = buf.get_mut(filled..) {
+        if spare.is_empty() {
+            break;
+        }
+        match file.read(spare) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(format!("cannot read secret file {shown}: {e}")),
+        }
+    }
+    if filled > max_len {
         return Err(format!(
             "secret file {shown} is larger than {max_len} bytes"
         ));
     }
+    // Shrinking never reallocates.
+    buf.truncate(filled);
     Ok(buf)
 }
 
@@ -94,6 +103,14 @@ mod tests {
         let p = temp_file("ok", SENTINEL);
         let got = read_secret_file(&p, 1024).unwrap();
         assert_eq!(&got[..], SENTINEL);
+    }
+
+    #[test]
+    fn exact_limit_is_accepted_without_growing_the_buffer() {
+        let p = temp_file("exact", SENTINEL);
+        let got = read_secret_file(&p, SENTINEL.len()).unwrap();
+        assert_eq!(&got[..], SENTINEL);
+        assert_eq!(got.capacity(), SENTINEL.len() + 1);
     }
 
     #[test]

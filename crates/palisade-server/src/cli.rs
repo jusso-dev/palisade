@@ -156,11 +156,21 @@ async fn serve_async(config: Config) -> ExitCode {
         listeners = config.listeners.len(),
         "starting palisade-server"
     );
+    // Signal handlers are registered before any socket is bound, so a
+    // signal that arrives as soon as the server is listening is never lost
+    // or handled by the default action. The same streams serve the first
+    // and the second signal.
+    let mut signals = match Signals::new() {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(error = %e, "cannot listen for shutdown signals; not starting");
+            return ExitCode::FAILURE;
+        }
+    };
     let running = Server::new(config, prepared).start();
 
-    if let Err(e) = shutdown_signal().await {
-        tracing::error!(error = %e, "cannot listen for shutdown signals; shutting down");
-    }
+    signals.next().await;
+    tracing::info!("shutdown signal received");
     tokio::select! {
         outcome = running.shutdown() => {
             match outcome {
@@ -169,49 +179,80 @@ async fn serve_async(config: Config) -> ExitCode {
             }
             ExitCode::SUCCESS
         }
-        r = shutdown_signal() => {
-            if r.is_ok() {
-                tracing::warn!("second shutdown signal; exiting without draining");
-            }
+        () = signals.next() => {
+            tracing::warn!("second shutdown signal; exiting without draining");
             ExitCode::FAILURE
         }
     }
 }
 
-/// Resolves on the first shutdown request: Ctrl-C everywhere, plus SIGTERM
-/// on Unix and the console close, logoff and shutdown events on Windows.
-async fn shutdown_signal() -> std::io::Result<()> {
+/// The shutdown requests the server listens for: Ctrl-C everywhere, plus
+/// SIGTERM on Unix, and Ctrl-Break and the console close, logoff and
+/// shutdown events on Windows.
+struct Signals {
     #[cfg(unix)]
-    {
-        use tokio::signal::unix::{SignalKind, signal};
-        let mut term = signal(SignalKind::terminate())?;
-        tokio::select! {
-            r = tokio::signal::ctrl_c() => r?,
-            _ = term.recv() => {}
-        }
-        tracing::info!("shutdown signal received");
-        Ok(())
-    }
+    int: tokio::signal::unix::Signal,
+    #[cfg(unix)]
+    term: tokio::signal::unix::Signal,
     #[cfg(windows)]
-    {
-        use tokio::signal::windows;
-        let mut brk = windows::ctrl_break()?;
-        let mut close = windows::ctrl_close()?;
-        let mut shut = windows::ctrl_shutdown()?;
-        tokio::select! {
-            r = tokio::signal::ctrl_c() => r?,
-            _ = brk.recv() => {}
-            _ = close.recv() => {}
-            _ = shut.recv() => {}
+    c: tokio::signal::windows::CtrlC,
+    #[cfg(windows)]
+    brk: tokio::signal::windows::CtrlBreak,
+    #[cfg(windows)]
+    close: tokio::signal::windows::CtrlClose,
+    #[cfg(windows)]
+    logoff: tokio::signal::windows::CtrlLogoff,
+    #[cfg(windows)]
+    shut: tokio::signal::windows::CtrlShutdown,
+}
+
+#[cfg(not(any(unix, windows)))]
+compile_error!("palisade-server supports Unix and Windows only");
+
+impl Signals {
+    fn new() -> std::io::Result<Self> {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            Ok(Self {
+                int: signal(SignalKind::interrupt())?,
+                term: signal(SignalKind::terminate())?,
+            })
         }
-        tracing::info!("shutdown signal received");
-        Ok(())
+        #[cfg(windows)]
+        {
+            use tokio::signal::windows;
+            Ok(Self {
+                c: windows::ctrl_c()?,
+                brk: windows::ctrl_break()?,
+                close: windows::ctrl_close()?,
+                logoff: windows::ctrl_logoff()?,
+                shut: windows::ctrl_shutdown()?,
+            })
+        }
     }
-    #[cfg(not(any(unix, windows)))]
-    {
-        tokio::signal::ctrl_c().await?;
-        tracing::info!("shutdown signal received");
-        Ok(())
+
+    /// Resolves on the next request. A stream that has ended (it cannot,
+    /// while the runtime runs) never resolves.
+    async fn next(&mut self) {
+        async fn recv_or_pending(r: Option<()>) {
+            if r.is_none() {
+                std::future::pending::<()>().await;
+            }
+        }
+        #[cfg(unix)]
+        tokio::select! {
+            r = self.int.recv() => recv_or_pending(r).await,
+            r = self.term.recv() => recv_or_pending(r).await,
+        }
+        #[cfg(windows)]
+        tokio::select! {
+            r = self.c.recv() => recv_or_pending(r).await,
+            r = self.brk.recv() => recv_or_pending(r).await,
+            r = self.close.recv() => recv_or_pending(r).await,
+            r = self.logoff.recv() => recv_or_pending(r).await,
+            r = self.shut.recv() => recv_or_pending(r).await,
+        }
     }
 }
 

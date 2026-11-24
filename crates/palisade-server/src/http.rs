@@ -32,7 +32,6 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use ring::rand::{SecureRandom, SystemRandom};
 use serde_json::json;
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::limit::RequestBodyLimitLayer;
@@ -205,7 +204,7 @@ fn valid_request_id(v: &str) -> bool {
 fn new_request_id() -> String {
     static FALLBACK: AtomicU64 = AtomicU64::new(0);
     let mut bytes = [0u8; 16];
-    if SystemRandom::new().fill(&mut bytes).is_err() {
+    if crate::tls::fill_random(&mut bytes).is_err() {
         // The OS random source failed. IDs only correlate log lines, so a
         // process-local counter is an acceptable stand-in.
         return format!("local-{}", FALLBACK.fetch_add(1, Ordering::Relaxed));

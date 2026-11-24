@@ -187,6 +187,15 @@ pub fn server_config(
     Ok(Arc::new(config))
 }
 
+/// Fills `buf` from the TLS provider's secure random source, so the crate
+/// reaches `ring` only through `rustls` (ADR 0008).
+pub fn fill_random(buf: &mut [u8]) -> Result<(), String> {
+    ring::default_provider()
+        .secure_random
+        .fill(buf)
+        .map_err(|_| "the system random source failed".to_owned())
+}
+
 /// Checks that `host` is one of the leaf certificate's subject alternative
 /// names (DNS or IP), using the same matching a TLS client applies.
 pub fn leaf_covers(identity: &Identity, host: &ServerName<'_>) -> Result<(), String> {

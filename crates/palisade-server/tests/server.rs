@@ -30,6 +30,7 @@ fn fast() -> Tuning {
         retry_min: Duration::from_millis(20),
         retry_max: Duration::from_millis(100),
         poll: Duration::from_millis(50),
+        request_head_timeout: Duration::from_millis(500),
     }
 }
 
@@ -178,7 +179,7 @@ async fn chacha_only_client_is_rejected() {
 }
 
 #[tokio::test]
-async fn strict_profile_rejects_aes128_and_p256() {
+async fn strict_profile_rejects_aes128_x25519_and_p256() {
     let pki = pki("strict", &["localhost"]);
     let (mut cfg, ports) = base_config(&pki, "");
     cfg.tls.profile = config::CryptoProfile::AsdStrict;
@@ -202,6 +203,18 @@ async fn strict_profile_rejects_aes128_and_p256() {
     assert!(
         connect(
             client_with_provider(&pki, x25519),
+            addr(ports.admin),
+            "localhost"
+        )
+        .await
+        .is_err()
+    );
+
+    let mut p256 = rustls::crypto::ring::default_provider();
+    p256.kx_groups = vec![rustls::crypto::ring::kx_group::SECP256R1];
+    assert!(
+        connect(
+            client_with_provider(&pki, p256),
             addr(ports.admin),
             "localhost"
         )
@@ -710,4 +723,136 @@ fn prepare_reports_bad_tls_files_without_key_contents() {
         e.contains("listen.agent") && e.contains("agent-ca.crt"),
         "{e}"
     );
+}
+
+/// A client that completes TLS and then sends `prefix` (possibly nothing)
+/// must be disconnected once the request-head timeout passes, whatever the
+/// ALPN result, so it cannot hold a connection slot.
+async fn assert_idle_client_is_closed(alpn: &[&[u8]], prefix: &[u8]) {
+    let pki = pki("idle", &["localhost"]);
+    let (mut cfg, ports) = base_config(&pki, "");
+    cfg.listeners[0].max_connections = 1;
+    let running = start(cfg, None);
+    wait_ready(&running).await;
+    let client = client_config(&pki, &[&TLS13], None, alpn);
+    let mut idle = connect(client, addr(ports.admin), "localhost")
+        .await
+        .unwrap();
+    if !prefix.is_empty() {
+        idle.write_all(prefix).await.unwrap();
+        idle.flush().await.unwrap();
+    }
+    let started = std::time::Instant::now();
+    let mut buf = Vec::new();
+    let closed = tokio::time::timeout(Duration::from_secs(5), idle.read_to_end(&mut buf)).await;
+    assert!(closed.is_ok(), "idle connection was never closed");
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed >= Duration::from_millis(400),
+        "closed too early: {elapsed:?}"
+    );
+    // The slot is free again.
+    let h1 = client_config(&pki, &[&TLS13], None, &[b"http/1.1"]);
+    let mut s = connect(h1, addr(ports.admin), "localhost").await.unwrap();
+    assert_eq!(http1(&mut s, &get_request("/healthz")).await.status, 200);
+    running.shutdown().await;
+}
+
+fn h2_preface_and_settings() -> Vec<u8> {
+    let mut preface = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".to_vec();
+    preface.extend_from_slice(&[0, 0, 0, 0x04, 0, 0, 0, 0, 0]);
+    preface
+}
+
+#[tokio::test]
+async fn idle_http1_client_is_closed() {
+    assert_idle_client_is_closed(&[b"http/1.1"], b"").await;
+}
+
+#[tokio::test]
+async fn client_without_alpn_sending_nothing_is_closed() {
+    assert_idle_client_is_closed(&[], b"").await;
+}
+
+#[tokio::test]
+async fn partial_http2_preface_is_closed() {
+    assert_idle_client_is_closed(&[b"h2"], b"PRI * HT").await;
+}
+
+#[tokio::test]
+async fn http2_client_that_never_sends_a_request_is_closed() {
+    assert_idle_client_is_closed(&[b"h2"], &h2_preface_and_settings()).await;
+}
+
+#[tokio::test]
+async fn alpn_http1_client_cannot_switch_to_http2() {
+    let pki = pki("alpn-h1", &["localhost"]);
+    let (cfg, ports) = base_config(&pki, "");
+    let running = start(cfg, None);
+    wait_ready(&running).await;
+    let client = client_config(&pki, &[&TLS13], None, &[b"http/1.1"]);
+    let mut s = connect(client, addr(ports.admin), "localhost")
+        .await
+        .unwrap();
+    assert_eq!(s.get_ref().1.alpn_protocol(), Some(&b"http/1.1"[..]));
+    s.write_all(&h2_preface_and_settings()).await.unwrap();
+    let mut buf = Vec::new();
+    let _ = tokio::time::timeout(Duration::from_secs(5), s.read_to_end(&mut buf)).await;
+    let text = String::from_utf8_lossy(&buf);
+    assert!(
+        buf.is_empty() || text.starts_with("HTTP/1.1 4"),
+        "an HTTP/2 preface on an http/1.1 connection must not be served as HTTP/2: {buf:02x?}"
+    );
+    running.shutdown().await;
+}
+
+#[tokio::test]
+async fn idle_sockets_do_not_hold_connection_slots() {
+    // One listener on two addresses with a cap of one: the idle socket must
+    // not hold the only slot, so both addresses keep working.
+    let pki = pki("multi", &["localhost"]);
+    let (mut cfg, ports) = base_config(&pki, "");
+    cfg.listeners[0].bind = config::BindTarget::Interface("lo-test".into());
+    cfg.listeners[0].max_connections = 1;
+    let fake = Arc::new(FakeHost::default());
+    fake.set(vec![
+        host_addr("lo-test", "127.0.0.1"),
+        host_addr("lo-test", "::1"),
+    ]);
+    let prepared = server::prepare(&cfg, &[]).unwrap();
+    let running = Server::new(cfg, prepared)
+        .with_tuning(fast())
+        .with_addr_source(fake.source())
+        .start();
+    wait_ready(&running).await;
+    let client = client_config(&pki, &[&TLS13], None, &[b"http/1.1"]);
+    for ip in ["127.0.0.1", "::1"] {
+        let a = SocketAddr::new(ip.parse().unwrap(), ports.admin);
+        let mut s = tokio::time::timeout(
+            Duration::from_secs(5),
+            connect(client.clone(), a, "localhost"),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            panic!("{ip}: handshake never completed (slot held by an idle socket?)")
+        })
+        .unwrap();
+        assert_eq!(
+            http1(&mut s, &get_request("/healthz")).await.status,
+            200,
+            "{ip}"
+        );
+    }
+    running.shutdown().await;
+}
+
+#[test]
+fn prepare_rejects_interface_and_literal_resolving_to_one_address() {
+    let pki = pki("resolved-overlap", &["localhost"]);
+    let (mut cfg, ports) = base_config(&pki, "");
+    cfg.listeners[0].bind = config::BindTarget::Interface("lo-test".into());
+    cfg.listeners[1].port = ports.admin;
+    let host = vec![host_addr("lo-test", "127.0.0.1")];
+    let e = server::prepare(&cfg, &host).unwrap_err().join("\n");
+    assert!(e.contains("both resolve to 127.0.0.1"), "{e}");
 }

@@ -138,6 +138,113 @@ fn missing_config_is_a_usage_error() {
 }
 
 #[cfg(unix)]
+fn send_signal(child: &std::process::Child, sig: &str) {
+    let status = Command::new("kill")
+        .args([sig, &child.id().to_string()])
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
+#[cfg(unix)]
+fn wait_for_line(
+    rx: &std::sync::mpsc::Receiver<String>,
+    lines: &mut Vec<String>,
+    needle: &str,
+    count: usize,
+) {
+    use std::time::{Duration, Instant};
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut seen = lines.iter().filter(|l| l.contains(needle)).count();
+    while seen < count && Instant::now() < deadline {
+        if let Ok(line) = rx.recv_timeout(Duration::from_millis(100)) {
+            if line.contains(needle) {
+                seen += 1;
+            }
+            lines.push(line);
+        }
+    }
+    assert!(seen >= count, "never saw {count} x {needle}: {lines:#?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn second_signal_during_drain_exits_one() {
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    // A long grace period and a connection held open: the drain cannot
+    // finish, so only the second signal ends the process, with exit 1.
+    let pki = pki("cli-second", &["localhost"]);
+    let admin = free_port();
+    let path = write_config(
+        &pki,
+        &config_body(admin, free_port(), "[shutdown]\ngrace_secs = 600\n"),
+    );
+    let mut child = Command::new(BIN)
+        .args(["serve", "--config", path.to_str().unwrap()])
+        .stderr(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let mut lines = Vec::new();
+    wait_for_line(&rx, &mut lines, "\"listening\"", 2);
+
+    // A TLS connection with half a request head keeps the drain waiting:
+    // HTTP/1.1 graceful shutdown lets a request that has started finish.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let held = rt.block_on(async {
+        use tokio::io::AsyncWriteExt;
+        let cfg = client_config(&pki, &[&rustls::version::TLS13], None, &[b"http/1.1"]);
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], admin));
+        let mut s = connect(cfg, addr, "localhost").await.unwrap();
+        s.write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\n")
+            .await
+            .unwrap();
+        s.flush().await.unwrap();
+        s
+    });
+    std::thread::sleep(Duration::from_millis(200));
+
+    send_signal(&child, "-TERM");
+    wait_for_line(&rx, &mut lines, "shutdown started", 1);
+    send_signal(&child, "-INT");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let code = loop {
+        if let Some(s) = child.try_wait().unwrap() {
+            break s.code();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "second signal did not end the process"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    while let Ok(line) = rx.recv_timeout(Duration::from_millis(300)) {
+        lines.push(line);
+    }
+    assert_eq!(code, Some(1), "{lines:#?}");
+    assert!(
+        lines.iter().any(|l| l.contains("second shutdown signal")),
+        "{lines:#?}"
+    );
+    drop(held);
+}
+
+#[cfg(unix)]
 #[test]
 fn serve_logs_json_and_exits_zero_on_sigterm() {
     use std::io::{BufRead, BufReader};
