@@ -148,6 +148,7 @@ pub fn base_metadata(
         .join(format!("xtask-base-{}-{nanos}", std::process::id()));
     std::fs::create_dir_all(root.join("target"))
         .map_err(|e| format!("cannot create target/: {e}"))?;
+    #[cfg_attr(not(unix), expect(unused_mut, reason = "only Unix sets a mode"))]
     let mut builder = std::fs::DirBuilder::new();
     #[cfg(unix)]
     std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
