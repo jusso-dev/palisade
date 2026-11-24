@@ -128,6 +128,8 @@ fn is_public_v6(ip: Ipv6Addr) -> bool {
         || is_v6_link_local(ip)
         // Deprecated site-local, fec0::/10.
         || (s0 & 0xFFC0) == 0xFEC0
+        // Benchmarking, 2001:2::/48 (RFC 5180).
+        || (s0 == 0x2001 && s1 == 0x0002 && ip.segments()[2] == 0)
         // Documentation, 2001:db8::/32 and 3fff::/20.
         || (s0 == 0x2001 && s1 == 0x0DB8)
         || (s0 == 0x3FFF && (s1 & 0xF000) == 0)
@@ -201,6 +203,7 @@ mod tests {
             "fe80::1",
             "fec0::1",
             "2001:db8::1",
+            "2001:2::1",
             "::ffff:10.0.0.1",
             "ff02::1",
         ] {

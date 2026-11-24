@@ -190,8 +190,10 @@ pub fn server_config(
 /// Fills `buf` from the TLS provider's secure random source, so the crate
 /// reaches `ring` only through `rustls` (ADR 0008).
 pub fn fill_random(buf: &mut [u8]) -> Result<(), String> {
-    ring::default_provider()
-        .secure_random
+    static RANDOM: std::sync::OnceLock<&'static dyn rustls::crypto::SecureRandom> =
+        std::sync::OnceLock::new();
+    RANDOM
+        .get_or_init(|| ring::default_provider().secure_random)
         .fill(buf)
         .map_err(|_| "the system random source failed".to_owned())
 }

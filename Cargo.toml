@@ -41,7 +41,7 @@ palisade-policy = { path = "crates/palisade-policy" }
 axum = { version = "0.8.9", default-features = false }
 boon = { version = "0.6.1" }
 clap = { version = "4.6.9", default-features = false, features = ["std", "derive", "env", "error-context", "help", "usage"] }
-hyper-util = { version = "0.1.21", default-features = false, features = ["http1", "http2", "server-auto", "server-graceful", "service", "tokio"] }
+hyper-util = { version = "0.1.21", default-features = false, features = ["http1", "http2", "server-auto", "service", "tokio"] }
 if-addrs = { version = "0.15.0", default-features = false }
 libc = { version = "0.2.191", default-features = false }
 md-5 = { version = "0.11.0", default-features = false }
