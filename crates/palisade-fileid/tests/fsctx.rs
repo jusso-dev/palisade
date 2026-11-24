@@ -124,7 +124,8 @@ proptest! {
 
 /// Writes seed inputs for the `fsctx_parse` fuzz target into the directory
 /// in `PALISADE_FUZZ_SEED_DIR`: Win32 and NT paths, a self-relative
-/// security descriptor and a `Zone.Identifier` stream.
+/// security descriptor, a `Zone.Identifier` stream, a `FILE_STREAM_INFO`
+/// list and a change-journal record.
 ///
 /// ```text
 /// PALISADE_FUZZ_SEED_DIR=fuzz/corpus/fsctx_parse \
@@ -158,6 +159,33 @@ fn write_fsctx_fuzz_seeds() {
         ]),
     );
     std::fs::write(dir.join("seed-descriptor"), sd.to_self_relative().unwrap()).unwrap();
+    // A two-record stream list (default stream and a named one), padded as
+    // the OS pads it, and a version-2 change-journal record.
+    let record = |name: &str| {
+        let units: Vec<u16> = name.encode_utf16().collect();
+        let mut r = Vec::new();
+        r.extend_from_slice(&0_u32.to_le_bytes());
+        r.extend_from_slice(&u32::try_from(units.len() * 2).unwrap().to_le_bytes());
+        r.extend_from_slice(&7_i64.to_le_bytes());
+        r.extend_from_slice(&8_i64.to_le_bytes());
+        for u in units {
+            r.extend_from_slice(&u.to_le_bytes());
+        }
+        while r.len() % 8 != 0 {
+            r.push(0);
+        }
+        r
+    };
+    let mut streams = record("::$DATA");
+    let next = u32::try_from(streams.len()).unwrap();
+    streams[..4].copy_from_slice(&next.to_le_bytes());
+    streams.extend(record(":Zone.Identifier:$DATA"));
+    std::fs::write(dir.join("seed-streams"), streams).unwrap();
+    let mut usn = vec![0_u8; 64];
+    usn[..4].copy_from_slice(&64_u32.to_le_bytes());
+    usn[4..6].copy_from_slice(&2_u16.to_le_bytes());
+    usn[24..32].copy_from_slice(&12345_i64.to_le_bytes());
+    std::fs::write(dir.join("seed-usn"), usn).unwrap();
     std::fs::write(
         dir.join("seed-zone"),
         "[ZoneTransfer]\r\nZoneId=3\r\nReferrerUrl=https://example.invalid/\r\nHostUrl=https://example.invalid/setup.exe\r\n",

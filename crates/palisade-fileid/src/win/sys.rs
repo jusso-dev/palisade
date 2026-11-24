@@ -15,13 +15,14 @@ use std::fs::File;
 use std::io;
 use std::os::windows::io::AsRawHandle as _;
 
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+use windows_sys::Win32::Foundation::{CloseHandle, ERROR_IO_PENDING, HANDLE};
 use windows_sys::Win32::Storage::FileSystem::{
-    FILE_BASIC_INFO, FILE_ID_INFO, FILE_INFO_BY_HANDLE_CLASS, FILE_STANDARD_INFO, FileBasicInfo,
-    FileIdInfo, FileStandardInfo, FileStreamInfo, GetFileInformationByHandleEx,
+    FILE_BASIC_INFO, FILE_ID_INFO, FILE_INFO_BY_HANDLE_CLASS, FILE_REMOTE_PROTOCOL_INFO,
+    FILE_STANDARD_INFO, FILE_TYPE_DISK, FileBasicInfo, FileIdInfo, FileRemoteProtocolInfo,
+    FileStandardInfo, FileStreamInfo, GetFileInformationByHandleEx, GetFileType,
     GetFinalPathNameByHandleW, GetVolumeInformationByHandleW,
 };
-use windows_sys::Win32::System::IO::DeviceIoControl;
+use windows_sys::Win32::System::IO::{DeviceIoControl, GetOverlappedResult, OVERLAPPED};
 use windows_sys::Win32::System::Ioctl::{
     FSCTL_QUERY_USN_JOURNAL, FSCTL_READ_FILE_USN_DATA, READ_FILE_USN_DATA, USN_JOURNAL_DATA_V0,
 };
@@ -31,7 +32,7 @@ use windows_sys::Win32::System::Memory::{
 };
 use windows_sys::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
 use windows_sys::Win32::System::SystemInformation::{GetSystemInfo, SYSTEM_INFO};
-use windows_sys::Win32::System::Threading::GetCurrentProcess;
+use windows_sys::Win32::System::Threading::{CreateEventW, GetCurrentProcess};
 
 /// The largest buffer any variable-length query here grows to: 1 MiB. A
 /// stream list or path longer than this is reported as an error, never
@@ -90,6 +91,23 @@ pub(crate) fn basic_info(file: &File) -> io::Result<FILE_BASIC_INFO> {
     // SAFETY: `FILE_BASIC_INFO` is the structure for `FileBasicInfo`: four
     // `i64` and a `u32`, valid for every bit pattern.
     unsafe { info_by_handle(file, FileBasicInfo) }
+}
+
+/// Whether the handle is a file or directory on disk (`FILE_TYPE_DISK`),
+/// not a pipe, console or character device.
+pub(crate) fn is_disk_file(file: &File) -> bool {
+    // SAFETY: `handle(file)` is an open handle borrowed for the call;
+    // `GetFileType` only reads it.
+    unsafe { GetFileType(handle(file)) == FILE_TYPE_DISK }
+}
+
+/// Whether the file is on a remote file system: `FileRemoteProtocolInfo`
+/// succeeds only for files opened through a network redirector.
+pub(crate) fn is_remote(file: &File) -> bool {
+    // SAFETY: `FILE_REMOTE_PROTOCOL_INFO` is the structure for
+    // `FileRemoteProtocolInfo`: integers and unions of integer arrays only,
+    // valid for every bit pattern.
+    unsafe { info_by_handle::<FILE_REMOTE_PROTOCOL_INFO>(file, FileRemoteProtocolInfo) }.is_ok()
 }
 
 /// The plain-data shape of `FILE_STANDARD_INFO`. The `windows-sys` type
@@ -252,15 +270,43 @@ pub(crate) fn volume_information(file: &File) -> io::Result<VolumeFacts> {
     })
 }
 
-/// Sends a buffered `FSCTL_*` request with input `input` and returns the
-/// bytes the OS wrote, up to `out_bytes`.
+/// An unnamed, manual-reset event, closed on drop.
+struct Event(HANDLE);
+
+impl Event {
+    fn new() -> io::Result<Self> {
+        // SAFETY: null security attributes and a null name create an
+        // unnamed event with default security; nothing is borrowed.
+        let h = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
+        if h.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Self(h))
+    }
+}
+
+impl Drop for Event {
+    fn drop(&mut self) {
+        // SAFETY: `self.0` is the event `new` created and owns, closed once.
+        let _ = unsafe { CloseHandle(self.0) };
+    }
+}
+
+/// Sends an `FSCTL_*` request with input `input` and returns the bytes the
+/// OS wrote, up to `out_bytes`.
+///
+/// The request always carries an `OVERLAPPED` with its own event, and waits
+/// for it if the OS completes it later. So it is sound whether `file` was
+/// opened for synchronous or for overlapped I/O: the buffers stay alive and
+/// borrowed until the OS has finished with them.
 ///
 /// # Safety
 ///
-/// `code` must be a buffered (`METHOD_BUFFERED`) control code that reads
-/// at most `size_of::<I>()` bytes from the input and writes at most
-/// `out_bytes` bytes to the output, and `I` must be the plain-data input
-/// structure it expects.
+/// `code` must be a control code that reads at most `size_of::<I>()` bytes
+/// from the input buffer and writes at most `out_bytes` bytes to the output
+/// buffer, whatever its transfer method (`METHOD_BUFFERED` or
+/// `METHOD_NEITHER`), and `I` must be the plain-data input structure it
+/// expects.
 unsafe fn fsctl<I>(
     file: &File,
     code: u32,
@@ -273,12 +319,19 @@ unsafe fn fsctl<I>(
         Some(i) => (std::ptr::from_ref(i).cast(), size_u32::<I>()),
         None => (std::ptr::null(), 0),
     };
+    let event = Event::new()?;
+    let mut overlapped = OVERLAPPED {
+        hEvent: event.0,
+        ..OVERLAPPED::default()
+    };
     let mut returned = 0_u32;
     // SAFETY: the input, if any, is a live `I` of `in_len` bytes that the
     // OS only reads; `out` is a live, writable buffer of `out_len` bytes,
-    // the size passed; `returned` is a live local. No `OVERLAPPED` is
-    // passed, so the call completes before it returns. The caller
-    // guarantees the control code reads and writes within those sizes.
+    // the size passed; `returned`, `overlapped` and its event are live
+    // locals. If the request completes later (`ERROR_IO_PENDING`), the wait
+    // below blocks until it has, so none of them is dropped or moved while
+    // the OS can still write to it. The caller guarantees the control code
+    // reads and writes within those sizes.
     let ok = unsafe {
         DeviceIoControl(
             handle(file),
@@ -288,11 +341,24 @@ unsafe fn fsctl<I>(
             out.as_mut_ptr().cast(),
             out_len,
             &raw mut returned,
-            std::ptr::null_mut(),
+            &raw mut overlapped,
         )
     };
     if ok == 0 {
-        return Err(io::Error::last_os_error());
+        let e = io::Error::last_os_error();
+        if e.raw_os_error() != i32::try_from(ERROR_IO_PENDING).ok() {
+            return Err(e);
+        }
+        // SAFETY: `overlapped` is the structure the pending request uses,
+        // still alive; waiting (`bWait = TRUE`) returns only once the
+        // request has completed, after which the OS no longer touches the
+        // buffers.
+        let done = unsafe {
+            GetOverlappedResult(handle(file), &raw const overlapped, &raw mut returned, 1)
+        };
+        if done == 0 {
+            return Err(io::Error::last_os_error());
+        }
     }
     let n = usize::try_from(returned).unwrap_or(0).min(out.len() * 8);
     Ok(as_bytes(&out, n))
@@ -305,18 +371,24 @@ pub(crate) fn read_file_usn_bytes(file: &File) -> io::Result<Vec<u8>> {
         MinMajorVersion: 2,
         MaxMajorVersion: 3,
     };
-    // SAFETY: `FSCTL_READ_FILE_USN_DATA` is buffered, reads a
-    // `READ_FILE_USN_DATA` and writes one `USN_RECORD_V2` or `V3` with its
-    // file name, which fits in 1 KiB (a 255-unit name plus the header).
+    // SAFETY: `FSCTL_READ_FILE_USN_DATA` (`METHOD_NEITHER`) reads a
+    // `READ_FILE_USN_DATA` from the input buffer and writes one
+    // `USN_RECORD_V2` or `V3` with the file name into the output buffer,
+    // within its stated length; a record with a 255-unit name and the V3
+    // header is under 1 KiB.
     unsafe { fsctl(file, FSCTL_READ_FILE_USN_DATA, Some(&input), 1024) }
 }
 
-/// The journal ID of the change journal of the volume `file` is on
-/// (`FSCTL_QUERY_USN_JOURNAL`).
-pub(crate) fn usn_journal_id(file: &File) -> io::Result<u64> {
-    // SAFETY: `FSCTL_QUERY_USN_JOURNAL` is buffered, takes no input and
-    // writes a `USN_JOURNAL_DATA_V0` (or a larger later version, of which
-    // the first fields are the same); 128 bytes holds every version.
+/// The journal ID of the change journal of a volume
+/// (`FSCTL_QUERY_USN_JOURNAL`). `volume` must be a handle to the volume
+/// itself, such as `\\?\Volume{GUID}` opened without a trailing
+/// separator.
+pub(crate) fn usn_journal_id(volume: &File) -> io::Result<u64> {
+    let file = volume;
+    // SAFETY: `FSCTL_QUERY_USN_JOURNAL` (`METHOD_BUFFERED`) takes no input
+    // and writes a `USN_JOURNAL_DATA_V0`, `V1` or `V2`, the first fields of
+    // which are the same, within the output length; 128 bytes holds every
+    // version.
     let bytes = unsafe { fsctl::<()>(file, FSCTL_QUERY_USN_JOURNAL, None, 128) }?;
     let id = bytes
         .get(..8)
@@ -388,8 +460,12 @@ impl Mapping {
     }
 
     /// Maps `len` bytes from `offset`, which must be a multiple of
-    /// [`allocation_granularity`] and lie within the file.
+    /// [`allocation_granularity`] and lie within the file. `len` must not be
+    /// zero (the OS would map to the end of the file instead).
     pub(crate) fn view(&self, offset: u64, len: usize) -> io::Result<View> {
+        if len == 0 {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "empty view"));
+        }
         let high = u32::try_from(offset >> 32).unwrap_or(u32::MAX);
         let low = u32::try_from(offset & 0xFFFF_FFFF).unwrap_or(0);
         // SAFETY: `self.handle` is the live mapping created in `new`. The
@@ -418,21 +494,41 @@ pub(crate) struct View {
 }
 
 impl View {
-    /// The mapped bytes.
+    /// The view's length in bytes.
+    pub(crate) fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Copies `out.len()` bytes from `offset` in the view into `out`.
     ///
-    /// Another process may change the file while it is mapped, so the
-    /// bytes can change under the slice. They are only ever fed to a hash,
-    /// which reads each byte once, and a change is caught afterwards by the
-    /// stamp check in [`crate::hash::hash_through`]; nothing here relies on
-    /// the bytes staying the same.
-    pub(crate) fn bytes(&self) -> &[u8] {
-        // SAFETY: `MapViewOfFile` returned a readable view of `self.len`
-        // bytes at `self.addr`, which stays mapped until `self` is dropped,
-        // so the slice is valid for `&self`'s lifetime. The memory is never
-        // written through this process (the view is read-only). Writes by
-        // other processes are tolerated as described above: `u8` has no
-        // invalid bit patterns.
-        unsafe { std::slice::from_raw_parts(self.addr.Value.cast::<u8>(), self.len) }
+    /// Another process may write the file while it is mapped, so the mapped
+    /// memory is shared and can change at any time. No Rust reference is
+    /// ever made to it: the bytes are copied out with a raw-pointer copy
+    /// into memory this process owns, and only the copy is used. A change
+    /// mid-copy can make the copy a mix of old and new bytes, which the
+    /// stamp check in [`crate::hash::hash_through`] catches afterwards.
+    pub(crate) fn copy_to(&self, offset: usize, out: &mut [u8]) -> io::Result<()> {
+        let end = offset.checked_add(out.len()).filter(|&e| e <= self.len);
+        if end.is_none() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "copy past the view",
+            ));
+        }
+        // SAFETY: `offset + out.len() <= self.len` (checked above), so the
+        // source range lies inside the readable view `MapViewOfFile`
+        // returned, which stays mapped while `self` is alive. `out` is a
+        // distinct, writable buffer of exactly that length, so the ranges do
+        // not overlap. A raw byte copy is valid for any bytes, and no
+        // reference to the shared memory is created.
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                self.addr.Value.cast::<u8>().cast_const().add(offset),
+                out.as_mut_ptr(),
+                out.len(),
+            );
+        }
+        Ok(())
     }
 }
 
@@ -475,6 +571,10 @@ mod tests {
         assert_eq!(u64::from(vol.serial), id.VolumeSerialNumber & 0xFFFF_FFFF);
         let path = final_path_by_handle(&file, 0).unwrap();
         assert!(path.ends_with("f.bin"), "{path}");
+        let guid = final_path_by_handle(&file, 1).unwrap();
+        assert!(guid.starts_with(r"\\?\Volume{"), "{guid}");
+        assert!(is_disk_file(&file));
+        assert!(!is_remote(&file));
         drop(file);
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -485,15 +585,11 @@ mod tests {
         let bytes = stream_info_bytes(&file).unwrap();
         let list = crate::fsctx::ntfs::parse_stream_info(&bytes).unwrap();
         assert!(list.streams.iter().any(|s| s.is_default() && s.size == 1));
-        // The temporary folder on the CI runners is NTFS with a journal.
-        match read_file_usn_bytes(&file) {
-            Ok(b) => {
-                let facts = crate::fsctx::ntfs::parse_usn_record(&b).unwrap();
-                assert!(facts.usn >= 0);
-                assert!(usn_journal_id(&file).is_ok());
-            }
-            Err(e) => eprintln!("no change journal here: {e}"),
-        }
+        // The temporary folder on the CI runners is on the system volume,
+        // NTFS with an active change journal.
+        let b = read_file_usn_bytes(&file).unwrap();
+        let facts = crate::fsctx::ntfs::parse_usn_record(&b).unwrap();
+        assert!(facts.usn >= 0);
         drop(file);
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -506,12 +602,21 @@ mod tests {
         assert!(g.is_power_of_two());
         let map = Mapping::new(&file).unwrap();
         let first = map.view(0, 1000).unwrap();
-        assert_eq!(first.bytes(), &content[..1000]);
+        let mut buf = vec![0_u8; 1000];
+        first.copy_to(0, &mut buf).unwrap();
+        assert_eq!(buf, &content[..1000]);
+        let mut tail = vec![0_u8; 10];
+        first.copy_to(990, &mut tail).unwrap();
+        assert_eq!(tail, &content[990..1000]);
+        assert!(first.copy_to(991, &mut tail).is_err(), "past the view");
         let off = usize::try_from(g).unwrap();
         let second = map.view(g, 100).unwrap();
-        assert_eq!(second.bytes(), &content[off..off + 100]);
-        // Past the end fails rather than mapping.
+        let mut buf = vec![0_u8; 100];
+        second.copy_to(0, &mut buf).unwrap();
+        assert_eq!(buf, &content[off..off + 100]);
+        // Past the end, or empty, fails rather than mapping.
         assert!(map.view(g * 1000, 10).is_err());
+        assert!(map.view(0, 0).is_err());
         drop((first, second, map, file));
         let _ = std::fs::remove_dir_all(dir);
     }

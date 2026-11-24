@@ -20,7 +20,8 @@ use palisade_fileid::hash::{
 };
 use palisade_fileid::win::file::{
     FileFacts, MMAP_THRESHOLD, ReadStrategy, WinStamps, choose_strategy, hash_open_file,
-    hash_streams, list_streams, open_for_hashing, peak_working_set_bytes,
+    hash_open_file_for_cache, hash_streams, list_streams, open_for_hashing, open_for_inventory,
+    peak_working_set_bytes,
 };
 
 /// A directory this test created, removed when dropped.
@@ -56,7 +57,7 @@ fn complete(status: HashStatus) -> palisade_fileid::hash::FlatHashes {
 /// The `compute` closure `hash_through` calls: the backend's own hash of
 /// the handle it opened.
 fn compute(file: &File) -> Result<CacheValue, palisade_fileid::hash::HashError> {
-    let h = complete(hash_open_file(
+    let h = complete(hash_open_file_for_cache(
         file,
         &HashOptions::default(),
         HashPurpose::Execution,
@@ -75,27 +76,41 @@ fn facts_and_strong_keys_from_the_handle() {
     assert_eq!(facts.size, 3);
     assert_eq!(facts.number_of_links, 1);
     assert!(!facts.directory);
-    assert_eq!(
-        facts.fs_type,
-        FsType::Ntfs,
-        "the runner's temp folder is NTFS"
-    );
-    assert!(facts.supports_usn);
-    assert_ne!(facts.file_id, [0; 16]);
+    // The runners' temporary folder is on the system volume: local NTFS
+    // with an active change journal, so the key must be strong.
+    assert_eq!(facts.fs_type, Some(FsType::Ntfs));
+    assert!(!facts.remote);
+    assert!(!facts.is_placeholder());
+    let (volume_serial, file_id) = facts.file_id.unwrap();
+    assert_ne!(file_id, [0; 16]);
     assert!(facts.creation.0 > 0 && facts.last_write.0 > 0 && facts.change.0 > 0);
     assert_eq!(
-        u64::from(facts.volume_serial_32),
-        facts.volume_serial & 0xFFFF_FFFF
+        u64::from(facts.volume_serial_32.unwrap()),
+        volume_serial & 0xFFFF_FFFF
     );
-    // Whether the system volume keeps an active journal is a system
-    // setting; when it does, the key is strong.
+    let (_, usn) = facts
+        .usn
+        .expect("an active change journal on the system volume");
     let key = WinStamps.stamp(&file).unwrap();
     assert_eq!(key.size(), 3);
-    match (&key, facts.usn) {
-        (FileKey::Strong { usn, .. }, Some((_, u))) => assert_eq!(*usn, u),
-        (FileKey::Weak { path: p, .. }, None) => assert!(p.ends_with(r"\A.BIN"), "{p}"),
-        other => panic!("key and facts disagree: {other:?}"),
-    }
+    let FileKey::Strong { usn: key_usn, .. } = key else {
+        panic!("expected a strong key, got {key:?}")
+    };
+    assert_eq!(key_usn, usn);
+    // Without a journal the same file gets the weak key: its final path.
+    let weak = WinStamps::key_from(
+        &file,
+        &FileFacts {
+            usn: None,
+            ..facts.clone()
+        },
+    )
+    .unwrap();
+    let FileKey::Weak { path: wp, size, .. } = &weak else {
+        panic!("expected a weak key, got {weak:?}")
+    };
+    assert!(wp.ends_with(r"\A.BIN"), "{wp}");
+    assert_eq!(*size, 3);
     // Two handles to the same file give the same key.
     let again = WinStamps.stamp(&open_for_hashing(&path).unwrap()).unwrap();
     assert_eq!(key, again);
@@ -114,6 +129,13 @@ fn facts_and_strong_keys_from_the_handle() {
         .open(&*dir)
         .unwrap();
     assert!(WinStamps.stamp(&d).is_err());
+    // A device is not a file on disk.
+    let nul = OpenOptions::new().read(true).open(r"\\.\NUL").unwrap();
+    assert!(FileFacts::read(&nul).is_err());
+    assert!(matches!(
+        hash_open_file(&nul, &HashOptions::default(), HashPurpose::Execution, true),
+        Err(palisade_fileid::hash::HashError::NotAFile)
+    ));
 }
 
 /// `OpenOptions` for a directory handle (`FILE_FLAG_BACKUP_SEMANTICS`).
@@ -194,6 +216,18 @@ fn cache_flow_on_ntfs() {
     assert_eq!(source, ValueSource::Computed);
     assert_eq!(value.flat.unwrap().hashes.size, 9);
 
+    // Touching only the write time changes the key too: a miss.
+    let reads_before = reads.get();
+    let f = OpenOptions::new().write(true).open(&path).unwrap();
+    f.set_modified(std::time::SystemTime::now() + Duration::from_secs(3600))
+        .unwrap();
+    drop(f);
+    let Through::Done { source, .. } = run() else {
+        panic!("unstable")
+    };
+    assert_eq!(source, ValueSource::Computed);
+    assert_eq!(reads.get(), reads_before + 1);
+
     // A rename keeps the file ID, so the journal consumer can find the
     // entry and rekey it (#60).
     let before = WinStamps.stamp(&open_for_hashing(&path).unwrap()).unwrap();
@@ -202,7 +236,7 @@ fn cache_flow_on_ntfs() {
     let after = WinStamps
         .stamp(&open_for_hashing(&renamed).unwrap())
         .unwrap();
-    if let (
+    let (
         FileKey::Strong {
             volume_serial,
             file_id,
@@ -215,28 +249,40 @@ fn cache_flow_on_ntfs() {
             ..
         },
     ) = (&before, &after)
-    {
-        assert_eq!(file_id, id2, "a rename keeps the file ID");
-        assert!(usn2 > usn, "a rename moves the USN");
-        let mut guard = cache.lock().unwrap();
-        assert_eq!(guard.key_of(*volume_serial, *file_id), Some(&before));
-        assert!(guard.rekey_after_rename(after.clone(), Some(renamed.to_str().unwrap().into())));
-        assert!(guard.get(&after, None).is_ok());
+    else {
+        panic!("expected strong keys: {before:?} {after:?}")
+    };
+    assert_eq!(file_id, id2, "a rename keeps the file ID");
+    assert!(usn2 > usn, "a rename moves the USN");
+    let mut guard = cache.lock().unwrap();
+    assert_eq!(guard.key_of(*volume_serial, *file_id), Some(&before));
+    assert!(guard.rekey_after_rename(after.clone(), Some(renamed.to_str().unwrap().into())));
+    assert!(guard.get(&after, None).is_ok());
+}
+
+/// A separate writer process that appends to the file for as long as it
+/// runs (#46 test plan: "a writer process modifies the file during
+/// hashing"). It is killed when dropped, even if the test panics.
+struct Writer(std::process::Child);
+
+impl Drop for Writer {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
     }
 }
 
-/// A separate writer process appends to the file for as long as it runs
-/// (#46 test plan: "a writer process modifies the file during hashing").
-fn spawn_writer(path: &Path) -> std::process::Child {
-    let script = format!(
-        "$f = [IO.File]::Open('{}', 'Append', 'Write', 'ReadWrite, Delete'); \
-         while ($true) {{ $f.WriteByte(120); $f.Flush(); Start-Sleep -Milliseconds 2 }}",
-        path.display()
-    );
-    std::process::Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-        .spawn()
-        .unwrap()
+fn spawn_writer(path: &Path) -> Writer {
+    // The path goes in through the environment, so no quoting can break it.
+    let script = "$f = [IO.File]::Open($env:PALISADE_TARGET, 'Append', 'Write', 'ReadWrite, Delete'); \
+         while ($true) { $f.WriteByte(120); $f.Flush(); Start-Sleep -Milliseconds 2 }";
+    Writer(
+        std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", script])
+            .env("PALISADE_TARGET", path)
+            .spawn()
+            .unwrap(),
+    )
 }
 
 #[test]
@@ -244,7 +290,7 @@ fn a_concurrent_writer_makes_the_hash_unstable() {
     let dir = scratch("writer");
     let path = dir.join("busy.bin");
     std::fs::write(&path, vec![0_u8; 1 << 20]).unwrap();
-    let mut writer = spawn_writer(&path);
+    let writer = spawn_writer(&path);
     // Wait until the writer has started changing the file.
     let start = std::time::Instant::now();
     while std::fs::metadata(&path).unwrap().len() == 1 << 20 {
@@ -268,18 +314,15 @@ fn a_concurrent_writer_makes_the_hash_unstable() {
         &FileLocation::default(),
         slow,
     );
-    let _ = writer.kill();
-    let _ = writer.wait();
-    match t {
-        Ok(Through::Unstable { .. }) => {}
-        // The size can also change mid-read, which the hash reports as an
-        // error; either way nothing is cached.
-        Err(palisade_fileid::hash::ThroughError::Hash(
-            palisade_fileid::hash::HashError::SizeChanged { .. },
-        )) => {}
-        other => panic!("expected an unstable result, got {other:?}"),
-    }
+    drop(writer);
+    // Every attempt saw the size change, so the result is unstable after
+    // the retries, never an error and never a cached value.
+    assert!(
+        matches!(t, Ok(Through::Unstable { attempts: 4 })),
+        "expected unstable after 4 attempts, got {t:?}"
+    );
     assert!(cache.lock().unwrap().is_empty());
+    assert_eq!(cache.lock().unwrap().metrics().snapshot().unstable, 1);
 }
 
 #[test]
@@ -397,7 +440,10 @@ fn alternate_data_streams_are_hashed_on_their_own() {
     assert!(list.streams.iter().any(|s| s.is_default() && s.size == 7));
 
     let hashes = hash_streams(&path, &HashOptions::default()).unwrap();
+    assert!(!hashes.truncated);
+    assert_eq!(hashes.streams.len(), 2);
     let hidden = hashes
+        .streams
         .iter()
         .find(|h| h.stream.name == "hidden.exe")
         .unwrap();
@@ -417,8 +463,65 @@ fn alternate_data_streams_are_hashed_on_their_own() {
         .unwrap(),
     );
     assert_eq!(main, hash_bytes(b"visible", AlgorithmSet::DEFAULT));
-    // A stream path is rejected; it names a stream, not a file.
-    assert!(hash_streams(Path::new(&ads), &HashOptions::default()).is_err());
+    // Paths that would mis-name the streams are rejected, never silently
+    // skipped: a stream path, a trailing separator, a trailing dot or space.
+    let base = path.display().to_string();
+    for bad in [
+        ads.clone(),
+        format!("{ads}\\"),
+        format!("{base}."),
+        format!("{base} "),
+        format!("{base}\\"),
+        r"relative\host.txt".to_owned(),
+    ] {
+        assert!(
+            hash_streams(Path::new(&bad), &HashOptions::default()).is_err(),
+            "{bad}"
+        );
+    }
+    // The literal `\\?\` form of the same path is accepted.
+    let literal =
+        hash_streams(Path::new(&format!(r"\\?\{base}")), &HashOptions::default()).unwrap();
+    assert_eq!(literal.streams.len(), 2);
+    // Invalid options are rejected up front, even for a file without streams.
+    let plain = dir.join("plain.txt");
+    std::fs::write(&plain, b"x").unwrap();
+    let bad_options = HashOptions {
+        algorithms: AlgorithmSet::EMPTY,
+        ..HashOptions::default()
+    };
+    assert!(hash_streams(&plain, &bad_options).is_err());
+    assert!(
+        hash_streams(&plain, &HashOptions::default())
+            .unwrap()
+            .streams
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_file_with_more_streams_than_the_cap_reports_truncation() {
+    let dir = scratch("many");
+    let path = dir.join("host.txt");
+    std::fs::write(&path, b"x").unwrap();
+    for i in 0..=palisade_fileid::fsctx::ntfs::MAX_STREAMS {
+        std::fs::write(format!("{}:s{i}", path.display()), b"y").unwrap();
+    }
+    let hashes = hash_streams(&path, &HashOptions::default()).unwrap();
+    assert!(hashes.truncated, "the cap must be reported");
+    assert!(hashes.streams.len() < palisade_fileid::fsctx::ntfs::MAX_STREAMS);
+}
+
+#[test]
+fn inventory_opens_do_not_recall() {
+    let dir = scratch("norecall");
+    let path = dir.join("a.bin");
+    std::fs::write(&path, b"abc").unwrap();
+    let file = open_for_inventory(&path).unwrap();
+    let h = complete(
+        hash_open_file(&file, &HashOptions::default(), HashPurpose::Inventory, true).unwrap(),
+    );
+    assert_eq!(h, hash_bytes(b"abc", AlgorithmSet::DEFAULT));
 }
 
 /// The OS's own hash tool, for the reference digests #46 asks for.

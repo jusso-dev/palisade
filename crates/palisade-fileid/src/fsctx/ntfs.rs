@@ -17,9 +17,15 @@ use std::fmt;
 /// are reported as [`StreamList::truncated`].
 pub const MAX_STREAMS: usize = 4096;
 
-/// The longest stream name, in UTF-16 code units, as NTFS allows (255),
-/// plus the `:` prefix and the `:$DATA` suffix.
-const MAX_STREAM_NAME_UNITS: usize = 255 + 7;
+/// The longest stream name, in UTF-16 code units, as NTFS allows.
+pub const MAX_STREAM_NAME_UNITS: usize = 255;
+
+/// The longest stream type accepted, in UTF-16 code units. The longest the
+/// OS defines is `$LOGGED_UTILITY_STREAM` (22).
+pub const MAX_STREAM_TYPE_UNITS: usize = 64;
+
+/// The longest `:name:type` field accepted, in UTF-16 code units.
+const MAX_FIELD_UNITS: usize = 2 + MAX_STREAM_NAME_UNITS + MAX_STREAM_TYPE_UNITS;
 
 /// One data stream of a file.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -70,14 +76,15 @@ pub enum RecordError {
         /// The byte offset of the record.
         offset: usize,
     },
-    /// A stream name is not of the form `:name:type`, is longer than NTFS
-    /// allows, or is not valid UTF-16.
+    /// A stream name is not of the form `:name:type`, its name is longer
+    /// than NTFS allows or its type longer than [`MAX_STREAM_TYPE_UNITS`],
+    /// it holds a path separator or NUL, or it is not valid UTF-16.
     BadStreamName {
         /// The byte offset of the record.
         offset: usize,
     },
-    /// A `NextEntryOffset` points backwards or inside its own header, which
-    /// would loop.
+    /// A `NextEntryOffset` points inside its own record (its header or its
+    /// name), which would overlap or loop.
     BadNextOffset {
         /// The byte offset of the record.
         offset: usize,
@@ -150,7 +157,7 @@ pub fn parse_stream_info(bytes: &[u8]) -> Result<StreamList, RecordError> {
             return Err(RecordError::Truncated { offset });
         };
         let name_len = usize::try_from(name_len).map_err(|_| RecordError::Truncated { offset })?;
-        if name_len % 2 != 0 || name_len / 2 > MAX_STREAM_NAME_UNITS {
+        if name_len % 2 != 0 || name_len / 2 > MAX_FIELD_UNITS {
             return Err(RecordError::BadStreamName { offset });
         }
         let raw = STREAM_HEADER
@@ -168,10 +175,19 @@ pub fn parse_stream_info(bytes: &[u8]) -> Result<StreamList, RecordError> {
             .collect();
         let full = String::from_utf16(&units).map_err(|_| RecordError::BadStreamName { offset })?;
         // `:name:type`, where the default stream is `::$DATA`.
+        // A name or type holding a separator or NUL could change the path a
+        // caller builds from it, so it is malformed.
+        let plain = |t: &str| !t.contains(['\\', '/', '\0', ':']);
         let (name, kind) = full
             .strip_prefix(':')
             .and_then(|rest| rest.rsplit_once(':'))
-            .filter(|(name, kind)| !kind.is_empty() && !name.contains(':'))
+            .filter(|(name, kind)| {
+                !kind.is_empty()
+                    && plain(name)
+                    && plain(kind)
+                    && name.encode_utf16().count() <= MAX_STREAM_NAME_UNITS
+                    && kind.encode_utf16().count() <= MAX_STREAM_TYPE_UNITS
+            })
             .ok_or(RecordError::BadStreamName { offset })?;
         list.streams.push(StreamEntry {
             name: name.to_owned(),
@@ -183,7 +199,7 @@ pub fn parse_stream_info(bytes: &[u8]) -> Result<StreamList, RecordError> {
             break;
         }
         let next = usize::try_from(next).map_err(|_| RecordError::BadNextOffset { offset })?;
-        if next < STREAM_HEADER {
+        if next < STREAM_HEADER.saturating_add(name_len) {
             return Err(RecordError::BadNextOffset { offset });
         }
         offset = offset
@@ -311,6 +327,30 @@ mod tests {
                 "{bad}"
             );
         }
+        // Separators and NUL in the name or type.
+        for bad in [":a\\..\\b:$DATA", ":a/b:$DATA", ":a\0:$DATA", ":a:$DA/TA"] {
+            assert!(
+                matches!(
+                    parse_stream_info(&stream_record(0, bad, 1)),
+                    Err(RecordError::BadStreamName { .. })
+                ),
+                "{bad:?}"
+            );
+        }
+        // A 255-unit name with the longest OS type is fine; 256 is not.
+        let max = format!(":{}:$LOGGED_UTILITY_STREAM", "n".repeat(255));
+        assert_eq!(
+            parse_stream_info(&stream_record(0, &max, 1))
+                .unwrap()
+                .streams[0]
+                .kind,
+            "$LOGGED_UTILITY_STREAM"
+        );
+        let over = format!(":{}:x", "n".repeat(256));
+        assert!(matches!(
+            parse_stream_info(&stream_record(0, &over, 1)),
+            Err(RecordError::BadStreamName { .. })
+        ));
         // An odd name length, and one longer than NTFS allows.
         let mut odd = stream_record(0, "::$DATA", 1);
         odd[4] = 3;
@@ -331,12 +371,18 @@ mod tests {
             parse_stream_info(&sur),
             Err(RecordError::BadStreamName { .. })
         ));
-        // A next offset inside the header, which would loop.
-        let rec = stream_record(8, "::$DATA", 1);
-        assert!(matches!(
-            parse_stream_info(&rec),
-            Err(RecordError::BadNextOffset { .. })
-        ));
+        // A next offset inside the header, which would loop, or inside the
+        // record's own name, which would overlap.
+        for next in [8, 24, 24 + 12] {
+            let rec = stream_record(next, "::$DATA", 1);
+            assert!(
+                matches!(
+                    parse_stream_info(&rec),
+                    Err(RecordError::BadNextOffset { .. })
+                ),
+                "{next}"
+            );
+        }
         // A next offset past the end.
         let rec = stream_record(4096, "::$DATA", 1);
         assert!(matches!(
