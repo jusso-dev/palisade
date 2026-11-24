@@ -38,7 +38,14 @@ jobs:
           # Set by GitHub, not by the commits, so it cannot be spoofed by
           # putting the bot's address in a commit.
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          # Also set by GitHub. OWNER means the repository owner opened the
+          # pull request; see CONTRIBUTING.md#sign-off for why that is exempt.
+          PR_AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
         run: |
+          if [ "$PR_AUTHOR_ASSOCIATION" = "OWNER" ]; then
+            echo "::notice title=DCO::Opened by the repository owner; sign-off not required (CONTRIBUTING.md#sign-off)."
+            exit 0
+          fi
           if [ "$PR_AUTHOR" = "dependabot[bot]" ]; then
             bash .github/scripts/check-dco.sh --dependabot "$BASE_SHA" "$HEAD_SHA"
           else
