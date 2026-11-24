@@ -12,7 +12,10 @@ The members are the ten crates under `crates/` plus `xtask`. `palisade-driver` i
 `default-members`, so a plain `cargo build` at the root does not build it. `--workspace` still
 includes it. Every crate has a README with its purpose, allowed dependencies, platform support,
 feature flags and stability level. `cargo xtask check-manifests` fails if the purpose paragraph
-(text before the first `## ` section) or one of those sections is missing.
+(text before the first `## ` section) or one of those sections is missing. A crate README may not
+contain an HTML comment (`<!--`): the rendered page hides it, and a line-based check cannot tell
+where one ends, so a section or feature inside it could be counted. Write `&lt;!--` to show the
+characters.
 
 ## Shared settings
 
@@ -56,9 +59,10 @@ listed in
   spellings (`unsafe_code` and `unsafe-code`);
 - a Cargo config file in the repository (`.cargo/config.toml`, or the legacy `.cargo/config`, in
   any letter case) sets anything but `[alias]`, or an alias passes `--config`, a response file
-  (`@file`), rustflags, `--cap-lints`, any `-Z` unstable option, or a lint option (`-A`,
-  `--allow` and the rest, also grouped after other short flags as in `-gA`) whose operand names the
-  lint. Other arguments may mention it, such as a `unsafe_code::tests` filter. Rustflags, compiler and wrapper
+  (`@file`), a rustflags setting (a word naming rustflags with an `=`), `--cap-lints`, any `-Z`
+  unstable option, or a lint option (`-A`, `--allow` and the rest, also grouped after other short
+  flags as in `-gA`) whose operand names the lint. Other arguments may mention either, such as a
+  `unsafe_code::tests` or `rustflags` test filter. Rustflags, compiler and wrapper
   overrides and `[env]` can all switch lints off, so a repository config may not set them;
 - a file is a symbolic link, in the working tree or as recorded in the git index (which catches a
   link that `core.symlinks=false` checked out as a regular file), a listed file cannot be
@@ -83,11 +87,15 @@ applies to all of these. Every `unsafe` block also needs a `// SAFETY:` comment
 - **Each feature builds on its own.** CI runs `cargo hack check --each-feature --all-targets` on the
   portable crates, `core`, `fileid`, `policy`, `proto`, `server`, `cli` and `console` (the
   `feature-powerset` job).
-- **`test-util` never reaches a release build.** It may hold fixtures and mocks. It is never in
+- **No ordinary build turns `test-util` on.** It may hold fixtures and mocks. It is never in
   `default`, no other feature of the crate turns it on (so `default` cannot reach it indirectly),
   and only `[dev-dependencies]` may enable it on another crate. No `[workspace.dependencies]`
   entry may enable it, because members inherit those features in every table. Enforced by
-  `cargo xtask check-manifests`.
+  `cargo xtask check-manifests`. The check reads manifests, not build commands, so
+  `cargo build --release --features test-util` or `--all-features` would still turn it on. No
+  crate has the feature yet, and there is no release workflow yet; the release build in #22 must
+  name its features rather than pass `--all-features`. CI's `--all-features` jobs only check and
+  test.
 
 The planned flag names, each added with the code that needs it:
 
@@ -109,9 +117,10 @@ The planned flag names, each added with the code that needs it:
   `split-debuginfo = "packed"` (PDB files on Windows, which the release pipeline publishes as
   symbols in #22), and `strip = "none"`.
 - `panic = "unwind"` in release. #19 suggested `abort` for agent binaries, subject to an ADR.
-  [ADR 0012](adr/0012-fail-open-vs-fail-closed-defaults.md) decided `unwind`: the agent catches a
-  parser panic on one crafted file and treats that file as unknown, instead of crashing the whole
-  service. Cargo applies `panic` to a whole profile, so every release binary unwinds. The `no_std`
+  [ADR 0012](adr/0012-fail-open-vs-fail-closed-defaults.md) decided `unwind`, so that the agent
+  can catch a parser panic on one crafted file and treat that file as unknown, instead of crashing
+  the whole service. That recovery is planned, not built: the agent is still a stub (#4), and the
+  `catch_unwind` boundaries land with its service host (#56). Cargo applies `panic` to a whole profile, so every release binary unwinds. The `no_std`
   driver is built separately and sets its own strategy (#8).
 - `palisade-policy`, `palisade-fileid` and `palisade-proto` keep overflow checks in release builds
   too: decision logic, and the parsers of untrusted input.
