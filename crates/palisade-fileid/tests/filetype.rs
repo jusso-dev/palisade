@@ -196,6 +196,45 @@ fn pe_drivers() {
     assert_eq!(pe_details(&wdm.build(), None).sub_kind, PeSubKind::Driver);
 }
 
+/// The full-file parser's driver verdict (#45) and the sub-kind agree: a
+/// native image with an `INIT` section or `IMAGE_FILE_SYSTEM` is a driver
+/// even when it also imports from `ntdll.dll`, and neither signal makes a
+/// non-native image one.
+#[test]
+fn pe_drivers_agree_with_the_parser() {
+    let native = PeBuilder {
+        subsystem: 1,
+        ..PeBuilder::default()
+    };
+    let init = native.clone().section(
+        "INIT",
+        vec![0xc3; 0x40],
+        IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ,
+    );
+    let system = PeBuilder {
+        characteristics: native.characteristics | 0x1000,
+        ..native.clone()
+    };
+    let user_init = PeBuilder::default().section(
+        "INIT",
+        vec![0xc3; 0x40],
+        IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ,
+    );
+    for (builder, driver) in [
+        (init, true),
+        (system, true),
+        (native, false),
+        (user_init, false),
+    ] {
+        let image = pe_with(builder, imports(&["ntdll.dll"]), &[(1, 0, 20)]);
+        let info = palisade_fileid::pe::parse(&image).unwrap();
+        assert_eq!(info.is_kernel_driver(), driver, "{:?}", info.driver);
+        let d = pe_details(&image, None);
+        assert!(!d.incomplete);
+        assert_eq!(d.sub_kind == PeSubKind::Driver, driver, "{d:?}");
+    }
+}
+
 #[test]
 fn pe_efi() {
     for subsystem in 10..=13 {

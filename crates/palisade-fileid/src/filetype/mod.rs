@@ -225,7 +225,12 @@ pub enum PeSubKind {
     /// A kernel-mode driver: it imports from the kernel image, the hardware
     /// abstraction layer or another `.sys` module, sets `WDM_DRIVER`, or
     /// uses the native subsystem without importing from `ntdll.dll` (native
-    /// user-mode programs such as the session manager import from it).
+    /// user-mode programs such as the session manager import from it) or
+    /// with an `INIT` section or `IMAGE_FILE_SYSTEM`. These include every
+    /// signal behind [`crate::pe::PeInfo::is_kernel_driver`], so an image
+    /// the parser calls a kernel driver is a `Driver` here too, unless the
+    /// import table could not be read in full
+    /// ([`PeDetails::incomplete`]).
     Driver,
     /// A UEFI image (subsystems 10 to 13).
     Efi,

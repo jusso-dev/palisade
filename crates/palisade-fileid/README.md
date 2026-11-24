@@ -429,9 +429,12 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   every kind that can run code, natively or through a host, and for a ZIP
   archive whose structure could not be read in one consistent way.
 
-  The PE sub-kind reuses `pe::parse_with` on the header bytes only, then
+  The PE sub-kind reuses `pe::parse_prefix` on the header bytes only, then
   maps RVAs with the parser's loader layout and makes small reads of the
   import, export, resource root, CLR and load configuration directories.
+  Its `Driver` rule includes every `pe` kernel driver signal (`INIT`,
+  `IMAGE_FILE_SYSTEM`, kernel module imports), so it agrees with
+  `PeInfo::is_kernel_driver`.
 
 ## Handling untrusted input
 

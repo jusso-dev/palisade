@@ -1,7 +1,7 @@
 //! `MZ` files: PE sub-classification, and the older NE, LE, LX and DOS
 //! formats.
 //!
-//! The PE headers are parsed by [`crate::pe::parse_with`] (#45), over only
+//! The PE headers are parsed by [`crate::pe::parse_prefix`] (#45), over only
 //! the header bytes: the DOS header up to the end of the section table. RVAs
 //! are then mapped with the same loader layout the parser uses, against the
 //! real file length, and the few directories the sub-kind needs (imports,
@@ -20,8 +20,8 @@ use super::{
 };
 use crate::pe::read::{bytes, u16_at, u32_at, u64_at};
 use crate::pe::{
-    self, DataDirectoryKind, DllCharacteristics, Layout, Machine, ParseOptions, PeErrorKind,
-    PeFormat, PeInfo, SectionCharacteristics, Subsystem,
+    self, DataDirectoryKind, DllCharacteristics, Layout, Machine, PeErrorKind, PeFormat, PeInfo,
+    SectionCharacteristics, Subsystem,
 };
 
 /// A DOS `MZ` header has its fixed fields in the first 28 bytes.
@@ -134,8 +134,11 @@ fn classify_pe<R: Read + Seek + ?Sized>(
 }
 
 /// Reads the bytes from the start of the file to the end of the section
-/// table, and parses them. Section data, the certificate table and anything
-/// else past the headers is not read.
+/// table, and parses them with [`pe::parse_prefix`] against the real file
+/// length. Section data, the certificate table and anything else past the
+/// headers is not read, and the parser's own directory work (imports,
+/// exports, resources, the driver verdict) is skipped for a prefix rather
+/// than run over bytes that are not there.
 fn parse_headers<R: Read + Seek + ?Sized>(
     src: &mut Source<'_, R>,
     e_lfanew: u32,
@@ -149,7 +152,7 @@ fn parse_headers<R: Read + Seek + ?Sized>(
     // At most 1 MiB + 4 + 20 + 65,535 + 40,960 bytes.
     let len = usize::try_from(end).map_err(|_| ParseError::ReadBudgetExceeded)?;
     let headers = src.read_at(0, len)?;
-    pe::parse_with(&headers, &ParseOptions::metadata_only()).map_err(|e| ParseError::Pe(e.kind))
+    pe::parse_prefix(&headers, src.len()).map_err(|e| ParseError::Pe(e.kind))
 }
 
 /// Bounded reads of the PE directories, through the loader's RVA mapping.
@@ -175,12 +178,20 @@ impl<R: Read + Seek + ?Sized> Probe<'_, '_, '_, R> {
                 || s.characteristics
                     .contains(SectionCharacteristics::MEM_EXECUTE)
         });
+        // The other kernel signals of `pe::PeInfo::driver` (#45), so a
+        // native image the parser calls a kernel driver is `Driver` here
+        // too, even when it also imports `ntdll.dll`.
+        let native_kernel_signal = info
+            .sections
+            .iter()
+            .any(|s| s.raw_name.starts_with(b"INIT\0"))
+            || info.coff.characteristics.is_system();
         let driver = info
             .optional
             .dll_characteristics
             .contains(DllCharacteristics::WDM_DRIVER)
             || imports.kernel
-            || (subsystem == Subsystem::Native && !imports.ntdll);
+            || (subsystem == Subsystem::Native && (!imports.ntdll || native_kernel_signal));
         let sub_kind = if subsystem.is_efi() {
             PeSubKind::Efi
         } else if driver {
