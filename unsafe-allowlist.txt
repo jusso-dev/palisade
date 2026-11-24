@@ -10,4 +10,7 @@
 #   crates/palisade-driver/
 #
 # Changing this file needs code owner review (.github/CODEOWNERS).
-# No file allows unsafe code yet: the workspace sets `unsafe_code = "forbid"`.
+# The workspace sets `unsafe_code = "deny"`; the files below relax it.
+
+# The OS trust-verification cross-check (#48).
+crates/palisade-fileid/src/win/trust.rs

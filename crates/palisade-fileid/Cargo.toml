@@ -16,7 +16,7 @@ workspace = true
 # OS-backed reads on Windows (`palisade_fileid::win`, ADR 0003). Off by
 # default. Intended for the agent, and the CLI for diagnostics; neither
 # depends on this crate yet.
-os-trust = []
+os-trust = ["dep:windows-sys"]
 
 [dependencies]
 md-5 = { workspace = true }
@@ -35,6 +35,14 @@ unicode-normalization = { workspace = true }
 # `O_NONBLOCK`, so opening a path that has become a FIFO cannot block.
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
+
+# The Windows API, for `palisade_fileid::win` only, so only with `os-trust`.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, optional = true, features = [
+    "Win32_Foundation",
+    "Win32_Security_Cryptography",
+    "Win32_Security_WinTrust",
+] }
 
 [dev-dependencies]
 criterion = { workspace = true }

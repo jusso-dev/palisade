@@ -69,8 +69,13 @@
 //!   [`VerificationError`] code, shared with the OS event decoder (#58).
 //!   Allow decisions must use [`ValidityReport::primary`].
 //!
-//! The OS trust store cross-check is the `os-trust` item of #48; catalogs
-//! are [`crate::catalog`] (#51).
+//! # The OS cross-check (#48)
+//!
+//! [`cross_check`] compares a [`SignatureReport`] with what the OS
+//! trust-verification API said about the same file (read by
+//! `palisade_fileid::win::trust` on Windows with the `os-trust` feature)
+//! and records every disagreement as a diagnostic. It never changes the
+//! report. Catalogs are [`crate::catalog`] (#51).
 //!
 //! # Untrusted input
 //!
@@ -107,6 +112,7 @@ mod crypto;
 pub mod eku;
 pub mod hash;
 mod image;
+mod os_check;
 pub mod page;
 pub(crate) mod pkcs7;
 mod revocation;
@@ -132,6 +138,10 @@ pub use hash::{
 pub use image::{
     HEADER_PREFIX_LEN, ImageHashOptions, ImageHashStatus, ImageHashes, hash_image_file,
     hash_image_reader,
+};
+pub use os_check::{
+    Comparison, CrossCheck, MAX_OS_SIGNATURES, OsSignatureResult, OsTrustResult, OsVerdict,
+    Outcome, classify, code, cross_check,
 };
 pub use page::{
     PAGE_SIZE, PageHashCheck, PageHashError, PageHashMismatch, PageHashTables, PageHasher,
