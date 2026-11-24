@@ -949,18 +949,25 @@ pub async fn start(settings: &DatabaseSettings) -> Result<Database, DbError> {
         }
     }
     let database = Database::connect_runtime(settings)?;
+    // The role is checked before the schema: a login outside
+    // palisade_runtime cannot read the schema at all, and that permission
+    // error must not hide the role problem as "not reachable yet".
+    enum Checked {
+        Unsafe(Vec<String>),
+        Schema(SchemaState),
+    }
     let checked = tokio::time::timeout(settings.connect_timeout, async {
         let mut conn = database.pool().acquire().await?;
         let problems = role_facts(&mut conn).await?.problems();
-        let state = schema_state(&mut conn).await?;
-        Ok::<_, DbError>((problems, state))
+        if !problems.is_empty() {
+            return Ok(Checked::Unsafe(problems));
+        }
+        Ok::<_, DbError>(Checked::Schema(schema_state(&mut conn).await?))
     })
     .await;
     match checked {
-        Ok(Ok((problems, _))) if !problems.is_empty() => {
-            return Err(DbError(problems.join("; ")));
-        }
-        Ok(Ok((_, state))) => match state.verdict() {
+        Ok(Ok(Checked::Unsafe(problems))) => return Err(DbError(problems.join("; "))),
+        Ok(Ok(Checked::Schema(state))) => match state.verdict() {
             SchemaVerdict::Newer => {
                 return Err(DbError(
                     "the database schema is newer than this binary; upgrade palisade-server"

@@ -1436,6 +1436,53 @@ async fn serve_start_up_migrates_or_refuses() {
 }
 
 #[tokio::test]
+async fn serve_refuses_a_login_outside_the_runtime_group_on_a_migrated_database() {
+    let Some(f) = Fixture::with("outsider", Roles::Changed).await else {
+        return;
+    };
+    f.migrate().await;
+    // Two logins that cannot read the schema at all, because neither is in
+    // palisade_runtime: a plain one, and one with BYPASSRLS. Both must be
+    // refused as unsafe, not treated as an unreachable database.
+    for (suffix, attrs, needle) in [
+        ("plain", "", "is not a member of palisade_runtime"),
+        ("bypass", "BYPASSRLS", "BYPASSRLS"),
+    ] {
+        let user = format!("{}_{suffix}", f.owner);
+        let pw = password();
+        let mut su = admin(&f.admin_url).await;
+        su.execute(sqlx::AssertSqlSafe(format!(
+            "CREATE ROLE \"{user}\" LOGIN {attrs} PASSWORD '{pw}'"
+        )))
+        .await
+        .unwrap();
+        su.execute(sqlx::AssertSqlSafe(format!(
+            "GRANT CONNECT ON DATABASE \"{}\" TO \"{user}\"",
+            f.database
+        )))
+        .await
+        .unwrap();
+        let pw_file = f.dir.join(format!("{suffix}.password"));
+        write_password(&pw_file, &pw);
+        let mut settings = f.settings.clone();
+        settings.runtime = config::DbLogin {
+            user: user.clone(),
+            password_file: pw_file,
+        };
+        settings.auto_migrate = false;
+        let e = db::start(&settings).await.unwrap_err();
+        assert!(e.0.contains(needle), "{suffix}: {e}");
+        su.execute(sqlx::AssertSqlSafe(format!(
+            "REVOKE ALL ON DATABASE \"{}\" FROM \"{user}\"",
+            f.database
+        )))
+        .await
+        .unwrap();
+        su.close().await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn serve_starts_not_ready_when_the_database_is_unreachable() {
     // Needs no Postgres: nothing listens on the port.
     let dir = common::temp_dir("pg-start-down");
