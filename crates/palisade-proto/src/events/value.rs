@@ -1154,6 +1154,567 @@ impl JsonSchema for IpAddress {
     }
 }
 
+/// The JSON Schema of a flag that is written only when set: the constant
+/// `true`. See `flag` in the parent module.
+pub(crate) fn flag_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({ "type": "boolean", "const": true })
+}
+
+// ---------------------------------------------------------------------------
+// DNS name
+// ---------------------------------------------------------------------------
+
+/// A DNS host name, for example `files.example.org`.
+///
+/// The only accepted form is lowercase ASCII without a trailing dot: 1 to
+/// 253 characters, in labels of 1 to 63 letters, digits, `-` or `_`, each
+/// starting and ending with a letter, digit or `_`. A single label (a short
+/// host name) is accepted. Internationalised names are written in their
+/// ASCII (punycode) form. Use [`DnsName::normalise`] to lowercase a name and
+/// drop a trailing dot.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DnsName(String);
+
+const DNS_NAME_ERROR: ValueError =
+    ValueError("expected a lowercase DNS name such as files.example.org");
+
+impl DnsName {
+    /// The name.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Lowercases ASCII letters and drops one trailing dot, then checks the
+    /// canonical form.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValueError`] if the result is not a DNS name.
+    pub fn normalise(text: &str) -> Result<Self, ValueError> {
+        let text = text.strip_suffix('.').unwrap_or(text);
+        text.to_ascii_lowercase().parse()
+    }
+}
+
+impl FromStr for DnsName {
+    type Err = ValueError;
+
+    fn from_str(s: &str) -> Result<Self, ValueError> {
+        if s.is_empty() || s.len() > 253 {
+            return Err(DNS_NAME_ERROR);
+        }
+        let edge = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_';
+        for label in s.split('.') {
+            let bytes = label.as_bytes();
+            let (Some(&first), Some(&last)) = (bytes.first(), bytes.last()) else {
+                return Err(DNS_NAME_ERROR);
+            };
+            if bytes.len() > 63
+                || !edge(first)
+                || !edge(last)
+                || !bytes.iter().all(|&b| edge(b) || b == b'-')
+            {
+                return Err(DNS_NAME_ERROR);
+            }
+        }
+        Ok(Self(s.to_owned()))
+    }
+}
+
+impl fmt::Display for DnsName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+string_serde!(DnsName, "a lowercase DNS name such as files.example.org");
+
+impl JsonSchema for DnsName {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "DnsName".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A lowercase DNS name without a trailing dot.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 253,
+            "pattern": "^[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?(\\.[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?)*$"
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// JSON Pointer
+// ---------------------------------------------------------------------------
+
+/// A JSON Pointer (RFC 6901) to a member of an object, for example
+/// `/rules/3/name`: 1 to 1024 characters, `/` and then reference tokens in
+/// which `~` appears only as `~0` (for `~`) or `~1` (for `/`).
+///
+/// RFC 6901 escaping is mandatory and unique, so each pointer has one
+/// spelling. The empty pointer (the whole document) is not a value: a change
+/// to a whole object is recorded as changes to its members.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct JsonPointer(String);
+
+impl JsonPointer {
+    /// The pointer.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl FromStr for JsonPointer {
+    type Err = ValueError;
+
+    fn from_str(s: &str) -> Result<Self, ValueError> {
+        const ERR: ValueError = ValueError(
+            "expected a JSON Pointer such as /rules/0/name, with `~` written as ~0 or ~1",
+        );
+        if !s.starts_with('/') || s.chars().count() > 1024 {
+            return Err(ERR);
+        }
+        let mut chars = s.chars();
+        while let Some(c) = chars.next() {
+            if c == '~' && !matches!(chars.next(), Some('0' | '1')) {
+                return Err(ERR);
+            }
+        }
+        Ok(Self(s.to_owned()))
+    }
+}
+
+impl fmt::Display for JsonPointer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+string_serde!(JsonPointer, "a JSON Pointer such as /rules/0/name");
+
+impl JsonSchema for JsonPointer {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "JsonPointer".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A non-empty JSON Pointer (RFC 6901).",
+            "type": "string",
+            "maxLength": 1024,
+            "pattern": "^(/([^~]|~[01])*)+$"
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// JSON value
+// ---------------------------------------------------------------------------
+
+/// A JSON value recorded in an event, such as the old or new value of a
+/// changed setting.
+///
+/// It follows the event's own rules, so it has one canonical form: no
+/// `null` (an absent value is left out), integers only (the models Palisade
+/// records have no floating-point fields), object keys unique and written in
+/// sorted order. Bounded: strings of at most 4096 characters, keys of at
+/// most 256, nesting at most 16 deep, and at most 1024 values in all. The
+/// JSON Schema states the shape and the string limits; the depth and count
+/// limits, and the integer range (`i64::MIN` to `u64::MAX`), are checked
+/// only by the reader.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum JsonValue {
+    /// `true` or `false`.
+    Bool(bool),
+    /// An integer from `i64::MIN` to `i64::MAX`.
+    Int(i64),
+    /// An integer above `i64::MAX`. Smaller integers are always [`Self::Int`].
+    UInt(u64),
+    /// A string.
+    String(String),
+    /// An array.
+    Array(Vec<Self>),
+    /// An object, by key.
+    Object(BTreeMap<String, Self>),
+}
+
+impl JsonValue {
+    /// Most nesting levels.
+    pub const MAX_DEPTH: usize = 16;
+    /// Most values, counting every nested value.
+    pub const MAX_NODES: usize = 1024;
+    /// Longest string, in characters.
+    pub const MAX_STRING: usize = 4096;
+    /// Longest object key, in characters.
+    pub const MAX_KEY: usize = 256;
+
+    /// An integer, in its one form.
+    #[must_use]
+    pub fn from_u64(value: u64) -> Self {
+        i64::try_from(value).map_or(Self::UInt(value), Self::Int)
+    }
+}
+
+impl Serialize for JsonValue {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Bool(b) => serializer.serialize_bool(*b),
+            Self::Int(i) => serializer.serialize_i64(*i),
+            Self::UInt(u) => serializer.serialize_u64(*u),
+            Self::String(s) => serializer.serialize_str(s),
+            Self::Array(items) => items.serialize(serializer),
+            Self::Object(map) => map.serialize(serializer),
+        }
+    }
+}
+
+/// Reads one [`JsonValue`], counting nesting and values against the limits.
+struct JsonSeed<'a> {
+    depth: usize,
+    nodes: &'a std::cell::Cell<usize>,
+}
+
+impl JsonSeed<'_> {
+    fn count<E: de::Error>(&self) -> Result<(), E> {
+        let n = self.nodes.get().saturating_add(1);
+        if n > JsonValue::MAX_NODES {
+            return Err(E::custom("a JSON value may hold at most 1024 values"));
+        }
+        self.nodes.set(n);
+        Ok(())
+    }
+
+    /// The seed for a value inside this one.
+    const fn child(&self) -> JsonSeed<'_> {
+        JsonSeed {
+            depth: self.depth.saturating_add(1),
+            nodes: self.nodes,
+        }
+    }
+}
+
+impl<'de> de::DeserializeSeed<'de> for JsonSeed<'_> {
+    type Value = JsonValue;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<JsonValue, D::Error> {
+        // The root is at depth 1, so a value at depth 17 is the 17th level.
+        if self.depth > JsonValue::MAX_DEPTH {
+            return Err(de::Error::custom("a JSON value may nest at most 16 deep"));
+        }
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for JsonSeed<'_> {
+    type Value = JsonValue;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a JSON value without null or non-integer numbers")
+    }
+
+    fn visit_bool<E: de::Error>(self, v: bool) -> Result<JsonValue, E> {
+        self.count()?;
+        Ok(JsonValue::Bool(v))
+    }
+
+    fn visit_i64<E: de::Error>(self, v: i64) -> Result<JsonValue, E> {
+        self.count()?;
+        Ok(JsonValue::Int(v))
+    }
+
+    fn visit_u64<E: de::Error>(self, v: u64) -> Result<JsonValue, E> {
+        self.count()?;
+        Ok(JsonValue::from_u64(v))
+    }
+
+    fn visit_f64<E: de::Error>(self, _: f64) -> Result<JsonValue, E> {
+        Err(E::custom("a JSON value holds integers only"))
+    }
+
+    fn visit_unit<E: de::Error>(self) -> Result<JsonValue, E> {
+        Err(E::custom("null is not a value: leave the member out"))
+    }
+
+    fn visit_str<E: de::Error>(self, v: &str) -> Result<JsonValue, E> {
+        self.count()?;
+        if v.chars().count() > JsonValue::MAX_STRING {
+            return Err(E::custom(
+                "a string in a JSON value may hold at most 4096 characters",
+            ));
+        }
+        Ok(JsonValue::String(v.to_owned()))
+    }
+
+    fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<JsonValue, A::Error> {
+        self.count()?;
+        let mut items = Vec::new();
+        while let Some(item) = seq.next_element_seed(self.child())? {
+            items.push(item);
+        }
+        Ok(JsonValue::Array(items))
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut access: A) -> Result<JsonValue, A::Error> {
+        self.count()?;
+        let mut map = BTreeMap::new();
+        while let Some(key) = access.next_key::<String>()? {
+            if key.chars().count() > JsonValue::MAX_KEY {
+                return Err(de::Error::custom(
+                    "a key in a JSON value may hold at most 256 characters",
+                ));
+            }
+            if map.contains_key(&key) {
+                return Err(de::Error::custom(format!("duplicate key `{key}`")));
+            }
+            let value = access.next_value_seed(self.child())?;
+            map.insert(key, value);
+        }
+        Ok(JsonValue::Object(map))
+    }
+}
+
+impl<'de> Deserialize<'de> for JsonValue {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let nodes = std::cell::Cell::new(0);
+        de::DeserializeSeed::deserialize(
+            JsonSeed {
+                depth: 1,
+                nodes: &nodes,
+            },
+            deserializer,
+        )
+    }
+}
+
+impl JsonSchema for JsonValue {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "JsonValue".into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let this = generator.subschema_for::<Self>();
+        json_schema!({
+            "description": "A JSON value without null or non-integer numbers. Nesting (at most 16) and size (at most 1024 values) are checked by the reader.",
+            "anyOf": [
+                { "type": "boolean" },
+                { "type": "integer" },
+                { "type": "string", "maxLength": 4096 },
+                { "type": "array", "items": this.clone() },
+                {
+                    "type": "object",
+                    "propertyNames": { "maxLength": 256 },
+                    "additionalProperties": this
+                }
+            ]
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sorted set
+// ---------------------------------------------------------------------------
+
+/// A set of at most `MAX` values, written as a list in ascending order
+/// without repeats. That is its only accepted form, so each set has one
+/// spelling. The JSON Schema checks that items are unique; the order is
+/// checked only by the reader.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SortedSet<T, const MAX: usize>(Vec<T>);
+
+impl<T: Ord, const MAX: usize> SortedSet<T, MAX> {
+    /// Sorts and removes repeats.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValueError`] if more than `MAX` distinct values remain.
+    pub fn new(mut items: Vec<T>) -> Result<Self, ValueError> {
+        items.sort();
+        items.dedup();
+        if items.len() > MAX {
+            return Err(ValueError("too many items"));
+        }
+        Ok(Self(items))
+    }
+
+    /// The values, in ascending order.
+    #[must_use]
+    pub fn as_slice(&self) -> &[T] {
+        &self.0
+    }
+
+    /// Whether the set is empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl<T, const MAX: usize> Default for SortedSet<T, MAX> {
+    fn default() -> Self {
+        Self(Vec::new())
+    }
+}
+
+impl<T: Serialize, const MAX: usize> Serialize for SortedSet<T, MAX> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de, T: Deserialize<'de> + Ord, const MAX: usize> Deserialize<'de> for SortedSet<T, MAX> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let items = BoundedVec::<T, MAX>::deserialize(deserializer)?.0;
+        if items.windows(2).any(|w| matches!(w, [a, b] if a >= b)) {
+            return Err(de::Error::custom(
+                "a set is written in ascending order without repeats",
+            ));
+        }
+        Ok(Self(items))
+    }
+}
+
+impl<T: JsonSchema, const MAX: usize> JsonSchema for SortedSet<T, MAX> {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        format!("SortedSet{MAX}_{}", T::schema_name()).into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let items = generator.subschema_for::<T>();
+        json_schema!({
+            "type": "array",
+            "items": items,
+            "maxItems": MAX,
+            "uniqueItems": true
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Registry key
+// ---------------------------------------------------------------------------
+
+/// The root keys, in their canonical spelling, and the other spellings
+/// [`RegistryKey::normalise`] reads (compared ASCII case-insensitively).
+const REGISTRY_ROOTS: &[(&str, &[&str])] = &[
+    (
+        "HKEY_LOCAL_MACHINE",
+        &["HKEY_LOCAL_MACHINE", "HKLM", "\\REGISTRY\\MACHINE"],
+    ),
+    ("HKEY_USERS", &["HKEY_USERS", "HKU", "\\REGISTRY\\USER"]),
+    ("HKEY_CURRENT_USER", &["HKEY_CURRENT_USER", "HKCU"]),
+    ("HKEY_CLASSES_ROOT", &["HKEY_CLASSES_ROOT", "HKCR"]),
+    ("HKEY_CURRENT_CONFIG", &["HKEY_CURRENT_CONFIG", "HKCC"]),
+];
+
+/// The longest registry key name component the OS allows, in characters.
+const REGISTRY_COMPONENT_MAX: usize = 255;
+
+/// A registry key path, for example
+/// `HKEY_LOCAL_MACHINE\SOFTWARE\Policies`.
+///
+/// The canonical form starts with the full name of a root key
+/// (`HKEY_LOCAL_MACHINE`, `HKEY_USERS`, `HKEY_CURRENT_USER`,
+/// `HKEY_CLASSES_ROOT` or `HKEY_CURRENT_CONFIG`), followed by zero or more
+/// `\`-separated components of 1 to 255 characters, with no trailing `\`. At
+/// most 32,767 characters in all. Components keep the case they were
+/// reported in. Use [`RegistryKey::normalise`] to read the kernel form
+/// (`\REGISTRY\MACHINE\...`) and the short root names (`HKLM\...`).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RegistryKey(String);
+
+const REGISTRY_KEY_ERROR: ValueError = ValueError(
+    "expected a registry key such as HKEY_LOCAL_MACHINE\\SOFTWARE, with components of 1 to 255 characters",
+);
+
+impl RegistryKey {
+    /// The path.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Reads any root spelling in [`REGISTRY_ROOTS`] and one trailing `\`,
+    /// and returns the canonical form.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValueError`] if the text is not a registry key path.
+    pub fn normalise(text: &str) -> Result<Self, ValueError> {
+        let text = text.strip_suffix('\\').unwrap_or(text);
+        for (canonical, spellings) in REGISTRY_ROOTS {
+            for spelling in *spellings {
+                let Some(head) = text.get(..spelling.len()) else {
+                    continue;
+                };
+                if !head.eq_ignore_ascii_case(spelling) {
+                    continue;
+                }
+                let rest = text.get(spelling.len()..).unwrap_or_default();
+                if rest.is_empty() || rest.starts_with('\\') {
+                    return format!("{canonical}{rest}").parse();
+                }
+            }
+        }
+        Err(REGISTRY_KEY_ERROR)
+    }
+}
+
+impl FromStr for RegistryKey {
+    type Err = ValueError;
+
+    fn from_str(s: &str) -> Result<Self, ValueError> {
+        if s.chars().count() > 32_767 {
+            return Err(REGISTRY_KEY_ERROR);
+        }
+        let mut parts = s.split('\\');
+        let root = parts.next().unwrap_or_default();
+        if !REGISTRY_ROOTS.iter().any(|(r, _)| *r == root) {
+            return Err(REGISTRY_KEY_ERROR);
+        }
+        for part in parts {
+            let len = part.chars().count();
+            if len == 0 || len > REGISTRY_COMPONENT_MAX {
+                return Err(REGISTRY_KEY_ERROR);
+            }
+        }
+        Ok(Self(s.to_owned()))
+    }
+}
+
+impl fmt::Display for RegistryKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+string_serde!(
+    RegistryKey,
+    "a registry key such as HKEY_LOCAL_MACHINE\\SOFTWARE"
+);
+
+impl JsonSchema for RegistryKey {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "RegistryKey".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A registry key path: the full root key name, then components of 1 to 255 characters separated by `\\`.",
+            "type": "string",
+            "maxLength": 32_767,
+            "pattern": "^HKEY_(LOCAL_MACHINE|USERS|CURRENT_USER|CLASSES_ROOT|CURRENT_CONFIG)(\\\\[^\\\\]{1,255})*$"
+        })
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Token
 // ---------------------------------------------------------------------------

@@ -1,0 +1,282 @@
+# OS Security log -> canonical events (#196).
+#
+# Field names are those of the Security auditing provider's event
+# templates. The decoder (#58, #207) flattens each record's event data into
+# fields, keeps the provider's `%%<n>` message codes as they are (the value
+# tables below translate them), and adds the record's system user and
+# process as `System.UserID` and `System.ProcessID`. Account and logon IDs
+# arrive as the OS writes them (`0x3e7`); the engine reads hex and decimal.
+#
+# `-` and the null SID `S-1-0-0` mean "no value" in these templates, so they
+# are listed as absent values: a field holding one is left out of the event.
+#
+# Mapped:
+#   4688        process creation, with the command line where the
+#               "include command line" audit setting is on (ISM-1889)
+#   4624, 4625  logon and failed logon
+#   4728, 4729  member added to / removed from a global security group
+#   4732, 4733  member added to / removed from a local security group
+#   4756, 4757  member added to / removed from a universal security group
+#   4719        system audit policy changed
+#   1102        the Security log was cleared
+#
+# Not mapped here: 4648, 4672, 4689 and the account-management events 4720
+# to 4738, which belong to the collector work in #207 together with the
+# System log events (104 log cleared, 7045, 7040).
+#
+# Notes:
+# - In 4688 the subject is the account that created the process; the target
+#   account, when it differs, owns the new process and goes to
+#   `process.owner_sid`. The template writes the null SID when the two are
+#   the same.
+# - Logon type 0 (the system account at start-up) has no canonical name, so
+#   it is dropped and reported rather than guessed.
+# - 4719 reports per-user include and exclude changes (codes 8452 to 8459)
+#   as well; they have no canonical value, so a record carrying one keeps
+#   the category and subcategory and reports `AuditPolicyChanges` dropped.
+schema_version: 1.1.0
+source: os_security
+absent_values: ["-", "S-1-0-0"]
+value_maps:
+  logon_type:
+    "2": interactive
+    "3": network
+    "4": batch
+    "5": service
+    "7": unlock
+    "8": network_cleartext
+    "9": new_credentials
+    "10": remote_interactive
+    "11": cached_interactive
+    "12": cached_remote_interactive
+    "13": cached_unlock
+  token_elevation_type:
+    "%%1936": default
+    "%%1937": full
+    "%%1938": limited
+  yes_no:
+    "%%1842": "true"
+    "%%1843": "false"
+  mandatory_label:
+    S-1-16-0: untrusted
+    S-1-16-4096: low
+    S-1-16-8192: medium
+    S-1-16-8448: medium_plus
+    S-1-16-12288: high
+    S-1-16-16384: system
+    S-1-16-20480: protected
+  audit_category:
+    "%%8272": system
+    "%%8273": logon_logoff
+    "%%8274": object_access
+    "%%8275": privilege_use
+    "%%8276": detailed_tracking
+    "%%8277": policy_change
+    "%%8278": account_management
+    "%%8279": directory_service_access
+    "%%8280": account_logon
+  audit_change:
+    "%%8448": success_removed
+    "%%8449": success_added
+    "%%8450": failure_removed
+    "%%8451": failure_added
+entries:
+  - source_event_id: 4688
+    canonical_type: process.created
+    action: create_process
+    outcome: info
+    description: "A new process was created."
+    field_map:
+      SubjectUserSid: /user/sid
+      SubjectUserName: /user/name
+      SubjectDomainName: /user/domain
+      SubjectLogonId: /user/logon_id
+      NewProcessId: /process/pid
+      NewProcessName: /process/image_path
+      CommandLine: /process/cmdline
+      TokenElevationType:
+        to: /process/token_elevation_type
+        values: token_elevation_type
+      MandatoryLabel:
+        to: /process/integrity_level
+        values: mandatory_label
+      TargetUserSid: /process/owner_sid
+      ProcessId: /process/parent/pid
+      ParentProcessName: /process/parent/image_path
+  - source_event_id: 4624
+    canonical_type: identity.logon
+    action: logon
+    outcome: allowed
+    description: "An account logged on."
+    field_map:
+      TargetUserSid: /user/sid
+      TargetUserName: /user/name
+      TargetDomainName: /user/domain
+      TargetLogonId: /user/logon_id
+      LogonType:
+        to: /user/logon_type
+        values: logon_type
+      ElevatedToken:
+        to: /user/elevated
+        values: yes_no
+      LogonProcessName: /identity/logon_process
+      AuthenticationPackageName: /identity/authentication_package
+      WorkstationName: /identity/workstation
+      ProcessId: /process/pid
+      ProcessName: /process/image_path
+      IpAddress: /network/remote_ip
+      IpPort: /network/remote_port
+  - source_event_id: 4625
+    canonical_type: identity.logon_failed
+    action: logon
+    outcome: failed
+    description: "An account failed to log on."
+    field_map:
+      TargetUserSid: /user/sid
+      TargetUserName: /user/name
+      TargetDomainName: /user/domain
+      LogonType:
+        to: /user/logon_type
+        values: logon_type
+      Status: /identity/status_code
+      SubStatus: /identity/sub_status_code
+      LogonProcessName: /identity/logon_process
+      AuthenticationPackageName: /identity/authentication_package
+      WorkstationName: /identity/workstation
+      ProcessId: /process/pid
+      ProcessName: /process/image_path
+      IpAddress: /network/remote_ip
+      IpPort: /network/remote_port
+  # Group membership: the six events share one template.
+  - source_event_id: 4728
+    canonical_type: identity.group.changed
+    action: add_member
+    outcome: info
+    description: "A member was added to a global security group."
+    set:
+      /identity/group_scope: global
+    field_map:
+      SubjectUserSid: /user/sid
+      SubjectUserName: /user/name
+      SubjectDomainName: /user/domain
+      SubjectLogonId: /user/logon_id
+      MemberSid: /identity/member/sid
+      MemberName: /identity/member/distinguished_name
+      TargetSid: /identity/group/sid
+      TargetUserName: /identity/group/name
+      TargetDomainName: /identity/group/domain
+  - source_event_id: 4729
+    canonical_type: identity.group.changed
+    action: remove_member
+    outcome: info
+    description: "A member was removed from a global security group."
+    set:
+      /identity/group_scope: global
+    field_map:
+      SubjectUserSid: /user/sid
+      SubjectUserName: /user/name
+      SubjectDomainName: /user/domain
+      SubjectLogonId: /user/logon_id
+      MemberSid: /identity/member/sid
+      MemberName: /identity/member/distinguished_name
+      TargetSid: /identity/group/sid
+      TargetUserName: /identity/group/name
+      TargetDomainName: /identity/group/domain
+  - source_event_id: 4732
+    canonical_type: identity.local_group.changed
+    action: add_member
+    outcome: info
+    description: "A member was added to a local security group."
+    set:
+      /identity/group_scope: local
+    field_map:
+      SubjectUserSid: /user/sid
+      SubjectUserName: /user/name
+      SubjectDomainName: /user/domain
+      SubjectLogonId: /user/logon_id
+      MemberSid: /identity/member/sid
+      MemberName: /identity/member/distinguished_name
+      TargetSid: /identity/group/sid
+      TargetUserName: /identity/group/name
+      TargetDomainName: /identity/group/domain
+  - source_event_id: 4733
+    canonical_type: identity.local_group.changed
+    action: remove_member
+    outcome: info
+    description: "A member was removed from a local security group."
+    set:
+      /identity/group_scope: local
+    field_map:
+      SubjectUserSid: /user/sid
+      SubjectUserName: /user/name
+      SubjectDomainName: /user/domain
+      SubjectLogonId: /user/logon_id
+      MemberSid: /identity/member/sid
+      MemberName: /identity/member/distinguished_name
+      TargetSid: /identity/group/sid
+      TargetUserName: /identity/group/name
+      TargetDomainName: /identity/group/domain
+  - source_event_id: 4756
+    canonical_type: identity.group.changed
+    action: add_member
+    outcome: info
+    description: "A member was added to a universal security group."
+    set:
+      /identity/group_scope: universal
+    field_map:
+      SubjectUserSid: /user/sid
+      SubjectUserName: /user/name
+      SubjectDomainName: /user/domain
+      SubjectLogonId: /user/logon_id
+      MemberSid: /identity/member/sid
+      MemberName: /identity/member/distinguished_name
+      TargetSid: /identity/group/sid
+      TargetUserName: /identity/group/name
+      TargetDomainName: /identity/group/domain
+  - source_event_id: 4757
+    canonical_type: identity.group.changed
+    action: remove_member
+    outcome: info
+    description: "A member was removed from a universal security group."
+    set:
+      /identity/group_scope: universal
+    field_map:
+      SubjectUserSid: /user/sid
+      SubjectUserName: /user/name
+      SubjectDomainName: /user/domain
+      SubjectLogonId: /user/logon_id
+      MemberSid: /identity/member/sid
+      MemberName: /identity/member/distinguished_name
+      TargetSid: /identity/group/sid
+      TargetUserName: /identity/group/name
+      TargetDomainName: /identity/group/domain
+  - source_event_id: 4719
+    canonical_type: detection.audit_policy_changed
+    action: change_audit_policy
+    outcome: info
+    description: "The system audit policy was changed."
+    field_map:
+      SubjectUserSid: /user/sid
+      SubjectUserName: /user/name
+      SubjectDomainName: /user/domain
+      SubjectLogonId: /user/logon_id
+      CategoryId:
+        to: /audit_policy/category
+        values: audit_category
+      SubcategoryGuid: /audit_policy/subcategory_guid
+      AuditPolicyChanges:
+        to: /audit_policy/changes
+        values: audit_change
+        split: ","
+  # 1102 is written by the event log service into the Security log, with
+  # its fields in user data; the decoder flattens them the same way.
+  - source_event_id: 1102
+    canonical_type: detection.log_cleared
+    action: clear_log
+    outcome: info
+    description: "The Security log was cleared."
+    field_map:
+      SubjectUserSid: /user/sid
+      SubjectUserName: /user/name
+      SubjectDomainName: /user/domain
+      SubjectLogonId: /user/logon_id

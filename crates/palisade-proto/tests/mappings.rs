@@ -12,6 +12,11 @@
 //! Every expected event must also pass the committed JSON Schema and the
 //! ISM-0585 field checklist, and every entry (every source event ID and
 //! each canonical type it can map to) must have a fixture.
+//!
+//! The OS log fixtures run against [`MappingSet::builtin`]. Each generic
+//! third-party format has its own directory, `tests/fixtures/third_party/`
+//! with files named `<format>_*.json`, and runs against
+//! [`MappingSet::third_party`].
 
 #![allow(clippy::unwrap_used)]
 
@@ -20,9 +25,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use palisade_proto::events::{
-    EventType, Host, HostId, Labels, Outcome, SourceKind, TenantId, Timestamp, schema,
+    CURRENT, EventType, Host, HostId, Labels, Outcome, SourceKind, TenantId, Timestamp, schema,
 };
-use palisade_proto::mapping::{Envelope, MappingSet, Record};
+use palisade_proto::mapping::{Envelope, MappingSet, Record, THIRD_PARTY};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -99,17 +104,25 @@ fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mappings")
 }
 
-fn fixtures() -> Vec<PathBuf> {
-    let mut paths: Vec<PathBuf> = fs::read_dir(fixture_dir())
+fn third_party_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/third_party")
+}
+
+fn fixtures_in(dir: &Path, prefix: &str) -> Vec<PathBuf> {
+    let mut paths: Vec<PathBuf> = fs::read_dir(dir)
         .unwrap()
         .map(|e| e.unwrap().path())
         .filter(|p| {
             let name = p.file_name().unwrap().to_string_lossy();
-            name.ends_with(".json") && !name.ends_with(".expected.json")
+            name.starts_with(prefix) && name.ends_with(".json") && !name.ends_with(".expected.json")
         })
         .collect();
     paths.sort();
-    assert!(!paths.is_empty(), "no mapping fixtures");
+    assert!(
+        !paths.is_empty(),
+        "no mapping fixtures in {}",
+        dir.display()
+    );
     paths
 }
 
@@ -124,15 +137,15 @@ fn compiled_schema() -> (boon::Schemas, boon::SchemaIndex) {
     (schemas, index)
 }
 
-#[test]
-fn golden_fixtures_map_to_expected_events() {
-    let set = MappingSet::builtin().unwrap();
+/// Maps every fixture with `set`, checks each result, and returns the
+/// `(source, event ID, type)` combinations covered.
+fn run_golden(set: &MappingSet, paths: &[PathBuf]) -> BTreeSet<(SourceKind, u32, EventType)> {
     let (schemas, index) = compiled_schema();
     let bless = std::env::var_os("PALISADE_BLESS").is_some();
-    let mut covered: BTreeSet<(SourceKind, u32, EventType)> = BTreeSet::new();
-    for path in fixtures() {
+    let mut covered = BTreeSet::new();
+    for path in paths {
         let name = path.display().to_string();
-        let fixture: Fixture = serde_json::from_str(&fs::read_to_string(&path).unwrap())
+        let fixture: Fixture = serde_json::from_str(&fs::read_to_string(path).unwrap())
             .unwrap_or_else(|e| panic!("{name}: {e}"));
         let record = fixture.record.into_record();
         let signatures: Vec<Record> = fixture
@@ -151,11 +164,11 @@ fn golden_fixtures_map_to_expected_events() {
         );
         covered.insert((fixture.source, record.event_id, mapped.event.event_type));
 
-        let value = serde_json::to_value(&mapped.event).unwrap();
+        let event = &mapped.event;
+        let value = serde_json::to_value(event).unwrap();
         if let Err(e) = schemas.validate(&value, index) {
             panic!("{name}: the mapped event fails the JSON Schema: {e:#}");
         }
-        let event = &mapped.event;
         if event.event_type.as_str().ends_with(".decision") {
             assert!(
                 event.ism_0585_gaps().is_empty(),
@@ -163,6 +176,8 @@ fn golden_fixtures_map_to_expected_events() {
                 event.ism_0585_gaps()
             );
         }
+        // Mapped events are labelled with the version this crate writes.
+        assert_eq!(event.schema_version, CURRENT, "{name}");
 
         let expected_path = path.with_extension("expected.json");
         // Serialise the event itself, not the `Value`, so the text is in
@@ -183,11 +198,18 @@ fn golden_fixtures_map_to_expected_events() {
             expected_path.display()
         );
     }
-    for source in [
-        SourceKind::OsCodeIntegrity,
-        SourceKind::OsLegacyRuleCollection,
-    ] {
-        for id in set.event_ids(source) {
+    covered
+}
+
+fn assert_covered(
+    set: &MappingSet,
+    covered: &BTreeSet<(SourceKind, u32, EventType)>,
+    sources: &[SourceKind],
+) {
+    for &source in sources {
+        let ids = set.event_ids(source);
+        assert!(!ids.is_empty(), "{} has no mappings", source.as_str());
+        for id in ids {
             for ty in set.canonical_types(source, id) {
                 assert!(
                     covered.contains(&(source, id, ty)),
@@ -195,6 +217,59 @@ fn golden_fixtures_map_to_expected_events() {
                     source.as_str(),
                     ty.as_str()
                 );
+            }
+        }
+    }
+}
+
+#[test]
+fn golden_fixtures_map_to_expected_events() {
+    let set = MappingSet::builtin().unwrap();
+    let covered = run_golden(&set, &fixtures_in(&fixture_dir(), ""));
+    assert_covered(
+        &set,
+        &covered,
+        &[
+            SourceKind::OsCodeIntegrity,
+            SourceKind::OsLegacyRuleCollection,
+            SourceKind::OsSecurity,
+            SourceKind::OsPowershell,
+        ],
+    );
+}
+
+#[test]
+fn third_party_fixtures_map_to_expected_events() {
+    for (format, _, _) in THIRD_PARTY {
+        let set = MappingSet::third_party(format).unwrap().unwrap();
+        let covered = run_golden(
+            &set,
+            &fixtures_in(&third_party_dir(), &format!("{format}_")),
+        );
+        assert_covered(&set, &covered, &[SourceKind::ThirdParty]);
+    }
+}
+
+#[test]
+fn shipped_files_name_no_products() {
+    // The mapping files describe OS logs and a neutral import format only.
+    // A coarse check for vendor-style names; docs/NAMING.md has the rules.
+    let builtin = palisade_proto::mapping::BUILTIN
+        .iter()
+        .map(|(n, t)| (*n, *t));
+    let third = THIRD_PARTY.iter().map(|(_, n, t)| (*n, *t));
+    for (name, text) in builtin.chain(third) {
+        for line in text.lines() {
+            let lower = line.to_ascii_lowercase();
+            for word in [
+                "copyright",
+                "trademark",
+                "(r)",
+                "(tm)",
+                "\u{ae}",
+                "\u{2122}",
+            ] {
+                assert!(!lower.contains(word), "{name}: {line}");
             }
         }
     }

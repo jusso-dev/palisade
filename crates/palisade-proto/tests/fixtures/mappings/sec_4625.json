@@ -1,0 +1,32 @@
+{
+  "source": "os_security",
+  "record": {
+    "event_id": 4625,
+    "time_created": "2026-11-24T03:15:22.1234567Z",
+    "record_id": 1000,
+    "channel": "Security",
+    "fields": {
+      "SubjectUserSid": "S-1-5-18",
+      "SubjectUserName": "WS-0001$",
+      "SubjectDomainName": "EXAMPLE",
+      "SubjectLogonId": "0x3e7",
+      "TargetUserSid": "S-1-0-0",
+      "TargetUserName": "mallory",
+      "TargetDomainName": "EXAMPLE",
+      "Status": "0xc000006d",
+      "FailureReason": "%%2313",
+      "SubStatus": "0xc000006a",
+      "LogonType": "3",
+      "LogonProcessName": "NtLmSsp ",
+      "AuthenticationPackageName": "NTLM",
+      "WorkstationName": "-",
+      "TransmittedServices": "-",
+      "LmPackageName": "-",
+      "KeyLength": "0",
+      "ProcessId": "0x0",
+      "ProcessName": "-",
+      "IpAddress": "2001:DB8:0:0:0:0:0:7",
+      "IpPort": "0"
+    }
+  }
+}

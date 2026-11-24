@@ -106,9 +106,68 @@ fn schema_leaf(pointer: &str) -> Option<serde_json::Value> {
     let root = schema::generate();
     let mut node = &root;
     for key in pointer.trim_start_matches('/').split('/') {
+        // `0`: the first item of an array; `schema_node` follows `items`.
+        if key == "0" {
+            if node.get("type") != Some(&serde_json::json!("array")) {
+                return None;
+            }
+            node = node.get("items")?;
+            continue;
+        }
         node = schema_node(&root, node, key)?;
     }
     Some(node.clone())
+}
+
+/// Resolves `$ref` and returns the enum values a schema node allows.
+fn schema_enum(node: &serde_json::Value) -> Option<Vec<String>> {
+    let root = schema::generate();
+    let mut node = node.clone();
+    while let Some(r) = node.get("$ref").and_then(|r| r.as_str()) {
+        node = root.pointer(r.strip_prefix('#')?)?.clone();
+    }
+    if let Some(items) = node.get("items") {
+        return schema_enum(items);
+    }
+    let options = node.get("oneOf")?.as_array()?;
+    options
+        .iter()
+        .map(|o| o.get("const")?.as_str().map(str::to_owned))
+        .collect()
+}
+
+#[test]
+fn enum_targets_match_the_schema() {
+    for (pointer, kind) in EVENT_TARGETS {
+        let (Kind::Enum(values) | Kind::EnumSet(values)) = kind else {
+            continue;
+        };
+        let leaf = schema_leaf(pointer).unwrap();
+        let schema_values = schema_enum(&leaf).unwrap_or_else(|| panic!("{pointer}: not an enum"));
+        assert_eq!(*values, schema_values.as_slice(), "{pointer}");
+        if matches!(kind, Kind::EnumSet(_)) {
+            assert_eq!(
+                leaf.get("uniqueItems"),
+                Some(&serde_json::json!(true)),
+                "{pointer}"
+            );
+        }
+    }
+}
+
+#[test]
+fn principals_and_json_values_are_not_targets() {
+    for (pointer, _) in EVENT_TARGETS {
+        for forbidden in [
+            "/admin/",
+            "/approval/decided_by",
+            "/elevation/approver",
+            "/probe/expected",
+            "/probe/observed",
+        ] {
+            assert!(!pointer.starts_with(forbidden), "{pointer}");
+        }
+    }
 }
 
 #[test]
@@ -238,10 +297,26 @@ fn unknown_keys_types_and_versions_are_rejected() {
             .to_string()
             .contains("targets event schema 2.0.0")
     );
-    let newer = file_with(GOOD_ENTRY).replace("schema_version: 1.0.0", "schema_version: 1.1.0");
+    let newer = file_with(GOOD_ENTRY).replace("schema_version: 1.0.0", "schema_version: 1.2.0");
     assert!(MappingSet::from_yaml("t.yaml", &newer).is_err());
-    let bad_source = file_with(GOOD_ENTRY).replace("os_code_integrity", "third_party");
-    assert!(MappingSet::from_yaml("t.yaml", &bad_source).is_err());
+    let bare = file_with(GOOD_ENTRY)
+        .replace("schema_version: 1.0.0", "schema_version: 1.1.0")
+        .replace("os_code_integrity", "third_party");
+    assert!(
+        MappingSet::from_yaml("t.yaml", &bare)
+            .unwrap_err()
+            .to_string()
+            .contains("third_party:<format>")
+    );
+    let bad_format = bare.replace("third_party", "third_party:Bad-Name");
+    assert!(MappingSet::from_yaml("t.yaml", &bad_format).is_err());
+    let old = file_with(GOOD_ENTRY).replace("os_code_integrity", "third_party:generic");
+    assert!(
+        MappingSet::from_yaml("t.yaml", &old)
+            .unwrap_err()
+            .to_string()
+            .contains("need schema version 1.1.0")
+    );
 }
 
 #[test]
@@ -297,6 +372,11 @@ fn when_rules_must_leave_every_entry_reachable() {
         "    when:\n      field: X\n    canonical_type:",
     );
     assert!(load_error(&empty_when).contains("at least one"));
+    let both = GOOD_ENTRY.replace(
+        "    canonical_type:",
+        "    when:\n      field: X\n      present: true\n      equals: [a]\n    canonical_type:",
+    );
+    assert!(load_error(&both).contains("either `present: true`"));
 }
 
 #[test]
@@ -312,8 +392,299 @@ fn a_source_event_id_is_mapped_by_one_file() {
 #[test]
 fn every_builtin_file_loads() {
     let set = MappingSet::builtin().unwrap();
-    assert!(!set.event_ids(SourceKind::OsCodeIntegrity).is_empty());
-    assert!(!set.event_ids(SourceKind::OsLegacyRuleCollection).is_empty());
+    for source in [
+        SourceKind::OsCodeIntegrity,
+        SourceKind::OsLegacyRuleCollection,
+        SourceKind::OsSecurity,
+        SourceKind::OsPowershell,
+    ] {
+        assert!(!set.event_ids(source).is_empty(), "{}", source.as_str());
+    }
+    assert!(set.event_ids(SourceKind::ThirdParty).is_empty());
+    for (format, _, _) in THIRD_PARTY {
+        let set = MappingSet::third_party(format).unwrap().unwrap();
+        assert!(
+            !set.event_ids(SourceKind::ThirdParty).is_empty(),
+            "{format}"
+        );
+    }
+    assert!(MappingSet::third_party("nope").unwrap().is_none());
+}
+
+// ---------------------------------------------------------------- 1.1 lints
+
+/// A one-entry 1.1 file around `entry`, with a file-level `head`.
+fn file_11(head: &str, entry: &str) -> String {
+    format!("schema_version: 1.1.0\nsource: os_security\n{head}entries:\n{entry}")
+}
+
+const GOOD_11: &str = "  - source_event_id: 1
+    canonical_type: exec.decision
+    action: execute
+    outcome: blocked
+    description: Blocked.
+    field_map:
+      File: /file/path
+      Pid: /process/pid
+";
+
+fn load_error_11(head: &str, entry: &str) -> String {
+    MappingSet::from_yaml("t.yaml", &file_11(head, entry))
+        .unwrap_err()
+        .to_string()
+}
+
+#[test]
+fn a_file_cannot_use_newer_parts_than_its_version() {
+    let network = format!("{GOOD_ENTRY}      Host: /network/remote_hostname\n");
+    let e = load_error(&network);
+    assert!(
+        e.contains("entries[0].field_map.Host") && e.contains("new in schema version 1.1.0"),
+        "{e}"
+    );
+    let new_type = GOOD_ENTRY
+        .replace("exec.decision", "process.created")
+        .replace("File: /file/path", "File: /process/image_path");
+    assert!(load_error(&new_type).contains("entries[0].canonical_type"));
+    let constant = format!("{GOOD_ENTRY}    set:\n      /script/text: x\n");
+    assert!(load_error(&constant).contains("entries[0].set./script/text"));
+    // The same entries load at 1.1.
+    let ok = file_11(
+        "",
+        &format!("{GOOD_11}      Host: /network/remote_hostname\n"),
+    );
+    assert!(MappingSet::from_yaml("t.yaml", &ok).is_ok());
+}
+
+#[test]
+fn value_tables_are_checked_and_used() {
+    let head = "value_maps:\n  lt:\n    \"2\": interactive\n    \"10\": remote_interactive\n";
+    let entry = format!("{GOOD_11}      Type:\n        to: /user/logon_type\n        values: lt\n");
+    let set = MappingSet::from_yaml("t.yaml", &file_11(head, &entry)).unwrap();
+    let map = |t: &str| {
+        set.map(
+            SourceKind::OsSecurity,
+            &record(1, &[("File", "a"), ("Pid", "1"), ("Type", t)]),
+            &[],
+            &envelope(),
+        )
+        .unwrap()
+    };
+    let mapped = map("10");
+    assert_eq!(
+        mapped.event.user.unwrap().logon_type,
+        Some(crate::events::LogonType::RemoteInteractive)
+    );
+    let mapped = map("0");
+    assert_eq!(mapped.dropped[0].field, "Type");
+    assert!(mapped.event.user.is_none());
+    // A table value the target cannot hold.
+    let bad = head.replace("remote_interactive", "remote");
+    let e = load_error_11(&bad, &entry);
+    assert!(e.contains("maps `10` to `remote`"), "{e}");
+    // Unknown and unused tables.
+    let unknown = entry.replace("values: lt", "values: nope");
+    assert!(load_error_11(head, &unknown).contains("no value table `nope`"));
+    assert!(load_error_11(head, GOOD_11).contains("value_maps.lt: is not used"));
+    assert!(load_error_11("value_maps:\n  e: {}\n", GOOD_11).contains("1 to 256 entries"));
+}
+
+#[test]
+fn enum_sets_split_and_sort() {
+    let head = "value_maps:\n  c:\n    \"%%8448\": success_removed\n    \"%%8449\": success_added\n    \"%%8451\": failure_added\n";
+    let entry = format!(
+        "{GOOD_11}      Changes:\n        to: /audit_policy/changes\n        values: c\n        split: \",\"\n"
+    );
+    let set = MappingSet::from_yaml("t.yaml", &file_11(head, &entry)).unwrap();
+    let map = |v: &str| {
+        set.map(
+            SourceKind::OsSecurity,
+            &record(1, &[("File", "a"), ("Pid", "1"), ("Changes", v)]),
+            &[],
+            &envelope(),
+        )
+        .unwrap()
+    };
+    let event = map("%%8451, %%8449,%%8449").event;
+    assert_eq!(
+        event.audit_policy.unwrap().changes.as_slice(),
+        [
+            crate::events::AuditPolicyChange::SuccessAdded,
+            crate::events::AuditPolicyChange::FailureAdded
+        ]
+    );
+    let mapped = map("%%8449, %%8452");
+    assert_eq!(mapped.dropped[0].field, "Changes");
+    assert!(mapped.event.audit_policy.is_none());
+    // `split` only with a set, and a set only with `split`.
+    let no_split = entry.replace("        split: \",\"\n", "");
+    assert!(load_error_11(head, &no_split).contains("is a set exactly when"));
+    let split_scalar = format!(
+        "{GOOD_11}      Kind:\n        to: /process/integrity_level\n        split: \",\"\n"
+    );
+    assert!(load_error_11("", &split_scalar).contains("is a set exactly when"));
+}
+
+#[test]
+fn constants_are_read_as_their_target() {
+    let entry = format!(
+        "{GOOD_11}    set:\n      /script/kind: powershell\n      /script/inline: \"true\"\n      /network/remote_port: \"443\"\n"
+    );
+    let set = MappingSet::from_yaml("t.yaml", &file_11("", &entry)).unwrap();
+    let event = set
+        .map(
+            SourceKind::OsSecurity,
+            &record(1, &[("File", "a"), ("Pid", "1")]),
+            &[],
+            &envelope(),
+        )
+        .unwrap()
+        .event;
+    assert_eq!(event.network.unwrap().remote_port, Some(443));
+    assert_eq!(
+        event.script.unwrap().kind,
+        Some(crate::events::ScriptKind::Powershell)
+    );
+    for (constant, why) in [
+        ("/script/kind: nope", "not a value"),
+        ("/network/remote_port: \"70000\"", "not a value"),
+        ("/file/path: x", "filled more than once"),
+        ("/seq: \"1\"", "not a writable"),
+        ("/script/inline: \"false\"", "not a value"),
+    ] {
+        let e = load_error_11("", &format!("{GOOD_11}    set:\n      {constant}\n"));
+        assert!(e.contains(why), "{constant}: {e}");
+    }
+}
+
+#[test]
+fn absent_values_are_left_out() {
+    let head = "absent_values: [\"-\", \"S-1-0-0\"]\n";
+    let entry = format!(
+        "{GOOD_11}      Sid: /user/sid\n      Kind:\n        to: /process/integrity_level\n"
+    );
+    let set = MappingSet::from_yaml("t.yaml", &file_11(head, &entry)).unwrap();
+    let mapped = set
+        .map(
+            SourceKind::OsSecurity,
+            &record(
+                1,
+                &[
+                    ("File", "a"),
+                    ("Pid", "1"),
+                    ("Sid", "S-1-0-0"),
+                    ("Kind", "-"),
+                ],
+            ),
+            &[],
+            &envelope(),
+        )
+        .unwrap();
+    assert!(mapped.event.user.is_none());
+    assert!(mapped.dropped.is_empty());
+    assert!(load_error_11("absent_values: [\"\"]\n", GOOD_11).contains("absent_values[0]"));
+    assert!(load_error_11("absent_values: [a, a]\n", GOOD_11).contains("absent_values[1]"));
+    let constant = format!("{GOOD_11}    set:\n      /user/name: \"-\"\n");
+    assert!(load_error_11("absent_values: [\"-\"]\n", &constant).contains("absent values"));
+}
+
+#[test]
+fn when_present_selects_on_a_value() {
+    let entries = format!(
+        "{}{}",
+        GOOD_11.replace(
+            "    canonical_type:",
+            "    when:\n      field: Path\n      present: true\n    canonical_type:"
+        ),
+        GOOD_11.replace("exec.decision", "library.decision")
+    );
+    let set =
+        MappingSet::from_yaml("t.yaml", &file_11("absent_values: [\"-\"]\n", &entries)).unwrap();
+    let ty = |path: &str| {
+        set.map(
+            SourceKind::OsSecurity,
+            &record(1, &[("File", "a"), ("Pid", "1"), ("Path", path)]),
+            &[],
+            &envelope(),
+        )
+        .unwrap()
+        .event
+        .event_type
+    };
+    assert_eq!(ty("C:\\a.ps1"), EventType::ExecDecision);
+    assert_eq!(ty(""), EventType::LibraryDecision);
+    assert_eq!(ty("-"), EventType::LibraryDecision);
+    // A later condition on the same field after `present` is unreachable.
+    let shadowed = format!(
+        "{}{}",
+        GOOD_11.replace(
+            "    canonical_type:",
+            "    when:\n      field: Path\n      present: true\n    canonical_type:"
+        ),
+        GOOD_11.replace(
+            "    canonical_type:",
+            "    when:\n      field: Path\n      equals: [x]\n    canonical_type:"
+        )
+    );
+    assert!(load_error_11("", &shadowed).contains("every value of `Path`"));
+}
+
+#[test]
+fn first_signer_targets_fill_one_signer() {
+    let entry = format!(
+        "{GOOD_11}      Pub: /file/signers/0/publisher\n      Iss: /file/signers/0/issuer\n"
+    );
+    let set = MappingSet::from_yaml("t.yaml", &file_11("", &entry)).unwrap();
+    let event = set
+        .map(
+            SourceKind::OsSecurity,
+            &record(
+                1,
+                &[("File", "a"), ("Pid", "1"), ("Pub", "P"), ("Iss", "I")],
+            ),
+            &[],
+            &envelope(),
+        )
+        .unwrap()
+        .event;
+    let signers = event.file.unwrap().signers;
+    assert_eq!(signers.len(), 1);
+    assert_eq!(signers.as_slice()[0].issuer.as_ref().unwrap().as_str(), "I");
+    // Not together with signature records.
+    let both = format!(
+        "{entry}    signatures:\n      source_event_id: 2\n      count_field: C\n      index_field: I\n      field_map:\n        P: publisher\n"
+    );
+    assert!(load_error_11("", &both).contains("cannot also fill `/file/signers`"));
+}
+
+#[test]
+fn third_party_events_carry_their_format() {
+    let text = file_11("", GOOD_11).replace("os_security", "third_party:legacy_csv");
+    let mut set = MappingSet::from_yaml("t.yaml", &text).unwrap();
+    let event = set
+        .map(
+            SourceKind::ThirdParty,
+            &record(1, &[("File", "a"), ("Pid", "1")]),
+            &[],
+            &envelope(),
+        )
+        .unwrap()
+        .event;
+    let source = event.source.unwrap();
+    assert_eq!(source.kind, SourceKind::ThirdParty);
+    assert_eq!(source.format.unwrap().as_str(), "legacy_csv");
+    // One format per set.
+    let other = file_11(
+        "",
+        &GOOD_11.replace("source_event_id: 1", "source_event_id: 2"),
+    )
+    .replace("os_security", "third_party:other");
+    assert!(
+        set.add_yaml("u.yaml", &other)
+            .unwrap_err()
+            .to_string()
+            .contains("already translates")
+    );
 }
 
 #[test]

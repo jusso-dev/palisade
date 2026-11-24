@@ -350,6 +350,7 @@ fn script() -> BoxedStrategy<Script> {
                 language_mode: lm,
                 amsi_content_sha256: amsi.map(Hex::from_bytes),
                 script_block_id: block,
+                text: None,
             },
         )
         .boxed()
@@ -541,24 +542,634 @@ fn host() -> BoxedStrategy<Host> {
 
 fn source() -> BoxedStrategy<Source> {
     (
-        select(vec![
-            SourceKind::OsCodeIntegrity,
-            SourceKind::OsLegacyRuleCollection,
-            SourceKind::OsSecurity,
-            SourceKind::OsPowershell,
-        ]),
+        select(SourceKind::ALL.to_vec()),
         of(any::<u32>()),
         of(any::<u64>()),
         of(name()),
         of(guid()),
+        token(),
+        of(name()),
     )
-        .prop_map(|(kind, event_id, record_id, channel, activity_id)| Source {
-            kind,
-            event_id,
-            record_id,
-            channel,
-            activity_id,
+        .prop_map(
+            |(kind, event_id, record_id, channel, activity_id, format, rule_name)| Source {
+                kind,
+                event_id,
+                record_id,
+                channel,
+                activity_id,
+                format: (kind == SourceKind::ThirdParty).then_some(format),
+                rule_name,
+            },
+        )
+        .boxed()
+}
+
+// ---------------------------------------------------------------- 1.1 sets
+
+fn dns_name() -> impl Strategy<Value = DnsName> {
+    "[a-z0-9_]([a-z0-9-]{0,8}[a-z0-9])?(\\.[a-z0-9]([a-z0-9_-]{0,8}[a-z0-9_])?){0,3}"
+        .prop_map(|s| s.parse().unwrap())
+}
+
+fn registry_key() -> impl Strategy<Value = RegistryKey> {
+    (
+        select(vec![
+            "HKEY_LOCAL_MACHINE",
+            "HKEY_USERS",
+            "HKEY_CURRENT_USER",
+            "HKEY_CLASSES_ROOT",
+            "HKEY_CURRENT_CONFIG",
+        ]),
+        vec("[ -\\[\\]-~\u{e9}]{1,12}", 0..4),
+    )
+        .prop_map(|(root, parts)| {
+            let mut key = root.to_owned();
+            for p in parts {
+                key.push('\\');
+                key.push_str(&p);
+            }
+            key.parse().unwrap()
         })
+}
+
+fn json_pointer() -> impl Strategy<Value = JsonPointer> {
+    vec("([a-z0-9 ]|~0|~1){0,6}", 1..4).prop_map(|parts| {
+        let text: String = parts.iter().map(|p| format!("/{p}")).collect();
+        text.parse().unwrap()
+    })
+}
+
+pub fn json_value() -> BoxedStrategy<JsonValue> {
+    let leaf = prop_oneof![
+        any::<bool>().prop_map(JsonValue::Bool),
+        any::<i64>().prop_map(JsonValue::Int),
+        any::<u64>().prop_map(JsonValue::from_u64),
+        "[ -~\u{e9}]{0,12}".prop_map(JsonValue::String),
+    ];
+    leaf.prop_recursive(3, 24, 4, |inner| {
+        prop_oneof![
+            vec(inner.clone(), 0..4).prop_map(JsonValue::Array),
+            proptest::collection::btree_map("[a-z~/ ]{0,6}", inner, 0..4)
+                .prop_map(JsonValue::Object),
+        ]
+    })
+    .boxed()
+}
+
+fn principal() -> BoxedStrategy<Principal> {
+    (
+        select(vec![
+            PrincipalKind::User,
+            PrincipalKind::ApiClient,
+            PrincipalKind::ServiceAccount,
+            PrincipalKind::Scim,
+            PrincipalKind::SystemJob,
+            PrincipalKind::InstanceOperator,
+            PrincipalKind::Agent,
+        ]),
+        of(name()),
+        of(name()),
+        of(name()),
+        of(sid()),
+    )
+        .prop_map(|(kind, id, name, upn, sid)| Principal {
+            kind,
+            id,
+            name,
+            upn,
+            sid,
+        })
+        .boxed()
+}
+
+fn account() -> BoxedStrategy<Account> {
+    (of(sid()), of(name()), of(name()), of(long()))
+        .prop_map(|(sid, name, domain, dn)| Account {
+            sid,
+            name,
+            domain,
+            distinguished_name: dn,
+        })
+        .boxed()
+}
+
+fn network() -> BoxedStrategy<Network> {
+    (
+        (
+            of(select(vec![
+                Direction::Inbound,
+                Direction::Outbound,
+                Direction::Local,
+            ])),
+            of(any::<u8>()),
+            of(ip()),
+            of(any::<u16>()),
+            of(ip()),
+            of(any::<u16>()),
+        ),
+        (
+            of(dns_name()),
+            of(select(vec![
+                ResolutionMethod::Dns,
+                ResolutionMethod::DnsCache,
+                ResolutionMethod::HostsFile,
+                ResolutionMethod::LocalName,
+                ResolutionMethod::TlsSni,
+                ResolutionMethod::HttpHost,
+                ResolutionMethod::ReverseDns,
+                ResolutionMethod::Requested,
+            ])),
+            of(long()),
+            of(long()),
+        ),
+    )
+        .prop_map(|((d, p, li, lp, ri, rp), (host, res, url, unc))| Network {
+            direction: d,
+            protocol: p,
+            local_ip: li,
+            local_port: lp,
+            remote_ip: ri,
+            remote_port: rp,
+            resolution: host.as_ref().and(res),
+            remote_hostname: host,
+            url,
+            unc,
+        })
+        .boxed()
+}
+
+fn device() -> BoxedStrategy<Device> {
+    (
+        of(select(vec![
+            DeviceInterface::Usb,
+            DeviceInterface::Thunderbolt,
+            DeviceInterface::Firewire,
+            DeviceInterface::Bluetooth,
+            DeviceInterface::SdCard,
+            DeviceInterface::Sata,
+            DeviceInterface::Nvme,
+            DeviceInterface::Serial,
+            DeviceInterface::Other,
+        ])),
+        of(select(vec![
+            DeviceClass::Storage,
+            DeviceClass::Hid,
+            DeviceClass::Network,
+            DeviceClass::Imaging,
+            DeviceClass::Media,
+            DeviceClass::Printer,
+            DeviceClass::SmartCard,
+            DeviceClass::Portable,
+            DeviceClass::Optical,
+            DeviceClass::Other,
+        ])),
+        of(any::<u16>()),
+        of(any::<u16>()),
+        of(name()),
+        of(name()),
+        of(name()),
+        of(select(vec![
+            EncryptionState::Encrypted,
+            EncryptionState::Unencrypted,
+            EncryptionState::Suspended,
+            EncryptionState::InProgress,
+        ])),
+    )
+        .prop_map(|(i, c, v, p, s, f, id, e)| Device {
+            interface: i,
+            class: c,
+            vendor_id: v,
+            product_id: p,
+            serial: s,
+            friendly_name: f,
+            instance_id: id,
+            encryption: e,
+        })
+        .boxed()
+}
+
+fn registry_data() -> BoxedStrategy<RegistryData> {
+    (
+        of(select(vec![
+            RegistryValueType::None,
+            RegistryValueType::String,
+            RegistryValueType::ExpandString,
+            RegistryValueType::Binary,
+            RegistryValueType::Dword,
+            RegistryValueType::DwordBigEndian,
+            RegistryValueType::Link,
+            RegistryValueType::MultiString,
+            RegistryValueType::ResourceList,
+            RegistryValueType::FullResourceDescriptor,
+            RegistryValueType::ResourceRequirementsList,
+            RegistryValueType::Qword,
+        ])),
+        of(any::<u32>()),
+        of(bytes::<32>()),
+        of(text::<1024>()),
+        any::<bool>(),
+    )
+        .prop_map(|(t, size, hash, preview, truncated)| RegistryData {
+            value_type: t,
+            size,
+            sha256: hash.map(Hex::from_bytes),
+            truncated: truncated && preview.is_some(),
+            preview,
+        })
+        .boxed()
+}
+
+fn registry() -> BoxedStrategy<Registry> {
+    (
+        of(registry_key()),
+        prop_oneof![
+            Just((None, false)),
+            Just((None, true)),
+            text::<16_383>().prop_map(|n| (Some(n), false)),
+        ],
+        of(select(vec![
+            RegistryOperation::CreateKey,
+            RegistryOperation::DeleteKey,
+            RegistryOperation::SetValue,
+            RegistryOperation::DeleteValue,
+            RegistryOperation::ReadKey,
+            RegistryOperation::ReadValue,
+        ])),
+        of(registry_data()),
+        of(registry_data()),
+    )
+        .prop_map(
+            |(key, (value_name, default_value), op, old, new)| Registry {
+                key,
+                value_name,
+                default_value,
+                operation: op,
+                old,
+                new,
+            },
+        )
+        .boxed()
+}
+
+fn elevation() -> BoxedStrategy<Elevation> {
+    (
+        of(select(vec![
+            ElevationMethod::Jit,
+            ElevationMethod::OnDemand,
+            ElevationMethod::Auto,
+            ElevationMethod::ChallengeResponse,
+            ElevationMethod::UacReplacement,
+        ])),
+        of(name()),
+        of(text::<1024>()),
+        of(principal()),
+        of(uuid7()),
+        of(any::<u64>()),
+    )
+        .prop_map(|(m, tp, j, a, r, d)| Elevation {
+            method: m,
+            token_profile: tp,
+            justification: j,
+            approver: a,
+            request_id: r,
+            duration_seconds: d,
+        })
+        .boxed()
+}
+
+fn approval() -> BoxedStrategy<Approval> {
+    (
+        (
+            of(uuid7()),
+            of(select(vec![
+                ApprovalKind::Execute,
+                ApprovalKind::Install,
+                ApprovalKind::Elevate,
+                ApprovalKind::Device,
+                ApprovalKind::Network,
+                ApprovalKind::Exception,
+                ApprovalKind::Override,
+            ])),
+            of(select(vec![
+                ApprovalScope::Once,
+                ApprovalScope::UserOnDevice,
+                ApprovalScope::Device,
+                ApprovalScope::User,
+                ApprovalScope::DeviceGroup,
+                ApprovalScope::Tenant,
+            ])),
+            of(any::<u64>()),
+            of(select(vec![
+                ApprovalDecision::Pending,
+                ApprovalDecision::Approved,
+                ApprovalDecision::Denied,
+                ApprovalDecision::Expired,
+                ApprovalDecision::Cancelled,
+            ])),
+        ),
+        (
+            of(principal()),
+            of(select(vec![
+                ApprovalChannel::Console,
+                ApprovalChannel::Email,
+                ApprovalChannel::Chat,
+                ApprovalChannel::Itsm,
+                ApprovalChannel::Mobile,
+                ApprovalChannel::OfflineCode,
+            ])),
+            of(text::<1024>()),
+            of(name()),
+        ),
+    )
+        .prop_map(
+            |((id, kind, scope, dur, dec), (by, ch, reason, ticket))| Approval {
+                request_id: id,
+                kind,
+                requested_scope: scope,
+                duration_seconds: dur,
+                decision: dec,
+                decided_by: by,
+                channel: ch,
+                reason,
+                ticket_ref: ticket,
+            },
+        )
+        .boxed()
+}
+
+fn change() -> BoxedStrategy<Change> {
+    (
+        select(vec![ChangeOp::Add, ChangeOp::Remove, ChangeOp::Replace]),
+        json_pointer(),
+        json_value(),
+        json_value(),
+    )
+        .prop_map(|(op, path, a, b)| Change {
+            op,
+            path,
+            old: (op != ChangeOp::Add).then_some(a),
+            new: (op != ChangeOp::Remove).then_some(b),
+        })
+        .boxed()
+}
+
+fn admin() -> BoxedStrategy<Admin> {
+    (
+        (
+            of(principal()),
+            of(select(vec![
+                AdminChannel::Console,
+                AdminChannel::Api,
+                AdminChannel::Cli,
+                AdminChannel::Scim,
+                AdminChannel::WebhookCallback,
+                AdminChannel::EmailLink,
+                AdminChannel::Chat,
+                AdminChannel::Itsm,
+                AdminChannel::Job,
+                AdminChannel::Agent,
+            ])),
+            of(ip()),
+            of(text::<1024>()),
+            of(token()),
+            of(name()),
+            of(name()),
+        ),
+        (
+            of(json_value()),
+            of(json_value()),
+            vec(change(), 0..3),
+            of(text::<1024>()),
+            of(name()),
+            of(uuid7()),
+        ),
+    )
+        .prop_map(
+            |(
+                (actor, ch, ip, ua, ot, oid, oname),
+                (before, after, changes, reason, ticket, corr),
+            )| {
+                Admin {
+                    actor,
+                    channel: ch,
+                    source_ip: ip,
+                    user_agent: ua,
+                    object_type: ot,
+                    object_id: oid,
+                    object_name: oname,
+                    before,
+                    after,
+                    changes: BoundedVec::new(changes).unwrap(),
+                    reason,
+                    ticket_ref: ticket,
+                    correlation_id: corr,
+                }
+            },
+        )
+        .boxed()
+}
+
+fn identity() -> BoxedStrategy<Identity> {
+    (
+        of(name()),
+        of(name()),
+        of(name()),
+        of(any::<u32>()),
+        of(any::<u32>()),
+        of(account()),
+        of(select(vec![
+            GroupScope::Local,
+            GroupScope::Global,
+            GroupScope::Universal,
+        ])),
+        of(account()),
+    )
+        .prop_map(|(ap, lp, ws, st, sst, group, scope, member)| Identity {
+            authentication_package: ap,
+            logon_process: lp,
+            workstation: ws,
+            status_code: st,
+            sub_status_code: sst,
+            group,
+            group_scope: scope,
+            member,
+        })
+        .boxed()
+}
+
+fn audit_policy() -> BoxedStrategy<AuditPolicy> {
+    (
+        of(select(vec![
+            AuditCategory::System,
+            AuditCategory::LogonLogoff,
+            AuditCategory::ObjectAccess,
+            AuditCategory::PrivilegeUse,
+            AuditCategory::DetailedTracking,
+            AuditCategory::PolicyChange,
+            AuditCategory::AccountManagement,
+            AuditCategory::DirectoryServiceAccess,
+            AuditCategory::AccountLogon,
+        ])),
+        of(guid()),
+        vec(
+            select(vec![
+                AuditPolicyChange::SuccessAdded,
+                AuditPolicyChange::SuccessRemoved,
+                AuditPolicyChange::FailureAdded,
+                AuditPolicyChange::FailureRemoved,
+            ]),
+            0..6,
+        ),
+    )
+        .prop_map(|(category, guid, changes)| AuditPolicy {
+            category,
+            subcategory_guid: guid,
+            changes: SortedSet::new(changes).unwrap(),
+        })
+        .boxed()
+}
+
+fn restriction() -> BoxedStrategy<Restriction> {
+    (
+        of(select(vec![
+            LanguageMode::FullLanguage,
+            LanguageMode::ConstrainedLanguage,
+            LanguageMode::RestrictedLanguage,
+            LanguageMode::NoLanguage,
+        ])),
+        of(name()),
+        of(long()),
+        of(name()),
+    )
+        .prop_map(|(lm, title, message, id)| Restriction {
+            language_mode: lm,
+            title,
+            message,
+            error_id: id,
+        })
+        .boxed()
+}
+
+fn probe() -> BoxedStrategy<Probe> {
+    (
+        of(token()),
+        of(name()),
+        of(name()),
+        of(select(vec![
+            ProbeStatus::Pass,
+            ProbeStatus::Fail,
+            ProbeStatus::Error,
+            ProbeStatus::NotApplicable,
+        ])),
+        of(json_value()),
+        of(json_value()),
+        of(text::<1024>()),
+    )
+        .prop_map(
+            |(id, name, control, status, expected, observed, detail)| Probe {
+                id,
+                name,
+                control,
+                status,
+                expected,
+                observed,
+                detail,
+            },
+        )
+        .boxed()
+}
+
+fn fim() -> BoxedStrategy<Fim> {
+    (
+        of(select(vec![
+            FimChange::Created,
+            FimChange::Modified,
+            FimChange::Deleted,
+            FimChange::Renamed,
+            FimChange::PermissionsChanged,
+            FimChange::AttributesChanged,
+        ])),
+        of(long()),
+        of(bytes::<32>()),
+        of(any::<u64>()),
+        of(name()),
+    )
+        .prop_map(|(change, old_path, hash, size, watch)| Fim {
+            change,
+            old_path,
+            old_sha256: hash.map(Hex::from_bytes),
+            old_size: size,
+            watch,
+        })
+        .boxed()
+}
+
+/// The 1.1 field sets, each present or not.
+#[derive(Clone, Debug)]
+struct Sets11 {
+    network: Option<Network>,
+    device: Option<Device>,
+    registry: Option<Registry>,
+    elevation: Option<Elevation>,
+    approval: Option<Approval>,
+    admin: Option<Admin>,
+    identity: Option<Identity>,
+    audit_policy: Option<AuditPolicy>,
+    restriction: Option<Restriction>,
+    probe: Option<Probe>,
+    fim: Option<Fim>,
+}
+
+/// Each 1.1 field set present with probability `1/weight`, so most events
+/// stay small.
+fn sets_11(always: bool) -> BoxedStrategy<Sets11> {
+    fn maybe<T: std::fmt::Debug + Clone + 'static>(
+        s: BoxedStrategy<T>,
+        always: bool,
+    ) -> BoxedStrategy<Option<T>> {
+        if always {
+            s.prop_map(Some).boxed()
+        } else {
+            proptest::option::weighted(0.2, s).boxed()
+        }
+    }
+    (
+        (
+            maybe(network(), always),
+            maybe(device(), always),
+            maybe(registry(), always),
+            maybe(elevation(), always),
+            maybe(approval(), always),
+            maybe(admin(), always),
+        ),
+        (
+            maybe(identity(), always),
+            maybe(audit_policy(), always),
+            maybe(restriction(), always),
+            maybe(probe(), always),
+            maybe(fim(), always),
+        ),
+    )
+        .prop_map(
+            |(
+                (network, device, registry, elevation, approval, admin),
+                (identity, audit_policy, restriction, probe, fim),
+            )| {
+                Sets11 {
+                    network,
+                    device,
+                    registry,
+                    elevation,
+                    approval,
+                    admin,
+                    identity,
+                    audit_policy,
+                    restriction,
+                    probe,
+                    fim,
+                }
+            },
+        )
         .boxed()
 }
 
@@ -621,6 +1232,7 @@ pub fn event() -> BoxedStrategy<Event> {
             native(),
             agent(),
         ),
+        (sets_11(false), sets_11(true), of(long()), any::<bool>()),
     )
         .prop_map(
             |(
@@ -629,6 +1241,7 @@ pub fn event() -> BoxedStrategy<Event> {
                 (seq, prev, labels, source),
                 (user, policy, process, file, script, native, agent),
                 (u2, p2, pr2, f2, s2, n2, a2),
+                (sets, full, script_text, label_oldest),
             )| {
                 let mut event = Event {
                     schema_version: CURRENT,
@@ -657,7 +1270,21 @@ pub fn event() -> BoxedStrategy<Event> {
                     script,
                     native,
                     agent,
+                    network: sets.network,
+                    device: sets.device,
+                    registry: sets.registry,
+                    elevation: sets.elevation,
+                    approval: sets.approval,
+                    admin: sets.admin,
+                    identity: sets.identity,
+                    audit_policy: sets.audit_policy,
+                    restriction: sets.restriction,
+                    probe: sets.probe,
+                    fim: sets.fim,
                 };
+                if let Some(s) = event.script.as_mut() {
+                    s.text = script_text;
+                }
                 // Fill every field set the type requires.
                 for &set in event_type.required() {
                     match set {
@@ -682,7 +1309,51 @@ pub fn event() -> BoxedStrategy<Event> {
                         FieldSet::Agent => {
                             event.agent.get_or_insert(a2.clone());
                         }
+                        FieldSet::Network => {
+                            event.network.get_or_insert(full.network.clone().unwrap());
+                        }
+                        FieldSet::Device => {
+                            event.device.get_or_insert(full.device.clone().unwrap());
+                        }
+                        FieldSet::Registry => {
+                            event.registry.get_or_insert(full.registry.clone().unwrap());
+                        }
+                        FieldSet::Elevation => {
+                            event
+                                .elevation
+                                .get_or_insert(full.elevation.clone().unwrap());
+                        }
+                        FieldSet::Approval => {
+                            event.approval.get_or_insert(full.approval.clone().unwrap());
+                        }
+                        FieldSet::Admin => {
+                            event.admin.get_or_insert(full.admin.clone().unwrap());
+                        }
+                        FieldSet::Identity => {
+                            event.identity.get_or_insert(full.identity.clone().unwrap());
+                        }
+                        FieldSet::AuditPolicy => {
+                            event
+                                .audit_policy
+                                .get_or_insert(full.audit_policy.clone().unwrap());
+                        }
+                        FieldSet::Restriction => {
+                            event
+                                .restriction
+                                .get_or_insert(full.restriction.clone().unwrap());
+                        }
+                        FieldSet::Probe => {
+                            event.probe.get_or_insert(full.probe.clone().unwrap());
+                        }
+                        FieldSet::Fim => {
+                            event.fim.get_or_insert(full.fim.clone().unwrap());
+                        }
                     }
+                }
+                // Label an event with the oldest version it fits, sometimes,
+                // so 1.0 events are generated too.
+                if label_oldest {
+                    event.schema_version = event.min_version();
                 }
                 event
             },

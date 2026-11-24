@@ -1,0 +1,18 @@
+{
+  "source": "os_powershell",
+  "record": {
+    "event_id": 4104,
+    "time_created": "2026-11-24T03:15:22.1234567Z",
+    "record_id": 1000,
+    "channel": "PowerShell/Operational",
+    "fields": {
+      "MessageNumber": "1",
+      "MessageTotal": "1",
+      "ScriptBlockText": "Write-Output 'hello'",
+      "ScriptBlockId": "{1B2C3D4E-5F60-4718-9A2B-3C4D5E6F7A8B}",
+      "Path": "",
+      "System.UserID": "S-1-5-21-1111111111-2222222222-3333333333-1001",
+      "System.ProcessID": "6012"
+    }
+  }
+}

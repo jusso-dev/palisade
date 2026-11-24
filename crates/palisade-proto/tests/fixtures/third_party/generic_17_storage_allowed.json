@@ -1,0 +1,17 @@
+{
+  "source": "third_party",
+  "record": {
+    "event_id": 17,
+    "time_created": "2026-11-24T03:15:22Z",
+    "record_id": 5017,
+    "fields": {
+      "event_kind": "17",
+      "user_name": "alice",
+      "device_name": "Example USB Drive",
+      "device_serial": "0123456789AB",
+      "vendor_id": "0x0781",
+      "product_id": "21863",
+      "rule_name": "Approved drives"
+    }
+  }
+}

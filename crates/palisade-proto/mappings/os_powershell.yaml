@@ -1,0 +1,68 @@
+# PowerShell logs -> canonical events (#196).
+#
+# Field names are those of the PowerShell providers' event templates. The
+# decoder (#58, #207) flattens each record's event data into fields and adds
+# the record's system user and process as `System.UserID` and
+# `System.ProcessID`.
+#
+# Mapped:
+#   4104   script block logging (ISM-1623), from the PowerShell operational
+#          channel and the PowerShell 7 operational channel. A block that the
+#          interpreter splits across several records (`MessageNumber` of
+#          `MessageTotal`) is reassembled by the collector (#207) before it
+#          is mapped; this file maps one complete block. A block read from a
+#          file has a `Path`; a block typed or passed on the command line has
+#          none and is recorded as inline.
+#   16387  the constrained-language audit event of PowerShell 7.4 and later
+#          (analytic channel): what the interpreter would restrict if the
+#          OS application control policy were enforced. The template has no
+#          script path of its own: the position is part of `Message`.
+#
+# Not mapped here: 4103 (module logging), 40961, 40962 and 53504 (console
+# and remoting start-up), which belong to the collector work in #207.
+schema_version: 1.1.0
+source: os_powershell
+entries:
+  - source_event_id: 4104
+    when:
+      field: Path
+      present: true
+    canonical_type: script.block_logged
+    action: execute
+    outcome: info
+    description: "PowerShell logged a script block from a file."
+    set:
+      /script/kind: powershell
+    field_map:
+      Path: /script/path
+      ScriptBlockId: /script/script_block_id
+      ScriptBlockText: /script/text
+      System.UserID: /user/sid
+      System.ProcessID: /process/pid
+  - source_event_id: 4104
+    canonical_type: script.block_logged
+    action: execute
+    outcome: info
+    description: "PowerShell logged an inline script block."
+    set:
+      /script/kind: powershell
+      /script/inline: "true"
+    field_map:
+      ScriptBlockId: /script/script_block_id
+      ScriptBlockText: /script/text
+      System.UserID: /user/sid
+      System.ProcessID: /process/pid
+  - source_event_id: 16387
+    canonical_type: script.language_audit
+    action: execute
+    outcome: audited
+    mode: audit
+    description: "PowerShell would restrict a script in constrained language mode."
+    set:
+      /restriction/language_mode: constrained_language
+    field_map:
+      Title: /restriction/title
+      Message: /restriction/message
+      FullyQualifiedId: /restriction/error_id
+      System.UserID: /user/sid
+      System.ProcessID: /process/pid

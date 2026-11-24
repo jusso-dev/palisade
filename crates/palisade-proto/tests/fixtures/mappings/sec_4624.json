@@ -1,0 +1,36 @@
+{
+  "source": "os_security",
+  "record": {
+    "event_id": 4624,
+    "time_created": "2026-11-24T03:15:22.1234567Z",
+    "record_id": 1000,
+    "channel": "Security",
+    "fields": {
+      "SubjectUserSid": "S-1-5-18",
+      "SubjectUserName": "WS-0001$",
+      "SubjectDomainName": "EXAMPLE",
+      "SubjectLogonId": "0x3e7",
+      "TargetUserSid": "S-1-5-21-1111111111-2222222222-3333333333-1001",
+      "TargetUserName": "alice",
+      "TargetDomainName": "EXAMPLE",
+      "TargetLogonId": "0x8dcdc",
+      "LogonType": "10",
+      "LogonProcessName": "User32",
+      "AuthenticationPackageName": "Negotiate",
+      "WorkstationName": "WS-0002",
+      "LogonGuid": "{00000000-0000-0000-0000-000000000000}",
+      "TransmittedServices": "-",
+      "LmPackageName": "-",
+      "KeyLength": "0",
+      "ProcessId": "0x44c",
+      "ProcessName": "C:\\Windows\\System32\\svchost.exe",
+      "IpAddress": "192.0.2.15",
+      "IpPort": "50123",
+      "ImpersonationLevel": "%%1833",
+      "RestrictedAdminMode": "%%1843",
+      "VirtualAccount": "%%1843",
+      "TargetLinkedLogonId": "0x0",
+      "ElevatedToken": "%%1842"
+    }
+  }
+}

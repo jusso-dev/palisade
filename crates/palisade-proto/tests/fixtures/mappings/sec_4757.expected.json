@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.1.0",
+  "event_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+  "event_type": "identity.group.changed",
+  "category": "identity",
+  "action": "remove_member",
+  "outcome": "info",
+  "severity": 6,
+  "description": "A member was removed from a universal security group.",
+  "ts": "2026-11-24T03:15:22.123456Z",
+  "ts_agent_monotonic": 123456789,
+  "clock_synced": true,
+  "clock_skew_ms": -3,
+  "tenant_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e61",
+  "host": {
+    "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60",
+    "name": "WS-0001",
+    "os": "Windows 11 Enterprise",
+    "os_build": "26100.2314",
+    "arch": "x86_64",
+    "agent_version": "0.1.0"
+  },
+  "user": {
+    "sid": "S-1-5-21-1111111111-2222222222-3333333333-1001",
+    "name": "alice",
+    "domain": "EXAMPLE",
+    "logon_id": 369649
+  },
+  "seq": 41,
+  "prev_hash": "5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e",
+  "source": {
+    "kind": "os_security",
+    "event_id": 4757,
+    "record_id": 1000,
+    "channel": "Security"
+  },
+  "identity": {
+    "group": {
+      "sid": "S-1-5-21-1111111111-2222222222-3333333333-3102",
+      "name": "Server Admins",
+      "domain": "EXAMPLE"
+    },
+    "group_scope": "universal",
+    "member": {
+      "sid": "S-1-5-21-1111111111-2222222222-3333333333-1002"
+    }
+  }
+}

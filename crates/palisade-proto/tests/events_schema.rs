@@ -155,3 +155,249 @@ fn schema_and_validate_agree_on_cross_field_rules() {
         assert_eq!(check(&value), (false, false), "{name}");
     }
 }
+
+fn base_11() -> serde_json::Value {
+    let mut v = base();
+    v["schema_version"] = "1.1.0".into();
+    v
+}
+
+/// The 1.1 rules, checked by both sides: version labels, the third-party
+/// source format, and the rules inside the new field sets.
+#[test]
+fn schema_and_validate_agree_on_the_1_1_rules() {
+    let (schemas, index) = compiled();
+    let check = |value: &serde_json::Value| {
+        let by_schema = schemas.validate(value, index).is_ok();
+        let by_rust = serde_json::from_value::<Event>(value.clone())
+            .map(|e| e.validate().is_ok())
+            .unwrap_or(false);
+        (by_schema, by_rust)
+    };
+    let with = |label: &str, key: &str, val: serde_json::Value| {
+        let mut v = base_11();
+        v["schema_version"] = label.into();
+        v[key] = val;
+        v
+    };
+    let mut good = Vec::new();
+    let mut bad = Vec::new();
+    // A 1.0 event is valid under either label.
+    good.push(("1.0 event, 1.0 label", base()));
+    good.push(("1.0 event, 1.1 label", base_11()));
+    // Each 1.1 part needs a 1.1 label.
+    for (key, val) in [
+        ("network", serde_json::json!({ "remote_port": 1 })),
+        ("device", serde_json::json!({})),
+        ("registry", serde_json::json!({})),
+        ("elevation", serde_json::json!({})),
+        ("approval", serde_json::json!({})),
+        ("admin", serde_json::json!({})),
+        ("identity", serde_json::json!({})),
+        ("audit_policy", serde_json::json!({})),
+        ("restriction", serde_json::json!({})),
+        ("probe", serde_json::json!({})),
+        ("fim", serde_json::json!({})),
+        (
+            "source",
+            serde_json::json!({ "kind": "third_party", "format": "generic" }),
+        ),
+        (
+            "source",
+            serde_json::json!({ "kind": "os_security", "rule_name": "R" }),
+        ),
+        ("script", serde_json::json!({ "inline": true, "text": "x" })),
+    ] {
+        good.push((key, with("1.1.0", key, val.clone())));
+        good.push((key, with("1.1.3", key, val.clone())));
+        bad.push((key, with("1.0.0", key, val.clone())));
+        bad.push((key, with("1.0.9", key, val)));
+    }
+    let mut v = with("1.0.0", "process", serde_json::json!({}));
+    v["event_type"] = "process.created".into();
+    v.as_object_mut().unwrap().remove("file");
+    bad.push(("1.1 type with 1.0 label", v.clone()));
+    v["schema_version"] = "1.1.0".into();
+    good.push(("1.1 type with 1.1 label", v));
+    // Rules inside the 1.1 sets.
+    for (name, key, val) in [
+        (
+            "third_party without format",
+            "source",
+            serde_json::json!({ "kind": "third_party" }),
+        ),
+        (
+            "format on another kind",
+            "source",
+            serde_json::json!({ "kind": "os_security", "format": "generic" }),
+        ),
+        (
+            "resolution without hostname",
+            "network",
+            serde_json::json!({ "resolution": "dns" }),
+        ),
+        (
+            "value name and default",
+            "registry",
+            serde_json::json!({ "value_name": "a", "default_value": true }),
+        ),
+        (
+            "default_value false",
+            "registry",
+            serde_json::json!({ "default_value": false }),
+        ),
+        (
+            "truncated without preview",
+            "registry",
+            serde_json::json!({ "new": { "truncated": true } }),
+        ),
+        (
+            "add with old",
+            "admin",
+            serde_json::json!({ "changes": [{ "op": "add", "path": "/a", "old": 1, "new": 1 }] }),
+        ),
+        (
+            "replace without new",
+            "admin",
+            serde_json::json!({ "changes": [{ "op": "replace", "path": "/a", "old": 1 }] }),
+        ),
+        (
+            "null in a JSON value",
+            "admin",
+            serde_json::json!({ "before": { "a": null } }),
+        ),
+        (
+            "float in a JSON value",
+            "admin",
+            serde_json::json!({ "before": 1.5 }),
+        ),
+        (
+            "bad pointer",
+            "admin",
+            serde_json::json!({ "changes": [{ "op": "add", "path": "a", "new": 1 }] }),
+        ),
+        (
+            "short root name",
+            "registry",
+            serde_json::json!({ "key": "HKLM\\SOFTWARE" }),
+        ),
+        (
+            "uppercase host",
+            "network",
+            serde_json::json!({ "remote_hostname": "A.example" }),
+        ),
+        (
+            "port out of range",
+            "network",
+            serde_json::json!({ "remote_port": 65536 }),
+        ),
+        (
+            "repeated set member",
+            "audit_policy",
+            serde_json::json!({ "changes": ["success_added", "success_added"] }),
+        ),
+    ] {
+        bad.push((name, with("1.1.0", key, val)));
+    }
+    for (name, key, val) in [
+        (
+            "hostname and resolution",
+            "network",
+            serde_json::json!({ "remote_hostname": "a.example", "resolution": "dns" }),
+        ),
+        (
+            "default value",
+            "registry",
+            serde_json::json!({ "key": "HKEY_USERS\\S-1-5-18", "default_value": true }),
+        ),
+        (
+            "truncated with preview",
+            "registry",
+            serde_json::json!({ "old": { "preview": "x", "truncated": true } }),
+        ),
+        (
+            "well-formed changes",
+            "admin",
+            serde_json::json!({ "changes": [
+            { "op": "add", "path": "/a", "new": [1, "x"] },
+            { "op": "remove", "path": "/b~1c", "old": { "k": true } },
+            { "op": "replace", "path": "/d", "old": 1, "new": 18446744073709551615u64 }
+        ] }),
+        ),
+        (
+            "set in order",
+            "audit_policy",
+            serde_json::json!({ "changes": ["success_added", "failure_removed"] }),
+        ),
+    ] {
+        good.push((name, with("1.1.0", key, val)));
+    }
+    for (name, value) in good {
+        assert_eq!(check(&value), (true, true), "{name}: {value}");
+    }
+    for (name, value) in bad {
+        assert_eq!(check(&value), (false, false), "{name}: {value}");
+    }
+}
+
+/// The schema's own `since` table covers every property that the 1.0
+/// schema did not have, so a new field cannot slip in unversioned.
+#[test]
+fn every_new_schema_path_has_a_version() {
+    let schema = schema::generate();
+    let defs = schema["$defs"].as_object().unwrap();
+    let mut paths = Vec::new();
+    collect_paths(&schema, defs, "", &mut paths, 0);
+    let v1_0: std::collections::BTreeSet<&str> = V1_0_PATHS
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    for path in &paths {
+        if v1_0.contains(path.as_str()) {
+            continue;
+        }
+        assert!(
+            palisade_proto::events::pointer_since(path) > palisade_proto::events::V1_0,
+            "{path} is not in the 1.0 schema and has no `since` in `ADDED`"
+        );
+    }
+    // And every 1.0 path is still there.
+    for path in &v1_0 {
+        assert!(paths.iter().any(|p| p == path), "1.0 field {path} is gone");
+    }
+}
+
+fn collect_paths(
+    node: &serde_json::Value,
+    defs: &serde_json::Map<String, serde_json::Value>,
+    at: &str,
+    out: &mut Vec<String>,
+    depth: usize,
+) {
+    if depth > 12 {
+        return;
+    }
+    let mut node = node;
+    while let Some(r) = node.get("$ref").and_then(|r| r.as_str()) {
+        let name = r.trim_start_matches("#/$defs/");
+        if name == "JsonValue" {
+            return;
+        }
+        node = &defs[name];
+    }
+    if let Some(items) = node.get("items") {
+        collect_paths(items, defs, at, out, depth + 1);
+    }
+    if let Some(props) = node.get("properties").and_then(|p| p.as_object()) {
+        for (key, child) in props {
+            let path = format!("{at}/{key}");
+            out.push(path.clone());
+            collect_paths(child, defs, &path, out, depth + 1);
+        }
+    }
+}
+
+/// Every property path of the 1.0 schema (`schemas/events/v1.json` as #254
+/// published it). Arrays are transparent: `/file/signers/publisher`.
+const V1_0_PATHS: &str = include_str!("fixtures/schema_1_0_paths.txt");
