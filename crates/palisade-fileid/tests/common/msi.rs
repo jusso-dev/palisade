@@ -4,8 +4,9 @@
 //! [`MsiBuilder`] lays out a string pool, `_Tables`, `_Columns`, tables of
 //! string and integer columns, extra streams, nested storages and a
 //! summary information stream, and [`Cfb`] writes them as a version 3
-//! compound file (512-byte sectors, a mini stream for streams under 4096
-//! bytes). Directory entries are written as a right-leaning chain of black
+//! (512-byte sectors) or version 4 (4096-byte sectors) compound file, with
+//! a mini stream for streams under 4096 bytes and DIFAT sectors when the
+//! FAT outgrows the header. Directory entries are written as a right-leaning chain of black
 //! nodes, which is a valid red-black tree for the format. Everything is
 //! deterministic: the same builder calls give the same bytes.
 
@@ -34,6 +35,7 @@ const fn clsid(first: u32) -> [u8; 16] {
 const ENDOFCHAIN: u32 = 0xffff_fffe;
 const FREESECT: u32 = 0xffff_ffff;
 const FATSECT: u32 = 0xffff_fffd;
+const DIFSECT: u32 = 0xffff_fffc;
 const NOSTREAM: u32 = 0xffff_ffff;
 
 /// A node of the storage tree.
@@ -81,6 +83,8 @@ impl Node {
 pub struct Cfb {
     pub root_clsid: [u8; 16],
     pub children: Vec<Node>,
+    /// 3 (512-byte sectors) or 4 (4096-byte sectors).
+    pub version: u16,
 }
 
 /// Uppercase-then-length order, the format's sibling order.
@@ -112,6 +116,10 @@ struct DirEntry {
 }
 
 impl Cfb {
+    fn sector_size(&self) -> usize {
+        if self.version == 4 { 4096 } else { 512 }
+    }
+
     /// Writes the compound file.
     pub fn build(&self) -> Vec<u8> {
         // Flatten the tree: entry 0 is the root, then each storage's
@@ -158,7 +166,10 @@ impl Cfb {
             }
         }
 
-        // Sectors: [directory][minifat][mini stream][big streams][FAT].
+        // Sectors: [directory][minifat][mini stream][big streams][FAT]
+        // [DIFAT].
+        let ss = self.sector_size();
+        let per = ss / 4;
         let mut sectors: Vec<Vec<u8>> = Vec::new();
         let mut fat: Vec<u32> = Vec::new();
         let alloc = |bytes: &[u8], sectors: &mut Vec<Vec<u8>>, fat: &mut Vec<u32>| -> u32 {
@@ -166,10 +177,10 @@ impl Cfb {
                 return ENDOFCHAIN;
             }
             let first = sectors.len() as u32;
-            let n = bytes.len().div_ceil(512);
+            let n = bytes.len().div_ceil(ss);
             for k in 0..n {
-                let mut s = bytes[k * 512..((k + 1) * 512).min(bytes.len())].to_vec();
-                s.resize(512, 0);
+                let mut s = bytes[k * ss..((k + 1) * ss).min(bytes.len())].to_vec();
+                s.resize(ss, 0);
                 sectors.push(s);
                 fat.push(if k + 1 == n {
                     ENDOFCHAIN
@@ -181,13 +192,13 @@ impl Cfb {
         };
         // The directory is written after the start sectors are known, so
         // reserve its sectors now.
-        let dir_sectors = (entries.len() * 128).div_ceil(512);
-        let dir_start = alloc(&vec![0; dir_sectors * 512], &mut sectors, &mut fat);
+        let dir_sectors = (entries.len() * 128).div_ceil(ss);
+        let dir_start = alloc(&vec![0; dir_sectors * ss], &mut sectors, &mut fat);
         let mut minifat_bytes: Vec<u8> = minifat.iter().flat_map(|v| v.to_le_bytes()).collect();
         if !minifat_bytes.is_empty() {
-            minifat_bytes.resize(minifat_bytes.len().div_ceil(512) * 512, 0xff);
+            minifat_bytes.resize(minifat_bytes.len().div_ceil(ss) * ss, 0xff);
         }
-        let minifat_count = minifat_bytes.len() / 512;
+        let minifat_count = minifat_bytes.len() / ss;
         let minifat_start = alloc(&minifat_bytes, &mut sectors, &mut fat);
         let mini_start = alloc(&mini, &mut sectors, &mut fat);
         entries[0].start = mini_start;
@@ -195,55 +206,90 @@ impl Cfb {
         for (i, d) in &big {
             entries[*i].start = alloc(d, &mut sectors, &mut fat);
         }
-        // FAT sectors: enough to cover every sector including themselves.
+        // FAT and DIFAT sectors: enough to cover every sector, themselves
+        // included. The header holds 109 FAT sector numbers; each DIFAT
+        // sector holds `per - 1` more and the next DIFAT sector's number.
+        let difat_for = |fat_count: usize| fat_count.saturating_sub(109).div_ceil(per - 1);
         let mut fat_count = 1;
-        while (sectors.len() + fat_count) * 4 > fat_count * 512 {
+        while (sectors.len() + fat_count + difat_for(fat_count)) > fat_count * per {
             fat_count += 1;
         }
-        assert!(fat_count <= 109, "fixture too large for the header DIFAT");
+        let difat_count = difat_for(fat_count);
         let fat_start = sectors.len() as u32;
         for _ in 0..fat_count {
             fat.push(FATSECT);
-            sectors.push(vec![0; 512]);
+            sectors.push(vec![0; ss]);
         }
-        fat.resize(fat_count * 128, FREESECT);
+        let difat_start = sectors.len() as u32;
+        for _ in 0..difat_count {
+            fat.push(DIFSECT);
+            sectors.push(vec![0; ss]);
+        }
+        fat.resize(fat_count * per, FREESECT);
         for k in 0..fat_count {
-            let bytes: Vec<u8> = fat[k * 128..(k + 1) * 128]
+            let bytes: Vec<u8> = fat[k * per..(k + 1) * per]
                 .iter()
                 .flat_map(|v| v.to_le_bytes())
                 .collect();
             sectors[fat_start as usize + k] = bytes;
         }
+        for d in 0..difat_count {
+            let mut words = vec![FREESECT; per];
+            for (slot, w) in words.iter_mut().take(per - 1).enumerate() {
+                let k = 109 + d * (per - 1) + slot;
+                if k < fat_count {
+                    *w = fat_start + k as u32;
+                }
+            }
+            words[per - 1] = if d + 1 == difat_count {
+                ENDOFCHAIN
+            } else {
+                difat_start + d as u32 + 1
+            };
+            sectors[difat_start as usize + d] =
+                words.iter().flat_map(|v| v.to_le_bytes()).collect();
+        }
         // Now the directory.
-        let mut dir = Vec::with_capacity(dir_sectors * 512);
+        let mut dir = Vec::with_capacity(dir_sectors * ss);
         for e in &entries {
             dir.extend_from_slice(&dir_entry(e));
         }
-        dir.resize(dir_sectors * 512, 0);
+        dir.resize(dir_sectors * ss, 0);
         for k in 0..dir_sectors {
-            sectors[dir_start as usize + k] = dir[k * 512..(k + 1) * 512].to_vec();
+            sectors[dir_start as usize + k] = dir[k * ss..(k + 1) * ss].to_vec();
         }
-        for k in entries.len()..dir_sectors * 4 {
+        let per_dir = ss / 128;
+        for k in entries.len()..dir_sectors * per_dir {
             // Unused entries: all zero but the sibling and child IDs.
-            let s = &mut sectors[dir_start as usize + k / 4];
-            let off = (k % 4) * 128;
+            let s = &mut sectors[dir_start as usize + k / per_dir];
+            let off = (k % per_dir) * 128;
             s[off + 0x44..off + 0x50].fill(0xff);
         }
 
-        let mut out = vec![0_u8; 512];
+        // The header is 512 bytes; in version 4 it fills a whole sector.
+        let mut out = vec![0_u8; ss];
         out[..8].copy_from_slice(&[0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
         out[0x18..0x1a].copy_from_slice(&0x3e_u16.to_le_bytes());
-        out[0x1a..0x1c].copy_from_slice(&3_u16.to_le_bytes());
+        out[0x1a..0x1c].copy_from_slice(&self.version.to_le_bytes());
         out[0x1c..0x1e].copy_from_slice(&0xfffe_u16.to_le_bytes());
-        out[0x1e..0x20].copy_from_slice(&9_u16.to_le_bytes());
+        let shift: u16 = if self.version == 4 { 12 } else { 9 };
+        out[0x1e..0x20].copy_from_slice(&shift.to_le_bytes());
         out[0x20..0x22].copy_from_slice(&6_u16.to_le_bytes());
+        if self.version == 4 {
+            out[0x28..0x2c].copy_from_slice(&(dir_sectors as u32).to_le_bytes());
+        }
         out[0x2c..0x30].copy_from_slice(&(fat_count as u32).to_le_bytes());
         out[0x30..0x34].copy_from_slice(&dir_start.to_le_bytes());
         out[0x38..0x3c].copy_from_slice(&4096_u32.to_le_bytes());
         out[0x3c..0x40].copy_from_slice(&minifat_start.to_le_bytes());
         out[0x40..0x44].copy_from_slice(&(minifat_count as u32).to_le_bytes());
-        out[0x44..0x48].copy_from_slice(&ENDOFCHAIN.to_le_bytes());
-        out[0x48..0x4c].copy_from_slice(&0_u32.to_le_bytes());
+        let first_difat = if difat_count == 0 {
+            ENDOFCHAIN
+        } else {
+            difat_start
+        };
+        out[0x44..0x48].copy_from_slice(&first_difat.to_le_bytes());
+        out[0x48..0x4c].copy_from_slice(&(difat_count as u32).to_le_bytes());
         for k in 0..109 {
             let v = if k < fat_count {
                 fat_start + k as u32
@@ -486,6 +532,12 @@ pub struct MsiBuilder {
     pub summary: Option<Vec<(u32, Prop)>>,
     /// Use 3-byte string references.
     pub long_refs: bool,
+    /// The refcount written for strings of 64 KiB or more.
+    pub long_refcount: u16,
+    /// Strings put first in the pool, unused by any table.
+    pub prefix_strings: Vec<String>,
+    /// The compound file version: 3 or 4.
+    pub cfb_version: u16,
 }
 
 impl Default for MsiBuilder {
@@ -498,6 +550,9 @@ impl Default for MsiBuilder {
             extra: Vec::new(),
             summary: None,
             long_refs: false,
+            long_refcount: 1,
+            prefix_strings: Vec::new(),
+            cfb_version: 3,
         }
     }
 }
@@ -563,9 +618,9 @@ impl MsiBuilder {
     /// The compound file, before writing.
     pub fn cfb(&self) -> Cfb {
         // String pool: every string, in first-use order.
-        let mut strings: Vec<String> = Vec::new();
+        let mut strings: Vec<String> = self.prefix_strings.clone();
         let id = |s: &str, strings: &mut Vec<String>| -> u32 {
-            if let Some(p) = strings.iter().position(|x| x == s) {
+            if let Some(p) = strings.iter().rposition(|x| x == s) {
                 (p + 1) as u32
             } else {
                 strings.push(s.to_owned());
@@ -638,10 +693,12 @@ impl MsiBuilder {
         for st in &strings {
             let bytes = st.as_bytes();
             if bytes.len() >= 0x10000 {
+                // (0, refcount), then (length low, length high): one
+                // string ID, two pool entries.
                 pool.extend_from_slice(&0_u16.to_le_bytes());
-                pool.extend_from_slice(&((bytes.len() >> 16) as u16).to_le_bytes());
+                pool.extend_from_slice(&self.long_refcount.to_le_bytes());
                 pool.extend_from_slice(&(bytes.len() as u16).to_le_bytes());
-                pool.extend_from_slice(&1_u16.to_le_bytes());
+                pool.extend_from_slice(&((bytes.len() >> 16) as u16).to_le_bytes());
             } else {
                 pool.extend_from_slice(&(bytes.len() as u16).to_le_bytes());
                 pool.extend_from_slice(&1_u16.to_le_bytes());
@@ -663,6 +720,7 @@ impl MsiBuilder {
         Cfb {
             root_clsid: self.clsid,
             children: nodes,
+            version: self.cfb_version,
         }
     }
 

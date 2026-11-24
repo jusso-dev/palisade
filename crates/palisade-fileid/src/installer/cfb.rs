@@ -12,13 +12,16 @@
 //! returns, so anything ambiguous is an error, never a guess:
 //!
 //! - a sector chain that loops, runs off the file or the FAT, or is shorter
-//!   than its stream;
+//!   or longer than its stream (every chain of a known length must end in
+//!   `ENDOFCHAIN` exactly where its data does), and a DIFAT chain longer
+//!   than the FAT;
 //! - a sector (or mini sector) claimed by two chains, or by a chain and the
 //!   FAT, DIFAT, directory or mini FAT, so no two streams can share bytes
 //!   and no data is read twice;
-//! - a directory entry reached twice, a child of the wrong type, or two
+//! - a directory entry reached twice, a child of the wrong type, two
 //!   siblings with the same name (names compare case-insensitively, as the
-//!   format requires);
+//!   format requires), or a name with a character the format forbids
+//!   (`/`, `\`, `:`, `!`);
 //! - a header that is not version 3 with 512-byte sectors or version 4 with
 //!   4096-byte sectors, a mini sector size other than 64, or a mini stream
 //!   cutoff other than 4096.
@@ -50,6 +53,7 @@ const HEADER_DIFAT_ENTRIES: usize = 109;
 
 const MAXREGSECT: u32 = 0xffff_fffa;
 const ENDOFCHAIN: u32 = 0xffff_fffe;
+const FREESECT: u32 = 0xffff_ffff;
 const NOSTREAM: u32 = 0xffff_ffff;
 
 const TYPE_UNUSED: u8 = 0;
@@ -69,6 +73,9 @@ pub enum CfbError {
     SectorOutOfRange(u32),
     /// A sector chain ends before its stream does.
     TruncatedChain,
+    /// A sector chain does not end (with `ENDOFCHAIN`) where its stream
+    /// does.
+    ChainTooLong,
     /// A sector or mini sector is claimed twice: a loop, or two chains that
     /// share data.
     SharedSector(u32),
@@ -91,6 +98,7 @@ impl fmt::Display for CfbError {
             Self::BadHeader(what) => write!(f, "bad compound file header: {what}"),
             Self::SectorOutOfRange(s) => write!(f, "sector {s} is out of range"),
             Self::TruncatedChain => f.write_str("a sector chain ends before its stream"),
+            Self::ChainTooLong => f.write_str("a sector chain runs past its stream"),
             Self::SharedSector(s) => write!(f, "sector {s} is claimed twice"),
             Self::BadDirectoryEntry(i) => write!(f, "directory entry {i} is malformed"),
             Self::DirectoryCycle(i) => write!(f, "directory entry {i} is reached twice"),
@@ -138,10 +146,20 @@ impl Entry {
         String::from_utf16_lossy(&self.name)
     }
 
-    /// The child with exactly this name.
+    /// The child with this name, compared case-insensitively as the
+    /// format (and the OS) compares names. Names are unique under that
+    /// comparison, so there is at most one.
     #[must_use]
     pub fn child(&self, name: &[u16]) -> Option<&Entry> {
-        self.children.iter().find(|c| c.name == name)
+        let want = fold(name);
+        self.children.iter().find(|c| fold(&c.name) == want)
+    }
+
+    /// Whether this entry's name equals `name` case-insensitively.
+    #[must_use]
+    pub fn is_named(&self, name: &str) -> bool {
+        let units: Vec<u16> = name.encode_utf16().collect();
+        fold(&self.name) == fold(&units)
     }
 }
 
@@ -153,6 +171,9 @@ pub struct CompoundFile<'a> {
     pub root: Entry,
     /// The major version (3 or 4).
     pub version: u16,
+    /// Bytes after the last sector any structure or stream uses. Nothing
+    /// covers them, so they can hide data in a signed package.
+    pub trailing_bytes: u64,
 }
 
 impl<'a> CompoundFile<'a> {
@@ -334,10 +355,22 @@ impl<'a> Parser<'a> {
         self.load_directory()?;
         self.load_minifat()?;
         let root = self.walk()?;
+        // The end of the last claimed sector (or of its stream data, if
+        // that sector is the short final one).
+        let last = self
+            .claims
+            .0
+            .iter()
+            .rposition(|&c| c)
+            .map_or(1, |i| i.saturating_add(2));
+        let used = last.saturating_mul(self.sector_len).min(self.data.len());
+        let trailing_bytes =
+            u64::try_from(self.data.len().saturating_sub(used)).unwrap_or(u64::MAX);
         Ok(CompoundFile {
             data: self.data,
             root,
             version: self.version,
+            trailing_bytes,
         })
     }
 
@@ -370,6 +403,11 @@ impl<'a> Parser<'a> {
             next = u32_at(sector, 4 * per_difat);
             difat_left -= 1;
         }
+        // The DIFAT chain ends where the FAT does.
+        let read_any = fat_count > HEADER_DIFAT_ENTRIES;
+        if difat_left != 0 || (read_any && next != ENDOFCHAIN && next != FREESECT) {
+            return Err(CfbError::BadHeader("DIFAT longer than the FAT"));
+        }
         let per_sector = self.sector_len / 4;
         let mut fat = Vec::with_capacity(fat_count.saturating_mul(per_sector));
         for &s in &fat_sectors {
@@ -390,7 +428,13 @@ impl<'a> Parser<'a> {
         let mut s = start;
         loop {
             if count.is_some_and(|c| out.len() == c) {
-                return Ok(out);
+                // A chain of a known length must end exactly there: a
+                // longer one would share sectors, loop or hide data.
+                return if s == ENDOFCHAIN {
+                    Ok(out)
+                } else {
+                    Err(CfbError::ChainTooLong)
+                };
             }
             if s == ENDOFCHAIN {
                 return match count {
@@ -501,7 +545,15 @@ impl<'a> Parser<'a> {
         }
         let units = name_len / 2 - 1;
         let name: Vec<u16> = (0..units).map(|i| u16_at(e, 2 * i)).collect();
-        if u16_at(e, 2 * units) != 0 || name.contains(&0) {
+        // MS-CFB 2.6.1: these characters are not allowed in a name.
+        let illegal = [
+            0,
+            u16::from(b'/'),
+            u16::from(b'\\'),
+            u16::from(b':'),
+            u16::from(b'!'),
+        ];
+        if u16_at(e, 2 * units) != 0 || name.iter().any(|u| illegal.contains(u)) {
             return Err(CfbError::BadDirectoryEntry(id));
         }
         Ok(RawEntry {
@@ -675,6 +727,9 @@ impl<'a> Parser<'a> {
                 .and_then(|i| self.minifat.get(i))
                 .copied()
                 .ok_or(CfbError::SectorOutOfRange(s))?;
+        }
+        if s != ENDOFCHAIN {
+            return Err(CfbError::ChainTooLong);
         }
         Ok(out)
     }

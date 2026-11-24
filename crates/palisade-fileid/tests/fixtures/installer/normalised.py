@@ -109,6 +109,10 @@ def summary_canonical(stream):
     return out
 
 
+def fold(name):
+    return name.upper()
+
+
 def main(path):
     data = open(path, "rb").read()
     root, children, content = read_cfb(data)
@@ -121,7 +125,7 @@ def main(path):
 
     def walk(storage, is_root, path):
         for c in sorted(children(storage), key=lambda c: units(c["raw"])):
-            if is_root and c["name"] in SKIP:
+            if is_root and fold(c["name"]) in {fold(n) for n in SKIP}:
                 continue
             p = path + ("/".encode("utf-16-le") if path else b"") + c["raw"]
             if c["kind"] == 1:
@@ -132,8 +136,10 @@ def main(path):
                 h.update(content(c))
 
     walk(root, True, b"")
-    summary = [c for c in children(root) if c["name"] == "\x05SummaryInformation"]
+    summary = [c for c in children(root) if fold(c["name"]) == fold("\x05SummaryInformation")]
     if summary:
+        # Fixtures always have a well-formed summary; a malformed one is
+        # hashed raw under the tag "R" (not needed here).
         canon = summary_canonical(content(summary[0]))
         h.update(b"I" + struct.pack("<Q", len(canon)) + canon)
     else:

@@ -18,7 +18,7 @@ use palisade_fileid::authenticode::{
 use palisade_fileid::installer::cfb::CfbError;
 use palisade_fileid::installer::{
     CLSID_DATABASE, CustomActionKind, InstallerError, InstallerKind, InstallerWarning,
-    NormalisedHashStrength, parse_installer, transform_validation,
+    MAX_INVENTORY_ROWS, NormalisedHashStrength, parse_installer, transform_validation,
 };
 use palisade_fileid::pe::version::FileVersionQuad;
 
@@ -299,7 +299,8 @@ fn merge_module_patch_and_transform_kinds() {
     let flags = transform_validation::PRODUCT
         | transform_validation::LANGUAGE
         | transform_validation::UPGRADE_CODE;
-    t.summary_prop(16, Prop::I4((flags | (0x20 << 16)).cast_signed()));
+    // Validation flags in the upper word, suppressed errors in the lower.
+    t.summary_prop(16, Prop::I4(((flags << 16) | 0x20).cast_signed()));
     let id = parse_installer(&t.build()).unwrap();
     assert_eq!(id.kind, InstallerKind::Mst);
     let info = id.transform.as_ref().unwrap();
@@ -754,4 +755,267 @@ fn committed_unsigned_product_is_the_builder_output() {
     // `installer_os.rs` signs this file with the OS; it must be exactly
     // what the builder makes, which the signed fixtures also sign.
     assert_eq!(fixture("product.msi"), product().build());
+}
+
+// ---------------------------------------------------------------------------
+// Round 1 review: differentials and limits.
+
+#[test]
+fn special_stream_names_compare_case_insensitively() {
+    // A valid DSE-signed package whose Ex stream is renamed in case only:
+    // the OS still treats it as the metadata hash, so it must still be
+    // checked, and tampering with metadata must still fail.
+    let data = fixture("product-dse.msi");
+    let cf = palisade_fileid::installer::cfb::CompoundFile::parse(&data).unwrap();
+    let ex = cf
+        .root
+        .children
+        .iter()
+        .find(|c| c.is_named("\u{5}MsiDigitalSignatureEx"))
+        .unwrap();
+    let dir = header_u32(&data, 0x30) as usize;
+    let entry_at = 512 * (dir + 1) + 128 * ex.id as usize;
+    let mut renamed = data.clone();
+    // The last character, `x`, becomes `X`.
+    let last = entry_at + 2 * (ex.name.len() - 1);
+    assert_eq!(renamed[last], b'x');
+    renamed[last] = b'X';
+    assert!(parse_installer(&renamed).unwrap().signature_valid());
+    renamed[entry_at - 128 * ex.id as usize + 128 + 0x64] ^= 1;
+    assert!(!parse_installer(&renamed).unwrap().signature_valid());
+
+    // A case-renamed signature stream is still the signature.
+    let mut upper = fixture("product-sha256.msi");
+    let dir2 = header_u32(&upper, 0x30) as usize;
+    let cf2 = palisade_fileid::installer::cfb::CompoundFile::parse(&upper).unwrap();
+    let sig2 = cf2
+        .root
+        .children
+        .iter()
+        .find(|c| c.is_named("\u{5}DigitalSignature"))
+        .unwrap();
+    let at2 = 512 * (dir2 + 1) + 128 * sig2.id as usize + 2;
+    assert_eq!(upper[at2], b'D');
+    upper[at2 + 2] = b'I';
+    let id = parse_installer(&upper).unwrap();
+    assert!(id.signature.is_some());
+    assert!(id.signature_valid());
+}
+
+#[test]
+fn unencoded_decoy_tables_are_ignored() {
+    // A stream named with the table prefix but not compressed decodes to
+    // the same text as the real `Property` table; the installer never
+    // opens it, so it must not shadow the real one.
+    let mut b = product();
+    let mut decoy = Vec::new();
+    // One row of (Property, Value) references to strings 1 and 1: any
+    // non-zero bytes would do.
+    decoy.extend_from_slice(&[1, 0, 1, 0]);
+    b.extra.push(Node::raw_stream(
+        "\u{4840}Property".encode_utf16().collect(),
+        decoy,
+    ));
+    let id = parse_installer(&b.build()).unwrap();
+    assert_eq!(id.properties.product_code.unwrap().text, PRODUCT_CODE);
+    assert_eq!(
+        id.properties.product_name.as_deref(),
+        Some("Palisade Test Product")
+    );
+}
+
+#[test]
+fn duplicate_pool_strings_do_not_hide_tables() {
+    // `CustomAction` appears in the pool twice; `_Tables` and `_Columns`
+    // use the second copy. The schema must still be found by text.
+    let mut b = product();
+    b.prefix_strings = vec!["CustomAction".into()];
+    let id = parse_installer(&b.build()).unwrap();
+    assert_eq!(id.embedded.custom_actions.len(), 7, "{:?}", id.warnings);
+}
+
+#[test]
+fn long_strings_round_trip_through_the_builder() {
+    let mut b = product();
+    b.long_refcount = 9;
+    let big = "x".repeat(70_000);
+    b.tables[0].rows.push(vec![s("Comments"), s(&big)]);
+    // A property after the long string must still read correctly.
+    b.tables[0]
+        .rows
+        .push(vec![s("Manufacturer2"), s("after the long one")]);
+    let id = parse_installer(&b.build()).unwrap();
+    assert_eq!(id.properties.product_code.unwrap().text, PRODUCT_CODE);
+    assert!(id.warnings.is_empty(), "{:?}", id.warnings);
+}
+
+#[test]
+fn illegal_names_trailing_data_and_oversized_tables() {
+    // `/` in a name would let two trees share a normalised hash.
+    let mut slash = product();
+    slash.extra.push(Node::stream("a/b", vec![1]));
+    assert!(matches!(
+        parse_installer(&slash.build()).unwrap_err(),
+        InstallerError::Container(CfbError::BadDirectoryEntry(_))
+    ));
+
+    // Bytes after the last sector are reported and change nothing else.
+    let signed = fixture("product-sha256.msi");
+    let mut appended = signed.clone();
+    appended.extend_from_slice(&[0x41; 600]);
+    let a = parse_installer(&appended).unwrap();
+    let b = parse_installer(&signed).unwrap();
+    assert!(a.warnings.contains(&InstallerWarning::TrailingData(600)));
+    assert!(
+        !b.warnings
+            .iter()
+            .any(|w| matches!(w, InstallerWarning::TrailingData(_)))
+    );
+    assert_eq!(a.normalised_sha256, b.normalised_sha256);
+
+    // A `_Tables` stream with more rows than the limit is refused from its
+    // size, before its rows are allocated.
+    let mut cfb = product().cfb();
+    let name = encode_name("_Tables", true);
+    for n in &mut cfb.children {
+        if let Node::Stream { name: nm, data, .. } = n {
+            if *nm == name {
+                data.resize(2 * 5000, 1);
+            }
+        }
+    }
+    let id = parse_installer(&cfb.build()).unwrap();
+    assert!(id.properties.product_code.is_none());
+    assert!(
+        id.warnings
+            .iter()
+            .any(|w| matches!(w, InstallerWarning::Table(_)))
+    );
+}
+
+#[test]
+fn inventory_is_capped() {
+    let mut b = product();
+    let rows: Vec<_> = (0..MAX_INVENTORY_ROWS + 1)
+        .map(|i| vec![s(&format!("B{i}")), Cell::Null])
+        .collect();
+    b.tables[1].rows = rows;
+    let id = parse_installer(&b.build()).unwrap();
+    assert_eq!(id.embedded.binaries.len(), MAX_INVENTORY_ROWS);
+    assert!(
+        id.warnings
+            .contains(&InstallerWarning::InventoryTruncated("Binary"))
+    );
+}
+
+#[test]
+fn malformed_summary_still_counts_in_the_normalised_hash() {
+    let mut a = product();
+    a.summary = None;
+    a.extra.push(Node::stream(
+        "\u{5}SummaryInformation",
+        b"junk one".to_vec(),
+    ));
+    let mut b = a.clone();
+    b.extra = vec![Node::stream(
+        "\u{5}SummaryInformation",
+        b"junk two".to_vec(),
+    )];
+    let mut none = product();
+    none.summary = None;
+    let (ia, ib, inone) = (
+        parse_installer(&a.build()).unwrap(),
+        parse_installer(&b.build()).unwrap(),
+        parse_installer(&none.build()).unwrap(),
+    );
+    assert_ne!(ia.normalised_sha256, ib.normalised_sha256);
+    assert_ne!(ia.normalised_sha256, inone.normalised_sha256);
+}
+
+/// The directory entry of root child `name` (exact name), as `(file offset
+/// of the entry, start sector, size)`.
+fn root_entry(data: &[u8], name: &str) -> (usize, u32, u64) {
+    let cf = palisade_fileid::installer::cfb::CompoundFile::parse(data).unwrap();
+    let e = cf
+        .root
+        .children
+        .iter()
+        .find(|c| c.name.iter().copied().eq(name.encode_utf16()))
+        .unwrap();
+    let dir = header_u32(data, 0x30) as usize;
+    let at = 512 * (dir + 1) + 128 * e.id as usize;
+    (at, header_u32(data, at + 0x74), e.size)
+}
+
+#[test]
+fn chain_tails_must_end_exactly() {
+    let base = product().build();
+    let fat_sector = header_u32(&base, 0x4c) as usize;
+    let fat_at = |s: u32| 512 * (fat_sector + 1) + 4 * s as usize;
+
+    // A big stream (`Binary.Icon`, 5000 bytes, 10 sectors): point its last
+    // FAT entry back at its first sector instead of ENDOFCHAIN.
+    let icon = encode_name("Binary.Icon", false);
+    let icon: String = String::from_utf16(&icon).unwrap();
+    let (_, start, size) = root_entry(&base, &icon);
+    assert!(size >= 4096);
+    let last = start + (size.div_ceil(512) as u32) - 1;
+    assert_eq!(header_u32(&base, fat_at(last)), 0xffff_fffe);
+    let mut looped = base.clone();
+    set_u32(&mut looped, fat_at(last), start);
+    assert!(matches!(
+        parse_installer(&looped).unwrap_err(),
+        InstallerError::Container(CfbError::ChainTooLong)
+    ));
+    // Marked free instead: also refused.
+    let mut free = base.clone();
+    set_u32(&mut free, fat_at(last), 0xffff_ffff);
+    assert!(parse_installer(&free).is_err());
+
+    // A mini stream chain whose last mini FAT entry points at another
+    // stream's mini sector.
+    let minifat_sector = header_u32(&base, 0x3c) as usize;
+    let (_, mstart, msize) = root_entry(&base, "\u{5}SummaryInformation");
+    assert!(msize < 4096);
+    let mlast = mstart + (msize.div_ceil(64) as u32) - 1;
+    let mf_at = 512 * (minifat_sector + 1) + 4 * mlast as usize;
+    assert_eq!(header_u32(&base, mf_at), 0xffff_fffe);
+    let mut shared = base.clone();
+    set_u32(&mut shared, mf_at, 0);
+    assert!(matches!(
+        parse_installer(&shared).unwrap_err(),
+        InstallerError::Container(CfbError::ChainTooLong)
+    ));
+
+    // A DIFAT chain the header says is longer than the FAT needs.
+    let mut difat = base.clone();
+    set_u32(&mut difat, 0x48, 1);
+    assert!(parse_installer(&difat).is_err());
+}
+
+#[test]
+fn version_4_files_and_extended_difat() {
+    // 4096-byte sectors: the same identity and normalised hash.
+    let mut v4 = product();
+    v4.cfb_version = 4;
+    let data = v4.build();
+    assert_eq!(u16::from_le_bytes([data[0x1a], data[0x1b]]), 4);
+    let id = parse_installer(&data).unwrap();
+    assert_eq!(id.properties.product_code.unwrap().text, PRODUCT_CODE);
+    assert_eq!(id.normalised_sha256.to_string(), PINNED_NORMALISED);
+    assert!(id.warnings.is_empty(), "{:?}", id.warnings);
+
+    // More than 109 FAT sectors (over 109 * 128 sectors of 512 bytes, about
+    // 7 MiB), so the FAT is listed by DIFAT sectors too.
+    let mut big = product();
+    big.stream("Big.cab", vec![0x5a; 7_400_000]);
+    let data = big.build();
+    assert!(u32::from_le_bytes(data[0x48..0x4c].try_into().unwrap()) >= 1);
+    let id = parse_installer(&data).unwrap();
+    assert_eq!(id.properties.product_code.unwrap().text, PRODUCT_CODE);
+    // A DIFAT chain that does not end is refused.
+    let difat = header_u32(&data, 0x44) as usize;
+    let mut bad = data.clone();
+    set_u32(&mut bad, 512 * (difat + 1) + 508, difat as u32);
+    assert!(parse_installer(&bad).is_err());
 }

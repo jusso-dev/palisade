@@ -81,8 +81,14 @@
 //!    tagged `F`;
 //! 4. the summary information without its four FILETIME properties (edit
 //!    time, last printed, created, last saved), in the canonical encoding
-//!    of `summary::canonical_without_times`, tagged `I`, or the tag `N`
-//!    if the package has none.
+//!    of `summary::canonical_without_times`, tagged `I` and preceded by
+//!    its u64 LE length; or, if the stream is present but cannot be
+//!    parsed, its raw bytes, tagged `R` the same way; or the tag `N` if
+//!    the package has none.
+//!
+//! Names compare case-insensitively when deciding what to leave out, as
+//! the format compares them; path components cannot contain `/`, which
+//! the compound file reader rejects in names.
 //!
 //! Directory-entry times, the signature streams and sector layout never
 //! enter it, so two copies of a package that differ only in when they
@@ -92,9 +98,12 @@
 //!
 //! # Limits
 //!
-//! [`MAX_INSTALLER_SIZE`], the CFB limits ([`cfb::MAX_DIRECTORY_ENTRIES`],
+//! [`MAX_INSTALLER_SIZE`], [`MAX_SIGNATURE_SIZE`], [`MAX_SUMMARY_SIZE`],
+//! the CFB limits ([`cfb::MAX_DIRECTORY_ENTRIES`],
 //! [`cfb::MAX_STORAGE_DEPTH`]) and the table limits
-//! ([`database::MAX_STRINGS`], [`database::MAX_TABLES`]) bound the work and
+//! ([`database::MAX_STRINGS`], [`database::MAX_TABLES`],
+//! [`database::MAX_TABLE_ROWS`]; row limits are checked from a table's
+//! stream size before its rows are allocated) bound the work and
 //! memory any input can cause. The `fuzz_msi_tables` target fuzzes the
 //! whole path.
 
@@ -120,6 +129,11 @@ use summary::{SummaryError, SummaryInfo, pid};
 
 /// The largest package read: 1 GiB.
 pub const MAX_INSTALLER_SIZE: u64 = 1024 * 1024 * 1024;
+/// The largest `\u{5}DigitalSignature` stream read: 16 MiB, the PE
+/// certificate table limit.
+pub const MAX_SIGNATURE_SIZE: u64 = 16 * 1024 * 1024;
+/// The largest summary information stream parsed: 1 MiB.
+pub const MAX_SUMMARY_SIZE: u64 = 1024 * 1024;
 /// The most rows listed from each inventory table (`Binary`,
 /// `CustomAction`, `Media`, `MsiPatchMetadata`).
 pub const MAX_INVENTORY_ROWS: usize = 4096;
@@ -213,6 +227,13 @@ pub enum InstallerWarning {
     /// A `\u{5}DigitalSignature` storage (not a stream): ignored, and the
     /// package is not treated as signed.
     SignatureNotStream,
+    /// The signature or `MsiDigitalSignatureEx` stream is larger than any
+    /// valid one ([`MAX_SIGNATURE_SIZE`], 64 bytes): the signature is
+    /// reported malformed.
+    SignatureTooLarge,
+    /// This many bytes follow the last sector the compound file uses. No
+    /// hash or signature covers them.
+    TrailingData(u64),
 }
 
 /// A GUID property, as written, and whether it is a well-formed
@@ -314,8 +335,8 @@ pub struct SummaryFields {
     /// Word count (15): source image flags (short names, compressed,
     /// administrative image, elevation not required).
     pub word_count: Option<i32>,
-    /// Character count (16): for a transform, the validation and error
-    /// condition flags.
+    /// Character count (16): for a transform, the validation flags (upper
+    /// word) and the suppressed error conditions (lower word).
     pub char_count: Option<i32>,
     /// Creating application (18).
     pub app_name: Option<String>,
@@ -401,7 +422,7 @@ pub struct PatchInfo {
     pub target_product_name: Option<String>,
 }
 
-/// Transform validation flags (the low 16 bits of the summary character
+/// Transform validation flags (the upper 16 bits of the summary character
 /// count).
 pub mod transform_validation {
     /// The language must match.
@@ -445,7 +466,8 @@ pub struct TransformInfo {
     pub upgrade_code: Option<GuidText>,
     /// The validation flags ([`transform_validation`]).
     pub validation: u32,
-    /// The error-condition flags (the high 16 bits of the character count).
+    /// The error-condition flags the transform suppresses (the lower 16
+    /// bits of the character count).
     pub error_conditions: u32,
 }
 
@@ -644,15 +666,32 @@ pub fn parse_installer(data: &[u8]) -> Result<InstallerIdentity, InstallerError>
         base_kind
     };
 
+    if db.cf.trailing_bytes > 0 {
+        warnings.push(InstallerWarning::TrailingData(db.cf.trailing_bytes));
+    }
+    // The summary as the normalised hash sees it: parsed, present but
+    // unreadable (its raw bytes, so its content still counts), or absent.
+    let mut summary_raw: Option<Vec<u8>> = None;
     let summary_info = match root.child(&utf16(SUMMARY_INFORMATION)) {
-        Some(e) if !e.is_storage => match summary::parse(&db.cf.stream(e), database_decode) {
-            Ok(info) => Some(info),
-            Err(err) => {
-                warnings.push(InstallerWarning::Summary(err));
-                None
+        Some(e) if !e.is_storage && e.size <= MAX_SUMMARY_SIZE => {
+            let bytes = db.cf.stream(e);
+            match summary::parse(&bytes, database_decode) {
+                Ok(info) => Some(info),
+                Err(err) => {
+                    warnings.push(InstallerWarning::Summary(err));
+                    summary_raw = Some(bytes);
+                    None
+                }
             }
-        },
-        _ => {
+        }
+        Some(e) => {
+            warnings.push(InstallerWarning::Summary(SummaryError::Header(
+                "not a stream, or too large",
+            )));
+            summary_raw = Some(db.cf.stream(e));
+            None
+        }
+        None => {
             warnings.push(InstallerWarning::NoSummary);
             None
         }
@@ -676,8 +715,16 @@ pub fn parse_installer(data: &[u8]) -> Result<InstallerIdentity, InstallerError>
 
     let content = content_digests(&db.cf, &root);
     let signature = read_signature(&db.cf, &root, &content, &mut warnings);
-    let content_sha256 = content_sha256(&db.cf, &root);
-    let normalised_sha256 = normalised_hash(&db.cf, &root, summary_info.as_ref());
+    let content_sha256 = content
+        .get(HashAlgorithm::Sha256)
+        .cloned()
+        .unwrap_or_else(|| content_sha256(&db.cf, &root));
+    let summary_for_hash = match (&summary_info, &summary_raw) {
+        (Some(info), _) => NormalisedSummary::Parsed(info),
+        (None, Some(raw)) => NormalisedSummary::Raw(raw),
+        (None, None) => NormalisedSummary::Absent,
+    };
+    let normalised_sha256 = normalised_hash(&db.cf, &root, summary_for_hash);
 
     Ok(InstallerIdentity {
         kind,
@@ -734,7 +781,7 @@ fn read_properties(db: &Database<'_>, warnings: &mut Vec<InstallerWarning>) -> P
         );
         return out;
     };
-    for row in &table.rows {
+    for row in table.rows() {
         let (Some(&k), Some(&v)) = (row.get(key), row.get(value)) else {
             continue;
         };
@@ -844,13 +891,20 @@ fn read_patch(
             .collect();
     }
     // `MsiPatchMetadata` (Company, Property, Value).
-    match db.table("MsiPatchMetadata") {
+    // A patch whose database has no string pool has no tables either; that
+    // is normal for a patch, so it is not reported.
+    let table = if db.strings.is_ok() {
+        db.table("MsiPatchMetadata")
+    } else {
+        Ok(None)
+    };
+    match table {
         Ok(Some(table)) => {
             if let (Ok(p), Ok(v)) = (
                 table.string_column("Property"),
                 table.string_column("Value"),
             ) {
-                for row in table.rows.iter().take(MAX_INVENTORY_ROWS) {
+                for row in table.rows().take(MAX_INVENTORY_ROWS) {
                     let (Some(k), Some(val)) = (
                         row.get(p).and_then(|&x| db.text(x)),
                         row.get(v).and_then(|&x| db.text(x)),
@@ -882,10 +936,12 @@ fn read_patch(
 
 fn read_transform(summary: &SummaryFields) -> TransformInfo {
     let mut out = TransformInfo::default();
+    // The upper word holds the validation flags, the lower word the error
+    // conditions the transform ignores.
     let flags = summary.char_count.unwrap_or(0);
     let flags = u32::from_ne_bytes(flags.to_ne_bytes());
-    out.validation = flags & 0xffff;
-    out.error_conditions = flags >> 16;
+    out.validation = flags >> 16;
+    out.error_conditions = flags & 0xffff;
     // `{product}version;{product}version;{upgrade}`.
     if let Some(rev) = &summary.revision {
         let mut fields = rev.split(';');
@@ -914,15 +970,15 @@ fn read_transform(summary: &SummaryFields) -> TransformInfo {
 
 fn read_embedded(db: &Database<'_>, warnings: &mut Vec<InstallerWarning>) -> EmbeddedContent {
     let mut out = EmbeddedContent::default();
-    let stream_size = |name: &str| db.streams.get(name).map(|e| e.size);
+    let stream_size = |name: &str| db.stream_entry(name, false).map(|e| e.size);
 
     match db.table("Binary") {
         Ok(Some(t)) => {
             if let Ok(n) = t.string_column("Name") {
-                if t.rows.len() > MAX_INVENTORY_ROWS {
+                if t.row_count() > MAX_INVENTORY_ROWS {
                     warnings.push(InstallerWarning::InventoryTruncated("Binary"));
                 }
-                for row in t.rows.iter().take(MAX_INVENTORY_ROWS) {
+                for row in t.rows().take(MAX_INVENTORY_ROWS) {
                     if let Some(name) = row.get(n).and_then(|&v| db.text(v)) {
                         out.binaries.push(BinaryEntry {
                             name: name.to_owned(),
@@ -945,10 +1001,10 @@ fn read_embedded(db: &Database<'_>, warnings: &mut Vec<InstallerWarning>) -> Emb
                 t.string_column("Target"),
             );
             if let (Ok(a), Ok(ty), Ok(src), Ok(tgt)) = cols {
-                if t.rows.len() > MAX_INVENTORY_ROWS {
+                if t.row_count() > MAX_INVENTORY_ROWS {
                     warnings.push(InstallerWarning::InventoryTruncated("CustomAction"));
                 }
-                for row in t.rows.iter().take(MAX_INVENTORY_ROWS) {
+                for row in t.rows().take(MAX_INVENTORY_ROWS) {
                     let Some(action) = row.get(a).and_then(|&v| db.text(v)) else {
                         continue;
                     };
@@ -983,10 +1039,10 @@ fn read_embedded(db: &Database<'_>, warnings: &mut Vec<InstallerWarning>) -> Emb
     match db.table("Media") {
         Ok(Some(t)) => {
             if let Ok(c) = t.string_column("Cabinet") {
-                if t.rows.len() > MAX_INVENTORY_ROWS {
+                if t.row_count() > MAX_INVENTORY_ROWS {
                     warnings.push(InstallerWarning::InventoryTruncated("Media"));
                 }
-                for row in t.rows.iter().take(MAX_INVENTORY_ROWS) {
+                for row in t.rows().take(MAX_INVENTORY_ROWS) {
                     if let Some(name) = row
                         .get(c)
                         .and_then(|&v| db.text(v))
@@ -1037,8 +1093,11 @@ fn le_bytes(name: &[u16]) -> Vec<u8> {
     name.iter().flat_map(|u| u.to_le_bytes()).collect()
 }
 
+/// Whether `entry` is called `name`, compared case-insensitively as the
+/// compound file format and the OS compare names: `\u{5}DIGITALSIGNATURE`
+/// is the signature stream too.
 fn is_named(entry: &Entry, name: &str) -> bool {
-    entry.name.iter().copied().eq(name.encode_utf16())
+    entry.is_named(name)
 }
 
 /// The SHA-256 content hash alone.
@@ -1175,6 +1234,16 @@ fn read_signature(
             return None;
         }
     };
+    if sig.size > MAX_SIGNATURE_SIZE || ex.is_some_and(|e| e.size > 64) {
+        // Not read at all: reported as a signature that does not parse.
+        warnings.push(InstallerWarning::SignatureTooLarge);
+        return Some(verify_detached(
+            &[],
+            content,
+            Subject::Sip(SIP_GUID_MSI),
+            SignatureKind::Msi,
+        ));
+    }
     let der = cf.stream(sig);
     let mut report = verify_detached(
         &der,
@@ -1186,10 +1255,12 @@ fn read_signature(
     // signature's digest algorithm; otherwise the signature cannot be
     // valid, whatever its content digest says.
     if let Some(ex) = ex {
+        // A broken digest (MD5) never backs the metadata check.
         let expected = report
             .signatures
             .first()
             .and_then(|s| s.digest_alg)
+            .filter(|a| !a.is_broken())
             .and_then(|a| a.hash_algorithm())
             .and_then(|a| metadata_digest(root, a));
         let stored = if ex.is_storage {
@@ -1222,21 +1293,36 @@ fn demote(report: &mut SignatureReport, status: SignatureStatus) {
     }
 }
 
+/// What the normalised hash covers for the summary information.
+enum NormalisedSummary<'a> {
+    /// Parsed: its canonical form without the timestamps.
+    Parsed(&'a SummaryInfo),
+    /// Present but unreadable: its raw bytes.
+    Raw(&'a [u8]),
+    /// Absent.
+    Absent,
+}
+
 /// The normalised hash (see the module documentation).
-fn normalised_hash(cf: &CompoundFile<'_>, root: &Entry, summary: Option<&SummaryInfo>) -> Digest {
+fn normalised_hash(cf: &CompoundFile<'_>, root: &Entry, summary: NormalisedSummary<'_>) -> Digest {
     let mut h = Sha256Stream::default();
     h.update(NORMALISED_TAG);
     h.update(&root.clsid);
     let mut path: Vec<u8> = Vec::new();
     normalised_storage(cf, root, true, &mut path, &mut h);
     match summary {
-        Some(info) => {
+        NormalisedSummary::Parsed(info) => {
             let canon = summary::canonical_without_times(info);
             h.update(b"I");
             h.update(&u64::try_from(canon.len()).unwrap_or(u64::MAX).to_le_bytes());
             h.update(&canon);
         }
-        None => h.update(b"N"),
+        NormalisedSummary::Raw(raw) => {
+            h.update(b"R");
+            h.update(&u64::try_from(raw.len()).unwrap_or(u64::MAX).to_le_bytes());
+            h.update(raw);
+        }
+        NormalisedSummary::Absent => h.update(b"N"),
     }
     h.finish()
 }

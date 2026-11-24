@@ -30,6 +30,12 @@
 //! Anything inconsistent (a pool that does not cover `_StringData`, a table
 //! stream that is not a whole number of rows, a reference past the pool) is
 //! an error for that table, never a guess.
+//!
+//! Streams are looked up the way the installer opens them: by their
+//! *encoded* name, compared case-insensitively. A stream whose name merely
+//! decodes to the same text (an unencoded `\u{4840}Property`, say) is a
+//! different stream the installer never reads, so it is never read here
+//! either.
 
 #![forbid(unsafe_code)]
 
@@ -44,6 +50,32 @@ pub const MAX_STRINGS: usize = 1 << 22;
 pub const MAX_TABLES: usize = 4096;
 /// The most columns a table may have (the Windows Installer limit).
 pub const MAX_COLUMNS: usize = 32;
+/// The most rows read from one table. A table with more is an error for
+/// that table, found from its stream size before anything is allocated.
+pub const MAX_TABLE_ROWS: usize = 1 << 18;
+/// The most `_Columns` rows read.
+pub const MAX_COLUMN_ROWS: usize = MAX_TABLES * MAX_COLUMNS;
+
+fn columns_schema() -> [Column; 4] {
+    [
+        Column {
+            name: "Table".into(),
+            ty: column::VALID | column::STRING | 64,
+        },
+        Column {
+            name: "Number".into(),
+            ty: column::VALID | 2,
+        },
+        Column {
+            name: "Name".into(),
+            ty: column::VALID | column::STRING | 64,
+        },
+        Column {
+            name: "Type".into(),
+            ty: column::VALID | 2,
+        },
+    ]
+}
 
 /// Column type bits.
 pub(crate) mod column {
@@ -62,6 +94,12 @@ pub enum TableError {
     Catalog(&'static str),
     /// The table's stream is not a whole number of rows.
     RowSize {
+        /// The table.
+        table: String,
+    },
+    /// The table has more than [`MAX_TABLE_ROWS`] rows (or, for the
+    /// catalogs, more than [`MAX_TABLES`] or [`MAX_COLUMN_ROWS`]).
+    TooManyRows {
         /// The table.
         table: String,
     },
@@ -86,6 +124,7 @@ impl fmt::Display for TableError {
             Self::StringPool(why) => write!(f, "string pool: {why}"),
             Self::Catalog(why) => write!(f, "table catalog: {why}"),
             Self::RowSize { table } => write!(f, "table {table}: not a whole number of rows"),
+            Self::TooManyRows { table } => write!(f, "table {table}: too many rows"),
             Self::BadStringRef { table } => write!(f, "table {table}: bad string reference"),
             Self::Schema { table, column } => {
                 write!(f, "table {table}: missing or mistyped column {column}")
@@ -219,14 +258,19 @@ impl StringPool {
                 i += 1;
                 continue;
             }
-            // A string of 64 KiB or more takes two pool entries (a zero
-            // length whose refcount is the high word, then the low word),
-            // but only one string ID.
+            // A string of 64 KiB or more takes two pool entries: the first
+            // has a zero length and the refcount, the second the length's
+            // low and high words. It still has one string ID, the first
+            // entry's (the reference loader numbers strings, not entries).
             let len = if len_word == 0 {
                 if i + 1 >= count {
                     return Err(TableError::StringPool("long string at the end"));
                 }
-                let len = (refs << 16) | word(2 * i + 2);
+                let len = word(2 * i + 2) | (word(2 * i + 3) << 16);
+                if len < 0x1_0000 {
+                    return Err(TableError::StringPool("long entry for a short string"));
+                }
+                let _ = refs;
                 i += 2;
                 len
             } else {
@@ -268,13 +312,6 @@ impl StringPool {
             None if id == 0 => Ok(None),
             None => Err(()),
         }
-    }
-
-    fn id_of(&self, text: &str) -> Option<u32> {
-        self.strings
-            .iter()
-            .position(|s| s.as_deref() == Some(text))
-            .and_then(|i| u32::try_from(i).ok())
     }
 
     fn ref_bytes(&self) -> usize {
@@ -346,7 +383,7 @@ pub(crate) struct Column {
 
 impl Column {
     fn width(&self, ref_bytes: usize) -> Option<usize> {
-        if self.ty & !column::NULLABLE == column::STRING | column::VALID {
+        if self.is_binary() {
             // A binary (stream) column.
             return Some(2);
         }
@@ -360,8 +397,14 @@ impl Column {
         }
     }
 
+    fn is_binary(&self) -> bool {
+        self.ty & !column::NULLABLE == column::STRING | column::VALID
+    }
+
+    /// A string column (binary columns, which share the string bit, are
+    /// not).
     fn is_string(&self) -> bool {
-        self.ty & column::STRING != 0
+        self.ty & column::STRING != 0 && !self.is_binary()
     }
 }
 
@@ -378,15 +421,28 @@ pub(crate) enum Value {
     Stream,
 }
 
-/// A decoded table.
+/// A decoded table, its cells stored row by row in one buffer.
 #[derive(Debug, Clone)]
 pub(crate) struct Table {
     pub name: String,
     pub columns: Vec<Column>,
-    pub rows: Vec<Vec<Value>>,
+    cells: Vec<Value>,
 }
 
 impl Table {
+    /// The number of rows.
+    pub fn row_count(&self) -> usize {
+        self.cells
+            .len()
+            .checked_div(self.columns.len())
+            .unwrap_or(0)
+    }
+
+    /// The rows, each a slice of one value per column.
+    pub fn rows(&self) -> impl Iterator<Item = &[Value]> {
+        self.cells.chunks(self.columns.len().max(1))
+    }
+
     /// The index of the column called `name`.
     pub fn column(&self, name: &str) -> Option<usize> {
         self.columns.iter().position(|c| c.name == name)
@@ -407,7 +463,11 @@ impl Table {
     /// schema error.
     pub fn int_column(&self, name: &'static str) -> Result<usize, TableError> {
         self.column(name)
-            .filter(|&i| self.columns.get(i).is_some_and(|c| !c.is_string()))
+            .filter(|&i| {
+                self.columns
+                    .get(i)
+                    .is_some_and(|c| !c.is_string() && !c.is_binary())
+            })
             .ok_or_else(|| TableError::Schema {
                 table: self.name.clone(),
                 column: name,
@@ -420,38 +480,28 @@ impl Table {
 #[derive(Debug)]
 pub(crate) struct Database<'a> {
     pub cf: CompoundFile<'a>,
-    /// Root streams, by decoded name.
-    pub streams: BTreeMap<String, &'a Entry>,
+    root: &'a Entry,
     pub strings: Result<StringPool, TableError>,
+    /// `_Columns`, read once.
+    columns_catalog: Result<Table, TableError>,
     /// `_Tables`, in stored order. Empty when it could not be read.
     pub table_names: Vec<String>,
     /// Why the table catalog could not be read, if it could not.
     pub catalog_error: Option<TableError>,
 }
 
-/// Which stream name is a table's.
-fn table_stream(name: &str) -> String {
-    let mut s = String::from('\u{4840}');
-    s.push_str(name);
-    s
-}
-
 impl<'a> Database<'a> {
     pub fn open(cf: CompoundFile<'a>, root: &'a Entry) -> Self {
-        let mut streams = BTreeMap::new();
-        for child in &root.children {
-            if !child.is_storage {
-                streams.insert(decode_stream_name(&child.name), child);
-            }
-        }
         let mut db = Self {
             cf,
-            streams,
+            root,
             strings: Err(TableError::StringPool("not read")),
+            columns_catalog: Err(TableError::Catalog("not read")),
             table_names: Vec::new(),
             catalog_error: None,
         };
         db.strings = db.load_strings();
+        db.columns_catalog = db.read_raw("_Columns", &columns_schema(), MAX_COLUMN_ROWS);
         match db.load_table_names() {
             Ok(names) => db.table_names = names,
             Err(e) => db.catalog_error = Some(e),
@@ -459,16 +509,27 @@ impl<'a> Database<'a> {
         db
     }
 
-    pub fn stream_bytes(&self, name: &str) -> Option<Vec<u8>> {
-        self.streams.get(name).map(|e| self.cf.stream(e))
+    /// The root stream the installer opens for `name`: found by its
+    /// encoded name (with the table prefix for a table), compared
+    /// case-insensitively as the compound file format compares names. A
+    /// stream whose name only *decodes* to the same text (an unencoded
+    /// copy) is never used, as the OS never opens it.
+    pub fn stream_entry(&self, name: &str, table: bool) -> Option<&'a Entry> {
+        self.root
+            .child(&encode_stream_name(name, table))
+            .filter(|e| !e.is_storage)
+    }
+
+    fn stream_bytes(&self, name: &str, table: bool) -> Option<Vec<u8>> {
+        self.stream_entry(name, table).map(|e| self.cf.stream(e))
     }
 
     fn load_strings(&self) -> Result<StringPool, TableError> {
         let pool = self
-            .stream_bytes(&table_stream("_StringPool"))
+            .stream_bytes("_StringPool", true)
             .ok_or(TableError::StringPool("no _StringPool"))?;
         let data = self
-            .stream_bytes(&table_stream("_StringData"))
+            .stream_bytes("_StringData", true)
             .ok_or(TableError::StringPool("no _StringData"))?;
         StringPool::parse(&pool, &data)
     }
@@ -484,10 +545,11 @@ impl<'a> Database<'a> {
                 name: "Name".into(),
                 ty: column::VALID | column::STRING | 64,
             }],
+            MAX_TABLES,
         )?;
         let pool = self.pool()?;
-        let mut names = Vec::with_capacity(tables.rows.len());
-        for row in &tables.rows {
+        let mut names = Vec::with_capacity(tables.row_count());
+        for row in tables.rows() {
             match row.first() {
                 Some(Value::Str(id)) => match pool.get(*id) {
                     Ok(Some(s)) => names.push(s.to_owned()),
@@ -509,39 +571,19 @@ impl<'a> Database<'a> {
 
     /// The columns of `table`, from `_Columns`, in number order.
     fn columns(&self, table: &str) -> Result<Vec<Column>, TableError> {
-        let catalog = self.read_raw(
-            "_Columns",
-            &[
-                Column {
-                    name: "Table".into(),
-                    ty: column::VALID | column::STRING | 64,
-                },
-                Column {
-                    name: "Number".into(),
-                    ty: column::VALID | 2,
-                },
-                Column {
-                    name: "Name".into(),
-                    ty: column::VALID | column::STRING | 64,
-                },
-                Column {
-                    name: "Type".into(),
-                    ty: column::VALID | 2,
-                },
-            ],
-        )?;
+        let catalog = &self.columns_catalog;
         let pool = self.pool()?;
-        let Some(table_id) = pool.id_of(table) else {
-            return Err(TableError::Catalog("table name not in the string pool"));
-        };
+        let catalog = catalog.as_ref().map_err(Clone::clone)?;
         let mut found: BTreeMap<i32, Column> = BTreeMap::new();
-        for row in &catalog.rows {
+        for row in catalog.rows() {
             let (Some(Value::Str(t)), Some(&number), Some(&name), Some(&ty)) =
                 (row.first(), row.get(1), row.get(2), row.get(3))
             else {
                 continue;
             };
-            if *t != table_id {
+            // By text: the pool may hold the same string twice, and a row
+            // belongs to the table whichever ID it uses.
+            if pool.get(*t) != Ok(Some(table)) {
                 continue;
             }
             let (Value::Int(number), Value::Str(name), Value::Int(ty)) = (number, name, ty) else {
@@ -580,10 +622,17 @@ impl<'a> Database<'a> {
             return Ok(None);
         }
         let columns = self.columns(table)?;
-        self.read_raw(table, &columns).map(Some)
+        self.read_raw(table, &columns, MAX_TABLE_ROWS).map(Some)
     }
 
-    fn read_raw(&self, table: &str, columns: &[Column]) -> Result<Table, TableError> {
+    /// Reads a table stream with these columns. More than `max_rows` rows
+    /// is an error, checked before anything is allocated for them.
+    fn read_raw(
+        &self,
+        table: &str,
+        columns: &[Column],
+        max_rows: usize,
+    ) -> Result<Table, TableError> {
         let pool = self.pool()?;
         let ref_bytes = pool.ref_bytes();
         let widths: Vec<usize> = columns
@@ -596,17 +645,26 @@ impl<'a> Database<'a> {
             })?;
         let row_size: usize = widths.iter().sum();
         // A table the catalog lists but with no stream is empty.
-        let data = self.stream_bytes(&table_stream(table)).unwrap_or_default();
-        if row_size == 0 || data.len() % row_size != 0 {
+        let entry = self.stream_entry(table, true);
+        let len = entry.map_or(0, |e| e.size);
+        let row_size_u64 = u64::try_from(row_size).unwrap_or(u64::MAX);
+        if row_size == 0 || len % row_size_u64 != 0 {
             return Err(TableError::RowSize {
                 table: table.to_owned(),
             });
         }
-        let rows = data.len() / row_size;
-        let mut out = vec![Vec::with_capacity(columns.len()); rows];
+        let rows = usize::try_from(len / row_size_u64).unwrap_or(usize::MAX);
+        if rows > max_rows {
+            return Err(TableError::TooManyRows {
+                table: table.to_owned(),
+            });
+        }
+        let data = entry.map(|e| self.cf.stream(e)).unwrap_or_default();
+        let ncols = columns.len();
+        let mut out = vec![Value::Null; rows.saturating_mul(ncols)];
         let mut base = 0_usize;
-        for (col, &width) in columns.iter().zip(&widths) {
-            for (i, row) in out.iter_mut().enumerate() {
+        for (c, (col, &width)) in columns.iter().zip(&widths).enumerate() {
+            for i in 0..rows {
                 let at = base + i * width;
                 let raw = data
                     .get(at..at + width)
@@ -616,7 +674,7 @@ impl<'a> Database<'a> {
                             .fold(0_u32, |acc, &x| (acc << 8) | u32::from(x))
                     })
                     .unwrap_or(0);
-                let value = if col.ty & !column::NULLABLE == column::STRING | column::VALID {
+                let value = if col.is_binary() {
                     if raw == 0 { Value::Null } else { Value::Stream }
                 } else if col.is_string() {
                     if raw == 0 {
@@ -637,14 +695,16 @@ impl<'a> Database<'a> {
                 } else {
                     Value::Int(i32::from_ne_bytes((raw ^ 0x8000_0000).to_ne_bytes()))
                 };
-                row.push(value);
+                if let Some(cell) = out.get_mut(i * ncols + c) {
+                    *cell = value;
+                }
             }
             base += width * rows;
         }
         Ok(Table {
             name: table.to_owned(),
             columns: columns.to_vec(),
-            rows: out,
+            cells: out,
         })
     }
 
@@ -708,6 +768,52 @@ mod tests {
         assert!(StringPool::parse(&pool, b"abcd").is_err());
         // One that runs past it, too.
         assert!(StringPool::parse(&pool, b"ab").is_err());
+    }
+
+    fn pool_entry(pool: &mut Vec<u8>, a: u32, b: u32) {
+        pool.extend_from_slice(&u16::try_from(a).unwrap().to_le_bytes());
+        pool.extend_from_slice(&u16::try_from(b).unwrap().to_le_bytes());
+    }
+
+    #[test]
+    fn long_strings_take_two_entries_and_one_id() {
+        // String 1: 70,000 bytes with refcount 3 (not its length's high
+        // word). String 2: "after". String 3: 140,000 bytes.
+        let long1 = vec![b'a'; 70_000];
+        let long2 = vec![b'c'; 140_000];
+        let mut pool = Vec::new();
+        pool_entry(&mut pool, 1252, 0);
+        pool_entry(&mut pool, 0, 3);
+        pool_entry(&mut pool, 70_000 & 0xffff, 70_000 >> 16);
+        pool_entry(&mut pool, 5, 1);
+        pool_entry(&mut pool, 0, 7);
+        pool_entry(&mut pool, 140_000 & 0xffff, 140_000 >> 16);
+        let mut data = long1.clone();
+        data.extend_from_slice(b"after");
+        data.extend_from_slice(&long2);
+        let p = StringPool::parse(&pool, &data).unwrap();
+        assert_eq!(p.get(1).unwrap().map(str::len), Some(70_000));
+        assert_eq!(p.get(2), Ok(Some("after")));
+        assert_eq!(p.get(3).unwrap().map(str::len), Some(140_000));
+        assert!(p.get(4).is_err());
+
+        // Swapping the refcount and the high word is caught: the lengths
+        // no longer cover the data exactly.
+        let mut swapped = Vec::new();
+        pool_entry(&mut swapped, 1252, 0);
+        pool_entry(&mut swapped, 0, 70_000 >> 16);
+        pool_entry(&mut swapped, 70_000 & 0xffff, 3);
+        pool_entry(&mut swapped, 5, 1);
+        pool_entry(&mut swapped, 0, 140_000 >> 16);
+        pool_entry(&mut swapped, 140_000 & 0xffff, 7);
+        assert!(StringPool::parse(&swapped, &data).is_err());
+
+        // A long entry for a short string is malformed.
+        let mut short = Vec::new();
+        pool_entry(&mut short, 1252, 0);
+        pool_entry(&mut short, 0, 1);
+        pool_entry(&mut short, 5, 0);
+        assert!(StringPool::parse(&short, b"after").is_err());
     }
 
     #[test]
