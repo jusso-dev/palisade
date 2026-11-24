@@ -14,6 +14,14 @@
 //! A path that may still contain an 8.3 short name matches no variable: it
 //! must be expanded first (see [`super::path`]). The same goes for each
 //! folder in [`KnownFolders`].
+//!
+//! Folder matching compares names case-insensitively, as on an ordinary
+//! NTFS directory. A directory can be made case-sensitive, and then
+//! `C:\Parent\Temp` and `C:\Parent\temp` are different folders; this
+//! module does not know which directories are, so it matches both. Reading
+//! the per-directory flag needs the OS and is left to the OS backend (#54).
+//! Until then, a match here is not proof that a path is inside the folder
+//! on a case-sensitive directory.
 
 #![forbid(unsafe_code)]
 
@@ -155,7 +163,7 @@ pub fn path_variables_matched(
     folders: &KnownFolders,
     volume: Option<&VolumeInfo>,
 ) -> Result<Vec<PathVariable>, PathError> {
-    path.match_key()?;
+    path.require_long_names()?;
     let mut out = Vec::new();
     for v in PathVariable::ALL {
         let hit = match v {

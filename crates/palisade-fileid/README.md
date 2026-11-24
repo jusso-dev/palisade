@@ -69,8 +69,12 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   that come from where a file is stored rather than from its content. All of
   it is pure and runs on every OS:
   - `fsctx::path`: one canonical form for every way of naming a file, so a
-    file cannot dodge or borrow a path rule by being named differently
-    (threat model T-engine-04, AT-04). It handles `\\?\`, `\??\`, `\\.\`,
+    name cannot dodge or borrow a path rule by being spelt differently
+    (threat model T-engine-04, AT-04). This is name normalisation only: it
+    does not say which file a name opens. Through a link, `C:\trusted\link.exe`
+    can open `C:\untrusted\payload.exe`, so a caller must match the opened
+    file on the handle's final path (`PathForms::canonical`, filled from
+    `win::fsctx::final_path`), not on the normalised name (T-agent-13). It handles `\\?\`, `\??\`, `\\.\`,
     `GLOBALROOT`, NT device paths, volume GUID paths, UNC, `.` and `..`,
     trailing dots and spaces, reserved device names, alternate data stream
     syntax, NTFS-style case folding and paths up to 32,767 UTF-16 units.
@@ -194,8 +198,8 @@ OS trust-verification API that #48 describes will live there too.
 
 - `os-trust` (off by default): builds `palisade_fileid::win` on Windows. It
   adds OS-backed reads and never changes what the portable code reports. It
-  has no effect on other targets. Only the agent, and the CLI for local
-  diagnostics, turn it on.
+  has no effect on other targets. The agent, and the CLI for local
+  diagnostics, are its intended users; neither depends on this crate yet.
 
 ## Stability
 

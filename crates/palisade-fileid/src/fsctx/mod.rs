@@ -115,17 +115,39 @@ impl PathForms {
         Self::from_normalized(original, normalize_nt(original))
     }
 
-    /// The form to match rules against: the final path if known, otherwise
-    /// the long path. `None` when neither is known.
+    /// The form to match rules about the opened file against: the final
+    /// path of the opened handle. `None` until a caller has read it.
+    ///
+    /// The other forms describe the name as written. Through a symbolic
+    /// link, junction or mount point, that name can belong to a different
+    /// file from the one opened, so there is no fallback to them here
+    /// (threat model T-agent-13). Use [`Self::lexical`] to match the name
+    /// itself.
     #[must_use]
     pub fn canonical(&self) -> Option<&NormalizedPath> {
-        self.final_path.as_ref().or(self.long_path.as_ref())
+        self.final_path.as_ref()
     }
 
-    /// [`NormalizedPath::match_key`] of [`Self::canonical`].
+    /// [`NormalizedPath::match_key`] of [`Self::canonical`]: the key for
+    /// link-aware rule matching. `None` until the final path is known.
     #[must_use]
     pub fn case_folded(&self) -> Option<String> {
         self.canonical().and_then(|p| p.match_key().ok())
+    }
+
+    /// The name as written, with every short name expanded: the long path.
+    /// It does not resolve links, so it says what the path names, not which
+    /// file opening it reaches.
+    #[must_use]
+    pub fn lexical(&self) -> Option<&NormalizedPath> {
+        self.long_path.as_ref()
+    }
+
+    /// [`NormalizedPath::match_key`] of [`Self::lexical`], for matching the
+    /// name rather than the opened file.
+    #[must_use]
+    pub fn lexical_key(&self) -> Option<String> {
+        self.lexical().and_then(|p| p.match_key().ok())
     }
 }
 
@@ -180,13 +202,17 @@ mod tests {
             Some(r"C:\windows\system32\cmd.exe")
         );
         assert_eq!(
-            f.case_folded().as_deref(),
+            f.lexical_key().as_deref(),
             Some(r"C:\WINDOWS\SYSTEM32\CMD.EXE")
         );
+        // With no final path there is no link-aware key, only the lexical one.
+        assert_eq!(f.canonical(), None);
+        assert_eq!(f.case_folded(), None);
 
         let s = PathForms::from_original(r"C:\PROGRA~1\x.exe");
         assert!(s.normalized.is_ok());
         assert_eq!(s.long_path, None);
+        assert_eq!(s.lexical_key(), None);
         assert_eq!(s.case_folded(), None);
 
         let u = PathForms::from_original(r"\\srv\share\x.exe");
@@ -196,13 +222,32 @@ mod tests {
         let bad = PathForms::from_original(r"relative\x.exe");
         assert_eq!(bad.normalized, Err(PathError::NotFullyQualified));
         assert_eq!(bad.canonical(), None);
+        assert_eq!(bad.lexical(), None);
 
         let nt = PathForms::from_nt(r"\Device\HarddiskVolume3\Windows\x.exe");
         assert!(nt.nt_path.is_some());
-        assert!(nt.canonical().is_some());
+        assert!(nt.lexical().is_some());
+        assert!(nt.canonical().is_none());
 
         let ctx = FsContext::from_path(r"C:\x.exe");
         assert!(ctx.motw.is_none());
-        assert!(ctx.path.canonical().is_some());
+        assert!(ctx.path.lexical().is_some());
+        assert!(ctx.path.canonical().is_none());
+    }
+
+    #[test]
+    fn rule_key_uses_the_final_path() {
+        // `C:\trusted\link.exe` is a link to `C:\untrusted\payload.exe`.
+        let mut f = PathForms::from_original(r"C:\trusted\link.exe");
+        assert_eq!(f.case_folded(), None);
+        f.final_path = normalize_win32(r"C:\untrusted\payload.exe").ok();
+        assert_eq!(
+            f.case_folded().as_deref(),
+            Some(r"C:\UNTRUSTED\PAYLOAD.EXE")
+        );
+        assert_eq!(f.lexical_key().as_deref(), Some(r"C:\TRUSTED\LINK.EXE"));
+        // A final path with an unexpanded short name still yields no key.
+        f.final_path = normalize_win32(r"C:\PROGRA~1\x.exe").ok();
+        assert_eq!(f.case_folded(), None);
     }
 }

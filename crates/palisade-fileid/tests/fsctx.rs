@@ -60,6 +60,11 @@ proptest! {
             for c in p.components() {
                 prop_assert!(!c.is_empty() && c != "." && c != "..");
             }
+            for a in p.ancestors() {
+                let a = a.unwrap();
+                let again = normalize_win32(&a.to_win32_string());
+                prop_assert_eq!(again.as_ref().map(|x| x.case_folded()), Ok(a.case_folded()));
+            }
         }
     }
 

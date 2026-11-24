@@ -178,8 +178,10 @@ impl FromStr for Sid {
             Some("1") => {}
             Some(r) => {
                 return Err(match parse_decimal(r) {
+                    // The only supported revision must be written `1`;
+                    // `01` is a syntax error, not an unsupported revision.
+                    Some(1) | None => SidError::Syntax,
                     Some(v) => SidError::UnsupportedRevision(u8::try_from(v).unwrap_or(u8::MAX)),
-                    None => SidError::Syntax,
                 });
             }
             None => return Err(SidError::Syntax),
@@ -274,6 +276,9 @@ pub mod well_known {
     /// `OWNER RIGHTS` (S-1-3-4): an ACE for it applies to the object's
     /// current owner and replaces the owner's implicit rights.
     pub const OWNER_RIGHTS: Sid = Sid::constant(3, &[4]);
+    /// `NETWORK` (S-1-5-2): users logged on over the network. An anonymous
+    /// network logon holds it without `Everyone`.
+    pub const NETWORK: Sid = Sid::constant(5, &[2]);
     /// `INTERACTIVE` (S-1-5-4).
     pub const INTERACTIVE: Sid = Sid::constant(5, &[4]);
     /// `ANONYMOUS LOGON` (S-1-5-7).
@@ -430,6 +435,13 @@ mod tests {
             "S-2-5".parse::<Sid>(),
             Err(SidError::UnsupportedRevision(2))
         );
+        assert_eq!(
+            "S-2-5-18".parse::<Sid>(),
+            Err(SidError::UnsupportedRevision(2))
+        );
+        for s in ["S-01-5-18", "S-001-5-18"] {
+            assert_eq!(s.parse::<Sid>(), Err(SidError::Syntax), "{s}");
+        }
     }
 
     #[test]

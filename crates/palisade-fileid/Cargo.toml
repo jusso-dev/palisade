@@ -14,7 +14,8 @@ workspace = true
 
 [features]
 # OS-backed reads on Windows (`palisade_fileid::win`, ADR 0003). Off by
-# default; only the agent, and the CLI for diagnostics, turn it on.
+# default. Intended for the agent, and the CLI for diagnostics; neither
+# depends on this crate yet.
 os-trust = []
 
 [dependencies]

@@ -24,13 +24,15 @@
 //! The tokens evaluated are:
 //!
 //! - one per distinct non-administrator SID named by an applicable allow ACE,
-//!   holding that SID plus `Everyone` (just the SID for `ANONYMOUS LOGON`,
-//!   whose token lacks `Everyone` by default). This over-approximates every
-//!   real non-administrator token that holds `Everyone`, which is every
-//!   token except an anonymous one: take the first allow ACE that grants a
-//!   right to a real token. No deny ACE before it applied to the real token,
-//!   so none applied to the smaller token of that ACE's SID either, and that
-//!   token is granted the right too;
+//!   holding that SID plus `Everyone`. This over-approximates every real
+//!   non-administrator token that holds `Everyone`: take the first allow ACE
+//!   that grants a right to a real token. No deny ACE before it applied to
+//!   the real token, so none applied to the smaller token of that ACE's SID
+//!   either, and that token is granted the right too. An anonymous token
+//!   lacks `Everyone` by default and may hold `ANONYMOUS LOGON` and
+//!   `NETWORK`, so `ANONYMOUS LOGON` is evaluated alone, and `NETWORK` both
+//!   alone and with `Everyone`. A deny for `Everyone` is then not assumed
+//!   to stop either;
 //! - the object's owner, if it is not an administrator, with the owner's
 //!   implicit `READ_CONTROL` and `WRITE_DAC` (which a deny ACE cannot
 //!   remove), unless the DACL has an unconditional `OWNER RIGHTS`
@@ -45,12 +47,16 @@
 //!
 //! - **Conditional (callback) allow ACEs** and **object allow ACEs** may
 //!   apply; their rights are reported, and also listed as `uncertain`.
-//!   Conditional and object **deny** ACEs are assumed not to apply.
+//!   Conditional and object **deny** ACEs are assumed not to apply when
+//!   working out what may be held. They are assumed to apply when working
+//!   out what is held for certain, so a right that such a deny may remove
+//!   is `uncertain`, not certain.
 //! - **Generic rights** (`GENERIC_WRITE`, `GENERIC_ALL`) in an allow ACE are
 //!   mapped to the file rights they stand for. The OS access check does not
 //!   map generic bits stored in an ACE, so such an ACE may in fact grant
-//!   nothing; mapping it can only over-report. In a deny ACE they are not
-//!   mapped, so they deny nothing, as in the OS.
+//!   nothing; mapping it can only over-report, and a right that only a
+//!   generic bit grants is `uncertain`. In a deny ACE they are not mapped,
+//!   so they deny nothing, as in the OS.
 //! - **ACE types the model does not know** grant every right, as uncertain,
 //!   to an unknown principal.
 //! - **A NULL or absent DACL** grants everyone everything.
@@ -436,10 +442,11 @@ impl SecurityDescriptor {
         };
         let mut out = vec![0u8; 20];
         let mut control = self.control | control::SELF_RELATIVE;
+        // With no DACL the offset stays zero. `DACL_PRESENT` is kept as
+        // given: set, it is a NULL DACL; clear, the DACL is absent. Both
+        // grant everyone everything.
         if dacl.is_some() {
             control |= control::DACL_PRESENT;
-        } else {
-            control &= !control::DACL_PRESENT;
         }
         let put = |out: &mut Vec<u8>, at: usize, part: &[u8]| -> Option<()> {
             if part.is_empty() {
@@ -536,7 +543,14 @@ impl SecurityDescriptor {
         let owner = read_sid_at(bytes, read_u32(header, 4)?)?;
         let group = read_sid_at(bytes, read_u32(header, 8)?)?;
         let dacl_offset = read_u32(header, 16)?;
-        let dacl = if control & control::DACL_PRESENT == 0 || dacl_offset == 0 {
+        let dacl = if control & control::DACL_PRESENT == 0 {
+            // The self-relative format requires a zero offset here.
+            if dacl_offset != 0 {
+                return Err(DescriptorError::BadOffset);
+            }
+            None
+        } else if dacl_offset == 0 {
+            // A NULL DACL.
             None
         } else {
             Some(read_acl(bytes, dacl_offset)?)
@@ -589,7 +603,8 @@ fn read_sid_at(bytes: &[u8], offset: u32) -> Result<Option<Sid>, DescriptorError
 
 fn read_acl(bytes: &[u8], offset: u32) -> Result<Vec<Ace>, DescriptorError> {
     let start = to_index(offset)?;
-    if start < 20 {
+    // An ACL starts on a DWORD boundary.
+    if start < 20 || start % 4 != 0 {
         return Err(DescriptorError::BadOffset);
     }
     let header = bytes
@@ -682,7 +697,9 @@ pub enum DescriptorError {
     UnsupportedRevision(u8),
     /// `SE_SELF_RELATIVE` is not set, so the offsets would be pointers.
     NotSelfRelative,
-    /// An owner, group or DACL offset points into the header or past the end.
+    /// An owner, group or DACL offset points into the header or past the
+    /// end, the DACL offset is not a multiple of 4, or it is nonzero while
+    /// `SE_DACL_PRESENT` is clear.
     BadOffset,
     /// The ACL revision is not 2 or 4.
     UnsupportedAclRevision(u8),
@@ -918,10 +935,21 @@ fn map_generic_allow(access_mask: u32) -> u32 {
     m
 }
 
+/// Which question a DACL walk answers.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Walk {
+    /// What the token may hold: every allow ACE that might apply does, with
+    /// generic bits mapped, and only unconditional deny ACEs apply.
+    Possible,
+    /// What the token holds for certain: only unconditional allow ACEs
+    /// apply, without generic mapping, and every deny ACE that might apply
+    /// does.
+    Definite,
+}
+
 /// Walks the DACL in stored order for a token and returns the bits granted.
-/// With `assume_uncertain`, conditional and object allow ACEs are taken to
-/// apply; conditional and object deny ACEs never are.
-fn walk(aces: &[Ace], in_token: &dyn Fn(&Sid) -> bool, assume_uncertain: bool) -> u32 {
+fn walk(aces: &[Ace], in_token: &dyn Fn(&Sid) -> bool, mode: Walk) -> u32 {
+    let possible = mode == Walk::Possible;
     let mut granted = 0u32;
     let mut denied = 0u32;
     for ace in aces.iter().filter(|a| a.applies_to_object()) {
@@ -929,15 +957,21 @@ fn walk(aces: &[Ace], in_token: &dyn Fn(&Sid) -> bool, assume_uncertain: bool) -
         if !in_token(sid) {
             continue;
         }
+        let deny_applies = match ace.kind {
+            // A deny for `OWNER RIGHTS` is ignored when working out what may
+            // be held, so that whether or not the OS applies it to the
+            // owner, rights can only be over-reported.
+            AceKind::Deny => !possible || *sid != well_known::OWNER_RIGHTS,
+            AceKind::DenyConditional | AceKind::DenyObject => !possible,
+            _ => false,
+        };
         match ace.kind {
-            AceKind::Allow => granted |= map_generic_allow(ace.mask) & !denied,
-            AceKind::AllowConditional | AceKind::AllowObject if assume_uncertain => {
+            AceKind::Allow if possible => granted |= map_generic_allow(ace.mask) & !denied,
+            AceKind::Allow => granted |= ace.mask & !denied,
+            AceKind::AllowConditional | AceKind::AllowObject if possible => {
                 granted |= map_generic_allow(ace.mask) & !denied;
             }
-            // A deny for `OWNER RIGHTS` is ignored, so that whether or not
-            // the OS applies it to the owner, rights can only be
-            // over-reported.
-            AceKind::Deny if *sid != well_known::OWNER_RIGHTS => denied |= ace.mask & !granted,
+            _ if deny_applies => denied |= ace.mask & !granted,
             _ => {}
         }
     }
@@ -950,10 +984,12 @@ fn token_rights(
     in_token: &dyn Fn(&Sid) -> bool,
     relevant: WriteRights,
 ) -> (WriteRights, WriteRights) {
-    let definite = WriteRights::from_mask(walk(aces, in_token, false)).intersection(relevant);
-    let possible = WriteRights::from_mask(walk(aces, in_token, true)).intersection(relevant);
-    // `possible` is a superset of `definite`: assuming more allow ACEs apply
-    // can only grant bits earlier, never deny them.
+    let definite =
+        WriteRights::from_mask(walk(aces, in_token, Walk::Definite)).intersection(relevant);
+    let possible =
+        WriteRights::from_mask(walk(aces, in_token, Walk::Possible)).intersection(relevant);
+    // `possible` is a superset of `definite`: the possible walk applies more
+    // allow ACEs and fewer deny ACEs, so it grants each bit no later.
     (possible.union(definite), possible.difference(definite))
 }
 
@@ -1035,14 +1071,29 @@ pub fn evaluate(
     for sid in candidates {
         let is_owner = owner == Some(sid);
         // An anonymous token does not hold `Everyone` by default, so a deny
-        // for `Everyone` must not be assumed to stop it.
-        let with_everyone = sid != well_known::ANONYMOUS;
-        let in_token = |s: &Sid| {
-            *s == sid
-                || (with_everyone && *s == well_known::EVERYONE)
-                || (is_owner && *s == well_known::OWNER_RIGHTS)
+        // for `Everyone` must not be assumed to stop it. It may hold
+        // `NETWORK`, which is therefore evaluated both with and without
+        // `Everyone`.
+        let everyone_variants: &[bool] = if sid == well_known::ANONYMOUS {
+            &[false]
+        } else if sid == well_known::NETWORK {
+            &[true, false]
+        } else {
+            &[true]
         };
-        let (mut rights, mut uncertain) = token_rights(aces, &in_token, relevant);
+        let mut rights = WriteRights::NONE;
+        let mut definite = WriteRights::NONE;
+        for &with_everyone in everyone_variants {
+            let in_token = |s: &Sid| {
+                *s == sid
+                    || (with_everyone && *s == well_known::EVERYONE)
+                    || (is_owner && *s == well_known::OWNER_RIGHTS)
+            };
+            let (r, u) = token_rights(aces, &in_token, relevant);
+            rights = rights.union(r);
+            definite = definite.union(r.difference(u));
+        }
+        let mut uncertain = rights.difference(definite);
         let implicit = is_owner && !owner_rights_ace;
         if implicit {
             // The owner's implicit READ_CONTROL | WRITE_DAC cannot be
@@ -1551,6 +1602,21 @@ mod tests {
         let w = eval_file(&d);
         assert!(w.rights.contains(WriteRights::WRITE_DATA));
         assert!(w.rights.contains(WriteRights::WRITE_ATTRIBUTES));
+        // The OS may not map a generic bit stored in an ACE, so a right that
+        // only a generic bit grants is not certain.
+        assert!(w.uncertain.contains(WriteRights::WRITE_DATA));
+        assert_eq!(w.uncertain, w.rights);
+        // A file-specific grant of the same right makes it certain again.
+        let d = sd(
+            wk::ADMINISTRATORS,
+            vec![
+                Ace::allow(wk::USERS, mask::GENERIC_WRITE),
+                Ace::allow(wk::USERS, mask::FILE_WRITE_DATA),
+            ],
+        );
+        let w = eval_file(&d);
+        assert!(!w.uncertain.contains(WriteRights::WRITE_DATA));
+        assert!(w.uncertain.contains(WriteRights::WRITE_ATTRIBUTES));
 
         let d = sd(
             wk::ADMINISTRATORS,
@@ -1594,7 +1660,43 @@ mod tests {
                 Ace::allow(wk::USERS, mask::FILE_WRITE_DATA),
             ],
         );
-        assert_eq!(eval_file(&d).rights, WriteRights::WRITE_DATA);
+        let w = eval_file(&d);
+        assert_eq!(w.rights, WriteRights::WRITE_DATA);
+        // ...but it might apply, so the right is not certain.
+        assert_eq!(w.uncertain, WriteRights::WRITE_DATA);
+
+        // A conditional deny after an unconditional allow cannot take the
+        // right back, so it stays certain.
+        let d = sd(
+            wk::ADMINISTRATORS,
+            vec![
+                Ace::allow(wk::USERS, mask::FILE_WRITE_DATA),
+                Ace {
+                    kind: AceKind::DenyConditional,
+                    flags: 0,
+                    mask: mask::FILE_WRITE_DATA,
+                    sid: Some(wk::USERS),
+                },
+            ],
+        );
+        let w = eval_file(&d);
+        assert_eq!(w.rights, WriteRights::WRITE_DATA);
+        assert_eq!(w.uncertain, WriteRights::NONE);
+
+        // The same for an object deny.
+        let d = sd(
+            wk::ADMINISTRATORS,
+            vec![
+                Ace {
+                    kind: AceKind::DenyObject,
+                    flags: 0,
+                    mask: mask::FILE_WRITE_DATA,
+                    sid: Some(wk::USERS),
+                },
+                Ace::allow(wk::USERS, mask::FILE_WRITE_DATA),
+            ],
+        );
+        assert_eq!(eval_file(&d).uncertain, WriteRights::WRITE_DATA);
     }
 
     #[test]
@@ -1754,6 +1856,16 @@ mod tests {
         let null = SecurityDescriptor::new(Some(wk::LOCAL_SYSTEM), None);
         let bytes = null.to_self_relative().unwrap();
         assert_eq!(SecurityDescriptor::from_self_relative(&bytes), Ok(null));
+
+        // A present-but-NULL DACL keeps its flag through a round trip.
+        let mut present_null = SecurityDescriptor::new(Some(wk::LOCAL_SYSTEM), None);
+        present_null.control |= control::DACL_PRESENT;
+        let bytes = present_null.to_self_relative().unwrap();
+        assert_eq!(&bytes[16..20], &[0, 0, 0, 0]);
+        let parsed = SecurityDescriptor::from_self_relative(&bytes).unwrap();
+        assert_eq!(parsed, present_null);
+        assert_ne!(parsed.control & control::DACL_PRESENT, 0);
+        assert!(eval_file(&parsed).user_writable());
     }
 
     #[test]
@@ -1837,6 +1949,52 @@ mod tests {
     }
 
     #[test]
+    fn dacl_offset_must_match_the_flag_and_be_aligned() {
+        let good = sd(wk::ADMINISTRATORS, vec![Ace::allow(wk::USERS, RX)])
+            .to_self_relative()
+            .unwrap();
+        // A nonzero DACL offset with `DACL_PRESENT` clear.
+        let mut b = good.clone();
+        b[2] &= !0x04;
+        assert_eq!(
+            SecurityDescriptor::from_self_relative(&b),
+            Err(DescriptorError::BadOffset)
+        );
+        // Both valid zero-offset forms still parse.
+        for flags in [0x80, 0x80 | 0x04] {
+            let mut b = vec![1, 0, 0, flags];
+            b.extend_from_slice(&[0; 16]);
+            let d = SecurityDescriptor::from_self_relative(&b).unwrap();
+            assert_eq!(d.dacl, None);
+        }
+        // A misaligned DACL: an empty ACL two bytes after an administrator
+        // owner. It would otherwise parse and report no write rights.
+        let mut b = vec![1, 0, 0x04, 0x80];
+        b.extend_from_slice(&20u32.to_le_bytes()); // owner
+        b.extend_from_slice(&0u32.to_le_bytes()); // group
+        b.extend_from_slice(&0u32.to_le_bytes()); // SACL
+        b.extend_from_slice(&38u32.to_le_bytes()); // DACL, not a multiple of 4
+        b.extend_from_slice(&[1, 2, 0, 0, 0, 0, 0, 5, 32, 0, 0, 0, 0x20, 2, 0, 0]);
+        b.extend_from_slice(&[0, 0]);
+        b.extend_from_slice(&[2, 0, 8, 0, 0, 0, 0, 0]);
+        assert_eq!(
+            SecurityDescriptor::from_self_relative(&b),
+            Err(DescriptorError::BadOffset)
+        );
+        // The same ACL aligned, with unused bytes after it, is accepted.
+        let mut b = vec![1, 0, 0x04, 0x80];
+        b.extend_from_slice(&20u32.to_le_bytes());
+        b.extend_from_slice(&0u32.to_le_bytes());
+        b.extend_from_slice(&0u32.to_le_bytes());
+        b.extend_from_slice(&36u32.to_le_bytes());
+        b.extend_from_slice(&[1, 2, 0, 0, 0, 0, 0, 5, 32, 0, 0, 0, 0x20, 2, 0, 0]);
+        b.extend_from_slice(&[2, 0, 16, 0, 0, 0, 0, 0]);
+        b.extend_from_slice(&[0; 8]);
+        let d = SecurityDescriptor::from_self_relative(&b).unwrap();
+        assert_eq!(d.dacl, Some(vec![]));
+    }
+
+    #[test]
     fn anonymous_is_not_assumed_to_hold_everyone() {
         let d = sd(
             wk::ADMINISTRATORS,
@@ -1846,6 +2004,42 @@ mod tests {
             ],
         );
         assert_eq!(eval_file(&d).rights, WriteRights::WRITE_DATA);
+    }
+
+    #[test]
+    fn network_is_also_evaluated_without_everyone() {
+        // An anonymous network token holds `NETWORK` but not `Everyone`.
+        let d = sd(
+            wk::ADMINISTRATORS,
+            vec![
+                Ace::deny(wk::EVERYONE, mask::FILE_WRITE_DATA),
+                Ace::allow(wk::NETWORK, mask::FILE_WRITE_DATA),
+            ],
+        );
+        let w = eval_file(&d);
+        assert_eq!(w.rights, WriteRights::WRITE_DATA);
+        assert_eq!(w.uncertain, WriteRights::NONE);
+        assert!(
+            w.principals
+                .iter()
+                .any(|p| p.principal == Principal::Sid(wk::NETWORK))
+        );
+        let a = assess_path(
+            Some(&d),
+            ObjectKind::File,
+            &[],
+            &EvaluationOptions::default(),
+        );
+        assert!(a.owner_trust_blockers.contains(WriteRights::WRITE_DATA));
+        // With `Everyone` the deny still counts for `NETWORK`.
+        let d = sd(
+            wk::ADMINISTRATORS,
+            vec![
+                Ace::deny(wk::NETWORK, mask::FILE_WRITE_DATA),
+                Ace::allow(wk::NETWORK, mask::FILE_WRITE_DATA),
+            ],
+        );
+        assert!(!eval_file(&d).user_writable());
     }
 
     #[test]

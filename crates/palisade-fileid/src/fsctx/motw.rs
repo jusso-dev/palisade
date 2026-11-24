@@ -30,9 +30,14 @@
 //! could read plus [`MotwWarning`]s.
 //!
 //! - At most [`MAX_ZONE_IDENTIFIER_BYTES`] are read; anything after is
-//!   ignored and reported. At most [`MAX_MOTW_WARNINGS`] warnings are kept.
+//!   ignored and reported. A line the limit cuts is not parsed, because
+//!   its value may be incomplete (`ZoneId=1` of `ZoneId=13`). At most
+//!   [`MAX_MOTW_WARNINGS`] warnings are kept.
 //! - UTF-8 (with or without a byte order mark) and UTF-16LE with a byte
-//!   order mark are accepted. Invalid sequences are replaced and reported.
+//!   order mark are accepted. Invalid sequences, and a final odd byte of
+//!   UTF-16LE, are replaced with U+FFFD and reported.
+//! - A zone is any run of ASCII digits that fits in a `u32`, leading zeros
+//!   included (`ZoneId=003` is the internet zone).
 //! - Section names and keys are compared ignoring ASCII case. Whitespace
 //!   around keys and values is removed. Lines starting with `;` or `#` are
 //!   comments. Only keys in the `[ZoneTransfer]` section count.
@@ -204,7 +209,12 @@ fn decode(bytes: &[u8], warnings: &mut Vec<MotwWarning>) -> String {
             })
             .collect();
         let odd = rest.len() % 2 != 0;
-        let text = String::from_utf16_lossy(&units);
+        let mut text = String::from_utf16_lossy(&units);
+        if odd {
+            // An incomplete code unit is replaced, not dropped, so a value
+            // it ends cannot look complete.
+            text.push(char::REPLACEMENT_CHARACTER);
+        }
         if odd || String::from_utf16(&units).is_err() {
             warnings.push(MotwWarning::InvalidEncoding);
         }
@@ -221,7 +231,8 @@ fn decode(bytes: &[u8], warnings: &mut Vec<MotwWarning>) -> String {
 }
 
 fn parse_zone(value: &str, warnings: &mut Vec<MotwWarning>) -> Option<Zone> {
-    if !value.is_empty() && value.len() <= 10 && value.bytes().all(|b| b.is_ascii_digit()) {
+    // The stream size limit bounds the length; `parse` rejects overflow.
+    if !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()) {
         if let Ok(n) = value.parse::<u32>() {
             return Some(Zone::from_id(n));
         }
@@ -250,14 +261,20 @@ fn stricter(a: Option<Zone>, b: Zone) -> Zone {
 #[must_use]
 pub fn parse_zone_identifier(bytes: &[u8]) -> Motw {
     let mut motw = Motw::default();
-    let input = match bytes.get(..MAX_ZONE_IDENTIFIER_BYTES) {
+    let (input, truncated) = match bytes.get(..MAX_ZONE_IDENTIFIER_BYTES) {
         Some(head) if bytes.len() > MAX_ZONE_IDENTIFIER_BYTES => {
             motw.warnings.push(MotwWarning::Truncated);
-            head
+            (head, true)
         }
-        _ => bytes,
+        _ => (bytes, false),
     };
-    let text = decode(input, &mut motw.warnings);
+    let mut text = decode(input, &mut motw.warnings);
+    if truncated {
+        // The limit cut the last line; drop it rather than read part of a
+        // value. Complete lines before it are kept.
+        let keep = text.rfind('\n').map_or(0, |i| i + 1);
+        text.truncate(keep);
+    }
 
     let mut in_section = false;
     let mut saw_section = false;
@@ -393,6 +410,50 @@ mod tests {
                 .warnings
                 .contains(&MotwWarning::InvalidEncoding)
         );
+        // ...and replaced, so the value it ends is not accepted as valid,
+        // while complete lines before it are kept.
+        let text = "[ZoneTransfer]\r\nHostUrl=x\r\nZoneId=3";
+        let mut bytes = vec![0xFF, 0xFE];
+        for u in text.encode_utf16() {
+            bytes.extend_from_slice(&u.to_le_bytes());
+        }
+        bytes.push(0x41);
+        let m = parse_zone_identifier(&bytes);
+        assert_eq!(m.zone, None);
+        assert_eq!(m.host_url.as_deref(), Some("x"));
+        assert!(m.warnings.contains(&MotwWarning::InvalidEncoding));
+        assert!(
+            m.warnings
+                .iter()
+                .any(|w| matches!(w, MotwWarning::InvalidZoneId(_)))
+        );
+    }
+
+    #[test]
+    fn leading_zeros_are_accepted() {
+        let m = parse_zone_identifier(b"[ZoneTransfer]\nZoneId=00000000003\n");
+        assert_eq!(m.zone, Some(Zone::Internet));
+        assert!(m.warnings.is_empty(), "{:?}", m.warnings);
+        let m = parse_zone_identifier(b"[ZoneTransfer]\nZoneId=0004294967295\n");
+        assert_eq!(m.zone, Some(Zone::Other(u32::MAX)));
+        let m = parse_zone_identifier(b"[ZoneTransfer]\nZoneId=4294967296\n");
+        assert_eq!(m.zone, None);
+    }
+
+    #[test]
+    fn a_line_cut_by_the_limit_is_not_parsed() {
+        // `ZoneId=13` with the `1` as the last byte read.
+        let mut bytes = b"[ZoneTransfer]\n".to_vec();
+        let pad = MAX_ZONE_IDENTIFIER_BYTES - bytes.len() - "ZoneId=1".len() - 1;
+        bytes.extend(std::iter::repeat_n(b';', pad));
+        bytes.extend_from_slice(b"\nZoneId=13\n");
+        assert_eq!(bytes[MAX_ZONE_IDENTIFIER_BYTES - 1], b'1');
+        let m = parse_zone_identifier(&bytes);
+        assert_eq!(m.zone, None);
+        assert!(m.warnings.contains(&MotwWarning::Truncated));
+        // Without the cut, the same line is read.
+        let m = parse_zone_identifier(b"[ZoneTransfer]\nZoneId=13");
+        assert_eq!(m.zone, Some(Zone::Other(13)));
     }
 
     #[test]
@@ -407,6 +468,7 @@ mod tests {
 
         let m = parse_zone_identifier(b"[ZoneTransfer]\nZoneId=99999999999\n");
         assert_eq!(m.zone, None);
+        assert!(matches!(m.warnings[0], MotwWarning::InvalidZoneId(_)));
 
         let m = parse_zone_identifier(&[0x5B, 0xFF, 0xFE, 0x00, 0x80]);
         assert!(m.warnings.contains(&MotwWarning::InvalidEncoding));

@@ -1,7 +1,8 @@
 //! Fuzzes the file-system context parsers: path normalisation (Win32 and
 //! NT forms), self-relative security descriptors with the writability
 //! evaluation, and `Zone.Identifier` streams. No input may panic, and a
-//! normalised path must normalise to itself again.
+//! normalised path, and each ancestor that is not too long, must normalise
+//! to itself again.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
@@ -16,6 +17,10 @@ fuzz_target!(|data: &[u8]| {
                 assert_eq!(again.case_folded(), p.case_folded());
                 assert_eq!(again.components(), p.components());
                 assert_eq!(again.stream(), p.stream());
+                for a in p.ancestors().flatten() {
+                    let again = normalize_win32(&a.to_win32_string()).expect("ancestor");
+                    assert_eq!(again.case_folded(), a.case_folded());
+                }
             }
         }
     }

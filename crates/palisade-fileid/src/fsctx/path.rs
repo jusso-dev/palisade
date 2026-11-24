@@ -64,6 +64,12 @@
 //! applied, because NTFS does not apply it either: the two forms are two
 //! different files.
 //!
+//! A directory can be marked case-sensitive, and then two names that differ
+//! only in case are two entries. The folded key and
+//! [`NormalizedPath::starts_with`] cannot see that flag, so they treat such
+//! names as one. Reading the flag needs the OS and is left to the OS
+//! backend (#54).
+//!
 //! # 8.3 short names
 //!
 //! A short name such as `PROGRA~1` names the same entry as its long name,
@@ -882,14 +888,7 @@ fn finish_with(
     };
     // The canonical form can be longer than the input (a `\\?\GLOBALROOT`
     // prefix, say). It must itself be a valid path.
-    if path
-        .to_win32_string()
-        .encode_utf16()
-        .nth(MAX_PATH_UNITS)
-        .is_some()
-    {
-        return Err(PathError::TooLong);
-    }
+    path.check_length()?;
     Ok(path)
 }
 
@@ -908,11 +907,61 @@ fn fold_char(c: char) -> char {
     if c.is_ascii() {
         return c.to_ascii_uppercase();
     }
+    if c.len_utf16() != 1 {
+        return c;
+    }
     let mut upper = c.to_uppercase();
     match (upper.next(), upper.next()) {
-        (Some(u), None) if c.len_utf16() == 1 && u.len_utf16() == 1 => u,
+        (Some(u), None) if u.len_utf16() == 1 => u,
+        // A full mapping of more than one character. The simple mapping
+        // may still be a single code unit.
+        (Some(_), Some(_)) => simple_upper_exception(c).unwrap_or(c),
         _ => c,
     }
+}
+
+/// The Basic Multilingual Plane characters whose full upper-case mapping
+/// has more than one character but whose simple mapping is a single
+/// character (`UnicodeData.txt` against `SpecialCasing.txt`): the Greek
+/// letters with a combining iota subscript. Every other character with a
+/// multi-character full mapping (`ß`, `ŉ`, the ligatures) has no simple
+/// mapping and stays unchanged.
+const SIMPLE_UPPER_EXCEPTIONS: [(char, char); 27] = [
+    ('\u{1F80}', '\u{1F88}'),
+    ('\u{1F81}', '\u{1F89}'),
+    ('\u{1F82}', '\u{1F8A}'),
+    ('\u{1F83}', '\u{1F8B}'),
+    ('\u{1F84}', '\u{1F8C}'),
+    ('\u{1F85}', '\u{1F8D}'),
+    ('\u{1F86}', '\u{1F8E}'),
+    ('\u{1F87}', '\u{1F8F}'),
+    ('\u{1F90}', '\u{1F98}'),
+    ('\u{1F91}', '\u{1F99}'),
+    ('\u{1F92}', '\u{1F9A}'),
+    ('\u{1F93}', '\u{1F9B}'),
+    ('\u{1F94}', '\u{1F9C}'),
+    ('\u{1F95}', '\u{1F9D}'),
+    ('\u{1F96}', '\u{1F9E}'),
+    ('\u{1F97}', '\u{1F9F}'),
+    ('\u{1FA0}', '\u{1FA8}'),
+    ('\u{1FA1}', '\u{1FA9}'),
+    ('\u{1FA2}', '\u{1FAA}'),
+    ('\u{1FA3}', '\u{1FAB}'),
+    ('\u{1FA4}', '\u{1FAC}'),
+    ('\u{1FA5}', '\u{1FAD}'),
+    ('\u{1FA6}', '\u{1FAE}'),
+    ('\u{1FA7}', '\u{1FAF}'),
+    ('\u{1FB3}', '\u{1FBC}'),
+    ('\u{1FC3}', '\u{1FCC}'),
+    ('\u{1FF3}', '\u{1FFC}'),
+];
+
+fn simple_upper_exception(c: char) -> Option<char> {
+    SIMPLE_UPPER_EXCEPTIONS
+        .binary_search_by_key(&c, |&(from, _)| from)
+        .ok()
+        .and_then(|i| SIMPLE_UPPER_EXCEPTIONS.get(i))
+        .map(|&(_, to)| to)
 }
 
 // ---------------------------------------------------------------------------
@@ -972,20 +1021,51 @@ impl NormalizedPath {
 
     /// The path to the directory that contains this one, without a stream.
     /// `None` at the root.
+    ///
+    /// The parent can need a longer canonical form than the path itself: in
+    /// `C:\…\dir \x`, the space in `dir ` is kept, so once `dir ` is the
+    /// last component the literal `\\?\` form is needed to name it. A parent
+    /// whose canonical form would exceed [`MAX_PATH_UNITS`] is
+    /// `Some(Err(PathError::TooLong))`, never a path that does not re-parse.
+    /// Such a folder still exists; a caller that needs its ACL must treat it
+    /// as unreadable.
     #[must_use]
-    pub fn parent(&self) -> Option<Self> {
+    pub fn parent(&self) -> Option<Result<Self, PathError>> {
         let n = self.components.len().checked_sub(1)?;
-        Some(self.prefix_of(n))
+        Some(self.checked_prefix_of(n))
     }
 
     /// Every ancestor directory, immediate parent first and the root last:
     /// the folders whose ACLs a writability check must read.
-    #[must_use]
-    pub fn ancestors(&self) -> Vec<Self> {
+    ///
+    /// The ancestors are built one at a time, so a caller that stops early
+    /// does not pay for the rest. An ancestor whose canonical form would be
+    /// too long is an `Err` item, as for [`Self::parent`], and the
+    /// traversal goes on to the shorter ones.
+    pub fn ancestors(&self) -> impl Iterator<Item = Result<Self, PathError>> + '_ {
         (0..self.components.len())
             .rev()
-            .map(|n| self.prefix_of(n))
-            .collect()
+            .map(|n| self.checked_prefix_of(n))
+    }
+
+    /// [`Self::prefix_of`], rejecting a result that is too long to re-parse.
+    fn checked_prefix_of(&self, n: usize) -> Result<Self, PathError> {
+        let prefix = self.prefix_of(n);
+        prefix.check_length()?;
+        Ok(prefix)
+    }
+
+    /// Fails if the canonical form is longer than [`MAX_PATH_UNITS`].
+    fn check_length(&self) -> Result<(), PathError> {
+        if self
+            .to_win32_string()
+            .encode_utf16()
+            .nth(MAX_PATH_UNITS)
+            .is_some()
+        {
+            return Err(PathError::TooLong);
+        }
+        Ok(())
     }
 
     /// The first `n` components, with no stream.
@@ -1019,10 +1099,18 @@ impl NormalizedPath {
     /// Expands short-name candidates through `resolver`, left to right, so
     /// each lookup sees a parent whose earlier components are already long.
     /// Candidates the resolver cannot expand stay unresolved.
-    pub fn resolve_short_names(&mut self, resolver: &dyn ShortNameResolver) {
+    ///
+    /// Long names can make the path longer than [`MAX_PATH_UNITS`]. Then
+    /// nothing is changed, every candidate stays unresolved, and the result
+    /// is [`PathError::TooLong`].
+    pub fn resolve_short_names(
+        &mut self,
+        resolver: &dyn ShortNameResolver,
+    ) -> Result<(), PathError> {
         let ShortNames::Candidates(candidates) = &self.short_names else {
-            return;
+            return Ok(());
         };
+        let original = self.clone();
         let candidates = candidates.clone();
         let mut unresolved = Vec::new();
         for i in candidates {
@@ -1053,6 +1141,11 @@ impl NormalizedPath {
         } else {
             ShortNames::Candidates(unresolved)
         };
+        if let Err(e) = self.check_length() {
+            *self = original;
+            return Err(e);
+        }
+        Ok(())
     }
 
     /// Marks every component as a long name. Only for paths taken from the
@@ -1129,22 +1222,58 @@ impl NormalizedPath {
         intermediate_changes || last_changes
     }
 
-    /// The case-folded Win32 form ([`fold_case`] of
-    /// [`Self::to_win32_string`]). Two paths have the same folded form
+    /// The case-folded key form: the root, then each component folded with
+    /// [`fold_case`], then the stream. Two paths have the same folded form
     /// exactly when they name the same entry under NTFS comparison rules,
     /// given the same root.
+    ///
+    /// It is built from the parts, not from [`Self::to_win32_string`],
+    /// because whether that adds the literal `\\?\` prefix depends on the
+    /// spelling (the reserved-name check is ASCII-only), and two spellings
+    /// that fold alike must give one key. For a plain drive or UNC path it
+    /// is the upper-cased Win32 form (`C:\WINDOWS\CMD.EXE`). It is a key,
+    /// not a path to open.
+    ///
+    /// Per-directory case sensitivity is not modelled: every component is
+    /// folded (see the module documentation).
     #[must_use]
     pub fn case_folded(&self) -> String {
-        fold_case(&self.to_win32_string())
+        let mut key = root_key(&self.root);
+        let unc = matches!(self.root, Root::Unc { .. });
+        if !(unc && self.components.is_empty()) {
+            key.push('\\');
+        }
+        for (i, c) in self.components.iter().enumerate() {
+            if i > 0 {
+                key.push('\\');
+            }
+            key.push_str(&fold_case(c));
+        }
+        if let Some(s) = &self.stream {
+            key.push(':');
+            key.push_str(&fold_case(&s.name));
+            if s.kind != "$DATA" {
+                key.push(':');
+                key.push_str(&s.kind);
+            }
+        }
+        key
+    }
+
+    /// Fails with [`PathError::UnresolvedShortName`] if some component may
+    /// still be an unexpanded 8.3 short name.
+    pub fn require_long_names(&self) -> Result<(), PathError> {
+        if let Some(i) = self.short_name_candidates().first() {
+            let name = self.components.get(*i).cloned().unwrap_or_default();
+            return Err(PathError::UnresolvedShortName(name));
+        }
+        Ok(())
     }
 
     /// The key to match path rules against: [`Self::case_folded`], but only
     /// once every short-name candidate has been expanded.
     pub fn match_key(&self) -> Result<String, PathError> {
-        if let Some(i) = self.short_name_candidates().first() {
-            let name = self.components.get(*i).cloned().unwrap_or_default();
-            return Err(PathError::UnresolvedShortName(name));
-        }
+        self.require_long_names()?;
         Ok(self.case_folded())
     }
 
@@ -1552,6 +1681,18 @@ mod tests {
         assert_eq!(fold_case("é"), "É");
         // Supplementary-plane letters are not folded, as on NTFS.
         assert_eq!(fold_case("\u{10428}"), "\u{10428}");
+        // A full mapping of two characters, but a one-unit simple mapping.
+        assert_eq!(fold_case("\u{1F80}"), "\u{1F88}");
+        assert_eq!(fold_case("\u{1FF3}"), "\u{1FFC}");
+        assert_eq!(key("C:\\\u{1F80}.exe"), key("C:\\\u{1F88}.EXE"));
+        // No simple mapping: unchanged.
+        assert_eq!(fold_case("\u{149}"), "\u{149}");
+        assert!(SIMPLE_UPPER_EXCEPTIONS.windows(2).all(|w| w[0].0 < w[1].0));
+        for (from, to) in SIMPLE_UPPER_EXCEPTIONS {
+            assert!(from.to_uppercase().count() > 1, "{from:?}");
+            assert_eq!(from.len_utf16(), 1);
+            assert_eq!(to.len_utf16(), 1);
+        }
         assert_eq!(key(r"C:\Ünïcode\Ä.exe"), key(r"c:\üNÏCODE\ä.EXE"));
     }
 
@@ -1587,35 +1728,127 @@ mod tests {
             p.match_key(),
             Err(PathError::UnresolvedShortName(_))
         ));
-        p.resolve_short_names(&Table);
+        p.resolve_short_names(&Table).unwrap();
         assert_eq!(
             p.match_key().unwrap(),
             key(r"C:\Program Files\My Application\app.exe")
         );
 
         let mut q = normalize_win32(r"C:\PROGRA~1\OTHER~1\app.exe").unwrap();
-        q.resolve_short_names(&Table);
+        q.resolve_short_names(&Table).unwrap();
         assert_eq!(q.short_name_candidates(), [1]);
         assert!(q.match_key().is_err());
 
         // Once an ancestor fails, its descendants are not looked up.
         let mut u = normalize_win32(r"C:\NOSUCH~1\PROGRA~1\x").unwrap();
-        u.resolve_short_names(&Table);
+        u.resolve_short_names(&Table).unwrap();
         assert_eq!(u.short_name_candidates(), [0, 1]);
 
         // A resolver answer that is not a plain name is ignored.
         let mut r = normalize_win32(r"C:\PROGRA~1\bad~1").unwrap();
-        r.resolve_short_names(&Table);
+        r.resolve_short_names(&Table).unwrap();
         assert_eq!(r.short_name_candidates(), [1]);
+    }
+
+    /// Expands `PROGRA~1` to a name long enough to overflow the limit.
+    struct Overlong;
+
+    impl ShortNameResolver for Overlong {
+        fn long_name(&self, _parent: &NormalizedPath, name: &str) -> Option<String> {
+            (name == "PROGRA~1").then(|| "P".repeat(MAX_PATH_UNITS))
+        }
+    }
+
+    #[test]
+    fn short_name_expansion_respects_the_length_limit() {
+        let mut p = normalize_win32(r"C:\PROGRA~1\x.exe").unwrap();
+        let before = p.clone();
+        assert_eq!(p.resolve_short_names(&Overlong), Err(PathError::TooLong));
+        // Nothing was installed, and the path is still unverified.
+        assert_eq!(p, before);
+        assert!(matches!(
+            p.match_key(),
+            Err(PathError::UnresolvedShortName(_))
+        ));
+    }
+
+    /// `C:\` plus components of `a`s, then `dir \x`, exactly at the limit.
+    fn path_at_limit_ending_in_spaced_dir() -> String {
+        let mut s = String::from(r"C:\");
+        let tail = r"dir \x";
+        while s.len() + tail.len() < MAX_PATH_UNITS {
+            let room = MAX_PATH_UNITS - s.len() - tail.len();
+            let n = room.saturating_sub(1).clamp(1, 200);
+            s.push_str(&"a".repeat(n));
+            s.push('\\');
+        }
+        s.push_str(tail);
+        s
+    }
+
+    #[test]
+    fn over_limit_parent_is_reported() {
+        let input = path_at_limit_ending_in_spaced_dir();
+        assert_eq!(input.encode_utf16().count(), MAX_PATH_UNITS);
+        let p = normalize_win32(&input).unwrap();
+        // The parent ends in `dir `, which needs the four-unit literal
+        // prefix, so it no longer fits.
+        assert_eq!(p.parent(), Some(Err(PathError::TooLong)));
+        let mut ancestors = p.ancestors();
+        assert_eq!(ancestors.next(), Some(Err(PathError::TooLong)));
+        // Shorter ancestors are still produced, and every one re-parses.
+        let rest: Vec<NormalizedPath> = ancestors.map(Result::unwrap).collect();
+        assert_eq!(
+            rest.last().map(NormalizedPath::to_win32_string).as_deref(),
+            Some(r"C:\")
+        );
+        for a in &rest {
+            assert_eq!(normalize_win32(&a.to_win32_string()).as_ref(), Ok(a));
+        }
+    }
+
+    #[test]
+    fn ancestors_are_lazy() {
+        let p = normalize_win32(r"C:\a\b\c\d").unwrap();
+        let first: Vec<String> = p
+            .ancestors()
+            .take(1)
+            .map(|a| a.unwrap().to_win32_string())
+            .collect();
+        assert_eq!(first, [r"C:\a\b\c"]);
+    }
+
+    #[test]
+    fn match_key_ignores_the_display_prefix() {
+        // U+0131 (dotless i) folds to `I`, so these name the same entry,
+        // but only the ASCII spelling is a reserved name that needs the
+        // literal prefix in its Win32 form.
+        let ascii = normalize_win32(r"\\?\C:\CONIN$").unwrap();
+        let dotless = normalize_win32("\\\\?\\C:\\CON\u{131}N$").unwrap();
+        assert!(ascii.starts_with(&dotless) && dotless.starts_with(&ascii));
+        assert_ne!(ascii.to_win32_string(), dotless.to_win32_string());
+        assert_eq!(ascii.match_key(), dotless.match_key());
+        assert_eq!(ascii.match_key().unwrap(), r"C:\CONIN$");
+        // A literal path with a trailing dot keeps its own key.
+        assert_ne!(key(r"\\?\C:\x.exe."), key(r"C:\x.exe"));
+        // Keys for other roots.
+        assert_eq!(key(r"\\srv\share"), r"\\SRV\SHARE");
+        assert_eq!(key(r"\\srv\share\a"), r"\\SRV\SHARE\A");
+        assert_eq!(key(r"C:\"), r"C:\");
+        assert_eq!(key(r"C:\f.txt:s:$DATA"), r"C:\F.TXT:S");
+        assert_eq!(key(r"C:\f.txt:s:$BITMAP"), r"C:\F.TXT:S:$BITMAP");
     }
 
     #[test]
     fn ancestors_and_prefixes() {
         let p = normalize_win32(r"C:\Program Files\App\app.exe:s").unwrap();
-        let a: Vec<String> = p.ancestors().iter().map(|a| a.to_win32_string()).collect();
+        let a: Vec<String> = p
+            .ancestors()
+            .map(|a| a.unwrap().to_win32_string())
+            .collect();
         assert_eq!(a, [r"C:\Program Files\App", r"C:\Program Files", r"C:\"]);
         assert_eq!(
-            p.parent().unwrap().to_win32_string(),
+            p.parent().unwrap().unwrap().to_win32_string(),
             r"C:\Program Files\App"
         );
         assert!(normalize_win32(r"C:\").unwrap().parent().is_none());

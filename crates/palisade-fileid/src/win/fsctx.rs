@@ -58,11 +58,16 @@ pub fn final_path(path: &Path) -> io::Result<NormalizedPath> {
 /// [`MAX_ZONE_IDENTIFIER_BYTES`] plus one byte are read, so the parser can
 /// report truncation.
 ///
-/// `path` must name a file or directory, not a stream, and should be its
-/// final path (see [`final_path`]). The stream name is appended to `path`
-/// as given, so a path that Win32 normalisation would change can miss the
-/// stream. Such paths are rejected: an empty path, a trailing separator,
-/// and, unless the path is a literal `\\?\` path, a trailing dot or space.
+/// `path` must be a fully qualified path to a file or directory, not a
+/// stream, and should be its final path (see [`final_path`]). The stream
+/// name is appended to `path` as given, so a path that Win32 normalisation
+/// would change can miss the stream. Such paths are rejected: a relative or
+/// drive-relative path (`a:Zone.Identifier` would name drive `A:`, not a
+/// stream of `.\a`), a trailing separator, and, unless the path is a
+/// literal `\\?\` path, a trailing dot or space.
+///
+/// The existence checks are by pathname: they do not establish that the
+/// stream belongs to the same file if the path is replaced between calls.
 pub fn read_motw(path: &Path) -> io::Result<Option<Motw>> {
     let text = path
         .to_str()
@@ -73,6 +78,7 @@ pub fn read_motw(path: &Path) -> io::Result<Option<Motw>> {
     let separators: &[char] = if verbatim { &['\\'] } else { &['\\', '/'] };
     let last = text.rsplit(separators).next().unwrap_or("");
     if text.is_empty()
+        || !path.is_absolute()
         || text.ends_with(separators)
         || (!verbatim && text.ends_with(['.', ' ']))
         || last.contains(':')
@@ -88,7 +94,12 @@ pub fn read_motw(path: &Path) -> io::Result<Option<Motw>> {
     stream.push(":Zone.Identifier");
     let file = match File::open(&stream) {
         Ok(f) => f,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        // The stream is missing, unless the file itself has gone since the
+        // check above: then this is the same error as a missing file.
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            std::fs::symlink_metadata(path)?;
+            return Ok(None);
+        }
         // ERROR_INVALID_NAME: the file exists (checked above), so it is the
         // stream syntax the file system rejects, as FAT, exFAT and CDFS do.
         Err(e) if e.raw_os_error() == Some(ERROR_INVALID_NAME) => return Ok(None),
@@ -108,13 +119,38 @@ mod tests {
     use crate::fsctx::motw::Zone;
     use crate::fsctx::path::Root;
 
-    /// A fresh directory under the system temporary folder.
-    fn scratch(name: &str) -> std::path::PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("palisade-fsctx-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+    /// A directory this test created, removed when dropped, even if the
+    /// test panics.
+    struct Scratch(std::path::PathBuf);
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    impl std::ops::Deref for Scratch {
+        type Target = Path;
+        fn deref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    /// A new directory under the system temporary folder. `create_dir`
+    /// fails if the name exists, so the directory is never one that
+    /// something else made; a taken name is retried with the next number.
+    fn scratch(name: &str) -> Scratch {
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let base = std::env::temp_dir();
+        loop {
+            let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let dir = base.join(format!("palisade-fsctx-{name}-{}-{n}", std::process::id()));
+            match std::fs::create_dir(&dir) {
+                Ok(()) => return Scratch(dir),
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists && n < 1000 => {}
+                Err(e) => panic!("cannot create {}: {e}", dir.display()),
+            }
+        }
     }
 
     #[test]
@@ -127,11 +163,11 @@ mod tests {
         assert!(matches!(p.root(), Root::Drive(_) | Root::Unc { .. }));
         assert!(p.short_name_candidates().is_empty());
         assert!(p.match_key().is_ok());
-        // Another spelling of the same path has the same final path.
-        let other = dir.join(".").join("EXAMPLE FILE.TXT");
+        // Another spelling of the same path has the same final path. The
+        // name keeps its case, so this holds in a case-sensitive directory.
+        let other = dir.join(".").join("Example File.txt");
         assert_eq!(final_path(&other).unwrap().case_folded(), p.case_folded());
         assert!(final_path(&dir.join("missing")).is_err());
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -143,11 +179,19 @@ mod tests {
 
         let mut ads = OsString::from(file.as_os_str());
         ads.push(":Zone.Identifier");
-        std::fs::write(
+        match std::fs::write(
             &ads,
             b"[ZoneTransfer]\r\nZoneId=3\r\nReferrerUrl=https://example.org/\r\nHostUrl=https://example.org/download.exe\r\n",
-        )
-        .unwrap();
+        ) {
+            Ok(()) => {}
+            // The temporary folder is on a volume without streams: the
+            // backend must report "no mark" there.
+            Err(e) if e.raw_os_error() == Some(ERROR_INVALID_NAME) => {
+                assert_eq!(read_motw(&file).unwrap(), None);
+                return;
+            }
+            Err(e) => panic!("cannot create the test stream: {e}"),
+        }
         let m = read_motw(&file).unwrap().unwrap();
         assert_eq!(m.zone, Some(Zone::Internet));
         assert_eq!(m.referrer_url.as_deref(), Some("https://example.org/"));
@@ -163,8 +207,15 @@ mod tests {
         assert!(read_motw(Path::new(&dotted)).is_err());
         assert!(read_motw(Path::new(&ads)).is_err());
         assert!(read_motw(Path::new("")).is_err());
+        // Relative paths are rejected: `a:Zone.Identifier` names drive `A:`.
+        for relative in ["a", r"dir\a", r"\dir\a", "C:a"] {
+            assert_eq!(
+                read_motw(Path::new(relative)).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput,
+                "{relative}"
+            );
+        }
         // A missing file is an error, not "no mark".
         assert!(read_motw(&dir.join("missing.exe")).is_err());
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
