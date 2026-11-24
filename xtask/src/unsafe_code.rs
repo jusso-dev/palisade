@@ -109,11 +109,45 @@ pub fn repository_files(root: &Path) -> Result<(Vec<String>, Vec<String>), Strin
     Ok((files, violations))
 }
 
+/// The variables `git rev-parse --local-env-vars` lists: they point git at a
+/// particular repository, index or object store whatever the working
+/// directory. A git hook exports some of them (`GIT_DIR`, `GIT_INDEX_FILE`),
+/// so `cargo xtask check-unsafe` or `cargo test` run from a hook would
+/// otherwise read the hook's repository instead of the one at `root`.
+const GIT_LOCAL_ENV_VARS: &[&str] = &[
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_CONFIG",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_DIR",
+    "GIT_GRAFT_FILE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_PREFIX",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_SHALLOW_FILE",
+    "GIT_WORK_TREE",
+];
+
+/// `git`, run in `dir`, finding the repository from `dir` alone: the
+/// [`GIT_LOCAL_ENV_VARS`] are removed from its environment (not from this
+/// process's, which tests share). The rest of the environment is kept.
+fn git_in(dir: &Path) -> Command {
+    let mut git = Command::new("git");
+    git.current_dir(dir);
+    for name in GIT_LOCAL_ENV_VARS {
+        git.env_remove(name);
+    }
+    git
+}
+
 fn git_ls_files(root: &Path, args: &[&str]) -> Result<Vec<String>, String> {
-    let output = Command::new("git")
+    let output = git_in(root)
         .args(["ls-files", "-z"])
         .args(args)
-        .current_dir(root)
         .output()
         .map_err(|e| format!("cannot run git ls-files: {e}"))?;
     if !output.status.success() {
@@ -309,7 +343,7 @@ pub fn check_workspace_lint(root_manifest: &str) -> Result<Vec<String>, String> 
 pub const ALLOWED_CARGO_CONFIG_TABLES: &[&str] = &["alias"];
 
 /// A Cargo config file in the repository may only define aliases, and no
-/// alias may pass `--config`, a response file (`@file`), rustflags, a lint
+/// alias may pass `--config`, a response file (`@file`), a rustflags setting, a lint
 /// option whose operand names the `unsafe_code` lint (in either spelling),
 /// or `--cap-lints` ([`unsafe_alias_word`]). The file
 /// is parsed as TOML, so comments, escapes and `#` inside strings are
@@ -379,19 +413,22 @@ const LONG_LINT_OPTIONS: &[&str] = &["--allow", "--warn", "--deny", "--forbid", 
 const SHORT_LINT_OPTIONS: &[char] = &['A', 'W', 'D', 'F'];
 
 /// The first word of one alias that is not allowed: a response file, a
-/// `--config` option, anything naming rustflags or `--cap-lints`, a `-Z`
+/// `--config` option, an assignment to rustflags (a word naming them with an
+/// `=`, such as `build.rustflags=...`), anything naming `--cap-lints`, a `-Z`
 /// option (unstable flags such as `-Z crate-attr=...` can add attributes or
 /// change how config is read, and a stable build never needs them), or a
 /// lint option whose operand names the `unsafe_code` lint (either spelling,
 /// any case). A lint option that ends the alias is rejected too, because its
-/// operand would come from a chained alias. Other words may mention the lint,
-/// so a test filter such as `unsafe_code::tests` is fine.
+/// operand would come from a chained alias. Other words may mention the lint
+/// or rustflags, so a test filter such as `unsafe_code::tests` or `rustflags`
+/// is fine. Only `--config` (or `-Z`) can change Cargo's config from an
+/// alias, and both are rejected wherever they appear.
 fn unsafe_alias_word(words: &[String]) -> Option<&str> {
     for (i, word) in words.iter().enumerate() {
         let normalised = word.to_ascii_lowercase().replace('-', "_");
         if normalised.contains("cap_lints")
             || normalised.starts_with("__config")
-            || normalised.contains("rustflags")
+            || (normalised.contains("rustflags") && word.contains('='))
             || word.starts_with('@')
         {
             return Some(word);
@@ -570,9 +607,13 @@ fn meta_relaxes_unsafe_code(meta: &[TokenTree]) -> bool {
     };
     match ident_name(name).as_str() {
         "allow" | "expect" | "warn" => {
-            let mut idents = Vec::new();
-            collect_idents(args, &mut idents);
-            idents.iter().any(|i| is_unsafe_code_lint(i))
+            let Some(TokenTree::Group(group)) = args.first() else {
+                return false;
+            };
+            let tokens: Vec<TokenTree> = group.stream().into_iter().collect();
+            tokens
+                .split(|t| matches!(t, TokenTree::Punct(p) if p.as_char() == ','))
+                .any(lint_argument_names_unsafe_code)
         }
         "cfg_attr" => {
             let Some(TokenTree::Group(group)) = args.first() else {
@@ -586,6 +627,43 @@ fn meta_relaxes_unsafe_code(meta: &[TokenTree]) -> bool {
                 .any(meta_relaxes_unsafe_code)
         }
         _ => false,
+    }
+}
+
+/// One comma-separated argument of `allow(...)`, `expect(...)` or
+/// `warn(...)`. A tool path such as `clippy::unsafe_code` names a tool's lint,
+/// never rustc's built-in one, so it does not relax it. Any other argument
+/// that contains the `unsafe_code` identifier counts, at any depth: that
+/// covers `unsafe_code` and `r#unsafe_code`, and stays strict about forms the
+/// compiler rejects or a macro rewrites, such as `$(unsafe_code)*`.
+fn lint_argument_names_unsafe_code(argument: &[TokenTree]) -> bool {
+    if is_tool_path(argument) {
+        return false;
+    }
+    let mut idents = Vec::new();
+    collect_idents(argument, &mut idents);
+    idents.iter().any(|i| is_unsafe_code_lint(i))
+}
+
+/// `a::b`, `a::b::c` and so on: identifiers joined by `::`, with at least
+/// one `::` and nothing else, not even a leading `::`.
+fn is_tool_path(tokens: &[TokenTree]) -> bool {
+    let mut rest = tokens;
+    let mut segments = 0;
+    loop {
+        let Some((TokenTree::Ident(_), after)) = rest.split_first() else {
+            return false;
+        };
+        segments += 1;
+        match after {
+            [] => return segments > 1,
+            [TokenTree::Punct(a), TokenTree::Punct(b), tail @ ..]
+                if a.as_char() == ':' && b.as_char() == ':' =>
+            {
+                rest = tail;
+            }
+            _ => return false,
+        }
     }
 }
 
@@ -678,6 +756,12 @@ mod tests {
             "#![cfg_attr(unix, deny(unsafe_code), allow(unsafe_code))]",
             "#![cfg_attr(unix, allow(dead_code), warn(unsafe_code),)]",
             "#![cfg_attr(unix, cfg_attr(test, allow(unsafe_code)))]",
+            "#![allow(clippy::all, unsafe_code,)]",
+            "#![cfg_attr(unix, allow(clippy::unsafe_code), allow(unsafe_code))]",
+            // Forms rustc rejects or a macro rewrites stay strict.
+            "#![allow(::unsafe_code)]",
+            "macro_rules! m { () => { #[allow($(unsafe_code)*)] fn g() {} } }",
+            "macro_rules! m { ($t:ident) => { #[allow($t::unsafe_code)] fn g() {} } }",
         ] {
             assert!(relaxes(source), "{source}");
         }
@@ -696,6 +780,15 @@ mod tests {
             "#![cfg_attr(unix, cfg_attr(test, deny(unsafe_code)), allow(dead_code))]",
             "#![deny(unsafe_code)] #![allow(dead_code)]",
             "#![cfg_attr(feature = \"allow\", deny(unsafe_code))]",
+            // A tool path names a different lint, which does not relax
+            // rustc's `unsafe_code`.
+            "#[allow(clippy::unsafe_code)] fn f() {}",
+            "#![cfg_attr(unix, expect(clippy::unsafe_code, dead_code))]",
+            "#![warn(a::b::unsafe_code)]",
+            "#![allow(rustc::unsafe_code)]",
+            // rustc rejects these: there is no tool named `unsafe_code`.
+            "#![allow(unsafe_code::x)]",
+            "#![allow(unsafe_code::unsafe_code)]",
         ] {
             assert!(!relaxes(source), "{source}");
         }
@@ -911,6 +1004,9 @@ mod tests {
             "[unstable]\nbuild-std = [\"core\"]",
             "[alias]\nx = \"run --config build.rustflags=['-Aunsafe_code'] -p xtask\"",
             "[alias]\nx = [\"clippy\", \"--\", \"--cap-lints=allow\"]",
+            "[alias]\nx = [\"build\", \"--config\", \"rustflags\"]",
+            "[alias]\nx = [\"test\", \"--\", \"build.rustflags=['-Aunsafe_code']\"]",
+            "[alias]\nx = \"build --config=build.rustflags=[]\"",
             "[alias]\nx = \"rustc -- -A unsafe-code\"",
             "[alias]\nx = \"rustc -- @flags.txt\"",
             "[alias]\nx = \"rustc -- -A\\u0020UNSAFE_CODE\"",
@@ -950,6 +1046,9 @@ mod tests {
             "[alias]\nl = \"clippy -- -D warnings -A dead_code\"",
             "[alias]\nl = \"clippy -q -- -gD warnings\"",
             "[alias]\nt = [\"test\", \"--\", \"--skip\", \"unsafe_code::tests and more\"]",
+            // A test filter that names rustflags sets nothing.
+            "[alias]\nt = [\"test\", \"--\", \"rustflags\"]",
+            "[alias]\nt = \"test -p xtask -- rustflags_are_rejected\"",
             // Operands do not cross alias boundaries.
             "[alias]\na = \"clippy -- -D warnings\"\nunsafe_code = \"test\"",
         ] {
@@ -981,11 +1080,7 @@ mod tests {
     #[test]
     fn links_recorded_in_the_index_are_reported() {
         let git = |dir: &Path, args: &[&str]| {
-            let out = Command::new("git")
-                .args(args)
-                .current_dir(dir)
-                .output()
-                .expect("git runs");
+            let out = git_in(dir).args(args).output().expect("git runs");
             assert!(out.status.success(), "git {args:?}: {out:?}");
             String::from_utf8(out.stdout).unwrap()
         };
@@ -1012,6 +1107,29 @@ mod tests {
             links,
             ["link.rs is a symbolic link; check-unsafe cannot vouch for what it points to"]
         );
+    }
+
+    /// Every variable the installed git calls repository-local is removed,
+    /// so the list cannot fall behind git, and nothing else is.
+    #[test]
+    fn git_runs_without_repository_local_variables() {
+        let out = Command::new("git")
+            .args(["rev-parse", "--local-env-vars"])
+            .output()
+            .expect("git runs");
+        assert!(out.status.success(), "{out:?}");
+        let local = String::from_utf8(out.stdout).unwrap();
+        let git = git_in(Path::new("."));
+        let removed: Vec<&std::ffi::OsStr> = git
+            .get_envs()
+            .filter(|(_, value)| value.is_none())
+            .map(|(name, _)| name)
+            .collect();
+        for name in local.lines() {
+            assert!(removed.iter().any(|r| *r == name), "{name} is kept");
+        }
+        assert_eq!(removed.len(), GIT_LOCAL_ENV_VARS.len());
+        assert_eq!(git.get_envs().count(), GIT_LOCAL_ENV_VARS.len());
     }
 
     #[test]

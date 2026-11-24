@@ -6,10 +6,11 @@
 //!
 //! It also checks the feature flag conventions in `docs/workspace.md`: the
 //! `test-util` feature is never on by default and never enabled through a
-//! normal or build dependency, so it cannot reach a release build. And it
-//! checks every crate README ([`check_readme`]): it opens with a purpose
-//! paragraph, the required sections are present, and every feature the crate
-//! has is documented.
+//! normal or build dependency, so no ordinary build turns it on. It does not
+//! see build commands: `--features test-util` or `--all-features` still can.
+//! And it checks every crate README ([`check_readme`]): it opens with a
+//! purpose paragraph, the required sections are present, and every feature
+//! the crate has is documented. HTML comments in a README do not count.
 
 use toml::{Table, Value};
 
@@ -273,10 +274,13 @@ fn implicit_features(manifest: &Table) -> Vec<String> {
 /// Checks a crate README: it states the crate's purpose in a paragraph
 /// before its first `## ` section, every section in [`README_SECTIONS`] is
 /// present, and every feature in `features` is named in backticks in the
-/// `## Feature flags` section.
+/// `## Feature flags` section. HTML comments are removed first, so a heading,
+/// paragraph or feature name inside one, which the rendered page does not
+/// show, does not count.
 pub fn check_readme(path: &str, readme: &str, features: &[String]) -> Vec<String> {
+    let readme = without_html_comments(readme);
     let mut v = Vec::new();
-    if !has_purpose_paragraph(readme) {
+    if !has_purpose_paragraph(&readme) {
         v.push(format!(
             "{path}: missing the purpose paragraph before the first `## ` section"
         ));
@@ -303,22 +307,32 @@ pub fn check_readme(path: &str, readme: &str, features: &[String]) -> Vec<String
     v
 }
 
-/// Some text, other than headings and HTML comments, before the first `## `
-/// line.
+/// `readme` with every `<!-- ... -->` comment replaced by one space. An
+/// unterminated comment runs to the end, as it does when rendered. The space
+/// keeps the text on either side apart, and means a line that held a comment
+/// no longer starts with `## `: text after `-->` on the same line belongs to
+/// the comment's HTML block, so it is not a heading. `<!--` inside a code
+/// span or fence is removed too, which can only make the check stricter.
+fn without_html_comments(readme: &str) -> String {
+    let mut out = String::with_capacity(readme.len());
+    let mut rest = readme;
+    while let Some(start) = rest.find("<!--") {
+        out.push_str(&rest[..start]);
+        out.push(' ');
+        rest = rest[start + 4..]
+            .find("-->")
+            .map_or("", |end| &rest[start + 4 + end + 3..]);
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Some text, other than headings, before the first `## ` line. HTML
+/// comments are already removed.
 fn has_purpose_paragraph(readme: &str) -> bool {
-    let intro: Vec<&str> = readme
+    readme
         .lines()
         .take_while(|l| !l.starts_with("## "))
-        .collect();
-    let mut intro = intro.join("\n");
-    while let Some(start) = intro.find("<!--") {
-        let end = intro[start..]
-            .find("-->")
-            .map_or(intro.len(), |e| start + e + 3);
-        intro.replace_range(start..end, "");
-    }
-    intro
-        .lines()
         .any(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#'))
 }
 
@@ -588,6 +602,60 @@ toml = { workspace = true }
                 "x/README.md: missing section `## Platform support`",
                 "x/README.md: feature `serde` is not documented under `## Feature flags`",
             ]
+        );
+    }
+
+    #[test]
+    fn html_comments_do_not_count_as_readme_content() {
+        let std = ["std".to_owned()];
+        // A section that exists only inside a comment is missing.
+        let hidden = README.replace("## Stability", "<!--\n## Stability\n-->");
+        assert_eq!(
+            check_readme("x/README.md", &hidden, &std),
+            ["x/README.md: missing section `## Stability`"]
+        );
+        // Text after `-->` on the comment's last line is not a heading.
+        let trailing = README.replace("## Stability", "<!-- x -->## Stability");
+        assert_eq!(
+            check_readme("x/README.md", &trailing, &std),
+            ["x/README.md: missing section `## Stability`"]
+        );
+        // A feature named only inside a comment is undocumented.
+        let commented = README.replace("- `std` (default): std.", "<!-- Document `std` here -->");
+        assert_eq!(
+            check_readme("x/README.md", &commented, &std),
+            ["x/README.md: feature `std` is not documented under `## Feature flags`"]
+        );
+        // An unterminated comment hides everything after it.
+        let unterminated = README.replace("## Stability", "<!-- ## Stability");
+        assert_eq!(
+            check_readme("x/README.md", &unterminated, &std),
+            ["x/README.md: missing section `## Stability`"]
+        );
+        // Visible text next to comments still counts.
+        let visible = README.replace(
+            "## Feature flags\n\n",
+            "## Feature flags\n\n<!-- `serde` later -->\n",
+        );
+        assert_eq!(
+            check_readme("x/README.md", &visible, &std),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn a_commented_out_heading_does_not_end_the_intro() {
+        // The purpose paragraph follows a comment that holds a `## ` line.
+        let draft = README.replace("Purpose.", "<!--\n## Draft\n-->\n\nPurpose.");
+        assert_eq!(
+            check_readme("x/README.md", &draft, &["std".to_owned()]),
+            Vec::<String>::new()
+        );
+        // An intro of only headings and comments is still rejected.
+        let empty = README.replace("Purpose.", "<!--\n## Draft\nPurpose.\n-->\n### Overview");
+        assert_eq!(
+            check_readme("x/README.md", &empty, &["std".to_owned()]),
+            ["x/README.md: missing the purpose paragraph before the first `## ` section"]
         );
     }
 
