@@ -81,8 +81,8 @@ use std::fmt;
 
 pub use ctl::{
     CatalogMember, CertificateTrustList, CtlError, CtlWarning, MAX_ATTRIBUTES, MAX_CTL_WARNINGS,
-    MAX_MEMBERS, MAX_NAME_VALUES, MAX_VALUE_BYTES, MemberDigest, NameValue, NameValueData,
-    SubjectAlgorithm, parse_ctl,
+    MAX_MEMBERS, MAX_NAME_VALUES, MAX_VALUE_BYTES, MemberDigest, MemberTag, NameValue,
+    NameValueData, SubjectAlgorithm, parse_ctl,
 };
 pub use store::{
     CatalogMatch, CatalogRecord, CatalogSigner, CatalogSource, CatalogStatus, CatalogStore,
@@ -90,6 +90,7 @@ pub use store::{
     MAX_LOAD_ERRORS, MAX_MATCHES, StoreLimits,
 };
 
+use crate::authenticode::asn1;
 use crate::authenticode::pkcs7::{self, Warnings};
 use crate::authenticode::verify::{blank, check_signature, find_signer_cert, os_ci_issues};
 use crate::authenticode::{
@@ -137,8 +138,9 @@ pub enum CatalogWarning {
         /// How many bytes.
         len: usize,
     },
-    /// The signer carries nested signatures. They are not read: only the
-    /// catalog's own signature counts.
+    /// The signer carries this many nested signatures (counted up to the
+    /// collection limit). They are checked as DER but not read or
+    /// verified: only the catalog's own signature counts.
     NestedSignaturesIgnored(usize),
 }
 
@@ -218,6 +220,14 @@ pub fn parse_catalog(bytes: &[u8]) -> Result<Catalog, CatalogError> {
     )
     .map_err(CatalogError::Envelope)?;
     let ctl = ctl::parse_ctl_tlv(&ctl_tlv).map_err(CatalogError::Ctl)?;
+    // Parts the decoders skip without reading (nested signatures on the
+    // signer, which the PE walker checks by parsing them) are still held
+    // to DER: check the whole element once.
+    let mut whole = asn1::Reader::new(bytes, 0);
+    whole
+        .read(asn1::tag::SEQUENCE)
+        .and_then(|tlv| asn1::validate(&tlv))
+        .map_err(|e| CatalogError::Envelope(e.into()))?;
 
     let mut warnings = Vec::new();
     if !trailing.is_empty() {

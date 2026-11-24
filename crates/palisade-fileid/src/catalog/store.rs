@@ -55,7 +55,8 @@ pub struct StoreLimits {
     pub max_catalogs: usize,
     /// The largest catalog file read, at most [`MAX_CATALOG_SIZE`].
     pub max_catalog_size: u64,
-    /// The most catalog bytes read in total.
+    /// The most catalog bytes read in total. A file's length is checked
+    /// against what is left before it is read.
     pub max_total_bytes: u64,
     /// The most members indexed in total. A catalog that does not fit is
     /// indexed in part ([`CatalogRecord::index_truncated`]).
@@ -127,6 +128,9 @@ pub struct CatalogRecord {
     /// than [`super::MAX_MEMBERS`], or the store's member limit was
     /// reached.
     pub index_truncated: bool,
+    /// The digest algorithm of the catalog's own signature (the
+    /// SignerInfo's). `None` unless it decoded to a known algorithm.
+    pub signature_digest_alg: Option<DigestAlgorithm>,
     /// The CTL's subject algorithm.
     pub subject_algorithm: Option<SubjectAlgorithm>,
     /// The catalog-wide OS attribute (`OSAttr` or `OS`).
@@ -166,8 +170,9 @@ pub enum LoadError {
     },
     /// The path is not a regular file.
     NotAFile(PathBuf),
-    /// The catalog is larger than [`StoreLimits::max_catalog_size`]. It
-    /// is recorded as unreadable too.
+    /// The catalog is larger than [`StoreLimits::max_catalog_size`] (or
+    /// [`MAX_CATALOG_SIZE`]). It is recorded as unreadable, with its real
+    /// size, and not read.
     TooLarge {
         /// The path, if any.
         path: Option<PathBuf>,
@@ -177,8 +182,11 @@ pub enum LoadError {
     /// [`StoreLimits::max_catalogs`] was reached; nothing more is loaded.
     CatalogLimit,
     /// [`StoreLimits::max_total_bytes`] would be exceeded; the catalog
-    /// was not loaded.
+    /// was not read or recorded. [`CatalogStoreBuilder::add_dir`] stops
+    /// once the budget is spent.
     ByteLimit,
+    /// The file's length changed while it was read. It was not recorded.
+    Changed(PathBuf),
     /// [`StoreLimits::max_members`] was reached; later members are not
     /// indexed.
     MemberLimit,
@@ -200,6 +208,7 @@ impl fmt::Display for LoadError {
             },
             Self::CatalogLimit => f.write_str("catalog limit reached"),
             Self::ByteLimit => f.write_str("catalog byte limit reached"),
+            Self::Changed(p) => write!(f, "{}: changed while it was read", p.display()),
             Self::MemberLimit => f.write_str("member index limit reached"),
             Self::DepthLimit(p) => write!(f, "{}: too deep", p.display()),
             Self::EntryLimit => f.write_str("directory entry limit reached"),
@@ -285,9 +294,19 @@ impl DigestKind {
     const fn is_authenticode(self) -> bool {
         matches!(self, Self::AuthenticodeSha256 | Self::AuthenticodeSha1)
     }
+
+    /// The algorithm a digest in this slot must have.
+    const fn algorithm(self) -> HashAlgorithm {
+        match self {
+            Self::AuthenticodeSha256 | Self::FlatSha256 => HashAlgorithm::Sha256,
+            Self::AuthenticodeSha1 | Self::FlatSha1 => HashAlgorithm::Sha1,
+        }
+    }
 }
 
-/// The digests of one file that a catalog lookup tries.
+/// The digests of one file that a catalog lookup tries. A digest whose
+/// algorithm is not its field's (a SHA-1 digest in a SHA-256 field, say)
+/// is ignored.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FileDigests {
     /// The Authenticode SHA-256 image hash.
@@ -371,6 +390,21 @@ impl CatalogMatch<'_> {
     pub const fn trusted(&self) -> bool {
         self.record.trusted
     }
+
+    /// Whether the match rests on SHA-1 anywhere: the member digest that
+    /// matched, or the catalog's own signature. **Not collision
+    /// resistant**: no allow decision may rest on such a match alone (ADR
+    /// 0008).
+    #[must_use]
+    pub fn relies_on_sha1(&self) -> bool {
+        self.matched_by.is_sha1() || !self.signature_is_sha2()
+    }
+
+    fn signature_is_sha2(&self) -> bool {
+        self.record
+            .signature_digest_alg
+            .is_some_and(DigestAlgorithm::is_sha2)
+    }
 }
 
 /// The result of [`CatalogStore::lookup`].
@@ -378,7 +412,8 @@ impl CatalogMatch<'_> {
 pub struct LookupResult<'a> {
     /// Each catalog that lists the file, once, by its best matching
     /// digest: trusted catalogs first, then by [`DigestKind`] order, then
-    /// in load order. At most [`MAX_MATCHES`].
+    /// SHA-2-signed catalogs before SHA-1-signed ones, then in load order.
+    /// At most [`MAX_MATCHES`].
     pub matches: Vec<CatalogMatch<'a>>,
     /// Whether more catalogs matched than [`MAX_MATCHES`].
     pub truncated: bool,
@@ -464,33 +499,64 @@ impl CatalogStoreBuilder {
     ) -> LoadReport {
         let mut report = LoadReport::default();
         let size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
-        if !self.reserve(size, &mut report) {
-            return report;
+        if self.admit(source, path.as_ref(), size, &mut report) {
+            self.bytes = self.bytes.saturating_add(size);
+            let parsed = super::parse_catalog(bytes);
+            self.record(source, path, size, parsed, Some(bytes), &mut report);
         }
-        let limit = self.limits.max_catalog_size.min(MAX_CATALOG_SIZE);
-        let parsed = if size > limit {
-            report.error(LoadError::TooLarge {
-                path: path.clone(),
-                size,
-            });
-            Err(CatalogError::TooLarge(size))
-        } else {
-            super::parse_catalog(bytes)
-        };
-        self.record(source, path, size, parsed, bytes, &mut report);
         report
     }
 
-    /// Loads the catalog file at `path`.
+    /// Loads the catalog file at `path`. Its length is checked against
+    /// the size and byte limits before anything is read, and at most that
+    /// many bytes are read.
     pub fn add_file(&mut self, source: CatalogSource, path: &Path) -> LoadReport {
         let mut report = LoadReport::default();
         if self.full() {
             report.error(LoadError::CatalogLimit);
             return report;
         }
-        if let Some(bytes) = self.read_file(path, &mut report) {
-            report.merge(self.add_bytes(source, Some(path.to_owned()), &bytes));
+        let Some(file) = open_regular(path, &mut report) else {
+            return report;
+        };
+        let size = match file.metadata() {
+            Ok(m) => m.len(),
+            Err(e) => {
+                report.error(LoadError::Io {
+                    path: path.to_owned(),
+                    kind: e.kind(),
+                });
+                return report;
+            }
+        };
+        let path_buf = path.to_owned();
+        if !self.admit(source, Some(&path_buf), size, &mut report) {
+            return report;
         }
+        // One byte more than the length, to notice a file that grew.
+        let mut bytes = Vec::new();
+        if let Err(e) = file.take(size.saturating_add(1)).read_to_end(&mut bytes) {
+            report.error(LoadError::Io {
+                path: path_buf,
+                kind: e.kind(),
+            });
+            return report;
+        }
+        let read = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+        self.bytes = self.bytes.saturating_add(read);
+        if read != size {
+            report.error(LoadError::Changed(path_buf));
+            return report;
+        }
+        let parsed = super::parse_catalog(&bytes);
+        self.record(
+            source,
+            Some(path_buf),
+            size,
+            parsed,
+            Some(&bytes),
+            &mut report,
+        );
         report
     }
 
@@ -559,14 +625,20 @@ impl CatalogStoreBuilder {
                     report.error(LoadError::CatalogLimit);
                     return report;
                 }
+                if self.remaining_bytes() == 0 {
+                    report.error(LoadError::ByteLimit);
+                    return report;
+                }
                 report.merge(self.add_file(source, &path));
             }
             dirs.sort();
-            // Reversed, so the stack pops them in name order.
-            for path in dirs.into_iter().rev() {
-                if depth >= self.limits.max_depth {
+            if depth >= self.limits.max_depth {
+                for path in dirs {
                     report.error(LoadError::DepthLimit(path));
-                } else {
+                }
+            } else {
+                // Reversed, so the stack pops them in name order.
+                for path in dirs.into_iter().rev() {
                     stack.push((path, depth.saturating_add(1)));
                 }
             }
@@ -591,68 +663,47 @@ impl CatalogStoreBuilder {
         self.records.len() >= self.limits.max_catalogs
     }
 
-    /// Checks the catalog and byte limits for a catalog of `size` bytes,
-    /// and counts its bytes.
-    fn reserve(&mut self, size: u64, report: &mut LoadReport) -> bool {
+    /// The bytes left in the [`StoreLimits::max_total_bytes`] budget.
+    fn remaining_bytes(&self) -> u64 {
+        self.limits.max_total_bytes.saturating_sub(self.bytes)
+    }
+
+    /// Checks the catalog, size and byte limits for a catalog of `size`
+    /// bytes, before it is read. A catalog over the size limit is recorded
+    /// as unreadable (with its real size) and not read; one that does not
+    /// fit the byte budget is not recorded.
+    fn admit(
+        &mut self,
+        source: CatalogSource,
+        path: Option<&PathBuf>,
+        size: u64,
+        report: &mut LoadReport,
+    ) -> bool {
         if self.full() {
             report.error(LoadError::CatalogLimit);
             return false;
         }
-        let read = size.min(self.limits.max_catalog_size.saturating_add(1));
-        let total = self.bytes.saturating_add(read);
-        if total > self.limits.max_total_bytes {
+        let limit = self.limits.max_catalog_size.min(MAX_CATALOG_SIZE);
+        if size > limit {
+            report.error(LoadError::TooLarge {
+                path: path.cloned(),
+                size,
+            });
+            self.record(
+                source,
+                path.cloned(),
+                size,
+                Err(CatalogError::TooLarge(size)),
+                None,
+                report,
+            );
+            return false;
+        }
+        if size > self.remaining_bytes() {
             report.error(LoadError::ByteLimit);
             return false;
         }
-        self.bytes = total;
         true
-    }
-
-    /// Reads a catalog file, at most one byte past the size limit.
-    fn read_file(&self, path: &Path, report: &mut LoadReport) -> Option<Vec<u8>> {
-        let io_error = |e: io::Error| LoadError::Io {
-            path: path.to_owned(),
-            kind: e.kind(),
-        };
-        // `metadata` first: opening a directory fails on some OSes before
-        // anything could be checked, with an OS-specific error.
-        match std::fs::metadata(path) {
-            Ok(m) if m.is_file() => {}
-            Ok(_) => {
-                report.error(LoadError::NotAFile(path.to_owned()));
-                return None;
-            }
-            Err(e) => {
-                report.error(io_error(e));
-                return None;
-            }
-        }
-        let file = match crate::hash::open_without_blocking(path) {
-            Ok(file) => file,
-            Err(e) => {
-                report.error(io_error(e));
-                return None;
-            }
-        };
-        // The path may have been replaced since `metadata`.
-        match file.metadata() {
-            Ok(m) if m.is_file() => {}
-            Ok(_) => {
-                report.error(LoadError::NotAFile(path.to_owned()));
-                return None;
-            }
-            Err(e) => {
-                report.error(io_error(e));
-                return None;
-            }
-        }
-        let limit = self.limits.max_catalog_size.min(MAX_CATALOG_SIZE);
-        let mut bytes = Vec::new();
-        if let Err(e) = file.take(limit.saturating_add(1)).read_to_end(&mut bytes) {
-            report.error(io_error(e));
-            return None;
-        }
-        Some(bytes)
     }
 
     fn record(
@@ -661,18 +712,17 @@ impl CatalogStoreBuilder {
         path: Option<PathBuf>,
         size: u64,
         parsed: Result<Catalog, CatalogError>,
-        bytes: &[u8],
+        bytes: Option<&[u8]>,
         report: &mut LoadReport,
     ) {
         let catalog = match parsed {
             Ok(catalog) => catalog,
             Err(e) => {
-                let id = match e {
-                    CatalogError::TooLarge(_) => None,
-                    _ => hash_bytes(bytes, AlgorithmSet::SHA256)
+                let id = bytes.and_then(|b| {
+                    hash_bytes(b, AlgorithmSet::SHA256)
                         .get(HashAlgorithm::Sha256)
-                        .cloned(),
-                };
+                        .cloned()
+                });
                 if let Some(id) = &id {
                     if !self.seen.insert((source, id.clone())) {
                         report.duplicates = report.duplicates.saturating_add(1);
@@ -690,6 +740,7 @@ impl CatalogStoreBuilder {
                     member_count: 0,
                     indexed_members: 0,
                     index_truncated: false,
+                    signature_digest_alg: None,
                     subject_algorithm: None,
                     os_attr: None,
                     this_update: None,
@@ -780,6 +831,7 @@ impl CatalogStoreBuilder {
             member_count: catalog.ctl.members.len(),
             indexed_members: indexed,
             index_truncated,
+            signature_digest_alg: signature.and_then(|s| s.signer_digest_alg),
             subject_algorithm: Some(catalog.ctl.subject_algorithm.clone()),
             os_attr: catalog.ctl.os_attr().map(str::to_owned),
             this_update: Some(catalog.ctl.this_update),
@@ -801,10 +853,13 @@ impl CatalogStoreBuilder {
     fn signer_of(&mut self, source: CatalogSource, catalog: &Catalog) -> Option<usize> {
         let sig = catalog.signature()?;
         let signer_cert = sig.signer.as_ref()?.signer_cert;
-        // A chain depends only on the certificates, the signer's position
-        // among them and the namespace's trust configuration.
+        // The verdict depends on the certificates, the signer's position
+        // among them, the namespace's trust configuration, and the
+        // signature's own digest algorithms (which `SignerTrust` reports
+        // and ranks by).
         let mut key = self.generation.to_le_bytes().to_vec();
         key.push(u8::try_from(source.index()).unwrap_or(u8::MAX));
+        key.extend(format!("{:?}/{:?};", sig.digest_alg, sig.signer_digest_alg).bytes());
         key.extend(u64::try_from(signer_cert).unwrap_or(u64::MAX).to_le_bytes());
         for cert in &sig.certs_in_blob {
             key.extend(u64::try_from(cert.len()).unwrap_or(u64::MAX).to_le_bytes());
@@ -827,6 +882,46 @@ impl CatalogStoreBuilder {
         });
         self.signer_keys.insert(key, index);
         Some(index)
+    }
+}
+
+/// Opens `path` for reading if it is a regular file, recording why not.
+fn open_regular(path: &Path, report: &mut LoadReport) -> Option<std::fs::File> {
+    let io_error = |e: io::Error| LoadError::Io {
+        path: path.to_owned(),
+        kind: e.kind(),
+    };
+    // `metadata` first: opening a directory fails on some OSes before
+    // anything could be checked, with an OS-specific error.
+    match std::fs::metadata(path) {
+        Ok(m) if m.is_file() => {}
+        Ok(_) => {
+            report.error(LoadError::NotAFile(path.to_owned()));
+            return None;
+        }
+        Err(e) => {
+            report.error(io_error(e));
+            return None;
+        }
+    }
+    let file = match crate::hash::open_without_blocking(path) {
+        Ok(file) => file,
+        Err(e) => {
+            report.error(io_error(e));
+            return None;
+        }
+    };
+    // The path may have been replaced since `metadata`.
+    match file.metadata() {
+        Ok(m) if m.is_file() => Some(file),
+        Ok(_) => {
+            report.error(LoadError::NotAFile(path.to_owned()));
+            None
+        }
+        Err(e) => {
+            report.error(io_error(e));
+            None
+        }
     }
 }
 
@@ -892,21 +987,24 @@ impl CatalogStore {
         let mut seen = BTreeSet::new();
         for (kind, digest) in digests.in_order() {
             let Some(digest) = digest else { continue };
-            let hits = match digest.algorithm() {
-                HashAlgorithm::Sha256 => self
-                    .sha256
-                    .find(digest.as_bytes())
-                    .iter()
-                    .map(|e| (e.catalog, e.member, e.pe_image))
-                    .collect::<Vec<_>>(),
-                HashAlgorithm::Sha1 => self
-                    .sha1
-                    .find(digest.as_bytes())
-                    .iter()
-                    .map(|e| (e.catalog, e.member, e.pe_image))
-                    .collect(),
-                _ => Vec::new(),
-            };
+            // A digest is used only in the slot of its own algorithm, so a
+            // SHA-1 digest can never be reported as a SHA-256 match.
+            let hits: Box<dyn Iterator<Item = (u32, u32, bool)>> =
+                match (kind.algorithm(), digest.algorithm()) {
+                    (HashAlgorithm::Sha256, HashAlgorithm::Sha256) => Box::new(
+                        self.sha256
+                            .find(digest.as_bytes())
+                            .iter()
+                            .map(|e| (e.catalog, e.member, e.pe_image)),
+                    ),
+                    (HashAlgorithm::Sha1, HashAlgorithm::Sha1) => Box::new(
+                        self.sha1
+                            .find(digest.as_bytes())
+                            .iter()
+                            .map(|e| (e.catalog, e.member, e.pe_image)),
+                    ),
+                    _ => continue,
+                };
             for (catalog, member, pe_image) in hits {
                 if pe_image != kind.is_authenticode() {
                     continue;
@@ -938,7 +1036,16 @@ impl CatalogStore {
                 })
             })
             .collect();
-        matches.sort_by_key(|m| (!m.trusted(), m.matched_by, m.catalog));
+        // Trusted first, then by member digest, then SHA-2-signed catalogs
+        // before SHA-1-signed ones, then load order.
+        matches.sort_by_key(|m| {
+            (
+                !m.trusted(),
+                m.matched_by,
+                !m.signature_is_sha2(),
+                m.catalog,
+            )
+        });
         let truncated = matches.len() > MAX_MATCHES;
         matches.truncate(MAX_MATCHES);
         LookupResult { matches, truncated }

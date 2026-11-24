@@ -96,8 +96,9 @@ pub enum CtlError {
     Asn1(Asn1Error),
     /// An algorithm identifier, or a member's digest, is malformed.
     Signature(SignatureError),
-    /// `version` is not v1 (0). The value is given; a version too large
-    /// for a `u32` is reported as `u32::MAX`.
+    /// `version` is encoded and is not v1 (0). (An encoded v1, or a
+    /// version that is negative or does not fit a `u32`, is an
+    /// [`Self::Asn1`] error.)
     Version(u32),
     /// The subject usage does not include `szOID_CATALOG_LIST`: this is a
     /// trust list of something else (certificates, for example), not a
@@ -123,8 +124,8 @@ pub enum CtlError {
         /// The member's position in the list.
         member: usize,
     },
-    /// A member, or the catalog's extensions, has more than
-    /// [`MAX_ATTRIBUTES`] attributes.
+    /// A member, the catalog's extensions or its subject usage has more
+    /// than [`MAX_ATTRIBUTES`] entries.
     TooManyAttributes,
     /// A critical CTL extension this crate does not process.
     UnhandledCriticalExtension(ObjectId),
@@ -248,13 +249,37 @@ impl MemberDigest {
     }
 }
 
+/// A member tag (`subjectIdentifier`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum MemberTag {
+    /// UTF-16LE text, decoded: the form of v1 catalogs
+    /// (`szOID_CATALOG_LIST_MEMBER`), usually the digest in uppercase hex.
+    /// Ill-formed UTF-16 became U+FFFD ([`CtlWarning::LossyText`]).
+    Text(String),
+    /// Raw octets, up to [`MAX_VALUE_BYTES`]: the form of v2 catalogs
+    /// (`szOID_CATALOG_LIST_MEMBER2`), usually the digest itself.
+    Bytes(Vec<u8>),
+}
+
+impl MemberTag {
+    /// Whether the tag names `digest`: its uppercase (or lowercase) hex as
+    /// text, or its octets.
+    #[must_use]
+    pub fn is_digest(&self, digest: &[u8]) -> bool {
+        match self {
+            Self::Text(t) => tag_is_hex_of(t, digest),
+            Self::Bytes(b) => b == digest,
+        }
+    }
+}
+
 /// One `TrustedSubject`: a file the catalog lists.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogMember {
-    /// The member tag (`subjectIdentifier`), decoded from UTF-16LE. Usually
-    /// the digest in uppercase hex, but any string is allowed; members are
-    /// indexed by [`Self::digest`], never by the tag.
-    pub tag: String,
+    /// The member tag (`subjectIdentifier`). Usually the member's digest
+    /// (as hex text in v1 catalogs, as raw octets in v2), but any value is
+    /// allowed; members are indexed by [`Self::digest`], never by the tag.
+    pub tag: MemberTag,
     /// The signed digest. `None` when the member has no `SPC_INDIRECT_DATA`
     /// attribute, or its digest algorithm is unknown
     /// ([`CtlWarning::UnknownDigest`]); such a member is never matched.
@@ -410,10 +435,11 @@ pub(crate) fn parse_ctl_tlv(seq: &Tlv<'_>) -> Result<CertificateTrustList> {
     let mut warnings = Warnings::default();
     let mut r = seq.reader();
     if r.peek_tag() == Some(tag::INTEGER) {
-        // DEFAULT v1: DER omits it, so any encoded version is not v1, or
-        // not DER.
+        // DEFAULT v1: DER omits it, so an encoded v1 is not DER, and any
+        // other version is unknown. Invalid DER in the INTEGER (or a
+        // negative or over-long value) is an ASN.1 error.
         let at = r.offset();
-        let version = read_small_uint(&mut r).unwrap_or(u32::MAX);
+        let version = read_small_uint(&mut r)?;
         if version == 0 {
             return Err(asn1::err(Asn1ErrorKind::InvalidValue, at).into());
         }
@@ -426,10 +452,11 @@ pub(crate) fn parse_ctl_tlv(seq: &Tlv<'_>) -> Result<CertificateTrustList> {
     let mut catalog_list = false;
     while !u.is_empty() {
         let id = read_oid(&mut u)?;
-        catalog_list |= id == oid::CATALOG_LIST;
-        if subject_usage.len() < MAX_ATTRIBUTES {
-            subject_usage.push(ObjectId::from_der(id));
+        if subject_usage.len() >= MAX_ATTRIBUTES {
+            return Err(CtlError::TooManyAttributes);
         }
+        catalog_list |= id == oid::CATALOG_LIST;
+        subject_usage.push(ObjectId::from_der(id));
     }
     if !catalog_list {
         return Err(CtlError::NotCatalogList);
@@ -457,6 +484,9 @@ pub(crate) fn parse_ctl_tlv(seq: &Tlv<'_>) -> Result<CertificateTrustList> {
         Ok(alg) => SubjectAlgorithm::Other(digest_oid(alg)),
     };
 
+    // v2 catalogs store member tags as raw octets, v1 (and any other) as
+    // UTF-16LE text.
+    let binary_tags = subject_algorithm == SubjectAlgorithm::CatalogListMemberV2;
     let mut members = Vec::new();
     let mut members_truncated = false;
     if let Some(subjects) = r.read_optional(tag::SEQUENCE)? {
@@ -470,7 +500,7 @@ pub(crate) fn parse_ctl_tlv(seq: &Tlv<'_>) -> Result<CertificateTrustList> {
                 continue;
             }
             let index = members.len();
-            members.push(parse_member(&subject, index, &mut warnings)?);
+            members.push(parse_member(&subject, index, binary_tags, &mut warnings)?);
         }
     }
 
@@ -555,13 +585,27 @@ fn push_name_value(list: &mut Vec<NameValue>, value: NameValue, warnings: &mut W
     }
 }
 
-fn parse_member(subject: &Tlv<'_>, index: usize, warnings: &mut Warnings) -> Result<CatalogMember> {
+fn parse_member(
+    subject: &Tlv<'_>,
+    index: usize,
+    binary_tags: bool,
+    warnings: &mut Warnings,
+) -> Result<CatalogMember> {
     let mut s = subject.reader();
     let identifier = s.read(tag::OCTET_STRING)?;
     let attrs = s.read_optional(tag::SET)?;
     s.finish()?;
 
-    let tag = utf16le_text(identifier.content, warnings);
+    let tag = if binary_tags {
+        let raw = identifier.content;
+        let kept = raw.get(..MAX_VALUE_BYTES).unwrap_or(raw);
+        if kept.len() < raw.len() {
+            warnings.push(CtlWarning::Truncated);
+        }
+        MemberTag::Bytes(kept.to_vec())
+    } else {
+        MemberTag::Text(utf16le_text(identifier.content, warnings))
+    };
     let mut member = CatalogMember {
         tag,
         digest: None,
@@ -635,7 +679,7 @@ fn parse_member(subject: &Tlv<'_>, index: usize, warnings: &mut Warnings) -> Res
     }
     match &member.digest {
         None if !seen_indirect => warnings.push(CtlWarning::NoDigest { member: index }),
-        Some(d) if !tag_is_hex_of(&member.tag, &d.digest) => {
+        Some(d) if !member.tag.is_digest(&d.digest) => {
             warnings.push(CtlWarning::TagNotDigest { member: index });
         }
         _ => {}
@@ -744,10 +788,18 @@ fn utf16le_text(bytes: &[u8], warnings: &mut Warnings) -> String {
     let body = bytes.get(..end).unwrap_or_default();
     let mut truncated = body.len() > MAX_VALUE_BYTES;
     let body = body.get(..MAX_VALUE_BYTES).unwrap_or(body);
-    let units = body.chunks_exact(2).map(|pair| match pair {
-        [lo, hi] => u16::from_le_bytes([*lo, *hi]),
-        _ => 0,
-    });
+    let mut units: Vec<u16> = body
+        .chunks_exact(2)
+        .map(|pair| match pair {
+            [lo, hi] => u16::from_le_bytes([*lo, *hi]),
+            _ => 0,
+        })
+        .collect();
+    // A cut at the byte limit can split a surrogate pair: drop its first
+    // half rather than report the text as ill-formed.
+    if truncated && units.last().is_some_and(|u| (0xd800..0xdc00).contains(u)) {
+        units.pop();
+    }
     let mut text = String::new();
     let mut lossy = false;
     for (count, c) in char::decode_utf16(units).enumerate() {

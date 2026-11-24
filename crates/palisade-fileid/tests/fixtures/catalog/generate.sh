@@ -16,6 +16,13 @@
 #   v1-sha1.cat     v1 catalog: SHA-1 member digests, SHA-1 signature.
 #   v2-sha256.cat   v2 catalog: SHA-256 member digests and signature.
 #   org-sha256.cat  An organisation catalog: v2, signed under org-ca.
+#   v2-sha1-signed.cat  The v2 trust list (SHA-256 members) signed with
+#                   SHA-1, to check that a SHA-1 catalog signature is
+#                   flagged even when the member digest is SHA-256.
+#
+# The tests make a catalog with a nested signature themselves, from
+# v2-sha256.cat and v2-sha1-signed.cat (osslsigncode cannot nest on a
+# catalog).
 #   ca.der          Root of the catalog signer of v1 and v2.
 #   org-ca.der      Root of the organisation catalog signer.
 #
@@ -88,5 +95,7 @@ sign() {
 sign v1-sha1 signer.chain signer.key sha1
 sign v2-sha256 signer.chain signer.key sha256
 sign org-sha256 org-signer.chain org-signer.key sha256
+cp v2-sha256.unsigned.cat v2-sha1-signed.unsigned.cat
+sign v2-sha1-signed signer.chain signer.key sha1
 
 echo "catalog fixtures written to $out"

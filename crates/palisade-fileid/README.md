@@ -329,11 +329,13 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     `messageDigest` check (over the CTL) and signature check. The
     signature is a `SignatureKind::Catalog` entry in a `SignatureReport`,
     so `evaluate_trust` gives its chain, trust and signer identity
-    unchanged. Nested signatures on a catalog are reported and not read.
+    unchanged. Nested signatures on a catalog are reported and checked as
+    DER, but not read: only the catalog's own signature counts.
   - `parse_ctl` decodes the CTL: subject usage (must include
     `szOID_CATALOG_LIST`), list identifier, sequence number, effective
     dates, subject algorithm (`szOID_CATALOG_LIST_MEMBER` for v1 SHA-1
-    catalogs, `..._MEMBER2` for v2 SHA-256), each member's tag,
+    catalogs, `..._MEMBER2` for v2 SHA-256), each member's tag (UTF-16
+    hex text in v1, raw digest octets in v2),
     `SPC_INDIRECT_DATA` digest (algorithm, digest and data type:
     `SPC_PE_IMAGE_DATA` for PE members, whose digest is the Authenticode
     hash; other types for flat-hashed files), `CAT_NAMEVALUE` pairs
@@ -346,12 +348,14 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   - `CatalogStoreBuilder` loads catalogs from bytes, files or a directory
     tree (`*.cat`, name order, links not followed, bounded depth and entry
     count) into a `CatalogStore`, within `StoreLimits` (catalogs, bytes
-    per catalog and in total, indexed members). Each `CatalogSource`
+    per catalog and in total, indexed members). A file's length is checked
+    against those limits before any of it is read. Each `CatalogSource`
     (`System`, `DriverStore`, `Policy`) is its own namespace with its own
     `TrustConfig`, so an organisation catalog is trusted only under the
     organisation's anchors. The catalog ID is the file's SHA-256, and each
     `CatalogRecord` holds the path, source, status, signer (chain, trust
-    and identity, shared between catalogs with the same certificates),
+    and identity, shared between catalogs with the same certificates and
+    signature digests), the catalog signature's digest algorithm,
     member counts, subject algorithm, `os_attr`, effective date and
     claimed signing time. Only catalogs whose signature is valid are
     indexed, in sorted in-memory tables (44 bytes per SHA-256 member, 32
@@ -361,9 +365,12 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     SHA-256 and SHA-1 for a conformant PE image, flat SHA-256 and SHA-1
     for a non-empty file) and tries them in that order. An Authenticode
     digest matches only PE members and a flat digest only other members.
-    Each catalog that lists the file is returned once, trusted catalogs
-    first, with which digest matched; SHA-1 matches say so, because no
-    allow decision may rest on SHA-1 alone (ADR 0008).
+    A digest is used only in the field for its own algorithm. Each
+    catalog that lists the file is returned once, trusted catalogs first,
+    SHA-2-signed before SHA-1-signed, with which digest matched.
+    `CatalogMatch::relies_on_sha1` is true when either the member digest
+    or the catalog's signature is SHA-1, because no allow decision may
+    rest on SHA-1 alone (ADR 0008).
 
   Still to come in #51: the persistent on-disk index and incremental
   updates, the lookup settings, the authoring helper and the OS catalog

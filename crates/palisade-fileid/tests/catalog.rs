@@ -26,8 +26,8 @@ use palisade_fileid::authenticode::{
 use palisade_fileid::catalog::{
     CatalogError, CatalogSource, CatalogStatus, CatalogStoreBuilder, CtlError, CtlWarning,
     DigestKind, FileDigests, LoadError, MAX_ATTRIBUTES, MAX_CATALOG_SIZE, MAX_MATCHES, MAX_MEMBERS,
-    MAX_NAME_VALUES, NameValue, NameValueData, StoreLimits, SubjectAlgorithm, parse_catalog,
-    parse_ctl,
+    MAX_NAME_VALUES, MemberTag, NameValue, NameValueData, StoreLimits, SubjectAlgorithm,
+    parse_catalog, parse_ctl,
 };
 use palisade_fileid::hash::{AlgorithmSet, HashAlgorithm, hash_bytes};
 use proptest::prelude::*;
@@ -147,7 +147,8 @@ struct Member {
 }
 
 impl Member {
-    /// A member as OS catalog tools write it: tag is the digest in uppercase hex,
+    /// A member as OS catalog tools write it in a v1 catalog: tag is the
+    /// digest in uppercase hex (see [`Self::v2`] for v2),
     /// then the name-values, the indirect data and the member info.
     fn new(pe: bool, alg: &str, digest: &[u8], file: &str) -> Self {
         let data = if pe {
@@ -176,6 +177,13 @@ impl Member {
         }
     }
 
+    /// The same member as a v2 catalog writes it: the tag is the digest's
+    /// raw octets.
+    fn v2(mut self, digest: &[u8]) -> Self {
+        self.tag = digest.to_vec();
+        self
+    }
+
     fn der(&self) -> Vec<u8> {
         let attrs: Vec<&[u8]> = self.attributes.iter().map(Vec::as_slice).collect();
         seq(&[&octets(&self.tag), &set(&attrs)])
@@ -186,6 +194,10 @@ impl Member {
 #[derive(Clone)]
 struct Ctl {
     prefix: Vec<u8>,
+    /// DER inserted after `ctlThisUpdate` (a sequence number goes before
+    /// it, in `before_time`).
+    after_time: Vec<u8>,
+    before_time: Vec<u8>,
     usage: Vec<String>,
     subject_alg: String,
     members: Vec<Vec<u8>>,
@@ -196,6 +208,8 @@ impl Ctl {
     fn new(subject_alg: &str) -> Self {
         Self {
             prefix: Vec::new(),
+            after_time: Vec::new(),
+            before_time: Vec::new(),
             usage: vec![CATALOG_LIST.to_owned()],
             subject_alg: subject_alg.to_owned(),
             members: Vec::new(),
@@ -232,8 +246,10 @@ impl Ctl {
             self.prefix.clone(),
             seq(&usage_refs),
             octets(&[0x50; 16]),
+            self.before_time.clone(),
             // 2023-11-14 22:13:20 UTC (1700000000).
             tlv(0x17, b"231114221320Z"),
+            self.after_time.clone(),
             seq(&[&oid(&self.subject_alg), &null()]),
         ];
         if !self.members.is_empty() {
@@ -247,8 +263,8 @@ impl Ctl {
     }
 }
 
-/// An unsigned catalog: a SignedData around `ctl` with no signers, as
-/// makecat writes before signing. osslsigncode signs it.
+/// An unsigned catalog: a SignedData around `ctl` with no signers, as a
+/// catalog tool writes it before signing. osslsigncode signs it.
 fn unsigned_catalog(ctl: &[u8]) -> Vec<u8> {
     let signed = seq(&[
         &integer(1),
@@ -288,11 +304,17 @@ fn fixture_ctl(name: &str) -> Vec<u8> {
     let image = pe_member_image();
     let (alg, subject, hash) = match name {
         "v1-sha1" => (SHA1, MEMBER_V1, HashAlgorithm::Sha1),
-        "v2-sha256" | "org-sha256" => (SHA256, MEMBER_V2, HashAlgorithm::Sha256),
+        "v2-sha256" | "org-sha256" | "v2-sha1-signed" => (SHA256, MEMBER_V2, HashAlgorithm::Sha256),
         other => panic!("no fixture {other}"),
     };
-    let pe = Member::new(true, alg, &authenticode(&image, hash), "palisade-test.exe");
-    let flat = Member::new(false, alg, &digest(FLAT_MEMBER, hash), "palisade-test.txt");
+    let pe_digest = authenticode(&image, hash);
+    let flat_digest = digest(FLAT_MEMBER, hash);
+    let mut pe = Member::new(true, alg, &pe_digest, "palisade-test.exe");
+    let mut flat = Member::new(false, alg, &flat_digest, "palisade-test.txt");
+    if subject == MEMBER_V2 {
+        pe = pe.v2(&pe_digest);
+        flat = flat.v2(&flat_digest);
+    }
     let os = if name == "org-sha256" {
         "Organisation"
     } else {
@@ -305,7 +327,10 @@ fn fixture_ctl(name: &str) -> Vec<u8> {
         .der()
 }
 
-const FIXTURE_NAMES: [&str; 3] = ["v1-sha1", "v2-sha256", "org-sha256"];
+const FIXTURE_NAMES: [&str; 4] = ["v1-sha1", "v2-sha256", "org-sha256", "v2-sha1-signed"];
+/// The fixtures `generate.sh` signs from an unsigned catalog the tests
+/// write (`v2-sha1-signed` re-signs the v2 one).
+const UNSIGNED_NAMES: [&str; 3] = ["v1-sha1", "v2-sha256", "org-sha256"];
 
 /// Writes the unsigned catalogs `generate.sh` signs.
 ///
@@ -318,7 +343,7 @@ const FIXTURE_NAMES: [&str; 3] = ["v1-sha1", "v2-sha256", "org-sha256"];
 fn write_unsigned_catalogs() {
     let dir = std::env::var_os("PALISADE_CATALOG_OUT").expect("set PALISADE_CATALOG_OUT");
     let dir = std::path::Path::new(&dir);
-    for name in FIXTURE_NAMES {
+    for name in UNSIGNED_NAMES {
         let path = dir.join(format!("{name}.unsigned.cat"));
         std::fs::write(path, unsigned_catalog(&fixture_ctl(name))).unwrap();
     }
@@ -431,7 +456,8 @@ fn v1_catalog_parses_and_verifies() {
     assert_eq!(d.alg, DigestAlgorithm::Sha1);
     assert!(d.is_pe_image());
     assert_eq!(d.digest, authenticode(&image, HashAlgorithm::Sha1));
-    assert_eq!(pe.tag, hex_upper(&d.digest));
+    assert_eq!(pe.tag, MemberTag::Text(hex_upper(&d.digest)));
+    assert!(pe.tag.is_digest(&d.digest));
     assert_eq!(pe.file_name(), Some("palisade-test.exe"));
     assert_eq!(pe.os_attr(), Some("2:10.0"));
     assert_eq!(pe.subject_guid.as_deref(), Some(PE_SIP));
@@ -475,9 +501,13 @@ fn v2_catalog_parses_and_verifies() {
         cat.ctl.subject_algorithm,
         SubjectAlgorithm::CatalogListMemberV2
     );
-    let pe = cat.ctl.members[0].digest.as_ref().unwrap();
+    assert!(cat.ctl.warnings.is_empty(), "{:?}", cat.ctl.warnings);
+    let member = &cat.ctl.members[0];
+    let pe = member.digest.as_ref().unwrap();
     assert_eq!(pe.alg, DigestAlgorithm::Sha256);
     assert_eq!(pe.digest, authenticode(&image, HashAlgorithm::Sha256));
+    // v2 tags are the digest's raw octets.
+    assert_eq!(member.tag, MemberTag::Bytes(pe.digest.clone()));
     let sig = cat.signature().unwrap();
     assert_eq!(sig.status, SignatureStatus::Valid);
     assert_eq!(sig.signer_digest_alg, Some(DigestAlgorithm::Sha256));
@@ -640,8 +670,9 @@ fn oversized_catalog_is_rejected() {
 // ---------------------------------------------------------------------------
 // CTL decoding rules.
 
+/// A v2 member (raw octet tag), for the CTL rule tests, which use v2.
 fn simple_member(alg: &str, digest: &[u8]) -> Member {
-    Member::new(true, alg, digest, "a.exe")
+    Member::new(true, alg, digest, "a.exe").v2(digest)
 }
 
 fn ctl_error(ctl: &Ctl) -> CtlError {
@@ -655,6 +686,15 @@ fn ctl_version_must_be_absent() {
     assert!(matches!(ctl_error(&ctl), CtlError::Asn1(_)));
     ctl.prefix = integer(1);
     assert_eq!(ctl_error(&ctl), CtlError::Version(1));
+    // Invalid DER in the version is an ASN.1 error, not a version.
+    for bad in [
+        vec![0x02, 0x00],
+        vec![0x02, 0x01, 0xff],
+        vec![0x02, 0x81, 0x01, 0x01],
+    ] {
+        ctl.prefix = bad;
+        assert!(matches!(ctl_error(&ctl), CtlError::Asn1(_)));
+    }
 }
 
 #[test]
@@ -662,6 +702,33 @@ fn ctl_must_be_a_catalog_list() {
     let mut ctl = Ctl::new(MEMBER_V2);
     ctl.usage = vec!["1.3.6.1.4.1.311.10.3.9".to_owned()];
     assert_eq!(ctl_error(&ctl), CtlError::NotCatalogList);
+    // More usages than the limit are rejected, wherever the catalog list
+    // usage is.
+    ctl.usage = vec!["1.2.3".to_owned(); MAX_ATTRIBUTES];
+    ctl.usage.push(CATALOG_LIST.to_owned());
+    assert_eq!(ctl_error(&ctl), CtlError::TooManyAttributes);
+}
+
+#[test]
+fn optional_ctl_fields_are_decoded() {
+    let d = [0x44; 32];
+    let mut member = simple_member(SHA256, &d);
+    member
+        .attributes
+        .push(attribute("1.3.6.1.4.1.311.12.2.3", &[&tlv(0x80, &[])]));
+    let mut ctl = Ctl::new(MEMBER_V2).member(&member);
+    ctl.before_time = integer(0x0102);
+    for (next, want) in [
+        // UTCTime and GeneralizedTime, both 2023-11-15 00:00:00 UTC.
+        (tlv(0x17, b"231115000000Z"), 1_700_006_400),
+        (tlv(0x18, b"20231115000000Z"), 1_700_006_400),
+    ] {
+        ctl.after_time = next;
+        let parsed = parse_ctl(&ctl.der()).unwrap();
+        assert_eq!(parsed.sequence_number.as_deref(), Some(&[0x01, 0x02][..]));
+        assert_eq!(parsed.next_update, Some(want));
+        assert!(parsed.members[0].member_info2);
+    }
 }
 
 #[test]
@@ -715,7 +782,11 @@ fn member_attribute_rules() {
 fn member_warnings() {
     let d = [0x22; 32];
     let mut odd_tag = simple_member(SHA256, &d);
-    odd_tag.tag = utf16z("not-a-digest");
+    odd_tag.tag = b"not-a-digest".to_vec();
+    // A raw tag holding a NUL pair and surrogate-range octets is kept as it
+    // is, with no text warnings.
+    let mut raw_tag = simple_member(SHA256, &d);
+    raw_tag.tag = vec![0x00, 0xd8, 0x00, 0x00, 0x41];
     let mut no_digest = simple_member(SHA256, &d);
     no_digest.attributes.remove(2);
     let unknown = simple_member("1.2.3.4", &d);
@@ -729,10 +800,19 @@ fn member_warnings() {
             .member(&no_digest)
             .member(&unknown)
             .member(&extra)
+            .member(&raw_tag)
             .der(),
     )
     .unwrap();
-    assert_eq!(ctl.members[0].tag, "not-a-digest");
+    assert_eq!(
+        ctl.members[4].tag,
+        MemberTag::Bytes(vec![0x00, 0xd8, 0x00, 0x00, 0x41])
+    );
+    assert!(!ctl.warnings.contains(&CtlWarning::LossyText));
+    assert_eq!(
+        ctl.members[0].tag,
+        MemberTag::Bytes(b"not-a-digest".to_vec())
+    );
     assert!(ctl.members[0].digest.is_some());
     assert!(ctl.members[1].digest.is_none());
     assert!(ctl.members[2].digest.is_none());
@@ -886,8 +966,156 @@ fn pe_lookup_tries_authenticode_sha256_then_sha1() {
         "Palisade Test Catalog Signer"
     );
     assert!(result.matches[2].matched_by.is_sha1());
-    // The two system catalogs share a signer.
-    assert_eq!(store.signers().len(), 2);
+    assert!(result.matches[2].relies_on_sha1());
+    assert!(!result.matches[0].relies_on_sha1());
+    // One signer certificate, but a SHA-1 and a SHA-256 signature: two
+    // verdicts, each with its own digest algorithm. Plus the organisation's.
+    assert_eq!(store.signers().len(), 3);
+    for m in &result.matches {
+        assert_eq!(
+            m.signer.unwrap().trust.signer_digest_alg,
+            m.record.signature_digest_alg
+        );
+    }
+}
+
+#[test]
+fn signer_cache_keeps_signature_digests_apart() {
+    for order in [
+        ["v1-sha1.cat", "v2-sha256.cat"],
+        ["v2-sha256.cat", "v1-sha1.cat"],
+    ] {
+        let mut b = CatalogStoreBuilder::new(StoreLimits::default())
+            .trust(CatalogSource::System, anchors("ca.der"));
+        for name in order {
+            b.add_bytes(CatalogSource::System, Some(name.into()), &fixture(name));
+        }
+        let store = b.build();
+        for record in store.records() {
+            let want = if record.path.as_deref() == Some(std::path::Path::new("v1-sha1.cat")) {
+                DigestAlgorithm::Sha1
+            } else {
+                DigestAlgorithm::Sha256
+            };
+            assert_eq!(record.signature_digest_alg, Some(want), "{order:?}");
+            let signer = &store.signers()[record.signer.unwrap()];
+            assert_eq!(signer.trust.signer_digest_alg, Some(want), "{order:?}");
+        }
+    }
+}
+
+#[test]
+fn sha1_signed_catalog_with_sha256_members_is_flagged_and_ranked_last() {
+    // The v2 CTL (SHA-256 members) signed with SHA-1, beside the same CTL
+    // signed with SHA-256.
+    let mut b = CatalogStoreBuilder::new(StoreLimits::default())
+        .trust(CatalogSource::System, anchors("ca.der"));
+    b.add_bytes(CatalogSource::System, None, &fixture("v2-sha1-signed.cat"));
+    b.add_bytes(CatalogSource::System, None, &fixture("v2-sha256.cat"));
+    let store = b.build();
+    let result = store.lookup(&FileDigests::of_bytes(&pe_member_image()));
+    assert_eq!(result.matches.len(), 2);
+    let (first, second) = (&result.matches[0], &result.matches[1]);
+    assert_eq!(first.matched_by, DigestKind::AuthenticodeSha256);
+    assert_eq!(second.matched_by, DigestKind::AuthenticodeSha256);
+    // SHA-256-signed first, though loaded second.
+    assert_eq!(first.catalog, 1);
+    assert!(!first.relies_on_sha1());
+    assert_eq!(
+        second.record.signature_digest_alg,
+        Some(DigestAlgorithm::Sha1)
+    );
+    assert!(second.relies_on_sha1());
+}
+
+#[test]
+fn digests_are_used_only_in_their_own_slot() {
+    let store = system_store();
+    let image = pe_member_image();
+    let ah = hash_pe(&image, AlgorithmSet::EMPTY).unwrap();
+    let sha1 = ah.get(HashAlgorithm::Sha1).cloned();
+    let sha256 = ah.get(HashAlgorithm::Sha256).cloned();
+    // A SHA-1 digest in a SHA-256 slot, and the reverse: no match, never a
+    // SHA-1 match labelled as SHA-256.
+    let swapped = FileDigests {
+        authenticode_sha256: sha1.clone(),
+        authenticode_sha1: sha256,
+        ..FileDigests::default()
+    };
+    assert!(store.lookup(&swapped).matches.is_empty());
+    let sha1_only = FileDigests {
+        authenticode_sha1: sha1,
+        ..FileDigests::default()
+    };
+    let result = store.lookup(&sha1_only);
+    assert_eq!(result.matches.len(), 1);
+    assert_eq!(result.matches[0].matched_by, DigestKind::AuthenticodeSha1);
+}
+
+/// `der` with the content of the element at `path` replaced by
+/// `content`, re-encoding the length of every element around it.
+fn with_content(der: &[u8], path: &[usize], content: &[u8]) -> Vec<u8> {
+    let Some((&first, rest)) = path.split_first() else {
+        return tlv(der[0], content);
+    };
+    let (h, l) = header(der, 0);
+    let body = &der[h..h + l];
+    let mut out = Vec::new();
+    let mut pos = 0;
+    let mut index = 0;
+    while pos < body.len() {
+        let (ch, cl) = header(body, pos);
+        let child = &body[pos..pos + ch + cl];
+        if index == first {
+            out.extend(with_content(child, rest, content));
+        } else {
+            out.extend_from_slice(child);
+        }
+        pos += ch + cl;
+        index += 1;
+    }
+    tlv(der[0], &out)
+}
+
+/// `v2-sha256.cat` with `v2-sha1-signed.cat` added to its SignerInfo as a
+/// nested signature (an unauthenticated attribute, which the outer
+/// signature does not cover), and the nested ContentInfo replaced by
+/// `nested` when given.
+fn nested_catalog(nested: Option<&[u8]>) -> Vec<u8> {
+    let outer = fixture("v2-sha256.cat");
+    let inner = fixture("v2-sha1-signed.cat");
+    let inner = nested.unwrap_or(&inner);
+    let attr = seq(&[&oid("1.3.6.1.4.1.311.2.4.1"), &set(&[inner])]);
+    let unsigned = tlv(0xa1, &attr);
+    // The only SignerInfo: [1, 0, 4, 0]. Append `[1] unsignedAttrs`.
+    let si_path = [1, 0, 4, 0];
+    let si = element(&outer, &si_path);
+    let (h, l) = header(si, 0);
+    let mut body = si[h..h + l].to_vec();
+    body.extend(&unsigned);
+    with_content(&outer, &si_path, &body)
+}
+
+#[test]
+fn nested_signatures_are_checked_as_der_and_reported() {
+    let cat = parse_catalog(&nested_catalog(None)).unwrap();
+    assert!(cat.signature_valid(), "{:?}", cat.signature());
+    assert_eq!(
+        cat.warnings,
+        [palisade_fileid::catalog::CatalogWarning::NestedSignaturesIgnored(1)]
+    );
+    // Invalid DER inside the (unread) nested signature: a BER indefinite
+    // length. The outer signature does not cover it, but the catalog is
+    // rejected anyway.
+    let inner = fixture("v2-sha1-signed.cat");
+    let (h, l) = header(&inner, 0);
+    let mut ber = vec![0x30, 0x80];
+    ber.extend_from_slice(&inner[h..h + l]);
+    ber.extend([0, 0]);
+    assert!(matches!(
+        parse_catalog(&nested_catalog(Some(&ber))),
+        Err(CatalogError::Envelope(SignatureError::Asn1(_)))
+    ));
 }
 
 #[test]
@@ -1151,6 +1379,53 @@ fn temp_dir(name: &str) -> std::path::PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+#[test]
+fn file_limits_are_checked_before_reading() {
+    let root = temp_dir("limits");
+    let v1 = fixture("v1-sha1.cat");
+    let v2 = fixture("v2-sha256.cat");
+    std::fs::write(root.join("a.cat"), &v1).unwrap();
+    std::fs::write(root.join("b.cat"), &v2).unwrap();
+    std::fs::write(root.join("c.cat"), &v1).unwrap();
+
+    // Oversized: recorded with its real size, not read.
+    let limits = StoreLimits {
+        max_catalog_size: (v1.len() - 1) as u64,
+        ..StoreLimits::default()
+    };
+    let mut b = CatalogStoreBuilder::new(limits);
+    let r = b.add_file(CatalogSource::System, &root.join("a.cat"));
+    assert_eq!(
+        r.errors,
+        [LoadError::TooLarge {
+            path: Some(root.join("a.cat")),
+            size: v1.len() as u64
+        }]
+    );
+    let store = b.build();
+    assert_eq!(store.records()[0].size, v1.len() as u64);
+    assert_eq!(store.records()[0].id, None);
+    assert_eq!(
+        store.records()[0].status,
+        CatalogStatus::Unreadable(CatalogError::TooLarge(v1.len() as u64))
+    );
+
+    // Byte budget: a.cat fits, b.cat does not, and the walk stops when
+    // nothing is left, so c.cat (which would fit by itself) is never read.
+    let limits = StoreLimits {
+        max_total_bytes: v1.len() as u64,
+        ..StoreLimits::default()
+    };
+    let mut b = CatalogStoreBuilder::new(limits);
+    let r = b.add_dir(CatalogSource::System, &root);
+    assert_eq!(r.recorded, 1, "{r:?}");
+    assert_eq!(r.errors, [LoadError::ByteLimit]);
+    let r = b.add_file(CatalogSource::System, &root.join("b.cat"));
+    assert_eq!(r.errors, [LoadError::ByteLimit]);
+    assert_eq!(b.build().records().len(), 1);
+    std::fs::remove_dir_all(&root).unwrap();
 }
 
 #[test]
