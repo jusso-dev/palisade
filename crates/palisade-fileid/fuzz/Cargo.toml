@@ -6,6 +6,7 @@
 #   cargo +nightly fuzz run version_info_parse
 #   cargo +nightly fuzz run authenticode_ranges
 #   cargo +nightly fuzz run authenticode_pkcs7
+#   cargo +nightly fuzz run fsctx_parse
 [package]
 name = "palisade-fileid-fuzz"
 version = "0.0.0"
@@ -46,6 +47,13 @@ bench = false
 [[bin]]
 name = "authenticode_pkcs7"
 path = "fuzz_targets/authenticode_pkcs7.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fsctx_parse"
+path = "fuzz_targets/fsctx_parse.rs"
 test = false
 doc = false
 bench = false

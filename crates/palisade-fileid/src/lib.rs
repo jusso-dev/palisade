@@ -5,5 +5,8 @@
 #![cfg_attr(test, allow(clippy::indexing_slicing))]
 
 pub mod authenticode;
+pub mod fsctx;
 pub mod hash;
 pub mod pe;
+#[cfg(all(windows, feature = "os-trust"))]
+pub mod win;
