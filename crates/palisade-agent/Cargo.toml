@@ -13,5 +13,18 @@ publish.workspace = true
 name = "palisade-agent"
 path = "src/main.rs"
 
+[dependencies]
+serde = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+toml = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-service = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
+
 [lints]
 workspace = true
