@@ -496,6 +496,9 @@ struct Node<'a> {
     cert: &'a CertSummary,
     origin: CertOrigin,
     anchor: Option<usize>,
+    /// The certificate is a policy intermediate or anchor, even if the
+    /// file also embeds a copy (which keeps the embedded origin).
+    from_policy: bool,
 }
 
 /// Builds the chains of the signer certificate `certs[signer]`, where
@@ -574,6 +577,12 @@ pub(crate) fn build_chain_within(
             .get(cert.sha256_thumbprint.as_str())
             .copied()
     };
+    let policy_thumbprints: HashSet<&str> = config
+        .intermediates
+        .iter()
+        .chain(config.anchors.iter().map(|a| &a.cert))
+        .map(|c| c.sha256_thumbprint.as_str())
+        .collect();
     let mut pool: Vec<Node<'_>> = Vec::new();
     let mut seen: HashSet<&str> = HashSet::new();
     for (i, cert) in &embedded {
@@ -582,6 +591,7 @@ pub(crate) fn build_chain_within(
                 cert,
                 origin: CertOrigin::Embedded(*i),
                 anchor: anchor_of(cert),
+                from_policy: policy_thumbprints.contains(cert.sha256_thumbprint.as_str()),
             });
         }
     }
@@ -592,6 +602,7 @@ pub(crate) fn build_chain_within(
                 cert,
                 origin: CertOrigin::PolicyIntermediate(i),
                 anchor: anchor_of(cert),
+                from_policy: true,
             });
         }
     }
@@ -601,6 +612,7 @@ pub(crate) fn build_chain_within(
                 cert: &anchor.cert,
                 origin: CertOrigin::PolicyAnchor(i),
                 anchor: Some(i),
+                from_policy: true,
             });
         }
     }
@@ -1109,7 +1121,11 @@ impl<'p, 'i> Search<'p, 'i> {
                 .map(|v| {
                     v.iter()
                         .copied()
+                        // Anchors are trusted already and end every
+                        // trusted path, so they are never checked as
+                        // children (two re-keyed roots sharing a name).
                         .filter(|c| *c != t && on_chain(*c))
+                        .filter(|c| self.pool.get(*c).is_some_and(|n| n.anchor.is_none()))
                         .collect()
                 })
                 .unwrap_or_default();
@@ -1147,11 +1163,7 @@ impl<'p, 'i> Search<'p, 'i> {
     /// Whether `node` is the leaf or a policy certificate, whose links are
     /// checked on the budget added certificates cannot spend.
     fn privileged(&self, node: usize, leaf: usize) -> bool {
-        node == leaf
-            || self
-                .pool
-                .get(node)
-                .is_some_and(|n| !matches!(n.origin, CertOrigin::Embedded(_)) || n.anchor.is_some())
+        node == leaf || self.pool.get(node).is_some_and(|n| n.from_policy)
     }
 
     /// The best maximal paths from `leaf` over pool indices below `limit`.

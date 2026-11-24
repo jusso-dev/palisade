@@ -867,6 +867,44 @@ fn decoys_cannot_starve_trust_with_rekeyed_cas() {
 }
 
 #[test]
+fn same_name_anchors_are_not_checked_against_each_other() {
+    // `root` and `cross-root` share a subject. Both trusted, neither is
+    // checked as the other's child, so no issue is recorded.
+    let report = build_chain(
+        &chain_of(&["leaf", "inter"]),
+        0,
+        &config(&["root", "cross-root"]),
+    )
+    .unwrap();
+    assert!(report.full_chain.anchored);
+    assert!(report.issues.is_empty(), "{:?}", report.issues);
+}
+
+#[test]
+fn an_embedded_copy_of_a_policy_intermediate_keeps_policy_priority() {
+    // The policy intermediate is also embedded, behind 62 decoys that
+    // claim the same issuer. It is still reached and trusted.
+    let inter = der("inter");
+    let mut certs = vec![der("leaf")];
+    for i in 0..MAX_EMBEDDED_CERTIFICATES - 2 {
+        let mut c = inter.clone();
+        let at = c.len() - 1 - (i / 8);
+        c[at] ^= 1 << (i % 8);
+        certs.push(c);
+    }
+    certs.push(inter.clone());
+    let mut cfg = config(&["root"]);
+    cfg.add_intermediate(&inter).unwrap();
+    let report = build_chain(&certs, 0, &cfg).unwrap();
+    assert!(report.full_chain.anchored, "{:?}", report.issues);
+    let pca = report.pca.unwrap();
+    assert!(matches!(
+        report.certificates[pca].origin,
+        CertOrigin::Embedded(_)
+    ));
+}
+
+#[test]
 fn unrelated_policy_entries_do_not_appear_in_reports() {
     // Policy holds another chain (the ECC root and CA) and a pinned
     // non-CA certificate: none is reachable from this leaf, so none is
