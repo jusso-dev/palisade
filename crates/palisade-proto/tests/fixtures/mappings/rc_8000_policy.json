@@ -1,0 +1,12 @@
+{
+  "source": "os_legacy_rule_collection",
+  "record": {
+    "event_id": 8000,
+    "time_created": "2026-11-24T03:15:22.1234567Z",
+    "record_id": 1000,
+    "channel": "rule-collection/EXE and DLL",
+    "fields": {
+      "Status": "0xC0000001"
+    }
+  }
+}

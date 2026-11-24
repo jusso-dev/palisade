@@ -1,0 +1,19 @@
+{
+  "source": "os_legacy_rule_collection",
+  "record": {
+    "event_id": 8024,
+    "time_created": "2026-11-24T03:15:22.1234567Z",
+    "record_id": 1000,
+    "channel": "rule-collection/Packaged app-Deployment",
+    "fields": {
+      "PolicyNameBuffer": "APPX",
+      "RuleId": "{F1E2D3C4-B5A6-4978-8695-A4B3C2D1E0F9}",
+      "RuleNameBuffer": "Example packaged app rule",
+      "RuleSddlBuffer": "D:(A;;FX;;;S-1-1-0)",
+      "TargetUser": "S-1-5-21-1111111111-2222222222-3333333333-1001",
+      "TargetProcessId": "7000",
+      "PackageBuffer": "Example.Notes_1.0.0.0_x64__abcdefghijk",
+      "Fqbn": "CN=EXAMPLE SOFTWARE LTD\\EXAMPLE.NOTES\\APPX\\1.0.0.0"
+    }
+  }
+}

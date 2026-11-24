@@ -1,0 +1,18 @@
+{
+  "source": "os_code_integrity",
+  "record": {
+    "event_id": 3095,
+    "time_created": "2026-11-24T03:15:22.1234567Z",
+    "record_id": 1000,
+    "channel": "code-integrity/Operational",
+    "fields": {
+      "PolicyNameBuffer": "Palisade base policy",
+      "PolicyIdBuffer": "2026.11.24.1",
+      "PolicyGUID": "{A244370E-44C9-4C06-B551-F6016E563076}",
+      "Status": "0xC0000001",
+      "Options": "0x90881004",
+      "PolicyHash": "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
+      "OptionsV2": "0x0"
+    }
+  }
+}

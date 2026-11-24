@@ -1,0 +1,2600 @@
+{
+  "$defs": {
+    "AgentInfo": {
+      "additionalProperties": false,
+      "description": "Agent state.",
+      "properties": {
+        "cache": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CacheStats"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Identity cache counters."
+        },
+        "dropped_count": {
+          "description": "Events dropped since the last report. Drops are always counted, never\nsilent.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "health": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HealthStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The overall health."
+        },
+        "tamper_attempts": {
+          "description": "Tamper attempts since the last report.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "throttled_count": {
+          "description": "Events throttled since the last report.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "CacheStats": {
+      "additionalProperties": false,
+      "description": "Cache counters.",
+      "properties": {
+        "entries": {
+          "description": "Entries in the cache.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "hits": {
+          "description": "Lookups answered from the cache.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "misses": {
+          "description": "Lookups not answered from the cache.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Category": {
+      "description": "The broad class of an event.",
+      "oneOf": [
+        {
+          "const": "execution",
+          "description": "Running an executable.",
+          "type": "string"
+        },
+        {
+          "const": "script",
+          "description": "Running a script.",
+          "type": "string"
+        },
+        {
+          "const": "library",
+          "description": "Loading a library into a process.",
+          "type": "string"
+        },
+        {
+          "const": "driver",
+          "description": "Loading a kernel driver.",
+          "type": "string"
+        },
+        {
+          "const": "installer",
+          "description": "Running an installer.",
+          "type": "string"
+        },
+        {
+          "const": "packaged_app",
+          "description": "Installing or activating a packaged app.",
+          "type": "string"
+        },
+        {
+          "const": "containment",
+          "description": "Application containment.",
+          "type": "string"
+        },
+        {
+          "const": "device",
+          "description": "Device control.",
+          "type": "string"
+        },
+        {
+          "const": "network",
+          "description": "Network control.",
+          "type": "string"
+        },
+        {
+          "const": "web",
+          "description": "Web access control.",
+          "type": "string"
+        },
+        {
+          "const": "elevation",
+          "description": "Privilege elevation.",
+          "type": "string"
+        },
+        {
+          "const": "approval",
+          "description": "Approval requests.",
+          "type": "string"
+        },
+        {
+          "const": "exception",
+          "description": "Policy exceptions.",
+          "type": "string"
+        },
+        {
+          "const": "policy",
+          "description": "Policy distribution and activation.",
+          "type": "string"
+        },
+        {
+          "const": "agent",
+          "description": "The agent itself.",
+          "type": "string"
+        },
+        {
+          "const": "admin_audit",
+          "description": "Administrative actions on the server.",
+          "type": "string"
+        },
+        {
+          "const": "identity",
+          "description": "Identity changes, such as local group membership.",
+          "type": "string"
+        },
+        {
+          "const": "compliance",
+          "description": "Compliance probes.",
+          "type": "string"
+        },
+        {
+          "const": "detection",
+          "description": "Detections.",
+          "type": "string"
+        },
+        {
+          "const": "integrity",
+          "description": "File integrity monitoring.",
+          "type": "string"
+        }
+      ]
+    },
+    "DeviceType": {
+      "description": "The kind of device a file is stored on.",
+      "oneOf": [
+        {
+          "const": "fixed",
+          "description": "A fixed disk.",
+          "type": "string"
+        },
+        {
+          "const": "removable",
+          "description": "A removable drive.",
+          "type": "string"
+        },
+        {
+          "const": "network",
+          "description": "A network share.",
+          "type": "string"
+        },
+        {
+          "const": "cdrom",
+          "description": "An optical drive.",
+          "type": "string"
+        },
+        {
+          "const": "virtual",
+          "description": "A virtual disk.",
+          "type": "string"
+        }
+      ]
+    },
+    "EventMode": {
+      "description": "The enforcement mode in effect when the event happened.\n\nThis is the policy [`Mode`] as seen by an event, plus two states the\nagent can be in. [`EventMode::from_policy_mode`] converts.",
+      "oneOf": [
+        {
+          "const": "enforce",
+          "description": "Decisions take effect.",
+          "type": "string"
+        },
+        {
+          "const": "monitor",
+          "description": "Decisions are evaluated and would-block decisions reported.",
+          "type": "string"
+        },
+        {
+          "const": "audit",
+          "description": "Like `monitor`, with a full event for every decision.",
+          "type": "string"
+        },
+        {
+          "const": "learning",
+          "description": "Audit, collecting would-block objects as learning candidates.",
+          "type": "string"
+        },
+        {
+          "const": "maintenance",
+          "description": "An unlocked maintenance window (#222).",
+          "type": "string"
+        },
+        {
+          "const": "simulate",
+          "description": "A simulation of a policy that is not deployed.",
+          "type": "string"
+        }
+      ]
+    },
+    "EventType": {
+      "description": "A registered event type (`crates/palisade-proto/events/registry.yaml`).",
+      "enum": [
+        "exec.decision",
+        "library.decision",
+        "driver.decision",
+        "script.decision",
+        "installer.decision",
+        "packaged_app.decision",
+        "com.decision",
+        "exec.origin_check",
+        "policy.applied",
+        "policy.failed",
+        "policy.activated",
+        "agent.started",
+        "agent.stopped",
+        "agent.health",
+        "agent.tamper",
+        "agent.throttled",
+        "agent.dropped",
+        "agent.clock_unsynced"
+      ],
+      "type": "string"
+    },
+    "File": {
+      "additionalProperties": false,
+      "description": "The file an event is about: the target of a decision.",
+      "properties": {
+        "ads_name": {
+          "description": "The alternate data stream name, if the target is a stream.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When the file was created."
+        },
+        "device_type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeviceType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The kind of device the file is on."
+        },
+        "hashes": {
+          "$ref": "#/$defs/Hashes",
+          "description": "The file's digests."
+        },
+        "modified": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When the file was last modified."
+        },
+        "object_type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ObjectType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The object class."
+        },
+        "owner_sid": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The SID of the file owner."
+        },
+        "package_name": {
+          "description": "For packaged apps: the package family or full name.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "description": "The path as reported, for example a device path.",
+          "maxLength": 32767,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path_normalised": {
+          "description": "The path with drive letters and `%ENV%` substitutions.",
+          "maxLength": 32767,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signers": {
+          "description": "The file's signatures, leaf first.",
+          "items": {
+            "$ref": "#/$defs/Signer"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "size": {
+          "description": "The size in bytes.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "user_writable_location": {
+          "description": "Whether a standard user can write to the file's location.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "version_info": {
+          "$ref": "#/$defs/VersionInfo",
+          "description": "The file's version resource."
+        }
+      },
+      "type": "object"
+    },
+    "Guid": {
+      "description": "A GUID in canonical lowercase form, without braces.",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "type": "string"
+    },
+    "Hashes": {
+      "additionalProperties": false,
+      "description": "The digests of a file.\n\n`sha256`, `sha1` and `md5` are flat hashes of the whole file. The\n`authenticode_*` digests are the digest a signature covers: the\nAuthenticode image hash for PE files, or the subject-interface-package\ndigest for scripts and other signable formats. SHA-1 and MD5 are for\nmatching OS and imported data only, never the sole basis of a decision\n(ADR 0008).",
+      "properties": {
+        "authenticode_sha1": {
+          "description": "SHA-1 signature digest. Interop only.",
+          "pattern": "^[0-9a-f]{40}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "authenticode_sha256": {
+          "description": "SHA-256 signature digest.",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "md5": {
+          "description": "MD5 of the file. Interop only.",
+          "pattern": "^[0-9a-f]{32}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sha1": {
+          "description": "SHA-1 of the file. Interop only.",
+          "pattern": "^[0-9a-f]{40}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sha256": {
+          "description": "SHA-256 of the file.",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "HealthStatus": {
+      "description": "The agent's overall health.",
+      "oneOf": [
+        {
+          "const": "healthy",
+          "description": "Everything works.",
+          "type": "string"
+        },
+        {
+          "const": "degraded",
+          "description": "Working, with a problem that needs attention.",
+          "type": "string"
+        },
+        {
+          "const": "unhealthy",
+          "description": "Not protecting the device.",
+          "type": "string"
+        }
+      ]
+    },
+    "Host": {
+      "additionalProperties": false,
+      "description": "The device an event is about.",
+      "properties": {
+        "agent_version": {
+          "description": "The Palisade agent version.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "arch": {
+          "description": "The CPU architecture, for example `x86_64` or `aarch64`.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "domain": {
+          "description": "The directory domain the device is joined to.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fqdn": {
+          "description": "The fully qualified domain name.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "groups": {
+          "description": "The device groups it belongs to, at most 64.",
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "id": {
+          "$ref": "#/$defs/HostId",
+          "description": "The device ID from enrolment."
+        },
+        "ips": {
+          "description": "The device's IP addresses, at most 32.",
+          "items": {
+            "$ref": "#/$defs/IpAddress"
+          },
+          "maxItems": 32,
+          "type": "array"
+        },
+        "name": {
+          "description": "The host name. Dropped in anonymous mode (#228).",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "os": {
+          "description": "The operating system, for example `Windows 11 Enterprise`.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "os_build": {
+          "description": "The OS build, for example `26100.2314`.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "HostId": {
+      "$ref": "#/$defs/Uuid7",
+      "description": "The ID of an enrolled device, assigned by the server at enrolment."
+    },
+    "IntegrityLevel": {
+      "description": "A process integrity level.",
+      "oneOf": [
+        {
+          "const": "untrusted",
+          "description": "Untrusted.",
+          "type": "string"
+        },
+        {
+          "const": "low",
+          "description": "Low.",
+          "type": "string"
+        },
+        {
+          "const": "medium",
+          "description": "Medium.",
+          "type": "string"
+        },
+        {
+          "const": "medium_plus",
+          "description": "Medium plus.",
+          "type": "string"
+        },
+        {
+          "const": "high",
+          "description": "High.",
+          "type": "string"
+        },
+        {
+          "const": "system",
+          "description": "System.",
+          "type": "string"
+        },
+        {
+          "const": "protected",
+          "description": "Protected process.",
+          "type": "string"
+        }
+      ]
+    },
+    "IpAddress": {
+      "anyOf": [
+        {
+          "format": "ipv4"
+        },
+        {
+          "format": "ipv6"
+        }
+      ],
+      "description": "An IPv4 or IPv6 address in canonical form.",
+      "type": "string"
+    },
+    "Labels": {
+      "additionalProperties": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      },
+      "description": "Free-form labels from policy tags.",
+      "maxProperties": 64,
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_.:-]{0,63}$"
+      },
+      "type": "object"
+    },
+    "LanguageMode": {
+      "description": "The PowerShell language mode a script ran in.",
+      "oneOf": [
+        {
+          "const": "full_language",
+          "description": "Full language.",
+          "type": "string"
+        },
+        {
+          "const": "constrained_language",
+          "description": "Constrained language.",
+          "type": "string"
+        },
+        {
+          "const": "restricted_language",
+          "description": "Restricted language.",
+          "type": "string"
+        },
+        {
+          "const": "no_language",
+          "description": "No language.",
+          "type": "string"
+        }
+      ]
+    },
+    "LogonType": {
+      "description": "How a logon session was created. The names follow the OS logon types\n2 to 13.",
+      "oneOf": [
+        {
+          "const": "interactive",
+          "description": "2: at the console.",
+          "type": "string"
+        },
+        {
+          "const": "network",
+          "description": "3: from the network.",
+          "type": "string"
+        },
+        {
+          "const": "batch",
+          "description": "4: a batch job.",
+          "type": "string"
+        },
+        {
+          "const": "service",
+          "description": "5: a service.",
+          "type": "string"
+        },
+        {
+          "const": "unlock",
+          "description": "7: a workstation unlock.",
+          "type": "string"
+        },
+        {
+          "const": "network_cleartext",
+          "description": "8: from the network with a cleartext password.",
+          "type": "string"
+        },
+        {
+          "const": "new_credentials",
+          "description": "9: new credentials for outbound connections.",
+          "type": "string"
+        },
+        {
+          "const": "remote_interactive",
+          "description": "10: remote desktop.",
+          "type": "string"
+        },
+        {
+          "const": "cached_interactive",
+          "description": "11: with cached credentials.",
+          "type": "string"
+        },
+        {
+          "const": "cached_remote_interactive",
+          "description": "12: remote desktop with cached credentials.",
+          "type": "string"
+        },
+        {
+          "const": "cached_unlock",
+          "description": "13: an unlock with cached credentials.",
+          "type": "string"
+        }
+      ]
+    },
+    "Native": {
+      "additionalProperties": false,
+      "description": "Details from OS-native enforcement: the OS code integrity and legacy\nrule-collection engines.\n\nThese are the OS's own identifiers. Linking them to the Palisade policy\nand rule that produced the native policy fills [`Event::policy`] (#90).",
+      "properties": {
+        "catalog_sha1": {
+          "description": "The SHA-1 digest used for catalog lookup. Interop only.",
+          "pattern": "^[0-9a-f]{40}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "catalog_sha256": {
+          "description": "The SHA-256 digest used for catalog lookup.",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "clsid": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Guid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The COM class ID, for COM activation events."
+        },
+        "fqbn": {
+          "description": "The fully qualified binary name (publisher, product, file name and\nversion), verbatim.",
+          "maxLength": 32767,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "managed_installer_enabled": {
+          "description": "Whether the native policy trusts files from a managed installer.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "passes_managed_installer": {
+          "description": "Whether the file carried a managed-installer origin claim.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "policy_audit_mode": {
+          "description": "Whether the native policy was in audit mode.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "policy_count": {
+          "description": "How many policies an activation or refresh covered.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "policy_guid": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Guid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The native policy's GUID."
+        },
+        "policy_hash": {
+          "description": "The native policy's hash.",
+          "pattern": "^([0-9a-f]{2}){1,64}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "policy_id": {
+          "description": "The native policy's ID string.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "policy_name": {
+          "description": "The native policy's name.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "policy_options": {
+          "description": "The native policy's option bits, as the OS reports them on activation.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "requested_signing_level": {
+          "description": "The signing level the caller requested (code 0 to 14).",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "rule_guid": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Guid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The native rule's GUID."
+        },
+        "rule_hash": {
+          "description": "The hash the rule-collection engine computed for hash rules. Its\nalgorithm depends on the file type, so it is not one of [`Hashes`].",
+          "pattern": "^([0-9a-f]{2}){1,64}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rule_name": {
+          "description": "The native rule's name.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rule_sddl": {
+          "description": "The native rule's security descriptor (SDDL).",
+          "maxLength": 32767,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signing_scenario": {
+          "description": "The signing scenario: 0 for kernel mode, 1 for user mode.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "status_code": {
+          "description": "The OS status code (an NTSTATUS value).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "validated_signing_level": {
+          "description": "The signing level the OS validated (code 0 to 14).",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ObjectType": {
+      "description": "The class of object being evaluated. Scripts are `script.<kind>`.",
+      "enum": [
+        "executable",
+        "library",
+        "driver",
+        "script.powershell",
+        "script.batch",
+        "script.cmd",
+        "script.vbscript",
+        "script.jscript",
+        "script.wsf",
+        "script.wsc",
+        "script.python",
+        "script.java",
+        "script.reg",
+        "script.other",
+        "installer",
+        "compiled_html",
+        "html_application",
+        "control_panel_applet",
+        "packaged_app",
+        "command",
+        "com_object"
+      ],
+      "type": "string"
+    },
+    "Origin": {
+      "additionalProperties": false,
+      "description": "Where a file came from.",
+      "properties": {
+        "host_url": {
+          "description": "The download URL.",
+          "maxLength": 32767,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "motw_zone": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Zone"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The zone in the file's mark of the web."
+        },
+        "referrer_url": {
+          "description": "The referring page.",
+          "maxLength": 32767,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Outcome": {
+      "description": "What happened.",
+      "oneOf": [
+        {
+          "const": "allowed",
+          "description": "The action was allowed.",
+          "type": "string"
+        },
+        {
+          "const": "blocked",
+          "description": "The action was blocked.",
+          "type": "string"
+        },
+        {
+          "const": "audited",
+          "description": "The action was allowed, but would have been blocked if enforced.",
+          "type": "string"
+        },
+        {
+          "const": "elevated",
+          "description": "The action ran with elevated rights.",
+          "type": "string"
+        },
+        {
+          "const": "cancelled",
+          "description": "The user or the system cancelled the action.",
+          "type": "string"
+        },
+        {
+          "const": "failed",
+          "description": "The action failed.",
+          "type": "string"
+        },
+        {
+          "const": "info",
+          "description": "Information only: no allow or block decision.",
+          "type": "string"
+        }
+      ]
+    },
+    "ParentProcess": {
+      "additionalProperties": false,
+      "description": "A parent process. It has no parent of its own: the grandparent is\nsummarised on the child.",
+      "properties": {
+        "cmdline": {
+          "description": "The command line. Collected only when permitted, and redacted by\ndefault (#228).",
+          "maxLength": 32767,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hashes": {
+          "$ref": "#/$defs/Hashes",
+          "description": "The image's digests."
+        },
+        "image_path": {
+          "description": "The image path as reported, for example a device path.",
+          "maxLength": 32767,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "image_path_normalised": {
+          "description": "The image path with drive letters and `%ENV%` substitutions.",
+          "maxLength": 32767,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "integrity_level": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IntegrityLevel"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The process integrity level."
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Origin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where the image came from."
+        },
+        "owner_sid": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The SID of the process owner."
+        },
+        "pid": {
+          "description": "The process ID.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "process_key": {
+          "description": "A key that identifies the process uniquely on the device, assigned\nby the agent's process tracker (#59). Process IDs are reused; this is not.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signers": {
+          "description": "The image's signatures, leaf first.",
+          "items": {
+            "$ref": "#/$defs/Signer"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "token_elevation_type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenElevationType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The token elevation type."
+        },
+        "version_info": {
+          "$ref": "#/$defs/VersionInfo",
+          "description": "The image's version resource."
+        }
+      },
+      "type": "object"
+    },
+    "PolicyId": {
+      "$ref": "#/$defs/Uuid7",
+      "description": "The stable ID of a policy."
+    },
+    "PolicyRef": {
+      "additionalProperties": false,
+      "description": "The Palisade policy and rule behind a decision.",
+      "properties": {
+        "hash": {
+          "description": "The SHA-256 of the policy bundle.",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PolicyId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The policy ID."
+        },
+        "name": {
+          "description": "The policy name.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profile_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid7"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The profile the policy was assigned through."
+        },
+        "rule_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuleId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The rule that decided."
+        },
+        "rule_name": {
+          "description": "The rule's name.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rule_type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Token"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The kind of rule, for example `hash`, `publisher` or `path`."
+        },
+        "version": {
+          "description": "The policy revision.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Process": {
+      "additionalProperties": false,
+      "description": "The process that acted.",
+      "properties": {
+        "cmdline": {
+          "description": "The command line. Collected only when permitted, and redacted by\ndefault (#228).",
+          "maxLength": 32767,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "grandparent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProcessSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A summary of the grandparent process."
+        },
+        "hashes": {
+          "$ref": "#/$defs/Hashes",
+          "description": "The image's digests."
+        },
+        "image_path": {
+          "description": "The image path as reported, for example a device path.",
+          "maxLength": 32767,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "image_path_normalised": {
+          "description": "The image path with drive letters and `%ENV%` substitutions.",
+          "maxLength": 32767,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "integrity_level": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IntegrityLevel"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The process integrity level."
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Origin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where the image came from."
+        },
+        "owner_sid": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The SID of the process owner."
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ParentProcess"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The parent process, with the same fields."
+        },
+        "pid": {
+          "description": "The process ID.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "process_key": {
+          "description": "A key that identifies the process uniquely on the device, assigned\nby the agent's process tracker (#59). Process IDs are reused; this is not.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signers": {
+          "description": "The image's signatures, leaf first.",
+          "items": {
+            "$ref": "#/$defs/Signer"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "token_elevation_type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenElevationType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The token elevation type."
+        },
+        "version_info": {
+          "$ref": "#/$defs/VersionInfo",
+          "description": "The image's version resource."
+        }
+      },
+      "type": "object"
+    },
+    "ProcessSummary": {
+      "additionalProperties": false,
+      "description": "A short description of a process.",
+      "properties": {
+        "image_path": {
+          "description": "The image path.",
+          "maxLength": 32767,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pid": {
+          "description": "The process ID.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "process_key": {
+          "description": "The process key (#59).",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RuleId": {
+      "$ref": "#/$defs/Uuid7",
+      "description": "The stable ID of a rule. It is never reused, even after the rule is deleted."
+    },
+    "SchemaVersion": {
+      "description": "A semantic version MAJOR.MINOR.PATCH, without pre-release or build suffixes.",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "type": "string"
+    },
+    "Script": {
+      "additionalProperties": false,
+      "description": "A script.\n\nA script is either a file (`path`) or inline text (`inline`), never both.\nA file-backed script's digests and signatures are in [`Event::file`].",
+      "properties": {
+        "amsi_content_sha256": {
+          "description": "SHA-256 of the content passed to the antimalware scan interface.",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "content_sha256": {
+          "description": "SHA-256 of the script content.",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "inline": {
+          "description": "The script was inline text, not a file.",
+          "type": "boolean"
+        },
+        "interpreter": {
+          "description": "The interpreter that ran it.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScriptKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The kind of script."
+        },
+        "language_mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LanguageMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The language mode it ran in."
+        },
+        "path": {
+          "description": "The script file.",
+          "maxLength": 32767,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "script_block_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Guid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The interpreter's script block ID."
+        }
+      },
+      "type": "object"
+    },
+    "ScriptKind": {
+      "description": "The kind of script, for [`ObjectType::Script`].",
+      "oneOf": [
+        {
+          "const": "powershell",
+          "description": "`.ps1`, `.psm1`, `.psd1`.",
+          "type": "string"
+        },
+        {
+          "const": "batch",
+          "description": "`.bat`.",
+          "type": "string"
+        },
+        {
+          "const": "cmd",
+          "description": "`.cmd`.",
+          "type": "string"
+        },
+        {
+          "const": "vbscript",
+          "description": "`.vbs`, `.vbe`.",
+          "type": "string"
+        },
+        {
+          "const": "jscript",
+          "description": "`.js`, `.jse` run by the OS script host.",
+          "type": "string"
+        },
+        {
+          "const": "wsf",
+          "description": "`.wsf`.",
+          "type": "string"
+        },
+        {
+          "const": "wsc",
+          "description": "`.wsc`, `.sct` scriptlets.",
+          "type": "string"
+        },
+        {
+          "const": "python",
+          "description": "`.py`, `.pyw`, `.pyc`, `.pyo`.",
+          "type": "string"
+        },
+        {
+          "const": "java",
+          "description": "`.jar`, `.class`.",
+          "type": "string"
+        },
+        {
+          "const": "reg",
+          "description": "`.reg` registry scripts.",
+          "type": "string"
+        },
+        {
+          "const": "other",
+          "description": "Any other interpreted script.",
+          "type": "string"
+        }
+      ]
+    },
+    "Severity": {
+      "description": "Event severity, 0 (lowest) to 10 (highest).",
+      "maximum": 10,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "Sid": {
+      "description": "A Windows security identifier in its standard text form.",
+      "pattern": "^S-1-(0|[1-9][0-9]{0,14})(-(0|[1-9][0-9]{0,9})){0,15}$",
+      "type": "string"
+    },
+    "Signer": {
+      "additionalProperties": false,
+      "description": "One signature on a file, leaf first.\n\n`signature_type`, `signing_level` and `verification_error` keep the OS\ncodes as numbers, so values the decoder tables (#90) do not know yet are\nnot lost.",
+      "properties": {
+        "chain_valid": {
+          "description": "Whether the certificate chain verified.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "issuer": {
+          "description": "The issuing certificate's common name.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "issuer_tbs_hash": {
+          "description": "The hash of the issuing certificate's to-be-signed part.",
+          "pattern": "^([0-9a-f]{2}){1,64}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "leaf_thumbprint": {
+          "description": "The leaf certificate's thumbprint.",
+          "pattern": "^([0-9a-f]{2}){1,64}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "publisher": {
+          "description": "The leaf certificate's subject common name.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signature_type": {
+          "description": "How the OS verified the signature (code 0 to 7).",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "signing_level": {
+          "description": "The signing level the OS validated (code 0 to 14).",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tbs_hash": {
+          "description": "The hash of the leaf certificate's to-be-signed part.",
+          "pattern": "^([0-9a-f]{2}){1,64}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timestamp": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The signing time from a trusted timestamp."
+        },
+        "verification_error": {
+          "description": "Why verification failed, or 0 if it succeeded (code 0 to 28).",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Source": {
+      "additionalProperties": false,
+      "description": "The log an event was translated from.",
+      "properties": {
+        "activity_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Guid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The source's correlation activity ID, which groups related records."
+        },
+        "channel": {
+          "description": "The log channel.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "event_id": {
+          "description": "The source's own event ID.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/SourceKind",
+          "description": "The kind of log."
+        },
+        "record_id": {
+          "description": "The source's record number.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "SourceKind": {
+      "description": "A kind of log that events can be translated from.",
+      "oneOf": [
+        {
+          "const": "os_code_integrity",
+          "description": "The OS code integrity log.",
+          "type": "string"
+        },
+        {
+          "const": "os_legacy_rule_collection",
+          "description": "The OS legacy rule-collection logs.",
+          "type": "string"
+        },
+        {
+          "const": "os_security",
+          "description": "The OS Security log.",
+          "type": "string"
+        },
+        {
+          "const": "os_powershell",
+          "description": "The PowerShell logs.",
+          "type": "string"
+        }
+      ]
+    },
+    "TenantId": {
+      "$ref": "#/$defs/Uuid7",
+      "description": "The ID of a tenant."
+    },
+    "Timestamp": {
+      "description": "An RFC 3339 UTC timestamp with exactly six fractional digits and `Z`.",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6}Z$",
+      "type": "string"
+    },
+    "Token": {
+      "description": "A lowercase machine-readable word.",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$",
+      "type": "string"
+    },
+    "TokenElevationType": {
+      "description": "The elevation type of a process token.",
+      "oneOf": [
+        {
+          "const": "default",
+          "description": "No split token (UAC off, or a built-in or service account).",
+          "type": "string"
+        },
+        {
+          "const": "full",
+          "description": "The elevated half of a split token.",
+          "type": "string"
+        },
+        {
+          "const": "limited",
+          "description": "The filtered half of a split token.",
+          "type": "string"
+        }
+      ]
+    },
+    "User": {
+      "additionalProperties": false,
+      "description": "The user an event is about.",
+      "properties": {
+        "domain": {
+          "description": "The account's domain.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "elevated": {
+          "description": "Whether the acting token was elevated.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "is_admin": {
+          "description": "Whether the user is a local administrator.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "logon_id": {
+          "description": "The logon ID (locally unique identifier) of the logon session.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "logon_type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LogonType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How the session logged on."
+        },
+        "name": {
+          "description": "The account name. Dropped or pseudonymised by redaction (#228).",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "description": "The logon session's terminal-services session ID.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "sid": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The security identifier."
+        },
+        "upn": {
+          "description": "The user principal name.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Uuid7": {
+      "description": "A UUID version 7 in canonical lowercase form.",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    },
+    "VersionInfo": {
+      "additionalProperties": false,
+      "description": "The version resource of a PE file.",
+      "properties": {
+        "company": {
+          "description": "`CompanyName`.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "description": "`FileDescription`.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "file_version": {
+          "description": "`FileVersion`.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "internal_name": {
+          "description": "`InternalName`.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "original_filename": {
+          "description": "`OriginalFilename`.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "product_name": {
+          "description": "`ProductName`.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "product_version": {
+          "description": "`ProductVersion`.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Zone": {
+      "description": "The security zone a file was downloaded from (its mark of the web).",
+      "oneOf": [
+        {
+          "const": "local_machine",
+          "description": "Zone 0: the local machine.",
+          "type": "string"
+        },
+        {
+          "const": "intranet",
+          "description": "Zone 1: the local intranet.",
+          "type": "string"
+        },
+        {
+          "const": "trusted",
+          "description": "Zone 2: trusted sites.",
+          "type": "string"
+        },
+        {
+          "const": "internet",
+          "description": "Zone 3: the internet.",
+          "type": "string"
+        },
+        {
+          "const": "restricted",
+          "description": "Zone 4: restricted sites.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$id": "https://github.com/jusso-dev/palisade/schemas/events/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "exec.decision"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "execution"
+          }
+        },
+        "required": [
+          "file"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "library.decision"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "library"
+          }
+        },
+        "required": [
+          "file"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "driver.decision"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "driver"
+          }
+        },
+        "required": [
+          "file"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "script.decision"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "script"
+          }
+        },
+        "required": [
+          "script"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "installer.decision"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "installer"
+          }
+        },
+        "required": [
+          "file"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "packaged_app.decision"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "packaged_app"
+          }
+        },
+        "required": [
+          "file"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "com.decision"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "execution"
+          }
+        },
+        "required": [
+          "native"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "exec.origin_check"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "execution"
+          }
+        },
+        "required": [
+          "file",
+          "native"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "policy.applied"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "policy"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "policy.failed"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "policy"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "policy.activated"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "policy"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "agent.started"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "agent"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "agent.stopped"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "agent"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "agent.health"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "agent"
+          }
+        },
+        "required": [
+          "agent"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "agent.tamper"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "agent"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "agent.throttled"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "agent"
+          }
+        },
+        "required": [
+          "agent"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "agent.dropped"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "agent"
+          }
+        },
+        "required": [
+          "agent"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "agent.clock_unsynced"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "agent"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "else": {
+        "required": [
+          "prev_hash"
+        ]
+      },
+      "if": {
+        "properties": {
+          "seq": {
+            "const": 0
+          }
+        },
+        "required": [
+          "seq"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "prev_hash"
+          ]
+        }
+      }
+    },
+    {
+      "properties": {
+        "script": {
+          "not": {
+            "properties": {
+              "inline": {
+                "const": true
+              }
+            },
+            "required": [
+              "path",
+              "inline"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "description": "One canonical event.\n\nField order here is the serialisation order, so [`Event::to_canonical_json`]\nis deterministic.",
+  "properties": {
+    "action": {
+      "$ref": "#/$defs/Token",
+      "description": "The verb, for example `execute`, `load`, `install` or `activate`."
+    },
+    "agent": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AgentInfo"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Agent state, for agent events."
+    },
+    "category": {
+      "$ref": "#/$defs/Category",
+      "description": "The type's category. It must match the registry."
+    },
+    "clock_skew_ms": {
+      "description": "The producer's last measured clock offset, in milliseconds.",
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "clock_synced": {
+      "description": "Whether the producer's wall clock was synchronised when `ts` was taken.",
+      "type": "boolean"
+    },
+    "description": {
+      "description": "A human-readable description of the event (ISM-0585).",
+      "maxLength": 1024,
+      "minLength": 1,
+      "type": "string"
+    },
+    "event_id": {
+      "$ref": "#/$defs/Uuid7",
+      "description": "A unique ID, assigned by the producer."
+    },
+    "event_type": {
+      "$ref": "#/$defs/EventType",
+      "description": "The registered type, for example `exec.decision`."
+    },
+    "file": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/File"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The file acted on."
+    },
+    "host": {
+      "$ref": "#/$defs/Host",
+      "description": "The device the event is about (ISM-0585: IT equipment)."
+    },
+    "labels": {
+      "$ref": "#/$defs/Labels",
+      "description": "Labels from policy tags."
+    },
+    "mode": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EventMode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The enforcement mode, where one applies."
+    },
+    "native": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Native"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "OS-native enforcement details."
+    },
+    "outcome": {
+      "$ref": "#/$defs/Outcome",
+      "description": "What happened."
+    },
+    "policy": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PolicyRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The Palisade policy and rule that decided, if known."
+    },
+    "prev_hash": {
+      "description": "The chain value of the producer's previous event. Absent only when\n`seq` is 0.",
+      "pattern": "^[0-9a-f]{64}$",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "process": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Process"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The process that acted."
+    },
+    "schema_version": {
+      "$ref": "#/$defs/SchemaVersion",
+      "description": "The schema version of this event."
+    },
+    "script": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Script"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The script, for script events."
+    },
+    "seq": {
+      "description": "The producer's sequence number, starting at 0.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "severity": {
+      "$ref": "#/$defs/Severity",
+      "description": "0 to 10. See [`Severity::syslog`] for the syslog mapping."
+    },
+    "source": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Source"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Where the event came from, for events translated from another log."
+    },
+    "tenant_id": {
+      "$ref": "#/$defs/TenantId",
+      "description": "The tenant."
+    },
+    "ts": {
+      "$ref": "#/$defs/Timestamp",
+      "description": "When the event happened, in UTC."
+    },
+    "ts_agent_monotonic": {
+      "description": "The producer's monotonic clock when the event was recorded, in\nmicroseconds since the agent started. It orders events even when the\nwall clock jumps.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "user": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/User"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The user, if any."
+    }
+  },
+  "required": [
+    "schema_version",
+    "event_id",
+    "event_type",
+    "category",
+    "action",
+    "outcome",
+    "severity",
+    "description",
+    "ts",
+    "clock_synced",
+    "tenant_id",
+    "host",
+    "seq"
+  ],
+  "title": "Palisade canonical event",
+  "type": "object",
+  "x-schema-version": "1.0.0"
+}

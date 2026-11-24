@@ -1,0 +1,128 @@
+# The event-type registry (#196): the source of truth for every canonical
+# event type. `src/events/registry_gen.rs` and `REGISTRY.md` are generated
+# from this file. After editing it, regenerate both with:
+#
+#   PALISADE_BLESS=1 cargo test -p palisade-proto --test registry
+#
+# Each entry:
+#   type         dotted name, lowercase: `<area>.<what>`
+#   category     one of the envelope `category` values
+#   severity     default severity, 0 to 10 (a mapping entry may override it)
+#   required     the field sets every event of this type must carry
+#   summarisable whether allowed events of this type may be summarised
+#                instead of sent one by one (#197). Blocked and audited
+#                events are never summarised.
+#   description  one sentence, shown in the generated reference
+#
+# Adding a type is a minor schema change. Removing a type, or changing an
+# existing type's category or required field sets, is a major change.
+schema_version: 1.0.0
+types:
+  - type: exec.decision
+    category: execution
+    severity: 3
+    required: [file]
+    summarisable: true
+    description: An executable was allowed, blocked or audited.
+  - type: library.decision
+    category: library
+    severity: 3
+    required: [file]
+    summarisable: true
+    description: A library load into a process was allowed, blocked or audited.
+  - type: driver.decision
+    category: driver
+    severity: 5
+    required: [file]
+    summarisable: true
+    description: A kernel driver load was allowed, blocked or audited.
+  - type: script.decision
+    category: script
+    severity: 3
+    required: [script]
+    summarisable: true
+    description: A script was allowed, blocked or audited.
+  - type: installer.decision
+    category: installer
+    severity: 3
+    required: [file]
+    summarisable: true
+    description: An installer package was allowed, blocked or audited.
+  - type: packaged_app.decision
+    category: packaged_app
+    severity: 3
+    required: [file]
+    summarisable: true
+    description: A packaged app's installation or activation was allowed, blocked or audited.
+  - type: com.decision
+    category: execution
+    severity: 3
+    required: [native]
+    summarisable: true
+    description: A COM class activation was allowed, blocked or audited.
+  - type: exec.origin_check
+    category: execution
+    severity: 1
+    required: [file, native]
+    summarisable: true
+    description: The OS checked a file's managed-installer or reputation origin claims. Diagnostic only, not the final decision.
+  - type: policy.applied
+    category: policy
+    severity: 2
+    required: []
+    summarisable: false
+    description: A policy was applied, or was already current.
+  - type: policy.failed
+    category: policy
+    severity: 7
+    required: []
+    summarisable: false
+    description: A policy could not be applied or activated.
+  - type: policy.activated
+    category: policy
+    severity: 2
+    required: []
+    summarisable: false
+    description: A policy became active in the enforcement engine.
+  - type: agent.started
+    category: agent
+    severity: 2
+    required: []
+    summarisable: false
+    description: The agent started.
+  - type: agent.stopped
+    category: agent
+    severity: 4
+    required: []
+    summarisable: false
+    description: The agent stopped.
+  - type: agent.health
+    category: agent
+    severity: 1
+    required: [agent]
+    summarisable: false
+    description: A periodic report of the agent's health and counters.
+  - type: agent.tamper
+    category: agent
+    severity: 9
+    required: []
+    summarisable: false
+    description: An attempt to tamper with the agent, its configuration or its data was detected.
+  - type: agent.throttled
+    category: agent
+    severity: 5
+    required: [agent]
+    summarisable: false
+    description: The agent throttled events because of their rate.
+  - type: agent.dropped
+    category: agent
+    severity: 7
+    required: [agent]
+    summarisable: false
+    description: The agent dropped events, and reports how many.
+  - type: agent.clock_unsynced
+    category: agent
+    severity: 5
+    required: []
+    summarisable: false
+    description: The agent's wall clock is not synchronised, so event times may be wrong.

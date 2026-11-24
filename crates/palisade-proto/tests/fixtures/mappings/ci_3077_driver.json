@@ -1,0 +1,61 @@
+{
+  "source": "os_code_integrity",
+  "record": {
+    "event_id": 3077,
+    "time_created": "2026-11-24T03:15:22.1234567Z",
+    "record_id": 1000,
+    "channel": "code-integrity/Operational",
+    "fields": {
+      "FileName": "\\Device\\HarddiskVolume3\\Windows\\System32\\drivers\\example.sys",
+      "ProcessName": "System",
+      "RequestedSigningLevel": "4",
+      "ValidatedSigningLevel": "1",
+      "Status": "0xC0E90002",
+      "SHA1Hash": "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "SHA256Hash": "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "SHA1FlatHash": "0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+      "SHA256FlatHash": "0xDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+      "USN": "123456",
+      "SISigningScenario": "0",
+      "PolicyName": "Palisade base policy",
+      "PolicyID": "2026.11.24.1",
+      "PolicyGUID": "{A244370E-44C9-4C06-B551-F6016E563076}",
+      "PolicyHash": "0xEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
+      "OriginalFileName": "tool.exe",
+      "InternalName": "tool",
+      "FileDescription": "Example tool",
+      "ProductName": "Example Suite",
+      "FileVersion": "1.2.3.4",
+      "UserWriteable": "true",
+      "PackageFamilyName": "",
+      "System.UserID": "S-1-5-21-1111111111-2222222222-3333333333-1001",
+      "System.ProcessID": "4242"
+    },
+    "activity_id": "6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7"
+  },
+  "signatures": [
+    {
+      "event_id": 3089,
+      "time_created": "2026-11-24T03:15:22.1234567Z",
+      "record_id": 1002,
+      "channel": "code-integrity/Operational",
+      "fields": {
+        "TotalSignatureCount": "1",
+        "Signature": "1",
+        "CacheState": "0",
+        "Hash": "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        "PageHash": "false",
+        "SignatureType": "1",
+        "ValidatedSigningLevel": "4",
+        "VerificationError": "21",
+        "Flags": "0",
+        "PolicyBits": "0",
+        "PublisherName": "Example Hardware Ltd",
+        "IssuerName": "Example Code Signing CA",
+        "PublisherTBSHash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "IssuerTBSHash": "0x2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      "activity_id": "6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7"
+    }
+  ]
+}

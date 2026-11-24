@@ -1,0 +1,17 @@
+{
+  "source": "os_code_integrity",
+  "record": {
+    "event_id": 3023,
+    "time_created": "2026-11-24T03:15:22.1234567Z",
+    "record_id": 1000,
+    "channel": "code-integrity/Operational",
+    "fields": {
+      "FileNameBuffer": "\\Device\\HarddiskVolume3\\Windows\\System32\\drivers\\legacy.sys",
+      "SecureRequired": "0x0",
+      "RequestedSigningLevel": "8",
+      "ProcessNameBuffer": "System",
+      "System.UserID": "S-1-5-18",
+      "System.ProcessID": "4"
+    }
+  }
+}

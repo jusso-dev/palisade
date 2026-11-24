@@ -490,6 +490,15 @@ dependencies = [
 [[package]]
 name = "palisade-proto"
 version = "0.1.0"
+dependencies = [
+ "boon",
+ "palisade-core",
+ "palisade-policy",
+ "proptest",
+ "schemars",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "palisade-server"

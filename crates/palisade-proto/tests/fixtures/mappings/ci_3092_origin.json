@@ -1,0 +1,20 @@
+{
+  "source": "os_code_integrity",
+  "record": {
+    "event_id": 3092,
+    "time_created": "2026-11-24T03:15:22.1234567Z",
+    "record_id": 1000,
+    "channel": "code-integrity/Verbose",
+    "fields": {
+      "FileName": "\\Device\\HarddiskVolume3\\Program Files\\Example\\setup-helper.exe",
+      "StatusCode": "0xC0E90002",
+      "ManagedInstallerEnabled": "true",
+      "PassesManagedInstaller": "false",
+      "AuditEnabled": "false",
+      "PolicyName": "Palisade base policy",
+      "PolicyID": "2026.11.24.1",
+      "System.UserID": "S-1-5-21-1111111111-2222222222-3333333333-1001",
+      "System.ProcessID": "6000"
+    }
+  }
+}
