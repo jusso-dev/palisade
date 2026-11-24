@@ -9,12 +9,50 @@ use palisade_core::path::VolumeMap;
 use super::{
     CompileErrorKind, CompiledCriterion, EvalContext, Note, REGEX_SIZE_LIMIT, Tri, Version, fold,
 };
+use crate::context::EvaluationContext;
 use crate::facts::{
     ObjectFacts, PathFact, PathVariable, PathVariables, SignatureSource, SignerFact, SignerStatus,
 };
 use crate::model::{Action, Criterion, Field, Operator, Strength};
 
 use Tri::{Match, NoMatch, Unknown};
+
+/// No context facts, for criteria on the object.
+static NO_CONTEXT: EvaluationContext = EvaluationContext {
+    user: crate::context::UserContext {
+        sid: None,
+        account_name: None,
+        upn: None,
+        groups: None,
+        primary_group: None,
+        is_admin: None,
+        is_elevated: None,
+        is_service_account: None,
+        is_system: None,
+    },
+    device: crate::context::DeviceContext {
+        hostname: None,
+        fqdn: None,
+        domain: None,
+        netbios: None,
+        ad_site: None,
+        groups: None,
+        tags: None,
+        os_version: None,
+        os_edition: None,
+        arch: None,
+        is_server: None,
+        is_domain_controller: None,
+        is_laptop: None,
+        is_vdi: None,
+        is_terminal_server: None,
+    },
+    session: crate::context::SessionContext {
+        session_type: None,
+        client_hostname: None,
+        is_remote: None,
+    },
+};
 
 const SHA: &str = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
 
@@ -43,6 +81,7 @@ fn deny_ctx(variables: &PathVariables) -> EvalContext<'_> {
     EvalContext {
         action: Action::Deny {},
         variables,
+        context: &NO_CONTEXT,
     }
 }
 
@@ -211,6 +250,7 @@ fn negation_never_turns_unknown_into_a_match() {
                 let ctx = EvalContext {
                     action,
                     variables: &vars,
+                    context: &NO_CONTEXT,
                 };
                 assert_eq!(
                     c.eval(&ObjectFacts::new(), &ctx).result,
@@ -351,7 +391,8 @@ fn hashes_compare_as_hex_in_either_case() {
 
 #[test]
 fn compatibility_table() {
-    for field in Field::ALL {
+    // Identity fields; context fields have their own table test.
+    for field in Field::ALL.into_iter().filter(|f| !f.is_context()) {
         for op in [
             Operator::Equals,
             Operator::Contains,
@@ -434,6 +475,7 @@ fn versions_parse_and_compare_symmetrically() {
         let ctx = EvalContext {
             action,
             variables: &vars,
+            context: &NO_CONTEXT,
         };
         for (fact, expected) in [
             ("1.9.65535.65535", NoMatch),
@@ -773,6 +815,7 @@ fn allow_rules_only_trust_paths_users_cannot_write() {
     let allow = EvalContext {
         action: Action::Allow {},
         variables: &vars,
+        context: &NO_CONTEXT,
     };
     for writable in [Some(true), None] {
         let mut fact = PathFact::new("C:\\Tools\\a.exe", &VolumeMap::new());
@@ -965,13 +1008,13 @@ fn strength_ratings() {
         (Field::MetaProductName, Weak),
         (Field::MetaFileVersion, Weak),
     ] {
-        assert_eq!(field.strength(), expected, "{field:?}");
+        assert_eq!(field.strength(), Some(expected), "{field:?}");
     }
     assert!(Strong > Medium && Medium > Weak);
     // Every weak hash is also rated weak.
     for field in Field::ALL {
         if field.is_weak_hash() {
-            assert_eq!(field.strength(), Weak, "{field:?}");
+            assert_eq!(field.strength(), Some(Weak), "{field:?}");
         }
     }
 }
@@ -1057,12 +1100,7 @@ proptest! {
     #[test]
     fn compile_never_panics(
         field in proptest::sample::select(Field::ALL.to_vec()),
-        operator in proptest::sample::select(vec![
-            Operator::Equals, Operator::NotEquals, Operator::StartsWith, Operator::EndsWith,
-            Operator::Contains, Operator::NotContains, Operator::Wildcard, Operator::NotWildcard,
-            Operator::Regex, Operator::NotRegex, Operator::VersionEq, Operator::VersionGt,
-            Operator::VersionGe, Operator::VersionLt, Operator::VersionLe, Operator::VersionBetween,
-        ]),
+        operator in proptest::sample::select(Operator::ALL.to_vec()),
         values in proptest::collection::vec("\\PC{0,30}", 0..4),
         fact in "\\PC{0,40}",
     ) {
@@ -1071,6 +1109,17 @@ proptest! {
             let mut facts = ObjectFacts::new().with(field, fact.as_str());
             facts.path = Some(PathFact::new(&fact, &VolumeMap::new()));
             let _ = eval(&c, &facts);
+            // Context fields read the same arbitrary text from the context.
+            let mut context = NO_CONTEXT.clone();
+            context.user.sid = Some(fact.clone());
+            context.user.account_name = Some(fact.clone());
+            context.user.groups = Some(vec![fact.clone()]);
+            context.device.hostname = Some(fact.clone());
+            context.device.tags = Some(vec![fact.clone()]);
+            context.device.os_version = Some(fact.clone());
+            let vars = PathVariables::new();
+            let ctx = EvalContext { action: Action::Allow {}, variables: &vars, context: &context };
+            let _ = c.eval(&facts, &ctx);
         }
     }
 }

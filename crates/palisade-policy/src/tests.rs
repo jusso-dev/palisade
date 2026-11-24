@@ -1001,3 +1001,324 @@ fn every_weak_hash_is_refused_as_the_only_allow_identity() {
     .unwrap();
     assert_eq!(page.warnings()[0].code, ErrorCode::WeakIdentity);
 }
+
+#[test]
+fn context_alone_is_no_identity_anchor_for_every_action() {
+    let admins = leaf(Field::UserGroups, Operator::MemberOf, &["S-1-5-32-544"]);
+    for action in [Action::Allow {}, Action::Deny {}, Action::Audit {}] {
+        let errors = with_rule(admins.clone(), action).validate().unwrap_err();
+        assert_eq!(
+            codes(&errors),
+            vec![(ErrorCode::NoIdentityAnchor, "/rule_sets/0/rules/0/match")],
+            "{action:?}"
+        );
+        assert!(
+            errors[0].message.contains("`match/criterion`"),
+            "{}",
+            errors[0].message
+        );
+    }
+    // Context narrows an identity: a publisher for administrators only.
+    let narrowed = Match::All(vec![
+        leaf(Field::SignerPublisher, Operator::Equals, &["Example Ltd"]),
+        admins.clone(),
+        leaf(Field::UserIsElevated, Operator::IsTrue, &[]),
+    ]);
+    for action in [Action::Allow {}, Action::Deny {}, Action::Audit {}] {
+        let validated = with_rule(narrowed.clone(), action).validate().unwrap();
+        assert!(validated.warnings().is_empty(), "{action:?}");
+    }
+    // A negated context criterion with an identity is fine too.
+    let not_admin = Match::All(vec![
+        leaf(Field::HashSha256, Operator::Equals, &[&sha256('c')]),
+        Match::Not(Box::new(admins)),
+    ]);
+    assert!(with_rule(not_admin, Action::Deny {}).validate().is_ok());
+}
+
+#[test]
+fn no_identity_anchor_names_the_unanchored_path() {
+    // The second `any` branch matches on the session alone.
+    let tree = Match::Any(vec![
+        leaf(Field::HashSha256, Operator::Equals, &[&sha256('a')]),
+        Match::All(vec![
+            leaf(Field::SessionType, Operator::Equals, &["rdp"]),
+            Match::Not(Box::new(leaf(
+                Field::PathExtension,
+                Operator::Equals,
+                &["ps1"],
+            ))),
+        ]),
+    ]);
+    let errors = with_rule(tree.clone(), Action::Deny {})
+        .validate()
+        .unwrap_err();
+    assert_eq!(
+        codes(&errors),
+        vec![(ErrorCode::NoIdentityAnchor, "/rule_sets/0/rules/0/match")]
+    );
+    assert!(
+        errors[0]
+            .message
+            .contains("`match/any/1/all/0/criterion` and `match/any/1/all/1/not`"),
+        "{}",
+        errors[0].message
+    );
+    // An allow rule gets the same code and path.
+    let errors = with_rule(tree, Action::Allow {}).validate().unwrap_err();
+    assert_eq!(errors[0].code, ErrorCode::NoIdentityAnchor);
+    assert!(errors[0].message.contains("`match/any/1/all/0/criterion`"));
+
+    // Negations alone on a deny rule keep their own code, with the path.
+    let tree = Match::All(vec![
+        Match::Not(Box::new(leaf(
+            Field::HashSha256,
+            Operator::Equals,
+            &[&sha256('b')],
+        ))),
+        leaf(Field::PathFull, Operator::NotEquals, &["C:\\x.exe"]),
+    ]);
+    let errors = with_rule(tree, Action::Deny {}).validate().unwrap_err();
+    assert_eq!(errors[0].code, ErrorCode::NegationOnly);
+    assert!(
+        errors[0]
+            .message
+            .contains("`match/all/0/not` and `match/all/1/criterion`"),
+        "{}",
+        errors[0].message
+    );
+}
+
+#[test]
+fn non_allow_finding_does_not_depend_on_child_order() {
+    // One path matches on a negation alone and the other on context alone.
+    // Context is involved, so the finding is `no_identity_anchor` whichever
+    // child comes first, and the witness names the context path.
+    let negation = Match::Not(Box::new(leaf(
+        Field::PathExtension,
+        Operator::Equals,
+        &["ps1"],
+    )));
+    let session = leaf(Field::SessionType, Operator::Equals, &["rdp"]);
+    for (tree, witness) in [
+        (
+            Match::Any(vec![negation.clone(), session.clone()]),
+            "`match/any/1/criterion`",
+        ),
+        (
+            Match::Any(vec![session.clone(), negation.clone()]),
+            "`match/any/0/criterion`",
+        ),
+    ] {
+        for action in [Action::Deny {}, Action::Audit {}] {
+            let errors = with_rule(tree.clone(), action).validate().unwrap_err();
+            assert_eq!(
+                codes(&errors),
+                vec![(ErrorCode::NoIdentityAnchor, "/rule_sets/0/rules/0/match")],
+                "{action:?} {tree:?}"
+            );
+            assert!(errors[0].message.contains(witness), "{}", errors[0].message);
+        }
+    }
+    // Context nested under an `all` with a negation still counts, in
+    // either order.
+    for tree in [
+        Match::Any(vec![
+            negation.clone(),
+            Match::All(vec![negation.clone(), session.clone()]),
+        ]),
+        Match::Any(vec![
+            Match::All(vec![session.clone(), negation.clone()]),
+            negation.clone(),
+        ]),
+    ] {
+        let errors = with_rule(tree, Action::Deny {}).validate().unwrap_err();
+        assert_eq!(errors[0].code, ErrorCode::NoIdentityAnchor);
+    }
+    // A context criterion on an anchored branch does not make an
+    // unanchored path of negations count as context.
+    let anchored_context = Match::All(vec![
+        leaf(Field::HashSha256, Operator::Equals, &[&sha256('f')]),
+        session,
+    ]);
+    for tree in [
+        Match::Any(vec![negation.clone(), anchored_context.clone()]),
+        Match::Any(vec![anchored_context, negation]),
+    ] {
+        let errors = with_rule(tree, Action::Deny {}).validate().unwrap_err();
+        assert_eq!(errors[0].code, ErrorCode::NegationOnly);
+    }
+}
+
+#[test]
+fn identity_findings_name_a_structural_path() {
+    // The second branch can never match (a known value fails one test and
+    // a missing one passes neither), but the analysis is structural, so
+    // the rule is still rejected. The message says the analysis cannot
+    // show an identity on that path, not that the rule matches through it.
+    let tree = Match::Any(vec![
+        leaf(Field::HashSha256, Operator::Equals, &[&sha256('a')]),
+        Match::All(vec![
+            leaf(Field::UserIsAdmin, Operator::IsTrue, &[]),
+            leaf(Field::UserIsAdmin, Operator::IsFalse, &[]),
+        ]),
+    ]);
+    for action in [Action::Allow {}, Action::Deny {}] {
+        let errors = with_rule(tree.clone(), action).validate().unwrap_err();
+        assert_eq!(errors[0].code, ErrorCode::NoIdentityAnchor);
+        let message = &errors[0].message;
+        assert!(
+            message.contains(
+                "has a path through `match/any/1/all/0/criterion` and `match/any/1/all/1/criterion`"
+            ),
+            "{message}"
+        );
+        assert!(
+            message.contains("the analysis cannot show that it identifies the object"),
+            "{message}"
+        );
+        assert!(!message.contains("can match"), "{message}");
+    }
+    // The other witness-based findings use the same wording.
+    let weak = with_rule(
+        leaf(Field::PathFileName, Operator::Equals, &["a.exe"]),
+        Action::Allow {},
+    )
+    .validate()
+    .unwrap();
+    let message = &weak.warnings()[0].message;
+    assert!(
+        message.contains("has a path through `match/criterion`"),
+        "{message}"
+    );
+    assert!(!message.contains("can match"), "{message}");
+}
+
+#[test]
+fn yes_or_no_criteria_take_no_values() {
+    let anchor = leaf(Field::HashSha256, Operator::Equals, &[&sha256('d')]);
+    let ok = Match::All(vec![
+        anchor.clone(),
+        leaf(Field::UserIsAdmin, Operator::IsFalse, &[]),
+    ]);
+    let doc = with_rule(ok, Action::Deny {});
+    // `values` is left out when it is empty, and may be left out on input.
+    let json = doc.to_json_pretty().unwrap();
+    assert!(json.contains(r#""operator": "is_false""#));
+    assert_eq!(json.matches(r#""values""#).count(), 1, "{json}");
+    assert_eq!(PolicyDocument::from_json(&json).unwrap(), doc);
+    assert!(doc.validate().is_ok());
+
+    let with_value = Match::All(vec![
+        anchor.clone(),
+        leaf(Field::UserIsAdmin, Operator::IsTrue, &["yes"]),
+    ]);
+    let errors = with_rule(with_value, Action::Deny {})
+        .validate()
+        .unwrap_err();
+    assert_eq!(
+        codes(&errors),
+        vec![(
+            ErrorCode::InvalidValueCount,
+            "/rule_sets/0/rules/0/match/all/1/criterion/values"
+        )]
+    );
+    // Every other operator still needs a value.
+    let empty = Match::All(vec![
+        anchor,
+        leaf(Field::UserGroups, Operator::MemberOf, &[]),
+    ]);
+    let errors = with_rule(empty, Action::Deny {}).validate().unwrap_err();
+    assert_eq!(
+        codes(&errors),
+        vec![(
+            ErrorCode::InvalidValueCount,
+            "/rule_sets/0/rules/0/match/all/1/criterion/values"
+        )]
+    );
+}
+
+#[test]
+fn context_values_are_checked_and_case_only_applies_to_text() {
+    let anchor = leaf(Field::HashSha256, Operator::Equals, &[&sha256('e')]);
+    let mut sid = Criterion {
+        field: Field::UserSid,
+        operator: Operator::Equals,
+        values: vec!["S-1-5-18".to_owned()],
+        case_sensitive: Some(true),
+    };
+    let doc = with_rule(
+        Match::All(vec![
+            anchor.clone(),
+            Match::Criterion(sid.clone()),
+            leaf(Field::DeviceGroups, Operator::MemberOf, &["Workstations"]),
+            leaf(Field::SessionType, Operator::Equals, &["terminal"]),
+            leaf(Field::UserName, Operator::Regex, &[".*"]),
+        ]),
+        Action::Deny {},
+    );
+    let errors = doc.validate().unwrap_err();
+    assert_eq!(
+        codes(&errors),
+        vec![
+            (
+                ErrorCode::CaseSensitivityNotApplicable,
+                "/rule_sets/0/rules/0/match/all/1/criterion/case_sensitive"
+            ),
+            (
+                ErrorCode::InvalidValue,
+                "/rule_sets/0/rules/0/match/all/2/criterion/values/0"
+            ),
+            (
+                ErrorCode::InvalidValue,
+                "/rule_sets/0/rules/0/match/all/3/criterion/values/0"
+            ),
+            (
+                ErrorCode::OperatorFieldMismatch,
+                "/rule_sets/0/rules/0/match/all/4/criterion/operator"
+            ),
+        ]
+    );
+    // Tags and account names have a case.
+    sid.case_sensitive = None;
+    let mut tag = Criterion {
+        field: Field::DeviceTags,
+        operator: Operator::MemberOf,
+        values: vec!["Finance".to_owned()],
+        case_sensitive: Some(true),
+    };
+    let doc = with_rule(
+        Match::All(vec![
+            anchor,
+            Match::Criterion(sid),
+            Match::Criterion(tag.clone()),
+        ]),
+        Action::Deny {},
+    );
+    assert!(doc.validate().is_ok());
+    tag.field = Field::UserIsAdmin;
+    tag.operator = Operator::IsTrue;
+    tag.values.clear();
+    let doc = with_rule(Match::Criterion(tag), Action::Deny {});
+    let errors = doc.validate().unwrap_err();
+    assert!(
+        codes(&errors).contains(&(
+            ErrorCode::CaseSensitivityNotApplicable,
+            "/rule_sets/0/rules/0/match/criterion/case_sensitive"
+        )),
+        "{errors:?}"
+    );
+}
+
+proptest! {
+    #![proptest_config(cases(512))]
+
+    #[test]
+    fn validated_trees_always_compile(doc in arbitrary::document()) {
+        let validated = doc.validate().unwrap();
+        for rule in validated.document().rule_sets.iter().flat_map(|s| &s.rules) {
+            let compiled = crate::condition::CompiledMatch::compile(&rule.match_);
+            prop_assert!(compiled.is_ok(), "{:?}", compiled.err());
+        }
+    }
+}

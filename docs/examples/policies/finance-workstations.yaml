@@ -2,7 +2,8 @@
 #
 # Finance workstations: allow one line-of-business suite by publisher,
 # product and minimum version, and keep PowerShell in audit while scripts
-# are reviewed.
+# are reviewed. `signer.publisher` is the signer's common name (the `CN` of
+# the leaf certificate's subject), not the whole distinguished name.
 #
 # Quote values that are text but look like other types: versions ("12.0"),
 # and words such as "yes", "no", "on" and "off". Unquoted, the reader
@@ -35,8 +36,7 @@ rule_sets:
             - criterion:
                 field: signer.publisher
                 operator: equals
-                values:
-                  - "CN=Example Accounting Pty Ltd, O=Example Accounting Pty Ltd, C=AU"
+                values: [Example Accounting Pty Ltd]
             - criterion:
                 field: meta.product_name
                 operator: equals
@@ -45,7 +45,39 @@ rule_sets:
                 field: meta.product_version
                 operator: version_ge
                 values: ["12.0.0.0"]
+            # The admin console ships in the same product, so this rule
+            # leaves it to the next one, which decides who may run it.
+            - not:
+                criterion:
+                  field: meta.original_filename
+                  operator: equals
+                  values: [LedgerAdmin.exe]
         action: {type: allow}
         metadata:
           justification: Core line-of-business application.
           ticket_ref: CHG-1042
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4f12
+        name: Ledger admin console for administrators only
+        # Context criteria narrow a rule; they never identify the object.
+        # The publisher and file name identify it; the user's groups and
+        # session decide who may run it. Group values are SIDs, not names.
+        object_types: [executable]
+        match:
+          all:
+            - criterion:
+                field: signer.publisher
+                operator: equals
+                values: [Example Accounting Pty Ltd]
+            - criterion:
+                field: meta.original_filename
+                operator: equals
+                values: [LedgerAdmin.exe]
+            - criterion:
+                field: user.groups
+                operator: member_of
+                values: [S-1-5-32-544]
+            - not:
+                criterion:
+                  field: session.is_remote
+                  operator: is_true
+        action: {type: allow}
