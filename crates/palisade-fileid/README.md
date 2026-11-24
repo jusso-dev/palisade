@@ -2,7 +2,7 @@
 
 File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes), signature and certificate chain extraction, and version-info metadata.
 
-**Status:** early. PE header and version-resource parsing, flat hashing, the Authenticode image hash and Authenticode signature verification work; the rest of [#3](https://github.com/jusso-dev/palisade/issues/3) is still to come.
+**Status:** early. PE header and version-resource parsing, flat hashing, the Authenticode image hash, Authenticode signature verification and certificate chains, signer trust and signer identity work; the rest of [#3](https://github.com/jusso-dev/palisade/issues/3) is still to come.
 
 ## What is here
 
@@ -99,6 +99,110 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     (links resolved, short names expanded) and its `Zone.Identifier` stream.
     Owner and DACL reads, drive and bus type, volume GUIDs, DFS and the OS
     access check are still to come (#54).
+- `authenticode` certificate chains, signer trust and identity
+  ([#49](https://github.com/jusso-dev/palisade/issues/49)):
+  - `CertSummary::from_der` parses an X.509 v1, v2 or v3 certificate. It
+    keeps the subject and issuer as ordered RDNs with their raw DER, typed
+    components (`CN`, `O`, `OU`, `L`, `S`, `C`, `E`, `serialNumber`,
+    `businessCategory`, `jurisdictionC` and others) and a DN string in the
+    order OS tooling prints (`CN=…, O=…, L=…, S=…, C=…`). It also extracts
+    the serial, validity, signature and key algorithms, key size, SHA-1 and
+    SHA-256 thumbprints, the TBS hash under the certificate's own digest
+    (40, 64, 96 or 128 hex characters) and always under SHA-256, key
+    identifiers, basic constraints, key usage, EKUs, certificate policies,
+    CRL distribution points, OCSP and CA-issuer URLs, and whether it is
+    self-signed. The TBS hash covers the exact `tbsCertificate` bytes in the
+    file; nothing is re-encoded. DER is strict: explicitly encoded DEFAULT
+    values (a v1 version field, `critical` FALSE, `cA` FALSE) are rejected,
+    and ECDSA signature algorithms must have no parameters. Name values
+    decode exactly or are flagged lossy: TeletexString is read as UTF-8
+    when valid and as 8-bit text otherwise, as the OS renders it, and a
+    BMPString surrogate is lossy (BMPString is UCS-2). So is a character
+    outside a restricted type's repertoire (a letter in a NumericString,
+    an `&` in a PrintableString): such a name is shown but never used as
+    an identity. Extensions that
+    are only reported (alternative names, CRL distribution points, AIA,
+    and certificate policies with a qualifier other than a CPS pointer or
+    user notice) count as unhandled when critical. `CertSummary` serialises
+    to JSON with stable field names (serde), and `pem()` exports it.
+  - `eku` is the EKU catalogue: Code Signing, Time Stamping, Lifetime
+    Signing, the hardware (driver) certification EKU, OS component, Protected
+    Process (Light), Early Launch Antimalware, kernel-mode code signing, HAL
+    extension, package store signing, document signing and others. Unknown
+    EKUs keep their OID. `Eku::os_policy_value` gives the `01`, length, OID
+    body form that OS-native policy writes.
+  - `build_chain` orders the certificates embedded beside a signer into the
+    **as-provided chain**, with no online lookups, and builds the **full
+    chain** against a `TrustConfig`: trust anchors and intermediates that
+    policy ships (#6, #9), and the well-known root table, which is data from
+    policy too. It reports `chain_complete`, `anchored_to`, `anchor_source`
+    and `well_known_root_id`. The intermediates, the "PCA" (the highest
+    certificate in the file below the root) and the root come from the full
+    chain's embedded part. The embedded certificate set is not signed, so a
+    certificate someone added that is not on the trusted path can never
+    become the PCA.
+  - Every link must match by issuer name (byte for byte) and key
+    identifier. The issuer must be a CA with `keyCertSign` (if it has a key
+    usage) and room in its path length, and the child's signature must
+    verify with the issuer's key, so a forged issuer name never links.
+    Anchors are held to the same rules when they issue: a pinned end-entity
+    certificate can be trusted as itself but issues nothing. Only a v1 or
+    v2 anchor, which has no extensions to say so, is taken as a CA. No
+    certificate may carry a critical extension this crate does not process,
+    except a configured anchor.
+  - Trust is decided **downwards from the anchors**: each certificate
+    whose issuer name matches a trusted certificate is checked with that
+    trusted key, and only links verified this way can make an anchored
+    path. Only certificates reachable upwards from the leaf by name are
+    looked at, so unrelated policy entries cost nothing and appear in no
+    report. At most 64 embedded certificates are tried (parsed or not),
+    each checked at most once per trusted key whose name it claims. The
+    trust phase has its own budget, which earlier and nested signatures
+    cannot spend. Links into the leaf and policy certificates come first,
+    on a pool of their own (4096 candidate steps and 4096 checks per chain)
+    that links into other embedded certificates never spend, so nothing a
+    file adds can starve them. That pool is spent only by the leaf and
+    policy certificates, so only the trust configuration itself (more than
+    64 trusted keys sharing one subject name) can exhaust it; that fails
+    closed, untrusted, with `WorkLimitReached` in the chain's issues.
+    Verified results are cached per key, not per certificate.
+  - The as-provided chain (and, when nothing is anchored, the full chain)
+    is then searched upwards with whatever keys the file holds: every path
+    is enumerated, loops are detected, paths stop at 10 certificates, and
+    the 8 best are kept (anchored, then complete, then permitting code
+    signing, then shortest), with
+    cross-signed paths as alternatives. These checks spend at most 128 per
+    chain and 512 per file. Running out fails closed and never affects
+    trust.
+  - `evaluate_trust` builds the chain of every valid signature in a
+    `SignatureReport` and chooses the primary signature **after** trust:
+    the first trusted signature with the strongest digest (the weaker of
+    its image and signer digests, as in #48). A signer is
+    trusted when its chain reaches a configured anchor, every certificate in
+    it permits code signing, and its key usage allows digital signatures.
+    An untrusted signer, including a nested signature anyone could have
+    appended, never becomes primary. The trusted primary yields a
+    `SignerIdentity`: `publisher_name` (leaf `CN`, or `O`, recording which;
+    never a blank, inexact or control-character name), `publisher_dn` (only
+    when every attribute decodes exactly), `publisher_product` (with
+    `ProductName`),
+    `publisher_os_rule` (PCA TBS hash or well-known root ID, plus leaf `CN`)
+    and `file_publisher_os_rule` (plus file name and minimum version, both
+    only for an `os_ci_compatible` signer), with the reason for any that
+    cannot be made. A file with no trusted signer
+    gets a `VendorHint` from `CompanyName` instead, marked unverified. It is
+    a separate type, so it can never satisfy a publisher rule.
+  - Constraint checks for policy: `leaf_has_eku`, `chain_has_eku`,
+    `permits_code_signing`, `meets_min_key_bits`, `cert_sig_algs_allowed`
+    and `os_ci_compatible` (RSA keys of at most 4096 bits in the whole
+    chain).
+
+  `SignatureReport::primary` is still #48's choice by cryptographic
+  validity alone. Anything that decides trust must use
+  `TrustReport::primary`. Not checked yet: validity periods, timestamps
+  (including `requires_countersignature`) and revocation, which are #50.
+  The OS trust store is not consulted; that is the `os-trust` cross-check
+  in #48. Catalog signing is #51.
 
 ## Handling untrusted input
 
@@ -140,9 +244,13 @@ Fixtures are synthetic PE images built byte by byte at test time
 (`tests/common`); no PE binaries are checked in. The signature tests use
 small PKCS#7 signatures in `tests/fixtures/authenticode`, made over that
 synthetic image by osslsigncode with throwaway keys from a test-only CA, plus
-one Ed25519 test certificate and one RSA-PSS signature value. No private keys
-and no third-party binaries are committed; `generate.sh` there documents how
-every file was made and regenerates them.
+one Ed25519 test certificate and one RSA-PSS signature value. The chain tests
+use test certificates in `tests/fixtures/chain` (cross-signed, forged-issuer,
+loop, depth, expired, ECC, self-signed and other chains, plus two
+signatures), with reference thumbprints and TBS hashes computed by Python's
+`hashlib`, independently of this crate. No private keys and no third-party
+binaries are committed; the `generate.sh` scripts document how every file was
+made and regenerate them.
 
 ```sh
 cargo test -p palisade-fileid
@@ -166,15 +274,17 @@ cargo +nightly fuzz run version_info_parse -- -dict=fuzz/pe.dict -max_total_time
 cargo +nightly fuzz run authenticode_ranges -- -dict=fuzz/pe.dict -max_total_time=60
 cargo +nightly fuzz run authenticode_pkcs7 -- -dict=fuzz/pkcs7.dict -max_total_time=60
 cargo +nightly fuzz run fsctx_parse -- -max_total_time=60
+cargo +nightly fuzz run x509_chain -- -max_total_time=60
 ```
 
 Running the fuzz targets in CI is part of [#25](https://github.com/jusso-dev/palisade/issues/25).
 
 ## Allowed dependencies
 
-`palisade-core`, plus the RustCrypto `sha2`, `sha1` and `md-5` crates, and
+`palisade-core`, plus the RustCrypto `sha2`, `sha1` and `md-5` crates,
 `ring` for signature verification (ADR 0008), used only inside
-`authenticode/crypto.rs`. The workspace rules are enforced by
+`authenticode/crypto.rs`, and `serde` (derive only, no format crate) so
+certificate and chain reports serialise with stable field names. The workspace rules are enforced by
 `cargo xtask check-deps`.
 
 `ring` is not pure Rust (it has C and assembly), and on aarch64 Windows it

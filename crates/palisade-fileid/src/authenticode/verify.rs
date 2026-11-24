@@ -534,7 +534,10 @@ fn check_signature(sd: &SignedData<'_>, cert: Option<&Certificate<'_>>) -> Signa
 
 /// The scheme to verify with. The digest a scheme uses is always the
 /// SignerInfo's (parsing rejects a conflicting one).
-fn scheme(alg: &SignatureAlgorithm, signer_alg: DigestAlgorithm) -> Result<Scheme, Unsupported> {
+pub(crate) fn scheme(
+    alg: &SignatureAlgorithm,
+    signer_alg: DigestAlgorithm,
+) -> Result<Scheme, Unsupported> {
     match alg {
         SignatureAlgorithm::RsaPkcs1(d) => Ok(Scheme::RsaPkcs1(*d)),
         SignatureAlgorithm::Ecdsa(d) => Ok(Scheme::Ecdsa(*d)),

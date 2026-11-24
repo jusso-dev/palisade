@@ -20,6 +20,8 @@
 
 use std::fmt;
 
+use serde::Serialize;
+
 /// Universal tags used by the signature code.
 pub(crate) mod tag {
     pub const BOOLEAN: u8 = 0x01;
@@ -32,6 +34,14 @@ pub(crate) mod tag {
     pub const GENERALIZED_TIME: u8 = 0x18;
     pub const SEQUENCE: u8 = 0x30;
     pub const SET: u8 = 0x31;
+    pub const UTF8_STRING: u8 = 0x0c;
+    pub const NUMERIC_STRING: u8 = 0x12;
+    pub const PRINTABLE_STRING: u8 = 0x13;
+    pub const TELETEX_STRING: u8 = 0x14;
+    pub const IA5_STRING: u8 = 0x16;
+    pub const VISIBLE_STRING: u8 = 0x1a;
+    pub const UNIVERSAL_STRING: u8 = 0x1c;
+    pub const BMP_STRING: u8 = 0x1e;
 
     /// A context-specific, constructed tag: `[n]` EXPLICIT, or IMPLICIT over
     /// a constructed type.
@@ -47,7 +57,8 @@ pub(crate) mod tag {
 }
 
 /// What was wrong with a DER encoding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Asn1ErrorKind {
     /// An element's header or content runs past the end of its container.
@@ -104,7 +115,7 @@ impl fmt::Display for Asn1ErrorKind {
 }
 
 /// A DER decoding error, with the offset of the offending element.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub struct Asn1Error {
     /// What went wrong.
     pub kind: Asn1ErrorKind,
@@ -407,6 +418,151 @@ pub(crate) fn bit_string_flags(tlv: &Tlv<'_>) -> Result<u8> {
     }
 }
 
+/// The first two octets of a BIT STRING of flags, big-endian, so ASN.1 bit
+/// 0 is the most significant bit of the result. Missing octets are zero.
+/// The unused bits of the last octet must be zero (X.690 11.2.1).
+pub(crate) fn bit_string_flags16(tlv: &Tlv<'_>) -> Result<u16> {
+    let content = tlv.expect(tag::BIT_STRING)?.content;
+    let invalid = tlv.error(Asn1ErrorKind::InvalidValue);
+    let (unused, rest) = content.split_first().ok_or(invalid)?;
+    match (unused, rest.last()) {
+        (0, _) => {}
+        (1..=7, Some(last)) if last & ((1_u8 << unused) - 1) == 0 => {}
+        _ => return Err(invalid),
+    }
+    let byte = |i: usize| u16::from(rest.get(i).copied().unwrap_or(0));
+    Ok((byte(0) << 8) | byte(1))
+}
+
+/// A DER BOOLEAN: `0x00` is false and `0xff` true. Any other content is
+/// not DER and is rejected.
+pub(crate) fn boolean(tlv: &Tlv<'_>) -> Result<bool> {
+    match tlv.expect(tag::BOOLEAN)?.content {
+        [0x00] => Ok(false),
+        [0xff] => Ok(true),
+        _ => Err(tlv.error(Asn1ErrorKind::InvalidValue)),
+    }
+}
+
+/// Text decoded from an X.509 string type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DecodedText {
+    pub text: String,
+    /// Some content was not valid for the string type: invalid UTF-8, a
+    /// non-ASCII byte in an ASCII type, a surrogate in a BMPString or an
+    /// invalid code point (each became U+FFFD), or an ASCII character
+    /// outside the type's repertoire (kept as it is).
+    pub lossy: bool,
+}
+
+/// Decodes an X.509 string (UTF8String, PrintableString, IA5String,
+/// VisibleString, NumericString, TeletexString, BMPString or
+/// UniversalString). Returns `Ok(None)` for any other tag.
+///
+/// Unlike [`bmp_text`] and [`ascii_text`], nothing is cut: a NUL is kept as
+/// U+0000, so `"a\0b"` never reads as `"a"` (the classic null-prefix name
+/// attack), and no length limit applies beyond the input itself.
+///
+/// - The ASCII types (PrintableString, IA5String, VisibleString,
+///   NumericString) are read byte for byte as ASCII; a non-ASCII byte
+///   becomes U+FFFD. A character outside the type's repertoire (X.680
+///   41: NumericString is digits and space, PrintableString letters,
+///   digits, space and `'()+,-./:=?`, VisibleString printable ASCII) is
+///   kept as it is, but the result is lossy, so it is never used as an
+///   identity. Some issued certificates break these repertoires (an `&`
+///   in a PrintableString, say); their names are shown but not matched on.
+/// - TeletexString is read as UTF-8 when it is valid UTF-8, and as 8-bit
+///   (Latin-1) characters otherwise, as the OS's default name rendering
+///   does.
+/// - BMPString is UCS-2: each code unit is one character. A surrogate code
+///   unit is not a character in it, so it becomes U+FFFD and the result is
+///   lossy, even when two of them would form a UTF-16 pair.
+pub(crate) fn x509_text(tlv: &Tlv<'_>) -> Result<Option<DecodedText>> {
+    let content = tlv.content;
+    let invalid = tlv.error(Asn1ErrorKind::InvalidValue);
+    let decoded = match tlv.tag {
+        tag::UTF8_STRING => match std::str::from_utf8(content) {
+            Ok(text) => DecodedText {
+                text: text.to_owned(),
+                lossy: false,
+            },
+            Err(_) => DecodedText {
+                text: String::from_utf8_lossy(content).into_owned(),
+                lossy: true,
+            },
+        },
+        tag::PRINTABLE_STRING | tag::IA5_STRING | tag::VISIBLE_STRING | tag::NUMERIC_STRING => {
+            let allowed = |b: u8| match tlv.tag {
+                tag::NUMERIC_STRING => b.is_ascii_digit() || b == b' ',
+                tag::PRINTABLE_STRING => b.is_ascii_alphanumeric() || b" '()+,-./:=?".contains(&b),
+                tag::VISIBLE_STRING => b.is_ascii_graphic() || b == b' ',
+                _ => b.is_ascii(),
+            };
+            let lossy = !content.iter().all(|b| allowed(*b));
+            let text = content
+                .iter()
+                .map(|b| {
+                    if b.is_ascii() {
+                        char::from(*b)
+                    } else {
+                        char::REPLACEMENT_CHARACTER
+                    }
+                })
+                .collect();
+            DecodedText { text, lossy }
+        }
+        tag::TELETEX_STRING => DecodedText {
+            text: std::str::from_utf8(content).map_or_else(
+                |_| content.iter().map(|b| char::from(*b)).collect(),
+                str::to_owned,
+            ),
+            lossy: false,
+        },
+        tag::BMP_STRING => {
+            if content.len() % 2 != 0 {
+                return Err(invalid);
+            }
+            let mut lossy = false;
+            let text = content
+                .chunks_exact(2)
+                .map(|pair| {
+                    let unit = match pair {
+                        [hi, lo] => u16::from_be_bytes([*hi, *lo]),
+                        _ => 0xd800,
+                    };
+                    char::from_u32(u32::from(unit)).unwrap_or_else(|| {
+                        lossy = true;
+                        char::REPLACEMENT_CHARACTER
+                    })
+                })
+                .collect();
+            DecodedText { text, lossy }
+        }
+        tag::UNIVERSAL_STRING => {
+            if content.len() % 4 != 0 {
+                return Err(invalid);
+            }
+            let mut lossy = false;
+            let text = content
+                .chunks_exact(4)
+                .map(|quad| {
+                    let value = match quad {
+                        [a, b, c, d] => u32::from_be_bytes([*a, *b, *c, *d]),
+                        _ => u32::MAX,
+                    };
+                    char::from_u32(value).unwrap_or_else(|| {
+                        lossy = true;
+                        char::REPLACEMENT_CHARACTER
+                    })
+                })
+                .collect();
+            DecodedText { text, lossy }
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(decoded))
+}
+
 /// How deep [`validate`] follows constructed elements.
 pub(crate) const MAX_DEPTH: usize = 64;
 
@@ -609,32 +765,89 @@ impl ObjectId {
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
+
+    /// Parses dotted-decimal form, such as `1.3.6.1.5.5.7.3.3`. Needs at
+    /// least two arcs, the first 0, 1 or 2, and the second below 40 unless
+    /// the first is 2. Every arc must fit in 64 bits (the first two are
+    /// encoded together, which can need more), and decimal digits are the
+    /// only characters allowed besides the dots.
+    #[must_use]
+    pub fn from_dotted(text: &str) -> Option<Self> {
+        let mut arcs = text.split('.').map(|part| {
+            if part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            part.parse::<u64>().ok()
+        });
+        let first = arcs.next()??;
+        let second = arcs.next()??;
+        let head = match first {
+            0 | 1 if second < 40 => u128::from(first * 40 + second),
+            2 => u128::from(second) + 80,
+            _ => return None,
+        };
+        let mut out = Vec::new();
+        push_base128(&mut out, head);
+        for arc in arcs {
+            push_base128(&mut out, u128::from(arc?));
+        }
+        Some(Self(out))
+    }
+}
+
+/// Appends `value` in the base-128 form an OBJECT IDENTIFIER arc uses.
+fn push_base128(out: &mut Vec<u8>, value: u128) {
+    let mut groups = [0_u8; 19];
+    let mut count = 0_usize;
+    let mut rest = value;
+    loop {
+        if let Some(slot) = groups.get_mut(count) {
+            *slot = u8::try_from(rest & 0x7f).unwrap_or(0);
+        }
+        count += 1;
+        rest >>= 7;
+        if rest == 0 {
+            break;
+        }
+    }
+    for (i, group) in groups.iter().take(count).enumerate().rev() {
+        out.push(if i == 0 { *group } else { group | 0x80 });
+    }
 }
 
 impl fmt::Display for ObjectId {
     /// Dotted-decimal form, such as `1.2.840.113549.1.7.2`. An arc too large
     /// for 64 bits is shown as `?`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut value: Option<u64> = Some(0);
+        // Wide enough for the first subidentifier, which holds the second
+        // arc plus 80 and so can need 65 bits for a 64-bit arc.
+        let mut value: Option<u128> = Some(0);
         let mut first = true;
         for byte in &self.0 {
             value = value
                 .and_then(|v| v.checked_mul(128))
-                .and_then(|v| v.checked_add(u64::from(byte & 0x7f)));
+                .and_then(|v| v.checked_add(u128::from(byte & 0x7f)));
             if byte & 0x80 != 0 {
                 continue;
             }
+            let arc = |v: u128| u64::try_from(v).ok();
             match (first, value) {
                 (true, Some(v)) => {
                     let (a, b) = match v {
-                        0..=39 => (0, v),
-                        40..=79 => (1, v - 40),
-                        _ => (2, v - 80),
+                        0..=39 => (0, arc(v)),
+                        40..=79 => (1, arc(v - 40)),
+                        _ => (2, arc(v - 80)),
                     };
-                    write!(f, "{a}.{b}")?;
+                    match b {
+                        Some(b) => write!(f, "{a}.{b}")?,
+                        None => write!(f, "{a}.?")?,
+                    }
                 }
                 (true, None) => f.write_str("2.?")?,
-                (false, Some(v)) => write!(f, ".{v}")?,
+                (false, Some(v)) => match arc(v) {
+                    Some(v) => write!(f, ".{v}")?,
+                    None => f.write_str(".?")?,
+                },
                 (false, None) => f.write_str(".?")?,
             }
             first = false;
@@ -745,6 +958,78 @@ pub(crate) mod oid {
 
     /// 2.5.29.14 `subjectKeyIdentifier`.
     pub const SUBJECT_KEY_IDENTIFIER: &[u8] = &[0x55, 0x1d, 0x0e];
+    /// 2.5.29.15 `keyUsage`.
+    pub const KEY_USAGE: &[u8] = &[0x55, 0x1d, 0x0f];
+    /// 2.5.29.17 `subjectAltName`.
+    pub const SUBJECT_ALT_NAME: &[u8] = &[0x55, 0x1d, 0x11];
+    /// 2.5.29.18 `issuerAltName`.
+    pub const ISSUER_ALT_NAME: &[u8] = &[0x55, 0x1d, 0x12];
+    /// 2.5.29.19 `basicConstraints`.
+    pub const BASIC_CONSTRAINTS: &[u8] = &[0x55, 0x1d, 0x13];
+    /// 2.5.29.31 `cRLDistributionPoints`.
+    pub const CRL_DISTRIBUTION_POINTS: &[u8] = &[0x55, 0x1d, 0x1f];
+    /// 2.5.29.32 `certificatePolicies`.
+    pub const CERTIFICATE_POLICIES: &[u8] = &[0x55, 0x1d, 0x20];
+    /// 2.5.29.35 `authorityKeyIdentifier`.
+    pub const AUTHORITY_KEY_IDENTIFIER: &[u8] = &[0x55, 0x1d, 0x23];
+    /// 2.5.29.37 `extKeyUsage`.
+    pub const EXT_KEY_USAGE: &[u8] = &[0x55, 0x1d, 0x25];
+    /// 1.3.6.1.5.5.7.1.1 `authorityInfoAccess`.
+    pub const AUTHORITY_INFO_ACCESS: &[u8] = &[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x01, 0x01];
+    /// 1.3.6.1.5.5.7.48.1 `id-ad-ocsp`.
+    pub const AD_OCSP: &[u8] = &[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x01];
+    /// 1.3.6.1.5.5.7.48.2 `id-ad-caIssuers`.
+    pub const AD_CA_ISSUERS: &[u8] = &[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x02];
+    /// 1.3.6.1.5.5.7.2.1 `id-qt-cps`, a CPS pointer policy qualifier.
+    pub const QT_CPS: &[u8] = &[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x02, 0x01];
+    /// 1.3.6.1.5.5.7.2.2 `id-qt-unotice`, a user notice policy qualifier.
+    pub const QT_UNOTICE: &[u8] = &[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x02, 0x02];
+
+    /// 2.5.4.3 `commonName`.
+    pub const AT_COMMON_NAME: &[u8] = &[0x55, 0x04, 0x03];
+    /// 2.5.4.4 `surname`.
+    pub const AT_SURNAME: &[u8] = &[0x55, 0x04, 0x04];
+    /// 2.5.4.5 `serialNumber`.
+    pub const AT_SERIAL_NUMBER: &[u8] = &[0x55, 0x04, 0x05];
+    /// 2.5.4.6 `countryName`.
+    pub const AT_COUNTRY: &[u8] = &[0x55, 0x04, 0x06];
+    /// 2.5.4.7 `localityName`.
+    pub const AT_LOCALITY: &[u8] = &[0x55, 0x04, 0x07];
+    /// 2.5.4.8 `stateOrProvinceName`.
+    pub const AT_STATE: &[u8] = &[0x55, 0x04, 0x08];
+    /// 2.5.4.9 `streetAddress`.
+    pub const AT_STREET: &[u8] = &[0x55, 0x04, 0x09];
+    /// 2.5.4.10 `organizationName`.
+    pub const AT_ORGANIZATION: &[u8] = &[0x55, 0x04, 0x0a];
+    /// 2.5.4.11 `organizationalUnitName`.
+    pub const AT_ORGANIZATIONAL_UNIT: &[u8] = &[0x55, 0x04, 0x0b];
+    /// 2.5.4.12 `title`.
+    pub const AT_TITLE: &[u8] = &[0x55, 0x04, 0x0c];
+    /// 2.5.4.15 `businessCategory`.
+    pub const AT_BUSINESS_CATEGORY: &[u8] = &[0x55, 0x04, 0x0f];
+    /// 2.5.4.17 `postalCode`.
+    pub const AT_POSTAL_CODE: &[u8] = &[0x55, 0x04, 0x11];
+    /// 2.5.4.42 `givenName`.
+    pub const AT_GIVEN_NAME: &[u8] = &[0x55, 0x04, 0x2a];
+    /// 2.5.4.43 `initials`.
+    pub const AT_INITIALS: &[u8] = &[0x55, 0x04, 0x2b];
+    /// 1.2.840.113549.1.9.1 `emailAddress`.
+    pub const AT_EMAIL: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x09, 0x01];
+    /// 0.9.2342.19200300.100.1.25 `domainComponent`.
+    pub const AT_DOMAIN_COMPONENT: &[u8] =
+        &[0x09, 0x92, 0x26, 0x89, 0x93, 0xf2, 0x2c, 0x64, 0x01, 0x19];
+    /// 1.3.6.1.4.1.311.60.2.1.1 jurisdiction locality (EV certificates).
+    pub const AT_JURISDICTION_LOCALITY: &[u8] = &[
+        0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x3c, 0x02, 0x01, 0x01,
+    ];
+    /// 1.3.6.1.4.1.311.60.2.1.2 jurisdiction state or province.
+    pub const AT_JURISDICTION_STATE: &[u8] = &[
+        0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x3c, 0x02, 0x01, 0x02,
+    ];
+    /// 1.3.6.1.4.1.311.60.2.1.3 jurisdiction country.
+    pub const AT_JURISDICTION_COUNTRY: &[u8] = &[
+        0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x3c, 0x02, 0x01, 0x03,
+    ];
 }
 
 #[cfg(test)]
@@ -912,6 +1197,36 @@ mod tests {
             ED25519,
             ED448,
             SUBJECT_KEY_IDENTIFIER,
+            KEY_USAGE,
+            SUBJECT_ALT_NAME,
+            ISSUER_ALT_NAME,
+            BASIC_CONSTRAINTS,
+            CRL_DISTRIBUTION_POINTS,
+            CERTIFICATE_POLICIES,
+            AUTHORITY_KEY_IDENTIFIER,
+            EXT_KEY_USAGE,
+            AUTHORITY_INFO_ACCESS,
+            AD_OCSP,
+            AD_CA_ISSUERS,
+            AT_COMMON_NAME,
+            AT_SURNAME,
+            AT_SERIAL_NUMBER,
+            AT_COUNTRY,
+            AT_LOCALITY,
+            AT_STATE,
+            AT_STREET,
+            AT_ORGANIZATION,
+            AT_ORGANIZATIONAL_UNIT,
+            AT_TITLE,
+            AT_BUSINESS_CATEGORY,
+            AT_POSTAL_CODE,
+            AT_GIVEN_NAME,
+            AT_INITIALS,
+            AT_EMAIL,
+            AT_DOMAIN_COMPONENT,
+            AT_JURISDICTION_LOCALITY,
+            AT_JURISDICTION_STATE,
+            AT_JURISDICTION_COUNTRY,
         ] {
             let mut der = header(tag::OID, o.len());
             der.extend_from_slice(o);
@@ -929,6 +1244,55 @@ mod tests {
         assert_eq!(dotted(P521), "1.3.132.0.35");
         assert_eq!(dotted(RSASSA_PSS), "1.2.840.113549.1.1.10");
         assert_eq!(dotted(SUBJECT_KEY_IDENTIFIER), "2.5.29.14");
+        assert_eq!(dotted(AUTHORITY_INFO_ACCESS), "1.3.6.1.5.5.7.1.1");
+        assert_eq!(dotted(AD_CA_ISSUERS), "1.3.6.1.5.5.7.48.2");
+        assert_eq!(dotted(AT_EMAIL), "1.2.840.113549.1.9.1");
+        assert_eq!(dotted(AT_DOMAIN_COMPONENT), "0.9.2342.19200300.100.1.25");
+        assert_eq!(dotted(AT_JURISDICTION_COUNTRY), "1.3.6.1.4.1.311.60.2.1.3");
+        assert_eq!(dotted(AT_INITIALS), "2.5.4.43");
+    }
+
+    #[test]
+    fn dotted_object_identifiers_round_trip() {
+        for text in [
+            "1.3.6.1.5.5.7.3.3",
+            "2.5.29.37.0",
+            "0.9.2342.19200300.100.1.25",
+            "1.3.6.1.4.1.311.10.3.13",
+            "2.999.1",
+            "2.18446744073709551615",
+            "2.18446744073709551615.18446744073709551615",
+            "1.39",
+            "0.0",
+        ] {
+            let parsed = ObjectId::from_dotted(text).unwrap();
+            assert_eq!(parsed.to_string(), text);
+            let mut der = header(tag::OID, parsed.as_bytes().len());
+            der.extend_from_slice(parsed.as_bytes());
+            assert!(oid_bytes(&read_one(&der).unwrap()).is_ok(), "{text}");
+        }
+        assert_eq!(
+            ObjectId::from_dotted("1.3.6.1.5.5.7.3.3").unwrap(),
+            ObjectId::from_der(&[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x03])
+        );
+        for bad in [
+            "",
+            "1",
+            "3.1",
+            "1.40",
+            "0.40",
+            "1..2",
+            "1.2.",
+            ".1.2",
+            "1.2.x",
+            "1.-2",
+            "+1.2",
+            "1.2.3 ",
+            "1.18446744073709551616",
+            "2.18446744073709551616",
+        ] {
+            assert_eq!(ObjectId::from_dotted(bad), None, "{bad:?}");
+        }
     }
 
     #[test]
@@ -988,6 +1352,90 @@ mod tests {
         assert_eq!(bit_string_flags(&empty).unwrap(), 0);
         let bad = read_one(&[0x03, 0x01, 0x03]).unwrap();
         assert!(bit_string_flags(&bad).is_err());
+    }
+
+    #[test]
+    fn sixteen_bit_flags_and_booleans() {
+        let ku = read_one(&[0x03, 0x03, 0x07, 0x86, 0x80]).unwrap();
+        assert_eq!(bit_string_flags16(&ku).unwrap(), 0x8680);
+        let short = read_one(&[0x03, 0x02, 0x01, 0x86]).unwrap();
+        assert_eq!(bit_string_flags16(&short).unwrap(), 0x8600);
+        let empty = read_one(&[0x03, 0x01, 0x00]).unwrap();
+        assert_eq!(bit_string_flags16(&empty).unwrap(), 0);
+        for bad in [
+            &[0x03, 0x00][..],
+            &[0x03, 0x01, 0x01],
+            &[0x03, 0x02, 0x01, 0x87],
+            &[0x03, 0x02, 0x08, 0x00],
+        ] {
+            assert!(
+                bit_string_flags16(&read_one(bad).unwrap()).is_err(),
+                "{bad:?}"
+            );
+        }
+        assert!(boolean(&read_one(&[0x01, 0x01, 0xff]).unwrap()).unwrap());
+        assert!(!boolean(&read_one(&[0x01, 0x01, 0x00]).unwrap()).unwrap());
+        for bad in [
+            &[0x01, 0x01, 0x01][..],
+            &[0x01, 0x00],
+            &[0x01, 0x02, 0xff, 0xff],
+        ] {
+            assert!(boolean(&read_one(bad).unwrap()).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn x509_strings() {
+        let text = |tag: u8, content: &[u8]| {
+            let mut der = header(tag, content.len());
+            der.extend_from_slice(content);
+            x509_text(&read_one(&der).unwrap())
+        };
+        let ok = |tag: u8, content: &[u8]| text(tag, content).unwrap().unwrap();
+        assert_eq!(
+            ok(tag::UTF8_STRING, "Tésts".as_bytes()),
+            DecodedText {
+                text: "Tésts".into(),
+                lossy: false
+            }
+        );
+        // A NUL is kept, never treated as the end of the name.
+        assert_eq!(ok(tag::PRINTABLE_STRING, b"a\0b").text, "a\0b");
+        assert_eq!(ok(tag::UTF8_STRING, b"a\0b").text, "a\0b");
+        let bad_utf8 = ok(tag::UTF8_STRING, b"a\xffb");
+        assert!(bad_utf8.lossy && bad_utf8.text == "a\u{FFFD}b");
+        let high = ok(tag::IA5_STRING, b"a\x80");
+        assert!(high.lossy && high.text == "a\u{FFFD}");
+        // TeletexString: UTF-8 first, as the OS renders it, else 8-bit.
+        assert_eq!(ok(tag::TELETEX_STRING, b"caf\xe9").text, "café");
+        let teletex_utf8 = ok(tag::TELETEX_STRING, b"caf\xc3\xa9");
+        assert!(!teletex_utf8.lossy && teletex_utf8.text == "café");
+        // Each ASCII type's repertoire is enforced: the text is kept, but
+        // flagged.
+        let numeric = ok(tag::NUMERIC_STRING, b"A1");
+        assert!(numeric.lossy && numeric.text == "A1");
+        assert!(!ok(tag::NUMERIC_STRING, b"12 34").lossy);
+        assert!(ok(tag::PRINTABLE_STRING, b"A&B").lossy);
+        assert!(ok(tag::PRINTABLE_STRING, b"a@b").lossy);
+        assert!(!ok(tag::PRINTABLE_STRING, b"Tests, Pty (AU) 'x'+-./:=?").lossy);
+        assert!(ok(tag::VISIBLE_STRING, b"a\tb").lossy);
+        assert!(!ok(tag::VISIBLE_STRING, b"a@b~").lossy);
+        assert!(!ok(tag::IA5_STRING, b"a@b\t").lossy);
+        assert_eq!(ok(tag::BMP_STRING, &[0x00, 0x41, 0x00, 0xe9]).text, "Aé");
+        assert!(ok(tag::BMP_STRING, &[0xd8, 0x00]).lossy);
+        // BMPString is UCS-2: a surrogate pair is two invalid characters,
+        // not one supplementary character.
+        let pair = ok(tag::BMP_STRING, &[0x00, 0x41, 0xd8, 0x3d, 0xde, 0x00]);
+        assert!(pair.lossy, "{pair:?}");
+        assert_eq!(pair.text, "A\u{FFFD}\u{FFFD}");
+        assert!(text(tag::BMP_STRING, &[0x00]).is_err());
+        assert_eq!(
+            ok(tag::UNIVERSAL_STRING, &[0, 0, 0, 0x41, 0, 1, 0xf6, 0x00]).text,
+            "A\u{1F600}"
+        );
+        assert!(ok(tag::UNIVERSAL_STRING, &[0, 0x11, 0, 0]).lossy);
+        assert!(text(tag::UNIVERSAL_STRING, &[0, 0, 0]).is_err());
+        assert_eq!(text(tag::OCTET_STRING, b"x").unwrap(), None);
     }
 
     #[test]
