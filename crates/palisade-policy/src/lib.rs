@@ -7,6 +7,8 @@ pub mod decision;
 pub mod dsl;
 pub mod evaluate;
 pub mod facts;
+pub mod hierarchy;
+pub mod library;
 pub mod mode;
 pub mod model;
 pub mod ops;

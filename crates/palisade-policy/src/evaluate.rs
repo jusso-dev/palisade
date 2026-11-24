@@ -167,6 +167,7 @@ impl Compiled<'_> {
             order: self.rule.order,
             priority: self.rule.priority,
             curated: self.set.read_only,
+            band: self.set.band,
         }
     }
 

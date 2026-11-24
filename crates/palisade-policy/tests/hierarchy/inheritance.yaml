@@ -1,0 +1,118 @@
+# A global mandatory blocklist, a tenant allowlist, a group that suppresses
+# one inherited allow and locks the mode, and a device with its own allow.
+# Dynamic group membership adds a rule set and a setting.
+description: >-
+  Rules are additive across levels with provenance; an allowlist rule is
+  suppressed below the group; a mandatory blocklist cannot be suppressed and
+  still blocks; settings are override-by-nearest with a lock; the locked
+  enforce mode raises a weaker device mode and a type mode.
+device: 01936b2e-0014-7b3d-9f21-0a1b2c3d4e5f
+membership: [01936b2e-001e-7b3d-9f21-0a1b2c3d4e5f]
+snapshot:
+  schema_version: 1.0.0
+  revision: 12
+  nodes:
+    - id: 01936b2e-0001-7b3d-9f21-0a1b2c3d4e5f
+      name: Installation
+      kind: global
+      assignments: [{policy: 01936b2e-0032-7b3d-9f21-0a1b2c3d4e5f, slot_order: 0}]
+      settings: {capture_command_line: false}
+      locked_settings: [capture_command_line]
+    - id: 01936b2e-0002-7b3d-9f21-0a1b2c3d4e5f
+      name: Example tenant
+      kind: tenant
+      parent: 01936b2e-0001-7b3d-9f21-0a1b2c3d4e5f
+      assignments: [{policy: 01936b2e-0033-7b3d-9f21-0a1b2c3d4e5f, slot_order: 0}]
+      settings: {poll_interval_secs: 600}
+    - id: 01936b2e-0003-7b3d-9f21-0a1b2c3d4e5f
+      name: Unassigned
+      kind: group
+      parent: 01936b2e-0002-7b3d-9f21-0a1b2c3d4e5f
+      builtin: unassigned
+    - id: 01936b2e-000a-7b3d-9f21-0a1b2c3d4e5f
+      name: Workstations
+      kind: group
+      parent: 01936b2e-0002-7b3d-9f21-0a1b2c3d4e5f
+      mode: enforce
+      lock_mode: true
+      suppress_inherited: [01936b2e-0047-7b3d-9f21-0a1b2c3d4e5f]
+    - id: 01936b2e-001e-7b3d-9f21-0a1b2c3d4e5f
+      name: Finance tag
+      kind: dynamic_group
+      parent: 01936b2e-0002-7b3d-9f21-0a1b2c3d4e5f
+      rank: 1
+      settings: {poll_interval_secs: 300}
+    - id: 01936b2e-0014-7b3d-9f21-0a1b2c3d4e5f
+      name: WS-0042
+      kind: device
+      parent: 01936b2e-000a-7b3d-9f21-0a1b2c3d4e5f
+      mode: audit
+      settings: {capture_command_line: true}
+      assignments: [{policy: 01936b2e-0034-7b3d-9f21-0a1b2c3d4e5f, slot_order: 0}]
+  policies:
+    - realm: global
+      document:
+        schema_version: 1.0.0
+        policy:
+          id: 01936b2e-0032-7b3d-9f21-0a1b2c3d4e5f
+          name: Never run
+          revision: 3
+          mode: enforce
+          rule_sets: [01936b2e-003c-7b3d-9f21-0a1b2c3d4e5f]
+        rule_sets:
+          - id: 01936b2e-003c-7b3d-9f21-0a1b2c3d4e5f
+            name: Never run
+            kind: blocklist
+            mandatory: true
+            rules:
+              - id: 01936b2e-0046-7b3d-9f21-0a1b2c3d4e5f
+                name: bypass tool
+                match: {criterion: {field: hash.sha256, operator: equals, values: [aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]}}
+                action: {type: deny}
+    - realm: {tenant: 01936b2e-0002-7b3d-9f21-0a1b2c3d4e5f}
+      document:
+        schema_version: 1.0.0
+        policy:
+          id: 01936b2e-0033-7b3d-9f21-0a1b2c3d4e5f
+          name: Tenant baseline
+          revision: 9
+          mode: audit
+          mode_options:
+            mode_by_type: {script.powershell: monitor}
+          rule_sets: [01936b2e-003d-7b3d-9f21-0a1b2c3d4e5f]
+        rule_sets:
+          - id: 01936b2e-003d-7b3d-9f21-0a1b2c3d4e5f
+            name: Tenant apps
+            kind: allowlist
+            rules:
+              - id: 01936b2e-0047-7b3d-9f21-0a1b2c3d4e5f
+                name: old tool
+                match: {criterion: {field: hash.sha256, operator: equals, values: [bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb]}}
+                action: {type: allow}
+              - id: 01936b2e-0048-7b3d-9f21-0a1b2c3d4e5f
+                name: bypass tool, allowed by mistake
+                match: {criterion: {field: hash.sha256, operator: equals, values: [aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]}}
+                action: {type: allow}
+    - realm: {tenant: 01936b2e-0002-7b3d-9f21-0a1b2c3d4e5f}
+      document:
+        schema_version: 1.0.0
+        policy:
+          id: 01936b2e-0034-7b3d-9f21-0a1b2c3d4e5f
+          name: Device extras
+          revision: 1
+          mode: audit
+          rule_sets: [01936b2e-003e-7b3d-9f21-0a1b2c3d4e5f]
+        rule_sets:
+          - id: 01936b2e-003e-7b3d-9f21-0a1b2c3d4e5f
+            name: Device apps
+            kind: allowlist
+            rules:
+              - id: 01936b2e-0049-7b3d-9f21-0a1b2c3d4e5f
+                name: device tool
+                match: {criterion: {field: hash.sha256, operator: equals, values: [cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc]}}
+                action: {type: allow}
+decisions:
+  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa: blocked
+  bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb: blocked
+  cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc: allowed
+  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd: blocked

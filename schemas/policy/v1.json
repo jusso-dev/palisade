@@ -751,6 +751,29 @@
         }
       ]
     },
+    "LibraryId": {
+      "description": "A UUID version 7 in canonical lowercase form.",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    },
+    "LibraryRef": {
+      "additionalProperties": false,
+      "description": "A reference to a library from a match tree or a hierarchy assignment.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/LibraryId",
+          "description": "The library."
+        },
+        "pin": {
+          "$ref": "#/$defs/Pin",
+          "description": "The version: `latest` (the default) or a version number."
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "LogLevel": {
       "description": "Whether a decision produces a local event.",
       "oneOf": [
@@ -777,7 +800,7 @@
       ]
     },
     "Match": {
-      "description": "A condition tree (#33).\n\nEach node is an object with exactly one key: `all`, `any`, `not` or\n`criterion`.",
+      "description": "A condition tree (#33).\n\nEach node is an object with exactly one key: `all`, `any`, `not`,\n`criterion` or `ref`.",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -836,6 +859,19 @@
           },
           "required": [
             "criterion"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A reference to a reusable match fragment or application definition\nin a library (#37), by ID and an optional version pin. A policy\ndocument that is evaluated never holds one: the hierarchy replaces\nevery reference with the tree it names when it builds the effective\npolicy, and validation rejects one that is left (`unresolved_ref`).",
+          "properties": {
+            "ref": {
+              "$ref": "#/$defs/LibraryRef"
+            }
+          },
+          "required": [
+            "ref"
           ],
           "type": "object"
         }
@@ -1195,6 +1231,19 @@
           "const": "windows",
           "description": "Windows.",
           "type": "string"
+        }
+      ]
+    },
+    "Pin": {
+      "description": "`latest` (the newest version) or one version number.",
+      "oneOf": [
+        {
+          "const": "latest"
+        },
+        {
+          "maximum": 4294967295,
+          "minimum": 1,
+          "type": "integer"
         }
       ]
     },
@@ -1562,6 +1611,28 @@
       "additionalProperties": false,
       "description": "A named, reusable, ordered collection of rules.",
       "properties": {
+        "allow_child_suppress": {
+          "description": "Whether a group below the one that assigns this rule set may disable\none of its rules with `suppress_inherited` (#37). Unset means `true`\nfor an allowlist or a baseline and `false` for every other kind. A\nmandatory rule set can never be suppressed (`suppress_not_allowed`).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "band": {
+          "description": "The `first_match` band of the hierarchy level that assigned this rule\nset (#37): rules of a lower band come first, whatever their `order`.\nThe hierarchy writes it into an effective policy and replaces any\nvalue an authored policy gives, so a local administrator cannot move\na rule set ahead of global policy. 0, the default, outside a\nhierarchy.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "category_path": {
+          "description": "The category, as `Category` or `Category/Subcategory`: each part 1 to\n64 characters, trimmed, with no `/` or control characters. Assigning\na category assigns every rule set library in it (#37).",
+          "pattern": "^[^/]+(/[^/]+)?$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "description": {
           "description": "Free-text description, at most 4096 characters.",
           "maxLength": 4096,

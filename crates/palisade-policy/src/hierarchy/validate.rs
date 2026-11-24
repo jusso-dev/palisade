@@ -1,0 +1,1122 @@
+//! Validation of a hierarchy snapshot (#37).
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::OnceLock;
+
+use super::limits::{
+    MAX_ASSIGNMENTS_PER_NODE, MAX_GROUP_DEPTH, MAX_NODES, MAX_POLICIES, MAX_REFS_PER_NODE,
+    MAX_SUPPRESSIONS_PER_NODE,
+};
+use super::placement::{self, PlacementRule};
+use super::{
+    Builtin, HierarchyCode, HierarchyDocument, HierarchyError, LevelOrder, Membership, ModeMerge,
+    Node, NodeId, NodeKind, herr,
+};
+use crate::library::{
+    Catalogue, Library, LibraryCode, LibraryContent, LibraryError, LibraryId, LibraryRef, Realm,
+    Version, Visibility, name_problem, refs_in,
+};
+use crate::model::{PolicyDocument, PolicyId, PolicySettings, RuleSet};
+use crate::schema;
+
+/// A node, with what validation worked out about it.
+#[derive(Clone, Debug)]
+pub(crate) struct NodeInfo {
+    pub(crate) node: Node,
+    pub(crate) index: usize,
+    /// The tenant it is in, or `None` for the global node and global
+    /// templates.
+    pub(crate) tenant: Option<NodeId>,
+}
+
+impl NodeInfo {
+    pub(crate) const fn visibility(&self) -> Visibility {
+        match self.tenant {
+            Some(t) => Visibility::Tenant(t),
+            None => Visibility::Global,
+        }
+    }
+
+    pub(crate) fn path(&self) -> String {
+        format!("/nodes/{}", self.index)
+    }
+}
+
+/// A policy, with its references replaced and validated.
+#[derive(Clone, Debug)]
+pub(crate) struct PolicyInfo {
+    pub(crate) index: usize,
+    pub(crate) realm: Realm,
+    /// The document, with every `ref` replaced, as validation normalised it.
+    pub(crate) document: PolicyDocument,
+    /// The library versions its trees use.
+    pub(crate) used: BTreeSet<Version>,
+    /// The libraries its trees refer to directly.
+    pub(crate) refs: BTreeSet<LibraryId>,
+}
+
+/// A rule set library version, with its references replaced and validated.
+#[derive(Clone, Debug)]
+pub(crate) struct RuleSetInfo {
+    pub(crate) rule_set: RuleSet,
+    pub(crate) used: BTreeSet<Version>,
+}
+
+/// A hierarchy snapshot that passed validation. It can only be built by
+/// [`HierarchyDocument::validate`].
+#[derive(Clone, Debug)]
+pub struct ValidatedHierarchy {
+    pub(crate) revision: u64,
+    pub(crate) nodes: BTreeMap<NodeId, NodeInfo>,
+    pub(crate) policies: BTreeMap<PolicyId, PolicyInfo>,
+    pub(crate) catalogue: Catalogue,
+    pub(crate) rule_sets: BTreeMap<Version, RuleSetInfo>,
+    pub(crate) library_index: BTreeMap<Version, usize>,
+    /// Each tenant's placement rules, in evaluation order.
+    pub(crate) placement: BTreeMap<NodeId, Vec<PlacementRule>>,
+}
+
+/// The top-level keys of the policy settings, from its schema.
+pub(crate) fn setting_keys() -> &'static BTreeSet<String> {
+    static KEYS: OnceLock<BTreeSet<String>> = OnceLock::new();
+    KEYS.get_or_init(|| {
+        let generator = schemars::generate::SchemaSettings::draft2020_12().into_generator();
+        let schema = generator.into_root_schema_for::<PolicySettings>();
+        schema
+            .get("properties")
+            .and_then(serde_json::Value::as_object)
+            .map(|p| p.keys().cloned().collect())
+            .unwrap_or_default()
+    })
+}
+
+/// Why one setting's value is not valid, if it is not: it must read as
+/// that key of [`PolicySettings`].
+pub(crate) fn setting_problem(key: &str, value: &serde_json::Value) -> Option<String> {
+    if !setting_keys().contains(key) {
+        return Some(format!("`{key}` is not a policy setting"));
+    }
+    let mut map = serde_json::Map::new();
+    map.insert(key.to_owned(), value.clone());
+    serde_json::from_value::<PolicySettings>(serde_json::Value::Object(map))
+        .err()
+        .map(|e| format!("not a valid value for `{key}`: {e}"))
+}
+
+fn lib_errors(
+    prefix: &str,
+    errors: Vec<LibraryError>,
+) -> impl Iterator<Item = HierarchyError> + '_ {
+    errors.into_iter().map(move |e| HierarchyError {
+        code: HierarchyCode::Library(e.code),
+        path: format!("{prefix}{}", e.path),
+        message: e.message,
+    })
+}
+
+impl HierarchyDocument {
+    /// Checks the snapshot: the shape of the tree, every reference between
+    /// nodes, policies and libraries, every library and policy (with its
+    /// references replaced), the placement rules, and the effective policy
+    /// of every global, tenant and group node. Devices are checked when
+    /// their effective policy is computed, because it depends on their
+    /// dynamic groups.
+    ///
+    /// # Errors
+    ///
+    /// Every finding, in a stable order.
+    pub fn validate(self) -> Result<ValidatedHierarchy, Vec<HierarchyError>> {
+        let mut errors = Vec::new();
+        if !self.schema_version.is_readable_by(schema::CURRENT) {
+            errors.push(herr(
+                HierarchyCode::UnsupportedSchemaVersion,
+                "/schema_version",
+                format!(
+                    "schema version {} is not readable by a {} reader",
+                    self.schema_version,
+                    schema::CURRENT
+                ),
+            ));
+        }
+        for (key, len, max) in [
+            ("/nodes", self.nodes.len(), MAX_NODES),
+            ("/policies", self.policies.len(), MAX_POLICIES),
+        ] {
+            if len > max {
+                errors.push(herr(
+                    HierarchyCode::TooMany,
+                    key,
+                    format!("{len} entries; at most {max} are allowed"),
+                ));
+                return Err(errors);
+            }
+        }
+
+        let library_index = library_positions(&self.libraries);
+        let catalogue = match Catalogue::new(self.libraries.clone()) {
+            Ok(c) => Some(c),
+            Err(e) => {
+                errors.extend(lib_errors("", e));
+                None
+            }
+        };
+
+        let nodes = check_nodes(&self.nodes, &mut errors);
+        let tenants: BTreeSet<NodeId> = nodes
+            .values()
+            .filter(|n| n.node.kind == NodeKind::Tenant)
+            .map(|n| n.node.id)
+            .collect();
+        for (i, lib) in self.libraries.iter().enumerate() {
+            if let Realm::Tenant(t) = lib.realm {
+                if !tenants.contains(&t) {
+                    errors.push(herr(
+                        HierarchyCode::UnknownNode,
+                        format!("/libraries/{i}/realm"),
+                        format!("tenant {t} does not exist"),
+                    ));
+                }
+            }
+        }
+
+        let (policies, rule_sets) = match &catalogue {
+            Some(c) => (
+                check_policies(&self.policies, &tenants, c, &mut errors),
+                check_rule_set_libraries(&self.libraries, c, &mut errors),
+            ),
+            None => (BTreeMap::new(), BTreeMap::new()),
+        };
+        if let Some(c) = &catalogue {
+            for info in nodes.values() {
+                check_node_refs(info, &policies, c, &mut errors);
+            }
+        }
+        let placement = placement::check(&self.placement, &nodes, &mut errors);
+
+        if !errors.is_empty() {
+            return Err(errors);
+        }
+        let validated = ValidatedHierarchy {
+            revision: self.revision,
+            nodes,
+            policies,
+            catalogue: catalogue.unwrap_or_default(),
+            rule_sets,
+            library_index,
+            placement,
+        };
+        // The effective policy of every structural node: catches
+        // suppressions of rules that are not inherited, precedence
+        // conflicts and effective documents that do not validate before any
+        // device is computed.
+        let mut seen = BTreeSet::new();
+        for info in validated.nodes.values() {
+            let structural = matches!(
+                info.node.kind,
+                NodeKind::Global | NodeKind::Tenant | NodeKind::Group
+            ) && info.node.builtin != Some(Builtin::Unmanaged);
+            if !structural {
+                continue;
+            }
+            if let Err(found) = validated.effective_policy_as(info.node.id, &Membership::default())
+            {
+                for mut e in found {
+                    if e.path.starts_with("/effective") {
+                        e.message = format!(
+                            "in the effective policy of `{}`: {}",
+                            info.node.name, e.message
+                        );
+                        e.path = format!("{}{}", info.path(), e.path);
+                    }
+                    if seen.insert((e.code, e.path.clone(), e.message.clone())) {
+                        errors.push(e);
+                    }
+                }
+            }
+        }
+        if errors.is_empty() {
+            Ok(validated)
+        } else {
+            Err(errors)
+        }
+    }
+}
+
+fn library_positions(libraries: &[Library]) -> BTreeMap<Version, usize> {
+    let mut out = BTreeMap::new();
+    for (i, lib) in libraries.iter().enumerate() {
+        out.entry((lib.id, lib.version)).or_insert(i);
+    }
+    out
+}
+
+/// The shape of the tree. Returns the nodes that are well placed.
+fn check_nodes(input: &[Node], errors: &mut Vec<HierarchyError>) -> BTreeMap<NodeId, NodeInfo> {
+    let mut by_id: BTreeMap<NodeId, usize> = BTreeMap::new();
+    for (i, n) in input.iter().enumerate() {
+        let base = format!("/nodes/{i}");
+        if let Some(problem) = name_problem(&n.name) {
+            errors.push(herr(
+                HierarchyCode::InvalidName,
+                format!("{base}/name"),
+                problem,
+            ));
+        }
+        if let Some(first) = by_id.insert(n.id, i) {
+            by_id.insert(n.id, first);
+            errors.push(herr(
+                HierarchyCode::DuplicateId,
+                format!("{base}/id"),
+                format!("node ID {} is already used by /nodes/{first}", n.id),
+            ));
+        }
+    }
+    let kind_of = |id: &NodeId| by_id.get(id).map(|&i| &input[i]);
+
+    // Exactly one global node, with no parent.
+    let globals: Vec<usize> = (0..input.len())
+        .filter(|&i| input[i].kind == NodeKind::Global)
+        .collect();
+    if globals.len() != 1 {
+        errors.push(herr(
+            HierarchyCode::InvalidParent,
+            "/nodes",
+            format!(
+                "a snapshot has exactly one `global` node; found {}",
+                globals.len()
+            ),
+        ));
+    }
+
+    for (i, n) in input.iter().enumerate() {
+        let base = format!("/nodes/{i}");
+        match (n.kind, n.parent) {
+            (NodeKind::Global, None) => {}
+            (NodeKind::Global, Some(_)) => errors.push(herr(
+                HierarchyCode::InvalidParent,
+                format!("{base}/parent"),
+                "the global node has no parent",
+            )),
+            (kind, None) => errors.push(herr(
+                HierarchyCode::InvalidParent,
+                format!("{base}/parent"),
+                format!("a `{}` node needs a parent", kind.as_str()),
+            )),
+            (kind, Some(p)) => match kind_of(&p) {
+                None => errors.push(herr(
+                    HierarchyCode::UnknownNode,
+                    format!("{base}/parent"),
+                    format!("node {p} does not exist"),
+                )),
+                Some(parent) => {
+                    let ok = match kind {
+                        NodeKind::Tenant => parent.kind == NodeKind::Global,
+                        NodeKind::Group => {
+                            matches!(parent.kind, NodeKind::Tenant | NodeKind::Group)
+                                && parent.builtin.is_none()
+                        }
+                        NodeKind::Device => {
+                            parent.kind == NodeKind::Group
+                                && parent.builtin != Some(Builtin::Staging)
+                        }
+                        NodeKind::DynamicGroup => parent.kind == NodeKind::Tenant,
+                        NodeKind::Template => {
+                            matches!(parent.kind, NodeKind::Global | NodeKind::Tenant)
+                        }
+                        NodeKind::Global => true,
+                    };
+                    if !ok {
+                        let why = match kind {
+                            NodeKind::Tenant => "a tenant's parent is the global node",
+                            NodeKind::Group => {
+                                "a group's parent is a tenant or a group that is not built in"
+                            }
+                            NodeKind::Device => {
+                                "a device's parent is its primary group, which cannot be `staging`"
+                            }
+                            NodeKind::DynamicGroup => "a dynamic group's parent is its tenant",
+                            _ => "a template's parent is the global node or a tenant",
+                        };
+                        errors.push(herr(
+                            HierarchyCode::InvalidParent,
+                            format!("{base}/parent"),
+                            format!("`{}` is a `{}`; {why}", parent.name, parent.kind.as_str()),
+                        ));
+                    }
+                }
+            },
+        }
+        check_fields(&base, n, errors);
+    }
+
+    // Parent cycles, each named once, from its smallest node ID.
+    let mut cyclic: BTreeSet<NodeId> = BTreeSet::new();
+    let mut done: BTreeSet<NodeId> = BTreeSet::new();
+    let mut reported: BTreeSet<Vec<NodeId>> = BTreeSet::new();
+    for n in input {
+        let mut walk: Vec<NodeId> = Vec::new();
+        let mut at = Some(n.id);
+        while let Some(id) = at {
+            if done.contains(&id) {
+                break;
+            }
+            if let Some(start) = walk.iter().position(|w| *w == id) {
+                let mut cycle = walk[start..].to_vec();
+                let min = cycle
+                    .iter()
+                    .enumerate()
+                    .min_by_key(|(_, v)| **v)
+                    .map_or(0, |(i, _)| i);
+                cycle.rotate_left(min);
+                cyclic.extend(cycle.iter().copied());
+                if reported.insert(cycle.clone()) {
+                    let mut names: Vec<String> = cycle
+                        .iter()
+                        .filter_map(&kind_of)
+                        .map(|c| format!("`{}`", c.name))
+                        .collect();
+                    if let Some(first) = names.first().cloned() {
+                        names.push(first);
+                    }
+                    let i = by_id.get(&cycle[0]).copied().unwrap_or(0);
+                    errors.push(herr(
+                        HierarchyCode::NodeCycle,
+                        format!("/nodes/{i}/parent"),
+                        format!("parents form a cycle: {}", names.join(" -> ")),
+                    ));
+                }
+                break;
+            }
+            walk.push(id);
+            at = kind_of(&id).and_then(|n| n.parent);
+        }
+        done.extend(walk);
+    }
+
+    // Tenants, depths and built-in groups, for nodes not on a cycle.
+    let mut out = BTreeMap::new();
+    let mut builtins: BTreeMap<(NodeId, Builtin), Vec<usize>> = BTreeMap::new();
+    for (i, n) in input.iter().enumerate() {
+        if cyclic.contains(&n.id) || by_id.get(&n.id) != Some(&i) {
+            continue;
+        }
+        let mut tenant = None;
+        let mut depth = 0usize;
+        let mut at = n.parent;
+        if n.kind == NodeKind::Group {
+            depth = 1;
+        }
+        let mut steps = 0;
+        while let Some(p) = at {
+            let Some(parent) = kind_of(&p) else { break };
+            if cyclic.contains(&p) {
+                break;
+            }
+            match parent.kind {
+                NodeKind::Tenant => {
+                    tenant = Some(parent.id);
+                    break;
+                }
+                NodeKind::Group if n.kind == NodeKind::Group => depth += 1,
+                _ => {}
+            }
+            at = parent.parent;
+            steps += 1;
+            if steps > input.len() {
+                break;
+            }
+        }
+        if n.kind == NodeKind::Tenant {
+            tenant = Some(n.id);
+        }
+        if n.kind == NodeKind::Group && depth > MAX_GROUP_DEPTH {
+            errors.push(herr(
+                HierarchyCode::GroupTooDeep,
+                format!("/nodes/{i}/parent"),
+                format!(
+                    "group `{}` is nested {depth} deep below its tenant; at most {MAX_GROUP_DEPTH} is allowed",
+                    n.name
+                ),
+            ));
+        }
+        if let Some(b) = n.builtin {
+            match (n.kind, n.parent.and_then(|p| kind_of(&p)).map(|p| p.kind)) {
+                (NodeKind::Group, Some(NodeKind::Tenant)) => {
+                    if let Some(t) = tenant {
+                        builtins.entry((t, b)).or_default().push(i);
+                    }
+                }
+                _ => errors.push(herr(
+                    HierarchyCode::InvalidBuiltin,
+                    format!("/nodes/{i}/builtin"),
+                    "a built-in group is a group directly below its tenant",
+                )),
+            }
+        }
+        out.insert(
+            n.id,
+            NodeInfo {
+                node: n.clone(),
+                index: i,
+                tenant,
+            },
+        );
+    }
+    for info in out.values().filter(|n| n.node.kind == NodeKind::Tenant) {
+        let t = info.node.id;
+        for b in [Builtin::Unassigned, Builtin::Unmanaged, Builtin::Staging] {
+            let found = builtins.get(&(t, b)).map_or(&[][..], Vec::as_slice);
+            let required = b == Builtin::Unassigned;
+            if found.len() > 1 || (required && found.is_empty()) {
+                errors.push(herr(
+                    HierarchyCode::InvalidBuiltin,
+                    info.path(),
+                    format!(
+                        "tenant `{}` has {} `{}` groups; it needs {}",
+                        info.node.name,
+                        found.len(),
+                        b.as_str(),
+                        if required {
+                            "exactly one"
+                        } else {
+                            "at most one"
+                        }
+                    ),
+                ));
+            }
+        }
+    }
+    // A template link: to a template visible from the node, never from a
+    // template.
+    for info in out.values() {
+        let Some(t) = info.node.template else {
+            continue;
+        };
+        let base = format!("{}/template", info.path());
+        let problem = match out.get(&t) {
+            None => Some(format!("node {t} does not exist")),
+            Some(target) if target.node.kind != NodeKind::Template => {
+                Some(format!("`{}` is not a template", target.node.name))
+            }
+            Some(_) if info.node.kind == NodeKind::Template => {
+                Some("a template cannot link to another template".to_owned())
+            }
+            Some(_) if info.node.kind == NodeKind::Global => {
+                Some("the global node cannot link to a template".to_owned())
+            }
+            Some(target) if target.tenant.is_some() && target.tenant != info.tenant => Some(
+                format!("template `{}` belongs to another tenant", target.node.name),
+            ),
+            Some(_) => None,
+        };
+        if let Some(problem) = problem {
+            errors.push(herr(HierarchyCode::InvalidTemplate, base, problem));
+        }
+    }
+    // Precedence on a group needs its tenant's permission.
+    let global_options = out
+        .values()
+        .find(|n| n.node.kind == NodeKind::Global)
+        .and_then(|n| n.node.tenant_options);
+    for info in out.values() {
+        if info.node.kind != NodeKind::Group || info.node.precedence.is_none() {
+            continue;
+        }
+        let tenant_options = info
+            .tenant
+            .and_then(|t| out.get(&t))
+            .and_then(|t| t.node.tenant_options);
+        let allowed = tenant_options
+            .and_then(|o| o.allow_group_precedence)
+            .or_else(|| global_options.and_then(|o| o.allow_group_precedence))
+            .unwrap_or(false);
+        if !allowed {
+            errors.push(herr(
+                HierarchyCode::PrecedenceNotAllowed,
+                format!("{}/precedence", info.path()),
+                format!(
+                    "group `{}` sets a precedence model, but its tenant does not allow groups to (`tenant_options.allow_group_precedence`)",
+                    info.node.name
+                ),
+            ));
+        }
+    }
+    out
+}
+
+/// Fields that only some kinds of node may have, and per-node limits.
+fn check_fields(base: &str, n: &Node, errors: &mut Vec<HierarchyError>) {
+    let mut not_allowed = |field: &str, why: &str| {
+        errors.push(herr(
+            HierarchyCode::FieldNotAllowed,
+            format!("{base}/{field}"),
+            why.to_owned(),
+        ));
+    };
+    let kind = n.kind;
+    if n.rank.is_some() && kind != NodeKind::DynamicGroup {
+        not_allowed("rank", "only a dynamic group has a rank");
+    }
+    if n.precedence.is_some()
+        && !matches!(kind, NodeKind::Global | NodeKind::Tenant | NodeKind::Group)
+    {
+        not_allowed(
+            "precedence",
+            "the precedence model is chosen by the global node, a tenant or, if the tenant allows it, a group",
+        );
+    }
+    if n.tenant_options.is_some() && !matches!(kind, NodeKind::Global | NodeKind::Tenant) {
+        not_allowed(
+            "tenant_options",
+            "only the global node and tenants have tenant options",
+        );
+    }
+    if n.builtin.is_some() && kind != NodeKind::Group {
+        not_allowed("builtin", "only a group can be built in");
+    }
+    if n.allow_auto_assignment.is_some() && kind != NodeKind::Group {
+        not_allowed(
+            "allow_auto_assignment",
+            "only a group takes part in placement",
+        );
+    }
+    if n.builtin == Some(Builtin::Unmanaged) {
+        let configured = !n.assignments.is_empty()
+            || !n.rule_sets.is_empty()
+            || !n.categories.is_empty()
+            || !n.suppress_inherited.is_empty()
+            || !n.settings.is_empty()
+            || !n.locked_settings.is_empty()
+            || n.mode.is_some()
+            || n.lock_mode
+            || n.template.is_some()
+            || n.precedence.is_some();
+        if configured {
+            not_allowed(
+                "builtin",
+                "the `unmanaged` group is removed from management: it has no policies, settings or modes",
+            );
+        }
+    }
+    for (key, len, max) in [
+        ("assignments", n.assignments.len(), MAX_ASSIGNMENTS_PER_NODE),
+        ("rule_sets", n.rule_sets.len(), MAX_REFS_PER_NODE),
+        ("categories", n.categories.len(), MAX_REFS_PER_NODE),
+        (
+            "suppress_inherited",
+            n.suppress_inherited.len(),
+            MAX_SUPPRESSIONS_PER_NODE,
+        ),
+    ] {
+        if len > max {
+            errors.push(herr(
+                HierarchyCode::TooMany,
+                format!("{base}/{key}"),
+                format!("{len} entries; at most {max} are allowed"),
+            ));
+        }
+    }
+    for (key, value) in &n.settings {
+        if let Some(problem) = setting_problem(key, value) {
+            errors.push(herr(
+                HierarchyCode::InvalidSetting,
+                format!("{base}/settings/{}", pointer_escape(key)),
+                problem,
+            ));
+        }
+    }
+    let mut locked = BTreeSet::new();
+    for (i, key) in n.locked_settings.iter().enumerate() {
+        let path = format!("{base}/locked_settings/{i}");
+        if !setting_keys().contains(key) {
+            errors.push(herr(
+                HierarchyCode::InvalidSetting,
+                path,
+                format!("`{key}` is not a policy setting"),
+            ));
+        } else if !locked.insert(key) {
+            errors.push(herr(
+                HierarchyCode::InvalidSetting,
+                path,
+                format!("`{key}` is listed more than once"),
+            ));
+        }
+    }
+    let mut suppressed = BTreeSet::new();
+    for (i, id) in n.suppress_inherited.iter().enumerate() {
+        if !suppressed.insert(id) {
+            errors.push(herr(
+                HierarchyCode::SuppressUnknownRule,
+                format!("{base}/suppress_inherited/{i}"),
+                format!("rule {id} is listed more than once"),
+            ));
+        }
+    }
+    let mut categories = BTreeSet::new();
+    for (i, c) in n.categories.iter().enumerate() {
+        let path = format!("{base}/categories/{i}");
+        if let Some(problem) = crate::validate::category_problem(c) {
+            errors.push(herr(HierarchyCode::InvalidCategory, path, problem));
+        } else if !categories.insert(c) {
+            errors.push(herr(
+                HierarchyCode::InvalidCategory,
+                path,
+                format!("category `{c}` is listed more than once"),
+            ));
+        }
+    }
+}
+
+/// JSON Pointer escaping (RFC 6901) of one key.
+pub(crate) fn pointer_escape(key: &str) -> String {
+    key.replace('~', "~0").replace('/', "~1")
+}
+
+/// Assignments, rule set libraries and the visibility of what a node uses.
+fn check_node_refs(
+    info: &NodeInfo,
+    policies: &BTreeMap<PolicyId, PolicyInfo>,
+    catalogue: &Catalogue,
+    errors: &mut Vec<HierarchyError>,
+) {
+    let base = info.path();
+    let n = &info.node;
+    let mut seen_policy = BTreeMap::new();
+    let mut seen_slot = BTreeMap::new();
+    for (i, a) in n.assignments.iter().enumerate() {
+        let path = format!("{base}/assignments/{i}");
+        match policies.get(&a.policy) {
+            None => errors.push(herr(
+                HierarchyCode::UnknownPolicy,
+                format!("{path}/policy"),
+                format!("policy {} does not exist", a.policy),
+            )),
+            Some(p) => {
+                if !visible(p.realm, info) {
+                    errors.push(herr(
+                        HierarchyCode::NotVisible,
+                        format!("{path}/policy"),
+                        format!(
+                            "policy `{}` belongs to another tenant",
+                            p.document.policy.name
+                        ),
+                    ));
+                }
+            }
+        }
+        if let Some(first) = seen_policy.insert(a.policy, i) {
+            errors.push(herr(
+                HierarchyCode::DuplicateAssignment,
+                format!("{path}/policy"),
+                format!(
+                    "policy {} is already assigned by {base}/assignments/{first}",
+                    a.policy
+                ),
+            ));
+        }
+        if let Some(first) = seen_slot.insert(a.slot_order, i) {
+            errors.push(herr(
+                HierarchyCode::DuplicateAssignment,
+                format!("{path}/slot_order"),
+                format!(
+                    "slot {} is already used by {base}/assignments/{first}; each slot on a node is unique",
+                    a.slot_order
+                ),
+            ));
+        }
+    }
+    let mut seen_lib = BTreeMap::new();
+    for (i, r) in n.rule_sets.iter().enumerate() {
+        let path = format!("{base}/rule_sets/{i}");
+        if let Some(first) = seen_lib.insert(r.id, i) {
+            errors.push(herr(
+                HierarchyCode::DuplicateAssignment,
+                path.clone(),
+                format!(
+                    "library {} is already assigned by {base}/rule_sets/{first}",
+                    r.id
+                ),
+            ));
+        }
+        match catalogue.resolve(r, info.visibility()) {
+            Err(e) => errors.extend(lib_errors(&path, vec![e])),
+            Ok(lib) if !matches!(lib.content, LibraryContent::RuleSet { .. }) => {
+                errors.push(herr(
+                    HierarchyCode::Library(LibraryCode::RefKindNotAllowed),
+                    path,
+                    format!(
+                        "library `{}` is a `{}`; a node assigns rule set libraries only",
+                        lib.name,
+                        lib.content.kind()
+                    ),
+                ));
+            }
+            Ok(_) => {}
+        }
+    }
+}
+
+/// Whether something in `realm` may be used at the node.
+pub(crate) fn visible(realm: Realm, info: &NodeInfo) -> bool {
+    match realm {
+        Realm::Global => true,
+        Realm::Tenant(t) => info.tenant == Some(t),
+    }
+}
+
+/// Every policy, with its references replaced, validated on its own.
+fn check_policies(
+    input: &[super::PolicyEntry],
+    tenants: &BTreeSet<NodeId>,
+    catalogue: &Catalogue,
+    errors: &mut Vec<HierarchyError>,
+) -> BTreeMap<PolicyId, PolicyInfo> {
+    let mut out = BTreeMap::new();
+    for (i, entry) in input.iter().enumerate() {
+        let base = format!("/policies/{i}");
+        let id = entry.document.policy.id;
+        if let Some(first) = out.get(&id).map(|p: &PolicyInfo| p.index) {
+            errors.push(herr(
+                HierarchyCode::DuplicateId,
+                format!("{base}/document/policy/id"),
+                format!("policy ID {id} is already used by /policies/{first}"),
+            ));
+            continue;
+        }
+        if let Realm::Tenant(t) = entry.realm {
+            if !tenants.contains(&t) {
+                errors.push(herr(
+                    HierarchyCode::UnknownNode,
+                    format!("{base}/realm"),
+                    format!("tenant {t} does not exist"),
+                ));
+            }
+        }
+        let from = match entry.realm {
+            Realm::Global => Visibility::Global,
+            Realm::Tenant(t) => Visibility::Tenant(t),
+        };
+        let mut document = entry.document.clone();
+        let mut used = BTreeSet::new();
+        let mut refs = BTreeSet::new();
+        let mut ok = true;
+        for (j, set) in document.rule_sets.iter_mut().enumerate() {
+            for (k, rule) in set.rules.iter_mut().enumerate() {
+                for (_, r) in refs_in(&rule.match_) {
+                    refs.insert(r.id);
+                }
+                match catalogue.expand(&rule.match_, from, &mut used) {
+                    Ok(tree) => rule.match_ = tree,
+                    Err(e) => {
+                        ok = false;
+                        errors.extend(lib_errors(
+                            &format!("{base}/document/rule_sets/{j}/rules/{k}/match"),
+                            vec![e],
+                        ));
+                    }
+                }
+            }
+        }
+        if !ok {
+            continue;
+        }
+        match document.validate() {
+            Ok(v) => {
+                out.insert(
+                    id,
+                    PolicyInfo {
+                        index: i,
+                        realm: entry.realm,
+                        document: v.into_document(),
+                        used,
+                        refs,
+                    },
+                );
+            }
+            Err(findings) => {
+                for f in findings
+                    .into_iter()
+                    .filter(|f| f.severity == crate::validate::Severity::Error)
+                {
+                    errors.push(herr(
+                        HierarchyCode::Policy(f.code),
+                        format!("{base}/document{}", f.path),
+                        f.message,
+                    ));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Every rule set library version, with its references replaced, checked
+/// as a policy of one rule set would be.
+fn check_rule_set_libraries(
+    libraries: &[Library],
+    catalogue: &Catalogue,
+    errors: &mut Vec<HierarchyError>,
+) -> BTreeMap<Version, RuleSetInfo> {
+    let mut out = BTreeMap::new();
+    for (i, lib) in libraries.iter().enumerate() {
+        let LibraryContent::RuleSet { rule_set } = &lib.content else {
+            continue;
+        };
+        if out.contains_key(&(lib.id, lib.version)) {
+            continue;
+        }
+        let base = format!("/libraries/{i}/content/rule_set");
+        let from = match lib.realm {
+            Realm::Global => Visibility::Global,
+            Realm::Tenant(t) => Visibility::Tenant(t),
+        };
+        let mut set = rule_set.clone();
+        let mut used = BTreeSet::new();
+        let mut ok = true;
+        for (k, rule) in set.rules.iter_mut().enumerate() {
+            match catalogue.expand(&rule.match_, from, &mut used) {
+                Ok(tree) => rule.match_ = tree,
+                Err(e) => {
+                    ok = false;
+                    errors.extend(lib_errors(&format!("{base}/rules/{k}/match"), vec![e]));
+                }
+            }
+        }
+        if !ok {
+            continue;
+        }
+        set.band = 0;
+        match wrap(set).validate() {
+            Ok(v) => {
+                let mut doc = v.into_document();
+                if let Some(set) = doc.rule_sets.pop() {
+                    out.insert(
+                        (lib.id, lib.version),
+                        RuleSetInfo {
+                            rule_set: set,
+                            used,
+                        },
+                    );
+                }
+            }
+            Err(findings) => {
+                for f in findings
+                    .into_iter()
+                    .filter(|f| f.severity == crate::validate::Severity::Error)
+                {
+                    let Some(rest) = f.path.strip_prefix("/rule_sets/0") else {
+                        continue;
+                    };
+                    errors.push(herr(
+                        HierarchyCode::Library(LibraryCode::InvalidRuleSet),
+                        format!("{base}{rest}"),
+                        format!("{}: {}", f.code, f.message),
+                    ));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// A policy holding only `set`, to validate the set on its own.
+fn wrap(set: RuleSet) -> PolicyDocument {
+    PolicyDocument {
+        schema_version: schema::CURRENT,
+        policy: crate::model::Policy {
+            id: PolicyId(set.id.0),
+            name: "Library".to_owned(),
+            description: None,
+            revision: 0,
+            precedence_model: crate::model::PrecedenceModel::DenyWins,
+            precedence_options: crate::model::PrecedenceOptions::default(),
+            mode: crate::model::Mode::Enforce,
+            mode_options: crate::model::ModeOptions::default(),
+            settings: PolicySettings::default(),
+            rule_sets: vec![set.id],
+            metadata: crate::model::Metadata::default(),
+        },
+        rule_sets: vec![set],
+    }
+}
+
+impl ValidatedHierarchy {
+    /// The node, if it exists.
+    #[must_use]
+    pub fn node(&self, id: NodeId) -> Option<&Node> {
+        self.nodes.get(&id).map(|n| &n.node)
+    }
+
+    /// The revision of the snapshot.
+    #[must_use]
+    pub const fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// The libraries.
+    #[must_use]
+    pub const fn catalogue(&self) -> &Catalogue {
+        &self.catalogue
+    }
+
+    /// The `level_order` and `mode_merge` that apply in `tenant`: the
+    /// tenant's own, then the global node's, then the defaults.
+    pub(crate) fn options(&self, tenant: Option<NodeId>) -> (LevelOrder, ModeMerge) {
+        let global = self
+            .nodes
+            .values()
+            .find(|n| n.node.kind == NodeKind::Global)
+            .and_then(|n| n.node.tenant_options);
+        let own = tenant
+            .and_then(|t| self.nodes.get(&t))
+            .and_then(|t| t.node.tenant_options);
+        let level = own
+            .and_then(|o| o.level_order)
+            .or_else(|| global.and_then(|o| o.level_order));
+        let merge = own
+            .and_then(|o| o.mode_merge)
+            .or_else(|| global.and_then(|o| o.mode_merge));
+        (level.unwrap_or_default(), merge.unwrap_or_default())
+    }
+
+    /// Whether a change of signed-in user re-runs placement in `tenant`.
+    pub(crate) fn place_on_user_change(&self, tenant: NodeId) -> bool {
+        let get = |id: Option<NodeId>| {
+            id.and_then(|i| self.nodes.get(&i))
+                .and_then(|n| n.node.tenant_options)
+                .and_then(|o| o.place_on_user_change)
+        };
+        let global = self
+            .nodes
+            .values()
+            .find(|n| n.node.kind == NodeKind::Global)
+            .map(|n| n.node.id);
+        get(Some(tenant)).or_else(|| get(global)).unwrap_or(false)
+    }
+
+    /// Checks that library `id` can be deleted: nothing references it.
+    ///
+    /// # Errors
+    ///
+    /// `in_use`, listing every referrer: nodes that assign it or one of its
+    /// categories, policies whose trees use it, and other libraries.
+    pub fn check_delete(&self, id: LibraryId) -> Result<(), HierarchyError> {
+        let mut users: BTreeSet<String> = BTreeSet::new();
+        for info in self.nodes.values() {
+            if info.node.rule_sets.iter().any(|r: &LibraryRef| r.id == id) {
+                users.insert(format!("node `{}` ({})", info.node.name, info.path()));
+            }
+            for c in &info.node.categories {
+                if self
+                    .catalogue
+                    .in_category(c, info.visibility())
+                    .iter()
+                    .any(|l| l.id == id)
+                {
+                    users.insert(format!(
+                        "node `{}` through category `{c}` ({})",
+                        info.node.name,
+                        info.path()
+                    ));
+                }
+            }
+        }
+        for p in self.policies.values() {
+            if p.refs.contains(&id) {
+                users.insert(format!(
+                    "policy `{}` (/policies/{})",
+                    p.document.policy.name, p.index
+                ));
+            }
+        }
+        for ((lib_id, version), lib) in self.catalogue.versions() {
+            if lib_id == id {
+                continue;
+            }
+            if lib
+                .content
+                .trees()
+                .iter()
+                .any(|(_, t)| refs_in(t).iter().any(|(_, r)| r.id == id))
+            {
+                let at = self
+                    .library_index
+                    .get(&(lib_id, version))
+                    .copied()
+                    .unwrap_or(0);
+                users.insert(format!(
+                    "library `{}` v{version} (/libraries/{at})",
+                    lib.name
+                ));
+            }
+        }
+        if users.is_empty() {
+            Ok(())
+        } else {
+            let at = self
+                .catalogue
+                .versions()
+                .find(|((l, _), _)| *l == id)
+                .and_then(|(v, _)| self.library_index.get(&v))
+                .map_or_else(|| "/libraries".to_owned(), |i| format!("/libraries/{i}"));
+            Err(herr(
+                HierarchyCode::InUse,
+                at,
+                format!(
+                    "library {id} is still used by {}",
+                    users.into_iter().collect::<Vec<_>>().join(", ")
+                ),
+            ))
+        }
+    }
+
+    /// A new node copied once from `template`, with no link to it:
+    /// assignments, rule set libraries, categories, suppressions,
+    /// settings, locks and mode. Add it to the next snapshot, which is
+    /// validated as usual.
+    ///
+    /// # Errors
+    ///
+    /// `invalid_template` if `template` is not a template.
+    pub fn copy_from_template(
+        &self,
+        template: NodeId,
+        id: NodeId,
+        name: String,
+        kind: NodeKind,
+        parent: NodeId,
+    ) -> Result<Node, HierarchyError> {
+        let t = self
+            .nodes
+            .get(&template)
+            .filter(|t| t.node.kind == NodeKind::Template)
+            .ok_or_else(|| {
+                herr(
+                    HierarchyCode::InvalidTemplate,
+                    "",
+                    format!("node {template} is not a template"),
+                )
+            })?;
+        let t = &t.node;
+        Ok(Node {
+            id,
+            name,
+            kind,
+            parent: Some(parent),
+            builtin: None,
+            template: None,
+            assignments: t.assignments.clone(),
+            rule_sets: t.rule_sets.clone(),
+            categories: t.categories.clone(),
+            suppress_inherited: t.suppress_inherited.clone(),
+            settings: t.settings.clone(),
+            locked_settings: t.locked_settings.clone(),
+            mode: t.mode,
+            lock_mode: t.lock_mode,
+            precedence: None,
+            tenant_options: None,
+            rank: None,
+            allow_auto_assignment: None,
+        })
+    }
+}

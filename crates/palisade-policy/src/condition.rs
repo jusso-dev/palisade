@@ -82,6 +82,12 @@ pub enum TreeError {
         /// Where the group is, relative to the root.
         pointer: String,
     },
+    /// The tree still holds a library reference, which the hierarchy
+    /// resolves before evaluation (#37). `pointer` is relative to the root.
+    UnresolvedRef {
+        /// Where the reference is, relative to the root.
+        pointer: String,
+    },
     /// A criterion did not compile. `pointer` is relative to the tree's
     /// root, such as `/all/0/criterion`.
     Criterion {
@@ -104,6 +110,9 @@ impl core::fmt::Display for TreeError {
             }
             Self::EmptyGroup { pointer } => {
                 write!(f, "{pointer}: a group needs at least one condition")
+            }
+            Self::UnresolvedRef { pointer } => {
+                write!(f, "{pointer}: a library reference was not resolved")
             }
             Self::Criterion { pointer, errors } => {
                 write!(f, "{pointer}: ")?;
@@ -217,6 +226,12 @@ impl CompiledMatch {
                 }
             }
             Match::Not(child) => Node::Not(self.add(child, format!("{pointer}/not"), errors)),
+            Match::Ref(_) => {
+                errors.push(TreeError::UnresolvedRef {
+                    pointer: format!("{pointer}/ref"),
+                });
+                Node::Leaf(u32::MAX)
+            }
             Match::Criterion(c) => match CompiledCriterion::compile(c) {
                 Ok(compiled) => {
                     self.leaves.push(compiled);

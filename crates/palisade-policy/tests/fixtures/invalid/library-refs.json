@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0.0",
+  "policy": {
+    "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+    "name": "Fixture",
+    "revision": 1,
+    "mode": "enforce",
+    "rule_sets": [
+      "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60",
+      "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e61"
+    ]
+  },
+  "rule_sets": [
+    {
+      "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60",
+      "name": "Allowed apps",
+      "kind": "allowlist",
+      "category_path": "Apps/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "rules": [
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e70",
+          "name": "Office suite",
+          "match": {
+            "all": [
+              {"criterion": {"field": "signer.publisher", "operator": "equals", "values": ["Example Ltd"]}},
+              {"ref": {"id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e80", "pin": 2}}
+            ]
+          },
+          "action": {"type": "allow"}
+        }
+      ]
+    },
+    {
+      "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e61",
+      "name": "Never run",
+      "kind": "blocklist",
+      "mandatory": true,
+      "allow_child_suppress": true,
+      "rules": []
+    }
+  ]
+}

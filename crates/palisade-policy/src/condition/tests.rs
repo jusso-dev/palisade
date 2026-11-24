@@ -57,6 +57,7 @@ fn reference(tree: &Match) -> Tri {
         Match::All(children) => children.iter().map(reference).fold(Yes, Tri::and),
         Match::Any(children) => children.iter().map(reference).fold(No, Tri::or),
         Match::Not(child) => reference(child).not(),
+        Match::Ref(_) => unreachable!("the generator makes no references"),
         Match::Criterion(c) => match (c.field, c.operator) {
             (Field::UserIsAdmin, Operator::IsTrue) => Yes,
             (Field::UserIsAdmin, Operator::IsFalse) => No,
@@ -91,7 +92,7 @@ fn permute(tree: &Match, seed: &mut u64) -> Match {
             }
         }
         Match::Not(child) => Match::Not(Box::new(permute(child, seed))),
-        Match::Criterion(_) => tree.clone(),
+        Match::Criterion(_) | Match::Ref(_) => tree.clone(),
     }
 }
 

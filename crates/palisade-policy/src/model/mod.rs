@@ -175,6 +175,26 @@ pub struct RuleSet {
     /// try a new blocklist in `audit` (#36). `disabled` is not allowed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode_override: Option<Mode>,
+    /// Whether a group below the one that assigns this rule set may disable
+    /// one of its rules with `suppress_inherited` (#37). Unset means `true`
+    /// for an allowlist or a baseline and `false` for every other kind. A
+    /// mandatory rule set can never be suppressed (`suppress_not_allowed`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_child_suppress: Option<bool>,
+    /// The category, as `Category` or `Category/Subcategory`: each part 1 to
+    /// 64 characters, trimmed, with no `/` or control characters. Assigning
+    /// a category assigns every rule set library in it (#37).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(regex(pattern = r"^[^/]+(/[^/]+)?$"))]
+    pub category_path: Option<String>,
+    /// The `first_match` band of the hierarchy level that assigned this rule
+    /// set (#37): rules of a lower band come first, whatever their `order`.
+    /// The hierarchy writes it into an effective policy and replaces any
+    /// value an authored policy gives, so a local administrator cannot move
+    /// a rule set ahead of global policy. 0, the default, outside a
+    /// hierarchy.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub band: u8,
     /// The rules, in order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rules: Vec<Rule>,
@@ -265,6 +285,11 @@ pub struct Rule {
 
 const fn default_true() -> bool {
     true
+}
+
+/// serde's `skip_serializing_if` passes a reference.
+const fn is_zero(n: &u8) -> bool {
+    *n == 0
 }
 
 /// How one rule relates to the policy mode (#36).

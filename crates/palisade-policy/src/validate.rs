@@ -171,6 +171,15 @@ pub enum ErrorCode {
     /// `enforcement_override` other than `inherit` on a rule that does not
     /// deny: only a block can be enforced or relaxed (#36).
     EnforcementOverrideNotDeny,
+    /// A match tree still holds a library reference (`ref`). References are
+    /// replaced with their trees when the effective policy is built (#37).
+    UnresolvedRef,
+    /// A `category_path` is not `Category` or `Category/Subcategory` with
+    /// valid parts (#37).
+    InvalidCategory,
+    /// `allow_child_suppress: true` on a mandatory rule set, whose rules
+    /// can never be suppressed (#37, ADR 0004).
+    SuppressNotAllowed,
 }
 
 impl ErrorCode {
@@ -229,6 +238,9 @@ impl ErrorCode {
             Self::ModeDisconnectedWeaker => "mode_disconnected_weaker",
             Self::ModeOverrideNotAllowed => "mode_override_not_allowed",
             Self::EnforcementOverrideNotDeny => "enforcement_override_not_deny",
+            Self::UnresolvedRef => "unresolved_ref",
+            Self::InvalidCategory => "invalid_category",
+            Self::SuppressNotAllowed => "suppress_not_allowed",
         }
     }
 
@@ -370,6 +382,7 @@ fn normalize_hashes(doc: &mut PolicyDocument) {
             match node {
                 Match::All(children) | Match::Any(children) => stack.extend(children.iter_mut()),
                 Match::Not(child) => stack.push(child),
+                Match::Ref(_) => {}
                 Match::Criterion(c) => {
                     if let FieldClass::Hash { .. } = c.field.class() {
                         for value in &mut c.values {
@@ -502,6 +515,22 @@ impl Validator {
                 self.name(&format!("{base}/version"), version);
             }
             self.metadata(&format!("{base}/metadata"), &set.metadata);
+            if let Some(category) = &set.category_path {
+                if let Some(problem) = category_problem(category) {
+                    self.push(
+                        ErrorCode::InvalidCategory,
+                        &format!("{base}/category_path"),
+                        problem,
+                    );
+                }
+            }
+            if set.mandatory && set.allow_child_suppress == Some(true) {
+                self.push(
+                    ErrorCode::SuppressNotAllowed,
+                    &format!("{base}/allow_child_suppress"),
+                    "a mandatory rule set blocks under every policy below it (ADR 0004); its rules can never be suppressed",
+                );
+            }
             if set.mandatory && set.kind != RuleSetKind::Blocklist {
                 self.push(
                     ErrorCode::MandatoryNotBlocklist,
@@ -597,6 +626,14 @@ impl Validator {
                     }
                 }
                 Match::Not(child) => stack.push((child, format!("{path}/not"))),
+                Match::Ref(r) => self.push(
+                    ErrorCode::UnresolvedRef,
+                    &format!("{path}/ref"),
+                    format!(
+                        "library {} is referenced but not resolved; build the effective policy from the hierarchy (#37), which replaces each reference with its tree",
+                        r.id
+                    ),
+                ),
                 Match::Criterion(c) => {
                     criteria += 1;
                     ordered.push((c, format!("{path}/criterion")));
@@ -1052,6 +1089,14 @@ fn guaranteed_identity(node: &Match, pointer: &str) -> Guarantee {
                 pointer: format!("{pointer}/not"),
             }],
         },
+        // Rejected as `unresolved_ref`; it guarantees nothing.
+        Match::Ref(_) => Guarantee {
+            identity: Identity::None,
+            context: false,
+            witness: vec![Step {
+                pointer: format!("{pointer}/ref"),
+            }],
+        },
         Match::Criterion(c) => {
             let identity = match c.field.strength() {
                 _ if !c.operator.is_positive() => Identity::None,
@@ -1101,13 +1146,45 @@ fn regex_count(tree: &Match) -> usize {
     count
 }
 
+/// Most characters in one part of a `category_path`.
+pub const MAX_CATEGORY_PART_CHARS: usize = 64;
+
+/// Why a `category_path` is not acceptable, if it is not: one or two parts
+/// separated by `/`, each 1 to 64 characters, trimmed, with no control or
+/// bidirectional formatting characters.
+pub(crate) fn category_problem(path: &str) -> Option<String> {
+    let parts: Vec<&str> = path.split('/').collect();
+    if parts.len() > 2 {
+        return Some("at most two levels, `Category/Subcategory`".to_owned());
+    }
+    for part in parts {
+        if part.trim().is_empty() {
+            return Some("each part must be non-empty".to_owned());
+        }
+        if part.trim() != part {
+            return Some("parts must not start or end with whitespace".to_owned());
+        }
+        if part.chars().count() > MAX_CATEGORY_PART_CHARS {
+            return Some(format!(
+                "each part is at most {MAX_CATEGORY_PART_CHARS} characters"
+            ));
+        }
+        if part.chars().any(|c| c.is_control() || is_bidi_control(c)) {
+            return Some(
+                "must not contain control or bidirectional formatting characters".to_owned(),
+            );
+        }
+    }
+    None
+}
+
 /// Keys accepted in `settings.advanced`. None are defined yet; each will be
 /// added here with its type when a feature needs one.
 const KNOWN_ADVANCED_KEYS: &[&str] = &[];
 
 /// Unicode bidirectional formatting characters, which can make a name read
 /// differently from what it contains.
-const fn is_bidi_control(c: char) -> bool {
+pub(crate) const fn is_bidi_control(c: char) -> bool {
     matches!(c, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
 }
 

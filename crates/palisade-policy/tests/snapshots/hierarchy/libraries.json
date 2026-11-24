@@ -1,0 +1,206 @@
+{
+  "content_hash": "afc4ad5c8dc2a21651f8a1877564fd1a8b7598234a6739f8d7a31bc4cadc2b2a",
+  "document": {
+    "policy": {
+      "id": "01936b2e-0014-7b3d-9f21-0a1b2c3d4e5f",
+      "mode": "enforce",
+      "name": "BUILD-07",
+      "precedence_model": "first_match",
+      "revision": 4,
+      "rule_sets": [
+        "01936b2e-003c-7b3d-9f21-0a1b2c3d4e5f",
+        "01936b2e-0064-7b3d-9f21-0a1b2c3d4e5f",
+        "01936b2e-006e-7b3d-9f21-0a1b2c3d4e5f"
+      ],
+      "settings": {
+        "allow_unknown_advanced": false,
+        "capture_command_line": false,
+        "decision_cache_ttl_secs": 300,
+        "dll_control": "enforce",
+        "driver_control": "enforce",
+        "max_ancestor_depth": 8,
+        "poll_interval_secs": 900,
+        "script_control": "enforce",
+        "time_zone_basis": "device_local"
+      }
+    },
+    "rule_sets": [
+      {
+        "band": 11,
+        "hidden": false,
+        "id": "01936b2e-003c-7b3d-9f21-0a1b2c3d4e5f",
+        "kind": "allowlist",
+        "mandatory": false,
+        "name": "Build tools",
+        "os": "windows",
+        "read_only": false,
+        "rules": [
+          {
+            "action": {
+              "type": "allow"
+            },
+            "enabled": true,
+            "enforcement_override": "inherit",
+            "id": "01936b2e-0046-7b3d-9f21-0a1b2c3d4e5f",
+            "match": {
+              "all": [
+                {
+                  "criterion": {
+                    "field": "hash.sha256",
+                    "operator": "equals",
+                    "values": [
+                      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                      "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                    ]
+                  }
+                },
+                {
+                  "criterion": {
+                    "field": "path.directory",
+                    "operator": "starts_with",
+                    "values": [
+                      "C:\\Tools"
+                    ]
+                  }
+                }
+              ]
+            },
+            "name": "compilers",
+            "order": 100001
+          }
+        ]
+      },
+      {
+        "band": 1,
+        "hidden": false,
+        "id": "01936b2e-0064-7b3d-9f21-0a1b2c3d4e5f",
+        "kind": "blocklist",
+        "mandatory": false,
+        "name": "Tenant denies",
+        "os": "windows",
+        "read_only": false,
+        "rules": [
+          {
+            "action": {
+              "type": "deny"
+            },
+            "enabled": true,
+            "enforcement_override": "inherit",
+            "id": "01936b2e-0065-7b3d-9f21-0a1b2c3d4e5f",
+            "match": {
+              "criterion": {
+                "field": "hash.sha256",
+                "operator": "equals",
+                "values": [
+                  "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                ]
+              }
+            },
+            "name": "old installer",
+            "order": 500000
+          }
+        ]
+      },
+      {
+        "category_path": "Hardening/Interpreters",
+        "hidden": false,
+        "id": "01936b2e-006e-7b3d-9f21-0a1b2c3d4e5f",
+        "kind": "blocklist",
+        "mandatory": false,
+        "name": "Curated hardening",
+        "os": "windows",
+        "read_only": true,
+        "rules": [
+          {
+            "action": {
+              "type": "deny"
+            },
+            "enabled": true,
+            "enforcement_override": "inherit",
+            "id": "01936b2e-006f-7b3d-9f21-0a1b2c3d4e5f",
+            "match": {
+              "criterion": {
+                "field": "hash.sha256",
+                "operator": "equals",
+                "values": [
+                  "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                ]
+              }
+            },
+            "name": "script host",
+            "order": 100100
+          }
+        ]
+      }
+    ],
+    "schema_version": "1.0.0"
+  },
+  "libraries": [
+    "01936b2e-0064-7b3d-9f21-0a1b2c3d4e5f v1",
+    "01936b2e-006e-7b3d-9f21-0a1b2c3d4e5f v3",
+    "01936b2e-00c8-7b3d-9f21-0a1b2c3d4e5f v1",
+    "01936b2e-00c9-7b3d-9f21-0a1b2c3d4e5f v1"
+  ],
+  "mode": {
+    "adjustments": [],
+    "floor": null,
+    "merge": "closest",
+    "mode": "enforce",
+    "source": "01936b2e-0014-7b3d-9f21-0a1b2c3d4e5f"
+  },
+  "precedence": {
+    "node": "01936b2e-0001-7b3d-9f21-0a1b2c3d4e5f"
+  },
+  "rules": {
+    "01936b2e-0046-7b3d-9f21-0a1b2c3d4e5f": {
+      "contributions": [
+        {
+          "node": "01936b2e-0014-7b3d-9f21-0a1b2c3d4e5f",
+          "via": {
+            "policy": {
+              "policy": "01936b2e-0032-7b3d-9f21-0a1b2c3d4e5f",
+              "slot_order": 0
+            }
+          }
+        }
+      ],
+      "rule_id": "01936b2e-0046-7b3d-9f21-0a1b2c3d4e5f",
+      "rule_set_id": "01936b2e-003c-7b3d-9f21-0a1b2c3d4e5f",
+      "status": "active"
+    },
+    "01936b2e-0065-7b3d-9f21-0a1b2c3d4e5f": {
+      "contributions": [
+        {
+          "node": "01936b2e-0002-7b3d-9f21-0a1b2c3d4e5f",
+          "via": {
+            "library": {
+              "library": "01936b2e-0064-7b3d-9f21-0a1b2c3d4e5f",
+              "version": 1
+            }
+          }
+        }
+      ],
+      "rule_id": "01936b2e-0065-7b3d-9f21-0a1b2c3d4e5f",
+      "rule_set_id": "01936b2e-0064-7b3d-9f21-0a1b2c3d4e5f",
+      "status": "active"
+    },
+    "01936b2e-006f-7b3d-9f21-0a1b2c3d4e5f": {
+      "contributions": [
+        {
+          "node": "01936b2e-0001-7b3d-9f21-0a1b2c3d4e5f",
+          "via": {
+            "category": {
+              "category": "Hardening",
+              "library": "01936b2e-006e-7b3d-9f21-0a1b2c3d4e5f",
+              "version": 3
+            }
+          }
+        }
+      ],
+      "rule_id": "01936b2e-006f-7b3d-9f21-0a1b2c3d4e5f",
+      "rule_set_id": "01936b2e-006e-7b3d-9f21-0a1b2c3d4e5f",
+      "status": "active"
+    }
+  },
+  "settings": {}
+}
