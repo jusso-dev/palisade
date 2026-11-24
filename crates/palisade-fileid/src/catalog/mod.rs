@@ -18,10 +18,24 @@
 //!   [`crate::authenticode::evaluate_trust`] takes like any other (#49).
 //! - [`parse_ctl`] decodes a CTL on its own.
 //! - [`CatalogStoreBuilder`] loads catalogs from bytes or from a directory
-//!   tree, within [`StoreLimits`], into a [`CatalogStore`] that indexes every member of every catalog
-//!   whose signature is valid, by digest. [`CatalogStore::lookup`] takes a
-//!   file's [`FileDigests`] and returns each catalog that lists it, trusted
-//!   catalogs first, with the signer's trust verdict and identity.
+//!   tree, within [`StoreLimits`], into a [`CatalogStore`] that indexes, by
+//!   digest, the members of catalogs whose signature is valid.
+//!   [`CatalogStore::lookup`] takes a file's [`FileDigests`] and returns
+//!   each catalog that lists it, trusted catalogs first, with the signer's
+//!   trust verdict and identity.
+//!
+//! # Which members are indexed
+//!
+//! Only members of a catalog whose signature is valid, and of those only
+//! members with an `SPC_INDIRECT_DATA` digest under SHA-256 or SHA-1.
+//! Members with no digest, or a digest under another algorithm, are kept
+//! in the [`CertificateTrustList`] but never indexed. Limits can leave out
+//! members that would otherwise be indexed: those past [`MAX_MEMBERS`] in
+//! one catalog ([`CertificateTrustList::members_truncated`]) and those past
+//! [`StoreLimits::max_members`] in the store
+//! ([`CatalogRecord::index_truncated`]). So a lookup that finds nothing does
+//! not show that no catalog lists the file; check those flags, and the
+//! store's records, before treating a miss as absence.
 //!
 //! # Member digests
 //!
@@ -68,8 +82,10 @@
 //! signatures apply: DER only, typed errors, no panics, no allocation sized
 //! by a declared length, and fixed limits: [`MAX_CATALOG_SIZE`],
 //! [`MAX_MEMBERS`], [`MAX_ATTRIBUTES`], [`MAX_NAME_VALUES`],
-//! [`MAX_VALUE_BYTES`] and [`MAX_CTL_WARNINGS`] per catalog, and
-//! [`StoreLimits`] for a store. The `fuzz_ctl` fuzz target covers parsing,
+//! [`MAX_VALUE_BYTES`], [`MAX_CTL_WARNINGS`] and [`MAX_DECODED_BYTES`] per
+//! catalog, and [`StoreLimits`] for a store. The trust list is decoded
+//! before its signature is checked, so [`MAX_DECODED_BYTES`] bounds the
+//! memory an unsigned or forged catalog can take. The `fuzz_ctl` fuzz target covers parsing,
 //! loading and lookup.
 
 #![forbid(unsafe_code)]
@@ -81,8 +97,8 @@ use std::fmt;
 
 pub use ctl::{
     CatalogMember, CertificateTrustList, CtlError, CtlWarning, MAX_ATTRIBUTES, MAX_CTL_WARNINGS,
-    MAX_MEMBERS, MAX_NAME_VALUES, MAX_VALUE_BYTES, MemberDigest, MemberTag, NameValue,
-    NameValueData, SubjectAlgorithm, parse_ctl,
+    MAX_DECODED_BYTES, MAX_MEMBERS, MAX_NAME_VALUES, MAX_VALUE_BYTES, MemberDigest, MemberTag,
+    NameValue, NameValueData, SubjectAlgorithm, parse_ctl,
 };
 pub use store::{
     CatalogMatch, CatalogRecord, CatalogSigner, CatalogSource, CatalogStatus, CatalogStore,
@@ -92,7 +108,7 @@ pub use store::{
 
 use crate::authenticode::asn1;
 use crate::authenticode::pkcs7::{self, Warnings};
-use crate::authenticode::verify::{blank, check_signature, find_signer_cert, os_ci_issues};
+use crate::authenticode::verify::{check_signature, find_signer_cert, os_ci_issues};
 use crate::authenticode::{
     AuthenticodeStatus, BadSignature, DigestAlgorithm, InvalidReason, KeyAlgorithm, SignatureCheck,
     SignatureError, SignatureInfo, SignatureKind, SignatureReport, SignatureStatus,
@@ -139,8 +155,9 @@ pub enum CatalogWarning {
         len: usize,
     },
     /// The signer carries this many nested signatures (counted up to the
-    /// collection limit). They are checked as DER but not read or
-    /// verified: only the catalog's own signature counts.
+    /// collection limit). They are checked as DER (tags, lengths and the
+    /// primitive encodings [`parse_catalog`] checks everywhere) but not
+    /// decoded or verified: only the catalog's own signature counts.
     NestedSignaturesIgnored(usize),
 }
 
@@ -206,6 +223,14 @@ impl Catalog {
 /// Fails only when the file is too large, or its SignedData or CTL cannot
 /// be decoded. A catalog that decodes but whose signature does not verify
 /// is returned, with the reason in [`Catalog::signatures`].
+///
+/// Every element of the SignedData, including the parts no decoder reads
+/// (nested signatures), must be DER as far as tags and lengths go, and
+/// its INTEGER, BOOLEAN, NULL and OBJECT IDENTIFIER encodings must be
+/// valid: an INTEGER non-empty, a BOOLEAN `00` or `ff`, a NULL empty, an
+/// OBJECT IDENTIFIER well formed. (INTEGERs the CTL decoder reads must also
+/// be minimal; certificate serial numbers, as elsewhere in the crate, need
+/// not be.)
 pub fn parse_catalog(bytes: &[u8]) -> Result<Catalog, CatalogError> {
     let size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
     if size > MAX_CATALOG_SIZE {
@@ -226,7 +251,7 @@ pub fn parse_catalog(bytes: &[u8]) -> Result<Catalog, CatalogError> {
     let mut whole = asn1::Reader::new(bytes, 0);
     whole
         .read(asn1::tag::SEQUENCE)
-        .and_then(|tlv| asn1::validate(&tlv))
+        .and_then(|tlv| validate_strict(&tlv))
         .map_err(|e| CatalogError::Envelope(e.into()))?;
 
     let mut warnings = Vec::new();
@@ -270,6 +295,48 @@ pub fn parse_catalog(bytes: &[u8]) -> Result<Catalog, CatalogError> {
         signatures,
         warnings,
     })
+}
+
+/// [`asn1::validate`], plus a check of each primitive INTEGER, BOOLEAN,
+/// NULL and OBJECT IDENTIFIER's content. Iterative, at most
+/// [`asn1::MAX_DEPTH`] levels deep, like [`asn1::validate`].
+fn validate_strict(tlv: &asn1::Tlv<'_>) -> Result<(), asn1::Asn1Error> {
+    let mut stack: Vec<asn1::Reader<'_>> = Vec::new();
+    check_element(tlv, &mut stack)?;
+    while let Some(top) = stack.last_mut() {
+        if top.is_empty() {
+            stack.pop();
+            continue;
+        }
+        let child = top.read_any()?;
+        check_element(&child, &mut stack)?;
+    }
+    Ok(())
+}
+
+/// Checks one element for [`validate_strict`]: a primitive's content, or,
+/// for a constructed element, pushes a reader over its children.
+fn check_element<'a>(
+    element: &asn1::Tlv<'a>,
+    stack: &mut Vec<asn1::Reader<'a>>,
+) -> Result<(), asn1::Asn1Error> {
+    use asn1::tag;
+    match element.tag {
+        tag::INTEGER => asn1::integer_bytes(element).map(|_| ()),
+        tag::BOOLEAN => asn1::boolean(element).map(|_| ()),
+        tag::OID => asn1::oid_bytes(element).map(|_| ()),
+        tag::NULL if !element.content.is_empty() => {
+            Err(element.error(asn1::Asn1ErrorKind::InvalidValue))
+        }
+        constructed if constructed & 0x20 != 0 => {
+            if stack.len() >= asn1::MAX_DEPTH {
+                return Err(element.error(asn1::Asn1ErrorKind::TooDeep));
+            }
+            stack.push(element.reader());
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Checks the catalog's SignerInfo over `content`, the CTL's content
@@ -318,24 +385,36 @@ fn check(envelope: &pkcs7::Envelope<'_>, content: &[u8]) -> SignatureInfo {
         }),
         _ => None,
     };
+    // Every field is spelled out, so a field added to `SignatureInfo`
+    // cannot be left at a default here unnoticed.
     SignatureInfo {
+        index: 0,
+        total: 1,
         kind: SignatureKind::Catalog,
+        entry: 0,
+        parent: None,
+        depth: 0,
         // The signed content's digest is the signer's (`messageDigest`
         // over the CTL), so primary selection and SHA-1 checks rank it.
         digest_alg: signer_alg,
+        signed_image_digest: None,
         signer_digest_alg: signer_alg,
         sig_alg: Some(signer.sig_alg.clone()),
         key_alg,
         key_bits,
+        digest_match: None,
         signature_valid,
         status,
         signer: signer_attrs,
+        untrusted_signer_attrs: false,
         signer_id: Some(signer.sid.clone()),
         certs_in_blob: envelope.certificates.iter().map(|c| c.to_vec()).collect(),
+        pe_image_flags: None,
+        page_hashes: None,
         timestamp_tokens: signer.timestamps.clone(),
+        // What a timestamp on the catalog must imprint (#50).
+        signature_value: signer.signature.to_vec(),
         os_ci_issues,
         warnings: warnings.0,
-        total: 1,
-        ..blank(SignatureStatus::Valid)
     }
 }

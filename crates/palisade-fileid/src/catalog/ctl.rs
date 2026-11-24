@@ -28,22 +28,25 @@
 //!
 //! Strict DER, like the rest of the crate: an explicitly encoded `version`
 //! of v1 or `critical` FALSE is rejected, and so is any invalid element,
-//! anywhere. Every collection has a fixed limit.
+//! anywhere, including an INTEGER that is not minimally encoded and a
+//! member attribute `SET OF` whose elements are not in DER order. Every
+//! collection has a fixed limit, and so does the decoded trust list as a
+//! whole ([`MAX_DECODED_BYTES`]).
 
 #![forbid(unsafe_code)]
 
 use std::fmt;
+use std::mem::size_of;
 
-use crate::authenticode::asn1::{
-    self, Asn1Error, Asn1ErrorKind, ObjectId, Tlv, read_oid, read_small_uint, tag,
-};
+use crate::authenticode::asn1::{self, Asn1Error, Asn1ErrorKind, ObjectId, Tlv, read_oid, tag};
 use crate::authenticode::pkcs7::parse_digest_alg;
 use crate::authenticode::{DigestAlgorithm, SignatureError};
 
 /// The most members read from one catalog (262,144; the largest OS
-/// catalogs list tens of thousands). Further members are checked as DER
-/// but not kept, and [`CertificateTrustList::members_truncated`] is set; a
-/// file listed only past the limit is not found, so a lookup fails closed.
+/// catalogs list tens of thousands). Further members are decoded and
+/// checked like the others, then dropped, and
+/// [`CertificateTrustList::members_truncated`] is set; a file listed only
+/// past the limit is not found, so a lookup fails closed.
 pub const MAX_MEMBERS: usize = 1 << 18;
 /// The most attributes read from one member, and the most catalog-wide
 /// extensions read. Past it the catalog is rejected
@@ -57,6 +60,22 @@ pub const MAX_NAME_VALUES: usize = 32;
 pub const MAX_VALUE_BYTES: usize = 8192;
 /// The most warnings kept for one catalog.
 pub const MAX_CTL_WARNINGS: usize = 64;
+/// The most memory a decoded trust list may take: 128 MiB, twice
+/// [`super::MAX_CATALOG_SIZE`]. What is counted is the size of every value
+/// kept (members, their name-value pairs and the catalog-wide ones) and
+/// the heap bytes each one owns, as allocated. It is checked as each
+/// member and extension is decoded, and before the member list grows, so
+/// the overshoot is at most the one member being decoded (itself bounded
+/// by the per-member limits).
+///
+/// The per-member limits alone do not bound this: short name-value pairs
+/// take a few bytes each in the file but tens of bytes decoded, so a
+/// hostile catalog under the size limit could decode to gigabytes before
+/// its signature is checked. Real catalogs, whose members carry a digest
+/// and a few longer name-value pairs, decode to under twice their size.
+/// A catalog over the limit is rejected ([`CtlError::DecodedTooLarge`]),
+/// so none of its members is indexed.
+pub const MAX_DECODED_BYTES: usize = 128 * 1024 * 1024;
 
 /// The object identifiers this module knows, as encoded.
 pub(crate) mod oid {
@@ -97,8 +116,8 @@ pub enum CtlError {
     /// An algorithm identifier, or a member's digest, is malformed.
     Signature(SignatureError),
     /// `version` is encoded and is not v1 (0). (An encoded v1, or a
-    /// version that is negative or does not fit a `u32`, is an
-    /// [`Self::Asn1`] error.)
+    /// version that is negative, not minimally encoded or does not fit a
+    /// `u32`, is an [`Self::Asn1`] error.)
     Version(u32),
     /// The subject usage does not include `szOID_CATALOG_LIST`: this is a
     /// trust list of something else (certificates, for example), not a
@@ -129,6 +148,12 @@ pub enum CtlError {
     TooManyAttributes,
     /// A critical CTL extension this crate does not process.
     UnhandledCriticalExtension(ObjectId),
+    /// The decoded trust list would take more than [`MAX_DECODED_BYTES`].
+    /// Decoding stopped there.
+    DecodedTooLarge {
+        /// The offset of the member or extension that went over.
+        offset: usize,
+    },
 }
 
 impl fmt::Display for CtlError {
@@ -154,6 +179,10 @@ impl fmt::Display for CtlError {
             Self::UnhandledCriticalExtension(o) => {
                 write!(f, "critical CTL extension {o} is not processed")
             }
+            Self::DecodedTooLarge { offset } => write!(
+                f,
+                "the decoded trust list exceeds {MAX_DECODED_BYTES} bytes at offset {offset:#x}"
+            ),
         }
     }
 }
@@ -182,10 +211,12 @@ type Result<T> = std::result::Result<T, CtlError>;
 #[non_exhaustive]
 pub enum SubjectAlgorithm {
     /// `szOID_CATALOG_LIST_MEMBER`: a v1 catalog, whose member tags are
-    /// usually the SHA-1 digest in hex.
+    /// UTF-16LE text ([`MemberTag::Text`]), usually the SHA-1 digest in
+    /// hex.
     CatalogListMember,
     /// `szOID_CATALOG_LIST_MEMBER2`: a v2 catalog, whose member tags are
-    /// usually the SHA-256 digest in hex.
+    /// raw octets ([`MemberTag::Bytes`]), usually the SHA-256 digest
+    /// itself.
     CatalogListMemberV2,
     /// Any other algorithm, kept as its OID.
     Other(ObjectId),
@@ -340,8 +371,10 @@ pub enum CtlWarning {
         /// The algorithm.
         alg: ObjectId,
     },
-    /// A member's tag is not the uppercase hex of its digest. The digest
-    /// is what the catalog's signature covers and what is indexed.
+    /// A member's tag does not name its digest ([`MemberTag::is_digest`]):
+    /// a text tag is not the digest in hex (either case), or a raw-octet
+    /// tag is not the digest's octets. Members are indexed by digest, so
+    /// this changes no lookup.
     TagNotDigest {
         /// The member's position in the list.
         member: usize,
@@ -369,7 +402,8 @@ pub struct CertificateTrustList {
     pub subject_usage: Vec<ObjectId>,
     /// `listIdentifier`, as stored (often a GUID's 16 bytes or text).
     pub list_identifier: Option<Vec<u8>>,
-    /// `sequenceNumber`: the INTEGER content octets, as encoded.
+    /// `sequenceNumber`: the INTEGER content octets, as encoded (minimal,
+    /// two's complement).
     pub sequence_number: Option<Vec<u8>>,
     /// `ctlThisUpdate` (the catalog's effective date), in seconds since
     /// the Unix epoch (UTC).
@@ -439,7 +473,7 @@ pub(crate) fn parse_ctl_tlv(seq: &Tlv<'_>) -> Result<CertificateTrustList> {
         // other version is unknown. Invalid DER in the INTEGER (or a
         // negative or over-long value) is an ASN.1 error.
         let at = r.offset();
-        let version = read_small_uint(&mut r)?;
+        let version = read_minimal_uint(&mut r)?;
         if version == 0 {
             return Err(asn1::err(Asn1ErrorKind::InvalidValue, at).into());
         }
@@ -466,7 +500,7 @@ pub(crate) fn parse_ctl_tlv(seq: &Tlv<'_>) -> Result<CertificateTrustList> {
         .read_optional(tag::OCTET_STRING)?
         .map(|t| t.content.to_vec());
     let sequence_number = match r.read_optional(tag::INTEGER)? {
-        Some(t) => Some(asn1::integer_bytes(&t)?.to_vec()),
+        Some(t) => Some(minimal_integer(&t)?.to_vec()),
         None => None,
     };
     let this_update = asn1::time(&r.read_any()?)?;
@@ -487,27 +521,36 @@ pub(crate) fn parse_ctl_tlv(seq: &Tlv<'_>) -> Result<CertificateTrustList> {
     // v2 catalogs store member tags as raw octets, v1 (and any other) as
     // UTF-16LE text.
     let binary_tags = subject_algorithm == SubjectAlgorithm::CatalogListMemberV2;
-    let mut members = Vec::new();
+    let mut budget = Budget::default();
+    let mut members: Vec<CatalogMember> = Vec::new();
     let mut members_truncated = false;
+    // The position in `trustedSubjects`, for errors and warnings; past
+    // MAX_MEMBERS it runs ahead of `members.len()`.
+    let mut position = 0_usize;
     if let Some(subjects) = r.read_optional(tag::SEQUENCE)? {
         let mut s = subjects.reader();
         while !s.is_empty() {
             let subject = s.read(tag::SEQUENCE)?;
-            if members.len() >= MAX_MEMBERS {
-                // Still checked, so a truncated catalog is valid DER too.
-                asn1::validate(&subject)?;
+            let index = position;
+            position = position.saturating_add(1);
+            if index >= MAX_MEMBERS {
+                // Still decoded and checked, so a truncated catalog meets
+                // the same rules; only one is held at a time.
+                parse_member(&subject, index, binary_tags, &mut Warnings::default())?;
                 members_truncated = true;
                 continue;
             }
-            let index = members.len();
-            members.push(parse_member(&subject, index, binary_tags, &mut warnings)?);
+            let member = parse_member(&subject, index, binary_tags, &mut warnings)?;
+            budget.charge(member_heap(&member), subject.offset)?;
+            budget.reserve_member(&mut members, subject.offset)?;
+            members.push(member);
         }
     }
 
     let mut attributes = Vec::new();
     if let Some(ext) = r.read_optional(tag::context_cons(0))? {
         let list = asn1::single(ext.content, ext.content_offset, tag::SEQUENCE)?;
-        parse_extensions(&list, &mut attributes, &mut warnings)?;
+        parse_extensions(&list, &mut attributes, &mut warnings, &mut budget)?;
     }
     r.finish()?;
 
@@ -523,6 +566,124 @@ pub(crate) fn parse_ctl_tlv(seq: &Tlv<'_>) -> Result<CertificateTrustList> {
         attributes,
         warnings: warnings.0,
     })
+}
+
+/// Counts the memory a decoded trust list holds against
+/// [`MAX_DECODED_BYTES`].
+#[derive(Default)]
+struct Budget {
+    used: usize,
+    /// The member list capacity already charged.
+    list_capacity: usize,
+}
+
+impl Budget {
+    /// Charges `bytes` for the element at `offset`.
+    fn charge(&mut self, bytes: usize, offset: usize) -> Result<()> {
+        self.used = self.used.saturating_add(bytes);
+        if self.used > MAX_DECODED_BYTES {
+            return Err(CtlError::DecodedTooLarge { offset });
+        }
+        Ok(())
+    }
+
+    /// Makes room for one more member, charging the growth of the list's
+    /// allocation before it is made.
+    fn reserve_member(&mut self, members: &mut Vec<CatalogMember>, offset: usize) -> Result<()> {
+        if members.len() < members.capacity() {
+            return Ok(());
+        }
+        // Never past MAX_MEMBERS in all; callers keep `len` below it.
+        let room = MAX_MEMBERS.saturating_sub(members.len()).max(1);
+        let extra = members.capacity().max(4).min(room);
+        self.charge(extra.saturating_mul(size_of::<CatalogMember>()), offset)?;
+        members.reserve_exact(extra);
+        // The allocator may give more than asked for; count that too.
+        let asked = self.list_capacity.saturating_add(extra);
+        let surplus = members.capacity().saturating_sub(asked);
+        self.list_capacity = members.capacity();
+        self.charge(surplus.saturating_mul(size_of::<CatalogMember>()), offset)
+    }
+}
+
+/// The heap bytes a member owns, as allocated (its own size is charged
+/// with the member list).
+fn member_heap(member: &CatalogMember) -> usize {
+    let tag = match &member.tag {
+        MemberTag::Text(t) => t.capacity(),
+        MemberTag::Bytes(b) => b.capacity(),
+    };
+    let digest = member.digest.as_ref().map_or(0, |d| {
+        d.digest
+            .capacity()
+            .saturating_add(d.data_type.as_bytes().len())
+    });
+    let guid = member.subject_guid.as_ref().map_or(0, String::capacity);
+    tag.saturating_add(digest)
+        .saturating_add(guid)
+        .saturating_add(name_values_heap(&member.name_values))
+}
+
+/// The heap bytes a name-value list owns: its allocation and each pair's
+/// text or data.
+fn name_values_heap(values: &Vec<NameValue>) -> usize {
+    values.iter().fold(
+        values.capacity().saturating_mul(size_of::<NameValue>()),
+        |acc, v| {
+            let value = match &v.value {
+                NameValueData::Text(t) => t.capacity(),
+                NameValueData::Bytes(b) => b.capacity(),
+            };
+            acc.saturating_add(v.name.capacity()).saturating_add(value)
+        },
+    )
+}
+
+/// The content of an INTEGER, checked to be minimally encoded (X.690
+/// 8.3.2): no leading `00` before an octet whose top bit is clear, and no
+/// leading `ff` before one whose top bit is set. `00 80` is minimal: the
+/// zero keeps the value positive.
+fn minimal_integer<'a>(tlv: &Tlv<'a>) -> Result<&'a [u8]> {
+    let content = asn1::integer_bytes(tlv)?;
+    if let [first, second, ..] = content {
+        let redundant =
+            (*first == 0x00 && second & 0x80 == 0) || (*first == 0xff && second & 0x80 != 0);
+        if redundant {
+            return Err(tlv.error(Asn1ErrorKind::InvalidValue).into());
+        }
+    }
+    Ok(content)
+}
+
+/// Reads a non-negative, minimally encoded INTEGER that fits a `u32`
+/// (up to five content octets, the first `00`, for values from
+/// `0x8000_0000`).
+fn read_minimal_uint(reader: &mut asn1::Reader<'_>) -> Result<u32> {
+    let tlv = reader.read(tag::INTEGER)?;
+    minimal_integer(&tlv)?;
+    let (magnitude, _) = asn1::unsigned_integer(&tlv)?;
+    if magnitude.len() > 4 {
+        return Err(tlv.error(Asn1ErrorKind::InvalidValue).into());
+    }
+    Ok(magnitude
+        .iter()
+        .fold(0_u32, |acc, b| (acc << 8) | u32::from(*b)))
+}
+
+/// Reads the next element of a DER `SET OF` reader, checking that its
+/// encoding does not sort before `previous`'s (X.690 11.6: ascending
+/// order, the encodings compared as octet strings; for complete TLVs that
+/// is the slice order).
+fn read_set_element<'a>(
+    reader: &mut asn1::Reader<'a>,
+    previous: &mut Option<&'a [u8]>,
+) -> Result<Tlv<'a>> {
+    let element = reader.read_any()?;
+    if previous.is_some_and(|p| element.raw < p) {
+        return Err(element.error(Asn1ErrorKind::InvalidValue).into());
+    }
+    *previous = Some(element.raw);
+    Ok(element)
 }
 
 /// The OID of a known digest algorithm, for reporting.
@@ -542,6 +703,7 @@ fn parse_extensions(
     list: &Tlv<'_>,
     attributes: &mut Vec<NameValue>,
     warnings: &mut Warnings,
+    budget: &mut Budget,
 ) -> Result<()> {
     let mut l = list.reader();
     let mut count = 0_usize;
@@ -567,7 +729,10 @@ fn parse_extensions(
         e.finish()?;
         if id == oid::CAT_NAMEVALUE {
             let nv = asn1::single(value.content, value.content_offset, tag::SEQUENCE)?;
+            let before = name_values_heap(attributes);
             push_name_value(attributes, parse_name_value(&nv, warnings)?, warnings);
+            let after = name_values_heap(attributes);
+            budget.charge(after.saturating_sub(before), extension.offset)?;
         } else if critical {
             return Err(CtlError::UnhandledCriticalExtension(ObjectId::from_der(id)));
         } else {
@@ -619,16 +784,23 @@ fn parse_member(
     if let Some(attrs) = attrs {
         let mut a = attrs.reader();
         let mut count = 0_usize;
+        let mut previous = None;
         while !a.is_empty() {
             count = count.saturating_add(1);
             if count > MAX_ATTRIBUTES {
                 return Err(CtlError::TooManyAttributes);
             }
-            let attr = a.read(tag::SEQUENCE)?;
+            let attr = read_set_element(&mut a, &mut previous)?.expect(tag::SEQUENCE)?;
             let mut at = attr.reader();
             let attr_type = read_oid(&mut at)?;
             let values = at.read(tag::SET)?;
             at.finish()?;
+            // The attribute's values are a `SET OF` too.
+            let mut v = values.reader();
+            let mut previous_value = None;
+            while !v.is_empty() {
+                read_set_element(&mut v, &mut previous_value)?;
+            }
             let duplicate = || CtlError::DuplicateAttribute {
                 member: index,
                 attribute: ObjectId::from_der(attr_type),
@@ -663,7 +835,7 @@ fn parse_member(
                         warnings.push(CtlWarning::Truncated);
                     }
                     member.subject_guid = Some(text.text);
-                    member.cert_version = Some(read_small_uint(&mut m)?);
+                    member.cert_version = Some(read_minimal_uint(&mut m)?);
                     m.finish()?;
                 }
                 oid::CAT_MEMBERINFO2 => {
@@ -677,6 +849,8 @@ fn parse_member(
             }
         }
     }
+    // Kept for as long as the trust list is: no spare capacity.
+    member.name_values.shrink_to_fit();
     match &member.digest {
         None if !seen_indirect => warnings.push(CtlWarning::NoDigest { member: index }),
         Some(d) if !member.tag.is_digest(&d.digest) => {
@@ -749,14 +923,7 @@ fn parse_name_value(nv: &Tlv<'_>, warnings: &mut Warnings) -> Result<NameValue> 
     if name_text.truncated {
         warnings.push(CtlWarning::Truncated);
     }
-    let flags_tlv = r.read(tag::INTEGER)?;
-    let (magnitude, _) = asn1::unsigned_integer(&flags_tlv)?;
-    if magnitude.len() > 4 {
-        return Err(flags_tlv.error(Asn1ErrorKind::InvalidValue).into());
-    }
-    let flags = magnitude
-        .iter()
-        .fold(0_u32, |acc, b| (acc << 8) | u32::from(*b));
+    let flags = read_minimal_uint(&mut r)?;
     let value = r.read(tag::OCTET_STRING)?.content;
     r.finish()?;
     let value = if flags & NameValue::DATA_BASE64 != 0 {

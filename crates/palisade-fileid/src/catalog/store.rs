@@ -145,7 +145,8 @@ pub struct CatalogRecord {
 }
 
 /// A catalog signer, shared by every catalog in one namespace with the same
-/// signer certificate and embedded certificates (so the same chain).
+/// signer certificate, embedded certificates (so the same chain) and
+/// signature digest algorithms, under the same trust configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogSigner {
     /// The namespace whose [`TrustConfig`] decided it.
@@ -533,38 +534,49 @@ impl CatalogStoreBuilder {
         if !self.admit(source, Some(&path_buf), size, &mut report) {
             return report;
         }
+        self.read_admitted(source, path_buf, size, file, &mut report);
+        report
+    }
+
+    /// Reads and records an admitted catalog of `size` bytes from
+    /// `reader`, charging what is read to the byte budget.
+    fn read_admitted(
+        &mut self,
+        source: CatalogSource,
+        path: PathBuf,
+        size: u64,
+        reader: impl Read,
+        report: &mut LoadReport,
+    ) {
         // One byte more than the length, to notice a file that grew.
         let mut bytes = Vec::new();
-        if let Err(e) = file.take(size.saturating_add(1)).read_to_end(&mut bytes) {
-            report.error(LoadError::Io {
-                path: path_buf,
-                kind: e.kind(),
-            });
-            return report;
-        }
+        let result = reader.take(size.saturating_add(1)).read_to_end(&mut bytes);
+        // Charged before the result is looked at: a read that fails part
+        // way has still read (and allocated) what it returned.
         let read = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
         self.bytes = self.bytes.saturating_add(read);
+        if let Err(e) = result {
+            report.error(LoadError::Io {
+                path,
+                kind: e.kind(),
+            });
+            return;
+        }
         if read != size {
-            report.error(LoadError::Changed(path_buf));
-            return report;
+            report.error(LoadError::Changed(path));
+            return;
         }
         let parsed = super::parse_catalog(&bytes);
-        self.record(
-            source,
-            Some(path_buf),
-            size,
-            parsed,
-            Some(&bytes),
-            &mut report,
-        );
-        report
+        self.record(source, Some(path), size, parsed, Some(&bytes), report);
     }
 
     /// Loads every `*.cat` file (any case) under `root`, descending at most
     /// [`StoreLimits::max_depth`] levels. Symbolic links (and other reparse
     /// points the OS reports as links) are not followed. Entries are read
     /// in name order, so the result does not depend on the directory's
-    /// order.
+    /// order. The walk stops, before listing another directory, once
+    /// [`StoreLimits::max_catalogs`] or [`StoreLimits::max_total_bytes`] is
+    /// spent.
     ///
     /// For the OS layout, load `catroot` (its `{GUID}` folders) as
     /// [`CatalogSource::System`] and `DriverStore\FileRepository` as
@@ -575,6 +587,10 @@ impl CatalogStoreBuilder {
         let mut entries_seen = 0_usize;
         let mut stack = vec![(root.to_owned(), 0_usize)];
         while let Some((dir, depth)) = stack.pop() {
+            if let Some(limit) = self.spent() {
+                report.error(limit);
+                return report;
+            }
             let listing = match std::fs::read_dir(&dir) {
                 Ok(listing) => listing,
                 Err(e) => {
@@ -621,12 +637,8 @@ impl CatalogStoreBuilder {
                     report.skipped = report.skipped.saturating_add(1);
                     continue;
                 }
-                if self.full() {
-                    report.error(LoadError::CatalogLimit);
-                    return report;
-                }
-                if self.remaining_bytes() == 0 {
-                    report.error(LoadError::ByteLimit);
+                if let Some(limit) = self.spent() {
+                    report.error(limit);
                     return report;
                 }
                 report.merge(self.add_file(source, &path));
@@ -661,6 +673,18 @@ impl CatalogStoreBuilder {
 
     fn full(&self) -> bool {
         self.records.len() >= self.limits.max_catalogs
+    }
+
+    /// The limit that stops [`Self::add_dir`], if one is spent: no catalog
+    /// can be recorded, or no byte can be read.
+    fn spent(&self) -> Option<LoadError> {
+        if self.full() {
+            Some(LoadError::CatalogLimit)
+        } else if self.remaining_bytes() == 0 {
+            Some(LoadError::ByteLimit)
+        } else {
+            None
+        }
     }
 
     /// The bytes left in the [`StoreLimits::max_total_bytes`] budget.
@@ -1049,5 +1073,58 @@ impl CatalogStore {
         let truncated = matches.len() > MAX_MATCHES;
         matches.truncate(MAX_MATCHES);
         LookupResult { matches, truncated }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Returns `ok` bytes, then fails.
+    struct FailsAfter {
+        ok: usize,
+    }
+
+    impl Read for FailsAfter {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if self.ok == 0 {
+                return Err(io::Error::other("device error"));
+            }
+            let n = buf.len().min(self.ok);
+            buf.iter_mut().take(n).for_each(|b| *b = 0x30);
+            self.ok -= n;
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn a_failed_read_is_charged_for_what_it_read() {
+        let mut b = CatalogStoreBuilder::new(StoreLimits {
+            max_total_bytes: 1000,
+            ..StoreLimits::default()
+        });
+        let mut report = LoadReport::default();
+        let path = PathBuf::from("x.cat");
+        b.read_admitted(
+            CatalogSource::System,
+            path.clone(),
+            1000,
+            FailsAfter { ok: 600 },
+            &mut report,
+        );
+        assert_eq!(
+            report.errors,
+            [LoadError::Io {
+                path,
+                kind: io::ErrorKind::Other
+            }]
+        );
+        assert_eq!(b.bytes, 600);
+        assert_eq!(b.remaining_bytes(), 400);
+        assert!(b.records.is_empty());
+        // What is left no longer admits a catalog of the same size.
+        let mut report = LoadReport::default();
+        assert!(!b.admit(CatalogSource::System, None, 1000, &mut report));
+        assert_eq!(report.errors, [LoadError::ByteLimit]);
     }
 }

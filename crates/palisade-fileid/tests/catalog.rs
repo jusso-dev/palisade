@@ -25,9 +25,9 @@ use palisade_fileid::authenticode::{
 };
 use palisade_fileid::catalog::{
     CatalogError, CatalogSource, CatalogStatus, CatalogStoreBuilder, CtlError, CtlWarning,
-    DigestKind, FileDigests, LoadError, MAX_ATTRIBUTES, MAX_CATALOG_SIZE, MAX_MATCHES, MAX_MEMBERS,
-    MAX_NAME_VALUES, MemberTag, NameValue, NameValueData, StoreLimits, SubjectAlgorithm,
-    parse_catalog, parse_ctl,
+    DigestKind, FileDigests, LoadError, MAX_ATTRIBUTES, MAX_CATALOG_SIZE, MAX_DECODED_BYTES,
+    MAX_MATCHES, MAX_MEMBERS, MAX_NAME_VALUES, MemberTag, NameValue, NameValueData, StoreLimits,
+    SubjectAlgorithm, parse_catalog, parse_ctl,
 };
 use palisade_fileid::hash::{AlgorithmSet, HashAlgorithm, hash_bytes};
 use proptest::prelude::*;
@@ -60,7 +60,16 @@ fn seq(parts: &[&[u8]]) -> Vec<u8> {
     tlv(0x30, &parts.concat())
 }
 
+/// A DER `SET OF`: the elements in ascending order of their encodings
+/// (X.690 11.6). [`set_unsorted`] keeps the order given, for negative
+/// tests.
 fn set(parts: &[&[u8]]) -> Vec<u8> {
+    let mut sorted = parts.to_vec();
+    sorted.sort_unstable();
+    set_unsorted(&sorted)
+}
+
+fn set_unsorted(parts: &[&[u8]]) -> Vec<u8> {
     tlv(0x31, &parts.concat())
 }
 
@@ -515,6 +524,36 @@ fn v2_catalog_parses_and_verifies() {
 }
 
 #[test]
+fn catalog_signature_value_is_the_signer_infos() {
+    // A timestamp on a catalog imprints the SignerInfo's signature value
+    // (#50), so the report must carry it, exactly.
+    for name in FIXTURE_NAMES {
+        let der = fixture(&format!("{name}.cat"));
+        // The only SignerInfo; its encryptedDigest is its last element
+        // (no unsigned attributes in the fixtures).
+        let si = element(&der, &[1, 0, 4, 0]);
+        let (h, l) = header(si, 0);
+        let mut pos = h;
+        let mut last = pos;
+        while pos < h + l {
+            last = pos;
+            let (ch, cl) = header(si, pos);
+            pos += ch + cl;
+        }
+        assert_eq!(si[last], 0x04, "{name}");
+        let (ch, cl) = header(si, last);
+        let want = &si[last + ch..last + ch + cl];
+        let cat = parse_catalog(&der).unwrap();
+        let sig = cat.signature().unwrap();
+        assert!(!sig.signature_value.is_empty(), "{name}");
+        assert_eq!(sig.signature_value, want, "{name}");
+        assert_eq!(sig.kind, SignatureKind::Catalog);
+        assert_eq!(sig.digest_match, None);
+        assert_eq!(sig.signed_image_digest, None);
+    }
+}
+
+#[test]
 fn catalog_signer_trust_and_identity() {
     let cat = parse_catalog(&fixture("v2-sha256.cat")).unwrap();
     let untrusted = cat.trust(&TrustConfig::new());
@@ -686,6 +725,14 @@ fn ctl_version_must_be_absent() {
     assert!(matches!(ctl_error(&ctl), CtlError::Asn1(_)));
     ctl.prefix = integer(1);
     assert_eq!(ctl_error(&ctl), CtlError::Version(1));
+    // Every u32 is a version, including those that need a leading 00.
+    ctl.prefix = integer(u32::MAX);
+    assert_eq!(ctl_error(&ctl), CtlError::Version(u32::MAX));
+    ctl.prefix = integer(0x8000_0000);
+    assert_eq!(ctl_error(&ctl), CtlError::Version(0x8000_0000));
+    // Past u32: an ASN.1 error.
+    ctl.prefix = tlv(0x02, &[0x01, 0x00, 0x00, 0x00, 0x00]);
+    assert!(matches!(ctl_error(&ctl), CtlError::Asn1(_)));
     // Invalid DER in the version is an ASN.1 error, not a version.
     for bad in [
         vec![0x02, 0x00],
@@ -729,6 +776,130 @@ fn optional_ctl_fields_are_decoded() {
         assert_eq!(parsed.next_update, Some(want));
         assert!(parsed.members[0].member_info2);
     }
+}
+
+#[test]
+fn ctl_integers_must_be_minimal() {
+    let mut ctl = Ctl::new(MEMBER_V2);
+    // A leading 00 that the next octet's top bit needs is minimal, and so
+    // is a leading ff that the next octet's top bit needs.
+    for minimal in [vec![0x00, 0x80], vec![0x01], vec![0xff, 0x7f], vec![0x80]] {
+        ctl.before_time = tlv(0x02, &minimal);
+        let parsed = parse_ctl(&ctl.der()).unwrap();
+        assert_eq!(parsed.sequence_number, Some(minimal));
+    }
+    // Redundant sign octets are not DER.
+    for redundant in [vec![0x00, 0x01], vec![0x00, 0x00], vec![0xff, 0x80]] {
+        ctl.before_time = tlv(0x02, &redundant);
+        assert!(
+            matches!(ctl_error(&ctl), CtlError::Asn1(_)),
+            "{redundant:02x?}"
+        );
+    }
+    ctl.before_time = Vec::new();
+
+    // The same for a name-value's flags and a member's certVersion.
+    let d = [0x45; 32];
+    let mut member = simple_member(SHA256, &d);
+    member.attributes.push(attribute(
+        CAT_NAMEVALUE,
+        &[&seq(&[&bmp("n"), &tlv(0x02, &[0x00, 0x01]), &octets(&[])])],
+    ));
+    assert!(matches!(
+        ctl_error(&Ctl::new(MEMBER_V2).member(&member)),
+        CtlError::Asn1(_)
+    ));
+    let mut member = simple_member(SHA256, &d);
+    member.attributes[3] = attribute(
+        CAT_MEMBERINFO,
+        &[&seq(&[&bmp(PE_SIP), &tlv(0x02, &[0x00, 0x02, 0x00])])],
+    );
+    assert!(matches!(
+        ctl_error(&Ctl::new(MEMBER_V2).member(&member)),
+        CtlError::Asn1(_)
+    ));
+    // A non-minimal encoded version is invalid DER, not a version.
+    ctl.prefix = tlv(0x02, &[0x00, 0x01]);
+    assert!(matches!(ctl_error(&ctl), CtlError::Asn1(_)));
+}
+
+#[test]
+fn member_attribute_sets_must_be_in_der_order() {
+    let d = [0x46; 32];
+    let member = simple_member(SHA256, &d);
+    let mut attrs: Vec<&[u8]> = member.attributes.iter().map(Vec::as_slice).collect();
+    attrs.sort_unstable();
+    let tag = octets(&d);
+    let with_attrs = |set_der: &[u8]| {
+        let mut ctl = Ctl::new(MEMBER_V2);
+        ctl.members = vec![seq(&[&tag, set_der])];
+        parse_ctl(&ctl.der())
+    };
+    // Ascending: accepted.
+    let parsed = with_attrs(&set_unsorted(&attrs)).unwrap();
+    assert_eq!(parsed.members[0].file_name(), Some("a.exe"));
+    // The same attributes, descending: rejected.
+    attrs.reverse();
+    assert!(matches!(
+        with_attrs(&set_unsorted(&attrs)),
+        Err(CtlError::Asn1(_))
+    ));
+
+    // An attribute's values are a SET OF too.
+    let a = name_value("A", TEXT_FLAGS, &utf16z("1"));
+    let b = name_value("B", TEXT_FLAGS, &utf16z("2"));
+    let (low, high) = if a < b { (&a, &b) } else { (&b, &a) };
+    let pairs = |values: &[u8]| {
+        let mut m = simple_member(SHA256, &d);
+        m.attributes.push(seq(&[&oid(CAT_NAMEVALUE), values]));
+        parse_ctl(&Ctl::new(MEMBER_V2).member(&m).der())
+    };
+    let parsed = pairs(&set_unsorted(&[low, high])).unwrap();
+    assert!(parsed.members[0].attribute("A").is_some());
+    assert!(parsed.members[0].attribute("B").is_some());
+    assert!(matches!(
+        pairs(&set_unsorted(&[high, low])),
+        Err(CtlError::Asn1(_))
+    ));
+    // Equal elements may repeat.
+    assert!(pairs(&set_unsorted(&[low, low])).is_ok());
+}
+
+#[test]
+fn decoded_size_is_bounded_before_the_signature_is_checked() {
+    // Many members, each with the most name-value pairs kept, all as short
+    // as DER allows: a few bytes each in the file, but a full `NameValue`
+    // decoded. Unbounded, this file (well under MAX_CATALOG_SIZE) would
+    // decode to several times MAX_DECODED_BYTES; it is rejected part way.
+    let empty_pair = seq(&[&bmp(""), &integer(0), &octets(&[])]);
+    let pairs: Vec<&[u8]> = vec![empty_pair.as_slice(); MAX_NAME_VALUES];
+    let member = seq(&[
+        &octets(&[]),
+        &set(&[&seq(&[&oid(CAT_NAMEVALUE), &set(&pairs)])]),
+    ]);
+    // Enough members to need the budget twice over.
+    let count = 2 * MAX_DECODED_BYTES / (MAX_NAME_VALUES * 64);
+    let mut ctl = Ctl::new(MEMBER_V2);
+    ctl.members = vec![member; count];
+    let der = ctl.der();
+    assert!((der.len() as u64) < MAX_CATALOG_SIZE, "{}", der.len());
+    match parse_ctl(&der) {
+        Err(CtlError::DecodedTooLarge { offset }) => {
+            // Decoding stopped well before the end.
+            assert!(offset < der.len() * 3 / 4, "{offset} of {}", der.len());
+        }
+        other => panic!("{:?}", other.map(|c| c.members.len())),
+    }
+    // In a signed catalog it is rejected the same way, before the
+    // signature (which no longer matches) is looked at.
+    let (h, l) = header(&der, 0);
+    let cat = with_content(&fixture("v2-sha256.cat"), &CTL_PATH, &der[h..h + l]);
+    assert!(matches!(
+        parse_catalog(&cat),
+        Err(CatalogError::Ctl(CtlError::DecodedTooLarge { .. }))
+    ));
+    // A real-sized catalog is far inside the budget.
+    assert!(parse_catalog(&fixture("v2-sha256.cat")).is_ok());
 }
 
 #[test]
@@ -836,22 +1007,27 @@ fn member_warnings() {
 #[test]
 fn name_values_are_bounded_and_typed() {
     let d = [0x33; 32];
-    let mut member = simple_member(SHA256, &d);
-    member.attributes.push(attribute(
+    let mut typed = simple_member(SHA256, &d);
+    typed.attributes.push(attribute(
         CAT_NAMEVALUE,
         &[&name_value("Blob", NameValue::DATA_BASE64, &[1, 2, 3])],
     ));
+    let mut many = simple_member(SHA256, &d);
     for i in 0..MAX_NAME_VALUES {
-        member.attributes.push(attribute(
+        many.attributes.push(attribute(
             CAT_NAMEVALUE,
             &[&name_value(&format!("n{i}"), TEXT_FLAGS, &utf16z("v"))],
         ));
     }
-    let ctl = parse_ctl(&Ctl::new(MEMBER_V2).member(&member).der()).unwrap();
-    let m = &ctl.members[0];
-    assert_eq!(m.name_values.len(), MAX_NAME_VALUES);
-    assert_eq!(m.name_values[2].value, NameValueData::Bytes(vec![1, 2, 3]));
-    assert_eq!(m.name_values[2].text(), None);
+    let ctl = parse_ctl(&Ctl::new(MEMBER_V2).member(&typed).member(&many).der()).unwrap();
+    let blob = ctl.members[0]
+        .name_values
+        .iter()
+        .find(|v| v.name == "Blob")
+        .unwrap();
+    assert_eq!(blob.value, NameValueData::Bytes(vec![1, 2, 3]));
+    assert_eq!(blob.text(), None);
+    assert_eq!(ctl.members[1].name_values.len(), MAX_NAME_VALUES);
     assert!(ctl.warnings.contains(&CtlWarning::TooManyNameValues));
 }
 
@@ -896,6 +1072,18 @@ fn members_are_bounded() {
     let parsed = parse_ctl(&ctl.der()).unwrap();
     assert_eq!(parsed.members.len(), MAX_MEMBERS);
     assert!(parsed.members_truncated);
+    // A bad member past the limit is still rejected, and named by its own
+    // position in the list.
+    let d = [0x47; 31];
+    let mut short = simple_member(SHA256, &d);
+    short.tag = utf16z("x");
+    ctl.members.push(short.der());
+    assert_eq!(
+        ctl_error(&ctl),
+        CtlError::DigestLength {
+            member: MAX_MEMBERS + 2
+        }
+    );
 }
 
 #[test]
@@ -1104,18 +1292,54 @@ fn nested_signatures_are_checked_as_der_and_reported() {
         cat.warnings,
         [palisade_fileid::catalog::CatalogWarning::NestedSignaturesIgnored(1)]
     );
-    // Invalid DER inside the (unread) nested signature: a BER indefinite
-    // length. The outer signature does not cover it, but the catalog is
-    // rejected anyway.
-    let inner = fixture("v2-sha1-signed.cat");
-    let (h, l) = header(&inner, 0);
-    let mut ber = vec![0x30, 0x80];
-    ber.extend_from_slice(&inner[h..h + l]);
-    ber.extend([0, 0]);
+    // Invalid DER inside the (unread) nested signature, below a valid
+    // root header: a BER indefinite length in a child. Only the whole-file
+    // validation pass reads that far; the outer signature does not cover
+    // it, but the catalog is rejected anyway.
+    let ber = seq(&[
+        &oid("1.2.840.113549.1.7.2"),
+        &tlv(0xa0, &[0x30, 0x80, 0x02, 0x01, 0x01, 0x00, 0x00]),
+    ]);
     assert!(matches!(
         parse_catalog(&nested_catalog(Some(&ber))),
         Err(CatalogError::Envelope(SignatureError::Asn1(_)))
     ));
+}
+
+#[test]
+fn primitives_inside_nested_signatures_are_checked() {
+    // The nested SignedData with its version INTEGER emptied: tags and
+    // lengths stay valid, so only a check of the INTEGER's content finds
+    // it. Likewise a BOOLEAN that is not 00 or ff, a NULL with content and
+    // a malformed OBJECT IDENTIFIER.
+    let inner = fixture("v2-sha1-signed.cat");
+    let version = [1, 0, 0];
+    let digest_alg_null = [1, 0, 1, 0, 1];
+    let digest_alg_oid = [1, 0, 1, 0, 0];
+    for bad in [
+        with_content(&inner, &version, &[]),
+        with_content(&inner, &digest_alg_null, &[0x00]),
+        with_content(&inner, &digest_alg_oid, &[0x2b, 0x80]),
+    ] {
+        assert!(matches!(
+            parse_catalog(&nested_catalog(Some(&bad))),
+            Err(CatalogError::Envelope(SignatureError::Asn1(_)))
+        ));
+    }
+    let boolean = seq(&[
+        &oid("1.2.840.113549.1.7.2"),
+        &tlv(0xa0, &seq(&[&[0x01, 0x01, 0x01]])),
+    ]);
+    assert!(matches!(
+        parse_catalog(&nested_catalog(Some(&boolean))),
+        Err(CatalogError::Envelope(SignatureError::Asn1(_)))
+    ));
+    // The untouched nested signature still passes.
+    assert!(
+        parse_catalog(&nested_catalog(None))
+            .unwrap()
+            .signature_valid()
+    );
 }
 
 #[test]
@@ -1209,12 +1433,18 @@ fn sources_are_separate_namespaces() {
 
 #[test]
 fn signers_follow_the_trust_configuration_in_force() {
-    // The same catalog signer, first under no anchors, then under its
-    // root: the second catalog gets a new verdict, not the cached one.
+    // The same catalog signer, certificates and signature digest, first
+    // under no anchors, then under its root: the second catalog gets a new
+    // verdict, not the cached one. (Trailing bytes give the second its own
+    // ID; they are not signed, so everything that keys the signer is the
+    // same.)
+    let cat = fixture("v2-sha256.cat");
+    let mut other = cat.clone();
+    other.push(0);
     let mut b = CatalogStoreBuilder::new(StoreLimits::default());
-    b.add_bytes(CatalogSource::System, None, &fixture("v1-sha1.cat"));
+    b.add_bytes(CatalogSource::System, None, &cat);
     let mut b = b.trust(CatalogSource::System, anchors("ca.der"));
-    b.add_bytes(CatalogSource::System, None, &fixture("v2-sha256.cat"));
+    b.add_bytes(CatalogSource::System, None, &other);
     let store = b.build();
     assert!(!store.records()[0].trusted);
     assert!(store.records()[1].trusted);
@@ -1425,6 +1655,52 @@ fn file_limits_are_checked_before_reading() {
     let r = b.add_file(CatalogSource::System, &root.join("b.cat"));
     assert_eq!(r.errors, [LoadError::ByteLimit]);
     assert_eq!(b.build().records().len(), 1);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn spent_budgets_stop_the_walk_before_listing_directories() {
+    // Once nothing more can be loaded, no further directory is listed:
+    // a tree of many empty directories does not use up the entry limit.
+    // The root holds a.cat and d/, and d/ holds eight directories: more
+    // entries than the limit of 4, but only if d/ is listed.
+    let root = temp_dir("spent");
+    std::fs::write(root.join("a.cat"), fixture("v1-sha1.cat")).unwrap();
+    for i in 0..8 {
+        std::fs::create_dir_all(root.join("d").join(format!("e{i}"))).unwrap();
+    }
+    let v1_len = fixture("v1-sha1.cat").len() as u64;
+    for (limits, spent) in [
+        (
+            StoreLimits {
+                max_total_bytes: v1_len,
+                max_dir_entries: 4,
+                ..StoreLimits::default()
+            },
+            LoadError::ByteLimit,
+        ),
+        (
+            StoreLimits {
+                max_catalogs: 1,
+                max_dir_entries: 4,
+                ..StoreLimits::default()
+            },
+            LoadError::CatalogLimit,
+        ),
+    ] {
+        let mut b = CatalogStoreBuilder::new(limits);
+        let r = b.add_dir(CatalogSource::System, &root);
+        assert_eq!(r.recorded, 1, "{r:?}");
+        // Stopped before d/, by the spent limit, not the entry limit.
+        assert_eq!(r.errors, [spent], "{r:?}");
+    }
+    // An exhausted budget stops a new walk before the root is listed.
+    let mut b = CatalogStoreBuilder::new(StoreLimits {
+        max_total_bytes: 0,
+        ..StoreLimits::default()
+    });
+    let r = b.add_dir(CatalogSource::System, &root.join("missing"));
+    assert_eq!(r.errors, [LoadError::ByteLimit]);
     std::fs::remove_dir_all(&root).unwrap();
 }
 

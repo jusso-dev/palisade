@@ -211,7 +211,11 @@ pub enum SignatureCheck {
 #[non_exhaustive]
 pub enum SignatureStatus {
     /// The signature is cryptographically valid and its digest matches the
-    /// image.
+    /// image. For a [`SignatureKind::Catalog`] signature, which signs a
+    /// trust list rather than an image, it means only that the signature
+    /// over the catalog's CTL is cryptographically valid (`digest_match`
+    /// is `None`): a member file is catalog-signed only when a valid
+    /// catalog also lists its digest (see [`crate::catalog`]).
     Valid,
     /// The signature is cryptographically valid, but the image digest it
     /// signs does not match the file: the file was changed after signing.
@@ -453,8 +457,12 @@ pub struct SignatureInfo {
     /// 0 for an embedded signature, 1 and up for nested ones.
     pub depth: u8,
     /// The image digest algorithm (`SpcIndirectDataContent.messageDigest`).
+    /// For a [`SignatureKind::Catalog`] signature, the SignerInfo's digest
+    /// algorithm, the one that hashes the CTL (its `messageDigest`); not
+    /// any member's digest algorithm.
     pub digest_alg: Option<DigestAlgorithm>,
-    /// The image digest the signature signs.
+    /// The image digest the signature signs. `None` for a catalog
+    /// signature.
     pub signed_image_digest: Option<Vec<u8>>,
     /// The SignerInfo's digest algorithm, used for the `messageDigest`
     /// attribute and the signature.
@@ -466,7 +474,8 @@ pub struct SignatureInfo {
     /// The signer key's size in bits (the RSA modulus, or the curve size).
     pub key_bits: Option<u32>,
     /// Whether the signed image digest equals the file's Authenticode
-    /// digest under the same algorithm. `None` if it could not be computed.
+    /// digest under the same algorithm. `None` if it could not be computed,
+    /// and always `None` for a catalog signature, which signs no image.
     pub digest_match: Option<bool>,
     /// The cryptographic check.
     pub signature_valid: SignatureCheck,
