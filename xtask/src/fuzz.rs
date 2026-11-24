@@ -442,7 +442,7 @@ pub fn markdown(seconds: u32, outcomes: &[Outcome]) -> String {
             };
             let dir = o.dir.strip_suffix("/fuzz").unwrap_or(o.dir);
             out.push_str(&format!(
-                "To reproduce, from `{dir}`:\n\n```sh\nbase64 -d > {name} <<'EOF'\n{}EOF\ncargo +{TOOLCHAIN} fuzz run {} {name}\n```\n",
+                "To reproduce, from `{dir}`:\n\n```sh\nbase64 -d > {name} <<'EOF'\n{}EOF\ncargo +{TOOLCHAIN} fuzz run {} {name} -- -timeout={INPUT_TIMEOUT_SECONDS}\n```\n",
                 base64_lines(bytes),
                 o.target
             ));
@@ -797,7 +797,7 @@ mod tests {
         );
         assert!(
             md.contains(&format!(
-                "cargo +{TOOLCHAIN} fuzz run pe_parse crash-0a1b\n"
+                "cargo +{TOOLCHAIN} fuzz run pe_parse crash-0a1b -- -timeout={INPUT_TIMEOUT_SECONDS}\n"
             )),
             "{md}"
         );

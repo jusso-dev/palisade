@@ -205,8 +205,8 @@ Run them locally, on a quiet machine:
 ```sh
 cargo bench -p palisade-policy --bench criterion_eval
 cargo bench -p palisade-fileid --bench hash_and_parse
-cargo bench -p palisade-policy -- --save-baseline before   # then, after a change:
-cargo bench -p palisade-policy -- --baseline before
+cargo bench -p palisade-policy --bench criterion_eval -- --save-baseline before   # then, after a change:
+cargo bench -p palisade-policy --bench criterion_eval -- --baseline before
 ```
 
 The `bench` job in CI builds every bench and runs each benchmark once in test mode
