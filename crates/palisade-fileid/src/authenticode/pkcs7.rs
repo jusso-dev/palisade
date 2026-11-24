@@ -108,16 +108,31 @@ pub(crate) struct SignedData<'a> {
     pub warnings: Warnings,
 }
 
-/// Decodes a `ContentInfo` holding an Authenticode SignedData. `der` must
-/// be exactly one element; `base` is its offset, for errors. Returns the
-/// SignedData and the number of bytes after the element.
-pub(crate) fn parse_content_info(der: &[u8], base: usize) -> Result<(SignedData<'_>, &[u8])> {
+/// What an Authenticode signature signs: the type of its indirect data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Subject {
+    /// `SPC_PE_IMAGE_DATA`: a PE image.
+    PeImage,
+    /// `SPC_SIPINFO` naming this subject interface package GUID (16 bytes,
+    /// as encoded): an installer package, an app package (#53).
+    Sip([u8; 16]),
+}
+
+/// Decodes a `ContentInfo` holding an Authenticode SignedData whose
+/// indirect data must be of `subject`'s type. `der` must be exactly one
+/// element; `base` is its offset, for errors. Returns the SignedData and
+/// the bytes after the element.
+pub(crate) fn parse_content_info_for(
+    der: &[u8],
+    base: usize,
+    subject: Subject,
+) -> Result<(SignedData<'_>, &[u8])> {
     let (envelope, indirect, trailing) = parse_envelope(
         der,
         base,
         oid::SPC_INDIRECT_DATA,
         SignatureError::NotIndirectData,
-        parse_indirect_data,
+        |seq, warnings| parse_indirect_data(seq, subject, warnings),
     )?;
     Ok((
         SignedData {
@@ -302,12 +317,24 @@ fn digest_from_oid(alg: &[u8]) -> DigestId {
     })
 }
 
-fn parse_indirect_data<'a>(seq: &Tlv<'a>, warnings: &mut Warnings) -> Result<IndirectData<'a>> {
+fn parse_indirect_data<'a>(
+    seq: &Tlv<'a>,
+    subject: Subject,
+    warnings: &mut Warnings,
+) -> Result<IndirectData<'a>> {
     let mut r = seq.reader();
     // SpcAttributeTypeAndOptionalValue.
     let data = r.read(tag::SEQUENCE)?;
     let mut d = data.reader();
     let data_type = read_oid(&mut d)?;
+    if let Subject::Sip(guid) = subject {
+        if data_type != oid::SPC_SIPINFO {
+            return Err(SignatureError::NotSipInfo(ObjectId::from_der(data_type)));
+        }
+        parse_sip_info(&d.read(tag::SEQUENCE)?, &guid)?;
+        d.finish()?;
+        return finish_indirect_data(seq, &mut r, None, None);
+    }
     if data_type != oid::SPC_PE_IMAGE_DATA {
         return Err(SignatureError::NotPeImageData(ObjectId::from_der(
             data_type,
@@ -332,7 +359,33 @@ fn parse_indirect_data<'a>(seq: &Tlv<'a>, warnings: &mut Warnings) -> Result<Ind
         v.finish()?;
     }
     d.finish()?;
+    finish_indirect_data(seq, &mut r, pe_image_flags, page_hashes)
+}
 
+/// `SpcSipInfo ::= SEQUENCE { version INTEGER, guid OCTET STRING (16),
+/// five INTEGERs }`. The GUID must be `guid`; the integers are checked as
+/// DER but carry nothing this crate uses.
+fn parse_sip_info(info: &Tlv<'_>, guid: &[u8; 16]) -> Result<()> {
+    let mut r = info.reader();
+    asn1::integer_bytes(&r.read(tag::INTEGER)?)?;
+    let id = r.read(tag::OCTET_STRING)?;
+    if id.content != guid {
+        return Err(SignatureError::SubjectTypeMismatch);
+    }
+    for _ in 0..5 {
+        asn1::integer_bytes(&r.read(tag::INTEGER)?)?;
+    }
+    r.finish()?;
+    Ok(())
+}
+
+/// The `DigestInfo` that ends an `SpcIndirectDataContent`.
+fn finish_indirect_data<'a>(
+    seq: &Tlv<'a>,
+    r: &mut Reader<'a>,
+    pe_image_flags: Option<u8>,
+    page_hashes: Option<PageHashes>,
+) -> Result<IndirectData<'a>> {
     // DigestInfo.
     let digest_info = r.read(tag::SEQUENCE)?;
     let mut di = digest_info.reader();

@@ -9,6 +9,7 @@ pub mod catalog;
 pub mod filetype;
 pub mod fsctx;
 pub mod hash;
+pub mod installer;
 pub mod pe;
 #[cfg(all(windows, feature = "os-trust"))]
 pub mod win;

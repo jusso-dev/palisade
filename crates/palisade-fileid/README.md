@@ -1,8 +1,8 @@
 # palisade-fileid
 
-File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes), signature and certificate chain extraction, and version-info metadata.
+File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes), signature and certificate chain extraction, version-info metadata, and Windows Installer package identity.
 
-**Status:** early. PE header and version-resource parsing, flat hashing, the Authenticode image hash, page hashes, Authenticode signature verification, certificate chains, signer trust and signer identity, timestamps, expiry and revocation, catalog parsing, catalog signatures and the catalog member index, and content-based file type detection work; the rest of [#3](https://github.com/jusso-dev/palisade/issues/3) is still to come.
+**Status:** early. PE header and version-resource parsing, flat hashing, the Authenticode image hash, page hashes, Authenticode signature verification, certificate chains, signer trust and signer identity, timestamps, expiry and revocation, catalog parsing, catalog signatures and the catalog member index, content-based file type detection, and Windows Installer package identity and signatures work; the rest of [#3](https://github.com/jusso-dev/palisade/issues/3) is still to come.
 
 ## What is here
 
@@ -439,6 +439,45 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   The import table ends where the loader ends it: at the first descriptor
   with no name or no import address table.
 
+- `installer`: Windows Installer packages
+  ([#53](https://github.com/jusso-dev/palisade/issues/53)): `.msi`, `.msp`,
+  `.mst` and `.msm`. `installer::parse_installer(&bytes)` reads the
+  compound file with a bounded reader (`installer::cfb`) that rejects any
+  sector claimed twice, any FAT or directory loop, a duplicate name and a
+  truncated chain, so an ambiguous container is an error, never a guess.
+  It decodes the stream names, the string pool (2- and 3-byte references,
+  long strings), `_Tables`, `_Columns` and typed rows, and returns an
+  `InstallerIdentity`: the kind (from the root CLSID; a database with
+  `ModuleSignature` is a merge module), the `Property` rows ProductCode,
+  UpgradeCode, ProductName, ProductVersion (also as a quad), Manufacturer,
+  ProductLanguage, ALLUSERS, MSIINSTALLPERUSER and ARPSYSTEMCOMPONENT, every
+  summary information field (the revision number is the PackageCode), patch
+  codes, obsoleted patches, target product codes, transforms and
+  `MsiPatchMetadata` for a patch, the target and upgraded product codes and
+  versions and the validation flags for a transform, and an inventory of
+  `Binary` streams, `CustomAction` rows (DLL, EXE and script actions flagged
+  as embedded executable content) and embedded `#cab` cabinets.
+
+  The `\u{5}DigitalSignature` stream is verified by the same Authenticode
+  code as PE signatures (`SignatureKind::Msi`, indirect data `SPC_SIPINFO`
+  for the installer subject type), over the package's content hash: every
+  stream in sorted order without the signature streams, then each storage's
+  CLSID. `\u{5}MsiDigitalSignatureEx`, when present, must equal the metadata
+  hash, and is included in the content hash. A tampered stream, a moved
+  signature or changed metadata is a digest mismatch, never valid; the
+  report feeds `evaluate_trust` and `evaluate_validity` like any other.
+
+  `normalised_sha256` is a documented, Palisade-specific identity (medium
+  strength): SHA-256 over every stream except the signature and summary
+  streams, by path, plus the summary information without its four
+  timestamps. Two copies of a package that differ only in build, save or
+  signing times have the same value and different flat hashes. The exact
+  algorithm is in the module documentation, and
+  `tests/fixtures/installer/normalised.py` implements it independently.
+  The pure parser runs everywhere; on Windows, `tests/installer_os.rs`
+  checks the product fields, the PackageCode and the signature verdict
+  against the OS installer API and the OS signature check.
+
 ## Handling untrusted input
 
 Every file this crate reads may be hostile, so the parser:
@@ -498,7 +537,9 @@ with keys the file supplies, and CRLs are capped at 8 MiB and 100,000 entries
 The same rules apply to the path normaliser, the security descriptor parser
 and the `Zone.Identifier` parser, which are also fuzzed (`fsctx_parse`), and
 to catalog files, which are capped at 64 MiB and fuzzed with lookups
-(`fuzz_ctl`).
+(`fuzz_ctl`), and to installer packages, which are capped at 1 GiB, 65,536
+directory entries, 16 storage levels, 4,194,304 strings and 4,096 tables,
+and fuzzed end to end (`fuzz_msi_tables`).
 
 The parser has no `unsafe` code, and its modules say `#![forbid(unsafe_code)]`.
 
@@ -524,6 +565,12 @@ SHA-1, and an organisation catalog under its own test root). The tests
 build each unsigned catalog byte by byte, listing the synthetic PE image and
 a short text file, and osslsigncode signs them with throwaway test keys; a
 test checks that each fixture signs exactly that content. No OS catalog is
+committed. The installer tests build every package at test time
+(`tests/common/msi.rs` writes compound files with tables, streams, storages
+and summary information); `tests/fixtures/installer` holds that test product
+signed by osslsigncode with SHA-256, SHA-1 and SHA-256 plus
+`MsiDigitalSignatureEx`, under a throwaway test root, and its normalised
+hash computed by an independent Python script. No vendor package is
 committed. No private keys and no third-party binaries are
 committed; the `generate.sh` scripts document how every file was made and
 regenerate them.
@@ -563,6 +610,9 @@ PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/timestamp_crl" \
 cargo +nightly fuzz run timestamp_crl -- -dict=fuzz/pkcs7.dict -max_total_time=60
 cargo +nightly fuzz run fuzz_ctl -- -max_total_time=60
 cargo +nightly fuzz run fuzz_classify -- -timeout=1 -max_total_time=60
+PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/fuzz_msi_tables" \
+  cargo test -p palisade-fileid --test installer -- --ignored write_installer_fuzz_seeds
+cargo +nightly fuzz run fuzz_msi_tables -- -max_total_time=60
 ```
 
 `benches/hash_and_parse.rs` (criterion) measures flat hashing, streamed

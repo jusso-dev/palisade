@@ -5,7 +5,7 @@
 
 use super::crypto::{self, PublicKey, Scheme, Verified};
 use super::hash::{AuthenticodeError, AuthenticodeHashes, HashRanges, image_digests};
-use super::pkcs7::{self, CertKey, Certificate, SignedData, Signer, Warnings};
+use super::pkcs7::{self, CertKey, Certificate, SignedData, Signer, Subject, Warnings};
 use super::signature::{
     BadSignature, CertificateEntry, CertificateTableError, DigestAlgorithm, InvalidReason,
     KeyAlgorithm, OsCiIssue, ReportWarning, SignatureAlgorithm, SignatureCheck, SignatureInfo,
@@ -225,6 +225,7 @@ fn walk_table(
                     options,
                     report,
                     entry: entry_index,
+                    subject: Subject::PeImage,
                 };
                 walker.signature(body, base, SignatureKind::Embedded, None, 0);
             } else if !report.warnings.contains(&ReportWarning::TooManySignatures) {
@@ -262,6 +263,8 @@ struct Walker<'r> {
     options: &'r VerifyOptions,
     report: &'r mut SignatureReport,
     entry: usize,
+    /// What every signature in this walk must sign.
+    subject: Subject,
 }
 
 impl Walker<'_> {
@@ -274,7 +277,7 @@ impl Walker<'_> {
         depth: u8,
     ) {
         let index = self.report.signatures.len();
-        let (mut info, nested) = match pkcs7::parse_content_info(der, base) {
+        let (mut info, nested) = match pkcs7::parse_content_info_for(der, base, self.subject) {
             Ok((signed, trailing)) => {
                 let mut info = check(&signed, self.image, self.options);
                 // Signers pad entries with up to 7 zero bytes; more, or
@@ -333,6 +336,51 @@ impl Walker<'_> {
             }
         }
     }
+}
+
+/// Verifies one detached Authenticode signature over a non-PE subject (an
+/// installer package's `\u{5}DigitalSignature` stream, #53) and its nested
+/// signatures. `content` holds the subject's content digests, which the
+/// signed digest is compared with; `kind` is the top-level signature's
+/// kind. The report has no `WIN_CERTIFICATE` entries, and its
+/// `image_status` is `content`'s.
+pub(crate) fn verify_detached(
+    der: &[u8],
+    content: &AuthenticodeHashes,
+    subject: Subject,
+    kind: SignatureKind,
+) -> SignatureReport {
+    let options = VerifyOptions::default();
+    let mut report = SignatureReport {
+        entries: Vec::new(),
+        signatures: Vec::new(),
+        primary: None,
+        signing_state: SigningState::Unsigned,
+        tolerate_digest_mismatch: false,
+        image_status: content.status.clone(),
+        warnings: Vec::new(),
+    };
+    let mut walker = Walker {
+        image: content,
+        options: &options,
+        report: &mut report,
+        entry: 0,
+        subject,
+    };
+    walker.signature(der, 0, kind, None, 0);
+    let total = report.signatures.len();
+    for sig in &mut report.signatures {
+        sig.total = total;
+    }
+    report.primary = select_primary(&report.signatures);
+    report.signing_state = match (report.primary, report.signatures.first()) {
+        (Some(_), _) => SigningState::Valid,
+        (None, Some(first)) => {
+            SigningState::Invalid(InvalidReason::Signature(first.status.clone()))
+        }
+        (None, None) => SigningState::Unsigned,
+    };
+    report
 }
 
 /// A placeholder [`SignatureInfo`]; the walker fills in the position fields.

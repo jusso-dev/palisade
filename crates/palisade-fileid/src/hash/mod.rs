@@ -506,6 +506,28 @@ impl fmt::Debug for MultiHasher {
     }
 }
 
+/// A streaming SHA-256 whose result is always a [`Digest`] (no
+/// algorithm-set lookup that could come back empty).
+#[derive(Clone, Default)]
+pub(crate) struct Sha256Stream(Sha256);
+
+impl Sha256Stream {
+    pub(crate) fn update(&mut self, chunk: &[u8]) {
+        self.0.update(chunk);
+    }
+
+    pub(crate) fn finish(self) -> Digest {
+        finished(HashAlgorithm::Sha256, &self.0.finalize())
+    }
+}
+
+/// SHA-256 of `data`.
+pub(crate) fn sha256_of(data: &[u8]) -> Digest {
+    let mut h = Sha256Stream::default();
+    h.update(data);
+    h.finish()
+}
+
 /// Hashes an in-memory buffer.
 #[must_use]
 pub fn hash_bytes(data: &[u8], set: AlgorithmSet) -> FlatHashes {

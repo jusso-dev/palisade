@@ -259,6 +259,11 @@ pub enum SignatureKind {
     /// The signature of a catalog file (#51, [`crate::catalog`]): a
     /// SignedData over a certificate trust list of member digests.
     Catalog,
+    /// The signature of a Windows Installer package (#53,
+    /// [`crate::installer`]): the `\u{5}DigitalSignature` stream, an
+    /// Authenticode SignedData whose indirect data is `SPC_SIPINFO` for the
+    /// installer subject type, over the package's content hash.
+    Msi,
 }
 
 /// The `SpcStatementType` authenticated attribute.
@@ -540,6 +545,13 @@ pub enum SignatureError {
     /// The indirect data is not `SPC_PE_IMAGE_DATA_OBJID`, so it does not
     /// sign a PE image.
     NotPeImageData(ObjectId),
+    /// The indirect data is not `SPC_SIPINFO_OBJID`
+    /// (1.3.6.1.4.1.311.2.1.30), so it does not sign a non-PE subject such
+    /// as an installer package.
+    NotSipInfo(ObjectId),
+    /// The `SPC_SIPINFO` names a subject type other than the one the file
+    /// is (for example a package signature on an installer).
+    SubjectTypeMismatch,
     /// The SignedData has no signed content.
     MissingContent,
     /// Authenticode requires exactly one SignerInfo.
@@ -577,6 +589,10 @@ impl fmt::Display for SignatureError {
             }
             Self::NotCatalog(o) => write!(f, "signed content type {o} is not szOID_CTL"),
             Self::NotPeImageData(o) => write!(f, "indirect data type {o} is not SPC_PE_IMAGE_DATA"),
+            Self::NotSipInfo(o) => write!(f, "indirect data type {o} is not SPC_SIPINFO"),
+            Self::SubjectTypeMismatch => {
+                f.write_str("the SIP information names another subject type")
+            }
             Self::MissingContent => f.write_str("the SignedData has no content"),
             Self::SignerCount(n) => write!(f, "{n} SignerInfos; Authenticode requires exactly one"),
             Self::MissingAuthenticatedAttributes => f.write_str("no authenticated attributes"),
