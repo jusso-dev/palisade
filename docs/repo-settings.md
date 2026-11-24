@@ -24,6 +24,8 @@ same settings are also available under **Settings** in the web UI.
 | `main` ruleset | Pull requests only, required checks, linear history, no force pushes or deletion | See [Branch protection](#branch-protection-for-main) |
 | Merge methods | Squash only, commit title from the PR title | The PR title is the changelog entry ([CONTRIBUTING.md](../CONTRIBUTING.md#conventional-commits)) |
 | Discussions | On, with a Q&A category | The support channel in [SUPPORT.md](../SUPPORT.md) |
+| Labels and milestones | Exactly the lists in `.github/labels.yml` and `.github/milestones.yml` | Synced by `labels.yml`; see [Labels and milestones](#labels-and-milestones) |
+| `DCO` check | Runs on every pull request; not yet required | See [DCO check](#dco-check) |
 
 ## Code security
 
@@ -206,11 +208,62 @@ gh api repos/jusso-dev/palisade \
 `squash_merge_commit_title` must be `PR_TITLE`. The default uses the commit title instead when a
 pull request has a single commit, which would bypass the PR title check.
 
-## Not yet configured
+## Labels and milestones
 
-These are planned and will be documented here when they land:
+The label set and the milestone titles live in two files, so they are reviewed like code:
 
-- the label set and the milestone titles, kept in files under `.github/` and synced by a workflow
-  ([#28](https://github.com/jusso-dev/palisade/issues/28));
-- a required Developer Certificate of Origin check, if the sign-off ADR under [#28](https://github.com/jusso-dev/palisade/issues/28) requires one
-  ([CONTRIBUTING.md](../CONTRIBUTING.md#sign-off-and-licensing-of-contributions)).
+- [`.github/labels.yml`](../.github/labels.yml): every label, with its colour and description;
+- [`.github/milestones.yml`](../.github/milestones.yml): the seven milestones, `M0 Foundations` to
+  `M6 Compliance & Advanced`, with their exact titles and descriptions.
+
+The `Label sync` workflow (`.github/workflows/labels.yml`) runs
+[`.github/scripts/sync-labels.sh`](../.github/scripts/sync-labels.sh):
+
+- On a pull request that touches either file, the issue templates, `dependabot.yml` or the script,
+  it runs the script's tests and validates the files. Validation also fails if an issue template
+  or Dependabot applies a label that is not listed, because the sync would delete it.
+- On a push to `main` it applies the files. Missing labels are created, colours and descriptions
+  are updated, and **labels that are not listed are deleted**, which removes them from every
+  issue. Missing milestones are created and their descriptions updated. An open milestone that is
+  not listed is reported and the run fails, but it is never deleted or closed; close it by hand,
+  or add it to the file. Closed milestones that are not listed are ignored.
+- Run it by hand from the Actions tab for a dry run that prints every change and writes nothing.
+  Tick `apply` to make the changes. Changes are only ever applied from `main`; a manual run on any
+  other branch is always a dry run.
+
+Only the sync job has a write scope, `issues: write`, which covers labels and milestones, plus
+`contents: read` for the checkout. It never runs on a pull request.
+
+To dry-run locally, with the GitHub CLI signed in to an account that can read the repository:
+
+```sh
+bash .github/scripts/sync-labels.sh --validate
+bash .github/scripts/sync-labels.sh --check --repo jusso-dev/palisade   # exit 1 means drift; nothing is written
+bash .github/scripts/sync-labels.test.sh
+```
+
+Review the `DELETE` lines before the first apply. The first sync removes the default labels that
+GitHub creates with a repository (`bug`, `documentation`, `duplicate`, `enhancement`, `invalid`,
+`question`, `wontfix`) and `accessibility`, none of which is in the list. The issue templates
+apply `needs-triage` instead, and Dependabot applies `area:security` or `area:infra`.
+
+## DCO check
+
+The `DCO` workflow (`.github/workflows/dco.yml`) runs
+[`.github/scripts/check-dco.sh`](../.github/scripts/check-dco.sh) on every pull request. It fails
+if any non-merge commit lacks a `Signed-off-by:` trailer whose email matches the commit author
+([CONTRIBUTING.md](../CONTRIBUTING.md#sign-off)). It needs no token scope beyond `contents: read`.
+Dependabot's pull requests pass it with the bot's own sign-off ([docs/ci.md](ci.md#dcoyml-pull-requests)).
+
+The check is **informational**: the `main` ruleset does not require it yet. Requiring sign-off is
+decided by an ADR under [#28](https://github.com/jusso-dev/palisade/issues/28). Once that ADR is
+accepted, add the check to the ruleset's required status checks:
+
+```json
+{ "context": "DCO", "integration_id": 15368 }
+```
+
+in the `required_status_checks` list of the ruleset in
+[Branch protection](#branch-protection-for-main), then update the ruleset with
+`gh api -X PUT repos/jusso-dev/palisade/rulesets/<id> --input <file>`, and update the summary
+table above.

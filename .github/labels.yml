@@ -1,0 +1,79 @@
+# The repository's labels. `.github/scripts/sync-labels.sh` makes the labels on
+# GitHub match this list exactly: it creates missing labels, updates colours
+# and descriptions, and deletes any label that is not listed here. See
+# docs/repo-settings.md#labels-and-milestones.
+#
+# Each entry needs `name`, `color` (6 lowercase hex digits, quoted so YAML
+# keeps it a string) and `description` (at most 100 characters).
+# Issue templates apply `needs-triage`; the maintainer replaces it with area
+# and priority labels when triaging.
+
+- name: epic
+  color: "5319e7"
+  description: Large multi-issue capability
+
+# Areas: which part of the project an issue touches.
+- name: area:core
+  color: "0e8a16"
+  description: Policy model & evaluation engine
+- name: area:agent
+  color: "1d76db"
+  description: Windows endpoint agent/service
+- name: area:server
+  color: "fbca04"
+  description: Central management server
+- name: area:console
+  color: "c5def5"
+  description: Web management console
+- name: area:cli
+  color: "bfdadc"
+  description: pal CLI / policy-as-code tooling
+- name: area:api
+  color: "006b75"
+  description: REST API & automation
+- name: area:enforcement
+  color: "b60205"
+  description: Native Windows policy enforcement and optional driver
+- name: area:scripts
+  color: "d93f0b"
+  description: PowerShell & script enforcement
+- name: area:elevation
+  color: "e99695"
+  description: Privilege elevation & self-service
+- name: area:integrations
+  color: "0052cc"
+  description: SIEM, ITSM, identity, notifications
+- name: area:compliance
+  color: "7057ff"
+  description: Essential Eight & reporting
+- name: area:security
+  color: "000000"
+  description: Hardening, tamper protection, supply chain
+- name: area:infra
+  color: "cccccc"
+  description: Build, CI, packaging, docs
+
+# Priority within the milestone.
+- name: priority:p0
+  color: "b60205"
+  description: Must have for MVP
+- name: priority:p1
+  color: "d93f0b"
+  description: Needed for v1.0
+- name: priority:p2
+  color: "fbca04"
+  description: Post-1.0 / advanced
+
+# Triage helpers.
+- name: good first issue
+  color: "7057ff"
+  description: Good for newcomers
+- name: help wanted
+  color: "008672"
+  description: Extra attention is needed
+- name: needs-triage
+  color: "ededed"
+  description: New, not yet triaged by the maintainer
+- name: blocked
+  color: "5a5a5a"
+  description: Waiting on another issue or a decision

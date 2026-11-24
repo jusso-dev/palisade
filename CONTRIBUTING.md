@@ -27,6 +27,12 @@ Use [SECURITY.md](SECURITY.md).
 - `area:*` labels say which part of the project an issue touches, and `priority:p0` to
   `priority:p2` give its priority within the milestone.
 - `good first issue` and `help wanted` mark issues that suit new contributors.
+- New issues get `needs-triage`. The maintainer replaces it with area and priority labels.
+  `blocked` marks an issue that waits on another issue or a decision.
+- The label set and the milestone titles are kept in [`.github/labels.yml`](.github/labels.yml)
+  and [`.github/milestones.yml`](.github/milestones.yml), and a workflow syncs them to GitHub.
+  To add or change a label, edit the file in a pull request
+  ([docs/repo-settings.md](docs/repo-settings.md#labels-and-milestones)).
 
 A pull request says which issue it relates to: `Closes #N` if it completes the issue, or
 `Part of #N` if it delivers part of it. Say what is left and which issue it belongs to.
@@ -111,6 +117,16 @@ expression `Apache-2.0 OR MIT`, in `[workspace.package]`, and every crate inheri
 (`cargo xtask check-manifests` enforces that). Files copied from elsewhere keep their original
 notices.
 
+### Third-party notices
+
+Release artefacts ship the licence texts of every third-party crate they contain, in a
+`THIRD_PARTY_NOTICES.md` file generated from `Cargo.lock` at release time. It is not kept in the
+repository, because it would go stale with every dependency update. Generating it, and including
+it in the release archives and the installer, is part of the release pipeline
+([#24](https://github.com/jusso-dev/palisade/issues/24)) and MSI packaging
+([#22](https://github.com/jusso-dev/palisade/issues/22)). The licences it may contain are limited
+by the allowlist in `deny.toml`.
+
 ## Testing expectations
 
 - Every change that affects behaviour comes with tests. Bug fixes include a test that fails
@@ -181,10 +197,31 @@ inbound = outbound ([ADR 0010](docs/adr/0010-licence.md)): unless you explicitly
 any contribution you intentionally submit for inclusion in Palisade, as defined in the Apache-2.0
 licence, is dual-licensed as `Apache-2.0 OR MIT`, without any additional terms or conditions.
 
-Whether commits must also carry a Developer Certificate of Origin sign-off (`Signed-off-by:`,
-added by `git commit -s`) is an open decision. ADR 0010 leaves it to a separate ADR, to be written
-under [#28](https://github.com/jusso-dev/palisade/issues/28) and enforced by a CI check if it requires sign-off. Until then,
-sign-off is welcome but not required.
+#### Sign-off
+
+Sign off every commit with the [Developer Certificate of Origin](https://developercertificate.org)
+(DCO). Signing off says that you wrote the change, or otherwise have the right to submit it under
+the project licence. Add the sign-off with `git commit -s`, which appends a trailer with the name
+and email from your Git configuration:
+
+```
+Signed-off-by: Ada Lovelace <ada@example.org>
+```
+
+- The email in the trailer must match the commit's author email.
+- To sign off commits you have already made, run `git rebase --signoff <base branch>` and then
+  `git push --force-with-lease`.
+- Never sign off on someone else's behalf.
+
+The `DCO` check (`.github/workflows/dco.yml`) reports every commit in a pull request that has no
+matching sign-off. It is informational for now. The decision to require sign-off, with no CLA, is
+recorded in a separate ADR under [#28](https://github.com/jusso-dev/palisade/issues/28). Once
+that ADR is accepted, the maintainer makes `DCO` a required check
+([docs/repo-settings.md](docs/repo-settings.md#dco-check)).
+
+Squash merges turn a pull request into one commit on `main`. The DCO check covers the commits in
+the pull request, and the pull request keeps them on record, so the squashed commit on `main` is
+not checked again.
 
 ### Pull request size
 
@@ -196,7 +233,8 @@ sign-off is welcome but not required.
 ### Review
 
 - The `ci-ok` check and the `PR title` check must pass. The `main` branch ruleset makes both
-  required ([docs/repo-settings.md](docs/repo-settings.md)).
+  required ([docs/repo-settings.md](docs/repo-settings.md)). The `DCO` check must pass too,
+  although it is not yet a required check.
 - Changes to CI, supply-chain policy, unsafe code, the driver and signing need the maintainer's
   review ([`.github/CODEOWNERS`](.github/CODEOWNERS)).
 - Workflow changes must pass `cargo xtask check-workflows`: GitHub-hosted runners only, allowlisted

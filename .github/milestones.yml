@@ -1,0 +1,22 @@
+# The repository's milestones, delivered roughly in order. The titles are
+# exact: `.github/scripts/sync-labels.sh` matches milestones by title, creates
+# missing ones and updates descriptions. It never deletes or closes a
+# milestone. The README's "Status by milestone" table uses the same titles.
+# See docs/repo-settings.md#labels-and-milestones.
+#
+# Each entry needs `title` and `description`.
+
+- title: M0 Foundations
+  description: Workspace, CI, core policy model, threat model
+- title: M1 Audit & Inventory
+  description: Agent in audit mode, file inventory, event collection, learning mode
+- title: M2 Enforcement
+  description: Native Windows policy compilation & deployment, script/DLL control, offline override
+- title: M3 Central Management
+  description: Server, API, console, groups, approvals workflow, RBAC
+- title: M4 Elevation & Self-Service
+  description: Just-in-time elevation, user requests, trusted developer workflows
+- title: M5 Integrations & Policy-as-Code
+  description: SIEM, ITSM, identity, CLI, GitOps, CI/CD
+- title: M6 Compliance & Advanced
+  description: Essential Eight reporting, application containment, driver, change control

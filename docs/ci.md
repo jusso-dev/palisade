@@ -43,19 +43,55 @@ which should not rerun the whole build. The title reaches the script through
 an environment variable, never by expression interpolation into the shell.
 It is also a required check.
 
+### `dco.yml` (pull requests)
+
+| Job | Runners | What it runs |
+|---|---|---|
+| `DCO` | ubuntu-latest | `bash .github/scripts/check-dco.test.sh`, then `.github/scripts/check-dco.sh` on the pull request's base and head commits |
+
+Fails if a commit in the pull request has no `Signed-off-by:` trailer from its
+author ([CONTRIBUTING.md](../CONTRIBUTING.md#sign-off)). It is not a required
+check yet ([repo-settings.md](repo-settings.md#dco-check)). The commit SHAs
+reach the script through environment variables. It reruns when a pull
+request's base branch changes (`edited`).
+
+Dependabot authors its commits at a noreply address but signs them off as
+`dependabot[bot] <support@github.com>`. When GitHub reports that Dependabot
+opened the pull request, the workflow passes `--dependabot`, and the script
+accepts that sign-off for commits authored at the bot's noreply address only.
+The pull request author comes from GitHub, not from the commits, so a commit
+that copies the bot's address gains nothing.
+
+### `labels.yml` (label and milestone changes, and on demand)
+
+| Job | Runners | What it runs |
+|---|---|---|
+| `validate` | ubuntu-latest | `bash .github/scripts/sync-labels.test.sh`, then `.github/scripts/sync-labels.sh --validate` |
+| `sync` | ubuntu-latest | `.github/scripts/sync-labels.sh --apply` on a push to `main`; `--check` (a dry run) on a manual run unless `apply` is ticked |
+
+Runs on pull requests and pushes to `main` that change `.github/labels.yml`,
+`.github/milestones.yml`, the issue templates, `dependabot.yml`, the sync
+script or the workflow. `sync` never runs on a pull request, and is the only
+job here with a write scope (`issues: write`, plus `contents: read` for the
+checkout). Details:
+[repo-settings.md](repo-settings.md#labels-and-milestones).
+
 ### `audit.yml` (daily at 03:17 UTC, and on demand)
 
 Runs `cargo deny check advisories` and `cargo audit` against `main`. A new
 advisory can affect `main` without any change here, which is why this is
 scheduled. On failure, a second job opens an issue titled "Scheduled advisory
 audit is failing" with the `area:security` label, or comments on the open
-one. That job is the only place with `issues: write`.
+one. That job and the `sync` job in `labels.yml` are the only places with
+`issues: write`.
 
 ### Dependabot (`.github/dependabot.yml`)
 
 Weekly updates for Cargo dependencies and for the pinned action SHAs, with
 minor and patch bumps grouped into one PR per ecosystem. Dependabot PRs run
-the full CI like any other PR.
+the full CI like any other PR, including `DCO`. They are labelled
+`area:security` (Cargo) or `area:infra` (actions), because the label sync
+deletes Dependabot's default labels.
 
 ## Runner and action policy
 
@@ -113,6 +149,10 @@ cargo xtask check-workflows
 cargo deny --locked check          # needs cargo-deny 0.22
 bash .github/scripts/check-pr-title.test.sh
 bash .github/scripts/check-pr-title.sh "docs: example title"
+bash .github/scripts/check-dco.test.sh
+bash .github/scripts/check-dco.sh origin/main HEAD
+bash .github/scripts/sync-labels.test.sh   # needs jq and yq v4
+bash .github/scripts/sync-labels.sh --validate
 ```
 
 To check Windows-only code from Linux or another desktop OS:

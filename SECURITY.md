@@ -93,9 +93,13 @@ In scope:
 Out of scope:
 
 - Findings that need administrator-equivalent access on the endpoint, or any other access that the
-  threat model already defines as a trust boundary Palisade does not defend. The threat model is
-  tracked in [#18](https://github.com/jusso-dev/palisade/issues/18); until it is published, ask in your report and the maintainer will decide case by
-  case.
+  [threat model](docs/security/threat-model.md) already defines as a trust boundary Palisade does
+  not defend. Its [Actors and claims](docs/security/threat-model.md#actors-and-claims) table says
+  which actors Palisade resists. A finding is in scope when it defeats one of those claims, and
+  out of scope when it needs an actor the table says Palisade does not resist, such as malware
+  with administrator or SYSTEM rights, or a kernel-level attacker. The
+  [residual-risk register](docs/security/threat-model.md#residual-risk-register) lists the
+  accepted risks. If you are unsure, report it anyway and say why you think it is in scope.
 - Bugs in the operating system, in third-party dependencies (report those upstream; tell us if
   Palisade is affected) or in GitHub itself.
 - Missing hardening with no demonstrated impact, scanner output without a working proof of
