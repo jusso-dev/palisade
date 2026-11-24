@@ -4,27 +4,38 @@
 //! module builds:
 //!
 //! - the **as-provided chain**: the embedded certificates only, ordered from
-//!   the leaf up as far as they reach. It yields the intermediates, the
-//!   "PCA" (the highest certificate in the file below the root) and the
-//!   root, if the file carries one. No online lookups are made;
+//!   the leaf up as far as they reach, with no online lookups;
 //! - the **full chain**: the same search over the embedded certificates
 //!   plus a [`TrustConfig`]: the Palisade-managed anchor bundle and extra
 //!   intermediates that policy ships (#6, #9). It reports whether the chain
 //!   is complete and which anchor, if any, it reaches.
 //!
+//! The PCA (the highest certificate provided in the file below the root)
+//! and the root are taken from the **full chain**: its embedded prefix
+//! from the leaf up. The embedded certificate set is not signed, so anyone
+//! can add certificates to it; a certificate that is not on the path to the
+//! trusted anchor must never become the PCA.
+//!
 //! Every link is checked: the issuer's subject must equal the child's issuer
 //! name byte for byte, key identifiers must agree when both are present,
-//! the issuer must be a CA allowed to sign certificates (unless it is a
-//! configured anchor), path length constraints must hold, no certificate may
-//! carry a critical extension this crate does not process, and the child's
-//! signature must verify with the issuer's key. A name match alone never
-//! links two certificates.
+//! the issuer must be a CA allowed to sign certificates (`cA` set, and
+//! `keyCertSign` if it has a key usage), path length constraints must
+//! hold, and the child's signature must verify with the issuer's key. These
+//! apply to configured anchors too, when they issue a certificate: an
+//! anchor that is an end-entity certificate (a pinned self-signed signer)
+//! can be the top of a chain but can issue nothing. Only an anchor of
+//! version 1 or 2, which has no extensions to say so, is taken to be a CA.
+//! A certificate with a critical extension this crate does not process is
+//! never used, unless it is itself a configured anchor. A name match alone
+//! never links two certificates.
 //!
-//! The search enumerates every path, detects loops, stops at
-//! [`MAX_CHAIN_LENGTH`] certificates, and records at most
-//! [`MAX_CHAIN_PATHS`] paths. It then picks the best: anchored before
-//! unanchored, complete before incomplete, then the shortest. The others
-//! are kept as alternatives, which is how cross-signed paths show up. At
+//! The search enumerates every path, detects loops and stops at
+//! [`MAX_CHAIN_LENGTH`] certificates. Policy certificates are tried before
+//! embedded ones, and anchored or complete paths always displace dead ends,
+//! so certificates added to a file cannot crowd out its trusted chain. The
+//! best [`MAX_CHAIN_PATHS`] paths are kept: anchored before unanchored,
+//! complete before incomplete, then the shortest. The others are reported
+//! as alternatives, which is how cross-signed paths show up. At
 //! most [`MAX_SIGNATURE_CHECKS`] certificate signatures (links, and the
 //! self-signatures of self-issued certificates) are verified per build, and
 //! [`MAX_FILE_SIGNATURE_CHECKS`] per file, so hostile certificate sets
@@ -45,7 +56,7 @@ use super::asn1::{Asn1Error, Asn1ErrorKind, ObjectId, tag};
 use super::crypto::Verified;
 use super::eku;
 use super::signature::{KeyAlgorithm, SignatureAlgorithm, Unsupported};
-use super::x509::{self, CertSummary, CertificateError, KeyUsage};
+use super::x509::{self, Budget, CertSummary, CertificateError, KeyUsage};
 
 /// The longest path built, in certificates, leaf and root included.
 pub const MAX_CHAIN_LENGTH: usize = 10;
@@ -326,16 +337,17 @@ pub struct ChainReport {
     pub as_provided: ChainPath,
     /// Other as-provided paths (cross-signed alternatives), best first.
     pub as_provided_alternatives: Vec<ChainPath>,
-    /// The as-provided certificates between the leaf and the root, lowest
-    /// first.
+    /// The embedded certificates of the full chain between the leaf and
+    /// the root, lowest first: the full chain's embedded prefix, without
+    /// the leaf and without a self-signed root.
     pub intermediates: Vec<usize>,
-    /// The "PCA": the highest certificate provided in the file, excluding
-    /// the root. `None` when the file carries no intermediate (only the
-    /// leaf, or the leaf and a root), in which case Publisher-level OS
-    /// rules cannot be made for it.
+    /// The "PCA": the highest certificate provided in the file on the full
+    /// chain, excluding the root. `None` when the file carries no
+    /// intermediate on it (only the leaf, or the leaf and a root), in which
+    /// case Publisher-level OS rules cannot be made for it.
     pub pca: Option<usize>,
-    /// The self-signed root at the top of the as-provided chain, if the
-    /// file carries it. For a self-signed leaf, the leaf itself.
+    /// The self-signed root of the full chain, if the file carries it. For
+    /// a self-signed leaf, the leaf itself.
     pub root_as_provided: Option<usize>,
     /// The chosen full chain, built over the embedded certificates and the
     /// [`TrustConfig`].
@@ -348,8 +360,8 @@ pub struct ChainReport {
     pub anchored_to: Option<AnchorRef>,
     /// Where that anchor came from.
     pub anchor_source: AnchorSource,
-    /// The well-known ID of the full chain's root (or, failing that, the
-    /// as-provided root), from [`TrustConfig`]'s table.
+    /// The well-known ID of the full chain's root (its self-signed top or
+    /// anchor), from [`TrustConfig`]'s table.
     pub well_known_root_id: Option<u8>,
     /// What was found along the way.
     pub issues: Vec<ChainIssue>,
@@ -450,17 +462,22 @@ pub fn build_chain(
     signer: usize,
     config: &TrustConfig,
 ) -> Result<ChainReport, CertificateError> {
-    let mut budget = MAX_SIGNATURE_CHECKS;
-    build_chain_within(certs, signer, config, &mut budget)
+    build_chain_within(
+        certs,
+        signer,
+        config,
+        &mut Budget::new(MAX_SIGNATURE_CHECKS),
+    )
 }
 
-/// [`build_chain`], verifying at most `budget` link signatures (and at most
-/// [`MAX_SIGNATURE_CHECKS`]). `budget` is reduced by the number verified.
+/// [`build_chain`], verifying at most [`MAX_SIGNATURE_CHECKS`] certificate
+/// signatures, and no more than `budget` has left. `budget` is charged for
+/// every verification.
 pub(crate) fn build_chain_within(
     certs: &[Vec<u8>],
     signer: usize,
     config: &TrustConfig,
-    budget: &mut usize,
+    file_budget: &mut Budget,
 ) -> Result<ChainReport, CertificateError> {
     let mut issues = Issues::default();
     let anchors_by_thumbprint: HashMap<&str, usize> = config
@@ -480,14 +497,16 @@ pub(crate) fn build_chain_within(
     }))?;
     // Self-signature checks while parsing come out of the same budget as
     // link checks.
-    let mut parse_budget = (*budget).min(MAX_SIGNATURE_CHECKS);
-    let leaf_summary = x509::parse_within(leaf_der, &mut parse_budget)?;
+    let mut budget = Budget::new(file_budget.left().min(MAX_SIGNATURE_CHECKS));
+    let parsed = x509::parse_within(leaf_der, &mut budget);
+    file_budget.absorb(&budget);
+    let leaf_summary = parsed?;
     let mut embedded: Vec<(usize, CertSummary)> = vec![(signer, leaf_summary)];
     for (i, der) in certs.iter().enumerate() {
         if i == signer {
             continue;
         }
-        match x509::parse_within(der, &mut parse_budget) {
+        match x509::parse_within(der, &mut budget) {
             Ok(c) => embedded.push((i, c)),
             Err(error) => issues.push(ChainIssue::UnparseableCertificate { embedded: i, error }),
         }
@@ -495,7 +514,8 @@ pub(crate) fn build_chain_within(
 
     // The pool: the signer, the other embedded certificates in blob order,
     // then policy intermediates and anchors. A certificate already present
-    // (same SHA-256 thumbprint) is not added again.
+    // (same SHA-256 thumbprint) is not added again. The search tries
+    // issuers in the reverse of this order, so policy certificates first.
     let anchor_of = |cert: &CertSummary| {
         anchors_by_thumbprint
             .get(cert.sha256_thumbprint.as_str())
@@ -534,25 +554,15 @@ pub(crate) fn build_chain_within(
     // The signer is pool node 0, and so report certificate 0.
     let leaf = 0;
 
-    let parse_checks = (*budget).min(MAX_SIGNATURE_CHECKS) - parse_budget;
-    *budget = budget.saturating_sub(parse_checks);
-    if parse_budget == 0 {
+    let mut search = Search::new(&pool, &mut issues, budget);
+    let provided_paths = search.run(leaf, embedded_count, false);
+    let full_paths = search.run(leaf, pool.len(), true);
+    let budget = search.budget;
+    drop(search);
+    file_budget.absorb(&budget);
+    if budget.exhausted {
         issues.push(ChainIssue::WorkLimitReached);
     }
-    let mut search = Search::new(&pool, &mut issues, parse_budget);
-    let leaf_ok = search.usable(leaf);
-    let provided_paths = if leaf_ok {
-        search.run(leaf, embedded_count, false)
-    } else {
-        Vec::new()
-    };
-    let full_paths = if leaf_ok {
-        search.run(leaf, pool.len(), true)
-    } else {
-        Vec::new()
-    };
-    *budget = budget.saturating_sub(search.checks);
-    drop(search);
 
     let trivial = || vec![leaf];
     let provided = rank(provided_paths, &pool, false);
@@ -579,9 +589,7 @@ pub(crate) fn build_chain_within(
     }
     let mut to_path = |path: &[usize], out: &mut Vec<ChainCert>, with_anchor: bool| {
         let certs: Vec<usize> = path.iter().map(|p| index_of(*p, out)).collect();
-        let top = path.last().and_then(|p| pool.get(*p));
-        let anchored = with_anchor && top.is_some_and(|n| n.anchor.is_some());
-        let complete = anchored || top.is_some_and(|n| n.cert.is_self_signed);
+        let (anchored, complete) = path_state(path, &pool, with_anchor);
         ChainPath {
             certs,
             anchored,
@@ -606,25 +614,34 @@ pub(crate) fn build_chain_within(
         .map(|issue| remap(issue, &mut |p| index_of(p, &mut out)))
         .collect();
 
-    let top = as_provided.certs.last().copied();
-    let root_as_provided = top.filter(|t| out.get(*t).is_some_and(|c| c.cert.is_self_signed));
-    let below_root = as_provided
+    // The PCA, intermediates and root come from the full chain's embedded
+    // prefix, never from a path the full chain does not take.
+    let embedded_prefix: Vec<usize> = full_chain
         .certs
+        .iter()
+        .copied()
+        .take_while(|i| {
+            out.get(*i)
+                .is_some_and(|c| matches!(c.origin, CertOrigin::Embedded(_)))
+        })
+        .collect();
+    let prefix_is_whole = embedded_prefix.len() == full_chain.certs.len();
+    let root_as_provided = embedded_prefix
+        .last()
+        .copied()
+        .filter(|t| prefix_is_whole && out.get(*t).is_some_and(|c| c.cert.is_self_signed));
+    let below_root = embedded_prefix
         .len()
         .saturating_sub(usize::from(root_as_provided.is_some()));
-    let intermediates: Vec<usize> = as_provided
-        .certs
+    let intermediates: Vec<usize> = embedded_prefix
         .get(1..below_root)
         .unwrap_or_default()
         .to_vec();
     let pca = intermediates.last().copied();
 
+    let top = full_chain.certs.last().and_then(|t| out.get(*t));
     let anchored_to = if full_chain.anchored {
-        full_chain
-            .certs
-            .last()
-            .and_then(|t| out.get(*t))
-            .and_then(|c| c.anchor)
+        top.and_then(|c| c.anchor)
             .and_then(|i| config.anchors.get(i).map(|a| (i, a)))
             .map(|(index, a)| AnchorRef {
                 index,
@@ -634,18 +651,9 @@ pub(crate) fn build_chain_within(
     } else {
         None
     };
-    let full_root = full_chain
-        .certs
-        .last()
-        .and_then(|t| out.get(*t))
-        .filter(|c| c.cert.is_self_signed || c.anchor.is_some());
-    let well_known_root_id = full_root
-        .and_then(|c| config.well_known_root_id(&c.cert))
-        .or_else(|| {
-            root_as_provided
-                .and_then(|r| out.get(r))
-                .and_then(|c| config.well_known_root_id(&c.cert))
-        });
+    let well_known_root_id = top
+        .filter(|c| full_chain.complete && (c.cert.is_self_signed || c.anchor.is_some()))
+        .and_then(|c| config.well_known_root_id(&c.cert));
 
     Ok(ChainReport {
         leaf,
@@ -700,16 +708,29 @@ fn remap(issue: ChainIssue, f: &mut impl FnMut(usize) -> usize) -> ChainIssue {
     }
 }
 
-/// Sorts paths best first: anchored (full chains only), then complete,
-/// then shorter, then earlier certificates.
+/// Whether `path` ends at an anchor (only when `with_anchor`), and whether
+/// it is complete: anchored, or ending at a self-signed certificate.
+fn path_state(path: &[usize], pool: &[Node<'_>], with_anchor: bool) -> (bool, bool) {
+    let top = path.last().and_then(|p| pool.get(*p));
+    let anchored = with_anchor && top.is_some_and(|n| n.anchor.is_some());
+    let complete = anchored || top.is_some_and(|n| n.cert.is_self_signed);
+    (anchored, complete)
+}
+
+/// The sort key of a path: anchored, then complete, then shorter, then
+/// earlier certificates.
+fn path_key(
+    path: &[usize],
+    pool: &[Node<'_>],
+    with_anchor: bool,
+) -> (bool, bool, usize, Vec<usize>) {
+    let (anchored, complete) = path_state(path, pool, with_anchor);
+    (!anchored, !complete, path.len(), path.to_vec())
+}
+
+/// Sorts paths best first (see [`path_key`]).
 fn rank(mut paths: Vec<Vec<usize>>, pool: &[Node<'_>], with_anchor: bool) -> Vec<Vec<usize>> {
-    let key = |path: &Vec<usize>| {
-        let top = path.last().and_then(|p| pool.get(*p));
-        let anchored = with_anchor && top.is_some_and(|n| n.anchor.is_some());
-        let complete = anchored || top.is_some_and(|n| n.cert.is_self_signed);
-        (!anchored, !complete, path.len(), path.clone())
-    };
-    paths.sort_by_cached_key(key);
+    paths.sort_by_cached_key(|p| path_key(p, pool, with_anchor));
     paths
 }
 
@@ -741,13 +762,17 @@ impl Issues {
     }
 }
 
+/// The most issuer candidates examined in one search. Every step costs a
+/// few comparisons at most; signature checks are bounded by the budget.
+const MAX_SEARCH_STEPS: usize = 4096;
+
 struct Search<'p, 'i> {
     pool: &'p [Node<'p>],
     by_subject: HashMap<&'p [u8], Vec<usize>>,
     /// Link verification results, by (child, issuer).
     verified: HashMap<(usize, usize), bool>,
-    checks: usize,
-    max_checks: usize,
+    budget: Budget,
+    steps: usize,
     issues: &'i mut Issues,
     paths: Vec<Vec<usize>>,
     /// Only pool indices below this are used.
@@ -756,9 +781,11 @@ struct Search<'p, 'i> {
 }
 
 impl<'p, 'i> Search<'p, 'i> {
-    fn new(pool: &'p [Node<'p>], issues: &'i mut Issues, max_checks: usize) -> Self {
+    fn new(pool: &'p [Node<'p>], issues: &'i mut Issues, budget: Budget) -> Self {
         let mut by_subject: HashMap<&'p [u8], Vec<usize>> = HashMap::new();
-        for (i, node) in pool.iter().enumerate() {
+        // Later pool entries first: policy anchors, then policy
+        // intermediates, then embedded certificates from the last.
+        for (i, node) in pool.iter().enumerate().rev() {
             by_subject
                 .entry(node.cert.subject.der.as_slice())
                 .or_default()
@@ -768,8 +795,8 @@ impl<'p, 'i> Search<'p, 'i> {
             pool,
             by_subject,
             verified: HashMap::new(),
-            checks: 0,
-            max_checks,
+            budget,
+            steps: 0,
             issues,
             paths: Vec::new(),
             limit: 0,
@@ -777,13 +804,14 @@ impl<'p, 'i> Search<'p, 'i> {
         }
     }
 
-    /// Whether `node` may be in a path at all: an anchor always may; any
-    /// other certificate may not carry an unprocessed critical extension.
+    /// Whether `node` may be in a path at all. A certificate with a
+    /// critical extension this crate does not process may not, unless it
+    /// is a configured anchor and anchors are in use.
     fn usable(&mut self, node: usize) -> bool {
         let Some(n) = self.pool.get(node) else {
             return false;
         };
-        if n.anchor.is_some() {
+        if self.anchors && n.anchor.is_some() {
             return true;
         }
         let mut ok = true;
@@ -797,21 +825,41 @@ impl<'p, 'i> Search<'p, 'i> {
         ok
     }
 
-    /// Every maximal path from `leaf` over pool indices below `limit`.
+    /// The best maximal paths from `leaf` over pool indices below `limit`.
     fn run(&mut self, leaf: usize, limit: usize, anchors: bool) -> Vec<Vec<usize>> {
         self.limit = limit;
         self.anchors = anchors;
         self.paths.clear();
+        self.steps = 0;
         let mut path = vec![leaf];
-        self.extend(&mut path);
+        if self.usable(leaf) {
+            self.extend(&mut path);
+        }
         std::mem::take(&mut self.paths)
     }
 
+    /// Keeps `path` if it is among the best [`MAX_CHAIN_PATHS`] so far.
+    /// Over the cap, the worst path is dropped, so a dead end can never
+    /// displace an anchored or complete path.
     fn record(&mut self, path: &[usize]) {
+        let key = |p: &[usize]| path_key(p, self.pool, self.anchors);
         if self.paths.len() < MAX_CHAIN_PATHS {
             self.paths.push(path.to_vec());
-        } else {
-            self.issues.push(ChainIssue::TooManyPaths);
+            return;
+        }
+        self.issues.push(ChainIssue::TooManyPaths);
+        let worst = self
+            .paths
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, p)| key(p))
+            .map(|(i, p)| (i, key(p)));
+        if let Some((i, worst_key)) = worst {
+            if key(path) < worst_key {
+                if let Some(slot) = self.paths.get_mut(i) {
+                    *slot = path.to_vec();
+                }
+            }
         }
     }
 
@@ -833,6 +881,11 @@ impl<'p, 'i> Search<'p, 'i> {
             .unwrap_or_default();
         let mut extended = false;
         for issuer in candidates {
+            if self.steps >= MAX_SEARCH_STEPS {
+                self.budget.exhausted = true;
+                break;
+            }
+            self.steps += 1;
             if path.contains(&issuer) {
                 self.issues.push(ChainIssue::Loop { cert: issuer });
                 continue;
@@ -845,10 +898,6 @@ impl<'p, 'i> Search<'p, 'i> {
             if !self.link(path, issuer) {
                 continue;
             }
-            if self.paths.len() >= MAX_CHAIN_PATHS {
-                self.issues.push(ChainIssue::TooManyPaths);
-                return;
-            }
             extended = true;
             path.push(issuer);
             self.extend(path);
@@ -860,7 +909,8 @@ impl<'p, 'i> Search<'p, 'i> {
     }
 
     /// Whether `issuer` issued the top of `path`, with every constraint
-    /// that applies to it.
+    /// that applies to it. Anchors are held to the same CA, key usage and
+    /// path length rules when they issue a certificate.
     fn link(&mut self, path: &[usize], issuer: usize) -> bool {
         let (Some(&child), Some(issuer_node)) = (path.last(), self.pool.get(issuer)) else {
             return false;
@@ -876,43 +926,46 @@ impl<'p, 'i> Search<'p, 'i> {
                 return false;
             }
         }
-        if issuer_node.anchor.is_none() || !self.anchors {
-            if !self.usable(issuer) {
+        if !self.usable(issuer) {
+            return false;
+        }
+        // A v1 or v2 certificate has no extensions to say it is a CA; it is
+        // accepted as one only when it is a configured anchor.
+        let legacy_anchor = self.anchors && issuer_node.anchor.is_some() && i.version < 3;
+        let is_ca = match i.basic_constraints {
+            Some(bc) => bc.ca,
+            None => legacy_anchor,
+        };
+        if !is_ca {
+            self.issues.push(ChainIssue::IssuerNotCa { issuer });
+            return false;
+        }
+        if i.key_usage
+            .is_some_and(|ku| !ku.contains(KeyUsage::KEY_CERT_SIGN))
+        {
+            self.issues.push(ChainIssue::IssuerKeyUsage { issuer });
+            return false;
+        }
+        if let Some(max) = i.basic_constraints.and_then(|b| b.path_len) {
+            // Non-self-issued intermediates below this issuer (the leaf
+            // does not count).
+            let below = path
+                .iter()
+                .skip(1)
+                .filter_map(|p| self.pool.get(*p))
+                .filter(|n| n.cert.subject.der != n.cert.issuer.der)
+                .count();
+            if u32::try_from(below).unwrap_or(u32::MAX) > max {
+                self.issues.push(ChainIssue::PathLengthExceeded { issuer });
                 return false;
-            }
-            if !i.basic_constraints.is_some_and(|b| b.ca) {
-                self.issues.push(ChainIssue::IssuerNotCa { issuer });
-                return false;
-            }
-            if i.key_usage
-                .is_some_and(|ku| !ku.contains(KeyUsage::KEY_CERT_SIGN))
-            {
-                self.issues.push(ChainIssue::IssuerKeyUsage { issuer });
-                return false;
-            }
-            if let Some(max) = i.basic_constraints.and_then(|b| b.path_len) {
-                // Non-self-issued intermediates below this issuer (the
-                // leaf does not count).
-                let below = path
-                    .iter()
-                    .skip(1)
-                    .filter_map(|p| self.pool.get(*p))
-                    .filter(|n| n.cert.subject.der != n.cert.issuer.der)
-                    .count();
-                if u32::try_from(below).unwrap_or(u32::MAX) > max {
-                    self.issues.push(ChainIssue::PathLengthExceeded { issuer });
-                    return false;
-                }
             }
         }
         if let Some(ok) = self.verified.get(&(child, issuer)) {
             return *ok;
         }
-        if self.checks >= self.max_checks {
-            self.issues.push(ChainIssue::WorkLimitReached);
+        if !self.budget.take() {
             return false;
         }
-        self.checks += 1;
         let ok = match verify_link(c, i) {
             Verified::Valid => true,
             Verified::Invalid => {

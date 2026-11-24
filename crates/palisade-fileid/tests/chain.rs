@@ -268,7 +268,7 @@ fn utf8_names_and_organization_only_subjects() {
 
 #[test]
 fn pem_export_matches_openssl() {
-    let pem = std::fs::read_to_string(format!("{FIXTURES}/leaf.pem")).unwrap();
+    let pem = std::fs::read_to_string(format!("{FIXTURES}/leaf.pem.txt")).unwrap();
     assert_eq!(cert("leaf").pem(), pem);
 }
 
@@ -294,6 +294,7 @@ fn json_export_has_stable_field_names() {
         "key_bits",
         "sha1_thumbprint",
         "sha256_thumbprint",
+        "spki_sha256",
         "tbs_hash",
         "tbs_hash_alg",
         "tbs_hash_sha256",
@@ -866,6 +867,240 @@ fn chain_reports_serialise() {
     );
 }
 
+// --- Anchors are held to CA rules when they issue. --------------------------
+
+#[test]
+fn an_end_entity_anchor_cannot_issue() {
+    // A pinned self-signed signer (CA:FALSE, no keyCertSign) is trusted as
+    // itself...
+    let cfg = config(&["leaf-pinned"]);
+    let own = build_chain(&chain_of(&["leaf-pinned"]), 0, &cfg).unwrap();
+    assert!(own.full_chain.anchored);
+    // ...but a certificate signed with its key is not.
+    let evil = build_chain(
+        &chain_of(&["leaf-issued-by-pinned", "leaf-pinned"]),
+        0,
+        &cfg,
+    )
+    .unwrap();
+    assert_eq!(evil.full_chain.certs, [0]);
+    assert!(!evil.full_chain.anchored);
+    assert!(
+        evil.issues.contains(&ChainIssue::IssuerNotCa { issuer: 1 }),
+        "{:?}",
+        evil.issues
+    );
+    // The same with the pinned certificate only in policy.
+    let evil = build_chain(&chain_of(&["leaf-issued-by-pinned"]), 0, &cfg).unwrap();
+    assert!(!evil.full_chain.anchored);
+}
+
+#[test]
+fn an_anchor_without_cert_sign_cannot_issue() {
+    let cfg = config(&["root-no-cert-sign"]);
+    let r = build_chain(&chain_of(&["leaf-under-no-cert-sign"]), 0, &cfg).unwrap();
+    assert!(!r.full_chain.anchored);
+    let anchor = r
+        .certificates
+        .iter()
+        .position(|c| c.anchor == Some(0))
+        .unwrap();
+    assert!(
+        r.issues
+            .contains(&ChainIssue::IssuerKeyUsage { issuer: anchor }),
+        "{:?}",
+        r.issues
+    );
+}
+
+#[test]
+fn an_anchors_path_length_is_enforced() {
+    // `inter` has pathlen 0. Trusted as an anchor, it still may not have a
+    // CA below it.
+    let r = build_chain(
+        &chain_of(&["leaf-too-deep", "inter-sub", "inter"]),
+        0,
+        &config(&["inter"]),
+    )
+    .unwrap();
+    assert!(!r.full_chain.anchored);
+    assert!(
+        r.issues
+            .contains(&ChainIssue::PathLengthExceeded { issuer: 2 }),
+        "{:?}",
+        r.issues
+    );
+}
+
+#[test]
+fn critical_extension_exemption_is_for_anchors_only() {
+    // As provided (no anchors in play), the name-constrained CA is not used
+    // even if policy trusts it.
+    let r = build_chain(
+        &chain_of(&["leaf-under-name-constraints", "inter-name-constraints"]),
+        0,
+        &config(&["inter-name-constraints"]),
+    )
+    .unwrap();
+    assert_eq!(r.as_provided.certs, [0]);
+    assert!(r.full_chain.anchored);
+    assert_eq!(r.full_chain.certs, [0, 1]);
+}
+
+// --- Version 1 and 2 certificates. ------------------------------------------
+
+#[test]
+fn version_1_and_2_certificates() {
+    let root = cert("root-v1");
+    assert_eq!(root.version, 1);
+    assert!(root.is_self_signed);
+    assert_eq!(root.basic_constraints, None);
+    assert_eq!(root.extended_key_usage, None);
+    let v2 = cert("leaf-v2");
+    assert_eq!(v2.version, 2);
+    assert_eq!(v2.subject.common_name(), Some("Palisade V2 Signer"));
+    // A v1 root is a CA only as a configured anchor.
+    let anchored = build_chain(&chain_of(&["leaf-v1"]), 0, &config(&["root-v1"])).unwrap();
+    assert!(anchored.full_chain.anchored, "{:?}", anchored.issues);
+    let anchored =
+        build_chain(&chain_of(&["leaf-v2", "root-v1"]), 0, &config(&["root-v1"])).unwrap();
+    assert!(anchored.full_chain.anchored, "{:?}", anchored.issues);
+    let provided = build_chain(&chain_of(&["leaf-v1", "root-v1"]), 0, &TrustConfig::new()).unwrap();
+    assert_eq!(provided.as_provided.certs, [0]);
+    assert!(
+        provided
+            .issues
+            .contains(&ChainIssue::IssuerNotCa { issuer: 1 })
+    );
+}
+
+#[test]
+fn unique_identifier_bit_strings_must_be_der() {
+    let good = der("leaf-v2");
+    // subjectUniqueID [2] = 04 f0: four unused bits, all zero.
+    let at = find(&good, &[0x82, 0x02, 0x04, 0xf0]);
+    let mut dirty = good.clone();
+    dirty[at + 3] = 0xf1;
+    assert!(CertSummary::from_der(&dirty).is_err());
+    let mut too_many = good.clone();
+    too_many[at + 2] = 0x08;
+    assert!(CertSummary::from_der(&too_many).is_err());
+}
+
+// --- The embedded certificate set cannot steer the PCA or the search. -----
+
+/// A certificate with `template`'s TBS fields (subject, key, extensions)
+/// but `issuer_name`, signed by nobody: the attacker's copy of a real
+/// intermediate, made without any CA key.
+fn clone_with_issuer(template: &[u8], issuer_from: &[u8], serial: u8) -> Vec<u8> {
+    // tbsCertificate children: [0] version, serial, sigAlg, issuer, ...
+    let (h, _) = header(template, 0);
+    let tbs_at = h;
+    let (th, tl) = header(template, tbs_at);
+    let mut kids = Vec::new();
+    let mut at = tbs_at + th;
+    while at < tbs_at + th + tl {
+        let (kh, kl) = header(template, at);
+        kids.push(template[at..at + kh + kl].to_vec());
+        at += kh + kl;
+    }
+    // Replace the serial and the issuer.
+    kids[1] = vec![0x02, 0x01, serial];
+    let other_subject = {
+        let (oh, _) = header(issuer_from, 0);
+        let (ith, itl) = header(issuer_from, oh);
+        let mut a = oh + ith;
+        let mut found = Vec::new();
+        let mut n = 0;
+        while a < oh + ith + itl {
+            let (kh, kl) = header(issuer_from, a);
+            if n == 5 {
+                found = issuer_from[a..a + kh + kl].to_vec();
+            }
+            n += 1;
+            a += kh + kl;
+        }
+        found
+    };
+    kids[3] = other_subject;
+    let tbs_content = kids.concat();
+    let mut tbs = vec![0x30];
+    tbs.extend(encode_len(tbs_content.len()));
+    tbs.extend(tbs_content);
+    // Keep the original signature algorithm and a junk signature.
+    let rest_at = tbs_at + th + tl;
+    let rest = &template[rest_at..];
+    let content = [tbs.as_slice(), rest].concat();
+    let mut out = vec![0x30];
+    out.extend(encode_len(content.len()));
+    out.extend(content);
+    out
+}
+
+#[test]
+fn injected_clones_of_the_intermediate_never_become_the_pca() {
+    // The file carries the real chain, plus a copy of the intermediate
+    // (same subject, key and key identifier, so the leaf's signature
+    // verifies with it) that claims a self-signed attacker root as its
+    // issuer, and that attacker root.
+    let fake = clone_with_issuer(&der("inter"), &der("leaf-self-signed"), 0x77);
+    let fake_summary = CertSummary::from_der(&fake).unwrap();
+    assert_eq!(fake_summary.subject.der, cert("inter").subject.der);
+    assert_eq!(fake_summary.spki_sha256, cert("inter").spki_sha256);
+    let certs = vec![der("leaf"), fake, der("leaf-self-signed"), der("inter")];
+    let report = build_chain(&certs, 0, &config(&["root"])).unwrap();
+    assert!(report.full_chain.anchored);
+    let pca = report.pca_cert().unwrap();
+    assert_eq!(pca.sha256_thumbprint, cert("inter").sha256_thumbprint);
+    assert_eq!(report.root_as_provided, None);
+    // The PCA is on the full chain.
+    assert!(report.full_chain.certs.contains(&report.pca.unwrap()));
+}
+
+#[test]
+fn dead_end_clones_cannot_crowd_out_the_trusted_chain() {
+    // Twenty clones of the intermediate, each naming a different missing
+    // issuer, are dead ends. The real chain is still found, through the
+    // embedded intermediate or the policy one.
+    let mut certs = vec![der("leaf")];
+    for i in 0..20_u8 {
+        let mut fake = clone_with_issuer(&der("inter"), &der("leaf-self-signed"), i);
+        // Make each claimed issuer distinct and absent: flip a byte of the
+        // issuer CN.
+        let cn = find(&fake, b"Palisade Self Signer");
+        fake[cn] = b'A' + i;
+        certs.push(fake);
+    }
+    certs.push(der("inter"));
+    let report = build_chain(&certs, 0, &config(&["root"])).unwrap();
+    assert!(report.full_chain.anchored, "{:?}", report.issues);
+    assert_eq!(
+        report.pca_cert().unwrap().sha256_thumbprint,
+        cert("inter").sha256_thumbprint
+    );
+    assert!(report.issues.contains(&ChainIssue::TooManyPaths));
+    // With the intermediate only in policy.
+    certs.pop();
+    let mut cfg = config(&["root"]);
+    cfg.add_intermediate(&der("inter")).unwrap();
+    let report = build_chain(&certs, 0, &cfg).unwrap();
+    assert!(report.full_chain.anchored, "{:?}", report.issues);
+    assert_eq!(report.pca, None);
+}
+
+#[test]
+fn well_known_root_comes_only_from_the_full_chain() {
+    // The well-known root is embedded but the full chain anchors elsewhere
+    // (root2 via the cross-certificate): no well-known ID.
+    let mut cfg = config(&["root2"]);
+    cfg.add_well_known_root(9, &cert("root").tbs_hash.unwrap())
+        .unwrap();
+    let certs = chain_of(&["leaf", "inter", "cross-root", "root"]);
+    let r = build_chain(&certs, 0, &cfg).unwrap();
+    assert!(r.full_chain.anchored);
+    assert_eq!(r.well_known_root_id, None);
+}
+
 // --- Trust evaluation and identity. -----------------------------------------
 
 fn p7(name: &str) -> Vec<u8> {
@@ -962,7 +1197,7 @@ fn identity_strings_for_a_trusted_signer() {
         (name.value.as_str(), name.source),
         ("Palisade Test Publisher", NameSource::CommonName)
     );
-    assert_eq!(id.publisher_dn, cert("leaf").subject.canonical);
+    assert_eq!(id.publisher_dn, Some(cert("leaf").subject.canonical));
     assert_eq!(id.product_name.as_deref(), Some("Example Suite"));
     assert_eq!(
         id.publisher_product,
@@ -1072,27 +1307,210 @@ fn invalid_signatures_are_never_trusted() {
     assert!(trust.signers[0].chain.is_none());
 }
 
+/// `report`'s signature 0 with its embedded certificates replaced by
+/// `certs` (signer first) and its digests set. The trust layer reads only
+/// these fields, so this exercises it on certificates no fixture signature
+/// carries.
+fn with_certs(
+    report: &SignatureReport,
+    certs: Vec<Vec<u8>>,
+    digest: DigestAlgorithm,
+    signer_digest: DigestAlgorithm,
+) -> palisade_fileid::authenticode::SignatureInfo {
+    let mut sig = report.signatures[0].clone();
+    sig.certs_in_blob = certs;
+    sig.signer.as_mut().unwrap().signer_cert = 0;
+    sig.digest_alg = Some(digest);
+    sig.signer_digest_alg = Some(signer_digest);
+    sig
+}
+
+fn report_of(sigs: Vec<palisade_fileid::authenticode::SignatureInfo>) -> SignatureReport {
+    let mut report = signed(&p7("leaf-inter-root"));
+    report.signatures = sigs
+        .into_iter()
+        .enumerate()
+        .map(|(i, mut s)| {
+            s.index = i;
+            s
+        })
+        .collect();
+    report
+}
+
+#[test]
+fn organization_only_signer_identity() {
+    let base = signed(&p7("leaf-inter-root"));
+    let sig = with_certs(
+        &base,
+        chain_of(&["leaf-o-only", "inter"]),
+        DigestAlgorithm::Sha256,
+        DigestAlgorithm::Sha256,
+    );
+    let trust = evaluate_trust(
+        &report_of(vec![sig]),
+        &config(&["root"]),
+        Some(&version_info()),
+    );
+    let id = trust.identity.unwrap();
+    let name = id.publisher_name.unwrap();
+    assert_eq!(
+        (name.value.as_str(), name.source),
+        ("Palisade Tésts", NameSource::Organization)
+    );
+    assert_eq!(id.publisher_os_rule, None);
+    assert_eq!(id.file_publisher_os_rule, None);
+    assert!(
+        id.issues.contains(&IdentityIssue::NoCommonName),
+        "{:?}",
+        id.issues
+    );
+    assert_eq!(
+        id.publisher_product,
+        Some(("Palisade Tésts".to_owned(), "Example Suite".to_owned()))
+    );
+}
+
 #[test]
 fn names_that_do_not_decode_exactly_are_not_identities() {
-    // Replace the leaf CN's UTF8String with a PrintableString holding a
-    // non-ASCII byte. The certificate's signature breaks, but the name
-    // logic is what is tested here, via build_chain and a self-made
-    // identity check on the summary.
-    let mut leaf = der("leaf");
+    let base = signed(&p7("leaf-inter-root"));
     let cn = b"Palisade Test Publisher";
-    let at = find(&leaf, cn);
-    leaf[at - 2] = 0x13;
-    leaf[at] = 0xc0;
-    let c = CertSummary::from_der(&leaf).unwrap();
+    let at = find(&der("leaf"), cn);
+    let trust_for = |leaf: Vec<u8>| {
+        let sig = with_certs(
+            &base,
+            vec![leaf, der("inter")],
+            DigestAlgorithm::Sha256,
+            DigestAlgorithm::Sha256,
+        );
+        // The edited leaf's signature no longer verifies, so trust it
+        // directly as an anchor: the name logic is what is tested.
+        let mut cfg = TrustConfig::new();
+        cfg.add_anchor("leaf", &sig.certs_in_blob[0]).unwrap();
+        evaluate_trust(&report_of(vec![sig]), &cfg, None)
+    };
+    // A PrintableString holding a non-ASCII byte: lossy.
+    let mut lossy = der("leaf");
+    lossy[at - 2] = 0x13;
+    lossy[at] = 0xc0;
+    let c = CertSummary::from_der(&lossy).unwrap();
     let attr = c.subject.first(AttributeKind::CommonName).unwrap();
     assert!(attr.lossy && !attr.is_clean());
-    // A NUL is kept and makes the name unclean.
+    let id = trust_for(lossy).identity.unwrap();
+    assert_eq!(id.publisher_name, None);
+    assert_eq!(id.publisher_os_rule, None);
+    assert_eq!(id.publisher_dn, None);
+    assert!(id.issues.contains(&IdentityIssue::UnusableName));
+    assert!(id.issues.contains(&IdentityIssue::UnusableDn));
+    // A NUL is kept, makes the name unclean, and there is no fallback to O.
     let mut nul = der("leaf");
     nul[at + 8] = 0;
     let c = CertSummary::from_der(&nul).unwrap();
     let attr = c.subject.first(AttributeKind::CommonName).unwrap();
     assert_eq!(attr.value, "Palisade\0Test Publisher");
     assert!(!attr.is_clean());
+    let id = trust_for(nul).identity.unwrap();
+    assert_eq!(id.publisher_name, None);
+    assert!(id.issues.contains(&IdentityIssue::UnusableName));
+    // Blank: a CN of spaces.
+    let mut blank = der("leaf");
+    blank[at..at + cn.len()].fill(b' ');
+    let c = CertSummary::from_der(&blank).unwrap();
+    assert!(
+        !c.subject
+            .first(AttributeKind::CommonName)
+            .unwrap()
+            .is_clean()
+    );
+    let id = trust_for(blank).identity.unwrap();
+    assert_eq!(id.publisher_name, None);
+    assert!(id.issues.contains(&IdentityIssue::UnusableName));
+}
+
+#[test]
+fn signers_restricted_from_code_signing_are_untrusted() {
+    let base = signed(&p7("leaf-inter-root"));
+    // A TLS-only issuer.
+    let tls_ca = with_certs(
+        &base,
+        chain_of(&["leaf-under-tls-ca", "inter-tls"]),
+        DigestAlgorithm::Sha256,
+        DigestAlgorithm::Sha256,
+    );
+    // A TLS server leaf: wrong EKU and no code signing.
+    let tls_leaf = with_certs(
+        &base,
+        chain_of(&["leaf-tls", "inter"]),
+        DigestAlgorithm::Sha256,
+        DigestAlgorithm::Sha256,
+    );
+    // A leaf whose key usage lacks digitalSignature: the sub-CA, used as a
+    // signer (keyCertSign and cRLSign only).
+    let no_ds = with_certs(
+        &base,
+        chain_of(&["inter-sub", "inter"]),
+        DigestAlgorithm::Sha256,
+        DigestAlgorithm::Sha256,
+    );
+    let trust = evaluate_trust(
+        &report_of(vec![tls_ca, tls_leaf, no_ds]),
+        &config(&["root"]),
+        None,
+    );
+    assert_eq!(trust.primary, None);
+    assert_eq!(
+        trust.signers[0].untrusted,
+        [UntrustedReason::CodeSigningNotPermitted]
+    );
+    assert_eq!(
+        trust.signers[1].untrusted,
+        [UntrustedReason::CodeSigningNotPermitted]
+    );
+    assert_eq!(
+        trust.signers[2].untrusted,
+        [UntrustedReason::SignerKeyUsage]
+    );
+    assert!(
+        trust
+            .signers
+            .iter()
+            .all(|s| s.chain.as_ref().unwrap().full_chain.anchored)
+    );
+}
+
+#[test]
+fn primary_ranks_by_the_weaker_digest() {
+    let base = signed(&p7("leaf-inter-root"));
+    let certs = || chain_of(&["leaf", "inter"]);
+    // SHA-256 image digest but a SHA-1 SignerInfo digest, then a full
+    // SHA-256 signature: the second is stronger.
+    let mixed = with_certs(
+        &base,
+        certs(),
+        DigestAlgorithm::Sha256,
+        DigestAlgorithm::Sha1,
+    );
+    let full = with_certs(
+        &base,
+        certs(),
+        DigestAlgorithm::Sha256,
+        DigestAlgorithm::Sha256,
+    );
+    let trust = evaluate_trust(
+        &report_of(vec![mixed.clone(), full.clone()]),
+        &config(&["root"]),
+        None,
+    );
+    assert_eq!(trust.primary, Some(1));
+    // Equal strength: the first wins.
+    let trust = evaluate_trust(
+        &report_of(vec![full.clone(), full]),
+        &config(&["root"]),
+        None,
+    );
+    assert_eq!(trust.primary, Some(0));
+    let trust = evaluate_trust(&report_of(vec![mixed]), &config(&["root"]), None);
+    assert_eq!(trust.primary, Some(0));
 }
 
 #[test]

@@ -121,30 +121,43 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     EKUs keep their OID. `Eku::os_policy_value` gives the `01`, length, OID
     body form that OS-native policy writes.
   - `build_chain` orders the certificates embedded beside a signer into the
-    **as-provided chain** (leaf, intermediates, the "PCA", which is the
-    highest certificate in the file below the root, and the root if the file
-    carries it), with no online lookups. It also builds the **full chain**
-    against a `TrustConfig`: trust anchors and intermediates that policy
-    ships (#6, #9), and the well-known root table, which is data from policy
-    too. It reports `chain_complete`, `anchored_to`, `anchor_source` and
-    `well_known_root_id`. Every link must match by issuer name (byte for
-    byte) and key identifier, the issuer must be a CA with `keyCertSign` and
-    room in its path length, no certificate may carry a critical extension
-    this crate does not process, and the child's signature must verify with
-    the issuer's key, so a forged issuer name never links. Every path is
-    enumerated, loops are detected, paths stop at 10 certificates, and the
-    best path (anchored, then complete, then shortest) is chosen, with the
-    others kept as alternatives (cross-signed paths). At most 8 paths and
-    128 link signatures per chain, and 512 per file, are checked.
+    **as-provided chain**, with no online lookups, and builds the **full
+    chain** against a `TrustConfig`: trust anchors and intermediates that
+    policy ships (#6, #9), and the well-known root table, which is data from
+    policy too. It reports `chain_complete`, `anchored_to`, `anchor_source`
+    and `well_known_root_id`. The intermediates, the "PCA" (the highest
+    certificate in the file below the root) and the root come from the full
+    chain's embedded part. The embedded certificate set is not signed, so a
+    certificate someone added that is not on the trusted path can never
+    become the PCA.
+  - Every link must match by issuer name (byte for byte) and key
+    identifier. The issuer must be a CA with `keyCertSign` (if it has a key
+    usage) and room in its path length, and the child's signature must
+    verify with the issuer's key, so a forged issuer name never links.
+    Anchors are held to the same rules when they issue: a pinned end-entity
+    certificate can be trusted as itself but issues nothing. Only a v1 or
+    v2 anchor, which has no extensions to say so, is taken as a CA. No
+    certificate may carry a critical extension this crate does not process,
+    except a configured anchor.
+  - Every path is enumerated, loops are detected and paths stop at 10
+    certificates. Policy certificates are tried first, and the 8 best paths
+    are kept (anchored, then complete, then shortest), so dead ends added to
+    a file cannot crowd out its trusted chain. The best is chosen and the
+    others are kept as alternatives (cross-signed paths). At most 128
+    certificate signatures are checked per chain (links and
+    self-signatures), and 512 per file. Running out fails closed.
   - `evaluate_trust` builds the chain of every valid signature in a
     `SignatureReport` and chooses the primary signature **after** trust:
-    the first trusted signature with the strongest digest. A signer is
+    the first trusted signature with the strongest digest (the weaker of
+    its image and signer digests, as in #48). A signer is
     trusted when its chain reaches a configured anchor, every certificate in
     it permits code signing, and its key usage allows digital signatures.
     An untrusted signer, including a nested signature anyone could have
     appended, never becomes primary. The trusted primary yields a
-    `SignerIdentity`: `publisher_name` (leaf `CN`, or `O`, recording which),
-    `publisher_dn`, `publisher_product` (with `ProductName`),
+    `SignerIdentity`: `publisher_name` (leaf `CN`, or `O`, recording which;
+    never a blank, inexact or control-character name), `publisher_dn` (only
+    when every attribute decodes exactly), `publisher_product` (with
+    `ProductName`),
     `publisher_os_rule` (PCA TBS hash or well-known root ID, plus leaf `CN`)
     and `file_publisher_os_rule` (plus file name and minimum version), with
     the reason for any that cannot be made. A file with no trusted signer

@@ -27,6 +27,7 @@ use super::chain::{ChainReport, MAX_FILE_SIGNATURE_CHECKS, TrustConfig, build_ch
 use super::signature::{
     DigestAlgorithm, KeyAlgorithm, SignatureInfo, SignatureReport, SignatureStatus,
 };
+use super::x509::Budget;
 use super::x509::{AttributeKind, CertSummary, CertificateError, KeyUsage};
 use crate::pe::version::{FileVersionQuad, VersionField, VersionInfo};
 
@@ -61,8 +62,11 @@ pub struct SignerTrust {
     pub trusted: bool,
     /// Why it is not trusted.
     pub untrusted: Vec<UntrustedReason>,
-    /// The signature's image digest algorithm, for primary selection.
+    /// The signature's image digest algorithm.
     pub digest_alg: Option<DigestAlgorithm>,
+    /// The SignerInfo's digest algorithm. Primary selection ranks a
+    /// signature by the weaker of the two.
+    pub signer_digest_alg: Option<DigestAlgorithm>,
     /// Whether an OS-native code integrity signer rule can use this signer:
     /// the signature itself is compatible
     /// ([`SignatureInfo::os_ci_compatible`]), and every certificate in the
@@ -155,13 +159,20 @@ fn serialize_version<S: serde::Serializer>(v: &FileVersionQuad, s: S) -> Result<
 #[non_exhaustive]
 pub enum IdentityIssue {
     /// The leaf subject's `CN` (or, with no `CN`, its `O`) is not an exact
-    /// decoding, or holds a control character, so it is not used as a
-    /// name.
+    /// decoding, is empty or only whitespace, or holds a control
+    /// character, so it is not used as a name.
     UnusableName,
+    /// A leaf subject attribute is not an exact, control-free decoding, so
+    /// no `publisher_dn` is given.
+    UnusableDn,
     /// The leaf subject has more than one `CN`; the first is used.
     MultipleCommonNames,
     /// The leaf subject has neither `CN` nor `O`.
     NoName,
+    /// The leaf subject has no usable `CN` (the publisher name came from
+    /// `O`), so the OS Publisher and FilePublisher levels, which need the
+    /// leaf `CN`, cannot be made.
+    NoCommonName,
     /// The file carries no intermediate, so there is no PCA, and the root
     /// is not a well-known root: Publisher-level OS rules cannot be made.
     NoPca,
@@ -181,8 +192,11 @@ pub struct SignerIdentity {
     pub signature: usize,
     /// The leaf `CN`, or `O` when there is no `CN`.
     pub publisher_name: Option<PublisherName>,
-    /// The full canonical subject DN of the leaf.
-    pub publisher_dn: String,
+    /// The full canonical subject DN of the leaf. `None` when any subject
+    /// attribute is not an exact, control-free decoding (see
+    /// [`super::NameAttribute::lossy`]), because such a DN could match a
+    /// pattern meant for another name.
+    pub publisher_dn: Option<String>,
     /// The product name from the version resource (`ProductName`).
     pub product_name: Option<String>,
     /// `(publisher_name, product_name)`: both present, for publisher plus
@@ -243,7 +257,7 @@ pub fn evaluate_trust(
     config: &TrustConfig,
     version: Option<&VersionInfo>,
 ) -> TrustReport {
-    let mut budget = MAX_FILE_SIGNATURE_CHECKS;
+    let mut budget = Budget::new(MAX_FILE_SIGNATURE_CHECKS);
     let signers: Vec<SignerTrust> = report
         .signatures
         .iter()
@@ -272,7 +286,7 @@ pub fn evaluate_trust(
     }
 }
 
-fn signer_trust(sig: &SignatureInfo, config: &TrustConfig, budget: &mut usize) -> SignerTrust {
+fn signer_trust(sig: &SignatureInfo, config: &TrustConfig, budget: &mut Budget) -> SignerTrust {
     let mut untrusted = Vec::new();
     // Only a valid signature's signer is looked at. `signer` is also set
     // for a tolerated digest mismatch, which is never trusted.
@@ -322,11 +336,13 @@ fn signer_trust(sig: &SignatureInfo, config: &TrustConfig, budget: &mut usize) -
         untrusted,
         chain,
         digest_alg: sig.digest_alg,
+        signer_digest_alg: sig.signer_digest_alg,
         os_ci_compatible,
     }
 }
 
-/// The first trusted signature with the strongest digest.
+/// The first trusted signature with the strongest digest, ranking each by
+/// the weaker of its image and signer digests (as #48 does).
 fn select_primary(signers: &[SignerTrust]) -> Option<usize> {
     let rank = |d: Option<DigestAlgorithm>| match d {
         Some(a) if a.is_sha2() => 2,
@@ -335,7 +351,7 @@ fn select_primary(signers: &[SignerTrust]) -> Option<usize> {
     };
     let mut best: Option<(usize, u8)> = None;
     for s in signers.iter().filter(|s| s.trusted) {
-        let r = rank(s.digest_alg);
+        let r = rank(s.digest_alg).min(rank(s.signer_digest_alg));
         if best.is_none_or(|(_, b)| r > b) {
             best = Some((s.signature, r));
         }
@@ -355,8 +371,15 @@ fn identity(
         None => (None, None),
     };
     let publisher_dn = leaf
-        .map(|c| c.subject.canonical.clone())
-        .unwrap_or_default();
+        .filter(|c| {
+            c.subject
+                .attributes()
+                .all(|a| !a.lossy && !a.value.chars().any(char::is_control))
+        })
+        .map(|c| c.subject.canonical.clone());
+    if leaf.is_some() && publisher_dn.is_none() {
+        issues.push(IdentityIssue::UnusableDn);
+    }
 
     let product_name = version
         .and_then(|v| v.get(VersionField::ProductName))
@@ -443,6 +466,9 @@ fn names(
         return (None, None);
     }
     let leaf_cn = (source == NameSource::CommonName).then(|| attr.value.clone());
+    if leaf_cn.is_none() {
+        issues.push(IdentityIssue::NoCommonName);
+    }
     (
         Some(PublisherName {
             value: attr.value.clone(),

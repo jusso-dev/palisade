@@ -5,7 +5,7 @@
 # and trusted by nothing. No private key is committed. `expected.txt` holds
 # reference values for every certificate (thumbprints, TBS hashes, serial),
 # computed here by Python's hashlib from the DER, independently of the Rust
-# parser, which the tests compare against. `leaf.pem` is openssl's PEM form
+# parser, which the tests compare against. `leaf.pem.txt` is openssl's PEM form
 # of `leaf.der`, for the PEM export test.
 #
 # The `.p7` files are PKCS#7 SignedData over the synthetic image
@@ -195,6 +195,68 @@ for i in 01 02 03 04 05 06 07 08 09 10 11; do
 done
 rsa d12; issue d12 "/O=Palisade Tests/CN=Palisade Depth Signer" "$prev" leaf.cnf
 
+# Anchors that must not issue: a self-signed end-entity signer (CA:FALSE,
+# no keyCertSign) and a leaf signed with its key; and a v3 root with a key
+# usage that lacks keyCertSign, and a leaf under it.
+cat > ee.cnf <<'CNF'
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature
+extendedKeyUsage=codeSigning
+subjectKeyIdentifier=hash
+CNF
+cat > noku-root.cnf <<'CNF'
+basicConstraints=critical,CA:TRUE
+keyUsage=critical,digitalSignature
+subjectKeyIdentifier=hash
+CNF
+rsa pinned; selfsign pinned "/O=Palisade Tests/CN=Palisade Pinned Signer" ee.cnf
+rsa evil; issue evil "/O=Palisade Tests/CN=Palisade Impersonated Publisher" pinned leaf.cnf
+rsa nokuroot; selfsign nokuroot "/O=Palisade Tests/CN=Palisade No Cert Sign Root" noku-root.cnf
+rsa nokuleaf; issue nokuleaf "/O=Palisade Tests/CN=Palisade Under No Cert Sign Root" nokuroot leaf.cnf
+
+# Version 1 and 2 certificates, which openssl no longer makes: the TBS is
+# built here and signed with openssl. A v1 root, a v1 leaf it issued, and a
+# v2 leaf with issuer and subject unique identifiers.
+rsa v1root; rsa v1leaf; rsa v2leaf
+for k in v1root v1leaf v2leaf; do openssl pkey -in "$k.key" -pubout -outform DER -out "$k.spki"; done
+python3 -I - "$work" <<'PY'
+import pathlib, subprocess, sys
+w = pathlib.Path(sys.argv[1])
+def tlv(tag, body):
+    n = len(body)
+    if n < 0x80:
+        head = bytes([n])
+    else:
+        b = n.to_bytes((n.bit_length() + 7) // 8, "big")
+        head = bytes([0x80 | len(b)]) + b
+    return bytes([tag]) + head + body
+def oid(b): return tlv(0x06, bytes.fromhex(b))
+def name(*parts):
+    rdns = b""
+    for o, v in parts:
+        rdns += tlv(0x31, tlv(0x30, oid(o) + tlv(0x0c, v.encode())))
+    return tlv(0x30, rdns)
+O, CN = "55040a", "550403"
+ALG = tlv(0x30, oid("2a864886f70d01010b") + b"\x05\x00")  # sha256WithRSAEncryption
+VALID = tlv(0x30, tlv(0x17, b"250101000000Z") + tlv(0x17, b"350101000000Z"))
+root = name((O, "Palisade Tests"), (CN, "Palisade V1 Root"))
+def cert(version, serial, issuer, subject, key, signer, unique=b""):
+    spki = (w / f"{key}.spki").read_bytes()
+    v = b"" if version == 1 else tlv(0xa0, tlv(0x02, bytes([version - 1])))
+    tbs = tlv(0x30, v + tlv(0x02, bytes([serial])) + ALG + issuer + VALID + subject + spki + unique)
+    (w / "tbs.der").write_bytes(tbs)
+    sig = subprocess.run(["openssl", "dgst", "-sha256", "-sign", str(w / f"{signer}.key"),
+                          str(w / "tbs.der")], check=True, capture_output=True).stdout
+    return tlv(0x30, tbs + ALG + tlv(0x03, b"\x00" + sig))
+(w / "v1root.der").write_bytes(cert(1, 1, root, root, "v1root", "v1root"))
+(w / "v1leaf.der").write_bytes(cert(1, 2, root, name((O, "Palisade Tests"), (CN, "Palisade V1 Signer")), "v1leaf", "v1root"))
+uids = tlv(0x81, b"\x00\x01\x02") + tlv(0x82, b"\x04\xf0")
+(w / "v2leaf.der").write_bytes(cert(2, 3, root, name((O, "Palisade Tests"), (CN, "Palisade V2 Signer")), "v2leaf", "v1root", uids))
+PY
+for c in v1root v1leaf v2leaf; do openssl x509 -inform DER -in "$c.der" -out "$c.pem"; done
+openssl verify -CAfile v1root.pem v1leaf.pem >/dev/null
+openssl verify -CAfile v1root.pem v2leaf.pem >/dev/null
+
 # Sanity checks with openssl itself.
 openssl verify -CAfile root.pem -untrusted inter.pem leaf.pem >/dev/null
 openssl verify -CAfile root.pem -untrusted inter.pem onlyo.pem >/dev/null
@@ -222,7 +284,11 @@ der ncca inter-name-constraints; der ncleaf leaf-under-name-constraints
 der sub inter-sub; der deep leaf-too-deep
 der loopa loop-a; der loopb loop-b; der loopleaf leaf-loop
 for i in 00 01 02 03 04 05 06 07 08 09 10 11 12; do der "d$i" "depth-$i"; done
-openssl x509 -in leaf.pem -out "$out/leaf.pem"
+der pinned leaf-pinned; der evil leaf-issued-by-pinned
+der nokuroot root-no-cert-sign; der nokuleaf leaf-under-no-cert-sign
+der v1root root-v1; der v1leaf leaf-v1; der v2leaf leaf-v2
+# Named .txt: the repository ignores *.pem, to keep keys out.
+openssl x509 -in leaf.pem -out "$out/leaf.pem.txt"
 
 # Dual signature: SHA-1 by chain A (leaf A and root A) first, then a nested
 # SHA-256 signature by chain B (leaf B and root B).

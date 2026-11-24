@@ -201,11 +201,12 @@ pub struct NameAttribute {
 }
 
 impl NameAttribute {
-    /// Whether the value is an exact decoding with no control characters,
-    /// so it is safe to match as an identity string.
+    /// Whether the value is an exact decoding, not empty or only
+    /// whitespace, with no control characters, so it is safe to match as an
+    /// identity string.
     #[must_use]
     pub fn is_clean(&self) -> bool {
-        !self.lossy && !self.value.chars().any(char::is_control)
+        !self.lossy && !self.value.trim().is_empty() && !self.value.chars().any(char::is_control)
     }
 }
 
@@ -413,6 +414,9 @@ pub struct CertSummary {
     pub sha1_thumbprint: String,
     /// SHA-256 of the whole certificate.
     pub sha256_thumbprint: String,
+    /// SHA-256 of the DER `subjectPublicKeyInfo`: identifies the key,
+    /// whatever certificate carries it.
+    pub spki_sha256: String,
     /// The hash of the DER `tbsCertificate`, exactly as encoded, under the
     /// digest of [`Self::sig_alg`]: 40 hex characters for SHA-1, 64 for
     /// SHA-256, 96 for SHA-384 and 128 for SHA-512. This is the value OS
@@ -457,7 +461,7 @@ impl CertSummary {
     /// Parses one DER certificate. `der` must be exactly the certificate,
     /// with nothing after it.
     pub fn from_der(der: &[u8]) -> Result<Self> {
-        parse_within(der, &mut 1)
+        parse_within(der, &mut Budget::new(1))
     }
 
     /// The certificate in PEM form: `-----BEGIN CERTIFICATE-----`, the DER
@@ -555,7 +559,10 @@ struct Walked<'a> {
     not_before: i64,
     not_after: i64,
     subject: Tlv<'a>,
-    spki: Tlv<'a>,
+    /// The DER `subjectPublicKeyInfo`.
+    spki: &'a [u8],
+    key_alg: KeyAlgorithm,
+    key_bits: Option<u32>,
     extensions: Option<Tlv<'a>>,
 }
 
@@ -604,10 +611,7 @@ fn walk(der: &[u8]) -> Result<Walked<'_>> {
             if version == 0 {
                 return Err(CertificateError::FieldNotAllowed);
             }
-            // [n] IMPLICIT BIT STRING: an unused-bits octet, then the bits.
-            if id.content.first().is_none_or(|unused| *unused > 7) {
-                return Err(id.error(Asn1ErrorKind::InvalidValue).into());
-            }
+            implicit_bit_string(&id)?;
         }
     }
     let extensions = match t.read_optional(tag::context_cons(3))? {
@@ -624,7 +628,7 @@ fn walk(der: &[u8]) -> Result<Walked<'_>> {
         None => None,
     };
     t.finish()?;
-    let (_, _, key) = pkcs7::parse_spki(&spki)?;
+    let (key_alg, key_bits, key) = pkcs7::parse_spki(&spki)?;
     Ok(Walked {
         raw: Raw {
             tbs: tbs.raw,
@@ -638,9 +642,73 @@ fn walk(der: &[u8]) -> Result<Walked<'_>> {
         not_before,
         not_after,
         subject,
-        spki,
+        spki: spki.raw,
+        key_alg,
+        key_bits,
         extensions,
     })
+}
+
+/// Checks an `[n] IMPLICIT BIT STRING`: an unused-bits count of 0 to 7,
+/// at least one content octet when it is not 0, and zero unused bits
+/// (X.690 11.2.1).
+fn implicit_bit_string(tlv: &Tlv<'_>) -> Result<()> {
+    let invalid = || CertificateError::Asn1(tlv.error(Asn1ErrorKind::InvalidValue));
+    let (unused, rest) = tlv.content.split_first().ok_or_else(invalid)?;
+    match (unused, rest.last()) {
+        (0, _) => Ok(()),
+        (1..=7, Some(last)) if last & ((1_u8 << unused) - 1) == 0 => Ok(()),
+        _ => Err(invalid()),
+    }
+}
+
+/// A count of certificate signatures that may still be verified. Running
+/// out never makes a result more trusted: a link not checked is not made,
+/// and a certificate whose self-signature was not checked is not
+/// self-signed.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Budget {
+    left: usize,
+    used: usize,
+    /// A check was wanted after the budget ran out.
+    pub exhausted: bool,
+}
+
+impl Budget {
+    /// A budget of `checks` verifications.
+    pub const fn new(checks: usize) -> Self {
+        Self {
+            left: checks,
+            used: 0,
+            exhausted: false,
+        }
+    }
+
+    /// Spends one verification. `false`, and marks the budget exhausted,
+    /// when none is left.
+    pub fn take(&mut self) -> bool {
+        if self.left == 0 {
+            self.exhausted = true;
+            false
+        } else {
+            self.left -= 1;
+            self.used += 1;
+            true
+        }
+    }
+
+    /// How many verifications are left.
+    pub const fn left(&self) -> usize {
+        self.left
+    }
+
+    /// Records that `inner`, a budget carved out of this one, was spent.
+    pub fn absorb(&mut self, inner: &Self) {
+        let n = inner.used.min(self.left);
+        self.left -= n;
+        self.used += n;
+        self.exhausted |= inner.exhausted;
+    }
 }
 
 /// The borrowed parts of `der` that signature checks need. Walks the
@@ -678,12 +746,12 @@ pub(crate) fn check_signed_by(
 /// certificate's own signature costs one unit of `budget`; with none left,
 /// the certificate is reported as not self-signed, which can only make a
 /// chain look less complete, never more trusted.
-pub(crate) fn parse_within(der: &[u8], budget: &mut usize) -> Result<CertSummary> {
+pub(crate) fn parse_within(der: &[u8], budget: &mut Budget) -> Result<CertSummary> {
     let w = walk(der)?;
     let sig_alg = signature_algorithm(&w.sig_alg)?;
     let issuer = parse_name(&w.issuer)?;
     let subject = parse_name(&w.subject)?;
-    let (public_key_alg, key_bits, _) = pkcs7::parse_spki(&w.spki)?;
+    let (public_key_alg, key_bits) = (w.key_alg.clone(), w.key_bits);
     let mut ext = Extensions::default();
     if let Some(list) = &w.extensions {
         parse_extensions(list, &mut ext)?;
@@ -701,10 +769,9 @@ pub(crate) fn parse_within(der: &[u8], budget: &mut usize) -> Result<CertSummary
         tbs_set.insert(alg);
     }
     let tbs_hashes = hash_bytes(w.raw.tbs, tbs_set);
-    let self_signed = subject.der == issuer.der && *budget > 0 && {
-        *budget -= 1;
-        check_signed_by(&w.raw, &sig_alg, &w.raw, &public_key_alg) == Verified::Valid
-    };
+    let self_signed = subject.der == issuer.der
+        && budget.take()
+        && check_signed_by(&w.raw, &sig_alg, &w.raw, &public_key_alg) == Verified::Valid;
 
     Ok(CertSummary {
         version: u8::try_from(w.version.saturating_add(1)).unwrap_or(u8::MAX),
@@ -718,6 +785,10 @@ pub(crate) fn parse_within(der: &[u8], budget: &mut usize) -> Result<CertSummary
         key_bits,
         sha1_thumbprint: hex_of(&thumbprints, HashAlgorithm::Sha1),
         sha256_thumbprint: hex_of(&thumbprints, HashAlgorithm::Sha256),
+        spki_sha256: hex_of(
+            &hash_bytes(w.spki, AlgorithmSet::SHA256),
+            HashAlgorithm::Sha256,
+        ),
         tbs_hash: own.map(|alg| hex_of(&tbs_hashes, alg)),
         tbs_hash_alg,
         tbs_hash_sha256: hex_of(&tbs_hashes, HashAlgorithm::Sha256),
@@ -1013,9 +1084,7 @@ fn parse_distribution_point(point: &Tlv<'_>, ext: &mut Extensions) -> Result<()>
         }
     }
     if let Some(reasons) = r.read_optional(tag::context_prim(1))? {
-        if reasons.content.is_empty() {
-            return Err(reasons.error(Asn1ErrorKind::InvalidValue).into());
-        }
+        implicit_bit_string(&reasons)?;
     }
     if let Some(issuer) = r.read_optional(tag::context_cons(2))? {
         asn1::validate(&issuer)?;

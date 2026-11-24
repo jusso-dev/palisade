@@ -191,7 +191,7 @@ impl Eku {
     /// The EKU in the form OS-native code integrity policy writes in an
     /// `EKU` element's `Value`: the octet `01`, one length octet, then the
     /// OID's DER content octets, in uppercase hex. For code signing,
-    /// `010806...` is `01`, `08`, `2B06010505070303`. `None` for an OID of
+    /// `01082B06010505070303` is `01`, `08`, `2B06010505070303`. `None` for an OID of
     /// more than 127 content octets, which one length octet cannot hold.
     #[must_use]
     pub fn os_policy_value(&self) -> Option<String> {
