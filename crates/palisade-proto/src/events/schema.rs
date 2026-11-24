@@ -53,6 +53,13 @@ pub fn generate() -> Value {
     object.insert("title".to_owned(), "Palisade canonical event".into());
     object.insert("x-schema-version".to_owned(), CURRENT.to_string().into());
     object.insert("allOf".to_owned(), Value::Array(cross_field_rules()));
+    // A reader accepts its own major and minor versions up to its own, so
+    // the schema does too.
+    if let Some(Value::Object(props)) = object.get_mut("properties") {
+        if let Some(Value::Object(version)) = props.get_mut("schema_version") {
+            version.insert("pattern".to_owned(), readable_versions().into());
+        }
+    }
     if let Some(Value::Object(defs)) = object.get_mut("$defs") {
         for (name, def) in rule_defs() {
             defs.insert(name.to_owned(), def);
@@ -167,6 +174,17 @@ fn rule_defs() -> Vec<(&'static str, Value)> {
             }),
         ),
     ]
+}
+
+/// A pattern for every `schema_version` this crate reads: its major, and a
+/// minor up to its own.
+fn readable_versions() -> String {
+    let minors: Vec<String> = (0..=CURRENT.minor).map(|m| m.to_string()).collect();
+    format!(
+        "^{}\\.({})\\.(0|[1-9][0-9]*)$",
+        CURRENT.major,
+        minors.join("|")
+    )
 }
 
 /// A pattern for every `schema_version` of the current major older than

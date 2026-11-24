@@ -383,11 +383,7 @@ impl When {
     /// Whether the condition holds. An absent value never matches.
     /// Values are lowercased when the file is loaded.
     fn holds(&self, record: &Record, absent: &[String]) -> bool {
-        let Some(value) = record
-            .fields
-            .get(&self.field)
-            .filter(|v| !v.is_empty() && !absent.contains(v))
-        else {
+        let Some(value) = present_value(record, &self.field, absent) else {
             return false;
         };
         if self.present {
@@ -569,6 +565,9 @@ const OBJECT_NAME_TARGETS: &[&str] = &[
     "/registry/key",
 ];
 
+/// Most `absent_values` in one file.
+pub const MAX_ABSENT_VALUES: usize = 16;
+
 /// Most entries in one value table.
 pub const MAX_VALUE_MAP_ENTRIES: usize = 256;
 
@@ -617,8 +616,9 @@ impl MappingSet {
     ///
     /// # Errors
     ///
-    /// As [`MappingSet::from_yaml`], and also if a file for the same source
-    /// kind is already in the set.
+    /// As [`MappingSet::from_yaml`], and also if the file maps a source event
+    /// ID that another file in the set already maps, or is a `third_party`
+    /// file for another format than the set's.
     pub fn add_yaml(&mut self, name: &str, text: &str) -> Result<(), LoadError> {
         let err = |location: String, message: String| LoadError {
             file: name.to_owned(),
@@ -651,6 +651,12 @@ impl MappingSet {
             return Err(err(
                 "entries".to_owned(),
                 format!("more than {MAX_ENTRIES} entries"),
+            ));
+        }
+        if doc.absent_values.len() > MAX_ABSENT_VALUES {
+            return Err(err(
+                "absent_values".to_owned(),
+                format!("more than {MAX_ABSENT_VALUES} values"),
             ));
         }
         for (i, v) in doc.absent_values.iter().enumerate() {
@@ -842,11 +848,7 @@ impl MappingSet {
             insert_at(&mut event, pointer, value.clone());
         }
         for rule in &entry.fields {
-            let Some(raw) = record
-                .fields
-                .get(&rule.source)
-                .filter(|v| !absent.contains(v))
-            else {
+            let Some(raw) = present_value(record, &rule.source, absent) else {
                 continue;
             };
             match rule.read(raw) {
@@ -861,7 +863,8 @@ impl MappingSet {
 
         let mut signatures_incomplete = None;
         if let Some(spec) = &entry.signatures {
-            let (signers, incomplete) = map_signers(spec, record, signatures, &mut dropped)?;
+            let (signers, incomplete) =
+                map_signers(spec, record, signatures, absent, &mut dropped)?;
             if !signers.is_empty() {
                 insert_at(&mut event, SIGNERS_POINTER, Value::Array(signers));
             }
@@ -886,6 +889,16 @@ pub const THIRD_PARTY: &[(&str, &str, &str)] = &[(
     "third_party_generic.yaml",
     include_str!("../../mappings/third_party_generic.yaml"),
 )];
+
+/// A field's value, unless it is missing, empty, or one of the file's
+/// `absent_values`: each of those means "no value".
+fn present_value<'a>(record: &'a Record, field: &str, absent: &[String]) -> Option<&'a str> {
+    record
+        .fields
+        .get(field)
+        .map(String::as_str)
+        .filter(|v| !v.is_empty() && !absent.iter().any(|a| a == v))
+}
 
 impl FieldRule {
     /// Reads the field's value: through the value table, then as the
@@ -1042,6 +1055,7 @@ fn map_signers(
     spec: &Signatures,
     record: &Record,
     children: &[Record],
+    absent: &[String],
     dropped: &mut Vec<Dropped>,
 ) -> Result<(Vec<Value>, Incomplete), MapError> {
     let bad = |why: String| MapError::BadSignatures(why);
@@ -1112,7 +1126,7 @@ fn map_signers(
     for (&index, child) in &indexed {
         let mut signer = Map::new();
         for (field, target, kind) in &spec.fields {
-            let Some(raw) = child.fields.get(field) else {
+            let Some(raw) = present_value(child, field, absent) else {
                 continue;
             };
             match kind.read(raw) {
@@ -1178,6 +1192,17 @@ fn build_entry(
     } = doc;
     if let Some(when) = &mut when {
         when.normalise().map_err(|m| (".when".to_owned(), m))?;
+        // Absent values never match, so a condition on one is dead.
+        if let Some(v) = when
+            .equals
+            .iter()
+            .find(|v| ctx.absent.iter().any(|a| a.eq_ignore_ascii_case(v)))
+        {
+            return Err((
+                ".when".to_owned(),
+                format!("`{v}` is one of the file's absent values, so it never matches"),
+            ));
+        }
     }
     if canonical_type.since() > ctx.version {
         return Err((

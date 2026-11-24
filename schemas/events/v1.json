@@ -1502,7 +1502,7 @@
     "JsonPointer": {
       "description": "A non-empty JSON Pointer (RFC 6901).",
       "maxLength": 1024,
-      "pattern": "^(/([^~]|~[01])*)+$",
+      "pattern": "^(/([^~/]|~[01])*)+$",
       "type": "string"
     },
     "JsonValue": {
@@ -4658,7 +4658,8 @@
     },
     "schema_version": {
       "$ref": "#/$defs/SchemaVersion",
-      "description": "The schema version of this event."
+      "description": "The schema version of this event.",
+      "pattern": "^1\\.(0|1)\\.(0|[1-9][0-9]*)$"
     },
     "script": {
       "$ref": "#/$defs/Script",

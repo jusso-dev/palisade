@@ -151,6 +151,11 @@ fn schema_and_validate_agree_on_cross_field_rules() {
     let mut v = base();
     v["user"] = serde_json::json!({ "sid": "s-1-5-18" });
     cases.push(("lowercase sid", v));
+    for version in ["0.9.0", "1.2.0", "2.0.0"] {
+        let mut v = base();
+        v["schema_version"] = version.into();
+        cases.push(("unreadable version", v));
+    }
     for (name, value) in cases {
         assert_eq!(check(&value), (false, false), "{name}");
     }

@@ -598,9 +598,31 @@ fn json_values_have_one_form() {
         serde_json::to_string(&v).unwrap(),
         r#"{"a":{"c":18446744073709551615},"b":[1,-2,true,"x"]}"#
     );
-    assert_eq!(read("5").unwrap(), JsonValue::Int(5));
-    assert_eq!(JsonValue::from_u64(5), JsonValue::Int(5));
-    assert_eq!(JsonValue::from_u64(u64::MAX), JsonValue::UInt(u64::MAX));
+    // One form per integer: a small `u64` and the same `i64` are equal.
+    assert_eq!(
+        JsonValue::new(serde_json::json!(5u64)).unwrap(),
+        JsonValue::new(serde_json::json!(5i64)).unwrap()
+    );
+    assert_eq!(read("5").unwrap().to_json(), serde_json::json!(5));
+    assert_eq!(
+        read("18446744073709551615").unwrap().to_json(),
+        serde_json::json!(u64::MAX)
+    );
+    // The checked constructor applies the reader's rules.
+    for bad in [
+        serde_json::json!(null),
+        serde_json::json!([1, null]),
+        serde_json::json!(1.5),
+        serde_json::json!("x".repeat(4097)),
+        serde_json::json!({ "k".repeat(257): 1 }),
+        serde_json::Value::Array(vec![serde_json::json!(1); 1024]),
+    ] {
+        assert!(JsonValue::new(bad.clone()).is_err(), "built {bad}");
+    }
+    let deep = (0..16).fold(serde_json::json!(1), |v, _| serde_json::json!([v]));
+    assert!(JsonValue::new(deep).is_err(), "17 levels");
+    let ok = serde_json::json!({ "b": [1, "x", true], "a": { "c": -1 } });
+    assert_eq!(JsonValue::new(ok.clone()).unwrap().to_json(), ok);
     for bad in [
         "null",
         "[1,null]",
@@ -812,4 +834,46 @@ fn ism_0585_accepts_network_device_and_registry_objects() {
         let event = v11(patch.clone());
         assert_eq!(event.ism_0585_gaps().len(), gaps, "{patch}");
     }
+}
+
+#[test]
+fn every_added_pointer_raises_the_minimum_version() {
+    // `min_version` checks each addition by hand; this ties it to `ADDED`.
+    for (pointer, since) in ADDED {
+        let keys: Vec<&str> = pointer.trim_start_matches('/').split('/').collect();
+        let mut value = with(serde_json::json!({ "schema_version": "1.1.0" }));
+        let leaf = match keys.as_slice() {
+            [set] => {
+                value[*set] = serde_json::json!({});
+                *set
+            }
+            ["source", field] => {
+                value["source"] = serde_json::json!({ "kind": "third_party", "format": "generic" });
+                if *field == "rule_name" {
+                    value["source"] =
+                        serde_json::json!({ "kind": "os_security", "rule_name": "R" });
+                }
+                field
+            }
+            ["script", "text"] => {
+                value["script"] = serde_json::json!({ "inline": true, "text": "x" });
+                "text"
+            }
+            other => panic!("add a case for {other:?}"),
+        };
+        let event =
+            Event::from_json(&value.to_string()).unwrap_or_else(|e| panic!("{pointer}: {e}"));
+        assert_eq!(event.min_version(), *since, "{pointer} ({leaf})");
+    }
+}
+
+#[test]
+fn json_pointer_schema_pattern_is_unambiguous() {
+    // Every token excludes `/`, so the pattern cannot backtrack between the
+    // inner and outer repetition.
+    let schema = schema::generate();
+    assert_eq!(
+        schema["$defs"]["JsonPointer"]["pattern"],
+        "^(/([^~/]|~[01])*)+$"
+    );
 }

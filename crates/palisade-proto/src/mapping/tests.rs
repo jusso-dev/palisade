@@ -1162,3 +1162,43 @@ fn when_selects_the_entry() {
         Err(MapError::Unmapped { .. })
     ));
 }
+
+#[test]
+fn empty_and_absent_values_are_never_dropped() {
+    let head = "absent_values: [\"-\"]\nvalue_maps:\n  lt:\n    \"2\": interactive\n";
+    let entry = format!(
+        "{GOOD_11}      Type:\n        to: /user/logon_type\n        values: lt\n    signatures:\n      source_event_id: 2\n      count_field: Count\n      index_field: Index\n      field_map:\n        Publisher: publisher\n        Tbs: tbs_hash\n"
+    );
+    let set = MappingSet::from_yaml("t.yaml", &file_11(head, &entry)).unwrap();
+    for empty in ["", "-"] {
+        let rec = record(1, &[("File", "a"), ("Pid", "1"), ("Type", empty)]);
+        let signer = record(
+            2,
+            &[
+                ("Count", "1"),
+                ("Index", "0"),
+                ("Publisher", "P"),
+                ("Tbs", empty),
+            ],
+        );
+        let mapped = set
+            .map(SourceKind::OsSecurity, &rec, &[signer], &envelope())
+            .unwrap();
+        assert!(mapped.dropped.is_empty(), "{empty:?}: {:?}", mapped.dropped);
+        assert!(mapped.event.user.is_none());
+        let signers = mapped.event.file.unwrap().signers;
+        assert!(signers.as_slice()[0].tbs_hash.is_none());
+    }
+}
+
+#[test]
+fn when_values_and_absent_values_are_checked() {
+    let when = GOOD_11.replace(
+        "    canonical_type:",
+        "    when:\n      field: X\n      equals: [\"-\"]\n    canonical_type:",
+    );
+    assert!(load_error_11("absent_values: [\"-\"]\n", &when).contains("never matches"));
+    let many: Vec<String> = (0..17).map(|i| format!("\"v{i}\"")).collect();
+    let head = format!("absent_values: [{}]\n", many.join(", "));
+    assert!(load_error_11(&head, GOOD_11).contains("more than 16"));
+}

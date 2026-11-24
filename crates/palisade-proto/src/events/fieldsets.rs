@@ -1,6 +1,6 @@
 //! The field sets added in schema version 1.1 (#196): network, device,
 //! registry, elevation, approval, admin, identity, audit policy, language
-//! restriction and compliance probe.
+//! restriction, compliance probe and file integrity monitoring.
 //!
 //! Every type follows the rules of the 1.0 field sets: one accepted form per
 //! value, no `null`, bounded text and lists, and unknown fields rejected.

@@ -601,18 +601,19 @@ fn json_pointer() -> impl Strategy<Value = JsonPointer> {
 
 pub fn json_value() -> BoxedStrategy<JsonValue> {
     let leaf = prop_oneof![
-        any::<bool>().prop_map(JsonValue::Bool),
-        any::<i64>().prop_map(JsonValue::Int),
-        any::<u64>().prop_map(JsonValue::from_u64),
-        "[ -~\u{e9}]{0,12}".prop_map(JsonValue::String),
+        any::<bool>().prop_map(serde_json::Value::Bool),
+        any::<i64>().prop_map(serde_json::Value::from),
+        any::<u64>().prop_map(serde_json::Value::from),
+        "[ -~\u{e9}]{0,12}".prop_map(serde_json::Value::String),
     ];
     leaf.prop_recursive(3, 24, 4, |inner| {
         prop_oneof![
-            vec(inner.clone(), 0..4).prop_map(JsonValue::Array),
+            vec(inner.clone(), 0..4).prop_map(serde_json::Value::Array),
             proptest::collection::btree_map("[a-z~/ ]{0,6}", inner, 0..4)
-                .prop_map(JsonValue::Object),
+                .prop_map(|m| serde_json::Value::Object(m.into_iter().collect())),
         ]
     })
+    .prop_map(|v| JsonValue::new(v).unwrap())
     .boxed()
 }
 

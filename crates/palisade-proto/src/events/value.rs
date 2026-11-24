@@ -1193,6 +1193,10 @@ impl DnsName {
     /// Returns [`ValueError`] if the result is not a DNS name.
     pub fn normalise(text: &str) -> Result<Self, ValueError> {
         let text = text.strip_suffix('.').unwrap_or(text);
+        // Lowercasing ASCII keeps the length: reject long input first.
+        if text.len() > 253 {
+            return Err(DNS_NAME_ERROR);
+        }
         text.to_ascii_lowercase().parse()
     }
 }
@@ -1306,7 +1310,7 @@ impl JsonSchema for JsonPointer {
             "description": "A non-empty JSON Pointer (RFC 6901).",
             "type": "string",
             "maxLength": 1024,
-            "pattern": "^(/([^~]|~[01])*)+$"
+            "pattern": "^(/([^~/]|~[01])*)+$"
         })
     }
 }
@@ -1326,19 +1330,21 @@ impl JsonSchema for JsonPointer {
 /// JSON Schema states the shape and the string limits; the depth and count
 /// limits, and the integer range (`i64::MIN` to `u64::MAX`), are checked
 /// only by the reader.
+///
+/// The representation is private: a value is built only by
+/// [`JsonValue::new`] or by reading JSON, which check the same rules, so an
+/// event can never hold a value that its own reader would reject.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum JsonValue {
-    /// `true` or `false`.
+pub struct JsonValue(Node);
+
+/// The checked tree. An integer that fits `i64` is always `Int`.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum Node {
     Bool(bool),
-    /// An integer from `i64::MIN` to `i64::MAX`.
     Int(i64),
-    /// An integer above `i64::MAX`. Smaller integers are always [`Self::Int`].
     UInt(u64),
-    /// A string.
     String(String),
-    /// An array.
     Array(Vec<Self>),
-    /// An object, by key.
     Object(BTreeMap<String, Self>),
 }
 
@@ -1352,14 +1358,53 @@ impl JsonValue {
     /// Longest object key, in characters.
     pub const MAX_KEY: usize = 256;
 
-    /// An integer, in its one form.
+    /// Checks a JSON value against the rules above.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValueError`] for `null`, a number that is not an integer
+    /// from `i64::MIN` to `u64::MAX`, or a value over a limit.
+    pub fn new(value: serde_json::Value) -> Result<Self, ValueError> {
+        Self::deserialize(value).map_err(|e: serde_json::Error| {
+            let text = e.to_string();
+            if text.contains("null") {
+                ValueError("null is not a value: leave the member out")
+            } else if text.contains("integers") || text.contains("floating") {
+                ValueError("a JSON value holds integers only")
+            } else {
+                ValueError("a JSON value is over a size, depth or length limit")
+            }
+        })
+    }
+
+    /// The value as a `serde_json` value.
     #[must_use]
-    pub fn from_u64(value: u64) -> Self {
-        i64::try_from(value).map_or(Self::UInt(value), Self::Int)
+    pub fn to_json(&self) -> serde_json::Value {
+        fn convert(node: &Node) -> serde_json::Value {
+            match node {
+                Node::Bool(b) => serde_json::Value::Bool(*b),
+                Node::Int(i) => serde_json::Value::from(*i),
+                Node::UInt(u) => serde_json::Value::from(*u),
+                Node::String(s) => serde_json::Value::String(s.clone()),
+                Node::Array(items) => items.iter().map(convert).collect(),
+                Node::Object(map) => map
+                    .iter()
+                    .map(|(k, v)| (k.clone(), convert(v)))
+                    .collect::<serde_json::Map<_, _>>()
+                    .into(),
+            }
+        }
+        convert(&self.0)
     }
 }
 
 impl Serialize for JsonValue {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
+
+impl Serialize for Node {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
             Self::Bool(b) => serializer.serialize_bool(*b),
@@ -1398,9 +1443,9 @@ impl JsonSeed<'_> {
 }
 
 impl<'de> de::DeserializeSeed<'de> for JsonSeed<'_> {
-    type Value = JsonValue;
+    type Value = Node;
 
-    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<JsonValue, D::Error> {
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Node, D::Error> {
         // The root is at depth 1, so a value at depth 17 is the 17th level.
         if self.depth > JsonValue::MAX_DEPTH {
             return Err(de::Error::custom("a JSON value may nest at most 16 deep"));
@@ -1410,70 +1455,97 @@ impl<'de> de::DeserializeSeed<'de> for JsonSeed<'_> {
 }
 
 impl<'de> Visitor<'de> for JsonSeed<'_> {
-    type Value = JsonValue;
+    type Value = Node;
 
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("a JSON value without null or non-integer numbers")
     }
 
-    fn visit_bool<E: de::Error>(self, v: bool) -> Result<JsonValue, E> {
+    fn visit_bool<E: de::Error>(self, v: bool) -> Result<Node, E> {
         self.count()?;
-        Ok(JsonValue::Bool(v))
+        Ok(Node::Bool(v))
     }
 
-    fn visit_i64<E: de::Error>(self, v: i64) -> Result<JsonValue, E> {
+    fn visit_i64<E: de::Error>(self, v: i64) -> Result<Node, E> {
         self.count()?;
-        Ok(JsonValue::Int(v))
+        Ok(Node::Int(v))
     }
 
-    fn visit_u64<E: de::Error>(self, v: u64) -> Result<JsonValue, E> {
+    fn visit_u64<E: de::Error>(self, v: u64) -> Result<Node, E> {
         self.count()?;
-        Ok(JsonValue::from_u64(v))
+        Ok(i64::try_from(v).map_or(Node::UInt(v), Node::Int))
     }
 
-    fn visit_f64<E: de::Error>(self, _: f64) -> Result<JsonValue, E> {
+    fn visit_f64<E: de::Error>(self, _: f64) -> Result<Node, E> {
         Err(E::custom("a JSON value holds integers only"))
     }
 
-    fn visit_unit<E: de::Error>(self) -> Result<JsonValue, E> {
+    fn visit_unit<E: de::Error>(self) -> Result<Node, E> {
         Err(E::custom("null is not a value: leave the member out"))
     }
 
-    fn visit_str<E: de::Error>(self, v: &str) -> Result<JsonValue, E> {
+    fn visit_str<E: de::Error>(self, v: &str) -> Result<Node, E> {
         self.count()?;
-        if v.chars().count() > JsonValue::MAX_STRING {
+        // A character is at most 4 bytes: reject long input without counting.
+        if v.len() > JsonValue::MAX_STRING.saturating_mul(4)
+            || v.chars().count() > JsonValue::MAX_STRING
+        {
             return Err(E::custom(
                 "a string in a JSON value may hold at most 4096 characters",
             ));
         }
-        Ok(JsonValue::String(v.to_owned()))
+        Ok(Node::String(v.to_owned()))
     }
 
-    fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<JsonValue, A::Error> {
+    fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Node, A::Error> {
         self.count()?;
         let mut items = Vec::new();
         while let Some(item) = seq.next_element_seed(self.child())? {
             items.push(item);
         }
-        Ok(JsonValue::Array(items))
+        Ok(Node::Array(items))
     }
 
-    fn visit_map<A: MapAccess<'de>>(self, mut access: A) -> Result<JsonValue, A::Error> {
+    fn visit_map<A: MapAccess<'de>>(self, mut access: A) -> Result<Node, A::Error> {
         self.count()?;
         let mut map = BTreeMap::new();
-        while let Some(key) = access.next_key::<String>()? {
-            if key.chars().count() > JsonValue::MAX_KEY {
-                return Err(de::Error::custom(
-                    "a key in a JSON value may hold at most 256 characters",
-                ));
-            }
+        while let Some(key) = access.next_key_seed(KeySeed)? {
             if map.contains_key(&key) {
                 return Err(de::Error::custom(format!("duplicate key `{key}`")));
             }
             let value = access.next_value_seed(self.child())?;
             map.insert(key, value);
         }
-        Ok(JsonValue::Object(map))
+        Ok(Node::Object(map))
+    }
+}
+
+/// Reads an object key, rejecting an over-long one before copying it.
+struct KeySeed;
+
+impl<'de> de::DeserializeSeed<'de> for KeySeed {
+    type Value = String;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<String, D::Error> {
+        deserializer.deserialize_str(self)
+    }
+}
+
+impl Visitor<'_> for KeySeed {
+    type Value = String;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a key of at most 256 characters")
+    }
+
+    fn visit_str<E: de::Error>(self, v: &str) -> Result<String, E> {
+        if v.len() > JsonValue::MAX_KEY.saturating_mul(4) || v.chars().count() > JsonValue::MAX_KEY
+        {
+            return Err(E::custom(
+                "a key in a JSON value may hold at most 256 characters",
+            ));
+        }
+        Ok(v.to_owned())
     }
 }
 
@@ -1487,6 +1559,7 @@ impl<'de> Deserialize<'de> for JsonValue {
             },
             deserializer,
         )
+        .map(JsonValue)
     }
 }
 
@@ -1641,13 +1714,20 @@ impl RegistryKey {
         &self.0
     }
 
-    /// Reads any root spelling in [`REGISTRY_ROOTS`] and one trailing `\`,
-    /// and returns the canonical form.
+    /// Reads the full root names, the short root names (`HKLM`, `HKU`,
+    /// `HKCU`, `HKCR`, `HKCC`) and the kernel forms (`\REGISTRY\MACHINE`,
+    /// `\REGISTRY\USER`), in any ASCII case, with one trailing `\`, and
+    /// returns the canonical form.
     ///
     /// # Errors
     ///
     /// Returns [`ValueError`] if the text is not a registry key path.
     pub fn normalise(text: &str) -> Result<Self, ValueError> {
+        // The canonical form is at most 32,767 characters, and no root
+        // spelling is more than 13 bytes longer than its canonical name.
+        if text.len() > 32_767usize.saturating_mul(4).saturating_add(16) {
+            return Err(REGISTRY_KEY_ERROR);
+        }
         let text = text.strip_suffix('\\').unwrap_or(text);
         for (canonical, spellings) in REGISTRY_ROOTS {
             for spelling in *spellings {
