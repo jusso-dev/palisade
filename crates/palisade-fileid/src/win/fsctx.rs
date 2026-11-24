@@ -50,8 +50,27 @@ pub fn final_path(path: &Path) -> io::Result<NormalizedPath> {
 ///
 /// Returns `Ok(None)` if the file has no such stream. At most
 /// [`MAX_ZONE_IDENTIFIER_BYTES`] plus one byte are read, so the parser can
-/// report truncation. `path` must name a file or directory, not a stream.
+/// report truncation.
+///
+/// `path` must name a file or directory, not a stream, and should be its
+/// final path (see [`final_path`]). The stream name is appended to `path`
+/// as given, so a path that Win32 normalisation would change (a trailing
+/// dot, space or separator) can miss the stream; such paths are rejected.
 pub fn read_motw(path: &Path) -> io::Result<Option<Motw>> {
+    let text = path
+        .to_str()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path is not valid Unicode"))?;
+    if text.ends_with(['.', ' ', '\\', '/'])
+        || text
+            .rsplit(['\\', '/'])
+            .next()
+            .is_some_and(|n| n.contains(':'))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "path must be a final path to a file or directory, not a stream",
+        ));
+    }
     let mut stream = OsString::from(path.as_os_str());
     stream.push(":Zone.Identifier");
     let file = match File::open(&stream) {
@@ -122,6 +141,11 @@ mod tests {
         );
         // The stream is not part of the file's content.
         assert_eq!(std::fs::read(&file).unwrap(), b"MZ");
+        // Paths that would miss or mis-name the stream are rejected.
+        let mut dotted = OsString::from(file.as_os_str());
+        dotted.push(".");
+        assert!(read_motw(Path::new(&dotted)).is_err());
+        assert!(read_motw(Path::new(&ads)).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

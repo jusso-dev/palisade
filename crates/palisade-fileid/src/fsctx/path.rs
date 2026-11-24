@@ -288,13 +288,28 @@ pub fn normalize_win32(input: &str) -> Result<NormalizedPath, PathError> {
             .strip_prefix(".\\")
             .or_else(|| after.strip_prefix("?\\"));
         if let Some(rest) = device {
+            // Win32 trimming would otherwise reach the server and share of
+            // `\\.\UNC\server\share` before they are known to be UNC names.
+            let mut raw = rest.split('\\').filter(|p| !p.is_empty());
+            if raw.next().is_some_and(|d| d.eq_ignore_ascii_case("UNC")) {
+                for name in raw.take(2) {
+                    check_unc_name(name)?;
+                }
+            }
             let mut notes = PathNotes {
                 prefix: Prefix::Device,
                 ..PathNotes::default()
             };
             let (comps, ends_sep) = win32_components(rest, 0, &mut notes)?;
             let (root, used) = identify_device(&comps, 0, &mut notes)?;
-            return finish(root, comps, used, ends_sep, notes, false);
+            // `\\.\C:\.` and `\\.\C:\a\..` name the root directory: a separator
+            // followed the volume, even though `.` and `..` removed what came
+            // after it.
+            let after_root = rest
+                .trim_start_matches('\\')
+                .split_once('\\')
+                .is_some_and(|(_, tail)| !tail.is_empty());
+            return finish(root, comps, used, ends_sep || after_root, notes, false);
         }
         if after == "." || after == "?" {
             return Err(PathError::DeviceNotDirectory);
@@ -397,9 +412,7 @@ fn win32_components(
             // The server and share are not trimmed or collapsed. A name
             // that Win32 trimming might change is ambiguous, so it is
             // rejected rather than guessed.
-            if *part == "." || *part == ".." || part.ends_with(['.', ' ']) {
-                return Err(PathError::InvalidComponent((*part).to_owned()));
-            }
+            check_unc_name(part)?;
             comps.push((*part).to_owned());
             continue;
         }
@@ -459,9 +472,11 @@ fn unc_root(
     let (Some(server), Some(share)) = (comps.get(at), comps.get(at + 1)) else {
         return Err(PathError::MissingShare);
     };
-    if server == "?" || server == "." {
+    check_unc_name(server)?;
+    check_unc_name(share)?;
+    if server == "?" {
         // `\\\?\x` collapses to a UNC path with server `?`, which reads
-        // back as the device prefix `\\?\`. Neither is a server name.
+        // back as the device prefix `\\?\`. It is not a server name.
         return Err(PathError::InvalidComponent(server.clone()));
     }
     if server.contains(':') && !server.starts_with('[') {
@@ -479,6 +494,23 @@ fn unc_root(
         },
         at + 2,
     ))
+}
+
+/// Checks a UNC server or share name, whichever way the path reached it
+/// (plain, `\\?\UNC`, `\\.\UNC`, `\Device\Mup`). The server and share are
+/// never trimmed or collapsed, so a name that Win32 trimming might change
+/// (a trailing dot or space), a `.` or `..`, or one holding a `/` (which a
+/// plain path would read as a separator) is ambiguous and rejected.
+fn check_unc_name(name: &str) -> Result<(), PathError> {
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.ends_with(['.', ' '])
+        || name.contains('/')
+    {
+        return Err(PathError::InvalidComponent(name.to_owned()));
+    }
+    Ok(())
 }
 
 fn is_loopback(server: &str) -> bool {
@@ -658,7 +690,7 @@ pub fn is_short_name_candidate(component: &str) -> bool {
     (1..=8).contains(&base_len)
         && base.contains('~')
         && !base.contains('.')
-        && ext.is_none_or(|e| e.chars().count() <= 3 && !e.contains('~'))
+        && ext.is_none_or(|e| e.chars().count() <= 3)
 }
 
 /// Splits the last component into its name and stream.
@@ -786,7 +818,7 @@ fn finish(
         .filter(|(_, c)| is_short_name_candidate(c))
         .map(|(i, _)| i)
         .collect();
-    Ok(NormalizedPath {
+    let path = NormalizedPath {
         root,
         components: rest,
         stream,
@@ -796,7 +828,18 @@ fn finish(
         } else {
             ShortNames::Candidates(candidates)
         },
-    })
+    };
+    // The canonical form can be longer than the input (a `\\?\GLOBALROOT`
+    // prefix, say). It must itself be a valid path.
+    if path
+        .to_win32_string()
+        .encode_utf16()
+        .nth(MAX_PATH_UNITS)
+        .is_some()
+    {
+        return Err(PathError::TooLong);
+    }
+    Ok(path)
 }
 
 // ---------------------------------------------------------------------------
@@ -816,7 +859,7 @@ fn fold_char(c: char) -> char {
     }
     let mut upper = c.to_uppercase();
     match (upper.next(), upper.next()) {
-        (Some(u), None) if u.len_utf16() == c.len_utf16() => u,
+        (Some(u), None) if c.len_utf16() == 1 && u.len_utf16() == 1 => u,
         _ => c,
     }
 }
@@ -932,6 +975,12 @@ impl NormalizedPath {
         let candidates = candidates.clone();
         let mut unresolved = Vec::new();
         for i in candidates {
+            if !unresolved.is_empty() {
+                // An ancestor is still unexpanded, so later lookups would
+                // run against a parent that is not known to be long.
+                unresolved.push(i);
+                continue;
+            }
             let parent = Self {
                 short_names: ShortNames::Verified,
                 ..self.prefix_of(i)
@@ -1171,6 +1220,11 @@ mod tests {
         // Nothing is protected: `..` can remove the device itself.
         assert_eq!(key(r"\\.\X:\..\C:\a"), key(r"C:\a"));
         assert_eq!(normalize_win32(r"\\.\C:\").unwrap().components().len(), 0);
+        assert_eq!(normalize_win32(r"\\.\C:\.").unwrap().components().len(), 0);
+        assert_eq!(
+            normalize_win32(r"\\.\C:\a\..").unwrap().components().len(),
+            0
+        );
         assert_eq!(
             normalize_win32(r"\\.\C:"),
             Err(PathError::DeviceNotDirectory)
@@ -1206,6 +1260,12 @@ mod tests {
             r"\\server\..\x",
             r"\\\?\share\x",
             r"\\\.\share\x",
+            r"\\?\UNC\server.\share\x",
+            r"\\?\UNC\server\share \x",
+            r"\\?\UNC\srv/a\share\x",
+            r"\\.\UNC\server.\share\x",
+            r"\\.\UNC\server \share\x",
+            r"\\.\unc\server\share.\x",
         ] {
             assert!(
                 matches!(normalize_win32(bad), Err(PathError::InvalidComponent(_))),
@@ -1278,6 +1338,16 @@ mod tests {
                 .case_folded(),
             key(r"\\server\share\x")
         );
+        for bad in [
+            r"\Device\Mup\server.\share\x",
+            r"\Device\Mup\server\share \x",
+            r"\Device\Mup\srv/a\share\x",
+        ] {
+            assert!(
+                matches!(normalize_nt(bad), Err(PathError::InvalidComponent(_))),
+                "{bad}"
+            );
+        }
         assert!(matches!(
             normalize_nt(r"\SystemRoot\System32\x.sys"),
             Err(PathError::UnsupportedNtPath(_))
@@ -1317,6 +1387,14 @@ mod tests {
         assert!(p.is_long());
         let too_long = format!(r"C:\{}", "a".repeat(MAX_PATH_UNITS - 2));
         assert_eq!(normalize_win32(&too_long), Err(PathError::TooLong));
+        // An input within the limit whose canonical form is not.
+        let nt = format!(
+            r"\Device\HarddiskVolume3\{}",
+            "a".repeat(MAX_PATH_UNITS - 30)
+        );
+        assert_eq!(normalize_nt(&nt), Err(PathError::TooLong));
+        let spaced = format!(r"C:\{}. \", "a".repeat(MAX_PATH_UNITS - 6));
+        assert_eq!(normalize_win32(&spaced), Err(PathError::TooLong));
     }
 
     #[test]
@@ -1391,6 +1469,8 @@ mod tests {
         assert_eq!(fold_case("ǆ"), "Ǆ");
         assert_eq!(fold_case("ﬁ"), "ﬁ");
         assert_eq!(fold_case("é"), "É");
+        // Supplementary-plane letters are not folded, as on NTFS.
+        assert_eq!(fold_case("\u{10428}"), "\u{10428}");
         assert_eq!(key(r"C:\Ünïcode\Ä.exe"), key(r"c:\üNÏCODE\ä.EXE"));
     }
 
@@ -1416,6 +1496,9 @@ mod tests {
         assert!(!is_short_name_candidate("README.TXT"));
         assert!(!is_short_name_candidate("LONGNAME~1"));
         assert!(!is_short_name_candidate("ABC~1.TEXT"));
+        // `~` is a legal 8.3 character in the extension too.
+        assert!(is_short_name_candidate("PROGRA~1.X~1"));
+        assert!(is_short_name_candidate("LONGNA~1.A~B"));
 
         let mut p = normalize_win32(r"C:\PROGRA~1\MYAPP~1\app.exe").unwrap();
         assert_eq!(p.short_name_candidates(), [0, 1]);
@@ -1433,6 +1516,11 @@ mod tests {
         q.resolve_short_names(&Table);
         assert_eq!(q.short_name_candidates(), [1]);
         assert!(q.match_key().is_err());
+
+        // Once an ancestor fails, its descendants are not looked up.
+        let mut u = normalize_win32(r"C:\NOSUCH~1\PROGRA~1\x").unwrap();
+        u.resolve_short_names(&Table);
+        assert_eq!(u.short_name_candidates(), [0, 1]);
 
         // A resolver answer that is not a plain name is ignored.
         let mut r = normalize_win32(r"C:\PROGRA~1\bad~1").unwrap();

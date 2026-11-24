@@ -88,7 +88,9 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   - `fsctx::sid`, `fsctx::volume`, `fsctx::vars`, `fsctx::motw`: SIDs,
     volume and location classification, path variables (`%WINDIR%` and so
     on) and the `Zone.Identifier` mark-of-the-web parser. A mark may make a
-    file less trusted, never more.
+    file less trusted, never more. Location classes fail closed to `Unknown`
+    when an input is missing. Owners count only on NTFS or ReFS local fixed
+    disks, never on removable media, virtual disks or network shares.
   - `win::fsctx` (Windows, `os-trust` feature): reads a file's final path
     (links resolved, short names expanded) and its `Zone.Identifier` stream.
     Owner and DACL reads, drive and bus type, volume GUIDs, DFS and the OS

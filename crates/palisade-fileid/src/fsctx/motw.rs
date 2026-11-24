@@ -30,7 +30,7 @@
 //! could read plus [`MotwWarning`]s.
 //!
 //! - At most [`MAX_ZONE_IDENTIFIER_BYTES`] are read; anything after is
-//!   ignored and reported.
+//!   ignored and reported. At most [`MAX_MOTW_WARNINGS`] warnings are kept.
 //! - UTF-8 (with or without a byte order mark) and UTF-16LE with a byte
 //!   order mark are accepted. Invalid sequences are replaced and reported.
 //! - Section names and keys are compared ignoring ASCII case. Whitespace
@@ -47,6 +47,19 @@ use std::fmt;
 
 /// The most bytes of a `Zone.Identifier` stream that are parsed.
 pub const MAX_ZONE_IDENTIFIER_BYTES: usize = 64 * 1024;
+
+/// The most warnings kept. Further warnings are dropped.
+pub const MAX_MOTW_WARNINGS: usize = 32;
+
+/// The keys this parser reads, lower case. Other keys are ignored and not
+/// tracked, so the work per line is bounded.
+const KNOWN_KEYS: [&str; 5] = [
+    "zoneid",
+    "appzoneid",
+    "hosturl",
+    "referrerurl",
+    "lastwriterpackagefamilyname",
+];
 
 /// A URL security zone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -213,8 +226,17 @@ fn parse_zone(value: &str, warnings: &mut Vec<MotwWarning>) -> Option<Zone> {
             return Some(Zone::from_id(n));
         }
     }
-    warnings.push(MotwWarning::InvalidZoneId(value.chars().take(64).collect()));
+    warn(
+        warnings,
+        MotwWarning::InvalidZoneId(value.chars().take(64).collect()),
+    );
     None
+}
+
+fn warn(warnings: &mut Vec<MotwWarning>, w: MotwWarning) {
+    if warnings.len() < MAX_MOTW_WARNINGS {
+        warnings.push(w);
+    }
 }
 
 fn stricter(a: Option<Zone>, b: Zone) -> Zone {
@@ -239,7 +261,7 @@ pub fn parse_zone_identifier(bytes: &[u8]) -> Motw {
 
     let mut in_section = false;
     let mut saw_section = false;
-    let mut seen: Vec<String> = Vec::new();
+    let mut seen = [false; KNOWN_KEYS.len()];
     for raw in text.lines() {
         let line = raw.trim();
         if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
@@ -258,18 +280,24 @@ pub fn parse_zone_identifier(bytes: &[u8]) -> Motw {
         };
         let key = key.trim().to_ascii_lowercase();
         let value = value.trim();
-        let first = !seen.contains(&key);
-        if !first {
-            if !motw
+        let Some(index) = KNOWN_KEYS.iter().position(|k| *k == key) else {
+            continue;
+        };
+        let Some(slot) = seen.get_mut(index) else {
+            continue;
+        };
+        let first = !*slot;
+        if *slot {
+            // Each key is reported at most once.
+            let reported = motw
                 .warnings
                 .iter()
-                .any(|w| matches!(w, MotwWarning::DuplicateKey(k) if *k == key))
-            {
-                motw.warnings.push(MotwWarning::DuplicateKey(key.clone()));
+                .any(|w| matches!(w, MotwWarning::DuplicateKey(k) if *k == key));
+            if !reported {
+                warn(&mut motw.warnings, MotwWarning::DuplicateKey(key.clone()));
             }
-        } else {
-            seen.push(key.clone());
         }
+        *slot = true;
         let text_value = || (!value.is_empty()).then(|| value.to_owned());
         match key.as_str() {
             "zoneid" | "appzoneid" => {
@@ -291,9 +319,9 @@ pub fn parse_zone_identifier(bytes: &[u8]) -> Motw {
         }
     }
     if !saw_section {
-        motw.warnings.push(MotwWarning::MissingSection);
-    } else if !seen.iter().any(|k| k == "zoneid") {
-        motw.warnings.push(MotwWarning::MissingZoneId);
+        warn(&mut motw.warnings, MotwWarning::MissingSection);
+    } else if !seen.first().copied().unwrap_or(false) {
+        warn(&mut motw.warnings, MotwWarning::MissingZoneId);
     }
     motw
 }
@@ -392,6 +420,16 @@ mod tests {
         assert_eq!(m.zone, Some(Zone::Other(1000)));
         assert!(m.claims_external_origin());
         assert_eq!(Zone::from_id(3).id(), 3);
+    }
+
+    #[test]
+    fn warnings_are_capped() {
+        let mut text = String::from("[ZoneTransfer]\n");
+        for i in 0..10_000 {
+            text.push_str(&format!("ZoneId=x{i}\nUnknownKey{i}=1\n"));
+        }
+        let m = parse_zone_identifier(text.as_bytes());
+        assert_eq!(m.warnings.len(), MAX_MOTW_WARNINGS);
     }
 
     #[test]

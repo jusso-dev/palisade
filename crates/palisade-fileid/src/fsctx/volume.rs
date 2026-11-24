@@ -10,7 +10,9 @@
 //! The classification is conservative: when the inputs disagree, the less
 //! trusted class wins. A fixed drive on a USB bus is [`LocationClass::Removable`],
 //! and a disk on a virtual bus is [`LocationClass::VirtualDisk`] unless it
-//! is the OS volume.
+//! is the OS volume. When an input is missing, the result is
+//! [`LocationClass::Unknown`], never a trusted class: a fixed disk is only
+//! [`LocationClass::OtherFixed`] when its bus and hot-plug state are known.
 
 #![forbid(unsafe_code)]
 
@@ -255,12 +257,20 @@ impl VolumeInfo {
         self.bus_type == Some(BusType::FileBackedVirtual)
     }
 
-    /// True if the file system records a reliable owner. `false` when the
-    /// file system is unknown, or the location is a network share.
+    /// True if the owner recorded on this volume can be relied on: the file
+    /// system records owners, and the volume is a local fixed disk
+    /// ([`LocationClass::OsVolume`] or [`LocationClass::OtherFixed`]).
+    ///
+    /// Removable media, virtual disks and network shares are excluded: their
+    /// contents can be prepared on another machine, with any owner SID
+    /// written into them, or the owner is whatever a server reports.
     #[must_use]
     pub fn supports_owner(&self) -> bool {
-        self.drive_type != Some(DriveType::Network)
-            && self.fs_type.as_ref().is_some_and(FsType::supports_owner)
+        self.fs_type.as_ref().is_some_and(FsType::supports_owner)
+            && matches!(
+                self.location_class(),
+                LocationClass::OsVolume | LocationClass::OtherFixed
+            )
     }
 
     /// The location class. See the module documentation for how
@@ -284,11 +294,21 @@ impl VolumeInfo {
         if self.is_hotplug == Some(true) || self.bus_type.is_some_and(BusType::is_user_pluggable) {
             return LocationClass::Removable;
         }
-        match self.is_os_volume {
-            Some(true) => LocationClass::OsVolume,
-            _ if self.bus_type.is_some_and(BusType::is_virtual) => LocationClass::VirtualDisk,
-            Some(false) => LocationClass::OtherFixed,
-            None => LocationClass::Unknown,
+        if self.is_os_volume == Some(true) {
+            return LocationClass::OsVolume;
+        }
+        if self.bus_type.is_some_and(BusType::is_virtual) {
+            return LocationClass::VirtualDisk;
+        }
+        // A disk that is neither the OS volume nor known to be a local,
+        // non-pluggable disk stays unknown. External USB disks and attached
+        // VHDs also report `DRIVE_FIXED`, so a failed bus or hot-plug query
+        // must not make a volume look like a trusted fixed disk.
+        let bus_known = matches!(self.bus_type, Some(b) if !matches!(b, BusType::Unknown(_)));
+        if self.is_os_volume == Some(false) && bus_known && self.is_hotplug == Some(false) {
+            LocationClass::OtherFixed
+        } else {
+            LocationClass::Unknown
         }
     }
 }
@@ -378,6 +398,16 @@ mod tests {
             ..VolumeInfo::default()
         };
         assert_eq!(unknown_os.location_class(), LocationClass::Unknown);
+        // A non-OS fixed disk whose bus or hot-plug state is unknown is not
+        // promoted to a trusted fixed disk.
+        let mut v = fixed(BusType::Sata, false);
+        v.bus_type = None;
+        assert_eq!(v.location_class(), LocationClass::Unknown);
+        let mut v = fixed(BusType::Unknown(0), false);
+        assert_eq!(v.location_class(), LocationClass::Unknown);
+        v.bus_type = Some(BusType::Sata);
+        v.is_hotplug = None;
+        assert_eq!(v.location_class(), LocationClass::Unknown);
     }
 
     #[test]
@@ -396,5 +426,18 @@ mod tests {
         };
         assert!(!share.supports_owner());
         assert!(!VolumeInfo::default().supports_owner());
+        // NTFS on removable or virtual media: the owner may have been set
+        // on another machine.
+        assert!(!fixed(BusType::Usb, false).supports_owner());
+        assert!(!fixed(BusType::FileBackedVirtual, false).supports_owner());
+        let ntfs_stick = VolumeInfo {
+            fs_type: Some(FsType::Ntfs),
+            drive_type: Some(DriveType::Removable),
+            ..VolumeInfo::default()
+        };
+        assert!(!ntfs_stick.supports_owner());
+        let mut no_drive = fixed(BusType::Sata, false);
+        no_drive.drive_type = None;
+        assert!(!no_drive.supports_owner());
     }
 }

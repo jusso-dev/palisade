@@ -33,8 +33,9 @@
 //!   token is granted the right too;
 //! - the object's owner, if it is not an administrator, with the owner's
 //!   implicit `READ_CONTROL` and `WRITE_DAC` (which a deny ACE cannot
-//!   remove), unless the DACL has an `OWNER RIGHTS` ACE, which then replaces
-//!   them;
+//!   remove), unless the DACL has an unconditional `OWNER RIGHTS`
+//!   allow ACE, which then replaces them. A descriptor with no owner is
+//!   treated as an unknown, possibly non-administrator owner;
 //! - a synthetic standard user (by default `Everyone`, `Authenticated Users`,
 //!   `BUILTIN\Users`, `INTERACTIVE` and `LOCAL`), reported on its own.
 //!
@@ -919,7 +920,10 @@ fn walk(aces: &[Ace], in_token: &dyn Fn(&Sid) -> bool, assume_uncertain: bool) -
             AceKind::AllowConditional | AceKind::AllowObject if assume_uncertain => {
                 granted |= map_generic_allow(ace.mask) & !denied;
             }
-            AceKind::Deny => denied |= ace.mask & !granted,
+            // A deny for `OWNER RIGHTS` is ignored, so that whether or not
+            // the OS applies it to the owner, rights can only be
+            // over-reported.
+            AceKind::Deny if *sid != well_known::OWNER_RIGHTS => denied |= ace.mask & !granted,
             _ => {}
         }
     }
@@ -988,9 +992,13 @@ pub fn evaluate(
     };
 
     let owner = sd.owner.filter(|o| !admins.contains(o));
-    let owner_rights_ace = aces
-        .iter()
-        .any(|a| a.applies_to_object() && a.sid == Some(well_known::OWNER_RIGHTS));
+    // Only an unconditional allow ACE for `OWNER RIGHTS` is taken to replace
+    // the owner's implicit rights. A conditional or object ACE may not
+    // apply, and a deny is ignored (see `walk`), so in those cases the
+    // implicit `WRITE_DAC` is still reported.
+    let owner_rights_ace = aces.iter().any(|a| {
+        a.applies_to_object() && a.kind == AceKind::Allow && a.sid == Some(well_known::OWNER_RIGHTS)
+    });
 
     // Candidate principals: every non-admin SID named by an applicable
     // allow ACE, plus a non-admin owner. Placeholders never match a token,
@@ -1020,12 +1028,13 @@ pub fn evaluate(
                 || (with_everyone && *s == well_known::EVERYONE)
                 || (is_owner && *s == well_known::OWNER_RIGHTS)
         };
-        let (mut rights, uncertain) = token_rights(aces, &in_token, relevant);
+        let (mut rights, mut uncertain) = token_rights(aces, &in_token, relevant);
         let implicit = is_owner && !owner_rights_ace;
         if implicit {
             // The owner's implicit READ_CONTROL | WRITE_DAC cannot be
-            // removed by a deny ACE.
+            // removed by a deny ACE, and is certain.
             rights = rights.union(WriteRights::WRITE_DAC);
+            uncertain = uncertain.difference(WriteRights::WRITE_DAC);
         }
         if !rights.is_empty() {
             principals.push(PrincipalRights {
@@ -1037,15 +1046,31 @@ pub fn evaluate(
         }
     }
 
+    // An unknown owner (the descriptor has none) may be a non-administrator:
+    // it may hold the implicit `WRITE_DAC` and whatever `OWNER RIGHTS` ACEs
+    // grant. Both are reported as uncertain, for an unknown principal.
+    let mut unknown = WriteRights::NONE;
+    if sd.owner.is_none() {
+        let in_owner_token = |s: &Sid| *s == well_known::OWNER_RIGHTS || *s == well_known::EVERYONE;
+        let (r, _) = token_rights(aces, &in_owner_token, relevant);
+        unknown = r.union(if owner_rights_ace {
+            WriteRights::NONE
+        } else {
+            WriteRights::WRITE_DAC
+        });
+    }
     // ACE types whose layout is unknown might grant anything to anyone.
     if aces
         .iter()
         .any(|a| a.applies_to_object() && matches!(a.kind, AceKind::Unknown(_)))
     {
+        unknown = relevant;
+    }
+    if !unknown.is_empty() {
         principals.push(PrincipalRights {
             principal: Principal::Unknown,
-            rights: relevant,
-            uncertain: relevant,
+            rights: unknown,
+            uncertain: unknown,
             implicit_owner_rights: false,
         });
     }
@@ -1372,6 +1397,51 @@ mod tests {
             vec![Ace::allow(wk::OWNER_RIGHTS, mask::FILE_ALL_ACCESS)],
         );
         assert!(!eval_file(&d).user_writable());
+    }
+
+    #[test]
+    fn owner_rights_edge_cases_fail_closed() {
+        let u = user(1001);
+        // A deny for OWNER RIGHTS neither removes the implicit WRITE_DAC
+        // nor blocks a later grant to the owner.
+        let d = sd(
+            u,
+            vec![
+                Ace::deny(wk::OWNER_RIGHTS, mask::FILE_WRITE_DATA | mask::WRITE_DAC),
+                Ace::allow(u, mask::FILE_WRITE_DATA),
+            ],
+        );
+        let w = eval_file(&d);
+        assert_eq!(
+            w.rights,
+            WriteRights::WRITE_DATA.union(WriteRights::WRITE_DAC)
+        );
+        assert!(w.principals[0].implicit_owner_rights);
+        // A conditional OWNER RIGHTS allow does not remove the implicit right.
+        let d = sd(
+            u,
+            vec![Ace {
+                kind: AceKind::AllowConditional,
+                flags: 0,
+                mask: RX,
+                sid: Some(wk::OWNER_RIGHTS),
+            }],
+        );
+        let w = eval_file(&d);
+        assert_eq!(w.rights, WriteRights::WRITE_DAC);
+        assert_eq!(w.uncertain, WriteRights::NONE);
+        // No owner: the unknown owner may hold WRITE_DAC and the OWNER
+        // RIGHTS grants, as uncertain.
+        let d = SecurityDescriptor::new(
+            None,
+            Some(vec![Ace::allow(wk::OWNER_RIGHTS, mask::FILE_WRITE_DATA)]),
+        );
+        let w = eval_file(&d);
+        assert_eq!(w.rights, WriteRights::WRITE_DATA);
+        assert_eq!(w.uncertain, WriteRights::WRITE_DATA);
+        assert_eq!(w.principals[0].principal, Principal::Unknown);
+        let d = SecurityDescriptor::new(None, Some(vec![]));
+        assert_eq!(eval_file(&d).rights, WriteRights::WRITE_DAC);
     }
 
     #[test]
