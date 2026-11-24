@@ -112,6 +112,11 @@ pub enum PageHashError {
     /// looks them up by offset, so the order of such a table is not well
     /// defined.
     SectionsNotInFileOrder,
+    /// A page hash table's length is not a whole number of entries.
+    MalformedTable {
+        /// The table's length in bytes.
+        len: usize,
+    },
     /// The data hashed is not the length of the file the layout was built
     /// for, so it is not that file.
     LengthMismatch {
@@ -142,6 +147,12 @@ impl fmt::Display for PageHashError {
             Self::SectionsNotInFileOrder => f.write_str("the section table is not in file order"),
             Self::UnsupportedAlgorithm(alg) => {
                 write!(f, "there are no {alg} page hashes (only sha1 and sha256)")
+            }
+            Self::MalformedTable { len } => {
+                write!(
+                    f,
+                    "a {len}-byte page hash table is not a whole number of entries"
+                )
             }
             Self::LengthMismatch { expected, actual } => write!(
                 f,
@@ -226,6 +237,14 @@ impl PageLayout {
         if !sections.is_sorted_by_key(|(pointer, _)| *pointer) {
             return Err(PageHashError::SectionsNotInFileOrder);
         }
+        // Checked before any page is listed, so an image near 4 GiB fails at
+        // once instead of after building a table it cannot use.
+        if let Some(&(pointer, size)) = sections.last() {
+            let end = u64::from(pointer) + u64::from(size);
+            if u32::try_from(end).is_err() {
+                return Err(PageHashError::OffsetTooLarge { offset: end });
+            }
+        }
         let mut pages = vec![Page {
             offset: 0,
             len: size_of_headers,
@@ -266,13 +285,14 @@ impl PageLayout {
 }
 
 impl PageHashes {
-    /// The number of entries in the table.
+    /// The number of whole entries in the table (trailing bytes that do not
+    /// make an entry are not counted).
     #[must_use]
     pub fn len(&self) -> usize {
         self.table.len() / OFFSET_SIZE.saturating_add(self.algorithm.digest_len())
     }
 
-    /// Whether the table has no entries.
+    /// Whether the table has no whole entry.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -580,8 +600,23 @@ pub enum PageMismatchKind {
 /// This checks only that the table describes the file. Whether the table
 /// can be trusted depends on the signature that carries it; see
 /// [`verify_signature_page_hashes`].
+///
+/// A page table covers the header page and each section's raw data, not
+/// the bytes between the last section and the certificate table (an
+/// overlay) or after it. Only the whole-image Authenticode digest covers
+/// those, so a [`PageHashCheck::Match`] for a signature whose image digest
+/// does not match ([`SignatureStatus::DigestMismatch`]) does not mean the
+/// file is unmodified: it means every mapped page is.
 #[must_use]
 pub fn verify_page_hashes(data: &[u8], info: &PeInfo, signed: &PageHashes) -> PageHashCheck {
+    // A table parsed from a signature is always whole entries, but the
+    // fields are public: trailing bytes must not be silently ignored.
+    let record = OFFSET_SIZE.saturating_add(signed.algorithm.digest_len());
+    if signed.table.len() % record != 0 {
+        return PageHashCheck::Unavailable(PageHashError::MalformedTable {
+            len: signed.table.len(),
+        });
+    }
     let ours = match page_hash_table(data, info, signed.algorithm) {
         Ok(t) => t,
         Err(e) => return PageHashCheck::Unavailable(e),
@@ -637,7 +672,8 @@ pub fn verify_page_hashes(data: &[u8], info: &PeInfo, signed: &PageHashes) -> Pa
 /// hash table.
 ///
 /// "Verifies" here is the cryptographic check of #48. Whether the signer is
-/// trusted is the certificate chain's business (#49).
+/// trusted is the certificate chain's business (#49). See
+/// [`verify_page_hashes`] for what a match does and does not cover.
 #[must_use]
 pub fn verify_signature_page_hashes(
     data: &[u8],

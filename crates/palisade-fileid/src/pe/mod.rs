@@ -97,6 +97,12 @@ pub enum PeErrorKind {
     /// The optional header magic is neither PE32 (`0x10b`) nor PE32+
     /// (`0x20b`).
     UnknownOptionalHeaderMagic(u16),
+    /// [`parse_prefix`] was given fewer bytes than the headers and section
+    /// table need, though the file is long enough to hold them.
+    PrefixTooShort {
+        /// Bytes the headers and section table need.
+        needed: u64,
+    },
 }
 
 impl fmt::Display for PeError {
@@ -113,6 +119,9 @@ impl fmt::Display for PeError {
             }
             PeErrorKind::UnknownOptionalHeaderMagic(v) => {
                 write!(f, "unknown optional header magic {v:#x}")
+            }
+            PeErrorKind::PrefixTooShort { needed } => {
+                write!(f, "the headers need the first {needed} bytes")
             }
         }?;
         write!(f, " (at offset {:#x})", self.offset)
@@ -692,20 +701,31 @@ pub fn parse(data: &[u8]) -> Result<PeInfo, PeError> {
 
 /// Like [`parse`], with a choice of whole-file analyses.
 pub fn parse_with(data: &[u8], options: &ParseOptions) -> Result<PeInfo, PeError> {
-    parse_impl(data, to_u64(data.len()), options)
+    parse_impl(data, to_u64(data.len()), options, true)
 }
 
 /// Parses the headers of a PE image from `prefix`, the first bytes of a file
 /// that is `file_len` bytes long, so a large file can be identified while it
 /// is read in one sequential pass.
 ///
-/// Everything that depends on the file's length (the certificate table
-/// checks, [`PeInfo::overlay`], [`PeInfo::file_size`] and the
-/// `SectionDataOutOfFile` warnings) uses `file_len`. Only `prefix` is read,
-/// so the resource tree, version info and debug directory are reported only
-/// when they lie inside it, and neither the checksum nor section entropy is
-/// computed ([`ParseOptions::metadata_only`]). The DOS, COFF and optional
-/// headers and the section table must be inside `prefix`.
+/// The result has the headers, data directories, section table,
+/// certificate table location and overlay, which is everything the
+/// Authenticode image hash and the page hash tables need. Everything that
+/// depends on the file's length (the certificate table checks,
+/// [`PeInfo::overlay`], [`PeInfo::file_size`] and the `SectionDataOutOfFile`
+/// warnings) uses `file_len`. The DOS, COFF and optional headers and the
+/// section table (up to [`MAX_SECTIONS`] entries) must be inside `prefix`
+/// when the file is long enough to hold them; otherwise the result would
+/// describe fewer sections than the file has, so it is
+/// [`PeErrorKind::PrefixTooShort`].
+///
+/// When `prefix` is shorter than the file, the debug directory, the
+/// resource tree and the version info are **not** parsed (they are left
+/// empty, with no warning), because they can lie anywhere in the file.
+/// Neither the checksum nor section entropy is computed
+/// ([`ParseOptions::metadata_only`]). When `prefix` holds the whole file
+/// the result is that of [`parse_with`] with
+/// [`ParseOptions::metadata_only`].
 ///
 /// `prefix` longer than `file_len` is cut to `file_len`.
 pub fn parse_prefix(prefix: &[u8], file_len: u64) -> Result<PeInfo, PeError> {
@@ -716,16 +736,37 @@ pub fn parse_prefix(prefix: &[u8], file_len: u64) -> Result<PeInfo, PeError> {
                 .min(prefix.len()),
         )
         .unwrap_or(prefix);
-    parse_impl(
-        prefix,
-        file_len.max(to_u64(prefix.len())),
-        &ParseOptions::metadata_only(),
-    )
+    let file_len = file_len.max(to_u64(prefix.len()));
+    let whole = to_u64(prefix.len()) == file_len;
+    let info = parse_impl(prefix, file_len, &ParseOptions::metadata_only(), whole)?;
+    if !whole {
+        let sections = usize::from(info.coff.number_of_sections).min(MAX_SECTIONS);
+        let needed = info
+            .optional
+            .offset
+            .saturating_add(u64::from(info.coff.size_of_optional_header))
+            .saturating_add(to_u64(sections.saturating_mul(SECTION_HEADER_SIZE)))
+            .min(file_len);
+        if needed > to_u64(prefix.len()) {
+            return Err(PeError {
+                offset: to_u64(prefix.len()),
+                kind: PeErrorKind::PrefixTooShort { needed },
+            });
+        }
+    }
+    Ok(info)
 }
 
 /// [`parse_with`] over `data`, the first bytes of a file of `file_len`
-/// bytes. Reads stay inside `data`; length checks use `file_len`.
-fn parse_impl(data: &[u8], file_len: u64, options: &ParseOptions) -> Result<PeInfo, PeError> {
+/// bytes. Reads stay inside `data`; length checks use `file_len`. The debug
+/// directory and resources are parsed only when `directories` is set, which
+/// must be only when `data` is the whole file.
+fn parse_impl(
+    data: &[u8],
+    file_len: u64,
+    options: &ParseOptions,
+    directories: bool,
+) -> Result<PeInfo, PeError> {
     let mut warnings = Warnings::default();
 
     if data.len() < 64 {
@@ -872,7 +913,7 @@ fn parse_impl(data: &[u8], file_len: u64, options: &ParseOptions) -> Result<PeIn
     };
     let debug = data_directories
         .get(DataDirectoryKind::Debug.index())
-        .filter(|d| d.is_present())
+        .filter(|d| directories && d.is_present())
         .map(|d| debug::parse(data, layout, *d, &mut warnings))
         .unwrap_or_default();
 
@@ -880,7 +921,7 @@ fn parse_impl(data: &[u8], file_len: u64, options: &ParseOptions) -> Result<PeIn
     let mut version_info = None;
     if let Some(dir) = data_directories
         .get(DataDirectoryKind::Resource.index())
-        .filter(|d| d.is_present())
+        .filter(|d| directories && d.is_present())
     {
         if let Some(summary) = resource::walk(data, layout, *dir, &mut warnings) {
             version_info = version_from_resources(data, &summary, &mut warnings);
@@ -1108,11 +1149,14 @@ fn section_raw_data<'a>(
     warnings: &mut Warnings,
 ) -> Option<&'a [u8]> {
     let (start, size) = section.file_data(file_alignment)?;
+    if u64::from(start) + u64::from(size) > file_len {
+        warnings.push(
+            to_usize(start).unwrap_or(usize::MAX),
+            WarningKind::SectionDataOutOfFile { index },
+        );
+    }
     let start = to_usize(start)?;
     let end = start.saturating_add(to_usize(size)?);
-    if to_u64(end) > file_len {
-        warnings.push(start, WarningKind::SectionDataOutOfFile { index });
-    }
     data.get(start..end.min(data.len()))
         .filter(|raw| !raw.is_empty())
 }

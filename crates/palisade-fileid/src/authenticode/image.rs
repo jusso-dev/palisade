@@ -430,14 +430,13 @@ fn read_some<R: Read>(reader: &mut R, buf: &mut [u8]) -> Result<usize, HashError
 /// Adds `n` to the bytes read so far, failing as soon as the file is longer
 /// than its metadata said.
 fn check_len(read: u64, n: usize, file_len: u64) -> Result<u64, HashError> {
-    let total = read.saturating_add(to_u64(n));
-    if total > file_len {
-        return Err(HashError::SizeChanged {
+    match read.checked_add(to_u64(n)) {
+        Some(total) if total <= file_len => Ok(total),
+        total => Err(HashError::SizeChanged {
             expected: file_len,
-            actual: total,
-        });
+            actual: total.unwrap_or(u64::MAX),
+        }),
     }
-    Ok(total)
 }
 
 fn internal(message: &str) -> HashError {

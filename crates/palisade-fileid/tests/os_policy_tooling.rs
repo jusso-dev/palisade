@@ -6,7 +6,9 @@
 //! OS policy cmdlets), and compares every hash rule the tooling emits with
 //! [`authenticode_hashes`]: the SHA-1 and SHA-256 Authenticode hashes, and
 //! the SHA-1 and SHA-256 "page hash" values. CI runs it on its Windows
-//! runners. Where the cmdlets are not installed it says so and passes.
+//! runners, where the cmdlets must be present: under CI (`CI` is set, as
+//! GitHub Actions sets it) a missing cmdlet fails the test. On a developer
+//! machine without them it says so and passes.
 
 #![cfg(windows)]
 // Test code: helpers may unwrap, since a failure should fail loudly.
@@ -73,8 +75,9 @@ fn images() -> Vec<(&'static str, Vec<u8>)> {
             }
             .build(),
         ),
-        // The multi-section image, signed with page hashes: the certificate
-        // table and its directory entry must not change any value.
+        ("palisade-multi.exe", multi.clone().build()),
+        // The same image, signed with page hashes: the certificate table
+        // and its directory entry must not change any value.
         (
             "palisade-signed.exe",
             PeBuilder {
@@ -132,8 +135,13 @@ fn hashes_match_os_policy_tooling() {
         .status()
         .unwrap();
     if status.code() == Some(3) {
-        eprintln!("skipped: the OS code integrity policy cmdlets are not installed here");
         std::fs::remove_dir_all(&dir).unwrap();
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "the OS code integrity policy cmdlets are missing on this CI runner, so the page \
+             hash values cannot be checked against the OS tooling"
+        );
+        eprintln!("skipped: the OS code integrity policy cmdlets are not installed here");
         return;
     }
     assert!(status.success(), "{status}");
@@ -142,8 +150,8 @@ fn hashes_match_os_policy_tooling() {
     std::fs::remove_dir_all(&dir).unwrap();
     // Every rule for one of our files must carry our value. The tooling
     // emits rules for user and kernel mode, and may merge rules whose hash
-    // is the same (two images here share a header page), so each value is
-    // also checked as a set per kind.
+    // is the same (the unsigned and signed multi-section images have the
+    // same values), so each value is also checked as a set per kind.
     let mut seen_values: BTreeSet<(&str, String)> = BTreeSet::new();
     for line in rules.lines().filter(|l| !l.trim().is_empty()) {
         let (friendly, hash) = line.split_once('\t').unwrap();

@@ -503,3 +503,60 @@ fn write_page_hash_images() {
         std::fs::write(dir.join(format!("{name}.exe")), b.build()).unwrap();
     }
 }
+
+#[test]
+fn malformed_tables_are_not_compared() {
+    let image = signed("multi", "page_hash/multi-sha256.p7");
+    let info = pe::parse(&image).unwrap();
+    let mut table = signed_table(&image);
+    table.table.push(0);
+    assert_eq!(
+        table.len(),
+        PageLayout::from_pe(&info).unwrap().entry_count()
+    );
+    assert_eq!(
+        verify_page_hashes(&image, &info, &table),
+        PageHashCheck::Unavailable(PageHashError::MalformedTable {
+            len: table.table.len()
+        })
+    );
+}
+
+#[test]
+fn section_data_past_4_gib_has_no_table() {
+    let image = PeBuilder::default().build();
+    let mut info = pe::parse(&image).unwrap();
+    // A hand-built layout: one section from 0x400 to just past 4 GiB, in a
+    // file that is that long. No data is needed to build the layout.
+    let size = u32::MAX - 0x3ff;
+    info.sections[0].size_of_raw_data = size;
+    info.file_size = 0x400 + u64::from(size);
+    assert!(HashRanges::from_pe(&info).status().is_conformant());
+    assert_eq!(
+        PageLayout::from_pe(&info).unwrap_err(),
+        PageHashError::OffsetTooLarge {
+            offset: 0x1_0000_0000
+        }
+    );
+}
+
+#[test]
+fn weak_and_non_conformant_signatures_are_not_checked() {
+    // A status other than Valid or DigestMismatch, even with a sound
+    // signature, is never checked: a weak digest, or an image whose layout
+    // is not conformant (so its digest is not authoritative).
+    let image = signed("multi", "page_hash/multi-sha256.p7");
+    let info = pe::parse(&image).unwrap();
+    let report = verify_pe(&image, &VerifyOptions::default()).unwrap();
+    let mut sig = report.signatures[0].clone();
+    for status in [
+        SignatureStatus::WeakAlgorithm(palisade_fileid::authenticode::DigestAlgorithm::Md5),
+        SignatureStatus::NonConformantImage,
+    ] {
+        sig.status = status;
+        assert_eq!(
+            verify_signature_page_hashes(&image, &info, &sig),
+            Some(PageHashCheck::SignatureNotValid)
+        );
+    }
+}
