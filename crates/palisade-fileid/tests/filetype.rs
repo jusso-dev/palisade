@@ -3675,6 +3675,66 @@ fn any_shebang_line_before_a_zip_stays_executable() {
     assert!(!classify(b"#![allow(dead_code)]\nfn main() {}\n", None).is_executable_content());
 }
 
+/// Asserts that `data` is the clean shebang script `kind` under `hint`,
+/// decided by its `#!` line alone.
+fn assert_shebang_script(data: &[u8], hint: &str, kind: ScriptKind) {
+    let c = classify(data, Some(hint));
+    assert_eq!(
+        (c.content_kind, c.confidence),
+        (FileKind::Script(kind), Confidence::High),
+        "{hint} {c:?}"
+    );
+    assert!(!c.heuristic && !c.extension_assisted, "{hint} {c:?}");
+    assert!(
+        !c.flags.python_zipapp && c.parse_error.is_none(),
+        "{hint} {c:?}"
+    );
+}
+
+#[test]
+fn a_shebang_line_before_a_zip_decides_over_the_extension() {
+    // Round 19: a planted volume descriptor let the disc image path apply
+    // a script or HTML application name to the file, so a weaker
+    // extension-assisted kind replaced the `#!` line's.
+    for line in [&b"#![x]\n"[..], b"#!/bin/sh\n"] {
+        let mut data = line.to_vec();
+        data.extend_from_slice(b"PK\x03\x04");
+        data.resize(0x8800, 0);
+        data[0x8000..0x8007].copy_from_slice(b"\x01CD001\x01");
+        for hint in ["app.hta", "run.ps1", "x.vbs", "x.com"] {
+            assert_shebang_script(&data, hint, ScriptKind::Shell);
+            assert!(classify(&data, Some(hint)).mismatch, "{line:?} {hint}");
+        }
+        assert!(!classify(&data, Some("tool.sh")).mismatch, "{line:?}");
+    }
+}
+
+#[test]
+fn a_shebang_line_before_a_zip_decides_over_the_archive_bytes() {
+    // Round 19: keywords and markers in the archive's bytes were
+    // classified as text, and a keyword guess could then be replaced by
+    // a `.com` or script name.
+    let mut keywords = zip(b"#![dim x : msgbox x]\n", &["__main__.py"]);
+    keywords.push(b'X');
+    let php = zip(b"#![x]\n", &["<?php system($x); ?>"]);
+    let encoded = zip(b"#![x]\n", &["#@~^AAAAAA==^#~@"]);
+    let mut hta = zip(b"#!/usr/bin/env python3\n", &["x"]);
+    for unit in "<HTA:APPLICATION/>".encode_utf16() {
+        hta.extend_from_slice(&unit.to_le_bytes());
+    }
+    for (data, kind) in [
+        (&keywords, ScriptKind::Shell),
+        (&php, ScriptKind::Shell),
+        (&encoded, ScriptKind::Shell),
+        (&hta, ScriptKind::Python),
+    ] {
+        for hint in ["x.com", "x.ps1", "x.hta", "x.bin"] {
+            assert_shebang_script(data, hint, kind);
+        }
+        assert!(!classify(data, None).flags.encoded_script);
+    }
+}
+
 /// Seed inputs for the property tests and the fuzz target.
 fn seeds() -> Vec<Vec<u8>> {
     let dll = PeBuilder {

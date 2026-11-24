@@ -619,28 +619,20 @@ fn detect<R: Read + Seek + ?Sized>(
         return;
     }
     // A zip application: a shebang line, then a ZIP archive. The archive
-    // is binary, so this is checked before the text test, and only once:
-    // anything but a clean zip application is classified as text below.
-    // A read failure in the probe is kept, and reported with whatever the
-    // rest finds (text, a script, a disc image), since the archive could
-    // not be ruled out.
+    // is binary, so this is checked before the text test. Anything but a
+    // clean zip application is the script the `#!` line names, at high
+    // confidence, and the rest of the file (text, keywords, markers in
+    // the archive's bytes, a disc image descriptor) is not classified:
+    // the `#!` line alone decides. A read failure in the probe is kept,
+    // since the archive could not be ruled out.
     if let Some(script) = text::shebang_zip(head) {
         let mut probe = out.clone();
         if zip::classify(src, name, &mut probe, true) {
             *out = probe;
             return;
         }
-        detect_unstructured(src, name, out);
-        // Whatever the rest looks like (binary, text, a disc image), the
-        // file is the script its `#!` line names.
-        if !out.is_executable_content() {
-            set(out, FileKind::Script(script));
-            out.heuristic = false;
-            out.extension_assisted = false;
-        }
-        if out.parse_error.is_none() {
-            out.parse_error = probe.parse_error;
-        }
+        set(out, FileKind::Script(script));
+        out.parse_error = probe.parse_error;
         return;
     }
     detect_unstructured(src, name, out);
