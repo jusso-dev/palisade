@@ -86,6 +86,9 @@ pub enum Curve {
 pub enum KeyAlgorithm {
     /// RSA.
     Rsa,
+    /// An RSA key restricted to RSA-PSS (`id-RSASSA-PSS`, RFC 4055).
+    /// Reported as unsupported: its restrictions are not enforced yet.
+    RsaPss,
     /// An elliptic-curve key on a known curve.
     Ec(Curve),
     /// An elliptic-curve key on another curve.
@@ -356,6 +359,9 @@ pub enum SignatureWarning {
     /// The image or signer digest is SHA-1, which is not collision
     /// resistant. The signature loses primary selection to any SHA-2 one.
     Sha1Digest,
+    /// The signer's RSA key is smaller than 2048 bits. It still verifies,
+    /// for old files, but ADR 0008 sets 2048 bits as the floor for trust.
+    SmallRsaKey(u32),
     /// The SignerInfo's digest algorithm differs from the indirect data's.
     /// Each is checked with its own algorithm.
     DigestAlgorithmsDiffer,

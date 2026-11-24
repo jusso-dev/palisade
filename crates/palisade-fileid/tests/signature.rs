@@ -24,14 +24,15 @@ mod common;
 use common::*;
 use palisade_fileid::authenticode::{
     Asn1ErrorKind, BadSignature, CertificateTableError, Curve, DigestAlgorithm, InvalidReason,
-    KeyAlgorithm, MAX_CERTIFICATE_ENTRIES, MAX_NESTING_DEPTH, MAX_SIGNATURES, OsCiIssue,
-    ReportWarning, SignatureAlgorithm, SignatureCheck, SignatureError, SignatureKind,
+    KeyAlgorithm, MAX_CERTIFICATE_ENTRIES, MAX_NESTING_DEPTH, MAX_SIGNATURES, MAX_WARNINGS,
+    OsCiIssue, ReportWarning, SignatureAlgorithm, SignatureCheck, SignatureError, SignatureKind,
     SignatureReport, SignatureStatus, SignatureWarning, SignerIdentifier, SigningState,
     StatementType, TimestampKind, Unsupported, VerifyOptions, authenticode_hashes,
     verify_certificate_table, verify_pe, verify_signatures,
 };
 use palisade_fileid::hash::{AlgorithmSet, HashAlgorithm};
 use palisade_fileid::pe;
+use proptest::prelude::*;
 use sha2::{Digest as _, Sha256};
 
 const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/authenticode");
@@ -994,6 +995,258 @@ fn indirect_data_digest_covers_the_content() {
     let digest = Sha256::digest(&content[h..]);
     let attrs = element(&blob, &signer(&[SI_ATTRS]));
     assert!(attrs.windows(32).any(|w| w == digest.as_slice()));
+}
+
+// --- Round-1 review cases. ---------------------------------------------------
+
+#[test]
+fn warnings_stay_capped_with_trailing_data_and_nesting_limits() {
+    let leaf = fixture("rsa2048-sha256.p7");
+    // 40 distinct unknown authenticated attributes would overflow the cap;
+    // they are unsigned additions here, so the signature breaks, which does
+    // not matter for the warning list.
+    let attrs = element(&leaf, &signer(&[SI_ATTRS]));
+    let (h, _) = header(attrs, 0);
+    let mut content = attrs[h..].to_vec();
+    for i in 0..40_u8 {
+        let oid = tlv(0x06, &[0x2b, 0x06, 0x01, 0x04, 0x01, 0x83, 0x00, i]);
+        content.extend(tlv(0x30, &[oid, tlv(0x31, &[0x05, 0x00])].concat()));
+    }
+    let noisy = replace(&leaf, &signer(&[SI_ATTRS]), &tlv(0xa0, &content));
+    // Too deep a nest under it, and data after it in the entry.
+    let mut blob = noisy.clone();
+    for _ in 0..(MAX_NESTING_DEPTH as usize + 2) {
+        blob = nest(&noisy, &blob);
+    }
+    blob.extend_from_slice(b"hidden");
+    let report = verify_blob(&blob);
+    for sig in &report.signatures {
+        assert!(
+            sig.warnings.len() <= MAX_WARNINGS + 1,
+            "{}",
+            sig.warnings.len()
+        );
+        let truncated = sig
+            .warnings
+            .iter()
+            .filter(|w| **w == SignatureWarning::WarningsTruncated)
+            .count();
+        assert_eq!(truncated, 1);
+        assert_eq!(
+            sig.warnings.last(),
+            Some(&SignatureWarning::WarningsTruncated)
+        );
+    }
+}
+
+#[test]
+fn short_or_corrupt_tables_are_malformed_not_unsigned() {
+    for table in [
+        vec![0_u8; 1],
+        vec![0_u8; 7],
+        vec![0xcc_u8; 5],
+        vec![0_u8; 8],
+    ] {
+        let report = verify(&image_with_table(table.clone()));
+        assert!(
+            matches!(
+                report.signing_state,
+                SigningState::Invalid(InvalidReason::CertificateTable(
+                    CertificateTableError::Malformed { .. }
+                ))
+            ),
+            "{table:?}: {:?}",
+            report.signing_state
+        );
+    }
+    // An unknown entry, then a corrupt one: still not unsigned.
+    let mut table = entry(0x0200, 0x0001, b"X509....");
+    table.extend_from_slice(&3_u32.to_le_bytes());
+    table.extend_from_slice(&[0; 4]);
+    let report = verify(&image_with_table(table));
+    assert!(matches!(
+        report.signing_state,
+        SigningState::Invalid(InvalidReason::CertificateTable(
+            CertificateTableError::Malformed { .. }
+        ))
+    ));
+}
+
+/// The rsa2048 leaf certificate of `rsa2048-sha256.p7` with its SPKI
+/// algorithm changed to id-RSASSA-PSS, and the signer pointed at it. Only
+/// the certificate's own signature (not checked here) is broken by this.
+fn with_pss_restricted_key(blob: &[u8]) -> Vec<u8> {
+    let certs = element(blob, &sd(&[SD_CERTIFICATES]));
+    let leaf_index = (0..2)
+        .find(|i| {
+            let cert = element(certs, &[*i]);
+            cert.windows(6).any(|w| w == b"Signer")
+        })
+        .unwrap();
+    let cert = element(certs, &[leaf_index]).to_vec();
+    // tbsCertificate children: [0] version, serial, sigalg, issuer, validity,
+    // subject, spki. SPKI's AlgorithmIdentifier is [0, 6, 0].
+    let pss = tlv(
+        0x30,
+        &tlv(
+            0x06,
+            &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0a],
+        ),
+    );
+    let cert = replace(&cert, &[0, 6, 0], &pss);
+    replace(blob, &sd(&[SD_CERTIFICATES, leaf_index]), &cert)
+}
+
+#[test]
+fn pss_restricted_keys_are_not_used_for_verification() {
+    let blob = with_pss_restricted_key(&fixture("rsa2048-sha256.p7"));
+    let report = verify_blob(&blob);
+    let sig = only(&report);
+    assert_eq!(sig.key_alg, Some(KeyAlgorithm::RsaPss));
+    assert_eq!(
+        sig.status,
+        SignatureStatus::Unsupported(Unsupported::KeyAlgorithm(KeyAlgorithm::RsaPss))
+    );
+    assert!(sig.signer.is_none());
+    assert_eq!(report.primary, None);
+}
+
+#[test]
+fn malformed_der_in_the_pe_image_link_is_rejected() {
+    let blob = fixture("rsa2048-sha256.p7");
+    // SpcPeImageData is indirect [0] (SpcAttributeTypeAndOptionalValue) ->
+    // [1] (the value SEQUENCE); its children are flags and [0] file.
+    let file_at = indirect(&[0, 1, 1]);
+    assert_eq!(element(&blob, &file_at)[0], 0xa0);
+    // A [2] file link whose content is a truncated element.
+    let bad = tlv(0xa0, &[0xa2, 0x05, 0x80, 0x01]);
+    let report = verify_blob(&replace(&blob, &file_at, &bad));
+    assert!(matches!(
+        malformed(&report),
+        SignatureError::Asn1(a) if a.kind == Asn1ErrorKind::Truncated
+    ));
+    // Two links instead of one.
+    let link = element(&blob, &[&file_at[..], &[0]].concat()).to_vec();
+    let two = tlv(0xa0, &[link.clone(), link].concat());
+    let report = verify_blob(&replace(&blob, &file_at, &two));
+    assert!(matches!(
+        malformed(&report),
+        SignatureError::Asn1(a) if a.kind == Asn1ErrorKind::TrailingData
+    ));
+}
+
+#[test]
+fn malformed_page_hash_moniker_is_rejected() {
+    let blob = fixture("rsa2048-page-hashes.p7");
+    // [0] file -> [1] moniker; append a stray element inside the moniker.
+    let moniker_at = indirect(&[0, 1, 1, 0]);
+    let moniker = element(&blob, &moniker_at);
+    assert_eq!(moniker[0], 0xa1);
+    let (h, _) = header(moniker, 0);
+    let mut content = moniker[h..].to_vec();
+    content.extend_from_slice(&[0x05, 0x00]);
+    let report = verify_blob(&replace(&blob, &moniker_at, &tlv(0xa1, &content)));
+    assert!(matches!(
+        malformed(&report),
+        SignatureError::Asn1(a) if a.kind == Asn1ErrorKind::TrailingData
+    ));
+}
+
+#[test]
+fn subject_key_identifier_signers_are_matched() {
+    let blob = fixture("rsa2048-sha256.p7");
+    let certs = element(&blob, &sd(&[SD_CERTIFICATES]));
+    let leaf = (0..2)
+        .map(|i| element(certs, &[i]))
+        .find(|c| c.windows(6).any(|w| w == b"Signer"))
+        .unwrap();
+    // The SKI is the only 20-byte OCTET STRING inside an OCTET STRING
+    // following the 2.5.29.14 OID.
+    let ski_oid = [0x06, 0x03, 0x55, 0x1d, 0x0e];
+    let at = leaf.windows(5).position(|w| w == ski_oid).unwrap() + 5;
+    let (wrapper_h, _) = header(leaf, at);
+    let inner = at + wrapper_h;
+    let (h, l) = header(leaf, inner);
+    let ski = leaf[inner + h..inner + h + l].to_vec();
+    assert_eq!(ski.len(), 20);
+
+    let with_ski = |version: u8| {
+        let b = replace(&blob, &signer(&[1]), &tlv(0x80, &ski));
+        replace(&b, &signer(&[0]), &[0x02, 0x01, version])
+    };
+    let report = verify_blob(&with_ski(3));
+    let sig = only(&report);
+    assert_eq!(sig.status, SignatureStatus::Valid, "{sig:#?}");
+    assert_eq!(
+        sig.signer_id,
+        Some(SignerIdentifier::SubjectKeyId(ski.clone()))
+    );
+    assert!(sig.warnings.is_empty());
+
+    // Version 1 with a key identifier is reported.
+    let report = verify_blob(&with_ski(1));
+    let sig = only(&report);
+    assert_eq!(sig.status, SignatureStatus::Valid);
+    assert_eq!(sig.warnings, [SignatureWarning::SignerVersionMismatch(1)]);
+
+    // A key identifier no certificate has.
+    let b = replace(&blob, &signer(&[1]), &tlv(0x80, &[0xab; 20]));
+    let b = replace(&b, &signer(&[0]), &[0x02, 0x01, 3]);
+    assert_eq!(
+        only(&verify_blob(&b)).status,
+        SignatureStatus::BadSignature(BadSignature::SignerCertificateNotFound)
+    );
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 256,
+        ..ProptestConfig::default()
+    })]
+
+    /// Random byte edits to a valid dual signature never panic, never break
+    /// the documented bounds, and never produce a `Valid` signature that did
+    /// not pass every check. (The fuzz target asserts the same, more deeply.)
+    #[test]
+    fn mutated_signatures_respect_invariants(
+        edits in proptest::collection::vec((any::<prop::sample::Index>(), any::<u8>()), 1..8),
+        cut in any::<prop::sample::Index>(),
+        truncate in any::<bool>(),
+    ) {
+        let mut blob = fixture("rsa2048-sha1-nested-sha256.p7");
+        for (at, value) in &edits {
+            let i = at.index(blob.len());
+            blob[i] = *value;
+        }
+        if truncate {
+            blob.truncate(cut.index(blob.len()));
+        }
+        for tolerate in [false, true] {
+            let options = VerifyOptions { tolerate_digest_mismatch: tolerate };
+            let report = verify_pe(&image_with_table(pkcs7_entry(&blob)), &options).unwrap();
+            prop_assert!(report.signatures.len() <= MAX_SIGNATURES);
+            for (i, sig) in report.signatures.iter().enumerate() {
+                prop_assert_eq!((sig.index, sig.total), (i, report.signatures.len()));
+                prop_assert!(sig.depth <= MAX_NESTING_DEPTH);
+                prop_assert!(sig.warnings.len() <= MAX_WARNINGS + 1);
+                if sig.status.is_valid() {
+                    prop_assert_eq!(&sig.signature_valid, &SignatureCheck::Valid);
+                    prop_assert_eq!(sig.digest_match, Some(true));
+                }
+                if sig.signer.is_some() && !sig.status.is_valid() {
+                    prop_assert!(tolerate && sig.status == SignatureStatus::DigestMismatch);
+                    prop_assert!(sig.untrusted_signer_attrs);
+                }
+            }
+            match report.primary {
+                Some(p) => {
+                    prop_assert!(report.signatures[p].status.is_valid());
+                    prop_assert_eq!(&report.signing_state, &SigningState::Valid);
+                }
+                None => prop_assert!(report.signing_state != SigningState::Valid),
+            }
+        }
+    }
 }
 
 /// Writes the unsigned image the fixtures sign, for `generate.sh`.

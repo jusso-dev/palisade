@@ -19,6 +19,8 @@ pub const MAX_CERTIFICATES: usize = 64;
 pub const MAX_TIMESTAMPS: usize = 8;
 /// The most warnings kept for one signature.
 pub const MAX_WARNINGS: usize = 32;
+/// The most distinct entries kept from a `digestAlgorithms` set.
+const MAX_DIGEST_SET: usize = 16;
 /// The most nested SignedData values collected from one SignerInfo. Further
 /// ones are counted against [`super::MAX_SIGNATURES`] by the caller anyway,
 /// so collecting one more than the limit is enough to report it.
@@ -40,12 +42,16 @@ pub(crate) type DigestId = std::result::Result<DigestAlgorithm, ObjectId>;
 pub(crate) struct Warnings(pub Vec<SignatureWarning>);
 
 impl Warnings {
+    /// Adds `warning` unless it is already recorded. Past [`MAX_WARNINGS`],
+    /// records a single [`SignatureWarning::WarningsTruncated`] instead, so
+    /// the list never exceeds `MAX_WARNINGS + 1`.
     pub fn push(&mut self, warning: SignatureWarning) {
+        if self.0.contains(&warning) {
+            return;
+        }
         if self.0.len() < MAX_WARNINGS {
-            if !self.0.contains(&warning) {
-                self.0.push(warning);
-            }
-        } else if self.0.last() != Some(&SignatureWarning::WarningsTruncated) {
+            self.0.push(warning);
+        } else if !self.0.contains(&SignatureWarning::WarningsTruncated) {
             self.0.push(SignatureWarning::WarningsTruncated);
         }
     }
@@ -161,8 +167,14 @@ fn parse_signed_data<'a>(sd: &Tlv<'a>) -> Result<SignedData<'a>> {
             }
         }
     }
-    // CRLs are not used for Authenticode verification; revocation is #50.
-    r.read_optional(tag::context_cons(1))?;
+    // CRLs are not used for Authenticode verification (revocation is #50),
+    // but each must still be a valid DER element.
+    if let Some(crls) = r.read_optional(tag::context_cons(1))? {
+        let mut c = crls.reader();
+        while !c.is_empty() {
+            c.read(tag::SEQUENCE)?;
+        }
+    }
 
     let signer_infos = r.read(tag::SET)?;
     r.finish()?;
@@ -181,10 +193,11 @@ fn parse_signed_data<'a>(sd: &Tlv<'a>) -> Result<SignedData<'a>> {
         _ => return Err(SignatureError::SignerCount(count)),
     };
 
-    let signer_digest_listed = match &signer.digest_alg {
-        Ok(alg) => digest_set_contains(&digest_algorithms, *alg)?,
-        Err(_) => false,
-    };
+    let listed = digest_set(&digest_algorithms)?;
+    let signer_digest_listed = signer
+        .digest_alg
+        .as_ref()
+        .is_ok_and(|alg| listed.contains(&Ok(*alg)));
     Ok(SignedData {
         signer_digest_listed,
         indirect,
@@ -194,16 +207,19 @@ fn parse_signed_data<'a>(sd: &Tlv<'a>) -> Result<SignedData<'a>> {
     })
 }
 
-fn digest_set_contains(set: &Tlv<'_>, wanted: DigestAlgorithm) -> Result<bool> {
+/// The `digestAlgorithms` set, each identifier checked. Duplicates are
+/// kept once, so the result is bounded by the six known algorithms plus
+/// [`MAX_DIGEST_SET`] unknown ones.
+fn digest_set(set: &Tlv<'_>) -> Result<Vec<DigestId>> {
     let mut r = set.reader();
-    let mut found = false;
+    let mut out = Vec::new();
     while !r.is_empty() {
-        let id = r.read(tag::SEQUENCE)?;
-        if parse_digest_alg(&id)? == Ok(wanted) {
-            found = true;
+        let id = parse_digest_alg(&r.read(tag::SEQUENCE)?)?;
+        if out.len() < MAX_DIGEST_SET && !out.contains(&id) {
+            out.push(id);
         }
     }
-    Ok(found)
+    Ok(out)
 }
 
 /// A DigestAlgorithmIdentifier: an OID with absent or NULL parameters.
@@ -253,9 +269,13 @@ fn parse_indirect_data<'a>(seq: &Tlv<'a>, warnings: &mut Warnings) -> Result<Ind
             pe_image_flags = Some(asn1::bit_string_flags(&flags)?);
         }
         if let Some(file) = v.read_optional(tag::context_cons(0))? {
-            let link = asn1::single(file.content, file.content_offset, tag::context_cons(1));
-            if let Ok(moniker) = link {
-                page_hashes = parse_page_hash_moniker(&moniker, warnings);
+            // SpcLink: [0] url, [1] moniker or [2] file. Only a moniker can
+            // carry page hashes; every form must still be valid DER.
+            let mut f = file.reader();
+            let link = f.read_any()?;
+            f.finish()?;
+            if link.tag == tag::context_cons(1) {
+                page_hashes = parse_page_hash_moniker(&link, warnings)?;
             }
         }
         v.finish()?;
@@ -285,45 +305,52 @@ fn parse_indirect_data<'a>(seq: &Tlv<'a>, warnings: &mut Warnings) -> Result<Ind
 
 /// `SpcSerializedObject` (`[1] IMPLICIT SEQUENCE { classId OCTET STRING,
 /// serializedData OCTET STRING }`). Returns the page hash table if the class
-/// ID is the page hash one and the table is well formed; a malformed table
-/// is dropped with a warning, because page hashes are optional.
-fn parse_page_hash_moniker(moniker: &Tlv<'_>, warnings: &mut Warnings) -> Option<PageHashes> {
+/// ID is the page hash one. Invalid DER anywhere in it is an error, like
+/// anywhere else in the signed content; a well-formed table of an unknown
+/// version or with a partial record is dropped with a warning, because page
+/// hashes are optional.
+fn parse_page_hash_moniker(
+    moniker: &Tlv<'_>,
+    warnings: &mut Warnings,
+) -> Result<Option<PageHashes>> {
     let mut r = moniker.reader();
-    let class_id = r.read(tag::OCTET_STRING).ok()?;
+    let class_id = r.read(tag::OCTET_STRING)?;
+    let data = r.read(tag::OCTET_STRING)?;
+    r.finish()?;
     if class_id.content != PAGE_HASH_CLASS_ID {
-        return None;
+        return Ok(None);
     }
-    let parsed = r
-        .read(tag::OCTET_STRING)
-        .ok()
-        .and_then(|data| parse_page_hash_table(data.content, data.content_offset));
+    let parsed = parse_page_hash_table(data.content, data.content_offset)?;
     if parsed.is_none() {
         warnings.push(SignatureWarning::PageHashesMalformed);
     }
-    parsed
+    Ok(parsed)
 }
 
 /// `SET { SEQUENCE { OID, SET { OCTET STRING table } } }`.
-fn parse_page_hash_table(data: &[u8], base: usize) -> Option<PageHashes> {
-    let set = asn1::single(data, base, tag::SET).ok()?;
+fn parse_page_hash_table(data: &[u8], base: usize) -> Result<Option<PageHashes>> {
+    let set = asn1::single(data, base, tag::SET)?;
     let mut entries = set.reader();
-    let entry = entries.read(tag::SEQUENCE).ok()?;
+    let entry = entries.read(tag::SEQUENCE)?;
+    entries.finish()?;
     let mut e = entry.reader();
-    let algorithm = match read_oid(&mut e).ok()? {
+    let version = read_oid(&mut e)?;
+    let values = e.read(tag::SET)?;
+    e.finish()?;
+    let table = asn1::single(values.content, values.content_offset, tag::OCTET_STRING)?;
+    let algorithm = match version {
         oid::PAGE_HASHES_V1 => HashAlgorithm::Sha1,
         oid::PAGE_HASHES_V2 => HashAlgorithm::Sha256,
-        _ => return None,
+        _ => return Ok(None),
     };
-    let values = e.read(tag::SET).ok()?;
-    let table = asn1::single(values.content, values.content_offset, tag::OCTET_STRING).ok()?;
-    let record = algorithm.digest_len().checked_add(4)?;
+    let record = algorithm.digest_len().saturating_add(4);
     if table.content.is_empty() || table.content.len() % record != 0 {
-        return None;
+        return Ok(None);
     }
-    Some(PageHashes {
+    Ok(Some(PageHashes {
         algorithm,
         table: table.content.to_vec(),
-    })
+    }))
 }
 
 fn parse_signer_info<'a>(info: &Tlv<'a>, warnings: &mut Warnings) -> Result<Signer<'a>> {
@@ -495,9 +522,14 @@ fn parse_opus_info(value: &Tlv<'_>, warnings: &mut Warnings) -> Result<Opus> {
     let mut r = value.expect(tag::SEQUENCE)?.reader();
     let mut opus = Opus::default();
     if let Some(name) = r.read_optional(tag::context_cons(0))? {
-        let inner = asn1::single(name.content, name.content_offset, tag::context_prim(0))
-            .or_else(|_| asn1::single(name.content, name.content_offset, tag::context_prim(1)))?;
-        opus.program_name = Some(spc_text(&inner, warnings)?);
+        let mut n = name.reader();
+        let inner = n.read_any()?;
+        n.finish()?;
+        if inner.tag == tag::context_prim(0) || inner.tag == tag::context_prim(1) {
+            opus.program_name = Some(spc_text(&inner, warnings)?);
+        } else {
+            warnings.push(SignatureWarning::UnreadLinkForm);
+        }
     }
     if let Some(more) = r.read_optional(tag::context_cons(1))? {
         let mut m = more.reader();
@@ -643,7 +675,7 @@ fn parse_signature_alg(id: &Tlv<'_>, signer_digest: &DigestId) -> Result<Signatu
             Ok(_) => SignatureAlgorithm::Ecdsa(signer()?),
             Err(_) => other(alg),
         },
-        oid::RSASSA_PSS => parse_pss_params(params.as_ref()).unwrap_or_else(|| other(alg)),
+        oid::RSASSA_PSS => parse_pss_params(params.as_ref())?.unwrap_or_else(|| other(alg)),
         oid::ED25519 if params.is_none() => SignatureAlgorithm::Ed25519,
         oid::ED448 if params.is_none() => SignatureAlgorithm::Ed448,
         oid::ED25519 | oid::ED448 => return Err(SignatureError::AlgorithmParameters),
@@ -651,44 +683,49 @@ fn parse_signature_alg(id: &Tlv<'_>, signer_digest: &DigestId) -> Result<Signatu
     })
 }
 
-/// `RSASSA-PSS-params` (RFC 4055). Returns `None` when a digest or mask
-/// function is unknown or the encoding is invalid.
-fn parse_pss_params(params: Option<&Tlv<'_>>) -> Option<SignatureAlgorithm> {
-    let seq = params?.expect(tag::SEQUENCE).ok()?;
-    let mut r = seq.reader();
-    let mut digest = DigestAlgorithm::Sha1;
-    let mut mgf1_digest = DigestAlgorithm::Sha1;
+/// `RSASSA-PSS-params` (RFC 4055). Invalid DER is an error. Returns
+/// `Ok(None)` when a digest or mask function is unknown, or the trailer
+/// field is not 1, so the algorithm is reported as unsupported.
+fn parse_pss_params(params: Option<&Tlv<'_>>) -> Result<Option<SignatureAlgorithm>> {
+    let Some(params) = params else {
+        return Err(SignatureError::AlgorithmParameters);
+    };
+    let mut r = params.expect(tag::SEQUENCE)?.reader();
+    let mut digest = Ok(DigestAlgorithm::Sha1);
+    let mut mgf1_digest = Ok(DigestAlgorithm::Sha1);
+    let mut mgf_known = true;
     let mut salt_len = 20;
-    if let Some(hash) = r.read_optional(tag::context_cons(0)).ok()? {
-        let id = asn1::single(hash.content, hash.content_offset, tag::SEQUENCE).ok()?;
-        digest = parse_digest_alg(&id).ok()?.ok()?;
+    let mut trailer = 1;
+    if let Some(hash) = r.read_optional(tag::context_cons(0))? {
+        let id = asn1::single(hash.content, hash.content_offset, tag::SEQUENCE)?;
+        digest = parse_digest_alg(&id)?;
     }
-    if let Some(mgf) = r.read_optional(tag::context_cons(1)).ok()? {
-        let id = asn1::single(mgf.content, mgf.content_offset, tag::SEQUENCE).ok()?;
+    if let Some(mgf) = r.read_optional(tag::context_cons(1))? {
+        let id = asn1::single(mgf.content, mgf.content_offset, tag::SEQUENCE)?;
         let mut m = id.reader();
-        if read_oid(&mut m).ok()? != oid::MGF1 {
-            return None;
-        }
-        mgf1_digest = parse_digest_alg(&m.read(tag::SEQUENCE).ok()?).ok()?.ok()?;
-        m.finish().ok()?;
+        mgf_known = read_oid(&mut m)? == oid::MGF1;
+        let hash = m.read(tag::SEQUENCE)?;
+        m.finish()?;
+        mgf1_digest = parse_digest_alg(&hash)?;
     }
-    if let Some(salt) = r.read_optional(tag::context_cons(2)).ok()? {
-        let mut s = salt.reader();
-        salt_len = read_small_uint(&mut s).ok()?;
-        s.finish().ok()?;
+    if let Some(salt) = r.read_optional(tag::context_cons(2))? {
+        let mut t = salt.reader();
+        salt_len = read_small_uint(&mut t)?;
+        t.finish()?;
     }
-    if let Some(trailer) = r.read_optional(tag::context_cons(3)).ok()? {
-        let mut t = trailer.reader();
-        if read_small_uint(&mut t).ok()? != 1 {
-            return None;
-        }
-        t.finish().ok()?;
+    if let Some(field) = r.read_optional(tag::context_cons(3))? {
+        let mut t = field.reader();
+        trailer = read_small_uint(&mut t)?;
+        t.finish()?;
     }
-    r.finish().ok()?;
-    Some(SignatureAlgorithm::RsaPss {
-        digest,
-        mgf1_digest,
-        salt_len,
+    r.finish()?;
+    Ok(match (digest, mgf1_digest, mgf_known, trailer) {
+        (Ok(digest), Ok(mgf1_digest), true, 1) => Some(SignatureAlgorithm::RsaPss {
+            digest,
+            mgf1_digest,
+            salt_len,
+        }),
+        _ => None,
     })
 }
 
@@ -790,16 +827,26 @@ fn parse_spki<'a>(spki: &Tlv<'a>) -> std::result::Result<Spki<'a>, asn1::Asn1Err
             let (_, bits) = asn1::unsigned_integer(&k.read(tag::INTEGER)?)?;
             asn1::unsigned_integer(&k.read(tag::INTEGER)?)?;
             k.finish()?;
-            (
-                KeyAlgorithm::Rsa,
-                Some(bits),
-                Some(CertKey::Rsa { der: key, bits }),
-            )
+            if alg == oid::RSASSA_PSS {
+                // RFC 4055: an id-RSASSA-PSS key may only make PSS
+                // signatures, with the parameters its SPKI names. Those
+                // restrictions are not enforced here, so the key is not
+                // offered for verification at all.
+                (KeyAlgorithm::RsaPss, Some(bits), None)
+            } else {
+                (
+                    KeyAlgorithm::Rsa,
+                    Some(bits),
+                    Some(CertKey::Rsa { der: key, bits }),
+                )
+            }
         }
         oid::EC_PUBLIC_KEY => {
+            // Named curves only; explicit or implicit curve parameters are
+            // reported as an unknown algorithm.
             let curve_oid = match &params {
-                Some(p) => asn1::oid_bytes(p).ok(),
-                None => None,
+                Some(p) if p.tag == tag::OID => Some(asn1::oid_bytes(p)?),
+                _ => None,
             };
             let curve = match curve_oid {
                 Some(oid::P256) => Curve::P256,

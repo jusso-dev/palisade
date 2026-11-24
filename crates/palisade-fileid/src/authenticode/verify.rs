@@ -158,7 +158,12 @@ fn walk_table(
     while pos < table.len() {
         let rest = table.get(pos..).unwrap_or_default();
         if rest.len() < ENTRY_HEADER {
-            if rest.iter().any(|b| *b != 0) {
+            if pos == 0 {
+                // A table too short for even one entry header.
+                malformed = Some(CertificateTableError::Malformed {
+                    offset: file_offset(table_offset, pos),
+                });
+            } else if rest.iter().any(|b| *b != 0) {
                 report.warnings.push(ReportWarning::UnexpectedTableData {
                     offset: file_offset(table_offset, pos),
                 });
@@ -192,7 +197,10 @@ fn walk_table(
             report
                 .warnings
                 .push(ReportWarning::BadEntryLength { offset, length });
-            if report.entries.is_empty() {
+            // The walk stops here, so any later signature is unreadable.
+            // With no signature read, the file is not "unsigned": its
+            // table is corrupt.
+            if report.signatures.is_empty() {
                 malformed = Some(CertificateTableError::Malformed { offset });
             }
             break;
@@ -273,10 +281,12 @@ impl Walker<'_> {
                 // anything non-zero, is unsigned data hidden in the file.
                 let all_zero = trailing.iter().all(|b| *b == 0);
                 if !trailing.is_empty() && (trailing.len() >= ENTRY_ALIGNMENT || !all_zero) {
-                    info.warnings.push(SignatureWarning::TrailingData {
+                    let mut warnings = Warnings(std::mem::take(&mut info.warnings));
+                    warnings.push(SignatureWarning::TrailingData {
                         len: trailing.len(),
                         all_zero,
                     });
+                    info.warnings = warnings.0;
                 }
                 (info, signed.signer.nested)
             }
@@ -438,6 +448,11 @@ fn check(
         None => (None, None),
     };
     let os_ci_issues = os_ci_issues(key_alg.as_ref(), key_bits, weak);
+    if let (Some(KeyAlgorithm::Rsa), Some(bits)) = (&key_alg, key_bits) {
+        if bits < 2048 {
+            warnings.push(SignatureWarning::SmallRsaKey(bits));
+        }
+    }
 
     let tolerated = options.tolerate_digest_mismatch && status == SignatureStatus::DigestMismatch;
     let signer_attrs = match (&status, &signer_cert) {
