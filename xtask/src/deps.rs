@@ -166,6 +166,46 @@ pub fn member_manifest_paths(metadata: &Value) -> Result<Vec<String>, String> {
     Ok(paths)
 }
 
+/// `(crate name, target kind, source path)` of every library, binary and
+/// proc-macro target of the workspace members.
+pub fn member_targets(metadata: &Value) -> Result<Vec<(String, String, String)>, String> {
+    let members: BTreeSet<&str> = array(metadata, "workspace_members")?
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    let mut targets = Vec::new();
+    for package in array(metadata, "packages")? {
+        if !package["id"]
+            .as_str()
+            .is_some_and(|id| members.contains(id))
+        {
+            continue;
+        }
+        let name = package["name"]
+            .as_str()
+            .ok_or("package without name in cargo metadata")?;
+        for target in array(package, "targets")? {
+            let kinds: Vec<&str> = array(target, "kind")?
+                .iter()
+                .filter_map(Value::as_str)
+                .collect();
+            let Some(kind) = kinds.iter().find(|k| {
+                matches!(
+                    **k,
+                    "lib" | "rlib" | "dylib" | "cdylib" | "staticlib" | "bin" | "proc-macro"
+                )
+            }) else {
+                continue;
+            };
+            let src_path = target["src_path"]
+                .as_str()
+                .ok_or("target without src_path in cargo metadata")?;
+            targets.push((name.to_owned(), (*kind).to_owned(), src_path.to_owned()));
+        }
+    }
+    Ok(targets)
+}
+
 fn lookup<T: Copy>(table: &[(&str, T)], name: &str) -> Option<T> {
     table.iter().find(|(n, _)| *n == name).map(|(_, v)| *v)
 }
@@ -478,6 +518,35 @@ mod tests {
         assert_eq!(
             v,
             ["palisade-driver must not depend on third-party crate tiny-nostd (build dependency)"]
+        );
+    }
+
+    #[test]
+    fn member_targets_lists_lib_bin_and_proc_macro_roots_of_members_only() {
+        let doc = json!({
+            "workspace_members": ["id#a"],
+            "packages": [
+                {"id": "id#a", "name": "a", "targets": [
+                    {"kind": ["lib"], "src_path": "/a/src/lib.rs"},
+                    {"kind": ["bin"], "src_path": "/a/src/main.rs"},
+                    {"kind": ["test"], "src_path": "/a/tests/t.rs"},
+                    {"kind": ["custom-build"], "src_path": "/a/build.rs"},
+                ]},
+                {"id": "id#dep", "name": "dep", "targets": [
+                    {"kind": ["proc-macro"], "src_path": "/dep/src/lib.rs"},
+                ]},
+            ],
+        });
+        assert_eq!(
+            super::member_targets(&doc).unwrap(),
+            [
+                ("a".to_owned(), "lib".to_owned(), "/a/src/lib.rs".to_owned()),
+                (
+                    "a".to_owned(),
+                    "bin".to_owned(),
+                    "/a/src/main.rs".to_owned()
+                ),
+            ]
         );
     }
 

@@ -39,6 +39,7 @@ palisade-core = { path = "crates/palisade-core", default-features = false }
 boon = { version = "0.6.1" }
 libc = { version = "0.2.191", default-features = false }
 md-5 = { version = "0.11.0", default-features = false }
+proc-macro2 = { version = "1.0.107", default-features = false }
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 ring = { version = "0.17.14", default-features = false, features = ["alloc"] }
 schemars = { version = "1.2.3", default-features = false, features = ["derive"] }
@@ -75,8 +76,14 @@ overflow-checks = true
 [profile.release]
 lto = "thin"
 codegen-units = 1
+# ADR 0012: the agent unwinds, so a parser panic on one crafted file is caught
+# and that file is treated as unknown, instead of crashing the service. Cargo
+# applies `panic` to the whole profile; the no_std driver sets its own (#8).
+panic = "unwind"
 debug = "line-tables-only"
-# Symbols are stripped and published separately by the release pipeline (#22).
+# Debug info goes to separate files (PDBs on Windows), which the release
+# pipeline publishes as symbols (#22).
+split-debuginfo = "packed"
 strip = "none"
 
 # Decision logic and the parsers of untrusted input keep overflow checks

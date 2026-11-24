@@ -1,0 +1,13 @@
+# Files that may relax the `unsafe_code` lint (`allow`, `expect` or `warn`).
+# The policy is ADR 0011 (docs/adr/0011-msrv-and-unsafe-code-policy.md).
+#
+# One repository-relative path per line. `cargo xtask check-unsafe` fails if a
+# file relaxes the lint without being listed here, if an entry no longer
+# relaxes it, or if an entry is outside the locations ADR 0011 allows:
+#   crates/palisade-agent/src/ffi(.rs|/)
+#   crates/palisade-tray/src/ffi(.rs|/)
+#   crates/palisade-fileid/src/win(.rs|/)
+#   crates/palisade-driver/
+#
+# Changing this file needs code owner review (.github/CODEOWNERS).
+# No file allows unsafe code yet: the workspace sets `unsafe_code = "forbid"`.
