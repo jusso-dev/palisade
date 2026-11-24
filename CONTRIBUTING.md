@@ -217,12 +217,14 @@ Signed-off-by: Ada Lovelace <ada@example.org>
 
 **Maintainer exemption.** Pull requests opened by the repository owner's account do not need
 sign-off, and the `DCO` check passes them with a notice. The owner holds the copyright and the
-right to licence their own changes, so a sign-off adds nothing. This also covers changes prepared
+right to license their own changes, so a sign-off adds nothing. This also covers changes prepared
 by AI coding agents working for the owner: the owner authorises each one by opening and merging the
 pull request from their own account, and agents never add a `Signed-off-by:` line in the owner's
 name. The exemption is decided by GitHub's record of who opened the pull request
 (`author_association` is `OWNER`), not by anything in the commits, so it cannot be claimed by
 copying the owner's name or email. Everyone else, including collaborators, signs off as above.
+The exemption covers every commit in an owner-opened pull request, so if the owner carries someone
+else's commit, the owner checks that commit's sign-off by hand.
 
 The `DCO` check (`.github/workflows/dco.yml`) reports every commit in a pull request that has no
 matching sign-off. It is informational for now. The decision to require sign-off, with no CLA, is

@@ -31,4 +31,4 @@ Closes #<!-- issue number, or use "Part of #N" and say what is left below -->
 - [ ] No secrets, tokens, keys or real malware samples.
 - [ ] No commercial product or vendor names ([naming guide](https://github.com/jusso-dev/palisade/blob/main/docs/NAMING.md)).
 - [ ] The title is a Conventional Commit that would read well in the changelog.
-- [ ] Every commit is signed off (`git commit -s`), as described in [CONTRIBUTING.md](https://github.com/jusso-dev/palisade/blob/main/CONTRIBUTING.md#sign-off).
+- [ ] Every commit is signed off (`git commit -s`), or the pull request is opened by the repository owner, as described in [CONTRIBUTING.md](https://github.com/jusso-dev/palisade/blob/main/CONTRIBUTING.md#sign-off).
