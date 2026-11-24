@@ -1090,6 +1090,111 @@ fn no_identity_anchor_names_the_unanchored_path() {
 }
 
 #[test]
+fn non_allow_finding_does_not_depend_on_child_order() {
+    // One path matches on a negation alone and the other on context alone.
+    // Context is involved, so the finding is `no_identity_anchor` whichever
+    // child comes first, and the witness names the context path.
+    let negation = Match::Not(Box::new(leaf(
+        Field::PathExtension,
+        Operator::Equals,
+        &["ps1"],
+    )));
+    let session = leaf(Field::SessionType, Operator::Equals, &["rdp"]);
+    for (tree, witness) in [
+        (
+            Match::Any(vec![negation.clone(), session.clone()]),
+            "`match/any/1/criterion`",
+        ),
+        (
+            Match::Any(vec![session.clone(), negation.clone()]),
+            "`match/any/0/criterion`",
+        ),
+    ] {
+        for action in [Action::Deny {}, Action::Audit {}] {
+            let errors = with_rule(tree.clone(), action).validate().unwrap_err();
+            assert_eq!(
+                codes(&errors),
+                vec![(ErrorCode::NoIdentityAnchor, "/rule_sets/0/rules/0/match")],
+                "{action:?} {tree:?}"
+            );
+            assert!(errors[0].message.contains(witness), "{}", errors[0].message);
+        }
+    }
+    // Context nested under an `all` with a negation still counts, in
+    // either order.
+    for tree in [
+        Match::Any(vec![
+            negation.clone(),
+            Match::All(vec![negation.clone(), session.clone()]),
+        ]),
+        Match::Any(vec![
+            Match::All(vec![session.clone(), negation.clone()]),
+            negation.clone(),
+        ]),
+    ] {
+        let errors = with_rule(tree, Action::Deny {}).validate().unwrap_err();
+        assert_eq!(errors[0].code, ErrorCode::NoIdentityAnchor);
+    }
+    // A context criterion on an anchored branch does not make an
+    // unanchored path of negations count as context.
+    let anchored_context = Match::All(vec![
+        leaf(Field::HashSha256, Operator::Equals, &[&sha256('f')]),
+        session,
+    ]);
+    for tree in [
+        Match::Any(vec![negation.clone(), anchored_context.clone()]),
+        Match::Any(vec![anchored_context, negation]),
+    ] {
+        let errors = with_rule(tree, Action::Deny {}).validate().unwrap_err();
+        assert_eq!(errors[0].code, ErrorCode::NegationOnly);
+    }
+}
+
+#[test]
+fn identity_findings_name_a_structural_path() {
+    // The second branch can never match (a known value fails one test and
+    // a missing one passes neither), but the analysis is structural, so
+    // the rule is still rejected. The message says the analysis cannot
+    // show an identity on that path, not that the rule matches through it.
+    let tree = Match::Any(vec![
+        leaf(Field::HashSha256, Operator::Equals, &[&sha256('a')]),
+        Match::All(vec![
+            leaf(Field::UserIsAdmin, Operator::IsTrue, &[]),
+            leaf(Field::UserIsAdmin, Operator::IsFalse, &[]),
+        ]),
+    ]);
+    for action in [Action::Allow {}, Action::Deny {}] {
+        let errors = with_rule(tree.clone(), action).validate().unwrap_err();
+        assert_eq!(errors[0].code, ErrorCode::NoIdentityAnchor);
+        let message = &errors[0].message;
+        assert!(
+            message.contains(
+                "has a path through `match/any/1/all/0/criterion` and `match/any/1/all/1/criterion`"
+            ),
+            "{message}"
+        );
+        assert!(
+            message.contains("the analysis cannot show that it identifies the object"),
+            "{message}"
+        );
+        assert!(!message.contains("can match"), "{message}");
+    }
+    // The other witness-based findings use the same wording.
+    let weak = with_rule(
+        leaf(Field::PathFileName, Operator::Equals, &["a.exe"]),
+        Action::Allow {},
+    )
+    .validate()
+    .unwrap();
+    let message = &weak.warnings()[0].message;
+    assert!(
+        message.contains("has a path through `match/criterion`"),
+        "{message}"
+    );
+    assert!(!message.contains("can match"), "{message}");
+}
+
+#[test]
 fn yes_or_no_criteria_take_no_values() {
     let anchor = leaf(Field::HashSha256, Operator::Equals, &[&sha256('d')]);
     let ok = Match::All(vec![

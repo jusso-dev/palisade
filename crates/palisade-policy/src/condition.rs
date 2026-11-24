@@ -25,10 +25,12 @@
 //! # Rule level
 //!
 //! [`TreeEvaluation::matches`] decides whether the rule matches: only
-//! `Match` does. `Unknown` counts as no match for every action, which fails
-//! closed for allow rules, and is the documented default for deny rules
-//! (#32). The per-rule `unknown_as` option and the mandatory-deny defaults
-//! are part of precedence (#35).
+//! `Match` does. `Unknown` counts as no match for every action. For an allow
+//! rule that fails closed: an unknown fact never allows. For a deny rule it
+//! means the rule does not apply, so an unknown fact does not block either;
+//! that is the default (`no_match`) that #32 sets for deny rules. The
+//! per-rule `unknown_as` option, which can make a deny rule block on
+//! `Unknown`, and the mandatory-deny defaults are part of precedence (#35).
 
 use crate::facts::ObjectFacts;
 use crate::model::Match;
@@ -124,8 +126,9 @@ pub struct TreeEvaluation {
 }
 
 impl TreeEvaluation {
-    /// Whether the rule matches: only `Match` does, so `Unknown` fails
-    /// closed.
+    /// Whether the rule matches: only `Match` does. `Unknown` is no match
+    /// for every action, so an allow rule does not allow and a deny rule
+    /// does not block (see the module docs).
     #[must_use]
     pub fn matches(&self) -> bool {
         self.result == Tri::Match

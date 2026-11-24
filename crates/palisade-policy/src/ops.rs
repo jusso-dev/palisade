@@ -153,6 +153,7 @@ use crate::context::{
     ContextFact, EvaluationContext, SessionType, normalize_principal, normalize_sid,
 };
 use crate::facts::{ObjectFacts, PathFact, PathVariable, PathVariables, SignerFact};
+use crate::model::limits::MAX_VALUE_BYTES;
 use crate::model::{Action, Criterion, Field, FieldClass, Operator};
 
 /// The most memory a compiled regular expression or wildcard may use, in
@@ -412,6 +413,9 @@ pub enum CompileErrorKind {
     PatternTooLarge,
     /// A regular expression is not valid, with the parser's message.
     RegexSyntax(String),
+    /// `case_sensitive` was set on a field that has no case, such as a
+    /// hash, a version or a yes-or-no fact.
+    CaseSensitivityNotApplicable,
 }
 
 impl core::fmt::Display for CompileErrorKind {
@@ -433,6 +437,9 @@ impl core::fmt::Display for CompileErrorKind {
                 "the pattern compiles to more than {REGEX_SIZE_LIMIT} bytes; simplify it or split it into several values"
             ),
             Self::RegexSyntax(message) => write!(f, "invalid regular expression: {message}"),
+            Self::CaseSensitivityNotApplicable => {
+                f.write_str("`case_sensitive` does not apply: the field has no case to compare")
+            }
         }
     }
 }
@@ -493,7 +500,12 @@ struct PathValue<T> {
 
 impl CompiledCriterion {
     /// Compiles a criterion. Policy validation compiles every criterion, so
-    /// a validated policy always compiles.
+    /// a validated policy always compiles. Compiling also enforces the rules
+    /// that validation checks on the criterion's shape, so a criterion that
+    /// was never validated cannot compile past them: the operator must fit
+    /// the field, the number of values must fit the operator, values are at
+    /// most [`MAX_VALUE_BYTES`] bytes, and `case_sensitive` may only be set
+    /// on a field with a case ([`FieldClass::has_case`]).
     ///
     /// # Errors
     ///
@@ -508,6 +520,27 @@ impl CompiledCriterion {
         let (min, max) = c.operator.value_count();
         if c.values.len() < min || c.values.len() > max {
             return Err(whole(CompileErrorKind::ValueCount));
+        }
+        // Checked before the default applies, so an explicit `false` is
+        // rejected as well.
+        if c.case_sensitive.is_some() && !class.has_case() {
+            return Err(whole(CompileErrorKind::CaseSensitivityNotApplicable));
+        }
+        // Before any value is compiled, so an oversized pattern costs
+        // nothing.
+        let oversized: Vec<CompileError> = c
+            .values
+            .iter()
+            .enumerate()
+            .filter_map(|(i, v)| {
+                value_too_long(v).map(|why| CompileError {
+                    value: Some(i),
+                    kind: CompileErrorKind::InvalidValue(why),
+                })
+            })
+            .collect();
+        if !oversized.is_empty() {
+            return Err(oversized);
         }
         let operator = c.operator.positive();
         let case_sensitive = c.case_sensitive.unwrap_or(false);
@@ -914,6 +947,17 @@ fn join(base: &str, rest: &str) -> String {
         out.push('\\');
     }
     out
+}
+
+/// Why a criterion value is too long, if it is: more than
+/// [`MAX_VALUE_BYTES`] bytes. Validation reports the same message.
+pub(crate) fn value_too_long(value: &str) -> Option<String> {
+    (value.len() > MAX_VALUE_BYTES).then(|| {
+        format!(
+            "{} bytes; at most {MAX_VALUE_BYTES} are allowed",
+            value.len()
+        )
+    })
 }
 
 /// Compiles the values of a criterion whose operator fits its field.

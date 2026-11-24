@@ -210,3 +210,75 @@ fn schema_header_names_the_committed_schema() {
             .is_file()
     );
 }
+
+#[test]
+fn finance_example_keeps_the_admin_console_to_its_own_rule() {
+    use palisade_policy::condition::CompiledMatch;
+    use palisade_policy::context::EvaluationContext;
+    use palisade_policy::facts::{
+        ObjectFacts, PathVariables, SignatureSource, SignerFact, SignerStatus,
+    };
+    use palisade_policy::model::{Action, Field};
+    use palisade_policy::ops::EvalContext;
+
+    let text = read(&manifest_dir().join("../../docs/examples/policies/finance-workstations.yaml"));
+    let doc = PolicyDocument::from_yaml(&text).unwrap();
+    let rules = &doc.rule_sets[0].rules;
+    let [app, console] = [&rules[0], &rules[1]].map(|r| CompiledMatch::compile(&r.match_).unwrap());
+
+    // The facts a signed Ledger binary has: the publisher is the common
+    // name of the signer, not the whole distinguished name.
+    let binary = |file: &str| {
+        ObjectFacts::new()
+            .with(Field::MetaProductName, "Example Ledger")
+            .with(Field::MetaProductVersion, "12.1.0.0")
+            .with(Field::MetaOriginalFilename, file)
+            .with_signers(vec![SignerFact {
+                status: SignerStatus::Valid,
+                source: SignatureSource::Embedded,
+                publisher: Some("Example Accounting Pty Ltd".to_owned()),
+                issuer: Some("Example Issuing CA".to_owned()),
+                leaf_thumbprint_sha256: None,
+            }])
+    };
+    let user = |admin: bool, remote: bool| {
+        let mut ctx = EvaluationContext::new();
+        let groups = if admin {
+            vec!["S-1-5-32-544".to_owned(), "S-1-5-32-545".to_owned()]
+        } else {
+            vec!["S-1-5-32-545".to_owned()]
+        };
+        ctx.user.groups = Some(groups);
+        ctx.session.is_remote = Some(remote);
+        ctx
+    };
+    let variables = PathVariables::new();
+    let matches = |tree: &CompiledMatch, facts: &ObjectFacts, context: &EvaluationContext| {
+        tree.eval(
+            facts,
+            &EvalContext {
+                action: Action::Allow {},
+                variables: &variables,
+                context,
+            },
+        )
+        .matches()
+    };
+
+    let ledger = binary("Ledger.exe");
+    let admin_console = binary("LedgerAdmin.exe");
+    for (admin, remote) in [(false, false), (false, true), (true, false), (true, true)] {
+        let ctx = user(admin, remote);
+        // The application rule allows the regular binaries for everyone,
+        // and never the console.
+        assert!(matches(&app, &ledger, &ctx));
+        assert!(!matches(&app, &admin_console, &ctx));
+        assert!(!matches(&console, &ledger, &ctx));
+        // Only an administrator at the console may run it.
+        assert_eq!(
+            matches(&console, &admin_console, &ctx),
+            admin && !remote,
+            "admin {admin}, remote {remote}"
+        );
+    }
+}

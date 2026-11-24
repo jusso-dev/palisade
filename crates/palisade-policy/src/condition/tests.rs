@@ -138,15 +138,43 @@ proptest! {
 
 #[test]
 fn kleene_truth_tables() {
-    let all = [Yes, No, Unknown];
-    for a in all {
-        for b in all {
-            let and = Match::All(vec![leaf(a), leaf(b)]);
-            let or = Match::Any(vec![leaf(a), leaf(b)]);
-            assert_eq!(eval_tree(&and).0, a.and(b), "{a:?} and {b:?}");
-            assert_eq!(eval_tree(&or).0, a.or(b), "{a:?} or {b:?}");
-        }
-        assert_eq!(eval_tree(&Match::Not(Box::new(leaf(a)))).0, a.not());
+    // Written out cell by cell, so a regression in `Tri` itself is caught.
+    let and = [
+        (Yes, Yes, Yes),
+        (Yes, No, No),
+        (Yes, Unknown, Unknown),
+        (No, Yes, No),
+        (No, No, No),
+        (No, Unknown, No),
+        (Unknown, Yes, Unknown),
+        (Unknown, No, No),
+        (Unknown, Unknown, Unknown),
+    ];
+    let or = [
+        (Yes, Yes, Yes),
+        (Yes, No, Yes),
+        (Yes, Unknown, Yes),
+        (No, Yes, Yes),
+        (No, No, No),
+        (No, Unknown, Unknown),
+        (Unknown, Yes, Yes),
+        (Unknown, No, Unknown),
+        (Unknown, Unknown, Unknown),
+    ];
+    for (a, b, want) in and {
+        let tree = Match::All(vec![leaf(a), leaf(b)]);
+        assert_eq!(eval_tree(&tree).0, want, "{a:?} and {b:?}");
+    }
+    for (a, b, want) in or {
+        let tree = Match::Any(vec![leaf(a), leaf(b)]);
+        assert_eq!(eval_tree(&tree).0, want, "{a:?} or {b:?}");
+    }
+    for (a, want) in [(Yes, No), (No, Yes), (Unknown, Unknown)] {
+        assert_eq!(
+            eval_tree(&Match::Not(Box::new(leaf(a)))).0,
+            want,
+            "not {a:?}"
+        );
     }
     // `all` of unknown and match is unknown, and `any` of unknown and no
     // match is unknown: neither becomes a match.
@@ -278,6 +306,66 @@ fn compile_checks_the_limits() {
         CompiledMatch::compile(&hostile).unwrap_err(),
         vec![TreeError::TooDeep]
     );
+}
+
+#[test]
+fn compile_enforces_value_bytes_and_case_like_validation() {
+    use crate::model::limits::MAX_VALUE_BYTES;
+    use crate::ops::{CompileError, CompileErrorKind};
+
+    // A tag of exactly the limit compiles; one byte more does not.
+    let at_limit = "t".repeat(MAX_VALUE_BYTES);
+    let over = "t".repeat(MAX_VALUE_BYTES + 1);
+    assert!(
+        CompiledMatch::compile(&crit(Field::DeviceTags, Operator::MemberOf, &[&at_limit])).is_ok()
+    );
+    let errors =
+        CompiledMatch::compile(&crit(Field::DeviceTags, Operator::MemberOf, &["ok", &over]))
+            .unwrap_err();
+    let [TreeError::Criterion { pointer, errors }] = errors.as_slice() else {
+        panic!("{errors:?}");
+    };
+    assert_eq!(pointer, "/criterion");
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].value, Some(1));
+    assert!(
+        matches!(&errors[0].kind, CompileErrorKind::InvalidValue(why) if why.contains("at most 2048")),
+        "{errors:?}"
+    );
+
+    // `case_sensitive` on a field with no case is rejected even when it is
+    // `false`, which is also the default; leaving it out still compiles.
+    for case in [Some(false), Some(true)] {
+        let tree = Match::All(vec![
+            leaf(Yes),
+            Match::Criterion(Criterion {
+                field: Field::UserIsAdmin,
+                operator: Operator::IsTrue,
+                values: Vec::new(),
+                case_sensitive: case,
+            }),
+        ]);
+        assert_eq!(
+            CompiledMatch::compile(&tree).unwrap_err(),
+            vec![TreeError::Criterion {
+                pointer: "/all/1/criterion".to_owned(),
+                errors: vec![CompileError {
+                    value: None,
+                    kind: CompileErrorKind::CaseSensitivityNotApplicable,
+                }],
+            }],
+            "{case:?}"
+        );
+    }
+    assert!(CompiledMatch::compile(&leaf(Yes)).is_ok());
+    // A field with a case still takes the option.
+    let tag = Match::Criterion(Criterion {
+        field: Field::DeviceTags,
+        operator: Operator::MemberOf,
+        values: vec!["Finance".to_owned()],
+        case_sensitive: Some(true),
+    });
+    assert!(CompiledMatch::compile(&tag).is_ok());
 }
 
 #[test]
