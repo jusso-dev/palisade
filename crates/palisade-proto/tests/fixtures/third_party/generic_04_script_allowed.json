@@ -1,0 +1,29 @@
+{
+  "source": "third_party",
+  "record": {
+    "event_id": 4,
+    "time_created": "2026-11-24T03:15:22Z",
+    "record_id": 5004,
+    "fields": {
+      "event_kind": "4",
+      "user_sid": "S-1-5-21-1111111111-2222222222-3333333333-1001",
+      "user_name": "alice",
+      "user_domain": "EXAMPLE",
+      "process_id": "4412",
+      "process_path": "C:\\Windows\\explorer.exe",
+      "file_path": "C:\\Users\\alice\\Downloads\\setup.ps1",
+      "file_size": "102400",
+      "sha256": "ABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB",
+      "sha1": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "md5": "efefefefefefefefefefefefefefefef",
+      "publisher": "Example Software Ltd",
+      "issuer": "Example Code Signing CA",
+      "product_name": "Example Tool",
+      "company": "Example Software Ltd",
+      "file_version": "1.2.3.4",
+      "original_name": "tool.exe",
+      "rule_name": "Allow signed tools",
+      "command_line": "-"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "source": "os_security",
+  "record": {
+    "event_id": 4719,
+    "time_created": "2026-11-24T03:15:22.1234567Z",
+    "record_id": 1000,
+    "channel": "Security",
+    "fields": {
+      "SubjectUserSid": "S-1-5-18",
+      "SubjectUserName": "WS-0001$",
+      "SubjectDomainName": "EXAMPLE",
+      "SubjectLogonId": "0x3e7",
+      "CategoryId": "%%8276",
+      "SubcategoryId": "%%13312",
+      "SubcategoryGuid": "{0CCE922B-69AE-11D9-BED3-505054503030}",
+      "AuditPolicyChanges": "%%8448, %%8450"
+    }
+  }
+}

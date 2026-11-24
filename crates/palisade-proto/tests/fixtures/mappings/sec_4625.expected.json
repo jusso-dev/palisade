@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.1.0",
+  "event_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+  "event_type": "identity.logon_failed",
+  "category": "identity",
+  "action": "logon",
+  "outcome": "failed",
+  "severity": 5,
+  "description": "An account failed to log on.",
+  "ts": "2026-11-24T03:15:22.123456Z",
+  "ts_agent_monotonic": 123456789,
+  "clock_synced": true,
+  "clock_skew_ms": -3,
+  "tenant_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e61",
+  "host": {
+    "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60",
+    "name": "WS-0001",
+    "os": "Windows 11 Enterprise",
+    "os_build": "26100.2314",
+    "arch": "x86_64",
+    "agent_version": "0.1.0"
+  },
+  "user": {
+    "name": "mallory",
+    "domain": "EXAMPLE",
+    "logon_type": "network"
+  },
+  "seq": 41,
+  "prev_hash": "5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e",
+  "source": {
+    "kind": "os_security",
+    "event_id": 4625,
+    "record_id": 1000,
+    "channel": "Security"
+  },
+  "process": {
+    "pid": 0
+  },
+  "network": {
+    "remote_ip": "2001:db8::7",
+    "remote_port": 0
+  },
+  "identity": {
+    "authentication_package": "NTLM",
+    "logon_process": "NtLmSsp ",
+    "status_code": 3221225581,
+    "sub_status_code": 3221225578
+  }
+}

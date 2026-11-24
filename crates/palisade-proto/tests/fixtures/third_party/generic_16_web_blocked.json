@@ -1,0 +1,19 @@
+{
+  "source": "third_party",
+  "record": {
+    "event_id": 16,
+    "time_created": "2026-11-24T03:15:22Z",
+    "record_id": 5016,
+    "fields": {
+      "event_kind": "16",
+      "user_sid": "S-1-5-21-1111111111-2222222222-3333333333-1001",
+      "process_id": "4412",
+      "process_path": "C:\\Program Files\\Example\\app.exe",
+      "remote_host": "Updates.Example.org.",
+      "remote_ip": "198.51.100.7",
+      "remote_port": "443",
+      "rule_name": "Block unknown hosts",
+      "url": "https://updates.example.org/latest"
+    }
+  }
+}

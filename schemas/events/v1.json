@@ -1,5 +1,162 @@
 {
   "$defs": {
+    "Account": {
+      "additionalProperties": false,
+      "description": "An account or group in a directory or on the device.",
+      "properties": {
+        "distinguished_name": {
+          "description": "The directory distinguished name, for example\n`CN=Alice,OU=Staff,DC=example,DC=org`.",
+          "maxLength": 32767,
+          "minLength": 1,
+          "type": "string"
+        },
+        "domain": {
+          "description": "The domain, or the device name for a local account.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "name": {
+          "description": "The account name.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "sid": {
+          "$ref": "#/$defs/Sid",
+          "description": "The security identifier."
+        }
+      },
+      "type": "object"
+    },
+    "Admin": {
+      "additionalProperties": false,
+      "description": "An administrative action on the server (#132).",
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/Principal",
+          "description": "Who acted."
+        },
+        "after": {
+          "$ref": "#/$defs/JsonValue",
+          "description": "The object after the action, redacted (#228)."
+        },
+        "before": {
+          "$ref": "#/$defs/JsonValue",
+          "description": "The object before the action, redacted (#228)."
+        },
+        "changes": {
+          "description": "What changed, member by member.",
+          "items": {
+            "$ref": "#/$defs/Change"
+          },
+          "maxItems": 256,
+          "type": "array"
+        },
+        "channel": {
+          "$ref": "#/$defs/AdminChannel",
+          "description": "The channel it came through."
+        },
+        "correlation_id": {
+          "$ref": "#/$defs/Uuid7",
+          "description": "Ties together every record of one bulk operation or deployment."
+        },
+        "object_id": {
+          "description": "The object's ID.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "object_name": {
+          "description": "The object's display name.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "object_type": {
+          "$ref": "#/$defs/Token",
+          "description": "The kind of object acted on, for example `policy` or `computer`."
+        },
+        "reason": {
+          "description": "The reason given.",
+          "maxLength": 1024,
+          "minLength": 1,
+          "type": "string"
+        },
+        "source_ip": {
+          "$ref": "#/$defs/IpAddress",
+          "description": "The client's address."
+        },
+        "ticket_ref": {
+          "description": "The change ticket reference.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "user_agent": {
+          "description": "The client's user agent.",
+          "maxLength": 1024,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "AdminChannel": {
+      "description": "The channel an administrative action came through.",
+      "oneOf": [
+        {
+          "const": "console",
+          "description": "The console.",
+          "type": "string"
+        },
+        {
+          "const": "api",
+          "description": "The REST API.",
+          "type": "string"
+        },
+        {
+          "const": "cli",
+          "description": "The command-line tool.",
+          "type": "string"
+        },
+        {
+          "const": "scim",
+          "description": "Directory provisioning.",
+          "type": "string"
+        },
+        {
+          "const": "webhook_callback",
+          "description": "A webhook callback.",
+          "type": "string"
+        },
+        {
+          "const": "email_link",
+          "description": "An e-mail link.",
+          "type": "string"
+        },
+        {
+          "const": "chat",
+          "description": "A team-chat action.",
+          "type": "string"
+        },
+        {
+          "const": "itsm",
+          "description": "An ITSM integration.",
+          "type": "string"
+        },
+        {
+          "const": "job",
+          "description": "A scheduled job.",
+          "type": "string"
+        },
+        {
+          "const": "agent",
+          "description": "An agent's own report.",
+          "type": "string"
+        }
+      ]
+    },
     "AgentInfo": {
       "additionalProperties": false,
       "description": "Agent state.",
@@ -32,6 +189,294 @@
         }
       },
       "type": "object"
+    },
+    "Approval": {
+      "additionalProperties": false,
+      "description": "An approval request and its decision.",
+      "properties": {
+        "channel": {
+          "$ref": "#/$defs/ApprovalChannel",
+          "description": "The channel it went through."
+        },
+        "decided_by": {
+          "$ref": "#/$defs/Principal",
+          "description": "Who decided."
+        },
+        "decision": {
+          "$ref": "#/$defs/ApprovalDecision",
+          "description": "Where the request stands."
+        },
+        "duration_seconds": {
+          "description": "How long an approval would last, in seconds.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/$defs/ApprovalKind",
+          "description": "What is asked for."
+        },
+        "reason": {
+          "description": "The requester's or approver's reason.",
+          "maxLength": 1024,
+          "minLength": 1,
+          "type": "string"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Uuid7",
+          "description": "The request."
+        },
+        "requested_scope": {
+          "$ref": "#/$defs/ApprovalScope",
+          "description": "What the approval would cover."
+        },
+        "ticket_ref": {
+          "description": "The ITSM ticket reference.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ApprovalChannel": {
+      "description": "The channel an approval was requested or decided through.",
+      "oneOf": [
+        {
+          "const": "console",
+          "description": "The console.",
+          "type": "string"
+        },
+        {
+          "const": "email",
+          "description": "An e-mail link.",
+          "type": "string"
+        },
+        {
+          "const": "chat",
+          "description": "A team-chat message.",
+          "type": "string"
+        },
+        {
+          "const": "itsm",
+          "description": "An ITSM ticket.",
+          "type": "string"
+        },
+        {
+          "const": "mobile",
+          "description": "A mobile notification.",
+          "type": "string"
+        },
+        {
+          "const": "offline_code",
+          "description": "An offline code read out to the user (#120, #159).",
+          "type": "string"
+        }
+      ]
+    },
+    "ApprovalDecision": {
+      "description": "Where an approval request stands.",
+      "oneOf": [
+        {
+          "const": "pending",
+          "description": "Not decided yet.",
+          "type": "string"
+        },
+        {
+          "const": "approved",
+          "description": "Approved.",
+          "type": "string"
+        },
+        {
+          "const": "denied",
+          "description": "Refused.",
+          "type": "string"
+        },
+        {
+          "const": "expired",
+          "description": "Not decided in time.",
+          "type": "string"
+        },
+        {
+          "const": "cancelled",
+          "description": "Withdrawn by the requester.",
+          "type": "string"
+        }
+      ]
+    },
+    "ApprovalKind": {
+      "description": "What an approval request asks for.",
+      "oneOf": [
+        {
+          "const": "execute",
+          "description": "Running an application.",
+          "type": "string"
+        },
+        {
+          "const": "install",
+          "description": "Installing software.",
+          "type": "string"
+        },
+        {
+          "const": "elevate",
+          "description": "Elevated rights.",
+          "type": "string"
+        },
+        {
+          "const": "device",
+          "description": "Using a device.",
+          "type": "string"
+        },
+        {
+          "const": "network",
+          "description": "Network or web access.",
+          "type": "string"
+        },
+        {
+          "const": "exception",
+          "description": "A policy exception.",
+          "type": "string"
+        },
+        {
+          "const": "override",
+          "description": "A temporary override of the policy (#120).",
+          "type": "string"
+        }
+      ]
+    },
+    "ApprovalScope": {
+      "description": "What an approval would cover.",
+      "oneOf": [
+        {
+          "const": "once",
+          "description": "This one action.",
+          "type": "string"
+        },
+        {
+          "const": "user_on_device",
+          "description": "This user on this device.",
+          "type": "string"
+        },
+        {
+          "const": "device",
+          "description": "This device, for every user.",
+          "type": "string"
+        },
+        {
+          "const": "user",
+          "description": "This user, on every device.",
+          "type": "string"
+        },
+        {
+          "const": "device_group",
+          "description": "A group of devices.",
+          "type": "string"
+        },
+        {
+          "const": "tenant",
+          "description": "The whole tenant.",
+          "type": "string"
+        }
+      ]
+    },
+    "AuditCategory": {
+      "description": "A category of the OS audit policy.",
+      "oneOf": [
+        {
+          "const": "system",
+          "description": "System.",
+          "type": "string"
+        },
+        {
+          "const": "logon_logoff",
+          "description": "Logon and logoff.",
+          "type": "string"
+        },
+        {
+          "const": "object_access",
+          "description": "Object access.",
+          "type": "string"
+        },
+        {
+          "const": "privilege_use",
+          "description": "Privilege use.",
+          "type": "string"
+        },
+        {
+          "const": "detailed_tracking",
+          "description": "Detailed tracking (process creation and the like).",
+          "type": "string"
+        },
+        {
+          "const": "policy_change",
+          "description": "Policy change.",
+          "type": "string"
+        },
+        {
+          "const": "account_management",
+          "description": "Account management.",
+          "type": "string"
+        },
+        {
+          "const": "directory_service_access",
+          "description": "Directory service access.",
+          "type": "string"
+        },
+        {
+          "const": "account_logon",
+          "description": "Account logon.",
+          "type": "string"
+        }
+      ]
+    },
+    "AuditPolicy": {
+      "additionalProperties": false,
+      "description": "A change to the OS audit policy.",
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/AuditCategory",
+          "description": "The category of the changed subcategory."
+        },
+        "changes": {
+          "description": "What changed, in the order the schema lists the values.",
+          "items": {
+            "$ref": "#/$defs/AuditPolicyChange"
+          },
+          "maxItems": 4,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "subcategory_guid": {
+          "$ref": "#/$defs/Guid",
+          "description": "The changed subcategory's GUID, which identifies it."
+        }
+      },
+      "type": "object"
+    },
+    "AuditPolicyChange": {
+      "description": "One change to an audit policy subcategory.",
+      "oneOf": [
+        {
+          "const": "success_added",
+          "description": "Success auditing was turned on.",
+          "type": "string"
+        },
+        {
+          "const": "success_removed",
+          "description": "Success auditing was turned off.",
+          "type": "string"
+        },
+        {
+          "const": "failure_added",
+          "description": "Failure auditing was turned on.",
+          "type": "string"
+        },
+        {
+          "const": "failure_removed",
+          "description": "Failure auditing was turned off.",
+          "type": "string"
+        }
+      ]
     },
     "CacheStats": {
       "additionalProperties": false,
@@ -163,6 +608,255 @@
         }
       ]
     },
+    "Change": {
+      "additionalProperties": false,
+      "description": "One change to an object.",
+      "properties": {
+        "new": {
+          "$ref": "#/$defs/JsonValue",
+          "description": "The value after: for `add` and `replace` only."
+        },
+        "old": {
+          "$ref": "#/$defs/JsonValue",
+          "description": "The value before: for `remove` and `replace` only."
+        },
+        "op": {
+          "$ref": "#/$defs/ChangeOp",
+          "description": "What happened to the member."
+        },
+        "path": {
+          "$ref": "#/$defs/JsonPointer",
+          "description": "The member, as a JSON Pointer into the object."
+        }
+      },
+      "required": [
+        "op",
+        "path"
+      ],
+      "type": "object"
+    },
+    "ChangeOp": {
+      "description": "One kind of change in a JSON Patch-like diff.",
+      "oneOf": [
+        {
+          "const": "add",
+          "description": "A member was added: `new` only.",
+          "type": "string"
+        },
+        {
+          "const": "remove",
+          "description": "A member was removed: `old` only.",
+          "type": "string"
+        },
+        {
+          "const": "replace",
+          "description": "A member's value changed: `old` and `new`.",
+          "type": "string"
+        }
+      ]
+    },
+    "ChangeRule": {
+      "description": "`add` has `new` only, `remove` `old` only, `replace` both.",
+      "oneOf": [
+        {
+          "not": {
+            "required": [
+              "old"
+            ]
+          },
+          "properties": {
+            "op": {
+              "const": "add"
+            }
+          },
+          "required": [
+            "new"
+          ]
+        },
+        {
+          "not": {
+            "required": [
+              "new"
+            ]
+          },
+          "properties": {
+            "op": {
+              "const": "remove"
+            }
+          },
+          "required": [
+            "old"
+          ]
+        },
+        {
+          "properties": {
+            "op": {
+              "const": "replace"
+            }
+          },
+          "required": [
+            "old",
+            "new"
+          ]
+        }
+      ]
+    },
+    "Device": {
+      "additionalProperties": false,
+      "description": "A peripheral device.",
+      "properties": {
+        "class": {
+          "$ref": "#/$defs/DeviceClass",
+          "description": "What kind of device it is."
+        },
+        "encryption": {
+          "$ref": "#/$defs/EncryptionState",
+          "description": "For storage: whether the contents are encrypted."
+        },
+        "friendly_name": {
+          "description": "The name shown to users.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "instance_id": {
+          "description": "The OS device instance ID.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "interface": {
+          "$ref": "#/$defs/DeviceInterface",
+          "description": "The bus it is connected through."
+        },
+        "product_id": {
+          "description": "The product ID (for USB, the 16-bit PID).",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "serial": {
+          "description": "The serial number, as reported.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "vendor_id": {
+          "description": "The vendor ID (for USB, the 16-bit VID).",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "DeviceClass": {
+      "description": "What kind of peripheral it is.",
+      "oneOf": [
+        {
+          "const": "storage",
+          "description": "Removable or external storage.",
+          "type": "string"
+        },
+        {
+          "const": "hid",
+          "description": "A keyboard, mouse or other human interface device.",
+          "type": "string"
+        },
+        {
+          "const": "network",
+          "description": "A network adapter.",
+          "type": "string"
+        },
+        {
+          "const": "imaging",
+          "description": "A camera or scanner.",
+          "type": "string"
+        },
+        {
+          "const": "media",
+          "description": "Audio or video.",
+          "type": "string"
+        },
+        {
+          "const": "printer",
+          "description": "A printer.",
+          "type": "string"
+        },
+        {
+          "const": "smart_card",
+          "description": "A smart card reader.",
+          "type": "string"
+        },
+        {
+          "const": "portable",
+          "description": "A phone or portable media device.",
+          "type": "string"
+        },
+        {
+          "const": "optical",
+          "description": "An optical drive.",
+          "type": "string"
+        },
+        {
+          "const": "other",
+          "description": "Anything else.",
+          "type": "string"
+        }
+      ]
+    },
+    "DeviceInterface": {
+      "description": "The bus a peripheral is connected through.",
+      "oneOf": [
+        {
+          "const": "usb",
+          "description": "USB.",
+          "type": "string"
+        },
+        {
+          "const": "thunderbolt",
+          "description": "Thunderbolt.",
+          "type": "string"
+        },
+        {
+          "const": "firewire",
+          "description": "IEEE 1394.",
+          "type": "string"
+        },
+        {
+          "const": "bluetooth",
+          "description": "Bluetooth.",
+          "type": "string"
+        },
+        {
+          "const": "sd_card",
+          "description": "An SD or other memory-card reader.",
+          "type": "string"
+        },
+        {
+          "const": "sata",
+          "description": "SATA or eSATA.",
+          "type": "string"
+        },
+        {
+          "const": "nvme",
+          "description": "NVMe.",
+          "type": "string"
+        },
+        {
+          "const": "serial",
+          "description": "A serial or parallel port.",
+          "type": "string"
+        },
+        {
+          "const": "other",
+          "description": "Anything else.",
+          "type": "string"
+        }
+      ]
+    },
     "DeviceType": {
       "description": "The kind of device a file is stored on.",
       "oneOf": [
@@ -189,6 +883,125 @@
         {
           "const": "virtual",
           "description": "A virtual disk.",
+          "type": "string"
+        }
+      ]
+    },
+    "Direction": {
+      "description": "Which way a connection goes, seen from the device.",
+      "oneOf": [
+        {
+          "const": "inbound",
+          "description": "Towards the device.",
+          "type": "string"
+        },
+        {
+          "const": "outbound",
+          "description": "Away from the device.",
+          "type": "string"
+        },
+        {
+          "const": "local",
+          "description": "Between two endpoints on the device.",
+          "type": "string"
+        }
+      ]
+    },
+    "DnsName": {
+      "description": "A lowercase DNS name without a trailing dot.",
+      "maxLength": 253,
+      "minLength": 1,
+      "pattern": "^[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?(\\.[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?)*$",
+      "type": "string"
+    },
+    "Elevation": {
+      "additionalProperties": false,
+      "description": "A privilege elevation.",
+      "properties": {
+        "approver": {
+          "$ref": "#/$defs/Principal",
+          "description": "Who approved it."
+        },
+        "duration_seconds": {
+          "description": "How long the grant lasts, in seconds.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "justification": {
+          "description": "The user's justification.",
+          "maxLength": 1024,
+          "minLength": 1,
+          "type": "string"
+        },
+        "method": {
+          "$ref": "#/$defs/ElevationMethod",
+          "description": "How it was obtained."
+        },
+        "request_id": {
+          "$ref": "#/$defs/Uuid7",
+          "description": "The request it fulfils, if one was made."
+        },
+        "token_profile": {
+          "description": "The token profile applied, by name.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ElevationMethod": {
+      "description": "How elevation was obtained.",
+      "oneOf": [
+        {
+          "const": "jit",
+          "description": "A just-in-time grant, requested and approved (#158).",
+          "type": "string"
+        },
+        {
+          "const": "on_demand",
+          "description": "The user asked for it on one application (#155).",
+          "type": "string"
+        },
+        {
+          "const": "auto",
+          "description": "A rule elevated the application without asking.",
+          "type": "string"
+        },
+        {
+          "const": "challenge_response",
+          "description": "An offline challenge/response code (#159).",
+          "type": "string"
+        },
+        {
+          "const": "uac_replacement",
+          "description": "Palisade's replacement for the OS consent prompt (#155).",
+          "type": "string"
+        }
+      ]
+    },
+    "EncryptionState": {
+      "description": "Whether a storage device's contents are encrypted.",
+      "oneOf": [
+        {
+          "const": "encrypted",
+          "description": "Fully encrypted and protected.",
+          "type": "string"
+        },
+        {
+          "const": "unencrypted",
+          "description": "Not encrypted.",
+          "type": "string"
+        },
+        {
+          "const": "suspended",
+          "description": "Encrypted, with protection suspended.",
+          "type": "string"
+        },
+        {
+          "const": "in_progress",
+          "description": "Encryption or decryption is in progress.",
           "type": "string"
         }
       ]
@@ -248,7 +1061,39 @@
         "agent.tamper",
         "agent.throttled",
         "agent.dropped",
-        "agent.clock_unsynced"
+        "agent.clock_unsynced",
+        "process.created",
+        "script.block_logged",
+        "script.language_audit",
+        "containment.decision",
+        "device.attached",
+        "device.detached",
+        "storage.decision",
+        "network.app.decision",
+        "network.host.decision",
+        "web.decision",
+        "elevation.requested",
+        "elevation.decision",
+        "elevation.ended",
+        "approval.requested",
+        "approval.decided",
+        "exception.created",
+        "exception.changed",
+        "exception.removed",
+        "exception.expired",
+        "otp.session.started",
+        "otp.session.ended",
+        "admin.action",
+        "admin.login",
+        "admin.login_failed",
+        "identity.logon",
+        "identity.logon_failed",
+        "identity.local_group.changed",
+        "identity.group.changed",
+        "detection.log_cleared",
+        "detection.audit_policy_changed",
+        "integrity.fim.changed",
+        "compliance.probe.result"
       ],
       "type": "string"
     },
@@ -328,6 +1173,95 @@
         }
       },
       "type": "object"
+    },
+    "Fim": {
+      "additionalProperties": false,
+      "description": "A change to a monitored file (#183). The file as it is now is\n[`super::Event::file`]; this records what it was before.",
+      "properties": {
+        "change": {
+          "$ref": "#/$defs/FimChange",
+          "description": "What happened."
+        },
+        "old_path": {
+          "description": "For a rename, the path before.",
+          "maxLength": 32767,
+          "minLength": 1,
+          "type": "string"
+        },
+        "old_sha256": {
+          "description": "SHA-256 of the content before.",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "old_size": {
+          "description": "The size before, in bytes.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "watch": {
+          "description": "The monitoring rule that matched, by name.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "FimChange": {
+      "description": "What happened to a monitored file.",
+      "oneOf": [
+        {
+          "const": "created",
+          "description": "The file was created.",
+          "type": "string"
+        },
+        {
+          "const": "modified",
+          "description": "The file's content changed.",
+          "type": "string"
+        },
+        {
+          "const": "deleted",
+          "description": "The file was deleted.",
+          "type": "string"
+        },
+        {
+          "const": "renamed",
+          "description": "The file was renamed or moved: the old path is in `old_path`.",
+          "type": "string"
+        },
+        {
+          "const": "permissions_changed",
+          "description": "The file's owner or permissions changed.",
+          "type": "string"
+        },
+        {
+          "const": "attributes_changed",
+          "description": "The file's attributes or timestamps changed.",
+          "type": "string"
+        }
+      ]
+    },
+    "GroupScope": {
+      "description": "The scope of a security group.",
+      "oneOf": [
+        {
+          "const": "local",
+          "description": "A group on one device, or a domain-local group.",
+          "type": "string"
+        },
+        {
+          "const": "global",
+          "description": "A directory global group.",
+          "type": "string"
+        },
+        {
+          "const": "universal",
+          "description": "A directory universal group.",
+          "type": "string"
+        }
+      ]
     },
     "Guid": {
       "description": "A GUID in canonical lowercase form, without braces.",
@@ -464,6 +1398,55 @@
       "$ref": "#/$defs/Uuid7",
       "description": "The ID of an enrolled device, assigned by the server at enrolment."
     },
+    "Identity": {
+      "additionalProperties": false,
+      "description": "Identity details: logons and group membership changes. The account that\nlogged on, or that made a change, is [`super::Event::user`].",
+      "properties": {
+        "authentication_package": {
+          "description": "The authentication package, for example `Kerberos` or `NTLM`.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "group": {
+          "$ref": "#/$defs/Account",
+          "description": "The group whose membership changed."
+        },
+        "group_scope": {
+          "$ref": "#/$defs/GroupScope",
+          "description": "The group's scope."
+        },
+        "logon_process": {
+          "description": "The logon process.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "member": {
+          "$ref": "#/$defs/Account",
+          "description": "The account added to or removed from the group."
+        },
+        "status_code": {
+          "description": "For a failed logon: the OS status code (an NTSTATUS value).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sub_status_code": {
+          "description": "For a failed logon: the more specific OS status code.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "workstation": {
+          "description": "The name of the workstation the logon came from.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "IntegrityLevel": {
       "description": "A process integrity level.",
       "oneOf": [
@@ -515,6 +1498,42 @@
       ],
       "description": "An IPv4 or IPv6 address in canonical form.",
       "type": "string"
+    },
+    "JsonPointer": {
+      "description": "A non-empty JSON Pointer (RFC 6901).",
+      "maxLength": 1024,
+      "pattern": "^(/([^~/]|~[01])*)+$",
+      "type": "string"
+    },
+    "JsonValue": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "maxLength": 4096,
+          "type": "string"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "propertyNames": {
+            "maxLength": 256
+          },
+          "type": "object"
+        }
+      ],
+      "description": "A JSON value without null or non-integer numbers. Nesting (at most 16) and size (at most 1024 values) are checked by the reader."
     },
     "Labels": {
       "additionalProperties": {
@@ -733,6 +1752,66 @@
       },
       "type": "object"
     },
+    "Network": {
+      "additionalProperties": false,
+      "description": "A network connection or request.",
+      "properties": {
+        "direction": {
+          "$ref": "#/$defs/Direction",
+          "description": "Which way it goes."
+        },
+        "local_ip": {
+          "$ref": "#/$defs/IpAddress",
+          "description": "The device's address."
+        },
+        "local_port": {
+          "description": "The device's port.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "protocol": {
+          "description": "The IP protocol number (IANA), for example 6 for TCP and 17 for UDP.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "remote_hostname": {
+          "$ref": "#/$defs/DnsName",
+          "description": "The other end's host name."
+        },
+        "remote_ip": {
+          "$ref": "#/$defs/IpAddress",
+          "description": "The other end's address."
+        },
+        "remote_port": {
+          "description": "The other end's port.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "resolution": {
+          "$ref": "#/$defs/ResolutionMethod",
+          "description": "How `remote_hostname` was learned. Present only with it."
+        },
+        "unc": {
+          "description": "The UNC path requested, for example `\\\\files\\share\\a.exe`.",
+          "maxLength": 32767,
+          "minLength": 1,
+          "type": "string"
+        },
+        "url": {
+          "description": "The URL requested, as reported.",
+          "maxLength": 32767,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "ObjectType": {
       "description": "The class of object being evaluated. Scripts are `script.<kind>`.",
       "enum": [
@@ -942,6 +2021,148 @@
       },
       "type": "object"
     },
+    "Principal": {
+      "additionalProperties": false,
+      "description": "Who acted, as the server knows them.",
+      "properties": {
+        "id": {
+          "description": "The principal's stable ID: a user ID, an API token or client ID, or\na job name.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/PrincipalKind",
+          "description": "What kind of principal."
+        },
+        "name": {
+          "description": "The display name.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "sid": {
+          "$ref": "#/$defs/Sid",
+          "description": "The Windows security identifier, for directory accounts."
+        },
+        "upn": {
+          "description": "The user principal name or e-mail address.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "PrincipalKind": {
+      "description": "Who acted: a person, a client or a component.",
+      "oneOf": [
+        {
+          "const": "user",
+          "description": "A person signed in to the console or a client.",
+          "type": "string"
+        },
+        {
+          "const": "api_client",
+          "description": "An API client, identified by its token or client ID.",
+          "type": "string"
+        },
+        {
+          "const": "service_account",
+          "description": "A service account.",
+          "type": "string"
+        },
+        {
+          "const": "scim",
+          "description": "Directory provisioning (SCIM).",
+          "type": "string"
+        },
+        {
+          "const": "system_job",
+          "description": "A scheduled server job.",
+          "type": "string"
+        },
+        {
+          "const": "instance_operator",
+          "description": "An operator of the Palisade instance, outside the tenant.",
+          "type": "string"
+        },
+        {
+          "const": "agent",
+          "description": "A Palisade agent.",
+          "type": "string"
+        }
+      ]
+    },
+    "Probe": {
+      "additionalProperties": false,
+      "description": "One compliance probe and its result (#210).",
+      "properties": {
+        "control": {
+          "description": "The control it evidences, for example `ISM-1623`.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "detail": {
+          "description": "A short explanation of the result.",
+          "maxLength": 1024,
+          "minLength": 1,
+          "type": "string"
+        },
+        "expected": {
+          "$ref": "#/$defs/JsonValue",
+          "description": "The value the requirement expects."
+        },
+        "id": {
+          "$ref": "#/$defs/Token",
+          "description": "The probe's stable ID, for example `powershell_script_block_logging`."
+        },
+        "name": {
+          "description": "The probe's name.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "observed": {
+          "$ref": "#/$defs/JsonValue",
+          "description": "The value found on the device."
+        },
+        "status": {
+          "$ref": "#/$defs/ProbeStatus",
+          "description": "The result."
+        }
+      },
+      "type": "object"
+    },
+    "ProbeStatus": {
+      "description": "The result of a compliance probe.",
+      "oneOf": [
+        {
+          "const": "pass",
+          "description": "The device meets the requirement.",
+          "type": "string"
+        },
+        {
+          "const": "fail",
+          "description": "The device does not meet the requirement.",
+          "type": "string"
+        },
+        {
+          "const": "error",
+          "description": "The probe could not run.",
+          "type": "string"
+        },
+        {
+          "const": "not_applicable",
+          "description": "The requirement does not apply to this device.",
+          "type": "string"
+        }
+      ]
+    },
     "Process": {
       "additionalProperties": false,
       "description": "The process that acted.",
@@ -1044,6 +2265,266 @@
       },
       "type": "object"
     },
+    "Registry": {
+      "additionalProperties": false,
+      "description": "A registry key or value.",
+      "properties": {
+        "default_value": {
+          "const": true,
+          "description": "The value is the key's unnamed (default) value. Never with a\n`value_name`.",
+          "type": "boolean"
+        },
+        "key": {
+          "$ref": "#/$defs/RegistryKey",
+          "description": "The key."
+        },
+        "new": {
+          "$ref": "#/$defs/RegistryData",
+          "description": "The data after the change."
+        },
+        "old": {
+          "$ref": "#/$defs/RegistryData",
+          "description": "The data before the change."
+        },
+        "operation": {
+          "$ref": "#/$defs/RegistryOperation",
+          "description": "What was done."
+        },
+        "value_name": {
+          "description": "The value's name. The unnamed (default) value has no name: it is\nrecorded with `default_value` instead.",
+          "maxLength": 16383,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "RegistryData": {
+      "additionalProperties": false,
+      "description": "Registry value data: recorded truncated, hashed, or both, never in full\nbeyond the preview limit.",
+      "properties": {
+        "preview": {
+          "description": "The data as text: strings as they are, numbers in decimal, a list of\nstrings joined with line feeds, anything else as lowercase hex. At\nmost 1024 characters.",
+          "maxLength": 1024,
+          "minLength": 1,
+          "type": "string"
+        },
+        "sha256": {
+          "description": "SHA-256 of the data's raw bytes.",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "size": {
+          "description": "The size of the data in bytes.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "truncated": {
+          "const": true,
+          "description": "The preview is shorter than the data. Only with a `preview`.",
+          "type": "boolean"
+        },
+        "value_type": {
+          "$ref": "#/$defs/RegistryValueType",
+          "description": "The value type."
+        }
+      },
+      "type": "object"
+    },
+    "RegistryDataRule": {
+      "description": "`truncated` data has a `preview`.",
+      "if": {
+        "required": [
+          "truncated"
+        ]
+      },
+      "then": {
+        "required": [
+          "preview"
+        ]
+      }
+    },
+    "RegistryKey": {
+      "description": "A registry key path: the full root key name, then components of 1 to 255 characters separated by `\\`.",
+      "maxLength": 32767,
+      "pattern": "^HKEY_(LOCAL_MACHINE|USERS|CURRENT_USER|CLASSES_ROOT|CURRENT_CONFIG)(\\\\[^\\\\]{1,255})*$",
+      "type": "string"
+    },
+    "RegistryOperation": {
+      "description": "What was done to a registry key or value.",
+      "oneOf": [
+        {
+          "const": "create_key",
+          "description": "A key was created.",
+          "type": "string"
+        },
+        {
+          "const": "delete_key",
+          "description": "A key was deleted.",
+          "type": "string"
+        },
+        {
+          "const": "set_value",
+          "description": "A value was written.",
+          "type": "string"
+        },
+        {
+          "const": "delete_value",
+          "description": "A value was deleted.",
+          "type": "string"
+        },
+        {
+          "const": "read_key",
+          "description": "A key's values or subkeys were read.",
+          "type": "string"
+        },
+        {
+          "const": "read_value",
+          "description": "A value was read.",
+          "type": "string"
+        }
+      ]
+    },
+    "RegistryValueType": {
+      "description": "The type of registry value data. The names follow the OS value types.",
+      "oneOf": [
+        {
+          "const": "none",
+          "description": "No type.",
+          "type": "string"
+        },
+        {
+          "const": "string",
+          "description": "A string.",
+          "type": "string"
+        },
+        {
+          "const": "expand_string",
+          "description": "A string with unexpanded environment variables.",
+          "type": "string"
+        },
+        {
+          "const": "binary",
+          "description": "Binary data.",
+          "type": "string"
+        },
+        {
+          "const": "dword",
+          "description": "A 32-bit number.",
+          "type": "string"
+        },
+        {
+          "const": "dword_big_endian",
+          "description": "A 32-bit number, big-endian.",
+          "type": "string"
+        },
+        {
+          "const": "link",
+          "description": "A symbolic link.",
+          "type": "string"
+        },
+        {
+          "const": "multi_string",
+          "description": "A list of strings.",
+          "type": "string"
+        },
+        {
+          "const": "resource_list",
+          "description": "A hardware resource list.",
+          "type": "string"
+        },
+        {
+          "const": "full_resource_descriptor",
+          "description": "A hardware resource descriptor.",
+          "type": "string"
+        },
+        {
+          "const": "resource_requirements_list",
+          "description": "A hardware resource requirements list.",
+          "type": "string"
+        },
+        {
+          "const": "qword",
+          "description": "A 64-bit number.",
+          "type": "string"
+        }
+      ]
+    },
+    "ResolutionMethod": {
+      "description": "How a remote host name was learned.",
+      "oneOf": [
+        {
+          "const": "dns",
+          "description": "A DNS query the agent observed.",
+          "type": "string"
+        },
+        {
+          "const": "dns_cache",
+          "description": "The OS resolver cache.",
+          "type": "string"
+        },
+        {
+          "const": "hosts_file",
+          "description": "The local hosts file.",
+          "type": "string"
+        },
+        {
+          "const": "local_name",
+          "description": "NetBIOS, LLMNR or multicast DNS.",
+          "type": "string"
+        },
+        {
+          "const": "tls_sni",
+          "description": "The TLS server name indication.",
+          "type": "string"
+        },
+        {
+          "const": "http_host",
+          "description": "The HTTP `Host` header.",
+          "type": "string"
+        },
+        {
+          "const": "reverse_dns",
+          "description": "A reverse lookup of the remote address.",
+          "type": "string"
+        },
+        {
+          "const": "requested",
+          "description": "The name the application asked for, before resolution.",
+          "type": "string"
+        }
+      ]
+    },
+    "Restriction": {
+      "additionalProperties": false,
+      "description": "A restriction a script interpreter applied, or in audit mode would have\napplied, because the script is not allowed to run unrestricted.",
+      "properties": {
+        "error_id": {
+          "description": "The interpreter's identifier for the restriction.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "language_mode": {
+          "$ref": "#/$defs/LanguageMode",
+          "description": "The language mode that applies, or would apply."
+        },
+        "message": {
+          "description": "The interpreter's message, with the script position.",
+          "maxLength": 32767,
+          "minLength": 1,
+          "type": "string"
+        },
+        "title": {
+          "description": "The kind of restriction, as the interpreter titles it.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "RuleId": {
       "$ref": "#/$defs/Uuid7",
       "description": "The stable ID of a rule. It is never reused, even after the rule is deleted."
@@ -1068,7 +2549,7 @@
           "type": "string"
         },
         "inline": {
-          "description": "The script was inline text, not a file.",
+          "description": "The script was inline text, not a file.\n\nWriters leave it out when it is not set. Readers also accept an\nexplicit `false`, as 1.0 did, so this flag alone keeps two spellings\nuntil the next major version. The flags added in 1.1 accept only\n`true`.",
           "type": "boolean"
         },
         "interpreter": {
@@ -1094,6 +2575,12 @@
         "script_block_id": {
           "$ref": "#/$defs/Guid",
           "description": "The interpreter's script block ID."
+        },
+        "text": {
+          "description": "The script text as the interpreter logged it. Collected only when\npermitted, and redacted by default, like the command line (#228).\nSince 1.1.",
+          "maxLength": 32767,
+          "minLength": 1,
+          "type": "string"
         }
       },
       "type": "object"
@@ -1252,6 +2739,10 @@
           "minimum": 0,
           "type": "integer"
         },
+        "format": {
+          "$ref": "#/$defs/Token",
+          "description": "For `third_party`: the generic name of the import format, for\nexample `generic`. Present exactly when `kind` is `third_party`.\nSince 1.1."
+        },
         "kind": {
           "$ref": "#/$defs/SourceKind",
           "description": "The kind of log."
@@ -1261,6 +2752,12 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "rule_name": {
+          "description": "The rule or policy that decided, as the source names it. For events\nimported from another product, whose rules have no Palisade ID.\nSince 1.1.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
         }
       },
       "required": [
@@ -1289,6 +2786,11 @@
         {
           "const": "os_powershell",
           "description": "The PowerShell logs.",
+          "type": "string"
+        },
+        {
+          "const": "third_party",
+          "description": "Events imported from another product, in a generic format named by\n`source.format`. Since 1.1.",
           "type": "string"
         }
       ]
@@ -1854,6 +3356,707 @@
       }
     },
     {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "process.created"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "execution"
+          }
+        },
+        "required": [
+          "process"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "script.block_logged"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "script"
+          }
+        },
+        "required": [
+          "script"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "script.language_audit"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "script"
+          }
+        },
+        "required": [
+          "restriction"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "containment.decision"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "containment"
+          }
+        },
+        "required": [
+          "process"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "device.attached"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "device"
+          }
+        },
+        "required": [
+          "device"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "device.detached"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "device"
+          }
+        },
+        "required": [
+          "device"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "storage.decision"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "device"
+          }
+        },
+        "required": [
+          "device"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "network.app.decision"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "network"
+          }
+        },
+        "required": [
+          "network"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "network.host.decision"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "network"
+          }
+        },
+        "required": [
+          "network"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "web.decision"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "web"
+          }
+        },
+        "required": [
+          "network"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "elevation.requested"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "elevation"
+          }
+        },
+        "required": [
+          "elevation"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "elevation.decision"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "elevation"
+          }
+        },
+        "required": [
+          "elevation"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "elevation.ended"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "elevation"
+          }
+        },
+        "required": [
+          "elevation"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "approval.requested"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "approval"
+          }
+        },
+        "required": [
+          "approval"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "approval.decided"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "approval"
+          }
+        },
+        "required": [
+          "approval"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "exception.created"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "exception"
+          }
+        },
+        "required": [
+          "admin"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "exception.changed"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "exception"
+          }
+        },
+        "required": [
+          "admin"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "exception.removed"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "exception"
+          }
+        },
+        "required": [
+          "admin"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "exception.expired"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "exception"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "otp.session.started"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "exception"
+          }
+        },
+        "required": [
+          "approval"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "otp.session.ended"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "exception"
+          }
+        },
+        "required": [
+          "approval"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "admin.action"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "admin_audit"
+          }
+        },
+        "required": [
+          "admin"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "admin.login"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "admin_audit"
+          }
+        },
+        "required": [
+          "admin"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "admin.login_failed"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "admin_audit"
+          }
+        },
+        "required": [
+          "admin"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "identity.logon"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "identity"
+          }
+        },
+        "required": [
+          "user"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "identity.logon_failed"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "identity"
+          }
+        },
+        "required": [
+          "user"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "identity.local_group.changed"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "identity"
+          }
+        },
+        "required": [
+          "identity"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "identity.group.changed"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "identity"
+          }
+        },
+        "required": [
+          "identity"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "detection.log_cleared"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "detection"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "detection.audit_policy_changed"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "detection"
+          }
+        },
+        "required": [
+          "audit_policy"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "integrity.fim.changed"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "integrity"
+          }
+        },
+        "required": [
+          "file",
+          "fim"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "compliance.probe.result"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "compliance"
+          }
+        },
+        "required": [
+          "probe"
+        ]
+      }
+    },
+    {
       "else": {
         "required": [
           "prev_hash"
@@ -1909,6 +4112,430 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "pattern": "^1\\.(0)\\.(0|[1-9][0-9]*)$"
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "properties": {
+          "source": {
+            "not": {
+              "required": [
+                "format"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "pattern": "^1\\.(0)\\.(0|[1-9][0-9]*)$"
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "properties": {
+          "source": {
+            "not": {
+              "required": [
+                "rule_name"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "pattern": "^1\\.(0)\\.(0|[1-9][0-9]*)$"
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "properties": {
+          "script": {
+            "not": {
+              "required": [
+                "text"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "pattern": "^1\\.(0)\\.(0|[1-9][0-9]*)$"
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "network"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "pattern": "^1\\.(0)\\.(0|[1-9][0-9]*)$"
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "device"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "pattern": "^1\\.(0)\\.(0|[1-9][0-9]*)$"
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "registry"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "pattern": "^1\\.(0)\\.(0|[1-9][0-9]*)$"
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "elevation"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "pattern": "^1\\.(0)\\.(0|[1-9][0-9]*)$"
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "approval"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "pattern": "^1\\.(0)\\.(0|[1-9][0-9]*)$"
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "admin"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "pattern": "^1\\.(0)\\.(0|[1-9][0-9]*)$"
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "identity"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "pattern": "^1\\.(0)\\.(0|[1-9][0-9]*)$"
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "audit_policy"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "pattern": "^1\\.(0)\\.(0|[1-9][0-9]*)$"
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "restriction"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "pattern": "^1\\.(0)\\.(0|[1-9][0-9]*)$"
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "probe"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "pattern": "^1\\.(0)\\.(0|[1-9][0-9]*)$"
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "fim"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "pattern": "^1\\.(0)\\.(0|[1-9][0-9]*)$"
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "properties": {
+          "event_type": {
+            "not": {
+              "enum": [
+                "process.created",
+                "script.block_logged",
+                "script.language_audit",
+                "containment.decision",
+                "device.attached",
+                "device.detached",
+                "storage.decision",
+                "network.app.decision",
+                "network.host.decision",
+                "web.decision",
+                "elevation.requested",
+                "elevation.decision",
+                "elevation.ended",
+                "approval.requested",
+                "approval.decided",
+                "exception.created",
+                "exception.changed",
+                "exception.removed",
+                "exception.expired",
+                "otp.session.started",
+                "otp.session.ended",
+                "admin.action",
+                "admin.login",
+                "admin.login_failed",
+                "identity.logon",
+                "identity.logon_failed",
+                "identity.local_group.changed",
+                "identity.group.changed",
+                "detection.log_cleared",
+                "detection.audit_policy_changed",
+                "integrity.fim.changed",
+                "compliance.probe.result"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "pattern": "^1\\.(0)\\.(0|[1-9][0-9]*)$"
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "properties": {
+          "source": {
+            "properties": {
+              "kind": {
+                "not": {
+                  "enum": [
+                    "third_party"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "admin": {
+          "properties": {
+            "changes": {
+              "items": {
+                "$ref": "#/$defs/ChangeRule"
+              }
+            }
+          }
+        },
+        "network": {
+          "if": {
+            "required": [
+              "resolution"
+            ]
+          },
+          "then": {
+            "required": [
+              "remote_hostname"
+            ]
+          }
+        },
+        "registry": {
+          "not": {
+            "required": [
+              "value_name",
+              "default_value"
+            ]
+          },
+          "properties": {
+            "new": {
+              "$ref": "#/$defs/RegistryDataRule"
+            },
+            "old": {
+              "$ref": "#/$defs/RegistryDataRule"
+            }
+          }
+        },
+        "source": {
+          "else": {
+            "not": {
+              "required": [
+                "format"
+              ]
+            }
+          },
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "third_party"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "format"
+            ]
+          }
+        }
+      }
     }
   ],
   "description": "One canonical event.\n\nField order here is the serialisation order, so [`Event::to_canonical_json`]\nis deterministic.",
@@ -1917,9 +4544,21 @@
       "$ref": "#/$defs/Token",
       "description": "The verb, for example `execute`, `load`, `install` or `activate`."
     },
+    "admin": {
+      "$ref": "#/$defs/Admin",
+      "description": "The administrative action. Since 1.1."
+    },
     "agent": {
       "$ref": "#/$defs/AgentInfo",
       "description": "Agent state, for agent events."
+    },
+    "approval": {
+      "$ref": "#/$defs/Approval",
+      "description": "The approval request. Since 1.1."
+    },
+    "audit_policy": {
+      "$ref": "#/$defs/AuditPolicy",
+      "description": "The OS audit policy change. Since 1.1."
     },
     "category": {
       "$ref": "#/$defs/Category",
@@ -1940,6 +4579,14 @@
       "minLength": 1,
       "type": "string"
     },
+    "device": {
+      "$ref": "#/$defs/Device",
+      "description": "The peripheral device. Since 1.1."
+    },
+    "elevation": {
+      "$ref": "#/$defs/Elevation",
+      "description": "The privilege elevation. Since 1.1."
+    },
     "event_id": {
       "$ref": "#/$defs/Uuid7",
       "description": "A unique ID, assigned by the producer."
@@ -1952,9 +4599,17 @@
       "$ref": "#/$defs/File",
       "description": "The file acted on."
     },
+    "fim": {
+      "$ref": "#/$defs/Fim",
+      "description": "The file integrity change. Since 1.1."
+    },
     "host": {
       "$ref": "#/$defs/Host",
       "description": "The device the event is about (ISM-0585: IT equipment)."
+    },
+    "identity": {
+      "$ref": "#/$defs/Identity",
+      "description": "Logon and group membership details. Since 1.1."
     },
     "labels": {
       "$ref": "#/$defs/Labels",
@@ -1967,6 +4622,10 @@
     "native": {
       "$ref": "#/$defs/Native",
       "description": "OS-native enforcement details."
+    },
+    "network": {
+      "$ref": "#/$defs/Network",
+      "description": "The network connection or request. Since 1.1."
     },
     "outcome": {
       "$ref": "#/$defs/Outcome",
@@ -1981,13 +4640,26 @@
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
     },
+    "probe": {
+      "$ref": "#/$defs/Probe",
+      "description": "The compliance probe. Since 1.1."
+    },
     "process": {
       "$ref": "#/$defs/Process",
       "description": "The process that acted."
     },
+    "registry": {
+      "$ref": "#/$defs/Registry",
+      "description": "The registry key or value. Since 1.1."
+    },
+    "restriction": {
+      "$ref": "#/$defs/Restriction",
+      "description": "The script language restriction. Since 1.1."
+    },
     "schema_version": {
       "$ref": "#/$defs/SchemaVersion",
-      "description": "The schema version of this event."
+      "description": "The schema version of this event.",
+      "pattern": "^1\\.(0|1)\\.(0|[1-9][0-9]*)$"
     },
     "script": {
       "$ref": "#/$defs/Script",
@@ -2043,5 +4715,5 @@
   ],
   "title": "Palisade canonical event",
   "type": "object",
-  "x-schema-version": "1.0.0"
+  "x-schema-version": "1.1.0"
 }

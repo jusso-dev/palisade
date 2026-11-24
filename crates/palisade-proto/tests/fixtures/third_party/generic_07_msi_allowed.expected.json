@@ -1,0 +1,62 @@
+{
+  "schema_version": "1.1.0",
+  "event_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+  "event_type": "installer.decision",
+  "category": "installer",
+  "action": "install",
+  "outcome": "allowed",
+  "severity": 3,
+  "description": "Imported: an installer was allowed.",
+  "ts": "2026-11-24T03:15:22.000000Z",
+  "ts_agent_monotonic": 123456789,
+  "clock_synced": true,
+  "clock_skew_ms": -3,
+  "tenant_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e61",
+  "host": {
+    "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60",
+    "name": "WS-0001",
+    "os": "Windows 11 Enterprise",
+    "os_build": "26100.2314",
+    "arch": "x86_64",
+    "agent_version": "0.1.0"
+  },
+  "user": {
+    "sid": "S-1-5-21-1111111111-2222222222-3333333333-1001",
+    "name": "alice",
+    "domain": "EXAMPLE"
+  },
+  "seq": 41,
+  "prev_hash": "5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e",
+  "source": {
+    "kind": "third_party",
+    "event_id": 7,
+    "record_id": 5007,
+    "format": "generic",
+    "rule_name": "Allow signed tools"
+  },
+  "process": {
+    "pid": 4412,
+    "image_path": "C:\\Windows\\explorer.exe"
+  },
+  "file": {
+    "path": "C:\\Users\\alice\\Downloads\\setup.msi",
+    "size": 102400,
+    "hashes": {
+      "sha256": "abababababababababababababababababababababababababababababababab",
+      "sha1": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "md5": "efefefefefefefefefefefefefefefef"
+    },
+    "signers": [
+      {
+        "publisher": "Example Software Ltd",
+        "issuer": "Example Code Signing CA"
+      }
+    ],
+    "version_info": {
+      "original_filename": "tool.exe",
+      "product_name": "Example Tool",
+      "company": "Example Software Ltd",
+      "file_version": "1.2.3.4"
+    }
+  }
+}

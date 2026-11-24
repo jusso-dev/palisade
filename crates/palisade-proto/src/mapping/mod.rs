@@ -14,8 +14,12 @@
 //! # File format
 //!
 //! ```yaml
-//! schema_version: 1.0.0          # the event schema major version it targets
-//! source: os_code_integrity      # a `source.kind` value
+//! schema_version: 1.1.0          # the event schema version it targets
+//! source: os_security            # a `source.kind`, or `third_party:<format>`
+//! absent_values: ["-"]           # optional: source values that mean "none"
+//! value_maps:                    # optional: named value tables
+//!   logon_type:
+//!     "2": interactive
 //! entries:
 //!   - source_event_id: 3077
 //!     when:                      # optional: the entry applies only if this holds
@@ -29,6 +33,12 @@
 //!     description: The OS code integrity policy blocked a kernel driver.
 //!     field_map:                 # source field: canonical JSON Pointer (or a list)
 //!       FileName: /file/path
+//!       LogonType:               # or a spec:
+//!         to: /user/logon_type   #   the target (or a list)
+//!         values: logon_type     #   optional: translate through a table
+//!         split: ","             #   for set targets: the separator
+//!     set:                       # optional: constants, as text read like a source value
+//!       /script/kind: powershell
 //!     signatures:                # optional: correlated per-signature records
 //!       source_event_id: 3089
 //!       count_field: TotalSignatureCount
@@ -37,9 +47,15 @@
 //!         PublisherName: publisher
 //! ```
 //!
-//! Entries for the same source event ID are tried in file order, and the
-//! first whose `when` holds is used. Only the last entry for an ID may omit
-//! `when`, and it is then the fallback.
+//! A `when` may also be `present: true`, which holds when the field has a
+//! value. Entries for the same source event ID are tried in file order, and
+//! the first whose `when` holds is used. Only the last entry for an ID may
+//! omit `when`, and it is then the fallback.
+//!
+//! A source value that is empty or listed in `absent_values` counts as
+//! absent: it fills nothing and matches no `when`. A value that a table does
+//! not list, or that does not fit its target, is dropped and reported in
+//! [`Mapped::dropped`]; the event is still produced without it.
 //!
 //! # Checks when a file is loaded
 //!
@@ -47,14 +63,23 @@
 //! when:
 //!
 //! - it is not strict YAML, has unknown keys, or targets another schema
-//!   major version;
-//! - a `canonical_type` is not registered;
+//!   major version or a newer minor version;
+//! - a `canonical_type` is not registered, or is newer than the file's
+//!   `schema_version`;
 //! - a target is not a writable canonical field (the table in `targets.rs`); this is how a
 //!   mapping that references a field that does not exist fails CI;
+//! - a target, or the source kind, is newer than the file's
+//!   `schema_version`;
+//! - a value table is empty, too long, unused, or maps a value to one its
+//!   target cannot hold; a constant is not a value its target can hold;
+//! - `split` is used without a set target, or a set target without `split`;
+//! - an entry fills `file.signers` both directly and from signature records;
 //! - an entry cannot fill a field set its type requires from its
 //!   `field_map` (signer records do not count: an unsigned file has none);
 //! - a `*.decision` entry maps none of the subject fields or none of the
 //!   object-name fields that [`Event::ism_0585_gaps`] accepts (ISM-0585);
+//! - a `third_party` file joins a set that already translates another
+//!   format, or a file maps a source event ID another file in the set maps;
 //! - a `when` has an empty or repeated value, or a value that an earlier
 //!   entry for the same event ID and field already matches (so the entry
 //!   could never apply to it), or an entry follows the fallback.
@@ -87,6 +112,14 @@ pub const BUILTIN: &[(&str, &str)] = &[
     (
         "os_legacy_rule_collection.yaml",
         include_str!("../../mappings/os_legacy_rule_collection.yaml"),
+    ),
+    (
+        "os_security.yaml",
+        include_str!("../../mappings/os_security.yaml"),
+    ),
+    (
+        "os_powershell.yaml",
+        include_str!("../../mappings/os_powershell.yaml"),
     ),
 ];
 
@@ -219,8 +252,44 @@ impl std::error::Error for MapError {}
 #[serde(deny_unknown_fields)]
 struct FileDoc {
     schema_version: SchemaVersion,
-    source: SourceKind,
+    source: SourceDoc,
+    /// Source values that mean "no value", such as `-` (compared exactly).
+    #[serde(default)]
+    absent_values: Vec<String>,
+    /// Named tables from source values to canonical values.
+    #[serde(default)]
+    value_maps: BTreeMap<String, BTreeMap<String, String>>,
     entries: Vec<EntryDoc>,
+}
+
+/// `os_security`, or `third_party:<format>` for a generic import format.
+struct SourceDoc {
+    kind: SourceKind,
+    format: Option<Token>,
+}
+
+impl<'de> Deserialize<'de> for SourceDoc {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error as _;
+        let text = String::deserialize(deserializer)?;
+        if let Some(format) = text.strip_prefix("third_party:") {
+            let format: Token = format.parse().map_err(|_| {
+                D::Error::custom("`third_party:` needs a format name such as `generic`")
+            })?;
+            return Ok(Self {
+                kind: SourceKind::ThirdParty,
+                format: Some(format),
+            });
+        }
+        let kind: SourceKind = serde_json::from_value(Value::String(text))
+            .map_err(|e| D::Error::custom(e.to_string()))?;
+        if kind == SourceKind::ThirdParty {
+            return Err(D::Error::custom(
+                "write `third_party:<format>`, naming the import format",
+            ));
+        }
+        Ok(Self { kind, format: None })
+    }
 }
 
 #[derive(Deserialize)]
@@ -238,9 +307,35 @@ struct EntryDoc {
     severity: Option<Severity>,
     description: Description,
     #[serde(default)]
-    field_map: BTreeMap<String, Targets>,
+    field_map: BTreeMap<String, FieldDoc>,
+    /// Constant values: canonical JSON Pointer to the value's text, read as
+    /// the target's kind.
+    #[serde(default)]
+    set: BTreeMap<String, String>,
     #[serde(default)]
     signatures: Option<SignaturesDoc>,
+}
+
+/// One source field: a target pointer, a list of them, or a spec.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum FieldDoc {
+    One(String),
+    Many(Vec<String>),
+    Spec(FieldSpecDoc),
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FieldSpecDoc {
+    /// The target pointer, or several.
+    to: Targets,
+    /// A table from `value_maps` that translates the value first.
+    #[serde(default)]
+    values: Option<String>,
+    /// For an enum-set target: the separator between the members.
+    #[serde(default)]
+    split: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -259,6 +354,16 @@ impl Targets {
     }
 }
 
+impl FieldDoc {
+    fn into_parts(self) -> (Vec<String>, Option<String>, Option<String>) {
+        match self {
+            Self::One(t) => (vec![t], None, None),
+            Self::Many(t) => (t, None, None),
+            Self::Spec(spec) => (spec.to.into_vec(), spec.values, spec.split),
+        }
+    }
+}
+
 /// A condition on one source field. Comparison is ASCII case-insensitive.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -268,24 +373,33 @@ struct When {
     equals: Vec<String>,
     #[serde(default)]
     ends_with: Vec<String>,
+    /// Holds when the field has a value (it is present, not empty and not
+    /// one of the file's `absent_values`).
+    #[serde(default)]
+    present: bool,
 }
 
 impl When {
-    /// Whether the condition holds. An empty field value counts as absent,
-    /// so it never matches. Values are lowercased when the file is loaded.
-    fn holds(&self, record: &Record) -> bool {
-        let Some(value) = record.fields.get(&self.field).filter(|v| !v.is_empty()) else {
+    /// Whether the condition holds. An absent value never matches.
+    /// Values are lowercased when the file is loaded.
+    fn holds(&self, record: &Record, absent: &[String]) -> bool {
+        let Some(value) = present_value(record, &self.field, absent) else {
             return false;
         };
+        if self.present {
+            return true;
+        }
         let value = value.to_ascii_lowercase();
         self.equals.contains(&value) || self.ends_with.iter().any(|v| value.ends_with(v.as_str()))
     }
 
     /// Lowercases the values and rejects empty or repeated ones.
     fn normalise(&mut self) -> Result<(), String> {
-        if self.field.is_empty() || (self.equals.is_empty() && self.ends_with.is_empty()) {
+        let has_values = !self.equals.is_empty() || !self.ends_with.is_empty();
+        if self.field.is_empty() || has_values == self.present {
             return Err(
-                "needs a `field` and at least one `equals` or `ends_with` value".to_owned(),
+                "needs a `field` and either `present: true` or at least one `equals` or `ends_with` value"
+                    .to_owned(),
             );
         }
         for list in [&mut self.equals, &mut self.ends_with] {
@@ -311,6 +425,12 @@ impl When {
     /// different fields cannot be compared, and file order decides.
     fn shadowed_by(&self, before: &Self) -> Option<String> {
         if self.field != before.field {
+            return None;
+        }
+        if before.present {
+            return Some(format!("every value of `{}`", self.field));
+        }
+        if self.present {
             return None;
         }
         let matched_before = |v: &str| {
@@ -345,6 +465,18 @@ struct SignaturesDoc {
 // Loaded model
 // ---------------------------------------------------------------------------
 
+/// How one source field is read into one target.
+#[derive(Clone, Debug)]
+struct FieldRule {
+    source: String,
+    pointer: String,
+    kind: Kind,
+    /// Translates the raw value first. A value not in the table is dropped.
+    values: Option<BTreeMap<String, String>>,
+    /// Splits the raw value into enum-set members.
+    split: Option<String>,
+}
+
 #[derive(Clone, Debug)]
 struct Entry {
     when: Option<When>,
@@ -354,9 +486,12 @@ struct Entry {
     mode: Option<EventMode>,
     severity: Severity,
     description: Description,
-    /// Source field, target pointer, kind.
-    fields: Vec<(String, String, Kind)>,
+    fields: Vec<FieldRule>,
+    /// Constant values, already read as their target's kind.
+    constants: Vec<(String, Value)>,
     signatures: Option<Signatures>,
+    /// The file's `absent_values`.
+    absent: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -369,9 +504,15 @@ struct Signatures {
 }
 
 /// A loaded, checked set of mappings.
+///
+/// Several files may cover one source, as long as no two map the same
+/// source event ID. All `third_party` files in a set must name the same
+/// import format: a set translates one format at a time.
 #[derive(Clone, Debug, Default)]
 pub struct MappingSet {
     entries: BTreeMap<(SourceKind, u32), Vec<Entry>>,
+    /// The import format of the set's `third_party` files.
+    format: Option<Token>,
 }
 
 /// A mapping file was rejected.
@@ -397,19 +538,6 @@ impl fmt::Display for LoadError {
 
 impl std::error::Error for LoadError {}
 
-/// The pointer prefix of a field set.
-const fn set_prefix(set: FieldSet) -> &'static str {
-    match set {
-        FieldSet::User => "/user/",
-        FieldSet::Policy => "/policy/",
-        FieldSet::Process => "/process/",
-        FieldSet::File => "/file/",
-        FieldSet::Script => "/script/",
-        FieldSet::Native => "/native/",
-        FieldSet::Agent => "/agent/",
-    }
-}
-
 /// Targets that identify the subject of a decision, for ISM-0585. These are
 /// the fields [`Event::ism_0585_gaps`] accepts.
 const SUBJECT_TARGETS: &[&str] = &[
@@ -425,8 +553,23 @@ const OBJECT_NAME_TARGETS: &[&str] = &[
     "/file/path",
     "/file/package_name",
     "/script/path",
+    "/script/inline",
     "/native/clsid",
+    "/network/url",
+    "/network/unc",
+    "/network/remote_hostname",
+    "/network/remote_ip",
+    "/device/instance_id",
+    "/device/friendly_name",
+    "/device/serial",
+    "/registry/key",
 ];
+
+/// Most `absent_values` in one file.
+pub const MAX_ABSENT_VALUES: usize = 16;
+
+/// Most entries in one value table.
+pub const MAX_VALUE_MAP_ENTRIES: usize = 256;
 
 impl MappingSet {
     /// The shipped mappings.
@@ -441,6 +584,20 @@ impl MappingSet {
             set.add_yaml(name, text)?;
         }
         Ok(set)
+    }
+
+    /// The shipped mapping for a generic third-party import format, by its
+    /// name, for example `generic`. Each format is a set of its own.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LoadError`] if the shipped file is invalid.
+    pub fn third_party(format: &str) -> Result<Option<Self>, LoadError> {
+        THIRD_PARTY
+            .iter()
+            .find(|(f, _, _)| *f == format)
+            .map(|(_, name, text)| Self::from_yaml(name, text))
+            .transpose()
     }
 
     /// Loads one mapping file.
@@ -460,7 +617,8 @@ impl MappingSet {
     /// # Errors
     ///
     /// As [`MappingSet::from_yaml`], and also if the file maps a source event
-    /// ID that another file in the set already maps.
+    /// ID that another file in the set already maps, or is a `third_party`
+    /// file for another format than the set's.
     pub fn add_yaml(&mut self, name: &str, text: &str) -> Result<(), LoadError> {
         let err = |location: String, message: String| LoadError {
             file: name.to_owned(),
@@ -472,12 +630,20 @@ impl MappingSet {
                 .map_err(|e| err(String::new(), e.to_string()))?;
         let doc: FileDoc =
             serde_json::from_value(value).map_err(|e| err(String::new(), e.to_string()))?;
-        if doc.schema_version.major != CURRENT.major || doc.schema_version.minor > CURRENT.minor {
+        let version = doc.schema_version;
+        if version.major != CURRENT.major || version.minor > CURRENT.minor {
             return Err(err(
                 "schema_version".to_owned(),
+                format!("targets event schema {version}, but this crate implements {CURRENT}"),
+            ));
+        }
+        if doc.source.kind.since() > version {
+            return Err(err(
+                "source".to_owned(),
                 format!(
-                    "targets event schema {}, but this crate implements {CURRENT}",
-                    doc.schema_version
+                    "`{}` sources need schema version {} or newer",
+                    doc.source.kind.as_str(),
+                    doc.source.kind.since()
                 ),
             ));
         }
@@ -487,7 +653,43 @@ impl MappingSet {
                 format!("more than {MAX_ENTRIES} entries"),
             ));
         }
+        if doc.absent_values.len() > MAX_ABSENT_VALUES {
+            return Err(err(
+                "absent_values".to_owned(),
+                format!("more than {MAX_ABSENT_VALUES} values"),
+            ));
+        }
+        for (i, v) in doc.absent_values.iter().enumerate() {
+            if v.is_empty() || doc.absent_values.iter().take(i).any(|w| w == v) {
+                return Err(err(
+                    format!("absent_values[{i}]"),
+                    "values must be non-empty and listed once".to_owned(),
+                ));
+            }
+        }
+        for (table, map) in &doc.value_maps {
+            if map.is_empty() || map.len() > MAX_VALUE_MAP_ENTRIES {
+                return Err(err(
+                    format!("value_maps.{table}"),
+                    format!("needs 1 to {MAX_VALUE_MAP_ENTRIES} entries"),
+                ));
+            }
+        }
+        if let (Some(have), Some(new)) = (&self.format, &doc.source.format) {
+            if have != new {
+                return Err(err(
+                    "source".to_owned(),
+                    format!("the set already translates `third_party:{have}`"),
+                ));
+            }
+        }
+        let ctx = FileContext {
+            version,
+            value_maps: &doc.value_maps,
+            absent: &doc.absent_values,
+        };
         let mut loaded: BTreeMap<u32, Vec<Entry>> = BTreeMap::new();
+        let mut used_tables = BTreeSet::new();
         for (i, entry) in doc.entries.into_iter().enumerate() {
             let at = |field: &str| format!("entries[{i}]{field}");
             let id = entry.source_event_id;
@@ -500,7 +702,8 @@ impl MappingSet {
                     ),
                 ));
             }
-            let built = build_entry(entry).map_err(|(field, message)| err(at(&field), message))?;
+            let built = build_entry(entry, &ctx, &mut used_tables)
+                .map_err(|(field, message)| err(at(&field), message))?;
             if let Some(when) = &built.when {
                 for earlier in list.iter().filter_map(|e| e.when.as_ref()) {
                     if let Some(value) = when.shadowed_by(earlier) {
@@ -515,22 +718,32 @@ impl MappingSet {
             }
             list.push(built);
         }
+        if let Some(unused) = ctx.value_maps.keys().find(|t| !used_tables.contains(*t)) {
+            return Err(err(
+                format!("value_maps.{unused}"),
+                "is not used by any entry".to_owned(),
+            ));
+        }
         // Check every key before inserting any, so a rejected file leaves
         // the set unchanged.
+        let source = doc.source.kind;
         if let Some(id) = loaded
             .keys()
-            .find(|id| self.entries.contains_key(&(doc.source, **id)))
+            .find(|id| self.entries.contains_key(&(source, **id)))
         {
             return Err(err(
                 "entries".to_owned(),
                 format!(
                     "{} event {id} is already mapped by another file",
-                    doc.source.as_str()
+                    source.as_str()
                 ),
             ));
         }
         for (id, list) in loaded {
-            self.entries.insert((doc.source, id), list);
+            self.entries.insert((source, id), list);
+        }
+        if doc.source.format.is_some() {
+            self.format = doc.source.format;
         }
         Ok(())
     }
@@ -579,12 +792,16 @@ impl MappingSet {
             .get(&(source, record.event_id))
             .and_then(|list| {
                 list.iter()
-                    .find(|e| e.when.as_ref().is_none_or(|w| w.holds(record)))
+                    .find(|e| e.when.as_ref().is_none_or(|w| w.holds(record, &e.absent)))
             })
             .ok_or(MapError::Unmapped {
                 source,
                 event_id: record.event_id,
             })?;
+        let absent = entry.absent.as_slice();
+        let format = (source == SourceKind::ThirdParty)
+            .then_some(self.format.as_ref())
+            .flatten();
         let mut dropped = Vec::new();
         let mut event = envelope_value(envelope)?;
         let put = |event: &mut Map<String, Value>, key: &str, value: Value| {
@@ -625,17 +842,20 @@ impl MappingSet {
             "ts",
             Value::String(record.time_created.to_string()),
         );
-        put(&mut event, "source", source_value(source, record)?);
+        put(&mut event, "source", source_value(source, format, record)?);
 
-        for (field, pointer, kind) in &entry.fields {
-            let Some(raw) = record.fields.get(field) else {
+        for (pointer, value) in &entry.constants {
+            insert_at(&mut event, pointer, value.clone());
+        }
+        for rule in &entry.fields {
+            let Some(raw) = present_value(record, &rule.source, absent) else {
                 continue;
             };
-            match kind.read(raw) {
-                Ok(Some(value)) => insert_at(&mut event, pointer, value),
+            match rule.read(raw) {
+                Ok(Some(value)) => insert_at(&mut event, &rule.pointer, value),
                 Ok(None) => {}
                 Err(reason) => dropped.push(Dropped {
-                    field: field.clone(),
+                    field: rule.source.clone(),
                     reason,
                 }),
             }
@@ -643,7 +863,8 @@ impl MappingSet {
 
         let mut signatures_incomplete = None;
         if let Some(spec) = &entry.signatures {
-            let (signers, incomplete) = map_signers(spec, record, signatures, &mut dropped)?;
+            let (signers, incomplete) =
+                map_signers(spec, record, signatures, absent, &mut dropped)?;
             if !signers.is_empty() {
                 insert_at(&mut event, SIGNERS_POINTER, Value::Array(signers));
             }
@@ -658,6 +879,64 @@ impl MappingSet {
             dropped,
             signatures_incomplete,
         })
+    }
+}
+
+/// The generic third-party import formats, by format name: the format, the
+/// file name and the file. See [`MappingSet::third_party`].
+pub const THIRD_PARTY: &[(&str, &str, &str)] = &[(
+    "generic",
+    "third_party_generic.yaml",
+    include_str!("../../mappings/third_party_generic.yaml"),
+)];
+
+/// A field's value, unless it is missing, empty, or one of the file's
+/// `absent_values`: each of those means "no value".
+fn present_value<'a>(record: &'a Record, field: &str, absent: &[String]) -> Option<&'a str> {
+    record
+        .fields
+        .get(field)
+        .map(String::as_str)
+        .filter(|v| !v.is_empty() && !absent.iter().any(|a| a == v))
+}
+
+impl FieldRule {
+    /// Reads the field's value: through the value table, then as the
+    /// target's kind. A split field becomes an enum set in schema order.
+    fn read(&self, raw: &str) -> Result<Option<Value>, &'static str> {
+        let translate = |v: &str| -> Result<String, &'static str> {
+            match &self.values {
+                None => Ok(v.to_owned()),
+                Some(table) => table
+                    .get(v)
+                    .cloned()
+                    .ok_or("not a value the mapping's table knows"),
+            }
+        };
+        let Some(separator) = &self.split else {
+            return self.kind.read(&translate(raw)?);
+        };
+        let mut members: Vec<(usize, String)> = Vec::new();
+        for part in raw.split(separator.as_str()).map(str::trim) {
+            if part.is_empty() {
+                continue;
+            }
+            let value = translate(part)?;
+            let rank = self
+                .kind
+                .set_rank(&value)
+                .ok_or("not one of the field's values")?;
+            if !members.iter().any(|(r, _)| *r == rank) {
+                members.push((rank, value));
+            }
+        }
+        if members.is_empty() {
+            return Ok(None);
+        }
+        members.sort();
+        Ok(Some(Value::Array(
+            members.into_iter().map(|(_, v)| Value::String(v)).collect(),
+        )))
     }
 }
 
@@ -690,9 +969,19 @@ fn envelope_value(envelope: &Envelope) -> Result<Map<String, Value>, MapError> {
     Ok(map)
 }
 
-fn source_value(source: SourceKind, record: &Record) -> Result<Value, MapError> {
+fn source_value(
+    source: SourceKind,
+    format: Option<&Token>,
+    record: &Record,
+) -> Result<Value, MapError> {
     let mut map = Map::new();
     map.insert("kind".to_owned(), to_value(&source)?);
+    if let Some(format) = format {
+        map.insert(
+            "format".to_owned(),
+            Value::String(format.as_str().to_owned()),
+        );
+    }
     map.insert("event_id".to_owned(), Value::from(record.event_id));
     if let Some(id) = record.record_id {
         map.insert("record_id".to_owned(), Value::from(id));
@@ -710,8 +999,9 @@ fn source_value(source: SourceKind, record: &Record) -> Result<Value, MapError> 
     Ok(Value::Object(map))
 }
 
-/// Inserts `value` at a JSON Pointer of plain object keys, creating objects
-/// on the way.
+/// Inserts `value` at a JSON Pointer, creating objects on the way. A `0`
+/// key creates (or reuses) the first element of an array: the only index a
+/// target may name (`/file/signers/0/...`).
 fn insert_at(root: &mut Map<String, Value>, pointer: &str, value: Value) {
     let mut keys = pointer.trim_start_matches('/').split('/').peekable();
     let mut node = root;
@@ -723,6 +1013,29 @@ fn insert_at(root: &mut Map<String, Value>, pointer: &str, value: Value) {
         let child = node
             .entry(key.to_owned())
             .or_insert_with(|| Value::Object(Map::new()));
+        if keys.peek() == Some(&"0") {
+            keys.next();
+            if !child.is_array() {
+                *child = Value::Array(Vec::new());
+            }
+            let Value::Array(items) = child else { return };
+            if items.is_empty() {
+                items.push(Value::Object(Map::new()));
+            }
+            let Some(first) = items.first_mut() else {
+                return;
+            };
+            if keys.peek().is_none() {
+                *first = value;
+                return;
+            }
+            if !first.is_object() {
+                *first = Value::Object(Map::new());
+            }
+            let Value::Object(next) = first else { return };
+            node = next;
+            continue;
+        }
         if !child.is_object() {
             *child = Value::Object(Map::new());
         }
@@ -742,6 +1055,7 @@ fn map_signers(
     spec: &Signatures,
     record: &Record,
     children: &[Record],
+    absent: &[String],
     dropped: &mut Vec<Dropped>,
 ) -> Result<(Vec<Value>, Incomplete), MapError> {
     let bad = |why: String| MapError::BadSignatures(why);
@@ -812,7 +1126,7 @@ fn map_signers(
     for (&index, child) in &indexed {
         let mut signer = Map::new();
         for (field, target, kind) in &spec.fields {
-            let Some(raw) = child.fields.get(field) else {
+            let Some(raw) = present_value(child, field, absent) else {
                 continue;
             };
             match kind.read(raw) {
@@ -836,48 +1150,178 @@ fn map_signers(
     Ok((signers, incomplete))
 }
 
+/// What every entry of one file shares.
+struct FileContext<'a> {
+    version: SchemaVersion,
+    value_maps: &'a BTreeMap<String, BTreeMap<String, String>>,
+    absent: &'a [String],
+}
+
+/// Checks one target pointer: writable, and not newer than the file.
+fn resolve_target(target: &str, version: SchemaVersion) -> Result<Kind, String> {
+    let kind = targets::event_target(target)
+        .ok_or_else(|| format!("`{target}` is not a writable canonical field"))?;
+    let since = crate::events::pointer_since(target);
+    if since > version {
+        return Err(format!(
+            "`{target}` is new in schema version {since}, but the file targets {version}"
+        ));
+    }
+    Ok(kind)
+}
+
 /// Checks one entry and resolves its targets. On error, returns the field
 /// path within the entry and a message.
-fn build_entry(mut doc: EntryDoc) -> Result<Entry, (String, String)> {
-    if let Some(when) = &mut doc.when {
+fn build_entry(
+    doc: EntryDoc,
+    ctx: &FileContext<'_>,
+    used_tables: &mut BTreeSet<String>,
+) -> Result<Entry, (String, String)> {
+    let EntryDoc {
+        source_event_id: _,
+        mut when,
+        canonical_type,
+        action,
+        outcome,
+        mode,
+        severity,
+        description,
+        field_map,
+        set,
+        signatures,
+    } = doc;
+    if let Some(when) = &mut when {
         when.normalise().map_err(|m| (".when".to_owned(), m))?;
+        // Absent values never match, so a condition on one is dead.
+        if let Some(v) = when
+            .equals
+            .iter()
+            .find(|v| ctx.absent.iter().any(|a| a.eq_ignore_ascii_case(v)))
+        {
+            return Err((
+                ".when".to_owned(),
+                format!("`{v}` is one of the file's absent values, so it never matches"),
+            ));
+        }
+    }
+    if canonical_type.since() > ctx.version {
+        return Err((
+            ".canonical_type".to_owned(),
+            format!(
+                "`{}` is new in schema version {}, but the file targets {}",
+                canonical_type.as_str(),
+                canonical_type.since(),
+                ctx.version
+            ),
+        ));
     }
     let mut fields = Vec::new();
     let mut targets_seen = BTreeSet::new();
-    for (source, targets) in doc.field_map {
+    for (source, doc) in field_map {
+        let at = format!(".field_map.{source}");
         if source.is_empty() {
             return Err((
                 ".field_map".to_owned(),
                 "a source field name is empty".to_owned(),
             ));
         }
-        let targets = targets.into_vec();
+        let (targets, table, split) = doc.into_parts();
         if targets.is_empty() {
-            return Err((format!(".field_map.{source}"), "names no target".to_owned()));
+            return Err((at, "names no target".to_owned()));
+        }
+        let values = match &table {
+            None => None,
+            Some(name) => {
+                let map = ctx
+                    .value_maps
+                    .get(name)
+                    .ok_or_else(|| (at.clone(), format!("no value table `{name}`")))?;
+                used_tables.insert(name.clone());
+                Some(map.clone())
+            }
+        };
+        if split.as_deref() == Some("") {
+            return Err((at, "`split` needs a separator".to_owned()));
         }
         for target in targets {
-            let kind = targets::event_target(&target).ok_or_else(|| {
-                (
-                    format!(".field_map.{source}"),
-                    format!("`{target}` is not a writable canonical field"),
-                )
-            })?;
+            let kind = resolve_target(&target, ctx.version).map_err(|m| (at.clone(), m))?;
+            if matches!(kind, Kind::EnumSet(_)) != split.is_some() {
+                return Err((
+                    at,
+                    format!("`{target}` is a set exactly when the field has a `split` separator"),
+                ));
+            }
+            // Every value the table produces must fit the target.
+            if let Some(map) = &values {
+                for (from, to) in map {
+                    let fits = match kind {
+                        Kind::EnumSet(_) => kind.set_rank(to).is_some(),
+                        _ => matches!(kind.read(to), Ok(Some(_))),
+                    };
+                    if !fits {
+                        return Err((
+                            at,
+                            format!(
+                                "table `{}` maps `{from}` to `{to}`, which `{target}` cannot hold",
+                                table.as_deref().unwrap_or_default()
+                            ),
+                        ));
+                    }
+                }
+            }
             if !targets_seen.insert(target.clone()) {
                 return Err((
-                    format!(".field_map.{source}"),
+                    at,
                     format!("`{target}` is filled by more than one source field"),
                 ));
             }
-            fields.push((source.clone(), target, kind));
+            fields.push(FieldRule {
+                source: source.clone(),
+                pointer: target,
+                kind,
+                values: values.clone(),
+                split: split.clone(),
+            });
         }
     }
-    let signatures = match doc.signatures {
+    let mut constants = Vec::new();
+    for (target, text) in set {
+        let at = format!(".set.{target}");
+        let kind = resolve_target(&target, ctx.version).map_err(|m| (at.clone(), m))?;
+        let value = match kind {
+            Kind::EnumSet(_) => None,
+            _ => kind.read(&text).ok().flatten(),
+        }
+        .ok_or_else(|| {
+            (
+                at.clone(),
+                format!("`{text}` is not a value `{target}` can hold"),
+            )
+        })?;
+        if ctx.absent.contains(&text) {
+            return Err((at, format!("`{text}` is one of the file's absent values")));
+        }
+        if !targets_seen.insert(target.clone()) {
+            return Err((at, format!("`{target}` is filled more than once")));
+        }
+        constants.push((target, value));
+    }
+    let signatures = match signatures {
         None => None,
         Some(sig) => {
             if sig.count_field.is_empty() || sig.index_field.is_empty() {
                 return Err((
                     ".signatures".to_owned(),
                     "needs `count_field` and `index_field`".to_owned(),
+                ));
+            }
+            if targets_seen
+                .iter()
+                .any(|t| t.starts_with(&format!("{SIGNERS_POINTER}/")))
+            {
+                return Err((
+                    ".signatures".to_owned(),
+                    format!("an entry with signature records cannot also fill `{SIGNERS_POINTER}`"),
                 ));
             }
             let mut sig_fields = Vec::new();
@@ -912,20 +1356,25 @@ fn build_entry(mut doc: EntryDoc) -> Result<Entry, (String, String)> {
         }
     };
     // Signer records do not fill a field set: an unsigned file has none.
-    let fills = |prefix: &str| targets_seen.iter().any(|t| t.starts_with(prefix));
-    for &set in doc.canonical_type.required() {
-        if !fills(set_prefix(set)) {
+    let fills = |set: FieldSet| {
+        targets_seen.iter().any(|t| {
+            t.strip_prefix(set.pointer())
+                .is_some_and(|r| r.starts_with('/'))
+        })
+    };
+    for &set in canonical_type.required() {
+        if !fills(set) {
             return Err((
                 ".field_map".to_owned(),
                 format!(
                     "`{}` requires the `{}` field set, and no target fills it",
-                    doc.canonical_type.as_str(),
+                    canonical_type.as_str(),
                     set.as_str()
                 ),
             ));
         }
     }
-    if doc.canonical_type.as_str().ends_with(".decision") {
+    if canonical_type.as_str().ends_with(".decision") {
         if !SUBJECT_TARGETS.iter().any(|t| targets_seen.contains(*t)) {
             return Err((
                 ".field_map".to_owned(),
@@ -938,22 +1387,22 @@ fn build_entry(mut doc: EntryDoc) -> Result<Entry, (String, String)> {
         {
             return Err((
                 ".field_map".to_owned(),
-                "a decision must map the name of its object: a file path, package name, script path or class ID (ISM-0585)".to_owned(),
+                "a decision must map the name of its object: a file, script, class, network destination, device or registry key (ISM-0585)".to_owned(),
             ));
         }
     }
-    let severity = doc
-        .severity
-        .unwrap_or_else(|| doc.canonical_type.default_severity());
+    let severity = severity.unwrap_or_else(|| canonical_type.default_severity());
     Ok(Entry {
-        when: doc.when,
-        event_type: doc.canonical_type,
-        action: doc.action,
-        outcome: doc.outcome,
-        mode: doc.mode,
+        when,
+        event_type: canonical_type,
+        action,
+        outcome,
+        mode,
         severity,
-        description: doc.description,
+        description,
         fields,
+        constants,
         signatures,
+        absent: ctx.absent.to_vec(),
     })
 }

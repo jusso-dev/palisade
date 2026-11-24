@@ -358,13 +358,15 @@ fn versions_are_checked_before_fields() {
         Err(LoadError::UnsupportedSchemaVersion(_))
     ));
     assert!(matches!(
-        read("1.1.0"),
+        read("1.2.0"),
         Err(LoadError::NewerMinorVersion(_))
     ));
-    assert!(
-        matches!(read("1.0.1"), Err(LoadError::Json(_))),
-        "same minor: read, and the extra field fails"
-    );
+    for older_or_same in ["1.0.0", "1.0.1", "1.1.0", "1.1.7"] {
+        assert!(
+            matches!(read(older_or_same), Err(LoadError::Json(_))),
+            "{older_or_same}: read, and the extra field fails"
+        );
+    }
     let missing = with(serde_json::json!({ "schema_version": null })).to_string();
     assert!(matches!(
         Event::from_json(&missing),
@@ -489,4 +491,389 @@ proptest! {
         prop_assert_eq!(text.parse::<Timestamp>().unwrap(), t);
         prop_assert_eq!(Timestamp::parse_utc(&text).unwrap(), t);
     }
+}
+
+// ---------------------------------------------------------------- 1.1 values
+
+#[test]
+fn dns_names_are_canonical() {
+    for good in [
+        "a",
+        "files.example.org",
+        "_ldap._tcp.example.org",
+        "xn--bcher-kva.example",
+        "1.2.3",
+    ] {
+        assert_eq!(good.parse::<DnsName>().unwrap().as_str(), good);
+    }
+    let long_label = "a".repeat(64);
+    // 253 characters is the limit; 255 is over it.
+    let at_limit = ["a"; 127].join(".");
+    assert!(at_limit.parse::<DnsName>().is_ok());
+    let too_long = ["a"; 128].join(".");
+    for bad in [
+        "",
+        "Files.example.org",
+        "files.example.org.",
+        "a..b",
+        "-a.example",
+        "a-.example",
+        "a b",
+        "b\u{fc}cher.example",
+        long_label.as_str(),
+        too_long.as_str(),
+    ] {
+        assert!(bad.parse::<DnsName>().is_err(), "accepted {bad:?}");
+    }
+    assert_eq!(
+        DnsName::normalise("Files.Example.ORG.").unwrap().as_str(),
+        "files.example.org"
+    );
+    assert!(DnsName::normalise("a..b").is_err());
+}
+
+#[test]
+fn registry_keys_are_canonical() {
+    for good in [
+        "HKEY_LOCAL_MACHINE",
+        "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies",
+        "HKEY_USERS\\S-1-5-21-1-2-3-1001\\Software",
+        "HKEY_CURRENT_USER\\a b\\c/d",
+    ] {
+        assert_eq!(good.parse::<RegistryKey>().unwrap().as_str(), good);
+    }
+    let long = format!("HKEY_USERS\\{}", "x".repeat(256));
+    for bad in [
+        "",
+        "HKLM\\SOFTWARE",
+        "hkey_local_machine\\SOFTWARE",
+        "HKEY_LOCAL_MACHINE\\",
+        "HKEY_LOCAL_MACHINE\\\\SOFTWARE",
+        "HKEY_LOCAL_MACHINEX",
+        "\\REGISTRY\\MACHINE\\SOFTWARE",
+        long.as_str(),
+    ] {
+        assert!(bad.parse::<RegistryKey>().is_err(), "accepted {bad:?}");
+    }
+    for (raw, canonical) in [
+        ("HKLM\\SOFTWARE", "HKEY_LOCAL_MACHINE\\SOFTWARE"),
+        ("hklm\\SOFTWARE\\", "HKEY_LOCAL_MACHINE\\SOFTWARE"),
+        ("\\REGISTRY\\MACHINE\\SYSTEM", "HKEY_LOCAL_MACHINE\\SYSTEM"),
+        ("\\Registry\\User\\S-1-5-18", "HKEY_USERS\\S-1-5-18"),
+        ("HKCU", "HKEY_CURRENT_USER"),
+        ("HKEY_CLASSES_ROOT\\.ps1", "HKEY_CLASSES_ROOT\\.ps1"),
+    ] {
+        assert_eq!(
+            RegistryKey::normalise(raw).unwrap().as_str(),
+            canonical,
+            "{raw}"
+        );
+    }
+    for bad in [
+        "HKLMX\\a",
+        "\\REGISTRY\\MACHINEX",
+        "SOFTWARE\\x",
+        "HKLM\\\\x",
+    ] {
+        assert!(RegistryKey::normalise(bad).is_err(), "normalised {bad:?}");
+    }
+}
+
+#[test]
+fn json_pointers_are_canonical() {
+    for good in ["/a", "/rules/0/name", "/a~0b/c~1d", "/", "//"] {
+        assert!(good.parse::<JsonPointer>().is_ok(), "{good}");
+    }
+    for bad in ["", "a", "/a~", "/a~2", "/~x"] {
+        assert!(bad.parse::<JsonPointer>().is_err(), "accepted {bad:?}");
+    }
+}
+
+#[test]
+fn json_values_have_one_form() {
+    let read = |s: &str| serde_json::from_str::<JsonValue>(s);
+    let v = read(r#"{"b":[1,-2,true,"x"],"a":{"c":18446744073709551615}}"#).unwrap();
+    // Keys are written sorted; integers keep their exact value.
+    assert_eq!(
+        serde_json::to_string(&v).unwrap(),
+        r#"{"a":{"c":18446744073709551615},"b":[1,-2,true,"x"]}"#
+    );
+    // One form per integer: a small `u64` and the same `i64` are equal.
+    assert_eq!(
+        JsonValue::new(serde_json::json!(5u64)).unwrap(),
+        JsonValue::new(serde_json::json!(5i64)).unwrap()
+    );
+    assert_eq!(read("5").unwrap().to_json(), serde_json::json!(5));
+    assert_eq!(
+        read("18446744073709551615").unwrap().to_json(),
+        serde_json::json!(u64::MAX)
+    );
+    // The checked constructor applies the reader's rules.
+    for bad in [
+        serde_json::json!(null),
+        serde_json::json!([1, null]),
+        serde_json::json!(1.5),
+        serde_json::json!("x".repeat(4097)),
+        serde_json::json!({ "k".repeat(257): 1 }),
+        serde_json::Value::Array(vec![serde_json::json!(1); 1024]),
+    ] {
+        assert!(JsonValue::new(bad.clone()).is_err(), "built {bad}");
+    }
+    let deep = (0..16).fold(serde_json::json!(1), |v, _| serde_json::json!([v]));
+    assert!(JsonValue::new(deep).is_err(), "17 levels");
+    let ok = serde_json::json!({ "b": [1, "x", true], "a": { "c": -1 } });
+    assert_eq!(JsonValue::new(ok.clone()).unwrap().to_json(), ok);
+    for bad in [
+        "null",
+        "[1,null]",
+        r#"{"a":null}"#,
+        "1.5",
+        "1e3",
+        r#"{"a":1,"a":2}"#,
+        "-9223372036854775809",
+    ] {
+        assert!(read(bad).is_err(), "accepted {bad}");
+    }
+    // Depth: 16 levels are accepted, 17 are not.
+    let nest = |n: usize| format!("{}1{}", "[".repeat(n - 1), "]".repeat(n - 1));
+    assert!(read(&nest(16)).is_ok());
+    assert!(read(&nest(17)).is_err());
+    // Size: 1024 values in all.
+    let items = |n: usize| format!("[{}]", vec!["1"; n].join(","));
+    assert!(read(&items(1023)).is_ok());
+    assert!(read(&items(1024)).is_err());
+    // String and key limits.
+    assert!(read(&format!("\"{}\"", "x".repeat(4096))).is_ok());
+    assert!(read(&format!("\"{}\"", "x".repeat(4097))).is_err());
+    assert!(read(&format!("{{\"{}\":1}}", "k".repeat(257))).is_err());
+}
+
+#[test]
+fn sorted_sets_have_one_form() {
+    type Set = SortedSet<AuditPolicyChange, 4>;
+    let set: Set = serde_json::from_str(r#"["success_added","failure_added"]"#).unwrap();
+    assert_eq!(
+        set.as_slice(),
+        [
+            AuditPolicyChange::SuccessAdded,
+            AuditPolicyChange::FailureAdded
+        ]
+    );
+    for bad in [
+        r#"["failure_added","success_added"]"#,
+        r#"["success_added","success_added"]"#,
+    ] {
+        assert!(serde_json::from_str::<Set>(bad).is_err(), "accepted {bad}");
+    }
+    let built = Set::new(vec![
+        AuditPolicyChange::FailureAdded,
+        AuditPolicyChange::SuccessAdded,
+        AuditPolicyChange::FailureAdded,
+    ])
+    .unwrap();
+    assert_eq!(built, set);
+}
+
+#[test]
+fn new_flags_are_written_only_when_set() {
+    let reg = |extra: serde_json::Value| {
+        let mut v = with(serde_json::json!({ "schema_version": "1.1.0" }));
+        v["registry"] = extra;
+        Event::from_json(&v.to_string())
+    };
+    assert!(reg(serde_json::json!({ "default_value": true })).is_ok());
+    assert!(reg(serde_json::json!({ "default_value": false })).is_err());
+    assert!(reg(serde_json::json!({ "new": { "preview": "x", "truncated": false } })).is_err());
+    // `script.inline` keeps its 1.0 reading of `false`.
+    let mut v = minimal_json();
+    v["script"] = serde_json::json!({ "path": "a.ps1", "inline": false });
+    assert!(Event::from_json(&v.to_string()).is_ok());
+}
+
+// ---------------------------------------------------------------- 1.1 rules
+
+fn v11(patch: serde_json::Value) -> Event {
+    let mut v = with(serde_json::json!({ "schema_version": "1.1.0" }));
+    for (k, val) in patch.as_object().unwrap() {
+        v[k] = val.clone();
+    }
+    Event::from_json(&v.to_string()).unwrap()
+}
+
+fn codes(event: &Event) -> Vec<EventErrorCode> {
+    event
+        .validate()
+        .err()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|e| e.code)
+        .collect()
+}
+
+#[test]
+fn a_version_label_covers_everything_the_event_uses() {
+    // A 1.0 event is valid at 1.0 and at 1.1.
+    let old = minimal();
+    assert_eq!(old.min_version(), V1_0);
+    let mut relabelled = old.clone();
+    relabelled.schema_version = V1_1;
+    assert_eq!(relabelled.validate(), Ok(()));
+    // Each 1.1 part makes a 1.0 label invalid.
+    for patch in [
+        serde_json::json!({ "network": {} }),
+        serde_json::json!({ "fim": {} }),
+        serde_json::json!({ "source": { "kind": "third_party", "format": "generic" } }),
+        serde_json::json!({ "source": { "kind": "os_security", "rule_name": "x" } }),
+        serde_json::json!({ "script": { "inline": true, "text": "x" } }),
+        serde_json::json!({
+            "event_type": "process.created", "category": "execution", "process": {}
+        }),
+    ] {
+        let mut event = v11(patch.clone());
+        assert_eq!(event.min_version(), V1_1, "{patch}");
+        assert_eq!(event.validate(), Ok(()), "{patch}");
+        event.schema_version = V1_0;
+        assert_eq!(codes(&event), [EventErrorCode::NewerThanVersion], "{patch}");
+    }
+}
+
+#[test]
+fn every_1_1_field_set_and_type_is_newer_than_1_0() {
+    for set in FieldSet::ALL {
+        assert_eq!(set.since() == V1_1, pointer_since(set.pointer()) == V1_1);
+    }
+    for t in EventType::ALL {
+        assert!(t.since() <= CURRENT, "{}", t.as_str());
+        assert!(
+            t.required().iter().all(|s| s.since() <= t.since()),
+            "{}",
+            t.as_str()
+        );
+    }
+    for kind in SourceKind::ALL {
+        assert_eq!(kind.since() == V1_1, kind == SourceKind::ThirdParty);
+    }
+}
+
+#[test]
+fn the_1_1_cross_field_rules_hold() {
+    for (patch, code) in [
+        (
+            serde_json::json!({ "source": { "kind": "third_party" } }),
+            EventErrorCode::SourceFormat,
+        ),
+        (
+            serde_json::json!({ "source": { "kind": "os_security", "format": "generic" } }),
+            EventErrorCode::SourceFormat,
+        ),
+        (
+            serde_json::json!({ "network": { "resolution": "dns" } }),
+            EventErrorCode::ResolutionWithoutHostname,
+        ),
+        (
+            serde_json::json!({ "registry": { "value_name": "Run", "default_value": true } }),
+            EventErrorCode::RegistryValueName,
+        ),
+        (
+            serde_json::json!({ "registry": { "old": { "truncated": true } } }),
+            EventErrorCode::TruncatedWithoutPreview,
+        ),
+        (
+            serde_json::json!({ "admin": { "changes": [{ "op": "add", "path": "/a" }] } }),
+            EventErrorCode::ChangeValues,
+        ),
+        (
+            serde_json::json!({ "admin": { "changes": [{ "op": "remove", "path": "/a", "old": 1, "new": 2 }] } }),
+            EventErrorCode::ChangeValues,
+        ),
+    ] {
+        assert_eq!(codes(&v11(patch.clone())), [code], "{patch}");
+    }
+    for ok in [
+        serde_json::json!({ "network": { "remote_hostname": "a.example", "resolution": "dns" } }),
+        serde_json::json!({ "registry": { "default_value": true } }),
+        serde_json::json!({ "registry": { "new": { "preview": "x", "truncated": true } } }),
+        serde_json::json!({ "admin": { "changes": [
+            { "op": "add", "path": "/a", "new": 1 },
+            { "op": "remove", "path": "/b", "old": "x" },
+            { "op": "replace", "path": "/c", "old": [], "new": {} }
+        ] } }),
+    ] {
+        assert_eq!(codes(&v11(ok.clone())), [], "{ok}");
+    }
+}
+
+#[test]
+fn ism_0585_accepts_network_device_and_registry_objects() {
+    for (patch, gaps) in [
+        (
+            serde_json::json!({ "network": { "url": "https://a.example/" } }),
+            0,
+        ),
+        (
+            serde_json::json!({ "network": { "remote_ip": "192.0.2.1" } }),
+            0,
+        ),
+        (serde_json::json!({ "network": { "remote_port": 443 } }), 1),
+        (
+            serde_json::json!({ "device": { "instance_id": "USB\\VID_1" } }),
+            0,
+        ),
+        (serde_json::json!({ "device": { "vendor_id": 1 } }), 1),
+        (
+            serde_json::json!({ "registry": { "key": "HKEY_USERS" } }),
+            0,
+        ),
+        (
+            serde_json::json!({ "registry": { "value_name": "Run" } }),
+            1,
+        ),
+    ] {
+        let mut patch = patch;
+        patch["user"] = serde_json::json!({ "sid": "S-1-5-18" });
+        let event = v11(patch.clone());
+        assert_eq!(event.ism_0585_gaps().len(), gaps, "{patch}");
+    }
+}
+
+#[test]
+fn every_added_pointer_raises_the_minimum_version() {
+    // `min_version` checks each addition by hand; this ties it to `ADDED`.
+    for (pointer, since) in ADDED {
+        let keys: Vec<&str> = pointer.trim_start_matches('/').split('/').collect();
+        let mut value = with(serde_json::json!({ "schema_version": "1.1.0" }));
+        let leaf = match keys.as_slice() {
+            [set] => {
+                value[*set] = serde_json::json!({});
+                *set
+            }
+            ["source", field] => {
+                value["source"] = serde_json::json!({ "kind": "third_party", "format": "generic" });
+                if *field == "rule_name" {
+                    value["source"] =
+                        serde_json::json!({ "kind": "os_security", "rule_name": "R" });
+                }
+                field
+            }
+            ["script", "text"] => {
+                value["script"] = serde_json::json!({ "inline": true, "text": "x" });
+                "text"
+            }
+            other => panic!("add a case for {other:?}"),
+        };
+        let event =
+            Event::from_json(&value.to_string()).unwrap_or_else(|e| panic!("{pointer}: {e}"));
+        assert_eq!(event.min_version(), *since, "{pointer} ({leaf})");
+    }
+}
+
+#[test]
+fn json_pointer_schema_pattern_is_unambiguous() {
+    // Every token excludes `/`, so the pattern cannot backtrack between the
+    // inner and outer repetition.
+    let schema = schema::generate();
+    assert_eq!(
+        schema["$defs"]["JsonPointer"]["pattern"],
+        "^(/([^~/]|~[01])*)+$"
+    );
 }

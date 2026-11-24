@@ -1,0 +1,490 @@
+# Generic third-party import -> canonical events (#196).
+#
+# Organisations moving to Palisade from another application control product
+# can import their historic events through this format. It names no product:
+# an export is converted to these neutral columns first (by a script or the
+# import tooling, #73, #194), one row or JSON object per event, and each row
+# becomes one record.
+#
+# The columns (CSV header names, or JSON object keys, case-sensitive):
+#
+#   event_kind      required: what happened, one of the `source_event_id`
+#                   codes below, written as its number. The import tooling
+#                   makes it the record's event ID.
+#   time            required: when, RFC 3339 UTC (`Z`), 0 to 9 fraction
+#                   digits. The import tooling makes it the record's time.
+#   record_id       optional: the row's ID in the old product, a number.
+#                   The import tooling makes it the record's record ID.
+#   user_sid        the acting user's SID
+#   user_name       the acting user's account name
+#   user_domain     the acting user's domain
+#   process_id      the acting process's ID
+#   process_path    the acting process's image path
+#   command_line    the acting process's command line
+#   file_path       the file acted on
+#   file_size       its size in bytes
+#   sha256          its SHA-256 (hex)
+#   sha1            its SHA-1 (hex)
+#   md5             its MD5 (hex)
+#   publisher       the leaf signer's subject name
+#   issuer          the leaf signer's issuer name
+#   product_name    the version resource's product name
+#   company         the version resource's company name
+#   file_version    the version resource's file version
+#   original_name   the version resource's original file name
+#   rule_name       the old product's rule or policy that decided
+#   remote_host     a network destination's host name
+#   remote_ip       a network destination's address
+#   remote_port     a network destination's port
+#   url             a web address
+#   device_name     a peripheral device's name
+#   device_serial   a peripheral device's serial number
+#   vendor_id       a USB vendor ID (decimal, or hex with `0x`)
+#   product_id      a USB product ID
+#
+# Empty cells count as absent, and so does `-`. A cell that does not fit
+# its field is dropped and reported, and the rest of the row still maps.
+# Values are not guessed: a row whose required field set cannot be filled
+# is rejected with a reason.
+#
+# The event kinds (the old product's own outcomes, translated to ours):
+#
+#   1  an executable was allowed          2  ... was blocked
+#   3  ... would have been blocked (audit)
+#   4  a script was allowed               5  ... was blocked
+#   6  ... would have been blocked (audit)
+#   7  an installer was allowed           8  ... was blocked
+#   9  ... would have been blocked (audit)
+#   10 a library was allowed              11 ... was blocked
+#   12 ... would have been blocked (audit)
+#   13 a network connection was allowed   14 ... was blocked
+#   15 a web address was allowed          16 ... was blocked
+#   17 a storage device was allowed       18 ... was blocked
+#   19 a device was connected
+#
+# Imported events keep `source.kind: third_party` and `source.format:
+# generic`, so they are never mistaken for decisions Palisade made.
+schema_version: 1.1.0
+source: third_party:generic
+absent_values: ["-"]
+entries:
+  - source_event_id: 1
+    canonical_type: exec.decision
+    action: execute
+    outcome: allowed
+    description: "Imported: an executable was allowed."
+    field_map:
+      user_sid: /user/sid
+      user_name: /user/name
+      user_domain: /user/domain
+      process_id: /process/pid
+      process_path: /process/image_path
+      command_line: /process/cmdline
+      file_path: /file/path
+      file_size: /file/size
+      sha256: /file/hashes/sha256
+      sha1: /file/hashes/sha1
+      md5: /file/hashes/md5
+      publisher: /file/signers/0/publisher
+      issuer: /file/signers/0/issuer
+      product_name: /file/version_info/product_name
+      company: /file/version_info/company
+      file_version: /file/version_info/file_version
+      original_name: /file/version_info/original_filename
+      rule_name: /source/rule_name
+  - source_event_id: 2
+    canonical_type: exec.decision
+    action: execute
+    outcome: blocked
+    mode: enforce
+    severity: 6
+    description: "Imported: an executable was blocked."
+    field_map:
+      user_sid: /user/sid
+      user_name: /user/name
+      user_domain: /user/domain
+      process_id: /process/pid
+      process_path: /process/image_path
+      command_line: /process/cmdline
+      file_path: /file/path
+      file_size: /file/size
+      sha256: /file/hashes/sha256
+      sha1: /file/hashes/sha1
+      md5: /file/hashes/md5
+      publisher: /file/signers/0/publisher
+      issuer: /file/signers/0/issuer
+      product_name: /file/version_info/product_name
+      company: /file/version_info/company
+      file_version: /file/version_info/file_version
+      original_name: /file/version_info/original_filename
+      rule_name: /source/rule_name
+  - source_event_id: 3
+    canonical_type: exec.decision
+    action: execute
+    outcome: audited
+    mode: audit
+    severity: 4
+    description: "Imported: the old product would have blocked an executable."
+    field_map:
+      user_sid: /user/sid
+      user_name: /user/name
+      user_domain: /user/domain
+      process_id: /process/pid
+      process_path: /process/image_path
+      command_line: /process/cmdline
+      file_path: /file/path
+      file_size: /file/size
+      sha256: /file/hashes/sha256
+      sha1: /file/hashes/sha1
+      md5: /file/hashes/md5
+      publisher: /file/signers/0/publisher
+      issuer: /file/signers/0/issuer
+      product_name: /file/version_info/product_name
+      company: /file/version_info/company
+      file_version: /file/version_info/file_version
+      original_name: /file/version_info/original_filename
+      rule_name: /source/rule_name
+  - source_event_id: 4
+    canonical_type: script.decision
+    action: execute
+    outcome: allowed
+    description: "Imported: a script was allowed."
+    field_map:
+      user_sid: /user/sid
+      user_name: /user/name
+      user_domain: /user/domain
+      process_id: /process/pid
+      process_path: /process/image_path
+      command_line: /process/cmdline
+      file_path: [/file/path, /script/path]
+      file_size: /file/size
+      sha256: /file/hashes/sha256
+      sha1: /file/hashes/sha1
+      md5: /file/hashes/md5
+      publisher: /file/signers/0/publisher
+      issuer: /file/signers/0/issuer
+      product_name: /file/version_info/product_name
+      company: /file/version_info/company
+      file_version: /file/version_info/file_version
+      original_name: /file/version_info/original_filename
+      rule_name: /source/rule_name
+  - source_event_id: 5
+    canonical_type: script.decision
+    action: execute
+    outcome: blocked
+    mode: enforce
+    severity: 6
+    description: "Imported: a script was blocked."
+    field_map:
+      user_sid: /user/sid
+      user_name: /user/name
+      user_domain: /user/domain
+      process_id: /process/pid
+      process_path: /process/image_path
+      command_line: /process/cmdline
+      file_path: [/file/path, /script/path]
+      file_size: /file/size
+      sha256: /file/hashes/sha256
+      sha1: /file/hashes/sha1
+      md5: /file/hashes/md5
+      publisher: /file/signers/0/publisher
+      issuer: /file/signers/0/issuer
+      product_name: /file/version_info/product_name
+      company: /file/version_info/company
+      file_version: /file/version_info/file_version
+      original_name: /file/version_info/original_filename
+      rule_name: /source/rule_name
+  - source_event_id: 6
+    canonical_type: script.decision
+    action: execute
+    outcome: audited
+    mode: audit
+    severity: 4
+    description: "Imported: the old product would have blocked a script."
+    field_map:
+      user_sid: /user/sid
+      user_name: /user/name
+      user_domain: /user/domain
+      process_id: /process/pid
+      process_path: /process/image_path
+      command_line: /process/cmdline
+      file_path: [/file/path, /script/path]
+      file_size: /file/size
+      sha256: /file/hashes/sha256
+      sha1: /file/hashes/sha1
+      md5: /file/hashes/md5
+      publisher: /file/signers/0/publisher
+      issuer: /file/signers/0/issuer
+      product_name: /file/version_info/product_name
+      company: /file/version_info/company
+      file_version: /file/version_info/file_version
+      original_name: /file/version_info/original_filename
+      rule_name: /source/rule_name
+  - source_event_id: 7
+    canonical_type: installer.decision
+    action: install
+    outcome: allowed
+    description: "Imported: an installer was allowed."
+    field_map:
+      user_sid: /user/sid
+      user_name: /user/name
+      user_domain: /user/domain
+      process_id: /process/pid
+      process_path: /process/image_path
+      command_line: /process/cmdline
+      file_path: /file/path
+      file_size: /file/size
+      sha256: /file/hashes/sha256
+      sha1: /file/hashes/sha1
+      md5: /file/hashes/md5
+      publisher: /file/signers/0/publisher
+      issuer: /file/signers/0/issuer
+      product_name: /file/version_info/product_name
+      company: /file/version_info/company
+      file_version: /file/version_info/file_version
+      original_name: /file/version_info/original_filename
+      rule_name: /source/rule_name
+  - source_event_id: 8
+    canonical_type: installer.decision
+    action: install
+    outcome: blocked
+    mode: enforce
+    severity: 6
+    description: "Imported: an installer was blocked."
+    field_map:
+      user_sid: /user/sid
+      user_name: /user/name
+      user_domain: /user/domain
+      process_id: /process/pid
+      process_path: /process/image_path
+      command_line: /process/cmdline
+      file_path: /file/path
+      file_size: /file/size
+      sha256: /file/hashes/sha256
+      sha1: /file/hashes/sha1
+      md5: /file/hashes/md5
+      publisher: /file/signers/0/publisher
+      issuer: /file/signers/0/issuer
+      product_name: /file/version_info/product_name
+      company: /file/version_info/company
+      file_version: /file/version_info/file_version
+      original_name: /file/version_info/original_filename
+      rule_name: /source/rule_name
+  - source_event_id: 9
+    canonical_type: installer.decision
+    action: install
+    outcome: audited
+    mode: audit
+    severity: 4
+    description: "Imported: the old product would have blocked an installer."
+    field_map:
+      user_sid: /user/sid
+      user_name: /user/name
+      user_domain: /user/domain
+      process_id: /process/pid
+      process_path: /process/image_path
+      command_line: /process/cmdline
+      file_path: /file/path
+      file_size: /file/size
+      sha256: /file/hashes/sha256
+      sha1: /file/hashes/sha1
+      md5: /file/hashes/md5
+      publisher: /file/signers/0/publisher
+      issuer: /file/signers/0/issuer
+      product_name: /file/version_info/product_name
+      company: /file/version_info/company
+      file_version: /file/version_info/file_version
+      original_name: /file/version_info/original_filename
+      rule_name: /source/rule_name
+  - source_event_id: 10
+    canonical_type: library.decision
+    action: load
+    outcome: allowed
+    description: "Imported: a library was allowed."
+    field_map:
+      user_sid: /user/sid
+      user_name: /user/name
+      user_domain: /user/domain
+      process_id: /process/pid
+      process_path: /process/image_path
+      command_line: /process/cmdline
+      file_path: /file/path
+      file_size: /file/size
+      sha256: /file/hashes/sha256
+      sha1: /file/hashes/sha1
+      md5: /file/hashes/md5
+      publisher: /file/signers/0/publisher
+      issuer: /file/signers/0/issuer
+      product_name: /file/version_info/product_name
+      company: /file/version_info/company
+      file_version: /file/version_info/file_version
+      original_name: /file/version_info/original_filename
+      rule_name: /source/rule_name
+  - source_event_id: 11
+    canonical_type: library.decision
+    action: load
+    outcome: blocked
+    mode: enforce
+    severity: 6
+    description: "Imported: a library was blocked."
+    field_map:
+      user_sid: /user/sid
+      user_name: /user/name
+      user_domain: /user/domain
+      process_id: /process/pid
+      process_path: /process/image_path
+      command_line: /process/cmdline
+      file_path: /file/path
+      file_size: /file/size
+      sha256: /file/hashes/sha256
+      sha1: /file/hashes/sha1
+      md5: /file/hashes/md5
+      publisher: /file/signers/0/publisher
+      issuer: /file/signers/0/issuer
+      product_name: /file/version_info/product_name
+      company: /file/version_info/company
+      file_version: /file/version_info/file_version
+      original_name: /file/version_info/original_filename
+      rule_name: /source/rule_name
+  - source_event_id: 12
+    canonical_type: library.decision
+    action: load
+    outcome: audited
+    mode: audit
+    severity: 4
+    description: "Imported: the old product would have blocked a library."
+    field_map:
+      user_sid: /user/sid
+      user_name: /user/name
+      user_domain: /user/domain
+      process_id: /process/pid
+      process_path: /process/image_path
+      command_line: /process/cmdline
+      file_path: /file/path
+      file_size: /file/size
+      sha256: /file/hashes/sha256
+      sha1: /file/hashes/sha1
+      md5: /file/hashes/md5
+      publisher: /file/signers/0/publisher
+      issuer: /file/signers/0/issuer
+      product_name: /file/version_info/product_name
+      company: /file/version_info/company
+      file_version: /file/version_info/file_version
+      original_name: /file/version_info/original_filename
+      rule_name: /source/rule_name
+  - source_event_id: 13
+    canonical_type: network.app.decision
+    action: connect
+    outcome: allowed
+    description: "Imported: a network connection was allowed."
+    field_map:
+      user_sid: /user/sid
+      user_name: /user/name
+      user_domain: /user/domain
+      process_id: /process/pid
+      process_path: /process/image_path
+      remote_host: /network/remote_hostname
+      remote_ip: /network/remote_ip
+      remote_port: /network/remote_port
+      rule_name: /source/rule_name
+  - source_event_id: 14
+    canonical_type: network.app.decision
+    action: connect
+    outcome: blocked
+    mode: enforce
+    severity: 6
+    description: "Imported: a network connection was blocked."
+    field_map:
+      user_sid: /user/sid
+      user_name: /user/name
+      user_domain: /user/domain
+      process_id: /process/pid
+      process_path: /process/image_path
+      remote_host: /network/remote_hostname
+      remote_ip: /network/remote_ip
+      remote_port: /network/remote_port
+      rule_name: /source/rule_name
+  - source_event_id: 15
+    canonical_type: web.decision
+    action: browse
+    outcome: allowed
+    description: "Imported: a web address was allowed."
+    field_map:
+      user_sid: /user/sid
+      user_name: /user/name
+      user_domain: /user/domain
+      process_id: /process/pid
+      process_path: /process/image_path
+      remote_host: /network/remote_hostname
+      remote_ip: /network/remote_ip
+      remote_port: /network/remote_port
+      rule_name: /source/rule_name
+      url: /network/url
+  - source_event_id: 16
+    canonical_type: web.decision
+    action: browse
+    outcome: blocked
+    mode: enforce
+    severity: 6
+    description: "Imported: a web address was blocked."
+    field_map:
+      user_sid: /user/sid
+      user_name: /user/name
+      user_domain: /user/domain
+      process_id: /process/pid
+      process_path: /process/image_path
+      remote_host: /network/remote_hostname
+      remote_ip: /network/remote_ip
+      remote_port: /network/remote_port
+      rule_name: /source/rule_name
+      url: /network/url
+  - source_event_id: 17
+    canonical_type: storage.decision
+    action: access
+    outcome: allowed
+    description: "Imported: a storage device was allowed."
+    field_map:
+      user_sid: /user/sid
+      user_name: /user/name
+      user_domain: /user/domain
+      process_id: /process/pid
+      process_path: /process/image_path
+      device_name: /device/friendly_name
+      device_serial: /device/serial
+      vendor_id: /device/vendor_id
+      product_id: /device/product_id
+      rule_name: /source/rule_name
+  - source_event_id: 18
+    canonical_type: storage.decision
+    action: access
+    outcome: blocked
+    mode: enforce
+    severity: 6
+    description: "Imported: a storage device was blocked."
+    field_map:
+      user_sid: /user/sid
+      user_name: /user/name
+      user_domain: /user/domain
+      process_id: /process/pid
+      process_path: /process/image_path
+      device_name: /device/friendly_name
+      device_serial: /device/serial
+      vendor_id: /device/vendor_id
+      product_id: /device/product_id
+      rule_name: /source/rule_name
+  - source_event_id: 19
+    canonical_type: device.attached
+    action: attach
+    outcome: info
+    description: "Imported: a device was connected."
+    field_map:
+      user_sid: /user/sid
+      user_name: /user/name
+      user_domain: /user/domain
+      process_id: /process/pid
+      process_path: /process/image_path
+      device_name: /device/friendly_name
+      device_serial: /device/serial
+      vendor_id: /device/vendor_id
+      product_id: /device/product_id
+      rule_name: /source/rule_name

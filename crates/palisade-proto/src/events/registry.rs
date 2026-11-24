@@ -14,7 +14,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use super::{Category, Description, FieldSet, SchemaVersion};
+use super::{Category, Description, FieldSet, SchemaVersion, V1_0};
 
 const REGISTRY: &str = include_str!("../../events/registry.yaml");
 
@@ -34,6 +34,7 @@ struct Entry {
     severity: u8,
     required: Vec<FieldSet>,
     summarisable: bool,
+    since: SchemaVersion,
     description: Description,
 }
 
@@ -46,9 +47,9 @@ fn load() -> RegistryDoc {
     let doc: RegistryDoc =
         serde_json::from_value(value).unwrap_or_else(|e| panic!("events/registry.yaml: {e}"));
     assert_eq!(
-        doc.schema_version.major,
-        super::CURRENT.major,
-        "registry major version"
+        doc.schema_version,
+        super::CURRENT,
+        "the registry's schema_version must be the crate's CURRENT"
     );
     let mut names = BTreeSet::new();
     for entry in &doc.types {
@@ -70,6 +71,22 @@ fn load() -> RegistryDoc {
             "`{}`: a field set is listed twice",
             entry.name
         );
+        assert!(
+            entry.since.major == super::CURRENT.major
+                && entry.since.patch == 0
+                && entry.since <= super::CURRENT,
+            "`{}`: `since` must be a released minor version of this major, no newer than {}",
+            entry.name,
+            super::CURRENT
+        );
+        for set in &entry.required {
+            assert!(
+                set.since() <= entry.since,
+                "`{}`: requires `{}`, which is newer than the type",
+                entry.name,
+                set.as_str()
+            );
+        }
     }
     assert!(!doc.types.is_empty(), "the registry is empty");
     doc
@@ -128,7 +145,10 @@ fn generate_rust(doc: &RegistryDoc) -> String {
         "//   PALISADE_BLESS=1 cargo test -p palisade-proto --lib registry"
     );
     let _ = writeln!(w);
-    let _ = writeln!(w, "use super::{{Category, FieldSet, Severity}};");
+    let _ = writeln!(
+        w,
+        "use super::{{Category, FieldSet, SchemaVersion, Severity}};"
+    );
     let _ = writeln!(w);
     let _ = writeln!(w, "/// A registered event type. See `events/REGISTRY.md`.");
     let _ = writeln!(
@@ -196,6 +216,17 @@ fn generate_rust(doc: &RegistryDoc) -> String {
         &|e| e.summarisable.to_string(),
     );
     method(
+        "since",
+        "The schema version the type was added in.",
+        "SchemaVersion",
+        &|e| {
+            format!(
+                "SchemaVersion::new({}, {}, {})",
+                e.since.major, e.since.minor, e.since.patch
+            )
+        },
+    );
+    method(
         "description",
         "One sentence about the type.",
         "&'static str",
@@ -219,9 +250,9 @@ fn generate_markdown(doc: &RegistryDoc) -> String {
     let _ = writeln!(w);
     let _ = writeln!(
         w,
-        "| Type | Category | Default severity | Required field sets | Summarisable | Description |"
+        "| Type | Category | Default severity | Required field sets | Summarisable | Since | Description |"
     );
-    let _ = writeln!(w, "|---|---|---|---|---|---|");
+    let _ = writeln!(w, "|---|---|---|---|---|---|---|");
     for e in &doc.types {
         let required: Vec<String> = e
             .required
@@ -235,12 +266,13 @@ fn generate_markdown(doc: &RegistryDoc) -> String {
         };
         let _ = writeln!(
             w,
-            "| `{}` | `{}` | {} | {} | {} | {} |",
+            "| `{}` | `{}` | {} | {} | {} | {} | {} |",
             e.name,
             json_name(&e.category),
             e.severity,
             required,
             if e.summarisable { "yes" } else { "no" },
+            e.since,
             e.description
         );
     }
@@ -280,11 +312,70 @@ fn registry_matches_generated_enum() {
         assert_eq!(entry.severity, ty.default_severity().get());
         assert_eq!(entry.required, ty.required());
         assert_eq!(entry.summarisable, ty.summarisable());
+        assert_eq!(entry.since, ty.since());
+    }
+}
+
+/// The 1.0 types as released. Changing a released type's category or
+/// required field sets, or removing it, is a major change (see the
+/// `events` module docs), so this list may only change with the major
+/// version.
+const RELEASED_1_0: &[(&str, &str, &[&str])] = &[
+    ("exec.decision", "execution", &["file"]),
+    ("library.decision", "library", &["file"]),
+    ("driver.decision", "driver", &["file"]),
+    ("script.decision", "script", &["script"]),
+    ("installer.decision", "installer", &["file"]),
+    ("packaged_app.decision", "packaged_app", &["file"]),
+    ("com.decision", "execution", &["native"]),
+    ("exec.origin_check", "execution", &["file", "native"]),
+    ("policy.applied", "policy", &[]),
+    ("policy.failed", "policy", &[]),
+    ("policy.activated", "policy", &[]),
+    ("agent.started", "agent", &[]),
+    ("agent.stopped", "agent", &[]),
+    ("agent.health", "agent", &["agent"]),
+    ("agent.tamper", "agent", &[]),
+    ("agent.throttled", "agent", &["agent"]),
+    ("agent.dropped", "agent", &["agent"]),
+    ("agent.clock_unsynced", "agent", &[]),
+];
+
+#[test]
+fn released_types_are_unchanged() {
+    let doc = load();
+    let v1_0: Vec<&Entry> = doc.types.iter().filter(|e| e.since == V1_0).collect();
+    assert_eq!(v1_0.len(), RELEASED_1_0.len(), "1.0 types added or removed");
+    for (name, category, required) in RELEASED_1_0 {
+        let entry = v1_0
+            .iter()
+            .find(|e| e.name == *name)
+            .unwrap_or_else(|| panic!("released type `{name}` is gone or no longer 1.0"));
+        assert_eq!(json_name(&entry.category), *category, "{name}");
+        let sets: Vec<&str> = entry.required.iter().map(|s| s.as_str()).collect();
+        assert_eq!(sets, *required, "{name}");
+    }
+    // A 1.1 type must not reuse a released name.
+    assert!(
+        doc.types
+            .iter()
+            .filter(|e| e.since != V1_0)
+            .all(|e| RELEASED_1_0.iter().all(|(n, _, _)| *n != e.name))
+    );
+}
+
+#[test]
+fn field_set_versions_are_consistent() {
+    // A field set's `since` and the `ADDED` table agree.
+    for set in FieldSet::ALL {
+        assert_eq!(set.since(), super::pointer_since(set.pointer()), "{set:?}");
+        assert_eq!(set.pointer().trim_start_matches('/'), set.as_str());
+        assert_eq!(json_name(&set), set.as_str());
     }
 }
 
 #[test]
-fn registry_has_the_execution_control_minimum() {
+fn registry_has_the_issue_minimum() {
     for name in [
         "exec.decision",
         "library.decision",
@@ -303,6 +394,34 @@ fn registry_has_the_execution_control_minimum() {
         "agent.throttled",
         "agent.dropped",
         "agent.clock_unsynced",
+        // The remaining minimum types of #196, added in 1.1.
+        "containment.decision",
+        "device.attached",
+        "device.detached",
+        "storage.decision",
+        "network.app.decision",
+        "network.host.decision",
+        "web.decision",
+        "elevation.requested",
+        "elevation.decision",
+        "elevation.ended",
+        "approval.requested",
+        "approval.decided",
+        "exception.created",
+        "exception.changed",
+        "exception.removed",
+        "exception.expired",
+        "otp.session.started",
+        "otp.session.ended",
+        "admin.action",
+        "admin.login",
+        "admin.login_failed",
+        "identity.local_group.changed",
+        "identity.group.changed",
+        "detection.log_cleared",
+        "detection.audit_policy_changed",
+        "integrity.fim.changed",
+        "compliance.probe.result",
     ] {
         assert!(
             name.parse::<super::EventType>().is_ok(),

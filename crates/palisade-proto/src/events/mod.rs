@@ -31,6 +31,26 @@
 //!   required field sets. A major version gets a new schema file
 //!   (`schemas/events/v2.json`) and a converter.
 //!
+//! Each addition records the version it arrived in: the registry has a
+//! `since` for every event type, [`FieldSet::since`] gives it for every
+//! field set, and [`Event::min_version`] is the oldest version an event can
+//! be labelled with. An event labelled with an older version than a part it
+//! uses is invalid ([`EventErrorCode::NewerThanVersion`]), in
+//! [`Event::validate`] and in the JSON Schema alike, so a version label
+//! always tells a reader which fields it may meet.
+//!
+//! Version history:
+//!
+//! - **1.0.0**: the envelope; the `process`, `file`, `script`, `native` and
+//!   `agent` field sets; the execution-control, policy and agent types.
+//! - **1.1.0**: the `network`, `device`, `registry`, `elevation`, `approval`,
+//!   `admin`, `identity`, `audit_policy`, `restriction`, `probe` and `fim`
+//!   field sets; the containment, device, storage, network, web, elevation,
+//!   approval, exception, override, admin, identity, detection, integrity,
+//!   compliance, process-creation and script-logging types; `source.kind`
+//!   `third_party` with `source.format`. New fields come after every 1.0
+//!   field, so the canonical form of a 1.0 event is unchanged.
+//!
 //! Readers are strict. They reject unknown fields and unknown enum values,
 //! because events are hash-chained (`seq`, `prev_hash`) and a reader that
 //! silently dropped a field it did not know would hide data from the chain's
@@ -56,6 +76,7 @@
 //! reordered. Shorter upload intervals and uploading tamper events first
 //! (#197) narrow that window.
 
+pub mod fieldsets;
 #[cfg(test)]
 mod registry;
 #[rustfmt::skip]
@@ -74,17 +95,34 @@ use std::str::FromStr;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+pub use fieldsets::{
+    Account, Admin, AdminChannel, Approval, ApprovalChannel, ApprovalDecision, ApprovalKind,
+    ApprovalScope, AuditCategory, AuditPolicy, AuditPolicyChange, Change, ChangeOp, Device,
+    DeviceClass, DeviceInterface, Direction, Elevation, ElevationMethod, EncryptionState, Fim,
+    FimChange, GroupScope, Identity, Network, Principal, PrincipalKind, Probe, ProbeStatus,
+    Registry, RegistryData, RegistryOperation, RegistryValueType, Remark, ResolutionMethod,
+    Restriction,
+};
 pub use palisade_core::{Mode, ObjectType, PolicyId, RuleId, SchemaVersion, ScriptKind, Uuid7};
 pub use registry_gen::EventType;
 pub(crate) use value::present;
 pub use value::{
-    BoundedVec, Description, Guid, Hex, HexBytes, HostId, IpAddress, LabelKey, Labels, LongText,
-    Md5Hex, Name, Severity, Sha1Hex, Sha256Hex, Sid, SyslogSeverity, TenantId, Text, Timestamp,
-    Token, ValueError,
+    BoundedVec, Description, DnsName, Guid, Hex, HexBytes, HostId, IpAddress, JsonPointer,
+    JsonValue, LabelKey, Labels, LongText, Md5Hex, Name, RegistryKey, Severity, Sha1Hex, Sha256Hex,
+    Sid, SortedSet, SyslogSeverity, TenantId, Text, Timestamp, Token, ValueError,
 };
 
 /// The event schema version this crate writes, and the newest it reads.
-pub const CURRENT: SchemaVersion = SchemaVersion::new(1, 0, 0);
+pub const CURRENT: SchemaVersion = SchemaVersion::new(1, 1, 0);
+
+/// The first version of the current major: every part of the schema that
+/// has no later `since` version is in it.
+pub const V1_0: SchemaVersion = SchemaVersion::new(1, 0, 0);
+
+/// Schema version 1.1: the field sets after `agent`, the event types
+/// registered with `since: 1.1.0`, `source.kind` `third_party` and
+/// `source.format`.
+pub const V1_1: SchemaVersion = SchemaVersion::new(1, 1, 0);
 
 /// Most signatures recorded for one file or process image.
 pub const MAX_SIGNERS: usize = 64;
@@ -222,9 +260,53 @@ pub enum FieldSet {
     Native,
     /// [`Event::agent`].
     Agent,
+    /// [`Event::network`]. Since 1.1.
+    Network,
+    /// [`Event::device`]. Since 1.1.
+    Device,
+    /// [`Event::registry`]. Since 1.1.
+    Registry,
+    /// [`Event::elevation`]. Since 1.1.
+    Elevation,
+    /// [`Event::approval`]. Since 1.1.
+    Approval,
+    /// [`Event::admin`]. Since 1.1.
+    Admin,
+    /// [`Event::identity`]. Since 1.1.
+    Identity,
+    /// [`Event::audit_policy`]. Since 1.1.
+    AuditPolicy,
+    /// [`Event::restriction`]. Since 1.1.
+    Restriction,
+    /// [`Event::probe`]. Since 1.1.
+    Probe,
+    /// [`Event::fim`]. Since 1.1.
+    Fim,
 }
 
 impl FieldSet {
+    /// Every field set, in envelope order.
+    pub const ALL: [Self; 18] = [
+        Self::User,
+        Self::Policy,
+        Self::Process,
+        Self::File,
+        Self::Script,
+        Self::Native,
+        Self::Agent,
+        Self::Network,
+        Self::Device,
+        Self::Registry,
+        Self::Elevation,
+        Self::Approval,
+        Self::Admin,
+        Self::Identity,
+        Self::AuditPolicy,
+        Self::Restriction,
+        Self::Probe,
+        Self::Fim,
+    ];
+
     /// The field name in the envelope.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -236,8 +318,109 @@ impl FieldSet {
             Self::Script => "script",
             Self::Native => "native",
             Self::Agent => "agent",
+            Self::Network => "network",
+            Self::Device => "device",
+            Self::Registry => "registry",
+            Self::Elevation => "elevation",
+            Self::Approval => "approval",
+            Self::Admin => "admin",
+            Self::Identity => "identity",
+            Self::AuditPolicy => "audit_policy",
+            Self::Restriction => "restriction",
+            Self::Probe => "probe",
+            Self::Fim => "fim",
         }
     }
+
+    /// The JSON Pointer of the field set in the envelope.
+    #[must_use]
+    pub const fn pointer(self) -> &'static str {
+        match self {
+            Self::User => "/user",
+            Self::Policy => "/policy",
+            Self::Process => "/process",
+            Self::File => "/file",
+            Self::Script => "/script",
+            Self::Native => "/native",
+            Self::Agent => "/agent",
+            Self::Network => "/network",
+            Self::Device => "/device",
+            Self::Registry => "/registry",
+            Self::Elevation => "/elevation",
+            Self::Approval => "/approval",
+            Self::Admin => "/admin",
+            Self::Identity => "/identity",
+            Self::AuditPolicy => "/audit_policy",
+            Self::Restriction => "/restriction",
+            Self::Probe => "/probe",
+            Self::Fim => "/fim",
+        }
+    }
+
+    /// The schema version the field set was added in.
+    #[must_use]
+    pub const fn since(self) -> SchemaVersion {
+        match self {
+            Self::User
+            | Self::Policy
+            | Self::Process
+            | Self::File
+            | Self::Script
+            | Self::Native
+            | Self::Agent => V1_0,
+            Self::Network
+            | Self::Device
+            | Self::Registry
+            | Self::Elevation
+            | Self::Approval
+            | Self::Admin
+            | Self::Identity
+            | Self::AuditPolicy
+            | Self::Restriction
+            | Self::Probe
+            | Self::Fim => V1_1,
+        }
+    }
+}
+
+/// The parts of the schema added after 1.0, by JSON Pointer, with the
+/// version that added them. A pointer covers everything beneath it.
+///
+/// This one table drives [`Event::min_version`], the version rules of the
+/// JSON Schema and the version lint of the mapping files. The test
+/// `every_new_schema_path_has_a_version` fails if the schema gains a field
+/// that is in neither the 1.0 schema nor this table.
+pub const ADDED: &[(&str, SchemaVersion)] = &[
+    ("/source/format", V1_1),
+    ("/source/rule_name", V1_1),
+    ("/script/text", V1_1),
+    ("/network", V1_1),
+    ("/device", V1_1),
+    ("/registry", V1_1),
+    ("/elevation", V1_1),
+    ("/approval", V1_1),
+    ("/admin", V1_1),
+    ("/identity", V1_1),
+    ("/audit_policy", V1_1),
+    ("/restriction", V1_1),
+    ("/probe", V1_1),
+    ("/fim", V1_1),
+];
+
+/// The schema version that added the field at `pointer`: the newest entry
+/// of [`ADDED`] that covers it, or 1.0.
+#[must_use]
+pub fn pointer_since(pointer: &str) -> SchemaVersion {
+    ADDED
+        .iter()
+        .filter(|(p, _)| {
+            pointer
+                .strip_prefix(p)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+        })
+        .map(|(_, v)| *v)
+        .max()
+        .unwrap_or(V1_0)
 }
 
 impl fmt::Display for EventType {
@@ -414,6 +597,83 @@ pub struct Event {
         deserialize_with = "present"
     )]
     pub agent: Option<AgentInfo>,
+    /// The network connection or request. Since 1.1.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub network: Option<Network>,
+    /// The peripheral device. Since 1.1.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub device: Option<Device>,
+    /// The registry key or value. Since 1.1.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub registry: Option<Registry>,
+    /// The privilege elevation. Since 1.1.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub elevation: Option<Elevation>,
+    /// The approval request. Since 1.1.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub approval: Option<Approval>,
+    /// The administrative action. Since 1.1.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub admin: Option<Admin>,
+    /// Logon and group membership details. Since 1.1.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub identity: Option<Identity>,
+    /// The OS audit policy change. Since 1.1.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub audit_policy: Option<AuditPolicy>,
+    /// The script language restriction. Since 1.1.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub restriction: Option<Restriction>,
+    /// The compliance probe. Since 1.1.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub probe: Option<Probe>,
+    /// The file integrity change. Since 1.1.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub fim: Option<Fim>,
 }
 
 /// The device an event is about.
@@ -673,6 +933,24 @@ pub struct Source {
         deserialize_with = "present"
     )]
     pub activity_id: Option<Guid>,
+    /// For `third_party`: the generic name of the import format, for
+    /// example `generic`. Present exactly when `kind` is `third_party`.
+    /// Since 1.1.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub format: Option<Token>,
+    /// The rule or policy that decided, as the source names it. For events
+    /// imported from another product, whose rules have no Palisade ID.
+    /// Since 1.1.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub rule_name: Option<Name>,
 }
 
 /// A kind of log that events can be translated from.
@@ -689,9 +967,21 @@ pub enum SourceKind {
     OsSecurity,
     /// The PowerShell logs.
     OsPowershell,
+    /// Events imported from another product, in a generic format named by
+    /// `source.format`. Since 1.1.
+    ThirdParty,
 }
 
 impl SourceKind {
+    /// Every source kind, in declaration order.
+    pub const ALL: [Self; 5] = [
+        Self::OsCodeIntegrity,
+        Self::OsLegacyRuleCollection,
+        Self::OsSecurity,
+        Self::OsPowershell,
+        Self::ThirdParty,
+    ];
+
     /// The `snake_case` name.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -700,6 +990,16 @@ impl SourceKind {
             Self::OsLegacyRuleCollection => "os_legacy_rule_collection",
             Self::OsSecurity => "os_security",
             Self::OsPowershell => "os_powershell",
+            Self::ThirdParty => "third_party",
+        }
+    }
+
+    /// The schema version the source kind was added in.
+    #[must_use]
+    pub const fn since(self) -> SchemaVersion {
+        match self {
+            Self::ThirdParty => V1_1,
+            _ => V1_0,
         }
     }
 }
@@ -1236,6 +1536,11 @@ pub struct Script {
     )]
     pub path: Option<LongText>,
     /// The script was inline text, not a file.
+    ///
+    /// Writers leave it out when it is not set. Readers also accept an
+    /// explicit `false`, as 1.0 did, so this flag alone keeps two spellings
+    /// until the next major version. The flags added in 1.1 accept only
+    /// `true`.
     #[serde(default, skip_serializing_if = "is_false")]
     pub inline: bool,
     /// The kind of script.
@@ -1280,10 +1585,32 @@ pub struct Script {
         deserialize_with = "present"
     )]
     pub script_block_id: Option<Guid>,
+    /// The script text as the interpreter logged it. Collected only when
+    /// permitted, and redacted by default, like the command line (#228).
+    /// Since 1.1.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub text: Option<LongText>,
 }
 
 const fn is_false(value: &bool) -> bool {
     !*value
+}
+
+/// Reads a flag that is written only when it is set: `true` is accepted,
+/// and `false` is rejected because the field is then left out. So a set
+/// flag has one spelling, and an unset one has none.
+pub(crate) fn flag<'de, D: Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+    if bool::deserialize(deserializer)? {
+        Ok(true)
+    } else {
+        Err(serde::de::Error::custom(
+            "`false` is not written: leave the field out",
+        ))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1620,6 +1947,21 @@ pub enum EventErrorCode {
     ChainLink,
     /// A script has both a `path` and `inline`, or neither.
     ScriptPathXorInline,
+    /// The event uses a part of the schema that is newer than its
+    /// `schema_version` ([`Event::min_version`]).
+    NewerThanVersion,
+    /// `source.format` is missing although `source.kind` is `third_party`,
+    /// or present although it is not.
+    SourceFormat,
+    /// `network.resolution` is present without `network.remote_hostname`.
+    ResolutionWithoutHostname,
+    /// A registry value has both a `value_name` and `default_value`.
+    RegistryValueName,
+    /// Registry data is marked `truncated` but has no `preview`.
+    TruncatedWithoutPreview,
+    /// An admin change does not have exactly the `old` and `new` values its
+    /// `op` needs.
+    ChangeValues,
 }
 
 impl fmt::Display for EventError {
@@ -1653,6 +1995,34 @@ impl fmt::Display for EventError {
                     self.path
                 )
             }
+            EventErrorCode::NewerThanVersion => write!(
+                f,
+                "{}: the event uses fields or values newer than this version",
+                self.path
+            ),
+            EventErrorCode::SourceFormat => write!(
+                f,
+                "{}: required exactly when `source.kind` is `third_party`",
+                self.path
+            ),
+            EventErrorCode::ResolutionWithoutHostname => write!(
+                f,
+                "{}: needs `remote_hostname`, the name it describes",
+                self.path
+            ),
+            EventErrorCode::RegistryValueName => write!(
+                f,
+                "{}: a value has a name or is the default value, not both",
+                self.path
+            ),
+            EventErrorCode::TruncatedWithoutPreview => {
+                write!(f, "{}: `truncated` needs a `preview`", self.path)
+            }
+            EventErrorCode::ChangeValues => write!(
+                f,
+                "{}: `add` has `new` only, `remove` `old` only, and `replace` both",
+                self.path
+            ),
         }
     }
 }
@@ -1714,7 +2084,7 @@ impl Event {
         }
         for &set in self.event_type.required() {
             if !self.has(set) {
-                fail(EventErrorCode::MissingFieldSet(set), set_pointer(set));
+                fail(EventErrorCode::MissingFieldSet(set), set.pointer());
             }
         }
         if (self.seq == 0) == self.prev_hash.is_some() {
@@ -1726,6 +2096,47 @@ impl Event {
             .is_some_and(|s| s.inline == s.path.is_some())
         {
             fail(EventErrorCode::ScriptPathXorInline, "/script");
+        }
+        if self.min_version() > self.schema_version {
+            fail(EventErrorCode::NewerThanVersion, "/schema_version");
+        }
+        if let Some(source) = &self.source {
+            if (source.kind == SourceKind::ThirdParty) != source.format.is_some() {
+                fail(EventErrorCode::SourceFormat, "/source/format");
+            }
+        }
+        if self
+            .network
+            .as_ref()
+            .is_some_and(|n| n.resolution.is_some() && n.remote_hostname.is_none())
+        {
+            fail(
+                EventErrorCode::ResolutionWithoutHostname,
+                "/network/resolution",
+            );
+        }
+        if let Some(registry) = &self.registry {
+            if registry.default_value && registry.value_name.is_some() {
+                fail(EventErrorCode::RegistryValueName, "/registry/default_value");
+            }
+            for (data, path) in [
+                (&registry.old, "/registry/old/truncated"),
+                (&registry.new, "/registry/new/truncated"),
+            ] {
+                if data
+                    .as_ref()
+                    .is_some_and(|d| d.truncated && d.preview.is_none())
+                {
+                    fail(EventErrorCode::TruncatedWithoutPreview, path);
+                }
+            }
+        }
+        if self
+            .admin
+            .as_ref()
+            .is_some_and(|a| a.changes.iter().any(|c| !c.is_well_formed()))
+        {
+            fail(EventErrorCode::ChangeValues, "/admin/changes");
         }
         if errors.is_empty() {
             Ok(())
@@ -1745,7 +2156,49 @@ impl Event {
             FieldSet::Script => self.script.is_some(),
             FieldSet::Native => self.native.is_some(),
             FieldSet::Agent => self.agent.is_some(),
+            FieldSet::Network => self.network.is_some(),
+            FieldSet::Device => self.device.is_some(),
+            FieldSet::Registry => self.registry.is_some(),
+            FieldSet::Elevation => self.elevation.is_some(),
+            FieldSet::Approval => self.approval.is_some(),
+            FieldSet::Admin => self.admin.is_some(),
+            FieldSet::Identity => self.identity.is_some(),
+            FieldSet::AuditPolicy => self.audit_policy.is_some(),
+            FieldSet::Restriction => self.restriction.is_some(),
+            FieldSet::Probe => self.probe.is_some(),
+            FieldSet::Fim => self.fim.is_some(),
         }
+    }
+
+    /// The oldest schema version that has every field, field set, event
+    /// type and enum value this event uses. An event labelled with an older
+    /// `schema_version` is invalid.
+    #[must_use]
+    pub fn min_version(&self) -> SchemaVersion {
+        let mut version = self.event_type.since();
+        let mut need = |v: SchemaVersion| {
+            if v > version {
+                version = v;
+            }
+        };
+        for set in FieldSet::ALL {
+            if self.has(set) {
+                need(set.since());
+            }
+        }
+        if let Some(source) = &self.source {
+            need(source.kind.since());
+            if source.format.is_some() {
+                need(pointer_since("/source/format"));
+            }
+            if source.rule_name.is_some() {
+                need(pointer_since("/source/rule_name"));
+            }
+        }
+        if self.script.as_ref().is_some_and(|s| s.text.is_some()) {
+            need(pointer_since("/script/text"));
+        }
+        version
     }
 
     /// The ISM-0585 fields this event lacks, by name. Empty when the event
@@ -1755,7 +2208,10 @@ impl Event {
     /// `ts`, `description` and `host` are required by the type, so only the
     /// subject and object can be missing. The "file name" is the name of the
     /// object acted on: a file path, a script path or inline marker, a
-    /// packaged app's name, or, for COM activation, the class ID.
+    /// packaged app's name, or, for COM activation, the class ID. Since 1.1
+    /// it may also be a network destination (URL, UNC path, remote host name
+    /// or address), a device (instance ID, friendly name or serial) or a
+    /// registry key, for decisions about those objects.
     #[must_use]
     pub fn ism_0585_gaps(&self) -> Vec<&'static str> {
         let mut gaps = Vec::new();
@@ -1779,7 +2235,17 @@ impl Event {
             .as_ref()
             .is_some_and(|s| s.path.is_some() || s.inline);
         let com_class = self.native.as_ref().is_some_and(|n| n.clsid.is_some());
-        if !file && !script && !com_class {
+        let network = self.network.as_ref().is_some_and(|n| {
+            n.url.is_some()
+                || n.unc.is_some()
+                || n.remote_hostname.is_some()
+                || n.remote_ip.is_some()
+        });
+        let device = self.device.as_ref().is_some_and(|d| {
+            d.instance_id.is_some() || d.friendly_name.is_some() || d.serial.is_some()
+        });
+        let registry = self.registry.as_ref().is_some_and(|r| r.key.is_some());
+        if !file && !script && !com_class && !network && !device && !registry {
             gaps.push("file name");
         }
         gaps
@@ -1829,17 +2295,5 @@ impl<'de> Deserialize<'de> for VersionPeek {
             }
         }
         deserializer.deserialize_any(V)
-    }
-}
-
-const fn set_pointer(set: FieldSet) -> &'static str {
-    match set {
-        FieldSet::User => "/user",
-        FieldSet::Policy => "/policy",
-        FieldSet::Process => "/process",
-        FieldSet::File => "/file",
-        FieldSet::Script => "/script",
-        FieldSet::Native => "/native",
-        FieldSet::Agent => "/agent",
     }
 }
