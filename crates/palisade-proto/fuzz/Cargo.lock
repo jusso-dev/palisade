@@ -207,6 +207,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "md-5",
+ "palisade-core",
  "ring",
  "serde",
  "sha1",
