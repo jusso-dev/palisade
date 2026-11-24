@@ -5,7 +5,13 @@
 //!
 //! Input: one byte (the low seven bits pick the field and operator, the high
 //! bit `case_sensitive`), then the pattern, a zero byte, and the fact the
-//! pattern is matched against.
+//! pattern is matched against. For `path.file_name` the fact is a file name,
+//! placed in a directory so that it is a full path.
+//!
+//! Besides not panicking, it checks the fail-closed rules of #31 and #32:
+//! a path test in an allow rule never matches a path whose permissions are
+//! unknown or writable by users, and a regular expression on `path.full`
+//! never matches an alternate data stream.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
@@ -13,18 +19,24 @@ use palisade_core::path::VolumeMap;
 use palisade_policy::context::EvaluationContext;
 use palisade_policy::facts::{ObjectFacts, PathFact, PathVariable, PathVariables};
 use palisade_policy::model::{ActionKind, Criterion};
-use palisade_policy::ops::{CompiledCriterion, EvalContext};
+use palisade_policy::ops::{CompiledCriterion, EvalContext, Tri};
+
+fn operator_is_positive(operator: &str) -> bool {
+    !operator.starts_with("not_")
+}
 
 const FIELDS: [&str; 3] = ["path.full", "meta.product_name", "path.file_name"];
-const OPERATORS: [&str; 8] = [
+const OPERATORS: [&str; 10] = [
     "wildcard",
     "not_wildcard",
     "regex",
     "not_regex",
     "equals",
+    "not_equals",
     "starts_with",
-    "contains",
     "ends_with",
+    "contains",
+    "not_contains",
 ];
 
 fuzz_target!(|data: &[u8]| {
@@ -56,22 +68,48 @@ fuzz_target!(|data: &[u8]| {
     let Ok(compiled) = CompiledCriterion::compile(&criterion) else {
         return;
     };
-    let facts = if field.starts_with("path.") {
-        ObjectFacts::new()
-            .with_path(PathFact::new(fact, &VolumeMap::new()).with_user_writable(false))
-    } else {
-        ObjectFacts::new().with(criterion.field, fact)
-    };
     let variables = PathVariables::new().with(PathVariable::ProgramFiles, &[r"C:\Program Files"]);
     let context = EvaluationContext::new();
-    for action in [ActionKind::Allow, ActionKind::Deny] {
-        let _ = compiled.eval(
-            &facts,
-            &EvalContext {
-                action,
-                variables: &variables,
-                context: &context,
-            },
-        );
+    let eval = |facts: &ObjectFacts, action| {
+        compiled
+            .eval(
+                facts,
+                &EvalContext {
+                    action,
+                    variables: &variables,
+                    context: &context,
+                },
+            )
+            .result
+    };
+    if !field.starts_with("path.") {
+        let facts = ObjectFacts::new().with(criterion.field, fact);
+        for action in [ActionKind::Allow, ActionKind::Deny] {
+            let _ = eval(&facts, action);
+        }
+        return;
+    }
+    let raw = if field == "path.file_name" {
+        format!(r"C:\dir\{fact}")
+    } else {
+        fact.to_owned()
+    };
+    let mut volumes = VolumeMap::new();
+    volumes.insert(r"\Device\HarddiskVolume3", 'C');
+    let path = PathFact::new(&raw, &volumes);
+    let is_stream = path.path.stream().is_some();
+    for writable in [Some(false), Some(true), None] {
+        let facts = ObjectFacts::new().with_path(PathFact {
+            user_writable: writable,
+            ..path.clone()
+        });
+        let allow = eval(&facts, ActionKind::Allow);
+        let deny = eval(&facts, ActionKind::Deny);
+        if writable != Some(false) && operator_is_positive(operator) {
+            assert_ne!(allow, Tri::Match, "allow trusted an unsafe path");
+        }
+        if is_stream && field == "path.full" && operator == "regex" {
+            assert_ne!(deny, Tri::Match, "a regex matched a stream");
+        }
     }
 });

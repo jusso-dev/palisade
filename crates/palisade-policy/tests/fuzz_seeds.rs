@@ -74,48 +74,234 @@ fn write_policy_yaml_fuzz_seeds() {
     copy_all(&seed_dir(), &sources);
 }
 
+/// The fields and operators of `fuzz_wildcard_regex_compile`, in its order.
+const FIELDS: [&str; 3] = ["path.full", "meta.product_name", "path.file_name"];
+const OPERATORS: [&str; 10] = [
+    "wildcard",
+    "not_wildcard",
+    "regex",
+    "not_regex",
+    "equals",
+    "not_equals",
+    "starts_with",
+    "ends_with",
+    "contains",
+    "not_contains",
+];
+
+/// The selector byte for a field, an operator and the case.
+fn selector(field: &str, operator: &str, case_sensitive: bool) -> u8 {
+    let f = FIELDS.iter().position(|x| *x == field).unwrap();
+    let o = OPERATORS.iter().position(|x| *x == operator).unwrap();
+    let pick = u8::try_from(o * FIELDS.len() + f).unwrap();
+    assert!(pick < 0x80);
+    pick | if case_sensitive { 0x80 } else { 0 }
+}
+
+/// Seed patterns: field, operator, case-sensitive, pattern, fact, and the
+/// result in a deny rule (which trusts any path). For `path.file_name` the
+/// fact is a file name; the target places it in a directory.
+const PATTERNS: &[(&str, &str, bool, &str, &str, bool)] = &[
+    // Recursive and single-component wildcards, streams, variables, escapes.
+    (
+        "path.full",
+        "wildcard",
+        false,
+        r"C:\Program Files\**\*.exe",
+        r"C:\Program Files\App\bin\app.exe",
+        true,
+    ),
+    (
+        "path.full",
+        "wildcard",
+        false,
+        r"%PROGRAMFILES%\*\app?.exe",
+        r"C:\Program Files\X\app1.exe",
+        true,
+    ),
+    (
+        "path.full",
+        "wildcard",
+        false,
+        r"C:\x\*:*",
+        r"C:\x\a.txt:payload",
+        true,
+    ),
+    (
+        "path.full",
+        "wildcard",
+        false,
+        r"**\[*]odd[?].exe",
+        r"D:\a\*odd?.exe",
+        true,
+    ),
+    (
+        "path.full",
+        "not_wildcard",
+        false,
+        r"\\server\share\**",
+        r"\\server\share\dir\f.exe",
+        false,
+    ),
+    (
+        "path.full",
+        "regex",
+        false,
+        r"C:\\x\\.*",
+        r"C:\x\a.txt:payload",
+        false,
+    ),
+    (
+        "path.full",
+        "starts_with",
+        false,
+        r"C:\Tools",
+        r"\Device\HarddiskVolume3\tools\a.exe",
+        true,
+    ),
+    // Text wildcards and linear-time regular expressions.
+    (
+        "meta.product_name",
+        "wildcard",
+        false,
+        "Ex*Suite ?",
+        "Example Suite 2",
+        true,
+    ),
+    (
+        "meta.product_name",
+        "regex",
+        false,
+        "Ex[a-z]+ (Suite|Tool)",
+        "Example Tool",
+        true,
+    ),
+    (
+        "meta.product_name",
+        "regex",
+        false,
+        "(a|aa)*b",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaac",
+        false,
+    ),
+    (
+        "meta.product_name",
+        "regex",
+        false,
+        r"\p{L}+\d{1,3}",
+        "\u{dc}n\u{ef}code42",
+        true,
+    ),
+    (
+        "meta.product_name",
+        "not_contains",
+        false,
+        "beta",
+        "Example Suite",
+        true,
+    ),
+    // File-name text operators.
+    (
+        "path.file_name",
+        "starts_with",
+        false,
+        "notepad",
+        "NOTEPAD.EXE",
+        true,
+    ),
+    (
+        "path.file_name",
+        "ends_with",
+        false,
+        ".exe",
+        "setup.EXE",
+        true,
+    ),
+    (
+        "path.file_name",
+        "not_equals",
+        false,
+        "cmd.exe",
+        "CMD.EXE",
+        false,
+    ),
+    // Case-sensitive variants.
+    (
+        "path.full",
+        "wildcard",
+        true,
+        r"C:\Tools\*",
+        r"c:\tools\a.exe",
+        false,
+    ),
+    ("meta.product_name", "regex", true, "Ex.*", "example", false),
+];
+
 /// Patterns and facts in the target's input format: a selector byte, the
 /// pattern, a zero byte, then the fact.
 #[test]
 #[ignore = "writes files; run on demand to seed the fuzz corpus"]
 fn write_pattern_fuzz_seeds() {
     let dir = seed_dir();
-    let cases: &[(u8, &str, &str)] = &[
-        // path.full wildcard: recursive, single-component, streams, variables.
-        (
-            0,
-            r"C:\Program Files\**\*.exe",
-            r"C:\Program Files\App\bin\app.exe",
-        ),
-        (
-            0,
-            r"%PROGRAMFILES%\*\app?.exe",
-            r"C:\Program Files\X\app1.exe",
-        ),
-        (0, r"C:\x\*:*", r"C:\x\a.txt:payload"),
-        (0, r"**\[*]odd[?].exe", r"D:\a\*odd?.exe"),
-        (0, r"\\server\share\**", r"\\server\share\dir\f.exe"),
-        // meta.product_name wildcard and regex.
-        (1, "Ex*Suite ?", "Example Suite 2"),
-        (7, "Ex[a-z]+ (Suite|Tool)", "Example Tool"),
-        (
-            7,
-            "(a|aa)*b",
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaac",
-        ),
-        (7, r"\p{L}+\d{1,3}", "Ünïcode42"),
-        // path.file_name text operators.
-        (14, "notepad", "NOTEPAD.EXE"),
-        (23, ".exe", "setup.EXE"),
-        // Case-sensitive variants.
-        (0x80, r"C:\Tools\*", r"c:\tools\a.exe"),
-        (0x80 | 7, "Ex.*", "example"),
-    ];
-    for (i, (selector, pattern, fact)) in cases.iter().enumerate() {
-        let mut bytes = vec![*selector];
+    for (i, (field, operator, case, pattern, fact, _)) in PATTERNS.iter().enumerate() {
+        let mut bytes = vec![selector(field, operator, *case)];
         bytes.extend_from_slice(pattern.as_bytes());
         bytes.push(0);
         bytes.extend_from_slice(fact.as_bytes());
         fs::write(dir.join(format!("seed-{i}")), bytes).unwrap();
+    }
+}
+
+/// Every pattern seed decodes to the field and operator it names, compiles,
+/// and gives the stated result, so a seed cannot silently stop exercising
+/// the matcher. The facts are prepared as the fuzz target prepares them.
+#[test]
+fn pattern_seeds_compile_and_match_as_stated() {
+    use palisade_core::path::VolumeMap;
+    use palisade_policy::context::EvaluationContext;
+    use palisade_policy::facts::{ObjectFacts, PathFact, PathVariable, PathVariables};
+    use palisade_policy::model::{ActionKind, Criterion};
+    use palisade_policy::ops::{CompiledCriterion, EvalContext, Tri};
+
+    let variables = PathVariables::new().with(PathVariable::ProgramFiles, &[r"C:\Program Files"]);
+    let context = EvaluationContext::new();
+    let mut volumes = VolumeMap::new();
+    volumes.insert(r"\Device\HarddiskVolume3", 'C');
+    for (field, operator, case, pattern, fact, expected) in PATTERNS {
+        let s = selector(field, operator, *case);
+        let pick = usize::from(s & 0x7f);
+        assert_eq!(FIELDS[pick % FIELDS.len()], *field);
+        assert_eq!(OPERATORS[pick / FIELDS.len() % OPERATORS.len()], *operator);
+        let criterion: Criterion = serde_json::from_value(serde_json::json!({
+            "field": field,
+            "operator": operator,
+            "values": [pattern],
+            "case_sensitive": case,
+        }))
+        .unwrap();
+        let compiled = CompiledCriterion::compile(&criterion)
+            .unwrap_or_else(|e| panic!("{field} {operator} {pattern:?}: {e:?}"));
+        let facts = if field.starts_with("path.") {
+            let raw = if *field == "path.file_name" {
+                format!(r"C:\dir\{fact}")
+            } else {
+                (*fact).to_owned()
+            };
+            ObjectFacts::new().with_path(PathFact::new(&raw, &volumes))
+        } else {
+            ObjectFacts::new().with(criterion.field, *fact)
+        };
+        let result = compiled
+            .eval(
+                &facts,
+                &EvalContext {
+                    action: ActionKind::Deny,
+                    variables: &variables,
+                    context: &context,
+                },
+            )
+            .result;
+        let want = if *expected { Tri::Match } else { Tri::NoMatch };
+        assert_eq!(result, want, "{field} {operator} {pattern:?} on {fact:?}");
     }
 }

@@ -344,6 +344,7 @@ cargo xtask threat-coverage
 cargo deny --locked check          # needs cargo-deny 0.22
 cargo deny --locked --manifest-path crates/palisade-fileid/fuzz/Cargo.toml --config deny.toml check
 cargo deny --locked --manifest-path crates/palisade-proto/fuzz/Cargo.toml --config deny.toml check
+cargo deny --locked --manifest-path crates/palisade-policy/fuzz/Cargo.toml --config deny.toml check
 cargo xtask audit                  # cargo-audit 0.23, with deny.toml's ignores
 cargo vet --locked                 # needs cargo-vet 0.10
 cargo xtask check-supply-chain
