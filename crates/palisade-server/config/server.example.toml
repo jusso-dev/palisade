@@ -1,0 +1,64 @@
+# Example palisade-server configuration.
+#
+# Every key can be overridden by an environment variable: PALISADE_ plus the
+# key path in upper case, with `__` (two underscores) between levels. For
+# example `PALISADE_LISTEN__ADMIN__PORT=9443` or
+# `PALISADE_TLS__KEY_FILE=/run/secrets/server.key`.
+#
+# Relative paths resolve against the directory that holds this file.
+
+[deployment]
+# `standard`, or `overlay` when the server is reachable only through a
+# private overlay network. Under `overlay`, any listener reachable on a
+# public address is logged as a warning and reported in readiness.
+profile = "standard"
+
+[tls]
+# PEM certificate chain, leaf first. Its subject alternative names must
+# cover every `public_url` host below (`check-config` verifies this).
+cert_file = "tls/server.crt"
+# PEM private key. A secret: only the path is ever shown or logged, and on
+# Unix the file must not be readable by the group or others (chmod 600).
+key_file = "tls/server.key"
+# Lowest TLS version accepted: "1.2" (default; TLS 1.3 is preferred) or "1.3".
+min_version = "1.2"
+# Cipher policy: "default" (AES-GCM; X25519, P-256, P-384) or "asd-strict"
+# (AES-256-GCM-SHA384 and P-384 only).
+profile = "default"
+
+# Console, REST API and SSO callbacks.
+[listen.admin]
+# An IP address, or the name of a network interface (for example an overlay
+# interface such as "overlay0"); an interface is followed as its addresses
+# come and go.
+bind = "127.0.0.1"
+port = 8443
+public_url = "https://localhost:8443"
+body_limit_bytes = 16777216
+request_timeout_secs = 30
+max_connections = 4096
+
+# Agent traffic. Clients must present a certificate issued by a CA in
+# `client_ca_file`.
+[listen.agent]
+bind = "127.0.0.1"
+port = 8444
+public_url = "https://localhost:8444"
+client_ca_file = "tls/agent-ca.crt"
+body_limit_bytes = 8388608
+request_timeout_secs = 30
+max_connections = 4096
+
+# Probes with full indicator detail (and later the metrics exposition).
+# Optional; leave the section out to disable it. Defaults to 127.0.0.1:9464.
+[listen.metrics]
+bind = "127.0.0.1"
+port = 9464
+
+[shutdown]
+# How long shutdown waits for in-flight requests before dropping them.
+grace_secs = 30
+
+[log]
+# error, warn, info, debug or trace.
+level = "info"
