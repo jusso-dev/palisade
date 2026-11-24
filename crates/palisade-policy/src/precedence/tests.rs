@@ -355,6 +355,31 @@ fn directory_depth_counts_fixed_components() {
     // A wildcard drive fixes nothing; `[` is literal outside wildcards.
     assert_eq!(depth(Operator::Wildcard, "*:\\Tools\\Sub"), 0);
     assert_eq!(depth(Operator::Wildcard, "?:\\Tools\\Sub"), 0);
+    // A wildcard UNC server or share fixes nothing either.
+    for root in [
+        "\\\\*\\*\\Tools\\Sub\\Bin",
+        "\\\\server\\*\\Tools\\Sub",
+        "\\\\**\\Tools\\Sub\\Bin",
+        "\\\\?\\UNC\\*\\share\\Tools\\Sub",
+        "\\\\srv?\\share\\Tools",
+        "\\\\server\\sh[a]re\\Tools",
+    ] {
+        assert_eq!(depth(Operator::Wildcard, root), 0, "{root}");
+    }
+    // Under `starts_with` they are literal names.
+    assert_eq!(depth(Operator::StartsWith, "\\\\server\\sh[a]re\\Tools"), 1);
+    // A wildcard allow across every share never outranks a concrete deny.
+    let any_share = Spec::of(&crit(
+        Field::PathDirectory,
+        Operator::Wildcard,
+        &["\\\\*\\*\\Tools\\Sub\\Bin"],
+    ));
+    let restricted = Spec::of(&crit(
+        Field::PathDirectory,
+        Operator::StartsWith,
+        &["\\\\corp-fs\\restricted\\Tools"],
+    ));
+    assert!(restricted < any_share);
     assert_eq!(depth(Operator::StartsWith, "C:\\Apps\\[v2]\\Sub"), 3);
     assert_eq!(depth(Operator::Wildcard, "C:\\Apps\\[v2]\\Sub"), 1);
     assert_eq!(depth(Operator::StartsWith, "%PROGRAMFILES%\\App\\Bin"), 3);

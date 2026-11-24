@@ -302,7 +302,8 @@ fn criterion_spec(c: &crate::model::Criterion) -> Option<Spec> {
 ///   `C:\Users\name\AppData\Local\Temp`, depth 5), plus the components after
 ///   it.
 /// - With `wildcard`, counting stops at the first component with `*`, `?`
-///   or `[`, and a wildcard drive (`*:\`, `?:\`) fixes nothing. With
+///   or `[`, and a wildcard in the root (a drive such as `*:\`, or a UNC
+///   server or share such as `\\*\share` or `\\**\dir`) fixes nothing. With
 ///   `equals` and `starts_with` every character is literal.
 /// - A regular expression fixes nothing.
 /// - A stream name is not a directory component.
@@ -325,7 +326,9 @@ fn path_depth(value: &str, operator: Operator) -> u16 {
             (0, palisade_core::path::normalize(value))
         }
     };
-    if !path.is_resolved() {
+    // A wildcard in the root (`\\*\share`, `\\server\*`, `\\**\dir`)
+    // matches many roots, so nothing below it is fixed.
+    if !path.is_resolved() || (wildcard && path.root().contains(['*', '?', '['])) {
         return 0;
     }
     let below_root = path
