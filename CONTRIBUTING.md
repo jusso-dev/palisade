@@ -65,7 +65,7 @@ few extra tools.
 
 ```sh
 cargo xtask ci          # every check in ci.yml
-cargo xtask ci --fast   # skips docs, feature-powerset and msrv
+cargo xtask ci --fast   # skips coverage, fuzz, docs, feature-powerset and msrv
 ```
 
 ## Coding standards
@@ -125,8 +125,11 @@ by the allowlist in `deny.toml`.
   without the fix.
 - New rule types or condition types need **property tests** (for example: a rule never matches a
   file it should not) and **snapshot tests** of their compiled or serialised form.
-- Every parser of untrusted input needs a **fuzz target**. The fuzzing setup arrives with [#29](https://github.com/jusso-dev/palisade/issues/29)
-  (`fuzz`) and the parser crates; until then, say in your PR that a fuzz target is still owed.
+- Every parser of untrusted input needs a **fuzz target**, listed in `xtask/src/fuzz.rs` so CI
+  runs it ([docs/testing.md](docs/testing.md#fuzzing)). If a parser's target is not ready yet,
+  say in your PR that it is still owed.
+- Test names, determinism (no sleeps, no network), platform gating and fixtures follow
+  [docs/testing.md](docs/testing.md#conventions).
 - Test files must be benign ([responsible use](docs/responsible-use.md)). Never commit real
   malware.
 - Code that only runs on Windows is gated with `#[cfg(windows)]`, so the workspace still builds

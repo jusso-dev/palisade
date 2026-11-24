@@ -21,7 +21,12 @@ yaml-rust2 = { workspace = true }
 
 [dev-dependencies]
 boon = { workspace = true }
+criterion = { workspace = true }
 proptest = { workspace = true }
+
+[[bench]]
+name = "criterion_eval"
+harness = false
 
 [lints]
 workspace = true

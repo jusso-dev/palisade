@@ -73,6 +73,7 @@ An editor that uses the YAML language server then completes field names and enum
 - Property tests over random valid documents (`model::arbitrary`): they validate, they match the JSON Schema, and they round-trip through JSON losslessly (10,000 cases; set `PROPTEST_CASES` to change).
 - YAML: property tests that random valid documents round-trip through YAML losslessly and byte-for-byte, and read the same as JSON (10,000 cases); unit tests for every strictness rule; and `tests/yaml.rs`, which checks the examples against the committed schema, reads every JSON fixture as YAML, and checks the codes, pointers and line:column of the fixtures in `tests/fixtures/yaml/`.
 - Actions: unit tests of the reader (options are checked as they are read, and an option of another action is an error at its key), the full validity matrix written out as a table, and each validation code. `Decision` JSON is compared with committed snapshots in `tests/snapshots/decision/`; after a deliberate change, regenerate them with `PALISADE_BLESS=1 cargo test -p palisade-policy decision::`.
+- Benchmarks: `benches/criterion_eval.rs` (criterion) measures matching one compiled criterion against facts, for each kind of operator: `cargo bench -p palisade-policy`.
 - Fixtures in `tests/fixtures/`: `valid/` documents pass the schema and validation; `invalid/` documents pass the schema but fail validation with the codes and paths in their `.expected` files; `malformed/` documents are rejected by the schema at the paths in their `.expected` files.
 
 ## Allowed dependencies
@@ -87,6 +88,7 @@ All platforms. This crate uses `std`. Only `palisade-core` has to build without 
 
 - `regex-automata` and `regex-syntax`: the engine and parser behind the `regex` crate, for linear-time regular expressions with RE2 semantics, also used to compile wildcards (#32). Patterns are parsed once and built from the parse tree with only the linear-time engines enabled. `regex-syntax` also recognises look-around and backreferences, so the error can explain the alternative. Both are already in the lock file through `boon`.
 - `unicode-normalization`: NFC normalisation before strings are compared (#32).
+- Dev-dependencies: `boon` checks documents against the JSON Schema, `proptest` drives the property tests, and `criterion` runs the benchmarks.
 
 ## Feature flags
 

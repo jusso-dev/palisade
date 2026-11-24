@@ -121,3 +121,46 @@ proptest! {
         }
     }
 }
+
+/// Writes seed inputs for the `fsctx_parse` fuzz target into the directory
+/// in `PALISADE_FUZZ_SEED_DIR`: Win32 and NT paths, a self-relative
+/// security descriptor and a `Zone.Identifier` stream.
+///
+/// ```text
+/// PALISADE_FUZZ_SEED_DIR=fuzz/corpus/fsctx_parse \
+///     cargo test -p palisade-fileid --test fsctx -- --ignored write_fsctx_fuzz_seeds
+/// ```
+#[test]
+#[ignore = "writes files; run on demand to seed the fuzz corpus"]
+fn write_fsctx_fuzz_seeds() {
+    use palisade_fileid::fsctx::acl::{Ace, mask};
+    use palisade_fileid::fsctx::sid::well_known as wk;
+    let dir = std::env::var_os("PALISADE_FUZZ_SEED_DIR").expect("set PALISADE_FUZZ_SEED_DIR");
+    let dir = std::path::Path::new(&dir);
+    std::fs::create_dir_all(dir).unwrap();
+    let paths: [&str; 6] = [
+        r"C:\Program Files\Example\bin\tool.exe",
+        r"\\?\C:\Users\Public\Downloads\setup.exe:Zone.Identifier",
+        r"\\server\share\dir\..\file.txt",
+        r"\Device\HarddiskVolume3\Windows\System32\cmd.exe",
+        r"\??\UNC\server\share\a.dll",
+        r"C:\PROGRA~1\EXAMPL~1\a b\c.ps1",
+    ];
+    for (i, path) in paths.iter().enumerate() {
+        std::fs::write(dir.join(format!("seed-path-{i}")), path).unwrap();
+    }
+    let sd = SecurityDescriptor::new(
+        Some(wk::ADMINISTRATORS),
+        Some(vec![
+            Ace::deny(wk::GUESTS, mask::FILE_WRITE_DATA),
+            Ace::allow(wk::USERS, 0x0013_01BF),
+            Ace::allow(wk::EVERYONE, 0x0012_00A9),
+        ]),
+    );
+    std::fs::write(dir.join("seed-descriptor"), sd.to_self_relative().unwrap()).unwrap();
+    std::fs::write(
+        dir.join("seed-zone"),
+        "[ZoneTransfer]\r\nZoneId=3\r\nReferrerUrl=https://example.invalid/\r\nHostUrl=https://example.invalid/setup.exe\r\n",
+    )
+    .unwrap();
+}

@@ -64,6 +64,11 @@ version = "1.1.5"
 criteria = "safe-to-deploy"
 notes = "Baseline when cargo-vet was adopted (#23), raised from safe-to-run to safe-to-deploy because #251 (palisade-policy identity matching: regex operators) made it a normal dependency of a product crate before cargo-vet landed. Audit, or import an audit, before bumping."
 
+[[exemptions.anes]]
+version = "0.1.6"
+criteria = "safe-to-run"
+notes = "Added by #25 (criterion benchmarks, a dev-dependency of palisade-policy and palisade-fileid only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
 [[exemptions.anstyle]]
 version = "1.0.14"
 criteria = "safe-to-deploy"
@@ -124,6 +129,11 @@ version = "1.12.2"
 criteria = "safe-to-deploy"
 notes = "Added by #126 (palisade-server process skeleton: HTTP stack, TLS, command line and interface lookup) when cargo-vet was already in place. Audit, or import an audit, before bumping."
 
+[[exemptions.cast]]
+version = "0.3.0"
+criteria = "safe-to-run"
+notes = "Added by #25 (criterion benchmarks, a dev-dependency of palisade-policy and palisade-fileid only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
 [[exemptions.cc]]
 version = "1.11.3"
 criteria = "safe-to-deploy"
@@ -133,6 +143,21 @@ notes = "Added by #247 (palisade-fileid Authenticode verification: ring and its 
 version = "1.0.5"
 criteria = "safe-to-deploy"
 notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.ciborium]]
+version = "0.2.2"
+criteria = "safe-to-run"
+notes = "Added by #25 (criterion benchmarks, a dev-dependency of palisade-policy and palisade-fileid only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
+[[exemptions.ciborium-io]]
+version = "0.2.2"
+criteria = "safe-to-run"
+notes = "Added by #25 (criterion benchmarks, a dev-dependency of palisade-policy and palisade-fileid only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
+[[exemptions.ciborium-ll]]
+version = "0.2.2"
+criteria = "safe-to-run"
+notes = "Added by #25 (criterion benchmarks, a dev-dependency of palisade-policy and palisade-fileid only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
 
 [[exemptions.clap]]
 version = "4.6.9"
@@ -159,6 +184,21 @@ version = "0.3.1"
 criteria = "safe-to-deploy"
 notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
 
+[[exemptions.criterion]]
+version = "0.7.0"
+criteria = "safe-to-run"
+notes = "Added by #25 (criterion benchmarks, a dev-dependency of palisade-policy and palisade-fileid only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
+[[exemptions.criterion-plot]]
+version = "0.6.0"
+criteria = "safe-to-run"
+notes = "Added by #25 (criterion benchmarks, a dev-dependency of palisade-policy and palisade-fileid only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
+[[exemptions.crunchy]]
+version = "0.2.4"
+criteria = "safe-to-run"
+notes = "Added by #25 (criterion benchmarks, a dev-dependency of palisade-policy and palisade-fileid only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
 [[exemptions.crypto-common]]
 version = "0.2.2"
 criteria = "safe-to-deploy"
@@ -178,6 +218,11 @@ notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, b
 version = "1.0.20"
 criteria = "safe-to-deploy"
 notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.either]]
+version = "1.19.0"
+criteria = "safe-to-run"
+notes = "Added by #25 (criterion benchmarks, a dev-dependency of palisade-policy and palisade-fileid only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
 
 [[exemptions.equivalent]]
 version = "1.0.3"
@@ -253,6 +298,11 @@ notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, b
 version = "0.4.20"
 criteria = "safe-to-deploy"
 notes = "Added by #126 (palisade-server process skeleton: HTTP stack, TLS, command line and interface lookup) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
+[[exemptions.half]]
+version = "2.7.1"
+criteria = "safe-to-run"
+notes = "Added by #25 (criterion benchmarks, a dev-dependency of palisade-policy and palisade-fileid only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
 
 [[exemptions.hashbrown]]
 version = "0.17.2"
@@ -364,6 +414,11 @@ version = "2.14.2"
 criteria = "safe-to-deploy"
 notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
 
+[[exemptions.itertools]]
+version = "0.13.0"
+criteria = "safe-to-run"
+notes = "Added by #25 (criterion benchmarks, a dev-dependency of palisade-policy and palisade-fileid only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
 [[exemptions.itoa]]
 version = "1.0.19"
 criteria = "safe-to-deploy"
@@ -413,6 +468,11 @@ notes = "Added by #252 (palisade-agent service host: async runtime, logging and 
 version = "1.21.4"
 criteria = "safe-to-deploy"
 notes = "Baseline when cargo-vet was adopted (#23) at safe-to-run; raised to safe-to-deploy because #252 (palisade-agent service host) made it a normal dependency of a shipped crate. Audit, or import an audit, before bumping."
+
+[[exemptions.oorandom]]
+version = "11.1.5"
+criteria = "safe-to-run"
+notes = "Added by #25 (criterion benchmarks, a dev-dependency of palisade-policy and palisade-fileid only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
 
 [[exemptions.percent-encoding]]
 version = "2.3.2"
@@ -513,6 +573,11 @@ notes = "Added by #126 (palisade-server process skeleton: HTTP stack, TLS, comma
 version = "0.103.17"
 criteria = "safe-to-deploy"
 notes = "Added by #126 (palisade-server process skeleton: HTTP stack, TLS, command line and interface lookup) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
+[[exemptions.same-file]]
+version = "1.0.6"
+criteria = "safe-to-run"
+notes = "Added by #25 (criterion benchmarks, a dev-dependency of palisade-policy and palisade-fileid only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
 
 [[exemptions.schemars]]
 version = "1.2.3"
@@ -638,6 +703,11 @@ notes = "Added by #252 (palisade-agent service host: async runtime, logging and 
 version = "0.8.5"
 criteria = "safe-to-run"
 notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.tinytemplate]]
+version = "1.2.1"
+criteria = "safe-to-run"
+notes = "Added by #25 (criterion benchmarks, a dev-dependency of palisade-policy and palisade-fileid only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
 
 [[exemptions.tinyvec]]
 version = "1.13.3"
@@ -769,6 +839,11 @@ version = "0.9.5"
 criteria = "safe-to-run"
 notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
 
+[[exemptions.walkdir]]
+version = "2.5.1"
+criteria = "safe-to-run"
+notes = "Added by #25 (criterion benchmarks, a dev-dependency of palisade-policy and palisade-fileid only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
 [[exemptions.wasi]]
 version = "0.11.1+wasi-snapshot-preview1"
 criteria = "safe-to-deploy"
@@ -778,6 +853,11 @@ notes = "Added by #247 (palisade-fileid Authenticode verification: ring and its 
 version = "1.2.1"
 criteria = "safe-to-deploy"
 notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.winapi-util]]
+version = "0.1.11"
+criteria = "safe-to-run"
+notes = "Added by #25 (criterion benchmarks, a dev-dependency of palisade-policy and palisade-fileid only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
 
 [[exemptions.windows-link]]
 version = "0.2.1"

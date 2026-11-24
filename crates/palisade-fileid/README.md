@@ -258,7 +258,10 @@ cargo test -p palisade-fileid
 
 The `properties` tests (proptest) feed random and mutated images to the parsers
 on every run. Coverage-guided fuzz targets live in `fuzz/`, a separate cargo-fuzz
-workspace that needs a nightly toolchain:
+workspace with its own `Cargo.lock`, that needs a nightly toolchain. CI runs
+every target for 60 s on each pull request and for 30 minutes weekly. From the
+repository root, `cargo xtask fuzz` seeds and runs them all the same way
+([docs/testing.md](../../docs/testing.md#fuzzing)). By hand:
 
 ```sh
 cd crates/palisade-fileid
@@ -277,7 +280,9 @@ cargo +nightly fuzz run fsctx_parse -- -max_total_time=60
 cargo +nightly fuzz run x509_chain -- -max_total_time=60
 ```
 
-Running the fuzz targets in CI is part of [#25](https://github.com/jusso-dev/palisade/issues/25).
+`benches/hash_and_parse.rs` (criterion) measures flat hashing, streamed
+hashing, PE parsing and the Authenticode hash over the same synthetic inputs:
+`cargo bench -p palisade-fileid`.
 
 ## Allowed dependencies
 
@@ -294,6 +299,9 @@ dependency on this crate would be rejected. Resolving that needs an ADR 0003
 or 0008 amendment, either a narrowed carve-out or verification behind a
 separate crate (#19). Because every `ring` call is in one module, swapping
 the provider is a one-module change.
+
+Dev-dependencies: `proptest` for the property tests, and `criterion` for the
+benchmarks.
 
 ## Platform support
 
