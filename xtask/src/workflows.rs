@@ -21,9 +21,17 @@
 //!   ask for it themselves.
 //! - `pull_request_target` is never used.
 //! - `actions/checkout` sets `persist-credentials: false`.
+//!
+//! [`check_terms`] also scans every file under `.github/` for the names of
+//! cloud-managed build and pipeline services, case-insensitively, anywhere in
+//! the text (#21). Those names are kept out of the repository by
+//! `docs/NAMING.md`, so the check holds only their SHA-256 digests
+//! ([`FORBIDDEN_TERM_DIGESTS`]) and compares the digest of every substring of
+//! the same length.
 
 use std::path::Path;
 
+use sha2::{Digest as _, Sha256};
 use yaml_rust2::{Yaml, YamlLoader, yaml::Hash};
 
 /// GitHub-hosted runner labels that jobs may use.
@@ -44,6 +52,72 @@ pub const ALLOWED_ACTIONS: &[&str] = &[
     "Swatinem/rust-cache",
     "taiki-e/install-action",
 ];
+
+/// `(length, lowercase SHA-256 hex)` of each forbidden service name, in
+/// lowercase ASCII. They are the two cloud-managed build and pipeline
+/// service names that #21 lists.
+pub const FORBIDDEN_TERM_DIGESTS: &[(usize, &str)] = &[
+    (
+        9,
+        "497db5c94023cab018587a34037c8fbbec8e6dd5491f36dd1819151503786e43",
+    ),
+    (
+        12,
+        "9c9a8963bd8ff1efe3781c89d5b9753c3f4abba66054cc59a6c5353f30b638b8",
+    ),
+];
+
+/// Scans every file under `dir` (recursively) for a forbidden service name.
+/// `dir` is normally `.github`; paths in messages are relative to it.
+pub fn check_terms(dir: &Path) -> Result<Vec<String>, String> {
+    let mut v = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        let entries = std::fs::read_dir(&current)
+            .map_err(|e| format!("cannot read {}: {e}", current.display()))?;
+        for entry in entries {
+            let path = entry
+                .map_err(|e| format!("cannot read {}: {e}", current.display()))?
+                .path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let bytes =
+                std::fs::read(&path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+            let shown = path
+                .strip_prefix(dir)
+                .unwrap_or(&path)
+                .display()
+                .to_string();
+            // File names count too, so a file cannot be named after a service.
+            if contains_forbidden_term(shown.as_bytes()) || contains_forbidden_term(&bytes) {
+                v.push(format!(
+                    ".github/{shown}: names a cloud-managed build or pipeline service; CI runs on GitHub-hosted runners only (docs/ci.md)"
+                ));
+            }
+        }
+    }
+    v.sort();
+    Ok(v)
+}
+
+/// `true` if any substring of `text`, compared case-insensitively, has one of
+/// the [`FORBIDDEN_TERM_DIGESTS`].
+pub fn contains_forbidden_term(text: &[u8]) -> bool {
+    let lower = text.to_ascii_lowercase();
+    FORBIDDEN_TERM_DIGESTS.iter().any(|(len, digest)| {
+        lower.windows(*len).any(|window| {
+            // Every name starts with the same letter, which skips almost
+            // every window without hashing it.
+            window.first() == Some(&b'c') && hex(&Sha256::digest(window)) == *digest
+        })
+    })
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
 
 /// Checks every `*.yml` and `*.yaml` file directly inside `dir`.
 pub fn check_dir(dir: &Path) -> Result<Vec<String>, String> {
@@ -558,6 +632,64 @@ mod tests {
     fn yaml_anchors_are_resolved() {
         let jobs = "  a:\n    runs-on: &runner self-hosted\n    steps: []\n  b:\n    runs-on: *runner\n    steps: []\n";
         assert_eq!(check(&workflow(jobs)).len(), 2);
+    }
+
+    /// The forbidden names are assembled at run time from ordinary words, so
+    /// this file does not spell them out either.
+    fn service_names() -> [String; 2] {
+        [["code", "build"].concat(), ["code", "pipeline"].concat()]
+    }
+
+    #[test]
+    fn forbidden_term_digests_match_the_names() {
+        for (name, (len, _)) in service_names().iter().zip(super::FORBIDDEN_TERM_DIGESTS) {
+            assert_eq!(name.len(), *len);
+            assert!(super::contains_forbidden_term(name.as_bytes()), "{name}");
+        }
+    }
+
+    #[test]
+    fn forbidden_terms_are_found_anywhere_in_any_case() {
+        for name in service_names() {
+            let upper = name.to_ascii_uppercase();
+            for text in [
+                format!("runs-on: {name}-runner-1"),
+                format!("run: start-{upper}-job"),
+                format!("# uses the {name} service\n"),
+                format!("x{name}y"),
+            ] {
+                assert!(super::contains_forbidden_term(text.as_bytes()), "{text}");
+            }
+        }
+        for text in [
+            "runs-on: ubuntu-latest",
+            "decode build",
+            "code pipeline",
+            "",
+        ] {
+            assert!(!super::contains_forbidden_term(text.as_bytes()), "{text}");
+        }
+    }
+
+    #[test]
+    fn term_scan_covers_every_file_and_file_name_under_github() {
+        let dir = std::env::temp_dir().join(format!("xtask-terms-{}", std::process::id()));
+        let nested = dir.join("ISSUE_TEMPLATE");
+        std::fs::create_dir_all(&nested).unwrap();
+        let [first, second] = service_names();
+        std::fs::write(dir.join("ok.yml"), "runs-on: ubuntu-latest\n").unwrap();
+        std::fs::write(nested.join("bug.yml"), format!("body: {first}\n")).unwrap();
+        std::fs::write(dir.join(format!("{second}.md")), "harmless\n").unwrap();
+        let v = super::check_terms(&dir).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(v.len(), 2, "{v:?}");
+        assert!(v[0].starts_with(".github/ISSUE_TEMPLATE"), "{v:?}");
+    }
+
+    #[test]
+    fn this_repository_github_dir_names_no_build_service() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github");
+        assert_eq!(super::check_terms(&dir).unwrap(), Vec::<String>::new());
     }
 
     #[test]
