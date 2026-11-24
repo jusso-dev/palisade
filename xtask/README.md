@@ -23,7 +23,7 @@ More commands (`ci`, `dist`, `fixtures` and others) are planned in #29.
 No workspace crates: no product crate may depend on `xtask`, and `xtask`
 reads the workspace through `cargo metadata` instead of linking it. Third-party:
 `serde_json`, `toml` and `yaml-rust2`, to read `cargo metadata` output,
-manifests and workflow files.
+manifests and workflow files, and `proc-macro2`, to tokenise Rust source.
 
 ## Platform support
 

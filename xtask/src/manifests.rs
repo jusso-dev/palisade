@@ -110,7 +110,7 @@ pub fn check_test_util(path: &str, source: &str) -> Result<Vec<String>, String> 
     let features = manifest.get("features").and_then(Value::as_table);
     if features
         .and_then(|f| f.get("default"))
-        .is_some_and(enables_test_util)
+        .is_some_and(turns_on_test_util)
     {
         v.push(format!(
             "{path}: the default features must not include `{TEST_UTIL}`"
@@ -147,12 +147,7 @@ pub fn check_test_util(path: &str, source: &str) -> Result<Vec<String>, String> 
         if feature == TEST_UTIL || feature == "default" {
             continue;
         }
-        let leaks = enables.as_array().into_iter().flatten().any(|e| {
-            e.as_str().is_some_and(|e| {
-                e == TEST_UTIL || e.split_once('/').is_some_and(|(_, f)| f == TEST_UTIL)
-            })
-        });
-        if leaks {
+        if turns_on_test_util(enables) {
             v.push(format!(
                 "{path}: feature `{feature}` enables `{TEST_UTIL}`; only `{TEST_UTIL}` itself may"
             ));
@@ -182,6 +177,16 @@ pub fn check_workspace_test_util(path: &str, source: &str) -> Result<Vec<String>
             )
         })
         .collect())
+}
+
+/// A feature list that turns on this crate's `test-util` or a dependency's
+/// (`dep/test-util`, `dep?/test-util`).
+fn turns_on_test_util(features: &Value) -> bool {
+    features.as_array().into_iter().flatten().any(|e| {
+        e.as_str().is_some_and(|e| {
+            e == TEST_UTIL || e.split_once('/').is_some_and(|(_, f)| f == TEST_UTIL)
+        })
+    })
 }
 
 fn enables_test_util(features: &Value) -> bool {
@@ -418,6 +423,16 @@ toml = { workspace = true }
             v,
             ["x: feature `full` enables `test-util`; only `test-util` itself may"]
         );
+    }
+
+    #[test]
+    fn default_must_not_enable_a_dependency_test_util() {
+        for default in ["palisade-core/test-util", "palisade-core?/test-util"] {
+            let source = format!("{PACKAGE}[features]\ndefault = [\"{default}\"]\n");
+            let v = check_test_util("x", &source).unwrap();
+            assert_eq!(v.len(), 1, "{default}: {v:?}");
+            assert!(v[0].contains("default features"), "{v:?}");
+        }
     }
 
     #[test]

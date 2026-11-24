@@ -111,7 +111,7 @@ fn check_unsafe(root: &Path) -> Result<Vec<String>, String> {
     let (paths, mut violations) = unsafe_code::repository_files(root)?;
     let mut files = Vec::new();
     for path in &paths {
-        if path.ends_with(".rs") {
+        if unsafe_code::is_rust_path(path) {
             files.push((path.clone(), read(&root.join(path))?));
         }
     }
@@ -139,10 +139,7 @@ fn check_unsafe(root: &Path) -> Result<Vec<String>, String> {
     // Cargo reads `.cargo/config.toml` and `.cargo/config` from the build
     // directory and every parent, so check them wherever they are.
     for path in &paths {
-        let is_config = unsafe_code::CARGO_CONFIG_FILES
-            .iter()
-            .any(|c| path == c || path.ends_with(&format!("/{c}")));
-        if is_config {
+        if unsafe_code::is_cargo_config_path(path) {
             violations.extend(unsafe_code::check_cargo_config(
                 path,
                 &read(&root.join(path))?,

@@ -49,18 +49,23 @@ including inside `cfg_attr` and macro bodies) must be listed in
   locations above;
 - the library or binary root of `palisade-core`, `-policy`, `-proto`, `-server`, `-console`,
   `-cli` or `xtask` does not start with `#![forbid(unsafe_code)]` (a `forbid` inside a nested
-  module or function does not count);
+  module or function does not count, and neither does a tool path such as
+  `forbid(clippy::unsafe_code)`);
 - the workspace level is anything but `forbid` or `deny`, or the lint is set twice under both
   spellings (`unsafe_code` and `unsafe-code`);
-- a Cargo config file in the repository (`.cargo/config.toml`, or the legacy `.cargo/config`)
-  has any string that names the lint in either spelling or caps lints;
-- a tracked file is a symbolic link, or a Rust file cannot be tokenised.
+- a Cargo config file in the repository (`.cargo/config.toml`, or the legacy `.cargo/config`, in
+  any letter case) sets anything but `[alias]`, or an alias passes `--config`, a response file
+  (`@file`), rustflags, or a flag that names the lint or caps lints. Rustflags, compiler and wrapper
+  overrides and `[env]` can all switch lints off, so a repository config may not set them;
+- a tracked file is a symbolic link, or a Rust file (`.rs` in any letter case) cannot be
+  tokenised. That includes a first line starting with `#!` that is not an inner attribute: rustc
+  strips such a shebang line and the tokeniser does not, so the check fails rather than guess.
 
 The files scanned are the ones git tracks or would track (ignored build output is skipped), and
 each is tokenised with `proc-macro2`, the tokeniser procedural macros use, so comments and
 literals are never mistaken for attributes. What text scanning cannot see is left to review: an
-attribute a macro builds from its parameters (`#[$a($b)]`), a module loaded from an untracked file
-through `#[path]` or `include!`, and code a build script generates. The workspace `forbid` still
+attribute a macro builds from its parameters (`#[$a($b)]`), a module loaded through `#[path]` or
+`include!` from a file that is untracked or not named `.rs`, and code a build script generates. The workspace `forbid` still
 applies to all of these. Every `unsafe` block also needs a `// SAFETY:` comment
 (`clippy::undocumented_unsafe_blocks = "deny"`).
 
