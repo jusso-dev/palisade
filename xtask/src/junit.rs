@@ -64,7 +64,7 @@ pub fn parse(xml: &str) -> Result<Report, String> {
 /// The Markdown summary for the job page. `label` names the job, for
 /// example `windows-latest`.
 pub fn markdown(label: &str, report: &Report) -> String {
-    let failed = report.failures + report.errors;
+    let failed = report.failures.saturating_add(report.errors);
     let passed = report
         .tests
         .saturating_sub(failed)
@@ -226,6 +226,19 @@ mod tests {
             annotations(&report),
             ["::error title=Test failed::x%0A::add-mask::y 100%25"]
         );
+    }
+
+    #[test]
+    fn huge_counts_do_not_overflow() {
+        let report = Report {
+            tests: 1,
+            failures: u64::MAX,
+            errors: u64::MAX,
+            skipped: u64::MAX,
+            ..Report::default()
+        };
+        let md = markdown("x", &report);
+        assert!(md.contains(&format!("| 1 | 0 | {} |", u64::MAX)), "{md}");
     }
 
     #[test]

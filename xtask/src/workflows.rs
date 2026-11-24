@@ -76,22 +76,36 @@ pub fn check_terms(dir: &Path) -> Result<Vec<String>, String> {
         let entries = std::fs::read_dir(&current)
             .map_err(|e| format!("cannot read {}: {e}", current.display()))?;
         for entry in entries {
-            let path = entry
-                .map_err(|e| format!("cannot read {}: {e}", current.display()))?
-                .path();
-            if path.is_dir() {
-                stack.push(path);
-                continue;
-            }
-            let bytes =
-                std::fs::read(&path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+            let entry = entry.map_err(|e| format!("cannot read {}: {e}", current.display()))?;
+            let path = entry.path();
             let shown = path
                 .strip_prefix(dir)
                 .unwrap_or(&path)
                 .display()
                 .to_string();
-            // File names count too, so a file cannot be named after a service.
-            if contains_forbidden_term(shown.as_bytes()) || contains_forbidden_term(&bytes) {
+            // `file_type` does not follow symbolic links, so a link cannot
+            // loop the walk or lead it outside `.github`.
+            let file_type = entry
+                .file_type()
+                .map_err(|e| format!("cannot stat {}: {e}", path.display()))?;
+            if file_type.is_symlink() {
+                v.push(format!(
+                    ".github/{shown}: symbolic links are not allowed under .github"
+                ));
+                continue;
+            }
+            // Names count too, of files and directories, so neither can be
+            // named after a service.
+            let named = contains_forbidden_term(shown.as_bytes());
+            let mentions = if file_type.is_dir() {
+                stack.push(path);
+                named
+            } else {
+                let bytes = std::fs::read(&path)
+                    .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+                named || contains_forbidden_term(&bytes)
+            };
+            if mentions {
                 v.push(format!(
                     ".github/{shown}: names a cloud-managed build or pipeline service; CI runs on GitHub-hosted runners only (docs/ci.md)"
                 ));
@@ -684,6 +698,27 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(v.len(), 2, "{v:?}");
         assert!(v[0].starts_with(".github/ISSUE_TEMPLATE"), "{v:?}");
+    }
+
+    #[test]
+    fn term_scan_checks_directory_names_and_rejects_symlinks() {
+        let dir = std::env::temp_dir().join(format!("xtask-terms-dirs-{}", std::process::id()));
+        let [first, _] = service_names();
+        std::fs::create_dir_all(dir.join(format!("x-{first}"))).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(".", dir.join("loop")).unwrap();
+        let v = super::check_terms(&dir).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(
+            v.iter().any(|m| m.contains("names a cloud-managed")),
+            "{v:?}"
+        );
+        #[cfg(unix)]
+        assert!(
+            v.iter()
+                .any(|m| m == ".github/loop: symbolic links are not allowed under .github"),
+            "{v:?}"
+        );
     }
 
     #[test]
