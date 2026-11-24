@@ -91,7 +91,7 @@
       "description": "A test of one fact about the object: `field operator values`.\n\nValues are combined with OR for positive operators and with AND for\nnegative ones (#32): `not_in [a, b]` means neither `a` nor `b`.",
       "properties": {
         "case_sensitive": {
-          "description": "Compare strings case-sensitively. Unset means the field's default\n(#32), which is case-insensitive for every field defined so far.",
+          "description": "Compare strings case-sensitively. Unset means the field's default\n(#32), which is case-insensitive for every field defined so far.\nHashes and versions have no case, and reject this option.",
           "type": [
             "boolean",
             "null"
@@ -145,7 +145,7 @@
       ]
     },
     "Field": {
-      "description": "The identity facts a criterion can test. This is the subset of #31\nneeded to express hash, publisher and path rules (ISM-0955); #31 adds the\nrest.",
+      "description": "The identity facts a criterion can test (#31).\n\nThis is the part of the #31 catalogue that has a matcher: hashes, the\nsigner, the path and the version resource. The other families (signer\nconstraints such as EKU and TBS hashes, packaged apps, installers,\nownership, origin and process relationships) arrive in later minor\nversions, each with its facts and matcher.",
       "oneOf": [
         {
           "const": "hash.sha256",
@@ -153,8 +153,38 @@
           "type": "string"
         },
         {
+          "const": "hash.sha384",
+          "description": "SHA-384 of the whole file.",
+          "type": "string"
+        },
+        {
+          "const": "hash.sha512",
+          "description": "SHA-512 of the whole file.",
+          "type": "string"
+        },
+        {
           "const": "hash.authenticode_sha256",
-          "description": "SHA-256 Authenticode image hash.",
+          "description": "SHA-256 Authenticode image hash: the PE image without its checksum,\nsecurity directory entry and certificate table.",
+          "type": "string"
+        },
+        {
+          "const": "hash.authenticode_sha1",
+          "description": "SHA-1 Authenticode image hash. Compatibility only (ADR 0008).",
+          "type": "string"
+        },
+        {
+          "const": "hash.page_sha256",
+          "description": "SHA-256 hash of the first page of the image, for OS-native policy\nformats. It covers only that page, so it is a weak identity alone.",
+          "type": "string"
+        },
+        {
+          "const": "hash.page_sha1",
+          "description": "SHA-1 hash of the first page of the image. Compatibility only\n(ADR 0008).",
+          "type": "string"
+        },
+        {
+          "const": "hash.msi_fuzzy_sha256",
+          "description": "SHA-256 of an installer package with its timestamps left out, so\nrebuilds of the same content share one value (#3).",
           "type": "string"
         },
         {
@@ -169,12 +199,17 @@
         },
         {
           "const": "signer.publisher",
-          "description": "The leaf signer's subject.",
+          "description": "The leaf signer's subject common name.",
           "type": "string"
         },
         {
           "const": "signer.issuer",
-          "description": "The leaf signer's issuer.",
+          "description": "The common name of the leaf certificate's issuer.",
+          "type": "string"
+        },
+        {
+          "const": "signer.leaf_thumbprint",
+          "description": "The SHA-256 thumbprint of the leaf certificate.",
           "type": "string"
         },
         {
@@ -194,12 +229,22 @@
         },
         {
           "const": "path.extension",
-          "description": "The file extension.",
+          "description": "The file extension, without its leading dot.",
           "type": "string"
         },
         {
           "const": "meta.original_filename",
           "description": "The original file name from the version resource.",
+          "type": "string"
+        },
+        {
+          "const": "meta.internal_name",
+          "description": "The internal name from the version resource.",
+          "type": "string"
+        },
+        {
+          "const": "meta.file_description",
+          "description": "The file description from the version resource.",
           "type": "string"
         },
         {
@@ -389,7 +434,7 @@
       "type": "string"
     },
     "Operator": {
-      "description": "How a criterion compares the fact with its values (#32). Regular\nexpressions arrive with #32, together with their size limits.",
+      "description": "How a criterion compares the fact with its values (#32). Positive\noperators match if any value matches; negative operators (`not_*`)\nmatch if no value does, and never match a fact that is unknown.",
       "oneOf": [
         {
           "const": "equals",
@@ -403,7 +448,7 @@
         },
         {
           "const": "starts_with",
-          "description": "Starts with any value.",
+          "description": "Starts with any value. On paths, the value must end at a component\nboundary: `C:\\Tools` does not match `C:\\ToolsX`.",
           "type": "string"
         },
         {
@@ -432,6 +477,16 @@
           "type": "string"
         },
         {
+          "const": "regex",
+          "description": "Matches any regular expression. Anchored at both ends, and run by a\nlinear-time engine without look-around or backreferences.",
+          "type": "string"
+        },
+        {
+          "const": "not_regex",
+          "description": "Matches none of the regular expressions.",
+          "type": "string"
+        },
+        {
           "const": "version_eq",
           "description": "Version equal to any value.",
           "type": "string"
@@ -454,6 +509,11 @@
         {
           "const": "version_le",
           "description": "Version less than or equal to the value.",
+          "type": "string"
+        },
+        {
+          "const": "version_between",
+          "description": "Version within `[min, max]`, both inclusive. Takes exactly two\nvalues, the minimum first.",
           "type": "string"
         }
       ]

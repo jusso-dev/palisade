@@ -21,7 +21,7 @@ pub(crate) mod arbitrary;
 
 pub use palisade_core::{Mode, ObjectType, PolicyId, RuleId, RuleSetId, SchemaVersion, ScriptKind};
 pub use settings::{AdvancedValue, ControlLevel, PolicySettings, TimeZoneBasis};
-pub use tree::{Criterion, Field, FieldClass, Match, Operator};
+pub use tree::{Criterion, Field, FieldClass, Match, Operator, Strength};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

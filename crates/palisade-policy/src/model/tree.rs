@@ -1,9 +1,10 @@
 //! Match trees and identity criteria.
 //!
-//! This module defines only the shape of a match tree, which #30 needs. The
-//! full catalogue of identity criteria is #31, the operator semantics are #32,
-//! and context criteria and the identity-anchor rule are #33. New fields and
-//! operators are added as enum variants in a minor schema version.
+//! This module defines the shape of a match tree (#30), the identity fields
+//! a criterion can test with their strength (#31), and the operators with
+//! their compatibility table (#32). How a criterion is matched against facts
+//! is in [`crate::ops`]. Context criteria and the evaluation of whole trees
+//! are #33. New fields and operators are added as enum variants.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -92,13 +93,18 @@ pub struct Criterion {
     pub values: Vec<String>,
     /// Compare strings case-sensitively. Unset means the field's default
     /// (#32), which is case-insensitive for every field defined so far.
+    /// Hashes and versions have no case, and reject this option.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub case_sensitive: Option<bool>,
 }
 
-/// The identity facts a criterion can test. This is the subset of #31
-/// needed to express hash, publisher and path rules (ISM-0955); #31 adds the
-/// rest.
+/// The identity facts a criterion can test (#31).
+///
+/// This is the part of the #31 catalogue that has a matcher: hashes, the
+/// signer, the path and the version resource. The other families (signer
+/// constraints such as EKU and TBS hashes, packaged apps, installers,
+/// ownership, origin and process relationships) arrive in later minor
+/// versions, each with its facts and matcher.
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -106,21 +112,46 @@ pub enum Field {
     /// SHA-256 of the whole file. The primary identity (ADR 0008).
     #[serde(rename = "hash.sha256")]
     HashSha256,
-    /// SHA-256 Authenticode image hash.
+    /// SHA-384 of the whole file.
+    #[serde(rename = "hash.sha384")]
+    HashSha384,
+    /// SHA-512 of the whole file.
+    #[serde(rename = "hash.sha512")]
+    HashSha512,
+    /// SHA-256 Authenticode image hash: the PE image without its checksum,
+    /// security directory entry and certificate table.
     #[serde(rename = "hash.authenticode_sha256")]
     HashAuthenticodeSha256,
+    /// SHA-1 Authenticode image hash. Compatibility only (ADR 0008).
+    #[serde(rename = "hash.authenticode_sha1")]
+    HashAuthenticodeSha1,
+    /// SHA-256 hash of the first page of the image, for OS-native policy
+    /// formats. It covers only that page, so it is a weak identity alone.
+    #[serde(rename = "hash.page_sha256")]
+    HashPageSha256,
+    /// SHA-1 hash of the first page of the image. Compatibility only
+    /// (ADR 0008).
+    #[serde(rename = "hash.page_sha1")]
+    HashPageSha1,
+    /// SHA-256 of an installer package with its timestamps left out, so
+    /// rebuilds of the same content share one value (#3).
+    #[serde(rename = "hash.msi_fuzzy_sha256")]
+    HashMsiFuzzySha256,
     /// SHA-1 of the whole file. Compatibility only (ADR 0008).
     #[serde(rename = "hash.sha1")]
     HashSha1,
     /// MD5 of the whole file. Compatibility only (ADR 0008).
     #[serde(rename = "hash.md5")]
     HashMd5,
-    /// The leaf signer's subject.
+    /// The leaf signer's subject common name.
     #[serde(rename = "signer.publisher")]
     SignerPublisher,
-    /// The leaf signer's issuer.
+    /// The common name of the leaf certificate's issuer.
     #[serde(rename = "signer.issuer")]
     SignerIssuer,
+    /// The SHA-256 thumbprint of the leaf certificate.
+    #[serde(rename = "signer.leaf_thumbprint")]
+    SignerLeafThumbprint,
     /// The normalised full path.
     #[serde(rename = "path.full")]
     PathFull,
@@ -130,12 +161,18 @@ pub enum Field {
     /// The on-disk file name.
     #[serde(rename = "path.file_name")]
     PathFileName,
-    /// The file extension.
+    /// The file extension, without its leading dot.
     #[serde(rename = "path.extension")]
     PathExtension,
     /// The original file name from the version resource.
     #[serde(rename = "meta.original_filename")]
     MetaOriginalFilename,
+    /// The internal name from the version resource.
+    #[serde(rename = "meta.internal_name")]
+    MetaInternalName,
+    /// The file description from the version resource.
+    #[serde(rename = "meta.file_description")]
+    MetaFileDescription,
     /// The product name from the version resource.
     #[serde(rename = "meta.product_name")]
     MetaProductName,
@@ -150,7 +187,8 @@ pub enum Field {
     MetaProductVersion,
 }
 
-/// The type of a field's value, which decides the operators it accepts.
+/// The type of a field's value, which decides the operators it accepts and
+/// how values are compared (#32).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FieldClass {
     /// A hexadecimal digest of a fixed length.
@@ -158,28 +196,55 @@ pub enum FieldClass {
         /// The number of hex digits.
         hex_len: usize,
     },
-    /// A file-system path or path component.
+    /// A full path or a directory: normalised before comparison, and the
+    /// only class with path variables and the recursive `**` wildcard.
     Path,
+    /// One path component, such as a file name or an extension.
+    FileName,
     /// Free text, such as a signer name.
     Text,
     /// A dotted version number.
     Version,
 }
 
+/// How firmly a criterion identifies an object (#31). Ordered from weakest
+/// to strongest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Strength {
+    /// Attributes anyone can set or copy: file names, extensions, version
+    /// resource strings, a first-page hash, or an issuer alone.
+    Weak,
+    /// Identities that rest on a trust decision: a publisher, or a path,
+    /// which an allow rule only trusts where users cannot write (#32).
+    Medium,
+    /// Collision-resistant hashes of the content or the signing
+    /// certificate.
+    Strong,
+}
+
 impl Field {
     /// Every field, in declaration order.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 24] = [
         Self::HashSha256,
+        Self::HashSha384,
+        Self::HashSha512,
         Self::HashAuthenticodeSha256,
+        Self::HashAuthenticodeSha1,
+        Self::HashPageSha256,
+        Self::HashPageSha1,
+        Self::HashMsiFuzzySha256,
         Self::HashSha1,
         Self::HashMd5,
         Self::SignerPublisher,
         Self::SignerIssuer,
+        Self::SignerLeafThumbprint,
         Self::PathFull,
         Self::PathDirectory,
         Self::PathFileName,
         Self::PathExtension,
         Self::MetaOriginalFilename,
+        Self::MetaInternalName,
+        Self::MetaFileDescription,
         Self::MetaProductName,
         Self::MetaCompanyName,
         Self::MetaFileVersion,
@@ -190,15 +255,24 @@ impl Field {
     #[must_use]
     pub const fn class(self) -> FieldClass {
         match self {
-            Self::HashSha256 | Self::HashAuthenticodeSha256 => FieldClass::Hash { hex_len: 64 },
-            Self::HashSha1 => FieldClass::Hash { hex_len: 40 },
-            Self::HashMd5 => FieldClass::Hash { hex_len: 32 },
-            Self::PathFull | Self::PathDirectory | Self::PathFileName | Self::PathExtension => {
-                FieldClass::Path
+            Self::HashSha256
+            | Self::HashAuthenticodeSha256
+            | Self::HashPageSha256
+            | Self::HashMsiFuzzySha256
+            | Self::SignerLeafThumbprint => FieldClass::Hash { hex_len: 64 },
+            Self::HashSha384 => FieldClass::Hash { hex_len: 96 },
+            Self::HashSha512 => FieldClass::Hash { hex_len: 128 },
+            Self::HashAuthenticodeSha1 | Self::HashPageSha1 | Self::HashSha1 => {
+                FieldClass::Hash { hex_len: 40 }
             }
+            Self::HashMd5 => FieldClass::Hash { hex_len: 32 },
+            Self::PathFull | Self::PathDirectory => FieldClass::Path,
+            Self::PathFileName | Self::PathExtension => FieldClass::FileName,
             Self::SignerPublisher
             | Self::SignerIssuer
             | Self::MetaOriginalFilename
+            | Self::MetaInternalName
+            | Self::MetaFileDescription
             | Self::MetaProductName
             | Self::MetaCompanyName => FieldClass::Text,
             Self::MetaFileVersion | Self::MetaProductVersion => FieldClass::Version,
@@ -209,12 +283,45 @@ impl Field {
     /// identity of an allow rule (ADR 0008).
     #[must_use]
     pub const fn is_weak_hash(self) -> bool {
-        matches!(self, Self::HashSha1 | Self::HashMd5)
+        matches!(
+            self,
+            Self::HashSha1 | Self::HashMd5 | Self::HashAuthenticodeSha1 | Self::HashPageSha1
+        )
+    }
+
+    /// How firmly a positive test of this field identifies an object (#31).
+    #[must_use]
+    pub const fn strength(self) -> Strength {
+        match self {
+            Self::HashSha256
+            | Self::HashSha384
+            | Self::HashSha512
+            | Self::HashAuthenticodeSha256
+            | Self::HashMsiFuzzySha256
+            | Self::SignerLeafThumbprint => Strength::Strong,
+            Self::SignerPublisher | Self::PathFull | Self::PathDirectory => Strength::Medium,
+            Self::HashAuthenticodeSha1
+            | Self::HashPageSha256
+            | Self::HashPageSha1
+            | Self::HashSha1
+            | Self::HashMd5
+            | Self::SignerIssuer
+            | Self::PathFileName
+            | Self::PathExtension
+            | Self::MetaOriginalFilename
+            | Self::MetaInternalName
+            | Self::MetaFileDescription
+            | Self::MetaProductName
+            | Self::MetaCompanyName
+            | Self::MetaFileVersion
+            | Self::MetaProductVersion => Strength::Weak,
+        }
     }
 }
 
-/// How a criterion compares the fact with its values (#32). Regular
-/// expressions arrive with #32, together with their size limits.
+/// How a criterion compares the fact with its values (#32). Positive
+/// operators match if any value matches; negative operators (`not_*`)
+/// match if no value does, and never match a fact that is unknown.
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -224,7 +331,8 @@ pub enum Operator {
     Equals,
     /// Equal to none of the values.
     NotEquals,
-    /// Starts with any value.
+    /// Starts with any value. On paths, the value must end at a component
+    /// boundary: `C:\Tools` does not match `C:\ToolsX`.
     StartsWith,
     /// Ends with any value.
     EndsWith,
@@ -236,6 +344,11 @@ pub enum Operator {
     Wildcard,
     /// Matches none of the wildcard patterns.
     NotWildcard,
+    /// Matches any regular expression. Anchored at both ends, and run by a
+    /// linear-time engine without look-around or backreferences.
+    Regex,
+    /// Matches none of the regular expressions.
+    NotRegex,
     /// Version equal to any value.
     VersionEq,
     /// Version greater than the value.
@@ -246,6 +359,9 @@ pub enum Operator {
     VersionLt,
     /// Version less than or equal to the value.
     VersionLe,
+    /// Version within `[min, max]`, both inclusive. Takes exactly two
+    /// values, the minimum first.
+    VersionBetween,
 }
 
 impl Operator {
@@ -256,8 +372,21 @@ impl Operator {
     pub const fn is_positive(self) -> bool {
         !matches!(
             self,
-            Self::NotEquals | Self::NotContains | Self::NotWildcard
+            Self::NotEquals | Self::NotContains | Self::NotWildcard | Self::NotRegex
         )
+    }
+
+    /// The positive operator that this one negates, or the operator itself
+    /// if it is positive. `not_contains` gives `contains`.
+    #[must_use]
+    pub const fn positive(self) -> Self {
+        match self {
+            Self::NotEquals => Self::Equals,
+            Self::NotContains => Self::Contains,
+            Self::NotWildcard => Self::Wildcard,
+            Self::NotRegex => Self::Regex,
+            other => other,
+        }
     }
 
     /// Whether the operator compares versions.
@@ -265,26 +394,38 @@ impl Operator {
     pub const fn is_version(self) -> bool {
         matches!(
             self,
-            Self::VersionEq | Self::VersionGt | Self::VersionGe | Self::VersionLt | Self::VersionLe
+            Self::VersionEq
+                | Self::VersionGt
+                | Self::VersionGe
+                | Self::VersionLt
+                | Self::VersionLe
+                | Self::VersionBetween
         )
     }
 
-    /// Whether the operator takes exactly one value.
+    /// Whether the operator takes regular expressions.
     #[must_use]
-    pub const fn is_single_valued(self) -> bool {
-        matches!(
-            self,
-            Self::VersionGt | Self::VersionGe | Self::VersionLt | Self::VersionLe
-        )
+    pub const fn is_regex(self) -> bool {
+        matches!(self, Self::Regex | Self::NotRegex)
+    }
+
+    /// The smallest and largest number of values the operator takes.
+    #[must_use]
+    pub const fn value_count(self) -> (usize, usize) {
+        match self {
+            Self::VersionGt | Self::VersionGe | Self::VersionLt | Self::VersionLe => (1, 1),
+            Self::VersionBetween => (2, 2),
+            _ => (1, super::limits::MAX_VALUES_PER_CRITERION),
+        }
     }
 
     /// Whether the operator is valid on a field of this class: the static
-    /// compatibility table of #32, for the fields defined so far.
+    /// compatibility table of #32.
     #[must_use]
     pub const fn applies_to(self, class: FieldClass) -> bool {
         match class {
             FieldClass::Hash { .. } => matches!(self, Self::Equals | Self::NotEquals),
-            FieldClass::Path | FieldClass::Text => !self.is_version(),
+            FieldClass::Path | FieldClass::FileName | FieldClass::Text => !self.is_version(),
             FieldClass::Version => {
                 self.is_version() || matches!(self, Self::Equals | Self::NotEquals)
             }

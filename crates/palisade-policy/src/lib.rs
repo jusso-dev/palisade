@@ -2,7 +2,9 @@
 #![forbid(unsafe_code)]
 
 pub mod dsl;
+pub mod facts;
 pub mod model;
+pub mod ops;
 pub mod schema;
 pub mod validate;
 

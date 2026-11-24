@@ -57,17 +57,33 @@ fn object_type() -> impl Strategy<Value = ObjectType> {
     proptest::sample::select(ObjectType::ALL.to_vec())
 }
 
-fn value_for(class: FieldClass) -> BoxedStrategy<String> {
-    match class {
-        FieldClass::Hash { hex_len } => vec(
+fn value_for(class: FieldClass, operator: Operator) -> BoxedStrategy<String> {
+    match (class, operator) {
+        (FieldClass::Hash { hex_len }, _) => vec(
             proptest::sample::select(b"0123456789abcdef".to_vec()),
             hex_len,
         )
         .prop_map(|b| b.into_iter().map(char::from).collect())
         .boxed(),
-        FieldClass::Version => "[0-9]{1,4}(\\.[0-9]{1,4}){0,3}".boxed(),
-        FieldClass::Path => "[A-Za-z]:\\\\[A-Za-z0-9 _\\\\*?.-]{1,40}".boxed(),
-        FieldClass::Text => "[A-Za-z0-9 ,.\u{e9}-]{1,40}".boxed(),
+        (FieldClass::Version, _) => "[0-9]{1,4}(\\.[0-9]{1,4}){0,3}".boxed(),
+        // Simple patterns that are always valid regular expressions.
+        (_, Operator::Regex | Operator::NotRegex) => {
+            "[A-Za-z0-9]{1,10}(\\.\\*|\\+)?[A-Za-z0-9]{0,10}".boxed()
+        }
+        (FieldClass::Path, Operator::Wildcard | Operator::NotWildcard) => {
+            "[A-Za-z]:\\\\[A-Za-z0-9 _\\\\*?.-]{1,40}".boxed()
+        }
+        // Only these operators expand path variables.
+        (FieldClass::Path, Operator::Equals | Operator::NotEquals | Operator::StartsWith) => {
+            prop_oneof![
+                "[A-Za-z]:\\\\[A-Za-z0-9 _\\\\.-]{1,40}",
+                "%(PROGRAMFILES|WINDIR|TEMP)%(\\\\[A-Za-z0-9 _-]{1,20}){0,3}",
+            ]
+            .boxed()
+        }
+        (FieldClass::Path, _) => "[A-Za-z]:\\\\[A-Za-z0-9 _\\\\.-]{1,40}".boxed(),
+        (FieldClass::FileName, _) => "[A-Za-z0-9 _-]{1,30}(\\.[a-z]{1,4})?".boxed(),
+        (FieldClass::Text, _) => "[A-Za-z0-9 ,.\u{e9}-]{1,40}".boxed(),
     }
 }
 
@@ -80,24 +96,32 @@ pub fn criterion() -> impl Strategy<Value = Criterion> {
             .copied()
             .filter(|op| op.applies_to(class))
             .collect();
-        let case = if matches!(class, FieldClass::Path | FieldClass::Text) {
+        let case = if matches!(
+            class,
+            FieldClass::Path | FieldClass::FileName | FieldClass::Text
+        ) {
             proptest::option::of(any::<bool>()).boxed()
         } else {
             Just(None).boxed()
         };
         (proptest::sample::select(operators), case).prop_flat_map(move |(operator, case)| {
-            let max = if operator.is_single_valued() { 1 } else { 4 };
-            vec(value_for(class), 1..=max).prop_map(move |values| Criterion {
-                field,
-                operator,
-                values,
-                case_sensitive: case,
+            let (min, max) = operator.value_count();
+            vec(value_for(class, operator), min..=max.min(4)).prop_map(move |mut values| {
+                if operator == Operator::VersionBetween {
+                    values.sort_by_key(|v| crate::ops::Version::parse_strict(v));
+                }
+                Criterion {
+                    field,
+                    operator,
+                    values,
+                    case_sensitive: case,
+                }
             })
         })
     })
 }
 
-const OPERATORS: [Operator; 13] = [
+const OPERATORS: [Operator; 16] = [
     Operator::Equals,
     Operator::NotEquals,
     Operator::StartsWith,
@@ -106,11 +130,14 @@ const OPERATORS: [Operator; 13] = [
     Operator::NotContains,
     Operator::Wildcard,
     Operator::NotWildcard,
+    Operator::Regex,
+    Operator::NotRegex,
     Operator::VersionEq,
     Operator::VersionGt,
     Operator::VersionGe,
     Operator::VersionLt,
     Operator::VersionLe,
+    Operator::VersionBetween,
 ];
 
 /// A match tree within the depth and size limits.
@@ -128,7 +155,7 @@ pub fn tree() -> impl Strategy<Value = Match> {
         ]
     });
     (
-        value_for(FieldClass::Hash { hex_len: 64 }),
+        value_for(FieldClass::Hash { hex_len: 64 }, Operator::Equals),
         vec(inner, 0..3),
     )
         .prop_map(|(hash, rest)| {
