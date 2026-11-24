@@ -30,10 +30,32 @@
 //!    digest is reported as [`SignatureStatus::NonConformantImage`], never
 //!    as valid.
 //!
-//! It does **not** mean the signer is trusted. Building and validating the
-//! certificate chain, EKUs and signer attributes is #49; timestamps, expiry
-//! and revocation are #50. [`SignatureInfo::timestamp_tokens`] and
-//! [`SignatureInfo::certs_in_blob`] carry what those modules need.
+//! It does **not** mean the signer is trusted.
+//!
+//! # Chains, trust and signer identity (#49)
+//!
+//! - [`CertSummary::from_der`] parses an X.509 certificate into every
+//!   attribute signer rules match on: subject and issuer as ordered RDNs
+//!   with typed components and a canonical DN string, serial, validity,
+//!   algorithms, key size, thumbprints, TBS hashes, key identifiers, basic
+//!   constraints, key usage, EKUs (named from the [`eku`] catalogue),
+//!   policies, CRL and AIA URLs, and whether it is self-signed.
+//! - [`build_chain`] orders a signature's embedded certificates into the
+//!   as-provided chain (leaf, intermediates, PCA, root) and builds the
+//!   full chain against a [`TrustConfig`] of policy-shipped anchors and
+//!   intermediates, verifying every link's signature.
+//! - [`evaluate_trust`] does that for every valid signature in a
+//!   [`SignatureReport`] and picks the primary signature **among trusted
+//!   signers only**, so a nested signature from an untrusted signer can
+//!   never become primary. It yields the [`SignerIdentity`] publisher rules
+//!   use, or, for a file with no trusted signer, an unverified
+//!   [`VendorHint`]. [`SignatureReport::primary`] is the #48 choice by
+//!   cryptographic validity alone; trust decisions must use
+//!   [`TrustReport::primary`].
+//!
+//! Timestamps, expiry and revocation are #50; the OS trust store
+//! cross-check is the `os-trust` item of #48; catalogs are #51.
+//! [`SignatureInfo::timestamp_tokens`] carries what #50 needs.
 //!
 //! # Untrusted input
 //!
@@ -65,13 +87,23 @@
 #![forbid(unsafe_code)]
 
 mod asn1;
+mod chain;
 mod crypto;
+pub mod eku;
 pub mod hash;
 mod pkcs7;
 mod signature;
+mod trust;
 mod verify;
+mod x509;
 
 pub use asn1::{Asn1Error, Asn1ErrorKind, ObjectId};
+pub use chain::{
+    AnchorRef, AnchorSource, CertOrigin, ChainCert, ChainIssue, ChainPath, ChainReport,
+    MAX_CHAIN_ISSUES, MAX_CHAIN_LENGTH, MAX_CHAIN_PATHS, MAX_FILE_SIGNATURE_CHECKS,
+    MAX_SIGNATURE_CHECKS, TrustAnchor, TrustConfig, WellKnownRoot, WellKnownRootError, build_chain,
+};
+pub use eku::Eku;
 pub use hash::{
     AuthenticodeError, AuthenticodeHashes, AuthenticodeStatus, HashRanges, HashScenario,
     NonConformance, RangeHasher, authenticode_hashes, hash_pe,
@@ -84,7 +116,15 @@ pub use signature::{
     SignatureWarning, SignerAttributes, SignerIdentifier, SigningState, StatementType,
     TimestampKind, TimestampToken, Unsupported, VerifyOptions,
 };
+pub use trust::{
+    FilePublisherOsRule, IdentityIssue, NameSource, OsRuleRoot, PublisherName, PublisherOsRule,
+    SignerIdentity, SignerTrust, TrustReport, UntrustedReason, VendorHint, evaluate_trust,
+};
 pub use verify::{
     MAX_CERTIFICATE_ENTRIES, MAX_CERTIFICATE_TABLE_SIZE, MAX_NESTING_DEPTH, MAX_SIGNATURES,
     verify_certificate_table, verify_pe, verify_signatures,
+};
+pub use x509::{
+    AttributeKind, BasicConstraints, CertSummary, CertificateError, DistinguishedName, KeyUsage,
+    NameAttribute,
 };

@@ -738,7 +738,7 @@ fn parse_signature_alg(id: &Tlv<'_>, signer_digest: &DigestId) -> Result<Signatu
 /// `RSASSA-PSS-params` (RFC 4055). Invalid DER is an error. Returns
 /// `Ok(None)` when a digest or mask function is unknown, or the trailer
 /// field is not 1, so the algorithm is reported as unsupported.
-fn parse_pss_params(params: Option<&Tlv<'_>>) -> Result<Option<SignatureAlgorithm>> {
+pub(crate) fn parse_pss_params(params: Option<&Tlv<'_>>) -> Result<Option<SignatureAlgorithm>> {
     let Some(params) = params else {
         return Err(SignatureError::AlgorithmParameters);
     };
@@ -879,7 +879,7 @@ pub(crate) fn parse_certificate(
 
 type Spki<'a> = (KeyAlgorithm, Option<u32>, Option<CertKey<'a>>);
 
-fn parse_spki<'a>(spki: &Tlv<'a>) -> std::result::Result<Spki<'a>, asn1::Asn1Error> {
+pub(crate) fn parse_spki<'a>(spki: &Tlv<'a>) -> std::result::Result<Spki<'a>, asn1::Asn1Error> {
     let mut s = spki.reader();
     let alg_id = s.read(tag::SEQUENCE)?;
     let key_bits_tlv = s.read(tag::BIT_STRING)?;

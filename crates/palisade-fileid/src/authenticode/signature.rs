@@ -4,13 +4,16 @@
 
 use std::fmt;
 
+use serde::Serialize;
+
 use super::asn1::{Asn1Error, ObjectId};
 use super::hash::AuthenticodeStatus;
 use crate::hash::HashAlgorithm;
 use crate::pe::WarningKind;
 
 /// A digest algorithm named by a signature.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DigestAlgorithm {
     /// MD2. Broken; never trusted, and not even computed.
     Md2,
@@ -69,7 +72,8 @@ impl DigestAlgorithm {
 }
 
 /// A named elliptic curve.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Curve {
     /// NIST P-256 (`prime256v1`).
     P256,
@@ -81,7 +85,8 @@ pub enum Curve {
 }
 
 /// The algorithm of a signer's public key.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum KeyAlgorithm {
     /// RSA.
@@ -102,7 +107,8 @@ pub enum KeyAlgorithm {
 }
 
 /// The algorithm a SignerInfo's signature uses.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum SignatureAlgorithm {
     /// RSA PKCS#1 v1.5 over this digest.
@@ -129,7 +135,8 @@ pub enum SignatureAlgorithm {
 
 /// Why a signature could not be verified. A signature in this state is
 /// **never** treated as valid.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Unsupported {
     /// A broken digest algorithm (MD2, MD5).

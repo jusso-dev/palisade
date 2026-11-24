@@ -7,6 +7,7 @@
 #   cargo +nightly fuzz run authenticode_ranges
 #   cargo +nightly fuzz run authenticode_pkcs7
 #   cargo +nightly fuzz run fsctx_parse
+#   cargo +nightly fuzz run x509_chain
 [package]
 name = "palisade-fileid-fuzz"
 version = "0.0.0"
@@ -54,6 +55,13 @@ bench = false
 [[bin]]
 name = "fsctx_parse"
 path = "fuzz_targets/fsctx_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "x509_chain"
+path = "fuzz_targets/x509_chain.rs"
 test = false
 doc = false
 bench = false
