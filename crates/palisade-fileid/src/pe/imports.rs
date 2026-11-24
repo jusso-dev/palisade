@@ -6,8 +6,9 @@
 //! binary search over the name table, as `GetProcAddress` does. Tables and
 //! names are read from mapped memory: they may run on into the next
 //! section when the two are adjacent, a section's zero-filled tail past
-//! its raw data reads as zeros, and unmapped memory or the end of a
-//! truncated file ends the read as unreadable. No name read looks at more
+//! its raw data reads as zeros, and unmapped memory, the end of a
+//! truncated file, or a read spread over more than [`MAX_READ_EXTENTS`]
+//! extents ends the read as unreadable. No name read looks at more
 //! than a name's cap, so the work stays linear in the number of entries.
 //! The lists kept here are capped
 //! ([`MAX_IMPORT_MODULES`], [`MAX_IMPORTED_FUNCTIONS`], [`MAX_EXPORTS`]).
@@ -25,7 +26,7 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 use super::read::{bytes, to_usize, u16_at, u32_at};
-use super::{DataDirectory, DataDirectoryKind, Layout, PeFormat, WarningKind, Warnings};
+use super::{DataDirectory, DataDirectoryKind, Extent, Layout, PeFormat, WarningKind, Warnings};
 
 /// At most this many imported modules are listed.
 pub const MAX_IMPORT_MODULES: usize = 4096;
@@ -52,6 +53,13 @@ pub const MAX_NAME_LEN: usize = 512;
 /// [`ImportInfo::all_module_names`]. Kernel modules are always recorded,
 /// in [`ImportInfo::kernel_modules`], however many names come first.
 pub const MAX_MODULE_NAME_BYTES: usize = 1024 * 1024;
+
+/// A single read of a name, descriptor or thunk crosses at most this many
+/// mapped extents (runs of file-backed bytes or zero fill), so each read
+/// costs at most this many section lookups. Real images need two (into a
+/// section's zero fill, or into the next section). A read that needs more
+/// is unreadable, and is reported as such, never taken as complete.
+pub const MAX_READ_EXTENTS: usize = 4;
 
 const DESCRIPTOR_SIZE: usize = 20;
 const EXPORT_DIRECTORY_SIZE: usize = 40;
@@ -246,12 +254,14 @@ fn c_string<'a>(
     let limit = max.saturating_add(1);
     let mut out: Cow<'a, [u8]> = Cow::Borrowed(&[]);
     let mut at = rva;
-    // Each pass reads at least one byte, and at most `limit` in all.
-    loop {
-        if layout.zero_filled(at) {
-            return Some((out, true));
-        }
-        let (offset, available) = layout.backed_extent(at)?;
+    // Each pass reads at least one byte, and at most `limit` in all, over
+    // at most `MAX_READ_EXTENTS` extents.
+    for _ in 0..MAX_READ_EXTENTS {
+        let (offset, available) = match layout.extent(at) {
+            Extent::Backed(offset, available) => (offset, available),
+            Extent::Zero(_) => return Some((out, true)),
+            Extent::Unmapped => return None,
+        };
         let len = to_usize(available)?.min(limit.saturating_sub(out.len()));
         let raw = bytes(data, offset, len)?;
         let end = raw.iter().position(|b| *b == 0);
@@ -276,6 +286,8 @@ fn c_string<'a>(
         }
         at = at.checked_add(u32::try_from(len).ok()?)?;
     }
+    // Spread over more extents than a real image uses: unreadable.
+    None
 }
 
 /// A name read by [`name_at`].
@@ -314,24 +326,29 @@ impl Once {
 /// `N` bytes of mapped memory at `rva`, as the loader lays it out:
 /// file-backed bytes, and zeros where they are in a section's zero-filled
 /// tail. `None` if any byte is unmapped, or past the end of a truncated
-/// input inside the declared raw data (which is never taken for zero fill).
+/// input inside the declared raw data (which is never taken for zero fill),
+/// or if the bytes are spread over more than [`MAX_READ_EXTENTS`] extents.
 fn mapped<const N: usize>(data: &[u8], layout: Layout<'_>, rva: u32) -> Option<[u8; N]> {
     let mut out = [0_u8; N];
     let mut done = 0;
-    while done < N {
+    for _ in 0..MAX_READ_EXTENTS {
+        if done >= N {
+            break;
+        }
         let at = rva.checked_add(u32::try_from(done).ok()?)?;
-        if let Some((offset, available)) = layout.backed_extent(at) {
-            let n = to_usize(available)?.min(N - done);
-            out.get_mut(done..done + n)?
-                .copy_from_slice(bytes(data, offset, n)?);
-            done += n;
-        } else if layout.zero_filled(at) {
-            done += 1;
-        } else {
-            return None;
+        match layout.extent(at) {
+            Extent::Backed(offset, available) => {
+                let n = to_usize(available)?.min(N - done);
+                out.get_mut(done..done + n)?
+                    .copy_from_slice(bytes(data, offset, n)?);
+                done += n;
+            }
+            // `out` is already zero there.
+            Extent::Zero(len) => done += to_usize(len)?.min(N - done),
+            Extent::Unmapped => return None,
         }
     }
-    Some(out)
+    (done >= N).then_some(out)
 }
 
 /// `len` file-backed bytes at `rva`.

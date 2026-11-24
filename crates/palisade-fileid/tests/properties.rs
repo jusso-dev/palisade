@@ -85,6 +85,10 @@ fn check_bounds(data: &[u8], info: &PeInfo) {
         if imports.modules.iter().any(|m| m.name_cut) {
             assert!(imports.truncated);
         }
+        // So is a lossy one, which never matches.
+        if imports.modules.iter().any(|m| m.name_lossy) {
+            assert!(imports.truncated);
+        }
         let listed: usize = imports.modules.iter().map(|m| m.functions.len()).sum();
         assert_eq!(listed, imports.function_count);
     }

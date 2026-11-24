@@ -38,7 +38,8 @@ pub use driver::{DriverClass, DriverSignal, KERNEL_MODULES};
 pub use imports::{
     Export, ExportInfo, ExportTarget, ImportInfo, ImportedFunction, ImportedModule,
     MAX_EXPORT_SLOTS, MAX_EXPORTS, MAX_IMPORT_DESCRIPTORS, MAX_IMPORT_MODULES,
-    MAX_IMPORTED_FUNCTIONS, MAX_MODULE_NAME_BYTES, MAX_NAME_LEN, MAX_ORDINAL_SCAN, NotableExports,
+    MAX_IMPORTED_FUNCTIONS, MAX_MODULE_NAME_BYTES, MAX_NAME_LEN, MAX_ORDINAL_SCAN,
+    MAX_READ_EXTENTS, NotableExports,
 };
 pub use manifest::{
     AssemblyIdentity, Elevation, ElevationReason, ExecutionLevel, Manifest, ManifestError,
@@ -664,15 +665,38 @@ impl<'a> Layout<'a> {
     /// and has no file offset. The headers are mapped below both
     /// `SizeOfHeaders` and the lowest section RVA.
     pub(crate) fn backed_extent(&self, rva: u32) -> Option<(usize, u32)> {
+        match self.extent(rva) {
+            Extent::Backed(offset, available) => Some((offset, available)),
+            Extent::Zero(_) | Extent::Unmapped => None,
+        }
+    }
+
+    /// What is mapped at `rva`, with one section lookup: file-backed bytes
+    /// (as [`Self::backed_extent`]); a section's zero-filled tail (inside
+    /// its mapped span but past the raw data it declares, or in a section
+    /// with none), with how many zero bytes follow to the end of the span;
+    /// or nothing usable (unmapped, or past the end of a truncated input
+    /// inside the declared raw data). Zero fill depends only on the
+    /// headers, never on the input's length, so a truncated file is not
+    /// mistaken for it.
+    pub(crate) fn extent(&self, rva: u32) -> Extent {
         if let Some(s) = self.section_for(rva) {
-            let delta = rva.checked_sub(s.virtual_address)?;
-            let (start, raw_size) = s.file_data(self.file_alignment)?;
-            let backed = raw_size.min(mapped_span(s, self.section_alignment));
+            let Some(delta) = rva.checked_sub(s.virtual_address) else {
+                return Extent::Unmapped;
+            };
+            let span = mapped_span(s, self.section_alignment);
+            let Some((start, raw_size)) = s.file_data(self.file_alignment) else {
+                return Extent::Zero(span.saturating_sub(delta));
+            };
+            let backed = raw_size.min(span);
             if delta >= backed {
-                return None;
+                return Extent::Zero(span.saturating_sub(delta));
             }
-            let offset = to_usize(start.checked_add(delta)?)?;
-            return clamp_to_file(offset, backed - delta, self.file_len);
+            return start
+                .checked_add(delta)
+                .and_then(to_usize)
+                .and_then(|offset| clamp_to_file(offset, backed - delta, self.file_len))
+                .map_or(Extent::Unmapped, |(o, n)| Extent::Backed(o, n));
         }
         let limit = self
             .sections
@@ -683,27 +707,12 @@ impl<'a> Layout<'a> {
                 first.min(self.size_of_headers)
             });
         if rva < limit {
-            clamp_to_file(to_usize(rva)?, limit - rva, self.file_len)
+            to_usize(rva)
+                .and_then(|offset| clamp_to_file(offset, limit - rva, self.file_len))
+                .map_or(Extent::Unmapped, |(o, n)| Extent::Backed(o, n))
         } else {
-            None
+            Extent::Unmapped
         }
-    }
-
-    /// Whether `rva` is mapped zero-filled memory: inside a section's mapped
-    /// span but past the raw data it declares (or in a section with none).
-    /// This depends only on the headers, never on the input's length, so a
-    /// truncated file is not mistaken for zero fill.
-    pub(crate) fn zero_filled(&self, rva: u32) -> bool {
-        let Some(s) = self.section_for(rva) else {
-            return false;
-        };
-        let Some(delta) = rva.checked_sub(s.virtual_address) else {
-            return false;
-        };
-        let backed = s.file_data(self.file_alignment).map_or(0, |(_, raw_size)| {
-            raw_size.min(mapped_span(s, self.section_alignment))
-        });
-        delta >= backed
     }
 
     /// Maps the RVA range `rva..rva + len` to a file offset. The range must
@@ -713,6 +722,19 @@ impl<'a> Layout<'a> {
         let (offset, available) = self.backed_extent(rva)?;
         (len <= available).then_some(offset)
     }
+}
+
+/// What [`Layout::extent`] finds at an RVA.
+#[derive(Clone, Copy)]
+pub(crate) enum Extent {
+    /// This file offset, and how many file-backed bytes follow it (at
+    /// least one).
+    Backed(usize, u32),
+    /// A section's zero-filled tail, and how many zero bytes follow to the
+    /// end of the section's mapped span (at least one).
+    Zero(u32),
+    /// Unmapped, or past the end of a truncated input.
+    Unmapped,
 }
 
 /// Cuts an extent of `available` bytes at file offset `offset` so it ends at

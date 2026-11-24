@@ -59,6 +59,10 @@ fuzz_target!(|data: &[u8]| {
             if imports.modules.iter().any(|m| m.name_cut) {
                 assert!(imports.truncated);
             }
+            // So is a lossy one, which never matches.
+            if imports.modules.iter().any(|m| m.name_lossy) {
+                assert!(imports.truncated);
+            }
             assert!(imports.kernel_modules.len() <= pe::KERNEL_MODULES.len());
             for m in &imports.modules {
                 assert!(m.name.len() <= pe::MAX_NAME_LEN * 3);

@@ -44,6 +44,7 @@
 
 #![forbid(unsafe_code)]
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use quick_xml::XmlVersion;
@@ -543,9 +544,8 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
 
     let mut out = Manifest::default();
     let mut path = Path(Vec::new());
-    // The namespace prefixes each open element declares, in step with
-    // `path`.
-    let mut scopes: Vec<Vec<Vec<u8>>> = Vec::new();
+    // The namespace prefixes in scope, in step with `path`.
+    let mut scopes = Scopes::default();
     let mut elements = 0_usize;
     let mut roots = 0_usize;
     // Anything read yet (for the declaration, which must come first).
@@ -741,13 +741,47 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
     Ok(out)
 }
 
+/// The namespace prefixes in scope: how many open elements declare each
+/// one, and what each open element declared, so closing it undoes exactly
+/// that. Lookups are logarithmic, however many prefixes are declared.
+#[derive(Default)]
+struct Scopes {
+    bound: BTreeMap<Vec<u8>, usize>,
+    frames: Vec<Vec<Vec<u8>>>,
+}
+
+impl Scopes {
+    fn push(&mut self, declared: Vec<Vec<u8>>) {
+        for prefix in &declared {
+            let count = self.bound.entry(prefix.clone()).or_insert(0);
+            *count = count.saturating_add(1);
+        }
+        self.frames.push(declared);
+    }
+
+    fn pop(&mut self) {
+        for prefix in self.frames.pop().unwrap_or_default() {
+            if let Some(count) = self.bound.get_mut(&prefix) {
+                *count = count.saturating_sub(1);
+                if *count == 0 {
+                    self.bound.remove(&prefix);
+                }
+            }
+        }
+    }
+
+    fn is_bound(&self, prefix: &[u8]) -> bool {
+        self.bound.contains_key(prefix)
+    }
+}
+
 /// Records the namespace prefixes `e` declares (`xmlns:p="..."`) as a new
 /// scope, then checks that its own prefix and its attributes' prefixes are
 /// declared, as XML Namespaces requires. `xml` is always bound and `xmlns`
 /// only declares. A name with an undeclared prefix is not namespace
 /// well formed, so the manifest is an error rather than read by its local
 /// name.
-fn bind_prefixes(e: &BytesStart<'_>, scopes: &mut Vec<Vec<Vec<u8>>>) -> Result<(), ManifestError> {
+fn bind_prefixes(e: &BytesStart<'_>, scopes: &mut Scopes) -> Result<(), ManifestError> {
     let bad = |what: &str| Err(ManifestError::Xml(format!("namespace prefix: {what}")));
     let mut declared = Vec::new();
     let mut used = Vec::new();
@@ -773,7 +807,7 @@ fn bind_prefixes(e: &BytesStart<'_>, scopes: &mut Vec<Vec<Vec<u8>>>) -> Result<(
         if prefix == b"xmlns" {
             return bad("`xmlns` used as a prefix");
         }
-        if prefix != b"xml" && !scopes.iter().any(|s| s.contains(&prefix)) {
+        if prefix != b"xml" && !scopes.is_bound(&prefix) {
             return bad("undeclared");
         }
     }
@@ -961,4 +995,24 @@ fn installer_heuristic(
         .iter()
         .find(|(_, value)| value.to_lowercase().contains("install"))
         .map(|(field, _)| ElevationReason::InstallerVersionInfo(field))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Scopes;
+
+    #[test]
+    fn a_prefix_declared_twice_stays_bound_until_both_close() {
+        let mut scopes = Scopes::default();
+        scopes.push(vec![b"x".to_vec()]);
+        scopes.push(vec![b"x".to_vec(), b"y".to_vec()]);
+        assert!(scopes.is_bound(b"x") && scopes.is_bound(b"y"));
+        scopes.pop();
+        assert!(scopes.is_bound(b"x") && !scopes.is_bound(b"y"));
+        scopes.pop();
+        assert!(!scopes.is_bound(b"x"));
+        // Popping past the root is harmless.
+        scopes.pop();
+        assert!(!scopes.is_bound(b"x"));
+    }
 }

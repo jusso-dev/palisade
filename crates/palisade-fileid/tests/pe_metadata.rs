@@ -2367,3 +2367,92 @@ fn an_unreadable_process_manifest_is_never_replaced_by_id_2() {
     .build();
     assert_eq!(parse(&image).manifest_id, Some(2));
 }
+
+/// A PE32+ image with `SectionAlignment` and `FileAlignment` 1. `.text`
+/// (RVA 0x1000) holds one import descriptor, a terminator, and an ordinal
+/// thunk; the module name is at RVA 0x2000 and is spread over one section
+/// per piece in `pieces`, each mapped right after the last.
+fn name_over_sections(pieces: &[&[u8]]) -> Vec<u8> {
+    let builder = PeBuilder::default();
+    let mut image = builder.build();
+    let o = OPT_OFFSET;
+    put32(&mut image, o + 32, 1);
+    put32(&mut image, o + 36, 1);
+    // `.text`: descriptor 0, terminator, thunk at +0x40.
+    let text = SIZE_OF_HEADERS as usize;
+    image[text..text + 0x50].fill(0);
+    put32(&mut image, text, 0x1040);
+    put32(&mut image, text + 12, 0x2000);
+    put32(&mut image, text + 16, 0x1040);
+    put64(&mut image, text + 0x40, (1 << 63) | 7);
+    let dir = builder.data_directory_offset(DIR_IMPORT);
+    put32(&mut image, dir, 0x1000);
+    put32(&mut image, dir + 4, 40);
+    // One section per piece, its raw data appended to the file.
+    let table = builder.section_table_offset();
+    let mut rva = 0x2000_u32;
+    for (i, piece) in pieces.iter().enumerate() {
+        let raw = image.len() as u32;
+        image.extend_from_slice(piece);
+        let at = table + (i + 1) * 40;
+        image[at..at + 8].copy_from_slice(b".n\0\0\0\0\0\0");
+        put32(&mut image, at + 8, piece.len() as u32);
+        put32(&mut image, at + 12, rva);
+        put32(&mut image, at + 16, piece.len() as u32);
+        put32(&mut image, at + 20, raw);
+        put32(
+            &mut image,
+            at + 36,
+            IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ,
+        );
+        rva += piece.len() as u32;
+    }
+    put16(&mut image, COFF_OFFSET + 2, (pieces.len() + 1) as u16);
+    put32(&mut image, o + 56, rva);
+    image
+}
+
+#[test]
+fn a_read_spread_over_many_sections_is_unreadable() {
+    // A name over three adjacent sections is read whole.
+    let info = parse(&name_over_sections(&[b"ab", b"cd", b"\0"]));
+    let i = info.imports.as_ref().unwrap();
+    assert_eq!(i.modules[0].name, "abcd");
+    assert!(!i.truncated, "{:?}", info.parse_warnings);
+    // Spread over more extents than `MAX_READ_EXTENTS`, each read would
+    // cost a section lookup per byte; it is unreadable instead, and the
+    // table says so, so the work per read stays bounded.
+    let pieces: Vec<&[u8]> = vec![b"a"; pe::MAX_READ_EXTENTS + 1];
+    let mut pieces = pieces;
+    pieces.push(b"\0");
+    let info = parse(&name_over_sections(&pieces));
+    let i = info.imports.as_ref().unwrap();
+    assert!(i.modules.is_empty() && i.truncated);
+    assert!(
+        info.parse_warnings
+            .iter()
+            .any(|w| w.kind == WarningKind::ImportTableMalformed)
+    );
+}
+
+#[test]
+fn many_namespace_declarations_are_checked_quickly() {
+    // Thousands of prefixes declared on the root and used throughout: each
+    // check is a set lookup, not a scan of every declaration.
+    let n = 4_000;
+    let mut xml = String::from("<assembly");
+    for i in 0..n {
+        xml.push_str(&format!(" xmlns:p{i}=\"u\""));
+    }
+    xml.push('>');
+    for i in (0..n).step_by(4) {
+        xml.push_str(&format!("<p{i}:e p{}:a=\"1\"/>", n - 1 - i));
+    }
+    xml.push_str("</assembly>");
+    assert!(xml.len() <= MAX_MANIFEST_SIZE);
+    let start = std::time::Instant::now();
+    assert!(parse_manifest(xml.as_bytes()).is_ok());
+    // A smoke test only, generous so that slow CI machines pass: the
+    // structure (`Scopes`, a counted map) is what bounds the work.
+    assert!(start.elapsed() < std::time::Duration::from_secs(5));
+}
