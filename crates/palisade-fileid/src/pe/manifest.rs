@@ -11,10 +11,25 @@
 //! ([`MAX_MANIFEST_SIZE`], [`MAX_DEPTH`], [`MAX_ELEMENTS`],
 //! [`MAX_VALUE_LEN`]).
 //!
-//! Elements are matched by local name, ignoring namespace prefixes, and
-//! values are compared ASCII case-insensitively where the OS does
-//! (`requireAdministrator`, `true`). The first occurrence of each setting
-//! wins.
+//! Each setting is read only at its place in the manifest schema, by local
+//! name (namespace prefixes are ignored):
+//!
+//! | Setting | Path |
+//! |---|---|
+//! | `requestedExecutionLevel` | `assembly/trustInfo/security/requestedPrivileges/requestedExecutionLevel` |
+//! | `assemblyIdentity` (the manifest's own) | `assembly/assemblyIdentity` |
+//! | `supportedOS` | `assembly/compatibility/application/supportedOS` |
+//! | `autoElevate`, `dpiAware`, `dpiAwareness` | `assembly/application/windowsSettings/<name>` |
+//!
+//! So a dependency's `assemblyIdentity`, or a decoy setting placed anywhere
+//! else, is never taken for the real one. The first occurrence at the right
+//! place wins. Values are trimmed, then compared ASCII case-insensitively
+//! where the OS does (`requireAdministrator`, `true`). Text may be split by
+//! references or CDATA sections; it is joined before it is read.
+//!
+//! The whole document must be well formed: one root element, every element
+//! closed, every attribute well formed, unique and free of undefined
+//! entities, even on elements whose settings are not read.
 //!
 //! [`requires_elevation`] is the #45 heuristic for whether starting the
 //! file will ask for administrator rights.
@@ -84,9 +99,11 @@ pub struct AssemblyIdentity {
 /// What [`parse_manifest`] found.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Manifest {
-    /// `requestedExecutionLevel` `level`.
+    /// `requestedExecutionLevel` `level`. `None` when there is no
+    /// `requestedExecutionLevel`, or it has no `level`.
     pub execution_level: Option<ExecutionLevel>,
-    /// `requestedExecutionLevel` `uiAccess`.
+    /// `requestedExecutionLevel` `uiAccess`, from the same element as
+    /// [`Self::execution_level`].
     pub ui_access: Option<bool>,
     /// The `autoElevate` setting.
     pub auto_elevate: Option<bool>,
@@ -94,13 +111,14 @@ pub struct Manifest {
     pub dpi_aware: Option<String>,
     /// The `dpiAwareness` setting, as written.
     pub dpi_awareness: Option<String>,
-    /// The first `assemblyIdentity` (the manifest's own, not a
-    /// dependency's).
+    /// The manifest's own `assemblyIdentity` (a direct child of the root
+    /// `assembly`), never a dependency's.
     pub identity: Option<AssemblyIdentity>,
     /// `supportedOS` `Id` GUIDs, in document order, at most
     /// [`MAX_SUPPORTED_OS`].
     pub supported_os: Vec<String>,
-    /// A limit was reached, so some of the document was not read.
+    /// More than [`MAX_SUPPORTED_OS`] `supportedOS` entries; the rest were
+    /// not kept.
     pub truncated: bool,
 }
 
@@ -118,6 +136,10 @@ pub enum ManifestError {
     DocType,
     /// Nested deeper than [`MAX_DEPTH`].
     TooDeep,
+    /// More than [`MAX_ELEMENTS`] elements. A manifest's settings can come
+    /// after any number of others, so a cut-off manifest is not read at
+    /// all rather than read in part.
+    TooManyElements,
     /// The XML is malformed, or uses an undefined entity.
     Xml(String),
 }
@@ -129,6 +151,7 @@ impl fmt::Display for ManifestError {
             Self::NotUtf8 => f.write_str("manifest is not UTF-8"),
             Self::DocType => f.write_str("manifest has a DOCTYPE"),
             Self::TooDeep => f.write_str("manifest is nested too deeply"),
+            Self::TooManyElements => f.write_str("manifest has too many elements"),
             Self::Xml(e) => write!(f, "manifest is not well-formed XML: {e}"),
         }
     }
@@ -136,8 +159,10 @@ impl fmt::Display for ManifestError {
 
 impl std::error::Error for ManifestError {}
 
-/// Cuts `s` to at most [`MAX_VALUE_LEN`] bytes, on a character boundary.
-fn bounded(mut s: String) -> String {
+/// `s` trimmed, then cut to at most [`MAX_VALUE_LEN`] bytes on a character
+/// boundary. Trimming first means padding cannot push the value out.
+fn bounded(s: &str) -> String {
+    let mut s = s.trim().to_owned();
     if s.len() > MAX_VALUE_LEN {
         let mut end = MAX_VALUE_LEN;
         while !s.is_char_boundary(end) {
@@ -148,29 +173,32 @@ fn bounded(mut s: String) -> String {
     s
 }
 
-fn local_name(e: &BytesStart<'_>) -> Vec<u8> {
-    e.local_name().as_ref().to_vec()
-}
-
-/// The unescaped value of attribute `name` (local name, ASCII
-/// case-insensitive).
-fn attr(e: &BytesStart<'_>, name: &str) -> Result<Option<String>, ManifestError> {
+/// Every attribute of `e`, checked: each must be well formed, unique and
+/// free of undefined entities, whether or not it is read. Returns the
+/// values of those in `wanted` (local name, ASCII case-insensitive),
+/// trimmed and bounded, in `wanted` order.
+fn attrs<const N: usize>(
+    e: &BytesStart<'_>,
+    wanted: [&str; N],
+) -> Result<[Option<String>; N], ManifestError> {
+    let mut out: [Option<String>; N] = std::array::from_fn(|_| None);
     for a in e.attributes() {
         let a = a.map_err(|err| ManifestError::Xml(err.to_string()))?;
-        if a.key
-            .local_name()
-            .as_ref()
-            .eq_ignore_ascii_case(name.as_bytes())
+        // Only the five predefined entities resolve; anything else fails.
+        let value = a
+            .normalized_value(XmlVersion::Implicit1_0)
+            .map_err(|err| ManifestError::Xml(err.to_string()))?;
+        let key = a.key.local_name();
+        if let Some(i) = wanted
+            .iter()
+            .position(|w| key.as_ref().eq_ignore_ascii_case(w.as_bytes()))
         {
-            // Only the five predefined entities resolve (one level deep);
-            // anything else is an error.
-            let v = a
-                .normalized_value(XmlVersion::Implicit1_0)
-                .map_err(|err| ManifestError::Xml(err.to_string()))?;
-            return Ok(Some(bounded(v.into_owned())));
+            if let Some(slot) = out.get_mut(i) {
+                slot.get_or_insert_with(|| bounded(&value));
+            }
         }
     }
-    Ok(None)
+    Ok(out)
 }
 
 fn parse_bool(value: &str) -> Option<bool> {
@@ -192,6 +220,33 @@ enum TextField {
     DpiAwareness,
 }
 
+/// The open element path, by local name. Bounded by [`MAX_DEPTH`].
+struct Path(Vec<Vec<u8>>);
+
+impl Path {
+    /// Whether the open elements, from the root, are exactly `names`
+    /// (ASCII case-insensitive).
+    fn is(&self, names: &[&str]) -> bool {
+        self.0.len() == names.len()
+            && self
+                .0
+                .iter()
+                .zip(names)
+                .all(|(a, b)| a.eq_ignore_ascii_case(b.as_bytes()))
+    }
+}
+
+const EXECUTION_LEVEL: [&str; 5] = [
+    "assembly",
+    "trustInfo",
+    "security",
+    "requestedPrivileges",
+    "requestedExecutionLevel",
+];
+const IDENTITY: [&str; 2] = ["assembly", "assemblyIdentity"];
+const SUPPORTED_OS: [&str; 4] = ["assembly", "compatibility", "application", "supportedOS"];
+const WINDOWS_SETTINGS: [&str; 3] = ["assembly", "application", "windowsSettings"];
+
 /// Parses a manifest resource.
 pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
     if data.len() > MAX_MANIFEST_SIZE {
@@ -203,15 +258,19 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
     let data = data.strip_prefix(b"\xef\xbb\xbf").unwrap_or(data);
     let text = std::str::from_utf8(data).map_err(|_| ManifestError::NotUtf8)?;
     let mut reader = Reader::from_str(text);
-    let config = reader.config_mut();
-    config.trim_text(true);
-    config.check_end_names = true;
+    // Text is kept as written and trimmed once it is joined, so whitespace
+    // next to a reference survives.
+    reader.config_mut().check_end_names = true;
 
     let mut out = Manifest::default();
-    let mut depth = 0_usize;
+    let mut path = Path(Vec::new());
     let mut elements = 0_usize;
+    let mut roots = 0_usize;
+    let mut seen_execution_level = false;
     let mut text_field: Option<TextField> = None;
     let mut text = String::new();
+    // Only whitespace may sit outside the root element.
+    let outside = |path: &Path, t: &str| path.0.is_empty() && !t.trim().is_empty();
     loop {
         let event = reader
             .read_event()
@@ -222,32 +281,59 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
                 let empty = matches!(event, Event::Empty(_));
                 elements += 1;
                 if elements > MAX_ELEMENTS {
-                    out.truncated = true;
-                    break;
+                    return Err(ManifestError::TooManyElements);
                 }
-                if !empty {
-                    depth += 1;
-                    if depth > MAX_DEPTH {
-                        return Err(ManifestError::TooDeep);
+                if path.0.is_empty() {
+                    roots += 1;
+                    if roots > 1 {
+                        return Err(ManifestError::Xml("more than one root element".into()));
                     }
                 }
-                element(e, &mut out)?;
+                if path.0.len() >= MAX_DEPTH {
+                    return Err(ManifestError::TooDeep);
+                }
+                path.0.push(e.local_name().as_ref().to_vec());
+                element(e, &path, &mut out, &mut seen_execution_level)?;
+                // Text belongs to a setting only directly inside it.
+                text_field = None;
                 if !empty {
-                    text_field = match local_name(e).as_slice() {
+                    let name = path.0.last().map(Vec::as_slice).unwrap_or_default();
+                    let in_settings = path.0.len() == WINDOWS_SETTINGS.len() + 1
+                        && path
+                            .0
+                            .iter()
+                            .zip(WINDOWS_SETTINGS)
+                            .all(|(a, b)| a.eq_ignore_ascii_case(b.as_bytes()));
+                    text_field = match name {
+                        _ if !in_settings => None,
                         b"autoElevate" => Some(TextField::AutoElevate),
                         b"dpiAware" => Some(TextField::DpiAware),
                         b"dpiAwareness" => Some(TextField::DpiAwareness),
                         _ => None,
                     };
                     text.clear();
+                } else {
+                    path.0.pop();
                 }
             }
             Event::Text(t) => {
-                if text_field.is_some() && text.len() < MAX_VALUE_LEN {
-                    let raw = t.decode().map_err(|e| ManifestError::Xml(e.to_string()))?;
+                let raw = t.decode().map_err(|e| ManifestError::Xml(e.to_string()))?;
+                if outside(&path, &raw) {
+                    return Err(ManifestError::Xml("text outside the root element".into()));
+                }
+                if text_field.is_some() && text.len() < MAX_VALUE_LEN * 2 {
                     let resolved = quick_xml::escape::unescape(&raw)
                         .map_err(|e| ManifestError::Xml(e.to_string()))?;
                     text.push_str(&resolved);
+                }
+            }
+            Event::CData(t) => {
+                let raw = t.decode().map_err(|e| ManifestError::Xml(e.to_string()))?;
+                if path.0.is_empty() {
+                    return Err(ManifestError::Xml("CDATA outside the root element".into()));
+                }
+                if text_field.is_some() && text.len() < MAX_VALUE_LEN * 2 {
+                    text.push_str(&raw);
                 }
             }
             Event::GeneralRef(r) => {
@@ -265,14 +351,22 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
                     }
                     Err(e) => return Err(ManifestError::Xml(e.to_string())),
                 };
-                if text_field.is_some() && text.len() < MAX_VALUE_LEN {
+                if path.0.is_empty() {
+                    return Err(ManifestError::Xml(
+                        "reference outside the root element".into(),
+                    ));
+                }
+                // Leading whitespace cannot crowd out the value: the cap
+                // is twice the kept length, and the value is trimmed
+                // before it is cut.
+                if text_field.is_some() && text.len() < MAX_VALUE_LEN * 2 {
                     text.push_str(&resolved);
                 }
             }
             Event::End(_) => {
-                depth = depth.saturating_sub(1);
+                path.0.pop();
                 if let Some(field) = text_field.take() {
-                    let value = bounded(text.trim().to_owned());
+                    let value = bounded(&text);
                     match field {
                         TextField::AutoElevate => {
                             if out.auto_elevate.is_none() {
@@ -288,42 +382,67 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
                     }
                 }
             }
-            Event::Eof => break,
+            Event::Eof => {
+                if !path.0.is_empty() {
+                    return Err(ManifestError::Xml("an element is not closed".into()));
+                }
+                if roots == 0 {
+                    return Err(ManifestError::Xml("no root element".into()));
+                }
+                break;
+            }
             _ => {}
         }
     }
     Ok(out)
 }
 
-fn element(e: &BytesStart<'_>, out: &mut Manifest) -> Result<(), ManifestError> {
-    match local_name(e).as_slice() {
-        b"requestedExecutionLevel" => {
-            if out.execution_level.is_none() {
-                out.execution_level = attr(e, "level")?.map(|v| ExecutionLevel::parse(v.trim()));
-                out.ui_access = attr(e, "uiAccess")?.and_then(|v| parse_bool(&v));
+fn element(
+    e: &BytesStart<'_>,
+    path: &Path,
+    out: &mut Manifest,
+    seen_execution_level: &mut bool,
+) -> Result<(), ManifestError> {
+    if path.is(&EXECUTION_LEVEL) {
+        let [level, ui_access] = attrs(e, ["level", "uiAccess"])?;
+        // The first element decides, even if it lacks one of them.
+        if !*seen_execution_level {
+            *seen_execution_level = true;
+            out.execution_level = level.map(|v| ExecutionLevel::parse(&v));
+            out.ui_access = ui_access.and_then(|v| parse_bool(&v));
+        }
+    } else if path.is(&IDENTITY) {
+        let [name, version, arch, token, kind] = attrs(
+            e,
+            [
+                "name",
+                "version",
+                "processorArchitecture",
+                "publicKeyToken",
+                "type",
+            ],
+        )?;
+        if out.identity.is_none() {
+            out.identity = Some(AssemblyIdentity {
+                name,
+                version,
+                processor_architecture: arch,
+                public_key_token: token,
+                kind,
+            });
+        }
+    } else if path.is(&SUPPORTED_OS) {
+        let [id] = attrs(e, ["Id"])?;
+        if let Some(id) = id {
+            if out.supported_os.len() < MAX_SUPPORTED_OS {
+                out.supported_os.push(id);
+            } else {
+                out.truncated = true;
             }
         }
-        b"assemblyIdentity" => {
-            if out.identity.is_none() {
-                out.identity = Some(AssemblyIdentity {
-                    name: attr(e, "name")?,
-                    version: attr(e, "version")?,
-                    processor_architecture: attr(e, "processorArchitecture")?,
-                    public_key_token: attr(e, "publicKeyToken")?,
-                    kind: attr(e, "type")?,
-                });
-            }
-        }
-        b"supportedOS" => {
-            if let Some(id) = attr(e, "Id")? {
-                if out.supported_os.len() < MAX_SUPPORTED_OS {
-                    out.supported_os.push(id);
-                } else {
-                    out.truncated = true;
-                }
-            }
-        }
-        _ => {}
+    } else {
+        // Not read, but still checked.
+        let _ = attrs(e, [])?;
     }
     Ok(())
 }
@@ -337,9 +456,13 @@ pub enum ElevationReason {
     /// The manifest requests `highestAvailable`, which elevates for an
     /// administrator. Reported, but not counted as requiring elevation.
     HighestAvailable,
-    /// The manifest requests `asInvoker` (or another level), so no
-    /// installer heuristic applies.
+    /// The manifest requests `asInvoker`, so no installer heuristic
+    /// applies.
     ManifestAsInvoker,
+    /// The manifest requests a level this parser does not recognise. The
+    /// OS refuses to start such a file, so it is not treated as `asInvoker`;
+    /// the installer heuristics still apply.
+    UnknownLevel(String),
     /// There is no execution level in a manifest, and the file name
     /// contains this installer word.
     InstallerFileName(&'static str),
@@ -365,7 +488,8 @@ const INSTALLER_WORDS: [&str; 4] = ["setup", "install", "update", "patch"];
 
 /// Whether starting a file is expected to ask for administrator rights:
 /// true if its manifest requests `requireAdministrator`, or if it has no
-/// requested execution level and the installer heuristics match (its file
+/// (or an unrecognised) requested execution level and the installer
+/// heuristics match (its file
 /// name contains setup, install, update or patch, or its version info
 /// mentions installing). The OS applies the installer heuristics only to
 /// 32-bit images without an execution level; the caller decides whether
@@ -392,33 +516,47 @@ pub fn requires_elevation(
                 reason: ElevationReason::HighestAvailable,
             };
         }
-        Some(_) => {
+        Some(ExecutionLevel::AsInvoker) => {
             return Elevation {
                 requires_elevation: false,
                 reason: ElevationReason::ManifestAsInvoker,
             };
         }
+        Some(ExecutionLevel::Other(level)) => {
+            let heuristic = installer_heuristic(file_name, version_fields);
+            return Elevation {
+                requires_elevation: heuristic.is_some(),
+                reason: heuristic.unwrap_or(ElevationReason::UnknownLevel(level.clone())),
+            };
+        }
         None => {}
     }
+    match installer_heuristic(file_name, version_fields) {
+        Some(reason) => Elevation {
+            requires_elevation: true,
+            reason,
+        },
+        None => Elevation {
+            requires_elevation: false,
+            reason: ElevationReason::None,
+        },
+    }
+}
+
+/// The installer heuristics: a file name with an installer word, or a
+/// version field mentioning installing.
+fn installer_heuristic(
+    file_name: Option<&str>,
+    version_fields: &[(&'static str, &str)],
+) -> Option<ElevationReason> {
     if let Some(name) = file_name {
         let lower = name.to_lowercase();
         if let Some(word) = INSTALLER_WORDS.iter().find(|w| lower.contains(*w)) {
-            return Elevation {
-                requires_elevation: true,
-                reason: ElevationReason::InstallerFileName(word),
-            };
+            return Some(ElevationReason::InstallerFileName(word));
         }
     }
-    for (field, value) in version_fields {
-        if value.to_lowercase().contains("install") {
-            return Elevation {
-                requires_elevation: true,
-                reason: ElevationReason::InstallerVersionInfo(field),
-            };
-        }
-    }
-    Elevation {
-        requires_elevation: false,
-        reason: ElevationReason::None,
-    }
+    version_fields
+        .iter()
+        .find(|(_, value)| value.to_lowercase().contains("install"))
+        .map(|(field, _)| ElevationReason::InstallerVersionInfo(field))
 }

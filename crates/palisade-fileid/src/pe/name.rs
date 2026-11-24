@@ -4,7 +4,7 @@
 //! with odd spacing or in another Unicode form. [`NormalizedName`] keeps
 //! the original and gives two match forms:
 //!
-//! - [`NormalizedName::normalized`]: NUL padding stripped, trimmed, inner
+//! - [`NormalizedName::normalized`]: cut at the first NUL, trimmed, inner
 //!   whitespace runs collapsed to one space, then Unicode NFC.
 //! - [`NormalizedName::folded`]: that, case-folded the way the OS compares
 //!   names case-insensitively: each character maps to its simple upper-case
@@ -30,9 +30,10 @@ impl NormalizedName {
     /// Normalises `original`.
     #[must_use]
     pub fn new(original: &str) -> Self {
-        let unpadded = original.trim_end_matches('\0');
+        // A C string ends at its first NUL, as the OS reads it.
+        let unpadded = original.split('\0').next().unwrap_or_default();
         let mut collapsed = String::with_capacity(unpadded.len());
-        for word in unpadded.split(|c: char| c.is_whitespace() || c == '\0') {
+        for word in unpadded.split(char::is_whitespace) {
             if word.is_empty() {
                 continue;
             }

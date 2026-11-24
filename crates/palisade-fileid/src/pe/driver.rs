@@ -73,7 +73,7 @@ pub fn classify(
             }
         }
     }
-    if sections.iter().any(|s| s.raw_name == *b"INIT\0\0\0\0") {
+    if sections.iter().any(|s| s.raw_name.starts_with(b"INIT\0")) {
         signals.push(DriverSignal::InitSection);
     }
     if characteristics.is_system() {

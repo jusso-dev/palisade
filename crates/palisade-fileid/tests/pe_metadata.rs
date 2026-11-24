@@ -417,7 +417,7 @@ fn manifest_settings_are_read() {
 fn manifests_with_a_bom_entities_and_mixed_case_parse() {
     let mut xml = b"\xef\xbb\xbf".to_vec();
     xml.extend_from_slice(
-        br#"<assembly><requestedExecutionLevel level="RequireADMINISTRATOR"/><autoElevate>&#x74;rue</autoElevate><assemblyIdentity name="a&amp;b"/></assembly>"#,
+        br#"<assembly><assemblyIdentity name="a&amp;b"/><trustInfo><security><requestedPrivileges><requestedExecutionLevel level=" RequireADMINISTRATOR "/></requestedPrivileges></security></trustInfo><application><windowsSettings><autoElevate>&#x74;rue</autoElevate><dpiAware>per &#x6d;onitor</dpiAware><dpiAwareness><![CDATA[PerMonitorV2]]></dpiAwareness></windowsSettings></application></assembly>"#,
     );
     let m = parse_manifest(&xml).unwrap();
     assert_eq!(
@@ -425,24 +425,105 @@ fn manifests_with_a_bom_entities_and_mixed_case_parse() {
         Some(ExecutionLevel::RequireAdministrator)
     );
     assert_eq!(m.auto_elevate, Some(true));
+    // Spaces next to a reference survive; CDATA is read.
+    assert_eq!(m.dpi_aware.as_deref(), Some("per monitor"));
+    assert_eq!(m.dpi_awareness.as_deref(), Some("PerMonitorV2"));
     assert_eq!(m.identity.unwrap().name.as_deref(), Some("a&b"));
+    let cdata = br#"<assembly><application><windowsSettings><autoElevate><![CDATA[ true ]]></autoElevate></windowsSettings></application></assembly>"#;
+    assert_eq!(parse_manifest(cdata).unwrap().auto_elevate, Some(true));
+}
+
+/// A level inside requestedPrivileges, wrapped in an assembly.
+fn level_manifest(level: &str) -> String {
+    format!(
+        r#"<assembly><trustInfo><security><requestedPrivileges><requestedExecutionLevel level="{level}"/></requestedPrivileges></security></trustInfo></assembly>"#
+    )
+}
+
+#[test]
+fn settings_count_only_at_their_place_in_the_schema() {
+    // A dependency's identity is not the manifest's own, before or without
+    // a root identity.
+    let dep = r#"<dependency><dependentAssembly><assemblyIdentity name="Dep.Library" publicKeyToken="1111"/></dependentAssembly></dependency>"#;
+    let m = parse_manifest(format!("<assembly>{dep}</assembly>").as_bytes()).unwrap();
+    assert_eq!(m.identity, None);
+    let m = parse_manifest(
+        format!(r#"<assembly>{dep}<assemblyIdentity name="Own.App"/></assembly>"#).as_bytes(),
+    )
+    .unwrap();
+    assert_eq!(m.identity.unwrap().name.as_deref(), Some("Own.App"));
+
+    // A decoy level or autoElevate outside its place does not shadow the
+    // real one, before or after it.
+    let decoy = r#"<requestedExecutionLevel level="asInvoker"/><autoElevate>false</autoElevate>"#;
+    let real = r#"<trustInfo><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="true"/></requestedPrivileges></security></trustInfo><application><windowsSettings><autoElevate>true</autoElevate></windowsSettings></application>"#;
+    for xml in [
+        format!("<assembly>{decoy}{real}</assembly>"),
+        format!("<assembly>{real}{decoy}</assembly>"),
+        format!("<assembly><other>{decoy}</other>{real}</assembly>"),
+    ] {
+        let m = parse_manifest(xml.as_bytes()).unwrap();
+        assert_eq!(
+            m.execution_level,
+            Some(ExecutionLevel::RequireAdministrator),
+            "{xml}"
+        );
+        assert_eq!(
+            (m.ui_access, m.auto_elevate),
+            (Some(true), Some(true)),
+            "{xml}"
+        );
+    }
+    // Text in an element nested inside a setting is not the setting.
+    let nested = r#"<assembly><application><windowsSettings><autoElevate><x>true</x></autoElevate></windowsSettings></application></assembly>"#;
+    assert_eq!(
+        parse_manifest(nested.as_bytes()).unwrap().auto_elevate,
+        None
+    );
+    // The first requestedExecutionLevel decides, even without a level.
+    let first = r#"<assembly><trustInfo><security><requestedPrivileges><requestedExecutionLevel uiAccess="true"/><requestedExecutionLevel level="asInvoker" uiAccess="false"/></requestedPrivileges></security></trustInfo></assembly>"#;
+    let m = parse_manifest(first.as_bytes()).unwrap();
+    assert_eq!((m.execution_level, m.ui_access), (None, Some(true)));
+}
+
+#[test]
+fn padding_cannot_push_a_value_out() {
+    let padded = format!("{}requireAdministrator", " ".repeat(5_000));
+    let m = parse_manifest(level_manifest(&padded).as_bytes()).unwrap();
+    assert_eq!(
+        m.execution_level,
+        Some(ExecutionLevel::RequireAdministrator)
+    );
+    let refs = "&#x20;".repeat(1_500);
+    let xml = format!(
+        "<assembly><application><windowsSettings><autoElevate>{refs}true</autoElevate></windowsSettings></application></assembly>"
+    );
+    assert_eq!(
+        parse_manifest(xml.as_bytes()).unwrap().auto_elevate,
+        Some(true)
+    );
 }
 
 #[test]
 fn hostile_manifests_are_rejected() {
     let doctype = br#"<?xml version="1.0"?><!DOCTYPE a [<!ENTITY x "xxxxxxxx"><!ENTITY y "&x;&x;&x;">]><assembly>&y;</assembly>"#;
     assert_eq!(parse_manifest(doctype), Err(ManifestError::DocType));
-    let undefined = b"<assembly><autoElevate>&boom;</autoElevate></assembly>";
-    assert!(matches!(
-        parse_manifest(undefined),
-        Err(ManifestError::Xml(_))
-    ));
     let deep = format!(
         "{}{}",
         "<a>".repeat(MAX_DEPTH + 1),
         "</a>".repeat(MAX_DEPTH + 1)
     );
     assert_eq!(parse_manifest(deep.as_bytes()), Err(ManifestError::TooDeep));
+    // A self-closing element one level too deep is too deep too.
+    let deep_empty = format!(
+        "{}<b/>{}",
+        "<a>".repeat(MAX_DEPTH),
+        "</a>".repeat(MAX_DEPTH)
+    );
+    assert_eq!(
+        parse_manifest(deep_empty.as_bytes()),
+        Err(ManifestError::TooDeep)
+    );
     let big = vec![b' '; MAX_MANIFEST_SIZE + 1];
     assert_eq!(
         parse_manifest(&big),
@@ -452,10 +533,35 @@ fn hostile_manifests_are_rejected() {
         parse_manifest(b"\xff\xfe<\0a\0/\0>\0"),
         Err(ManifestError::NotUtf8)
     );
-    assert!(matches!(
-        parse_manifest(b"<a></b>"),
-        Err(ManifestError::Xml(_))
-    ));
+    let many = "<x/>".repeat(pe::manifest::MAX_ELEMENTS);
+    assert_eq!(
+        parse_manifest(format!("<assembly>{many}</assembly>").as_bytes()),
+        Err(ManifestError::TooManyElements)
+    );
+
+    // Not well formed, anywhere: every one is an error, never a partial or
+    // empty manifest.
+    for bad in [
+        &b""[..],
+        b"not xml",
+        b"<assembly><x>",
+        b"<assembly><autoElevate>true",
+        b"<a></b>",
+        b"<a/><b/>",
+        b"<assembly><autoElevate>&boom;</autoElevate></assembly>",
+        br#"<assembly x="&boom;"></assembly>"#,
+        br#"<assembly><requestedExecutionLevel level="asInvoker" x="&boom;"/></assembly>"#,
+        br#"<assembly><q a="1" a="2"/></assembly>"#,
+        br#"<assembly><q NOT_XML/></assembly>"#,
+        b"<assembly/>trailing",
+    ] {
+        assert!(
+            matches!(parse_manifest(bad), Err(ManifestError::Xml(_))),
+            "{:?}: {:?}",
+            String::from_utf8_lossy(bad),
+            parse_manifest(bad)
+        );
+    }
 
     // A bad manifest is a warning, not a parse failure.
     let info = parse(&with_manifest(doctype).build());
@@ -468,16 +574,76 @@ fn hostile_manifests_are_rejected() {
 }
 
 #[test]
+fn a_bad_process_manifest_is_not_replaced_by_a_decoy() {
+    // ID 1 is what the OS reads to start the process. If it does not parse
+    // here (UTF-16), a UTF-8 decoy at ID 2 must not stand in for it.
+    let mut utf16 = vec![0xff, 0xfe];
+    utf16.extend(
+        level_manifest("requireAdministrator")
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes),
+    );
+    let decoy = level_manifest("asInvoker");
+    let image = PeBuilder {
+        resources: vec![
+            Leaf {
+                type_id: 24,
+                name_id: 1,
+                lang: 0x0409,
+                data: utf16,
+            },
+            Leaf {
+                type_id: 24,
+                name_id: 2,
+                lang: 0x0409,
+                data: decoy.clone().into_bytes(),
+            },
+        ],
+        ..PeBuilder::default()
+    }
+    .build();
+    let info = parse(&image);
+    assert_eq!((info.manifest.as_ref(), info.manifest_id), (None, Some(1)));
+    assert!(
+        info.parse_warnings
+            .iter()
+            .any(|w| w.kind == WarningKind::Manifest(ManifestError::NotUtf8))
+    );
+    // A DLL with only an ID 2 manifest reports it, and says which it was.
+    let image = PeBuilder {
+        resources: vec![Leaf {
+            type_id: 24,
+            name_id: 2,
+            lang: 0x0409,
+            data: decoy.into_bytes(),
+        }],
+        ..PeBuilder::dll()
+    }
+    .build();
+    let info = parse(&image);
+    assert_eq!(info.manifest_id, Some(2));
+    assert_eq!(
+        info.manifest.unwrap().execution_level,
+        Some(ExecutionLevel::AsInvoker)
+    );
+}
+
+#[test]
 fn limits_bound_the_work() {
     let many: String = (0..100)
         .map(|i| format!(r#"<supportedOS Id="{i}"/>"#))
         .collect();
-    let m = parse_manifest(format!("<a>{many}</a>").as_bytes()).unwrap();
+    let xml = format!(
+        "<assembly><compatibility><application>{many}</application></compatibility></assembly>"
+    );
+    let m = parse_manifest(xml.as_bytes()).unwrap();
     assert_eq!(m.supported_os.len(), pe::manifest::MAX_SUPPORTED_OS);
     assert!(m.truncated);
     let long = "x".repeat(5000);
-    let m =
-        parse_manifest(format!(r#"<a><assemblyIdentity name="{long}"/></a>"#).as_bytes()).unwrap();
+    let m = parse_manifest(
+        format!(r#"<assembly><assemblyIdentity name="{long}"/></assembly>"#).as_bytes(),
+    )
+    .unwrap();
     assert_eq!(
         m.identity.unwrap().name.unwrap().len(),
         pe::manifest::MAX_VALUE_LEN
@@ -523,16 +689,29 @@ fn elevation_heuristic() {
     );
 
     // asInvoker in a manifest overrides the name heuristics.
-    let invoker = br#"<assembly><requestedExecutionLevel level="asInvoker"/></assembly>"#;
-    let info = parse(&with_manifest(invoker).build());
+    let invoker = level_manifest("asInvoker");
+    let info = parse(&with_manifest(invoker.as_bytes()).build());
     let e = info.requires_elevation(Some("setup.exe"));
     assert_eq!(
         (e.requires_elevation, e.reason),
         (false, ElevationReason::ManifestAsInvoker)
     );
-    let highest = br#"<assembly><requestedExecutionLevel level="highestAvailable"/></assembly>"#;
-    let e = parse(&with_manifest(highest).build()).requires_elevation(None);
+    let highest = level_manifest("highestAvailable");
+    let e = parse(&with_manifest(highest.as_bytes()).build()).requires_elevation(None);
     assert_eq!(e.reason, ElevationReason::HighestAvailable);
+    // An unknown level is not asInvoker: the installer heuristics apply.
+    let odd = level_manifest("elevateMaybe");
+    let info = parse(&with_manifest(odd.as_bytes()).build());
+    let e = info.requires_elevation(Some("setup.exe"));
+    assert_eq!(
+        (e.requires_elevation, e.reason),
+        (true, ElevationReason::InstallerFileName("setup"))
+    );
+    let e = info.requires_elevation(Some("tool.exe"));
+    assert_eq!(
+        e.reason,
+        ElevationReason::UnknownLevel("elevateMaybe".into())
+    );
 }
 
 // --- Name normalisation. ---------------------------------------------------------
@@ -549,4 +728,219 @@ fn names_are_normalised_and_folded() {
     // Simple folding only: ß does not become SS.
     assert!(!NormalizedName::new("straße").matches("STRASSE"));
     assert_eq!(NormalizedName::new("\0\0").normalized(), "");
+    assert_eq!(NormalizedName::new("a\0b").normalized(), "a");
+}
+
+// --- Round 2: imports and exports against crafted tables. -----------------
+
+/// An export section with `entries` of `(name bytes, ordinal index)` in
+/// name-table order, `functions` slots, and the slot RVAs given.
+fn raw_export_section(rva: u32, entries: &[(Vec<u8>, u16)], functions: &[u32]) -> Vec<u8> {
+    let mut out = vec![0_u8; 40];
+    let functions_at = out.len();
+    for f in functions {
+        out.extend_from_slice(&f.to_le_bytes());
+    }
+    let names_at = out.len();
+    out.resize(names_at + entries.len() * 4, 0);
+    let ordinals_at = out.len();
+    out.resize(ordinals_at + entries.len() * 2, 0);
+    for (i, (name, ordinal)) in entries.iter().enumerate() {
+        let at = out.len();
+        out.extend_from_slice(name);
+        out.push(0);
+        put32(&mut out, names_at + i * 4, rva + at as u32);
+        put16(&mut out, ordinals_at + i * 2, *ordinal);
+    }
+    put32(&mut out, 16, 1);
+    put32(&mut out, 20, functions.len() as u32);
+    put32(&mut out, 24, entries.len() as u32);
+    put32(&mut out, 28, rva + functions_at as u32);
+    put32(&mut out, 32, rva + names_at as u32);
+    put32(&mut out, 36, rva + ordinals_at as u32);
+    out
+}
+
+fn exports_of(entries: &[(Vec<u8>, u16)], functions: &[u32]) -> PeInfo {
+    let image = with_directory(PeBuilder::dll(), DIR_EXPORT, |rva| {
+        raw_export_section(rva, entries, functions)
+    });
+    parse(&image)
+}
+
+#[test]
+fn long_and_empty_export_names_hide_nothing() {
+    // Sorted as the loader expects: "", a 600-byte C++ name, then the
+    // notable ones. A crafted name at the search midpoint must not hide
+    // them, and must not end the listing.
+    let long = [b"?".as_slice(), &[b'x'; 600]].concat();
+    let names: Vec<Vec<u8>> = vec![
+        Vec::new(),
+        long.clone(),
+        b"CPlApplet".to_vec(),
+        b"DllGetClassObject".to_vec(),
+        b"DllRegisterServer".to_vec(),
+        b"ServiceMain".to_vec(),
+    ];
+    let entries: Vec<_> = names.iter().cloned().zip(0..).collect();
+    let info = exports_of(&entries, &[0x1000; 6]);
+    let e = info.exports.unwrap();
+    assert!(e.notable.cpl_applet && e.notable.dll_get_class_object);
+    assert!(e.notable.dll_register_server && e.notable.service_main);
+    assert_eq!(e.exports.len(), 6, "{:?}", e.exports);
+    let listed = e.exports[1].name.as_ref().unwrap();
+    assert_eq!(listed.len(), pe::MAX_NAME_LEN);
+    assert!(e.truncated, "a cut name marks the listing truncated");
+    assert_eq!(e.exports[0].name.as_deref(), Some(""));
+}
+
+#[test]
+fn the_lookup_uses_the_loader_midpoint() {
+    // Unsorted: the loader's inclusive search probes index 0 first and finds
+    // DllRegisterServer, so it is exported.
+    let entries = vec![(b"DllRegisterServer".to_vec(), 0), (b"AAA".to_vec(), 1)];
+    let e = exports_of(&entries, &[0x1000, 0x1010]).exports.unwrap();
+    assert!(e.notable.dll_register_server);
+}
+
+#[test]
+fn ordinals_past_the_function_table_are_rejected() {
+    // Two slots; the second name points at index 5.
+    let entries = vec![(b"Good".to_vec(), 0), (b"Bogus".to_vec(), 5)];
+    let info = exports_of(&entries, &[0x1000, 0x1010]);
+    let e = info.exports.as_ref().unwrap();
+    assert!(e.exports.iter().all(|x| x.name.as_deref() != Some("Bogus")));
+    assert!(e.truncated);
+    let warns = info
+        .parse_warnings
+        .iter()
+        .filter(|w| w.kind == WarningKind::ExportTableMalformed)
+        .count();
+    assert_eq!(warns, 1);
+    // A notable name past the table is not found either.
+    let entries = vec![(b"DllRegisterServer".to_vec(), 9)];
+    let e = exports_of(&entries, &[0x1000]).exports.unwrap();
+    assert!(!e.notable.dll_register_server);
+}
+
+#[test]
+fn unnamed_exports_are_listed_by_ordinal() {
+    // Three slots, one named; slot 1 is unused (RVA 0).
+    let entries = vec![(b"Named".to_vec(), 2)];
+    let e = exports_of(&entries, &[0x1000, 0, 0x1020]).exports.unwrap();
+    let summary: Vec<_> = e
+        .exports
+        .iter()
+        .map(|x| (x.name.clone(), x.ordinal))
+        .collect();
+    assert_eq!(summary, [(Some("Named".into()), 3), (None, 1)]);
+}
+
+#[test]
+fn an_unmapped_export_directory_is_reported() {
+    let mut image = with_directory(PeBuilder::dll(), DIR_EXPORT, |rva| {
+        raw_export_section(rva, &[], &[])
+    });
+    let at = PeBuilder::dll().data_directory_offset(DIR_EXPORT);
+    put32(&mut image, at, 0x00f0_0000);
+    let info = parse(&image);
+    assert!(info.exports.is_none());
+    assert!(info.parse_warnings.iter().any(|w| matches!(
+        w.kind,
+        WarningKind::DirectoryNotMapped(pe::DataDirectoryKind::Export)
+    )));
+}
+
+#[test]
+fn bad_descriptors_and_thunks_warn_once() {
+    // Build the table by hand: four descriptors, then a terminator.
+    let image = with_directory(PeBuilder::default(), DIR_IMPORT, |rva| {
+        let mut out = vec![0_u8; 5 * 20];
+        let name_at = out.len();
+        out.extend_from_slice(b"ok.dll\0");
+        while out.len() % 8 != 0 {
+            out.push(0);
+        }
+        let thunks_at = out.len();
+        out.resize(thunks_at + 16, 0);
+        put64(&mut out, thunks_at, (1 << 63) | 7);
+        for d in 0..3 {
+            // Name RVA unmapped, IAT present: malformed, not the end.
+            put32(&mut out, d * 20 + 12, 0x00f0_0000);
+            put32(&mut out, d * 20 + 16, rva + thunks_at as u32);
+        }
+        // A good name with an unmapped thunk array.
+        put32(&mut out, 3 * 20 + 12, rva + name_at as u32);
+        put32(&mut out, 3 * 20 + 16, 0x00f0_0000);
+        out
+    });
+    let info = parse(&image);
+    let imports = info.imports.as_ref().unwrap();
+    assert!(imports.truncated);
+    assert!(imports.imports_module("OK.DLL"));
+    assert_eq!(imports.modules.len(), 1);
+    assert_eq!(imports.modules[0].function_count, 0);
+    let warns = info
+        .parse_warnings
+        .iter()
+        .filter(|w| w.kind == WarningKind::ImportTableMalformed)
+        .count();
+    assert_eq!(warns, 1, "{:?}", info.parse_warnings);
+}
+
+#[test]
+fn module_names_are_bounded_in_memory() {
+    // Many distinct long names: the total kept stays under the byte cap.
+    let names: Vec<String> = (0..3000)
+        .map(|i| format!("{i:04}{}", "m".repeat(500)))
+        .collect();
+    let imports: Vec<Import<'_>> = names.iter().map(|n| (n.as_str(), vec![Err(1)])).collect();
+    let image = with_directory(PeBuilder::default(), DIR_IMPORT, |rva| {
+        import_section(rva, &imports, true)
+    });
+    let info = parse(&image);
+    let i = info.imports.unwrap();
+    let kept: usize = i.all_module_names.iter().map(String::len).sum();
+    assert!(kept <= pe::MAX_MODULE_NAME_BYTES);
+    assert!(i.truncated);
+}
+
+#[test]
+fn the_import_table_stops_where_the_loader_does() {
+    // A descriptor with a name but no import address table ends the table,
+    // as it does for the loader, even if it is not all zeros.
+    let image = with_directory(PeBuilder::default(), DIR_IMPORT, |rva| {
+        let mut body = import_section(
+            rva,
+            &[("a.dll", vec![Err(1)]), ("b.dll", vec![Err(2)])],
+            true,
+        );
+        // Zero b.dll's FirstThunk and OriginalFirstThunk, keep its name.
+        put32(&mut body, 20, 0);
+        put32(&mut body, 20 + 16, 0);
+        put32(&mut body, 20 + 4, 0xdead_beef); // TimeDateStamp set
+        body
+    });
+    let info = parse(&image);
+    let imports = info.imports.unwrap();
+    assert_eq!(imports.modules.len(), 1);
+    assert!(!imports.truncated);
+    assert!(info.parse_warnings.is_empty(), "{:?}", info.parse_warnings);
+}
+
+#[test]
+fn the_first_thunk_is_used_when_there_is_no_lookup_table() {
+    let image = with_directory(PeBuilder::default(), DIR_IMPORT, |rva| {
+        let mut body = import_section(rva, &[("a.dll", vec![Ok("Fn")])], true);
+        put32(&mut body, 0, 0); // OriginalFirstThunk
+        body
+    });
+    let imports = parse(&image).imports.unwrap();
+    assert_eq!(
+        imports.modules[0].functions,
+        [ImportedFunction::Name {
+            name: "Fn".into(),
+            hint: 0
+        }]
+    );
 }

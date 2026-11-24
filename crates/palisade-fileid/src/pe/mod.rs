@@ -38,7 +38,7 @@ pub use driver::{DriverClass, DriverSignal, KERNEL_MODULES};
 pub use imports::{
     Export, ExportInfo, ExportTarget, ImportInfo, ImportedFunction, ImportedModule,
     MAX_EXPORT_SLOTS, MAX_EXPORTS, MAX_IMPORT_DESCRIPTORS, MAX_IMPORT_MODULES,
-    MAX_IMPORTED_FUNCTIONS, MAX_NAME_LEN, NotableExports,
+    MAX_IMPORTED_FUNCTIONS, MAX_MODULE_NAME_BYTES, MAX_NAME_LEN, NotableExports,
 };
 pub use manifest::{
     AssemblyIdentity, Elevation, ElevationReason, ExecutionLevel, Manifest, ManifestError,
@@ -491,9 +491,15 @@ pub struct PeInfo {
     pub imports: Option<ImportInfo>,
     /// The export table, if the image has one.
     pub exports: Option<ExportInfo>,
-    /// The application manifest: the first standard `RT_MANIFEST` (ID 1,
-    /// 2 or 3) that parses.
+    /// The application manifest: the lowest standard `RT_MANIFEST` ID
+    /// present (1, 2 or 3), parsed. `None` when there is none, or when it
+    /// does not parse (with a [`WarningKind::Manifest`] warning); a higher
+    /// ID is never used in its place.
     pub manifest: Option<Manifest>,
+    /// The `RT_MANIFEST` ID [`Self::manifest`] was read from: 1 is the
+    /// process manifest the OS reads at process creation (and so the one
+    /// that decides elevation); 2 and 3 are DLL isolation manifests.
+    pub manifest_id: Option<u16>,
     /// Kernel driver signals and the verdict.
     pub driver: DriverClass,
     /// Non-fatal problems, at most [`MAX_WARNINGS`].
@@ -981,13 +987,14 @@ fn parse_impl(
     let mut resources = None;
     let mut version_info = None;
     let mut manifest = None;
+    let mut manifest_id = None;
     if let Some(dir) = data_directories
         .get(DataDirectoryKind::Resource.index())
         .filter(|d| directories && d.is_present())
     {
         if let Some(summary) = resource::walk(data, layout, *dir, &mut warnings) {
             version_info = version_from_resources(data, &summary, &mut warnings);
-            manifest = manifest_from_resources(data, &summary, &mut warnings);
+            (manifest, manifest_id) = manifest_from_resources(data, &summary, &mut warnings);
             resources = Some(summary);
         }
     }
@@ -1026,6 +1033,7 @@ fn parse_impl(
         imports,
         exports,
         manifest,
+        manifest_id,
         driver,
         parse_warnings: warnings.list,
         parse_warnings_truncated: warnings.truncated,
@@ -1320,26 +1328,35 @@ fn version_from_resources(
     }
 }
 
-/// The first standard manifest (`RT_MANIFEST` ID 1, 2 or 3, as the loader
-/// looks them up) that parses. Each one that does not is a warning.
+/// The manifest with the lowest standard `RT_MANIFEST` ID present (1, 2 or
+/// 3, found by loader-style lookup), and that ID. If it does not parse, no
+/// other manifest is used in its place: a decoy at a higher ID must not
+/// stand in for the one the OS reads.
 fn manifest_from_resources(
     data: &[u8],
     summary: &ResourceSummary,
     warnings: &mut Warnings,
-) -> Option<Manifest> {
-    for entry in &summary.standard_manifests {
-        let at = entry
-            .file_offset
-            .and_then(|o| usize::try_from(o).ok())
-            .unwrap_or(usize::MAX);
-        let Some(raw) = entry.bytes(data) else {
-            warnings.push(at, WarningKind::ResourceOutOfBounds);
-            continue;
-        };
-        match manifest::parse_manifest(raw) {
-            Ok(m) => return Some(m),
-            Err(e) => warnings.push(at, WarningKind::Manifest(e)),
+) -> (Option<Manifest>, Option<u16>) {
+    let Some(entry) = summary.standard_manifests.first() else {
+        return (None, None);
+    };
+    let id = match entry.name {
+        ResourceId::Id(id) => Some(id),
+        ResourceId::Name(_) => None,
+    };
+    let at = entry
+        .file_offset
+        .and_then(|o| usize::try_from(o).ok())
+        .unwrap_or_else(|| usize::try_from(summary.offset).unwrap_or(usize::MAX));
+    let Some(raw) = entry.bytes(data) else {
+        warnings.push(at, WarningKind::ResourceOutOfBounds);
+        return (None, id);
+    };
+    match manifest::parse_manifest(raw) {
+        Ok(m) => (Some(m), id),
+        Err(e) => {
+            warnings.push(at, WarningKind::Manifest(e));
+            (None, id)
         }
     }
-    None
 }
