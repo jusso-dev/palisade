@@ -38,7 +38,7 @@
 //! and an application definition may hold `ref` nodes. The reference graph
 //! is over library versions, with each pin resolved. [`Catalogue::new`]
 //! rejects every cycle in it (`library_cycle`), naming the path, such as
-//! `` `Script hosts` v2 -> `Office` v1 -> `Script hosts` v2 ``. References
+//! `` `Script hosts` v2 -> `Document editors` v1 -> `Script hosts` v2 ``. References
 //! nest at most [`limits::MAX_REF_DEPTH`] deep, and expanding one rule's
 //! tree produces at most [`limits::MAX_EXPANDED_NODES`] nodes, so a chain of
 //! fragments that each use the next twice cannot grow without bound.
@@ -268,8 +268,9 @@ pub struct Library {
     /// Curated: never edited in place, only duplicated.
     #[serde(default)]
     pub read_only: bool,
-    /// The principal who owns it, if any. Only the owner or a tenant
-    /// administrator edits a tenant library.
+    /// The principal who owns it, if any: a SID or a directory object ID,
+    /// compared in canonical form. Only the owner or a tenant administrator
+    /// edits a tenant library.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
     /// The library and version this one was duplicated from.
@@ -573,9 +574,22 @@ impl Library {
             Realm::Tenant(tenant) => {
                 actor.installation_admin
                     || (actor.tenant == Some(tenant)
-                        && (actor.tenant_admin
-                            || self.owner.as_deref() == Some(actor.principal.as_str())))
+                        && (actor.tenant_admin || self.is_owner(actor)))
             }
+        }
+    }
+
+    /// Whether `actor` is the owner: both principals are SIDs or object
+    /// IDs and are equal in canonical form. An empty or malformed principal
+    /// is never an owner.
+    fn is_owner(&self, actor: &Actor) -> bool {
+        let canonical = crate::context::normalize_principal;
+        match (
+            self.owner.as_deref().and_then(canonical),
+            canonical(&actor.principal),
+        ) {
+            (Some(a), Some(b)) => a == b,
+            _ => false,
         }
     }
 
@@ -665,6 +679,10 @@ pub enum LibraryCode {
     TooManyLibraries,
     /// A rule set library's content does not validate as a policy.
     InvalidRuleSet,
+    /// The owner is not a SID or a directory object ID.
+    InvalidOwner,
+    /// A rule set library's `read_only` differs from its rule set's.
+    ReadOnlyMismatch,
 }
 
 impl LibraryCode {
@@ -686,6 +704,8 @@ impl LibraryCode {
             Self::SetTooLarge => "set_too_large",
             Self::TooManyLibraries => "too_many_libraries",
             Self::InvalidRuleSet => "invalid_rule_set",
+            Self::InvalidOwner => "invalid_owner",
+            Self::ReadOnlyMismatch => "read_only_mismatch",
         }
     }
 }
@@ -1206,8 +1226,11 @@ fn cycles(
         if colour.get(&root) != Some(&Colour::White) {
             continue;
         }
-        // Explicit stack of (version, next edge index): no recursion.
+        // Explicit stack of (version, next edge index): no recursion. Each
+        // version's position on it, so a back edge finds its cycle's start
+        // in O(log n).
         let mut stack: Vec<(Version, usize)> = vec![(root, 0)];
+        let mut position: BTreeMap<Version, usize> = BTreeMap::from([(root, 0)]);
         colour.insert(root, Colour::Grey);
         while let Some(&mut (v, ref mut next)) = stack.last_mut() {
             let targets = edges.get(&v).map_or(&[][..], Vec::as_slice);
@@ -1216,10 +1239,11 @@ fn cycles(
                 match colour.get(&t).copied().unwrap_or(Colour::Black) {
                     Colour::White => {
                         colour.insert(t, Colour::Grey);
+                        position.insert(t, stack.len());
                         stack.push((t, 0));
                     }
                     Colour::Grey => {
-                        let start = stack.iter().position(|(s, _)| *s == t).unwrap_or(0);
+                        let start = position.get(&t).copied().unwrap_or(0);
                         let mut cycle: Vec<Version> =
                             stack[start..].iter().map(|(s, _)| *s).collect();
                         let min = cycle
@@ -1249,6 +1273,7 @@ fn cycles(
                     .unwrap_or(0);
                 height.insert(v, h);
                 colour.insert(v, Colour::Black);
+                position.remove(&v);
                 stack.pop();
             }
         }
@@ -1285,20 +1310,49 @@ fn check_library(base: &str, lib: &Library, errors: &mut Vec<LibraryError>) {
             problem,
         ));
     }
-    if lib
+    if let Some(problem) = lib
         .description
         .as_deref()
-        .is_some_and(|t| t.chars().count() > crate::model::limits::MAX_TEXT_CHARS)
+        .and_then(|t| crate::validate::text_problem(t, crate::model::limits::MAX_TEXT_CHARS))
     {
         errors.push(err(
             LibraryCode::InvalidText,
             format!("{base}/description"),
-            "at most 4096 characters",
+            problem,
         ));
+    }
+    if let Some(owner) = &lib.owner {
+        if crate::context::normalize_principal(owner).is_none() {
+            errors.push(err(
+                LibraryCode::InvalidOwner,
+                format!("{base}/owner"),
+                "the owner is a SID or a directory object ID",
+            ));
+        }
+    }
+    if lib.derived_from.is_some_and(|d| d.version == 0) {
+        errors.push(err(
+            LibraryCode::InvalidVersion,
+            format!("{base}/derived_from/version"),
+            "versions start at 1",
+        ));
+    }
+    for f in crate::validate::metadata_findings(&format!("{base}/metadata"), &lib.metadata) {
+        errors.push(err(LibraryCode::InvalidText, f.path, f.message));
     }
     let c = format!("{base}/content");
     match &lib.content {
         LibraryContent::RuleSet { rule_set } => {
+            if rule_set.read_only != lib.read_only {
+                errors.push(err(
+                    LibraryCode::ReadOnlyMismatch,
+                    format!("{c}/rule_set/read_only"),
+                    format!(
+                        "the rule set's `read_only` must match the library's ({}): it decides `curated_first` and the reserved `order` ranges, and only a curated library is curated",
+                        lib.read_only
+                    ),
+                ));
+            }
             if rule_set.id.0 != lib.id.0 {
                 errors.push(err(
                     LibraryCode::IdMismatch,
@@ -1402,13 +1456,13 @@ fn check_library(base: &str, lib: &Library, errors: &mut Vec<LibraryError>) {
             check_entries(&c, "entries", v, MAX_SET_ENTRIES, errors, plain_problem);
         }
         LibraryContent::MessageTemplate { text } => {
-            let chars = text.chars().count();
-            if text.trim().is_empty() || chars > MAX_TEMPLATE_CHARS {
-                errors.push(err(
-                    LibraryCode::InvalidText,
-                    format!("{c}/text"),
-                    format!("1 to {MAX_TEMPLATE_CHARS} characters"),
-                ));
+            let problem = if text.trim().is_empty() {
+                Some("must not be empty".to_owned())
+            } else {
+                crate::validate::text_problem(text, MAX_TEMPLATE_CHARS)
+            };
+            if let Some(problem) = problem {
+                errors.push(err(LibraryCode::InvalidText, format!("{c}/text"), problem));
             }
         }
     }

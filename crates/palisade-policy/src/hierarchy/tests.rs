@@ -1370,6 +1370,171 @@ fn placement_is_first_match_with_an_undeletable_catch_all() {
 }
 
 #[test]
+fn duplicate_keys_are_rejected_at_any_depth_in_json() {
+    let mut nodes = base_nodes();
+    set_node(
+        &mut nodes,
+        10,
+        json!({"settings": {"dll_control": "audit"}}),
+    );
+    let text = snapshot(nodes, vec![], vec![]).to_string().replace(
+        "\"dll_control\":\"audit\"",
+        "\"script_control_by_kind\":{\"powershell\":\"enforce\",\"powershell\":\"off\"}",
+    );
+    assert!(text.contains("\"powershell\":\"off\""));
+    let e = HierarchyDocument::from_json(&text).unwrap_err();
+    assert!(e.contains("duplicate") || e.contains("repeated"), "{e}");
+}
+
+#[test]
+fn a_library_rule_set_over_the_policy_limits_is_rejected_not_dropped() {
+    // 2,001 regular expressions in one rule set library, spread over rules
+    // of at most 25 values: over the per-policy cap.
+    let rules: Vec<Value> = (0..81)
+        .map(|i| {
+            json!({
+                "id": id(3000 + i),
+                "name": format!("Regex {i}"),
+                "object_types": ["executable"],
+                "match": {"all": [
+                    hash_crit('a'),
+                    {"criterion": {"field": "path.file_name", "operator": "regex",
+                        "values": (0..25).map(|j| format!("^t{i}x{j}\\.exe$")).collect::<Vec<_>>()}},
+                ]},
+                "action": {"type": "deny"},
+            })
+        })
+        .collect();
+    let mut lib = blocklist_library(1, true, json!("global"));
+    lib["content"]["rule_set"]["rules"] = json!(rules);
+    let mut nodes = base_nodes();
+    set_node(&mut nodes, 1, json!({"rule_sets": [{"id": id(100)}]}));
+    let found = errors(&snapshot(nodes, vec![], vec![lib]));
+    assert!(
+        found.contains(&(
+            "invalid_rule_set".to_owned(),
+            "/libraries/0/content/rule_set".to_owned()
+        )),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn a_disabled_rule_stays_disabled_whatever_suppressions_say() {
+    let mut off = rule(70, "allow", 'b');
+    off["enabled"] = json!(false);
+    let s = set(60, "allowlist", false, vec![off]);
+    let mut nodes = base_nodes();
+    set_node(&mut nodes, 1, json!({"assignments": assign(&[(50, 0)])}));
+    set_node(&mut nodes, 10, json!({"suppress_inherited": [id(70)]}));
+    set_node(&mut nodes, 20, json!({"assignments": assign(&[(51, 0)])}));
+    let h = validated(&snapshot(
+        nodes,
+        vec![
+            policy(50, "enforce", vec![s.clone()]),
+            policy(51, "enforce", vec![s]),
+        ],
+        vec![],
+    ));
+    let e = effective(&h, 20);
+    assert_eq!(e.rule(rule_id(70)).unwrap().status, RuleStatus::Disabled);
+    assert_eq!(decide(&e, 'b'), Outcome::Blocked);
+}
+
+#[test]
+fn defaulted_collection_settings_report_their_empty_value() {
+    let h = validated(&snapshot(base_nodes(), vec![], vec![]));
+    let e = effective(&h, 20);
+    assert_eq!(e.setting("override_durations").unwrap().value, json!([]));
+    assert_eq!(
+        e.setting("script_control_by_kind").unwrap().value,
+        json!({})
+    );
+    assert_eq!(e.setting("advanced").unwrap().value, json!({}));
+}
+
+#[test]
+fn mode_options_can_be_locked() {
+    let mut nodes = base_nodes();
+    set_node(
+        &mut nodes,
+        2,
+        json!({
+            "assignments": assign(&[(50, 0)]),
+            "locked_settings": ["mode_options.mode_disconnected", "mode_options.mode_by_type"],
+        }),
+    );
+    set_node(&mut nodes, 11, json!({"assignments": assign(&[(51, 0)])}));
+    let h = validated(&snapshot(
+        nodes,
+        vec![
+            policy_with(
+                50,
+                "audit",
+                vec![],
+                json!({"mode_options": {
+                    "mode_disconnected": "enforce",
+                    "mode_by_type": {"script.powershell": "enforce"},
+                }}),
+            ),
+            policy_with(
+                51,
+                "audit",
+                vec![],
+                json!({"mode_options": {
+                    "mode_disconnected": "audit",
+                    "mode_by_type": {"script.powershell": "monitor", "script.batch": "monitor"},
+                }}),
+            ),
+        ],
+        vec![],
+    ));
+    let e = effective(&h, 20);
+    let o = &e.policy().unwrap().document().policy.mode_options;
+    assert_eq!(o.mode_disconnected, Some(Mode::Enforce));
+    assert_eq!(
+        o.mode_by_type
+            .get(&ObjectType::Script(crate::model::ScriptKind::Powershell)),
+        Some(&Mode::Enforce)
+    );
+    assert_eq!(
+        o.mode_by_type
+            .get(&ObjectType::Script(crate::model::ScriptKind::Batch)),
+        None,
+        "a type the locking node did not set is locked at unset"
+    );
+    let p = e.setting("mode_options.mode_disconnected").unwrap();
+    assert_eq!(p.locked_at, Some(node_id(2)));
+    assert_eq!(
+        p.steps[1].outcome,
+        StepOutcome::BlockedByLock {
+            locked_at: node_id(2)
+        }
+    );
+}
+
+#[test]
+fn a_long_parent_chain_validates_quickly() {
+    // A chain of 20,000 groups: each walk to the root is memoised, so
+    // validation is O(n log n) rather than quadratic. Group IDs fit the
+    // 16-bit field of `id`.
+    let mut nodes = base_nodes();
+    for i in 0..20_000u32 {
+        assert!(30_000 + i < 0x1_0000);
+        let parent = if i == 0 { 10 } else { 30_000 + i - 1 };
+        nodes.push(node(30_000 + i, "group", Some(parent), json!({})));
+    }
+    let start = std::time::Instant::now();
+    let found = errors(&snapshot(nodes, vec![], vec![]));
+    assert!(found.iter().any(|(c, _)| c == "group_too_deep"));
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+}
+
+#[test]
 fn snapshots_read_from_yaml() {
     let yaml = "schema_version: 1.0.0\nrevision: 1\nnodes:\n  - {id: 01936b2e-0001-7b3d-9f21-0a1b2c3d4e5f, name: Global, kind: global}\n";
     let doc = HierarchyDocument::from_yaml(yaml).unwrap();

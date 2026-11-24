@@ -550,7 +550,7 @@ impl ValidatedHierarchy {
         for (info, band) in nodes {
             let band = match order {
                 LevelOrder::TopDown => band,
-                LevelOrder::BottomUp => BAND_DEVICE - band,
+                LevelOrder::BottomUp => BAND_DEVICE.saturating_sub(band),
                 LevelOrder::Flat => 0,
             };
             if let Some(t) = info.node.template.and_then(|t| self.nodes.get(&t)) {
@@ -966,6 +966,11 @@ impl<'a, 'h> Builder<'a, 'h> {
             let Some(entry) = self.sets.get(&p.rule_set_id) else {
                 continue;
             };
+            // A rule its rule set disables stays disabled: a suppression
+            // can neither enable it nor make it look active.
+            if p.status == RuleStatus::Disabled {
+                continue;
+            }
             let inherited_only = entry.contributions.iter().all(|(at, _)| *at < pos);
             p.status = if inherited_only {
                 RuleStatus::Suppressed { by }
@@ -1040,7 +1045,7 @@ impl<'a, 'h> Builder<'a, 'h> {
 
     /// The merged settings and their provenance.
     fn settings(&mut self) -> (PolicySettings, BTreeMap<String, SettingProvenance>) {
-        let default = serde_json::to_value(PolicySettings::default()).unwrap_or_default();
+        let default = super::validate::default_settings();
         let keys = super::validate::setting_keys();
         let mut current: BTreeMap<String, Option<serde_json::Value>> = keys
             .iter()
@@ -1080,7 +1085,9 @@ impl<'a, 'h> Builder<'a, 'h> {
                     offers.push((layer.contribution(Via::Node), v.clone()));
                 }
                 for (slot, value, policy) in &policies {
-                    let v = value.get(key);
+                    // A field left at its default is not written, so a
+                    // missing key is the default too.
+                    let v = value.get(key).or_else(|| default.get(key));
                     if v != default.get(key) {
                         offers.push((
                             layer.contribution(Via::Policy {
@@ -1150,10 +1157,27 @@ impl<'a, 'h> Builder<'a, 'h> {
     }
 
     /// The merged mode options, nearest layer and lowest slot first.
+    ///
+    /// A key in a node's `locked_settings` (`mode_options.mode_disconnected`,
+    /// `mode_options.disconnected_after_secs` or `mode_options.mode_by_type`,
+    /// which locks every type) keeps the value it has after that node's
+    /// layer; later offers are `blocked_by_lock`.
     fn mode_options(&self) -> (ModeOptions, BTreeMap<String, SettingProvenance>) {
         let mut out = ModeOptions::default();
         let mut prov: BTreeMap<String, SettingProvenance> = BTreeMap::new();
-        let mut offer = |key: String, from: Contribution, value: serde_json::Value| {
+        let mut locks: BTreeMap<String, NodeId> = BTreeMap::new();
+        let lock_of = |locks: &BTreeMap<String, NodeId>, key: &str| {
+            locks.get(key).copied().or_else(|| {
+                key.starts_with("mode_options.mode_by_type.")
+                    .then(|| locks.get("mode_options.mode_by_type").copied())
+                    .flatten()
+            })
+        };
+        let mut offer = |locks: &BTreeMap<String, NodeId>,
+                         key: String,
+                         from: Contribution,
+                         value: serde_json::Value| {
+            let locked_at = lock_of(locks, &key);
             let p = prov.entry(key).or_insert_with(|| SettingProvenance {
                 value: serde_json::Value::Null,
                 source: None,
@@ -1161,10 +1185,14 @@ impl<'a, 'h> Builder<'a, 'h> {
                 raised_by_floor: false,
                 steps: Vec::new(),
             });
+            p.locked_at = p.locked_at.or(locked_at);
             p.steps.push(SettingStep {
                 from,
                 value,
-                outcome: StepOutcome::Overridden,
+                outcome: match locked_at {
+                    Some(locked_at) => StepOutcome::BlockedByLock { locked_at },
+                    None => StepOutcome::Overridden,
+                },
             });
         };
         for layer in self.layers {
@@ -1176,6 +1204,7 @@ impl<'a, 'h> Builder<'a, 'h> {
                 let o = &doc.policy.mode_options;
                 for (t, m) in &o.mode_by_type {
                     offer(
+                        &locks,
                         format!("mode_options.mode_by_type.{t}"),
                         from.clone(),
                         serde_json::to_value(m).unwrap_or_default(),
@@ -1183,6 +1212,7 @@ impl<'a, 'h> Builder<'a, 'h> {
                 }
                 if let Some(m) = o.mode_disconnected {
                     offer(
+                        &locks,
                         "mode_options.mode_disconnected".to_owned(),
                         from.clone(),
                         serde_json::to_value(m).unwrap_or_default(),
@@ -1190,23 +1220,37 @@ impl<'a, 'h> Builder<'a, 'h> {
                 }
                 if let Some(s) = o.disconnected_after_secs {
                     offer(
+                        &locks,
                         "mode_options.disconnected_after_secs".to_owned(),
                         from.clone(),
                         s.into(),
                     );
                 }
             }
+            for key in &layer.info.node.locked_settings {
+                if key.starts_with("mode_options.") {
+                    locks.entry(key.clone()).or_insert(layer.info.node.id);
+                }
+            }
         }
         // Within a layer the lowest slot wins, across layers the nearest:
-        // the winner is the first offer of the last layer that offered.
+        // the winner is the first offer of the last layer that offered and
+        // was not blocked by a lock.
         for (key, p) in &mut prov {
-            let Some(last_node) = p.steps.last().map(|s| (s.from.node, s.from.template_for)) else {
+            let open = |s: &SettingStep| !matches!(s.outcome, StepOutcome::BlockedByLock { .. });
+            let Some(last_node) = p
+                .steps
+                .iter()
+                .rev()
+                .find(|s| open(s))
+                .map(|s| (s.from.node, s.from.template_for))
+            else {
                 continue;
             };
             let Some(win) = p
                 .steps
                 .iter()
-                .position(|s| (s.from.node, s.from.template_for) == last_node)
+                .position(|s| open(s) && (s.from.node, s.from.template_for) == last_node)
             else {
                 continue;
             };

@@ -90,6 +90,44 @@ pub(crate) fn setting_keys() -> &'static BTreeSet<String> {
     })
 }
 
+/// The keys besides `settings` that `locked_settings` may name.
+pub(crate) const MODE_OPTION_LOCKS: [&str; 3] = [
+    "mode_options.mode_disconnected",
+    "mode_options.disconnected_after_secs",
+    "mode_options.mode_by_type",
+];
+
+/// The default value of every setting, including those the model leaves
+/// out when they are empty (`[]` or `{}`), so provenance never reports
+/// `null` for a setting that has a value.
+pub(crate) fn default_settings() -> &'static serde_json::Value {
+    static DEFAULT: OnceLock<serde_json::Value> = OnceLock::new();
+    DEFAULT.get_or_init(|| {
+        let mut value = serde_json::to_value(PolicySettings::default()).unwrap_or_default();
+        let generator = schemars::generate::SchemaSettings::draft2020_12().into_generator();
+        let schema = generator.into_root_schema_for::<PolicySettings>();
+        if let (Some(map), Some(props)) = (
+            value.as_object_mut(),
+            schema
+                .get("properties")
+                .and_then(serde_json::Value::as_object),
+        ) {
+            for (key, prop) in props {
+                if map.contains_key(key) {
+                    continue;
+                }
+                let empty = match prop.get("type").and_then(serde_json::Value::as_str) {
+                    Some("array") => serde_json::json!([]),
+                    Some("object") => serde_json::json!({}),
+                    _ => continue,
+                };
+                map.insert(key.clone(), empty);
+            }
+        }
+        value
+    })
+}
+
 /// Why one setting's value is not valid, if it is not: it must read as
 /// that key of [`PolicySettings`].
 pub(crate) fn setting_problem(key: &str, value: &serde_json::Value) -> Option<String> {
@@ -355,12 +393,15 @@ fn check_nodes(input: &[Node], errors: &mut Vec<HierarchyError>) -> BTreeMap<Nod
     let mut reported: BTreeSet<Vec<NodeId>> = BTreeSet::new();
     for n in input {
         let mut walk: Vec<NodeId> = Vec::new();
+        // Position of each node on this walk, so a repeat is found in
+        // O(log n), and every node is walked once overall.
+        let mut on_walk: BTreeMap<NodeId, usize> = BTreeMap::new();
         let mut at = Some(n.id);
         while let Some(id) = at {
             if done.contains(&id) {
                 break;
             }
-            if let Some(start) = walk.iter().position(|w| *w == id) {
+            if let Some(&start) = on_walk.get(&id) {
                 let mut cycle = walk[start..].to_vec();
                 let min = cycle
                     .iter()
@@ -387,6 +428,7 @@ fn check_nodes(input: &[Node], errors: &mut Vec<HierarchyError>) -> BTreeMap<Nod
                 }
                 break;
             }
+            on_walk.insert(id, walk.len());
             walk.push(id);
             at = kind_of(&id).and_then(|n| n.parent);
         }
@@ -394,41 +436,19 @@ fn check_nodes(input: &[Node], errors: &mut Vec<HierarchyError>) -> BTreeMap<Nod
     }
 
     // Tenants, depths and built-in groups, for nodes not on a cycle.
+    let mut placed: BTreeMap<NodeId, (Option<NodeId>, usize)> = BTreeMap::new();
     let mut out = BTreeMap::new();
     let mut builtins: BTreeMap<(NodeId, Builtin), Vec<usize>> = BTreeMap::new();
     for (i, n) in input.iter().enumerate() {
         if cyclic.contains(&n.id) || by_id.get(&n.id) != Some(&i) {
             continue;
         }
-        let mut tenant = None;
-        let mut depth = 0usize;
-        let mut at = n.parent;
-        if n.kind == NodeKind::Group {
-            depth = 1;
-        }
-        let mut steps = 0;
-        while let Some(p) = at {
-            let Some(parent) = kind_of(&p) else { break };
-            if cyclic.contains(&p) {
-                break;
-            }
-            match parent.kind {
-                NodeKind::Tenant => {
-                    tenant = Some(parent.id);
-                    break;
-                }
-                NodeKind::Group if n.kind == NodeKind::Group => depth += 1,
-                _ => {}
-            }
-            at = parent.parent;
-            steps += 1;
-            if steps > input.len() {
-                break;
-            }
-        }
-        if n.kind == NodeKind::Tenant {
-            tenant = Some(n.id);
-        }
+        let (tenant, group_depth) = place_of(n.id, &kind_of, &cyclic, &mut placed);
+        let depth = if n.kind == NodeKind::Group {
+            group_depth
+        } else {
+            0
+        };
         if n.kind == NodeKind::Group && depth > MAX_GROUP_DEPTH {
             errors.push(herr(
                 HierarchyCode::GroupTooDeep,
@@ -544,6 +564,48 @@ fn check_nodes(input: &[Node], errors: &mut Vec<HierarchyError>) -> BTreeMap<Nod
     out
 }
 
+/// The tenant a node is in and, for a group, how deep it is below that
+/// tenant (a group directly below it is 1), memoised in `placed` so the
+/// whole tree costs O(n log n). The walk stops at the first node already
+/// placed, at a missing or cyclic parent, or at the tenant.
+fn place_of<'n>(
+    id: NodeId,
+    kind_of: &impl Fn(&NodeId) -> Option<&'n Node>,
+    cyclic: &BTreeSet<NodeId>,
+    placed: &mut BTreeMap<NodeId, (Option<NodeId>, usize)>,
+) -> (Option<NodeId>, usize) {
+    // Walk up to a node whose answer is known.
+    let mut chain: Vec<&Node> = Vec::new();
+    let mut at = Some(id);
+    let mut known = (None, 0usize);
+    while let Some(i) = at {
+        if let Some(&p) = placed.get(&i) {
+            known = p;
+            break;
+        }
+        let Some(node) = kind_of(&i) else { break };
+        if cyclic.contains(&i) {
+            break;
+        }
+        chain.push(node);
+        if node.kind == NodeKind::Tenant {
+            break;
+        }
+        at = node.parent;
+    }
+    // Fill in from the top down.
+    for node in chain.into_iter().rev() {
+        known = match node.kind {
+            NodeKind::Tenant => (Some(node.id), 0),
+            NodeKind::Group => (known.0, known.1.saturating_add(1)),
+            // Devices, dynamic groups and templates do not add depth.
+            _ => (known.0, known.1),
+        };
+        placed.insert(node.id, known);
+    }
+    known
+}
+
 /// Fields that only some kinds of node may have, and per-node limits.
 fn check_fields(base: &str, n: &Node, errors: &mut Vec<HierarchyError>) {
     let mut not_allowed = |field: &str, why: &str| {
@@ -628,11 +690,14 @@ fn check_fields(base: &str, n: &Node, errors: &mut Vec<HierarchyError>) {
     let mut locked = BTreeSet::new();
     for (i, key) in n.locked_settings.iter().enumerate() {
         let path = format!("{base}/locked_settings/{i}");
-        if !setting_keys().contains(key) {
+        if !setting_keys().contains(key) && !MODE_OPTION_LOCKS.contains(&key.as_str()) {
             errors.push(herr(
                 HierarchyCode::InvalidSetting,
                 path,
-                format!("`{key}` is not a policy setting"),
+                format!(
+                    "`{key}` is not a policy setting or one of {}",
+                    MODE_OPTION_LOCKS.join(", ")
+                ),
             ));
         } else if !locked.insert(key) {
             errors.push(herr(
@@ -904,9 +969,13 @@ fn check_rule_set_libraries(
                     .into_iter()
                     .filter(|f| f.severity == crate::validate::Severity::Error)
                 {
-                    let Some(rest) = f.path.strip_prefix("/rule_sets/0") else {
-                        continue;
-                    };
+                    // Every error is reported. Findings about the rule set
+                    // map to its path in the library; document-level ones
+                    // (`/rule_sets`, such as too many rules or regular
+                    // expressions) to the rule set itself. Nothing is
+                    // dropped, so an invalid library never validates and then
+                    // goes missing from an effective policy.
+                    let rest = f.path.strip_prefix("/rule_sets/0").unwrap_or_default();
                     errors.push(herr(
                         HierarchyCode::Library(LibraryCode::InvalidRuleSet),
                         format!("{base}{rest}"),

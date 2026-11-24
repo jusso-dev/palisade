@@ -329,10 +329,9 @@ pub fn matches(c: &PlacementConditions, f: &PlacementFacts) -> bool {
     let ou = c.directory_ou.is_empty()
         || f.directory_ou.as_deref().is_some_and(|ou| {
             let ou = lower(ou);
-            c.directory_ou.iter().any(|want| {
-                let want = lower(want);
-                ou == want || ou.ends_with(&format!(",{want}"))
-            })
+            c.directory_ou
+                .iter()
+                .any(|want| ou_within(&ou, &lower(want)))
         });
     let groups = c.directory_groups.is_empty() || {
         let have: BTreeSet<String> = f
@@ -348,6 +347,7 @@ pub fn matches(c: &PlacementConditions, f: &PlacementFacts) -> bool {
     let host = c.hostname.is_empty()
         || f.hostname
             .as_deref()
+            .filter(|h| h.len() <= MAX_HOSTNAME_BYTES)
             .is_some_and(|h| c.hostname.iter().any(|p| wildcard(&lower(p), &lower(h))));
     let net = c.networks.is_empty()
         || f.ip.is_some_and(|ip| {
@@ -367,7 +367,32 @@ pub fn matches(c: &PlacementConditions, f: &PlacementFacts) -> bool {
     ou && groups && host && net && tags && os
 }
 
-/// `*` and `?` wildcard matching, in linear time and space.
+/// Whether the distinguished name `ou` is `want` or below it: equal, or
+/// ending with `want` after a separating comma that is not escaped (RFC
+/// 4514: a comma preceded by an odd number of backslashes is part of a
+/// value, so `OU=A\,OU=B,...` is one OU named `A,OU=B`, not below `OU=B`).
+/// Both are lowercase.
+fn ou_within(ou: &str, want: &str) -> bool {
+    if ou == want {
+        return true;
+    }
+    let Some(head) = ou.strip_suffix(want) else {
+        return false;
+    };
+    let Some(before) = head.strip_suffix(',') else {
+        return false;
+    };
+    let slashes = before.bytes().rev().take_while(|b| *b == b'\\').count();
+    slashes % 2 == 0
+}
+
+/// Longest hostname compared, in bytes (a DNS name is at most 253).
+const MAX_HOSTNAME_BYTES: usize = 255;
+
+/// `*` and `?` wildcard matching with two pointers and one backtrack
+/// point: O(|pattern| × |text|) in the worst case, and no extra space.
+/// Patterns are at most 2,048 bytes (validated) and hostnames at most
+/// [`MAX_HOSTNAME_BYTES`] (longer ones never match), so the work is bounded.
 fn wildcard(pattern: &str, text: &str) -> bool {
     let p: Vec<char> = pattern.chars().collect();
     let t: Vec<char> = text.chars().collect();
@@ -432,6 +457,33 @@ fn parse_cidr(s: &str) -> Option<Cidr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_escaped_comma_is_not_an_ou_boundary() {
+        let within = |ou: &str, want: &str| ou_within(&ou.to_lowercase(), &want.to_lowercase());
+        let trusted = "OU=Trusted,DC=example,DC=org";
+        assert!(within("OU=Trusted,DC=example,DC=org", trusted));
+        assert!(within("OU=Sales,OU=Trusted,DC=example,DC=org", trusted));
+        assert!(!within("OU=Other\\,OU=Trusted,DC=example,DC=org", trusted));
+        assert!(
+            within("OU=Back\\\\,OU=Trusted,DC=example,DC=org", trusted),
+            "an escaped backslash"
+        );
+        assert!(!within("OU=NotTrusted,DC=example,DC=org", trusted));
+    }
+
+    #[test]
+    fn overlong_hostnames_never_match() {
+        let c = PlacementConditions {
+            hostname: vec!["*".to_owned()],
+            ..PlacementConditions::default()
+        };
+        let f = PlacementFacts {
+            hostname: Some("a".repeat(256)),
+            ..PlacementFacts::default()
+        };
+        assert!(!matches(&c, &f));
+    }
 
     #[test]
     fn wildcards_match_runs_and_single_characters() {

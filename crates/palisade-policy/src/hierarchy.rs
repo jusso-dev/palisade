@@ -90,6 +90,9 @@
 //!
 //! The mode options are merged the same way, per key:
 //! `mode_by_type.<type>`, `mode_disconnected` and `disconnected_after_secs`.
+//! `locked_settings` may lock them too, as `mode_options.mode_disconnected`,
+//! `mode_options.disconnected_after_secs` and `mode_options.mode_by_type`
+//! (every type at once).
 //! A `mode_disconnected` that is not at least as strict as the effective
 //! mode is dropped, because unset means the effective mode itself.
 //!
@@ -240,21 +243,25 @@ pub struct HierarchyDocument {
 }
 
 impl HierarchyDocument {
-    /// Reads a snapshot from JSON in strict mode.
+    /// Reads a snapshot from JSON in strict mode, with the reader of
+    /// [`crate::dsl`]: a key repeated at any depth (including inside a
+    /// node's `settings` values) is an error, so JSON and YAML always read
+    /// a snapshot the same way.
     ///
     /// # Errors
     ///
-    /// If the input is not a snapshot this reader understands.
-    pub fn from_json(input: &str) -> Result<Self, serde_json::Error> {
-        serde_json::from_str(input)
+    /// The reader's error, or the model error, as text.
+    pub fn from_json(input: &str) -> Result<Self, String> {
+        Self::from_yaml(input)
     }
 
     /// Reads a snapshot from YAML, with the strict rules of
-    /// [`crate::dsl`] (YAML 1.2, no anchors or tags, no duplicate keys).
+    /// [`crate::dsl`] (YAML 1.2, no anchors or tags, no duplicate keys at
+    /// any depth). JSON is YAML here, read by the same strict reader.
     ///
     /// # Errors
     ///
-    /// The YAML error, or the model error as text.
+    /// The reader's error, or the model error, as text.
     pub fn from_yaml(input: &str) -> Result<Self, String> {
         let value = crate::dsl::to_json_value(input, &crate::dsl::Limits::default())
             .map_err(|e| e.to_string())?;

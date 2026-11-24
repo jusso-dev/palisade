@@ -475,6 +475,78 @@ fn categories_include_subcategories() {
 }
 
 #[test]
+fn owners_metadata_and_texts_are_checked() {
+    let mut a = library(
+        1,
+        1,
+        json!("global"),
+        json!({"kind": "message_template", "text": "Blocked \u{202e}here"}),
+    );
+    a.owner = Some(String::new());
+    a.description = Some("bad\u{0}".to_owned());
+    a.derived_from = Some(Derivation {
+        id: lib_id(9),
+        version: 0,
+    });
+    a.metadata.tags = vec![" spaced".to_owned()];
+    let mut b = library(
+        2,
+        1,
+        json!("global"),
+        json!({"kind": "rule_set", "rule_set": {"id": id(2), "name": "x", "kind": "blocklist", "read_only": true}}),
+    );
+    b.read_only = false;
+    let e = Catalogue::new(vec![a, b]).unwrap_err();
+    assert_eq!(
+        codes(&e),
+        [
+            (
+                LibraryCode::InvalidText,
+                "/libraries/0/description".to_owned()
+            ),
+            (LibraryCode::InvalidOwner, "/libraries/0/owner".to_owned()),
+            (
+                LibraryCode::InvalidVersion,
+                "/libraries/0/derived_from/version".to_owned()
+            ),
+            (
+                LibraryCode::InvalidText,
+                "/libraries/0/metadata/tags/0".to_owned()
+            ),
+            (
+                LibraryCode::InvalidText,
+                "/libraries/0/content/text".to_owned()
+            ),
+            (
+                LibraryCode::ReadOnlyMismatch,
+                "/libraries/1/content/rule_set/read_only".to_owned()
+            ),
+        ]
+    );
+}
+
+#[test]
+fn an_empty_or_malformed_principal_never_owns_and_sids_compare_canonically() {
+    let mut lib = library(
+        1,
+        1,
+        json!({"tenant": id(50)}),
+        json!({"kind": "message_template", "text": "x"}),
+    );
+    let actor = |p: &str| Actor {
+        principal: p.to_owned(),
+        tenant: Some(tenant(50)),
+        tenant_admin: false,
+        installation_admin: false,
+    };
+    lib.owner = Some(String::new());
+    assert!(!lib.can_edit(&actor("")));
+    lib.owner = Some("S-1-5-21-1-2-3-1001".to_owned());
+    assert!(lib.can_edit(&actor("s-1-5-21-1-2-3-001001")));
+    assert!(!lib.can_edit(&actor("not a sid")));
+}
+
+#[test]
 fn ownership_decides_who_edits_and_who_uses() {
     let mut lib = library(
         1,

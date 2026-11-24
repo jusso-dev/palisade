@@ -1188,6 +1188,33 @@ pub(crate) const fn is_bidi_control(c: char) -> bool {
     matches!(c, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
 }
 
+/// The findings of the policy metadata rules (#40) for `m` at `base`: the
+/// same checks a policy, rule set or rule gets.
+pub(crate) fn metadata_findings(base: &str, m: &Metadata) -> Vec<ValidationError> {
+    let mut v = Validator::default();
+    v.metadata(base, m);
+    v.findings
+}
+
+/// Why a free-text field is not acceptable, if it is not: at most
+/// `max_chars` characters, with no control characters other than tab and
+/// line breaks, and no bidirectional formatting characters.
+pub(crate) fn text_problem(text: &str, max_chars: usize) -> Option<String> {
+    let chars = text.chars().count();
+    if chars > max_chars {
+        Some(format!(
+            "{chars} characters; at most {max_chars} are allowed"
+        ))
+    } else if has_control(text) || text.chars().any(is_bidi_control) {
+        Some(
+            "must not contain control characters other than tab and line breaks, or bidirectional formatting characters"
+                .to_owned(),
+        )
+    } else {
+        None
+    }
+}
+
 /// Control characters other than tab, line feed and carriage return.
 fn has_control(s: &str) -> bool {
     s.chars()
