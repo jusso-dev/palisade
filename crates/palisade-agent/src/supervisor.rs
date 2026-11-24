@@ -362,7 +362,7 @@ impl SupervisorHandle {
     /// Stops every subsystem in reverse start order within `budget`.
     pub async fn shutdown(mut self, budget: Duration) -> ShutdownReport {
         let overall = after(Instant::now(), budget);
-        self.inner.draining.send_replace(true);
+        self.inner.begin_draining();
         self.inner.set_agent_state(AgentState::Stopping);
         let mut outcomes = Vec::with_capacity(self.runners.len());
         for &i in self.inner.order.iter().rev() {
@@ -391,7 +391,7 @@ impl SupervisorHandle {
 /// future dropped before it finished; after a full shutdown it does nothing.
 impl Drop for SupervisorHandle {
     fn drop(&mut self) {
-        self.inner.draining.send_replace(true);
+        self.inner.begin_draining();
         let now = Instant::now();
         for slot in &self.inner.slots {
             slot.stop.send_if_modified(|stop| {
@@ -496,6 +496,13 @@ impl Inner {
         self.apply(&mut shared, next);
     }
 
+    /// Starts draining under the shared lock, so it is ordered with the
+    /// start decision in `run_slot`.
+    fn begin_draining(&self) {
+        let _shared = self.lock();
+        self.draining.send_replace(true);
+    }
+
     fn set_status(&self, i: usize, status: SubsystemStatus) {
         self.update(|s| s.slots[i].status = status);
     }
@@ -532,15 +539,17 @@ impl Inner {
     /// starting again is reported as a `Degraded` reason.
     fn derive(&self, slots: &[SlotState], starting: bool) -> AgentState {
         let running = |i: usize| slots[i].status == SubsystemStatus::Running;
-        // A subsystem blocked behind a dependency that has had its outcome
-        // and is down counts as settled, so startup cannot hang on it.
+        // A subsystem still waiting behind a dependency that has had its
+        // outcome and is down counts as settled, so startup cannot hang on
+        // it. One that has already started settles on its own outcome.
         let mut settled = vec![false; slots.len()];
         for &i in &self.order {
             settled[i] = slots[i].settled
-                || self.slots[i]
-                    .deps
-                    .iter()
-                    .any(|&d| settled[d] && !running(d));
+                || (slots[i].status == SubsystemStatus::WaitingForDependencies
+                    && self.slots[i]
+                        .deps
+                        .iter()
+                        .any(|&d| settled[d] && !running(d)));
         }
         let critical: Vec<String> = self
             .order
@@ -752,10 +761,19 @@ async fn run_slot(sup: Arc<Inner>, i: usize) {
             () = sup.wait_deps(i) => {}
         }
 
+        // Decided under the lock that `shutdown` takes to set `draining`, so
+        // no run starts once shutdown has begun.
+        let mut claimed = false;
         sup.update(|s| {
-            s.slots[i].status = SubsystemStatus::Starting;
-            s.slots[i].starts = s.slots[i].starts.saturating_add(1);
+            if !*sup.draining.borrow() {
+                claimed = true;
+                s.slots[i].status = SubsystemStatus::Starting;
+                s.slots[i].starts = s.slots[i].starts.saturating_add(1);
+            }
         });
+        if !claimed {
+            return sup.finish(i, StopOutcome::NotRunning);
+        }
         tracing::info!(subsystem = name, "starting subsystem");
         let (ready_tx, mut ready_rx) = watch::channel(false);
         let ctx = SubsystemContext::new(name, ready_tx, slot.stop.subscribe());
