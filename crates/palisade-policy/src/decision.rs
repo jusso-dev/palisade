@@ -11,9 +11,9 @@
 //! decides ([`Decision::implicit_deny`]), both as enforce mode sees them.
 //! The pipeline in [`crate::evaluate`] combines the matching rules (#35):
 //! it adds the `audit` annotations, the rules the deciding rule overrode,
-//! and the trust-source grants. Applying a non-enforcing mode, which
-//! changes [`Decision::outcome`] and keeps the enforce-mode result in
-//! [`Decision::would_have_been`], is #36.
+//! and the trust-source grants. It then applies the effective mode (#36,
+//! [`crate::mode`]), which can change [`Decision::outcome`] and keeps the
+//! enforce-mode result in [`Decision::would_have_been`].
 
 use core::fmt;
 
@@ -286,6 +286,7 @@ pub struct Decision {
     overridden: Vec<RuleRef>,
     annotations: Vec<RuleRef>,
     mode: Mode,
+    learning_candidate: bool,
     directives: Directives,
     effects: ResolvedEffects,
     reason_code: ReasonCode,
@@ -328,6 +329,7 @@ impl Decision {
             overridden: Vec::new(),
             annotations: Vec::new(),
             mode: Mode::Enforce,
+            learning_candidate: false,
             directives: Directives::of(&rule.action),
             effects: rule.effects.resolve(kind),
             reason_code,
@@ -348,6 +350,7 @@ impl Decision {
             overridden: Vec::new(),
             annotations: Vec::new(),
             mode: Mode::Enforce,
+            learning_candidate: false,
             directives: Directives::default(),
             effects: crate::model::Effects::default().resolve(ActionKind::Deny),
             reason_code: ReasonCode::ImplicitDenyUnknown,
@@ -413,10 +416,62 @@ impl Decision {
         self
     }
 
+    /// Adds rules to [`overridden`](Self::overridden), keeping it sorted.
+    pub(crate) fn with_overridden(mut self, more: Vec<RuleRef>) -> Self {
+        self.overridden.extend(more);
+        self.overridden.sort_by_key(|r| r.rule_id);
+        self
+    }
+
+    /// The same decision, made in `mode`, with its outcome unchanged.
+    pub(crate) fn in_mode(mut self, mode: Mode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    /// A block that the effective mode does not enforce (#36): the object
+    /// runs, as `allowed_audit`, or `allowed_override` if an override
+    /// session relaxed an enforcing mode, with `directives`.
+    /// `would_have_been` stays `blocked`, and the deciding rule and effects
+    /// stay, so the would-block event is still logged and sent, but
+    /// nothing was blocked, so the user is not notified.
+    pub(crate) fn relaxed(
+        mut self,
+        mode: crate::mode::EffectiveMode,
+        directives: Directives,
+        learning: bool,
+    ) -> Self {
+        let (outcome, reason_code) = if mode.by_session {
+            (Outcome::AllowedOverride, ReasonCode::OverrideSession)
+        } else {
+            (Outcome::AllowedAudit, ReasonCode::AuditModeWouldBlock)
+        };
+        self.outcome = outcome;
+        self.reason_code = reason_code;
+        self.mode = mode.mode;
+        self.learning_candidate = learning;
+        // A trust source whose grant the object now carries did not lose.
+        self.overridden
+            .retain(|r| !directives.trust_sources.iter().any(|g| g.rule == *r));
+        self.directives = directives;
+        self.effects.notify = crate::model::Notify::None;
+        self.effects.notification_text = None;
+        self.effects.help_url = None;
+        self
+    }
+
     /// The effective mode the decision was made in (#36).
     #[must_use]
     pub const fn mode(&self) -> Mode {
         self.mode
+    }
+
+    /// Whether the object is a learning candidate (#36, #5): the effective
+    /// mode is `learning`, and only the implicit deny would have blocked
+    /// it. An object that a deny rule would block is never learned (#69).
+    #[must_use]
+    pub const fn learning_candidate(&self) -> bool {
+        self.learning_candidate
     }
 
     /// What the acting components must do.

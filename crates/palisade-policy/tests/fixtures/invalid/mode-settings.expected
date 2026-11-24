@@ -1,0 +1,6 @@
+mode_not_allowed /policy/mode_options/mode_by_type/script.powershell
+mode_disconnected_weaker /policy/mode_options/mode_disconnected
+setting_out_of_range /policy/mode_options/disconnected_after_secs
+mode_override_not_allowed /rule_sets/0/mode_override
+mode_override_not_allowed /rule_sets/1/mode_override
+mode_not_allowed /rule_sets/2/mode_override

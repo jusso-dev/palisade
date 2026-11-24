@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 mod actions;
+mod mode;
 mod precedence;
 
 pub use precedence::order_ranges;
@@ -157,6 +158,19 @@ pub enum ErrorCode {
     /// A precedence option is set that the selected model does not use
     /// (#35).
     PrecedenceOptionUnused,
+    /// A mode is set where it is not allowed: `disabled` for a policy, an
+    /// object type or a rule set (#36).
+    ModeNotAllowed,
+    /// `mode_disconnected` is neither the policy's `mode` nor stricter, so
+    /// losing the server would relax the device, or it would never apply
+    /// (#36).
+    ModeDisconnectedWeaker,
+    /// `mode_override` on a rule set that is not a blocklist, or on a
+    /// mandatory blocklist (#36, ADR 0004).
+    ModeOverrideNotAllowed,
+    /// `enforcement_override` other than `inherit` on a rule that does not
+    /// deny: only a block can be enforced or relaxed (#36).
+    EnforcementOverrideNotDeny,
 }
 
 impl ErrorCode {
@@ -211,6 +225,10 @@ impl ErrorCode {
             Self::PriorityRequired => "priority_required",
             Self::DuplicatePriority => "duplicate_priority",
             Self::PrecedenceOptionUnused => "precedence_option_unused",
+            Self::ModeNotAllowed => "mode_not_allowed",
+            Self::ModeDisconnectedWeaker => "mode_disconnected_weaker",
+            Self::ModeOverrideNotAllowed => "mode_override_not_allowed",
+            Self::EnforcementOverrideNotDeny => "enforcement_override_not_deny",
         }
     }
 
@@ -394,6 +412,7 @@ impl Validator {
         self.text("/policy/description", policy.description.as_deref());
         self.metadata("/policy/metadata", &policy.metadata);
         self.settings(doc);
+        self.modes(doc);
         if policy.precedence_model == PrecedenceModel::AllowWins {
             self.push(
                 ErrorCode::AllowWinsNotRecommended,

@@ -315,6 +315,7 @@ fn every_field_is_always_present() {
         "overridden",
         "annotations",
         "mode",
+        "learning_candidate",
         "directives",
         "effects",
         "reason_code",

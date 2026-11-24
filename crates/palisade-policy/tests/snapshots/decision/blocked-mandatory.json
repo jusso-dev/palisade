@@ -12,6 +12,7 @@
   "overridden": [],
   "annotations": [],
   "mode": "enforce",
+  "learning_candidate": false,
   "directives": {
     "containment": null,
     "elevation": null,

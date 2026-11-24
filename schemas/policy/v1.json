@@ -913,6 +913,129 @@
         }
       ]
     },
+    "ModeOptions": {
+      "additionalProperties": false,
+      "description": "Mode settings besides the base `mode`. Each is optional in a document.",
+      "properties": {
+        "disconnected_after_secs": {
+          "description": "How long after its last successful check-in a device counts as\ndisconnected, in seconds: 60 to 2592000, and at least the check-in\ninterval. Unset means three check-in intervals.",
+          "format": "uint32",
+          "maximum": 2592000,
+          "minimum": 60,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "mode_by_type": {
+          "additionalProperties": false,
+          "description": "The mode per object type, replacing the base mode for that type:\nfor example `script.powershell: audit` while everything else is\nenforced. `disabled` is not allowed here: only a whole device can\nbe disabled.",
+          "properties": {
+            "com_object": {
+              "$ref": "#/$defs/Mode"
+            },
+            "command": {
+              "$ref": "#/$defs/Mode"
+            },
+            "compiled_html": {
+              "$ref": "#/$defs/Mode"
+            },
+            "control_panel_applet": {
+              "$ref": "#/$defs/Mode"
+            },
+            "driver": {
+              "$ref": "#/$defs/Mode"
+            },
+            "executable": {
+              "$ref": "#/$defs/Mode"
+            },
+            "html_application": {
+              "$ref": "#/$defs/Mode"
+            },
+            "installer": {
+              "$ref": "#/$defs/Mode"
+            },
+            "library": {
+              "$ref": "#/$defs/Mode"
+            },
+            "packaged_app": {
+              "$ref": "#/$defs/Mode"
+            },
+            "script.batch": {
+              "$ref": "#/$defs/Mode"
+            },
+            "script.cmd": {
+              "$ref": "#/$defs/Mode"
+            },
+            "script.java": {
+              "$ref": "#/$defs/Mode"
+            },
+            "script.jscript": {
+              "$ref": "#/$defs/Mode"
+            },
+            "script.other": {
+              "$ref": "#/$defs/Mode"
+            },
+            "script.powershell": {
+              "$ref": "#/$defs/Mode"
+            },
+            "script.python": {
+              "$ref": "#/$defs/Mode"
+            },
+            "script.reg": {
+              "$ref": "#/$defs/Mode"
+            },
+            "script.vbscript": {
+              "$ref": "#/$defs/Mode"
+            },
+            "script.wsc": {
+              "$ref": "#/$defs/Mode"
+            },
+            "script.wsf": {
+              "$ref": "#/$defs/Mode"
+            }
+          },
+          "propertyNames": {
+            "enum": [
+              "executable",
+              "library",
+              "driver",
+              "script.powershell",
+              "script.batch",
+              "script.cmd",
+              "script.vbscript",
+              "script.jscript",
+              "script.wsf",
+              "script.wsc",
+              "script.python",
+              "script.java",
+              "script.reg",
+              "script.other",
+              "installer",
+              "compiled_html",
+              "html_application",
+              "control_panel_applet",
+              "packaged_app",
+              "command",
+              "com_object"
+            ]
+          },
+          "type": "object"
+        },
+        "mode_disconnected": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Mode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The base mode while the device is disconnected: `mode` itself or a\nstricter mode, so losing the server never relaxes a device. It also\nraises a weaker `mode_by_type`. Unset means the same as `mode`."
+        }
+      },
+      "type": "object"
+    },
     "Notify": {
       "description": "Whether the user is shown a notification (#11).",
       "oneOf": [
@@ -1097,7 +1220,11 @@
         },
         "mode": {
           "$ref": "#/$defs/Mode",
-          "description": "The base enforcement mode (#36)."
+          "description": "The base enforcement mode (#36). `disabled` is not allowed: only a\ndevice can be disabled, with a reason and an expiry."
+        },
+        "mode_options": {
+          "$ref": "#/$defs/ModeOptions",
+          "description": "The modes per object type and while disconnected (#36)."
         },
         "name": {
           "description": "Display name: 1 to 128 characters, trimmed, no control characters.\nUniqueness within a tenant is checked by the server (#10).",
@@ -1373,7 +1500,7 @@
         "enforcement_override": {
           "$ref": "#/$defs/EnforcementOverride",
           "default": "inherit",
-          "description": "Per-rule enforcement override (#36)."
+          "description": "Per-rule enforcement override (#36). Only for `deny` rules."
         },
         "id": {
           "$ref": "#/$defs/RuleId",
@@ -1464,6 +1591,17 @@
         "metadata": {
           "$ref": "#/$defs/Metadata",
           "description": "Governance metadata (#40)."
+        },
+        "mode_override": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Mode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Only for a blocklist that is not mandatory: the mode its rules\ndecide in, replacing the mode for the object's type, for example to\ntry a new blocklist in `audit` (#36). `disabled` is not allowed."
         },
         "name": {
           "description": "Display name, with the same rules as a policy name.",

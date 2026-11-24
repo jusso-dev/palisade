@@ -1,0 +1,65 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/jusso-dev/palisade/main/schemas/policy/v1.json
+#
+# A staged rollout (#36): the policy is in audit, so what it would block is
+# reported but runs. Executables are already enforced, a disconnected
+# device enforces everything, and a new blocklist is tried in monitor
+# mode. The mandatory blocklist blocks in every mode, and one deny rule is
+# enforced in audit too (`always_enforce`).
+schema_version: "1.0.0"
+policy:
+  id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4f20
+  name: Staged rollout
+  revision: 1
+  mode: audit
+  mode_options:
+    mode_by_type:
+      executable: enforce
+    mode_disconnected: enforce
+    disconnected_after_secs: 3600
+  rule_sets:
+    - 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4f30
+    - 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4f40
+
+rule_sets:
+  - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4f30
+    name: Never run
+    kind: blocklist
+    mandatory: true
+    rules:
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4f31
+        name: Known bypass tool
+        match:
+          criterion:
+            field: hash.sha256
+            operator: equals
+            values: [aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]
+        action:
+          type: deny
+
+  - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4f40
+    name: Trial blocklist
+    kind: blocklist
+    # Report only, whatever the object's mode.
+    mode_override: monitor
+    rules:
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4f41
+        name: Remote access tool
+        match:
+          criterion:
+            field: signer.publisher
+            operator: equals
+            values: [Example Remote Ltd]
+        action:
+          type: deny
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4f42
+        name: Retired script host
+        object_types: [executable]
+        match:
+          criterion:
+            field: hash.sha256
+            operator: equals
+            values: [bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb]
+        action:
+          type: deny
+        # Enforced even though its rule set only reports.
+        enforcement_override: always_enforce

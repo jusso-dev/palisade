@@ -240,11 +240,16 @@ fn rule(kind: RuleSetKind, mandatory: bool) -> impl Strategy<Value = Rule> {
                 enabled,
                 object_types: types.into_iter().collect(),
                 match_,
-                action,
                 effects,
                 order,
                 priority,
-                enforcement_override,
+                // Only a deny may override its enforcement (#36).
+                enforcement_override: if matches!(action, Action::Deny(_)) {
+                    enforcement_override
+                } else {
+                    EnforcementOverride::Inherit
+                },
+                action,
                 metadata,
             },
         )
@@ -272,9 +277,21 @@ fn rule_set() -> impl Strategy<Value = RuleSet> {
             (any::<bool>(), any::<bool>()),
             vec(rule(kind, mandatory), 0..4),
             metadata(),
+            // Only a blocklist that is not mandatory may set its mode.
+            if kind == RuleSetKind::Blocklist && !mandatory {
+                proptest::option::of(enabled_mode()).boxed()
+            } else {
+                Just(None).boxed()
+            },
         )
             .prop_map(
-                move |((id, name, description, version), (read_only, hidden), rules, metadata)| {
+                move |(
+                    (id, name, description, version),
+                    (read_only, hidden),
+                    rules,
+                    metadata,
+                    mode_override,
+                )| {
                     RuleSet {
                         id: RuleSetId(id),
                         name,
@@ -285,12 +302,48 @@ fn rule_set() -> impl Strategy<Value = RuleSet> {
                         os: Os::Windows,
                         read_only,
                         hidden,
+                        mode_override,
                         rules,
                         metadata,
                     }
                 },
             )
     })
+}
+
+/// Any mode but `disabled`, which only a device can be in.
+pub fn enabled_mode() -> impl Strategy<Value = Mode> {
+    proptest::sample::select(vec![
+        Mode::Monitor,
+        Mode::Audit,
+        Mode::Learning,
+        Mode::Enforce,
+    ])
+}
+
+/// Mode options that are valid with a base mode of `mode`.
+pub fn mode_options(mode: Mode) -> impl Strategy<Value = super::ModeOptions> {
+    let stricter: Vec<Mode> = [Mode::Monitor, Mode::Audit, Mode::Learning, Mode::Enforce]
+        .into_iter()
+        .filter(|m| *m == mode || crate::mode::strictness(*m) > crate::mode::strictness(mode))
+        .collect();
+    (
+        btree_map(
+            proptest::sample::select(ObjectType::ALL.to_vec()),
+            enabled_mode(),
+            0..4,
+        ),
+        proptest::option::of(proptest::sample::select(stricter)),
+        // At least the longest check-in interval the generator uses.
+        proptest::option::of(604_800u32..=2_592_000),
+    )
+        .prop_map(
+            |(mode_by_type, mode_disconnected, disconnected_after_secs)| super::ModeOptions {
+                mode_by_type,
+                mode_disconnected,
+                disconnected_after_secs,
+            },
+        )
 }
 
 fn control() -> impl Strategy<Value = ControlLevel> {
@@ -356,13 +409,6 @@ fn settings() -> impl Strategy<Value = PolicySettings> {
 
 /// A document that passes [`PolicyDocument::validate`].
 pub fn document() -> impl Strategy<Value = PolicyDocument> {
-    let mode = proptest::sample::select(vec![
-        Mode::Disabled,
-        Mode::Monitor,
-        Mode::Audit,
-        Mode::Learning,
-        Mode::Enforce,
-    ]);
     let model = proptest::sample::select(vec![
         PrecedenceModel::DenyWins,
         PrecedenceModel::AllowWins,
@@ -370,15 +416,24 @@ pub fn document() -> impl Strategy<Value = PolicyDocument> {
         PrecedenceModel::FirstMatch,
         PrecedenceModel::Priority,
     ]);
+    // A policy cannot be `disabled` (#36).
+    let mode_and_options = enabled_mode().prop_flat_map(|m| (Just(m), mode_options(m)));
     (
-        (uuid7(), name(), text(), any::<u64>(), model, mode),
+        (
+            uuid7(),
+            name(),
+            text(),
+            any::<u64>(),
+            model,
+            mode_and_options,
+        ),
         (settings(), precedence_options()),
         vec(rule_set(), 0..4),
         metadata(),
     )
         .prop_map(
             |(
-                (id, name, description, revision, precedence_model, mode),
+                (id, name, description, revision, precedence_model, (mode, mode_options)),
                 (settings, precedence_options),
                 mut sets,
                 metadata,
@@ -395,6 +450,7 @@ pub fn document() -> impl Strategy<Value = PolicyDocument> {
                         precedence_model,
                         precedence_options,
                         mode,
+                        mode_options,
                         settings,
                         rule_sets,
                         metadata,
