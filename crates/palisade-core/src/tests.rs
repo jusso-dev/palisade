@@ -163,3 +163,330 @@ proptest! {
         let _ = s.parse::<SchemaVersion>();
     }
 }
+
+mod path {
+    use alloc::string::String;
+    use alloc::vec::Vec;
+
+    use proptest::prelude::*;
+
+    use crate::path::{PathKind, VolumeMap, normalize, normalize_with};
+
+    #[test]
+    fn normalisation_vectors() {
+        let mut volumes = VolumeMap::new();
+        assert!(volumes.insert("\\Device\\HarddiskVolume3", 'c'));
+        for (input, expected, kind) in [
+            // Separators, `.` and `..`.
+            (
+                "C:/Windows/System32",
+                "C:\\Windows\\System32",
+                PathKind::Drive,
+            ),
+            ("c:\\\\a\\\\\\b\\", "C:\\a\\b", PathKind::Drive),
+            ("C:\\a\\.\\b\\..\\c", "C:\\a\\c", PathKind::Drive),
+            ("C:\\..\\..\\x", "C:\\x", PathKind::Drive),
+            ("C:", "C:", PathKind::Relative),
+            ("C:\\", "C:\\", PathKind::Drive),
+            // Prefixes.
+            (
+                "\\\\?\\C:\\Tools\\a.exe",
+                "C:\\Tools\\a.exe",
+                PathKind::Drive,
+            ),
+            (
+                "\\??\\C:\\Tools\\a.exe",
+                "C:\\Tools\\a.exe",
+                PathKind::Drive,
+            ),
+            ("\\\\.\\C:\\Tools", "C:\\Tools", PathKind::Drive),
+            (
+                "\\\\?\\UNC\\srv\\share\\a",
+                "\\\\srv\\share\\a",
+                PathKind::Unc,
+            ),
+            (
+                "\\\\?\\unc\\srv\\share\\a",
+                "\\\\srv\\share\\a",
+                PathKind::Unc,
+            ),
+            // UNC.
+            ("//srv/share/x/../y", "\\\\srv\\share\\y", PathKind::Unc),
+            ("\\\\\\srv\\share", "\\\\srv\\share", PathKind::Unc),
+            (
+                "\\\\srv\\share\\..\\..\\x",
+                "\\\\srv\\share\\x",
+                PathKind::Unc,
+            ),
+            // Device paths.
+            (
+                "\\Device\\HarddiskVolume3\\Windows\\a.exe",
+                "C:\\Windows\\a.exe",
+                PathKind::Drive,
+            ),
+            (
+                "\\\\?\\GLOBALROOT\\Device\\HarddiskVolume3\\x",
+                "C:\\x",
+                PathKind::Drive,
+            ),
+            (
+                "\\Device\\HarddiskVolume33\\x",
+                "\\Device\\HarddiskVolume33\\x",
+                PathKind::Device,
+            ),
+            (
+                "\\\\?\\Volume{0a1b}\\x",
+                "\\\\?\\Volume{0a1b}\\x",
+                PathKind::Device,
+            ),
+            ("\\\\.\\..\\x", "\\\\?\\..\\x", PathKind::Device),
+            ("\\\\..\\x", "\\\\?\\UNC\\..\\x", PathKind::Device),
+            ("\\\\srv\\..\\x", "\\\\?\\UNC\\srv\\..\\x", PathKind::Device),
+            ("\\\\srv\\.", "\\\\?\\UNC\\srv\\.", PathKind::Device),
+            ("C:\\a\\b::$DATA\\.", "C:\\a\\b", PathKind::Drive),
+            // Spellings that only show once another rule has run.
+            (
+                "C:\\a.txt::$INDEX_ALLOCATION::$DATA",
+                "C:\\a.txt",
+                PathKind::Drive,
+            ),
+            (
+                "C:\\a\\..::$INDEX_ALLOCATION::$DATA",
+                "C:\\",
+                PathKind::Drive,
+            ),
+            (
+                "\\\\?\\GLOBALROOT\\a\\..\\Device\\HarddiskVolume3\\x",
+                "C:\\x",
+                PathKind::Drive,
+            ),
+            (
+                "\\\\?\\GLOBALROOT\\.\\Device\\HarddiskVolume3\\x",
+                "C:\\x",
+                PathKind::Drive,
+            ),
+            (
+                "\\\\?\\GLOBALROOT\\Device::$INDEX_ALLOCATION\\HarddiskVolume3\\x",
+                "C:\\x",
+                PathKind::Drive,
+            ),
+            // A relative path never becomes an absolute one.
+            (
+                "\\Device::$INDEX_ALLOCATION\\HarddiskVolume3\\x",
+                "\\.\\Device\\HarddiskVolume3\\x",
+                PathKind::Relative,
+            ),
+            (
+                "\\??::$INDEX_ALLOCATION\\C:\\x",
+                "\\.\\??\\C:\\x",
+                PathKind::Relative,
+            ),
+            (
+                "\\::$INDEX_ALLOCATION\\srv\\share\\evil.exe",
+                "\\srv\\share\\evil.exe",
+                PathKind::Relative,
+            ),
+            (
+                "\\::$INDEX_ALLOCATION\\?\\C:\\Windows\\cmd.exe",
+                "\\?\\C:\\Windows\\cmd.exe",
+                PathKind::Relative,
+            ),
+            (
+                "\\::$INDEX_ALLOCATION\\.\\C:\\Windows\\cmd.exe",
+                "\\.\\C:\\Windows\\cmd.exe",
+                PathKind::Relative,
+            ),
+            (
+                "\\:$I30:$INDEX_ALLOCATION\\Device\\HarddiskVolume3\\x",
+                "\\.\\Device\\HarddiskVolume3\\x",
+                PathKind::Relative,
+            ),
+            // Streams and stream types.
+            ("C:\\a.txt::$DATA", "C:\\a.txt", PathKind::Drive),
+            ("C:\\a.txt:s:$DATA", "C:\\a.txt:s", PathKind::Drive),
+            ("C:\\a.txt:s", "C:\\a.txt:s", PathKind::Drive),
+            (
+                "C:\\dir::$INDEX_ALLOCATION\\a",
+                "C:\\dir\\a",
+                PathKind::Drive,
+            ),
+            (
+                "C:\\dir:$I30:$INDEX_ALLOCATION\\a",
+                "C:\\dir\\a",
+                PathKind::Drive,
+            ),
+            // Trailing dots and spaces are significant.
+            ("C:\\a.exe.", "C:\\a.exe.", PathKind::Drive),
+            ("C:\\a.exe ", "C:\\a.exe ", PathKind::Drive),
+            // Case is kept, except for the drive letter.
+            ("d:\\MiXeD", "D:\\MiXeD", PathKind::Drive),
+            // Relative forms.
+            ("a\\.\\..\\b", "a\\.\\..\\b", PathKind::Relative),
+            ("::$INDEX_ALLOCATION\\a:b", ".\\a:b", PathKind::Relative),
+            ("\\Windows", "\\Windows", PathKind::Relative),
+            ("c:a", "C:a", PathKind::Relative),
+            ("**\\cmd.exe", "**\\cmd.exe", PathKind::Relative),
+        ] {
+            let p = normalize_with(input, &volumes);
+            assert_eq!(p.as_str(), expected, "{input:?}");
+            assert_eq!(p.kind(), kind, "{input:?}");
+        }
+    }
+
+    #[test]
+    fn long_stream_type_chains_collapse() {
+        let chain = "::$INDEX_ALLOCATION::$DATA".repeat(40);
+        let p = normalize(&format!("C:\\a.txt{chain}"));
+        assert_eq!(p.as_str(), "C:\\a.txt");
+        assert_eq!(p.stream(), None);
+        let p = normalize(&format!("C:\\a\\..{chain}"));
+        assert_eq!(p.as_str(), "C:\\");
+        let p = normalize(&format!("C:\\a.txt:s{}", ":$DATA".repeat(3)));
+        assert_eq!(p.as_str(), "C:\\a.txt:s");
+        assert_eq!(p.stream(), Some("s"));
+        assert_eq!(normalize(p.as_str()), p);
+    }
+
+    #[test]
+    fn components_and_streams() {
+        let p = normalize("C:\\Tools\\App\\run.tar.gz:payload");
+        assert_eq!(p.root(), "C:\\");
+        assert_eq!(p.directory(), Some("C:\\Tools\\App"));
+        assert_eq!(p.file_name(), Some("run.tar.gz"));
+        assert_eq!(p.extension(), Some("gz"));
+        assert_eq!(p.stream(), Some("payload"));
+        assert_eq!(p.without_stream(), "C:\\Tools\\App\\run.tar.gz");
+
+        let top = normalize("C:\\a.exe");
+        assert_eq!(top.directory(), Some("C:\\"));
+        assert_eq!(top.stream(), None);
+        let unc = normalize("\\\\srv\\share\\a.exe");
+        assert_eq!(unc.root(), "\\\\srv\\share");
+        assert_eq!(unc.directory(), Some("\\\\srv\\share"));
+        assert_eq!(normalize("C:\\").directory(), None);
+        assert_eq!(normalize("C:\\").file_name(), None);
+        assert_eq!(normalize("C:\\noext").extension(), None);
+        assert_eq!(normalize("C:\\dot.").extension(), None);
+    }
+
+    #[test]
+    fn streams_on_roots_and_directories() {
+        let mut volumes = VolumeMap::new();
+        volumes.insert("\\Device\\HarddiskVolume3", 'C');
+        for raw in ["C:\\:payload", "\\Device\\HarddiskVolume3\\:payload"] {
+            let p = normalize_with(raw, &volumes);
+            assert_eq!(p.as_str(), "C:\\:payload", "{raw}");
+            assert_eq!(p.stream(), Some("payload"));
+            assert_eq!(p.without_stream(), "C:\\");
+            assert_eq!(p.file_name(), None);
+            assert_eq!(p.directory(), None);
+        }
+        let unc = normalize("\\\\srv\\share\\:payload");
+        assert_eq!(unc.stream(), Some("payload"));
+        assert_eq!(unc.without_stream(), "\\\\srv\\share");
+        assert_eq!(unc.file_name(), None);
+        assert_eq!(unc.directory(), None);
+        // A stream on a directory belongs to the directory.
+        let dir = normalize("C:\\dir\\:payload");
+        assert_eq!(dir.without_stream(), "C:\\dir");
+        assert_eq!(dir.file_name(), Some("dir"));
+        assert_eq!(dir.directory(), Some("C:\\"));
+        assert_eq!(normalize(dir.as_str()), dir);
+    }
+
+    #[test]
+    fn volume_map_rejects_bad_entries() {
+        let mut volumes = VolumeMap::new();
+        assert!(!volumes.insert("\\Device\\", 'c'));
+        assert!(!volumes.insert("C:\\", 'c'));
+        assert!(!volumes.insert("\\Device\\HarddiskVolume1", '1'));
+        assert!(volumes.insert("/Device/HarddiskVolume1/", 'e'));
+        assert_eq!(
+            normalize_with("\\Device\\harddiskvolume1\\x", &volumes).as_str(),
+            "E:\\x"
+        );
+    }
+
+    fn segment() -> impl Strategy<Value = String> {
+        prop_oneof![
+            Just(String::from(".")),
+            Just(String::from("..")),
+            Just(String::new()),
+            Just(String::from("a.txt:s")),
+            Just(String::from("a::$DATA")),
+            Just(String::from("d:$I30:$INDEX_ALLOCATION")),
+            Just(String::from("Device")),
+            Just(String::from("HarddiskVolume3")),
+            Just(String::from("GLOBALROOT")),
+            Just(String::from("??")),
+            Just(String::from("C:")),
+            Just(String::from("UNC")),
+            Just(String::from("..::$INDEX_ALLOCATION")),
+            Just(String::from("x::$INDEX_ALLOCATION::$DATA")),
+            Just(String::from("::$INDEX_ALLOCATION")),
+            Just(String::from(":$I30:$INDEX_ALLOCATION")),
+            Just(String::from("?")),
+            "x(::\\$INDEX_ALLOCATION::\\$DATA){1,20}",
+            "[A-Za-z0-9 ._$:?-]{1,8}",
+        ]
+    }
+
+    fn raw_path() -> impl Strategy<Value = String> {
+        (
+            prop_oneof![
+                Just(""),
+                Just("C:"),
+                Just("c:\\"),
+                Just("\\"),
+                Just("\\\\"),
+                Just("\\\\?\\"),
+                Just("\\??\\"),
+                Just("\\\\.\\"),
+                Just("\\\\?\\UNC\\"),
+                Just("\\Device\\HarddiskVolume3"),
+                Just("\\\\?\\GLOBALROOT\\Device\\HarddiskVolume3"),
+                Just("\\\\?\\GLOBALROOT\\"),
+                Just("\\::$INDEX_ALLOCATION\\"),
+                Just("\\??::$INDEX_ALLOCATION\\"),
+            ],
+            proptest::collection::vec(segment(), 0..6),
+            prop_oneof![Just("\\"), Just("/"), Just("\\\\")],
+        )
+            .prop_map(|(prefix, parts, sep)| {
+                let mut s = String::from(prefix);
+                s.push_str(&parts.join(sep));
+                s
+            })
+    }
+
+    proptest! {
+        #[test]
+        fn normalisation_is_idempotent(raw in raw_path()) {
+            let mut volumes = VolumeMap::new();
+            volumes.insert("\\Device\\HarddiskVolume3", 'C');
+            let once = normalize_with(&raw, &volumes);
+            let twice = normalize_with(once.as_str(), &volumes);
+            // Only an input that starts like an absolute path can become
+            // one.
+            let flat = raw.replace('/', "\\");
+            let b = flat.as_bytes();
+            let absolute_start = flat.starts_with("\\\\")
+                || flat.starts_with("\\??\\")
+                || flat.get(..8).is_some_and(|h| h.eq_ignore_ascii_case("\\Device\\"))
+                || (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\');
+            if !absolute_start {
+                prop_assert_eq!(once.kind(), PathKind::Relative, "{:?} gave {}", raw, once);
+            }
+            prop_assert_eq!(once.as_str(), twice.as_str());
+            prop_assert_eq!(once.kind(), twice.kind());
+            // No `.` or `..` component survives in an absolute path, and no
+            // separator is doubled after the root.
+            if once.is_resolved() {
+                let body = &once.as_str()[once.root().len()..];
+                let parts: Vec<&str> = body.split('\\').filter(|p| !p.is_empty()).collect();
+                prop_assert!(parts.iter().all(|p| *p != "." && *p != ".."), "{}", once);
+                prop_assert!(!body.contains("\\\\"), "{}", once);
+            }
+        }
+    }
+}

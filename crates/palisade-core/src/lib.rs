@@ -7,6 +7,7 @@ extern crate alloc;
 mod id;
 mod mode;
 mod object;
+pub mod path;
 mod version;
 
 use core::fmt;

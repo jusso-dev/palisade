@@ -16,5 +16,5 @@ rule_sets:
           criterion:
             field: hash.sha1
             operator: equals
-            values: [AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA]
+            values: [GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG]
         action: {type: allow}

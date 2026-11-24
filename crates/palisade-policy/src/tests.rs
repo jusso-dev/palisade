@@ -282,8 +282,12 @@ fn allow_rules_need_a_strong_positive_identity() {
         .validate()
         .unwrap_err();
     assert_eq!(errors[0].code, ErrorCode::NoIdentityAnchor);
-    // The same tree is fine on a deny rule.
-    assert!(with_rule(negated, Action::Deny {}).validate().is_ok());
+    // On a deny rule, a negation alone matches almost everything (#32).
+    let errors = with_rule(negated, Action::Deny {}).validate().unwrap_err();
+    assert_eq!(
+        codes(&errors),
+        vec![(ErrorCode::NegationOnly, "/rule_sets/0/rules/0/match")]
+    );
 
     // SHA-1 alone cannot allow (ADR 0008), but can deny.
     let sha1: String = std::iter::repeat_n('e', 40).collect();
@@ -751,4 +755,249 @@ proptest! {
         // Serialising again gives the same bytes.
         prop_assert_eq!(back.to_json_pretty().unwrap(), text);
     }
+}
+
+#[test]
+fn hash_values_are_normalised_on_validation() {
+    let upper = format!("0x{}", sha256('A'));
+    let doc = with_rule(
+        leaf(Field::HashSha256, Operator::Equals, &[&upper]),
+        Action::Deny {},
+    );
+    let validated = doc.validate().unwrap();
+    let Match::Criterion(c) = &validated.document().rule_sets[0].rules[0].match_ else {
+        panic!("not a criterion");
+    };
+    assert_eq!(c.values, vec![sha256('a')]);
+    // Normalising again changes nothing.
+    let again = validated.into_document().validate().unwrap();
+    let Match::Criterion(c) = &again.document().rule_sets[0].rules[0].match_ else {
+        panic!("not a criterion");
+    };
+    assert_eq!(c.values, vec![sha256('a')]);
+}
+
+#[test]
+fn negation_alone_is_an_error_for_every_action() {
+    let negated = leaf(Field::PathFull, Operator::NotEquals, &["C:\\Tools\\a.exe"]);
+    for (action, code) in [
+        (Action::Allow {}, ErrorCode::NoIdentityAnchor),
+        (Action::Deny {}, ErrorCode::NegationOnly),
+        (Action::Audit {}, ErrorCode::NegationOnly),
+    ] {
+        let errors = with_rule(negated.clone(), action).validate().unwrap_err();
+        assert_eq!(
+            codes(&errors),
+            vec![(code, "/rule_sets/0/rules/0/match")],
+            "{action:?}"
+        );
+    }
+    // With a positive criterion beside it, the negation is fine.
+    let anchored = Match::All(vec![
+        leaf(Field::PathExtension, Operator::Equals, &["exe"]),
+        negated,
+    ]);
+    assert!(with_rule(anchored, Action::Deny {}).validate().is_ok());
+}
+
+#[test]
+fn weak_identity_allow_rules_warn() {
+    let name_only = leaf(Field::PathFileName, Operator::Equals, &["setup.exe"]);
+    let validated = with_rule(name_only.clone(), Action::Allow {})
+        .validate()
+        .unwrap();
+    assert_eq!(
+        codes(validated.warnings()),
+        vec![(ErrorCode::WeakIdentity, "/rule_sets/0/rules/0/match")]
+    );
+    assert_eq!(validated.warnings()[0].severity, Severity::Warning);
+    // A deny rule may use a weak identity.
+    assert!(
+        with_rule(name_only.clone(), Action::Deny {})
+            .validate()
+            .unwrap()
+            .warnings()
+            .is_empty()
+    );
+    // Publisher and product together is the recommended allow form.
+    let publisher_product = Match::All(vec![
+        leaf(Field::SignerPublisher, Operator::Equals, &["Example Ltd"]),
+        leaf(
+            Field::MetaProductName,
+            Operator::Equals,
+            &["Example Editor"],
+        ),
+    ]);
+    assert!(
+        with_rule(publisher_product, Action::Allow {})
+            .validate()
+            .unwrap()
+            .warnings()
+            .is_empty()
+    );
+    // `any` is as weak as its weakest branch.
+    let either = Match::Any(vec![
+        leaf(Field::HashSha256, Operator::Equals, &[&sha256('5')]),
+        name_only,
+    ]);
+    let validated = with_rule(either, Action::Allow {}).validate().unwrap();
+    assert_eq!(validated.warnings()[0].code, ErrorCode::WeakIdentity);
+}
+
+#[test]
+fn regex_and_pattern_problems_are_reported() {
+    let tree = Match::All(vec![
+        leaf(Field::HashSha256, Operator::Equals, &[&sha256('6')]),
+        leaf(Field::MetaProductName, Operator::Regex, &["ok.*", "a(?!b)"]),
+        leaf(Field::MetaProductName, Operator::NotRegex, &["(a)\\1"]),
+        leaf(Field::MetaProductName, Operator::Regex, &["a("]),
+        leaf(
+            Field::MetaProductName,
+            Operator::Regex,
+            &["(((a{100}){100}){100})"],
+        ),
+        leaf(
+            Field::MetaFileVersion,
+            Operator::VersionBetween,
+            &["3.0", "2.0"],
+        ),
+        leaf(Field::PathFull, Operator::StartsWith, &["%NOPE%\\x"]),
+    ]);
+    let errors = with_rule(tree, Action::Deny {}).validate().unwrap_err();
+    let base = "/rule_sets/0/rules/0/match/all";
+    assert_eq!(
+        codes(&errors),
+        vec![
+            (
+                ErrorCode::UnsupportedRegex,
+                &*format!("{base}/1/criterion/values/1")
+            ),
+            (
+                ErrorCode::UnsupportedRegex,
+                &*format!("{base}/2/criterion/values/0")
+            ),
+            (
+                ErrorCode::InvalidRegex,
+                &*format!("{base}/3/criterion/values/0")
+            ),
+            (
+                ErrorCode::PatternTooLarge,
+                &*format!("{base}/4/criterion/values/0")
+            ),
+            (
+                ErrorCode::InvalidValue,
+                &*format!("{base}/5/criterion/values/1")
+            ),
+            (
+                ErrorCode::InvalidValue,
+                &*format!("{base}/6/criterion/values/0")
+            ),
+        ]
+    );
+    assert!(
+        errors[0].message.contains("not_regex"),
+        "{}",
+        errors[0].message
+    );
+}
+
+#[test]
+fn regex_count_is_capped_per_policy() {
+    let regex = |i: usize| leaf(Field::MetaProductName, Operator::Regex, &[&format!("a{i}")]);
+    let mut doc = with_rule(regex(0), Action::Deny {});
+    let rule = doc.rule_sets[0].rules[0].clone();
+    // 81 rules of 25 values each: 2025 regular expressions.
+    let values: Vec<String> = (0..25).map(|i| format!("a{i}")).collect();
+    doc.rule_sets[0].rules = (0..81u8)
+        .map(|i| {
+            let mut r = rule.clone();
+            let mut id = *r.id.0.as_bytes();
+            id[15] = i;
+            r.id = crate::model::RuleId(palisade_core::Uuid7::from_bytes(id).unwrap());
+            r.match_ = Match::Criterion(Criterion {
+                field: Field::MetaProductName,
+                operator: Operator::Regex,
+                values: values.clone(),
+                case_sensitive: None,
+            });
+            r
+        })
+        .collect();
+    // Past the cap, regular expressions are not compiled, so even invalid
+    // ones are not reported: only the cap is.
+    if let Match::Criterion(c) = &mut doc.rule_sets[0].rules[0].match_ {
+        c.values[0] = "a(".to_owned();
+    }
+    let errors = doc.clone().validate().unwrap_err();
+    assert_eq!(
+        codes(&errors),
+        vec![(ErrorCode::TooManyRegexes, "/rule_sets")]
+    );
+    if let Match::Criterion(c) = &mut doc.rule_sets[0].rules[0].match_ {
+        c.values[0] = "a0".to_owned();
+    }
+    doc.rule_sets[0].rules.truncate(80);
+    assert!(doc.validate().is_ok());
+}
+
+#[test]
+fn value_counts_depend_on_the_operator() {
+    let tree = Match::All(vec![
+        leaf(Field::HashSha256, Operator::Equals, &[&sha256('7')]),
+        leaf(Field::MetaFileVersion, Operator::VersionBetween, &["1.0"]),
+        leaf(
+            Field::MetaFileVersion,
+            Operator::VersionBetween,
+            &["1.0", "2.0", "3.0"],
+        ),
+    ]);
+    let errors = with_rule(tree, Action::Deny {}).validate().unwrap_err();
+    let base = "/rule_sets/0/rules/0/match/all";
+    assert_eq!(
+        codes(&errors),
+        vec![
+            (
+                ErrorCode::InvalidValueCount,
+                &*format!("{base}/1/criterion/values")
+            ),
+            (
+                ErrorCode::InvalidValueCount,
+                &*format!("{base}/2/criterion/values")
+            ),
+        ]
+    );
+    assert!(
+        errors[0].message.contains("exactly 2"),
+        "{}",
+        errors[0].message
+    );
+}
+
+#[test]
+fn every_weak_hash_is_refused_as_the_only_allow_identity() {
+    for (field, len) in [
+        (Field::HashSha1, 40),
+        (Field::HashMd5, 32),
+        (Field::HashAuthenticodeSha1, 40),
+        (Field::HashPageSha1, 40),
+    ] {
+        let value = "e".repeat(len);
+        let errors = with_rule(leaf(field, Operator::Equals, &[&value]), Action::Allow {})
+            .validate()
+            .unwrap_err();
+        assert_eq!(
+            codes(&errors),
+            vec![(ErrorCode::WeakHashOnlyAllow, "/rule_sets/0/rules/0/match")],
+            "{field:?}"
+        );
+    }
+    // A first-page SHA-256 is not collision-prone, but covers one page, so
+    // it is only a weak identity: a warning, not an error.
+    let page = with_rule(
+        leaf(Field::HashPageSha256, Operator::Equals, &[&sha256('8')]),
+        Action::Allow {},
+    )
+    .validate()
+    .unwrap();
+    assert_eq!(page.warnings()[0].code, ErrorCode::WeakIdentity);
 }

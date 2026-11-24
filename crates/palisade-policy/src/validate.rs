@@ -16,8 +16,9 @@ use crate::model::limits::{
 use crate::model::settings::{ADVANCED_KEY_MAX_BYTES, is_valid_advanced_key, ranges};
 use crate::model::{
     Action, Criterion, EnforcementOverride, FieldClass, Match, Metadata, PolicyDocument,
-    PrecedenceModel, Rule, RuleSetKind,
+    PrecedenceModel, Rule, RuleSetKind, Strength,
 };
+use crate::ops::{self, CompileErrorKind, CompiledCriterion, MAX_REGEXES_PER_POLICY};
 use crate::schema;
 
 /// How serious a finding is.
@@ -88,6 +89,22 @@ pub enum ErrorCode {
     AllowWinsNotRecommended,
     /// An allow rule's tree contains no positive identity criterion.
     NoIdentityAnchor,
+    /// A deny or audit rule can match on negations alone, which match
+    /// almost every object (#32).
+    NegationOnly,
+    /// A regular expression uses look-around or a backreference, which the
+    /// linear-time engine does not support (#32).
+    UnsupportedRegex,
+    /// A regular expression is not valid.
+    InvalidRegex,
+    /// A regular expression or wildcard compiles to more than the size
+    /// limit (#32).
+    PatternTooLarge,
+    /// The policy holds more regular expressions than allowed (#32).
+    TooManyRegexes,
+    /// An allow rule's strongest guaranteed identity is weak, such as a
+    /// file name or version-resource string (#31).
+    WeakIdentity,
 }
 
 impl ErrorCode {
@@ -122,6 +139,12 @@ impl ErrorCode {
             Self::WeakHashOnlyAllow => "weak_hash_only_allow",
             Self::AllowWinsNotRecommended => "allow_wins_not_recommended",
             Self::NoIdentityAnchor => "no_identity_anchor",
+            Self::NegationOnly => "negation_only",
+            Self::UnsupportedRegex => "unsupported_regex",
+            Self::InvalidRegex => "invalid_regex",
+            Self::PatternTooLarge => "pattern_too_large",
+            Self::TooManyRegexes => "too_many_regexes",
+            Self::WeakIdentity => "weak_identity",
         }
     }
 
@@ -129,7 +152,7 @@ impl ErrorCode {
     #[must_use]
     pub const fn severity(self) -> Severity {
         match self {
-            Self::AllowWinsNotRecommended => Severity::Warning,
+            Self::AllowWinsNotRecommended | Self::WeakIdentity => Severity::Warning,
             _ => Severity::Error,
         }
     }
@@ -203,14 +226,20 @@ impl ValidatedPolicy {
 impl PolicyDocument {
     /// Checks everything the JSON Schema cannot: limits measured in bytes,
     /// references between objects, unique IDs, the operator compatibility
-    /// table, and the safety rules from ADR 0004 and ADR 0008.
+    /// table, that every criterion compiles ([`crate::ops`]), and the
+    /// safety rules from ADR 0004, ADR 0008, #31 and #32.
+    ///
+    /// Hash values are normalised first: a `0x` prefix is removed and the
+    /// digits are lowercased, so the validated document holds the canonical
+    /// form (#31).
     ///
     /// Every finding is reported, not just the first, in document order.
     ///
     /// # Errors
     ///
     /// Returns every finding if any has `error` severity.
-    pub fn validate(self) -> Result<ValidatedPolicy, Vec<ValidationError>> {
+    pub fn validate(mut self) -> Result<ValidatedPolicy, Vec<ValidationError>> {
+        normalize_hashes(&mut self);
         let mut v = Validator::default();
         v.document(&self);
         if v.findings.iter().any(|f| f.severity == Severity::Error) {
@@ -229,9 +258,42 @@ fn pointer_token(token: &str) -> String {
     token.replace('~', "~0").replace('/', "~1")
 }
 
-#[derive(Default)]
 struct Validator {
     findings: Vec<ValidationError>,
+    /// Whether regular expressions are compiled. Off once the document
+    /// holds more than the per-policy cap.
+    compile_regexes: bool,
+}
+
+impl Default for Validator {
+    fn default() -> Self {
+        Self {
+            findings: Vec::new(),
+            compile_regexes: true,
+        }
+    }
+}
+
+/// Normalises every hash value in the document in place.
+fn normalize_hashes(doc: &mut PolicyDocument) {
+    for rule in doc.rule_sets.iter_mut().flat_map(|s| s.rules.iter_mut()) {
+        let mut stack = vec![&mut rule.match_];
+        while let Some(node) = stack.pop() {
+            match node {
+                Match::All(children) | Match::Any(children) => stack.extend(children.iter_mut()),
+                Match::Not(child) => stack.push(child),
+                Match::Criterion(c) => {
+                    if let FieldClass::Hash { .. } = c.field.class() {
+                        for value in &mut c.values {
+                            if let Some(hex) = ops::normalize_hex(value) {
+                                *value = hex;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl Validator {
@@ -317,6 +379,22 @@ impl Validator {
         }
 
         let total_rules: usize = doc.rule_sets.iter().map(|s| s.rules.len()).sum();
+        let total_regexes: usize = doc
+            .rule_sets
+            .iter()
+            .flat_map(|s| &s.rules)
+            .map(|r| regex_count(&r.match_))
+            .sum();
+        if total_regexes > MAX_REGEXES_PER_POLICY {
+            self.compile_regexes = false;
+            self.push(
+                ErrorCode::TooManyRegexes,
+                "/rule_sets",
+                format!(
+                    "{total_regexes} regular expressions; at most {MAX_REGEXES_PER_POLICY} are allowed"
+                ),
+            );
+        }
         if total_rules > MAX_RULES_PER_POLICY {
             self.push(
                 ErrorCode::TooManyRules,
@@ -447,19 +525,30 @@ impl Validator {
 
         // The recursive analysis is bounded by the depth limit, so it only
         // runs on trees that passed it.
-        if matches!(rule.action, Action::Allow {}) && depth <= MAX_TREE_DEPTH {
-            match guaranteed_identity(&rule.match_) {
-                Identity::None => self.push(
+        if depth <= MAX_TREE_DEPTH {
+            let identity = guaranteed_identity(&rule.match_);
+            match (rule.action, identity) {
+                (Action::Allow {}, Identity::None) => self.push(
                     ErrorCode::NoIdentityAnchor,
                     &tree,
                     "an allow rule must identify the object on every way it can match: each `any` branch needs a positive identity criterion outside `not`",
                 ),
-                Identity::WeakHashOnly => self.push(
+                (_, Identity::None) => self.push(
+                    ErrorCode::NegationOnly,
+                    &tree,
+                    "this rule can match on negations alone, which match almost every object; combine each negation with a positive criterion in an `all`",
+                ),
+                (Action::Allow {}, Identity::WeakHashOnly) => self.push(
                     ErrorCode::WeakHashOnlyAllow,
                     &tree,
                     "this allow rule can match on SHA-1 or MD5 alone, which are compatibility hashes (ADR 0008); require a SHA-256 or another identity on every branch",
                 ),
-                Identity::Other => {}
+                (Action::Allow {}, Identity::Weak) => self.push(
+                    ErrorCode::WeakIdentity,
+                    &tree,
+                    "this allow rule can match on weak identities alone (file names, extensions or version-resource strings), which anyone can copy; add a hash, a publisher or a path",
+                ),
+                _ => {}
             }
         }
     }
@@ -486,24 +575,72 @@ impl Validator {
                 format!("`{}` has no case to compare", serde_name(&c.field)),
             );
         }
-        let max = if c.operator.is_single_valued() {
-            1
-        } else {
-            MAX_VALUES_PER_CRITERION
-        };
-        if c.values.is_empty() || c.values.len() > max {
+        let (min, max) = c.operator.value_count();
+        if c.values.len() < min || c.values.len() > max {
+            let expected = if min == max {
+                format!("exactly {min} is required")
+            } else {
+                format!("between {min} and {max} are allowed")
+            };
             self.push(
                 ErrorCode::InvalidValueCount,
                 &format!("{base}/values"),
-                format!("{} values; between 1 and {max} are allowed", c.values.len()),
+                format!(
+                    "{} values; {expected} for `{}`",
+                    c.values.len(),
+                    serde_name(&c.operator)
+                ),
             );
         }
-        for (i, value) in c.values.iter().enumerate() {
+        // Each value is checked against its field and operator: hash
+        // lengths, versions, path forms, regular expressions and pattern
+        // sizes. A value is compiled only once, and only if it is within the
+        // size limits; past the per-policy regex cap, regular expressions
+        // are not compiled at all, so hostile input cannot make validation
+        // compile more than the limits allow.
+        let mut all_ok = true;
+        for (i, value) in c.values.iter().enumerate().take(MAX_VALUES_PER_CRITERION) {
             let path = format!("{base}/values/{i}");
-            if let Some(problem) = value_problem(class, value) {
+            if let Some(problem) = value_problem(value) {
                 self.push(ErrorCode::InvalidValue, &path, problem);
+                all_ok = false;
+            } else if c.operator.is_regex() && !self.compile_regexes {
+                all_ok = false;
+            } else if let Err(kind) = CompiledCriterion::check_value(c, value) {
+                self.compile_error(&path, &kind);
+                all_ok = false;
             }
         }
+        // Checks across values, such as the order of a version range. Every
+        // value already compiled, and a range has no patterns, so this
+        // compiles nothing a second time.
+        let well_formed =
+            all_ok && c.operator.applies_to(class) && (min..=max).contains(&c.values.len());
+        if well_formed && c.operator.is_version() {
+            if let Err(errors) = CompiledCriterion::compile(c) {
+                for e in errors {
+                    let path = match e.value {
+                        Some(i) => format!("{base}/values/{i}"),
+                        None => format!("{base}/values"),
+                    };
+                    self.compile_error(&path, &e.kind);
+                }
+            }
+        }
+    }
+
+    fn compile_error(&mut self, path: &str, kind: &CompileErrorKind) {
+        let code = match kind {
+            CompileErrorKind::OperatorFieldMismatch => ErrorCode::OperatorFieldMismatch,
+            CompileErrorKind::ValueCount => ErrorCode::InvalidValueCount,
+            CompileErrorKind::InvalidValue(_) => ErrorCode::InvalidValue,
+            CompileErrorKind::RegexLookAround | CompileErrorKind::RegexBackreference => {
+                ErrorCode::UnsupportedRegex
+            }
+            CompileErrorKind::RegexSyntax(_) => ErrorCode::InvalidRegex,
+            CompileErrorKind::PatternTooLarge => ErrorCode::PatternTooLarge,
+        };
+        self.push(code, path, kind.to_string());
     }
 
     fn settings(&mut self, doc: &PolicyDocument) {
@@ -688,14 +825,15 @@ enum Identity {
     None,
     /// Some way of matching checks only SHA-1 or MD5.
     WeakHashOnly,
-    /// Every way of matching checks another identity criterion.
-    Other,
+    /// Some way of matching checks only weak identities (#31).
+    Weak,
+    /// Every way of matching checks a medium or strong identity.
+    Sound,
 }
 
 /// A conservative analysis: `all` guarantees the strongest of its children,
 /// `any` only the weakest, and `not` guarantees nothing, because a negated
-/// test never says what the object is. The full identity-anchor rule,
-/// including context criteria and strength ratings, is #33 and #31.
+/// test never says what the object is. Context criteria are #33.
 fn guaranteed_identity(node: &Match) -> Identity {
     match node {
         Match::All(children) => children
@@ -711,8 +849,24 @@ fn guaranteed_identity(node: &Match) -> Identity {
         Match::Not(_) => Identity::None,
         Match::Criterion(c) if !c.operator.is_positive() => Identity::None,
         Match::Criterion(c) if c.field.is_weak_hash() => Identity::WeakHashOnly,
-        Match::Criterion(_) => Identity::Other,
+        Match::Criterion(c) if c.field.strength() == Strength::Weak => Identity::Weak,
+        Match::Criterion(_) => Identity::Sound,
     }
+}
+
+/// The number of regular expression values in a tree.
+fn regex_count(tree: &Match) -> usize {
+    let mut count = 0usize;
+    let mut stack = vec![tree];
+    while let Some(node) = stack.pop() {
+        if let Match::Criterion(c) = node {
+            if c.operator.is_regex() {
+                count = count.saturating_add(c.values.len());
+            }
+        }
+        stack.extend(node.children());
+    }
+    count
 }
 
 /// Keys accepted in `settings.advanced`. None are defined yet; each will be
@@ -731,8 +885,10 @@ fn has_control(s: &str) -> bool {
         .any(|c| c.is_control() && !matches!(c, '\t' | '\n' | '\r'))
 }
 
-/// Why a criterion value is not acceptable for its field, if it is not.
-fn value_problem(class: FieldClass, value: &str) -> Option<String> {
+/// Why a criterion value is not acceptable for any field, if it is not.
+/// Checks that depend on the field are in
+/// [`CompiledCriterion::check_value`].
+fn value_problem(value: &str) -> Option<String> {
     if value.is_empty() {
         return Some("values must not be empty".to_owned());
     }
@@ -745,28 +901,7 @@ fn value_problem(class: FieldClass, value: &str) -> Option<String> {
     if value.chars().any(char::is_control) {
         return Some("values must not contain control characters".to_owned());
     }
-    match class {
-        FieldClass::Hash { hex_len } => {
-            let ok = value.len() == hex_len
-                && value
-                    .bytes()
-                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
-            (!ok).then(|| format!("expected {hex_len} lowercase hexadecimal digits"))
-        }
-        FieldClass::Version => {
-            let parts: Vec<&str> = value.split('.').collect();
-            let ok = (1..=4).contains(&parts.len())
-                && parts.iter().all(|p| {
-                    !p.is_empty()
-                        && p.bytes().all(|b| b.is_ascii_digit())
-                        && p.parse::<u16>().is_ok()
-                });
-            (!ok).then(|| {
-                "expected a version of 1 to 4 dot-separated numbers, each at most 65535".to_owned()
-            })
-        }
-        FieldClass::Path | FieldClass::Text => None,
-    }
+    None
 }
 
 /// The serde name of a unit enum variant, for messages.
