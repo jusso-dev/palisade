@@ -109,8 +109,11 @@ pub fn check_test_util(path: &str, source: &str) -> Result<Vec<String>, String> 
         .map_err(|e| format!("{path}: invalid TOML: {e}"))?;
     let mut v = Vec::new();
     let features = manifest.get("features").and_then(Value::as_table);
-    let implicit = implicit_features(&manifest).iter().any(|f| f == TEST_UTIL);
-    let turns_on_test_util = |enables: &Value| turns_on_test_util(enables, implicit);
+    // `test-util/<feature>` also turns on this crate's own `test-util`
+    // feature, if it has one, explicit or implicit.
+    let has_own = features.is_some_and(|f| f.contains_key(TEST_UTIL))
+        || implicit_features(&manifest).iter().any(|f| f == TEST_UTIL);
+    let turns_on_test_util = |enables: &Value| turns_on_test_util(enables, has_own);
     if features
         .and_then(|f| f.get("default"))
         .is_some_and(turns_on_test_util)
@@ -145,8 +148,8 @@ pub fn check_test_util(path: &str, source: &str) -> Result<Vec<String>, String> 
     }
     // Only `test-util` itself may turn on `test-util`: this crate's own
     // (`"test-util"`, which also covers `default` reaching it through another
-    // feature, or `test-util/<feature>` when it is an implicit feature) or a
-    // dependency's (`dep/test-util` or `dep?/test-util`).
+    // feature, or `test-util/<feature>` when this crate has a `test-util`
+    // feature) or a dependency's (`dep/test-util` or `dep?/test-util`).
     for (feature, enables) in features.into_iter().flatten() {
         if feature == TEST_UTIL || feature == "default" {
             continue;
@@ -184,17 +187,18 @@ pub fn check_workspace_test_util(path: &str, source: &str) -> Result<Vec<String>
 }
 
 /// A feature list that turns on this crate's `test-util` or a dependency's
-/// (`dep/test-util`, `dep?/test-util`). `implicit` is `true` when this
-/// crate's `test-util` is the implicit feature of an optional dependency
-/// named `test-util`: then `test-util/<feature>` turns it on too, because
-/// Cargo enables the dependency and its implicit feature. (`test-util?/...`
-/// does not enable the dependency.)
-fn turns_on_test_util(features: &Value, implicit: bool) -> bool {
+/// (`dep/test-util`, `dep?/test-util`). `has_own` is `true` when this crate
+/// has a `test-util` feature, declared in `[features]` or implicit from an
+/// optional dependency named `test-util`: then `test-util/<feature>` turns
+/// it on too, because for a non-weak `dep/feature` Cargo enables the
+/// dependency and this crate's feature of the same name. (`test-util?/...`
+/// does neither.)
+fn turns_on_test_util(features: &Value, has_own: bool) -> bool {
     features.as_array().into_iter().flatten().any(|e| {
         e.as_str().is_some_and(|e| {
             e == TEST_UTIL
                 || e.split_once('/')
-                    .is_some_and(|(dep, f)| f == TEST_UTIL || (implicit && dep == TEST_UTIL))
+                    .is_some_and(|(dep, f)| f == TEST_UTIL || (has_own && dep == TEST_UTIL))
         })
     })
 }
@@ -485,22 +489,24 @@ toml = { workspace = true }
     }
 
     #[test]
-    fn default_must_not_forward_to_an_implicit_test_util_feature() {
+    fn default_must_not_forward_to_an_own_test_util_feature() {
         // An optional dependency named `test-util`, with no `dep:test-util`,
         // is this crate's implicit `test-util` feature; `test-util/std`
-        // enables it.
+        // enables it. It enables an explicit `test-util` feature too.
         let dep = "[dependencies]\ntest-util = { workspace = true, optional = true }\n";
         for features in [
             "default = [\"test-util/std\"]",
             "extra = [\"test-util/std\"]",
+            "default = [\"test-util/std\"]\ntest-util = [\"dep:test-util\"]",
+            "extra = [\"test-util/std\"]\ntest-util = []\nhelpers = [\"dep:test-util\"]",
         ] {
             let source = format!("{PACKAGE}[features]\n{features}\n{dep}");
             let v = check_test_util("x", &source).unwrap();
             assert_eq!(v.len(), 1, "{features}: {v:?}");
         }
-        // `?` does not enable the dependency, and with `dep:test-util` there
-        // is no implicit feature, so `test-util/std` only enables the
-        // dependency's `std`.
+        // `?` does not enable the dependency, and with `dep:test-util` and no
+        // `test-util` feature, `test-util/std` only enables the dependency's
+        // `std`.
         for features in [
             "default = [\"test-util?/std\"]",
             "default = [\"test-util/std\"]\nhelpers = [\"dep:test-util\"]",

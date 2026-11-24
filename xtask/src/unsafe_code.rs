@@ -336,7 +336,7 @@ pub fn check_cargo_config(path: &str, source: &str) -> Vec<String> {
         };
         for alias in aliases {
             let mut words = Vec::new();
-            collect_strings(alias, &mut words);
+            collect_words(alias, &mut words);
             if let Some(bad) = unsafe_alias_word(&words) {
                 v.push(format!(
                     "{path}: `{key}` must not pass `{bad}`; aliases may not change lints, config or compiler flags"
@@ -347,40 +347,43 @@ pub fn check_cargo_config(path: &str, source: &str) -> Vec<String> {
     v
 }
 
-/// Table keys count too.
-fn collect_strings(value: &toml::Value, out: &mut Vec<String>) {
+/// The argument words of one alias, as Cargo passes them: a string alias is
+/// split on whitespace, but each element of an array alias is one word, even
+/// if it contains spaces. Table keys count too.
+fn collect_words(value: &toml::Value, out: &mut Vec<String>) {
     match value {
         toml::Value::String(s) => out.extend(s.split_whitespace().map(str::to_owned)),
-        toml::Value::Array(items) => items.iter().for_each(|i| collect_strings(i, out)),
+        toml::Value::Array(items) => {
+            for item in items {
+                match item {
+                    toml::Value::String(s) => out.push(s.clone()),
+                    other => collect_words(other, out),
+                }
+            }
+        }
         toml::Value::Table(table) => {
             for (key, value) in table {
                 out.push(key.clone());
-                collect_strings(value, out);
+                collect_words(value, out);
             }
         }
         _ => {}
     }
 }
 
-/// Options that set a lint level, as rustc and the lint tools take them.
-/// `-Z` is here because `-Z crate-attr=...` adds an attribute.
-const LINT_OPTIONS: &[&str] = &[
-    "-A",
-    "-W",
-    "-D",
-    "-F",
-    "-Z",
-    "--allow",
-    "--warn",
-    "--deny",
-    "--forbid",
-    "--force-warn",
-];
+/// Long options that set a lint level.
+const LONG_LINT_OPTIONS: &[&str] = &["--allow", "--warn", "--deny", "--forbid", "--force-warn"];
+
+/// Short options that set a lint level. `-F` is also Cargo's `--features`,
+/// which only makes the check stricter.
+const SHORT_LINT_OPTIONS: &[char] = &['A', 'W', 'D', 'F'];
 
 /// The first word of one alias that is not allowed: a response file, a
-/// `--config` option, anything naming rustflags or `--cap-lints`, or a lint
-/// option whose operand names the `unsafe_code` lint (either spelling, any
-/// case). A lint option that ends the alias is rejected too, because its
+/// `--config` option, anything naming rustflags or `--cap-lints`, a `-Z`
+/// option (unstable flags such as `-Z crate-attr=...` can add attributes or
+/// change how config is read, and a stable build never needs them), or a
+/// lint option whose operand names the `unsafe_code` lint (either spelling,
+/// any case). A lint option that ends the alias is rejected too, because its
 /// operand would come from a chained alias. Other words may mention the lint,
 /// so a test filter such as `unsafe_code::tests` is fine.
 fn unsafe_alias_word(words: &[String]) -> Option<&str> {
@@ -394,6 +397,10 @@ fn unsafe_alias_word(words: &[String]) -> Option<&str> {
             return Some(word);
         }
         if let Some(attached) = lint_option_operand(word) {
+            if attached.is_none() {
+                return Some(word);
+            }
+            let attached = attached.unwrap_or_default();
             let operand = if attached.is_empty() {
                 words.get(i + 1).map(String::as_str)
             } else {
@@ -409,22 +416,36 @@ fn unsafe_alias_word(words: &[String]) -> Option<&str> {
     None
 }
 
-/// For a lint option, its attached operand (`-Aunsafe_code`,
-/// `--allow=unsafe_code`), or `""` when the operand is the next word.
-fn lint_option_operand(word: &str) -> Option<&str> {
-    LINT_OPTIONS.iter().find_map(|option| {
-        let rest = word.strip_prefix(option)?;
-        if option.starts_with("--") {
+/// For a lint option, `Some(Some(operand))` with its attached operand
+/// (`-Aunsafe_code`, `--allow=unsafe_code`), or `Some(Some(""))` when the
+/// operand is the next word. `Some(None)` is a `-Z` option, which is never
+/// allowed. `None` is any other word.
+///
+/// rustc, the lint tools and Cargo let short flags be grouped in one word,
+/// and an option that takes a value takes the rest of the word or the next
+/// word: `-gA unsafe_code` and `-OAunsafe_code` both allow the lint. So
+/// rather than track which short flags take values, the first lint letter
+/// (or `Z`) anywhere in a short-option group counts, and everything after it
+/// is its operand. That can only make the check stricter.
+fn lint_option_operand(word: &str) -> Option<Option<&str>> {
+    if let Some(long) = word.strip_prefix("--") {
+        return LONG_LINT_OPTIONS.iter().find_map(|option| {
+            let rest = long.strip_prefix(&option[2..])?;
             // `--warn` is not a prefix of some other long option's name.
             if rest.is_empty() {
-                Some(rest)
+                Some(Some(rest))
             } else {
-                rest.strip_prefix('=')
+                rest.strip_prefix('=').map(Some)
             }
-        } else {
-            Some(rest.strip_prefix('=').unwrap_or(rest))
-        }
-    })
+        });
+    }
+    let group = word.strip_prefix('-')?;
+    let at = group.find(|c| c == 'Z' || SHORT_LINT_OPTIONS.contains(&c))?;
+    if group[at..].starts_with('Z') {
+        return Some(None);
+    }
+    let rest = &group[at + 1..];
+    Some(Some(rest.strip_prefix('=').unwrap_or(rest)))
 }
 
 fn names_unsafe_code(text: &str) -> bool {
@@ -897,6 +918,20 @@ mod tests {
             "[alias]\nx = \"clippy -- --warn=unsafe_code\"",
             "[alias]\nx = [\"rustc\", \"--\", \"--force-warn\", \"unsafe-code\"]",
             "[alias]\nx = \"rustc -- -Z crate-attr=allow(unsafe_code)\"",
+            // Unstable flags are rejected whatever they set.
+            "[alias]\nx = \"build -Z config-include\"",
+            "[alias]\nx = \"rustc -- -Zcrate-attr=allow(dead_code)\"",
+            "[alias]\nx = \"rustc -- -vZ unstable-options\"",
+            // Short flags grouped before a lint option.
+            "[alias]\nx = \"rustc -- -OAunsafe_code\"",
+            "[alias]\nx = \"rustc -- -OA unsafe_code\"",
+            "[alias]\nx = \"clippy -- -gWunsafe_code\"",
+            "[alias]\nx = \"rustdoc -- -vA=unsafe-code\"",
+            "[alias]\nx = \"rustc -- -gA\"\ny = \"x unsafe_code\"",
+            // Each element of an array alias is one word, spaces and all.
+            "[alias]\nx = [\"rustc\", \"--\", \"-Z\", \"crate-attr=allow( unsafe_code )\"]",
+            "[alias]\nx = [\"rustc\", \"--\", \"-A\", \"dead_code unsafe_code\"]",
+            "[alias]\nx = [\"rustc\", \"--\", \"-gA\", \" unsafe_code\"]",
             // The operand would come from the alias that chains this one.
             "[alias]\nx = \"rustc -- -A\"\ny = \"x unsafe_code\"",
         ] {
@@ -913,6 +948,8 @@ mod tests {
             "[alias]\nt = \"test -p xtask -- --skip unsafe_code::tests\"",
             "[alias]\nt = \"test -- --skip=unsafe_code::tests\"",
             "[alias]\nl = \"clippy -- -D warnings -A dead_code\"",
+            "[alias]\nl = \"clippy -q -- -gD warnings\"",
+            "[alias]\nt = [\"test\", \"--\", \"--skip\", \"unsafe_code::tests and more\"]",
             // Operands do not cross alias boundaries.
             "[alias]\na = \"clippy -- -D warnings\"\nunsafe_code = \"test\"",
         ] {

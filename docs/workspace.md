@@ -56,8 +56,9 @@ listed in
   spellings (`unsafe_code` and `unsafe-code`);
 - a Cargo config file in the repository (`.cargo/config.toml`, or the legacy `.cargo/config`, in
   any letter case) sets anything but `[alias]`, or an alias passes `--config`, a response file
-  (`@file`), rustflags, `--cap-lints`, or a lint option (`-A`, `--allow`, `-Z` and the rest) whose
-  operand names the lint. Other arguments may mention it, such as a `unsafe_code::tests` filter. Rustflags, compiler and wrapper
+  (`@file`), rustflags, `--cap-lints`, any `-Z` unstable option, or a lint option (`-A`,
+  `--allow` and the rest, also grouped after other short flags as in `-gA`) whose operand names the
+  lint. Other arguments may mention it, such as a `unsafe_code::tests` filter. Rustflags, compiler and wrapper
   overrides and `[env]` can all switch lints off, so a repository config may not set them;
 - a file is a symbolic link, in the working tree or as recorded in the git index (which catches a
   link that `core.symlinks=false` checked out as a regular file), a listed file cannot be
