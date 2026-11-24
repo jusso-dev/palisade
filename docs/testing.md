@@ -34,7 +34,14 @@ cargo test --workspace --all-features --locked           # also works, without t
   summary ([ci.md](ci.md#test-reports)).
 
 Neither profile retries. A test that passes only on a retry is flaky, and a flaky test in a
-security product hides real failures, so it is fixed rather than retried.
+security product hides real failures, so it is fixed rather than retried. Do not add `retries` to
+a profile or a per-test override.
+
+The `postgres` test group holds `palisade-server`'s database tests (`tests/postgres.rs`). Each
+test creates its own database and roles, so they run in parallel, at most four at a time so the
+server's connection limit never fails a test. Outside the `postgres` CI job they skip themselves,
+because `PALISADE_TEST_DATABASE_ADMIN_URL` is not set. A new test binary that needs Postgres joins
+the group by adding its `binary(...)` to the filter in `.config/nextest.toml`.
 
 The slowest tests are the 10,000-case property tests in `palisade-policy`, which take tens of
 seconds in a debug build. Set `PROPTEST_CASES` to run fewer cases locally.
@@ -184,10 +191,24 @@ The `coverage` job in `ci.yml` runs the nextest suite under
 region coverage for each crate, and the total. The instrumentation needs `llvm-tools-preview`,
 which `rust-toolchain.toml` installs.
 
-Coverage is reported, not enforced. The initial targets are 80% line coverage for
-`palisade-policy` and `palisade-fileid` (#25). A crate below its target gets a warning
-annotation on the run, and the job still passes. Uploading the full report as an artefact, and a
-no-decrease rule for `palisade-policy`, are deferred (#25).
+Coverage is reported, not enforced, with one exception. The initial targets are 80% line
+coverage for `palisade-policy` and `palisade-fileid` (#25). A crate below its target gets a
+warning annotation on the run, and the job still passes.
+
+The exception: **`palisade-policy` line coverage must not decrease.** On every pull request the
+`coverage-gate` job measures the crate's own tests at the base commit and at the PR, in the same
+job, and fails if the share of covered lines went down. New code needs tests in the same PR; new
+code at the same ratio passes. `PROPTEST_RNG_SEED` is fixed for both runs, so property tests
+generate the same cases and the number is reproducible. To check before pushing:
+
+```sh
+cargo xtask coverage-gate --base origin/main
+```
+
+The full line-by-line report is not uploaded as an artefact, because that needs an action
+outside the CI allowlist ([ci.md](ci.md#runner-and-action-policy)); generate it locally with
+`cargo llvm-cov report --html` (below). For the same reason the table goes to the job summary,
+not a PR comment, which would also need a write token on pull requests.
 
 To see the report locally:
 
@@ -227,6 +248,38 @@ criterion 0.7 was chosen because later releases needed a newer Rust than the MSR
 ([workspace.md](workspace.md#toolchain-and-msrv)); moving to a newer criterion is a separate
 change. Its plotting and parallel features are off.
 
-Benchmarks over whole policies (100 to 100k rules), 100 MB and 1 GB files and bundle loading,
-the regression comparison against `main`, and the performance-budget test, arrive with the code
-they measure (#25).
+### Regression gate
+
+`.github/workflows/bench.yml` runs `cargo xtask bench-compare --base <commit>` weekly (`main`
+against `main` a week earlier) and on demand for any branch. It measures every bench at the base
+commit and at the head, in one job on one runner, twice each, alternating (base, head, base,
+head), keeps each side's faster median, and compares them. A benchmark **regresses** when its
+median is more than 10% slower **and** the 95% confidence intervals of the two medians do not
+overlap. The table is in the job summary.
+
+How it copes with noise on shared hosted runners, which vary by tens of percent between runs and
+machines:
+
+- **Same job, back to back.** A stored baseline from another run would not be comparable, so the
+  base is measured again every time.
+- **Iteration counts.** criterion runs many iterations per sample and 100 samples per benchmark,
+  which gives the confidence intervals.
+- **Alternating rounds, best of two.** Noise on a shared machine almost only ever slows a run
+  down, and alternating means a slow patch hits both sides alike.
+- **Two conditions.** Over the threshold *and* outside the noise.
+
+Small changes still show up as noise, so treat a regression as a prompt to measure locally, where
+a quiet machine gives sharper numbers:
+
+```sh
+cargo xtask bench-compare --base origin/main    # the same comparison, locally
+```
+
+The gate was checked by slowing one benchmark (`hash_1mib/sha256`) by 20% on purpose. The
+comparison measured it at +19.7%, reported it as regressed and failed, and reported the other
+eleven benchmarks within ±5% as unchanged.
+
+Benchmarks over whole policies (100 to 100k rules), the decision cache and bundle loading, and
+the absolute performance budget of evaluation, arrive with the code they measure (#42, #43).
+The gate covers them as soon as they are added, because it runs every `crates/*/benches/*.rs`.
+The 100 MB and 1 GB file hashing runs stay local and on demand.

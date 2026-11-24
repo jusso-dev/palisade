@@ -20,6 +20,9 @@ the pinned toolchain and needs no other tools.
 | `sbom` | Reserved for #226; prints where the CycloneDX files will go (`target/dist/sbom/`) and fails. |
 | `test-summary <label> <junit.xml>` | Turns a nextest JUnit report into the CI job summary and one annotation per failed test. Code: `src/junit.rs`. |
 | `coverage-summary <label> <coverage.json>` | Turns a `cargo llvm-cov --json --summary-only` report into a per-crate coverage table on the job summary, with a warning for each crate below its target. Code: `src/coverage.rs`. |
+| `check-fuzz-locks` | Runs `cargo metadata --locked` on every `crates/*/fuzz/Cargo.toml` and fails, with the minimal re-lock command, if a fuzz workspace's committed lockfile is out of date. Code: `src/fuzz_locks.rs`. |
+| `coverage-gate --base <commit>` | Measures `palisade-policy` line coverage at `<commit>` (in a temporary worktree) and at the working tree, and fails if it decreased. Needs cargo-llvm-cov and cargo-nextest. Code: `src/coverage_gate.rs`. |
+| `bench-compare --base <commit>` | Runs every criterion bench at `<commit>` and at the working tree (twice each, alternating, keeping the faster), writes a comparison table to the job summary, and fails if a median is more than 10% slower with non-overlapping confidence intervals. Code: `src/bench_compare.rs`. |
 | `fuzz [--seconds N] [--target NAME]` | Builds every cargo-fuzz target, seeds its corpus from the test fixtures, runs it for `N` seconds (default 60) and writes the results, with a base64 reproducer for each finding, to the job summary. Needs the pinned nightly and cargo-fuzz. Its tests keep the target list in step with each fuzz `Cargo.toml` and `fuzz.yml`. Code: `src/fuzz.rs`; see `docs/testing.md`. |
 
 Each command prints one line per violation and exits non-zero if there are

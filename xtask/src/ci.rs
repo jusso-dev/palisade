@@ -141,6 +141,7 @@ pub const STEPS: &[Step] = &[
             "cargo llvm-cov nextest --workspace --all-features --locked --profile ci --json --summary-only --output-path target/llvm-cov-summary.json",
         )
     },
+    step("fuzz-locks", "cargo xtask check-fuzz-locks"),
     Step {
         tool: Some(FUZZ),
         slow: true,
@@ -433,6 +434,9 @@ mod tests {
             || command.starts_with("cargo xtask test-summary ")
             || command.starts_with("cargo xtask deps-report ")
             || command.starts_with("cargo xtask coverage-summary ")
+            // Compares with the PR's base commit; locally:
+            // `cargo xtask coverage-gate --base origin/main`.
+            || command.starts_with("cargo xtask coverage-gate ")
             || command.starts_with("archive=")
             || command.starts_with("echo ")
             || command.starts_with("exit ")

@@ -7,11 +7,14 @@
 #![forbid(unsafe_code)]
 
 mod adr;
+mod bench_compare;
 mod ci;
 mod coverage;
+mod coverage_gate;
 mod deps;
 mod dist;
 mod fuzz;
+mod fuzz_locks;
 mod junit;
 mod manifests;
 mod report;
@@ -38,7 +41,11 @@ Commands:
                    advisories deny.toml ignores
   ci [--fast]      Run the checks from .github/workflows/ci.yml locally (--fast skips coverage,
                    fuzz, docs, feature-powerset, msrv, package and server-image)
+  bench-compare --base <commit>
+                   Run every criterion bench at <commit> and at the working tree, and fail if a
+                   median is more than 10% slower outside the noise (bench.yml)
   check-deps       Enforce the allowed dependency directions between crates
+  check-fuzz-locks Check that every crates/*/fuzz/Cargo.lock is current (cargo metadata --locked)
   check-manifests  Enforce workspace inheritance of package fields, lints and dependency versions,
                    and that every crate README documents its features
   check-supply-chain
@@ -63,6 +70,9 @@ Commands:
                    Summarise a nextest JUnit report for the GitHub job page
   coverage-summary <label> <coverage.json>
                    Summarise a cargo-llvm-cov JSON summary for the GitHub job page
+  coverage-gate --base <commit>
+                   Fail if palisade-policy line coverage is lower than at <commit>; needs
+                   cargo-llvm-cov and cargo-nextest
   fuzz [--seconds N] [--target NAME]
                    Build every cargo-fuzz target, seed it from the test fixtures and run it for
                    N seconds (default 60), or only NAME; needs the pinned nightly and cargo-fuzz
@@ -94,6 +104,12 @@ fn main() -> ExitCode {
         [command, flag, base] if command == "deps-report" && flag == "--base" => {
             return deps_report(Some(base));
         }
+        [command, flag, base] if command == "coverage-gate" && flag == "--base" => {
+            return coverage_gate(base);
+        }
+        [command, flag, base] if command == "bench-compare" && flag == "--base" => {
+            return bench_compare(base);
+        }
         [command] if command == "ci" => return run_ci(false),
         [command, fast] if command == "ci" && fast == "--fast" => return run_ci(true),
         _ => {}
@@ -105,6 +121,7 @@ fn main() -> ExitCode {
     let result = match command {
         "check-deps" => run_check("check-deps", check_deps),
         "check-manifests" => run_check("check-manifests", check_manifests),
+        "check-fuzz-locks" => run_check("check-fuzz-locks", check_fuzz_locks),
         "audit" => return run_audit(),
         "check-supply-chain" => run_check("check-supply-chain", check_supply_chain),
         "check-unsafe" => run_check("check-unsafe", check_unsafe),
@@ -212,6 +229,97 @@ fn coverage_summary(label: &str, path: &Path) -> ExitCode {
         println!("{annotation}");
     }
     ExitCode::SUCCESS
+}
+
+/// `cargo xtask coverage-gate --base <commit>`: see `src/coverage_gate.rs`.
+fn coverage_gate(base: &str) -> ExitCode {
+    let root = workspace_root();
+    let work = root.join("target").join("coverage-gate");
+    let result = (|| -> Result<(String, Option<String>), String> {
+        println!(
+            "coverage-gate: measuring {} at the working tree",
+            coverage_gate::CRATE
+        );
+        let head = coverage_gate::measure(&root, &work.join("head"))?;
+        println!(
+            "coverage-gate: measuring {} at {base}",
+            coverage_gate::CRATE
+        );
+        let base_lines = report::base_metadata(&root, base, |dir| {
+            coverage_gate::measure(dir, &work.join("base"))
+        })?;
+        Ok(coverage_gate::report(base, base_lines, head))
+    })();
+    match result {
+        Ok((markdown, error)) => {
+            if let Err(e) = write_step_summary(&markdown) {
+                eprintln!("coverage-gate: error: {e}");
+                return ExitCode::FAILURE;
+            }
+            match error {
+                None => ExitCode::SUCCESS,
+                Some(annotation) => {
+                    println!("{annotation}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Err(error) => {
+            eprintln!("coverage-gate: error: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `cargo xtask bench-compare --base <commit>`: see `src/bench_compare.rs`.
+fn bench_compare(base: &str) -> ExitCode {
+    let root = workspace_root();
+    let work = bench_compare::work_dir(&root);
+    let result = (|| -> Result<(String, Vec<String>), String> {
+        // Alternate base and head runs while the base worktree exists.
+        let (base_results, head) = report::base_metadata(&root, base, |dir| {
+            let (mut base_best, mut head_best) = Default::default();
+            for round in 1..=bench_compare::ROUNDS {
+                println!("bench-compare: round {round}: benchmarking {base}");
+                let results =
+                    bench_compare::run_benches(dir, &work.join("base"), &work.join("target-base"))?;
+                bench_compare::best_of(&mut base_best, results);
+                println!("bench-compare: round {round}: benchmarking the working tree");
+                let results = bench_compare::run_benches(
+                    &root,
+                    &work.join("head"),
+                    &work.join("target-head"),
+                )?;
+                bench_compare::best_of(&mut head_best, results);
+            }
+            Ok((base_best, head_best))
+        })?;
+        if head.is_empty() {
+            return Err("no benchmark results; is there a crates/*/benches/*.rs?".to_owned());
+        }
+        let rows = bench_compare::compare(&base_results, &head);
+        Ok(bench_compare::markdown(base, &rows))
+    })();
+    match result {
+        Ok((markdown, errors)) => {
+            if let Err(e) = write_step_summary(&markdown) {
+                eprintln!("bench-compare: error: {e}");
+                return ExitCode::FAILURE;
+            }
+            for error in &errors {
+                println!("{error}");
+            }
+            if errors.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
+        Err(error) => {
+            eprintln!("bench-compare: error: {error}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// `cargo xtask fuzz`: runs every fuzz target, then writes the results to
@@ -348,6 +456,14 @@ fn check_manifests(root: &Path) -> Result<Vec<String>, String> {
         }
     }
     Ok(violations)
+}
+
+fn check_fuzz_locks(root: &Path) -> Result<Vec<String>, String> {
+    let manifests = fuzz_locks::fuzz_manifests(root)?;
+    for manifest in &manifests {
+        println!("check-fuzz-locks: {manifest}");
+    }
+    fuzz_locks::check(&manifests, |m| fuzz_locks::cargo_metadata_locked(root, m))
 }
 
 fn check_unsafe(root: &Path) -> Result<Vec<String>, String> {

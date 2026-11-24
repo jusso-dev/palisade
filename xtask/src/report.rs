@@ -125,18 +125,19 @@ pub fn git_show(root: &Path, commit: &str, path: &str) -> Result<String, String>
     String::from_utf8(output.stdout).map_err(|_| format!("{path} at {commit} is not UTF-8"))
 }
 
-/// `cargo metadata` for the base commit, from a temporary git worktree of it
-/// (detached, removed again before returning). `metadata` runs cargo
-/// metadata in a directory.
+/// Runs `metadata` in a temporary git worktree of the base commit (detached,
+/// removed again before returning), and returns its result. The dependency
+/// report runs `cargo metadata` there; the coverage gate and the benchmark
+/// comparison run their base measurement there.
 ///
 /// The worktree goes inside a new directory under `target/`, which only this
 /// user can write to on Unix and whose name includes the process ID and the
 /// time, so another local user cannot prepare or swap it.
-pub fn base_metadata(
+pub fn base_metadata<T>(
     root: &Path,
     commit: &str,
-    metadata: impl FnOnce(&Path) -> Result<Value, String>,
-) -> Result<Value, String> {
+    metadata: impl FnOnce(&Path) -> Result<T, String>,
+) -> Result<T, String> {
     if commit.is_empty() || commit.starts_with('-') || commit.contains(':') {
         return Err(format!("not a commit: `{commit}`"));
     }
@@ -304,7 +305,7 @@ mod tests {
         assert!(!dir.parent().unwrap().exists());
         // The callback's error is returned, and the worktree is still removed.
         let mut seen = None;
-        let err = base_metadata(&root, "HEAD", |dir| {
+        let err = base_metadata::<Value>(&root, "HEAD", |dir| {
             seen = Some(dir.to_path_buf());
             Err("boom".to_owned())
         });

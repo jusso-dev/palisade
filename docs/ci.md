@@ -19,7 +19,9 @@ type.
 | `clippy` | ubuntu-latest, windows-latest | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, then the same for `palisade-core` and `palisade-driver` with `--no-default-features` (the `no_std` build), and for `palisade-core` with `--no-default-features --features schema` (`no_std` with serde and JSON Schema support) |
 | `test` | ubuntu-latest, macos-latest, windows-latest (x64), windows-11-arm (ARM64, native) | `cargo nextest run --workspace --all-features --locked --profile ci`, then the doctests with `cargo test --doc`, then `cargo xtask test-summary` (see [Test reports](#test-reports)) |
 | `coverage` | ubuntu-latest, windows-latest | `cargo llvm-cov nextest --workspace --all-features --locked --profile ci --json --summary-only`, then `cargo xtask coverage-summary` (see [Coverage, fuzzing and benchmarks](#coverage-fuzzing-and-benchmarks)) |
-| `fuzz` | ubuntu-latest | `cargo xtask fuzz`: every cargo-fuzz target, seeded from the test fixtures, for 60 s each, on the pinned nightly |
+| `coverage-gate` | ubuntu-latest | On PRs, `cargo xtask coverage-gate --base <base>`: `palisade-policy` line coverage at the PR's base commit and at the PR, measured in the same job; fails if it decreased (see [Coverage, fuzzing and benchmarks](#coverage-fuzzing-and-benchmarks)) |
+| `fuzz-locks` | ubuntu-latest | `cargo xtask check-fuzz-locks`: `cargo metadata --locked` on every `crates/*/fuzz/Cargo.toml`, so a stale fuzz lockfile fails in seconds |
+| `fuzz` | ubuntu-latest | After `fuzz-locks`, `cargo xtask fuzz`: every cargo-fuzz target, seeded from the test fixtures, for 60 s each, on the pinned nightly |
 | `bench` | ubuntu-latest | `cargo test --bench <name>` for every criterion bench: builds them and runs each benchmark once, without timing |
 | `postgres` | ubuntu-latest | `cargo nextest run -p palisade-server --test postgres --locked --profile ci` against a Postgres 17 service container (official image, pinned by digest), with `PALISADE_TEST_DATABASE_ADMIN_URL` set. Elsewhere those tests skip themselves. `cargo xtask ci` runs this step only when that variable is set locally |
 | `msrv` | ubuntu-latest | `cargo +1.94.0 check --workspace --all-targets --all-features --locked`, after checking that the version matches `rust-version` in `Cargo.toml` |
@@ -69,6 +71,22 @@ Details and local commands are in [testing.md](testing.md).
   per crate to the job summary. It is reported, not enforced: a crate below
   its target (80% lines for `palisade-policy` and `palisade-fileid`) gets a
   warning annotation and the job still passes.
+- `coverage-gate` is the one coverage rule that is enforced (#25):
+  `palisade-policy` line coverage must not decrease. On a pull request,
+  `cargo xtask coverage-gate` runs `cargo llvm-cov nextest -p palisade-policy`
+  at the PR's base commit (in a temporary git worktree) and at the PR, with
+  `PROPTEST_RNG_SEED` fixed so property tests cover the same cases each time,
+  and fails if the share of covered lines went down. Adding code at the same
+  coverage ratio passes. Both numbers are in the job summary. Nothing is
+  stored between runs: a baseline from `main` would need an artefact or a
+  cache write from a pull request, and measuring the base again in the same
+  job needs neither.
+- `fuzz-locks` runs `cargo metadata --locked` on each fuzz workspace (found
+  on disk, so a new one is checked before it is listed anywhere). A pull
+  request that changes a dependency of a crate a fuzz workspace builds, even
+  indirectly, must re-lock that workspace; this job says so in seconds, with
+  the minimal re-lock command (`cargo metadata --manifest-path <dir>/Cargo.toml`,
+  which upgrades nothing). The `fuzz` job waits for it.
 - `fuzz` runs `cargo xtask fuzz`. It builds every target of every project
   listed in `xtask/src/fuzz.rs`, each from its fuzz workspace's committed
   `Cargo.lock`, seeds
@@ -119,6 +137,20 @@ Longer runs find what the 60 s PR run cannot. A unit test in
 `xtask/src/fuzz.rs` keeps the matrix in step with the target list. Only
 `report` has `issues: write`, and it runs no repository code. The failing
 input is in the failed job's summary.
+
+### `bench.yml` (weekly on Monday at 05:23 UTC, and on demand)
+
+| Job | Runners | What it runs |
+|---|---|---|
+| `compare` | ubuntu-latest | `cargo xtask bench-compare --base <commit>`: every criterion bench at the base commit and at the head, in the same job, twice each, alternating, keeping each side's faster median; fails if any median is more than 10% slower with non-overlapping 95% confidence intervals |
+
+The weekly run compares `main` with `main` a week earlier. Run it on demand
+from the Actions tab for any branch, with `base` (default `main`) to compare
+against. It is not part of PR CI: two full benchmark runs take longer than a
+PR check should, and the result is only meaningful when both runs share a
+runner, which is why the base is measured again each time instead of being
+stored. The comparison table is in the job summary. See
+[testing.md](testing.md#benchmarks).
 
 ### `pr-title.yml` (pull requests, including title edits)
 
@@ -337,8 +369,8 @@ runners like everything else:
   a write token on pull requests, so both stay with #25. Every one of these
   is in the job summary instead: test results, the coverage table, fuzz
   findings as base64, and the dependency report.
-- A coverage no-decrease gate for `palisade-policy`, and the benchmark
-  regression comparison against `main` with its performance budget (#25).
+- The absolute performance budget of policy evaluation, with the benchmarks
+  it is measured on (#42).
 - A Postgres service container for server tests, with the first server tests
   (#126, #127).
 - The mdBook build and link check, with the documentation site (#27).
