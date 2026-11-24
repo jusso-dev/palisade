@@ -13,6 +13,32 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   (stored and computed) and per-section entropy. It walks the resource tree and
   parses the version resource: `VS_FIXEDFILEINFO`, every `StringFileInfo`
   language block, language selection and the file-name fallback chain.
+  It also reads the import table (module and function names; the listing
+  is capped at 10,000 functions, but module names are still checked past
+  that cap) and the export
+  table (names, ordinals and forwarders; `CPlApplet`, `DllRegisterServer`,
+  `DllGetClassObject` and `ServiceMain` are found by the loader's binary
+  search over the whole name table; a name the search cannot read leaves
+  the answer unknown and marks the table truncated and malformed, so a
+  `false` is reliable only when `ExportInfo::truncated` is not set). Kernel modules are found anywhere in
+  the first 65,536 import descriptors (`MAX_IMPORT_DESCRIPTORS`). Any other
+  module is found only among the names kept: descriptors past that limit
+  are not read, at most 1 MiB of module names is kept
+  (`MAX_MODULE_NAME_BYTES`), and a name cut at 512 bytes, or one that is
+  not valid UTF-8, never matches. So
+  a negative `ImportInfo::imports_module` answer is reliable only when
+  `ImportInfo::truncated` is not set. It classifies kernel drivers:
+  subsystem native plus a kernel import, an `INIT` section or
+  `IMAGE_FILE_SYSTEM`, with the reasons. It parses the application
+  manifest (`requestedExecutionLevel`, `uiAccess`, `autoElevate`,
+  `dpiAware`, assembly identity, `supportedOS`) with a bounded XML parser
+  that rejects DTDs and undefined entities (XML 1.0 in UTF-8 only; XML 1.1
+  and UTF-16 manifests are errors, and so is an undeclared namespace
+  prefix), and gives the `requires_elevation` heuristic with its reason. The
+  installer heuristics apply only when there is no manifest; a process
+  manifest that is present but unreadable counts as requiring elevation. `NormalizedName` gives the
+  trimmed, whitespace-collapsed NFC and case-folded forms of a version
+  string for matching, keeping the original.
 - `hash`: flat SHA-256, SHA-1, MD5, SHA-384 and SHA-512, computed together in
   one streaming pass ([#46](https://github.com/jusso-dev/palisade/issues/46)).
   SHA-256 is the primary identity. SHA-1 and MD5 are not collision resistant
@@ -486,9 +512,11 @@ hashing, PE parsing and the Authenticode hash over the same synthetic inputs:
 `palisade-core` (for the shared `VerificationError` table, with its `serde`
 feature), plus the RustCrypto `sha2`, `sha1` and `md-5` crates,
 `ring` for signature verification and the hash cache record MAC (ADR 0008),
-used only inside `authenticode/crypto.rs` and `hash/mac.rs`, and `serde`
+used only inside `authenticode/crypto.rs` and `hash/mac.rs`, `serde`
 (derive only, no format crate) so certificate and chain reports serialise
-with stable field names. The workspace rules are enforced by
+with stable field names, `quick-xml` for the application manifest (no
+default features, no DTD support) and `unicode-normalization` for NFC. The
+workspace rules are enforced by
 `cargo xtask check-deps`.
 
 `ring` is not pure Rust (it has C and assembly), and on aarch64 Windows it

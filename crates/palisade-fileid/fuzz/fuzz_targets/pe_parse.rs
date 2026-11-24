@@ -49,5 +49,37 @@ fuzz_target!(|data: &[u8]| {
             let _ = v.product_version_mismatch();
             let _ = v.effective_file_name(VersionField::OriginalFileName);
         }
+        if let Some(imports) = &info.imports {
+            assert!(imports.modules.len() <= pe::MAX_IMPORT_MODULES);
+            assert!(imports.function_count <= pe::MAX_IMPORTED_FUNCTIONS);
+            assert!(imports.all_module_names.len() <= pe::MAX_IMPORT_DESCRIPTORS);
+            let kept: usize = imports.all_module_names.iter().map(String::len).sum();
+            assert!(kept <= pe::MAX_MODULE_NAME_BYTES);
+            // A cut module name is only a prefix, so the lists are incomplete.
+            if imports.modules.iter().any(|m| m.name_cut) {
+                assert!(imports.truncated);
+            }
+            // So is a lossy one, which never matches.
+            if imports.modules.iter().any(|m| m.name_lossy) {
+                assert!(imports.truncated);
+            }
+            assert!(imports.kernel_modules.len() <= pe::KERNEL_MODULES.len());
+            for m in &imports.modules {
+                assert!(m.name.len() <= pe::MAX_NAME_LEN * 3);
+            }
+        }
+        if let Some(exports) = &info.exports {
+            assert!(exports.exports.len() <= pe::MAX_EXPORTS);
+        }
+        if let Some(m) = &info.manifest {
+            assert!(m.supported_os.len() <= pe::manifest::MAX_SUPPORTED_OS);
+        }
+        // A non-native image is never a driver.
+        if info.optional.subsystem != pe::Subsystem::Native {
+            assert!(!info.is_kernel_driver());
+        }
+        let _ = info.requires_elevation(Some("setup.exe"));
     }
+    // The manifest parser on its own, over raw input.
+    let _ = pe::manifest::parse_manifest(data);
 });

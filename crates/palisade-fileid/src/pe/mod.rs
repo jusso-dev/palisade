@@ -1,8 +1,9 @@
 //! A hardened PE32 / PE32+ parser (#45).
 //!
 //! [`parse`] reads headers, sections, data directories, the debug directory,
-//! the resource tree and the version resource from an in-memory image. The
-//! input is untrusted:
+//! the import and export tables, the resource tree, the version resource
+//! and the application manifest from an in-memory image, and classifies
+//! kernel drivers. The input is untrusted:
 //!
 //! - No input can make the parser panic. Every read is bounds-checked and
 //!   all offset arithmetic is checked.
@@ -20,6 +21,10 @@
 
 mod analysis;
 mod debug;
+mod driver;
+mod imports;
+pub mod manifest;
+mod name;
 mod read;
 mod resource;
 mod types;
@@ -29,6 +34,17 @@ use std::fmt;
 
 pub use analysis::{compute_checksum, shannon_entropy};
 pub use debug::{CodeViewPdb, DebugEntry, DebugInfo, DebugType, MAX_DEBUG_ENTRIES, MAX_PDB_PATH};
+pub use driver::{DriverClass, DriverSignal, KERNEL_MODULES};
+pub use imports::{
+    Export, ExportInfo, ExportTarget, ImportInfo, ImportedFunction, ImportedModule,
+    MAX_EXPORT_SLOTS, MAX_EXPORTS, MAX_IMPORT_DESCRIPTORS, MAX_IMPORT_MODULES,
+    MAX_IMPORTED_FUNCTIONS, MAX_MODULE_NAME_BYTES, MAX_NAME_LEN, MAX_ORDINAL_SCAN,
+    MAX_READ_EXTENTS, NotableExports,
+};
+pub use manifest::{
+    AssemblyIdentity, Elevation, ElevationReason, ExecutionLevel, Manifest, ManifestError,
+};
+pub use name::NormalizedName;
 pub use resource::{
     MAX_KEPT_RESOURCES, MAX_RESOURCE_DEPTH, MAX_RESOURCE_ENTRIES, MAX_RESOURCE_NAME_UNITS,
     MAX_RESOURCE_TYPES, ResourceData, ResourceId, ResourceSummary, resource_type,
@@ -219,6 +235,16 @@ pub enum WarningKind {
     TooManyDebugEntries,
     /// The version resource could not be parsed, or parsed only in part.
     VersionInfo(version::VersionInfoIssue),
+    /// An import descriptor or its data is out of bounds or malformed.
+    ImportTableMalformed,
+    /// The import descriptor table has no terminating descriptor (one with
+    /// no name or no import address table) within the mapped data or
+    /// [`MAX_IMPORT_DESCRIPTORS`].
+    ImportTableTruncated,
+    /// The export directory's tables are out of bounds or malformed.
+    ExportTableMalformed,
+    /// The standard manifest could not be parsed.
+    Manifest(ManifestError),
 }
 
 /// Header fields from the COFF file header.
@@ -463,6 +489,25 @@ pub struct PeInfo {
     pub resources: Option<ResourceSummary>,
     /// The parsed version resource (`RT_VERSION`), if present.
     pub version_info: Option<VersionInfo>,
+    /// The import table, if the image has one.
+    pub imports: Option<ImportInfo>,
+    /// The export table, if the image has one.
+    pub exports: Option<ExportInfo>,
+    /// The application manifest: the lowest standard `RT_MANIFEST` ID
+    /// present (1, 2 or 3), parsed. `None` when there is none, or when it
+    /// cannot be read or does not parse (with a warning); a higher ID is
+    /// never used in its place. An ID counts as present when its directory
+    /// entry exists, even if no data under it can be read.
+    pub manifest: Option<Manifest>,
+    /// The `RT_MANIFEST` ID [`Self::manifest`] was read from: 1 is the
+    /// process manifest the OS reads at process creation (and so the one
+    /// that decides elevation); 2 and 3 are DLL isolation manifests. Set
+    /// even when [`Self::manifest`] is `None` because that manifest could
+    /// not be read or parsed, and set to the lower ID when the resource
+    /// tree is too damaged to rule it out, so a higher ID never stands in.
+    pub manifest_id: Option<u16>,
+    /// Kernel driver signals and the verdict.
+    pub driver: DriverClass,
     /// Non-fatal problems, at most [`MAX_WARNINGS`].
     pub parse_warnings: Vec<ParseWarning>,
     /// More than [`MAX_WARNINGS`] warnings occurred; the rest were dropped.
@@ -485,6 +530,51 @@ impl PeInfo {
     #[must_use]
     pub const fn timestamp_is_reproducible(&self) -> bool {
         self.debug.has_repro
+    }
+
+    /// Whether the image is a kernel-mode driver ([`PeInfo::driver`] has
+    /// the reasons).
+    #[must_use]
+    pub const fn is_kernel_driver(&self) -> bool {
+        self.driver.is_kernel_driver
+    }
+
+    /// The #45 elevation heuristic, for a file named `file_name` (the
+    /// final path component, if known), from the process manifest (ID 1)
+    /// only. See [`manifest::requires_elevation`]. A process manifest that
+    /// is present but cannot be read or parsed is
+    /// [`ElevationReason::ManifestUnreadable`] and counts as requiring
+    /// elevation.
+    #[must_use]
+    pub fn requires_elevation(&self, file_name: Option<&str>) -> Elevation {
+        let mut fields = Vec::new();
+        if let Some(v) = &self.version_info {
+            for field in [
+                version::VersionField::FileDescription,
+                version::VersionField::ProductName,
+                version::VersionField::InternalName,
+                version::VersionField::OriginalFileName,
+            ] {
+                if let Some(value) = v.get(field) {
+                    fields.push((field.event_name(), value));
+                }
+            }
+        }
+        // Only the process manifest (ID 1) decides elevation; IDs 2 and 3
+        // are isolation manifests the OS does not read at process creation.
+        let process_manifest = self
+            .manifest
+            .as_ref()
+            .filter(|_| self.manifest_id == Some(1));
+        // Present but unreadable: what it asks for is unknown, so fail
+        // closed rather than read it as "no manifest".
+        if self.manifest_id == Some(1) && process_manifest.is_none() {
+            return Elevation {
+                requires_elevation: true,
+                reason: ElevationReason::ManifestUnreadable,
+            };
+        }
+        manifest::requires_elevation(process_manifest, file_name, &fields)
     }
 
     /// The section whose mapped range contains `rva`: `VirtualAddress` up
@@ -575,15 +665,38 @@ impl<'a> Layout<'a> {
     /// and has no file offset. The headers are mapped below both
     /// `SizeOfHeaders` and the lowest section RVA.
     pub(crate) fn backed_extent(&self, rva: u32) -> Option<(usize, u32)> {
+        match self.extent(rva) {
+            Extent::Backed(offset, available) => Some((offset, available)),
+            Extent::Zero(_) | Extent::Unmapped => None,
+        }
+    }
+
+    /// What is mapped at `rva`, with one section lookup: file-backed bytes
+    /// (as [`Self::backed_extent`]); a section's zero-filled tail (inside
+    /// its mapped span but past the raw data it declares, or in a section
+    /// with none), with how many zero bytes follow to the end of the span;
+    /// or nothing usable (unmapped, or past the end of a truncated input
+    /// inside the declared raw data). Zero fill depends only on the
+    /// headers, never on the input's length, so a truncated file is not
+    /// mistaken for it.
+    pub(crate) fn extent(&self, rva: u32) -> Extent {
         if let Some(s) = self.section_for(rva) {
-            let delta = rva.checked_sub(s.virtual_address)?;
-            let (start, raw_size) = s.file_data(self.file_alignment)?;
-            let backed = raw_size.min(mapped_span(s, self.section_alignment));
+            let Some(delta) = rva.checked_sub(s.virtual_address) else {
+                return Extent::Unmapped;
+            };
+            let span = mapped_span(s, self.section_alignment);
+            let Some((start, raw_size)) = s.file_data(self.file_alignment) else {
+                return Extent::Zero(span.saturating_sub(delta));
+            };
+            let backed = raw_size.min(span);
             if delta >= backed {
-                return None;
+                return Extent::Zero(span.saturating_sub(delta));
             }
-            let offset = to_usize(start.checked_add(delta)?)?;
-            return clamp_to_file(offset, backed - delta, self.file_len);
+            return start
+                .checked_add(delta)
+                .and_then(to_usize)
+                .and_then(|offset| clamp_to_file(offset, backed - delta, self.file_len))
+                .map_or(Extent::Unmapped, |(o, n)| Extent::Backed(o, n));
         }
         let limit = self
             .sections
@@ -594,9 +707,11 @@ impl<'a> Layout<'a> {
                 first.min(self.size_of_headers)
             });
         if rva < limit {
-            clamp_to_file(to_usize(rva)?, limit - rva, self.file_len)
+            to_usize(rva)
+                .and_then(|offset| clamp_to_file(offset, limit - rva, self.file_len))
+                .map_or(Extent::Unmapped, |(o, n)| Extent::Backed(o, n))
         } else {
-            None
+            Extent::Unmapped
         }
     }
 
@@ -607,6 +722,19 @@ impl<'a> Layout<'a> {
         let (offset, available) = self.backed_extent(rva)?;
         (len <= available).then_some(offset)
     }
+}
+
+/// What [`Layout::extent`] finds at an RVA.
+#[derive(Clone, Copy)]
+pub(crate) enum Extent {
+    /// This file offset, and how many file-backed bytes follow it (at
+    /// least one).
+    Backed(usize, u32),
+    /// A section's zero-filled tail, and how many zero bytes follow to the
+    /// end of the section's mapped span (at least one).
+    Zero(u32),
+    /// Unmapped, or past the end of a truncated input.
+    Unmapped,
 }
 
 /// Cuts an extent of `available` bytes at file offset `offset` so it ends at
@@ -720,8 +848,10 @@ pub fn parse_with(data: &[u8], options: &ParseOptions) -> Result<PeInfo, PeError
 /// [`PeErrorKind::PrefixTooShort`].
 ///
 /// When `prefix` is shorter than the file, the debug directory, the
-/// resource tree and the version info are **not** parsed (they are left
-/// empty, with no warning), because they can lie anywhere in the file.
+/// resource tree, the version info, the manifest, and the import and export
+/// tables are **not** parsed (they are left empty, with no warning),
+/// because they can lie anywhere in the file. The driver verdict needs the
+/// imports, so it is left at its default ([`DriverClass::default`]) too.
 /// Neither the checksum nor section entropy is computed
 /// ([`ParseOptions::metadata_only`]). When `prefix` holds the whole file
 /// the result is that of [`parse_with`] with
@@ -759,8 +889,9 @@ pub fn parse_prefix(prefix: &[u8], file_len: u64) -> Result<PeInfo, PeError> {
 
 /// [`parse_with`] over `data`, the first bytes of a file of `file_len`
 /// bytes. Reads stay inside `data`; length checks use `file_len`. The debug
-/// directory and resources are parsed only when `directories` is set, which
-/// must be only when `data` is the whole file.
+/// directory, resources (with the version info and manifest), imports,
+/// exports and the driver verdict are worked out only when `directories` is
+/// set, which must be only when `data` is the whole file.
 fn parse_impl(
     data: &[u8],
     file_len: u64,
@@ -919,15 +1050,41 @@ fn parse_impl(
 
     let mut resources = None;
     let mut version_info = None;
+    let mut manifest = None;
+    let mut manifest_id = None;
     if let Some(dir) = data_directories
         .get(DataDirectoryKind::Resource.index())
         .filter(|d| directories && d.is_present())
     {
         if let Some(summary) = resource::walk(data, layout, *dir, &mut warnings) {
             version_info = version_from_resources(data, &summary, &mut warnings);
+            (manifest, manifest_id) = manifest_from_resources(data, &summary, &mut warnings);
             resources = Some(summary);
         }
     }
+
+    let directory = |kind: DataDirectoryKind| {
+        data_directories
+            .get(kind.index())
+            .copied()
+            .filter(|d| directories && d.is_present())
+    };
+    let imports = directory(DataDirectoryKind::Import)
+        .and_then(|d| imports::parse_imports(data, layout, d, optional.format, &mut warnings));
+    let exports = directory(DataDirectoryKind::Export)
+        .and_then(|d| imports::parse_exports(data, layout, d, &mut warnings));
+    // Without the import table the verdict would be a guess, so a prefix
+    // parse leaves it at its default rather than report a partial one.
+    let driver = if directories {
+        driver::classify(
+            optional.subsystem,
+            coff.characteristics,
+            &sections,
+            imports.as_ref(),
+        )
+    } else {
+        DriverClass::default()
+    };
 
     Ok(PeInfo {
         file_size: file_len,
@@ -943,6 +1100,11 @@ fn parse_impl(
         debug,
         resources,
         version_info,
+        imports,
+        exports,
+        manifest,
+        manifest_id,
+        driver,
         parse_warnings: warnings.list,
         parse_warnings_truncated: warnings.truncated,
     })
@@ -1232,6 +1394,48 @@ fn version_from_resources(
                 WarningKind::VersionInfo(issue),
             );
             None
+        }
+    }
+}
+
+/// The manifest with the lowest standard `RT_MANIFEST` ID present (1, 2 or
+/// 3, found by loader-style lookup), and that ID. If it cannot be read or
+/// does not parse, no other manifest is used in its place: a decoy at a
+/// higher ID must not stand in for the one the OS reads.
+fn manifest_from_resources(
+    data: &[u8],
+    summary: &ResourceSummary,
+    warnings: &mut Warnings,
+) -> (Option<Manifest>, Option<u16>) {
+    let Some(first) = summary.first_standard_manifest_id else {
+        return (None, None);
+    };
+    let id = Some(first);
+    let Some(entry) = summary
+        .standard_manifests
+        .iter()
+        .find(|e| e.name == ResourceId::Id(first))
+    else {
+        // The ID is there, but no data entry under it can be read.
+        warnings.push(
+            usize::try_from(summary.offset).unwrap_or(usize::MAX),
+            WarningKind::ResourceOutOfBounds,
+        );
+        return (None, id);
+    };
+    let at = entry
+        .file_offset
+        .and_then(|o| usize::try_from(o).ok())
+        .unwrap_or_else(|| usize::try_from(summary.offset).unwrap_or(usize::MAX));
+    let Some(raw) = entry.bytes(data) else {
+        warnings.push(at, WarningKind::ResourceOutOfBounds);
+        return (None, id);
+    };
+    match manifest::parse_manifest(raw) {
+        Ok(m) => (Some(m), id),
+        Err(e) => {
+            warnings.push(at, WarningKind::Manifest(e));
+            (None, id)
         }
     }
 }

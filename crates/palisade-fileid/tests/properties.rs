@@ -76,7 +76,41 @@ fn check_bounds(data: &[u8], info: &PeInfo) {
             assert!(i < v.all_langs.len());
         }
     }
+    if let Some(imports) = &info.imports {
+        assert!(imports.modules.len() <= pe::MAX_IMPORT_MODULES);
+        assert!(imports.function_count <= pe::MAX_IMPORTED_FUNCTIONS);
+        let kept: usize = imports.all_module_names.iter().map(String::len).sum();
+        assert!(kept <= pe::MAX_MODULE_NAME_BYTES);
+        // A cut module name is only a prefix, so the lists are incomplete.
+        if imports.modules.iter().any(|m| m.name_cut) {
+            assert!(imports.truncated);
+        }
+        // So is a lossy one, which never matches.
+        if imports.modules.iter().any(|m| m.name_lossy) {
+            assert!(imports.truncated);
+        }
+        let listed: usize = imports.modules.iter().map(|m| m.functions.len()).sum();
+        assert_eq!(listed, imports.function_count);
+    }
+    if let Some(exports) = &info.exports {
+        assert!(exports.exports.len() <= pe::MAX_EXPORTS);
+    }
+    if let Some(m) = &info.manifest {
+        assert!(m.supported_os.len() <= pe::manifest::MAX_SUPPORTED_OS);
+        assert!(info.manifest_id.is_some());
+    }
+    if info.optional.subsystem != pe::Subsystem::Native {
+        assert!(!info.is_kernel_driver());
+    }
 }
+
+/// A minimal manifest with every setting the parser reads.
+const SEED_MANIFEST: &str = concat!(
+    r#"<?xml version="1.0" encoding="UTF-8"?><assembly><assemblyIdentity name="Seed" version="1.0.0.0"/>"#,
+    r#"<trustInfo><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false"/></requestedPrivileges></security></trustInfo>"#,
+    r#"<compatibility><application><supportedOS Id="{00000000-0000-0000-0000-000000000000}"/></application></compatibility>"#,
+    r#"<application><windowsSettings><autoElevate>true</autoElevate><dpiAware>true</dpiAware></windowsSettings></application></assembly>"#,
+);
 
 fn seed_images() -> Vec<Vec<u8>> {
     let version = VersionSpec {
@@ -88,6 +122,12 @@ fn seed_images() -> Vec<Vec<u8>> {
         translations: vec![(0x0407, 0x04b0)],
     };
     let mut rich = with_version(&version);
+    rich.resources.push(Leaf {
+        type_id: 24,
+        name_id: 1,
+        lang: 0x0409,
+        data: SEED_MANIFEST.as_bytes().to_vec(),
+    });
     rich.debug = Some(DebugSpec {
         pdb_guid: [7; 16],
         pdb_age: 2,
@@ -266,6 +306,10 @@ fn seed_images_parse_cleanly() {
         assert!(info.parse_warnings.is_empty(), "{:?}", info.parse_warnings);
         check_bounds(&image, &info);
     }
+    // The rich seed's manifest is read, so mutations exercise the parser.
+    let info = pe::parse(&seed_images()[2]).unwrap();
+    assert_eq!(info.manifest_id, Some(1));
+    assert_eq!(info.manifest.unwrap().auto_elevate, Some(true));
 }
 
 /// Every prefix of a rich image parses or fails cleanly.
