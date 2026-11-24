@@ -645,8 +645,9 @@ fn lint_argument_names_unsafe_code(argument: &[TokenTree]) -> bool {
     idents.iter().any(|i| is_unsafe_code_lint(i))
 }
 
-/// `a::b`, `a::b::c` and so on: identifiers joined by `::`, with at least
-/// one `::` and nothing else, not even a leading `::`.
+/// `a::b`, `a::b::c` and so on: identifiers joined by `::` (two joined
+/// colons, not `: :`), with at least one `::` and nothing else, not even a
+/// leading `::`.
 fn is_tool_path(tokens: &[TokenTree]) -> bool {
     let mut rest = tokens;
     let mut segments = 0;
@@ -658,7 +659,9 @@ fn is_tool_path(tokens: &[TokenTree]) -> bool {
         match after {
             [] => return segments > 1,
             [TokenTree::Punct(a), TokenTree::Punct(b), tail @ ..]
-                if a.as_char() == ':' && b.as_char() == ':' =>
+                if a.as_char() == ':'
+                    && a.spacing() == proc_macro2::Spacing::Joint
+                    && b.as_char() == ':' =>
             {
                 rest = tail;
             }
@@ -760,6 +763,7 @@ mod tests {
             "#![cfg_attr(unix, allow(clippy::unsafe_code), allow(unsafe_code))]",
             // Forms rustc rejects or a macro rewrites stay strict.
             "#![allow(::unsafe_code)]",
+            "#![allow(clippy : : unsafe_code)]",
             "macro_rules! m { () => { #[allow($(unsafe_code)*)] fn g() {} } }",
             "macro_rules! m { ($t:ident) => { #[allow($t::unsafe_code)] fn g() {} } }",
         ] {
@@ -1113,7 +1117,7 @@ mod tests {
     /// so the list cannot fall behind git, and nothing else is.
     #[test]
     fn git_runs_without_repository_local_variables() {
-        let out = Command::new("git")
+        let out = git_in(Path::new("."))
             .args(["rev-parse", "--local-env-vars"])
             .output()
             .expect("git runs");
