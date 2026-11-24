@@ -230,8 +230,8 @@ pub struct TrustReport {
     pub signers: Vec<SignerTrust>,
     /// The primary signature, chosen after trust: the first trusted
     /// signature with the strongest digest (SHA-2 beats SHA-1). `None` if
-    /// no signature is trusted. An index into
-    /// [`SignatureReport::signatures`].
+    /// no signature is trusted. A position in [`SignatureReport::signatures`]
+    /// (and in [`Self::signers`]).
     pub primary: Option<usize>,
     /// The identity of the primary signer.
     pub identity: Option<SignerIdentity>,
@@ -266,8 +266,8 @@ pub fn evaluate_trust(
         .collect();
     let primary = select_primary(&signers);
     let identity = primary.and_then(|p| {
-        let chain = signers.get(p)?.chain.as_ref()?;
-        Some(identity(p, chain, version))
+        let signer = signers.get(p)?;
+        Some(identity(signer.signature, signer.chain.as_ref()?, version))
     });
     let vendor_hint = match primary {
         Some(_) => None,
@@ -351,10 +351,10 @@ fn select_primary(signers: &[SignerTrust]) -> Option<usize> {
         _ => 0,
     };
     let mut best: Option<(usize, u8)> = None;
-    for s in signers.iter().filter(|s| s.trusted) {
+    for (i, s) in signers.iter().enumerate().filter(|(_, s)| s.trusted) {
         let r = rank(s.digest_alg).min(rank(s.signer_digest_alg));
         if best.is_none_or(|(_, b)| r > b) {
-            best = Some((s.signature, r));
+            best = Some((i, r));
         }
     }
     best.map(|(i, _)| i)

@@ -697,6 +697,11 @@ impl Budget {
         }
     }
 
+    /// How many verifications were spent.
+    pub const fn used(&self) -> usize {
+        self.used
+    }
+
     /// How many verifications are left.
     pub const fn left(&self) -> usize {
         self.left

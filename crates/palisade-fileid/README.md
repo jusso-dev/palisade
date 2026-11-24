@@ -142,10 +142,14 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   - Trust is decided **downwards from the anchors**: each certificate
     whose issuer name matches a trusted certificate is checked with that
     trusted key, and only links verified this way can make an anchored
-    path. Certificates added to a file cost at most one check per trusted
-    key whose name they claim, and this phase has its own budget (512
-    checks per chain), so nothing in a file can starve it. Verified results
-    are cached per key, not per certificate.
+    path. Only certificates reachable upwards from the leaf by name are
+    looked at, so unrelated policy entries cost nothing and appear in no
+    report. At most 64 embedded certificates are used, each checked at most
+    once per trusted key whose name it claims. The trust phase has its own
+    budget (4096 checks per chain, far above that bound), and links into
+    the leaf and policy certificates come first, on a separate pool from
+    links into other embedded certificates, so nothing in a file can starve
+    it. Verified results are cached per key, not per certificate.
   - The as-provided chain (and, when nothing is anchored, the full chain)
     is then searched upwards with whatever keys the file holds: every path
     is enumerated, loops are detected, paths stop at 10 certificates, and

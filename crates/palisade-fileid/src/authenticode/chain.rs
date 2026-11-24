@@ -35,11 +35,16 @@
 //! a certificate whose signature verifies becomes trusted in turn. Only
 //! links verified this way can make an anchored path. So every check that
 //! decides trust uses a key from policy, or one an anchor vouched for, and
-//! a certificate someone added to a file costs at most one check per
-//! trusted key whose name it claims. This phase has its own budget,
-//! [`MAX_TRUST_CHECKS`] per build, which nothing in a file can spend:
-//! earlier signatures, nested signatures and added certificates cannot
-//! starve it.
+//! only certificates reachable upwards from the leaf by issuer name are
+//! looked at, so unrelated policy entries cost nothing. Each certificate is
+//! checked at most once per trusted key, and at most
+//! [`MAX_EMBEDDED_CERTIFICATES`] embedded certificates are used, so what a
+//! file adds costs at most that many checks per trusted key sharing a
+//! name. This phase has its own budget, [`MAX_TRUST_CHECKS`] per build,
+//! which earlier and nested signatures cannot spend and which that bound
+//! stays under. Links into the leaf and into policy certificates are
+//! checked first, on a separate pool from links into other embedded
+//! certificates.
 //!
 //! The as-provided chain, and the full chain when nothing is anchored, are
 //! then searched upwards from the leaf with whatever keys the file holds.
@@ -83,16 +88,29 @@ pub const MAX_SIGNATURE_CHECKS: usize = 128;
 /// checks.
 pub const MAX_FILE_SIGNATURE_CHECKS: usize = 512;
 /// The most signatures verified per chain build while deciding trust,
-/// downwards from the anchors. Each check uses a key from policy or one an
-/// anchor vouched for, and certificates added to a file cost at most one
-/// check per trusted key with the name they claim as issuer, so a file
-/// cannot exhaust this; it bounds pathological trust configurations.
-pub const MAX_TRUST_CHECKS: usize = 512;
+/// downwards from the anchors, in each of two pools: links into the leaf
+/// and into policy certificates, and links into other embedded
+/// certificates.
+///
+/// Each certificate is checked at most once per trusted key whose subject
+/// it names as its issuer, and at most [`MAX_EMBEDDED_CERTIFICATES`]
+/// embedded certificates are used, so certificates added to a file cause at
+/// most `MAX_EMBEDDED_CERTIFICATES` checks per trusted key sharing a name.
+/// The cap covers 64 trusted keys per name; it only binds for pathological
+/// trust configurations, never for anything a file contains. Added
+/// certificates spend only the second pool, so they cannot keep the leaf's
+/// link or a policy-supplied chain from being verified.
+pub const MAX_TRUST_CHECKS: usize = 4096;
+/// The most embedded certificates [`build_chain`] uses: as many as one
+/// signature keeps ([`super::MAX_CERTIFICATES`]). The signer is always
+/// used; later certificates beyond the limit are ignored and reported as
+/// [`ChainIssue::TooManyCertificates`].
+pub const MAX_EMBEDDED_CERTIFICATES: usize = super::MAX_CERTIFICATES;
 /// The most per-certificate issues recorded per chain build. The limit
 /// markers ([`ChainIssue::TooLong`], [`ChainIssue::TooManyPaths`],
-/// [`ChainIssue::WorkLimitReached`] and [`ChainIssue::IssuesTruncated`]) are
-/// kept beyond it, at most once each, so a report holds at most
-/// `MAX_CHAIN_ISSUES + 4` issues.
+/// [`ChainIssue::TooManyCertificates`], [`ChainIssue::WorkLimitReached`] and
+/// [`ChainIssue::IssuesTruncated`]) are kept beyond it, at most once each,
+/// so a report holds at most `MAX_CHAIN_ISSUES + 5` issues.
 pub const MAX_CHAIN_ISSUES: usize = 32;
 
 /// A trust anchor from the policy-shipped bundle.
@@ -334,6 +352,9 @@ pub enum ChainIssue {
     TooLong,
     /// More than [`MAX_CHAIN_PATHS`] paths exist; the rest were not built.
     TooManyPaths,
+    /// More than [`MAX_EMBEDDED_CERTIFICATES`] embedded certificates; the
+    /// rest were ignored.
+    TooManyCertificates,
     /// The signature-check budget ([`MAX_SIGNATURE_CHECKS`] per build,
     /// [`MAX_FILE_SIGNATURE_CHECKS`] per file) ran out; further links were
     /// not made, and further self-issued certificates were not treated as
@@ -534,6 +555,10 @@ pub(crate) fn build_chain_within(
         if i == signer {
             continue;
         }
+        if embedded.len() >= MAX_EMBEDDED_CERTIFICATES {
+            issues.push(ChainIssue::TooManyCertificates);
+            break;
+        }
         match x509::parse_within(der, &mut parse_budget) {
             Ok(c) => embedded.push((i, c)),
             Err(error) => issues.push(ChainIssue::UnparseableCertificate { embedded: i, error }),
@@ -588,11 +613,16 @@ pub(crate) fn build_chain_within(
     // Trust first, verifying downwards from the anchors with trusted keys
     // only, on a budget of its own that nothing in the file can spend.
     let mut trust_budget = Budget::new(MAX_TRUST_CHECKS);
-    search.mark_trusted(&mut trust_budget);
+    let mut embedded_trust_budget = Budget::new(MAX_TRUST_CHECKS);
+    search.mark_trusted(leaf, &mut trust_budget, &mut embedded_trust_budget);
     let anchored_paths = search.run(leaf, pool.len(), Mode::Trusted, &mut trust_budget);
     // Then the informational paths, checked with whatever keys the file
-    // holds.
-    let mut budget = Budget::new(file_budget.left().min(MAX_SIGNATURE_CHECKS));
+    // holds. The per-build cap covers the self-signature checks too.
+    let mut budget = Budget::new(
+        file_budget
+            .left()
+            .min(MAX_SIGNATURE_CHECKS.saturating_sub(parse_budget.used())),
+    );
     let provided_paths = search.run(leaf, embedded_count, Mode::Untrusted, &mut budget);
     let full_anchored = !anchored_paths.is_empty();
     let full_paths = if full_anchored {
@@ -602,7 +632,11 @@ pub(crate) fn build_chain_within(
     };
     drop(search);
     file_budget.absorb(&budget);
-    if budget.exhausted || trust_budget.exhausted || parse_budget.exhausted {
+    if budget.exhausted
+        || trust_budget.exhausted
+        || embedded_trust_budget.exhausted
+        || parse_budget.exhausted
+    {
         issues.push(ChainIssue::WorkLimitReached);
     }
 
@@ -811,7 +845,10 @@ impl Issues {
         }
         let marker = matches!(
             issue,
-            ChainIssue::TooLong | ChainIssue::TooManyPaths | ChainIssue::WorkLimitReached
+            ChainIssue::TooLong
+                | ChainIssue::TooManyPaths
+                | ChainIssue::TooManyCertificates
+                | ChainIssue::WorkLimitReached
         );
         if marker || self.list.len() < MAX_CHAIN_ISSUES {
             self.list.push(issue);
@@ -869,7 +906,7 @@ impl<'p, 'i> Search<'p, 'i> {
                 .or_default()
                 .push(i);
         }
-        for (i, node) in pool.iter().enumerate() {
+        for (i, node) in pool.iter().enumerate().rev() {
             by_issuer
                 .entry(node.cert.issuer.der.as_slice())
                 .or_default()
@@ -986,20 +1023,70 @@ impl<'p, 'i> Search<'p, 'i> {
         ok
     }
 
-    /// Verifies downwards from the anchors: every certificate whose issuer
-    /// name is a trusted certificate's subject is checked with that
-    /// trusted key, breadth first, at most [`MAX_CHAIN_LENGTH`] deep. Every
-    /// check uses a key from an anchor or from a certificate an anchor
-    /// vouched for, never a key someone added to the file, so certificates
-    /// added to a file cost at most one check per trusted key with the name
-    /// they claim as issuer.
-    fn mark_trusted(&mut self, budget: &mut Budget) {
+    /// The pool nodes a path from `leaf` could use: those reached upwards
+    /// from it by issuer name, within [`MAX_CHAIN_LENGTH`] certificates.
+    /// No signature is checked; this only keeps the trust walk away from
+    /// certificates that cannot be on the leaf's chain.
+    fn reachable_from(&self, leaf: usize) -> Vec<bool> {
+        let mut seen = vec![false; self.pool.len()];
+        let mut frontier = vec![leaf];
+        if let Some(s) = seen.get_mut(leaf) {
+            *s = true;
+        }
+        for _ in 1..MAX_CHAIN_LENGTH {
+            let mut next = Vec::new();
+            for n in frontier {
+                let Some(node) = self.pool.get(n) else {
+                    continue;
+                };
+                for &i in self
+                    .by_subject
+                    .get(node.cert.issuer.der.as_slice())
+                    .map(Vec::as_slice)
+                    .unwrap_or_default()
+                {
+                    if let Some(s) = seen.get_mut(i) {
+                        if !*s {
+                            *s = true;
+                            next.push(i);
+                        }
+                    }
+                }
+            }
+            if next.is_empty() {
+                break;
+            }
+            frontier = next;
+        }
+        seen
+    }
+
+    /// Verifies downwards from the anchors: every certificate that could be
+    /// on the leaf's chain and whose issuer name is a trusted certificate's
+    /// subject is checked with that trusted key, breadth first, at most
+    /// [`MAX_CHAIN_LENGTH`] deep. Every check uses a key from an anchor or
+    /// from a certificate an anchor vouched for, never a key someone added
+    /// to the file.
+    ///
+    /// Links into the leaf and into policy certificates are checked on
+    /// `policy_budget`; links into other embedded certificates, which
+    /// anyone can add, on `embedded_budget`. So added certificates cannot
+    /// spend the checks that the leaf's own link and policy-supplied chains
+    /// need.
+    fn mark_trusted(
+        &mut self,
+        leaf: usize,
+        policy_budget: &mut Budget,
+        embedded_budget: &mut Budget,
+    ) {
         self.mode = Mode::Trusted;
         self.limit = self.pool.len();
+        let reachable = self.reachable_from(leaf);
+        let on_chain = |i: usize| reachable.get(i).copied().unwrap_or(false);
         let mut depth = vec![0_usize; self.pool.len()];
         let mut queue = VecDeque::new();
         for (i, node) in self.pool.iter().enumerate() {
-            if node.anchor.is_some() {
+            if node.anchor.is_some() && on_chain(i) {
                 if let (Some(t), Some(d)) = (self.trusted.get_mut(i), depth.get_mut(i)) {
                     *t = true;
                     *d = 1;
@@ -1015,32 +1102,38 @@ impl<'p, 'i> Search<'p, 'i> {
             if d >= MAX_CHAIN_LENGTH {
                 continue;
             }
-            let children: Vec<usize> = self
+            // The leaf and policy certificates first, then embedded ones.
+            let mut children: Vec<usize> = self
                 .by_issuer
                 .get(node.cert.subject.der.as_slice())
-                .map(|v| v.iter().copied().filter(|c| *c != t).collect())
+                .map(|v| {
+                    v.iter()
+                        .copied()
+                        .filter(|c| *c != t && on_chain(*c))
+                        .collect()
+                })
                 .unwrap_or_default();
+            children.sort_by_key(|c| (!self.privileged(*c, leaf), *c));
             if children.is_empty() || !self.may_issue(t) {
                 continue;
             }
             for c in children {
                 if steps >= MAX_SEARCH_STEPS {
-                    budget.exhausted = true;
+                    policy_budget.exhausted = true;
                     return;
                 }
                 steps += 1;
-                if self.trusted.get(c).copied().unwrap_or(true) {
-                    // Already trusted: the edge is still checked, so the
-                    // path search can use it, but nothing is queued.
-                    if self.key_ids_agree(c, t) && self.usable(c) {
-                        self.check(c, t, budget);
-                    }
-                    continue;
-                }
                 if !self.key_ids_agree(c, t) || !self.usable(c) {
                     continue;
                 }
-                if self.check(c, t, budget) {
+                let budget = if self.privileged(c, leaf) {
+                    &mut *policy_budget
+                } else {
+                    &mut *embedded_budget
+                };
+                let ok = self.check(c, t, budget);
+                let newly = !self.trusted.get(c).copied().unwrap_or(true);
+                if ok && newly {
                     if let (Some(tc), Some(dc)) = (self.trusted.get_mut(c), depth.get_mut(c)) {
                         *tc = true;
                         *dc = d + 1;
@@ -1049,6 +1142,16 @@ impl<'p, 'i> Search<'p, 'i> {
                 }
             }
         }
+    }
+
+    /// Whether `node` is the leaf or a policy certificate, whose links are
+    /// checked on the budget added certificates cannot spend.
+    fn privileged(&self, node: usize, leaf: usize) -> bool {
+        node == leaf
+            || self
+                .pool
+                .get(node)
+                .is_some_and(|n| !matches!(n.origin, CertOrigin::Embedded(_)) || n.anchor.is_some())
     }
 
     /// The best maximal paths from `leaf` over pool indices below `limit`.
@@ -1126,7 +1229,9 @@ impl<'p, 'i> Search<'p, 'i> {
             .map(|v| {
                 v.iter()
                     .copied()
-                    .filter(|c| *c < self.limit)
+                    // A self-issued certificate names itself as issuer; it
+                    // is not its own issuer candidate.
+                    .filter(|c| *c != top && *c < self.limit)
                     .filter(|c| !trusted_only || self.trusted.get(*c).copied().unwrap_or(false))
                     .collect()
             })

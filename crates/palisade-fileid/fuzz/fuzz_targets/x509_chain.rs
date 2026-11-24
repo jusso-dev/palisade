@@ -51,7 +51,7 @@ fuzz_target!(|data: &[u8]| {
     assert!(report.as_provided.certs.len() <= MAX_CHAIN_LENGTH);
     assert!(report.full_chain.certs.len() <= MAX_CHAIN_LENGTH);
     assert!(report.alternatives.len() < MAX_CHAIN_PATHS);
-    assert!(report.issues.len() <= MAX_CHAIN_ISSUES + 4);
+    assert!(report.issues.len() <= MAX_CHAIN_ISSUES + 5);
     assert_eq!(report.full_chain.certs.first(), Some(&report.leaf));
     for path in std::iter::once(&report.full_chain).chain(&report.alternatives) {
         assert!(path.certs.iter().all(|i| *i < report.certificates.len()));
