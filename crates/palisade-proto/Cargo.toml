@@ -15,6 +15,8 @@ palisade-core = { workspace = true, features = ["std", "schema"] }
 palisade-fileid = { workspace = true }
 # The strict YAML reader for the registry and mapping files.
 palisade-policy = { workspace = true }
+# Signatures and SHA-256 for the PKI module, behind its `crypto` module (ADR 0008).
+ring = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
