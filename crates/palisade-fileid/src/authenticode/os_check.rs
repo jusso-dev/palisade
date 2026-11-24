@@ -26,10 +26,13 @@
 //!   only after the file digest and the signature have verified (an
 //!   untrusted root, an expired or revoked certificate, a wrong usage), is
 //!   **accepted**: the signature is intact;
-//! - a digest or signature failure, a missing signer certificate or a
-//!   malformed message is **rejected**, and so is "no signature";
+//! - a digest or signature failure, a missing signer certificate, an
+//!   unknown algorithm or a malformed message or certificate is
+//!   **rejected**, and "no signature" is its own verdict;
 //! - any other code is **unclassified**, and its comparison is
-//!   [`Outcome::NotComparable`].
+//!   [`Outcome::NotComparable`]. That is not an agreement:
+//!   [`CrossCheck::agrees`] is false while any comparison is not
+//!   comparable, and [`CrossCheck::not_comparable`] lists them.
 //!
 //! The OS reads only the first embedded signature (index 0) and the
 //! signatures nested directly in it (indexes 1 and up, its "secondary"
@@ -46,7 +49,9 @@
 
 #![forbid(unsafe_code)]
 
-use super::signature::{SignatureKind, SignatureReport, SignatureStatus};
+use super::signature::{
+    InvalidReason, SignatureKind, SignatureReport, SignatureStatus, SigningState,
+};
 
 /// The most signatures the OS backend asks about for one file: the primary
 /// and up to this many minus one secondary signatures. The same bound as
@@ -73,10 +78,49 @@ pub mod code {
     pub const NTE_BAD_SIGNATURE: u32 = 0x8009_0006;
     /// `CRYPT_E_BAD_MSG`: the message cannot be decoded.
     pub const CRYPT_E_BAD_MSG: u32 = 0x8009_200D;
+    /// `CRYPT_E_BAD_ENCODE`.
+    pub const CRYPT_E_BAD_ENCODE: u32 = 0x8009_2002;
+    /// `CRYPT_E_UNKNOWN_ALGO`.
+    pub const CRYPT_E_UNKNOWN_ALGO: u32 = 0x8009_1002;
+    /// `CRYPT_E_INVALID_MSG_TYPE`.
+    pub const CRYPT_E_INVALID_MSG_TYPE: u32 = 0x8009_1004;
+    /// `CRYPT_E_UNEXPECTED_ENCODING`.
+    pub const CRYPT_E_UNEXPECTED_ENCODING: u32 = 0x8009_1005;
+    /// `CRYPT_E_AUTH_ATTR_MISSING`.
+    pub const CRYPT_E_AUTH_ATTR_MISSING: u32 = 0x8009_1006;
+    /// `CRYPT_E_SIGNER_NOT_FOUND`.
+    pub const CRYPT_E_SIGNER_NOT_FOUND: u32 = 0x8009_100E;
+    /// `CRYPT_E_ATTRIBUTES_MISSING`.
+    pub const CRYPT_E_ATTRIBUTES_MISSING: u32 = 0x8009_100F;
+    /// `CRYPT_E_UNEXPECTED_MSG_TYPE`.
+    pub const CRYPT_E_UNEXPECTED_MSG_TYPE: u32 = 0x8009_200A;
+    /// `CRYPT_E_NO_SIGNER`.
+    pub const CRYPT_E_NO_SIGNER: u32 = 0x8009_200E;
+    /// `NTE_BAD_DATA`.
+    pub const NTE_BAD_DATA: u32 = 0x8009_0005;
+    /// `NTE_BAD_ALGID`.
+    pub const NTE_BAD_ALGID: u32 = 0x8009_0008;
+    /// `NTE_BAD_PUBLIC_KEY`.
+    pub const NTE_BAD_PUBLIC_KEY: u32 = 0x8009_0015;
+    /// `CERT_E_MALFORMED`: a certificate cannot be decoded.
+    pub const CERT_E_MALFORMED: u32 = 0x800B_0108;
+    /// `DIGSIG_E_ENCODE`.
+    pub const DIGSIG_E_ENCODE: u32 = 0x800B_0005;
+    /// `DIGSIG_E_DECODE`.
+    pub const DIGSIG_E_DECODE: u32 = 0x800B_0006;
+    /// `DIGSIG_E_EXTENSIBILITY`.
+    pub const DIGSIG_E_EXTENSIBILITY: u32 = 0x800B_0007;
+    /// `DIGSIG_E_CRYPTO`.
+    pub const DIGSIG_E_CRYPTO: u32 = 0x800B_0008;
     /// The first `CRYPT_E_ASN1_*` code: ASN.1 decoding errors.
     pub const CRYPT_E_ASN1_FIRST: u32 = 0x8009_3100;
-    /// The last `CRYPT_E_ASN1_*` code.
-    pub const CRYPT_E_ASN1_LAST: u32 = 0x8009_31FF;
+    /// The last `CRYPT_E_ASN1_*` code (`CRYPT_E_ASN1_EXTENDED` and
+    /// `CRYPT_E_ASN1_NOEOD` are `0x8009_3201` and `0x8009_3202`).
+    pub const CRYPT_E_ASN1_LAST: u32 = 0x8009_32FF;
+    /// `TRUST_E_TIME_STAMP`: a timestamp could not be verified.
+    pub const TRUST_E_TIME_STAMP: u32 = 0x8009_6005;
+    /// `TRUST_E_COUNTER_SIGNER`: a countersignature is invalid.
+    pub const TRUST_E_COUNTER_SIGNER: u32 = 0x8009_6003;
     /// `CERT_E_EXPIRED`.
     pub const CERT_E_EXPIRED: u32 = 0x800B_0101;
     /// `CERT_E_VALIDITYPERIODNESTING`.
@@ -118,14 +162,16 @@ pub enum OsVerdict {
     /// The signature verified and the OS trusts its chain.
     Trusted,
     /// The signature verified, but the OS does not trust its certificate
-    /// chain or rejected it on policy (an untrusted root, an expired or
-    /// revoked certificate, a wrong usage). The OS checks the file digest
-    /// and the signature before the chain, and reports their failures
-    /// first, so the signature itself is intact.
+    /// chain, rejected it on policy (an untrusted root, an expired or
+    /// revoked certificate, a wrong usage), or could not verify its
+    /// timestamp. The OS checks the file digest and the signature before
+    /// the chain and the countersignatures, and reports their failures
+    /// first, so the signature itself is intact. ([`super::SignatureStatus`]
+    /// does not cover chains or timestamps either.)
     ChainNotTrusted,
     /// The file digest, the `messageDigest` attribute or the signature
-    /// value does not verify, the signer certificate is missing, or the
-    /// message is malformed.
+    /// value does not verify, the signer certificate is missing, an
+    /// algorithm is unknown, or the message or a certificate is malformed.
     Broken,
     /// The OS found no signature.
     NoSignature,
@@ -158,6 +204,23 @@ pub const fn classify(code: u32) -> OsVerdict {
         | code::CRYPT_E_HASH_VALUE
         | code::NTE_BAD_SIGNATURE
         | code::CRYPT_E_BAD_MSG
+        | code::CRYPT_E_BAD_ENCODE
+        | code::CRYPT_E_UNKNOWN_ALGO
+        | code::CRYPT_E_INVALID_MSG_TYPE
+        | code::CRYPT_E_UNEXPECTED_ENCODING
+        | code::CRYPT_E_AUTH_ATTR_MISSING
+        | code::CRYPT_E_SIGNER_NOT_FOUND
+        | code::CRYPT_E_ATTRIBUTES_MISSING
+        | code::CRYPT_E_UNEXPECTED_MSG_TYPE
+        | code::CRYPT_E_NO_SIGNER
+        | code::NTE_BAD_DATA
+        | code::NTE_BAD_ALGID
+        | code::NTE_BAD_PUBLIC_KEY
+        | code::CERT_E_MALFORMED
+        | code::DIGSIG_E_ENCODE
+        | code::DIGSIG_E_DECODE
+        | code::DIGSIG_E_EXTENSIBILITY
+        | code::DIGSIG_E_CRYPTO
         | code::CRYPT_E_ASN1_FIRST..=code::CRYPT_E_ASN1_LAST => OsVerdict::Broken,
         code::CERT_E_EXPIRED
         | code::CERT_E_VALIDITYPERIODNESTING
@@ -174,7 +237,9 @@ pub const fn classify(code: u32) -> OsVerdict {
         | code::TRUST_E_BASIC_CONSTRAINTS
         | code::CRYPT_E_REVOKED
         | code::CRYPT_E_NO_REVOCATION_CHECK
-        | code::CRYPT_E_REVOCATION_OFFLINE => OsVerdict::ChainNotTrusted,
+        | code::CRYPT_E_REVOCATION_OFFLINE
+        | code::TRUST_E_TIME_STAMP
+        | code::TRUST_E_COUNTER_SIGNER => OsVerdict::ChainNotTrusted,
         _ => OsVerdict::Unclassified,
     }
 }
@@ -213,7 +278,9 @@ pub struct OsTrustResult {
 /// How one OS result compares with the Rust result for the same signature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Outcome {
-    /// Both accept the signature, or both reject it (or both find none).
+    /// Both accept the signature, or both reject it, or both find none:
+    /// an unsigned file, or (at index 0) a certificate table this crate
+    /// could not read and the OS rejected.
     Agree,
     /// The OS finds the signature intact and this crate does not: expected
     /// for the stricter checks described in the module documentation, and
@@ -222,12 +289,14 @@ pub enum Outcome {
     /// This crate finds the signature valid and the OS does not. This could
     /// hide a verification bug.
     RustAcceptsOsRejects,
-    /// The OS reported a signature that has no counterpart in the report.
+    /// The OS reported a signature (intact or broken) that has no
+    /// counterpart in the report.
     OnlyOs,
     /// The report has a signature the OS should have seen, at an index the
     /// OS did not report.
     OnlyRust,
-    /// The OS code is unclassified, so nothing can be said.
+    /// The OS code is unclassified, so nothing can be said. This is not an
+    /// agreement; see [`CrossCheck::not_comparable`].
     NotComparable,
 }
 
@@ -264,22 +333,29 @@ pub struct CrossCheck {
 }
 
 impl CrossCheck {
-    /// Whether every comparison agrees (or is not comparable) and the
-    /// secondary counts match.
+    /// Whether every comparison is [`Outcome::Agree`] and the secondary
+    /// counts match. A comparison that is [`Outcome::NotComparable`] makes
+    /// this false: an OS code nobody classified is not evidence of
+    /// agreement.
     #[must_use]
     pub fn agrees(&self) -> bool {
         !self.secondary_count_differs
-            && self
-                .comparisons
-                .iter()
-                .all(|c| matches!(c.outcome, Outcome::Agree | Outcome::NotComparable))
+            && self.comparisons.iter().all(|c| c.outcome == Outcome::Agree)
     }
 
-    /// The comparisons that disagree.
+    /// The comparisons where the two sides reach different answers. Those
+    /// that cannot be compared are in [`Self::not_comparable`] instead.
     pub fn disagreements(&self) -> impl Iterator<Item = &Comparison> {
         self.comparisons
             .iter()
             .filter(|c| !matches!(c.outcome, Outcome::Agree | Outcome::NotComparable))
+    }
+
+    /// The comparisons whose OS code is unclassified.
+    pub fn not_comparable(&self) -> impl Iterator<Item = &Comparison> {
+        self.comparisons
+            .iter()
+            .filter(|c| c.outcome == Outcome::NotComparable)
     }
 
     /// The comparisons where this crate accepts a signature the OS rejects.
@@ -311,6 +387,15 @@ fn os_view(report: &SignatureReport) -> Vec<usize> {
             .map(|(i, _)| i),
     );
     view
+}
+
+/// Whether this crate found the certificate table unreadable, with no
+/// signature in it read.
+fn table_unreadable(report: &SignatureReport) -> bool {
+    matches!(
+        report.signing_state,
+        SigningState::Invalid(InvalidReason::CertificateTable(_))
+    )
 }
 
 /// Compares the OS results for a file with the report this crate produced
@@ -355,11 +440,17 @@ pub fn cross_check(report: &SignatureReport, os: &OsTrustResult) -> CrossCheck {
         let outcome = match (&rust_status, os_result) {
             (None, None) => continue,
             (Some(_), None) => Outcome::OnlyRust,
-            (None, Some(r)) => match r.verdict().accepts() {
-                // An unsigned file, as both see it.
-                Some(false) => Outcome::Agree,
-                Some(true) => Outcome::OnlyOs,
-                None => Outcome::NotComparable,
+            (None, Some(r)) => match r.verdict() {
+                // Neither side has a signature here.
+                OsVerdict::NoSignature => Outcome::Agree,
+                // The OS found and rejected a signature this crate did not
+                // read. Only at index 0, and only when this crate also
+                // rejected the certificate table, do the two agree.
+                OsVerdict::Broken if os_index == 0 && table_unreadable(report) => Outcome::Agree,
+                OsVerdict::Broken | OsVerdict::Trusted | OsVerdict::ChainNotTrusted => {
+                    Outcome::OnlyOs
+                }
+                OsVerdict::Unclassified => Outcome::NotComparable,
             },
             (Some(status), Some(r)) => match r.verdict().accepts() {
                 None => Outcome::NotComparable,
@@ -459,9 +550,29 @@ mod tests {
         assert_eq!(classify(code::NTE_BAD_SIGNATURE), OsVerdict::Broken);
         assert_eq!(classify(0x8009_3102), OsVerdict::Broken);
         assert_eq!(classify(code::TRUST_E_NOSIGNATURE), OsVerdict::NoSignature);
-        // TRUST_E_TIME_STAMP and anything unknown are not classified.
-        assert_eq!(classify(0x8009_6005), OsVerdict::Unclassified);
-        assert_eq!(classify(0x8000_4005), OsVerdict::Unclassified);
+        assert_eq!(
+            classify(0x8009_3201),
+            OsVerdict::Broken,
+            "CRYPT_E_ASN1_EXTENDED"
+        );
+        assert_eq!(
+            classify(0x8009_3202),
+            OsVerdict::Broken,
+            "CRYPT_E_ASN1_NOEOD"
+        );
+        assert_eq!(classify(code::CERT_E_MALFORMED), OsVerdict::Broken);
+        assert_eq!(classify(code::NTE_BAD_ALGID), OsVerdict::Broken);
+        assert_eq!(classify(code::CRYPT_E_NO_SIGNER), OsVerdict::Broken);
+        assert_eq!(classify(code::DIGSIG_E_CRYPTO), OsVerdict::Broken);
+        assert_eq!(
+            classify(code::TRUST_E_TIME_STAMP),
+            OsVerdict::ChainNotTrusted
+        );
+        // E_FAIL, TRUST_E_SUBJECT_NOT_TRUSTED, TRUST_E_SUBJECT_FORM_UNKNOWN
+        // and CRYPT_E_FILE_ERROR say nothing about the signature.
+        for unknown in [0x8000_4005, 0x800B_0004, 0x800B_0003, 0x8009_2003] {
+            assert_eq!(classify(unknown), OsVerdict::Unclassified, "{unknown:#x}");
+        }
         assert_eq!(OsVerdict::Trusted.accepts(), Some(true));
         assert_eq!(OsVerdict::ChainNotTrusted.accepts(), Some(true));
         assert_eq!(OsVerdict::Broken.accepts(), Some(false));
@@ -533,9 +644,12 @@ mod tests {
         )]);
         let check = cross_check(&r, &os(&[code::NTE_BAD_SIGNATURE], 0));
         assert_eq!(outcomes(&check), [Outcome::Agree]);
-        let check = cross_check(&r, &os(&[0x8009_6005], 0));
+        let check = cross_check(&r, &os(&[0x8000_4005], 0));
         assert_eq!(outcomes(&check), [Outcome::NotComparable]);
-        assert!(check.agrees());
+        // Not comparable is not agreement, and not a disagreement either.
+        assert!(!check.agrees());
+        assert_eq!(check.disagreements().count(), 0);
+        assert_eq!(check.not_comparable().count(), 1);
 
         let r = report(vec![sig(
             SignatureKind::Embedded,
@@ -544,6 +658,42 @@ mod tests {
         )]);
         let check = cross_check(&r, &os(&[code::TRUST_E_BAD_DIGEST], 0));
         assert_eq!(outcomes(&check), [Outcome::Agree]);
+    }
+
+    #[test]
+    fn a_signature_only_the_os_found_is_never_an_agreement() {
+        // This crate saw no table; the OS found and rejected a signature.
+        let r = report(Vec::new());
+        let check = cross_check(&r, &os(&[code::TRUST_E_BAD_DIGEST], 0));
+        assert_eq!(outcomes(&check), [Outcome::OnlyOs]);
+        assert!(!check.agrees());
+        // This crate found the table unreadable, and the OS rejected it.
+        let mut unreadable = report(Vec::new());
+        unreadable.signing_state = SigningState::Invalid(InvalidReason::CertificateTable(
+            crate::authenticode::CertificateTableError::Malformed { offset: 0 },
+        ));
+        let check = cross_check(&unreadable, &os(&[code::TRUST_E_BAD_DIGEST], 0));
+        assert_eq!(outcomes(&check), [Outcome::Agree]);
+        // The OS found and rejected a nested signature this crate missed.
+        let r = report(vec![sig(
+            SignatureKind::Embedded,
+            None,
+            SignatureStatus::Malformed(crate::authenticode::SignatureError::NotSignedData(
+                crate::authenticode::ObjectId::from_der(&[1]),
+            )),
+        )]);
+        let check = cross_check(
+            &r,
+            &os(&[code::TRUST_E_BAD_DIGEST, code::NTE_BAD_SIGNATURE], 1),
+        );
+        assert_eq!(outcomes(&check), [Outcome::Agree, Outcome::OnlyOs]);
+        assert!(check.secondary_count_differs);
+        // The same with the OS count truncated: still not an agreement.
+        let mut truncated = os(&[code::TRUST_E_BAD_DIGEST, code::NTE_BAD_SIGNATURE], 40);
+        truncated.truncated = true;
+        let check = cross_check(&r, &truncated);
+        assert!(!check.secondary_count_differs);
+        assert!(!check.agrees());
     }
 
     #[test]
