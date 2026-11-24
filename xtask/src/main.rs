@@ -346,14 +346,17 @@ fn deps_report(base: Option<&str>) -> ExitCode {
         // packages (checksum-verified, no build scripts run), so their
         // `unsafe` can be counted. The worktree is removed afterwards.
         let mut registries = supply_chain::registry_dirs(&metadata);
+        let mut base_warnings = Vec::new();
         if let (Some(base), Some(_)) = (base, &base_lock) {
             match report::base_metadata(&root, base, |dir| cargo_metadata(dir, &["--all-features"]))
             {
-                Ok(base_metadata) => registries.extend(supply_chain::registry_dirs(&base_metadata)),
-                Err(error) => eprintln!(
+                Ok(base_metadata) => {
+                    registries.extend(supply_chain::registry_dirs(&base_metadata));
+                }
+                Err(error) => base_warnings.push(format!(
                     "::warning title=Base dependencies not unpacked::{}",
                     error.replace(['\n', '\r', '%'], " ")
-                ),
+                )),
             }
             registries.sort();
             registries.dedup();
@@ -366,7 +369,10 @@ fn deps_report(base: Option<&str>) -> ExitCode {
                     .then(|| supply_chain::count_dir(&crate_dir, &unsafe_code::count_unsafe).0)
             })
         };
-        report::render(&metadata, base_lock.as_deref(), tree.as_deref(), base_count)
+        let (markdown, mut warnings) =
+            report::render(&metadata, base_lock.as_deref(), tree.as_deref(), base_count)?;
+        warnings.extend(base_warnings);
+        Ok((markdown, warnings))
     })();
     match result {
         Ok((markdown, warnings)) => {

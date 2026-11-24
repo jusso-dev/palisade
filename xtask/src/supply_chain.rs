@@ -221,53 +221,29 @@ pub fn check_deny_toml(source: &str, today: &str) -> Result<Vec<String>, String>
 }
 
 /// Byte offsets where each `[licenses] exceptions` entry starts, from the
-/// parser's spans, so inline arrays, multi-line entries and
-/// `[[licenses.exceptions]]` tables are all handled as TOML defines them.
+/// TOML parser's spans: the entry's `{` in an inline array, or its
+/// `[[licenses.exceptions]]` header. Everything else in `deny.toml` is
+/// accepted as it is.
 fn exception_starts(source: &str) -> Result<Vec<usize>, String> {
-    type Spanned = toml::Spanned<toml::Value>;
-    let invalid = |e: toml::de::Error| format!("deny.toml: invalid TOML: {e}");
-    let doc: BTreeMap<String, toml::Spanned<BTreeMap<String, Spanned>>> =
-        toml::from_str(source).map_err(invalid)?;
-    let Some(exceptions) = doc
-        .get("licenses")
-        .and_then(|l| l.get_ref().get("exceptions"))
-    else {
-        return Ok(Vec::new());
-    };
-    let Some(entries) = exceptions.get_ref().as_array() else {
-        return Ok(Vec::new());
-    };
-    let text = source.get(exceptions.span()).unwrap_or_default();
-    if text.trim_start().starts_with("[[") {
-        // Array of tables: the span covers the first `[[licenses.exceptions]]`
-        // header only, so find every header line.
-        let mut starts = Vec::new();
-        let mut offset = 0;
-        for line in source.split_inclusive('\n') {
-            let header = line.trim().split('#').next().unwrap_or("").trim();
-            if header.replace(' ', "") == "[[licenses.exceptions]]" {
-                starts.push(offset + line.len() - line.trim_start().len());
-            }
-            offset += line.len();
-        }
-        if starts.len() != entries.len() {
-            return Err(format!(
-                "deny.toml: found {} `[[licenses.exceptions]]` headers for {} entries",
-                starts.len(),
-                entries.len()
-            ));
-        }
-        return Ok(starts);
+    #[derive(serde::Deserialize)]
+    struct Deny {
+        licenses: Option<Licenses>,
+        #[serde(flatten)]
+        _rest: BTreeMap<String, toml::Value>,
     }
-    // Inline array: parse just the array, keeping each entry's span.
-    let wrapped = format!("x = {text}");
-    let array: BTreeMap<String, Vec<Spanned>> = toml::from_str(&wrapped).map_err(invalid)?;
-    let base = exceptions.span().start;
-    Ok(array
-        .get("x")
+    #[derive(serde::Deserialize)]
+    struct Licenses {
+        exceptions: Option<Vec<toml::Spanned<toml::Value>>>,
+        #[serde(flatten)]
+        _rest: BTreeMap<String, toml::Value>,
+    }
+    let deny: Deny = toml::from_str(source).map_err(|e| format!("deny.toml: invalid TOML: {e}"))?;
+    Ok(deny
+        .licenses
+        .and_then(|l| l.exceptions)
         .into_iter()
         .flatten()
-        .map(|entry| base + entry.span().start - "x = ".len())
+        .map(|entry| entry.span().start)
         .collect())
 }
 
@@ -1021,8 +997,9 @@ criteria = "safe-to-deploy"
             ),
             1
         );
-        // Array of tables, and a commented `[licenses]` header.
-        let tables = "# reason: a\n[[licenses.exceptions]]\ncrate = \"a\"\nallow = [\"x\"]\n\n[[licenses.exceptions]] # no reason\ncrate = \"b\"\nallow = [\"y\"]\n";
+        // Array of tables, a commented `[licenses]` header, and a decoy
+        // header inside a multi-line string, which the parser ignores.
+        let tables = "top = 1\n[graph]\nnote = \"\"\"\n# reason: decoy\n[[licenses.exceptions]]\n\"\"\"\n# reason: a\n[[licenses.exceptions]]\ncrate = \"a\"\nallow = [\"x\"]\n\n[[ \"licenses\".exceptions ]] # no reason\ncrate = \"b\"\nallow = [\"y\"]\n";
         let v = check_deny_toml(tables, "2026-11-24").unwrap();
         assert_eq!(
             v,

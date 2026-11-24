@@ -128,16 +128,35 @@ pub fn git_show(root: &Path, commit: &str, path: &str) -> Result<String, String>
 /// `cargo metadata` for the base commit, from a temporary git worktree of it
 /// (detached, removed again before returning). `metadata` runs cargo
 /// metadata in a directory.
+///
+/// The worktree goes inside a new directory under `target/`, which only this
+/// user can write to on Unix and whose name includes the process ID and the
+/// time, so another local user cannot prepare or swap it.
 pub fn base_metadata(
     root: &Path,
     commit: &str,
-    metadata: impl Fn(&Path) -> Result<Value, String>,
+    metadata: impl FnOnce(&Path) -> Result<Value, String>,
 ) -> Result<Value, String> {
-    if commit.is_empty() || commit.starts_with('-') {
+    if commit.is_empty() || commit.starts_with('-') || commit.contains(':') {
         return Err(format!("not a commit: `{commit}`"));
     }
-    let dir = std::env::temp_dir().join(format!("xtask-base-{}", std::process::id()));
-    let git = |args: &[&str]| -> Result<(), String> {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.subsec_nanos());
+    let parent = root
+        .join("target")
+        .join(format!("xtask-base-{}-{nanos}", std::process::id()));
+    std::fs::create_dir_all(root.join("target"))
+        .map_err(|e| format!("cannot create target/: {e}"))?;
+    let mut builder = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    // `create`, not `create_all`: fails if the directory already exists.
+    builder
+        .create(&parent)
+        .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+    let dir = parent.join("base");
+    let git = |args: &[&std::ffi::OsStr]| -> Result<(), String> {
         let output = Command::new("git")
             .args(args)
             .current_dir(root)
@@ -147,18 +166,29 @@ pub fn base_metadata(
             Ok(())
         } else {
             Err(format!(
-                "git {} failed: {}",
-                args.join(" "),
+                "git worktree failed: {}",
                 String::from_utf8_lossy(&output.stderr).trim()
             ))
         }
     };
-    let dir_str = dir.to_string_lossy().into_owned();
-    git(&["worktree", "add", "--detach", "--quiet", &dir_str, commit])?;
-    let result = metadata(&dir);
-    let removed = git(&["worktree", "remove", "--force", &dir_str]);
+    let os = std::ffi::OsStr::new;
+    let added = git(&[
+        os("worktree"),
+        os("add"),
+        os("--detach"),
+        os("--quiet"),
+        dir.as_os_str(),
+        os(commit),
+    ]);
+    let result = added.and_then(|()| metadata(&dir));
+    let removed = git(&[os("worktree"), os("remove"), os("--force"), dir.as_os_str()])
+        .or_else(|e| if dir.exists() { Err(e) } else { Ok(()) });
+    let cleaned = std::fs::remove_dir_all(&parent)
+        .or_else(|e| if parent.exists() { Err(e) } else { Ok(()) })
+        .map_err(|e| format!("cannot remove {}: {e}", parent.display()));
     let value = result?;
     removed?;
+    cleaned?;
     Ok(value)
 }
 
@@ -247,6 +277,38 @@ mod tests {
         assert!(md.contains("- new: `syn` 2.0.0, 0 `unsafe`"), "{md}");
         assert!(md.contains("- new: `syn` 3.0.0, 0 `unsafe`"), "{md}");
         assert!(md.contains("- removed: `old` 1.0.0"), "{md}");
+    }
+
+    #[test]
+    fn base_metadata_checks_out_the_commit_and_cleans_up() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        if !root.join(".git").exists() {
+            return;
+        }
+        for bad in ["", "--output=/tmp/x", "HEAD:Cargo.toml"] {
+            assert!(
+                base_metadata(&root, bad, |_| Ok(Value::Null)).is_err(),
+                "{bad}"
+            );
+        }
+        let mut seen = None;
+        let value = base_metadata(&root, "HEAD", |dir| {
+            assert!(dir.join("Cargo.lock").is_file());
+            seen = Some(dir.to_path_buf());
+            Ok(Value::Bool(true))
+        });
+        assert_eq!(value.unwrap(), Value::Bool(true));
+        let dir = seen.unwrap();
+        assert!(!dir.exists());
+        assert!(!dir.parent().unwrap().exists());
+        // The callback's error is returned, and the worktree is still removed.
+        let mut seen = None;
+        let err = base_metadata(&root, "HEAD", |dir| {
+            seen = Some(dir.to_path_buf());
+            Err("boom".to_owned())
+        });
+        assert_eq!(err.unwrap_err(), "boom");
+        assert!(!seen.unwrap().exists());
     }
 
     #[test]
