@@ -1,0 +1,43 @@
+{
+  "source": "os_legacy_rule_collection",
+  "record": {
+    "event_id": 8029,
+    "time_created": "2026-11-24T03:15:22.1234567Z",
+    "record_id": 1000,
+    "channel": "rule-collection/MSI and Script",
+    "fields": {
+      "FilePath": "C:\\Users\\alice\\Downloads\\patch.MSP",
+      "Sha1Hash": "7777777777777777777777777777777777777777",
+      "Sha256Hash": "8888888888888888888888888888888888888888888888888888888888888888",
+      "Result": "-1073741790",
+      "USN": "9999",
+      "Sha1CatalogHash": "",
+      "Sha256CatalogHash": "9999999999999999999999999999999999999999999999999999999999999999",
+      "UserWriteable": "true",
+      "OriginalFilename": "",
+      "InternalName": "",
+      "FileDescription": "",
+      "ProductName": "",
+      "FileVersion": "",
+      "PolicyName": "Palisade base policy",
+      "PolicyID": "2026.11.24.1",
+      "PolicyGUID": "{A244370E-44C9-4C06-B551-F6016E563076}",
+      "System.UserID": "S-1-5-21-1111111111-2222222222-3333333333-1001",
+      "System.ProcessID": "8080"
+    },
+    "activity_id": "6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7"
+  },
+  "signatures": [
+    {
+      "event_id": 8038,
+      "time_created": "2026-11-24T03:15:22.1234567Z",
+      "record_id": 2001,
+      "channel": "rule-collection/MSI and Script",
+      "fields": {
+        "TotalSignatureCount": "0",
+        "Signature": "0"
+      },
+      "activity_id": "6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7"
+    }
+  ]
+}

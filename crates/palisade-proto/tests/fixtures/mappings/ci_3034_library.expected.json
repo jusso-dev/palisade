@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0.0",
+  "event_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+  "event_type": "library.decision",
+  "category": "library",
+  "action": "load",
+  "outcome": "audited",
+  "severity": 4,
+  "mode": "audit",
+  "description": "The OS code integrity policy would have blocked a library whose signature is revoked or expired.",
+  "ts": "2026-11-24T03:15:22.123456Z",
+  "ts_agent_monotonic": 123456789,
+  "clock_synced": true,
+  "clock_skew_ms": -3,
+  "tenant_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e61",
+  "host": {
+    "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60",
+    "name": "WS-0001",
+    "os": "Windows 11 Enterprise",
+    "os_build": "26100.2314",
+    "arch": "x86_64",
+    "agent_version": "0.1.0"
+  },
+  "user": {
+    "sid": "S-1-5-21-1111111111-2222222222-3333333333-1001"
+  },
+  "seq": 41,
+  "prev_hash": "5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e",
+  "source": {
+    "kind": "os_code_integrity",
+    "event_id": 3034,
+    "record_id": 1000,
+    "channel": "code-integrity/Operational"
+  },
+  "process": {
+    "pid": 4242,
+    "image_path": "\\Device\\HarddiskVolume3\\Windows\\explorer.exe"
+  },
+  "file": {
+    "path": "\\Device\\HarddiskVolume3\\Program Files\\Example\\old.dll"
+  },
+  "native": {
+    "status_code": 3221227011,
+    "requested_signing_level": 4,
+    "validated_signing_level": 1
+  }
+}

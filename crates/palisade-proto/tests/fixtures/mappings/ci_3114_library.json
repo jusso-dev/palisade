@@ -1,0 +1,19 @@
+{
+  "source": "os_code_integrity",
+  "record": {
+    "event_id": 3114,
+    "time_created": "2026-11-24T03:15:22.1234567Z",
+    "record_id": 1000,
+    "channel": "code-integrity/Operational",
+    "fields": {
+      "FileName": "\\Device\\HarddiskVolume3\\Users\\alice\\AppData\\Local\\app\\plugin.dll",
+      "ProcessName": "\\Device\\HarddiskVolume3\\Users\\alice\\AppData\\Local\\app\\app.exe",
+      "Status": "0xC0E90002",
+      "SHA1Hash": "3333333333333333333333333333333333333333",
+      "SHA256Hash": "4444444444444444444444444444444444444444444444444444444444444444",
+      "SHA256FlatHash": "5555555555555555555555555555555555555555555555555555555555555555",
+      "System.UserID": "S-1-5-21-1111111111-2222222222-3333333333-1001",
+      "System.ProcessID": "5150"
+    }
+  }
+}

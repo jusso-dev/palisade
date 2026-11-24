@@ -1,0 +1,583 @@
+# OS code integrity log -> canonical events (#196).
+#
+# Field names are those of the code integrity provider's event templates.
+# Hashes are hex of the size the record declares (`*HashSize`). The decoder
+# (#58, #90) renders binary fields as hex and adds the record's system user
+# and process as `System.UserID` and `System.ProcessID`.
+#
+# For 3076/3077, `SHA1Hash` and `SHA256Hash` are the Authenticode (signed
+# image) digests and the `*FlatHash` fields are digests of the whole file.
+# The signing scenario tells kernel mode (0) from user mode (1). User-mode
+# images are told apart by extension only, so a library with an unusual
+# extension is reported as `exec.decision`; content-based classification is
+# the collector's job (#58).
+#
+# Not mapped yet (#58, #90): 3001, 3002, 3004, 3010, 3011, 3012, 3024, 3026,
+# 3032, 3036, 3064, 3065, 3074, 3075, 3079 to 3086, 3101, 3103, 3104, 3105,
+# 3108, 3110, 3111, 3112. 3089 is not an event of its own: it is read as the
+# signature records of a block or audit event.
+#
+# This file is hand-maintained data. The tests check every target against
+# the event schema.
+schema_version: 1.0.0
+source: os_code_integrity
+entries:
+  # 3076: the main audit event.
+  - source_event_id: 3076
+    when:
+      field: SISigningScenario
+      equals: ["0"]
+    canonical_type: driver.decision
+    action: load
+    outcome: audited
+    mode: audit
+    severity: 5
+    description: "The OS code integrity policy would have blocked a kernel driver."
+    field_map:
+      FileName: /file/path
+      ProcessName: /process/image_path
+      RequestedSigningLevel: /native/requested_signing_level
+      ValidatedSigningLevel: /native/validated_signing_level
+      Status: /native/status_code
+      SHA1Hash: /file/hashes/authenticode_sha1
+      SHA256Hash: /file/hashes/authenticode_sha256
+      SHA1FlatHash: /file/hashes/sha1
+      SHA256FlatHash: /file/hashes/sha256
+      SISigningScenario: /native/signing_scenario
+      PolicyName: /native/policy_name
+      PolicyID: /native/policy_id
+      PolicyGUID: /native/policy_guid
+      PolicyHash: /native/policy_hash
+      OriginalFileName: /file/version_info/original_filename
+      InternalName: /file/version_info/internal_name
+      FileDescription: /file/version_info/description
+      ProductName: /file/version_info/product_name
+      FileVersion: /file/version_info/file_version
+      UserWriteable: /file/user_writable_location
+      PackageFamilyName: /file/package_name
+      System.UserID: /user/sid
+      System.ProcessID: /process/pid
+    signatures:
+      source_event_id: 3089
+      count_field: TotalSignatureCount
+      index_field: Signature
+      field_map:
+        PublisherName: publisher
+        IssuerName: issuer
+        PublisherTBSHash: tbs_hash
+        IssuerTBSHash: issuer_tbs_hash
+        SignatureType: signature_type
+        ValidatedSigningLevel: signing_level
+        VerificationError: verification_error
+  - source_event_id: 3076
+    when:
+      field: FileName
+      ends_with: [".dll", ".ocx", ".cpl", ".pyd", ".winmd"]
+    canonical_type: library.decision
+    action: load
+    outcome: audited
+    mode: audit
+    severity: 4
+    description: "The OS code integrity policy would have blocked a library."
+    field_map:
+      FileName: /file/path
+      ProcessName: /process/image_path
+      RequestedSigningLevel: /native/requested_signing_level
+      ValidatedSigningLevel: /native/validated_signing_level
+      Status: /native/status_code
+      SHA1Hash: /file/hashes/authenticode_sha1
+      SHA256Hash: /file/hashes/authenticode_sha256
+      SHA1FlatHash: /file/hashes/sha1
+      SHA256FlatHash: /file/hashes/sha256
+      SISigningScenario: /native/signing_scenario
+      PolicyName: /native/policy_name
+      PolicyID: /native/policy_id
+      PolicyGUID: /native/policy_guid
+      PolicyHash: /native/policy_hash
+      OriginalFileName: /file/version_info/original_filename
+      InternalName: /file/version_info/internal_name
+      FileDescription: /file/version_info/description
+      ProductName: /file/version_info/product_name
+      FileVersion: /file/version_info/file_version
+      UserWriteable: /file/user_writable_location
+      PackageFamilyName: /file/package_name
+      System.UserID: /user/sid
+      System.ProcessID: /process/pid
+    signatures:
+      source_event_id: 3089
+      count_field: TotalSignatureCount
+      index_field: Signature
+      field_map:
+        PublisherName: publisher
+        IssuerName: issuer
+        PublisherTBSHash: tbs_hash
+        IssuerTBSHash: issuer_tbs_hash
+        SignatureType: signature_type
+        ValidatedSigningLevel: signing_level
+        VerificationError: verification_error
+  - source_event_id: 3076
+    canonical_type: exec.decision
+    action: execute
+    outcome: audited
+    mode: audit
+    severity: 4
+    description: "The OS code integrity policy would have blocked an executable."
+    field_map:
+      FileName: /file/path
+      ProcessName: /process/image_path
+      RequestedSigningLevel: /native/requested_signing_level
+      ValidatedSigningLevel: /native/validated_signing_level
+      Status: /native/status_code
+      SHA1Hash: /file/hashes/authenticode_sha1
+      SHA256Hash: /file/hashes/authenticode_sha256
+      SHA1FlatHash: /file/hashes/sha1
+      SHA256FlatHash: /file/hashes/sha256
+      SISigningScenario: /native/signing_scenario
+      PolicyName: /native/policy_name
+      PolicyID: /native/policy_id
+      PolicyGUID: /native/policy_guid
+      PolicyHash: /native/policy_hash
+      OriginalFileName: /file/version_info/original_filename
+      InternalName: /file/version_info/internal_name
+      FileDescription: /file/version_info/description
+      ProductName: /file/version_info/product_name
+      FileVersion: /file/version_info/file_version
+      UserWriteable: /file/user_writable_location
+      PackageFamilyName: /file/package_name
+      System.UserID: /user/sid
+      System.ProcessID: /process/pid
+    signatures:
+      source_event_id: 3089
+      count_field: TotalSignatureCount
+      index_field: Signature
+      field_map:
+        PublisherName: publisher
+        IssuerName: issuer
+        PublisherTBSHash: tbs_hash
+        IssuerTBSHash: issuer_tbs_hash
+        SignatureType: signature_type
+        ValidatedSigningLevel: signing_level
+        VerificationError: verification_error
+  # 3077: the main enforced block event.
+  - source_event_id: 3077
+    when:
+      field: SISigningScenario
+      equals: ["0"]
+    canonical_type: driver.decision
+    action: load
+    outcome: blocked
+    mode: enforce
+    severity: 7
+    description: "The OS code integrity policy blocked a kernel driver."
+    field_map:
+      FileName: /file/path
+      ProcessName: /process/image_path
+      RequestedSigningLevel: /native/requested_signing_level
+      ValidatedSigningLevel: /native/validated_signing_level
+      Status: /native/status_code
+      SHA1Hash: /file/hashes/authenticode_sha1
+      SHA256Hash: /file/hashes/authenticode_sha256
+      SHA1FlatHash: /file/hashes/sha1
+      SHA256FlatHash: /file/hashes/sha256
+      SISigningScenario: /native/signing_scenario
+      PolicyName: /native/policy_name
+      PolicyID: /native/policy_id
+      PolicyGUID: /native/policy_guid
+      PolicyHash: /native/policy_hash
+      OriginalFileName: /file/version_info/original_filename
+      InternalName: /file/version_info/internal_name
+      FileDescription: /file/version_info/description
+      ProductName: /file/version_info/product_name
+      FileVersion: /file/version_info/file_version
+      UserWriteable: /file/user_writable_location
+      PackageFamilyName: /file/package_name
+      System.UserID: /user/sid
+      System.ProcessID: /process/pid
+    signatures:
+      source_event_id: 3089
+      count_field: TotalSignatureCount
+      index_field: Signature
+      field_map:
+        PublisherName: publisher
+        IssuerName: issuer
+        PublisherTBSHash: tbs_hash
+        IssuerTBSHash: issuer_tbs_hash
+        SignatureType: signature_type
+        ValidatedSigningLevel: signing_level
+        VerificationError: verification_error
+  - source_event_id: 3077
+    when:
+      field: FileName
+      ends_with: [".dll", ".ocx", ".cpl", ".pyd", ".winmd"]
+    canonical_type: library.decision
+    action: load
+    outcome: blocked
+    mode: enforce
+    severity: 6
+    description: "The OS code integrity policy blocked a library."
+    field_map:
+      FileName: /file/path
+      ProcessName: /process/image_path
+      RequestedSigningLevel: /native/requested_signing_level
+      ValidatedSigningLevel: /native/validated_signing_level
+      Status: /native/status_code
+      SHA1Hash: /file/hashes/authenticode_sha1
+      SHA256Hash: /file/hashes/authenticode_sha256
+      SHA1FlatHash: /file/hashes/sha1
+      SHA256FlatHash: /file/hashes/sha256
+      SISigningScenario: /native/signing_scenario
+      PolicyName: /native/policy_name
+      PolicyID: /native/policy_id
+      PolicyGUID: /native/policy_guid
+      PolicyHash: /native/policy_hash
+      OriginalFileName: /file/version_info/original_filename
+      InternalName: /file/version_info/internal_name
+      FileDescription: /file/version_info/description
+      ProductName: /file/version_info/product_name
+      FileVersion: /file/version_info/file_version
+      UserWriteable: /file/user_writable_location
+      PackageFamilyName: /file/package_name
+      System.UserID: /user/sid
+      System.ProcessID: /process/pid
+    signatures:
+      source_event_id: 3089
+      count_field: TotalSignatureCount
+      index_field: Signature
+      field_map:
+        PublisherName: publisher
+        IssuerName: issuer
+        PublisherTBSHash: tbs_hash
+        IssuerTBSHash: issuer_tbs_hash
+        SignatureType: signature_type
+        ValidatedSigningLevel: signing_level
+        VerificationError: verification_error
+  - source_event_id: 3077
+    canonical_type: exec.decision
+    action: execute
+    outcome: blocked
+    mode: enforce
+    severity: 6
+    description: "The OS code integrity policy blocked an executable."
+    field_map:
+      FileName: /file/path
+      ProcessName: /process/image_path
+      RequestedSigningLevel: /native/requested_signing_level
+      ValidatedSigningLevel: /native/validated_signing_level
+      Status: /native/status_code
+      SHA1Hash: /file/hashes/authenticode_sha1
+      SHA256Hash: /file/hashes/authenticode_sha256
+      SHA1FlatHash: /file/hashes/sha1
+      SHA256FlatHash: /file/hashes/sha256
+      SISigningScenario: /native/signing_scenario
+      PolicyName: /native/policy_name
+      PolicyID: /native/policy_id
+      PolicyGUID: /native/policy_guid
+      PolicyHash: /native/policy_hash
+      OriginalFileName: /file/version_info/original_filename
+      InternalName: /file/version_info/internal_name
+      FileDescription: /file/version_info/description
+      ProductName: /file/version_info/product_name
+      FileVersion: /file/version_info/file_version
+      UserWriteable: /file/user_writable_location
+      PackageFamilyName: /file/package_name
+      System.UserID: /user/sid
+      System.ProcessID: /process/pid
+    signatures:
+      source_event_id: 3089
+      count_field: TotalSignatureCount
+      index_field: Signature
+      field_map:
+        PublisherName: publisher
+        IssuerName: issuer
+        PublisherTBSHash: tbs_hash
+        IssuerTBSHash: issuer_tbs_hash
+        SignatureType: signature_type
+        ValidatedSigningLevel: signing_level
+        VerificationError: verification_error
+  # 3033: failed policy, usually a revoked signature or an expired lifetime-signing certificate.
+  - source_event_id: 3033
+    when:
+      field: FileNameBuffer
+      ends_with: [".sys"]
+    canonical_type: driver.decision
+    action: load
+    outcome: blocked
+    mode: enforce
+    severity: 7
+    description: "The OS code integrity policy blocked a kernel driver whose signature is revoked or expired."
+    field_map:
+      FileNameBuffer: /file/path
+      ProcessNameBuffer: /process/image_path
+      RequestedPolicy: /native/requested_signing_level
+      ValidatedPolicy: /native/validated_signing_level
+      Status: /native/status_code
+      System.UserID: /user/sid
+      System.ProcessID: /process/pid
+  - source_event_id: 3033
+    when:
+      field: FileNameBuffer
+      ends_with: [".dll", ".ocx", ".cpl", ".pyd", ".winmd"]
+    canonical_type: library.decision
+    action: load
+    outcome: blocked
+    mode: enforce
+    severity: 6
+    description: "The OS code integrity policy blocked a library whose signature is revoked or expired."
+    field_map:
+      FileNameBuffer: /file/path
+      ProcessNameBuffer: /process/image_path
+      RequestedPolicy: /native/requested_signing_level
+      ValidatedPolicy: /native/validated_signing_level
+      Status: /native/status_code
+      System.UserID: /user/sid
+      System.ProcessID: /process/pid
+  - source_event_id: 3033
+    canonical_type: exec.decision
+    action: execute
+    outcome: blocked
+    mode: enforce
+    severity: 6
+    description: "The OS code integrity policy blocked an executable whose signature is revoked or expired."
+    field_map:
+      FileNameBuffer: /file/path
+      ProcessNameBuffer: /process/image_path
+      RequestedPolicy: /native/requested_signing_level
+      ValidatedPolicy: /native/validated_signing_level
+      Status: /native/status_code
+      System.UserID: /user/sid
+      System.ProcessID: /process/pid
+  # 3034: failed policy, usually a revoked signature or an expired lifetime-signing certificate.
+  - source_event_id: 3034
+    when:
+      field: FileNameBuffer
+      ends_with: [".sys"]
+    canonical_type: driver.decision
+    action: load
+    outcome: audited
+    mode: audit
+    severity: 5
+    description: "The OS code integrity policy would have blocked a kernel driver whose signature is revoked or expired."
+    field_map:
+      FileNameBuffer: /file/path
+      ProcessNameBuffer: /process/image_path
+      RequestedPolicy: /native/requested_signing_level
+      ValidatedPolicy: /native/validated_signing_level
+      Status: /native/status_code
+      System.UserID: /user/sid
+      System.ProcessID: /process/pid
+  - source_event_id: 3034
+    when:
+      field: FileNameBuffer
+      ends_with: [".dll", ".ocx", ".cpl", ".pyd", ".winmd"]
+    canonical_type: library.decision
+    action: load
+    outcome: audited
+    mode: audit
+    severity: 4
+    description: "The OS code integrity policy would have blocked a library whose signature is revoked or expired."
+    field_map:
+      FileNameBuffer: /file/path
+      ProcessNameBuffer: /process/image_path
+      RequestedPolicy: /native/requested_signing_level
+      ValidatedPolicy: /native/validated_signing_level
+      Status: /native/status_code
+      System.UserID: /user/sid
+      System.ProcessID: /process/pid
+  - source_event_id: 3034
+    canonical_type: exec.decision
+    action: execute
+    outcome: audited
+    mode: audit
+    severity: 4
+    description: "The OS code integrity policy would have blocked an executable whose signature is revoked or expired."
+    field_map:
+      FileNameBuffer: /file/path
+      ProcessNameBuffer: /process/image_path
+      RequestedPolicy: /native/requested_signing_level
+      ValidatedPolicy: /native/validated_signing_level
+      Status: /native/status_code
+      System.UserID: /user/sid
+      System.ProcessID: /process/pid
+  # 3023: a driver failed the policy.
+  - source_event_id: 3023
+    canonical_type: driver.decision
+    action: load
+    outcome: blocked
+    mode: enforce
+    severity: 7
+    description: "A kernel driver did not meet the OS code integrity policy and was not loaded."
+    field_map:
+      FileNameBuffer: /file/path
+      ProcessNameBuffer: /process/image_path
+      RequestedSigningLevel: /native/requested_signing_level
+      System.UserID: /user/sid
+      System.ProcessID: /process/pid
+  # 3114: dynamic code security opted a managed-code app or library into policy checks, and it failed.
+  - source_event_id: 3114
+    when:
+      field: FileName
+      ends_with: [".dll", ".ocx", ".cpl", ".pyd", ".winmd"]
+    canonical_type: library.decision
+    action: load
+    outcome: blocked
+    mode: enforce
+    severity: 6
+    description: "Dynamic code security blocked a library that did not pass the OS code integrity policy."
+    field_map:
+      FileName: /file/path
+      ProcessName: /process/image_path
+      Status: /native/status_code
+      SHA1Hash: /file/hashes/authenticode_sha1
+      SHA256Hash: /file/hashes/authenticode_sha256
+      SHA256FlatHash: /file/hashes/sha256
+      System.UserID: /user/sid
+      System.ProcessID: /process/pid
+  - source_event_id: 3114
+    canonical_type: exec.decision
+    action: execute
+    outcome: blocked
+    mode: enforce
+    severity: 6
+    description: "Dynamic code security blocked an executable that did not pass the OS code integrity policy."
+    field_map:
+      FileName: /file/path
+      ProcessName: /process/image_path
+      Status: /native/status_code
+      SHA1Hash: /file/hashes/authenticode_sha1
+      SHA256Hash: /file/hashes/authenticode_sha256
+      SHA256FlatHash: /file/hashes/sha256
+      System.UserID: /user/sid
+      System.ProcessID: /process/pid
+  # Policy activation: 3095, 3096, 3097, 3099, 3100, 3102.
+  - source_event_id: 3095
+    canonical_type: policy.failed
+    action: refresh
+    outcome: failed
+    description: "An OS code integrity policy cannot be refreshed and needs a reboot."
+    field_map:
+      PolicyNameBuffer: /native/policy_name
+      PolicyIdBuffer: /native/policy_id
+      PolicyGUID: /native/policy_guid
+      Status: /native/status_code
+      Options: /native/policy_options
+      PolicyHash: /native/policy_hash
+  - source_event_id: 3096
+    canonical_type: policy.applied
+    action: refresh
+    outcome: info
+    description: "An OS code integrity policy was not refreshed because it is already current."
+    field_map:
+      PolicyNameBuffer: /native/policy_name
+      PolicyIdBuffer: /native/policy_id
+      PolicyGUID: /native/policy_guid
+      Status: /native/status_code
+      Options: /native/policy_options
+      PolicyHash: /native/policy_hash
+  - source_event_id: 3097
+    canonical_type: policy.failed
+    action: refresh
+    outcome: failed
+    description: "An OS code integrity policy cannot be refreshed."
+    field_map:
+      PolicyNameBuffer: /native/policy_name
+      PolicyIdBuffer: /native/policy_id
+      PolicyGUID: /native/policy_guid
+      Status: /native/status_code
+      Options: /native/policy_options
+      PolicyHash: /native/policy_hash
+  - source_event_id: 3099
+    canonical_type: policy.activated
+    action: activate
+    outcome: info
+    description: "An OS code integrity policy was loaded."
+    field_map:
+      PolicyNameBuffer: /native/policy_name
+      PolicyIdBuffer: /native/policy_id
+      PolicyGUID: /native/policy_guid
+      Status: /native/status_code
+      Options: /native/policy_options
+      PolicyHash: /native/policy_hash
+  - source_event_id: 3100
+    canonical_type: policy.failed
+    action: activate
+    outcome: failed
+    description: "An OS code integrity policy was refreshed but could not be activated."
+    field_map:
+      PolicyNameBuffer: /native/policy_name
+      PolicyIdBuffer: /native/policy_id
+      PolicyGUID: /native/policy_guid
+      Status: /native/status_code
+      Options: /native/policy_options
+      PolicyHash: /native/policy_hash
+  - source_event_id: 3102
+    canonical_type: policy.applied
+    action: refresh
+    outcome: info
+    description: "An OS code integrity policy refresh finished."
+    field_map:
+      NumberOfPolicies: /native/policy_count
+      Status: /native/status_code
+  # Origin claim diagnostics: 3088, 3090, 3091, 3092. They describe one evaluation, not the
+  # final decision; the reputation flags of these events are left to #90.
+  - source_event_id: 3088
+    canonical_type: exec.origin_check
+    action: origin_check
+    outcome: info
+    description: "A policy evaluation that uses origin claims succeeded (verbose channel)."
+    field_map:
+      FileName: /file/path
+      StatusCode: /native/status_code
+      ManagedInstallerEnabled: /native/managed_installer_enabled
+      PassesManagedInstaller: /native/passes_managed_installer
+      AuditEnabled: /native/policy_audit_mode
+      PolicyName: /native/policy_name
+      PolicyID: /native/policy_id
+      System.UserID: /user/sid
+      System.ProcessID: /process/pid
+  - source_event_id: 3090
+    canonical_type: exec.origin_check
+    action: origin_check
+    outcome: info
+    description: "A policy evaluation that uses origin claims succeeded."
+    field_map:
+      FileName: /file/path
+      StatusCode: /native/status_code
+      ManagedInstallerEnabled: /native/managed_installer_enabled
+      PassesManagedInstaller: /native/passes_managed_installer
+      AuditEnabled: /native/policy_audit_mode
+      PolicyName: /native/policy_name
+      PolicyID: /native/policy_id
+      System.UserID: /user/sid
+      System.ProcessID: /process/pid
+  - source_event_id: 3091
+    canonical_type: exec.origin_check
+    action: origin_check
+    outcome: info
+    mode: audit
+    description: "A policy evaluation that uses origin claims failed, under an audit policy."
+    field_map:
+      FileName: /file/path
+      StatusCode: /native/status_code
+      ManagedInstallerEnabled: /native/managed_installer_enabled
+      PassesManagedInstaller: /native/passes_managed_installer
+      AuditEnabled: /native/policy_audit_mode
+      PolicyName: /native/policy_name
+      PolicyID: /native/policy_id
+      System.UserID: /user/sid
+      System.ProcessID: /process/pid
+  - source_event_id: 3092
+    canonical_type: exec.origin_check
+    action: origin_check
+    outcome: info
+    mode: enforce
+    description: "A policy evaluation that uses origin claims failed, under an enforced policy."
+    field_map:
+      FileName: /file/path
+      StatusCode: /native/status_code
+      ManagedInstallerEnabled: /native/managed_installer_enabled
+      PassesManagedInstaller: /native/passes_managed_installer
+      AuditEnabled: /native/policy_audit_mode
+      PolicyName: /native/policy_name
+      PolicyID: /native/policy_id
+      System.UserID: /user/sid
+      System.ProcessID: /process/pid

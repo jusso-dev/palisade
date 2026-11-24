@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0.0",
+  "event_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+  "event_type": "policy.failed",
+  "category": "policy",
+  "action": "refresh",
+  "outcome": "failed",
+  "severity": 7,
+  "description": "An OS code integrity policy cannot be refreshed.",
+  "ts": "2026-11-24T03:15:22.123456Z",
+  "ts_agent_monotonic": 123456789,
+  "clock_synced": true,
+  "clock_skew_ms": -3,
+  "tenant_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e61",
+  "host": {
+    "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60",
+    "name": "WS-0001",
+    "os": "Windows 11 Enterprise",
+    "os_build": "26100.2314",
+    "arch": "x86_64",
+    "agent_version": "0.1.0"
+  },
+  "seq": 41,
+  "prev_hash": "5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e",
+  "source": {
+    "kind": "os_code_integrity",
+    "event_id": 3097,
+    "record_id": 1000,
+    "channel": "code-integrity/Operational"
+  },
+  "native": {
+    "status_code": 3221225473,
+    "policy_name": "Palisade base policy",
+    "policy_id": "2026.11.24.1",
+    "policy_guid": "a244370e-44c9-4c06-b551-f6016e563076",
+    "policy_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "policy_options": 2424836100
+  }
+}

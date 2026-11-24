@@ -1,0 +1,18 @@
+{
+  "source": "os_code_integrity",
+  "record": {
+    "event_id": 3034,
+    "time_created": "2026-11-24T03:15:22.1234567Z",
+    "record_id": 1000,
+    "channel": "code-integrity/Operational",
+    "fields": {
+      "FileNameBuffer": "\\Device\\HarddiskVolume3\\Program Files\\Example\\old.exe",
+      "ProcessNameBuffer": "\\Device\\HarddiskVolume3\\Windows\\explorer.exe",
+      "RequestedPolicy": "4",
+      "ValidatedPolicy": "1",
+      "Status": "0xC0000603",
+      "System.UserID": "S-1-5-21-1111111111-2222222222-3333333333-1001",
+      "System.ProcessID": "4242"
+    }
+  }
+}
