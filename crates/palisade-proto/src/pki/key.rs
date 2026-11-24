@@ -567,12 +567,13 @@ impl KeyRecord {
         }
     }
 
-    /// Whether the key may sign at `now`: it is active and inside its
-    /// validity window, with no skew allowance. Signing happens on the
-    /// server, whose clock is synchronised.
+    /// Whether the key may sign at `now`: it is a signing key (not the
+    /// escrow encryption key), active, and inside its validity window, with
+    /// no skew allowance. Signing happens on the server, whose clock is
+    /// synchronised.
     #[must_use]
     pub fn can_sign(&self, now: Timestamp) -> bool {
-        self.status.signs() && self.validity.contains(now)
+        self.algorithm.signature().is_some() && self.status.signs() && self.validity.contains(now)
     }
 }
 

@@ -439,6 +439,28 @@ fn key_record_lifecycle() {
 
     record.transition(KeyStatus::Retiring).unwrap();
     assert!(!record.can_sign(now()));
+
+    // The escrow key is an encryption key and never signs.
+    let mut escrow = KeyRecord::new(
+        key.clone(),
+        KeyPurpose::Escrow,
+        KeyAlgorithm::EcdhP384,
+        created,
+        validity,
+        KeyBackend::Kms,
+    )
+    .unwrap();
+    escrow.transition(KeyStatus::Active).unwrap();
+    assert!(!escrow.can_sign(now()));
+    assert_eq!(KeyAlgorithm::EcdhP384.signature(), None);
+    assert_eq!(
+        KeyAlgorithm::EcdsaP384Sha384.signature(),
+        Some(SignatureAlgorithm::EcdsaP384Sha384)
+    );
+    assert_eq!(
+        KeyAlgorithm::Ed25519.signature(),
+        Some(SignatureAlgorithm::Ed25519)
+    );
     record.transition(KeyStatus::Retired).unwrap();
     assert_eq!(
         record.transition(KeyStatus::Active),
@@ -1029,6 +1051,11 @@ fn decoder_rejects_non_canonical_envelopes() {
     let mut huge = envelope.clone();
     huge[1..5].copy_from_slice(&u32::MAX.to_be_bytes());
     assert_eq!(SignedTrustSet::decode(&huge), Err(DecodeError::TooLong));
+    let oversized = vec![1; super::trust_set::MAX_ENVELOPE_LEN + 1];
+    assert_eq!(
+        SignedTrustSet::decode(&oversized),
+        Err(DecodeError::TooLong)
+    );
     // A non-canonical payload inside a well-formed envelope.
     let mut bad_payload = envelope.clone();
     bad_payload[5] = 2;
@@ -1301,6 +1328,109 @@ fn algorithm_claims_must_match_the_trusted_key() {
             Err(Rejection::AlgorithmNotAccepted(SignatureAlgorithm::Ed25519))
         );
     }
+}
+
+/// `envelope` with one extra signature appended.
+fn with_extra_signature(envelope: &[u8], extra: Signature) -> Vec<u8> {
+    let signed = SignedTrustSet::decode(envelope).unwrap();
+    let mut sigs = signed.signatures().to_vec();
+    sigs.push(extra);
+    SignedTrustSet::from_parts(signed.payload().to_vec(), sigs)
+        .unwrap()
+        .encode()
+}
+
+#[test]
+fn a_mislabelled_signature_by_a_known_key_rejects_even_beside_a_valid_one() {
+    let f = Fixture::new();
+    let anchor = f.anchor_at_v1();
+    let good = f.sign(&f.set(2, now(), &[f.t1]), &[f.t1]);
+    // A bogus Ed25519 claim under the pinned root, next to a valid t1
+    // signature.
+    let bogus_root = Signature::new(f.root, SignatureAlgorithm::Ed25519, vec![0; 64]).unwrap();
+    assert_eq!(
+        anchor.check(&with_extra_signature(&good, bogus_root), now()),
+        Err(Rejection::AlgorithmNotAccepted(SignatureAlgorithm::Ed25519))
+    );
+    // The same under the other way round: valid root, bogus t1 claim.
+    let by_root = f.sign(&f.set(2, now(), &[f.t1]), &[f.root]);
+    let bogus_t1 = Signature::new(f.t1, SignatureAlgorithm::Ed25519, vec![0; 64]).unwrap();
+    assert_eq!(
+        anchor.check(&with_extra_signature(&by_root, bogus_t1), now()),
+        Err(Rejection::AlgorithmNotAccepted(SignatureAlgorithm::Ed25519))
+    );
+}
+
+#[test]
+fn a_bad_signature_by_an_expired_known_key_still_rejects() {
+    let f = Fixture::new();
+    let window = Validity::new(plus(now(), -2 * DAY), plus(now(), -DAY)).unwrap();
+    let mut v1 = TrustSet::new(
+        1,
+        plus(now(), -3 * DAY),
+        &[SignatureAlgorithm::EcdsaP384Sha384],
+    )
+    .unwrap();
+    v1.add_trust_key(f.listed(f.t1, window)).unwrap();
+    let anchor = TrustAnchor::with_current(f.public(f.root), v1, SkewTolerance::DEFAULT).unwrap();
+
+    let set = f.set(2, now(), &[f.t2]);
+    let signed = SignedTrustSet::sign(&set, &f.signer, &[f.root, f.t1]).unwrap();
+    // Untampered: t1 is expired but its signature verifies; the root's
+    // carries the set.
+    assert!(anchor.check(&signed.encode(), now()).is_ok());
+    // Tampered t1 signature: rejected although t1 is outside its window.
+    let mut sigs = signed.signatures().to_vec();
+    let i = sigs.iter().position(|s| s.kid() == f.t1).unwrap();
+    let mut bytes = sigs[i].bytes().to_vec();
+    bytes[5] ^= 1;
+    sigs[i] = Signature::new(f.t1, SignatureAlgorithm::EcdsaP384Sha384, bytes).unwrap();
+    let tampered = SignedTrustSet::from_parts(signed.payload().to_vec(), sigs)
+        .unwrap()
+        .encode();
+    assert_eq!(
+        anchor.check(&tampered, now()),
+        Err(Rejection::BadSignature(f.t1))
+    );
+}
+
+#[test]
+fn the_first_out_of_window_signer_is_reported() {
+    let f = Fixture::new();
+    let early = Validity::new(plus(now(), -3 * DAY), plus(now(), -2 * DAY)).unwrap();
+    let late = Validity::new(plus(now(), -2 * DAY), plus(now(), -DAY)).unwrap();
+    let mut v1 = TrustSet::new(
+        1,
+        plus(now(), -4 * DAY),
+        &[SignatureAlgorithm::EcdsaP384Sha384],
+    )
+    .unwrap();
+    v1.add_trust_key(f.listed(f.t1, early)).unwrap();
+    v1.add_trust_key(f.listed(f.t2, late)).unwrap();
+    let anchor = TrustAnchor::with_current(f.public(f.root), v1, SkewTolerance::DEFAULT).unwrap();
+    let envelope = f.sign(&f.set(2, now(), &[f.t1]), &[f.t1, f.t2]);
+    // Signatures are in kid order, so the first reported is the lower kid.
+    let first = f.t1.min(f.t2);
+    let window = if first == f.t1 { early } else { late };
+    assert_eq!(
+        anchor.check(&envelope, now()),
+        Err(Rejection::SignerNotValid(
+            first,
+            TimeError::Expired {
+                not_after: window.not_after()
+            }
+        ))
+    );
+}
+
+#[test]
+fn anchor_refuses_a_current_set_without_trust_keys() {
+    let f = Fixture::new();
+    let empty = TrustSet::new(1, now(), &[SignatureAlgorithm::EcdsaP384Sha384]).unwrap();
+    assert_eq!(
+        TrustAnchor::with_current(f.public(f.root), empty, SkewTolerance::DEFAULT).err(),
+        Some(TrustSetError::NoTrustKeys)
+    );
 }
 
 #[test]

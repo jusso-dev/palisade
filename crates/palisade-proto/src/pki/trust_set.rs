@@ -16,19 +16,23 @@
 //!    trusts: the pinned root, or a `root-ca` or `trust-set` key in the
 //!    *current* trust set. A key listed only in the new set never counts,
 //!    so a set cannot endorse itself.
-//! 3. A current-set key only counts if its algorithm is in the current set's
-//!    algorithm list and its validity window contains `now`, allowing for
-//!    clock skew. The pinned root has no window: it is trusted until the
-//!    device is re-enrolled (R-11).
-//! 4. No signature by a trusted key fails verification. A bad signature from
-//!    a known key is tampering, not noise, and rejects the whole set.
-//!    Signatures from unknown keys are ignored, which lets a set carry
-//!    signatures for agents on different trust versions during a rotation.
+//! 3. A current-set key only counts if its validity window contains `now`,
+//!    allowing for clock skew. The pinned root has no window: it is trusted
+//!    until the device is re-enrolled (R-11).
+//! 4. Every signature by a key the agent knows (the pinned root or a current
+//!    trust key) must name that key's own algorithm, an algorithm the
+//!    current set accepts, and must verify, whether or not the key is inside
+//!    its validity window. A bad or mislabelled signature from a known key is
+//!    tampering, not noise, and rejects the whole set. Signatures from
+//!    unknown keys are ignored, which lets a set carry signatures for agents
+//!    on different trust versions during a rotation.
 //! 5. `trust_version` is strictly greater than the current one, so an
 //!    older or replayed set is refused (rollback), and at most
 //!    [`MAX_VERSION_STEP`] greater. Without the cap, a stolen trust-set key
 //!    could publish version `u64::MAX` and no later set, not even one signed
-//!    by the root, could ever be newer (fast-forward).
+//!    by the root, could ever be newer (fast-forward). The cap applies to
+//!    root-signed sets too, so recovering agents that a stolen key moved
+//!    far ahead of the rest may need intermediate sets.
 //! 6. `issued_at` is not earlier than the current set's, and not later than
 //!    `now` plus the skew tolerance.
 //!
@@ -69,7 +73,7 @@
 //!
 //! Codes are [`KeyPurpose::code`], [`KeyStatus::code`] and
 //! [`SignatureAlgorithm::code`]. A key ID appears at most once across all
-//! four key lists, so no key serves two purposes. Each list holds only its
+//! three key lists, so no key serves two purposes. Each list holds only its
 //! own purposes: `root-ca` or `trust-set`, then `policy-signing`, then
 //! `unlock-token`. Listed keys are `active` or `retiring`: a retired or
 //! compromised key is revoked by leaving it out of the next trust set.
@@ -96,6 +100,9 @@ pub const FORMAT_VERSION: u8 = 1;
 /// increment it by one per publication, so an agent can miss up to a million
 /// publications and still catch up in one step.
 pub const MAX_VERSION_STEP: u64 = 1_000_000;
+/// Largest envelope accepted, in bytes: the largest payload, its header
+/// and the most signatures.
+pub const MAX_ENVELOPE_LEN: usize = 1 + 4 + MAX_PAYLOAD_LEN + 1 + MAX_SIGNATURES * (16 + 1 + 96);
 /// Most keys in each key list.
 pub const MAX_KEYS: usize = 64;
 /// Most server CA pins.
@@ -235,8 +242,10 @@ impl List {
     }
 }
 
-/// A trust-set manifest. Every value of this type is valid and has exactly
-/// one encoding: the constructors check every rule the decoder checks.
+/// A trust-set manifest. The constructors check every rule the decoder
+/// checks, so every value has exactly one encoding, except that a set
+/// without trust keys is refused by [`Self::encode`] and by
+/// [`TrustAnchor::with_current`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TrustSet {
     trust_version: u64,
@@ -700,6 +709,15 @@ impl SignedTrustSet {
     /// [`DecodeError`] for anything but a canonical envelope around a
     /// canonical payload.
     pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
+        Self::decode_parts(bytes).map(|(signed, _)| signed)
+    }
+
+    /// Decodes envelope bytes and returns the decoded payload too, so it is
+    /// parsed once.
+    fn decode_parts(bytes: &[u8]) -> Result<(Self, TrustSet), DecodeError> {
+        if bytes.len() > MAX_ENVELOPE_LEN {
+            return Err(DecodeError::TooLong);
+        }
         let mut r = Reader(bytes);
         let version = r.u8()?;
         if version != FORMAT_VERSION {
@@ -714,7 +732,7 @@ impl SignedTrustSet {
         }
         let payload = r.take(len)?.to_vec();
         // The payload must be canonical before anyone looks at signatures.
-        TrustSet::decode(&payload)?;
+        let set = TrustSet::decode(&payload)?;
         let n = r.count(1, MAX_SIGNATURES, "signatures")?;
         let mut signatures: Vec<Signature> = Vec::with_capacity(n);
         for _ in 0..n {
@@ -730,10 +748,13 @@ impl SignedTrustSet {
             signatures.push(sig);
         }
         r.finish()?;
-        Ok(Self {
-            payload,
-            signatures,
-        })
+        Ok((
+            Self {
+                payload,
+                signatures,
+            },
+            set,
+        ))
     }
 }
 
@@ -769,12 +790,16 @@ impl TrustAnchor {
     ///
     /// # Errors
     ///
-    /// As [`Self::new`].
+    /// As [`Self::new`], plus [`TrustSetError::NoTrustKeys`] if `current`
+    /// lists no trust key, which no decoded trust set can.
     pub fn with_current(
         pinned_root: PublicKey,
         current: TrustSet,
         skew: SkewTolerance,
     ) -> Result<Self, TrustSetError> {
+        if current.trust_keys.is_empty() {
+            return Err(TrustSetError::NoTrustKeys);
+        }
         let mut anchor = Self::new(pinned_root, skew)?;
         anchor.current = Some(current);
         Ok(anchor)
@@ -805,31 +830,32 @@ impl TrustAnchor {
     ///
     /// The first [`Rejection`] that applies.
     pub fn check(&self, envelope: &[u8], now: Timestamp) -> Result<TrustSet, Rejection> {
-        let signed = SignedTrustSet::decode(envelope).map_err(Rejection::Malformed)?;
-        let offered = TrustSet::decode(&signed.payload).map_err(Rejection::Malformed)?;
+        let (signed, offered) =
+            SignedTrustSet::decode_parts(envelope).map_err(Rejection::Malformed)?;
 
         let mut trusted_signature = false;
-        let mut skipped: Option<Rejection> = None;
+        let mut out_of_window: Option<Rejection> = None;
         for sig in &signed.signatures {
-            match self.trusted_signer(sig, now) {
-                Ok(Some(key)) => {
-                    if key.verify(
-                        sig.algorithm(),
-                        Domain::TrustSet,
-                        &signed.payload,
-                        sig.bytes(),
-                    ) {
-                        trusted_signature = true;
-                    } else {
-                        return Err(Rejection::BadSignature(sig.kid()));
-                    }
+            let Some((key, window)) = self.known_signer(sig)? else {
+                continue;
+            };
+            if !key.verify(
+                sig.algorithm(),
+                Domain::TrustSet,
+                &signed.payload,
+                sig.bytes(),
+            ) {
+                return Err(Rejection::BadSignature(sig.kid()));
+            }
+            match window.map(|w| w.check(now, self.skew)) {
+                None | Some(Ok(())) => trusted_signature = true,
+                Some(Err(e)) => {
+                    out_of_window.get_or_insert(Rejection::SignerNotValid(sig.kid(), e));
                 }
-                Ok(None) => {}
-                Err(why) => skipped = Some(why),
             }
         }
         if !trusted_signature {
-            return Err(skipped.unwrap_or(Rejection::NoTrustedSignature));
+            return Err(out_of_window.unwrap_or(Rejection::NoTrustedSignature));
         }
 
         let current_version = self.trust_version();
@@ -867,19 +893,24 @@ impl TrustAnchor {
         Ok(self.current.insert(accepted))
     }
 
-    /// The key that makes `sig` count, if the agent already trusts it.
-    /// `Ok(None)` for a key the agent does not know; `Err` for a known key
-    /// that may not be used now.
-    fn trusted_signer(
+    /// The key behind `sig` if the agent knows it, with its validity window
+    /// (`None` for the pinned root, which has none). `Ok(None)` for a key
+    /// the agent does not know.
+    ///
+    /// # Errors
+    ///
+    /// [`Rejection::AlgorithmNotAccepted`] if a known key's signature names
+    /// an algorithm that is not the key's own or that the current set does
+    /// not accept.
+    fn known_signer(
         &self,
         sig: &Signature,
-        now: Timestamp,
-    ) -> Result<Option<&PublicKey>, Rejection> {
+    ) -> Result<Option<(&PublicKey, Option<Validity>)>, Rejection> {
         let kid = sig.kid();
         if kid == self.pinned_root.kid() {
             // A root-ca key uses ECDSA P-384 only.
             return if sig.algorithm() == SignatureAlgorithm::EcdsaP384Sha384 {
-                Ok(Some(&self.pinned_root))
+                Ok(Some((&self.pinned_root, None)))
             } else {
                 Err(Rejection::AlgorithmNotAccepted(sig.algorithm()))
             };
@@ -893,10 +924,7 @@ impl TrustAnchor {
         if !current.algorithms.contains(&sig.algorithm()) || sig.algorithm() != key.algorithm {
             return Err(Rejection::AlgorithmNotAccepted(sig.algorithm()));
         }
-        key.validity
-            .check(now, self.skew)
-            .map_err(|e| Rejection::SignerNotValid(kid, e))?;
-        Ok(Some(&key.public_key))
+        Ok(Some((&key.public_key, Some(key.validity))))
     }
 }
 
