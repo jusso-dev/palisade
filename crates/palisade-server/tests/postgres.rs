@@ -942,8 +942,7 @@ async fn the_server_is_not_ready_until_the_database_is() {
         return;
     };
     let pki = common::pki("pg-serve", &["localhost"]);
-    let admin = common::free_port();
-    let agent = common::free_port();
+    let [admin, agent] = common::free_ports();
     let path = common::write_config(
         &pki,
         &format!(

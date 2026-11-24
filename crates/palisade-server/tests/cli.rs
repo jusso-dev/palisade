@@ -177,10 +177,10 @@ fn second_signal_during_drain_exits_one() {
     // A long grace period and a connection held open: the drain cannot
     // finish, so only the second signal ends the process, with exit 1.
     let pki = pki("cli-second", &["localhost"]);
-    let admin = free_port();
+    let [admin, agent] = free_ports();
     let path = write_config(
         &pki,
-        &config_body(admin, free_port(), "[shutdown]\ngrace_secs = 600\n"),
+        &config_body(admin, agent, "[shutdown]\ngrace_secs = 600\n"),
     );
     let mut child = Command::new(BIN)
         .args(["serve", "--config", path.to_str().unwrap()])
@@ -252,8 +252,7 @@ fn serve_logs_json_and_exits_zero_on_sigterm() {
     use std::time::{Duration, Instant};
 
     let pki = pki("cli-serve", &["localhost"]);
-    let admin = free_port();
-    let agent = free_port();
+    let [admin, agent] = free_ports();
     let path = write_config(&pki, &config_body(admin, agent, ""));
     let key = std::fs::read_to_string(&pki.server_key).unwrap();
     let key_body: String = key.lines().nth(1).unwrap().to_owned();

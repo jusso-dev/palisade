@@ -40,10 +40,8 @@ struct Ports {
 }
 
 fn base_config(pki: &Pki, extra: &str) -> (Config, Ports) {
-    let ports = Ports {
-        admin: free_port(),
-        agent: free_port(),
-    };
+    let [admin, agent] = free_ports();
+    let ports = Ports { admin, agent };
     let body = format!(
         "[listen.admin]\nbind = \"127.0.0.1\"\nport = {}\n{}\n{extra}",
         ports.admin,

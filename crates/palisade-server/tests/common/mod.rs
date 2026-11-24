@@ -85,12 +85,28 @@ pub fn pki(tag: &str, server_sans: &[&str]) -> Pki {
 }
 
 /// A free TCP port on loopback (racy, but good enough for tests).
+///
+/// For more than one port, use [`free_ports`]: separate calls can return
+/// the same number, because each probe socket is closed before the next
+/// one asks the OS for a port.
 pub fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
+    let [port] = free_ports::<1>();
+    port
+}
+
+/// `N` distinct free TCP ports on loopback. Every probe socket stays open
+/// until all `N` have been chosen, so the OS cannot hand the same port out
+/// twice. (The ports can still be taken by another process before the test
+/// binds them, as with [`free_port`].)
+pub fn free_ports<const N: usize>() -> [u16; N] {
+    let held: Vec<std::net::TcpListener> = (0..N)
+        .map(|_| std::net::TcpListener::bind("127.0.0.1:0").unwrap())
+        .collect();
+    let mut ports = [0u16; N];
+    for (slot, listener) in ports.iter_mut().zip(&held) {
+        *slot = listener.local_addr().unwrap().port();
+    }
+    ports
 }
 
 /// Builds a client config trusting the test server CA.
@@ -190,4 +206,18 @@ pub fn write_config(pki: &Pki, body: &str) -> PathBuf {
     let path = pki.dir.join("server.toml");
     std::fs::write(&path, text).unwrap();
     path
+}
+
+#[cfg(test)]
+mod port_tests {
+    /// Regression test: two listeners in one test must never get the same
+    /// port. Separate `free_port` calls could, and the server then refused
+    /// to start ("listen.admin and listen.agent both use 127.0.0.1 port …").
+    #[test]
+    fn free_ports_are_distinct() {
+        for _ in 0..200 {
+            let [a, b, c] = super::free_ports::<3>();
+            assert!(a != b && b != c && a != c, "{a} {b} {c}");
+        }
+    }
 }
