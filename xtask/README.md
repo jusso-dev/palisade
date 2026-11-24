@@ -7,7 +7,7 @@ the pinned toolchain and needs no other tools.
 | Command | What it enforces |
 |---|---|
 | `check-deps` | The allowed dependency directions between workspace crates, and crates banned from the `palisade-policy` and `palisade-agent` dependency trees. Rules: `src/deps.rs`. |
-| `check-manifests` | Every member crate inherits version, edition, MSRV, licence, repository, authors, `publish` and lints from the workspace, and takes every dependency from `[workspace.dependencies]`. `test-util` never reaches a release build. Every crate README has the required sections and documents every feature. Rules: `src/manifests.rs`. |
+| `check-manifests` | Every member crate inherits version, edition, MSRV, licence, repository, authors, `publish` and lints from the workspace, and takes every dependency from `[workspace.dependencies]`. `test-util` never reaches a release build. Every crate README opens with a purpose paragraph, has the required sections and documents every feature. Rules: `src/manifests.rs`. |
 | `check-unsafe` | Only files listed in `unsafe-allowlist.txt`, in the locations ADR 0011 allows, may relax the `unsafe_code` lint. Crates without an allowlisted module keep `#![forbid(unsafe_code)]` at their roots. Rules: `src/unsafe_code.rs`. |
 | `check-workflows` | GitHub-hosted runners only, allowlisted and SHA-pinned actions, least-privilege permissions. Rules: `src/workflows.rs`; see `docs/ci.md`. |
 

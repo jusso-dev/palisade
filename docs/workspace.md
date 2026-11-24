@@ -11,8 +11,8 @@ check enforces it. All the checks run in CI ([ci.md](ci.md)).
 The members are the ten crates under `crates/` plus `xtask`. `palisade-driver` is left out of
 `default-members`, so a plain `cargo build` at the root does not build it. `--workspace` still
 includes it. Every crate has a README with its purpose, allowed dependencies, platform support,
-feature flags and stability level. `cargo xtask check-manifests` fails if one of those sections is
-missing.
+feature flags and stability level. `cargo xtask check-manifests` fails if the purpose paragraph
+(text before the first `## ` section) or one of those sections is missing.
 
 ## Shared settings
 
@@ -39,8 +39,9 @@ relax the lint:
 - `palisade_fileid::win` and its submodules
 - the whole `palisade-driver` crate
 
-Every file that relaxes the lint (`allow`, `expect` or `warn`, as an inner or outer attribute,
-including inside `cfg_attr` and macro bodies) must be listed in
+Every file that relaxes the lint (`allow`, `expect` or `warn` naming `unsafe_code` in the same
+attribute, as an inner or outer attribute, including inside `cfg_attr` and macro bodies) must be
+listed in
 [`unsafe-allowlist.txt`](../unsafe-allowlist.txt), which needs code owner review.
 `cargo xtask check-unsafe` fails if:
 
@@ -55,10 +56,13 @@ including inside `cfg_attr` and macro bodies) must be listed in
   spellings (`unsafe_code` and `unsafe-code`);
 - a Cargo config file in the repository (`.cargo/config.toml`, or the legacy `.cargo/config`, in
   any letter case) sets anything but `[alias]`, or an alias passes `--config`, a response file
-  (`@file`), rustflags, or a flag that names the lint or caps lints. Rustflags, compiler and wrapper
+  (`@file`), rustflags, `--cap-lints`, or a lint option (`-A`, `--allow`, `-Z` and the rest) whose
+  operand names the lint. Other arguments may mention it, such as a `unsafe_code::tests` filter. Rustflags, compiler and wrapper
   overrides and `[env]` can all switch lints off, so a repository config may not set them;
-- a tracked file is a symbolic link, or a Rust file (`.rs` in any letter case) cannot be
-  tokenised. That includes a first line starting with `#!` that is not an inner attribute: rustc
+- a file is a symbolic link, in the working tree or as recorded in the git index (which catches a
+  link that `core.symlinks=false` checked out as a regular file), a listed file cannot be
+  inspected (only a tracked file deleted from the working tree is skipped), or a Rust file (`.rs`
+  in any letter case) cannot be tokenised. That includes a first line starting with `#!` that is not an inner attribute: rustc
   strips such a shebang line and the tokeniser does not, so the check fails rather than guess.
 
 The files scanned are the ones git tracks or would track (ignored build output is skipped), and

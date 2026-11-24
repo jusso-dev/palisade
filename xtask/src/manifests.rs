@@ -7,8 +7,9 @@
 //! It also checks the feature flag conventions in `docs/workspace.md`: the
 //! `test-util` feature is never on by default and never enabled through a
 //! normal or build dependency, so it cannot reach a release build. And it
-//! checks every crate README ([`check_readme`]): the required sections are
-//! present, and every feature the crate has is documented.
+//! checks every crate README ([`check_readme`]): it opens with a purpose
+//! paragraph, the required sections are present, and every feature the crate
+//! has is documented.
 
 use toml::{Table, Value};
 
@@ -108,6 +109,8 @@ pub fn check_test_util(path: &str, source: &str) -> Result<Vec<String>, String> 
         .map_err(|e| format!("{path}: invalid TOML: {e}"))?;
     let mut v = Vec::new();
     let features = manifest.get("features").and_then(Value::as_table);
+    let implicit = implicit_features(&manifest).iter().any(|f| f == TEST_UTIL);
+    let turns_on_test_util = |enables: &Value| turns_on_test_util(enables, implicit);
     if features
         .and_then(|f| f.get("default"))
         .is_some_and(turns_on_test_util)
@@ -142,7 +145,8 @@ pub fn check_test_util(path: &str, source: &str) -> Result<Vec<String>, String> 
     }
     // Only `test-util` itself may turn on `test-util`: this crate's own
     // (`"test-util"`, which also covers `default` reaching it through another
-    // feature) or a dependency's (`dep/test-util` or `dep?/test-util`).
+    // feature, or `test-util/<feature>` when it is an implicit feature) or a
+    // dependency's (`dep/test-util` or `dep?/test-util`).
     for (feature, enables) in features.into_iter().flatten() {
         if feature == TEST_UTIL || feature == "default" {
             continue;
@@ -180,11 +184,17 @@ pub fn check_workspace_test_util(path: &str, source: &str) -> Result<Vec<String>
 }
 
 /// A feature list that turns on this crate's `test-util` or a dependency's
-/// (`dep/test-util`, `dep?/test-util`).
-fn turns_on_test_util(features: &Value) -> bool {
+/// (`dep/test-util`, `dep?/test-util`). `implicit` is `true` when this
+/// crate's `test-util` is the implicit feature of an optional dependency
+/// named `test-util`: then `test-util/<feature>` turns it on too, because
+/// Cargo enables the dependency and its implicit feature. (`test-util?/...`
+/// does not enable the dependency.)
+fn turns_on_test_util(features: &Value, implicit: bool) -> bool {
     features.as_array().into_iter().flatten().any(|e| {
         e.as_str().is_some_and(|e| {
-            e == TEST_UTIL || e.split_once('/').is_some_and(|(_, f)| f == TEST_UTIL)
+            e == TEST_UTIL
+                || e.split_once('/')
+                    .is_some_and(|(dep, f)| f == TEST_UTIL || (implicit && dep == TEST_UTIL))
         })
     })
 }
@@ -204,13 +214,27 @@ pub fn feature_names(path: &str, source: &str) -> Result<Vec<String>, String> {
     let manifest: Table = source
         .parse()
         .map_err(|e| format!("{path}: invalid TOML: {e}"))?;
-    let features = manifest.get("features").and_then(Value::as_table);
-    let mut names: Vec<String> = features
+    let mut names: Vec<String> = manifest
+        .get("features")
+        .and_then(Value::as_table)
         .into_iter()
         .flatten()
         .map(|(k, _)| k.clone())
         .filter(|k| k != "default")
         .collect();
+    for name in implicit_features(&manifest) {
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    names.sort();
+    Ok(names)
+}
+
+/// Optional dependencies that no feature refers to as `dep:<name>`, which
+/// Cargo turns into features of the same name.
+fn implicit_features(manifest: &Table) -> Vec<String> {
+    let features = manifest.get("features").and_then(Value::as_table);
     let explicit_deps: Vec<&str> = features
         .into_iter()
         .flatten()
@@ -230,6 +254,7 @@ pub fn feature_names(path: &str, source: &str) -> Result<Vec<String>, String> {
             );
         }
     }
+    let mut names: Vec<String> = Vec::new();
     for table in tables {
         for (dep, spec) in table {
             let optional = spec.get("optional").and_then(Value::as_bool) == Some(true);
@@ -238,15 +263,20 @@ pub fn feature_names(path: &str, source: &str) -> Result<Vec<String>, String> {
             }
         }
     }
-    names.sort();
-    Ok(names)
+    names
 }
 
-/// Checks a crate README: every section in [`README_SECTIONS`] is present,
-/// and every feature in `features` is named in backticks in the
+/// Checks a crate README: it states the crate's purpose in a paragraph
+/// before its first `## ` section, every section in [`README_SECTIONS`] is
+/// present, and every feature in `features` is named in backticks in the
 /// `## Feature flags` section.
 pub fn check_readme(path: &str, readme: &str, features: &[String]) -> Vec<String> {
     let mut v = Vec::new();
+    if !has_purpose_paragraph(readme) {
+        v.push(format!(
+            "{path}: missing the purpose paragraph before the first `## ` section"
+        ));
+    }
     for section in README_SECTIONS {
         if !readme.lines().any(|l| l.trim_end() == *section) {
             v.push(format!("{path}: missing section `{section}`"));
@@ -267,6 +297,25 @@ pub fn check_readme(path: &str, readme: &str, features: &[String]) -> Vec<String
         }
     }
     v
+}
+
+/// Some text, other than headings and HTML comments, before the first `## `
+/// line.
+fn has_purpose_paragraph(readme: &str) -> bool {
+    let intro: Vec<&str> = readme
+        .lines()
+        .take_while(|l| !l.starts_with("## "))
+        .collect();
+    let mut intro = intro.join("\n");
+    while let Some(start) = intro.find("<!--") {
+        let end = intro[start..]
+            .find("-->")
+            .map_or(intro.len(), |e| start + e + 3);
+        intro.replace_range(start..end, "");
+    }
+    intro
+        .lines()
+        .any(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#'))
 }
 
 /// `true` for `{ workspace = true }` with no other keys.
@@ -436,6 +485,36 @@ toml = { workspace = true }
     }
 
     #[test]
+    fn default_must_not_forward_to_an_implicit_test_util_feature() {
+        // An optional dependency named `test-util`, with no `dep:test-util`,
+        // is this crate's implicit `test-util` feature; `test-util/std`
+        // enables it.
+        let dep = "[dependencies]\ntest-util = { workspace = true, optional = true }\n";
+        for features in [
+            "default = [\"test-util/std\"]",
+            "extra = [\"test-util/std\"]",
+        ] {
+            let source = format!("{PACKAGE}[features]\n{features}\n{dep}");
+            let v = check_test_util("x", &source).unwrap();
+            assert_eq!(v.len(), 1, "{features}: {v:?}");
+        }
+        // `?` does not enable the dependency, and with `dep:test-util` there
+        // is no implicit feature, so `test-util/std` only enables the
+        // dependency's `std`.
+        for features in [
+            "default = [\"test-util?/std\"]",
+            "default = [\"test-util/std\"]\nhelpers = [\"dep:test-util\"]",
+        ] {
+            let source = format!("{PACKAGE}[features]\n{features}\n{dep}");
+            assert_eq!(
+                check_test_util("x", &source).unwrap(),
+                Vec::<String>::new(),
+                "{features}"
+            );
+        }
+    }
+
+    #[test]
     fn workspace_dependencies_must_not_enable_test_util() {
         let source = "[workspace.dependencies]\nok = { version = \"1\", features = [\"std\"] }\nbad = { path = \"crates/bad\", features = [\"test-util\"] }\nplain = \"1\"\n";
         let v = check_workspace_test_util("Cargo.toml", source).unwrap();
@@ -469,6 +548,20 @@ toml = { workspace = true }
     fn complete_readme_passes() {
         assert_eq!(
             check_readme("x/README.md", README, &["std".to_owned()]),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn readme_without_a_purpose_paragraph_fails() {
+        // A crate with no features still needs its purpose stated.
+        let only_headings = README.replace("Purpose.\n\n", "<!-- TODO -->\n### Overview\n\n");
+        assert_eq!(
+            check_readme("x/README.md", &only_headings, &[]),
+            ["x/README.md: missing the purpose paragraph before the first `## ` section"]
+        );
+        assert_eq!(
+            check_readme("x/README.md", README, &[]),
             Vec::<String>::new()
         );
     }

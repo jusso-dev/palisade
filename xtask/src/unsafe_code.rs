@@ -6,20 +6,24 @@
 //! is the second layer, which still holds once the workspace lowers the lint
 //! to `deny` for the first FFI module. It fails when:
 //!
-//! - a Rust file relaxes the `unsafe_code` lint (`allow`, `expect` or `warn`,
-//!   as an inner or outer attribute, including inside `cfg_attr` and macro
-//!   bodies) and is not listed in `unsafe-allowlist.txt`;
+//! - a Rust file relaxes the `unsafe_code` lint (`allow`, `expect` or `warn`
+//!   naming the lint in the same attribute, as an inner or outer attribute,
+//!   including inside `cfg_attr` and macro bodies) and is not listed in
+//!   `unsafe-allowlist.txt`;
 //! - `unsafe-allowlist.txt` lists a file that does not relax the lint, does
 //!   not exist, is listed twice, or is outside the locations ADR 0011 allows
 //!   ([`ALLOWED_LOCATIONS`]);
 //! - a crate in [`FORBID_AT_ROOT`] has a library or binary root without a
 //!   crate-level `#![forbid(unsafe_code)]`;
-//! - a tracked file is a symbolic link, or a Rust file cannot be tokenised;
+//! - a file is a symbolic link (in the working tree, or recorded as one in
+//!   the git index), a listed file cannot be inspected, or a Rust file cannot
+//!   be tokenised;
 //! - the root `Cargo.toml` sets `unsafe_code` to anything but `forbid` or
 //!   `deny`, or spells it a second way (`unsafe-code`);
 //! - a Cargo config file in the repository (`.cargo/config.toml` or the
 //!   legacy `.cargo/config`, in any letter case) sets anything but plain
-//!   aliases ([`ALLOWED_CARGO_CONFIG_TABLES`]).
+//!   aliases ([`ALLOWED_CARGO_CONFIG_TABLES`]), or an alias changes lints,
+//!   config or compiler flags ([`check_cargo_config`]).
 //!
 //! The files scanned are every `.rs` file git tracks or would track (tracked
 //! plus untracked, minus ignored ones), so build output is skipped by the same
@@ -67,17 +71,48 @@ pub const CARGO_CONFIG_FILES: &[&str] = &[".cargo/config.toml", ".cargo/config"]
 /// Every file git tracks or would track under `root` (tracked and untracked,
 /// without ignored files), as repository-relative paths with `/` separators,
 /// sorted. Symbolic links are reported as violations, because a link could
-/// point the check away from the code the compiler reads.
+/// point the check away from the code the compiler reads. A tracked path is
+/// a link if the git index records it as one (mode `120000`), even where
+/// `core.symlinks=false` checked it out as a regular file, or if it is a
+/// link in the working tree.
 pub fn repository_files(root: &Path) -> Result<(Vec<String>, Vec<String>), String> {
+    // `--stage` prints `<mode> <object> <stage>\t<path>` for each index entry.
+    let mut entries: Vec<(String, bool)> = Vec::new();
+    for entry in git_ls_files(root, &["--cached", "--stage"])? {
+        let (info, path) = entry
+            .split_once('\t')
+            .ok_or_else(|| format!("unexpected git ls-files --stage line: {entry}"))?;
+        let in_index_as_link = info.starts_with("120000 ");
+        match entries.last_mut() {
+            // A conflicted path has one entry per stage, one after another.
+            Some((last, link)) if last == path => *link |= in_index_as_link,
+            _ => entries.push((path.to_owned(), in_index_as_link)),
+        }
+    }
+    for path in git_ls_files(root, &["--others", "--exclude-standard"])? {
+        entries.push((path, false));
+    }
+    let mut files = Vec::new();
+    let mut violations = Vec::new();
+    for (path, in_index_as_link) in entries {
+        let on_disk =
+            std::fs::symlink_metadata(root.join(&path)).map(|m| m.file_type().is_symlink());
+        match classify(&path, in_index_as_link, on_disk)? {
+            Entry::File => files.push(path),
+            Entry::Link => violations.push(format!(
+                "{path} is a symbolic link; check-unsafe cannot vouch for what it points to"
+            )),
+            Entry::Deleted => {}
+        }
+    }
+    files.sort();
+    Ok((files, violations))
+}
+
+fn git_ls_files(root: &Path, args: &[&str]) -> Result<Vec<String>, String> {
     let output = Command::new("git")
-        .args([
-            "ls-files",
-            "-z",
-            "--cached",
-            "--others",
-            "--exclude-standard",
-            "--deduplicate",
-        ])
+        .args(["ls-files", "-z"])
+        .args(args)
         .current_dir(root)
         .output()
         .map_err(|e| format!("cannot run git ls-files: {e}"))?;
@@ -87,26 +122,43 @@ pub fn repository_files(root: &Path) -> Result<(Vec<String>, Vec<String>), Strin
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
-    let mut files = Vec::new();
-    let mut violations = Vec::new();
-    for path in output.stdout.split(|b| *b == 0).filter(|p| !p.is_empty()) {
-        let path = String::from_utf8(path.to_vec())
-            .map_err(|_| "git ls-files returned a path that is not UTF-8".to_owned())?;
-        let full = root.join(&path);
-        // A tracked file deleted in the working tree is not compiled.
-        let Ok(metadata) = std::fs::symlink_metadata(&full) else {
-            continue;
-        };
-        if metadata.file_type().is_symlink() {
-            violations.push(format!(
-                "{path} is a symbolic link; check-unsafe cannot vouch for what it points to"
-            ));
-        } else {
-            files.push(path);
-        }
+    output
+        .stdout
+        .split(|b| *b == 0)
+        .filter(|p| !p.is_empty())
+        .map(|p| {
+            String::from_utf8(p.to_vec())
+                .map_err(|_| "git ls-files returned a path that is not UTF-8".to_owned())
+        })
+        .collect()
+}
+
+/// What a listed path is.
+#[derive(Debug, PartialEq)]
+enum Entry {
+    File,
+    Link,
+    /// Tracked, but deleted in the working tree, so not compiled.
+    Deleted,
+}
+
+/// `on_disk` is whether the working-tree path is a symbolic link. Only a
+/// missing path is skipped; any other error (such as permission denied)
+/// fails the check, so a file is never left out unseen.
+fn classify(
+    path: &str,
+    in_index_as_link: bool,
+    on_disk: std::io::Result<bool>,
+) -> Result<Entry, String> {
+    if in_index_as_link {
+        return Ok(Entry::Link);
     }
-    files.sort();
-    Ok((files, violations))
+    match on_disk {
+        Ok(true) => Ok(Entry::Link),
+        Ok(false) => Ok(Entry::File),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Entry::Deleted),
+        Err(e) => Err(format!("cannot inspect {path}: {e}")),
+    }
 }
 
 /// Entries of `unsafe-allowlist.txt`: one repository-relative path per line.
@@ -257,8 +309,9 @@ pub fn check_workspace_lint(root_manifest: &str) -> Result<Vec<String>, String> 
 pub const ALLOWED_CARGO_CONFIG_TABLES: &[&str] = &["alias"];
 
 /// A Cargo config file in the repository may only define aliases, and no
-/// alias may pass `--config`, a response file (`@file`), or a flag that
-/// names the `unsafe_code` lint (in either spelling) or caps lints. The file
+/// alias may pass `--config`, a response file (`@file`), rustflags, a lint
+/// option whose operand names the `unsafe_code` lint (in either spelling),
+/// or `--cap-lints` ([`unsafe_alias_word`]). The file
 /// is parsed as TOML, so comments, escapes and `#` inside strings are
 /// handled as Cargo handles them.
 pub fn check_cargo_config(path: &str, source: &str) -> Vec<String> {
@@ -275,12 +328,20 @@ pub fn check_cargo_config(path: &str, source: &str) -> Vec<String> {
             ));
             continue;
         }
-        let mut strings = Vec::new();
-        collect_strings(value, &mut strings);
-        if let Some(bad) = strings.iter().find(|s| is_unsafe_alias_word(s)) {
-            v.push(format!(
-                "{path}: `{key}` must not pass `{bad}`; aliases may not change lints, config or compiler flags"
-            ));
+        // Each alias on its own, so that an option's operand is the next
+        // word of the same alias.
+        let aliases: Vec<&toml::Value> = match value {
+            toml::Value::Table(table) => table.values().collect(),
+            other => vec![other],
+        };
+        for alias in aliases {
+            let mut words = Vec::new();
+            collect_strings(alias, &mut words);
+            if let Some(bad) = unsafe_alias_word(&words) {
+                v.push(format!(
+                    "{path}: `{key}` must not pass `{bad}`; aliases may not change lints, config or compiler flags"
+                ));
+            }
         }
     }
     v
@@ -301,13 +362,75 @@ fn collect_strings(value: &toml::Value, out: &mut Vec<String>) {
     }
 }
 
-fn is_unsafe_alias_word(word: &str) -> bool {
-    let normalised = word.to_ascii_lowercase().replace('-', "_");
-    normalised.contains("unsafe_code")
-        || normalised.contains("cap_lints")
-        || normalised.starts_with("__config")
-        || normalised.contains("rustflags")
-        || word.starts_with('@')
+/// Options that set a lint level, as rustc and the lint tools take them.
+/// `-Z` is here because `-Z crate-attr=...` adds an attribute.
+const LINT_OPTIONS: &[&str] = &[
+    "-A",
+    "-W",
+    "-D",
+    "-F",
+    "-Z",
+    "--allow",
+    "--warn",
+    "--deny",
+    "--forbid",
+    "--force-warn",
+];
+
+/// The first word of one alias that is not allowed: a response file, a
+/// `--config` option, anything naming rustflags or `--cap-lints`, or a lint
+/// option whose operand names the `unsafe_code` lint (either spelling, any
+/// case). A lint option that ends the alias is rejected too, because its
+/// operand would come from a chained alias. Other words may mention the lint,
+/// so a test filter such as `unsafe_code::tests` is fine.
+fn unsafe_alias_word(words: &[String]) -> Option<&str> {
+    for (i, word) in words.iter().enumerate() {
+        let normalised = word.to_ascii_lowercase().replace('-', "_");
+        if normalised.contains("cap_lints")
+            || normalised.starts_with("__config")
+            || normalised.contains("rustflags")
+            || word.starts_with('@')
+        {
+            return Some(word);
+        }
+        if let Some(attached) = lint_option_operand(word) {
+            let operand = if attached.is_empty() {
+                words.get(i + 1).map(String::as_str)
+            } else {
+                Some(attached)
+            };
+            match operand {
+                None => return Some(word),
+                Some(operand) if names_unsafe_code(operand) => return Some(word),
+                Some(_) => {}
+            }
+        }
+    }
+    None
+}
+
+/// For a lint option, its attached operand (`-Aunsafe_code`,
+/// `--allow=unsafe_code`), or `""` when the operand is the next word.
+fn lint_option_operand(word: &str) -> Option<&str> {
+    LINT_OPTIONS.iter().find_map(|option| {
+        let rest = word.strip_prefix(option)?;
+        if option.starts_with("--") {
+            // `--warn` is not a prefix of some other long option's name.
+            if rest.is_empty() {
+                Some(rest)
+            } else {
+                rest.strip_prefix('=')
+            }
+        } else {
+            Some(rest.strip_prefix('=').unwrap_or(rest))
+        }
+    })
+}
+
+fn names_unsafe_code(text: &str) -> bool {
+    text.to_ascii_lowercase()
+        .replace('-', "_")
+        .contains("unsafe_code")
 }
 
 /// `true` for a path whose last two components are a Cargo config file
@@ -389,17 +512,13 @@ struct Attribute {
 }
 
 impl Attribute {
-    /// `allow`, `expect` or `warn` with `unsafe_code` anywhere inside the
-    /// attribute, at any depth (for example inside `cfg_attr`). This errs on
-    /// the side of failing: `cfg_attr(x, deny(unsafe_code), allow(dead_code))`
-    /// counts too.
+    /// `allow`, `expect` or `warn` naming `unsafe_code` among its own
+    /// arguments, at any depth, either as the attribute itself or as one of
+    /// the attributes of a `cfg_attr` (nested `cfg_attr` too). The level and
+    /// the lint name must be in the same attribute:
+    /// `cfg_attr(x, deny(unsafe_code), allow(dead_code))` does not relax it.
     fn relaxes_unsafe_code(&self) -> bool {
-        let mut idents = Vec::new();
-        collect_idents(&self.body, &mut idents);
-        idents.iter().any(|i| is_unsafe_code_lint(i))
-            && idents
-                .iter()
-                .any(|i| matches!(i.as_str(), "allow" | "expect" | "warn"))
+        meta_relaxes_unsafe_code(&self.body)
     }
 
     /// Exactly `forbid(...)` with `unsafe_code` as one of its top-level
@@ -419,6 +538,33 @@ impl Attribute {
         tokens
             .split(|t| matches!(t, TokenTree::Punct(p) if p.as_char() == ','))
             .any(|arg| matches!(arg, [TokenTree::Ident(i)] if ident_name(i) == "unsafe_code"))
+    }
+}
+
+/// One attribute's tokens, such as `allow(unsafe_code)` or
+/// `cfg_attr(windows, allow(dead_code), expect(unsafe_code))`.
+fn meta_relaxes_unsafe_code(meta: &[TokenTree]) -> bool {
+    let Some((TokenTree::Ident(name), args)) = meta.split_first() else {
+        return false;
+    };
+    match ident_name(name).as_str() {
+        "allow" | "expect" | "warn" => {
+            let mut idents = Vec::new();
+            collect_idents(args, &mut idents);
+            idents.iter().any(|i| is_unsafe_code_lint(i))
+        }
+        "cfg_attr" => {
+            let Some(TokenTree::Group(group)) = args.first() else {
+                return false;
+            };
+            let tokens: Vec<TokenTree> = group.stream().into_iter().collect();
+            // The first item is the predicate; the rest are attributes.
+            tokens
+                .split(|t| matches!(t, TokenTree::Punct(p) if p.as_char() == ','))
+                .skip(1)
+                .any(meta_relaxes_unsafe_code)
+        }
+        _ => false,
     }
 }
 
@@ -508,6 +654,9 @@ mod tests {
             "macro_rules! m { () => { #[allow(unsafe_code)] fn g() {} } }",
             "mod a { mod b { fn f() { #![allow(unsafe_code)] } } }",
             "#[r#allow(r#unsafe_code)] fn f() {}",
+            "#![cfg_attr(unix, deny(unsafe_code), allow(unsafe_code))]",
+            "#![cfg_attr(unix, allow(dead_code), warn(unsafe_code),)]",
+            "#![cfg_attr(unix, cfg_attr(test, allow(unsafe_code)))]",
         ] {
             assert!(relaxes(source), "{source}");
         }
@@ -521,6 +670,11 @@ mod tests {
             "#![allow(dead_code)]",
             "#[allow(clippy::unwrap_used)] fn unsafe_code() {}",
             "fn f() { let unsafe_code = 1; } #[allow(unused)] fn g() {}",
+            // The level and the lint name are in different attributes.
+            "#![cfg_attr(unix, deny(unsafe_code), allow(dead_code))]",
+            "#![cfg_attr(unix, cfg_attr(test, deny(unsafe_code)), allow(dead_code))]",
+            "#![deny(unsafe_code)] #![allow(dead_code)]",
+            "#![cfg_attr(feature = \"allow\", deny(unsafe_code))]",
         ] {
             assert!(!relaxes(source), "{source}");
         }
@@ -739,10 +893,88 @@ mod tests {
             "[alias]\nx = \"rustc -- -A unsafe-code\"",
             "[alias]\nx = \"rustc -- @flags.txt\"",
             "[alias]\nx = \"rustc -- -A\\u0020UNSAFE_CODE\"",
+            "[alias]\nx = \"rustc -- -Aunsafe_code\"",
+            "[alias]\nx = \"clippy -- --warn=unsafe_code\"",
+            "[alias]\nx = [\"rustc\", \"--\", \"--force-warn\", \"unsafe-code\"]",
+            "[alias]\nx = \"rustc -- -Z crate-attr=allow(unsafe_code)\"",
+            // The operand would come from the alias that chains this one.
+            "[alias]\nx = \"rustc -- -A\"\ny = \"x unsafe_code\"",
         ] {
             assert_eq!(check(bad), 1, "{bad}");
         }
         assert_eq!(check("[build"), 1);
+    }
+
+    #[test]
+    fn aliases_may_mention_the_lint_outside_lint_options() {
+        let check = |s: &str| check_cargo_config("c", s);
+        for ok in [
+            "[alias]\nt = [\"test\", \"--\", \"unsafe_code::tests\"]",
+            "[alias]\nt = \"test -p xtask -- --skip unsafe_code::tests\"",
+            "[alias]\nt = \"test -- --skip=unsafe_code::tests\"",
+            "[alias]\nl = \"clippy -- -D warnings -A dead_code\"",
+            // Operands do not cross alias boundaries.
+            "[alias]\na = \"clippy -- -D warnings\"\nunsafe_code = \"test\"",
+        ] {
+            assert_eq!(check(ok), Vec::<String>::new(), "{ok}");
+        }
+    }
+
+    #[test]
+    fn only_a_missing_path_is_skipped() {
+        use std::io::{Error, ErrorKind};
+        assert_eq!(classify("a.rs", false, Ok(false)), Ok(Entry::File));
+        assert_eq!(classify("a.rs", false, Ok(true)), Ok(Entry::Link));
+        // `core.symlinks=false` checks a link out as a regular file.
+        assert_eq!(classify("a.rs", true, Ok(false)), Ok(Entry::Link));
+        assert_eq!(
+            classify("a.rs", true, Err(Error::from(ErrorKind::NotFound))),
+            Ok(Entry::Link)
+        );
+        assert_eq!(
+            classify("a.rs", false, Err(Error::from(ErrorKind::NotFound))),
+            Ok(Entry::Deleted)
+        );
+        let denied = classify("a.rs", false, Err(Error::from(ErrorKind::PermissionDenied)));
+        assert!(denied.unwrap_err().starts_with("cannot inspect a.rs: "));
+    }
+
+    /// A scratch repository in which a link is recorded in the index but
+    /// checked out as a regular file, as `core.symlinks=false` does.
+    #[test]
+    fn links_recorded_in_the_index_are_reported() {
+        let git = |dir: &Path, args: &[&str]| {
+            let out = Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .output()
+                .expect("git runs");
+            assert!(out.status.success(), "git {args:?}: {out:?}");
+            String::from_utf8(out.stdout).unwrap()
+        };
+        let dir = std::env::temp_dir().join(format!("xtask-links-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-q"]);
+        std::fs::write(dir.join("lib.rs"), "").unwrap();
+        std::fs::write(dir.join("link.rs"), "lib.rs").unwrap();
+        std::fs::write(dir.join("new.rs"), "").unwrap();
+        git(&dir, &["add", "lib.rs"]);
+        let object = git(&dir, &["hash-object", "-w", "link.rs"]);
+        let cacheinfo = format!("120000,{},link.rs", object.trim());
+        git(&dir, &["update-index", "--add", "--cacheinfo", &cacheinfo]);
+        std::fs::write(dir.join("gone.rs"), "").unwrap();
+        git(&dir, &["add", "gone.rs"]);
+        std::fs::remove_file(dir.join("gone.rs")).unwrap();
+
+        let result = repository_files(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        let (files, links) = result.unwrap();
+        assert_eq!(files, ["lib.rs", "new.rs"]);
+        assert_eq!(
+            links,
+            ["link.rs is a symbolic link; check-unsafe cannot vouch for what it points to"]
+        );
     }
 
     #[test]
