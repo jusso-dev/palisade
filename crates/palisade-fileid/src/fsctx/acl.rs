@@ -65,8 +65,9 @@
 //!   only take rights away, so ignoring it only over-reports.
 //!
 //! The Windows access-check API (`AuthzAccessCheck` with a synthetic token)
-//! is meant to be the authoritative method on Windows, with this evaluator
-//! as the fallback and cross-check. That backend is not here yet (#54).
+//! is the authoritative method on Windows, with this evaluator as the
+//! fallback and cross-check: `palisade_fileid::win::access::cross_check_writability`
+//! compares the two on any descriptor (with the `os-trust` feature).
 //!
 //! # Owner-based trust needs the DACL too
 //!
@@ -882,6 +883,9 @@ pub struct ObjectWritability {
     /// the owner is one of its SIDs, and anything an unknown owner or ACE
     /// type might grant.
     pub standard_user: WriteRights,
+    /// The subset of `standard_user` that is uncertain for the standard
+    /// user itself.
+    pub standard_user_uncertain: WriteRights,
     /// Each non-administrator principal that may hold at least one right,
     /// in SID order (an unknown principal last).
     pub principals: Vec<PrincipalRights>,
@@ -911,6 +915,7 @@ impl ObjectWritability {
             rights: all,
             uncertain: all,
             standard_user: all,
+            standard_user_uncertain: all,
             principals: vec![PrincipalRights {
                 principal: Principal::Unknown,
                 rights: all,
@@ -1030,6 +1035,7 @@ pub fn evaluate(
             rights: relevant,
             uncertain: WriteRights::NONE,
             standard_user: relevant,
+            standard_user_uncertain: WriteRights::NONE,
             principals: vec![PrincipalRights {
                 principal: Principal::Sid(well_known::EVERYONE),
                 rights: relevant,
@@ -1184,6 +1190,7 @@ pub fn evaluate(
         rights,
         uncertain,
         standard_user,
+        standard_user_uncertain: standard_uncertain,
         principals,
         non_canonical: is_non_canonical(aces),
         unreadable: false,
@@ -1310,6 +1317,8 @@ pub struct OwnerInfo {
     pub owner_supported: bool,
     /// The class of the owner.
     pub owner_trust_class: OwnerTrustClass,
+    /// The owner's account name (`DOMAIN\name`), if it was looked up.
+    pub owner_name: Option<String>,
 }
 
 impl OwnerInfo {
@@ -1331,6 +1340,7 @@ impl OwnerInfo {
             owner_sid: owner,
             owner_supported: true,
             owner_trust_class: class,
+            owner_name: None,
         }
     }
 
@@ -1341,6 +1351,7 @@ impl OwnerInfo {
             owner_sid: None,
             owner_supported: false,
             owner_trust_class: OwnerTrustClass::Unknown,
+            owner_name: None,
         }
     }
 }

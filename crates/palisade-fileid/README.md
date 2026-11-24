@@ -184,10 +184,29 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     file less trusted, never more. Location classes fail closed to `Unknown`
     when an input is missing. Owners count only on NTFS or ReFS local fixed
     disks, never on removable media, virtual disks or network shares.
+  - `fsctx::writable`: `WritabilityCache` evaluates each distinct
+    security descriptor once (keyed by the SHA-256 of its bytes and the
+    object kind; `evict` for security-change journal records, #60).
+    `assess_ancestors` is `assess_path` over an iterator, so the chain is
+    not built first, and can stop at the first user-writable folder.
+    `enumerate_user_writable_dirs` walks folders breadth first, bounded in
+    depth and count, through a `DirectorySource`, and lists the ones a
+    principal set may write to (for #17 and #212).
   - `win::fsctx` (Windows, `os-trust` feature): reads a file's final path
     (links resolved, short names expanded) and its `Zone.Identifier` stream.
-    Owner and DACL reads, drive and bus type, volume GUIDs, DFS and the OS
-    access check are still to come (#54).
+  - `win::security` and `win::access` (Windows, `os-trust` feature): the
+    owner, group and DACL from a handle (`GetSecurityInfo`), account names
+    (`LookupAccountSidW`, cached), owner classification that is reported
+    only on local NTFS or ReFS, writability of a real path and every folder
+    above it (links never followed), and the OS access check
+    (`AuthzAccessCheck` with a synthetic token of the standard user's SIDs).
+    `cross_check_writability` compares that check with the portable
+    evaluator: the evaluator must never miss a right the OS grants.
+    `OsDirectories` lets `enumerate_user_writable_dirs` walk real folders
+    without following junctions or mount points. Windows tests build a
+    weak-ACL fixture tree (a user-writable folder under a locked one, an
+    explicit deny, a `WRITE_DAC` grant to Users) and compare every result
+    with the OS access check, and check the stock system folders too.
 - `authenticode` certificate chains, signer trust and identity
   ([#49](https://github.com/jusso-dev/palisade/issues/49)):
   - `CertSummary::from_der` parses an X.509 v1, v2 or v3 certificate. It
