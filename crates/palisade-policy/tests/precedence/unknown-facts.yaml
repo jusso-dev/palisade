@@ -1,0 +1,65 @@
+description: >-
+  The file version is not a version and the product name is unknown. A deny
+  with on_unparseable match applies; a deny on the unknown product name does
+  not, because unknown_as defaults to no_match.
+object:
+  type: executable
+  publisher: Example Ltd
+  file_version: unknown build
+rule_sets:
+  - name: Versions
+    kind: mixed
+    rules:
+      - name: deny old builds
+        match:
+          all:
+            - criterion: {field: signer.publisher, operator: equals, values: [Example Ltd]}
+            - criterion: {field: meta.file_version, operator: version_lt, values: ['2.0']}
+        action: {type: deny, on_unparseable: match}
+        order: 100100
+        priority: 1
+      - name: deny unknown product
+        match:
+          all:
+            - criterion: {field: signer.publisher, operator: equals, values: [Example Ltd]}
+            - criterion: {field: meta.product_name, operator: equals, values: [Tool]}
+        action: {type: deny}
+        order: 100200
+        priority: 2
+      - name: allow publisher
+        match: {criterion: {field: signer.publisher, operator: equals, values: [Example Ltd]}}
+        action: {type: allow}
+        order: 100300
+        priority: 3
+expect:
+  - model: deny_wins
+    outcome: blocked
+    reason: explicit_deny
+    rule: deny old builds
+    overridden: [allow publisher]
+  - model: allow_wins
+    outcome: allowed
+    reason: explicit_allow
+    rule: allow publisher
+    overridden: [deny old builds]
+  - model: specificity
+    outcome: blocked
+    reason: explicit_deny
+    rule: deny old builds
+    overridden: [allow publisher]
+  - model: specificity
+    options: {same_tier_tiebreak: allow}
+    outcome: allowed
+    reason: explicit_allow
+    rule: allow publisher
+    overridden: [deny old builds]
+  - model: first_match
+    outcome: blocked
+    reason: explicit_deny
+    rule: deny old builds
+    overridden: [allow publisher]
+  - model: priority
+    outcome: blocked
+    reason: explicit_deny
+    rule: deny old builds
+    overridden: [allow publisher]

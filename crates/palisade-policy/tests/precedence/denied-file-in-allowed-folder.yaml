@@ -1,0 +1,55 @@
+description: >-
+  A file is denied inside a folder that is allowed. Under allow_wins the
+  folder allow wins, unless granularity_tiebreak lets the more specific rule
+  of the same rule set decide first.
+object:
+  type: executable
+  sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  path: C:\Tools\Sub\tool.exe
+  user_writable: false
+rule_sets:
+  - name: Tools
+    kind: mixed
+    rules:
+      - name: tools folder
+        match: {criterion: {field: path.directory, operator: starts_with, values: ['C:\Tools']}}
+        action: {type: allow}
+        order: 100100
+        priority: 1
+      - name: this tool
+        match: {criterion: {field: path.full, operator: equals, values: ['C:\Tools\Sub\tool.exe']}}
+        action: {type: deny}
+        order: 100200
+        priority: 2
+expect:
+  - model: deny_wins
+    outcome: blocked
+    reason: explicit_deny
+    rule: this tool
+    overridden: [tools folder]
+  - model: allow_wins
+    outcome: allowed
+    reason: explicit_allow
+    rule: tools folder
+    overridden: [this tool]
+  - model: allow_wins
+    options: {granularity_tiebreak: true}
+    outcome: blocked
+    reason: explicit_deny
+    rule: this tool
+    overridden: [tools folder]
+  - model: specificity
+    outcome: blocked
+    reason: explicit_deny
+    rule: this tool
+    overridden: [tools folder]
+  - model: first_match
+    outcome: allowed
+    reason: explicit_allow
+    rule: tools folder
+    overridden: [this tool]
+  - model: priority
+    outcome: allowed
+    reason: explicit_allow
+    rule: tools folder
+    overridden: [this tool]

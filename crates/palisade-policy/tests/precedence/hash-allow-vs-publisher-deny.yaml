@@ -1,0 +1,61 @@
+description: >-
+  A folder allow, a publisher deny and a hash allow all match one file.
+  Each model picks a different rule.
+object:
+  type: executable
+  sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  publisher: Example Ltd
+  path: C:\Tools\Sub\tool.exe
+  user_writable: false
+rule_sets:
+  - name: Workstation rules
+    kind: mixed
+    rules:
+      - name: folder allow
+        match: {criterion: {field: path.directory, operator: starts_with, values: ['C:\Tools']}}
+        action: {type: allow}
+        order: 100100
+        priority: 30
+      - name: publisher deny
+        match: {criterion: {field: signer.publisher, operator: equals, values: [Example Ltd]}}
+        action: {type: deny}
+        order: 100200
+        priority: 20
+      - name: hash allow
+        match: {criterion: {field: hash.sha256, operator: equals, values: [aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]}}
+        action: {type: allow}
+        order: 100300
+        priority: 10
+expect:
+  - model: deny_wins
+    outcome: blocked
+    reason: explicit_deny
+    rule: publisher deny
+    overridden: [folder allow, hash allow]
+  - model: allow_wins
+    outcome: allowed
+    reason: explicit_allow
+    # Both allows qualify; the more specific one decides.
+    rule: hash allow
+    overridden: [folder allow, publisher deny]
+  - model: specificity
+    outcome: allowed
+    reason: explicit_allow
+    rule: hash allow
+    overridden: [folder allow, publisher deny]
+  - model: first_match
+    outcome: allowed
+    reason: explicit_allow
+    rule: folder allow
+    overridden: [publisher deny, hash allow]
+  - model: priority
+    outcome: allowed
+    reason: explicit_allow
+    rule: hash allow
+    overridden: [folder allow, publisher deny]
+  - model: priority
+    options: {priority_direction: higher_wins}
+    outcome: allowed
+    reason: explicit_allow
+    rule: folder allow
+    overridden: [publisher deny, hash allow]

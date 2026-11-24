@@ -1,0 +1,58 @@
+description: >-
+  A curated (read-only) deny has a later order than a custom allow. With
+  curated_first, the default, first_match evaluates curated rules first.
+  Under priority, an equal priority goes to the deny.
+object:
+  type: executable
+  sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  publisher: Example Ltd
+rule_sets:
+  - name: Custom
+    kind: allowlist
+    rules:
+      - name: custom allow
+        match: {criterion: {field: hash.sha256, operator: equals, values: [aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]}}
+        action: {type: allow}
+        order: 100001
+        priority: 0
+  - name: Curated blocks
+    kind: blocklist
+    read_only: true
+    rules:
+      - name: curated deny
+        match: {criterion: {field: signer.publisher, operator: equals, values: [Example Ltd]}}
+        action: {type: deny}
+        order: 900000
+        priority: 0
+expect:
+  - model: deny_wins
+    outcome: blocked
+    reason: explicit_deny
+    rule: curated deny
+    overridden: [custom allow]
+  - model: allow_wins
+    outcome: allowed
+    reason: explicit_allow
+    rule: custom allow
+    overridden: [curated deny]
+  - model: specificity
+    outcome: allowed
+    reason: explicit_allow
+    rule: custom allow
+    overridden: [curated deny]
+  - model: first_match
+    outcome: blocked
+    reason: explicit_deny
+    rule: curated deny
+    overridden: [custom allow]
+  - model: first_match
+    options: {curated_first: false}
+    outcome: allowed
+    reason: explicit_allow
+    rule: custom allow
+    overridden: [curated deny]
+  - model: priority
+    outcome: blocked
+    reason: explicit_deny
+    rule: curated deny
+    overridden: [custom allow]

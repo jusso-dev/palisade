@@ -1,0 +1,72 @@
+description: >-
+  A mandatory blocklist entry matches together with a hash allow, an
+  elevation, a trust source and an audit rule. The mandatory deny decides
+  under every model, and the trust source grants nothing.
+object:
+  type: executable
+  sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  publisher: Example Ltd
+rule_sets:
+  - name: Never run
+    kind: blocklist
+    mandatory: true
+    read_only: true
+    rules:
+      - name: never run
+        match: {criterion: {field: hash.sha256, operator: equals, values: [aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]}}
+        action: {type: deny}
+  - name: Tenant rules
+    kind: mixed
+    rules:
+      - name: hash allow
+        match: {criterion: {field: hash.sha256, operator: equals, values: [aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]}}
+        action: {type: allow}
+        order: 100100
+        priority: 1
+      - name: elevate
+        object_types: [executable]
+        match: {criterion: {field: signer.publisher, operator: equals, values: [Example Ltd]}}
+        action:
+          type: allow_elevated
+          token_profile: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e90
+          condition: always
+        order: 100200
+        priority: 2
+      - name: trusted updater
+        object_types: [executable]
+        match: {criterion: {field: hash.sha256, operator: equals, values: [aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]}}
+        action: {type: trust_source, mode: direct, scope_paths: ['C:\Apps']}
+      - name: audit signed
+        match: {criterion: {field: signer.publisher, operator: equals, values: [Example Ltd]}}
+        action: {type: audit}
+expect:
+  - model: deny_wins
+    outcome: blocked
+    reason: mandatory_deny
+    rule: never run
+    overridden: [hash allow, elevate, trusted updater]
+    annotations: [audit signed]
+  - model: allow_wins
+    outcome: blocked
+    reason: mandatory_deny
+    rule: never run
+    overridden: [hash allow, elevate, trusted updater]
+    annotations: [audit signed]
+  - model: specificity
+    outcome: blocked
+    reason: mandatory_deny
+    rule: never run
+    overridden: [hash allow, elevate, trusted updater]
+    annotations: [audit signed]
+  - model: first_match
+    outcome: blocked
+    reason: mandatory_deny
+    rule: never run
+    overridden: [hash allow, elevate, trusted updater]
+    annotations: [audit signed]
+  - model: priority
+    outcome: blocked
+    reason: mandatory_deny
+    rule: never run
+    overridden: [hash allow, elevate, trusted updater]
+    annotations: [audit signed]

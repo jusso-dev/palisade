@@ -10,6 +10,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 mod actions;
+mod precedence;
+
+pub use precedence::order_ranges;
 
 #[cfg(test)]
 pub(crate) use actions::scope_path_key;
@@ -137,6 +140,23 @@ pub enum ErrorCode {
     /// An `ignore` rule: a performance exclusion that needs the
     /// `admin.exclusions` permission at the server (#34).
     ExclusionNeedsPermission,
+    /// Under `first_match`, a rule that allows or denies has no `order`
+    /// (#35).
+    OrderRequired,
+    /// Under `first_match`, a rule of a custom rule set has an `order` in a
+    /// reserved range (#35, [`order_ranges`]).
+    OrderReserved,
+    /// A rule's `order` is above 1000000 (#35).
+    OrderOutOfRange,
+    /// Under `priority`, a rule that allows or denies has no `priority`
+    /// (#35).
+    PriorityRequired,
+    /// Under `priority`, two rules with different actions share a
+    /// `priority`, so the fixed action order decides between them (#35).
+    DuplicatePriority,
+    /// A precedence option is set that the selected model does not use
+    /// (#35).
+    PrecedenceOptionUnused,
 }
 
 impl ErrorCode {
@@ -185,6 +205,12 @@ impl ErrorCode {
             Self::InvalidEffect => "invalid_effect",
             Self::EffectsNotApplicable => "effects_not_applicable",
             Self::ExclusionNeedsPermission => "exclusion_needs_permission",
+            Self::OrderRequired => "order_required",
+            Self::OrderReserved => "order_reserved",
+            Self::OrderOutOfRange => "order_out_of_range",
+            Self::PriorityRequired => "priority_required",
+            Self::DuplicatePriority => "duplicate_priority",
+            Self::PrecedenceOptionUnused => "precedence_option_unused",
         }
     }
 
@@ -192,9 +218,11 @@ impl ErrorCode {
     #[must_use]
     pub const fn severity(self) -> Severity {
         match self {
-            Self::AllowWinsNotRecommended | Self::WeakIdentity | Self::ExclusionNeedsPermission => {
-                Severity::Warning
-            }
+            Self::AllowWinsNotRecommended
+            | Self::WeakIdentity
+            | Self::ExclusionNeedsPermission
+            | Self::DuplicatePriority
+            | Self::PrecedenceOptionUnused => Severity::Warning,
             _ => Severity::Error,
         }
     }
@@ -373,6 +401,7 @@ impl Validator {
                 "`allow_wins` lets one broad allow defeat every deny; it is not recommended for Essential Eight",
             );
         }
+        self.precedence(doc);
 
         // Rule set IDs must be unique, and every reference must resolve.
         let mut set_ids = BTreeMap::new();

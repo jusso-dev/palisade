@@ -1,0 +1,76 @@
+description: >-
+  An everyone deny and two administrators-only allows match for an
+  administrator. allow_wins lets the most lenient rule win when
+  allow_tiebreak is most_permissive, and the most restrictive allow by
+  default. The other models keep the deny.
+object:
+  type: executable
+  publisher: Example Ltd
+  user_groups: [S-1-5-32-544, S-1-5-32-545]
+rule_sets:
+  - name: Everyone
+    kind: blocklist
+    rules:
+      - name: everyone deny
+        match: {criterion: {field: signer.publisher, operator: equals, values: [Example Ltd]}}
+        action: {type: deny}
+        order: 100100
+        priority: 1
+  - name: Administrators elevation
+    kind: elevation
+    rules:
+      - name: admins elevate
+        object_types: [executable]
+        match:
+          all:
+            - criterion: {field: signer.publisher, operator: equals, values: [Example Ltd]}
+            - criterion: {field: user.groups, operator: member_of, values: [S-1-5-32-544]}
+        action:
+          type: allow_elevated
+          token_profile: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e90
+          condition: always
+        order: 100200
+        priority: 2
+  - name: Administrators
+    kind: allowlist
+    rules:
+      - name: admins allow
+        match:
+          all:
+            - criterion: {field: signer.publisher, operator: equals, values: [Example Ltd]}
+            - criterion: {field: user.groups, operator: member_of, values: [S-1-5-32-544]}
+        action: {type: allow}
+        order: 100300
+        priority: 3
+expect:
+  - model: deny_wins
+    outcome: blocked
+    reason: explicit_deny
+    rule: everyone deny
+    overridden: [admins elevate, admins allow]
+  - model: allow_wins
+    outcome: allowed
+    reason: explicit_allow
+    rule: admins allow
+    overridden: [everyone deny, admins elevate]
+  - model: allow_wins
+    options: {allow_tiebreak: most_permissive}
+    outcome: allowed
+    reason: explicit_allow
+    rule: admins elevate
+    overridden: [everyone deny, admins allow]
+  - model: specificity
+    outcome: blocked
+    reason: explicit_deny
+    rule: everyone deny
+    overridden: [admins elevate, admins allow]
+  - model: first_match
+    outcome: blocked
+    reason: explicit_deny
+    rule: everyone deny
+    overridden: [admins elevate, admins allow]
+  - model: priority
+    outcome: blocked
+    reason: explicit_deny
+    rule: everyone deny
+    overridden: [admins elevate, admins allow]

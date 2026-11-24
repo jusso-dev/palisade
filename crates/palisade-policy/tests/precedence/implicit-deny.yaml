@@ -1,0 +1,53 @@
+description: >-
+  Only an audit rule and a trust source match. Neither decides, so the
+  implicit deny applies, and the trust source is overridden.
+object:
+  type: executable
+  sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+rule_sets:
+  - name: Rules
+    kind: mixed
+    rules:
+      - name: other allow
+        match: {criterion: {field: hash.sha256, operator: equals, values: [bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb]}}
+        action: {type: allow}
+        order: 100100
+        priority: 1
+      - name: audit it
+        match: {criterion: {field: hash.sha256, operator: equals, values: [aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]}}
+        action: {type: audit}
+      - name: trust it
+        object_types: [executable]
+        match: {criterion: {field: hash.sha256, operator: equals, values: [aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]}}
+        action: {type: trust_source, mode: direct, scope_paths: ['C:\Apps']}
+expect:
+  - model: deny_wins
+    outcome: blocked
+    reason: implicit_deny_unknown
+    overridden: [trust it]
+    annotations: [audit it]
+    trust_sources: []
+  - model: allow_wins
+    outcome: blocked
+    reason: implicit_deny_unknown
+    overridden: [trust it]
+    annotations: [audit it]
+    trust_sources: []
+  - model: specificity
+    outcome: blocked
+    reason: implicit_deny_unknown
+    overridden: [trust it]
+    annotations: [audit it]
+    trust_sources: []
+  - model: first_match
+    outcome: blocked
+    reason: implicit_deny_unknown
+    overridden: [trust it]
+    annotations: [audit it]
+    trust_sources: []
+  - model: priority
+    outcome: blocked
+    reason: implicit_deny_unknown
+    overridden: [trust it]
+    annotations: [audit it]
+    trust_sources: []

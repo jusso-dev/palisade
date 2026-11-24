@@ -1,0 +1,51 @@
+description: >-
+  The first rule by order defers, so first_match falls through to the next
+  rule. defer never decides under any model.
+object:
+  type: executable
+  sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  publisher: Example Ltd
+rule_sets:
+  - name: Ordered
+    kind: mixed
+    rules:
+      - name: no opinion
+        match: {criterion: {field: hash.sha256, operator: equals, values: [aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]}}
+        action: {type: defer}
+        order: 100100
+      - name: allow tool
+        match: {criterion: {field: hash.sha256, operator: equals, values: [aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]}}
+        action: {type: allow}
+        order: 100200
+        priority: 2
+      - name: deny publisher
+        match: {criterion: {field: signer.publisher, operator: equals, values: [Example Ltd]}}
+        action: {type: deny}
+        order: 100300
+        priority: 1
+expect:
+  - model: deny_wins
+    outcome: blocked
+    reason: explicit_deny
+    rule: deny publisher
+    overridden: [allow tool]
+  - model: allow_wins
+    outcome: allowed
+    reason: explicit_allow
+    rule: allow tool
+    overridden: [deny publisher]
+  - model: specificity
+    outcome: allowed
+    reason: explicit_allow
+    rule: allow tool
+    overridden: [deny publisher]
+  - model: first_match
+    outcome: allowed
+    reason: explicit_allow
+    rule: allow tool
+    overridden: [deny publisher]
+  - model: priority
+    outcome: blocked
+    reason: explicit_deny
+    rule: deny publisher
+    overridden: [allow tool]

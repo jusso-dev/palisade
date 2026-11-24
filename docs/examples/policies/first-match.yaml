@@ -1,0 +1,77 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/jusso-dev/palisade/main/schemas/policy/v1.json
+#
+# A firewall-style policy: rules are ordered, and the first rule that
+# matches and does not defer decides (#35). Curated rule sets come first
+# (curated_first, the default). The mandatory blocklist is checked before
+# every ordered rule, whatever its order.
+schema_version: "1.0.0"
+policy:
+  id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f
+  name: Ordered build servers
+  revision: 1
+  precedence_model: first_match
+  mode: enforce
+  rule_sets:
+    - 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60
+    - 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e70
+
+rule_sets:
+  - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60
+    name: Never run
+    kind: blocklist
+    mandatory: true
+    read_only: true
+    rules:
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e61
+        name: Known bypass tool
+        match:
+          criterion:
+            field: hash.sha256
+            operator: equals
+            values: [aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]
+        action:
+          type: deny
+
+  - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e70
+    name: Build tools
+    kind: mixed
+    rules:
+      # Custom rules use orders 100001 to 999989.
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e71
+        name: Not decided by the toolchain rule
+        match:
+          criterion:
+            field: signer.publisher
+            operator: equals
+            values: [Example Compilers Ltd]
+        # No opinion: evaluation falls through to the next rule.
+        action:
+          type: defer
+        order: 100100
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e72
+        name: Old compiler builds
+        match:
+          all:
+            - criterion:
+                field: signer.publisher
+                operator: equals
+                values: [Example Compilers Ltd]
+            - criterion:
+                field: meta.file_version
+                operator: version_lt
+                values: ["4.0"]
+        # A file version that is not a version counts as old.
+        action:
+          type: deny
+          on_unparseable: match
+        order: 100200
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e73
+        name: Compilers
+        match:
+          criterion:
+            field: signer.publisher
+            operator: equals
+            values: [Example Compilers Ltd]
+        action:
+          type: allow
+        order: 100300

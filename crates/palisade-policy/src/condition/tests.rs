@@ -391,3 +391,54 @@ fn compile_reports_every_bad_node_with_its_pointer() {
         ["/all/1/any", "/all/2/not/criterion", "/all/3/criterion"]
     );
 }
+
+/// Evaluates with facts whose file version is not a version, and whose
+/// SHA-256 is `a`×64.
+fn eval_unparseable(tree: &Match, unparseable: super::Unparseable) -> Tri {
+    let compiled = CompiledMatch::compile(tree).unwrap();
+    let variables = PathVariables::new();
+    let context = context();
+    let facts = ObjectFacts::new()
+        .with(Field::MetaFileVersion, "not a version")
+        .with(Field::HashSha256, "a".repeat(64));
+    compiled
+        .eval_with(
+            &facts,
+            &EvalContext {
+                action: ActionKind::Deny,
+                variables: &variables,
+                context: &context,
+            },
+            unparseable,
+        )
+        .result
+}
+
+#[test]
+fn unparseable_versions_favour_the_match_only_when_asked() {
+    use super::Unparseable::{FavourMatch, Unknown as Keep};
+    let older = crit(Field::MetaFileVersion, Operator::VersionLt, &["2.0"]);
+    let hash = crit(Field::HashSha256, Operator::Equals, &[&"a".repeat(64)]);
+    let other_hash = crit(Field::HashSha256, Operator::Equals, &[&"b".repeat(64)]);
+    let missing = crit(Field::MetaProductVersion, Operator::VersionLt, &["2.0"]);
+    let not = |m: &Match| Match::Not(Box::new(m.clone()));
+    let cases = [
+        // (tree, default, with on_unparseable: match)
+        (older.clone(), Unknown, Yes),
+        // Under `not`, the criterion is taken as `NoMatch`, so the `not`
+        // matches: still in the direction of the deny applying.
+        (not(&older), Unknown, Yes),
+        (not(&not(&older)), Unknown, Yes),
+        (Match::All(vec![hash.clone(), older.clone()]), Unknown, Yes),
+        // The rest of the tree still has to match.
+        (Match::All(vec![other_hash.clone(), older.clone()]), No, No),
+        (Match::Any(vec![other_hash, not(&older)]), Unknown, Yes),
+        // Only unparseable versions change: a missing fact stays unknown.
+        (missing.clone(), Unknown, Unknown),
+        (Match::All(vec![hash, missing]), Unknown, Unknown),
+    ];
+    for (tree, default, favoured) in cases {
+        assert_eq!(eval_unparseable(&tree, Keep), default, "{tree:?}");
+        assert_eq!(eval_unparseable(&tree, FavourMatch), favoured, "{tree:?}");
+    }
+}

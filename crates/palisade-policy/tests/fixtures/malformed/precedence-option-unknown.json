@@ -1,0 +1,74 @@
+{
+  "schema_version": "1.0.0",
+  "policy": {
+    "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+    "name": "First match without orders",
+    "revision": 1,
+    "mode": "enforce",
+    "precedence_model": "first_match",
+    "rule_sets": [
+      "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60"
+    ],
+    "precedence_options": {
+      "tiebreak": "deny"
+    }
+  },
+  "rule_sets": [
+    {
+      "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60",
+      "name": "Custom",
+      "kind": "mixed",
+      "rules": [
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e61",
+          "name": "No order",
+          "match": {
+            "criterion": {
+              "field": "hash.sha256",
+              "operator": "equals",
+              "values": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          },
+          "action": {
+            "type": "allow"
+          }
+        },
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e62",
+          "name": "In the system range",
+          "match": {
+            "criterion": {
+              "field": "hash.sha256",
+              "operator": "equals",
+              "values": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          },
+          "action": {
+            "type": "deny"
+          },
+          "order": 50
+        },
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e63",
+          "name": "Audit needs no order",
+          "match": {
+            "criterion": {
+              "field": "hash.sha256",
+              "operator": "equals",
+              "values": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          },
+          "action": {
+            "type": "audit"
+          }
+        }
+      ]
+    }
+  ]
+}
