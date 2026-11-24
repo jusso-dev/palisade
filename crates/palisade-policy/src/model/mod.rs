@@ -15,6 +15,7 @@
 
 pub mod action;
 pub mod effects;
+pub mod mode;
 pub mod precedence;
 pub(crate) mod settings;
 mod tree;
@@ -28,6 +29,7 @@ pub use action::{
     TrustSourceDirective, UnknownAs,
 };
 pub use effects::{Effects, EventSeverity, LogLevel, Notify, ResolvedEffects, Upload};
+pub use mode::ModeOptions;
 pub use palisade_core::{Mode, ObjectType, PolicyId, RuleId, RuleSetId, SchemaVersion, ScriptKind};
 pub use precedence::{AllowTiebreak, PrecedenceOptions, PriorityDirection, TierTiebreak};
 pub use settings::{AdvancedValue, ControlLevel, PolicySettings, TimeZoneBasis};
@@ -97,8 +99,12 @@ pub struct Policy {
     /// model does not use is ignored, with a warning.
     #[serde(default, skip_serializing_if = "PrecedenceOptions::is_default")]
     pub precedence_options: PrecedenceOptions,
-    /// The base enforcement mode (#36).
+    /// The base enforcement mode (#36). `disabled` is not allowed: only a
+    /// device can be disabled, with a reason and an expiry.
     pub mode: Mode,
+    /// The modes per object type and while disconnected (#36).
+    #[serde(default, skip_serializing_if = "ModeOptions::is_default")]
+    pub mode_options: ModeOptions,
     /// Typed settings. Every field has a documented default.
     #[serde(default)]
     pub settings: PolicySettings,
@@ -164,6 +170,11 @@ pub struct RuleSet {
     /// Hidden from default console views (staging).
     #[serde(default)]
     pub hidden: bool,
+    /// Only for a blocklist that is not mandatory: the mode its rules
+    /// decide in, replacing the mode for the object's type, for example to
+    /// try a new blocklist in `audit` (#36). `disabled` is not allowed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode_override: Option<Mode>,
     /// The rules, in order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rules: Vec<Rule>,
@@ -244,7 +255,7 @@ pub struct Rule {
     /// Priority for the `priority` model (#35).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority: Option<i32>,
-    /// Per-rule enforcement override (#36).
+    /// Per-rule enforcement override (#36). Only for `deny` rules.
     #[serde(default)]
     pub enforcement_override: EnforcementOverride,
     /// Governance metadata (#40).

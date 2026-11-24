@@ -634,6 +634,12 @@ fn duplicate_map_keys_are_rejected() {
         let err = PolicyDocument::from_json(&text).unwrap_err();
         assert!(err.to_string().contains("duplicate key"), "{err}");
     }
+    let text = MINIMAL.replace(
+        "\"mode\": \"audit\"",
+        r#""mode": "audit", "mode_options": {"mode_by_type": {"library": "audit", "library": "enforce"}}"#,
+    );
+    let err = PolicyDocument::from_json(&text).unwrap_err();
+    assert!(err.to_string().contains("duplicate key"), "{err}");
 }
 
 #[test]

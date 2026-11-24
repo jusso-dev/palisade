@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0.0",
+  "policy": {
+    "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+    "name": "Mode settings",
+    "revision": 1,
+    "mode": "audit",
+    "mode_options": {
+      "mode_by_type": {
+        "script.powershell": "disabled"
+      },
+      "mode_disconnected": "monitor",
+      "disconnected_after_secs": 120
+    },
+    "rule_sets": [
+      "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60",
+      "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e70",
+      "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e80"
+    ]
+  },
+  "rule_sets": [
+    {
+      "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60",
+      "name": "Allowlist",
+      "kind": "allowlist",
+      "mode_override": "audit",
+      "rules": [
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e61",
+          "name": "Allow",
+          "match": {
+            "criterion": {
+              "field": "hash.sha256",
+              "operator": "equals",
+              "values": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          },
+          "action": {
+            "type": "allow"
+          }
+        }
+      ]
+    },
+    {
+      "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e70",
+      "name": "Mandatory",
+      "kind": "blocklist",
+      "mandatory": true,
+      "mode_override": "audit",
+      "rules": [
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e71",
+          "name": "Deny",
+          "match": {
+            "criterion": {
+              "field": "hash.sha256",
+              "operator": "equals",
+              "values": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          },
+          "action": {
+            "type": "deny"
+          }
+        }
+      ]
+    },
+    {
+      "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e80",
+      "name": "Trial blocklist",
+      "kind": "blocklist",
+      "mode_override": "disabled",
+      "rules": [
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e81",
+          "name": "Deny",
+          "match": {
+            "criterion": {
+              "field": "hash.sha256",
+              "operator": "equals",
+              "values": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          },
+          "action": {
+            "type": "deny"
+          }
+        }
+      ]
+    }
+  ]
+}

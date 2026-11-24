@@ -13,7 +13,8 @@
 //!    source, elevation or exclusion can change that, under any model.
 //! 2. **Exclusion.** `ignore` rules. If one matches, the object is
 //!    `ignored`.
-//! 3. **Override session.** Not yet: sessions are #9 and #36.
+//! 3. **Override session.** An active session (#9) lowers the effective
+//!    mode of stages 4 and 6 ([`crate::mode`]). It never affects stage 1.
 //! 4. **Policy.** The policy's precedence model ([`crate::precedence`])
 //!    chooses among the matching `allow`, `allow_contained`,
 //!    `allow_elevated` and `deny` rules.
@@ -68,14 +69,14 @@
 //!
 //! # Modes
 //!
-//! The evaluator computes the enforce-mode decision, before anything that
-//! relaxes it: [`Decision::mode`] is always `enforce`. The policy's `mode`,
-//! each rule's `enforcement_override` (such as `never_enforce`) and the
-//! per-class control levels in the policy settings (`dll_control` and the
-//! others) are applied on top of it by the mode state machine (#36), which
-//! keeps this result in [`Decision::would_have_been`]. Until then a
-//! decision is the simulated enforce-mode result, and no component
-//! enforces it.
+//! [`Evaluator::evaluate`] computes the enforce-mode decision, before
+//! anything relaxes it: its [`Decision::mode`] is always `enforce`.
+//! [`Evaluator::evaluate_in`] applies the effective mode of the device
+//! ([`crate::mode`]): the policy's `mode`, the modes per object type, each
+//! rule set's `mode_override`, each rule's `enforcement_override`, the
+//! per-class control levels, connectivity, override sessions and
+//! emergency lockdown. It keeps the enforce-mode outcome in
+//! [`Decision::would_have_been`].
 //!
 //! # Determinism
 //!
@@ -89,9 +90,10 @@ use std::collections::BTreeMap;
 
 use crate::condition::{CompiledMatch, TreeError, Unparseable};
 use crate::context::EvaluationContext;
-use crate::decision::{Decision, RuleRef, TraceId, TrustGrant};
+use crate::decision::{Decision, Directives, Outcome, RuleRef, TraceId, TrustGrant};
 use crate::facts::{ObjectFacts, PathVariables};
-use crate::model::{Action, ObjectType, Policy, Rule, RuleId, RuleSet, RuleSetId, UnknownAs};
+use crate::mode::{self, DeviceState};
+use crate::model::{Action, Mode, ObjectType, Policy, Rule, RuleId, RuleSet, RuleSetId, UnknownAs};
 use crate::ops::{EvalContext, Tri};
 use crate::precedence::{Candidate, MatchSet, Precedence, Resolver, Spec, Verdict, most_specific};
 use crate::validate::ValidatedPolicy;
@@ -192,6 +194,32 @@ impl Compiled<'_> {
     }
 }
 
+/// The result of one relaxation layer of [`Evaluator::evaluate_in`].
+struct Layer<'a, 'p> {
+    /// The decision over the rules kept.
+    decision: Decision,
+    /// Its deciding rule, or `None` for the implicit deny.
+    winner: Option<&'a Compiled<'p>>,
+    /// The rules decided over.
+    kept: Vec<&'a Compiled<'p>>,
+    /// The denies set aside because they do not enforce.
+    dropped: Vec<RuleRef>,
+    /// Whether the decision blocks in an enforcing mode.
+    blocks: bool,
+}
+
+impl Layer<'_, '_> {
+    /// The directives an object that runs gets: an allow's, if one
+    /// decided, otherwise none.
+    fn directives(&self) -> Directives {
+        if self.decision.outcome() == Outcome::Allowed {
+            self.decision.directives().clone()
+        } else {
+            Directives::default()
+        }
+    }
+}
+
 /// Evaluates objects against one validated policy.
 #[derive(Debug)]
 pub struct Evaluator<'p> {
@@ -267,15 +295,174 @@ impl<'p> Evaluator<'p> {
         self.policy
     }
 
-    /// Decides one object, as enforce mode sees it.
+    /// Decides one object, as enforce mode sees it: [`Decision::mode`] is
+    /// `enforce`, whatever the policy's modes. This is the simulated result
+    /// that readiness reports use (#41); [`evaluate_in`](Self::evaluate_in)
+    /// applies the modes.
     #[must_use]
     pub fn evaluate(&self, subject: &Subject<'_>, trace_id: TraceId) -> Decision {
+        let matched = self.matching(subject);
+        self.run(&matched, trace_id).0
+    }
+
+    /// Decides one object on a device in `state`, applying the effective
+    /// mode ([`crate::mode`]). Returns `None` when the device is disabled:
+    /// the engine is not consulted, and nothing is decided or reported.
+    ///
+    /// [`Decision::would_have_been`] is the enforce-mode outcome
+    /// ([`evaluate`](Self::evaluate)). An object that enforce mode allows
+    /// or ignores gets the same decision, in its effective mode. A block
+    /// is relaxed in two layers, so that each relaxation is reported as
+    /// what it is:
+    ///
+    /// 1. **Modes.** Using the modes without the override session, every
+    ///    matching deny whose effective mode does not enforce is set
+    ///    aside, and the remaining rules are decided again. If that still
+    ///    blocks in an enforcing mode (an enforcing deny, a mandatory deny,
+    ///    or an enforcing implicit deny), the object is blocked by it: a
+    ///    blocklist in `audit` never lets through what another rule blocks.
+    ///    Otherwise the object runs as `allowed_audit`, naming the rule
+    ///    enforce mode decided by.
+    /// 2. **Session.** If layer 1 blocks and an override session is active,
+    ///    the same is done with the session's modes, starting from the
+    ///    rules layer 1 kept. If that still blocks in an enforcing mode,
+    ///    the object is blocked. Otherwise it runs as `allowed_override`,
+    ///    naming the rule layer 1 blocked by: the one the session bypassed.
+    ///
+    /// Every deny set aside is listed as overridden. A relaxed decision
+    /// keeps the named rule's effects except the notification, so the
+    /// would-block event is still logged. Its directives are those of the
+    /// last decision taken: if an allow decided it, the object runs with
+    /// that allow's containment, elevation and trust-source grants (which
+    /// are then no longer listed as overridden); otherwise it has none, so
+    /// nothing is terminated or requested. In `learning`, an object that
+    /// only the implicit deny would block is a learning candidate.
+    ///
+    /// Mandatory denies always enforce (ADR 0004, #125).
+    #[must_use]
+    pub fn evaluate_in(
+        &self,
+        subject: &Subject<'_>,
+        state: &DeviceState,
+        trace_id: TraceId,
+    ) -> Option<Decision> {
+        if mode::device_mode(self.policy, state) == Mode::Disabled {
+            return None;
+        }
+        let t = subject.object_type;
+        let matched = self.matching(subject);
+        let (full, winner) = self.run(&matched, trace_id);
+        if full.outcome() != Outcome::Blocked {
+            let mode = self.mode_of(t, winner, state).mode;
+            return Some(full.in_mode(mode));
+        }
+        // Layer 1: the modes, without the session.
+        let base = DeviceState {
+            session: None,
+            ..*state
+        };
+        let one = self.enforcing(t, &matched, (full.clone(), winner), &base, trace_id);
+        if !one.blocks {
+            let effective = self.mode_of(t, winner, &base);
+            let learning = effective.mode == Mode::Learning && winner.is_none();
+            let directives = one.directives();
+            return Some(full.relaxed(effective, directives, learning));
+        }
+        let Some(_) = state.session else {
+            return Some(
+                one.decision
+                    .with_overridden(one.dropped)
+                    .in_mode(Mode::Enforce),
+            );
+        };
+        // Layer 2: what the session relaxes of what layer 1 enforced.
+        let two = self.enforcing(
+            t,
+            &one.kept,
+            (one.decision.clone(), one.winner),
+            state,
+            trace_id,
+        );
+        let mut dropped = one.dropped.clone();
+        dropped.extend(two.dropped.iter().copied());
+        if two.blocks {
+            return Some(two.decision.with_overridden(dropped).in_mode(Mode::Enforce));
+        }
+        let effective = self.mode_of(t, one.winner, state);
+        let directives = two.directives();
+        Some(
+            one.decision
+                .with_overridden(one.dropped)
+                .relaxed(effective, directives, false),
+        )
+    }
+
+    /// The effective mode of a decision decided by `rule`, or by the
+    /// implicit deny.
+    fn mode_of(
+        &self,
+        t: ObjectType,
+        rule: Option<&Compiled<'_>>,
+        state: &DeviceState,
+    ) -> mode::EffectiveMode {
+        mode::resolve(self.policy, t, rule.map(|r| (r.set, r.rule)), state)
+    }
+
+    /// One relaxation layer. `first` is the decision over `rules`. If it
+    /// blocks in a mode that enforces under `state`, it stands. Otherwise
+    /// every deny that does not enforce under `state` is set aside, and the
+    /// rest are decided again.
+    fn enforcing<'a>(
+        &self,
+        t: ObjectType,
+        rules: &[&'a Compiled<'p>],
+        first: (Decision, Option<&'a Compiled<'p>>),
+        state: &DeviceState,
+        trace_id: TraceId,
+    ) -> Layer<'a, 'p> {
+        let enforces = |r: Option<&Compiled<'_>>| self.mode_of(t, r, state).mode == Mode::Enforce;
+        let (decision, winner) = first;
+        if decision.outcome() == Outcome::Blocked && enforces(winner) {
+            return Layer {
+                decision,
+                winner,
+                kept: rules.to_vec(),
+                dropped: Vec::new(),
+                blocks: true,
+            };
+        }
+        let (dropped, kept): (Vec<&Compiled<'p>>, Vec<&Compiled<'p>>) = rules
+            .iter()
+            .partition(|r| matches!(r.role, Role::Policy(Verdict::Deny)) && !enforces(Some(r)));
+        let (decision, winner) = self.run(&kept, trace_id);
+        let blocks = decision.outcome() == Outcome::Blocked && enforces(winner);
+        Layer {
+            decision,
+            winner,
+            kept,
+            dropped: dropped.iter().map(|r| r.reference).collect(),
+            blocks,
+        }
+    }
+
+    /// The enabled rules that apply to the subject.
+    fn matching(&self, subject: &Subject<'_>) -> Vec<&Compiled<'p>> {
+        self.rules.iter().filter(|r| r.applies(subject)).collect()
+    }
+
+    /// Runs the stages over the rules that apply, and returns the decision
+    /// and the deciding rule (`None` for the implicit deny).
+    fn run<'a>(
+        &self,
+        matched: &[&'a Compiled<'p>],
+        trace_id: TraceId,
+    ) -> (Decision, Option<&'a Compiled<'p>>) {
         let mut mandatory = Vec::new();
         let mut exclusions = Vec::new();
         let mut policy = Vec::new();
         let mut annotations = Vec::new();
         let mut trust = Vec::new();
-        for rule in self.rules.iter().filter(|r| r.applies(subject)) {
+        for &rule in matched {
             match rule.role {
                 Role::Mandatory => mandatory.push(rule),
                 Role::Exclusion => exclusions.push(rule),
@@ -302,11 +489,10 @@ impl<'p> Evaluator<'p> {
                     .filter(|r| r.rule.id != winner.rule.id)
                     .map(|r| r.reference)
                     .collect();
-                return self.decide(winner, trace_id).with_context(
-                    overridden,
-                    annotations,
-                    Vec::new(),
-                );
+                let d =
+                    self.decide(winner, trace_id)
+                        .with_context(overridden, annotations, Vec::new());
+                return (d, Some(winner));
             }
         }
 
@@ -317,11 +503,9 @@ impl<'p> Evaluator<'p> {
         let Some(i) = self.resolver.resolve(&set).winner else {
             // Stage 6: nothing decided.
             let overridden = trust.iter().map(|r| r.reference).collect();
-            return Decision::implicit_deny(trace_id).with_context(
-                overridden,
-                annotations,
-                Vec::new(),
-            );
+            let d =
+                Decision::implicit_deny(trace_id).with_context(overridden, annotations, Vec::new());
+            return (d, None);
         };
         let (winner, verdict) = policy[i];
         let mut overridden: Vec<RuleRef> = policy
@@ -341,8 +525,10 @@ impl<'p> Evaluator<'p> {
             overridden.extend(trust.iter().map(|r| r.reference));
             Vec::new()
         };
-        self.decide(winner, trace_id)
-            .with_context(overridden, annotations, grants)
+        let d = self
+            .decide(winner, trace_id)
+            .with_context(overridden, annotations, grants);
+        (d, Some(winner))
     }
 
     /// The decision of a deciding rule. Only enabled rules with a terminal
