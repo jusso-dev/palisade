@@ -18,8 +18,15 @@ use zeroize::Zeroizing;
 /// checks are part of the secrets work in #227.
 pub fn read_secret_file(path: &Path, max_len: usize) -> Result<Zeroizing<Vec<u8>>, String> {
     let shown = path.display();
-    let mut file =
-        std::fs::File::open(path).map_err(|e| format!("cannot open secret file {shown}: {e}"))?;
+    let mut file = std::fs::File::open(path).map_err(|e| {
+        // Windows cannot open a directory as a file, so the regular-file
+        // check below never runs there. Report it the same way on every OS.
+        if path.is_dir() {
+            format!("secret file {shown} is not a regular file")
+        } else {
+            format!("cannot open secret file {shown}: {e}")
+        }
+    })?;
     let meta = file
         .metadata()
         .map_err(|e| format!("cannot inspect secret file {shown}: {e}"))?;
