@@ -60,23 +60,13 @@ A fuller setup guide, a dev container and opt-in Git hooks are planned in [#29](
 
 ## Before you push
 
-Run the same checks CI runs. [docs/ci.md](docs/ci.md) explains each one.
+Run the same checks CI runs. [docs/ci.md](docs/ci.md) explains each one, and how to install the
+few extra tools.
 
 ```sh
-cargo fmt --all --check
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-cargo clippy -p palisade-core -p palisade-driver --no-default-features --all-targets --locked -- -D warnings
-cargo test --workspace --all-features --locked
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked
-cargo xtask check-deps
-cargo xtask check-manifests
-cargo xtask check-unsafe
-cargo xtask check-workflows
-cargo deny --locked check
+cargo xtask ci          # every check in ci.yml
+cargo xtask ci --fast   # skips docs, feature-powerset and msrv
 ```
-
-A single `cargo xtask ci` command that runs all of these is planned in [#29](https://github.com/jusso-dev/palisade/issues/29). Until it lands, run
-the list above.
 
 ## Coding standards
 

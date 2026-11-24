@@ -17,12 +17,12 @@ type.
 |---|---|---|
 | `fmt` | ubuntu-latest | `cargo fmt --all --check` |
 | `clippy` | ubuntu-latest, windows-latest | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, then the same for `palisade-core` and `palisade-driver` with `--no-default-features` (the `no_std` build), and for `palisade-core` with `--no-default-features --features schema` (`no_std` with serde and JSON Schema support) |
-| `test` | ubuntu-latest, windows-latest, macos-latest | `cargo test --workspace --all-features --locked` |
+| `test` | ubuntu-latest, macos-latest, windows-latest (x64), windows-11-arm (ARM64, native) | `cargo nextest run --workspace --all-features --locked --profile ci`, then the doctests with `cargo test --doc`, then `cargo xtask test-summary` (see [Test reports](#test-reports)) |
 | `msrv` | ubuntu-latest | `cargo +1.85.0 check --workspace --all-targets --all-features --locked`, after checking that the version matches `rust-version` in `Cargo.toml` |
 | `docs` | ubuntu-latest | `cargo doc --workspace --no-deps --all-features --locked` with `RUSTDOCFLAGS=-D warnings` |
-| `deps` | ubuntu-latest | `cargo xtask check-deps`, `cargo xtask check-manifests`, `cargo xtask check-unsafe`, `cargo deny --locked check` |
+| `deps` | ubuntu-latest | `cargo xtask check-deps`, `cargo xtask check-manifests`, `cargo xtask check-unsafe`, `cargo deny --locked check`, `cargo audit` |
 | `feature-powerset` | ubuntu-latest | `cargo hack check --each-feature --all-targets --locked` on the portable crates (`core`, `fileid`, `policy`, `proto`, `server`, `cli`, `console`) |
-| `runner-guard` | ubuntu-latest | `cargo xtask check-workflows` |
+| `runner-guard` | ubuntu-latest | `cargo xtask check-workflows` ([Runner and action policy](#runner-and-action-policy)) |
 | `workflow-lint` | ubuntu-latest | `actionlint` (checksum-verified release) and `zizmor --offline` |
 | `ci-ok` | ubuntu-latest | Passes only if every job above succeeded |
 
@@ -30,6 +30,25 @@ type.
 depends on every other job and fails if any of them failed, was cancelled or
 was skipped, so new jobs are covered without changing the branch rules. The
 ruleset is in [repo-settings.md](repo-settings.md#branch-protection-for-main).
+Requiring the one aggregate check, instead of each job by name, is how the
+required set in #21 (fmt, both clippy runs, the tests, msrv, deps, docs and
+runner-guard) is enforced: a matrix job's check names change whenever the
+matrix does, and the aggregate cannot be left out of date.
+
+The `test` matrix runs the whole workspace on every runner. On Linux and the
+other desktop OS that means the portable crates, plus the Windows-only crates
+as stubs; Windows x64 and Windows ARM64 run everything natively. The issue's
+`test-portable`, `test-windows-x64` and `test-windows-arm64` are the four
+entries of this one matrix.
+
+#### Test reports
+
+nextest writes a JUnit report (`.config/nextest.toml`, profile `ci`) to
+`target/nextest/ci/junit.xml`. The `Test summary` step runs even when the
+tests fail, and `cargo xtask test-summary` turns the report into a table on
+the job's summary page and one error annotation per failed test. Failure
+names are escaped, so a test name cannot inject a workflow command. If the
+tests did not build, there is no report, and the step only warns.
 
 ### `pr-title.yml` (pull requests, including title edits)
 
@@ -84,9 +103,9 @@ checkout). Details:
 
 ### `audit.yml` (daily at 03:17 UTC, and on demand)
 
-Runs `cargo deny check advisories` and `cargo audit` against `main`. A new
-advisory can affect `main` without any change here, which is why this is
-scheduled. On failure, a second job opens an issue titled "Scheduled advisory
+Runs `cargo deny check advisories` and `cargo audit` against `main`. Both
+also run on every PR (the `deps` job). A new advisory can affect `main`
+without any change here, which is why this is also scheduled. On failure, a second job opens an issue titled "Scheduled advisory
 audit is failing" with the `area:security` label, or comments on the open
 one. That job and the `sync` job in `labels.yml` are the only places with
 `issues: write`.
@@ -122,6 +141,11 @@ file against allowlists in `xtask/src/workflows.rs`:
 - `pull_request_target` is never used, so fork PRs never run with secrets or
   a write token.
 - `actions/checkout` sets `persist-credentials: false`.
+- No file under `.github/` (workflows, scripts, issue templates, anything)
+  names a cloud-managed build or pipeline service, in any letter case,
+  anywhere in its text or its file name. The names are kept out of this
+  repository ([NAMING.md](NAMING.md)), so the check stores only their SHA-256
+  digests and compares the digest of every substring of the same length.
 
 Because the check allowlists runners and actions rather than blocklisting
 services, an unapproved build service fails by default. Adding a runner label
@@ -143,24 +167,44 @@ The workspace rules the `deps` and `feature-powerset` jobs enforce are described
 ## Running the checks locally
 
 The toolchain is pinned in `rust-toolchain.toml`, so rustup picks it up
-automatically.
+automatically. One command runs every check in `ci.yml`, with the same
+command lines:
+
+```sh
+cargo xtask ci          # everything, including docs, feature-powerset and msrv
+cargo xtask ci --fast   # skips the three slow steps
+```
+
+It runs every step even after one fails, and lists the failed ones at the
+end. Before it starts, it checks that the extra tools are installed
+(cargo-nextest, cargo-deny, cargo-audit, cargo-hack, actionlint, zizmor and,
+without `--fast`, the MSRV toolchain), and prints the install command for
+each one that is missing, at the version CI uses. Jobs that differ only by
+runner run once, on your machine. A unit test in `xtask/src/ci.rs` compares
+its steps with `ci.yml`, so the two cannot drift.
+
+The same checks, one by one:
 
 ```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo clippy -p palisade-core -p palisade-driver --no-default-features --all-targets --locked -- -D warnings
 cargo clippy -p palisade-core --no-default-features --features schema --all-targets --locked -- -D warnings
-cargo test --workspace --all-features --locked
+cargo nextest run --workspace --all-features --locked --profile ci   # needs cargo-nextest 0.9
+cargo test --workspace --all-features --locked --doc
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked
 cargo xtask check-deps
 cargo xtask check-manifests
 cargo xtask check-unsafe
 cargo xtask check-workflows
 cargo deny --locked check          # needs cargo-deny 0.22
+cargo audit                        # needs cargo-audit 0.23
 cargo hack check --each-feature --all-targets --locked \
   -p palisade-core -p palisade-fileid -p palisade-policy \
   -p palisade-proto -p palisade-server -p palisade-cli \
   -p palisade-console                                    # needs cargo-hack 0.6
+actionlint -color && zizmor --offline .github/workflows
+cargo +1.85.0 check --workspace --all-targets --all-features --locked
 bash .github/scripts/check-pr-title.test.sh
 bash .github/scripts/check-pr-title.sh "docs: example title"
 bash .github/scripts/check-dco.test.sh
@@ -176,4 +220,18 @@ rustup target add x86_64-pc-windows-gnu
 cargo check --workspace --all-targets --target x86_64-pc-windows-gnu
 ```
 
-A single `cargo xtask ci` command that runs all of these is planned in #29.
+`cargo test --workspace --all-features --locked` still works and runs the
+same tests, without the JUnit report.
+
+## Not run in CI yet
+
+Each of these arrives with the work it depends on, and runs on GitHub-hosted
+runners like everything else:
+
+- Uploading the JUnit report as an artefact. That needs an action outside the
+  allowlist, so it waits for the test infrastructure work (#25). The summary
+  and annotations above already show the results on the run.
+- A Postgres service container for server tests, with the first server tests
+  (#126, #127).
+- The mdBook build and link check, with the documentation site (#27).
+- The `vm-smoke` subset of the Windows VM harness (#26).

@@ -6,7 +6,9 @@
 
 #![forbid(unsafe_code)]
 
+mod ci;
 mod deps;
+mod junit;
 mod manifests;
 mod unsafe_code;
 mod workflows;
@@ -20,16 +22,31 @@ const HELP: &str = "\
 Usage: cargo xtask <command>
 
 Commands:
+  ci [--fast]      Run the checks from .github/workflows/ci.yml locally (--fast skips docs,
+                   feature-powerset and msrv)
   check-deps       Enforce the allowed dependency directions between crates
   check-manifests  Enforce workspace inheritance of package fields, lints and dependency versions,
                    and that every crate README documents its features
   check-unsafe     Enforce the unsafe-code allowlist (unsafe-allowlist.txt, ADR 0011)
-  check-workflows  Enforce the CI runner and action policy for .github/workflows
+  check-workflows  Enforce the CI runner and action policy for .github/workflows,
+                   and that nothing under .github names a cloud-managed build service
+  test-summary <label> <junit.xml>
+                   Summarise a nextest JUnit report for the GitHub job page
   help             Show this message
 ";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let [command, label, path] = args.as_slice() {
+        if command == "test-summary" {
+            return test_summary(label, Path::new(path));
+        }
+    }
+    match args.as_slice() {
+        [command] if command == "ci" => return run_ci(false),
+        [command, fast] if command == "ci" && fast == "--fast" => return run_ci(true),
+        _ => {}
+    }
     let command = match args.as_slice() {
         [command] => command.as_str(),
         _ => "",
@@ -53,6 +70,74 @@ fn main() -> ExitCode {
     } else {
         ExitCode::FAILURE
     }
+}
+
+/// `cargo xtask ci`: the CI checks, run locally from the workspace root.
+fn run_ci(fast: bool) -> ExitCode {
+    let root = workspace_root();
+    let rust_version = read(&root.join("Cargo.toml"))
+        .and_then(|s| {
+            s.parse::<toml::Table>()
+                .map_err(|e| format!("Cargo.toml: invalid TOML: {e}"))
+        })
+        .and_then(|m| {
+            m.get("workspace")
+                .and_then(|w| w.get("package"))
+                .and_then(|p| p.get("rust-version"))
+                .and_then(toml::Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| "Cargo.toml: no workspace.package.rust-version".to_owned())
+        });
+    match rust_version.and_then(|v| ci::run(&root, fast, &v)) {
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => ExitCode::FAILURE,
+        Err(error) => {
+            eprintln!("ci: error: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Prints the Markdown summary of a nextest JUnit report to
+/// `$GITHUB_STEP_SUMMARY` (or stdout outside GitHub Actions), and one error
+/// annotation per failed test. The test step itself reports failure, so this
+/// exits non-zero only when the report cannot be read or parsed. A missing
+/// report (the tests did not build) is a warning, not an error.
+fn test_summary(label: &str, path: &Path) -> ExitCode {
+    if !path.exists() {
+        println!(
+            "::warning title=No test report::{} was not written; see the test step's log",
+            path.display()
+        );
+        return ExitCode::SUCCESS;
+    }
+    let report = match read(path).and_then(|xml| junit::parse(&xml)) {
+        Ok(report) => report,
+        Err(error) => {
+            eprintln!("test-summary: error: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let markdown = junit::markdown(label, &report);
+    match std::env::var_os("GITHUB_STEP_SUMMARY") {
+        Some(summary) => {
+            use std::io::Write as _;
+            let written = std::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(&summary)
+                .and_then(|mut f| f.write_all(markdown.as_bytes()));
+            if let Err(error) = written {
+                eprintln!("test-summary: error: cannot write the step summary: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+        None => print!("{markdown}"),
+    }
+    for annotation in junit::annotations(&report) {
+        println!("{annotation}");
+    }
+    ExitCode::SUCCESS
 }
 
 /// Runs one check and prints its outcome. Returns `true` when it passed.
@@ -150,7 +235,10 @@ fn check_unsafe(root: &Path) -> Result<Vec<String>, String> {
 }
 
 fn check_workflows(root: &Path) -> Result<Vec<String>, String> {
-    workflows::check_dir(&root.join(".github").join("workflows"))
+    let github = root.join(".github");
+    let mut violations = workflows::check_dir(&github.join("workflows"))?;
+    violations.extend(workflows::check_terms(&github)?);
+    Ok(violations)
 }
 
 /// The repository root: this crate lives in `<root>/xtask`.

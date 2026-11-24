@@ -55,11 +55,14 @@ jobs:
       # The same, with the optional serde and JSON Schema support, which must also build without `std`.
       - run: cargo clippy -p palisade-core --no-default-features --features schema --all-targets --locked -- -D warnings
 
+  # The whole workspace on every runner: Linux and the other desktop OS
+  # (portable crates; the Windows-only crates build as stubs there), Windows
+  # x64, and Windows ARM64 natively.
   test:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest, windows-11-arm]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -70,7 +73,19 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo test --workspace --all-features --locked
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: cargo-nextest@0.9.152
+      - run: cargo nextest run --workspace --all-features --locked --profile ci
+      # nextest does not run doctests.
+      - run: cargo test --workspace --all-features --locked --doc
+      - name: Test summary
+        if: ${{ !cancelled() }}
+        # bash on every runner, so "$LABEL" reads the environment on Windows too.
+        shell: bash
+        env:
+          LABEL: ${{ matrix.os }}
+        run: cargo xtask test-summary "$LABEL" target/nextest/ci/junit.xml
 
   msrv:
     runs-on: ubuntu-latest
@@ -115,11 +130,14 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
         with:
-          tool: cargo-deny@0.22.0
+          tool: cargo-deny@0.22.0,cargo-audit@0.23.0
       - run: cargo xtask check-deps
       - run: cargo xtask check-manifests
       - run: cargo xtask check-unsafe
       - run: cargo deny --locked check
+      # The same advisory database, read by a second tool on every PR; the
+      # daily audit.yml catches advisories published after a merge.
+      - run: cargo audit
 
   # Every feature of the portable crates builds on its own, so no feature
   # silently depends on another being on (docs/workspace.md#feature-flags).

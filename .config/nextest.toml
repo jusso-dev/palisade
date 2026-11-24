@@ -1,0 +1,11 @@
+# cargo-nextest configuration. CI runs `cargo nextest run --profile ci`.
+# Reference: https://nexte.st/docs/configuration/
+
+[profile.ci]
+# Run every test even after a failure, so one run reports all of them.
+fail-fast = false
+
+[profile.ci.junit]
+# Written to target/nextest/ci/junit.xml. `cargo xtask test-summary` turns it
+# into the job summary and one annotation per failed test.
+path = "junit.xml"
