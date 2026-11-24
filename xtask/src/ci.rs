@@ -204,6 +204,13 @@ pub const STEPS: &[Step] = &[
         )
     },
     Step {
+        tool: Some(DENY),
+        ..step(
+            "deps",
+            "cargo deny --locked --manifest-path crates/palisade-policy/fuzz/Cargo.toml --config deny.toml check",
+        )
+    },
+    Step {
         tool: Some(AUDIT),
         ..step("deps", "cargo xtask audit")
     },

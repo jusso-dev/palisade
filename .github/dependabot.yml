@@ -49,6 +49,18 @@ updates:
     commit-message:
       prefix: "chore(deps)"
 
+  - package-ecosystem: cargo
+    directory: /crates/palisade-policy/fuzz
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      fuzz-cargo-minor-and-patch:
+        update-types: [minor, patch]
+    labels: ["area:security"]
+    commit-message:
+      prefix: "chore(deps)"
+
   # Bumps the pinned action SHAs and their version comments.
   - package-ecosystem: github-actions
     directory: /

@@ -32,6 +32,9 @@ jobs:
       - run: >-
           cargo deny --locked --manifest-path crates/palisade-proto/fuzz/Cargo.toml
           --config deny.toml check advisories
+      - run: >-
+          cargo deny --locked --manifest-path crates/palisade-policy/fuzz/Cargo.toml
+          --config deny.toml check advisories
       # cargo-audit with the same ignores as deny.toml, over the root
       # lockfile and every fuzz workspace's lockfile.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
