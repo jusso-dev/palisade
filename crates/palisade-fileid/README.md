@@ -433,8 +433,11 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   maps RVAs with the parser's loader layout and makes small reads of the
   import, export, resource root, CLR and load configuration directories.
   Its `Driver` rule includes every `pe` kernel driver signal (`INIT`,
-  `IMAGE_FILE_SYSTEM`, kernel module imports), so it agrees with
-  `PeInfo::is_kernel_driver`.
+  `IMAGE_FILE_SYSTEM`, kernel module imports), so an image for which
+  `PeInfo::is_kernel_driver` is true is a `Driver` here too. (#44's rule
+  also makes a native image that does not import `ntdll.dll` a `Driver`.)
+  The import table ends where the loader ends it: at the first descriptor
+  with no name or no import address table.
 
 ## Handling untrusted input
 

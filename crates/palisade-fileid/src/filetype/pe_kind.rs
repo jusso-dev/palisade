@@ -1,7 +1,8 @@
 //! `MZ` files: PE sub-classification, and the older NE, LE, LX and DOS
 //! formats.
 //!
-//! The PE headers are parsed by [`crate::pe::parse_prefix`] (#45), over only
+//! The PE headers are parsed by the #45 parser's prefix parse
+//! ([`crate::pe::parse_prefix`], without its directory work), over only
 //! the header bytes: the DOS header up to the end of the section table. RVAs
 //! are then mapped with the same loader layout the parser uses, against the
 //! real file length, and the few directories the sub-kind needs (imports,
@@ -134,11 +135,12 @@ fn classify_pe<R: Read + Seek + ?Sized>(
 }
 
 /// Reads the bytes from the start of the file to the end of the section
-/// table, and parses them with [`pe::parse_prefix`] against the real file
-/// length. Section data, the certificate table and anything else past the
-/// headers is not read, and the parser's own directory work (imports,
-/// exports, resources, the driver verdict) is skipped for a prefix rather
-/// than run over bytes that are not there.
+/// table, and parses them as [`pe::parse_prefix`] does against the real
+/// file length, but never with the parser's own directory work (imports,
+/// exports, resources, the manifest, the driver verdict): not even when
+/// the header bytes run to the end of the file, so its full-table limits
+/// cannot cost more than the bounded probes below. Section data, the
+/// certificate table and anything else past the headers is not read.
 fn parse_headers<R: Read + Seek + ?Sized>(
     src: &mut Source<'_, R>,
     e_lfanew: u32,
@@ -152,7 +154,7 @@ fn parse_headers<R: Read + Seek + ?Sized>(
     // At most 1 MiB + 4 + 20 + 65,535 + 40,960 bytes.
     let len = usize::try_from(end).map_err(|_| ParseError::ReadBudgetExceeded)?;
     let headers = src.read_at(0, len)?;
-    pe::parse_prefix(&headers, src.len()).map_err(|e| ParseError::Pe(e.kind))
+    pe::parse_headers_only(&headers, src.len()).map_err(|e| ParseError::Pe(e.kind))
 }
 
 /// Bounded reads of the PE directories, through the loader's RVA mapping.
@@ -285,8 +287,9 @@ impl<R: Read + Seek + ?Sized> Probe<'_, '_, '_, R> {
         let Some(rva) = Self::directory(info, DataDirectoryKind::Import) else {
             return found;
         };
-        // The loader reads descriptors until an all-zero one, whatever the
-        // directory size says.
+        // The loader reads descriptors until one with no name or no import
+        // address table, whatever the directory size says, as
+        // `pe::PeInfo::imports` does (#45).
         let Some(table) = self.read_rva(rva, MAX_IMPORT_DESCRIPTORS * IMPORT_DESCRIPTOR_LEN) else {
             return found;
         };
@@ -294,7 +297,7 @@ impl<R: Read + Seek + ?Sized> Probe<'_, '_, '_, R> {
         for descriptor in table.chunks_exact(IMPORT_DESCRIPTOR_LEN) {
             let name_rva = u32_at(descriptor, 12).unwrap_or(0);
             let thunks = u32_at(descriptor, 16).unwrap_or(0);
-            if name_rva == 0 && thunks == 0 {
+            if name_rva == 0 || thunks == 0 {
                 terminated = true;
                 break;
             }

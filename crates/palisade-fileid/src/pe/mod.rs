@@ -859,6 +859,20 @@ pub fn parse_with(data: &[u8], options: &ParseOptions) -> Result<PeInfo, PeError
 ///
 /// `prefix` longer than `file_len` is cut to `file_len`.
 pub fn parse_prefix(prefix: &[u8], file_len: u64) -> Result<PeInfo, PeError> {
+    prefix_impl(prefix, file_len, true)
+}
+
+/// [`parse_prefix`], but the debug directory, resources, imports, exports
+/// and the driver verdict are never worked out, even when `prefix` holds
+/// the whole file. For callers that read only the headers and do their
+/// own bounded directory reads (the file type classifier, #44).
+pub(crate) fn parse_headers_only(prefix: &[u8], file_len: u64) -> Result<PeInfo, PeError> {
+    prefix_impl(prefix, file_len, false)
+}
+
+/// [`parse_prefix`]; `directories` allows the directory work when
+/// `prefix` is the whole file.
+fn prefix_impl(prefix: &[u8], file_len: u64, directories: bool) -> Result<PeInfo, PeError> {
     let prefix = prefix
         .get(
             ..usize::try_from(file_len)
@@ -868,7 +882,12 @@ pub fn parse_prefix(prefix: &[u8], file_len: u64) -> Result<PeInfo, PeError> {
         .unwrap_or(prefix);
     let file_len = file_len.max(to_u64(prefix.len()));
     let whole = to_u64(prefix.len()) == file_len;
-    let info = parse_impl(prefix, file_len, &ParseOptions::metadata_only(), whole)?;
+    let info = parse_impl(
+        prefix,
+        file_len,
+        &ParseOptions::metadata_only(),
+        whole && directories,
+    )?;
     if !whole {
         let sections = usize::from(info.coff.number_of_sections).min(MAX_SECTIONS);
         let needed = info
@@ -1437,5 +1456,78 @@ fn manifest_from_resources(
             warnings.push(at, WarningKind::Manifest(e));
             (None, id)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn put16(b: &mut [u8], at: usize, v: u16) {
+        b[at..at + 2].copy_from_slice(&v.to_le_bytes());
+    }
+
+    fn put32(b: &mut [u8], at: usize, v: u32) {
+        b[at..at + 4].copy_from_slice(&v.to_le_bytes());
+    }
+
+    /// A native PE32+ image with one section holding an import table that
+    /// names `ntoskrnl.exe`: a kernel driver to the full parse.
+    fn native_driver() -> Vec<u8> {
+        let mut b = vec![0_u8; 0x400];
+        b[..2].copy_from_slice(b"MZ");
+        put32(&mut b, 0x3c, 0x40);
+        b[0x40..0x44].copy_from_slice(b"PE\0\0");
+        let coff = 0x44;
+        put16(&mut b, coff, 0x8664);
+        put16(&mut b, coff + 2, 1);
+        put16(&mut b, coff + 16, 240);
+        put16(&mut b, coff + 18, 0x0022);
+        let o = coff + 20;
+        put16(&mut b, o, 0x20b);
+        put32(&mut b, o + 16, 0x1000);
+        put32(&mut b, o + 32, 0x1000);
+        put32(&mut b, o + 36, 0x200);
+        put16(&mut b, o + 40, 6);
+        put16(&mut b, o + 48, 6);
+        put32(&mut b, o + 56, 0x2000);
+        put32(&mut b, o + 60, 0x200);
+        put16(&mut b, o + 68, 1);
+        put32(&mut b, o + 108, 16);
+        // Import directory: RVA 0x1000, two descriptors.
+        put32(&mut b, o + 112 + 8, 0x1000);
+        put32(&mut b, o + 112 + 12, 40);
+        let s = o + 240;
+        b[s..s + 5].copy_from_slice(b".data");
+        put32(&mut b, s + 8, 0x200);
+        put32(&mut b, s + 12, 0x1000);
+        put32(&mut b, s + 16, 0x200);
+        put32(&mut b, s + 20, 0x200);
+        put32(&mut b, s + 36, 0x4000_0040);
+        // Section data at 0x200 (RVA 0x1000): descriptor, terminator,
+        // thunks at RVA 0x1080, the name at RVA 0x1100.
+        put32(&mut b, 0x200 + 12, 0x1100);
+        put32(&mut b, 0x200 + 16, 0x1080);
+        b[0x300..0x30c].copy_from_slice(b"ntoskrnl.exe");
+        b
+    }
+
+    #[test]
+    fn headers_only_never_parses_directories() {
+        let image = native_driver();
+        let len = to_u64(image.len());
+        let full = parse_prefix(&image, len).unwrap();
+        assert!(full.imports.is_some());
+        assert!(full.is_kernel_driver(), "{:?}", full.driver);
+        // The whole file, but headers only: no directory work at all.
+        let headers = parse_headers_only(&image, len).unwrap();
+        assert!(headers.imports.is_none() && headers.exports.is_none());
+        assert!(headers.resources.is_none() && headers.manifest.is_none());
+        assert_eq!(headers.driver, DriverClass::default());
+        assert_eq!(headers.sections, full.sections);
+        assert_eq!(headers.data_directories, full.data_directories);
+        // A prefix still needs the whole section table.
+        let short = parse_headers_only(&image[..0x150], len).unwrap_err();
+        assert!(matches!(short.kind, PeErrorKind::PrefixTooShort { .. }));
     }
 }

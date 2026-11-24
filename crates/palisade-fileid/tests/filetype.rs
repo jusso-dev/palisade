@@ -235,6 +235,99 @@ fn pe_drivers_agree_with_the_parser() {
     }
 }
 
+/// The import table ends at the first descriptor with no name or no import
+/// address table, as the loader and `pe::PeInfo::imports` read it. A kernel
+/// module named in or after that terminator is never imported.
+#[test]
+fn pe_import_table_stops_where_the_loader_does() {
+    // Descriptors: (name, FirstThunk) pairs; a name of `None` is RVA 0.
+    type Descriptor = (Option<&'static str>, bool);
+    let table = |entries: &'static [Descriptor]| {
+        move |rva: u32| {
+            let mut out = vec![0_u8; 0x400];
+            for (i, (module, thunks)) in entries.iter().enumerate() {
+                if let Some(module) = module {
+                    let at = 0x200 + i * 0x20;
+                    out[at..at + module.len()].copy_from_slice(module.as_bytes());
+                    put32(&mut out, i * 20 + 12, rva + at as u32);
+                }
+                if *thunks {
+                    put32(&mut out, i * 20 + 16, rva + 0x380);
+                }
+                // A set time stamp, so no descriptor is all zeros.
+                put32(&mut out, i * 20 + 4, 0xdead_beef);
+            }
+            out
+        }
+    };
+    let native = PeBuilder {
+        subsystem: 1,
+        ..PeBuilder::default()
+    };
+    let cases: [(PeBuilder, &[Descriptor], PeSubKind); 4] = [
+        // A kernel module in a terminator with no import address table.
+        (
+            PeBuilder::default(),
+            &[(Some("kernel32.dll"), true), (Some("ntoskrnl.exe"), false)],
+            PeSubKind::Exe,
+        ),
+        // A kernel module after a terminator with no name.
+        (
+            PeBuilder::default(),
+            &[(None, true), (Some("ntoskrnl.exe"), true)],
+            PeSubKind::Exe,
+        ),
+        // A native image importing from ntdll, then a decoy kernel import.
+        (
+            native.clone(),
+            &[(Some("ntdll.dll"), true), (Some("hal.dll"), false)],
+            PeSubKind::Exe,
+        ),
+        // A native image whose only "import" of ntdll is a terminator: it
+        // imports nothing, so it is a driver.
+        (native, &[(Some("ntdll.dll"), false)], PeSubKind::Driver),
+    ];
+    for (builder, entries, sub_kind) in cases {
+        let image = pe_with(builder, table(entries), &[(1, 0, 20)]);
+        let info = palisade_fileid::pe::parse(&image).unwrap();
+        let d = pe_details(&image, None);
+        assert_eq!(d.sub_kind, sub_kind, "{entries:?}: {d:?}");
+        assert!(!d.incomplete && !d.imports_kernel, "{entries:?}: {d:?}");
+        // The parser reads the same table: no kernel module import. (The
+        // last case is a driver here by #44's native-subsystem rule, which
+        // needs no kernel signal; the parser's verdict does.)
+        assert!(!info.is_kernel_driver(), "{entries:?}: {:?}", info.driver);
+        assert!(
+            !info
+                .driver
+                .signals
+                .iter()
+                .any(|s| matches!(s, palisade_fileid::pe::DriverSignal::ImportsKernelModule(_))),
+            "{entries:?}: {:?}",
+            info.driver
+        );
+    }
+}
+
+/// A PE whose header bytes run to the end of the file (here, one cut off
+/// just after its section table, so its import table is past the end) is
+/// classified from its headers alone: the result matches the same headers
+/// in a longer file, and is a PE whose directory reads were incomplete.
+#[test]
+fn pe_headers_to_the_end_of_the_file() {
+    let native = PeBuilder {
+        subsystem: 1,
+        ..PeBuilder::default()
+    };
+    let full = pe_with(native.clone(), imports(&["ntoskrnl.exe"]), &[(1, 0, 20)]);
+    let table_end = native.section_table_offset() + 2 * 40;
+    let cut = &full[..table_end];
+    let d = pe_details(cut, None);
+    assert!(d.incomplete && !d.imports_kernel, "{d:?}");
+    // One more byte makes it a prefix of a longer file; same answer.
+    assert_eq!(pe_details(&full[..=table_end], None), d);
+}
+
 #[test]
 fn pe_efi() {
     for subsystem in 10..=13 {
@@ -1433,7 +1526,8 @@ fn null_directory_rvas_are_absent() {
     assert_eq!(d.hybrid, None);
 
     // A null name pointer in an import descriptor and a null name table
-    // in the export directory are not read from the DOS header.
+    // in the export directory are not read from the DOS header. A
+    // descriptor with no name ends the table, as it does for the loader.
     let null_name = |_rva: u32| {
         let mut out = vec![0_u8; 0x400];
         put32(&mut out, 16, 0x1234);
@@ -1443,7 +1537,7 @@ fn null_directory_rvas_are_absent() {
         &pe_with(PeBuilder::default(), null_name, &[(1, 0, 40)]),
         None,
     );
-    assert!(d.incomplete && !d.imports_kernel);
+    assert!(!d.incomplete && !d.imports_kernel);
     let null_names = |_rva: u32| {
         let mut out = vec![0_u8; 0x400];
         put32(&mut out, 24, 3);

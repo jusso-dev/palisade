@@ -162,8 +162,8 @@ fn percent_decode_into(name: &[u8], out: &mut Vec<u8>) -> bool {
     out.extend_from_slice(name.get(..first).unwrap_or_default());
     let mut i = first;
     while let Some(&b) = name.get(i) {
-        match escape(i) {
-            Some((hi, lo)) if b == b'%' => {
+        match (b == b'%').then(|| escape(i)).flatten() {
+            Some((hi, lo)) => {
                 out.push(hi << 4 | lo);
                 i += 3;
             }
