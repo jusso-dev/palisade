@@ -28,6 +28,7 @@ type.
 | `supply-chain` | ubuntu-latest | `cargo vet --locked`, `cargo xtask check-supply-chain`, and on PRs `cargo xtask deps-report --base <base>` to the job summary ([dependencies.md](dependencies.md)) |
 | `feature-powerset` | ubuntu-latest | `cargo hack check --each-feature --all-targets --locked` on the portable crates (`core`, `fileid`, `policy`, `proto`, `server`, `cli`, `console`) |
 | `runner-guard` | ubuntu-latest | `cargo xtask check-workflows` ([Runner and action policy](#runner-and-action-policy)) |
+| `doc-checks` | ubuntu-latest | `cargo xtask threat-coverage`: the threat model's tables are complete and consistent, and every test, fuzz target and CI check it cites exists ([threat model](security/threat-model.md#keeping-it-current)) |
 | `workflow-lint` | ubuntu-latest | `actionlint` (checksum-verified release) and `zizmor --offline` |
 | `ci-ok` | ubuntu-latest | Passes only if every job above succeeded |
 

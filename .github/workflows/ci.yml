@@ -329,6 +329,21 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo xtask check-workflows
 
+  # The documentation checks that read the repository: the threat model's
+  # tables and the tests, fuzz targets and CI checks it cites (#219).
+  doc-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo xtask threat-coverage
+
   workflow-lint:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -355,7 +370,7 @@ jobs:
   # The single required check from this workflow for branch protection.
   ci-ok:
     if: always()
-    needs: [fmt, clippy, test, postgres, coverage, fuzz, bench, msrv, docs, deps, supply-chain, feature-powerset, runner-guard, workflow-lint]
+    needs: [fmt, clippy, test, postgres, coverage, fuzz, bench, msrv, docs, deps, supply-chain, feature-powerset, runner-guard, doc-checks, workflow-lint]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| Document version | 0.1.0 |
-| Last reviewed | 2026-11-24 |
-| Next review due | 2027-05-24 at the latest (see [Review cadence](#review-cadence)) |
+| Document version | 0.2.0 |
+| Last reviewed | 2026-11-25 |
+| Next review due | 2027-05-25 at the latest (see [Review cadence](#review-cadence)) |
 | Status | Draft. The residual-risk register is awaiting review by someone other than the author. |
 | Tracking issue | [#219](https://github.com/jusso-dev/palisade/issues/219), under epic [#18](https://github.com/jusso-dev/palisade/issues/18) |
 
@@ -49,8 +49,10 @@ what it does not.
   one issue that owns it.
 - **Status** has three values:
   - `planned`: the design exists (an ADR or an issue), but there is no code on `main` yet.
-  - `implemented`: the mitigation is on `main`, and the verification column names an existing
-    test, fuzz target or CI check that exercises it.
+  - `implemented`: the code that enforces the mitigation is on `main`, and the verification
+    column names an existing test, fuzz target or CI check that exercises it. When the
+    component that will call that code is still to be built (often the agent), the row's
+    residual-risk note says so.
   - `verified`: a #230 bypass scenario or a recorded red-team test shows the mitigation holding
     end to end on the Windows VM harness (#26). Nothing is `verified` yet, because the harness
     does not exist yet.
@@ -471,20 +473,20 @@ Summary by status:
 | `health` | 6 | 6 | 0 | 0 |
 | `tray` | 7 | 7 | 0 | 0 |
 | `cli` | 8 | 8 | 0 | 0 |
-| `cache` | 11 | 11 | 0 | 0 |
+| `cache` | 11 | 10 | 1 | 0 |
 | `events` | 7 | 7 | 0 | 0 |
 | `update` | 8 | 8 | 0 | 0 |
 | `api` | 11 | 11 | 0 | 0 |
 | `console` | 10 | 10 | 0 | 0 |
-| `db` | 8 | 8 | 0 | 0 |
-| `signer` | 6 | 6 | 0 | 0 |
-| `ca` | 8 | 8 | 0 | 0 |
+| `db` | 8 | 6 | 2 | 0 |
+| `signer` | 6 | 4 | 2 | 0 |
+| `ca` | 8 | 6 | 2 | 0 |
 | `ingest` | 8 | 8 | 0 | 0 |
 | `integ` | 10 | 10 | 0 | 0 |
 | `script` | 8 | 8 | 0 | 0 |
-| `ci` | 11 | 7 | 4 | 0 |
-| `engine` | 13 | 10 | 3 | 0 |
-| **Total** | **174** | **167** | **7** | **0** |
+| `ci` | 11 | 6 | 5 | 0 |
+| `engine` | 15 | 8 | 7 | 0 |
+| **Total** | **176** | **157** | **19** | **0** |
 
 ### Kernel driver (`palisade-driver`, optional minifilter)
 
@@ -596,7 +598,7 @@ Signed bundles `active`, `previous` and `pending` (ADR 0007), the anti-rollback 
 | T-cache-03 | T | An older, more permissive but validly signed bundle is replayed. | Write access to the cache or a network position | H | M | #225 | planned | The one-step N-1 fallback is a bounded exception (R-09). |
 | T-cache-04 | T | The bundle changes on disk between signature check and parsing. | Write access to the cache | H | L | #61 | planned | None. |
 | T-cache-05 | T | The anti-rollback record and caches are deleted to put the device back on the first-install audit path. | SYSTEM | H | L | #225 | planned | A SYSTEM attacker that removes every copy and the registry mirror can reach the first-install path (R-09). |
-| T-cache-06 | T | A hash cache record is edited so a file's cached hash matches an allowed hash. | SYSTEM | H | L | #46 | planned | An attacker who can read the agent's MAC key can forge records (R-01). |
+| T-cache-06 | T | A hash cache record is edited so a file's cached hash matches an allowed hash. | SYSTEM | H | L | #46 | implemented | An attacker who can read the agent's MAC key can forge records (R-01). The cache and its record format are on `main`; storing records and the key in the agent's protected store is #61. |
 | T-cache-07 | T | Time-rule state (floor, redeemed-code list, skew latch, override budget) is reset so a grant or code is revived. | SYSTEM, or offline access | M | L | #220, #222 | planned | See R-10 for the accepted clock risks. |
 | T-cache-08 | R | Cache changes cannot be tied to an actor. | Any change | L | M | #220 | planned | Without the driver the actor process is not always known. |
 | T-cache-09 | I | An offline or administrator read of the store reveals policy, exceptions or hashed secrets that can be attacked offline. | Admin, or offline disk access | M | M | #220, #225, #222 | planned | SYSTEM can always read the decrypted state (R-01); offline reads need disk encryption (R-05). |
@@ -648,7 +650,7 @@ gRPC and HTTPS fallback agent endpoints (ADR 0005), and the REST API used by the
 | T-api-06 | R | An administrator denies an API action. | Any admin action | M | M | #229, #132 | planned | A DB-level attacker can try to rewrite the chain (T-db-02). |
 | T-api-07 | I | Responses leak secrets or more data than the caller's role allows (stop-code hashes, tokens, other tenants). | Any authenticated caller | H | M | #222, #227, #229 | planned | None. |
 | T-api-08 | D | Check-in, enrolment or API floods overload the server. | Network access to the server | M | M | #229, #223, #62 | planned | A large distributed flood is out of scope (SECURITY.md). |
-| T-api-09 | D | Crafted input (deep YAML, huge policy, catastrophic regex) consumes CPU or memory. | Authenticated caller, or anyone who can submit policy | M | M | #190, #229 | planned | The server does not exist yet. The YAML limits are in place (T-engine-08); upload size and regex length caps come with #229. |
+| T-api-09 | D | Crafted input (deep YAML, huge policy, catastrophic regex) consumes CPU or memory. | Authenticated caller, or anyone who can submit policy | M | M | #190, #229 | planned | The policy YAML and regex limits are in place (T-engine-08), and every listener caps request bodies; the policy upload API and its caps come with #229. |
 | T-api-10 | E | A user grants themselves or others permissions they do not hold. | Authenticated admin with some permissions | H | M | #131, #229 | planned | None. |
 | T-api-11 | E | SQL injection reaches the database. | Any caller | H | L | #127, #229 | planned | None. |
 
@@ -675,14 +677,14 @@ Policies, devices, events, approvals, admin audit (ADR 0006, #127).
 
 | ID | STRIDE | Threat | Preconditions | Impact | Likelihood | Mitigation issue | Status | Residual risk |
 |---|---|---|---|---|---|---|---|---|
-| T-db-01 | S | The server connects to a rogue database or sends credentials in clear. | Network position between server and database | H | L | #227 | planned | None in production mode. |
+| T-db-01 | S | The server connects to a rogue database or sends credentials in clear. | Network position between server and database | H | L | #227 | planned | `verify-full` is the default; `disable` and `require` are accepted with a warning. Refusing them outside a test setup is #227. |
 | T-db-02 | T | Someone with database access rewrites or deletes admin audit records. | Database credentials | H | L | #229 | planned | The database owner role can drop the trigger; the exported, signed chain head still reveals the change. |
 | T-db-03 | T | Policy rows are inserted directly into the database so the server signs and distributes them. | Runtime database role | H | L | #229, #133 | planned | A database-level attacker with the runtime role can change what the server signs (R-08). |
 | T-db-04 | R | Changes made directly in the database bypass the application audit. | Database credentials | M | L | #229 | planned | Detection only. |
 | T-db-05 | I | A database dump or backup exposes secrets or personal data. | Access to backups | H | M | #227, #228 | planned | Personal data in events is readable to anyone with the dump unless pseudonymised. |
-| T-db-06 | I | A query without a tenant filter returns another tenant's rows. | Bug in a handler | H | M | #127 | planned | None: RLS is the control, not the filter. |
+| T-db-06 | I | A query without a tenant filter returns another tenant's rows. | Bug in a handler | H | M | #127 | implemented | None for a missing or wrong filter: RLS is the control, not the filter. A compromised server process chooses the scope itself (AC-08, R-08). |
 | T-db-07 | D | Event tables grow until storage is exhausted. | High event volume | M | M | #127, #228, #138 | planned | None if retention is set. |
-| T-db-08 | E | The runtime role disables RLS or alters tables. | Compromised server process | H | L | #127, #227 | planned | The owner role's secret must be kept off the runtime host. |
+| T-db-08 | E | The runtime role disables RLS or alters tables. | Compromised server process | H | L | #127, #227 | implemented | The owner role's secret must be kept off the runtime host. |
 
 ### Signer (policy, unlock-token and audit-chain keys)
 
@@ -691,11 +693,11 @@ The `Signer` interface with file, PKCS#11 and KMS back ends (#224).
 | ID | STRIDE | Threat | Preconditions | Impact | Likelihood | Mitigation issue | Status | Residual risk |
 |---|---|---|---|---|---|---|---|---|
 | T-signer-01 | S | A compromised server process uses the signer as an oracle to sign a permissive bundle or an unlock token. | Code execution on the server | H | L | #224, #142, #229 | planned | A non-exportable key does not stop oracle use (R-08). |
-| T-signer-02 | T | A signature made for one purpose is replayed as another (an unlock token accepted as a bundle). | Any valid signature | H | L | #225, #222 | planned | None. |
+| T-signer-02 | T | A signature made for one purpose is replayed as another (an unlock token accepted as a bundle). | Any valid signature | H | L | #225, #222 | implemented | None. The policy bundle (#225) and unlock token (#222) formats are still to be built; they use the policy and unlock domains that already exist. |
 | T-signer-03 | R | Signing operations are not recorded, so a malicious signature cannot be traced. | Any signing | M | M | #224 | planned | None. |
 | T-signer-04 | I | A private key is extracted from disk or memory. | Server host access | H | M | #224, #227 | planned | The file back end is for labs; it warns in production mode. |
 | T-signer-05 | D | The signer is unavailable, so no new bundles or tokens can be issued. | Outage of the signer | M | L | #138 | planned | Break-glass then depends on offline daily codes (#222). |
-| T-signer-06 | E | A key is used beyond its purpose, for example the policy key signing a trust set. | Server compromise | H | L | #224 | planned | None. |
+| T-signer-06 | E | A key is used beyond its purpose, for example the policy key signing a trust set. | Server compromise | H | L | #224 | implemented | None in the `pki` module. The agent does not use it yet (#220, #223). |
 
 ### Certificate authorities (offline root, online issuing CA)
 
@@ -707,10 +709,10 @@ Device and relay certificates, and trust-set manifests (#224).
 | T-ca-02 | T | The issuing CA key is compromised and used to mint device or relay certificates. | Issuing CA host compromise | H | L | #224, #223 | planned | A fake relay could receive events until the CA is rotated; payloads stay end-to-end signed. |
 | T-ca-03 | T | The offline root key is compromised. | Theft of the root key | H | L | #224 | planned | There is no clean recovery: devices must be re-enrolled with a new pin (R-11). |
 | T-ca-04 | R | Issuance is not recorded. | Any issuance | M | L | #224 | planned | None. |
-| T-ca-05 | I | With TLS 1.2, client certificates (device and tenant IDs) are visible to a passive observer. | Passive network observer | L | M | #223 | planned | TLS 1.2 deployments expose device identifiers on the wire. |
+| T-ca-05 | I | With TLS 1.2, client certificates (device and tenant IDs) are visible to a passive observer. | Passive network observer | L | M | #223 | implemented | TLS 1.2 deployments expose device identifiers on the wire. The server side is on `main`; the agent's side of the handshake is #223. |
 | T-ca-06 | D | The CA is unavailable, so certificates expire and devices cannot connect. | CA outage | M | L | #224, #223 | planned | Expired devices keep enforcing but stop reporting. |
 | T-ca-07 | E | A device certificate carries extra key usages and is used to pose as a relay or server. | A device certificate | M | L | #223 | planned | None. |
-| T-ca-08 | T | A crafted or fast-forwarded trust set is fed to the agent: malformed bytes aimed at the decoder, or a set signed with a stolen trust-set key whose `trust_version` is so high that no later set, not even a root-signed one, can be newer. | A network position, or a stolen trust-set key | H | L | #224, #220 | planned | Within one step a stolen trust-set key can still publish sets until the root signs a set without it. |
+| T-ca-08 | T | A crafted or fast-forwarded trust set is fed to the agent: malformed bytes aimed at the decoder, or a set signed with a stolen trust-set key whose `trust_version` is so high that no later set, not even a root-signed one, can be newer. | A network position, or a stolen trust-set key | H | L | #224, #220 | implemented | Within one step a stolen trust-set key can still publish sets until the root signs a set without it. The agent does not use the `pki` module yet (#220, #223). |
 
 ### Event ingest (agent events and inbound log sources)
 
@@ -770,7 +772,7 @@ GitHub-hosted runners only, release signing, update metadata, SBOM and provenanc
 | T-ci-03 | T | A pull request changes a workflow to use another runner type or to reach secrets. | Ability to open a pull request | H | M | #21 | implemented | A change to the allowlist itself is a reviewed change. |
 | T-ci-04 | T | A third-party action is replaced by a malicious version. | Compromise of an action's repository | H | L | #21 | implemented | A malicious commit at the pinned SHA would need review when bumped. |
 | T-ci-05 | T | A malicious or compromised dependency enters the build. | Compromise of a crate or a typosquat | H | M | #23 | implemented | A malicious release of an already-trusted crate passes these checks until an advisory exists (R-15). |
-| T-ci-06 | T | A pull request build poisons the Rust cache used by later `main` builds. | Ability to open a pull request | M | L | #21 | planned | The `save-if` setting is in `ci.yml` today, but nothing checks it, so a later edit could drop it. It stays planned until a check exists. |
+| T-ci-06 | T | A pull request build poisons the Rust cache used by later `main` builds. | Ability to open a pull request | M | L | #21 | implemented | A change to the rule itself is a reviewed change to `xtask/src/workflows.rs`. |
 | T-ci-07 | T | Build outputs are swapped between the build and signing steps. | Write access to workflow artefacts | H | L | #226 | planned | None. |
 | T-ci-08 | R | A shipped binary cannot be traced to a commit and build. | Any release | M | M | #226 | planned | None. |
 | T-ci-09 | I | A secret is committed or printed in CI logs. | Any contributor | H | M | #227 | planned | Secret scanning and push protection are already on, but they find known formats only, and the PR-time scanning job is not there yet. |
@@ -785,17 +787,19 @@ Pure, deterministic decision code and file parsers used by the agent, server and
 |---|---|---|---|---|---|---|---|---|
 | T-engine-01 | S | A renamed or re-tagged file matches an allow rule that checks only names or version metadata. | Standard user can copy files | H | M | #55, #191 | planned | A policy author can still choose weak rules; lint warns. |
 | T-engine-02 | S | A SHA-1 or MD5 collision makes a malicious file match an allow rule. | Ability to craft collisions | H | L | #40 | implemented | The OS-native layer on older builds may only match SHA-1 Authenticode values; the compile report flags those rules (ADR 0008). |
-| T-engine-03 | S | The Palisade Authenticode parser and the OS disagree about whether a file is signed or what it covers. | Crafted PE file | H | M | #47, #48 | planned | Parser differentials are a lasting risk class (R-16). |
-| T-engine-04 | T | Path forms (ADS, 8.3 names, case, trailing dots and spaces, `\\?\`, UNC, volume GUID) make one file match a different path rule. | Standard user | H | H | #54, #32 | planned | New path forms may appear (R-16). |
-| T-engine-05 | T | A broad allow rule defeats a deliberate deny because of the precedence model. | Policy author mistake | H | M | #35, #125 | planned | Policies that select `allow_wins` accept this risk with a warning. |
+| T-engine-03 | S | The Palisade Authenticode parser and the OS disagree about whether a file is signed or what it covers. | Crafted PE file | H | M | #47, #48 | planned | Parser differentials are a lasting risk class (R-16). The image hashes are compared with the OS policy tooling on Windows CI; the cross-check of signature verdicts against the OS trust API is #48. |
+| T-engine-04 | T | Path forms (ADS, 8.3 names, case, trailing dots and spaces, `\\?\`, UNC, volume GUID) make one file match a different path rule. | Standard user | H | H | #54, #32 | planned | New path forms may appear (R-16). Rule matching already normalises separators, prefixes, device paths, case, streams and dot components, and treats an unexpanded short name as unknown; volume GUID mapping and the agent's final-path facts are still #54 and #4. |
+| T-engine-05 | T | A broad allow rule defeats a deliberate deny because of the precedence model. | Policy author mistake | H | M | #35, #125 | implemented | Policies that select `allow_wins` accept this risk; validation warns (`allow_wins_not_recommended`). |
 | T-engine-06 | R | A decision cannot be explained or reproduced later. | Any decision | M | M | #41 | planned | None. |
 | T-engine-07 | I | A block message reveals policy internals (which paths are trusted). | Standard user | L | M | #147, #41 | planned | Some detail is intended so users can ask for help. |
 | T-engine-08 | D | Crafted input (PE tables, policy YAML) consumes excessive CPU or memory. | Standard user (files), policy author (YAML) | M | M | #45, #190, #42 | implemented | PE parsing limits are per table; the full evaluation budget is #42. |
 | T-engine-09 | E | A memory-safety bug in a file parser gives code execution in the SYSTEM agent. | Crafted file on the endpoint | H | L | #19, #45, #25, #230 | implemented | Logic bugs and panics remain possible; panics are contained (T-agent-12). The fuzz targets run for 60 s each on every PR and for 30 minutes each weekly (docs/testing.md), and parsers still to come need their own targets (#230). |
-| T-engine-10 | E | A path rule allows a folder that has a user-writable descendant (`%WINDIR%\Temp`, `%WINDIR%\Tasks`, `%WINDIR%\System32\spool\drivers\color`), or a folder whose ACL is later loosened, so a user copies a payload there and runs it. | Standard user | H | H | #54, #212, #124, #87 | planned | ACLs can change between checks; the drift report finds it later. |
+| T-engine-10 | E | A path rule allows a folder that has a user-writable descendant (`%WINDIR%\Temp`, `%WINDIR%\Tasks`, `%WINDIR%\System32\spool\drivers\color`), or a folder whose ACL is later loosened, so a user copies a payload there and runs it. | Standard user | H | H | #54, #212, #124, #87 | implemented | ACLs can change between checks; the drift report finds it later (#212). The engine and ACL evaluation are on `main`; the agent that computes the writability fact for each file is still to be built (#4). |
 | T-engine-11 | S | A user gains owner-based trust for a file: by owning it, by taking ownership of a file in a trusted location, or by overwriting in place an administrator-owned file whose ACL lets users write to it. NTFS keeps the existing owner on an in-place overwrite; the owner only changes when a new file is created. | Standard user | H | M | #117, #54, #220 | planned | Owner is a driver-only condition (ADR 0002): without the driver, or with it failing open, owner-based rules only audit and a path-plus-owner rule falls back to the broader native path allow (R-07). With the driver, the gap is a write made while the DACL was briefly permissive and tightened again before the trust was re-checked; the change journal and re-hash (#60, #46) record it. |
 | T-engine-12 | E | A trusted installer or updater writes or fetches an attacker file, which then inherits trust. | Ability to influence an installer or updater (custom action, download source) | H | M | #114, #116, #119 | planned | A trusted updater that is itself compromised passes its trust on until it is revoked. |
 | T-engine-13 | E | A parent-process trust rule is abused: a trusted parent spawns a shell or interpreter, or the attacker spoofs the reported parent process ID. | Standard user | H | M | #118, #175, #111 | planned | Until the driver ships, parent conditions can only be audited (ADR 0002, R-07). |
+| T-engine-14 | S | A file whose signature does not hold (digest mismatch, tampered signer data, weak digest, a chain to an untrusted root, a signer not allowed to sign code, revoked before the signing time, or expired without a trusted timestamp) is treated as signed by a trusted publisher. | Crafted or altered signed file | H | M | #48, #49, #50, #32 | implemented | The OS trust store cross-check (#48) and fetching revocation data online (#4) are still to be built; until then revocation is only what policy ships or the caller supplies. Parser differentials remain (R-16). |
+| T-engine-15 | S | A file is accepted as catalog-signed through a tampered or untrusted catalog, a digest looked up in the wrong slot, or a member entry for a different file. | Ability to place a catalog file or alter a file | H | L | #51 | implemented | The OS catalog database cross-check (#51) and folding catalog matches into the file identity record (#55) are still to be built. |
 
 ## Bypass attack trees
 
@@ -814,8 +818,20 @@ Verification IDs:
 - `fuzz:` followed by a name is a cargo-fuzz target that already exists on `main`;
 - `CI:` followed by a command is a check that already runs in CI.
 
-The `BYP`, `FUZZ`, `RT` and `TEST-*` names are proposals. #230 fixes the final names, and
-`xtask threat-coverage` (still to come) checks that each one links back to a threat.
+The `BYP`, `FUZZ`, `RT` and `TEST-*` names are proposals. #230 fixes the final names.
+
+In the verification column, entries are separated by `;`, and each entry that points at
+something on `main` starts with its tag:
+
+- `TEST:` then the crate in backticks and one or more test paths in backticks, for example
+  ``TEST: `palisade-policy` `tests::allow_rules_need_a_strong_positive_identity` ``. A later
+  crate name in backticks switches the crate. The last segment of a path is the test
+  function's name.
+- `fuzz:` then one or more fuzz target names in backticks.
+- `CI:` then the command in backticks, as a workflow under `.github/workflows/` runs it.
+
+`cargo xtask threat-coverage` checks this document on every pull request (see
+[Keeping it current](#keeping-it-current)).
 
 ```mermaid
 flowchart TD
@@ -1110,7 +1126,7 @@ One row per threat, in the same order as the STRIDE tables. `N/A` rows are omitt
 | T-driver-06 | Bounded, allocation-checked handling in the `no_std` driver; boot-loop detection disables the driver after repeated failed boots (#113); driver verifier runs in the VM harness; port and path handling are fuzzed. | #110, #113, #230 | FUZZ-path-normalise, BYP-drv-02 |
 | T-driver-07 | A kernel-side cache holds only file identity (hashes and signer, keyed by volume ID, file ID and change stamp), never a verdict, so every rule is evaluated for every request against the current policy and context; the identity cache does not depend on policy, so policy changes need no invalidation. Bounded request queue, per-process rate limits, `fail_secure` option; every timeout is an event. | #113, #42, #65 | BYP-drv-03 |
 | T-driver-08 | Small message surface, `// SAFETY:` comment on every unsafe block, driver depends only on `palisade-core` (ADR 0003), fuzzing of message decoders, driver verifier in the harness. | #110, #230 | FUZZ-driver-port |
-| T-driver-09 | Decide on the file object that backs the image section, at section creation, not on a path re-opened later; hashing compares size, last-write time and USN change stamp before and after the read and returns `Unstable` on a change; hash cache keyed by volume ID, file ID and USN change stamp and invalidated on write. | #110, #111, #46, #60 | BYP-toctou-01 |
+| T-driver-09 | Decide on the file object that backs the image section, at section creation, not on a path re-opened later; hashing compares size, last-write time and USN change stamp before and after the read and returns `Unstable` on a change; hash cache keyed by volume ID, file ID and USN change stamp and invalidated on write. | #110, #111, #46, #60 | TEST: `palisade-fileid` `hash_cache::a_file_changing_while_hashed_is_retried_then_unstable`; BYP-toctou-01 |
 | T-driver-10 | Vulnerable driver blocklist in the mandatory-deny tier, driver load control and inventory, hypervisor-enforced code integrity recommended, heartbeat loss alerting at the server. | #87, #105 | BYP-drv-04, RT-drv-03 |
 | T-native-01 | Signed base policies only accept supplemental policies signed by the Palisade policy key; the agent inventories active policies and raises a tamper event for unknown ones. | #83, #85 | BYP-policy-04 |
 | T-native-02 | Recommend signed policies with Secure Boot; the agent re-deploys a removed or older native policy and raises `tamper.detected`, comparing the deployed version with the expected one; the application identity service's configuration is watched. | #85, #220 | BYP-tamper-09, BYP-policy-06, RT-native-01 |
@@ -1130,10 +1146,10 @@ One row per threat, in the same order as the STRIDE tables. `N/A` rows are omitt
 | T-agent-09 | Full-memory dumps disabled by default, secrets in zeroising wrappers, minidumps exclude marked regions. | #227 | RT-agent-03 |
 | T-agent-10 | Service DACL lets administrators query only, SCM recovery actions, mutual watchdog, driver handle protection. | #220, #221 | BYP-tamper-01, RT-agent-01 |
 | T-agent-11 | Bounded blocking pool, cancellable hashing, CPU and I/O budgets; decisions never wait on the network (ADR 0009); the native layer is unaffected. | #65, #42 | BYP-drv-03 |
-| T-agent-12 | Per-file `catch_unwind` boundary, unparseable files treated as unknown (implicit deny in enforce mode), per-file panics do not trip the subsystem breaker (ADR 0012). | #45, #230 | fuzz: `pe_parse`, BYP-tamper-14 |
+| T-agent-12 | Per-file `catch_unwind` boundary, unparseable files treated as unknown (implicit deny in enforce mode), per-file panics do not trip the subsystem breaker (ADR 0012). | #45, #230 | TEST: `palisade-agent` `a_panic_restarts_only_that_subsystem`, `three_panics_in_ten_minutes_fail_a_non_critical_subsystem`; fuzz: `pe_parse`; BYP-tamper-14 |
 | T-agent-13 | Open files by handle without following reparse points where the decision does not need it, verify the final path of the handle, write only inside the SYSTEM-only data directory, and never open a caller-supplied path as SYSTEM: the CLI or tray opens it in the caller's own context and passes the content or an open handle to the agent. | #54, #60, #220 | BYP-fs-03, RT-agent-04 |
 | T-agent-14 | Safe Rust outside the `ffi` modules (ADR 0011), 64 KiB message limit, schema-validated messages, per-client rate limit, fuzz target for IPC messages. | #220, #230 | FUZZ-ipc |
-| T-agent-15 | Time rules from ADR 0012: anchored server time and a floor that never decreases; offline-started agents keep scheduled grants closed; skew latch and `tamper.clock.skew`. | #220, #222, #225 | BYP-clock-01, BYP-clock-02, BYP-clock-03, BYP-clock-04 |
+| T-agent-15 | Time rules from ADR 0012: anchored server time and a floor that never decreases; offline-started agents keep scheduled grants closed; skew latch and `tamper.clock.skew`. | #220, #222, #225 | TEST: `palisade-policy` `mode::machine::tests::setting_the_wall_clock_back_does_not_extend_a_time_box`, `mode::machine::tests::an_observed_expiry_is_final_even_if_the_clock_is_set_back`, `palisade-fileid` `validity::rolling_the_clock_back_does_not_revive_an_expired_signer`; BYP-clock-01, BYP-clock-02, BYP-clock-03, BYP-clock-04 |
 | T-agent-16 | Services registered for safe boot and a `tamper.boot.safe_mode` event; binary and cache integrity checks at the next start; Secure Boot and disk encryption (Assumptions); boot configuration reported by compliance probes. | #220, #210 | BYP-boot-01, RT-boot-01, RT-boot-02 |
 | T-agent-17 | A deferred custom action requires a valid `UNLOCK_TOKEN` before uninstall proceeds; the entry can be hidden; `uninstall.blocked` is logged. | #222 | BYP-tamper-20 |
 | T-health-01 | The watchdog waits on the agent's process handle, not just the heartbeat, and the heartbeat pipe has the same caller verification as the agent pipe. | #220 | BYP-tamper-01 |
@@ -1162,7 +1178,7 @@ One row per threat, in the same order as the STRIDE tables. `N/A` rows are omitt
 | T-cache-03 | Anti-rollback record of the highest accepted version, kept in protected storage and mirrored in the registry; lower versions rejected with `policy.rollback_rejected`; the N-1 fallback raises a critical event and a rapid check-in; deployed native policy versions are compared with the expected one. | #225 | BYP-policy-03 (older version), BYP-policy-02, BYP-policy-06 |
 | T-cache-04 | The agent reads the whole file into private memory, verifies, then decodes that copy; no memory mapping (ADR 0007). | #61 | BYP-toctou-02 |
 | T-cache-05 | "A policy was ever accepted" checks the record, both cache files and the registry mirror; a mismatch raises `tamper.policy.rollback_suspected` (ADR 0012). | #225 | BYP-tamper-04 |
-| T-cache-06 | Each record is authenticated with HMAC-SHA-256 over volume ID, file ID, change stamp and hashes; a failed record is discarded and the file re-hashed (ADR 0007). | #46 | BYP-fs-11 (modify after allow) |
+| T-cache-06 | Each record is authenticated with HMAC-SHA-256 over volume ID, file ID, change stamp and hashes; a failed record is discarded and the file re-hashed (ADR 0007). | #46 | TEST: `palisade-fileid` `hash_cache::every_tampered_byte_is_detected`, `hash_cache::a_record_cannot_be_moved_to_another_file`, `hash_cache::arbitrary_records_are_rejected`, `hash_cache::a_hit_needs_every_key_component_to_match`; BYP-fs-11 (modify after allow) |
 | T-cache-07 | State is in protected storage and only moves in the closed direction; the floor never decreases (ADR 0012). | #220, #222 | BYP-clock-05 |
 | T-cache-08 | Driver-based protection records the actor process; the user-mode fallback records the time and the restore. | #220 | BYP-tamper-04 |
 | T-cache-09 | `tamper.config_read_level` 1 by default, optional AES-256-GCM with a DPAPI- or TPM-wrapped key, Argon2id for stored stop codes. | #220, #225, #222 | RT-cache-01 |
@@ -1190,8 +1206,8 @@ One row per threat, in the same order as the STRIDE tables. `N/A` rows are omitt
 | T-api-05 | Typed request structs with `deny_unknown_fields` and length limits. | #229 | TEST-api-input (#229) |
 | T-api-06 | Hash-chained admin audit with actor, auth method, source address, before and after, reason; signed chain head. | #229, #132 | TEST-audit-chain (#229) |
 | T-api-07 | Secret fields redacted unless a specific permission is held, and plaintext secrets are never stored; scope filtering on every query. | #222, #227, #229 | TEST-api-redaction (#222) |
-| T-api-08 | Rate limits per token, address and route class; enrolment limits; check-in jitter; endpoints keep enforcing during an outage (ADR 0009). | #229, #223, #62 | TEST-rate-limit (#229) |
-| T-api-09 | The policy YAML front end bounds input size, nesting depth, node count and lookahead; the `regex` crate is linear-time. | #190, #229 | TEST: `palisade-policy` `dsl::tests::input_size_depth_and_node_count_are_bounded`; TEST-api-limits (#229) for upload size and regex caps |
+| T-api-08 | Rate limits per token, address and route class; enrolment limits; check-in jitter; endpoints keep enforcing during an outage (ADR 0009). | #229, #223, #62 | TEST: `palisade-server` `connection_cap_holds_extra_clients_in_the_backlog`; TEST-rate-limit (#229) |
+| T-api-09 | The policy YAML front end bounds input size, nesting depth, node count and lookahead; regular expressions are linear-time and size-capped; every server listener limits declared and streamed request bodies. | #190, #229 | TEST: `palisade-policy` `dsl::tests::input_size_depth_and_node_count_are_bounded`, `ops::tests::oversized_patterns_are_rejected`, `palisade-server` `body_limits_apply_to_declared_and_streamed_bodies`; TEST-api-limits (#229) for the upload API |
 | T-api-10 | Privilege-escalation guard: a role can only grant permissions it holds; RBAC checks are server-side. | #131, #229 | TEST-rbac-escalation (#131) |
 | T-api-11 | Compile-time checked, parameterised `sqlx` queries only; CI check for string-built SQL; RLS limits the blast radius (ADR 0006). | #127, #229 | TEST-sql-lint (#229) |
 | T-console-01 | SSO with MFA, local accounts with TOTP, breached-password check, lockout and throttling, generic errors. | #130, #229 | TEST-login-lockout (#229) |
@@ -1204,34 +1220,34 @@ One row per threat, in the same order as the STRIDE tables. `N/A` rows are omitt
 | T-console-08 | Backoff rather than permanent lock, per-address limits, SSO and break-glass accounts. | #229 | TEST-login-lockout (#229) |
 | T-console-09 | Optional four-eyes approval for high-impact changes (including bulk unlock-token issue), staged rollout rings, immutable versioned policy history, mandatory-deny tier that no policy can override (ADR 0004), audit and alerting. | #142, #229, #133, #135 | RT-console-01, RT-console-02 |
 | T-console-10 | Support access is time-boxed, scoped, approved by the tenant and audited. | #128 | TEST-tenant-support (#128) |
-| T-db-01 | TLS to Postgres required in production mode, with certificate verification. | #227 | TEST-db-tls (#227) |
+| T-db-01 | TLS to Postgres required in production mode, with certificate verification. | #227 | TEST: `palisade-server` `config::tests::database_section_gets_defaults`, `config::tests::database_env_overrides`; TEST-db-tls (#227) |
 | T-db-02 | Runtime role has INSERT and SELECT only on the audit table, a trigger rejects UPDATE and DELETE, the chain head is signed hourly and can be exported to an external sink. | #229 | TEST-audit-append-only (#229) |
 | T-db-03 | Policy versions are immutable and audited; the audit chain detects changes made outside the application; dual control can require an approval record the attacker would also need to forge. | #229, #133 | RT-db-01 |
 | T-db-04 | `pal audit verify` finds gaps and edits in the chain; database logging is recommended in the deployment guide. | #229 | TEST-audit-chain (#229) |
 | T-db-05 | Envelope encryption for sensitive columns with a KEK outside the database, tokens and passwords stored as hashes, pseudonymisation options. | #227, #228 | TEST-envelope (#227) |
-| T-db-06 | `FORCE ROW LEVEL SECURITY`, fail-closed policy expression, `NOBYPASSRLS` runtime role, tenant in every foreign key (ADR 0006). | #127 | TEST-rls (#127) |
+| T-db-06 | `FORCE ROW LEVEL SECURITY` on every tenant-owned table, a fail-closed policy expression (no scope set means no rows), the scope set per transaction only, `NOBYPASSRLS` runtime role, tenant in every foreign key; `migrate verify` rejects a table without it (ADR 0006). | #127 | TEST: `palisade-server` `a_tenant_cannot_see_or_touch_another_tenants_rows_through_the_runtime_role`, `no_scope_means_no_rows_and_the_scope_ends_with_the_transaction`, `verify_finds_a_table_without_forced_rls`, `table_constraints_hold`; CI: `cargo nextest run -p palisade-server --test postgres --locked --profile ci` (`postgres` job); TEST-rls (#127) |
 | T-db-07 | Monthly partitions, retention jobs that drop partitions, capacity alerts. | #127, #228, #138 | TEST-retention (#228) |
-| T-db-08 | Runtime role is not the owner and has `NOBYPASSRLS`; migrations use a separate owner role and secret. | #127, #227 | TEST-rls (#127) |
+| T-db-08 | The runtime role owns nothing and is `NOSUPERUSER NOBYPASSRLS`, as is every role it can reach through membership; `serve` refuses to start and readiness reports `database_role_unsafe` otherwise. Migrations use a separate owner role and secret, and refuse to run as the wrong role. | #127, #227 | TEST: `palisade-server` `the_runtime_role_cannot_disable_or_bypass_row_level_security`, `an_unsafe_runtime_role_is_reported`, `role_checks_follow_membership_and_function_ownership`, `migrations_refuse_the_wrong_role_without_changing_anything`; CI: `cargo nextest run -p palisade-server --test postgres --locked --profile ci` (`postgres` job) |
 | T-signer-01 | Hardware or KMS back ends, dual control before high-impact bundles are signed, signing volume and kid monitoring, every signature audited. | #224, #142, #229 | RT-signer-01 |
-| T-signer-02 | Domain-separation prefix in every signed structure, and separate keys per purpose (ADR 0008). | #225, #222 | TEST-domain-separation (#225) |
+| T-signer-02 | Domain-separation prefix in every signed structure (`palisade-trustset-v1`, `palisade-policy-v1`, `palisade-unlock-v1`), and separate keys per purpose that the signer enforces (ADR 0008). | #225, #222 | TEST: `palisade-proto` `pki::tests::domain_prefixes_are_distinct_and_nul_terminated`, `pki::tests::independent_signatures_verify_and_only_in_their_domain`, `pki::tests::a_signature_from_another_domain_does_not_count`, `pki::tests::signer_refuses_cross_purpose_signing`; TEST-domain-separation (#225) |
 | T-signer-03 | Each signing is audited with kid and digest; agents report applied bundle kid and hash at check-in. | #224 | TEST-audit-chain (#229) |
 | T-signer-04 | PKCS#11 or KMS keys that cannot be exported; file keys are encrypted PKCS#8 with a passphrase from a secret source. | #224, #227 | RT-signer-02 |
 | T-signer-05 | Endpoints keep enforcing their current policy (ADR 0012); health checks and high-availability guidance. | #138 | TEST-ha (#138) |
 | T-signer-06 | Key separation by purpose; agents accept a trust set only from the pinned root or the endorsed trust-set key. The `palisade-proto` `pki` module implements the rule and the signer refuses cross-purpose signing; the agent does not use it yet (#220, #223). | #224 | TEST: `palisade-proto` `pki::tests::first_trust_set_must_be_signed_by_the_pinned_root`, `chained_endorsement_and_rotation_of_the_trust_set_key`, `signer_refuses_cross_purpose_signing`; TEST-trustset (#224, agent end to end) |
 | T-ca-01 | Agents pin server SPKI hashes from the trust set; EKU constraints separate client, relay and server certificates. | #224, #223 | TEST-transport-pin (#223) |
-| T-ca-02 | Each enrolled device or relay record is bound to its certificate's SPKI SHA-256 fingerprint, and the server checks the presented certificate's serial **and** public-key fingerprint against that record on every connection, so certificates minted with a reused serial and a new key are refused; compromise runbook and emergency rotation. | #224, #223 | RT-ca-01 |
+| T-ca-02 | Each enrolled device or relay record is bound to its certificate's SPKI SHA-256 fingerprint, and the server checks the presented certificate's serial **and** public-key fingerprint against that record on every connection, so certificates minted with a reused serial and a new key are refused; compromise runbook and emergency rotation. | #224, #223 | TEST: `palisade-proto` `pki::tests::certificate_binding_needs_serial_and_key`; RT-ca-01 |
 | T-ca-03 | Root key offline, used only in documented ceremonies with the `pal pki` commands. | #224 | RT-ca-02 |
 | T-ca-04 | Every key event, issuance and ceremony is in the admin audit log. | #224 | TEST-audit-chain (#229) |
-| T-ca-05 | TLS 1.3 is preferred and encrypts client certificates; the strict profile can require it. | #223 | TEST-tls-profile (#223) |
+| T-ca-05 | Every server listener prefers TLS 1.3, which encrypts client certificates; `tls.min_version = "1.3"` refuses TLS 1.2, and the `asd-strict` profile narrows suites and groups (#126). | #223 | TEST: `palisade-server` `tls12_aead_is_accepted_and_tls13_preferred`, `min_version_13_rejects_tls12`, `strict_profile_rejects_aes128_x25519_and_p256`; TEST-tls-profile (#223) |
 | T-ca-06 | Renewal at two thirds of lifetime with alerts, re-enrolment grace period. | #224, #223 | TEST-renewal (#224) |
 | T-ca-07 | Device certificates carry clientAuth only; relays have their own profile. | #223 | TEST-eku (#223) |
 | T-ca-08 | One canonical binary encoding with bounded counts and lengths, checked before any signature; `trust_version` must be strictly greater than the current one and at most 1,000,000 greater; `issued_at` may not go backwards or be in the future beyond the skew tolerance. The agent does not use it yet (#220, #223). | #224, #220 | TEST: `palisade-proto` `pki::tests::rollback_and_replay_are_rejected`, `version_fast_forward_is_capped`, `mutated_envelopes_are_canonical_or_rejected`; fuzz: `trust_set_decode` |
 | T-ingest-01 | The device ID comes from the authenticated certificate, never from the payload. | #126, #223 | TEST-ingest-identity (#126) |
 | T-ingest-02 | TLS syslog with client allowlists; each source has a trust level that is shown with its events. | #207 | TEST-syslog-tls (#207) |
-| T-ingest-03 | Schema limits on field sizes and counts, safe Rust decoding, fuzz target for the ingest API. | #196, #230 | FUZZ-ingest |
+| T-ingest-03 | Schema limits on field sizes and counts, safe Rust decoding, fuzz target for the ingest API. | #196, #230 | TEST: `palisade-proto` `events::tests::text_and_lists_are_bounded`, `events::tests::unknown_fields_are_rejected_everywhere`; FUZZ-ingest |
 | T-ingest-04 | Chain head and sequence numbers are verified on ingest; the server store is tamper-evident. | #220, #202 | BYP-tamper-17 |
 | T-ingest-05 | Tamper-evident server store, chain verification, retention. | #202 | TEST-store-chain (#202) |
-| T-ingest-06 | mTLS for all agent traffic (ISM-1984). | #223 | TEST-transport-pin (#223) |
+| T-ingest-06 | mTLS for all agent traffic (ISM-1984). | #223 | TEST: `palisade-server` `agent_listener_requires_a_client_certificate_from_the_agent_ca`, `tls10_and_11_and_plaintext_are_rejected`; TEST-transport-pin (#223) |
 | T-ingest-07 | Per-device rate limits and quotas, quarantine, partitioned storage. | #126, #229 | TEST-rate-limit (#229) |
 | T-ingest-08 | Automated actions cannot add allow rules without the review workflow; recommendation guardrails. | #201, #75 | TEST-alert-actions (#201) |
 | T-integ-01 | Signed assertions required, audience and recipient checks, replay cache, PKCE. | #204, #229 | TEST-sso (#204) |
@@ -1257,7 +1273,7 @@ One row per threat, in the same order as the STRIDE tables. `N/A` rows are omitt
 | T-ci-03 | `cargo xtask check-workflows` allows only GitHub-hosted runner labels, rejects `pull_request_target`, requires read-only top-level permissions; fork workflows need approval. | #21 | TEST: `xtask` `workflows::tests::self_hosted_runner_fails`, `pull_request_target_fails_in_every_form` |
 | T-ci-04 | Action allowlist and full-SHA pinning in `check-workflows` and in the repository settings. | #21 | TEST: `xtask` `workflows::tests::unpinned_or_unknown_actions_fail` |
 | T-ci-05 | `cargo deny` bans unknown registries and git sources and wildcards, advisory checks daily and per PR, `--locked` builds, reviewed dependency updates. | #23 | CI: `cargo deny --locked check` (`deps` job in `ci.yml`) |
-| T-ci-06 | Caches are only written from `main` (`save-if`). | #21 | None yet: a `save-if` rule in `cargo xtask check-workflows` (#21) |
+| T-ci-06 | Caches are only written from `main`: `cargo xtask check-workflows` requires every rust-cache step to set `save-if` to `false` or to the main-branch expression. | #21 | TEST: `xtask` `workflows::tests::rust_cache_must_only_save_on_main`; CI: `cargo xtask check-workflows` (`runner-guard` job in `ci.yml`) |
 | T-ci-07 | Build provenance attestations from GitHub-hosted runners, hash checks before signing, reproducible-build comparison. | #226 | TEST-provenance (#226), RT-ci-01 |
 | T-ci-08 | SLSA provenance, SBOM per release, `pal verify`. | #226 | TEST-provenance (#226) |
 | T-ci-09 | Secret scanning and push protection (`docs/repo-settings.md`), a secret-scanning job on every PR and a lint for real-looking keys outside test fixtures (#227). | #227 | TEST-secret-scan (#227) |
@@ -1265,17 +1281,19 @@ One row per threat, in the same order as the STRIDE tables. `N/A` rows are omitt
 | T-ci-11 | Read-only top-level permissions, `persist-credentials: false` on checkout, both checked by `check-workflows`. | #21 | TEST: `xtask` `workflows::tests::missing_or_broad_permissions_fail`, `checkout_must_not_persist_credentials` |
 | T-engine-01 | Renamed-binary detection, lint warnings for allow rules that rely only on mutable metadata, path rules restricted to admin-only writable locations. | #55, #191 | BYP-fs-01 (rename), BYP-fs-12 (new extension) |
 | T-engine-02 | Validation rejects an allow rule whose only identity is SHA-1 or MD5 (ADR 0008). | #40 | TEST: `palisade-policy` `tests::allow_rules_need_a_strong_positive_identity` |
-| T-engine-03 | Image hash per the format specification, page hashes, optional cross-check against the OS trust API on Windows. | #47, #48 | fuzz: `authenticode_ranges`; FUZZ-authenticode (signature parser, #230) |
-| T-engine-04 | One normalisation routine used for every path rule, comparison on the final, normalised, case-folded path; fuzz target for path normalisation. | #54, #32 | FUZZ-path-normalise, BYP-fs-02, BYP-fs-04, BYP-fs-05, BYP-fs-06, BYP-fs-07, BYP-fs-08, BYP-fs-09, BYP-fs-10 |
-| T-engine-05 | Deny-wins default and a mandatory-deny tier no model can override (ADR 0004). | #35, #125 | TEST-precedence (#35) |
-| T-engine-06 | Decision trace naming the rule, model and inputs; deterministic engine with injected time (ADR 0009). | #41 | TEST-trace (#41) |
+| T-engine-03 | Image hash per the format specification, page hashes, optional cross-check against the OS trust API on Windows. | #47, #48 | TEST: `palisade-fileid` `os_policy_tooling::hashes_match_os_policy_tooling` (Windows), `authenticode::conformant_images_match_the_specification_steps`; fuzz: `authenticode_ranges`, `authenticode_pkcs7`; FUZZ-authenticode (signature parser, #230) |
+| T-engine-04 | One normalisation routine used for every path rule, comparison on the final, normalised, case-folded path; fuzz target for path normalisation. | #54, #32 | TEST: `palisade-core` `path::normalisation_vectors`, `path::normalisation_is_idempotent`, `palisade-policy` `ops::tests::path_spellings_are_one_object`, `ops::tests::alternate_data_streams_are_their_own_object`, `ops::tests::short_names_that_were_not_expanded_are_unknown`, `ops::tests::unc_and_mapped_drives_match_both_forms`; fuzz: `fsctx_parse`; FUZZ-path-normalise, BYP-fs-02, BYP-fs-04, BYP-fs-05, BYP-fs-06, BYP-fs-07, BYP-fs-08, BYP-fs-09, BYP-fs-10 |
+| T-engine-05 | Deny-wins is the default model, and a mandatory-deny tier (the blocklists) decides before any model, exclusion, mode or override session; only a disabled device skips it (ADR 0004, #125). | #35, #125 | TEST: `palisade-policy` `tests::minimal_document_gets_documented_defaults`, `tests::allow_wins_is_a_warning_not_an_error`, `evaluate::tests::under_deny_wins_a_matching_deny_always_blocks`, `evaluate::tests::a_mandatory_deny_beats_everything_under_every_model`, `evaluate::tests::a_matching_mandatory_deny_always_blocks`, `evaluate::tests::modes::a_mandatory_deny_blocks_in_every_mode_and_session`; TEST-precedence (#35) |
+| T-engine-06 | Decision trace naming the rule, model and inputs; deterministic engine with injected time (ADR 0009). | #41 | TEST: `palisade-policy` `evaluate::tests::every_model_names_its_winner_and_every_overridden_rule`, `evaluate::tests::decisions_do_not_depend_on_list_order`; TEST-trace (#41) |
 | T-engine-07 | User-facing messages use a reduced explanation; the full trace is for admins. | #147, #41 | RT-engine-01 |
-| T-engine-08 | The YAML front end bounds size, depth, nodes and lookahead; PE debug entries and path lengths are capped. | #45, #190, #42 | TEST: `palisade-policy` `dsl::tests::input_size_depth_and_node_count_are_bounded`, `palisade-fileid` `pe::debug::tests::rsds_path_scan_is_capped` |
-| T-engine-09 | No unsafe code in the parsers: the workspace sets `unsafe_code = "forbid"`, a member crate cannot relax it, and the parser modules also carry `#![forbid(unsafe_code)]` (#19, ADR 0011). Property tests feed random and mutated images to the PE and version-info parsers on every test run; coverage-guided fuzz targets exist for them (#45). | #19, #45, #25, #230 | TEST: `xtask` `manifests::tests::own_package_fields_and_lints_fail`; `palisade-fileid` `properties` tests `parse_never_panics_on_random_bytes`, `parse_never_panics_on_mutated_images`, `version_info_never_panics`; fuzz: `pe_parse`, `version_info_parse`, `authenticode_ranges`; CI: `cargo xtask fuzz` (`fuzz` job in `ci.yml`) |
-| T-engine-10 | Path-rule ACL validation (a user-writable descendant is a lint error), default deny exceptions for known writable subfolders in shipped templates, ACL re-checks and drift reports (ISM-1392, ISM-1746), implicit deny for unknown files dropped there. | #54, #212, #124, #87 | BYP-path-01, BYP-path-02, BYP-lol-08, RT-path-01 |
-| T-engine-11 | Only administrator owners are trusted, and owner-based trust also requires that the file's DACL grants no non-administrator write, append, delete, `WRITE_DAC` or `WRITE_OWNER` rights (the same ACL check as path rules, #54). With the driver, a write by a non-administrator to a file trusted by owner revokes that trust and, where policy says so, sets the owner to the writer (#117, #220). | #117, #54, #220 | BYP-path-03, BYP-trust-05, BYP-trust-07 |
+| T-engine-08 | The YAML front end bounds size, depth, nodes and lookahead; regular expressions are linear-time, size-capped and counted per policy; PE debug entries and path lengths are capped; certificate chain building, CRLs and catalogs have work and size limits that fail closed. | #45, #190, #42 | TEST: `palisade-policy` `dsl::tests::input_size_depth_and_node_count_are_bounded`, `ops::tests::oversized_patterns_are_rejected`, `ops::tests::pathological_patterns_match_in_linear_time`, `tests::regex_count_is_capped_per_policy`, `palisade-fileid` `pe::debug::tests::rsds_path_scan_is_capped`, `chain::hostile_certificate_sets_hit_the_work_limit_and_fail_closed`, `authenticode::revocation::tests::oversized_crls_are_rejected_before_parsing`, `catalog::decoded_size_is_bounded_before_the_signature_is_checked`, `catalog::store_limits_fail_closed` |
+| T-engine-09 | No unsafe code in the parsers: the workspace sets `unsafe_code = "forbid"`, a member crate cannot relax it, and the parser modules also carry `#![forbid(unsafe_code)]` (#19, ADR 0011). Property tests feed random and mutated input to the PE, version-info, signature, certificate, timestamp, CRL, catalog and path parsers on every test run; coverage-guided fuzz targets exist for each of them (#45, #25). | #19, #45, #25, #230 | TEST: `xtask` `manifests::tests::own_package_fields_and_lints_fail`; `palisade-fileid` `properties::parse_never_panics_on_random_bytes`, `properties::parse_never_panics_on_mutated_images`, `properties::version_info_never_panics`, `chain::hostile_certificates_never_panic`, `validity::mutated_crls_never_panic`, `catalog::random_bytes_never_panic`, `fsctx::arbitrary_strings_never_panic`; fuzz: `pe_parse`, `version_info_parse`, `authenticode_ranges`, `authenticode_pkcs7`, `x509_chain`, `timestamp_crl`, `fuzz_ctl`, `fsctx_parse`; CI: `cargo xtask fuzz` (`fuzz` job in `ci.yml`) |
+| T-engine-10 | An allow, trust or exclusion that rests on a path matches only when no non-administrator can write the file or any directory above it; when that is not known, the path criterion is unknown, never a match (#34, #32). The ACL evaluation reports the first writable ancestor (#54). Unknown files dropped there fall to the implicit deny. Still planned: lint errors for rules over folders with writable descendants, default deny exceptions in shipped templates (#124, #87), and ACL re-checks with drift reports (#212, ISM-1392, ISM-1746). | #54, #212, #124, #87 | TEST: `palisade-policy` `ops::tests::allow_rules_only_trust_paths_users_cannot_write`, `ops::tests::every_action_that_runs_trusts_or_excludes_only_trusts_safe_paths`, `evaluate::tests::nothing_matching_is_the_implicit_deny`, `palisade-fileid` `fsctx::acl::tests::assess_path_reports_first_writable_ancestor`, `fsctx::acl::tests::users_modify_is_user_writable`; BYP-path-01, BYP-path-02, BYP-lol-08, RT-path-01 |
+| T-engine-11 | Only administrator owners are trusted, and owner-based trust also requires that the file's DACL grants no non-administrator write, append, delete, `WRITE_DAC` or `WRITE_OWNER` rights (the same ACL check as path rules, #54). With the driver, a write by a non-administrator to a file trusted by owner revokes that trust and, where policy says so, sets the owner to the writer (#117, #220). | #117, #54, #220 | TEST: `palisade-fileid` `fsctx::acl::tests::owner_trust_blockers_follow_the_threat_model`; BYP-path-03, BYP-trust-05, BYP-trust-07 |
 | T-engine-12 | Direct versus chained inheritance with scope limits, the updater catalogue checks the updater's own signature rules, and provenance is recorded per file (#115). | #114, #116, #119 | BYP-trust-01, BYP-trust-02 |
 | T-engine-13 | Created-by rules exclude shells and interpreters by default, child-process control, and the real creator is taken from process-creation callbacks, not the reported parent. | #118, #175, #111 | BYP-trust-03, BYP-trust-04 |
+| T-engine-14 | Signer criteria match only signatures whose status is valid (or valid, expired and timestamped, or catalog-signed); every other status is a non-match with a `signer_not_trusted` note. Signature, chain, timestamp and revocation checks fail closed and are judged as of the trusted signing time. | #48, #49, #50, #32 | TEST: `palisade-policy` `ops::tests::signer_criteria_only_trust_good_signatures`, `palisade-fileid` `signature::tampered_signature_is_invalid`, `signature::md5_is_weak_and_never_trusted`, `chain::invalid_signatures_are_never_trusted`, `chain::signers_restricted_from_code_signing_are_untrusted`, `validity::revocation_before_the_signing_time_always_revokes`, `validity::a_timestamp_needs_a_trusted_tsa`, `validity::a_forged_crl_cannot_revoke_and_cannot_vouch`; fuzz: `authenticode_pkcs7`, `x509_chain`, `timestamp_crl` |
+| T-engine-15 | A catalog counts only when its own signature verifies under the trust configuration in force; each digest is used only in its own slot; a changed file does not match its old member entry. | #51 | TEST: `palisade-fileid` `catalog::tampered_ctl_fails_the_message_digest`, `catalog::signers_follow_the_trust_configuration_in_force`, `catalog::digests_are_used_only_in_their_own_slot`, `catalog::changed_file_does_not_match`, `catalog::mutated_catalogs_never_panic_and_never_verify`; fuzz: `fuzz_ctl` |
 
 ## Residual-risk register
 
@@ -1346,14 +1364,26 @@ Each review is a changelog entry that says what changed and who reviewed it.
 ### Keeping it current
 
 - A pull request that changes a trust boundary or adds a parser of untrusted input updates this
-  document. The pull request template will ask this question; adding that checkbox is tracked in
-  #219.
+  document. The pull request template asks this question.
 - New threats get the next free number for their component. IDs are never reused.
 - A mitigation moves from `planned` to `implemented` in the pull request that lands it, with the
   test name in the verification column.
-- `xtask threat-coverage` (#219, becoming blocking with #230) will parse the mitigation table and
-  fail CI when a threat marked `implemented` or `verified` has no `TEST:`, `fuzz:` or `CI:`
-  entry, or a `verified` threat has no `BYP-*` or `RT-*` entry.
+- `cargo xtask threat-coverage` runs in the `doc-checks` CI job, behind the required `ci-ok`
+  check, so it is blocking. It fails when:
+  - a STRIDE row is malformed (cell count, ID form, category, status, impact or likelihood), an
+    ID is reused, an `N/A` row has no reason, or a component does not consider all six
+    categories;
+  - the mitigation table lacks a row for a threat, has one twice or out of order, or names
+    different issues from the STRIDE row;
+  - a threat marked `implemented` or `verified` has no `TEST:`, `fuzz:` or `CI:` entry, or a
+    `verified` threat has no `BYP-*` or `RT-*` entry;
+  - any `TEST:`, `fuzz:` or `CI:` entry, on any row, names a test function, fuzz target or
+    workflow command that does not exist;
+  - the summary by status does not match the tables;
+  - this document or a tracked `.rs` or `.md` file names a threat ID the tables do not define,
+    such as a `// threat:` comment with a wrong number.
+- What it cannot check: that a cited test really exercises the mitigation. Reviewers check that,
+  and #230 turns the proposed `BYP-*` and `RT-*` names into scenarios.
 
 ### Disclosure
 
@@ -1368,3 +1398,4 @@ needs an actor this model says Palisade does not resist.
 | Version | Date | Change | Reviewed by |
 |---|---|---|---|
 | 0.1.0 | 2026-11-24 | First version: scope, assets, actors, trust boundaries, four data-flow diagrams, STRIDE tables for 19 components, 19 attack trees, privacy threats, mitigation mapping, residual-risk register, assumptions and process. | Author only; independent review pending |
+| 0.2.0 | 2026-11-25 | Status review after the policy engine, file identity, PKI and server foundations merged. Now `implemented`, each citing tests on `main`: T-engine-05 (deny-wins default and the mandatory-deny tier), T-engine-10 (path trust needs a non-writable path), T-cache-06 (MAC-protected hash cache records), T-signer-02 (domain separation), T-signer-06 and T-ca-08 (trust sets), T-ca-05 (TLS 1.3 preferred, 1.3-only option), T-db-06 and T-db-08 (forced row-level security, runtime role checks), T-ci-06 (`save-if` rule in `check-workflows`). New threats T-engine-14 (signature, chain, timestamp and revocation verdicts) and T-engine-15 (catalog signatures), both `implemented`. Existing tests are now also cited on 13 `planned` rows (one, T-api-09, already cited one), which stay planned until the component that calls the code exists. The pull request template asks the trust-boundary question, and `cargo xtask threat-coverage` checks the tables in CI. The residual-risk register is unchanged. | Author only; independent review pending |
