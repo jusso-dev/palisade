@@ -88,7 +88,10 @@ inline-array or the `[[licenses.exceptions]]` form. Each entry needs its own com
 
 Audits are imported from two public sets run by non-profit open-source organisations. When
 cargo-vet was adopted, 6 crates were covered by imported audits, and the other 93 were recorded as
-exemptions with the note "Baseline when cargo-vet was adopted". The exemptions are the backlog.
+exemptions with the note "Baseline when cargo-vet was adopted". The 17 crates that the Authenticode
+verifier (#247) brought in while cargo-vet was in review (`ring` and its build and platform
+dependencies) are exempted the same way, with a note that names #247. The exemptions are the
+backlog.
 Each one is removed when the crate is audited, or when an imported audit covers it
 (`cargo vet prune` removes exemptions that are no longer needed).
 
