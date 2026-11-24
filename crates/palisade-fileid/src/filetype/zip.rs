@@ -188,7 +188,8 @@ fn percent_decode_into(name: &[u8], out: &mut Vec<u8>) -> bool {
 
 /// Classifies a ZIP archive by its entries. `behind_shebang` is set when
 /// the file starts with a `#!` line, as a zip application does; then only a
-/// zip application is reported, and anything else leaves `out` unchanged.
+/// zip application is reported, and anything else leaves `out` unchanged
+/// except that a failed read is recorded in its `parse_error`.
 pub(super) fn classify<R: Read + Seek + ?Sized>(
     src: &mut Source<'_, R>,
     name: &NameInfo,
@@ -197,7 +198,14 @@ pub(super) fn classify<R: Read + Seek + ?Sized>(
 ) -> bool {
     let (entries, error) = match read_entries(src) {
         Ok(found) => found,
-        Err(_) if behind_shebang => return false,
+        Err(e) if behind_shebang => {
+            // A structure that is not a clean archive is the script the
+            // shebang names; a read that failed is not established.
+            if matches!(e, ParseError::Io(_) | ParseError::ReadBudgetExceeded) {
+                out.parse_error = Some(e);
+            }
+            return false;
+        }
         Err(e) => {
             out.content_kind = FileKind::Zip;
             out.confidence = Confidence::High;
@@ -302,13 +310,12 @@ fn walk<R: Read + Seek + ?Sized>(
     let cap = to_u64(MAX_ZIP_DIRECTORY);
     let over = dir.size > cap;
     let want = usize::try_from(dir.size.min(cap)).unwrap_or(MAX_ZIP_DIRECTORY);
+    // `find_directory` puts the directory before the end records, inside
+    // the file, so the read is never clamped; a reader that ends early is
+    // an error from `read_at`.
     let data = src.read_at(dir.offset, want)?;
     let mut entries = Entries::default();
     let mut scratch = Vec::new();
-    if data.len() != want {
-        // The file ended early: the reader returned less than its length.
-        return Ok((entries, Some(ParseError::ZipDirectoryMalformed)));
-    }
     // An entry cut by the size cap is not malformed; it is past the limit.
     let cut = |e: ParseError| {
         if over {
@@ -400,10 +407,6 @@ fn find_directory<R: Read + Seek + ?Sized>(
     let len = src.len();
     let tail_start = len.saturating_sub(to_u64(TAIL_LEN));
     let tail = src.read_at(tail_start, TAIL_LEN)?;
-    if to_u64(tail.len()) != len - tail_start {
-        // The reader returned less than its length.
-        return Err(ParseError::ZipDirectoryMalformed);
-    }
     let last = |sig: &[u8; 4], from: usize| {
         tail.get(from..)
             .and_then(|t| t.windows(4).rposition(|w| w == sig))

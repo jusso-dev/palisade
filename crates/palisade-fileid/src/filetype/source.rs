@@ -6,6 +6,12 @@
 //! directory entry). Every targeted read is clamped to the file length and
 //! counted against [`MAX_TARGETED_READ`], so no input can make the
 //! classifier read, or allocate for, more than a fixed amount.
+//!
+//! The length is the one the reader reports when the file is opened. A
+//! reader that then ends before it (a file truncated while it is read, or a
+//! reader that misreports its length) is never taken as a shorter file: a
+//! targeted read fails with [`io::ErrorKind::UnexpectedEof`], and a short
+//! head is recorded ([`Source::head_short`]) for the caller to report.
 
 #![forbid(unsafe_code)]
 
@@ -41,6 +47,7 @@ pub(super) struct Source<'r, R: ?Sized> {
     reader: &'r mut R,
     len: u64,
     head: Vec<u8>,
+    head_short: bool,
     budget: usize,
 }
 
@@ -52,13 +59,22 @@ impl<'r, R: Read + Seek + ?Sized> Source<'r, R> {
         let want = usize::try_from(len).map_or(HEAD_LEN, |l| l.min(HEAD_LEN));
         let mut head = vec![0_u8; want];
         let got = read_full(reader, &mut head)?;
+        let head_short = got < want;
         head.truncate(got);
         Ok(Self {
             reader,
             len,
             head,
+            head_short,
             budget: MAX_TARGETED_READ,
         })
+    }
+
+    /// Whether the reader ended before the head was read in full, though
+    /// the length it reported says the file goes on. The head holds what
+    /// was read.
+    pub(super) const fn head_short(&self) -> bool {
+        self.head_short
     }
 
     /// The file length, as the reader reported it when opened.
@@ -71,9 +87,11 @@ impl<'r, R: Read + Seek + ?Sized> Source<'r, R> {
         &self.head
     }
 
-    /// Reads up to `len` bytes at `offset`. The result is shorter when the
-    /// file ends first. A range inside the head is served from it and costs
-    /// nothing; any other read is charged in full to the budget.
+    /// Reads up to `len` bytes at `offset`. The result is shorter only when
+    /// the reported file length ends first; a reader that ends before that
+    /// length is an [`io::ErrorKind::UnexpectedEof`] error. A range inside
+    /// the head is served from it and costs nothing; any other read is
+    /// charged in full to the budget.
     pub(super) fn read_at(&mut self, offset: u64, len: usize) -> Result<Vec<u8>, ReadError> {
         let available = self.len.saturating_sub(offset);
         let len = usize::try_from(available).map_or(len, |a| a.min(len));
@@ -89,8 +107,9 @@ impl<'r, R: Read + Seek + ?Sized> Source<'r, R> {
         self.budget = self.budget.checked_sub(len).ok_or(ReadError::Budget)?;
         self.reader.seek(SeekFrom::Start(offset))?;
         let mut buf = vec![0_u8; len];
-        let got = read_full(self.reader, &mut buf)?;
-        buf.truncate(got);
+        if read_full(self.reader, &mut buf)? < len {
+            return Err(ReadError::Io(io::ErrorKind::UnexpectedEof));
+        }
         Ok(buf)
     }
 }

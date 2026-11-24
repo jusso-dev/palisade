@@ -3447,6 +3447,154 @@ fn zip_application_entry_names_are_exact() {
     assert_eq!(kind(&zip(b"", &["APPXMANIFEST.XML"]), None), FileKind::Msix);
 }
 
+// ---------------------------------------------------------------------------
+// Review round 16: readers that end early, and failed reads in probes
+// ---------------------------------------------------------------------------
+
+/// A reader that reports `extra` more bytes than it has, then ends early
+/// once it has returned `limit` bytes.
+struct EndsEarly {
+    data: Cursor<Vec<u8>>,
+    limit: u64,
+    extra: u64,
+}
+
+impl Read for EndsEarly {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let left = self.limit.saturating_sub(self.data.position()) as usize;
+        let n = buf.len().min(left);
+        self.data.read(&mut buf[..n])
+    }
+}
+
+impl Seek for EndsEarly {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        match pos {
+            SeekFrom::End(0) => Ok(self.data.get_ref().len() as u64 + self.extra),
+            other => self.data.seek(other),
+        }
+    }
+}
+
+fn classify_ending_early(data: &[u8], limit: usize, extra: u64) -> Classification {
+    let mut reader = EndsEarly {
+        data: Cursor::new(data.to_vec()),
+        limit: limit as u64,
+        extra,
+    };
+    filetype::classify(&mut reader, None)
+}
+
+const EOF: Option<ParseError> = Some(ParseError::Io(io::ErrorKind::UnexpectedEof));
+
+#[test]
+fn readers_that_end_early_are_reported() {
+    // A PE whose reader returns nothing: not taken for an empty file.
+    let pe = PeBuilder::default().build();
+    let c = classify_ending_early(&pe, 0, 0);
+    assert_eq!((c.content_kind, c.parse_error), (FileKind::Unknown, EOF));
+    assert_eq!(c.file_size, pe.len() as u64);
+    // An HTA cut after a leading comment, before its marker.
+    let hta = b"<!-- a note -->\n<html><HTA:APPLICATION id=\"x\"/></html>\n";
+    let c = classify_ending_early(hta, 16, 0);
+    assert_eq!(c.parse_error, EOF, "{c:?}");
+    // A whole file whose reader reports more than it has.
+    let c = classify_ending_early(&pe, pe.len(), 4096);
+    assert_eq!((c.content_kind, c.parse_error), (FileKind::Pe, EOF));
+    // A signed script longer than the head, whose reader ends at the head.
+    let mut signed = b"just some words\n".repeat(HEAD_LEN / 8);
+    signed.extend_from_slice(b"# SIG # Begin signature block\n");
+    let c = classify_ending_early(&signed, HEAD_LEN, 0);
+    assert_eq!((c.content_kind, c.parse_error), (FileKind::Text, EOF));
+    // A PE header past the head, where the reader ends.
+    let image = PeBuilder::default().build();
+    let shift = 0x2_0000;
+    let mut moved = vec![0_u8; image.len() + shift];
+    moved[..0x40].copy_from_slice(&image[..0x40]);
+    put32(&mut moved, 0x3c, (E_LFANEW + shift) as u32);
+    moved[E_LFANEW + shift..0x400 + shift].copy_from_slice(&image[E_LFANEW..0x400]);
+    let c = classify_ending_early(&moved, HEAD_LEN, 0);
+    assert_eq!(c.parse_error, EOF, "{c:?}");
+    assert!(c.is_executable_content(), "{c:?}");
+    // Read in full, each is clean.
+    assert_eq!(classify(&pe, None).parse_error, None);
+    assert_eq!(classify(hta, None).content_kind, FileKind::Hta);
+    assert_eq!(classify(&moved, None).content_kind, FileKind::Pe);
+}
+
+#[test]
+fn failed_reads_in_a_planted_descriptor_polyglot_are_reported() {
+    // Text across the head with a planted descriptor, and a signature
+    // block marker in the tail.
+    let mut data = b"just some words\n".repeat(HEAD_LEN / 8);
+    data[0x8000..0x8007].copy_from_slice(b"\x01CD001\x01");
+    data.extend_from_slice(b"# SIG # Begin signature block\n");
+    assert_eq!(kind(&data, None), FileKind::Script(ScriptKind::PowerShell));
+    let c = filetype::classify(&mut FailFrom(Cursor::new(data), HEAD_LEN as u64), None);
+    assert_eq!(
+        c.parse_error,
+        Some(ParseError::Io(io::ErrorKind::PermissionDenied)),
+        "{c:?}"
+    );
+}
+
+#[test]
+fn failed_reads_in_the_shebang_zip_probe_are_reported() {
+    // A zip application longer than the head, whose end records are past
+    // it, where the reader fails.
+    let long_a = "a".repeat(40_000);
+    let long_b = "b".repeat(40_000);
+    let app = zip(b"#!/bin/sh\n", &["__main__.py", &long_a, &long_b]);
+    assert!(app.len() > HEAD_LEN + 70_000);
+    let c = classify(&app, None);
+    assert!(c.flags.python_zipapp, "{c:?}");
+    let c = filetype::classify(&mut FailFrom(Cursor::new(app), HEAD_LEN as u64), None);
+    assert_eq!(c.content_kind, FileKind::Script(ScriptKind::Shell));
+    assert_eq!(
+        c.parse_error,
+        Some(ParseError::Io(io::ErrorKind::PermissionDenied)),
+        "{c:?}"
+    );
+}
+
+#[test]
+fn failed_pe_directory_reads_are_reported() {
+    // A native user-mode program importing `ntdll.dll`, with its import
+    // section moved past the head, where the reader fails.
+    let native = PeBuilder {
+        subsystem: 1,
+        ..PeBuilder::default()
+    };
+    let mut image = pe_with(native.clone(), imports(&["ntdll.dll"]), &[(1, 0, 40)]);
+    let header = native.section_table_offset() + 40;
+    let raw_ptr = u32::from_le_bytes(image[header + 20..header + 24].try_into().unwrap()) as usize;
+    let raw_len = u32::from_le_bytes(image[header + 16..header + 20].try_into().unwrap()) as usize;
+    let section = image[raw_ptr..raw_ptr + raw_len].to_vec();
+    image.resize(HEAD_LEN, 0);
+    image.extend_from_slice(&section);
+    put32(&mut image, header + 20, HEAD_LEN as u32);
+    let d = pe_details(&image, None);
+    assert_eq!((d.sub_kind, d.incomplete), (PeSubKind::Exe, false));
+    let c = filetype::classify(&mut FailFrom(Cursor::new(image), HEAD_LEN as u64), None);
+    assert_eq!(c.content_kind, FileKind::Pe);
+    assert!(c.pe.unwrap().incomplete);
+    assert_eq!(
+        c.parse_error,
+        Some(ParseError::Io(io::ErrorKind::PermissionDenied))
+    );
+}
+
+#[test]
+fn rust_inner_attributes_do_not_start_a_zip_application() {
+    let c = classify(&zip(b"#![x]\n", &["__main__.py"]), None);
+    assert!(!c.flags.python_zipapp, "{c:?}");
+    assert!(
+        classify(&zip(b"#!/bin/sh\n", &["__main__.py"]), None)
+            .flags
+            .python_zipapp
+    );
+}
+
 /// Seed inputs for the property tests and the fuzz target.
 fn seeds() -> Vec<Vec<u8>> {
     let dll = PeBuilder {

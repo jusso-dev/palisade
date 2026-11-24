@@ -566,6 +566,11 @@ pub fn classify<R: Read + Seek + ?Sized>(
         Ok(mut src) => {
             out.file_size = src.len();
             detect(&mut src, &name, &mut out);
+            // The reader ended before the length it reported: the result
+            // describes only part of the file, so it is not established.
+            if src.head_short() && out.parse_error.is_none() {
+                out.parse_error = Some(ParseError::Io(io::ErrorKind::UnexpectedEof));
+            }
             apply_name_hints(&name, &mut out);
         }
         Err(e) => out.parse_error = Some(e.into()),
@@ -614,12 +619,16 @@ fn detect<R: Read + Seek + ?Sized>(
     // A zip application: a shebang line, then a ZIP archive. The archive
     // is binary, so this is checked before the text test, and only once:
     // anything but a clean zip application is classified as text below.
+    // A read failure in the probe is kept, and reported with whatever the
+    // text path finds, since the archive could not be ruled out.
+    let mut probe_error = None;
     if text::is_shebang_zip(head) {
         let mut probe = out.clone();
         if zip::classify(src, name, &mut probe, true) {
             *out = probe;
             return;
         }
+        probe_error = probe.parse_error;
     }
     let head = src.head();
     // Bytecode has a magic at offset 0, so it is checked before the volume
@@ -649,11 +658,16 @@ fn detect<R: Read + Seek + ?Sized>(
         text::classify(src, name, &mut head_result);
         apply_name_hints(name, &mut head_result);
         let rank = |c: &Classification| (c.is_executable_content(), c.confidence);
-        let best = if rank(&head_result) > rank(&area_result) {
-            head_result
+        let (mut best, other) = if rank(&head_result) > rank(&area_result) {
+            (head_result, area_result)
         } else {
-            area_result
+            (area_result, head_result)
         };
+        // A read that failed for either result (the head's tail read, say)
+        // is reported whichever is kept.
+        if best.parse_error.is_none() {
+            best.parse_error = other.parse_error;
+        }
         if best.is_executable_content() || best.content_kind == FileKind::Text {
             *out = best;
         } else {
@@ -662,6 +676,9 @@ fn detect<R: Read + Seek + ?Sized>(
         return;
     }
     text::classify(src, name, out);
+    if out.parse_error.is_none() {
+        out.parse_error = probe_error;
+    }
 }
 
 /// Applies the rules where the name decides between kinds that content

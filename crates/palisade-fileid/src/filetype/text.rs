@@ -353,9 +353,15 @@ pub(super) fn system_area_is_script(area: &[u8], name: &NameInfo) -> bool {
 /// The longest shebang line looked past for a ZIP local file header.
 const MAX_SHEBANG_LINE: usize = 512;
 
-/// A `#!` line followed directly by a ZIP local file header.
+/// A `#!` line followed directly by a ZIP local file header. A `#![` line
+/// is not a shebang line, as in `markers`.
 pub(super) fn is_shebang_zip(head: &[u8]) -> bool {
     head.starts_with(b"#!")
+        && !head
+            .get(2..)
+            .unwrap_or_default()
+            .trim_ascii_start()
+            .starts_with(b"[")
         && head
             .iter()
             .take(MAX_SHEBANG_LINE)

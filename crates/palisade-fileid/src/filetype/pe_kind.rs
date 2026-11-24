@@ -127,11 +127,15 @@ fn classify_pe<R: Read + Seek + ?Sized>(
         src,
         layout,
         incomplete: false,
+        read_error: None,
     };
     let details = probe.details(&info, name, out);
     out.content_kind = FileKind::Pe;
     out.confidence = Confidence::High;
     out.pe = Some(details);
+    // A directory that could not be read is not just incomplete: the
+    // sub-kind may be wrong, so the reason is reported.
+    out.parse_error = probe.read_error;
 }
 
 /// Reads the bytes from the start of the file to the end of the section
@@ -171,6 +175,8 @@ struct Probe<'s, 'r, 'l, R: ?Sized> {
     src: &'s mut Source<'r, R>,
     layout: Layout<'l>,
     incomplete: bool,
+    /// The first read that failed.
+    read_error: Option<ParseError>,
 }
 
 impl<R: Read + Seek + ?Sized> Probe<'_, '_, '_, R> {
@@ -239,16 +245,23 @@ impl<R: Read + Seek + ?Sized> Probe<'_, '_, '_, R> {
     /// Up to `len` bytes at `rva`, cut to the file-backed part of its
     /// section. `None`, and the result marked incomplete, if the RVA is
     /// zero (a null pointer, which would otherwise map to the DOS header),
-    /// does not map, or the read fails.
+    /// does not map, or the read fails; a failed read is also kept in
+    /// `read_error`.
     fn read_rva(&mut self, rva: u32, len: usize) -> Option<Vec<u8>> {
-        let got = (rva != 0)
+        let extent = (rva != 0)
             .then(|| self.layout.backed_extent(rva))
             .flatten()
             .and_then(|(offset, available)| {
                 let len = usize::try_from(available).map_or(len, |a| a.min(len));
-                let offset = u64::try_from(offset).ok()?;
-                self.src.read_at(offset, len).ok()
+                Some((u64::try_from(offset).ok()?, len))
             });
+        let got = extent.and_then(|(offset, len)| match self.src.read_at(offset, len) {
+            Ok(bytes) => Some(bytes),
+            Err(e) => {
+                self.read_error.get_or_insert(e.into());
+                None
+            }
+        });
         if got.is_none() {
             self.incomplete = true;
         }

@@ -479,8 +479,10 @@ structure behind a recognised magic keeps the outer kind, with the reason
 in `parse_error`. A PE whose headers do not parse, or that ends inside its
 optional header or section table, stays executable (`Mz16`). A read that
 fails or comes up short is reported in `parse_error` (a compound file root
-entry cut short, a ZIP extra subfield cut short, an unreadable text tail),
-never taken as a clean negative.
+entry cut short, a ZIP extra subfield cut short, an unreadable text tail, a
+failed PE directory or zip application probe), never taken as a clean
+negative. A reader that ends before the length it reported (a file
+truncated while it is read) is `Io(UnexpectedEof)`, not a shorter file.
 
 Signature data gets the same treatment. Its ASN.1 is read by one small
 DER-only module (`authenticode/asn1.rs`), which rejects BER indefinite
