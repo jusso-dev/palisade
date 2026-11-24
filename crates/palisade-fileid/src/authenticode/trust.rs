@@ -183,6 +183,11 @@ pub enum IdentityIssue {
     NoProductName,
     /// The version resource has no usable file name or version.
     NoFileNameOrVersion,
+    /// The signer is not OS code integrity compatible
+    /// ([`SignerTrust::os_ci_compatible`] is `false`), so the OS Publisher
+    /// and FilePublisher levels are not given: the OS would not honour
+    /// them, and a rule must fall back to a hash level.
+    NotOsCiCompatible,
 }
 
 /// The identity of a trusted signer, as publisher rules use it.
@@ -203,9 +208,11 @@ pub struct SignerIdentity {
     /// `(publisher_name, product_name)`: both present, for publisher plus
     /// product rules (ISM-1471).
     pub publisher_product: Option<(String, String)>,
-    /// The OS "Publisher" level.
+    /// The OS "Publisher" level. `None` when the signer is not OS code
+    /// integrity compatible ([`IdentityIssue::NotOsCiCompatible`]).
     pub publisher_os_rule: Option<PublisherOsRule>,
-    /// The OS "FilePublisher" level.
+    /// The OS "FilePublisher" level. `None` whenever
+    /// [`Self::publisher_os_rule`] is.
     pub file_publisher_os_rule: Option<FilePublisherOsRule>,
     /// What limits the rules above.
     pub issues: Vec<IdentityIssue>,
@@ -267,7 +274,12 @@ pub fn evaluate_trust(
     let primary = select_primary(&signers);
     let identity = primary.and_then(|p| {
         let signer = signers.get(p)?;
-        Some(identity(signer.signature, signer.chain.as_ref()?, version))
+        Some(identity(
+            signer.signature,
+            signer.chain.as_ref()?,
+            signer.os_ci_compatible,
+            version,
+        ))
     });
     let vendor_hint = match primary {
         Some(_) => None,
@@ -363,6 +375,7 @@ fn select_primary(signers: &[SignerTrust]) -> Option<usize> {
 fn identity(
     signature: usize,
     chain: &ChainReport,
+    os_ci_compatible: bool,
     version: Option<&VersionInfo>,
 ) -> SignerIdentity {
     let mut issues = Vec::new();
@@ -409,8 +422,12 @@ fn identity(
             None
         }
     };
+    if !os_ci_compatible {
+        issues.push(IdentityIssue::NotOsCiCompatible);
+    }
     let publisher_os_rule = root
         .zip(leaf_cn)
+        .filter(|_| os_ci_compatible)
         .map(|(root, leaf_cn)| PublisherOsRule { root, leaf_cn });
 
     let file = version.and_then(|v| {

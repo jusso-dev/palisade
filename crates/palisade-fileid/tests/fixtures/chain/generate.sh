@@ -14,7 +14,8 @@
 # SHA-256 signature by chain B, and `leaf-inter-root.p7` a SHA-256
 # signature by `leaf.der` that embeds `root.der` and `inter.der` too.
 #
-# Needs: openssl (3.x or later), osslsigncode (2.x), python3, cargo.
+# Needs: openssl 3.4 or later (for `x509 -not_before`/`-not_after`),
+# osslsigncode (2.x), python3, cargo.
 #   sh crates/palisade-fileid/tests/fixtures/chain/generate.sh
 #
 # Keys, serials and ECDSA signatures are random, so a rerun changes every

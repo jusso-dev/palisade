@@ -448,9 +448,10 @@ pub(crate) fn boolean(tlv: &Tlv<'_>) -> Result<bool> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DecodedText {
     pub text: String,
-    /// Some content was not valid for the string type (invalid UTF-8, a
-    /// non-ASCII byte in an ASCII type, an unpaired surrogate, an invalid
-    /// code point) and became U+FFFD.
+    /// Some content was not valid for the string type: invalid UTF-8, a
+    /// non-ASCII byte in an ASCII type, a surrogate in a BMPString or an
+    /// invalid code point (each became U+FFFD), or an ASCII character
+    /// outside the type's repertoire (kept as it is).
     pub lossy: bool,
 }
 
@@ -460,8 +461,22 @@ pub(crate) struct DecodedText {
 ///
 /// Unlike [`bmp_text`] and [`ascii_text`], nothing is cut: a NUL is kept as
 /// U+0000, so `"a\0b"` never reads as `"a"` (the classic null-prefix name
-/// attack), and no length limit applies beyond the input itself. TeletexString
-/// is read as Latin-1, as common implementations do.
+/// attack), and no length limit applies beyond the input itself.
+///
+/// - The ASCII types (PrintableString, IA5String, VisibleString,
+///   NumericString) are read byte for byte as ASCII; a non-ASCII byte
+///   becomes U+FFFD. A character outside the type's repertoire (X.680
+///   41: NumericString is digits and space, PrintableString letters,
+///   digits, space and `'()+,-./:=?`, VisibleString printable ASCII) is
+///   kept as it is, but the result is lossy, so it is never used as an
+///   identity. Some issued certificates break these repertoires (an `&`
+///   in a PrintableString, say); their names are shown but not matched on.
+/// - TeletexString is read as UTF-8 when it is valid UTF-8, and as 8-bit
+///   (Latin-1) characters otherwise, as the OS's default name rendering
+///   does.
+/// - BMPString is UCS-2: each code unit is one character. A surrogate code
+///   unit is not a character in it, so it becomes U+FFFD and the result is
+///   lossy, even when two of them would form a UTF-16 pair.
 pub(crate) fn x509_text(tlv: &Tlv<'_>) -> Result<Option<DecodedText>> {
     let content = tlv.content;
     let invalid = tlv.error(Asn1ErrorKind::InvalidValue);
@@ -477,7 +492,13 @@ pub(crate) fn x509_text(tlv: &Tlv<'_>) -> Result<Option<DecodedText>> {
             },
         },
         tag::PRINTABLE_STRING | tag::IA5_STRING | tag::VISIBLE_STRING | tag::NUMERIC_STRING => {
-            let lossy = !content.is_ascii();
+            let allowed = |b: u8| match tlv.tag {
+                tag::NUMERIC_STRING => b.is_ascii_digit() || b == b' ',
+                tag::PRINTABLE_STRING => b.is_ascii_alphanumeric() || b" '()+,-./:=?".contains(&b),
+                tag::VISIBLE_STRING => b.is_ascii_graphic() || b == b' ',
+                _ => b.is_ascii(),
+            };
+            let lossy = !content.iter().all(|b| allowed(*b));
             let text = content
                 .iter()
                 .map(|b| {
@@ -491,21 +512,25 @@ pub(crate) fn x509_text(tlv: &Tlv<'_>) -> Result<Option<DecodedText>> {
             DecodedText { text, lossy }
         }
         tag::TELETEX_STRING => DecodedText {
-            text: content.iter().map(|b| char::from(*b)).collect(),
+            text: std::str::from_utf8(content).map_or_else(
+                |_| content.iter().map(|b| char::from(*b)).collect(),
+                str::to_owned,
+            ),
             lossy: false,
         },
         tag::BMP_STRING => {
             if content.len() % 2 != 0 {
                 return Err(invalid);
             }
-            let units = content.chunks_exact(2).map(|pair| match pair {
-                [hi, lo] => u16::from_be_bytes([*hi, *lo]),
-                _ => 0,
-            });
             let mut lossy = false;
-            let text = char::decode_utf16(units)
-                .map(|c| {
-                    c.unwrap_or_else(|_| {
+            let text = content
+                .chunks_exact(2)
+                .map(|pair| {
+                    let unit = match pair {
+                        [hi, lo] => u16::from_be_bytes([*hi, *lo]),
+                        _ => 0xd800,
+                    };
+                    char::from_u32(u32::from(unit)).unwrap_or_else(|| {
                         lossy = true;
                         char::REPLACEMENT_CHARACTER
                     })
@@ -743,8 +768,9 @@ impl ObjectId {
 
     /// Parses dotted-decimal form, such as `1.3.6.1.5.5.7.3.3`. Needs at
     /// least two arcs, the first 0, 1 or 2, and the second below 40 unless
-    /// the first is 2. Every arc must fit in 64 bits, and decimal digits are
-    /// the only characters allowed besides the dots.
+    /// the first is 2. Every arc must fit in 64 bits (the first two are
+    /// encoded together, which can need more), and decimal digits are the
+    /// only characters allowed besides the dots.
     #[must_use]
     pub fn from_dotted(text: &str) -> Option<Self> {
         let mut arcs = text.split('.').map(|part| {
@@ -756,21 +782,22 @@ impl ObjectId {
         let first = arcs.next()??;
         let second = arcs.next()??;
         let head = match first {
-            0 | 1 if second < 40 => first * 40 + second,
-            2 => second.checked_add(80)?,
+            0 | 1 if second < 40 => u128::from(first * 40 + second),
+            2 => u128::from(second) + 80,
             _ => return None,
         };
         let mut out = Vec::new();
-        for arc in std::iter::once(Some(head)).chain(arcs) {
-            push_base128(&mut out, arc?);
+        push_base128(&mut out, head);
+        for arc in arcs {
+            push_base128(&mut out, u128::from(arc?));
         }
         Some(Self(out))
     }
 }
 
 /// Appends `value` in the base-128 form an OBJECT IDENTIFIER arc uses.
-fn push_base128(out: &mut Vec<u8>, value: u64) {
-    let mut groups = [0_u8; 10];
+fn push_base128(out: &mut Vec<u8>, value: u128) {
+    let mut groups = [0_u8; 19];
     let mut count = 0_usize;
     let mut rest = value;
     loop {
@@ -792,26 +819,35 @@ impl fmt::Display for ObjectId {
     /// Dotted-decimal form, such as `1.2.840.113549.1.7.2`. An arc too large
     /// for 64 bits is shown as `?`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut value: Option<u64> = Some(0);
+        // Wide enough for the first subidentifier, which holds the second
+        // arc plus 80 and so can need 65 bits for a 64-bit arc.
+        let mut value: Option<u128> = Some(0);
         let mut first = true;
         for byte in &self.0 {
             value = value
                 .and_then(|v| v.checked_mul(128))
-                .and_then(|v| v.checked_add(u64::from(byte & 0x7f)));
+                .and_then(|v| v.checked_add(u128::from(byte & 0x7f)));
             if byte & 0x80 != 0 {
                 continue;
             }
+            let arc = |v: u128| u64::try_from(v).ok();
             match (first, value) {
                 (true, Some(v)) => {
                     let (a, b) = match v {
-                        0..=39 => (0, v),
-                        40..=79 => (1, v - 40),
-                        _ => (2, v - 80),
+                        0..=39 => (0, arc(v)),
+                        40..=79 => (1, arc(v - 40)),
+                        _ => (2, arc(v - 80)),
                     };
-                    write!(f, "{a}.{b}")?;
+                    match b {
+                        Some(b) => write!(f, "{a}.{b}")?,
+                        None => write!(f, "{a}.?")?,
+                    }
                 }
                 (true, None) => f.write_str("2.?")?,
-                (false, Some(v)) => write!(f, ".{v}")?,
+                (false, Some(v)) => match arc(v) {
+                    Some(v) => write!(f, ".{v}")?,
+                    None => f.write_str(".?")?,
+                },
                 (false, None) => f.write_str(".?")?,
             }
             first = false;
@@ -944,6 +980,10 @@ pub(crate) mod oid {
     pub const AD_OCSP: &[u8] = &[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x01];
     /// 1.3.6.1.5.5.7.48.2 `id-ad-caIssuers`.
     pub const AD_CA_ISSUERS: &[u8] = &[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x02];
+    /// 1.3.6.1.5.5.7.2.1 `id-qt-cps`, a CPS pointer policy qualifier.
+    pub const QT_CPS: &[u8] = &[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x02, 0x01];
+    /// 1.3.6.1.5.5.7.2.2 `id-qt-unotice`, a user notice policy qualifier.
+    pub const QT_UNOTICE: &[u8] = &[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x02, 0x02];
 
     /// 2.5.4.3 `commonName`.
     pub const AT_COMMON_NAME: &[u8] = &[0x55, 0x04, 0x03];
@@ -1220,6 +1260,8 @@ mod tests {
             "0.9.2342.19200300.100.1.25",
             "1.3.6.1.4.1.311.10.3.13",
             "2.999.1",
+            "2.18446744073709551615",
+            "2.18446744073709551615.18446744073709551615",
             "1.39",
             "0.0",
         ] {
@@ -1247,6 +1289,7 @@ mod tests {
             "+1.2",
             "1.2.3 ",
             "1.18446744073709551616",
+            "2.18446744073709551616",
         ] {
             assert_eq!(ObjectId::from_dotted(bad), None, "{bad:?}");
         }
@@ -1363,9 +1406,28 @@ mod tests {
         assert!(bad_utf8.lossy && bad_utf8.text == "a\u{FFFD}b");
         let high = ok(tag::IA5_STRING, b"a\x80");
         assert!(high.lossy && high.text == "a\u{FFFD}");
+        // TeletexString: UTF-8 first, as the OS renders it, else 8-bit.
         assert_eq!(ok(tag::TELETEX_STRING, b"caf\xe9").text, "café");
+        let teletex_utf8 = ok(tag::TELETEX_STRING, b"caf\xc3\xa9");
+        assert!(!teletex_utf8.lossy && teletex_utf8.text == "café");
+        // Each ASCII type's repertoire is enforced: the text is kept, but
+        // flagged.
+        let numeric = ok(tag::NUMERIC_STRING, b"A1");
+        assert!(numeric.lossy && numeric.text == "A1");
+        assert!(!ok(tag::NUMERIC_STRING, b"12 34").lossy);
+        assert!(ok(tag::PRINTABLE_STRING, b"A&B").lossy);
+        assert!(ok(tag::PRINTABLE_STRING, b"a@b").lossy);
+        assert!(!ok(tag::PRINTABLE_STRING, b"Tests, Pty (AU) 'x'+-./:=?").lossy);
+        assert!(ok(tag::VISIBLE_STRING, b"a\tb").lossy);
+        assert!(!ok(tag::VISIBLE_STRING, b"a@b~").lossy);
+        assert!(!ok(tag::IA5_STRING, b"a@b\t").lossy);
         assert_eq!(ok(tag::BMP_STRING, &[0x00, 0x41, 0x00, 0xe9]).text, "Aé");
         assert!(ok(tag::BMP_STRING, &[0xd8, 0x00]).lossy);
+        // BMPString is UCS-2: a surrogate pair is two invalid characters,
+        // not one supplementary character.
+        let pair = ok(tag::BMP_STRING, &[0x00, 0x41, 0xd8, 0x3d, 0xde, 0x00]);
+        assert!(pair.lossy, "{pair:?}");
+        assert_eq!(pair.text, "A\u{FFFD}\u{FFFD}");
         assert!(text(tag::BMP_STRING, &[0x00]).is_err());
         assert_eq!(
             ok(tag::UNIVERSAL_STRING, &[0, 0, 0, 0x41, 0, 1, 0xf6, 0x00]).text,

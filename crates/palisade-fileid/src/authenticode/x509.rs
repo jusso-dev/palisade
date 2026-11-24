@@ -193,8 +193,10 @@ pub struct NameAttribute {
     /// is shown as `#` and the hex of its DER encoding (RFC 4514).
     pub value: String,
     /// `true` when [`Self::value`] is not an exact decoding: invalid UTF-8,
-    /// a non-ASCII byte in an ASCII string type, an invalid code point, or
-    /// a value that is not a string at all. Such values must not be used as
+    /// a non-ASCII byte in an ASCII string type, a character outside a
+    /// restricted string type's repertoire, a surrogate in a BMPString, an
+    /// invalid code point, or a value that is not a string at all. Such
+    /// values must not be used as
     /// identities, because different encodings can decode to the same
     /// text.
     pub lossy: bool,
@@ -584,6 +586,10 @@ fn walk(der: &[u8]) -> Result<Walked<'_>> {
             let mut v = explicit.reader();
             let n = asn1::read_small_uint(&mut v)?;
             v.finish()?;
+            // DER omits a DEFAULT value: v1 has no explicit version.
+            if n == 0 {
+                return Err(explicit.error(Asn1ErrorKind::InvalidValue).into());
+            }
             n
         }
         None => 0,
@@ -834,29 +840,36 @@ fn signature_algorithm(id: &Tlv<'_>) -> Result<SignatureAlgorithm> {
     if let Some(p) = &params {
         asn1::validate(p)?;
     }
+    // RSA PKCS #1 identifiers take NULL parameters (RFC 4055 allows them
+    // absent too); ECDSA identifiers take none at all (RFC 5758, 3.2).
     let null_or_absent = params
         .as_ref()
         .is_none_or(|p| p.tag == tag::NULL && p.content.is_empty());
-    let implied = |make: fn(DigestAlgorithm) -> SignatureAlgorithm, digest| {
+    let rsa = |digest| {
         if null_or_absent {
-            Ok(make(digest))
+            Ok(SignatureAlgorithm::RsaPkcs1(digest))
         } else {
             Err(CertificateError::AlgorithmParameters)
         }
     };
-    let rsa = SignatureAlgorithm::RsaPkcs1;
-    let ecdsa = SignatureAlgorithm::Ecdsa;
+    let ecdsa = |digest| {
+        if params.is_none() {
+            Ok(SignatureAlgorithm::Ecdsa(digest))
+        } else {
+            Err(CertificateError::AlgorithmParameters)
+        }
+    };
     match alg {
-        oid::MD2_WITH_RSA => implied(rsa, DigestAlgorithm::Md2),
-        oid::MD5_WITH_RSA => implied(rsa, DigestAlgorithm::Md5),
-        oid::SHA1_WITH_RSA => implied(rsa, DigestAlgorithm::Sha1),
-        oid::SHA256_WITH_RSA => implied(rsa, DigestAlgorithm::Sha256),
-        oid::SHA384_WITH_RSA => implied(rsa, DigestAlgorithm::Sha384),
-        oid::SHA512_WITH_RSA => implied(rsa, DigestAlgorithm::Sha512),
-        oid::ECDSA_WITH_SHA1 => implied(ecdsa, DigestAlgorithm::Sha1),
-        oid::ECDSA_WITH_SHA256 => implied(ecdsa, DigestAlgorithm::Sha256),
-        oid::ECDSA_WITH_SHA384 => implied(ecdsa, DigestAlgorithm::Sha384),
-        oid::ECDSA_WITH_SHA512 => implied(ecdsa, DigestAlgorithm::Sha512),
+        oid::MD2_WITH_RSA => rsa(DigestAlgorithm::Md2),
+        oid::MD5_WITH_RSA => rsa(DigestAlgorithm::Md5),
+        oid::SHA1_WITH_RSA => rsa(DigestAlgorithm::Sha1),
+        oid::SHA256_WITH_RSA => rsa(DigestAlgorithm::Sha256),
+        oid::SHA384_WITH_RSA => rsa(DigestAlgorithm::Sha384),
+        oid::SHA512_WITH_RSA => rsa(DigestAlgorithm::Sha512),
+        oid::ECDSA_WITH_SHA1 => ecdsa(DigestAlgorithm::Sha1),
+        oid::ECDSA_WITH_SHA256 => ecdsa(DigestAlgorithm::Sha256),
+        oid::ECDSA_WITH_SHA384 => ecdsa(DigestAlgorithm::Sha384),
+        oid::ECDSA_WITH_SHA512 => ecdsa(DigestAlgorithm::Sha512),
         oid::RSASSA_PSS => Ok(pkcs7::parse_pss_params(params.as_ref())?
             .unwrap_or_else(|| SignatureAlgorithm::Other(ObjectId::from_der(alg)))),
         oid::ED25519 | oid::ED448 if params.is_some() => Err(CertificateError::AlgorithmParameters),
@@ -931,7 +944,8 @@ fn parse_extensions(list: &Tlv<'_>, ext: &mut Extensions) -> Result<()> {
         let mut e = extension.reader();
         let id = read_oid(&mut e)?;
         let critical = match e.read_optional(tag::BOOLEAN)? {
-            Some(flag) => asn1::boolean(&flag)?,
+            // DER omits a DEFAULT value, so an explicit FALSE is not DER.
+            Some(flag) => explicit_true(&flag)?,
             None => false,
         };
         let value = e.read(tag::OCTET_STRING)?;
@@ -947,8 +961,22 @@ fn parse_extensions(list: &Tlv<'_>, ext: &mut Extensions) -> Result<()> {
     Ok(())
 }
 
+/// A BOOLEAN with `DEFAULT FALSE`: present only when TRUE, because DER
+/// omits a value equal to its default (X.690 11.5).
+fn explicit_true(flag: &Tlv<'_>) -> Result<bool> {
+    if asn1::boolean(flag)? {
+        Ok(true)
+    } else {
+        Err(flag.error(Asn1ErrorKind::InvalidValue).into())
+    }
+}
+
 /// Reads a known extension into `ext`. Returns whether the extension is
-/// one this crate processes.
+/// one this crate processes, meaning chain building or trust acts on it.
+/// Extensions read only for reports (alternative names, CRL distribution
+/// points, authority information access, and certificate policies with a
+/// qualifier this crate does not know) return `false`, so a critical one
+/// is recorded as unhandled and keeps the certificate out of chains.
 fn parse_extension(id: &[u8], value: &Tlv<'_>, ext: &mut Extensions) -> Result<bool> {
     let inner = |t: u8| asn1::single(value.content, value.content_offset, t);
     match id {
@@ -977,7 +1005,7 @@ fn parse_extension(id: &[u8], value: &Tlv<'_>, ext: &mut Extensions) -> Result<b
             let seq = inner(tag::SEQUENCE)?;
             let mut r = seq.reader();
             let ca = match r.read_optional(tag::BOOLEAN)? {
-                Some(flag) => asn1::boolean(&flag)?,
+                Some(flag) => explicit_true(&flag)?,
                 None => false,
             };
             let path_len = if r.peek_tag() == Some(tag::INTEGER) {
@@ -1011,23 +1039,43 @@ fn parse_extension(id: &[u8], value: &Tlv<'_>, ext: &mut Extensions) -> Result<b
             if r.is_empty() {
                 return Err(seq.error(Asn1ErrorKind::InvalidValue).into());
             }
+            // The policy OIDs are only reported. The two qualifiers
+            // RFC 5280 defines (CPS pointer and user notice) are text for
+            // people; any other qualifier is one this crate cannot
+            // interpret, so a critical extension holding one is unhandled
+            // (RFC 5280, 4.2.1.4).
+            let mut known_qualifiers = true;
             while !r.is_empty() {
                 let info = r.read(tag::SEQUENCE)?;
                 let mut i = info.reader();
                 let policy = read_oid(&mut i)?;
                 if let Some(qualifiers) = i.read_optional(tag::SEQUENCE)? {
-                    asn1::validate(&qualifiers)?;
+                    let mut q = qualifiers.reader();
+                    if q.is_empty() {
+                        return Err(qualifiers.error(Asn1ErrorKind::InvalidValue).into());
+                    }
+                    while !q.is_empty() {
+                        let qualifier = q.read(tag::SEQUENCE)?;
+                        let mut qi = qualifier.reader();
+                        let kind = read_oid(&mut qi)?;
+                        asn1::validate(&qi.read_any()?)?;
+                        qi.finish()?;
+                        known_qualifiers &= matches!(kind, oid::QT_CPS | oid::QT_UNOTICE);
+                    }
                 }
                 i.finish()?;
                 ext.certificate_policies.push(ObjectId::from_der(policy));
             }
+            return Ok(known_qualifiers);
         }
         oid::CRL_DISTRIBUTION_POINTS => {
+            // Reported only: revocation is not checked here (#50).
             let seq = inner(tag::SEQUENCE)?;
             let mut r = seq.reader();
             while !r.is_empty() {
                 parse_distribution_point(&r.read(tag::SEQUENCE)?, ext)?;
             }
+            return Ok(false);
         }
         oid::AUTHORITY_INFO_ACCESS => {
             let seq = inner(tag::SEQUENCE)?;
@@ -1048,10 +1096,14 @@ fn parse_extension(id: &[u8], value: &Tlv<'_>, ext: &mut Extensions) -> Result<b
                     }
                 }
             }
+            // Reported only; nothing is fetched.
+            return Ok(false);
         }
         oid::SUBJECT_ALT_NAME | oid::ISSUER_ALT_NAME => {
-            // Not used for code signing identity; checked as DER only.
+            // Not used for code signing identity; checked as DER only, and
+            // not processed, so a critical one is unhandled.
             asn1::validate(&inner(tag::SEQUENCE)?)?;
+            return Ok(false);
         }
         _ => return Ok(false),
     }
@@ -1165,6 +1217,106 @@ mod tests {
         assert_eq!(
             DistinguishedName::render(&rdns),
             "OID.1.3.6.1.4.1.311.60.2.1.3=\" x\", CN=A + OU=\"\", O=\"Tests, \"\"Pty\"\"\", C=AU"
+        );
+    }
+
+    #[test]
+    fn ecdsa_signature_algorithms_take_no_parameters() {
+        let alg = |params: &[u8]| {
+            let mut content = vec![0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02];
+            content.extend_from_slice(params);
+            let mut der = asn1::header(tag::SEQUENCE, content.len());
+            der.extend(content);
+            let tlv = asn1::single(&der, 0, tag::SEQUENCE).unwrap();
+            signature_algorithm(&tlv)
+        };
+        assert_eq!(
+            alg(&[]).unwrap(),
+            SignatureAlgorithm::Ecdsa(DigestAlgorithm::Sha256)
+        );
+        assert_eq!(
+            alg(&[0x05, 0x00]).unwrap_err(),
+            CertificateError::AlgorithmParameters
+        );
+        // RSA PKCS #1 keeps accepting NULL or absent parameters.
+        let rsa = |params: &[u8]| {
+            let mut content = vec![
+                0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b,
+            ];
+            content.extend_from_slice(params);
+            let mut der = asn1::header(tag::SEQUENCE, content.len());
+            der.extend(content);
+            let tlv = asn1::single(&der, 0, tag::SEQUENCE).unwrap();
+            signature_algorithm(&tlv)
+        };
+        assert!(rsa(&[]).is_ok() && rsa(&[0x05, 0x00]).is_ok());
+    }
+
+    #[test]
+    fn report_only_extensions_are_unhandled_when_critical() {
+        let ext = |id: &[u8], value: &[u8]| {
+            let mut inner = asn1::header(tag::OCTET_STRING, value.len());
+            inner.extend_from_slice(value);
+            let mut content = asn1::header(tag::OID, id.len());
+            content.extend_from_slice(id);
+            content.extend_from_slice(&[0x01, 0x01, 0xff]);
+            content.extend(inner);
+            let mut der = asn1::header(tag::SEQUENCE, content.len());
+            der.extend(content);
+            der
+        };
+        let parse = |extension: &[u8]| {
+            let mut der = asn1::header(tag::SEQUENCE, extension.len());
+            der.extend_from_slice(extension);
+            let list = asn1::single(&der, 0, tag::SEQUENCE).unwrap();
+            let mut out = Extensions::default();
+            parse_extensions(&list, &mut out).map(|()| out)
+        };
+        // A critical subjectAltName holding an INTEGER: well-formed DER,
+        // but not processed, so unhandled.
+        let san = ext(oid::SUBJECT_ALT_NAME, &[0x30, 0x03, 0x02, 0x01, 0x05]);
+        let out = parse(&san).unwrap();
+        assert_eq!(
+            out.unhandled_critical,
+            [ObjectId::from_der(oid::SUBJECT_ALT_NAME)]
+        );
+        // Critical CRL distribution points and AIA are reported only.
+        let cdp = ext(oid::CRL_DISTRIBUTION_POINTS, &[0x30, 0x00]);
+        assert_eq!(parse(&cdp).unwrap().unhandled_critical.len(), 1);
+        let aia = ext(oid::AUTHORITY_INFO_ACCESS, &[0x30, 0x00]);
+        assert_eq!(parse(&aia).unwrap().unhandled_critical.len(), 1);
+        // certificatePolicies: policy 1.2.3 with a qualifier.
+        let policies = |qualifier: &[u8]| {
+            let mut q = qualifier.to_vec();
+            q.extend_from_slice(&[0x16, 0x01, b'x']);
+            let mut qs = asn1::header(tag::SEQUENCE, q.len() + 2);
+            qs.extend(asn1::header(tag::SEQUENCE, q.len()));
+            qs.extend(q);
+            let mut info = vec![0x06, 0x02, 0x2a, 0x03];
+            info.extend(qs);
+            let mut list = asn1::header(tag::SEQUENCE, info.len() + 2);
+            list.extend(asn1::header(tag::SEQUENCE, info.len()));
+            list.extend(info);
+            ext(oid::CERTIFICATE_POLICIES, &list)
+        };
+        // A CPS pointer is understood: handled, and the policy reported.
+        let mut cps = asn1::header(tag::OID, oid::QT_CPS.len());
+        cps.extend_from_slice(oid::QT_CPS);
+        let out = parse(&policies(&cps)).unwrap();
+        assert!(out.unhandled_critical.is_empty());
+        assert_eq!(
+            out.certificate_policies,
+            [ObjectId::from_der(&[0x2a, 0x03])]
+        );
+        // An unknown qualifier: still reported, but unhandled.
+        let out = parse(&policies(&[0x06, 0x02, 0x2a, 0x04])).unwrap();
+        assert_eq!(
+            out.unhandled_critical,
+            [ObjectId::from_der(oid::CERTIFICATE_POLICIES)]
+        );
+        assert_eq!(
+            out.certificate_policies,
+            [ObjectId::from_der(&[0x2a, 0x03])]
         );
     }
 

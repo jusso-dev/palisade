@@ -112,8 +112,19 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     identifiers, basic constraints, key usage, EKUs, certificate policies,
     CRL distribution points, OCSP and CA-issuer URLs, and whether it is
     self-signed. The TBS hash covers the exact `tbsCertificate` bytes in the
-    file; nothing is re-encoded. `CertSummary` serialises to JSON with
-    stable field names (serde), and `pem()` exports it.
+    file; nothing is re-encoded. DER is strict: explicitly encoded DEFAULT
+    values (a v1 version field, `critical` FALSE, `cA` FALSE) are rejected,
+    and ECDSA signature algorithms must have no parameters. Name values
+    decode exactly or are flagged lossy: TeletexString is read as UTF-8
+    when valid and as 8-bit text otherwise, as the OS renders it, and a
+    BMPString surrogate is lossy (BMPString is UCS-2). So is a character
+    outside a restricted type's repertoire (a letter in a NumericString,
+    an `&` in a PrintableString): such a name is shown but never used as
+    an identity. Extensions that
+    are only reported (alternative names, CRL distribution points, AIA,
+    and certificate policies with a qualifier other than a CPS pointer or
+    user notice) count as unhandled when critical. `CertSummary` serialises
+    to JSON with stable field names (serde), and `pem()` exports it.
   - `eku` is the EKU catalogue: Code Signing, Time Stamping, Lifetime
     Signing, the hardware (driver) certification EKU, OS component, Protected
     Process (Light), Early Launch Antimalware, kernel-mode code signing, HAL
@@ -144,16 +155,22 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     trusted key, and only links verified this way can make an anchored
     path. Only certificates reachable upwards from the leaf by name are
     looked at, so unrelated policy entries cost nothing and appear in no
-    report. At most 64 embedded certificates are used, each checked at most
-    once per trusted key whose name it claims. The trust phase has its own
-    budget (4096 checks per chain, far above that bound), and links into
-    the leaf and policy certificates come first, on a separate pool from
-    links into other embedded certificates, so nothing in a file can starve
-    it. Verified results are cached per key, not per certificate.
+    report. At most 64 embedded certificates are tried (parsed or not),
+    each checked at most once per trusted key whose name it claims. The
+    trust phase has its own budget, which earlier and nested signatures
+    cannot spend. Links into the leaf and policy certificates come first,
+    on a pool of their own (4096 candidate steps and 4096 checks per chain)
+    that links into other embedded certificates never spend, so nothing a
+    file adds can starve them. That pool is spent only by the leaf and
+    policy certificates, so only the trust configuration itself (more than
+    64 trusted keys sharing one subject name) can exhaust it; that fails
+    closed, untrusted, with `WorkLimitReached` in the chain's issues.
+    Verified results are cached per key, not per certificate.
   - The as-provided chain (and, when nothing is anchored, the full chain)
     is then searched upwards with whatever keys the file holds: every path
     is enumerated, loops are detected, paths stop at 10 certificates, and
-    the 8 best are kept (anchored, then complete, then shortest), with
+    the 8 best are kept (anchored, then complete, then permitting code
+    signing, then shortest), with
     cross-signed paths as alternatives. These checks spend at most 128 per
     chain and 512 per file. Running out fails closed and never affects
     trust.
@@ -170,8 +187,9 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     when every attribute decodes exactly), `publisher_product` (with
     `ProductName`),
     `publisher_os_rule` (PCA TBS hash or well-known root ID, plus leaf `CN`)
-    and `file_publisher_os_rule` (plus file name and minimum version), with
-    the reason for any that cannot be made. A file with no trusted signer
+    and `file_publisher_os_rule` (plus file name and minimum version, both
+    only for an `os_ci_compatible` signer), with the reason for any that
+    cannot be made. A file with no trusted signer
     gets a `VendorHint` from `CompanyName` instead, marked unverified. It is
     a separate type, so it can never satisfy a publisher rule.
   - Constraint checks for policy: `leaf_has_eku`, `chain_has_eku`,

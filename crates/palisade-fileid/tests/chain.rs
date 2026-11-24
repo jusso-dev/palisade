@@ -380,11 +380,44 @@ fn malformed_certificates_are_rejected() {
             offset: 0
         }) == CertSummary::from_der(&good[..good.len() - 1]).unwrap_err()
     );
-    // A BOOLEAN that is not DER (0x01 instead of 0xff) in basicConstraints.
-    let at = find(&good, &[0x01, 0x01, 0xff]);
+    // The leaf's keyUsage extension is critical: OID 2.5.29.15, then the
+    // `critical` BOOLEAN TRUE.
+    let ku_critical = find(&good, &[0x06, 0x03, 0x55, 0x1d, 0x0f, 0x01, 0x01, 0xff]) + 5;
+    let invalid_at = |offset| {
+        CertificateError::Asn1(palisade_fileid::authenticode::Asn1Error {
+            kind: palisade_fileid::authenticode::Asn1ErrorKind::InvalidValue,
+            offset,
+        })
+    };
+    // A `critical` BOOLEAN that is not DER (0x01 instead of 0xff).
     let mut bad_bool = good.clone();
-    bad_bool[at + 2] = 0x01;
-    assert!(CertSummary::from_der(&bad_bool).is_err());
+    bad_bool[ku_critical + 2] = 0x01;
+    assert_eq!(
+        CertSummary::from_der(&bad_bool).unwrap_err(),
+        invalid_at(ku_critical)
+    );
+    // `critical` explicitly FALSE: DER omits a DEFAULT value.
+    let mut explicit_false = good.clone();
+    explicit_false[ku_critical + 2] = 0x00;
+    assert_eq!(
+        CertSummary::from_der(&explicit_false).unwrap_err(),
+        invalid_at(ku_critical)
+    );
+    // basicConstraints `cA` explicitly FALSE. `inter` encodes
+    // `SEQUENCE { cA TRUE, pathLen 0 }` inside the extension's OCTET STRING.
+    let inter = der("inter");
+    let bc = find(&inter, &[0x06, 0x03, 0x55, 0x1d, 0x13]);
+    let ca =
+        bc + find(
+            &inter[bc..],
+            &[0x30, 0x06, 0x01, 0x01, 0xff, 0x02, 0x01, 0x00],
+        ) + 2;
+    let mut ca_false = inter.clone();
+    ca_false[ca + 2] = 0x00;
+    assert_eq!(
+        CertSummary::from_der(&ca_false).unwrap_err(),
+        invalid_at(ca)
+    );
     // An unknown version (v4).
     let at = find(&good, &[0xa0, 0x03, 0x02, 0x01, 0x02]);
     let mut v4 = good.clone();
@@ -416,13 +449,20 @@ fn malformed_certificates_are_rejected() {
         CertSummary::from_der(&dup).unwrap_err(),
         CertificateError::DuplicateExtension(ObjectId::from_dotted("2.5.29.37").unwrap())
     );
-    // Extensions in a v1 certificate.
-    let mut v1_ext = good.clone();
-    let at = find(&v1_ext, &[0xa0, 0x03, 0x02, 0x01, 0x02]);
-    v1_ext[at + 4] = 0x00;
+    // Extensions in a v2 certificate.
+    let version = find(&good, &[0xa0, 0x03, 0x02, 0x01, 0x02]);
+    let mut v2_ext = good.clone();
+    v2_ext[version + 4] = 0x01;
     assert_eq!(
-        CertSummary::from_der(&v1_ext).unwrap_err(),
+        CertSummary::from_der(&v2_ext).unwrap_err(),
         CertificateError::FieldNotAllowed
+    );
+    // An explicit v1 version: DER omits the DEFAULT, so this is not DER.
+    let mut explicit_v1 = good.clone();
+    explicit_v1[version + 4] = 0x00;
+    assert_eq!(
+        CertSummary::from_der(&explicit_v1).unwrap_err(),
+        invalid_at(version)
     );
 }
 
@@ -867,6 +907,135 @@ fn decoys_cannot_starve_trust_with_rekeyed_cas() {
 }
 
 #[test]
+fn file_certificates_cannot_starve_trust_with_many_same_name_anchors() {
+    // Policy trusts 67 CAs named "Palisade Chain CA": 66 copies of `inter`
+    // with distinct keys (one modulus bit flipped), then `inter` itself,
+    // the only one whose key verifies the leaf. The file adds 63
+    // certificates with that name as both subject and issuer, so each is a
+    // candidate child of every anchor (rejected by key identifier, but
+    // only after a candidate step). They take 63 of every anchor's steps:
+    // on one shared step count they would use up all 4096 before the last
+    // anchor is reached. Added certificates spend only their own pool, so
+    // the leaf is still checked against every anchor.
+    let inter = der("inter");
+    let modulus = find(&inter, &[0x02, 0x82, 0x01, 0x01, 0x00]) + 5;
+    let mut cfg = TrustConfig::new();
+    let copies = 66;
+    for i in 0..copies {
+        let mut c = inter.clone();
+        c[modulus + 8 + i / 8] ^= 1 << (i % 8);
+        cfg.add_anchor(format!("copy {i}"), &c).unwrap();
+    }
+    cfg.add_anchor("inter", &inter).unwrap();
+    let mut certs = vec![der("leaf")];
+    for i in 0..MAX_EMBEDDED_CERTIFICATES - 1 {
+        certs.push(clone_with_issuer(&inter, &inter, i as u8));
+    }
+    let candidates = (copies + 1) * (MAX_EMBEDDED_CERTIFICATES - 1);
+    assert!(candidates > 4096, "{candidates}");
+    let report = build_chain(&certs, 0, &cfg).unwrap();
+    assert!(report.full_chain.anchored, "{:?}", report.issues);
+    assert_eq!(report.anchored_to.as_ref().unwrap().index, copies);
+    // The added certificates' own pool ran out, and the report says so.
+    assert!(report.issues.contains(&ChainIssue::WorkLimitReached));
+}
+
+/// `template` with `extension` (a DER `Extension`) appended to its
+/// extensions. The signature is left as it is, so it no longer verifies:
+/// only usable as an anchor, whose own signature is never relied on.
+fn with_extra_extension(template: &[u8], extension: &[u8]) -> Vec<u8> {
+    let tlv = |tag: u8, content: &[u8]| {
+        let mut out = vec![tag];
+        out.extend(encode_len(content.len()));
+        out.extend_from_slice(content);
+        out
+    };
+    let (h, _) = header(template, 0);
+    let (th, tl) = header(template, h);
+    let mut kids = Vec::new();
+    let mut at = h + th;
+    while at < h + th + tl {
+        let (kh, kl) = header(template, at);
+        kids.push(template[at..at + kh + kl].to_vec());
+        at += kh + kl;
+    }
+    let last = kids.last_mut().unwrap();
+    assert_eq!(last[0], 0xa3);
+    let (eh, _) = header(last, 0);
+    let (sh, sl) = header(last, eh);
+    let mut list = last[eh + sh..eh + sh + sl].to_vec();
+    list.extend_from_slice(extension);
+    *last = tlv(0xa3, &tlv(0x30, &list));
+    let tbs = tlv(0x30, &kids.concat());
+    tlv(0x30, &[tbs.as_slice(), &template[h + th + tl..]].concat())
+}
+
+#[test]
+fn the_chosen_chain_prefers_a_path_that_permits_code_signing() {
+    // Two anchors with the intermediate's subject and key: the first
+    // restricted to TLS server use, the second (`inter`) unrestricted.
+    // Both are anchored paths of the same length; the one that permits
+    // code signing is chosen, so the signer is trusted and the restricted
+    // path is only an alternative.
+    let eku_server_auth = [
+        0x30, 0x13, 0x06, 0x03, 0x55, 0x1d, 0x25, 0x04, 0x0c, 0x30, 0x0a, 0x06, 0x08, 0x2b, 0x06,
+        0x01, 0x05, 0x05, 0x07, 0x03, 0x01,
+    ];
+    let restricted = with_extra_extension(&der("inter"), &eku_server_auth);
+    let parsed = CertSummary::from_der(&restricted).unwrap();
+    assert!(!parsed.permits_eku(&eku::CODE_SIGNING.id()));
+    assert_eq!(parsed.spki_sha256, cert("inter").spki_sha256);
+    let mut cfg = TrustConfig::new();
+    cfg.add_anchor("restricted", &restricted).unwrap();
+    cfg.add_anchor("inter", &der("inter")).unwrap();
+
+    let report = build_chain(&chain_of(&["leaf"]), 0, &cfg).unwrap();
+    assert!(report.full_chain.anchored);
+    assert_eq!(report.anchored_to.as_ref().unwrap().label, "inter");
+    assert!(report.permits_code_signing());
+    assert_eq!(report.alternatives.len(), 1);
+
+    let base = signed(&p7("leaf-inter-root"));
+    let sig = with_certs(
+        &base,
+        chain_of(&["leaf"]),
+        DigestAlgorithm::Sha256,
+        DigestAlgorithm::Sha256,
+    );
+    let trust = evaluate_trust(&report_of(vec![sig]), &cfg, None);
+    assert_eq!(trust.primary, Some(0), "{:?}", trust.signers[0].untrusted);
+    assert!(trust.identity.is_some());
+}
+
+#[test]
+fn os_rules_are_only_given_for_os_ci_compatible_signers() {
+    // A trusted ECC chain with a PCA and a CN: every other identity string
+    // is made, but the OS Publisher levels are not, because OS code
+    // integrity would not honour them.
+    let base = signed(&p7("leaf-inter-root"));
+    let sig = with_certs(
+        &base,
+        chain_of(&["ecc-leaf", "ecc-inter"]),
+        DigestAlgorithm::Sha256,
+        DigestAlgorithm::Sha256,
+    );
+    let trust = evaluate_trust(
+        &report_of(vec![sig]),
+        &config(&["ecc-root"]),
+        Some(&version_info()),
+    );
+    let signer = trust.primary_signer().unwrap();
+    assert!(signer.trusted, "{:?}", signer.untrusted);
+    assert!(!signer.os_ci_compatible);
+    assert!(signer.chain.as_ref().unwrap().pca.is_some());
+    let id = trust.identity.unwrap();
+    assert!(id.publisher_name.is_some() && id.publisher_product.is_some());
+    assert_eq!(id.publisher_os_rule, None);
+    assert_eq!(id.file_publisher_os_rule, None);
+    assert_eq!(id.issues, [IdentityIssue::NotOsCiCompatible]);
+}
+
+#[test]
 fn same_name_anchors_are_not_checked_against_each_other() {
     // `root` and `cross-root` share a subject. Both trusted, neither is
     // checked as the other's child, so no issue is recorded.
@@ -1063,6 +1232,27 @@ fn unparseable_embedded_certificates_are_skipped() {
     ));
     // The signer itself must parse.
     assert!(build_chain(&certs, 1, &TrustConfig::new()).is_err());
+    // Entries that fail to parse count against the limit too: the builder
+    // stops after MAX_EMBEDDED_CERTIFICATES attempts, signer included.
+    let mut junk = vec![der("leaf")];
+    junk.extend(std::iter::repeat_n(
+        vec![0x30, 0x00],
+        3 * MAX_EMBEDDED_CERTIFICATES,
+    ));
+    let report = build_chain(&junk, 0, &TrustConfig::new()).unwrap();
+    assert!(report.issues.contains(&ChainIssue::TooManyCertificates));
+    let unparseable: Vec<usize> = report
+        .issues
+        .iter()
+        .filter_map(|i| match i {
+            ChainIssue::UnparseableCertificate { embedded, .. } => Some(*embedded),
+            _ => None,
+        })
+        .collect();
+    // Issues are capped, so only the first ones are listed, and none is
+    // past the limit.
+    assert!(!unparseable.is_empty());
+    assert!(unparseable.iter().all(|i| *i < MAX_EMBEDDED_CERTIFICATES));
     assert!(build_chain(&certs, 9, &TrustConfig::new()).is_err());
 }
 
@@ -1370,9 +1560,10 @@ fn unparseable_signer_certificates_are_untrusted() {
 
 #[test]
 fn earlier_untrusted_signatures_cannot_starve_later_trusted_ones() {
-    // Four signatures over certificate sets that exhaust their untrusted
-    // checks, then a trusted SHA-256 one. The file-wide budget runs out,
-    // but trust for the last signature is decided on its own budget.
+    // Ten signatures over certificate sets that each spend 63 untrusted
+    // checks (one per distinct key a signature keeps), 630 in all, then a
+    // trusted SHA-256 one. The file-wide budget (512) runs out before the
+    // last, but trust for it is decided on its own budget.
     let base = signed(&p7("leaf-inter-root"));
     let inter = der("inter");
     let modulus = find(&inter, &[0x02, 0x82, 0x01, 0x01, 0x00]) + 5;
@@ -1382,7 +1573,8 @@ fn earlier_untrusted_signatures_cannot_starve_later_trusted_ones() {
         c[modulus + 8 + i / 8] ^= 1 << (i % 8);
         hostile.push(c);
     }
-    let mut sigs: Vec<_> = (0..4)
+    let hostile_sets = 10;
+    let mut sigs: Vec<_> = (0..hostile_sets)
         .map(|_| {
             with_certs(
                 &base,
@@ -1399,9 +1591,16 @@ fn earlier_untrusted_signatures_cannot_starve_later_trusted_ones() {
         DigestAlgorithm::Sha256,
     ));
     let trust = evaluate_trust(&report_of(sigs), &config(&["root"]), None);
-    assert_eq!(trust.primary, Some(4));
-    let chain = trust.signers[4].chain.as_ref().unwrap();
-    assert!(chain.full_chain.anchored);
+    // The file-wide budget is spent: the last hostile set is cut short.
+    let last_hostile = trust.signers[hostile_sets - 1].chain.as_ref().unwrap();
+    assert!(
+        last_hostile.issues.contains(&ChainIssue::WorkLimitReached),
+        "{:?}",
+        last_hostile.issues
+    );
+    assert_eq!(trust.primary, Some(hostile_sets));
+    let chain = trust.signers[hostile_sets].chain.as_ref().unwrap();
+    assert!(chain.full_chain.anchored, "{:?}", chain.issues);
     assert_eq!(
         chain.pca_cert().unwrap().sha256_thumbprint,
         cert("inter").sha256_thumbprint
