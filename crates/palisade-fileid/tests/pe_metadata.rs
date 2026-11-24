@@ -494,7 +494,7 @@ fn padding_cannot_push_a_value_out() {
         m.execution_level,
         Some(ExecutionLevel::RequireAdministrator)
     );
-    let refs = "&#x20;".repeat(1_500);
+    let refs = "&#x20;".repeat(5_000);
     let xml = format!(
         "<assembly><application><windowsSettings><autoElevate>{refs}true</autoElevate></windowsSettings></application></assembly>"
     );
@@ -942,5 +942,297 @@ fn the_first_thunk_is_used_when_there_is_no_lookup_table() {
             name: "Fn".into(),
             hint: 0
         }]
+    );
+}
+
+// --- Round 3. -----------------------------------------------------------------
+
+#[test]
+fn name_reads_are_bounded() {
+    // 10,000 export names all pointing at one long run with no NUL: each
+    // read stops after MAX_NAME_LEN + 1 bytes, so this is quick, and every
+    // name is reported as cut, not dropped.
+    let image = with_directory(PeBuilder::dll(), DIR_EXPORT, |rva| {
+        let n = 10_000;
+        let mut out = vec![0_u8; 40];
+        let functions_at = out.len();
+        out.resize(functions_at + n * 4, 0);
+        let names_at = out.len();
+        out.resize(names_at + n * 4, 0);
+        let ordinals_at = out.len();
+        out.resize(ordinals_at + n * 2, 0);
+        let run_at = out.len();
+        out.extend(std::iter::repeat_n(b'A', 400_000));
+        for i in 0..n {
+            put32(&mut out, functions_at + i * 4, 0x1000);
+            put32(&mut out, names_at + i * 4, rva + run_at as u32);
+            put16(&mut out, ordinals_at + i * 2, i as u16);
+        }
+        put32(&mut out, 20, n as u32);
+        put32(&mut out, 24, n as u32);
+        put32(&mut out, 28, rva + functions_at as u32);
+        put32(&mut out, 32, rva + names_at as u32);
+        put32(&mut out, 36, rva + ordinals_at as u32);
+        out.push(0);
+        out
+    });
+    let started = std::time::Instant::now();
+    let info = parse(&image);
+    let elapsed = started.elapsed();
+    let e = info.exports.unwrap();
+    assert_eq!(e.exports.len(), 10_000);
+    assert!(
+        e.exports
+            .iter()
+            .all(|x| x.name.as_ref().unwrap().len() == pe::MAX_NAME_LEN)
+    );
+    assert!(e.truncated);
+    // Scanning the whole run each time would read 4 GB; bounded reads take
+    // a few milliseconds. Generous, so slow CI runners still pass.
+    assert!(elapsed < std::time::Duration::from_secs(5), "{elapsed:?}");
+}
+
+#[test]
+fn a_name_ending_at_the_raw_data_is_terminated_by_the_zero_fill() {
+    // The section's raw data ends exactly at the end of a name with no NUL
+    // in the file; the loader maps zeros after it, so the name is complete.
+    let names = [b"AAAA".to_vec(), b"CPlApplet".to_vec(), b"ZZ".to_vec()];
+    let mut b = PeBuilder::dll();
+    let section = b.sections.len();
+    let rva = SECTION_ALIGNMENT * (section as u32 + 1);
+    let entries: Vec<_> = names.iter().cloned().zip(0..).collect();
+    let mut body = raw_export_section(rva, &entries, &[0x1000; 3]);
+    body.pop(); // the NUL after "ZZ": it now ends the raw data
+    let size = body.len() as u32;
+    let raw = size.div_ceil(0x200) * 0x200;
+    // Fill the rest of the raw data with non-zero bytes after "ZZ", and
+    // make the raw size end right after it.
+    b = b.section(
+        ".edata",
+        body,
+        IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ,
+    );
+    b.sections.last_mut().unwrap().virtual_size = Some(raw + 0x1000);
+    let mut image = b.build();
+    let at = b.data_directory_offset(DIR_EXPORT);
+    put32(&mut image, at, rva);
+    put32(&mut image, at + 4, size);
+    // Shrink SizeOfRawData to end at "ZZ", so the NUL is in the zero fill.
+    let header = PeBuilder::dll().section_table_offset() + section * 40;
+    put32(&mut image, header + 16, size);
+    let info = parse(&image);
+    let e = info.exports.unwrap();
+    assert_eq!(
+        e.exports
+            .iter()
+            .filter_map(|x| x.name.as_deref())
+            .collect::<Vec<_>>(),
+        ["AAAA", "CPlApplet", "ZZ"]
+    );
+    assert!(e.notable.cpl_applet);
+}
+
+#[test]
+fn unused_export_slots_are_not_exports() {
+    // A name whose slot holds RVA 0 is not an export, and not notable.
+    let entries = vec![(b"DllRegisterServer".to_vec(), 0), (b"Real".to_vec(), 1)];
+    let info = exports_of(&entries, &[0, 0x1010]);
+    let e = info.exports.unwrap();
+    assert!(!e.notable.dll_register_server);
+    assert_eq!(
+        e.exports
+            .iter()
+            .filter_map(|x| x.name.as_deref())
+            .collect::<Vec<_>>(),
+        ["Real"]
+    );
+}
+
+#[test]
+fn exactly_the_caps_are_not_truncated() {
+    let many: Vec<Result<&str, u16>> = (0..10_000_u16).map(Err).collect();
+    let image = with_directory(PeBuilder::default(), DIR_IMPORT, |rva| {
+        import_section(rva, &[("a.dll", many.clone())], true)
+    });
+    let i = parse(&image).imports.unwrap();
+    assert_eq!(i.function_count, 10_000);
+    assert!(!i.truncated);
+
+    let names: Vec<String> = (0..10_000).map(|i| format!("F{i:05}")).collect();
+    let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let image = with_directory(PeBuilder::dll(), DIR_EXPORT, |rva| {
+        export_section(rva, "x.dll", &refs, &[])
+    });
+    let e = parse(&image).exports.unwrap();
+    assert_eq!(e.exports.len(), 10_000);
+    assert!(!e.truncated);
+}
+
+#[test]
+fn a_cut_forwarder_is_reported_and_a_bad_slot_hides_nothing() {
+    let long = format!("M.{}", "f".repeat(700));
+    let image = with_directory(PeBuilder::dll(), DIR_EXPORT, |rva| {
+        export_section(rva, "x.dll", &["Fwd"], &[(0, long.as_str())])
+    });
+    let e = parse(&image).exports.unwrap();
+    assert!(e.truncated);
+    assert!(
+        matches!(&e.exports[0].target, ExportTarget::Forwarder(f) if f.len() == pe::MAX_NAME_LEN)
+    );
+
+    // Unnamed slots: a bad one (pointing at an unmapped forwarder string
+    // inside the directory is hard to build, so use an unreadable slot
+    // past the backed data) does not stop the listing.
+    let entries: Vec<(Vec<u8>, u16)> = Vec::new();
+    let e = exports_of(&entries, &[0x1000, 0x1010, 0x1020])
+        .exports
+        .unwrap();
+    assert_eq!(e.exports.len(), 3);
+}
+
+#[test]
+fn a_kernel_import_cannot_be_hidden_by_padding() {
+    // Enough long names to exhaust MAX_MODULE_NAME_BYTES, then ntoskrnl.
+    let names: Vec<String> = (0..2_100)
+        .map(|i| format!("{i:04}{}", "m".repeat(508)))
+        .collect();
+    let mut imports: Vec<Import<'_>> = names.iter().map(|n| (n.as_str(), vec![Err(1)])).collect();
+    imports.push(("ntoskrnl.exe", vec![Err(1)]));
+    let image = with_directory(
+        PeBuilder {
+            subsystem: 1,
+            ..PeBuilder::default()
+        },
+        DIR_IMPORT,
+        |rva| import_section(rva, &imports, true),
+    );
+    let info = parse(&image);
+    let i = info.imports.as_ref().unwrap();
+    assert!(i.truncated, "the name cap was reached");
+    assert!(i.imports_module("NTOSKRNL.EXE"));
+    assert_eq!(i.kernel_modules, ["ntoskrnl.exe"]);
+    assert!(info.is_kernel_driver());
+    // A listed module is always found too.
+    assert!(i.imports_module(&i.modules[2_050].name));
+}
+
+#[test]
+fn padding_before_a_comment_cdata_or_reference_is_dropped() {
+    let pad = " ".repeat(5_000);
+    for tail in ["<!-- x -->true", "<![CDATA[true]]>", "&#x74;rue"] {
+        let xml = format!(
+            "<assembly><application><windowsSettings><autoElevate>{pad}{tail}</autoElevate></windowsSettings></application></assembly>"
+        );
+        assert_eq!(
+            parse_manifest(xml.as_bytes()).unwrap().auto_elevate,
+            Some(true),
+            "{tail}"
+        );
+    }
+    // A huge single text value is bounded, not buffered whole.
+    let big = "x".repeat(200_000);
+    let xml = format!(
+        "<assembly><application><windowsSettings><dpiAware>{big}</dpiAware></windowsSettings></application></assembly>"
+    );
+    assert_eq!(
+        parse_manifest(xml.as_bytes())
+            .unwrap()
+            .dpi_aware
+            .unwrap()
+            .len(),
+        pe::manifest::MAX_VALUE_LEN
+    );
+}
+
+#[test]
+fn names_are_case_sensitive_and_prefixed_attributes_are_not_the_schema() {
+    // A prefixed or case-variant attribute is a different attribute; the
+    // real `level` decides.
+    for attrs in [
+        r#"xmlns:x="urn:d" x:level="asInvoker" level="requireAdministrator" x:uiAccess="false" uiAccess="true""#,
+        r#"LEVEL="asInvoker" level="requireAdministrator" UIACCESS="false" uiAccess="true""#,
+        r#"level="requireAdministrator" LEVEL="asInvoker" uiAccess="true" x:uiAccess="false" xmlns:x="urn:d""#,
+    ] {
+        let xml = format!(
+            r#"<assembly><trustInfo><security><requestedPrivileges><requestedExecutionLevel {attrs}/></requestedPrivileges></security></trustInfo></assembly>"#
+        );
+        let m = parse_manifest(xml.as_bytes()).unwrap();
+        assert_eq!(
+            m.execution_level,
+            Some(ExecutionLevel::RequireAdministrator),
+            "{attrs}"
+        );
+        assert_eq!(m.ui_access, Some(true), "{attrs}");
+    }
+    // A case-variant element is a different element.
+    let xml = format!(
+        "<assembly><TRUSTINFO><security><requestedPrivileges><requestedExecutionLevel level=\"asInvoker\"/></requestedPrivileges></security></TRUSTINFO>{}</assembly>",
+        r#"<trustInfo><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator"/></requestedPrivileges></security></trustInfo>"#
+    );
+    assert_eq!(
+        parse_manifest(xml.as_bytes()).unwrap().execution_level,
+        Some(ExecutionLevel::RequireAdministrator)
+    );
+}
+
+#[test]
+fn invalid_names_are_rejected() {
+    for bad in [
+        &b"<></>"[..],
+        b"< />",
+        br#"<assembly == "1"/>"#,
+        br#"<assembly><a="&boom;"/></assembly>"#,
+        br#"<assembly><1a/></assembly>"#,
+        br#"<assembly><q 1x="1"/></assembly>"#,
+    ] {
+        assert!(
+            matches!(parse_manifest(bad), Err(ManifestError::Xml(_))),
+            "{:?}: {:?}",
+            String::from_utf8_lossy(bad),
+            parse_manifest(bad)
+        );
+    }
+}
+
+#[test]
+fn the_first_text_setting_wins_however_it_is_written() {
+    let settings = |inner: &str| {
+        format!(
+            "<assembly><application><windowsSettings>{inner}</windowsSettings></application></assembly>"
+        )
+    };
+    let m = parse_manifest(
+        settings("<autoElevate>bogus</autoElevate><autoElevate>true</autoElevate>").as_bytes(),
+    )
+    .unwrap();
+    assert_eq!(m.auto_elevate, None);
+    let m = parse_manifest(settings("<dpiAware/><dpiAware>true</dpiAware>").as_bytes()).unwrap();
+    assert_eq!(m.dpi_aware, None);
+    let m = parse_manifest(settings("<dpiAware></dpiAware><dpiAware>true</dpiAware>").as_bytes())
+        .unwrap();
+    assert_eq!(m.dpi_aware.as_deref(), Some(""));
+}
+
+#[test]
+fn only_the_process_manifest_decides_elevation() {
+    // An EXE named setup.exe with only an ID 2 manifest saying asInvoker:
+    // the OS does not read ID 2 at process creation, so the installer
+    // heuristic still applies.
+    let image = PeBuilder {
+        resources: vec![Leaf {
+            type_id: 24,
+            name_id: 2,
+            lang: 0x0409,
+            data: level_manifest("asInvoker").into_bytes(),
+        }],
+        ..PeBuilder::default()
+    }
+    .build();
+    let info = parse(&image);
+    assert_eq!(info.manifest_id, Some(2));
+    let e = info.requires_elevation(Some("setup.exe"));
+    assert_eq!(
+        (e.requires_elevation, e.reason),
+        (true, ElevationReason::InstallerFileName("setup"))
     );
 }

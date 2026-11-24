@@ -23,13 +23,19 @@
 //!
 //! So a dependency's `assemblyIdentity`, or a decoy setting placed anywhere
 //! else, is never taken for the real one. The first occurrence at the right
-//! place wins. Values are trimmed, then compared ASCII case-insensitively
-//! where the OS does (`requireAdministrator`, `true`). Text may be split by
-//! references or CDATA sections; it is joined before it is read.
+//! place wins, whether it is written `<x/>` or `<x></x>`. Element and
+//! attribute names are case-sensitive, as in XML; only unprefixed
+//! attributes are read, as the manifest schema has no prefixed ones. Values
+//! are trimmed, then compared ASCII case-insensitively where the OS does
+//! (`requireAdministrator`, `true`). Text may be split by references,
+//! comments or CDATA sections; it is joined before it is read, and leading
+//! whitespace is dropped as it arrives, so padding cannot crowd a value
+//! out.
 //!
 //! The whole document must be well formed: one root element, every element
-//! closed, every attribute well formed, unique and free of undefined
-//! entities, even on elements whose settings are not read.
+//! closed, every element and attribute name a valid XML name, every
+//! attribute well formed, unique and free of undefined entities, even on
+//! elements whose settings are not read.
 //!
 //! [`requires_elevation`] is the #45 heuristic for whether starting the
 //! file will ask for administrator rights.
@@ -173,29 +179,52 @@ fn bounded(s: &str) -> String {
     s
 }
 
-/// Every attribute of `e`, checked: each must be well formed, unique and
-/// free of undefined entities, whether or not it is read. Returns the
-/// values of those in `wanted` (local name, ASCII case-insensitive),
-/// trimmed and bounded, in `wanted` order.
+/// Whether `name` is a valid XML name (with an optional `prefix:`). Names
+/// are checked by the rules for their first and later characters; a
+/// manifest's names are ASCII, so non-ASCII letters are accepted as the
+/// XML 1.0 fifth edition does.
+fn is_xml_name(name: &[u8]) -> bool {
+    let start = |c: char| c.is_alphabetic() || c == '_' || c == ':' || !c.is_ascii();
+    let rest = |c: char| start(c) || c.is_ascii_digit() || c == '-' || c == '.';
+    let Ok(name) = std::str::from_utf8(name) else {
+        return false;
+    };
+    let mut chars = name.chars();
+    chars.next().is_some_and(start) && chars.all(rest)
+}
+
+/// Every attribute of `e`, checked: each must have a valid name and be
+/// well formed, unique and free of undefined entities, whether or not it
+/// is read. Returns the values of those in `wanted`, matched by exact name
+/// and only when unprefixed, trimmed and bounded, in `wanted` order.
 fn attrs<const N: usize>(
     e: &BytesStart<'_>,
     wanted: [&str; N],
 ) -> Result<[Option<String>; N], ManifestError> {
+    if !is_xml_name(e.name().as_ref()) {
+        return Err(ManifestError::Xml("invalid element name".into()));
+    }
     let mut out: [Option<String>; N] = std::array::from_fn(|_| None);
     for a in e.attributes() {
         let a = a.map_err(|err| ManifestError::Xml(err.to_string()))?;
+        if !is_xml_name(a.key.as_ref()) {
+            return Err(ManifestError::Xml("invalid attribute name".into()));
+        }
         // Only the five predefined entities resolve; anything else fails.
         let value = a
             .normalized_value(XmlVersion::Implicit1_0)
             .map_err(|err| ManifestError::Xml(err.to_string()))?;
-        let key = a.key.local_name();
-        if let Some(i) = wanted
+        // A prefixed attribute (`x:level`) is another attribute: never the
+        // schema's `level`.
+        if a.key.prefix().is_some() {
+            continue;
+        }
+        if let Some(slot) = wanted
             .iter()
-            .position(|w| key.as_ref().eq_ignore_ascii_case(w.as_bytes()))
+            .position(|w| a.key.as_ref() == w.as_bytes())
+            .and_then(|i| out.get_mut(i))
         {
-            if let Some(slot) = out.get_mut(i) {
-                slot.get_or_insert_with(|| bounded(&value));
-            }
+            *slot = Some(bounded(&value));
         }
     }
     Ok(out)
@@ -224,15 +253,9 @@ enum TextField {
 struct Path(Vec<Vec<u8>>);
 
 impl Path {
-    /// Whether the open elements, from the root, are exactly `names`
-    /// (ASCII case-insensitive).
+    /// Whether the open elements, from the root, are exactly `names`.
     fn is(&self, names: &[&str]) -> bool {
-        self.0.len() == names.len()
-            && self
-                .0
-                .iter()
-                .zip(names)
-                .all(|(a, b)| a.eq_ignore_ascii_case(b.as_bytes()))
+        self.0.len() == names.len() && self.0.iter().zip(names).all(|(a, b)| a == b.as_bytes())
     }
 }
 
@@ -246,6 +269,24 @@ const EXECUTION_LEVEL: [&str; 5] = [
 const IDENTITY: [&str; 2] = ["assembly", "assemblyIdentity"];
 const SUPPORTED_OS: [&str; 4] = ["assembly", "compatibility", "application", "supportedOS"];
 const WINDOWS_SETTINGS: [&str; 3] = ["assembly", "application", "windowsSettings"];
+
+/// Appends a piece of a setting's text: leading whitespace is dropped while
+/// nothing else has arrived, so padding cannot crowd the value out, and the
+/// text never grows past one byte over [`MAX_VALUE_LEN`] (enough to know it
+/// was cut).
+fn append(text: &mut String, piece: &str) {
+    let piece = if text.is_empty() {
+        piece.trim_start()
+    } else {
+        piece
+    };
+    let room = (MAX_VALUE_LEN + 1).saturating_sub(text.len());
+    let mut end = piece.len().min(room);
+    while !piece.is_char_boundary(end) {
+        end -= 1;
+    }
+    text.push_str(piece.get(..end).unwrap_or_default());
+}
 
 /// Parses a manifest resource.
 pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
@@ -267,6 +308,9 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
     let mut elements = 0_usize;
     let mut roots = 0_usize;
     let mut seen_execution_level = false;
+    // Which text settings were met, so the first wins however it is
+    // written (`<x/>`, `<x></x>`, or a value that does not parse).
+    let mut seen_text: Vec<TextField> = Vec::with_capacity(3);
     let mut text_field: Option<TextField> = None;
     let mut text = String::new();
     // Only whitespace may sit outside the root element.
@@ -303,16 +347,37 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
                             .0
                             .iter()
                             .zip(WINDOWS_SETTINGS)
-                            .all(|(a, b)| a.eq_ignore_ascii_case(b.as_bytes()));
+                            .all(|(a, b)| a == b.as_bytes());
                     text_field = match name {
                         _ if !in_settings => None,
                         b"autoElevate" => Some(TextField::AutoElevate),
                         b"dpiAware" => Some(TextField::DpiAware),
                         b"dpiAwareness" => Some(TextField::DpiAwareness),
                         _ => None,
-                    };
+                    }
+                    .filter(|f| !seen_text.contains(f));
+                    if let Some(f) = text_field {
+                        seen_text.push(f);
+                    }
                     text.clear();
                 } else {
+                    let name = path.0.last().map(Vec::as_slice).unwrap_or_default();
+                    let in_settings = path.0.len() == WINDOWS_SETTINGS.len() + 1
+                        && path
+                            .0
+                            .iter()
+                            .zip(WINDOWS_SETTINGS)
+                            .all(|(a, b)| a == b.as_bytes());
+                    let field = match name {
+                        _ if !in_settings => None,
+                        b"autoElevate" => Some(TextField::AutoElevate),
+                        b"dpiAware" => Some(TextField::DpiAware),
+                        b"dpiAwareness" => Some(TextField::DpiAwareness),
+                        _ => None,
+                    };
+                    if let Some(f) = field.filter(|f| !seen_text.contains(f)) {
+                        seen_text.push(f);
+                    }
                     path.0.pop();
                 }
             }
@@ -321,10 +386,10 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
                 if outside(&path, &raw) {
                     return Err(ManifestError::Xml("text outside the root element".into()));
                 }
-                if text_field.is_some() && text.len() < MAX_VALUE_LEN * 2 {
-                    let resolved = quick_xml::escape::unescape(&raw)
-                        .map_err(|e| ManifestError::Xml(e.to_string()))?;
-                    text.push_str(&resolved);
+                if text_field.is_some() {
+                    // References arrive as their own events, so the text is
+                    // already plain.
+                    append(&mut text, &raw);
                 }
             }
             Event::CData(t) => {
@@ -332,8 +397,8 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
                 if path.0.is_empty() {
                     return Err(ManifestError::Xml("CDATA outside the root element".into()));
                 }
-                if text_field.is_some() && text.len() < MAX_VALUE_LEN * 2 {
-                    text.push_str(&raw);
+                if text_field.is_some() {
+                    append(&mut text, &raw);
                 }
             }
             Event::GeneralRef(r) => {
@@ -356,11 +421,8 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
                         "reference outside the root element".into(),
                     ));
                 }
-                // Leading whitespace cannot crowd out the value: the cap
-                // is twice the kept length, and the value is trimmed
-                // before it is cut.
-                if text_field.is_some() && text.len() < MAX_VALUE_LEN * 2 {
-                    text.push_str(&resolved);
+                if text_field.is_some() {
+                    append(&mut text, &resolved);
                 }
             }
             Event::End(_) => {
@@ -368,17 +430,9 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
                 if let Some(field) = text_field.take() {
                     let value = bounded(&text);
                     match field {
-                        TextField::AutoElevate => {
-                            if out.auto_elevate.is_none() {
-                                out.auto_elevate = parse_bool(&value);
-                            }
-                        }
-                        TextField::DpiAware => {
-                            out.dpi_aware.get_or_insert(value);
-                        }
-                        TextField::DpiAwareness => {
-                            out.dpi_awareness.get_or_insert(value);
-                        }
+                        TextField::AutoElevate => out.auto_elevate = parse_bool(&value),
+                        TextField::DpiAware => out.dpi_aware = Some(value),
+                        TextField::DpiAwareness => out.dpi_awareness = Some(value),
                     }
                 }
             }

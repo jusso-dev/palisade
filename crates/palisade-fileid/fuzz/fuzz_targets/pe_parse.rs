@@ -53,6 +53,9 @@ fuzz_target!(|data: &[u8]| {
             assert!(imports.modules.len() <= pe::MAX_IMPORT_MODULES);
             assert!(imports.function_count <= pe::MAX_IMPORTED_FUNCTIONS);
             assert!(imports.all_module_names.len() <= pe::MAX_IMPORT_DESCRIPTORS);
+            let kept: usize = imports.all_module_names.iter().map(String::len).sum();
+            assert!(kept <= pe::MAX_MODULE_NAME_BYTES);
+            assert!(imports.kernel_modules.len() <= pe::KERNEL_MODULES.len());
             for m in &imports.modules {
                 assert!(m.name.len() <= pe::MAX_NAME_LEN * 3);
             }

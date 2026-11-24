@@ -236,8 +236,9 @@ pub enum WarningKind {
     VersionInfo(version::VersionInfoIssue),
     /// An import descriptor or its data is out of bounds or malformed.
     ImportTableMalformed,
-    /// The import descriptor table has no all-zero terminator within the
-    /// mapped data or [`MAX_IMPORT_DESCRIPTORS`].
+    /// The import descriptor table has no terminating descriptor (one with
+    /// no name or no import address table) within the mapped data or
+    /// [`MAX_IMPORT_DESCRIPTORS`].
     ImportTableTruncated,
     /// The export directory's tables are out of bounds or malformed.
     ExportTableMalformed,
@@ -534,8 +535,8 @@ impl PeInfo {
     }
 
     /// The #45 elevation heuristic, for a file named `file_name` (the
-    /// final path component, if known). See
-    /// [`manifest::requires_elevation`].
+    /// final path component, if known), from the process manifest (ID 1)
+    /// only. See [`manifest::requires_elevation`].
     #[must_use]
     pub fn requires_elevation(&self, file_name: Option<&str>) -> Elevation {
         let mut fields = Vec::new();
@@ -551,7 +552,13 @@ impl PeInfo {
                 }
             }
         }
-        manifest::requires_elevation(self.manifest.as_ref(), file_name, &fields)
+        // Only the process manifest (ID 1) decides elevation; IDs 2 and 3
+        // are isolation manifests the OS does not read at process creation.
+        let process_manifest = self
+            .manifest
+            .as_ref()
+            .filter(|_| self.manifest_id == Some(1));
+        manifest::requires_elevation(process_manifest, file_name, &fields)
     }
 
     /// The section whose mapped range contains `rva`: `VirtualAddress` up

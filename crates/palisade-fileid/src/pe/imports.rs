@@ -1,9 +1,12 @@
 //! The import and export tables (#45).
 //!
 //! Both are read the way the OS loader reads them. The import descriptor
-//! table is read until its all-zero terminator, whatever the directory size
-//! says, and an export is looked up by binary search over the sorted name
-//! table, as `GetProcAddress` does. The lists kept here are capped
+//! table ends at the first descriptor with no name or no import address
+//! table, whatever the directory size says, and an export is looked up by
+//! binary search over the name table, as `GetProcAddress` does. Names are
+//! NUL-terminated strings in mapped memory: a section's zero-filled tail
+//! past its raw data counts as NUL, and no read scans more than a name's
+//! cap, so the work stays linear in the number of entries. The lists kept here are capped
 //! ([`MAX_IMPORT_MODULES`], [`MAX_IMPORTED_FUNCTIONS`], [`MAX_EXPORTS`]).
 //! Questions that must not be dodged by padding a table (which modules are
 //! imported at all, does an export exist) are answered over the whole
@@ -33,7 +36,8 @@ pub const MAX_EXPORT_SLOTS: u32 = 65_536;
 /// export lookup, always use the whole name.
 pub const MAX_NAME_LEN: usize = 512;
 /// At most this many bytes of module names are kept in
-/// [`ImportInfo::all_module_names`].
+/// [`ImportInfo::all_module_names`]. Kernel modules are always recorded,
+/// in [`ImportInfo::kernel_modules`], however many names come first.
 pub const MAX_MODULE_NAME_BYTES: usize = 1024 * 1024;
 
 const DESCRIPTOR_SIZE: usize = 20;
@@ -73,8 +77,13 @@ pub struct ImportInfo {
     pub modules: Vec<ImportedModule>,
     /// Every module name in the table (within [`MAX_IMPORT_DESCRIPTORS`]
     /// and [`MAX_MODULE_NAME_BYTES`]), ASCII-lowercased, in table order with
-    /// duplicates kept once.
+    /// duplicates kept once. Past the byte cap [`Self::truncated`] is set.
     pub all_module_names: Vec<String>,
+    /// The [`super::KERNEL_MODULES`] imported anywhere in the table (within
+    /// [`MAX_IMPORT_DESCRIPTORS`]), lowercase, in that list's order. This is
+    /// never cut short by the caps, so padding a table cannot hide a kernel
+    /// import.
+    pub kernel_modules: Vec<&'static str>,
     /// Imported functions across all listed modules.
     pub function_count: usize,
     /// A limit was reached, or part of the table was unreadable, so the
@@ -83,12 +92,20 @@ pub struct ImportInfo {
 }
 
 impl ImportInfo {
-    /// Whether any import descriptor names `module` (ASCII
-    /// case-insensitive, as the loader compares module names).
+    /// Whether an import descriptor names `module` (ASCII case-insensitive,
+    /// as the loader compares module names). A kernel module is found
+    /// anywhere in the table; any other module among the listed modules and
+    /// the names kept in [`Self::all_module_names`] (check
+    /// [`Self::truncated`]).
     #[must_use]
     pub fn imports_module(&self, module: &str) -> bool {
         let wanted = module.to_ascii_lowercase();
-        self.all_module_names.contains(&wanted)
+        self.kernel_modules.contains(&wanted.as_str())
+            || self.all_module_names.contains(&wanted)
+            || self
+                .modules
+                .iter()
+                .any(|m| m.name.eq_ignore_ascii_case(&wanted))
     }
 }
 
@@ -156,29 +173,46 @@ impl ExportInfo {
     }
 }
 
-/// A NUL-terminated name at `rva`, read from file-backed data only, as
-/// the loader reads it: the name runs to the first NUL, however long.
-/// The text kept is cut to [`MAX_NAME_LEN`] bytes. `None` if the RVA is
-/// zero or unmapped, or no NUL is found before the end of its section.
-/// An empty name is a valid result.
+/// A NUL-terminated name at `rva`, as the loader reads it. The text kept is
+/// at most [`MAX_NAME_LEN`] bytes; a longer name is marked cut, and no more
+/// of it is read. `None` if the RVA is zero or unmapped, or the name runs
+/// into unmapped memory or the end of the file. An empty name is valid.
 fn name_at(data: &[u8], layout: Layout<'_>, rva: u32) -> Option<Name> {
-    let raw = raw_name(data, layout, rva)?;
-    let kept = raw.get(..raw.len().min(MAX_NAME_LEN)).unwrap_or_default();
+    let (raw, terminated) = c_string(data, layout, rva, MAX_NAME_LEN)?;
     Some(Name {
-        text: String::from_utf8_lossy(kept).into_owned(),
-        cut: raw.len() > MAX_NAME_LEN,
+        text: String::from_utf8_lossy(raw).into_owned(),
+        cut: !terminated,
     })
 }
 
-/// The bytes of the NUL-terminated string at `rva`, without the NUL.
-fn raw_name<'a>(data: &'a [u8], layout: Layout<'_>, rva: u32) -> Option<&'a [u8]> {
+/// Up to `max` bytes of the NUL-terminated string at `rva`, and whether its
+/// NUL was found within them. At most `max + 1` bytes are looked at. A
+/// section's zero-filled tail (mapped, but past its raw data) reads as NUL.
+/// `None` if the RVA is zero or unmapped, or the string reaches unmapped
+/// memory or the end of the file before `max` bytes or a NUL.
+fn c_string<'a>(
+    data: &'a [u8],
+    layout: Layout<'_>,
+    rva: u32,
+    max: usize,
+) -> Option<(&'a [u8], bool)> {
     if rva == 0 {
         return None;
     }
     let (offset, available) = layout.backed_extent(rva)?;
-    let raw = bytes(data, offset, to_usize(available)?)?;
-    let end = raw.iter().position(|b| *b == 0)?;
-    raw.get(..end)
+    let len = to_usize(available)?.min(max.saturating_add(1));
+    let raw = bytes(data, offset, len)?;
+    if let Some(end) = raw.iter().position(|b| *b == 0) {
+        return Some((raw.get(..end)?, true));
+    }
+    if raw.len() > max {
+        return Some((raw.get(..max)?, false));
+    }
+    // The file-backed bytes ran out first: the string is terminated only if
+    // the next byte is mapped and zero-filled.
+    let next = rva.checked_add(u32::try_from(raw.len()).ok()?)?;
+    let zero_filled = layout.section_for(next).is_some() && layout.backed_extent(next).is_none();
+    zero_filled.then_some((raw, true))
 }
 
 /// A name read by [`name_at`].
@@ -243,6 +277,7 @@ pub(super) fn parse_imports(
     let mut bad = Once::new(start, WarningKind::ImportTableMalformed);
     let mut seen = BTreeSet::new();
     let mut name_bytes = 0_usize;
+    let mut kernel = [false; super::KERNEL_MODULES.len()];
     let thunk_size = if format == PeFormat::Pe32Plus { 8 } else { 4 };
     let available = to_usize(available).unwrap_or(0);
     let mut terminated = false;
@@ -256,7 +291,7 @@ pub(super) fn parse_imports(
         };
         let field = |o| u32_at(d, o).unwrap_or(0);
         // The loader stops at a descriptor with no name or no import
-        // address table, not only at an all-zero one.
+        // address table.
         if field(12) == 0 || field(16) == 0 {
             terminated = true;
             break;
@@ -271,6 +306,9 @@ pub(super) fn parse_imports(
             info.truncated = true;
         }
         let lower = name.text.to_ascii_lowercase();
+        for (found, module) in kernel.iter_mut().zip(super::KERNEL_MODULES) {
+            *found |= !name.cut && lower == module;
+        }
         if !seen.contains(&lower) {
             if name_bytes.saturating_add(lower.len()) > MAX_MODULE_NAME_BYTES {
                 info.truncated = true;
@@ -302,6 +340,11 @@ pub(super) fn parse_imports(
         warnings.push(start, WarningKind::ImportTableTruncated);
         info.truncated = true;
     }
+    info.kernel_modules = super::KERNEL_MODULES
+        .iter()
+        .zip(kernel)
+        .filter_map(|(m, found)| found.then_some(*m))
+        .collect();
     Some(info)
 }
 
@@ -321,10 +364,6 @@ fn read_thunks(
     };
     let count = to_usize(available).unwrap_or(0) / thunk_size;
     for i in 0..count {
-        if info.function_count >= MAX_IMPORTED_FUNCTIONS {
-            info.truncated = true;
-            return true;
-        }
         let at = start.saturating_add(i.saturating_mul(thunk_size));
         let (value, by_ordinal) = if thunk_size == 8 {
             let v = u64_at(data, at).unwrap_or(0);
@@ -334,6 +373,11 @@ fn read_thunks(
             (v & 0x7fff_ffff, v >> 31 == 1)
         };
         if value == 0 && !by_ordinal {
+            return true;
+        }
+        // Checked after the terminator, so exactly the cap is not "over".
+        if info.function_count >= MAX_IMPORTED_FUNCTIONS {
+            info.truncated = true;
             return true;
         }
         let function = if by_ordinal {
@@ -408,17 +452,28 @@ pub(super) fn parse_exports(
     );
     let number_of_functions = info.number_of_functions;
 
-    // Like the loader, an index past `NumberOfFunctions` is not an export.
-    let function_at = |index: u32| -> Option<ExportTarget> {
+    // Like the loader, an index past `NumberOfFunctions`, or a slot holding
+    // RVA 0, is not an export.
+    let slot_at = |index: u32| -> Slot {
         if index >= number_of_functions {
-            return None;
+            return Slot::Bad;
         }
-        let at = functions.checked_add(index.checked_mul(4)?)?;
-        let rva = u32_at(at_rva(data, layout, at, 4)?, 0)?;
-        if (dir_start..dir_end).contains(&u64::from(rva)) {
-            Some(ExportTarget::Forwarder(name_at(data, layout, rva)?.text))
+        let Some(rva) = functions
+            .checked_add(index.saturating_mul(4))
+            .and_then(|at| at_rva(data, layout, at, 4))
+            .and_then(|b| u32_at(b, 0))
+        else {
+            return Slot::Bad;
+        };
+        if rva == 0 {
+            Slot::Unused
+        } else if (dir_start..dir_end).contains(&u64::from(rva)) {
+            match name_at(data, layout, rva) {
+                Some(name) => Slot::Export(ExportTarget::Forwarder(name.text), name.cut),
+                None => Slot::Bad,
+            }
         } else {
-            Some(ExportTarget::Rva(rva))
+            Slot::Export(ExportTarget::Rva(rva), false)
         }
     };
     let name_rva_at = |i: u32| -> Option<u32> {
@@ -462,11 +517,14 @@ pub(super) fn parse_exports(
         if name.cut {
             info.truncated = true;
         }
-        let Some(target) = function_at(u32::from(index)) else {
+        let Slot::Export(target, cut) = slot_at(u32::from(index)) else {
             bad.report(warnings);
             info.truncated = true;
             continue;
         };
+        if cut {
+            info.truncated = true;
+        }
         if let Some(slot) = named.get_mut(usize::from(index)) {
             *slot = true;
         }
@@ -484,10 +542,6 @@ pub(super) fn parse_exports(
     }
     // Unnamed exports, by ordinal.
     for index in 0..slots {
-        if info.exports.len() >= MAX_EXPORTS {
-            info.truncated = true;
-            break;
-        }
         if to_usize(index)
             .and_then(|i| named.get(i))
             .copied()
@@ -495,18 +549,28 @@ pub(super) fn parse_exports(
         {
             continue;
         }
-        match function_at(index) {
-            // A zero RVA is an unused slot.
-            Some(ExportTarget::Rva(0)) => {}
-            Some(target) => info.exports.push(Export {
-                name: None,
-                ordinal: base.wrapping_add(index),
-                target,
-            }),
-            None => {
+        match slot_at(index) {
+            Slot::Unused => {}
+            Slot::Export(target, cut) => {
+                // Checked only when there is one to add, so exactly the cap
+                // is not "over".
+                if info.exports.len() >= MAX_EXPORTS {
+                    info.truncated = true;
+                    break;
+                }
+                if cut {
+                    info.truncated = true;
+                }
+                info.exports.push(Export {
+                    name: None,
+                    ordinal: base.wrapping_add(index),
+                    target,
+                });
+            }
+            // One bad slot does not hide the rest.
+            Slot::Bad => {
                 bad.report(warnings);
                 info.truncated = true;
-                break;
             }
         }
     }
@@ -522,12 +586,23 @@ pub(super) fn parse_exports(
         let mut low = 0_u32;
         while low <= high {
             let mid = low + (high - low) / 2;
-            let Some(name) = name_rva_at(mid).and_then(|r| raw_name(data, layout, r)) else {
+            // `strcmp` against `wanted` is decided within `wanted.len() + 1`
+            // bytes, so no more are read.
+            let Some((name, terminated)) =
+                name_rva_at(mid).and_then(|r| c_string(data, layout, r, wanted.len()))
+            else {
                 return false;
             };
-            match name.cmp(wanted.as_bytes()) {
+            // Unterminated within `wanted.len()` bytes means the name is
+            // longer: equal so far, so it sorts after `wanted`.
+            let order = match name.cmp(wanted.as_bytes()) {
+                std::cmp::Ordering::Equal if !terminated => std::cmp::Ordering::Greater,
+                other => other,
+            };
+            match order {
                 std::cmp::Ordering::Equal => {
-                    return ordinal_at(mid).is_some_and(|i| function_at(u32::from(i)).is_some());
+                    return ordinal_at(mid)
+                        .is_some_and(|i| matches!(slot_at(u32::from(i)), Slot::Export(..)));
                 }
                 std::cmp::Ordering::Less => low = mid + 1,
                 std::cmp::Ordering::Greater => match mid.checked_sub(1) {
@@ -545,4 +620,14 @@ pub(super) fn parse_exports(
         service_main: find("ServiceMain"),
     };
     Some(info)
+}
+
+/// One slot of the export address table.
+enum Slot {
+    /// RVA 0: no export at this ordinal.
+    Unused,
+    /// An export, and whether its forwarder string was cut.
+    Export(ExportTarget, bool),
+    /// Past the table, unreadable, or a forwarder that cannot be read.
+    Bad,
 }
