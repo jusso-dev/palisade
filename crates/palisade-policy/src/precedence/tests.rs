@@ -279,12 +279,7 @@ fn priority_takes_the_winning_number_then_the_fixed_action_order() {
 }
 
 fn crit(field: Field, operator: Operator, values: &[&str]) -> Match {
-    Match::Criterion(Criterion {
-        field,
-        operator,
-        values: values.iter().map(|v| (*v).to_owned()).collect(),
-        case_sensitive: None,
-    })
+    Match::Criterion(Criterion::new(field, operator, values.iter().copied()))
 }
 
 #[test]

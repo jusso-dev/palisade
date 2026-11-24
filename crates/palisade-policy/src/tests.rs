@@ -28,12 +28,7 @@ fn sha256(seed: char) -> String {
 }
 
 fn leaf(field: Field, operator: Operator, values: &[&str]) -> Match {
-    Match::Criterion(Criterion {
-        field,
-        operator,
-        values: values.iter().map(|v| (*v).to_owned()).collect(),
-        case_sensitive: None,
-    })
+    Match::Criterion(Criterion::new(field, operator, values.iter().copied()))
 }
 
 /// Builds a document with one rule set holding one rule with this tree and action.
@@ -922,12 +917,11 @@ fn regex_count_is_capped_per_policy() {
             let mut id = *r.id.0.as_bytes();
             id[15] = i;
             r.id = crate::model::RuleId(palisade_core::Uuid7::from_bytes(id).unwrap());
-            r.match_ = Match::Criterion(Criterion {
-                field: Field::MetaProductName,
-                operator: Operator::Regex,
-                values: values.clone(),
-                case_sensitive: None,
-            });
+            r.match_ = Match::Criterion(Criterion::new(
+                Field::MetaProductName,
+                Operator::Regex,
+                values.clone(),
+            ));
             r
         })
         .collect();
@@ -1258,10 +1252,12 @@ fn yes_or_no_criteria_take_no_values() {
 fn context_values_are_checked_and_case_only_applies_to_text() {
     let anchor = leaf(Field::HashSha256, Operator::Equals, &[&sha256('e')]);
     let mut sid = Criterion {
-        field: Field::UserSid,
-        operator: Operator::Equals,
-        values: vec!["S-1-5-18".to_owned()],
         case_sensitive: Some(true),
+        ..Criterion::new(
+            Field::UserSid,
+            Operator::Equals,
+            vec!["S-1-5-18".to_owned()],
+        )
     };
     let doc = with_rule(
         Match::All(vec![
@@ -1298,10 +1294,12 @@ fn context_values_are_checked_and_case_only_applies_to_text() {
     // Tags and account names have a case.
     sid.case_sensitive = None;
     let mut tag = Criterion {
-        field: Field::DeviceTags,
-        operator: Operator::MemberOf,
-        values: vec!["Finance".to_owned()],
         case_sensitive: Some(true),
+        ..Criterion::new(
+            Field::DeviceTags,
+            Operator::MemberOf,
+            vec!["Finance".to_owned()],
+        )
     };
     let doc = with_rule(
         Match::All(vec![

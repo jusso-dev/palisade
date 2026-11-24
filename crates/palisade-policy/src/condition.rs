@@ -39,6 +39,11 @@
 //! `NoMatch` under an odd number of `not` nodes. So it always counts
 //! towards the deny applying, and the rest of the tree is evaluated as
 //! usual.
+//!
+//! A criterion marked `safety_critical` in a mandatory blocklist works the
+//! same way for any unknown fact ([`CompiledMatch::eval_mandatory`]), so the
+//! shipped blocklists block an object whose facts are missing rather than
+//! let it through (#32, #87).
 
 use crate::facts::ObjectFacts;
 use crate::model::Match;
@@ -272,10 +277,35 @@ impl CompiledMatch {
         ctx: &EvalContext<'_>,
         unparseable: Unparseable,
     ) -> TreeEvaluation {
+        self.eval_full(facts, ctx, unparseable, false)
+    }
+
+    /// Evaluates the tree of a mandatory deny: as [`eval_with`](Self::eval_with),
+    /// and each `safety_critical` criterion that is `Unknown` counts towards
+    /// the deny applying (`Match`, or `NoMatch` under an odd number of `not`
+    /// nodes), so the shipped blocklists fail closed (#32, #87).
+    #[must_use]
+    pub fn eval_mandatory(
+        &self,
+        facts: &ObjectFacts,
+        ctx: &EvalContext<'_>,
+        unparseable: Unparseable,
+    ) -> TreeEvaluation {
+        self.eval_full(facts, ctx, unparseable, true)
+    }
+
+    fn eval_full(
+        &self,
+        facts: &ObjectFacts,
+        ctx: &EvalContext<'_>,
+        unparseable: Unparseable,
+        safety_critical: bool,
+    ) -> TreeEvaluation {
         let mut eval = Eval {
             facts,
             ctx,
             unparseable,
+            safety_critical,
             notes: Notes::default(),
         };
         let root = index(self.nodes.len() - 1);
@@ -312,9 +342,18 @@ impl CompiledMatch {
             }
             Node::Not(child) => self.eval_node(child, !negated, eval).not(),
             Node::Leaf(leaf) => {
-                let evaluation = self.leaves[leaf as usize].eval(eval.facts, eval.ctx);
+                let criterion = &self.leaves[leaf as usize];
+                let evaluation = criterion.eval(eval.facts, eval.ctx);
                 eval.notes.extend(evaluation.notes);
                 if evaluation.result == Tri::Unknown
+                    && eval.safety_critical
+                    && criterion.safety_critical()
+                {
+                    // A safety-critical criterion of a mandatory deny fails
+                    // closed: whatever made it unknown, it counts towards
+                    // the deny applying.
+                    Tri::from_bool(!negated)
+                } else if evaluation.result == Tri::Unknown
                     && eval.unparseable == Unparseable::FavourMatch
                     && evaluation.notes.contains(Note::VersionUnparseable)
                 {
@@ -338,6 +377,9 @@ struct Eval<'f, 'c> {
     facts: &'f ObjectFacts,
     ctx: &'f EvalContext<'c>,
     unparseable: Unparseable,
+    /// Whether `safety_critical` criteria fail closed: only in a mandatory
+    /// deny.
+    safety_critical: bool,
     notes: Notes,
 }
 

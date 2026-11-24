@@ -7,10 +7,14 @@
 //! criterion on it evaluates to [`Tri::Unknown`](crate::ops::Tri::Unknown).
 //!
 //! Every fact here is plain data, already known when a decision starts.
-//! Facts that cost a lookup at decision time (registry, files, environment
-//! blocks), their cost classes and caching, and the time facts that
-//! criteria test are later parts of #33. The network facts and the facts
-//! only scopes read ([`ScopeFacts`]) are part of rule scoping (#38).
+//! The agent collects the network facts on network changes and heartbeats,
+//! and the time facts from its trusted clock (#18), in the clock the
+//! policy's `time_zone_basis` names. When the clock cannot be trusted it
+//! leaves the time facts out, so every time criterion is unknown: an allow
+//! that depends on the time fails closed. Facts that cost a lookup at
+//! decision time (registry, files, environment blocks), their cost classes
+//! and caching are later parts of #33. The facts only scopes read
+//! ([`ScopeFacts`]) are part of rule scoping (#38).
 
 use std::net::IpAddr;
 
@@ -29,12 +33,14 @@ pub struct EvaluationContext {
     pub device: DeviceContext,
     /// The session the process runs in.
     pub session: SessionContext,
-    /// The device's network location (#38).
+    /// The device's network location (#33, #38).
     pub network: NetworkContext,
     /// The facts only scopes read (#38): the subjects' tokens and cached
     /// groups, trusted time, time zones, set memberships and instance
     /// counts.
     pub scope: ScopeFacts,
+    /// The time of the evaluation, for time criteria (#33).
+    pub time: TimeContext,
 }
 
 /// The user the process runs as, from its token and the directory.
@@ -60,6 +66,12 @@ pub struct UserContext {
     pub is_service_account: Option<bool>,
     /// The user is the local system account.
     pub is_system: Option<bool>,
+    /// The integrity level of the process token.
+    pub integrity_level: Option<IntegrityLevel>,
+    /// The distinguished name of the user's directory object, such as
+    /// `CN=alice,OU=Finance,DC=corp,DC=example`. `user.ou` tests the unit
+    /// it is in.
+    pub dn: Option<String>,
 }
 
 /// The device the decision is made on.
@@ -96,8 +108,11 @@ pub struct DeviceContext {
     pub is_vdi: Option<bool>,
     /// The device is a multi-session terminal server.
     pub is_terminal_server: Option<bool>,
+    /// The operating system build number, such as `22631`.
+    pub os_build: Option<u32>,
     /// The distinguished name of the device's computer object in the
     /// directory, such as `CN=WS-0042,OU=Finance,DC=corp,DC=example,DC=org`.
+    /// `device.ou` tests the unit it is in.
     pub dn: Option<String>,
 }
 
@@ -110,6 +125,8 @@ pub struct SessionContext {
     pub client_hostname: Option<String>,
     /// The session is remote.
     pub is_remote: Option<bool>,
+    /// The session ID.
+    pub id: Option<u32>,
     /// The address of the connected client, on a multi-session host.
     pub client_ip: Option<IpAddr>,
 }
@@ -134,6 +151,192 @@ pub struct NetworkContext {
     /// The names of the location profiles that are active, after the
     /// debounce.
     pub locations: Option<Vec<String>>,
+}
+
+/// When the evaluation happens, in the clock the policy's
+/// `time_zone_basis` names. The agent fills this from its trusted clock,
+/// and leaves it empty when the clock cannot be trusted (#18).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TimeContext {
+    /// The day of the week.
+    pub weekday: Option<Weekday>,
+    /// Minutes since midnight, 0 to 1439.
+    pub minute_of_day: Option<u16>,
+    /// The date.
+    pub date: Option<Date>,
+}
+
+/// The integrity level of a process token, from lowest to highest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum IntegrityLevel {
+    /// Untrusted.
+    Untrusted,
+    /// Low, as for a sandboxed process.
+    Low,
+    /// Medium: a standard user.
+    Medium,
+    /// Medium plus.
+    MediumPlus,
+    /// High: an elevated administrator.
+    High,
+    /// System.
+    System,
+    /// Protected process.
+    Protected,
+}
+
+impl IntegrityLevel {
+    /// Every level, from lowest to highest.
+    pub const ALL: [Self; 7] = [
+        Self::Untrusted,
+        Self::Low,
+        Self::Medium,
+        Self::MediumPlus,
+        Self::High,
+        Self::System,
+        Self::Protected,
+    ];
+
+    /// The name a criterion value uses.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Untrusted => "untrusted",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::MediumPlus => "medium_plus",
+            Self::High => "high",
+            Self::System => "system",
+            Self::Protected => "protected",
+        }
+    }
+
+    /// The level with this name, exactly as [`Self::as_str`] writes it.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|l| l.as_str() == name)
+    }
+}
+
+/// A day of the week.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Weekday {
+    /// Monday.
+    Mon,
+    /// Tuesday.
+    Tue,
+    /// Wednesday.
+    Wed,
+    /// Thursday.
+    Thu,
+    /// Friday.
+    Fri,
+    /// Saturday.
+    Sat,
+    /// Sunday.
+    Sun,
+}
+
+impl Weekday {
+    /// Every day, from Monday.
+    pub const ALL: [Self; 7] = [
+        Self::Mon,
+        Self::Tue,
+        Self::Wed,
+        Self::Thu,
+        Self::Fri,
+        Self::Sat,
+        Self::Sun,
+    ];
+
+    /// The name a criterion value uses: `mon` to `sun`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Mon => "mon",
+            Self::Tue => "tue",
+            Self::Wed => "wed",
+            Self::Thu => "thu",
+            Self::Fri => "fri",
+            Self::Sat => "sat",
+            Self::Sun => "sun",
+        }
+    }
+
+    /// The day with this name, exactly as [`Self::as_str`] writes it.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|d| d.as_str() == name)
+    }
+}
+
+/// A calendar date in the proleptic Gregorian calendar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Date {
+    year: u16,
+    month: u8,
+    day: u8,
+}
+
+impl Date {
+    /// The date, if it exists: years 1 to 9999.
+    #[must_use]
+    pub const fn new(year: u16, month: u8, day: u8) -> Option<Self> {
+        if year == 0 || year > 9999 || month == 0 || month > 12 || day == 0 {
+            return None;
+        }
+        let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+        let days = match month {
+            2 if leap => 29,
+            2 => 28,
+            4 | 6 | 9 | 11 => 30,
+            _ => 31,
+        };
+        if day > days {
+            None
+        } else {
+            Some(Self { year, month, day })
+        }
+    }
+
+    /// Reads `YYYY-MM-DD`, with exactly four, two and two digits.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        let b = s.as_bytes();
+        if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
+            return None;
+        }
+        let digits = |r: core::ops::Range<usize>| -> Option<u16> {
+            let part = &s[r];
+            if !part.bytes().all(|c| c.is_ascii_digit()) {
+                return None;
+            }
+            part.parse().ok()
+        };
+        let year = digits(0..4)?;
+        let month = u8::try_from(digits(5..7)?).ok()?;
+        let day = u8::try_from(digits(8..10)?).ok()?;
+        Self::new(year, month, day)
+    }
+}
+
+impl core::fmt::Display for Date {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{:04}-{:02}-{:02}", self.year, self.month, self.day)
+    }
+}
+
+/// Reads a time of day, `HH:MM` with a 24-hour clock, as minutes since
+/// midnight.
+#[must_use]
+pub fn parse_time_of_day(s: &str) -> Option<u16> {
+    let b = s.as_bytes();
+    if b.len() != 5 || b[2] != b':' || !b[..2].iter().chain(&b[3..]).all(u8::is_ascii_digit) {
+        return None;
+    }
+    let hours: u16 = s[..2].parse().ok()?;
+    let minutes: u16 = s[3..].parse().ok()?;
+    (hours < 24 && minutes < 60).then_some(hours * 60 + minutes)
 }
 
 /// How a session was started.
@@ -198,9 +401,83 @@ pub(crate) enum ContextFact<'a> {
     Bool(bool),
     /// A session type.
     Session(SessionType),
+    /// A whole number.
+    Number(u64),
+    /// An integrity level.
+    Level(IntegrityLevel),
+    /// One IP address.
+    Ip(IpAddr),
+    /// A set of IP addresses.
+    Ips(&'a [IpAddr]),
+    /// A set of MAC addresses.
+    Macs(&'a [[u8; 6]]),
+    /// A day of the week.
+    Weekday(Weekday),
+    /// Minutes since midnight.
+    Minute(u16),
+    /// A date.
+    Date(Date),
 }
 
 impl EvaluationContext {
+    /// No facts at all, as a constant: every context criterion evaluates
+    /// to unknown.
+    pub const EMPTY: Self = Self {
+        user: UserContext {
+            sid: None,
+            account_name: None,
+            upn: None,
+            groups: None,
+            primary_group: None,
+            is_admin: None,
+            is_elevated: None,
+            is_service_account: None,
+            is_system: None,
+            integrity_level: None,
+            dn: None,
+        },
+        device: DeviceContext {
+            hostname: None,
+            fqdn: None,
+            domain: None,
+            netbios: None,
+            ad_site: None,
+            groups: None,
+            tags: None,
+            os_version: None,
+            os_edition: None,
+            arch: None,
+            is_server: None,
+            is_domain_controller: None,
+            is_laptop: None,
+            is_vdi: None,
+            is_terminal_server: None,
+            os_build: None,
+            dn: None,
+        },
+        session: SessionContext {
+            session_type: None,
+            client_hostname: None,
+            is_remote: None,
+            id: None,
+            client_ip: None,
+        },
+        network: NetworkContext {
+            addresses: None,
+            macs: None,
+            dns_suffixes: None,
+            gateway_macs: None,
+            server_reachable: None,
+            locations: None,
+        },
+        scope: ScopeFacts::EMPTY,
+        time: TimeContext {
+            weekday: None,
+            minute_of_day: None,
+            date: None,
+        },
+    };
+
     /// No facts at all: every context criterion evaluates to unknown.
     #[must_use]
     pub fn new() -> Self {
@@ -219,7 +496,13 @@ impl EvaluationContext {
         fn flag(v: Option<bool>) -> Option<ContextFact<'static>> {
             v.map(ContextFact::Bool)
         }
-        let (u, d, s) = (&self.user, &self.device, &self.session);
+        let (u, d, s, n, t) = (
+            &self.user,
+            &self.device,
+            &self.session,
+            &self.network,
+            &self.time,
+        );
         match field {
             Field::UserSid => text(&u.sid),
             Field::UserName => match (u.account_name.as_deref(), u.upn.as_deref()) {
@@ -250,6 +533,24 @@ impl EvaluationContext {
             Field::SessionType => s.session_type.map(ContextFact::Session),
             Field::SessionClientHostname => text(&s.client_hostname),
             Field::SessionIsRemote => flag(s.is_remote),
+            Field::UserIntegrityLevel => u.integrity_level.map(ContextFact::Level),
+            Field::UserOu => text(&u.dn),
+            Field::DeviceOu => text(&d.dn),
+            Field::DeviceOsBuild => d.os_build.map(|v| ContextFact::Number(v.into())),
+            Field::SessionId => s.id.map(|v| ContextFact::Number(v.into())),
+            Field::SessionClientIp => s.client_ip.map(ContextFact::Ip),
+            Field::NetIp => n.addresses.as_deref().map(ContextFact::Ips),
+            Field::NetMac => n.macs.as_deref().map(ContextFact::Macs),
+            Field::NetDnsSuffix => set(&n.dns_suffixes),
+            Field::NetConnectedToServer => flag(n.server_reachable),
+            Field::NetLocation => set(&n.locations),
+            Field::TimeWeekday => t.weekday.map(ContextFact::Weekday),
+            // A minute past the end of the day is not a time of day.
+            Field::TimeLocalTime => t
+                .minute_of_day
+                .filter(|m| *m < 24 * 60)
+                .map(ContextFact::Minute),
+            Field::TimeDate => t.date.map(ContextFact::Date),
             _ => None,
         }
     }

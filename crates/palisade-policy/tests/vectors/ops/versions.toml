@@ -1,0 +1,74 @@
+# Version comparison: four 16-bit parts, zero-filled, symmetric bounds,
+# and unparseable facts that never satisfy a version test (#32).
+
+[[case]]
+name = "fewer parts are zero-filled"
+criterion = { field = "meta.file_version", operator = "version_eq", values = ["10.0"] }
+fact = "10.0.0.0"
+expect = "match"
+
+[[case]]
+name = "comma-separated fact"
+criterion = { field = "meta.file_version", operator = "version_ge", values = ["10.0.19041"] }
+fact = "10, 0, 19041, 1"
+expect = "match"
+
+[[case]]
+name = "suffix is stripped"
+criterion = { field = "meta.file_version", operator = "version_lt", values = ["10.1"] }
+fact = "10.0.19041.1 (release)"
+expect = "match"
+
+[[case]]
+name = "between includes both ends (lower)"
+criterion = { field = "meta.file_version", operator = "version_between", values = ["2.0", "3.0"] }
+fact = "2.0"
+expect = "match"
+
+[[case]]
+name = "between includes both ends (upper)"
+criterion = { field = "meta.file_version", operator = "version_between", values = ["2.0", "3.0"] }
+fact = "3.0.0.0"
+expect = "match"
+
+[[case]]
+name = "between, just above"
+criterion = { field = "meta.file_version", operator = "version_between", values = ["2.0", "3.0"] }
+fact = "3.0.0.1"
+expect = "no_match"
+
+[[case]]
+name = "between means the same for a deny"
+criterion = { field = "meta.file_version", operator = "version_between", values = ["2.0", "3.0"] }
+fact = "3.0"
+action = "deny"
+expect = "match"
+
+[[case]]
+name = "between means the same for an allow"
+criterion = { field = "meta.file_version", operator = "version_between", values = ["2.0", "3.0"] }
+fact = "3.0"
+action = "allow"
+expect = "match"
+
+[[case]]
+name = "unparseable fact is unknown"
+criterion = { field = "meta.file_version", operator = "version_ge", values = ["1.0"] }
+fact = "unknown"
+expect = "unknown"
+
+[[case]]
+name = "unparseable fact never satisfies a negated test either"
+criterion = { field = "meta.file_version", operator = "not_equals", values = ["1.0"] }
+fact = "unknown"
+expect = "unknown"
+
+[[case]]
+name = "part above 65535 is rejected"
+criterion = { field = "meta.file_version", operator = "version_ge", values = ["70000.0"] }
+error = "invalid_value"
+
+[[case]]
+name = "reversed range is rejected"
+criterion = { field = "meta.file_version", operator = "version_between", values = ["3.0", "2.0"] }
+error = "invalid_value"

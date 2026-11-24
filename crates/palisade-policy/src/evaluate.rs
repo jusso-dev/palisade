@@ -233,10 +233,13 @@ impl Compiled<'_> {
             variables: subject.variables,
             context: subject.context,
         };
-        let tree = self
-            .tree
-            .eval_with(subject.facts, &ctx, self.unparseable)
-            .result;
+        let evaluation = if self.role == Role::Mandatory {
+            self.tree
+                .eval_mandatory(subject.facts, &ctx, self.unparseable)
+        } else {
+            self.tree.eval_with(subject.facts, &ctx, self.unparseable)
+        };
+        let tree = evaluation.result;
         if tree == Tri::NoMatch {
             return false;
         }

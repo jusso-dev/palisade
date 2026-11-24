@@ -1,0 +1,154 @@
+# Numeric, level, date, network, set and time operators on context
+# fields (#32, #33).
+
+[[case]]
+name = "numeric between"
+criterion = { field = "device.os_build", operator = "between", values = ["22000", "22999"] }
+context = { "device.os_build" = 22631 }
+expect = "match"
+
+[[case]]
+name = "numeric ne needs every value different"
+criterion = { field = "session.id", operator = "ne", values = ["0", "1"] }
+context = { "session.id" = 1 }
+expect = "no_match"
+
+[[case]]
+name = "numeric on an unknown fact"
+criterion = { field = "device.os_build", operator = "ge", values = ["1"] }
+expect = "unknown"
+
+[[case]]
+name = "integrity level is ordered"
+criterion = { field = "user.integrity_level", operator = "lt", values = ["high"] }
+context = { "user.integrity_level" = "medium_plus" }
+expect = "match"
+
+[[case]]
+name = "date between includes both ends"
+criterion = { field = "time.date", operator = "date_between", values = ["2026-11-01", "2026-11-25"] }
+context = { "time.date" = "2026-11-25" }
+expect = "match"
+
+[[case]]
+name = "CIDR v4"
+criterion = { field = "session.client_ip", operator = "ip_in_cidr", values = ["192.168.0.0/16"] }
+context = { "session.client_ip" = "192.168.4.4" }
+expect = "match"
+
+[[case]]
+name = "CIDR v6"
+criterion = { field = "net.ip", operator = "ip_in_cidr", values = ["2001:db8::/32"] }
+context = { "net.ip" = ["10.0.0.1", "2001:db8:1::5"] }
+expect = "match"
+
+[[case]]
+name = "IPv4-mapped IPv6 is IPv4"
+criterion = { field = "session.client_ip", operator = "ip_in_cidr", values = ["10.0.0.0/8"] }
+context = { "session.client_ip" = "::ffff:10.9.9.9" }
+expect = "match"
+
+[[case]]
+name = "octet range"
+criterion = { field = "session.client_ip", operator = "ip_between", values = ["192.168.1.10-20"] }
+context = { "session.client_ip" = "192.168.1.21" }
+expect = "no_match"
+
+[[case]]
+name = "octet wildcard"
+criterion = { field = "net.ip", operator = "ip_wildcard", values = ["10.*.*.*"] }
+context = { "net.ip" = ["172.16.0.1", "10.4.4.4"] }
+expect = "match"
+
+[[case]]
+name = "CIDR with host bits is rejected"
+criterion = { field = "net.ip", operator = "ip_in_cidr", values = ["10.1.2.3/8"] }
+error = "invalid_value"
+
+[[case]]
+name = "all_of"
+criterion = { field = "user.groups", operator = "all_of", values = ["S-1-5-32-544", "S-1-5-32-545"] }
+context = { "user.groups" = ["S-1-5-32-545", "S-1-5-32-544", "S-1-1-0"] }
+expect = "match"
+
+[[case]]
+name = "all_of with one missing"
+criterion = { field = "user.groups", operator = "all_of", values = ["S-1-5-32-544", "S-1-5-32-551"] }
+context = { "user.groups" = ["S-1-5-32-545", "S-1-5-32-544"] }
+expect = "no_match"
+
+[[case]]
+name = "any_of is member_of"
+criterion = { field = "user.groups", operator = "any_of", values = ["S-1-5-32-551", "S-1-5-32-544"] }
+context = { "user.groups" = ["S-1-5-32-544"] }
+expect = "match"
+
+[[case]]
+name = "MAC set"
+criterion = { field = "net.mac", operator = "member_of", values = ["AA-BB-CC-00-11-22"] }
+context = { "net.mac" = ["aa:bb:cc:00:11:22"] }
+expect = "match"
+
+[[case]]
+name = "DNS suffix set folds case"
+criterion = { field = "net.dns_suffix", operator = "any_of", values = ["CORP.EXAMPLE.ORG"] }
+context = { "net.dns_suffix" = ["corp.example.org"] }
+expect = "match"
+
+[[case]]
+name = "network location"
+criterion = { field = "net.location", operator = "not_member_of", values = ["offline"] }
+context = { "net.locations" = ["corporate"] }
+expect = "match"
+
+[[case]]
+name = "weekday"
+criterion = { field = "time.weekday", operator = "weekday_in", values = ["sat", "sun"] }
+context = { "time.weekday" = "sun" }
+expect = "match"
+
+[[case]]
+name = "time window wraps midnight (late)"
+criterion = { field = "time.local_time", operator = "time_between", values = ["22:00", "06:00"] }
+context = { "time.minute" = 1430 }
+expect = "match"
+
+[[case]]
+name = "time window wraps midnight (early)"
+criterion = { field = "time.local_time", operator = "time_between", values = ["22:00", "06:00"] }
+context = { "time.minute" = 359 }
+expect = "match"
+
+[[case]]
+name = "time window excludes its end"
+criterion = { field = "time.local_time", operator = "time_between", values = ["22:00", "06:00"] }
+context = { "time.minute" = 360 }
+expect = "no_match"
+
+[[case]]
+name = "no trusted clock: unknown"
+criterion = { field = "time.local_time", operator = "time_between", values = ["00:00", "23:59"] }
+expect = "unknown"
+
+[[case]]
+name = "OU, directly in"
+criterion = { field = "user.ou", operator = "equals", values = ["OU=Finance,DC=corp,DC=example"] }
+context = { "user.dn" = "CN=alice,OU=Finance,DC=corp,DC=example" }
+expect = "match"
+
+[[case]]
+name = "OU, below, without include_sub_ous"
+criterion = { field = "device.ou", operator = "equals", values = ["OU=Finance,DC=corp,DC=example"] }
+context = { "device.dn" = "CN=WS1,OU=Laptops,OU=Finance,DC=corp,DC=example" }
+expect = "no_match"
+
+[[case]]
+name = "OU, below, with include_sub_ous"
+criterion = { field = "device.ou", operator = "equals", values = ["OU=Finance,DC=corp,DC=example"], include_sub_ous = true }
+context = { "device.dn" = "CN=WS1,OU=Laptops,OU=Finance,DC=corp,DC=example" }
+expect = "match"
+
+[[case]]
+name = "OU negation of an unknown fact"
+criterion = { field = "user.ou", operator = "not_equals", values = ["OU=Finance,DC=corp,DC=example"] }
+expect = "unknown"

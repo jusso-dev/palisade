@@ -1,0 +1,119 @@
+{
+  "schema_version": "1.0.0",
+  "policy": {
+    "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+    "name": "Fixture",
+    "revision": 1,
+    "mode": "enforce",
+    "rule_sets": [
+      "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60"
+    ]
+  },
+  "rule_sets": [
+    {
+      "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60",
+      "name": "Set",
+      "kind": "mixed",
+      "rules": [
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e61",
+          "name": "Rule 0",
+          "match": {
+            "all": [
+              {
+                "criterion": {
+                  "field": "hash.sha256",
+                  "operator": "equals",
+                  "values": [
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                  ]
+                }
+              },
+              {
+                "criterion": {
+                  "field": "meta.product_name",
+                  "operator": "contains",
+                  "values": [
+                    "x"
+                  ],
+                  "anchored": false
+                }
+              },
+              {
+                "criterion": {
+                  "field": "path.full",
+                  "operator": "not_wildcard",
+                  "values": [
+                    "C:\\x\\*"
+                  ],
+                  "match_ads": true
+                }
+              },
+              {
+                "criterion": {
+                  "field": "device.hostname",
+                  "operator": "equals",
+                  "values": [
+                    "x"
+                  ],
+                  "include_sub_ous": true
+                }
+              },
+              {
+                "criterion": {
+                  "field": "user.integrity_level",
+                  "operator": "ge",
+                  "values": [
+                    "Medium"
+                  ]
+                }
+              },
+              {
+                "criterion": {
+                  "field": "time.local_time",
+                  "operator": "time_between",
+                  "values": [
+                    "09:00",
+                    "09:00"
+                  ]
+                }
+              },
+              {
+                "criterion": {
+                  "field": "net.ip",
+                  "operator": "ip_in_cidr",
+                  "values": [
+                    "10.1.2.3/8"
+                  ]
+                }
+              },
+              {
+                "criterion": {
+                  "field": "device.os_build",
+                  "operator": "between",
+                  "values": [
+                    "9",
+                    "1"
+                  ]
+                }
+              },
+              {
+                "criterion": {
+                  "field": "meta.file_version",
+                  "operator": "version_lt",
+                  "values": [
+                    "2.0"
+                  ],
+                  "safety_critical": true
+                }
+              }
+            ]
+          },
+          "action": {
+            "type": "deny"
+          }
+        }
+      ]
+    }
+  ]
+}

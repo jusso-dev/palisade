@@ -282,3 +282,100 @@ fn finance_example_keeps_the_admin_console_to_its_own_rule() {
         );
     }
 }
+
+#[test]
+fn context_example_narrows_each_identity_by_context() {
+    use palisade_policy::condition::CompiledMatch;
+    use palisade_policy::context::{Date, EvaluationContext, IntegrityLevel, Weekday};
+    use palisade_policy::facts::{
+        ObjectFacts, PathVariables, SignatureSource, SignerFact, SignerStatus,
+    };
+    use palisade_policy::model::{ActionKind, Field};
+    use palisade_policy::ops::EvalContext;
+
+    let text = read(&manifest_dir().join("../../docs/examples/policies/context-criteria.yaml"));
+    let doc = PolicyDocument::from_yaml(&text).unwrap();
+    let rules = &doc.rule_sets[0].rules;
+    let [support, helper, scripts] =
+        [&rules[0], &rules[1], &rules[2]].map(|r| CompiledMatch::compile(&r.match_).unwrap());
+    let variables = PathVariables::new();
+    let run = |tree: &CompiledMatch, facts: &ObjectFacts, ctx: &EvaluationContext, action| {
+        tree.eval(
+            facts,
+            &EvalContext {
+                action,
+                variables: &variables,
+                context: ctx,
+            },
+        )
+        .matches()
+    };
+
+    // The remote-support tool, at 10:00 on a Wednesday from the office.
+    let tool = ObjectFacts::new().with_signers(vec![SignerFact {
+        status: SignerStatus::Valid,
+        source: SignatureSource::Embedded,
+        publisher: Some("Example Remote Tools Ltd".to_owned()),
+        issuer: None,
+        leaf_thumbprint_sha256: None,
+    }]);
+    let mut office = EvaluationContext::new();
+    office.network.locations = Some(vec!["corporate".to_owned()]);
+    office.time.weekday = Some(Weekday::Wed);
+    office.time.minute_of_day = Some(10 * 60);
+    office.time.date = Date::new(2026, 11, 25);
+    office.user.dn = Some("CN=bob,OU=Tier 1,OU=IT Support,DC=corp,DC=example,DC=org".to_owned());
+    assert!(run(&support, &tool, &office, ActionKind::Allow));
+    let mut weekend = office.clone();
+    weekend.time.weekday = Some(Weekday::Sat);
+    assert!(!run(&support, &tool, &weekend, ActionKind::Allow));
+    let mut late = office.clone();
+    late.time.minute_of_day = Some(18 * 60);
+    assert!(!run(&support, &tool, &late, ActionKind::Allow));
+    let mut home = office.clone();
+    home.network.locations = Some(vec!["remote".to_owned()]);
+    assert!(!run(&support, &tool, &home, ActionKind::Allow));
+    // An untrusted clock leaves the time unknown, so the allow fails closed.
+    let mut no_clock = office.clone();
+    no_clock.time = Default::default();
+    assert!(!run(&support, &tool, &no_clock, ActionKind::Allow));
+    let mut finance = office.clone();
+    finance.user.dn = Some("CN=carol,OU=Finance,DC=corp,DC=example,DC=org".to_owned());
+    assert!(!run(&support, &tool, &finance, ActionKind::Allow));
+
+    // The build helper.
+    let binary = ObjectFacts::new().with(
+        Field::HashSha256,
+        "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    );
+    let mut build = EvaluationContext::new();
+    build.device.os_build = Some(22631);
+    build.user.integrity_level = Some(IntegrityLevel::High);
+    build.device.tags = Some(vec![
+        "build".to_owned(),
+        "env.prod".to_owned(),
+        "x".to_owned(),
+    ]);
+    assert!(run(&helper, &binary, &build, ActionKind::Allow));
+    let mut low = build.clone();
+    low.user.integrity_level = Some(IntegrityLevel::Low);
+    assert!(!run(&helper, &binary, &low, ActionKind::Allow));
+    let mut old = build.clone();
+    old.device.os_build = Some(19045);
+    assert!(!run(&helper, &binary, &old, ActionKind::Allow));
+    let mut staging = build.clone();
+    staging.device.tags = Some(vec!["build".to_owned()]);
+    assert!(!run(&helper, &binary, &staging, ActionKind::Allow));
+
+    // Scripts in remote sessions: blocked from outside the office range.
+    let script = ObjectFacts::new().with_path(palisade_policy::facts::PathFact::new(
+        r"C:\Users\bob\Downloads\run.ps1",
+        &palisade_core::path::VolumeMap::new(),
+    ));
+    let mut remote = EvaluationContext::new();
+    remote.session.is_remote = Some(true);
+    remote.session.client_ip = Some("203.0.113.9".parse().unwrap());
+    assert!(run(&scripts, &script, &remote, ActionKind::Deny));
+    remote.session.client_ip = Some("10.1.2.3".parse().unwrap());
+    assert!(!run(&scripts, &script, &remote, ActionKind::Deny));
+}

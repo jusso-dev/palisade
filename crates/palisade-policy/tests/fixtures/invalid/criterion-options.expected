@@ -1,0 +1,8 @@
+option_not_applicable /rule_sets/0/rules/0/match/all/1/criterion/anchored
+option_not_applicable /rule_sets/0/rules/0/match/all/2/criterion/match_ads
+option_not_applicable /rule_sets/0/rules/0/match/all/3/criterion/include_sub_ous
+invalid_value /rule_sets/0/rules/0/match/all/4/criterion/values/0
+invalid_value /rule_sets/0/rules/0/match/all/5/criterion/values/1
+invalid_value /rule_sets/0/rules/0/match/all/6/criterion/values/0
+invalid_value /rule_sets/0/rules/0/match/all/7/criterion/values/1
+option_not_applicable /rule_sets/0/rules/0/match/all/8/criterion/safety_critical

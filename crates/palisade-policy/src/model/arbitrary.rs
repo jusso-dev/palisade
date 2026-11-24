@@ -84,6 +84,53 @@ fn value_for(class: FieldClass, operator: Operator) -> BoxedStrategy<String> {
         // Never used: yes-or-no operators take no values.
         (FieldClass::Bool, _) => Just(String::new()).boxed(),
         (FieldClass::PrincipalName, _) => "[A-Z]{1,8}\\\\[a-z0-9.]{1,12}".boxed(),
+        (FieldClass::Number, _) => (0u64..100_000).prop_map(|n| n.to_string()).boxed(),
+        (FieldClass::IntegrityLevel, _) => proptest::sample::select(
+            crate::context::IntegrityLevel::ALL
+                .iter()
+                .map(|l| l.as_str().to_owned())
+                .collect::<Vec<_>>(),
+        )
+        .boxed(),
+        (FieldClass::Date, _) => (1u16..=9999, 1u8..=12, 1u8..=28)
+            .prop_map(|(y, m, d)| format!("{y:04}-{m:02}-{d:02}"))
+            .boxed(),
+        (FieldClass::DistinguishedName, _) => "(OU=[A-Za-z]{1,8},){1,3}DC=[a-z]{1,8}".boxed(),
+        (FieldClass::Ip | FieldClass::IpSet, Operator::IpInCidr) => prop_oneof![
+            any::<[u8; 2]>().prop_map(|b| format!("10.{}.{}.0/24", b[0], b[1])),
+            Just("2001:db8::/32".to_owned()),
+        ]
+        .boxed(),
+        (FieldClass::Ip | FieldClass::IpSet, Operator::IpBetween) => {
+            (any::<u8>(), 0u8..100, 100u8..=255)
+                .prop_map(|(c, a, b)| format!("192.168.{c}.{a}-{b}"))
+                .boxed()
+        }
+        (FieldClass::Ip | FieldClass::IpSet, Operator::IpWildcard) => {
+            (any::<u8>()).prop_map(|a| format!("10.{a}.*.*")).boxed()
+        }
+        (FieldClass::Ip | FieldClass::IpSet, _) => any::<[u8; 4]>()
+            .prop_map(|b| std::net::Ipv4Addr::from(b).to_string())
+            .boxed(),
+        (FieldClass::MacSet, _) => any::<[u8; 6]>()
+            .prop_map(|b| {
+                b.iter()
+                    .map(|x| format!("{x:02x}"))
+                    .collect::<Vec<_>>()
+                    .join(":")
+            })
+            .boxed(),
+        (FieldClass::NameSet, _) => "[a-z][a-z0-9.-]{0,20}".boxed(),
+        (FieldClass::Weekday, _) => proptest::sample::select(
+            crate::context::Weekday::ALL
+                .iter()
+                .map(|d| d.as_str().to_owned())
+                .collect::<Vec<_>>(),
+        )
+        .boxed(),
+        (FieldClass::TimeOfDay, _) => (0u16..24, 0u16..60)
+            .prop_map(|(h, m)| format!("{h:02}:{m:02}"))
+            .boxed(),
         // Simple patterns that are always valid regular expressions.
         (_, Operator::Regex | Operator::NotRegex) => {
             "[A-Za-z0-9]{1,10}(\\.\\*|\\+)?[A-Za-z0-9]{0,10}".boxed()
@@ -112,7 +159,7 @@ pub fn criterion() -> impl Strategy<Value = Criterion> {
         let operators: Vec<Operator> = Operator::ALL
             .iter()
             .copied()
-            .filter(|op| op.applies_to(class))
+            .filter(|op| op.applies_to_field(field))
             .collect();
         let case = if class.has_case() {
             proptest::option::of(any::<bool>()).boxed()
@@ -122,14 +169,33 @@ pub fn criterion() -> impl Strategy<Value = Criterion> {
         (proptest::sample::select(operators), case).prop_flat_map(move |(operator, case)| {
             let (min, max) = operator.value_count();
             vec(value_for(class, operator), min..=max.min(4)).prop_map(move |mut values| {
-                if operator == Operator::VersionBetween {
-                    values.sort_by_key(|v| crate::ops::Version::parse_strict(v));
+                match operator {
+                    Operator::VersionBetween => {
+                        values.sort_by_key(|v| crate::ops::Version::parse_strict(v));
+                    }
+                    // Numbers and dates sort as their text when padded;
+                    // numbers are compared as numbers.
+                    Operator::Between if class == FieldClass::Number => {
+                        values.sort_by_key(|v| v.parse::<u64>().unwrap_or(0));
+                    }
+                    Operator::Between if class == FieldClass::IntegrityLevel => {
+                        values.sort_by_key(|v| crate::context::IntegrityLevel::from_name(v));
+                    }
+                    Operator::Between | Operator::DateBetween => values.sort(),
+                    // A window may wrap midnight, but cannot be empty.
+                    Operator::TimeBetween if values[0] == values[1] => {
+                        values[1] = if values[0] == "00:00" {
+                            "00:01"
+                        } else {
+                            "00:00"
+                        }
+                        .to_owned();
+                    }
+                    _ => {}
                 }
                 Criterion {
-                    field,
-                    operator,
-                    values,
                     case_sensitive: case,
+                    ..Criterion::new(field, operator, values)
                 }
             })
         })
@@ -155,12 +221,11 @@ pub fn tree() -> impl Strategy<Value = Match> {
         vec(inner, 0..3),
     )
         .prop_map(|(hash, rest)| {
-            let mut children = vec![Match::Criterion(Criterion {
-                field: Field::HashSha256,
-                operator: Operator::Equals,
-                values: vec![hash],
-                case_sensitive: None,
-            })];
+            let mut children = vec![Match::Criterion(Criterion::new(
+                Field::HashSha256,
+                Operator::Equals,
+                vec![hash],
+            ))];
             children.extend(rest);
             Match::All(children)
         })

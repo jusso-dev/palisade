@@ -1,0 +1,105 @@
+# String operators on text fields: case folding, NFC, several values,
+# negation, and unknown facts (#32).
+
+[[case]]
+name = "equals folds case"
+criterion = { field = "meta.product_name", operator = "equals", values = ["Other", "Editor"] }
+fact = "EDITOR"
+expect = "match"
+
+[[case]]
+name = "equals with case_sensitive"
+criterion = { field = "meta.product_name", operator = "equals", values = ["Editor"], case_sensitive = true }
+fact = "editor"
+expect = "no_match"
+
+[[case]]
+name = "equals compares after NFC"
+criterion = { field = "meta.product_name", operator = "equals", values = ["Caf\u00e9"] }
+fact = "Cafe\u0301"
+expect = "match"
+
+[[case]]
+name = "dotless i equals I under simple folding"
+criterion = { field = "meta.company_name", operator = "equals", values = ["DIGITAL"] }
+fact = "d\u0131g\u0131tal"
+expect = "match"
+
+[[case]]
+name = "dotted capital I is distinct"
+criterion = { field = "meta.company_name", operator = "equals", values = ["DIGITAL"] }
+fact = "D\u0130G\u0130TAL"
+expect = "no_match"
+
+[[case]]
+name = "not_contains needs every value absent"
+criterion = { field = "meta.product_name", operator = "not_contains", values = ["beta", "rc"] }
+fact = "Suite 2 RC1"
+expect = "no_match"
+
+[[case]]
+name = "not_contains matches when neither is present"
+criterion = { field = "meta.product_name", operator = "not_contains", values = ["beta", "rc"] }
+fact = "Suite 2"
+expect = "match"
+
+[[case]]
+name = "negation of an unknown fact is unknown"
+criterion = { field = "meta.product_name", operator = "not_equals", values = ["x"] }
+expect = "unknown"
+
+[[case]]
+name = "starts_with any value"
+criterion = { field = "meta.file_description", operator = "starts_with", values = ["x", "Ed"] }
+fact = "editor"
+expect = "match"
+
+[[case]]
+name = "ends_with"
+criterion = { field = "meta.original_filename", operator = "ends_with", values = [".EXE"] }
+fact = "setup.exe"
+expect = "match"
+
+[[case]]
+name = "wildcard on text: star is any run"
+criterion = { field = "meta.product_name", operator = "wildcard", values = ["Ex*Suite ?"] }
+fact = "Example Office Suite 2"
+expect = "match"
+
+[[case]]
+name = "wildcard escape matches a literal star"
+criterion = { field = "meta.product_name", operator = "wildcard", values = ["A[*]B"] }
+fact = "AxB"
+expect = "no_match"
+
+[[case]]
+name = "not_wildcard"
+criterion = { field = "meta.product_name", operator = "not_wildcard", values = ["*beta*"] }
+fact = "Suite"
+expect = "match"
+
+[[case]]
+name = "principal names take no regex"
+criterion = { field = "user.name", operator = "regex", values = ["EXAMPLE\\\\.*"] }
+error = "operator_field_mismatch"
+
+[[case]]
+name = "case_sensitive does not apply to hashes"
+criterion = { field = "hash.sha256", operator = "equals", values = ["9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"], case_sensitive = false }
+error = "case_sensitivity_not_applicable"
+
+[[case]]
+name = "hash compares hex in either case"
+criterion = { field = "hash.sha256", operator = "equals", values = ["0x9F86D081884C7D659A2FEAA0C55AD015A3BF4F1B2B0B822CD15D6C15B0F00A08"] }
+fact = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+expect = "match"
+
+[[case]]
+name = "hash of the wrong length is rejected"
+criterion = { field = "hash.sha256", operator = "equals", values = ["abcd"] }
+error = "invalid_value"
+
+[[case]]
+name = "too many values"
+criterion = { field = "meta.product_name", operator = "equals", values = ["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21","22","23","24","25","26"] }
+error = "value_count"

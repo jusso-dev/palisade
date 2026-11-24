@@ -192,6 +192,10 @@ pub enum ErrorCode {
     /// make a rule that lets an object run apply, or keep a deny from
     /// applying (#38).
     UserPatternNotAllowed,
+    /// A criterion option is set where it does not apply, such as
+    /// `anchored` on an operator that takes no regular expression (#32), or
+    /// `safety_critical` outside a mandatory blocklist (#32, #87).
+    OptionNotApplicable,
 }
 
 impl ErrorCode {
@@ -256,6 +260,7 @@ impl ErrorCode {
             Self::InvalidScope => "invalid_scope",
             Self::InvalidSchedule => "invalid_schedule",
             Self::UserPatternNotAllowed => "user_pattern_not_allowed",
+            Self::OptionNotApplicable => "option_not_applicable",
         }
     }
 
@@ -599,6 +604,9 @@ impl Validator {
                     );
                 }
                 self.rule(&path, rule);
+                if !set.mandatory {
+                    self.safety_critical_outside_mandatory(&path, &rule.match_);
+                }
                 self.action(&path, set, rule);
                 if let Some(scope) = &rule.scope {
                     self.scope(
@@ -747,9 +755,39 @@ impl Validator {
         }
     }
 
+    /// `safety_critical` only means something in a mandatory blocklist,
+    /// where it makes an unknown fact count towards the deny (#32, #87).
+    /// Anywhere else it would do nothing, or make a rule fail open.
+    fn safety_critical_outside_mandatory(&mut self, base: &str, tree: &Match) {
+        let mut stack = vec![(tree, format!("{base}/match"))];
+        while let Some((node, path)) = stack.pop() {
+            match node {
+                Match::All(children) | Match::Any(children) => {
+                    let key = if matches!(node, Match::All(_)) {
+                        "all"
+                    } else {
+                        "any"
+                    };
+                    for (i, child) in children.iter().enumerate().rev() {
+                        stack.push((child, format!("{path}/{key}/{i}")));
+                    }
+                }
+                Match::Not(child) => stack.push((child, format!("{path}/not"))),
+                Match::Criterion(c) if c.safety_critical => self.push(
+                    ErrorCode::OptionNotApplicable,
+                    &format!("{path}/criterion/safety_critical"),
+                    "`safety_critical` only applies in a mandatory blocklist",
+                ),
+                // Resolved by the hierarchy before evaluation (#37); the
+                // expanded tree is validated again.
+                Match::Criterion(_) | Match::Ref(_) => {}
+            }
+        }
+    }
+
     fn criterion(&mut self, base: &str, c: &Criterion) {
         let class = c.field.class();
-        if !c.operator.applies_to(class) {
+        if !c.operator.applies_to_field(c.field) {
             self.push(
                 ErrorCode::OperatorFieldMismatch,
                 &format!("{base}/operator"),
@@ -768,6 +806,17 @@ impl Validator {
                 format!("`{}` has no case to compare", serde_name(&c.field)),
             );
         }
+        let options_ok = match ops::option_problem(c) {
+            Some(kind) => {
+                let option = match &kind {
+                    CompileErrorKind::OptionNotApplicable(option, _) => *option,
+                    _ => "",
+                };
+                self.compile_error(&format!("{base}/{option}"), &kind);
+                false
+            }
+            None => true,
+        };
         let (min, max) = c.operator.value_count();
         if c.values.len() < min || c.values.len() > max {
             let expected = if min == max {
@@ -813,9 +862,11 @@ impl Validator {
         // again.
         let well_formed = all_ok
             && case_ok
-            && c.operator.applies_to(class)
+            && options_ok
+            && c.operator.applies_to_field(c.field)
             && (min..=max).contains(&c.values.len());
-        if well_formed && self.compile_values && c.operator.is_version() {
+        // Ranges and windows are checked across their two values.
+        if well_formed && self.compile_values && c.operator.value_count() == (2, 2) {
             if let Err(errors) = CompiledCriterion::compile(c) {
                 for e in errors {
                     let path = match e.value {
@@ -841,6 +892,7 @@ impl Validator {
             CompileErrorKind::CaseSensitivityNotApplicable => {
                 ErrorCode::CaseSensitivityNotApplicable
             }
+            CompileErrorKind::OptionNotApplicable(..) => ErrorCode::OptionNotApplicable,
         };
         self.push(code, path, kind.to_string());
     }

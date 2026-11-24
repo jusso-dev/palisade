@@ -354,6 +354,13 @@
       ],
       "description": "A test of one fact about the object or its context: `field operator\nvalues`.\n\nValues are combined with OR for positive operators and with AND for\nnegative ones (#32): `not_contains [a, b]` means neither `a` nor `b`.",
       "properties": {
+        "anchored": {
+          "description": "Only for `regex` and `not_regex`: `false` lets the pattern match\nanywhere in the fact instead of the whole fact (#32). Unset means\n`true`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "case_sensitive": {
           "description": "Compare strings case-sensitively. Unset means the field's default\n(#32), which is case-insensitive for every field defined so far.\nOnly text, paths, file names, account names and tags have a case;\nother fields (hashes, versions, SIDs, group sets, yes-or-no facts and\nsession types) reject this option.",
           "type": [
@@ -365,9 +372,27 @@
           "$ref": "#/$defs/Field",
           "description": "The fact being tested."
         },
+        "include_sub_ous": {
+          "description": "Only for `user.ou` and `device.ou`: `true` also matches objects in\nevery organisational unit below the named one (#33). Unset means\n`false`: the object must be directly in it.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "match_ads": {
+          "description": "Only for positive tests of `path.full`: `true` lets a value that\nnames no alternate data stream also match a stream of a file it\nmatches, so `C:\\\\Tools\\\\*` matches `C:\\\\Tools\\\\a.exe:s` (#32).\nUnset means `false`: a stream is its own object.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "operator": {
           "$ref": "#/$defs/Operator",
           "description": "How it is compared."
+        },
+        "safety_critical": {
+          "description": "Only in a mandatory blocklist: when the fact is unknown, this\ncriterion counts towards the deny applying (`match`, or `no_match`\nunder an odd number of `not` nodes), so the shipped blocklists fail\nclosed (#32, #87). Unset means `false`.",
+          "type": "boolean"
         },
         "values": {
           "description": "1 to 25 values. Each is at most 2048 bytes of UTF-8; the schema can\nonly bound the length in characters, so validation checks the bytes.\n`is_true` and `is_false` take no values, and the key may be left out.",
@@ -961,6 +986,76 @@
         {
           "const": "session.is_remote",
           "description": "Context (#33): the session is remote.",
+          "type": "string"
+        },
+        {
+          "const": "user.integrity_level",
+          "description": "Context (#33): the integrity level of the process token: `untrusted`,\n`low`, `medium`, `medium_plus`, `high`, `system` or `protected`.\nOrdered, so `ge` and `le` compare levels.",
+          "type": "string"
+        },
+        {
+          "const": "user.ou",
+          "description": "Context (#33): the organisational unit of the user's directory\nobject, as a distinguished name such as `OU=Finance,DC=corp,DC=example`.\nWith `include_sub_ous`, units below it match too.",
+          "type": "string"
+        },
+        {
+          "const": "device.ou",
+          "description": "Context (#33): the organisational unit of the device's directory\nobject, as for `user.ou`.",
+          "type": "string"
+        },
+        {
+          "const": "device.os_build",
+          "description": "Context (#33): the operating system build number, such as `22631`.",
+          "type": "string"
+        },
+        {
+          "const": "session.id",
+          "description": "Context (#33): the session ID.",
+          "type": "string"
+        },
+        {
+          "const": "session.client_ip",
+          "description": "Context (#33): the IP address of the client connected to the\nsession, on a multi-session host.",
+          "type": "string"
+        },
+        {
+          "const": "net.ip",
+          "description": "Context (#33): every local interface address. A positive test\nmatches if any address does.",
+          "type": "string"
+        },
+        {
+          "const": "net.mac",
+          "description": "Context (#33): every local interface MAC address.",
+          "type": "string"
+        },
+        {
+          "const": "net.dns_suffix",
+          "description": "Context (#33): every connection-specific DNS suffix.",
+          "type": "string"
+        },
+        {
+          "const": "net.connected_to_server",
+          "description": "Context (#33): the device can reach its server now.",
+          "type": "string"
+        },
+        {
+          "const": "net.location",
+          "description": "Context (#33, #38): the names of the network locations the device is\nin, such as `corporate`, `remote` or `offline`.",
+          "type": "string"
+        },
+        {
+          "const": "time.weekday",
+          "description": "Context (#33): the day of the week of the evaluation, as `mon` to\n`sun`, in the clock the policy's `time_zone_basis` names.",
+          "type": "string"
+        },
+        {
+          "const": "time.local_time",
+          "description": "Context (#33): the time of day of the evaluation, as `HH:MM`, in the\npolicy's clock.",
+          "type": "string"
+        },
+        {
+          "const": "time.date",
+          "description": "Context (#33): the date of the evaluation, as `YYYY-MM-DD`, in the\npolicy's clock.",
           "type": "string"
         }
       ]
@@ -1576,6 +1671,81 @@
         {
           "const": "is_false",
           "description": "The fact is false. Takes no values (#33). On an unknown fact it is\nunknown, like every other test.",
+          "type": "string"
+        },
+        {
+          "const": "eq",
+          "description": "Number, level or date equal to any value (#32).",
+          "type": "string"
+        },
+        {
+          "const": "ne",
+          "description": "Number, level or date equal to none of the values (#32).",
+          "type": "string"
+        },
+        {
+          "const": "gt",
+          "description": "Greater than the value (#32).",
+          "type": "string"
+        },
+        {
+          "const": "ge",
+          "description": "Greater than or equal to the value (#32).",
+          "type": "string"
+        },
+        {
+          "const": "lt",
+          "description": "Less than the value (#32).",
+          "type": "string"
+        },
+        {
+          "const": "le",
+          "description": "Less than or equal to the value (#32).",
+          "type": "string"
+        },
+        {
+          "const": "between",
+          "description": "Within `[min, max]`, both inclusive. Takes exactly two values, the\nminimum first (#32).",
+          "type": "string"
+        },
+        {
+          "const": "ip_in_cidr",
+          "description": "The address is in any of the CIDR blocks, such as `10.0.0.0/8` or\n`2001:db8::/32` (#32). On a set of addresses, any address may be.",
+          "type": "string"
+        },
+        {
+          "const": "ip_between",
+          "description": "The address is in any of the ranges, written `first-last` or, for\nIPv4, `a.b.c.first-last` (#32).",
+          "type": "string"
+        },
+        {
+          "const": "ip_wildcard",
+          "description": "The IPv4 address matches any whole-octet pattern, such as `10.*.*.*`\n(#32).",
+          "type": "string"
+        },
+        {
+          "const": "any_of",
+          "description": "The set holds at least one of the values (#32). The same test as\n`member_of`.",
+          "type": "string"
+        },
+        {
+          "const": "all_of",
+          "description": "The set holds every one of the values (#32).",
+          "type": "string"
+        },
+        {
+          "const": "weekday_in",
+          "description": "The day of the week is any of the values, `mon` to `sun` (#32).",
+          "type": "string"
+        },
+        {
+          "const": "time_between",
+          "description": "The time of day is within `[start, end)`, both `HH:MM`. A window\nwhose end is before its start wraps midnight: `22:00` to `06:00`\n(#32).",
+          "type": "string"
+        },
+        {
+          "const": "date_between",
+          "description": "The date is within `[from, to]`, both `YYYY-MM-DD` and inclusive\n(#32).",
           "type": "string"
         }
       ]

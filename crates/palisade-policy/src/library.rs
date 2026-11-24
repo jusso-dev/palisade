@@ -1212,14 +1212,7 @@ impl Catalogue {
         })?;
         let mut criteria: Vec<Match> = entries
             .chunks(MAX_VALUES_PER_CRITERION)
-            .map(|chunk| {
-                Match::Criterion(Criterion {
-                    field,
-                    operator,
-                    values: chunk.to_vec(),
-                    case_sensitive: None,
-                })
-            })
+            .map(|chunk| Match::Criterion(Criterion::new(field, operator, chunk.iter().cloned())))
             .collect();
         Ok(if criteria.len() == 1 {
             criteria.remove(0)
@@ -1584,12 +1577,7 @@ fn criterion_problem(field: Field, operator: Operator, value: &str) -> Option<St
     if let Some(why) = plain_problem(value) {
         return Some(why);
     }
-    let c = Criterion {
-        field,
-        operator,
-        values: vec![value.to_owned()],
-        case_sensitive: None,
-    };
+    let c = Criterion::new(field, operator, [value]);
     CompiledCriterion::check_value(&c, value)
         .err()
         .map(|k| k.to_string())

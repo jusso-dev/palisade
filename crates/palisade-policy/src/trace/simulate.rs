@@ -524,6 +524,8 @@ impl FactsSnapshot {
                 is_elevated: c.user_is_elevated,
                 is_service_account: c.user_is_service_account,
                 is_system: c.user_is_system,
+                integrity_level: None,
+                dn: None,
             },
             device: DeviceContext {
                 hostname: c.device_hostname.clone(),
@@ -541,12 +543,14 @@ impl FactsSnapshot {
                 is_laptop: c.device_is_laptop,
                 is_vdi: c.device_is_vdi,
                 is_terminal_server: c.device_is_terminal_server,
+                os_build: None,
                 dn: None,
             },
             session: SessionContext {
                 session_type,
                 client_hostname: c.session_client_hostname.clone(),
                 is_remote: c.session_is_remote,
+                id: None,
                 client_ip: None,
             },
             // Recorded snapshots carry no network location or scope facts
@@ -555,6 +559,10 @@ impl FactsSnapshot {
             // collect them.
             network: crate::context::NetworkContext::default(),
             scope: crate::scope::ScopeFacts::default(),
+            // Nor the time facts, the integrity level, the directory units,
+            // the OS build or the session ID (#33): a criterion on one is
+            // unknown in a replay.
+            time: crate::context::TimeContext::default(),
         };
         Ok(Inputs {
             facts,

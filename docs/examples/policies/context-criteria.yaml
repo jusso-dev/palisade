@@ -1,0 +1,94 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/jusso-dev/palisade/main/schemas/policy/v1.json
+#
+# Context criteria narrow an identity: who runs the object, where and when
+# (#32, #33). Every rule still names the object by a hash, signer or path;
+# the context only narrows it.
+#
+# - A remote-support tool runs only from the corporate network, during
+#   business hours on weekdays, and only for users in the IT support OU.
+# - A build agent's helper runs only on build servers (OS build 22000 or
+#   later) and at medium integrity or above.
+# - Scripts are blocked in remote sessions from outside the office range.
+schema_version: "1.0.0"
+policy:
+  id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5000
+  name: Context criteria
+  revision: 1
+  mode: enforce
+  settings:
+    time_zone_basis: device_local
+  rule_sets:
+    - 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5010
+
+rule_sets:
+  - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5010
+    name: Context-narrowed rules
+    kind: mixed
+    rules:
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5011
+        name: Remote support in hours from the office
+        object_types: [executable]
+        match:
+          all:
+            - criterion:
+                field: signer.publisher
+                operator: equals
+                values: [Example Remote Tools Ltd]
+            - criterion:
+                field: net.location
+                operator: member_of
+                values: [corporate]
+            - criterion:
+                field: time.weekday
+                operator: weekday_in
+                values: [mon, tue, wed, thu, fri]
+            - criterion:
+                field: time.local_time
+                operator: time_between
+                values: ["08:00", "18:00"]
+            - criterion:
+                field: user.ou
+                operator: equals
+                values: ["OU=IT Support,DC=corp,DC=example,DC=org"]
+                include_sub_ous: true
+        action: {type: allow}
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5012
+        name: Build helper on build servers
+        object_types: [executable]
+        match:
+          all:
+            - criterion:
+                field: hash.sha256
+                operator: equals
+                values: [9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08]
+            - criterion:
+                field: device.os_build
+                operator: ge
+                values: ["22000"]
+            - criterion:
+                field: user.integrity_level
+                operator: ge
+                values: [medium]
+            - criterion:
+                field: device.tags
+                operator: all_of
+                values: [build, env.prod]
+        action: {type: allow}
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5013
+        name: No scripts from remote clients outside the office
+        object_types: [script.powershell, script.vbscript]
+        match:
+          all:
+            - criterion:
+                field: path.extension
+                operator: equals
+                values: [ps1, vbs]
+            - criterion:
+                field: session.is_remote
+                operator: is_true
+            - not:
+                criterion:
+                  field: session.client_ip
+                  operator: ip_in_cidr
+                  values: [10.0.0.0/8, "2001:db8::/32"]
+        action: {type: deny}
