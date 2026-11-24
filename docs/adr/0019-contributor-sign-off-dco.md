@@ -60,13 +60,20 @@ Option 3. **Every commit in a pull request carries a DCO 1.1 sign-off. There is 
 - A sign-off is a `Signed-off-by: Name <email>` trailer in the commit message, with a non-empty
   name and an email that matches the commit's author email, ignoring case. `git commit -s` adds
   one.
-- The `DCO` workflow (`.github/workflows/dco.yml`) runs `.github/scripts/check-dco.sh` on every
-  pull request and fails if any non-merge commit lacks a matching sign-off. Merge commits are
-  skipped, because they add no new content of their own. The script and its tests live in the
-  repository and change only through review ([CODEOWNERS](../../.github/CODEOWNERS)).
-- Once this ADR is accepted, the maintainer adds `DCO` to the required status checks of the `main`
-  ruleset ([docs/repo-settings.md](../repo-settings.md#dco-check)). Until then the check reports
-  but does not block.
+- A `DCO` check, added in #244 as the workflow `.github/workflows/dco.yml` and the script
+  `.github/scripts/check-dco.sh` with its tests, runs on every pull request. It fails if any
+  non-merge commit lacks a matching sign-off. The script lives in the repository and changes
+  only through review ([CODEOWNERS](../../.github/CODEOWNERS)).
+- Merge commits are skipped. They are not free of content: a merge that resolves a conflict, or
+  that is edited before it is committed, can add changes found in neither parent. They are
+  skipped because the hosting platform's "update branch" button creates them, usually without
+  a sign-off, and failing those would punish contributors for keeping a branch current. Changes
+  made inside a merge commit are therefore not covered by the check (see Negative and Security
+  impact). Contributors who must change code while resolving a conflict should rebase instead.
+- Once this ADR is accepted, `DCO` becomes a required status check on `main`. Changing the
+  ruleset is a repository setting, tracked with the other required checks in #21. The steps are
+  in [docs/repo-settings.md](../repo-settings.md) (from #244). Until then the check reports but
+  does not block.
 - Pull requests are squash-merged, and the squashed commit on `main` is not itself checked. The
   record is the pull request's own commits, which GitHub keeps with the closed pull request.
 - Dependabot signs off its own commits, but with a different email from the one it authors them
@@ -84,7 +91,8 @@ added, and the DCO check stays a script in the repository run with allowlisted a
 
 ### Positive
 
-- Every change on a pull request has a signed statement from its author that they may submit it.
+- Every non-merge commit on a pull request has a signed statement from its author that they may
+  submit it.
 - Nothing to sign up for or sign in advance; `git commit -s` is enough.
 - No service, secret or third-party action to run or trust. The checker is under 100 lines
   of shell, with tests.
@@ -103,28 +111,41 @@ added, and the DCO check stays a script in the repository run with allowlisted a
 - The maintainer's own pull requests must be signed off too, which is one more habit to keep.
 - The Dependabot rule depends on the bot's current author and sign-off addresses. If they change,
   its pull requests fail `DCO` until the script is updated.
+- Changes introduced inside a merge commit, by conflict resolution or by editing the merge, carry
+  no sign-off and are not checked. Squash merging puts them on `main` like any other change. The
+  pull request's diff, which reviewers read, still shows them.
 
 ## Security impact
 
 The DCO is a provenance control for the source, not a runtime control. A sign-off ties each
 change to a named contributor who has certified their right to submit it, which helps trace and
-remove a tainted or disputed contribution (the supply-chain actor AC-09 and the source-hosting
-boundary TB-12 in the [threat model](../security/threat-model.md)). It does not stop malicious
-code: a hostile contributor can sign off just as easily as an honest one. Review, CODEOWNERS,
-required checks and dependency policy remain the controls against that.
+remove a tainted or disputed contribution that arrives through a pull request: the
+source-hosting boundary TB-12 in the [threat model](../security/threat-model.md). It does not
+stop malicious code: a hostile contributor can sign off just as easily as an honest one, and it
+does nothing about a compromised third-party crate, build tool or action (actor AC-09), which
+the dependency policy covers. Review, CODEOWNERS and the required checks remain the controls
+against malicious changes.
+
+The check has two known gaps, both closed by review rather than by the check:
+
+- Content added inside a merge commit is not checked (see Decision).
+- The workflow runs the script from the pull request's own branch, so a pull request can edit
+  `dco.yml` or `check-dco.sh` to make its own check pass. Every change under `.github/` needs the
+  maintainer's review (CODEOWNERS), and the reviewer reads that diff before merging.
 
 Choosing a script in the repository over a hosted app or third-party action adds no new code
 with access to pull requests, and the workflow needs only `contents: read`. The workflow uses the
 `pull_request` trigger, not `pull_request_target`, so fork pull requests run it without secrets
-or a write token. The commit SHAs reach the script through environment variables, never through
-expression interpolation into the shell.
+or a write token. Every value taken from the event (the commit SHAs and the pull request
+author's login) reaches the script through environment variables, never through expression
+interpolation into the shell.
 
 ## Links
 
 - Issue #28 (contributor docs, governance and licensing), which this ADR completes.
-- PR #244: adds the `DCO` workflow, `check-dco.sh` and the contributor docs this ADR relies on.
+- PR #244: adds the `DCO` workflow and script, and the sign-off section of
+  [CONTRIBUTING.md](../../CONTRIBUTING.md), the `DCO` section of [docs/ci.md](../ci.md) and the
+  steps in [docs/repo-settings.md](../repo-settings.md) for making the check required.
+- Issue #21: required status checks on `main`, which `DCO` joins once this ADR is accepted.
 - [ADR 0010](0010-licence.md): the licence, which left this decision to #28.
-- [CONTRIBUTING.md](../../CONTRIBUTING.md#sign-off): how to sign off.
-- [docs/repo-settings.md](../repo-settings.md#dco-check): making `DCO` a required check.
-- [docs/ci.md](../ci.md): the `DCO` workflow.
 - Developer Certificate of Origin 1.1: <https://developercertificate.org>.
