@@ -58,6 +58,7 @@
 //! overridden.
 
 use core::cmp::Reverse;
+use std::collections::BTreeMap;
 
 use crate::decision::RuleRef;
 use crate::facts::PathVariable;
@@ -156,9 +157,15 @@ impl Spec {
     ///   match through that one.
     /// - `not` identifies nothing.
     ///
-    /// A tree that identifies nothing on some path is in tier 7.
+    /// A tree that identifies nothing on some path is in tier 7, and so is
+    /// a tree deeper than validation allows.
     #[must_use]
     pub fn of(tree: &Match) -> Self {
+        // Validated trees are within the limit; a deeper tree built in code
+        // is not walked recursively.
+        if tree.depth() > crate::model::limits::MAX_TREE_DEPTH {
+            return Self::LEAST;
+        }
         spec_of(tree).unwrap_or(Self::LEAST)
     }
 }
@@ -283,42 +290,61 @@ fn criterion_spec(c: &crate::model::Criterion) -> Option<Spec> {
 }
 
 /// The number of fixed directory components below the root in a path
-/// value: the components before the first one with a wildcard. A leading
-/// path variable counts as the depth of its default location (for
-/// example `%PROGRAMFILES%` is `C:\Program Files`, depth 1, and `%TEMP%` is
-/// `C:\Users\name\AppData\Local\Temp`, depth 5). A regular expression has
-/// no fixed components.
+/// value, read the way matching reads it ([`crate::ops`]):
+///
+/// - A value without a path variable is normalised first
+///   ([`palisade_core::path::normalize`]), so `.` and `..` components,
+///   repeated separators and the `\??\` and `\\?\UNC\` prefixes count as
+///   the path they stand for. A value that does not normalise to a drive or
+///   UNC path fixes nothing.
+/// - A leading path variable counts as the depth of its default location
+///   (`%PROGRAMFILES%` is `C:\Program Files`, depth 1; `%TEMP%` is
+///   `C:\Users\name\AppData\Local\Temp`, depth 5), plus the components after
+///   it.
+/// - With `wildcard`, counting stops at the first component with `*`, `?`
+///   or `[`, and a wildcard drive (`*:\`, `?:\`) fixes nothing. With
+///   `equals` and `starts_with` every character is literal.
+/// - A regular expression fixes nothing.
+/// - A stream name is not a directory component.
 fn path_depth(value: &str, operator: Operator) -> u16 {
-    if operator == Operator::Regex {
+    let wildcard = match operator {
+        Operator::Regex => return 0,
+        Operator::Wildcard => true,
+        _ => false,
+    };
+    let (base, path) = match variable_prefix(value) {
+        Some((variable, rest)) => (
+            variable_depth(variable),
+            palisade_core::path::normalize(&format!("C:\\{rest}")),
+        ),
+        None => {
+            let b = value.as_bytes();
+            if wildcard && b.len() >= 2 && matches!(b[0], b'?' | b'*') && b[1] == b':' {
+                return 0;
+            }
+            (0, palisade_core::path::normalize(value))
+        }
+    };
+    if !path.is_resolved() {
         return 0;
     }
-    let value = value.replace('/', "\\");
-    let (base, rest) = if let Some(after) = value.strip_prefix('%') {
-        let Some((name, rest)) = after.split_once('%') else {
-            return 0;
-        };
-        let Some(variable) = PathVariable::from_name(name) else {
-            return 0;
-        };
-        (variable_depth(variable), rest.to_owned())
-    } else if let Some(unc) = value.strip_prefix("\\\\") {
-        // `\\server\share` is the root.
-        let rest: String = unc
-            .splitn(3, '\\')
-            .nth(2)
-            .map(str::to_owned)
-            .unwrap_or_default();
-        (0, rest)
-    } else {
-        let rest = value.get(2..).filter(|_| value.get(1..2) == Some(":"));
-        (0, rest.unwrap_or_default().to_owned())
-    };
-    let fixed = rest
+    let below_root = path
+        .without_stream()
+        .get(path.root().len()..)
+        .unwrap_or_default();
+    let fixed = below_root
         .split('\\')
         .filter(|c| !c.is_empty())
-        .take_while(|c| !c.contains(['*', '?', '[']))
+        .take_while(|c| !wildcard || !c.contains(['*', '?', '[']))
         .count();
     base.saturating_add(u16::try_from(fixed).unwrap_or(u16::MAX))
+}
+
+/// A leading `%NAME%` that names a known path variable, and the text after
+/// it.
+fn variable_prefix(value: &str) -> Option<(PathVariable, &str)> {
+    let (name, rest) = value.strip_prefix('%')?.split_once('%')?;
+    Some((PathVariable::from_name(name)?, rest))
 }
 
 /// The depth of a path variable's default location below the root.
@@ -503,29 +529,40 @@ pub struct AllowWins {
 }
 
 impl AllowWins {
-    /// Whether `c` survives the granularity tiebreak: no candidate of its
-    /// rule set is more specific.
-    fn survives(&self, matches: &MatchSet, c: &Candidate) -> bool {
-        !self.granularity_tiebreak
-            || !matches
-                .candidates
-                .iter()
-                .any(|o| o.set() == c.set() && o.spec < c.spec)
+    /// The most specific candidate of each rule set, with
+    /// `granularity_tiebreak`. Candidates less specific than their set's
+    /// are left out.
+    fn most_specific_per_set(&self, matches: &MatchSet) -> Option<BTreeMap<RuleSetId, Spec>> {
+        if !self.granularity_tiebreak {
+            return None;
+        }
+        let mut most: BTreeMap<RuleSetId, Spec> = BTreeMap::new();
+        for c in &matches.candidates {
+            most.entry(c.set())
+                .and_modify(|s| *s = (*s).min(c.spec))
+                .or_insert(c.spec);
+        }
+        Some(most)
     }
 }
 
 impl Precedence for AllowWins {
     fn resolve(&self, matches: &MatchSet) -> Resolution {
         let tiebreak = self.allow_tiebreak;
+        let most = self.most_specific_per_set(matches);
+        let survives = |c: &Candidate| {
+            most.as_ref()
+                .is_none_or(|m| m.get(&c.set()).is_none_or(|s| *s == c.spec))
+        };
         let winner = best(
             matches,
-            |c| c.verdict.allows() && self.survives(matches, c),
+            |c| c.verdict.allows() && survives(c),
             |c| (c.verdict.allow_rank(tiebreak), c.spec, c.id()),
         )
         .or_else(|| {
             best(
                 matches,
-                |c| !c.verdict.allows() && self.survives(matches, c),
+                |c| !c.verdict.allows() && survives(c),
                 |c| (c.spec, c.id()),
             )
         });

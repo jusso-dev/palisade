@@ -51,31 +51,40 @@ impl Validator {
                 if !referenced.contains(&set.id) {
                     continue;
                 }
+                // Under `first_match`, every rule of a custom rule set that
+                // has an order must use the custom range, whatever its
+                // action: a `defer` or `audit` rule is placed in the same
+                // order. Mandatory rule sets are decided before any order.
+                if model == PrecedenceModel::FirstMatch && !set.read_only && !set.mandatory {
+                    if let Some(order) = rule.order.filter(|o| {
+                        !order_ranges::CUSTOM.contains(o) && o <= order_ranges::CATCH_ALL.end()
+                    }) {
+                        self.push(
+                            ErrorCode::OrderReserved,
+                            &format!("{path}/order"),
+                            format!(
+                                "order {order} is reserved; rules of custom rule sets use {} to {}",
+                                order_ranges::CUSTOM.start(),
+                                order_ranges::CUSTOM.end()
+                            ),
+                        );
+                    }
+                }
                 // Mandatory and exclusion rules are decided before the
                 // model, and the other non-terminal rules never decide.
                 let Some(verdict) = Verdict::of(&rule.action).filter(|_| !set.mandatory) else {
                     continue;
                 };
                 match model {
-                    PrecedenceModel::FirstMatch => match rule.order {
-                        None => self.push(
-                            ErrorCode::OrderRequired,
-                            &format!("{path}/action"),
-                            "under `first_match`, every rule that allows or denies needs an `order`",
-                        ),
-                        Some(order) if !set.read_only && !order_ranges::CUSTOM.contains(&order) => {
+                    PrecedenceModel::FirstMatch => {
+                        if rule.order.is_none() {
                             self.push(
-                                ErrorCode::OrderReserved,
-                                &format!("{path}/order"),
-                                format!(
-                                    "order {order} is reserved; rules of custom rule sets use {} to {}",
-                                    order_ranges::CUSTOM.start(),
-                                    order_ranges::CUSTOM.end()
-                                ),
+                                ErrorCode::OrderRequired,
+                                &format!("{path}/action"),
+                                "under `first_match`, every rule that allows or denies needs an `order`",
                             );
                         }
-                        Some(_) => {}
-                    },
+                    }
                     PrecedenceModel::Priority => match rule.priority {
                         None => self.push(
                             ErrorCode::PriorityRequired,

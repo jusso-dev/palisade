@@ -706,26 +706,64 @@ fn the_decision_json_lists_overridden_rules_and_grants() {
 
 // Property tests over generated policies.
 
-/// Facts that match many generated rules: every hash value the generator
-/// can produce is not known in advance, so the generated rules get their
-/// SHA-256 anchor rewritten to `a`×64 (see `anchor`).
-fn anchor(doc: &mut PolicyDocument, keep: &[bool]) {
-    for (rule, keep) in doc
+/// The match trees the property tests give generated rules: each is one
+/// criterion, so whether it matches [`facts`] is known, and together they
+/// span several specificity tiers, including two directory depths.
+fn anchors() -> [(serde_json::Value, bool); 6] {
+    [
+        (hash_a(), true),
+        (publisher(), true),
+        (
+            crit("path.full", "equals", "C:\\Tools\\Sub\\tool.exe"),
+            true,
+        ),
+        (folder(), true),
+        (
+            crit("path.directory", "starts_with", "C:\\Tools\\Sub"),
+            true,
+        ),
+        (hash_b(), false),
+    ]
+}
+
+/// Replaces every generated rule's tree with the anchor `picks` chooses
+/// for it, and returns the IDs of the rules whose tree matches.
+fn anchor(doc: &mut PolicyDocument, picks: &[usize]) -> std::collections::BTreeSet<RuleId> {
+    let anchors = anchors();
+    let mut matching = std::collections::BTreeSet::new();
+    for (rule, pick) in doc
         .rule_sets
         .iter_mut()
         .flat_map(|s| s.rules.iter_mut())
-        .zip(keep.iter().cycle())
+        .zip(picks.iter().cycle())
     {
-        if let crate::model::Match::All(children) = &mut rule.match_ {
-            if let Some(crate::model::Match::Criterion(c)) = children.first_mut() {
-                if *keep {
-                    c.values = vec![sha('a')];
-                }
-            }
-            // Only the anchor, so that the rule matches the object.
-            children.truncate(1);
+        let (tree, matches) = &anchors[pick % anchors.len()];
+        rule.match_ = serde_json::from_value(tree.clone()).unwrap();
+        if *matches {
+            matching.insert(rule.id);
         }
     }
+    matching
+}
+
+/// Whether a rule of a referenced rule set matches the object and applies
+/// to its type.
+fn applies(
+    doc: &PolicyDocument,
+    matching: &std::collections::BTreeSet<RuleId>,
+    t: ObjectType,
+    keep: impl Fn(&RuleSet, &Rule) -> bool,
+) -> bool {
+    doc.rule_sets
+        .iter()
+        .filter(|s| doc.policy.rule_sets.contains(&s.id))
+        .flat_map(|s| s.rules.iter().map(move |r| (s, r)))
+        .any(|(s, r)| {
+            r.enabled
+                && matching.contains(&r.id)
+                && (r.object_types.is_empty() || r.object_types.contains(&t))
+                && keep(s, r)
+        })
 }
 
 fn shuffled(doc: &PolicyDocument, seed: u64) -> PolicyDocument {
@@ -758,20 +796,26 @@ fn object_type() -> impl Strategy<Value = ObjectType> {
     proptest::sample::select(ObjectType::ALL.to_vec())
 }
 
+fn picks() -> impl Strategy<Value = Vec<usize>> {
+    proptest::collection::vec(0usize..6, 1..12)
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(512))]
 
     /// The decision does not depend on the order of rule sets or rules,
-    /// under any model, and evaluating twice gives the same decision.
+    /// under any model and options, and evaluating twice gives the same
+    /// decision. The rules span several specificity tiers, so
+    /// `specificity` and `granularity_tiebreak` make real choices.
     #[test]
     fn decisions_do_not_depend_on_list_order(
         doc in crate::model::arbitrary::document(),
-        keep in proptest::collection::vec(any::<bool>(), 1..8),
+        picks in picks(),
         seed in any::<u64>(),
         t in object_type(),
     ) {
         let mut doc = doc;
-        anchor(&mut doc, &keep);
+        anchor(&mut doc, &picks);
         let policy = doc.clone().validate().unwrap();
         let first = decide_with(&policy, &facts(), t);
         prop_assert_eq!(&decide_with(&policy, &facts(), t), &first);
@@ -779,25 +823,48 @@ proptest! {
         prop_assert_eq!(&decide_with(&other, &facts(), t), &first);
     }
 
+    /// Each model in turn, on the same generated rules: the shuffle
+    /// invariance above holds for every one of the five.
+    #[test]
+    fn every_model_is_order_independent_on_the_same_rules(
+        doc in crate::model::arbitrary::document(),
+        options in crate::model::arbitrary::precedence_options(),
+        picks in picks(),
+        seed in any::<u64>(),
+        t in object_type(),
+    ) {
+        for model in [
+            PrecedenceModel::DenyWins,
+            PrecedenceModel::AllowWins,
+            PrecedenceModel::Specificity,
+            PrecedenceModel::FirstMatch,
+            PrecedenceModel::Priority,
+        ] {
+            let mut doc = doc.clone();
+            doc.policy.precedence_model = model;
+            doc.policy.precedence_options = options;
+            crate::model::arbitrary::fit_to_model(model, &mut doc.rule_sets);
+            anchor(&mut doc, &picks);
+            let policy = doc.clone().validate().unwrap();
+            let first = decide_with(&policy, &facts(), t);
+            let other = shuffled(&doc, seed).validate().unwrap();
+            prop_assert_eq!(&decide_with(&other, &facts(), t), &first, "{:?}", model);
+        }
+    }
+
     /// A matching mandatory deny always blocks, whatever else matches and
-    /// whatever the model (ADR 0004, #125).
+    /// whatever the model and options (ADR 0004, #125).
     #[test]
     fn a_matching_mandatory_deny_always_blocks(
         doc in crate::model::arbitrary::document(),
-        keep in proptest::collection::vec(any::<bool>(), 1..8),
+        picks in picks(),
         t in object_type(),
     ) {
         let mut doc = doc;
-        anchor(&mut doc, &keep);
+        let matching = anchor(&mut doc, &picks);
         let policy = doc.clone().validate().unwrap();
         let d = decide_with(&policy, &facts(), t);
-        let mandatory_matches = doc.rule_sets.iter()
-            .filter(|s| s.mandatory && doc.policy.rule_sets.contains(&s.id))
-            .flat_map(|s| &s.rules)
-            .any(|r| r.enabled
-                && (r.object_types.is_empty() || r.object_types.contains(&t))
-                && matches!(&r.match_, crate::model::Match::All(c) if matches!(c.first(), Some(crate::model::Match::Criterion(c)) if c.values == [sha('a')])));
-        if mandatory_matches {
+        if applies(&doc, &matching, t, |s, _| s.mandatory) {
             prop_assert_eq!(d.outcome(), Outcome::Blocked);
             prop_assert_eq!(d.reason_code(), ReasonCode::MandatoryDeny);
         } else {
@@ -805,32 +872,45 @@ proptest! {
         }
     }
 
-    /// Under `deny_wins`, a matching ordinary deny always beats every
-    /// ordinary allow (ADR 0004).
+    /// Under `deny_wins`, a matching deny always beats every allow
+    /// (ADR 0004). Only a mandatory deny or an exclusion decides first.
     #[test]
     fn under_deny_wins_a_matching_deny_always_blocks(
         doc in crate::model::arbitrary::document(),
-        keep in proptest::collection::vec(any::<bool>(), 1..8),
+        picks in picks(),
         t in object_type(),
     ) {
         let mut doc = doc;
         doc.policy.precedence_model = PrecedenceModel::DenyWins;
-        anchor(&mut doc, &keep);
+        let matching = anchor(&mut doc, &picks);
         let policy = doc.clone().validate().unwrap();
         let d = decide_with(&policy, &facts(), t);
-        let referenced = |id| doc.policy.rule_sets.contains(&id);
-        let deny_matches = doc.rule_sets.iter()
-            .filter(|s| referenced(s.id))
-            .flat_map(|s| &s.rules)
-            .any(|r| r.enabled
-                && r.action.kind() == ActionKind::Deny
-                && (r.object_types.is_empty() || r.object_types.contains(&t))
-                && matches!(&r.match_, crate::model::Match::All(c) if matches!(c.first(), Some(crate::model::Match::Criterion(c)) if c.values == [sha('a')])));
-        if deny_matches && d.outcome() != Outcome::Ignored {
+        let deny = applies(&doc, &matching, t, |_, r| r.action.kind() == ActionKind::Deny);
+        if deny && d.outcome() != Outcome::Ignored {
             prop_assert_eq!(d.outcome(), Outcome::Blocked);
         }
         if d.outcome() == Outcome::Allowed {
-            prop_assert!(!deny_matches);
+            prop_assert!(!deny);
+        }
+    }
+
+    /// Under `allow_wins` without granularity, a matching allow decides
+    /// unless a mandatory deny or an exclusion does first.
+    #[test]
+    fn under_allow_wins_a_matching_allow_decides(
+        doc in crate::model::arbitrary::document(),
+        picks in picks(),
+        t in object_type(),
+    ) {
+        let mut doc = doc;
+        doc.policy.precedence_model = PrecedenceModel::AllowWins;
+        doc.policy.precedence_options.granularity_tiebreak = false;
+        let matching = anchor(&mut doc, &picks);
+        let policy = doc.clone().validate().unwrap();
+        let d = decide_with(&policy, &facts(), t);
+        let allow = applies(&doc, &matching, t, |s, r| !s.mandatory && r.action.kind().permits());
+        if allow && !matches!(d.reason_code(), ReasonCode::MandatoryDeny | ReasonCode::Exclusion) {
+            prop_assert_eq!(d.outcome(), Outcome::Allowed);
         }
     }
 }

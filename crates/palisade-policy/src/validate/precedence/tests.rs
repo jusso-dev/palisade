@@ -111,6 +111,24 @@ fn first_match_reserves_order_ranges_for_custom_rules() {
         })
         .collect();
     assert_eq!(f, reserved);
+    // Every action is checked, not only those that decide.
+    let f = findings(doc(
+        "first_match",
+        serde_json::json!({}),
+        &[
+            serde_json::json!({"action": {"type": "defer"}, "order": 50}),
+            serde_json::json!({"action": {"type": "audit"}, "order": 999_995}),
+            serde_json::json!({"action": {"type": "defer"}, "order": 100_002}),
+        ],
+        &[],
+    ));
+    assert_eq!(
+        f,
+        vec![
+            at(ErrorCode::OrderReserved, "/rule_sets/0/rules/0/order"),
+            at(ErrorCode::OrderReserved, "/rule_sets/0/rules/1/order"),
+        ]
+    );
     // Curated rule sets may use any range.
     let f = findings(doc("first_match", serde_json::json!({}), &[], &custom));
     assert!(f.is_empty(), "{f:?}");
@@ -132,12 +150,17 @@ fn an_order_above_the_range_is_rejected_under_every_model() {
         let f = findings(doc(
             model,
             serde_json::json!({}),
-            &[],
+            // In a custom and a curated rule set: one finding each, not
+            // also `order_reserved`.
+            &[serde_json::json!({"order": 1_000_001})],
             &[serde_json::json!({"order": 1_000_001})],
         ));
         assert_eq!(
             f,
-            vec![at(ErrorCode::OrderOutOfRange, "/rule_sets/1/rules/0/order")],
+            vec![
+                at(ErrorCode::OrderOutOfRange, "/rule_sets/0/rules/0/order"),
+                at(ErrorCode::OrderOutOfRange, "/rule_sets/1/rules/0/order"),
+            ],
             "{model}"
         );
     }

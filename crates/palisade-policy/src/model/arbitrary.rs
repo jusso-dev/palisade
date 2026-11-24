@@ -365,6 +365,7 @@ pub fn document() -> impl Strategy<Value = PolicyDocument> {
     ]);
     let model = proptest::sample::select(vec![
         PrecedenceModel::DenyWins,
+        PrecedenceModel::AllowWins,
         PrecedenceModel::Specificity,
         PrecedenceModel::FirstMatch,
         PrecedenceModel::Priority,
@@ -450,18 +451,19 @@ pub fn precedence_options() -> impl Strategy<Value = super::PrecedenceOptions> {
         )
 }
 
-/// Gives every rule the model decides an `order` or a `priority`, as
-/// validation requires, keeping the generated value where it is valid.
+/// Gives every rule the model decides an `order` or a `priority`, and
+/// moves custom orders into the custom range, as validation requires,
+/// keeping the generated value where it is valid.
 pub fn fit_to_model(model: super::PrecedenceModel, sets: &mut [RuleSet]) {
     use crate::validate::order_ranges::CUSTOM;
     for set in sets.iter_mut().filter(|s| !s.mandatory) {
         let curated = set.read_only;
         for rule in &mut set.rules {
-            if crate::precedence::Verdict::of(&rule.action).is_none() {
-                continue;
-            }
+            let decides = crate::precedence::Verdict::of(&rule.action).is_some();
             match model {
-                PrecedenceModel::FirstMatch => {
+                // Every custom rule with an order uses the custom range;
+                // every rule that decides has one.
+                PrecedenceModel::FirstMatch if decides || rule.order.is_some() => {
                     let order = rule.order.unwrap_or(*CUSTOM.start());
                     rule.order = Some(if curated || CUSTOM.contains(&order) {
                         order
@@ -469,6 +471,8 @@ pub fn fit_to_model(model: super::PrecedenceModel, sets: &mut [RuleSet]) {
                         CUSTOM.start() + order % (CUSTOM.end() - CUSTOM.start() + 1)
                     });
                 }
+                PrecedenceModel::FirstMatch => {}
+                _ if !decides => {}
                 PrecedenceModel::Priority => {
                     rule.priority = Some(rule.priority.unwrap_or_default());
                 }

@@ -339,6 +339,39 @@ fn directory_depth_counts_fixed_components() {
     assert_eq!(depth(Operator::StartsWith, "%TEMP%"), 5);
     assert_eq!(depth(Operator::StartsWith, "\\\\server\\share\\dir"), 1);
     assert_eq!(depth(Operator::Regex, "C:\\\\Tools\\\\.*"), 0);
+    // Values are normalised as matching normalises them.
+    assert_eq!(depth(Operator::StartsWith, "C:\\a\\..\\.."), 0);
+    assert_eq!(depth(Operator::StartsWith, "C:\\Tools\\.\\.\\."), 1);
+    assert_eq!(depth(Operator::StartsWith, "C:\\Tools\\Sub\\.."), 1);
+    assert_eq!(depth(Operator::StartsWith, "C:\\A\\B\\..\\..\\Tools"), 1);
+    assert_eq!(depth(Operator::StartsWith, "\\??\\C:\\Tools\\Sub"), 2);
+    assert_eq!(depth(Operator::StartsWith, "\\\\?\\UNC\\server\\share"), 0);
+    assert_eq!(
+        depth(Operator::StartsWith, "\\\\?\\UNC\\server\\share\\dir"),
+        1
+    );
+    assert_eq!(depth(Operator::StartsWith, "C:\\\\Tools\\\\Sub"), 2);
+    assert_eq!(depth(Operator::StartsWith, "C:/Tools/Sub"), 2);
+    // A wildcard drive fixes nothing; `[` is literal outside wildcards.
+    assert_eq!(depth(Operator::Wildcard, "*:\\Tools\\Sub"), 0);
+    assert_eq!(depth(Operator::Wildcard, "?:\\Tools\\Sub"), 0);
+    assert_eq!(depth(Operator::StartsWith, "C:\\Apps\\[v2]\\Sub"), 3);
+    assert_eq!(depth(Operator::Wildcard, "C:\\Apps\\[v2]\\Sub"), 1);
+    assert_eq!(depth(Operator::StartsWith, "%PROGRAMFILES%\\App\\Bin"), 3);
+    // An unresolvable value fixes nothing.
+    assert_eq!(depth(Operator::StartsWith, "relative\\dir"), 0);
+    // A parent written with `..` never outranks its subdirectory.
+    let parent = Spec::of(&crit(
+        Field::PathDirectory,
+        Operator::StartsWith,
+        &["C:\\Tools\\Sub\\.."],
+    ));
+    let sub = Spec::of(&crit(
+        Field::PathDirectory,
+        Operator::StartsWith,
+        &["C:\\Tools\\Sub"],
+    ));
+    assert!(sub < parent);
     // Several values: the shallowest, since any may match.
     let both = crit(
         Field::PathDirectory,
@@ -357,6 +390,15 @@ fn directory_depth_counts_fixed_components() {
         &["C:\\A"],
     ));
     assert!(deeper < shallower);
+}
+
+#[test]
+fn spec_of_a_tree_deeper_than_the_limit_is_the_least_specific() {
+    let mut tree = crit(Field::HashSha256, Operator::Equals, &[&"a".repeat(64)]);
+    for _ in 0..10_000 {
+        tree = Match::All(vec![tree]);
+    }
+    assert_eq!(Spec::of(&tree), Spec::LEAST);
 }
 
 fn verdict() -> impl Strategy<Value = Verdict> {
