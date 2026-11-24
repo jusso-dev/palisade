@@ -139,13 +139,20 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     v2 anchor, which has no extensions to say so, is taken as a CA. No
     certificate may carry a critical extension this crate does not process,
     except a configured anchor.
-  - Every path is enumerated, loops are detected and paths stop at 10
-    certificates. Policy certificates are tried first, and the 8 best paths
-    are kept (anchored, then complete, then shortest), so dead ends added to
-    a file cannot crowd out its trusted chain. The best is chosen and the
-    others are kept as alternatives (cross-signed paths). At most 128
-    certificate signatures are checked per chain (links and
-    self-signatures), and 512 per file. Running out fails closed.
+  - Trust is decided **downwards from the anchors**: each certificate
+    whose issuer name matches a trusted certificate is checked with that
+    trusted key, and only links verified this way can make an anchored
+    path. Certificates added to a file cost at most one check per trusted
+    key whose name they claim, and this phase has its own budget (512
+    checks per chain), so nothing in a file can starve it. Verified results
+    are cached per key, not per certificate.
+  - The as-provided chain (and, when nothing is anchored, the full chain)
+    is then searched upwards with whatever keys the file holds: every path
+    is enumerated, loops are detected, paths stop at 10 certificates, and
+    the 8 best are kept (anchored, then complete, then shortest), with
+    cross-signed paths as alternatives. These checks spend at most 128 per
+    chain and 512 per file. Running out fails closed and never affects
+    trust.
   - `evaluate_trust` builds the chain of every valid signature in a
     `SignatureReport` and chooses the primary signature **after** trust:
     the first trusted signature with the strongest digest (the weaker of

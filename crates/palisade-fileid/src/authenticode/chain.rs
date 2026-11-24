@@ -29,26 +29,38 @@
 //! never used, unless it is itself a configured anchor. A name match alone
 //! never links two certificates.
 //!
-//! The search enumerates every path, detects loops and stops at
-//! [`MAX_CHAIN_LENGTH`] certificates. Policy certificates are tried before
-//! embedded ones, and anchored or complete paths always displace dead ends,
-//! so certificates added to a file cannot crowd out its trusted chain. The
-//! best [`MAX_CHAIN_PATHS`] paths are kept: anchored before unanchored,
-//! complete before incomplete, then the shortest. The others are reported
-//! as alternatives, which is how cross-signed paths show up. At
-//! most [`MAX_SIGNATURE_CHECKS`] certificate signatures (links, and the
-//! self-signatures of self-issued certificates) are verified per build, and
-//! [`MAX_FILE_SIGNATURE_CHECKS`] per file, so hostile certificate sets
-//! cannot make it slow. Running out fails closed: links not checked are not
-//! made, and a certificate whose self-signature was not checked is not
-//! self-signed, so the chain is only shorter, never trusted wrongly.
+//! **Trust is decided downwards from the anchors.** Starting from each
+//! configured anchor, every certificate whose issuer name matches a trusted
+//! certificate's subject is checked with that trusted key, breadth first;
+//! a certificate whose signature verifies becomes trusted in turn. Only
+//! links verified this way can make an anchored path. So every check that
+//! decides trust uses a key from policy, or one an anchor vouched for, and
+//! a certificate someone added to a file costs at most one check per
+//! trusted key whose name it claims. This phase has its own budget,
+//! [`MAX_TRUST_CHECKS`] per build, which nothing in a file can spend:
+//! earlier signatures, nested signatures and added certificates cannot
+//! starve it.
+//!
+//! The as-provided chain, and the full chain when nothing is anchored, are
+//! then searched upwards from the leaf with whatever keys the file holds.
+//! The search enumerates every path, detects loops, stops at
+//! [`MAX_CHAIN_LENGTH`] certificates and keeps the best [`MAX_CHAIN_PATHS`]
+//! paths (anchored before unanchored, complete before incomplete, then the
+//! shortest); the others are reported as alternatives, which is how
+//! cross-signed paths show up. These checks, with the self-signatures of
+//! self-issued certificates, spend at most [`MAX_SIGNATURE_CHECKS`] per
+//! build and [`MAX_FILE_SIGNATURE_CHECKS`] per file. Verification results
+//! are cached per issuer key, so copies of one key cost one check. Running
+//! out fails closed: a link not checked is not made, and a certificate
+//! whose self-signature was not checked is not self-signed. Neither ever
+//! affects trust.
 //!
 //! Not checked here: validity periods, timestamps and revocation (#50), and
 //! the OS trust store (the `os-trust` cross-check in #48).
 
 #![forbid(unsafe_code)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde::Serialize;
 
@@ -62,12 +74,20 @@ use super::x509::{self, Budget, CertSummary, CertificateError, KeyUsage};
 pub const MAX_CHAIN_LENGTH: usize = 10;
 /// The most candidate paths recorded per search.
 pub const MAX_CHAIN_PATHS: usize = 8;
-/// The most certificate signatures (links and self-signatures) verified
-/// per chain build.
+/// The most certificate signatures verified with keys a file supplies
+/// (self-signatures, and links in the untrusted searches) per chain build.
 pub const MAX_SIGNATURE_CHECKS: usize = 128;
-/// The most certificate signatures verified for all the signatures of one
-/// file, by [`super::evaluate_trust`].
+/// The most certificate signatures verified with keys a file supplies
+/// (self-signatures and the untrusted searches) for all the signatures of
+/// one file, by [`super::evaluate_trust`]. Trust does not depend on these
+/// checks.
 pub const MAX_FILE_SIGNATURE_CHECKS: usize = 512;
+/// The most signatures verified per chain build while deciding trust,
+/// downwards from the anchors. Each check uses a key from policy or one an
+/// anchor vouched for, and certificates added to a file cost at most one
+/// check per trusted key with the name they claim as issuer, so a file
+/// cannot exhaust this; it bounds pathological trust configurations.
+pub const MAX_TRUST_CHECKS: usize = 512;
 /// The most per-certificate issues recorded per chain build. The limit
 /// markers ([`ChainIssue::TooLong`], [`ChainIssue::TooManyPaths`],
 /// [`ChainIssue::WorkLimitReached`] and [`ChainIssue::IssuesTruncated`]) are
@@ -352,7 +372,8 @@ pub struct ChainReport {
     /// The chosen full chain, built over the embedded certificates and the
     /// [`TrustConfig`].
     pub full_chain: ChainPath,
-    /// Other full paths, best first.
+    /// Other full paths, best first. When the full chain is anchored, only
+    /// other anchored paths.
     pub alternatives: Vec<ChainPath>,
     /// The full chain ends at a self-signed certificate or a trust anchor.
     pub chain_complete: bool,
@@ -436,13 +457,16 @@ impl ChainReport {
     }
 
     /// Whether every certificate signature in the full chain uses an
-    /// algorithm in `allowed`. A self-signed root's own signature is not
-    /// counted: nothing relies on it.
+    /// algorithm in `allowed`. The signature of a self-signed certificate,
+    /// and of the anchor at the top of an anchored chain, is not counted:
+    /// nothing relies on it.
     #[must_use]
     pub fn cert_sig_algs_allowed(&self, allowed: &[SignatureAlgorithm]) -> bool {
+        let last = self.full_chain.certs.len().saturating_sub(1);
         self.full_chain_certs()
-            .filter(|c| !c.is_self_signed)
-            .all(|c| allowed.contains(&c.sig_alg))
+            .enumerate()
+            .filter(|(pos, c)| !c.is_self_signed && !(self.full_chain.anchored && *pos == last))
+            .all(|(_, c)| allowed.contains(&c.sig_alg))
     }
 }
 
@@ -470,9 +494,9 @@ pub fn build_chain(
     )
 }
 
-/// [`build_chain`], verifying at most [`MAX_SIGNATURE_CHECKS`] certificate
-/// signatures, and no more than `budget` has left. `budget` is charged for
-/// every verification.
+/// [`build_chain`], charging `file_budget` for the checks that use keys the
+/// file supplies ([`MAX_SIGNATURE_CHECKS`] at most per build). Trust checks
+/// have a budget of their own, [`MAX_TRUST_CHECKS`] per build.
 pub(crate) fn build_chain_within(
     certs: &[Vec<u8>],
     signer: usize,
@@ -497,16 +521,20 @@ pub(crate) fn build_chain_within(
     }))?;
     // Self-signature checks while parsing come out of the same budget as
     // link checks.
-    let mut budget = Budget::new(file_budget.left().min(MAX_SIGNATURE_CHECKS));
-    let parsed = x509::parse_within(leaf_der, &mut budget);
-    file_budget.absorb(&budget);
-    let leaf_summary = parsed?;
+    let mut parse_budget = Budget::new(file_budget.left().min(MAX_SIGNATURE_CHECKS));
+    let leaf_summary = match x509::parse_within(leaf_der, &mut parse_budget) {
+        Ok(c) => c,
+        Err(e) => {
+            file_budget.absorb(&parse_budget);
+            return Err(e);
+        }
+    };
     let mut embedded: Vec<(usize, CertSummary)> = vec![(signer, leaf_summary)];
     for (i, der) in certs.iter().enumerate() {
         if i == signer {
             continue;
         }
-        match x509::parse_within(der, &mut budget) {
+        match x509::parse_within(der, &mut parse_budget) {
             Ok(c) => embedded.push((i, c)),
             Err(error) => issues.push(ChainIssue::UnparseableCertificate { embedded: i, error }),
         }
@@ -554,19 +582,33 @@ pub(crate) fn build_chain_within(
     // The signer is pool node 0, and so report certificate 0.
     let leaf = 0;
 
-    let mut search = Search::new(&pool, &mut issues, budget);
-    let provided_paths = search.run(leaf, embedded_count, false);
-    let full_paths = search.run(leaf, pool.len(), true);
-    let budget = search.budget;
+    file_budget.absorb(&parse_budget);
+
+    let mut search = Search::new(&pool, &mut issues);
+    // Trust first, verifying downwards from the anchors with trusted keys
+    // only, on a budget of its own that nothing in the file can spend.
+    let mut trust_budget = Budget::new(MAX_TRUST_CHECKS);
+    search.mark_trusted(&mut trust_budget);
+    let anchored_paths = search.run(leaf, pool.len(), Mode::Trusted, &mut trust_budget);
+    // Then the informational paths, checked with whatever keys the file
+    // holds.
+    let mut budget = Budget::new(file_budget.left().min(MAX_SIGNATURE_CHECKS));
+    let provided_paths = search.run(leaf, embedded_count, Mode::Untrusted, &mut budget);
+    let full_anchored = !anchored_paths.is_empty();
+    let full_paths = if full_anchored {
+        anchored_paths
+    } else {
+        search.run(leaf, pool.len(), Mode::Untrusted, &mut budget)
+    };
     drop(search);
     file_budget.absorb(&budget);
-    if budget.exhausted {
+    if budget.exhausted || trust_budget.exhausted || parse_budget.exhausted {
         issues.push(ChainIssue::WorkLimitReached);
     }
 
     let trivial = || vec![leaf];
     let provided = rank(provided_paths, &pool, false);
-    let full = rank(full_paths, &pool, true);
+    let full = rank(full_paths, &pool, full_anchored);
 
     // Map pool indices to report indices: every embedded certificate, then
     // policy certificates in first-use order.
@@ -606,8 +648,14 @@ pub(crate) fn build_chain_within(
         .map(|p| to_path(&p, &mut out, false))
         .collect();
     let mut full_iter = full.into_iter();
-    let full_chain = to_path(&full_iter.next().unwrap_or_else(trivial), &mut out, true);
-    let alternatives: Vec<ChainPath> = full_iter.map(|p| to_path(&p, &mut out, true)).collect();
+    let full_chain = to_path(
+        &full_iter.next().unwrap_or_else(trivial),
+        &mut out,
+        full_anchored,
+    );
+    let alternatives: Vec<ChainPath> = full_iter
+        .map(|p| to_path(&p, &mut out, full_anchored))
+        .collect();
     let issue_list: Vec<ChainIssue> = issues
         .list
         .into_iter()
@@ -626,10 +674,14 @@ pub(crate) fn build_chain_within(
         })
         .collect();
     let prefix_is_whole = embedded_prefix.len() == full_chain.certs.len();
+    // The root: a self-signed top, or a self-issued anchor (whose own
+    // signature is never relied on, and may use an algorithm that is not
+    // verified here).
+    let anchored = full_chain.anchored;
     let root_as_provided = embedded_prefix
         .last()
         .copied()
-        .filter(|t| prefix_is_whole && out.get(*t).is_some_and(|c| c.cert.is_self_signed));
+        .filter(|t| prefix_is_whole && out.get(*t).is_some_and(|c| is_root(c, anchored)));
     let below_root = embedded_prefix
         .len()
         .saturating_sub(usize::from(root_as_provided.is_some()));
@@ -652,7 +704,7 @@ pub(crate) fn build_chain_within(
         None
     };
     let well_known_root_id = top
-        .filter(|c| full_chain.complete && (c.cert.is_self_signed || c.anchor.is_some()))
+        .filter(|c| full_chain.complete && (is_root(c, anchored) || c.anchor.is_some()))
         .and_then(|c| config.well_known_root_id(&c.cert));
 
     Ok(ChainReport {
@@ -675,6 +727,13 @@ pub(crate) fn build_chain_within(
         issues: issue_list,
         certificates: out,
     })
+}
+
+/// Whether `c`, the top of a full chain, is a root: self-signed, or (in an
+/// anchored chain) a self-issued anchor.
+fn is_root(c: &ChainCert, anchored: bool) -> bool {
+    c.cert.is_self_signed
+        || (anchored && c.anchor.is_some() && c.cert.subject.der == c.cert.issuer.der)
 }
 
 /// Rewrites the certificate indices in `issue` with `f`.
@@ -763,26 +822,45 @@ impl Issues {
 }
 
 /// The most issuer candidates examined in one search. Every step costs a
-/// few comparisons at most; signature checks are bounded by the budget.
+/// few comparisons at most; signature checks are bounded by budgets.
 const MAX_SEARCH_STEPS: usize = 4096;
+
+/// Which links a search may make.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    /// Only links verified downwards from an anchor, by
+    /// [`Search::mark_trusted`]; only paths that end at an anchor count.
+    Trusted,
+    /// Any link whose signature verifies, checked as needed with the
+    /// issuer's key, whoever supplied it. Paths end at self-signed
+    /// certificates; anchors are not recognised.
+    Untrusted,
+}
 
 struct Search<'p, 'i> {
     pool: &'p [Node<'p>],
+    /// Pool indices by subject name, policy certificates first.
     by_subject: HashMap<&'p [u8], Vec<usize>>,
-    /// Link verification results, by (child, issuer).
-    verified: HashMap<(usize, usize), bool>,
-    budget: Budget,
+    /// Pool indices by issuer name.
+    by_issuer: HashMap<&'p [u8], Vec<usize>>,
+    /// Link verification results, by child and the issuer key's SPKI hash:
+    /// a signature checked once with a key is not checked again with
+    /// another certificate for the same key.
+    verified: HashMap<(usize, &'p str), bool>,
+    /// Certificates verified downwards from an anchor (anchors included).
+    trusted: Vec<bool>,
     steps: usize,
     issues: &'i mut Issues,
     paths: Vec<Vec<usize>>,
     /// Only pool indices below this are used.
     limit: usize,
-    anchors: bool,
+    mode: Mode,
 }
 
 impl<'p, 'i> Search<'p, 'i> {
-    fn new(pool: &'p [Node<'p>], issues: &'i mut Issues, budget: Budget) -> Self {
+    fn new(pool: &'p [Node<'p>], issues: &'i mut Issues) -> Self {
         let mut by_subject: HashMap<&'p [u8], Vec<usize>> = HashMap::new();
+        let mut by_issuer: HashMap<&'p [u8], Vec<usize>> = HashMap::new();
         // Later pool entries first: policy anchors, then policy
         // intermediates, then embedded certificates from the last.
         for (i, node) in pool.iter().enumerate().rev() {
@@ -791,27 +869,34 @@ impl<'p, 'i> Search<'p, 'i> {
                 .or_default()
                 .push(i);
         }
+        for (i, node) in pool.iter().enumerate() {
+            by_issuer
+                .entry(node.cert.issuer.der.as_slice())
+                .or_default()
+                .push(i);
+        }
         Self {
             pool,
             by_subject,
+            by_issuer,
             verified: HashMap::new(),
-            budget,
+            trusted: vec![false; pool.len()],
             steps: 0,
             issues,
             paths: Vec::new(),
-            limit: 0,
-            anchors: false,
+            limit: pool.len(),
+            mode: Mode::Untrusted,
         }
     }
 
     /// Whether `node` may be in a path at all. A certificate with a
     /// critical extension this crate does not process may not, unless it
-    /// is a configured anchor and anchors are in use.
+    /// is a configured anchor in a trusted search.
     fn usable(&mut self, node: usize) -> bool {
         let Some(n) = self.pool.get(node) else {
             return false;
         };
-        if self.anchors && n.anchor.is_some() {
+        if self.mode == Mode::Trusted && n.anchor.is_some() {
             return true;
         }
         let mut ok = true;
@@ -825,15 +910,162 @@ impl<'p, 'i> Search<'p, 'i> {
         ok
     }
 
+    /// Whether `issuer` may issue certificates: usable, a CA, and allowed
+    /// `keyCertSign` by its key usage. A v1 or v2 certificate has no
+    /// extensions to say it is a CA; it is taken as one only when it is a
+    /// configured anchor in a trusted search.
+    fn may_issue(&mut self, issuer: usize) -> bool {
+        if !self.usable(issuer) {
+            return false;
+        }
+        let Some(node) = self.pool.get(issuer) else {
+            return false;
+        };
+        let i = node.cert;
+        let legacy_anchor = self.mode == Mode::Trusted && node.anchor.is_some() && i.version < 3;
+        let is_ca = match i.basic_constraints {
+            Some(bc) => bc.ca,
+            None => legacy_anchor,
+        };
+        if !is_ca {
+            self.issues.push(ChainIssue::IssuerNotCa { issuer });
+            return false;
+        }
+        if i.key_usage
+            .is_some_and(|ku| !ku.contains(KeyUsage::KEY_CERT_SIGN))
+        {
+            self.issues.push(ChainIssue::IssuerKeyUsage { issuer });
+            return false;
+        }
+        true
+    }
+
+    /// Whether the key identifiers of `child` and `issuer` agree (or one is
+    /// absent).
+    fn key_ids_agree(&mut self, child: usize, issuer: usize) -> bool {
+        let (Some(c), Some(i)) = (self.pool.get(child), self.pool.get(issuer)) else {
+            return false;
+        };
+        match (&c.cert.authority_key_id, &i.cert.subject_key_id) {
+            (Some(aki), Some(ski)) if aki != ski => {
+                self.issues
+                    .push(ChainIssue::KeyIdMismatch { child, issuer });
+                false
+            }
+            _ => true,
+        }
+    }
+
+    /// Verifies `child`'s signature with `issuer`'s key, once per key,
+    /// charging `budget`.
+    fn check(&mut self, child: usize, issuer: usize, budget: &mut Budget) -> bool {
+        let (Some(c), Some(i)) = (self.pool.get(child), self.pool.get(issuer)) else {
+            return false;
+        };
+        let key = (child, i.cert.spki_sha256.as_str());
+        if let Some(ok) = self.verified.get(&key) {
+            return *ok;
+        }
+        if !budget.take() {
+            return false;
+        }
+        let ok = match verify_link(c.cert, i.cert) {
+            Verified::Valid => true,
+            Verified::Invalid => {
+                self.issues
+                    .push(ChainIssue::SignatureInvalid { child, issuer });
+                false
+            }
+            Verified::Unsupported(why) => {
+                self.issues
+                    .push(ChainIssue::SignatureUnsupported { child, issuer, why });
+                false
+            }
+        };
+        self.verified.insert(key, ok);
+        ok
+    }
+
+    /// Verifies downwards from the anchors: every certificate whose issuer
+    /// name is a trusted certificate's subject is checked with that
+    /// trusted key, breadth first, at most [`MAX_CHAIN_LENGTH`] deep. Every
+    /// check uses a key from an anchor or from a certificate an anchor
+    /// vouched for, never a key someone added to the file, so certificates
+    /// added to a file cost at most one check per trusted key with the name
+    /// they claim as issuer.
+    fn mark_trusted(&mut self, budget: &mut Budget) {
+        self.mode = Mode::Trusted;
+        self.limit = self.pool.len();
+        let mut depth = vec![0_usize; self.pool.len()];
+        let mut queue = VecDeque::new();
+        for (i, node) in self.pool.iter().enumerate() {
+            if node.anchor.is_some() {
+                if let (Some(t), Some(d)) = (self.trusted.get_mut(i), depth.get_mut(i)) {
+                    *t = true;
+                    *d = 1;
+                }
+                queue.push_back(i);
+            }
+        }
+        let mut steps = 0_usize;
+        while let Some(t) = queue.pop_front() {
+            let (Some(node), Some(&d)) = (self.pool.get(t), depth.get(t)) else {
+                continue;
+            };
+            if d >= MAX_CHAIN_LENGTH {
+                continue;
+            }
+            let children: Vec<usize> = self
+                .by_issuer
+                .get(node.cert.subject.der.as_slice())
+                .map(|v| v.iter().copied().filter(|c| *c != t).collect())
+                .unwrap_or_default();
+            if children.is_empty() || !self.may_issue(t) {
+                continue;
+            }
+            for c in children {
+                if steps >= MAX_SEARCH_STEPS {
+                    budget.exhausted = true;
+                    return;
+                }
+                steps += 1;
+                if self.trusted.get(c).copied().unwrap_or(true) {
+                    // Already trusted: the edge is still checked, so the
+                    // path search can use it, but nothing is queued.
+                    if self.key_ids_agree(c, t) && self.usable(c) {
+                        self.check(c, t, budget);
+                    }
+                    continue;
+                }
+                if !self.key_ids_agree(c, t) || !self.usable(c) {
+                    continue;
+                }
+                if self.check(c, t, budget) {
+                    if let (Some(tc), Some(dc)) = (self.trusted.get_mut(c), depth.get_mut(c)) {
+                        *tc = true;
+                        *dc = d + 1;
+                    }
+                    queue.push_back(c);
+                }
+            }
+        }
+    }
+
     /// The best maximal paths from `leaf` over pool indices below `limit`.
-    fn run(&mut self, leaf: usize, limit: usize, anchors: bool) -> Vec<Vec<usize>> {
+    fn run(
+        &mut self,
+        leaf: usize,
+        limit: usize,
+        mode: Mode,
+        budget: &mut Budget,
+    ) -> Vec<Vec<usize>> {
         self.limit = limit;
-        self.anchors = anchors;
+        self.mode = mode;
         self.paths.clear();
         self.steps = 0;
         let mut path = vec![leaf];
         if self.usable(leaf) {
-            self.extend(&mut path);
+            self.extend(&mut path, budget);
         }
         std::mem::take(&mut self.paths)
     }
@@ -842,7 +1074,16 @@ impl<'p, 'i> Search<'p, 'i> {
     /// Over the cap, the worst path is dropped, so a dead end can never
     /// displace an anchored or complete path.
     fn record(&mut self, path: &[usize]) {
-        let key = |p: &[usize]| path_key(p, self.pool, self.anchors);
+        let anchored = self.mode == Mode::Trusted;
+        if anchored
+            && !path
+                .last()
+                .and_then(|t| self.pool.get(*t))
+                .is_some_and(|n| n.anchor.is_some())
+        {
+            return;
+        }
+        let key = |p: &[usize]| path_key(p, self.pool, anchored);
         if self.paths.len() < MAX_CHAIN_PATHS {
             self.paths.push(path.to_vec());
             return;
@@ -863,26 +1104,37 @@ impl<'p, 'i> Search<'p, 'i> {
         }
     }
 
-    fn extend(&mut self, path: &mut Vec<usize>) {
+    fn extend(&mut self, path: &mut Vec<usize>, budget: &mut Budget) {
         let Some(&top) = path.last() else {
             return;
         };
         let Some(node) = self.pool.get(top) else {
             return;
         };
-        if (self.anchors && node.anchor.is_some()) || node.cert.is_self_signed {
+        let stop = match self.mode {
+            Mode::Trusted => node.anchor.is_some(),
+            Mode::Untrusted => node.cert.is_self_signed,
+        };
+        if stop {
             self.record(path);
             return;
         }
+        let trusted_only = self.mode == Mode::Trusted;
         let candidates: Vec<usize> = self
             .by_subject
             .get(node.cert.issuer.der.as_slice())
-            .map(|v| v.iter().copied().filter(|c| *c < self.limit).collect())
+            .map(|v| {
+                v.iter()
+                    .copied()
+                    .filter(|c| *c < self.limit)
+                    .filter(|c| !trusted_only || self.trusted.get(*c).copied().unwrap_or(false))
+                    .collect()
+            })
             .unwrap_or_default();
         let mut extended = false;
         for issuer in candidates {
             if self.steps >= MAX_SEARCH_STEPS {
-                self.budget.exhausted = true;
+                budget.exhausted = true;
                 break;
             }
             self.steps += 1;
@@ -895,12 +1147,12 @@ impl<'p, 'i> Search<'p, 'i> {
                 self.issues.push(ChainIssue::TooLong);
                 continue;
             }
-            if !self.link(path, issuer) {
+            if !self.link(path, issuer, budget) {
                 continue;
             }
             extended = true;
             path.push(issuer);
-            self.extend(path);
+            self.extend(path, budget);
             path.pop();
         }
         if !extended {
@@ -910,43 +1162,22 @@ impl<'p, 'i> Search<'p, 'i> {
 
     /// Whether `issuer` issued the top of `path`, with every constraint
     /// that applies to it. Anchors are held to the same CA, key usage and
-    /// path length rules when they issue a certificate.
-    fn link(&mut self, path: &[usize], issuer: usize) -> bool {
-        let (Some(&child), Some(issuer_node)) = (path.last(), self.pool.get(issuer)) else {
+    /// path length rules when they issue a certificate. A trusted search
+    /// makes no new signature checks: it uses only links
+    /// [`Self::mark_trusted`] verified.
+    fn link(&mut self, path: &[usize], issuer: usize, budget: &mut Budget) -> bool {
+        let Some(&child) = path.last() else {
             return false;
         };
-        let Some(child_node) = self.pool.get(child) else {
-            return false;
-        };
-        let (c, i) = (child_node.cert, issuer_node.cert);
-        if let (Some(aki), Some(ski)) = (&c.authority_key_id, &i.subject_key_id) {
-            if aki != ski {
-                self.issues
-                    .push(ChainIssue::KeyIdMismatch { child, issuer });
-                return false;
-            }
-        }
-        if !self.usable(issuer) {
+        if !self.key_ids_agree(child, issuer) || !self.may_issue(issuer) {
             return false;
         }
-        // A v1 or v2 certificate has no extensions to say it is a CA; it is
-        // accepted as one only when it is a configured anchor.
-        let legacy_anchor = self.anchors && issuer_node.anchor.is_some() && i.version < 3;
-        let is_ca = match i.basic_constraints {
-            Some(bc) => bc.ca,
-            None => legacy_anchor,
-        };
-        if !is_ca {
-            self.issues.push(ChainIssue::IssuerNotCa { issuer });
-            return false;
-        }
-        if i.key_usage
-            .is_some_and(|ku| !ku.contains(KeyUsage::KEY_CERT_SIGN))
+        if let Some(max) = self
+            .pool
+            .get(issuer)
+            .and_then(|n| n.cert.basic_constraints)
+            .and_then(|b| b.path_len)
         {
-            self.issues.push(ChainIssue::IssuerKeyUsage { issuer });
-            return false;
-        }
-        if let Some(max) = i.basic_constraints.and_then(|b| b.path_len) {
             // Non-self-issued intermediates below this issuer (the leaf
             // does not count).
             let below = path
@@ -960,27 +1191,18 @@ impl<'p, 'i> Search<'p, 'i> {
                 return false;
             }
         }
-        if let Some(ok) = self.verified.get(&(child, issuer)) {
-            return *ok;
-        }
-        if !self.budget.take() {
-            return false;
-        }
-        let ok = match verify_link(c, i) {
-            Verified::Valid => true,
-            Verified::Invalid => {
-                self.issues
-                    .push(ChainIssue::SignatureInvalid { child, issuer });
-                false
+        match self.mode {
+            Mode::Trusted => {
+                let Some(i) = self.pool.get(issuer) else {
+                    return false;
+                };
+                self.verified
+                    .get(&(child, i.cert.spki_sha256.as_str()))
+                    .copied()
+                    .unwrap_or(false)
             }
-            Verified::Unsupported(why) => {
-                self.issues
-                    .push(ChainIssue::SignatureUnsupported { child, issuer, why });
-                false
-            }
-        };
-        self.verified.insert((child, issuer), ok);
-        ok
+            Mode::Untrusted => self.check(child, issuer, budget),
+        }
     }
 }
 

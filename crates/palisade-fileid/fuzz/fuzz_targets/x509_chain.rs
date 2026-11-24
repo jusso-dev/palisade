@@ -1,5 +1,6 @@
 //! Fuzzes X.509 certificate parsing and chain building (#49). The input is
-//! split on a marker into up to eight certificates; the first is the
+//! split on a marker into up to 64 certificates (as many as a signature
+//! keeps); the first is the
 //! signer, and the last is also configured as a trust anchor when it
 //! parses. No input may panic, and every report must respect the
 //! documented limits.
@@ -16,7 +17,7 @@ const MARKER: &[u8] = b"\xff\xfeCERT";
 fn split(data: &[u8]) -> Vec<Vec<u8>> {
     let mut out = Vec::new();
     let mut rest = data;
-    while out.len() < 8 {
+    while out.len() < 64 {
         match rest.windows(MARKER.len()).position(|w| w == MARKER) {
             Some(at) => {
                 out.push(rest[..at].to_vec());

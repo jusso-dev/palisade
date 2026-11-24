@@ -192,8 +192,9 @@ pub struct SignerIdentity {
     pub signature: usize,
     /// The leaf `CN`, or `O` when there is no `CN`.
     pub publisher_name: Option<PublisherName>,
-    /// The full canonical subject DN of the leaf. `None` when any subject
-    /// attribute is not an exact, control-free decoding (see
+    /// The full canonical subject DN of the leaf. `None` when the subject
+    /// is empty, or any subject attribute is not an exact, control-free
+    /// decoding (see
     /// [`super::NameAttribute::lossy`]), because such a DN could match a
     /// pattern meant for another name.
     pub publisher_dn: Option<String>,
@@ -372,9 +373,10 @@ fn identity(
     };
     let publisher_dn = leaf
         .filter(|c| {
-            c.subject
-                .attributes()
-                .all(|a| !a.lossy && !a.value.chars().any(char::is_control))
+            !c.subject.rdns.is_empty()
+                && c.subject
+                    .attributes()
+                    .all(|a| !a.lossy && !a.value.chars().any(char::is_control))
         })
         .map(|c| c.subject.canonical.clone());
     if leaf.is_some() && publisher_dn.is_none() {

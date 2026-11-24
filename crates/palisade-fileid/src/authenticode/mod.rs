@@ -101,7 +101,8 @@ pub use asn1::{Asn1Error, Asn1ErrorKind, ObjectId};
 pub use chain::{
     AnchorRef, AnchorSource, CertOrigin, ChainCert, ChainIssue, ChainPath, ChainReport,
     MAX_CHAIN_ISSUES, MAX_CHAIN_LENGTH, MAX_CHAIN_PATHS, MAX_FILE_SIGNATURE_CHECKS,
-    MAX_SIGNATURE_CHECKS, TrustAnchor, TrustConfig, WellKnownRoot, WellKnownRootError, build_chain,
+    MAX_SIGNATURE_CHECKS, MAX_TRUST_CHECKS, TrustAnchor, TrustConfig, WellKnownRoot,
+    WellKnownRootError, build_chain,
 };
 pub use eku::Eku;
 pub use hash::{

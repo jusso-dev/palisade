@@ -563,11 +563,13 @@ fn cross_signed_paths_are_all_recorded() {
             "Palisade Second Root"
         ]
     );
-    // Only root2 is trusted, so the longer path is the full chain.
+    // Only root2 is trusted, so the longer path is the full chain. An
+    // anchored full chain lists only anchored alternatives; the path to the
+    // untrusted self-signed root is in `as_provided`.
     assert_eq!(report.full_chain.certs.len(), 4);
     assert!(report.full_chain.anchored);
-    assert_eq!(report.alternatives.len(), 1);
-    assert!(!report.alternatives[0].anchored && report.alternatives[0].complete);
+    assert!(report.alternatives.iter().all(|p| p.anchored));
+    assert!(report.as_provided.complete && !report.as_provided.anchored);
     // With both trusted, the shortest anchored path wins.
     let both = build_chain(&certs, 0, &config(&["root", "root2"])).unwrap();
     assert_eq!(both.full_chain.certs.len(), 3);
@@ -713,14 +715,15 @@ fn depth_is_capped() {
 fn hostile_certificate_sets_hit_the_work_limit_and_fail_closed() {
     // `leaf-forged` names "Palisade Chain CA" as its issuer and has no key
     // identifier, so every certificate with that subject is a candidate
-    // whose signature must be checked. 150 distinct copies of `inter`
-    // (each with one signature bit flipped, so thumbprints differ) are more
-    // than the per-build budget.
+    // whose signature must be checked. Checks are cached per key, so the
+    // 150 copies of `inter` each get a different key (one modulus bit
+    // flipped), which is more than the per-build budget.
+    let inter = der("inter");
+    let modulus = find(&inter, &[0x02, 0x82, 0x01, 0x01, 0x00]) + 5;
     let mut certs = vec![der("leaf-forged")];
     for i in 0..150 {
-        let mut c = der("inter");
-        let at = c.len() - 1 - (i / 8);
-        c[at] ^= 1 << (i % 8);
+        let mut c = inter.clone();
+        c[modulus + 8 + i / 8] ^= 1 << (i % 8);
         certs.push(c);
     }
     let report = build_chain(&certs, 0, &TrustConfig::new()).unwrap();
@@ -733,6 +736,85 @@ fn hostile_certificate_sets_hit_the_work_limit_and_fail_closed() {
     );
     assert!(report.issues.len() <= palisade_fileid::authenticode::MAX_CHAIN_ISSUES + 4);
     assert!(report.issues.contains(&ChainIssue::IssuesTruncated));
+}
+
+#[test]
+fn copies_of_one_key_cost_one_check() {
+    // 150 copies of `inter` that differ only in their signature bits share
+    // a key, so the forged leaf's signature is checked against it once.
+    let mut certs = vec![der("leaf-forged")];
+    for i in 0..150 {
+        let mut c = der("inter");
+        let at = c.len() - 1 - (i / 8);
+        c[at] ^= 1 << (i % 8);
+        certs.push(c);
+    }
+    let report = build_chain(&certs, 0, &TrustConfig::new()).unwrap();
+    assert!(!report.issues.contains(&ChainIssue::WorkLimitReached));
+    let invalid = report
+        .issues
+        .iter()
+        .filter(|i| matches!(i, ChainIssue::SignatureInvalid { .. }))
+        .count();
+    assert_eq!(invalid, 1, "{:?}", report.issues);
+}
+
+#[test]
+fn untrusted_certificates_cannot_spend_the_trust_budget() {
+    // As before, enough distinct keys under the intermediate's name to
+    // exhaust the per-build budget for untrusted checks. The real chain is
+    // still trusted: trust is decided downwards from the anchor, with
+    // trusted keys only.
+    let inter = der("inter");
+    let modulus = find(&inter, &[0x02, 0x82, 0x01, 0x01, 0x00]) + 5;
+    let mut certs = vec![der("leaf")];
+    for i in 0..150 {
+        let mut c = inter.clone();
+        c[modulus + 8 + i / 8] ^= 1 << (i % 8);
+        certs.push(c);
+    }
+    certs.push(der("inter"));
+    let report = build_chain(&certs, 0, &config(&["root"])).unwrap();
+    assert!(report.full_chain.anchored, "{:?}", report.issues);
+    assert_eq!(
+        report.pca_cert().unwrap().sha256_thumbprint,
+        cert("inter").sha256_thumbprint
+    );
+    // A file budget spent to nothing (as by earlier signatures) does not
+    // change trust either.
+    let mut cfg = config(&["root"]);
+    cfg.add_intermediate(&der("inter")).unwrap();
+    let report = build_chain(&certs[..151], 0, &cfg).unwrap();
+    assert!(report.full_chain.anchored, "{:?}", report.issues);
+}
+
+#[test]
+fn self_issued_anchors_are_roots_even_if_their_self_signature_is_unchecked() {
+    // A root whose own signature does not verify here (one bit flipped,
+    // standing in for an algorithm that is not verified, such as MD5 or
+    // P-521) is self-issued but not self-signed. Configured as the anchor
+    // and embedded, it is still the root, not the PCA; and its own
+    // signature algorithm is not counted.
+    let mut root = der("root");
+    let last = root.len() - 1;
+    root[last] ^= 1;
+    let summary = CertSummary::from_der(&root).unwrap();
+    assert!(!summary.is_self_signed);
+    let mut cfg = TrustConfig::new();
+    cfg.add_anchor("root", &root).unwrap();
+    let certs = vec![der("leaf"), der("inter"), root.clone()];
+    let report = build_chain(&certs, 0, &cfg).unwrap();
+    assert!(report.full_chain.anchored);
+    assert_eq!(report.root_as_provided, Some(2));
+    assert_eq!(report.pca, Some(1));
+    assert_eq!(report.intermediates, [1]);
+    assert!(report.cert_sig_algs_allowed(&[SignatureAlgorithm::RsaPkcs1(DigestAlgorithm::Sha256)]));
+    // Appending the anchor to a [leaf, inter] file does not change the PCA.
+    let short = build_chain(&chain_of(&["leaf", "inter"]), 0, &cfg).unwrap();
+    assert_eq!(
+        short.pca_cert().unwrap().tbs_hash,
+        report.pca_cert().unwrap().tbs_hash
+    );
 }
 
 #[test]
@@ -1086,6 +1168,104 @@ fn dead_end_clones_cannot_crowd_out_the_trusted_chain() {
     let report = build_chain(&certs, 0, &cfg).unwrap();
     assert!(report.full_chain.anchored, "{:?}", report.issues);
     assert_eq!(report.pca, None);
+}
+
+#[test]
+fn empty_subjects_have_no_dn() {
+    // Replace the leaf's subject with an empty Name. The certificate's
+    // signature breaks, so trust it directly as an anchor.
+    let leaf = der("leaf");
+    let subject = cert("leaf").subject.der;
+    let at = find(&leaf, &subject);
+    let tbs_at = header(&leaf, 0).0;
+    let (th, tl) = header(&leaf, tbs_at);
+    let mut tbs = leaf[tbs_at + th..at].to_vec();
+    tbs.extend([0x30, 0x00]);
+    tbs.extend(&leaf[at + subject.len()..tbs_at + th + tl]);
+    let mut tbs_der = vec![0x30];
+    tbs_der.extend(encode_len(tbs.len()));
+    tbs_der.extend(tbs);
+    let content = [tbs_der.as_slice(), &leaf[tbs_at + th + tl..]].concat();
+    let mut empty = vec![0x30];
+    empty.extend(encode_len(content.len()));
+    empty.extend(content);
+    let c = CertSummary::from_der(&empty).unwrap();
+    assert!(c.subject.rdns.is_empty());
+    let base = signed(&p7("leaf-inter-root"));
+    let sig = with_certs(
+        &base,
+        vec![empty.clone()],
+        DigestAlgorithm::Sha256,
+        DigestAlgorithm::Sha256,
+    );
+    let mut cfg = TrustConfig::new();
+    cfg.add_anchor("leaf", &empty).unwrap();
+    let id = evaluate_trust(&report_of(vec![sig]), &cfg, None)
+        .identity
+        .unwrap();
+    assert_eq!(id.publisher_dn, None);
+    assert_eq!(id.publisher_name, None);
+    assert!(id.issues.contains(&IdentityIssue::NoName));
+}
+
+#[test]
+fn unparseable_signer_certificates_are_untrusted() {
+    let base = signed(&p7("leaf-inter-root"));
+    let mut bad = der("leaf");
+    bad.push(0);
+    assert!(CertSummary::from_der(&bad).is_err());
+    let sig = with_certs(
+        &base,
+        vec![bad],
+        DigestAlgorithm::Sha256,
+        DigestAlgorithm::Sha256,
+    );
+    let trust = evaluate_trust(&report_of(vec![sig]), &config(&["root"]), None);
+    assert!(matches!(
+        trust.signers[0].untrusted.as_slice(),
+        [UntrustedReason::SignerCertificate(_)]
+    ));
+    assert_eq!(trust.primary, None);
+}
+
+#[test]
+fn earlier_untrusted_signatures_cannot_starve_later_trusted_ones() {
+    // Four signatures over certificate sets that exhaust their untrusted
+    // checks, then a trusted SHA-256 one. The file-wide budget runs out,
+    // but trust for the last signature is decided on its own budget.
+    let base = signed(&p7("leaf-inter-root"));
+    let inter = der("inter");
+    let modulus = find(&inter, &[0x02, 0x82, 0x01, 0x01, 0x00]) + 5;
+    let mut hostile = vec![der("leaf-forged")];
+    for i in 0..150 {
+        let mut c = inter.clone();
+        c[modulus + 8 + i / 8] ^= 1 << (i % 8);
+        hostile.push(c);
+    }
+    let mut sigs: Vec<_> = (0..4)
+        .map(|_| {
+            with_certs(
+                &base,
+                hostile.clone(),
+                DigestAlgorithm::Sha256,
+                DigestAlgorithm::Sha256,
+            )
+        })
+        .collect();
+    sigs.push(with_certs(
+        &base,
+        chain_of(&["leaf", "inter"]),
+        DigestAlgorithm::Sha256,
+        DigestAlgorithm::Sha256,
+    ));
+    let trust = evaluate_trust(&report_of(sigs), &config(&["root"]), None);
+    assert_eq!(trust.primary, Some(4));
+    let chain = trust.signers[4].chain.as_ref().unwrap();
+    assert!(chain.full_chain.anchored);
+    assert_eq!(
+        chain.pca_cert().unwrap().sha256_thumbprint,
+        cert("inter").sha256_thumbprint
+    );
 }
 
 #[test]
