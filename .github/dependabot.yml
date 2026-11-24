@@ -1,9 +1,14 @@
 # Weekly dependency updates, with minor and patch bumps grouped into one PR per
 # ecosystem. Security updates are raised as soon as an advisory is published
 # (enable "Dependabot security updates" in the repository settings).
-# Every Dependabot PR runs the full CI, including cargo-deny.
+# Every Dependabot PR runs the full CI, including cargo-deny, cargo-audit and
+# cargo-vet. A Cargo bump fails cargo-vet until the new version is audited
+# (`cargo vet certify`), covered by an imported audit, or its exemption is
+# updated with a note (docs/dependencies.md).
 # `labels` replaces Dependabot's default labels, which are not in
 # .github/labels.yml and would be deleted by the label sync.
+# The npm (console) and docker (server image) ecosystems are added when those
+# directories exist: #136 and #126.
 version: 2
 updates:
   - package-ecosystem: cargo

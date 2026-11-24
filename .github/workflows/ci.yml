@@ -139,6 +139,37 @@ jobs:
       # daily audit.yml catches advisories published after a merge.
       - run: cargo audit
 
+  # cargo-vet audits, plus the rules cargo-deny and cargo-vet do not check
+  # themselves (duplicate budget, ignore expiry, criteria per crate). The
+  # dependency report goes to the job summary of every run.
+  supply-chain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The base commit too, to compare the dependency report against.
+          fetch-depth: 0
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: cargo-vet@0.10.3
+      - run: cargo vet --locked
+      - run: cargo xtask check-supply-chain
+      # On a PR that changes Cargo.lock, the job summary shows the dependency
+      # report, `cargo tree -d`, and the change in third-party `unsafe` counts
+      # against the base branch, with a warning for big jumps. It is a job
+      # summary rather than a PR comment, so no job needs write access.
+      - name: Dependency report
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: cargo xtask deps-report --base "$BASE_SHA" >> "$GITHUB_STEP_SUMMARY"
+
   # Every feature of the portable crates builds on its own, so no feature
   # silently depends on another being on (docs/workspace.md#feature-flags).
   feature-powerset:
@@ -200,7 +231,7 @@ jobs:
   # The single required check from this workflow for branch protection.
   ci-ok:
     if: always()
-    needs: [fmt, clippy, test, msrv, docs, deps, feature-powerset, runner-guard, workflow-lint]
+    needs: [fmt, clippy, test, msrv, docs, deps, supply-chain, feature-powerset, runner-guard, workflow-lint]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

@@ -10,6 +10,8 @@ mod ci;
 mod deps;
 mod junit;
 mod manifests;
+mod report;
+mod supply_chain;
 mod unsafe_code;
 mod workflows;
 
@@ -27,7 +29,15 @@ Commands:
   check-deps       Enforce the allowed dependency directions between crates
   check-manifests  Enforce workspace inheritance of package fields, lints and dependency versions,
                    and that every crate README documents its features
+  check-supply-chain
+                   Enforce the duplicate-version budget, deny.toml ignore expiry and reasons,
+                   and the cargo-vet criteria and exemption notes
   check-unsafe     Enforce the unsafe-code allowlist (unsafe-allowlist.txt, ADR 0011)
+  deps-report [--base <commit>]
+                   Print the dependency report: duplicates, third-party crates per crate,
+                   third-party unsafe counts and code that runs at build time; with --base,
+                   only when Cargo.lock changed, adding cargo tree -d and unsafe changes
+  sbom             Reserved for the SBOM (#226); prints where it will be written and fails
   check-workflows  Enforce the CI runner and action policy for .github/workflows,
                    and that nothing under .github names a cloud-managed build service
   test-summary <label> <junit.xml>
@@ -43,6 +53,9 @@ fn main() -> ExitCode {
         }
     }
     match args.as_slice() {
+        [command, flag, base] if command == "deps-report" && flag == "--base" => {
+            return deps_report(Some(base));
+        }
         [command] if command == "ci" => return run_ci(false),
         [command, fast] if command == "ci" && fast == "--fast" => return run_ci(true),
         _ => {}
@@ -54,7 +67,16 @@ fn main() -> ExitCode {
     let result = match command {
         "check-deps" => run_check("check-deps", check_deps),
         "check-manifests" => run_check("check-manifests", check_manifests),
+        "check-supply-chain" => run_check("check-supply-chain", check_supply_chain),
         "check-unsafe" => run_check("check-unsafe", check_unsafe),
+        "deps-report" => return deps_report(None),
+        "sbom" => {
+            eprintln!(
+                "sbom: not implemented yet. CycloneDX output is reserved at {SBOM_DIR}/<crate>.cdx.json; \
+                 generating and attesting it is #226 (release provenance), wired into the release pipeline (#24)."
+            );
+            return ExitCode::FAILURE;
+        }
         "check-workflows" => run_check("check-workflows", check_workflows),
         "help" | "--help" | "-h" => {
             print!("{HELP}");
@@ -232,6 +254,70 @@ fn check_unsafe(root: &Path) -> Result<Vec<String>, String> {
         }
     }
     Ok(violations)
+}
+
+/// Where `cargo xtask sbom` will write CycloneDX files (#226).
+const SBOM_DIR: &str = "target/dist/sbom";
+
+fn check_supply_chain(root: &Path) -> Result<Vec<String>, String> {
+    let metadata = cargo_metadata(root, &["--all-features"])?;
+    let mut violations = supply_chain::check_duplicates(
+        &supply_chain::duplicates(&metadata)?,
+        supply_chain::DUPLICATE_BUDGET,
+    );
+    violations.extend(supply_chain::check_deny_toml(
+        &read(&root.join("deny.toml"))?,
+        &supply_chain::today_utc()?,
+    )?);
+    let members: Vec<String> = deps::member_targets(&metadata)?
+        .into_iter()
+        .map(|(name, _, _)| name)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    violations.extend(supply_chain::check_vet_config(
+        &read(&root.join("supply-chain").join("config.toml"))?,
+        &members,
+    )?);
+    Ok(violations)
+}
+
+/// `cargo xtask deps-report [--base <commit>]`: see `src/report.rs`.
+fn deps_report(base: Option<&str>) -> ExitCode {
+    let root = workspace_root();
+    let result = (|| -> Result<(String, Vec<String>), String> {
+        let (base_lock, tree) = match base {
+            Some(base) => {
+                let lock = report::git_show(&root, base, "Cargo.lock")?;
+                if lock == read(&root.join("Cargo.lock"))? {
+                    return Ok((
+                        "## Dependency report\n\n`Cargo.lock` is unchanged from the base branch.\n"
+                            .to_owned(),
+                        Vec::new(),
+                    ));
+                }
+                (Some(lock), Some(report::cargo_tree_duplicates(&root)?))
+            }
+            None => (None, None),
+        };
+        let metadata = cargo_metadata(&root, &["--all-features"])?;
+        report::render(&metadata, base_lock.as_deref(), tree.as_deref())
+    })();
+    match result {
+        Ok((markdown, warnings)) => {
+            print!("{markdown}");
+            // Workflow commands go to stderr, which the runner also reads,
+            // so stdout stays clean for the job summary.
+            for warning in warnings {
+                eprintln!("{warning}");
+            }
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("deps-report: error: {error}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn check_workflows(root: &Path) -> Result<Vec<String>, String> {

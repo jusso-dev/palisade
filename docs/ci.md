@@ -21,6 +21,7 @@ type.
 | `msrv` | ubuntu-latest | `cargo +1.85.0 check --workspace --all-targets --all-features --locked`, after checking that the version matches `rust-version` in `Cargo.toml` |
 | `docs` | ubuntu-latest | `cargo doc --workspace --no-deps --all-features --locked` with `RUSTDOCFLAGS=-D warnings` |
 | `deps` | ubuntu-latest | `cargo xtask check-deps`, `cargo xtask check-manifests`, `cargo xtask check-unsafe`, `cargo deny --locked check`, `cargo audit` |
+| `supply-chain` | ubuntu-latest | `cargo vet --locked`, `cargo xtask check-supply-chain`, and on PRs `cargo xtask deps-report --base <base>` to the job summary ([dependencies.md](dependencies.md)) |
 | `feature-powerset` | ubuntu-latest | `cargo hack check --each-feature --all-targets --locked` on the portable crates (`core`, `fileid`, `policy`, `proto`, `server`, `cli`, `console`) |
 | `runner-guard` | ubuntu-latest | `cargo xtask check-workflows` ([Runner and action policy](#runner-and-action-policy)) |
 | `workflow-lint` | ubuntu-latest | `actionlint` (checksum-verified release) and `zizmor --offline` |
@@ -113,8 +114,11 @@ one. That job and the `sync` job in `labels.yml` are the only places with
 ### Dependabot (`.github/dependabot.yml`)
 
 Weekly updates for Cargo dependencies and for the pinned action SHAs, with
-minor and patch bumps grouped into one PR per ecosystem. Dependabot PRs run
-the full CI like any other PR, including `DCO`. They are labelled
+minor and patch bumps grouped into one PR per ecosystem. Security updates are
+opened as soon as an advisory is published. Dependabot PRs run the full CI
+like any other PR, including `DCO`, cargo-deny, cargo-audit and cargo-vet, so
+a bump merges only once the new version is audited or exempted with a note
+([dependencies.md](dependencies.md#cargo-vet)). They are labelled
 `area:security` (Cargo) or `area:infra` (actions), because the label sync
 deletes Dependabot's default labels.
 
@@ -177,7 +181,7 @@ cargo xtask ci --fast   # skips the three slow steps
 
 It runs every step even after one fails, and lists the failed ones at the
 end. Before it starts, it checks that the extra tools are installed
-(cargo-nextest, cargo-deny, cargo-audit, cargo-hack, actionlint, zizmor and,
+(cargo-nextest, cargo-deny, cargo-audit, cargo-vet, cargo-hack, actionlint, zizmor and,
 without `--fast`, the MSRV toolchain), and prints the install command for
 each one that is missing, at the version CI uses. Jobs that differ only by
 runner run once, on your machine. A unit test in `xtask/src/ci.rs` compares
@@ -199,6 +203,9 @@ cargo xtask check-unsafe
 cargo xtask check-workflows
 cargo deny --locked check          # needs cargo-deny 0.22
 cargo audit                        # needs cargo-audit 0.23
+cargo vet --locked                 # needs cargo-vet 0.10
+cargo xtask check-supply-chain
+cargo xtask deps-report            # add --base origin/main to compare
 cargo hack check --each-feature --all-targets --locked \
   -p palisade-core -p palisade-fileid -p palisade-policy \
   -p palisade-proto -p palisade-server -p palisade-cli \

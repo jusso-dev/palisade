@@ -146,7 +146,8 @@ ones are added with care.
 - The allowed dependency directions between workspace crates are enforced by
   `cargo xtask check-deps`.
 
-The full admission policy is tracked in [#23](https://github.com/jusso-dev/palisade/issues/23).
+The full admission policy, cargo-vet audits and the other supply-chain checks are in
+[docs/dependencies.md](docs/dependencies.md).
 
 ## Architecture decisions
 

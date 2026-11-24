@@ -43,6 +43,10 @@ const AUDIT: Tool = Tool {
     check: &["cargo", "audit", "--version"],
     install: "cargo install --locked cargo-audit@0.23.0",
 };
+const VET: Tool = Tool {
+    check: &["cargo", "vet", "--version"],
+    install: "cargo install --locked cargo-vet@0.10.3",
+};
 const HACK: Tool = Tool {
     check: &["cargo", "hack", "--version"],
     install: "cargo install --locked cargo-hack@0.6.46",
@@ -112,6 +116,11 @@ pub const STEPS: &[Step] = &[
         tool: Some(AUDIT),
         ..step("deps", "cargo audit")
     },
+    Step {
+        tool: Some(VET),
+        ..step("supply-chain", "cargo vet --locked")
+    },
+    step("supply-chain", "cargo xtask check-supply-chain"),
     Step {
         tool: Some(HACK),
         slow: true,
@@ -283,6 +292,7 @@ mod tests {
         command.starts_with("rustup ")
             || command.starts_with("grep ")
             || command.starts_with("cargo xtask test-summary ")
+            || command.starts_with("cargo xtask deps-report ")
             || command.starts_with("archive=")
             || command.starts_with("echo ")
             || command.starts_with("exit ")
@@ -330,7 +340,7 @@ mod tests {
         let path =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows/ci.yml");
         let source = std::fs::read_to_string(path).unwrap();
-        for tool in [NEXTEST, DENY, AUDIT, HACK, ZIZMOR] {
+        for tool in [NEXTEST, DENY, AUDIT, VET, HACK, ZIZMOR] {
             let pinned = tool.install.rsplit(' ').next().unwrap();
             assert!(source.contains(pinned), "ci.yml does not install {pinned}");
         }
