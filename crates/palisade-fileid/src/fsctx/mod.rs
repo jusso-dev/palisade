@@ -40,7 +40,7 @@ pub mod writable;
 pub use acl::{
     Ace, AceKind, AdminSids, Ancestor, DescriptorError, EvaluationOptions, ObjectKind,
     ObjectWritability, OwnerInfo, OwnerTrustClass, Principal, PrincipalRights, SecurityDescriptor,
-    Writability, WriteRights, assess_path, evaluate,
+    Writability, WriteRights, assess_path, evaluate, sanitized_self_relative,
 };
 pub use motw::{Motw, MotwWarning, Zone, parse_zone_identifier};
 pub use path::{

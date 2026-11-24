@@ -113,6 +113,20 @@ fn fixture(root: &Path) -> (PathBuf, PathBuf, PathBuf, PathBuf, PathBuf) {
         &format!("O:BAD:P{ADMIN_ONLY}(A;;0x1200A9;;;BU)(A;;WD;;;BU)"),
     )
     .unwrap();
+    // A child created inside `denied` inherits its ACEs, so NTFS gives it a
+    // DACL with an *inherited* deny (#54: "an inherited deny").
+    let child = denied.join("child");
+    std::fs::create_dir(&child).unwrap();
+    // Owned by Administrators like the rest, without touching its
+    // inherited DACL.
+    assert!(
+        std::process::Command::new("icacls")
+            .arg(&child)
+            .args(["/setowner", "*S-1-5-32-544", "/Q"])
+            .status()
+            .unwrap()
+            .success()
+    );
     (pf, app, logs, denied, dac_file)
 }
 
@@ -138,6 +152,7 @@ fn fixture_matches_the_os_access_check() {
         (&app, false),
         (&logs, true),
         (&denied, false),
+        (&denied.join("child"), false),
         (&dac_file, true),
     ] {
         let check = cross_check_writability(&descriptor(path), kind(path), &opts).unwrap();
@@ -197,8 +212,22 @@ fn path_assessment_of_the_fixture() {
         "{first}"
     );
 
-    // The denied folder is not writable itself.
+    // The denied folder is not writable itself, nor is its child, whose
+    // deny is inherited (checked to be marked inherited on disk).
     let w = assess_file(&denied, &opts, AssessOptions::default(), &mut cache).unwrap();
+    assert!(!w.file_user_writable, "{:?}", w.target);
+    let child = denied.join("child");
+    let sd = palisade_fileid::fsctx::SecurityDescriptor::from_self_relative(&descriptor(&child))
+        .unwrap();
+    assert!(
+        sd.dacl
+            .unwrap()
+            .iter()
+            .any(|a| a.is_inherited()
+                && matches!(a.kind, palisade_fileid::fsctx::acl::AceKind::Deny)),
+        "the child's deny must be inherited"
+    );
+    let w = assess_file(&child, &opts, AssessOptions::default(), &mut cache).unwrap();
     assert!(!w.file_user_writable, "{:?}", w.target);
 
     // Stopping early reads fewer ancestors and gives the same verdict.
@@ -235,7 +264,8 @@ fn writable_dirs_under_the_fixture() {
     let paths: Vec<_> = r.dirs.iter().map(|d| d.path.as_str()).collect();
     assert_eq!(paths, [logs.to_str().unwrap()]);
     assert!(!r.truncated);
-    assert_eq!(r.visited, 4, "PF, App, denied, logs");
+    assert_eq!(r.visited, 5, "PF, App, denied, logs, denied\\child");
+    assert!(r.incomplete.is_empty(), "{:?}", r.incomplete);
 
     // A junction to the writable folder is never followed.
     let junction = pf.join("link");
@@ -274,14 +304,17 @@ fn stock_system_folders() {
         windir.join(r"System32"),
         windir.join(r"System32\drivers"),
     ];
+    let mut checked = 0;
+    let mut writable = Vec::new();
     for path in candidates.iter().filter(|p| p.exists()) {
-        let Ok(f) = open_for_security(path) else {
-            continue;
-        };
-        let Ok(bytes) = read_descriptor(&f) else {
-            continue;
-        };
+        // The CI runners run tests elevated, so every folder can be read.
+        let bytes = read_descriptor(&open_for_security(path).unwrap()).unwrap();
         let check = cross_check_writability(&bytes, ObjectKind::Directory, &opts).unwrap();
+        checked += 1;
+        if !check.os.is_empty() {
+            writable.push(path.clone());
+            assert!(!check.portable.is_empty(), "{}: {check:?}", path.display());
+        }
         assert!(
             check.missed().is_empty(),
             "{}: missed {:?} ({check:?})",
@@ -289,6 +322,15 @@ fn stock_system_folders() {
             check.missed()
         );
     }
+    assert!(checked >= 4, "only {checked} stock folders exist");
+    // `%WINDIR%\Temp` lets standard users create files on a stock image,
+    // and `System32\spool\drivers\color` does too: E8 lists both.
+    assert!(
+        writable
+            .iter()
+            .any(|p| p.ends_with("Temp") || p.ends_with("color")),
+        "no E8 default exception was user-writable: {writable:?}"
+    );
     // System32 itself is never user-writable on a stock image.
     let s32 = read_descriptor(&open_for_security(&windir.join("System32")).unwrap()).unwrap();
     let check = cross_check_writability(&s32, ObjectKind::Directory, &opts).unwrap();
@@ -322,4 +364,61 @@ fn owners() {
     assert!(!o.owner_supported && o.owner_sid.is_none());
     let o = read_owner(&f, Some(&FsType::Ntfs), false, &mut names).unwrap();
     assert!(!o.owner_supported);
+}
+
+/// A junction inside a locked folder that leads to a user-writable folder
+/// must not hide it: the real folders the file lives in are assessed.
+#[test]
+fn links_cannot_hide_a_writable_folder() {
+    let dir = scratch("links");
+    let (pf, app, logs, _denied, _file) = fixture(&dir.0);
+    let opts = EvaluationOptions::default();
+    let mut cache = WritabilityCache::default();
+    let payload = logs.join("payload.exe");
+    std::fs::write(&payload, b"MZ").unwrap();
+    // Lock the payload itself, so only its folder is writable.
+    set_security_sddl(
+        &open_for_dacl(&payload),
+        &format!("O:BAD:P{ADMIN_ONLY}{USERS_RX}"),
+    )
+    .unwrap();
+
+    // A junction under the locked `PF` that points at the writable `logs`.
+    let junction = pf.join("Tools");
+    assert!(
+        std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&logs)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let through = junction.join("payload.exe");
+    let w = assess_file(&through, &opts, AssessOptions::default(), &mut cache).unwrap();
+    assert!(!w.file_user_writable);
+    assert!(
+        w.path_user_writable(),
+        "the junction hid {}: {w:?}",
+        logs.display()
+    );
+    assert_eq!(
+        w.first_user_writable_ancestor
+            .as_deref()
+            .map(str::to_ascii_lowercase),
+        Some(logs.to_str().unwrap().to_ascii_lowercase())
+    );
+    let _ = std::fs::remove_dir(&junction);
+
+    // A device path is rejected.
+    assert!(
+        assess_file(
+            Path::new(r"\\.\pipe\x"),
+            &opts,
+            AssessOptions::default(),
+            &mut cache
+        )
+        .is_err()
+    );
+    let _ = app;
 }

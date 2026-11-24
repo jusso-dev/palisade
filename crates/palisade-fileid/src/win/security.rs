@@ -48,6 +48,29 @@ const MAXIMUM_ALLOWED: u32 = 0x0200_0000;
 /// `SE_GROUP_ENABLED`.
 const SE_GROUP_ENABLED: u32 = 0x0000_0004;
 
+/// A binary SID in a 4-byte aligned buffer, as the OS's `SID` structure
+/// (whose sub-authorities are `u32`) requires.
+struct AlignedSid(Vec<u32>);
+
+impl AlignedSid {
+    fn new(sid: &Sid) -> Self {
+        let bytes = sid.to_bytes();
+        let mut words = vec![0_u32; bytes.len().div_ceil(4)];
+        for (w, c) in words.iter_mut().zip(bytes.chunks(4)) {
+            let mut b = [0_u8; 4];
+            if let Some(p) = b.get_mut(..c.len()) {
+                p.copy_from_slice(c);
+            }
+            *w = u32::from_le_bytes(b);
+        }
+        Self(words)
+    }
+
+    fn as_psid(&mut self) -> PSID {
+        self.0.as_mut_ptr().cast()
+    }
+}
+
 /// Memory the OS allocated with `LocalAlloc`, freed on drop.
 struct LocalBuf(*mut core::ffi::c_void);
 
@@ -234,12 +257,12 @@ pub fn set_security_sddl(file: &File, sddl: &str) -> io::Result<()> {
 /// SID can contact a domain controller, so cache the results
 /// ([`NameCache`]).
 pub fn account_name(sid: &Sid) -> Option<String> {
-    let mut bytes = sid.to_bytes();
-    let psid: PSID = bytes.as_mut_ptr().cast();
+    let mut aligned = AlignedSid::new(sid);
+    let psid: PSID = aligned.as_psid();
     let (mut name_len, mut domain_len) = (0_u32, 0_u32);
     let mut use_: SID_NAME_USE = 0;
-    // SAFETY: `bytes` is a valid binary SID (from `Sid::to_bytes`) alive
-    // for the call. With null buffers and zero lengths the OS only writes
+    // SAFETY: `aligned` holds a valid binary SID (from `Sid::to_bytes`),
+    // 4-byte aligned, alive for the call. With null buffers and zero lengths the OS only writes
     // the needed lengths into the two live locals.
     let ok = unsafe {
         LookupAccountSidW(
@@ -337,29 +360,13 @@ pub fn access_check(descriptor: &[u8], sids: &[Sid]) -> io::Result<u32> {
     let (user, groups) = sids
         .split_first()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no SIDs"))?;
-    // The descriptor must be a valid self-relative descriptor before the OS
-    // reads it; the portable parser checks every offset.
-    let mut parsed = crate::fsctx::SecurityDescriptor::from_self_relative(descriptor)
+    // The OS is given a descriptor rebuilt from the validated owner, group
+    // and DACL, with no SACL, in an owned, 8-byte aligned buffer, so no
+    // unchecked offset in the input can reach it (the call takes no
+    // length).
+    let clean = crate::fsctx::acl::sanitized_self_relative(descriptor)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    // The OS access check needs an owner and a group. A missing owner is
-    // given the NULL SID, which no token holds, so no owner rights apply
-    // (the portable model reports the unknown owner's rights as uncertain).
-    // A missing group is set to the owner; the group affects only ACEs for
-    // CREATOR GROUP, which never apply to an existing object.
-    let rebuilt;
-    let descriptor = if parsed.owner.is_none() || parsed.group.is_none() {
-        let owner = parsed.owner.unwrap_or(crate::fsctx::sid::well_known::NULL);
-        parsed.owner = Some(owner);
-        parsed.group = parsed.group.or(Some(owner));
-        rebuilt = parsed.to_self_relative().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "descriptor cannot be rebuilt")
-        })?;
-        rebuilt.as_slice()
-    } else {
-        descriptor
-    };
-    // An owned, 8-byte aligned copy, as the OS expects.
-    let mut sd: Vec<u64> = descriptor
+    let mut sd: Vec<u64> = clean
         .chunks(8)
         .map(|c| {
             let mut word = [0_u8; 8];
@@ -388,15 +395,16 @@ pub fn access_check(descriptor: &[u8], sids: &[Sid]) -> io::Result<u32> {
     }
     let rm = ResourceManager(rm);
 
-    let mut user_bytes = user.to_bytes();
+    let mut user_sid = AlignedSid::new(user);
     let mut ctx: AUTHZ_CLIENT_CONTEXT_HANDLE = std::ptr::null_mut();
-    // SAFETY: `user_bytes` is a valid binary SID alive for the call; `rm` is
+    // SAFETY: `user_sid` is a valid, 4-byte aligned binary SID alive for the
+    // call; `rm` is
     // the live resource manager; `ctx` is a live local set to a handle owned
     // by `ClientContext` below. No expiry and no dynamic groups.
     let ok = unsafe {
         AuthzInitializeContextFromSid(
             AUTHZ_SKIP_TOKEN_GROUPS,
-            user_bytes.as_mut_ptr().cast(),
+            user_sid.as_psid(),
             rm.0,
             std::ptr::null(),
             LUID {
@@ -413,11 +421,11 @@ pub fn access_check(descriptor: &[u8], sids: &[Sid]) -> io::Result<u32> {
     let mut ctx = ClientContext(ctx);
 
     if !groups.is_empty() {
-        let mut group_bytes: Vec<Vec<u8>> = groups.iter().map(Sid::to_bytes).collect();
-        let attrs: Vec<SID_AND_ATTRIBUTES> = group_bytes
+        let mut group_sids: Vec<AlignedSid> = groups.iter().map(AlignedSid::new).collect();
+        let attrs: Vec<SID_AND_ATTRIBUTES> = group_sids
             .iter_mut()
             .map(|b| SID_AND_ATTRIBUTES {
-                Sid: b.as_mut_ptr().cast(),
+                Sid: b.as_psid(),
                 Attributes: SE_GROUP_ENABLED,
             })
             .collect();
@@ -425,7 +433,7 @@ pub fn access_check(descriptor: &[u8], sids: &[Sid]) -> io::Result<u32> {
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "too many SIDs"))?;
         let mut with_groups: AUTHZ_CLIENT_CONTEXT_HANDLE = std::ptr::null_mut();
         // SAFETY: `attrs` holds `count` entries, each pointing into a
-        // binary SID in `group_bytes`, all alive for the call (the OS copies
+        // 4-byte aligned binary SID in `group_sids`, all alive for the call (the OS copies
         // them into the new context). No restricted SIDs. `with_groups` is a
         // live local set to a new handle owned below.
         let ok = unsafe {
@@ -478,6 +486,14 @@ pub fn access_check(descriptor: &[u8], sids: &[Sid]) -> io::Result<u32> {
     if ok == 0 {
         return Err(io::Error::last_os_error());
     }
+    // The per-request result: success, or access denied (nothing granted),
+    // are answers; anything else is an evaluation error, never "nothing
+    // granted".
+    if error != 0 && error != 5 {
+        return Err(io::Error::from_raw_os_error(
+            i32::try_from(error).unwrap_or(i32::MAX),
+        ));
+    }
     drop(ctx);
     drop(rm);
     Ok(granted)
@@ -515,6 +531,19 @@ mod tests {
         assert_ne!(g & mask::WRITE_DAC, 0, "{g:#x}");
         // Garbage is rejected before the OS sees it.
         assert!(access_check(b"junk", &token).is_err());
+        // A SACL offset far past the end never reaches the OS.
+        let mut crafted = sddl_to_bytes("O:BAG:BAD:(A;;0x1301BF;;;BU)").unwrap();
+        let c = u16::from_le_bytes([crafted[2], crafted[3]]) | 0x0010;
+        crafted[2..4].copy_from_slice(&c.to_le_bytes());
+        crafted[12..16].copy_from_slice(&0x1000_0000_u32.to_le_bytes());
+        let g = access_check(&crafted, &token).unwrap();
+        assert_ne!(g & FILE_WRITE_DATA, 0, "{g:#x}");
+        // No DACL at all: everyone gets everything, as the evaluator says.
+        let open_all = SecurityDescriptor::new(Some(wk::ADMINISTRATORS), None)
+            .to_self_relative()
+            .unwrap();
+        let g = access_check(&open_all, &token).unwrap();
+        assert_ne!(g & FILE_WRITE_DATA, 0, "{g:#x}");
         assert!(access_check(&open, &[]).is_err());
     }
 

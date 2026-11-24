@@ -519,6 +519,74 @@ fn write_acl(aces: &[Ace]) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// Rebuilds a self-relative descriptor from the owner, group and DACL of
+/// `bytes`, for handing to an OS API that takes no length.
+///
+/// The result has no SACL (`SE_SACL_PRESENT` cleared, offset zero), so no
+/// unvalidated offset reaches the OS; the owner defaults to `NULL SID`
+/// (which no token holds) and the group to the owner; and the DACL is the
+/// original DACL bytes, byte for byte, which [`SecurityDescriptor::from_self_relative`]
+/// has bounded and checked ACE by ACE. Every part is 4-byte aligned. An
+/// absent DACL and a NULL DACL both become a NULL DACL (`SE_DACL_PRESENT`
+/// set, offset zero): both grant everyone everything, and the OS access
+/// check accepts only the second. `Err` if `bytes` does not parse.
+pub fn sanitized_self_relative(bytes: &[u8]) -> Result<Vec<u8>, DescriptorError> {
+    let sd = SecurityDescriptor::from_self_relative(bytes)?;
+    let header = bytes.get(..20).ok_or(DescriptorError::Truncated)?;
+    let dacl_offset = to_index(read_u32(header, 16)?)?;
+    let dacl_bytes: Option<&[u8]> = if sd.dacl.is_some() && dacl_offset != 0 {
+        let size = usize::from(read_u16(bytes, dacl_offset + 2)?);
+        Some(
+            bytes
+                .get(
+                    dacl_offset
+                        ..dacl_offset
+                            .checked_add(size)
+                            .ok_or(DescriptorError::BadAcl)?,
+                )
+                .ok_or(DescriptorError::Truncated)?,
+        )
+    } else {
+        None
+    };
+    let owner = sd.owner.unwrap_or(well_known::NULL).to_bytes();
+    let group = sd.group.or(sd.owner).unwrap_or(well_known::NULL).to_bytes();
+    let pad = |v: &mut Vec<u8>| {
+        while v.len() % 4 != 0 {
+            v.push(0);
+        }
+    };
+    let mut out = vec![0_u8; 20];
+    let mut control = (sd.control & !0x0010) | control::SELF_RELATIVE;
+    let put = |out: &mut Vec<u8>, at: usize, part: &[u8]| -> Result<(), DescriptorError> {
+        let offset = u32::try_from(out.len()).map_err(|_| DescriptorError::BadOffset)?;
+        out.get_mut(at..at + 4)
+            .ok_or(DescriptorError::BadOffset)?
+            .copy_from_slice(&offset.to_le_bytes());
+        out.extend_from_slice(part);
+        Ok(())
+    };
+    put(&mut out, 4, &owner)?;
+    pad(&mut out);
+    put(&mut out, 8, &group)?;
+    pad(&mut out);
+    match dacl_bytes {
+        Some(d) => {
+            control |= control::DACL_PRESENT;
+            put(&mut out, 16, d)?;
+        }
+        // A NULL DACL (present, offset zero), or an absent one.
+        None => control |= control::DACL_PRESENT,
+    }
+    if let Some(b) = out.get_mut(0) {
+        *b = 1;
+    }
+    out.get_mut(2..4)
+        .ok_or(DescriptorError::Truncated)?
+        .copy_from_slice(&control.to_le_bytes());
+    Ok(out)
+}
+
 impl SecurityDescriptor {
     /// Parses a self-relative `SECURITY_DESCRIPTOR` (revision 1), as
     /// returned by `GetFileSecurityW` or `MakeSelfRelativeSD`.
@@ -1374,6 +1442,51 @@ mod tests {
 
     fn eval_file(sd: &SecurityDescriptor) -> ObjectWritability {
         evaluate(sd, ObjectKind::File, &EvaluationOptions::default())
+    }
+
+    #[test]
+    fn sanitized_descriptors_drop_the_sacl_and_keep_the_dacl() {
+        let d = sd(
+            wk::ADMINISTRATORS,
+            vec![
+                Ace::allow(wk::USERS, MODIFY),
+                Ace::deny(wk::GUESTS, mask::FILE_WRITE_DATA),
+            ],
+        );
+        let mut bytes = d.to_self_relative().unwrap();
+        // Claim a SACL at an offset far past the end.
+        let c = u16::from_le_bytes([bytes[2], bytes[3]]) | 0x0010;
+        bytes[2..4].copy_from_slice(&c.to_le_bytes());
+        bytes[12..16].copy_from_slice(&0x1000_0000_u32.to_le_bytes());
+        let clean = sanitized_self_relative(&bytes).unwrap();
+        assert_eq!(u32::from_le_bytes(clean[12..16].try_into().unwrap()), 0);
+        assert_eq!(u16::from_le_bytes([clean[2], clean[3]]) & 0x0010, 0);
+        let back = SecurityDescriptor::from_self_relative(&clean).unwrap();
+        assert_eq!(back.owner, Some(wk::ADMINISTRATORS));
+        assert_eq!(back.group, Some(wk::ADMINISTRATORS));
+        assert_eq!(back.dacl, d.dacl);
+        // Every offset is 4-byte aligned.
+        for at in [4, 8, 16] {
+            assert_eq!(
+                u32::from_le_bytes(clean[at..at + 4].try_into().unwrap()) % 4,
+                0
+            );
+        }
+        // No owner: NULL SID owner and group. No DACL: a NULL DACL, which
+        // means the same.
+        let bare = SecurityDescriptor::new(None, None)
+            .to_self_relative()
+            .unwrap();
+        let clean_bytes = sanitized_self_relative(&bare).unwrap();
+        let clean = SecurityDescriptor::from_self_relative(&clean_bytes).unwrap();
+        assert_eq!(clean.owner, Some(wk::NULL));
+        assert_eq!(clean.dacl, None);
+        assert_ne!(clean.control & control::DACL_PRESENT, 0);
+        assert_eq!(
+            evaluate(&clean, ObjectKind::File, &EvaluationOptions::default()).rights,
+            WriteRights::relevant(ObjectKind::File)
+        );
+        assert!(sanitized_self_relative(b"junk").is_err());
     }
 
     #[test]

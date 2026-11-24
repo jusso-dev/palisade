@@ -255,6 +255,19 @@ where
     }
 }
 
+/// The subfolders of one folder, as a [`DirectorySource`] lists them.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Listing {
+    /// The subfolders, as full paths.
+    pub dirs: Vec<String>,
+    /// Every entry was read and is either listed or deliberately left out
+    /// (a link, junction or mount point). `false` if the folder could not
+    /// be listed, or an entry could not be read or named; the walk then
+    /// reports [`WritableDirs::truncated`], since writable folders may lie
+    /// in the part not seen.
+    pub complete: bool,
+}
+
 /// Where [`enumerate_user_writable_dirs`] reads folders from.
 pub trait DirectorySource {
     /// The error the source reports.
@@ -266,8 +279,9 @@ pub trait DirectorySource {
 
     /// The subfolders of `path`, as full paths. Links, junctions and mount
     /// points must not be listed: following them could leave the root or
-    /// loop. A folder that cannot be listed has no subfolders here.
-    fn subdirectories(&mut self, path: &str) -> Result<Vec<String>, Self::Error>;
+    /// loop. A folder that cannot be listed (fully) is an incomplete
+    /// [`Listing`], never an empty complete one.
+    fn subdirectories(&mut self, path: &str) -> Result<Listing, Self::Error>;
 }
 
 /// Bounds for [`enumerate_user_writable_dirs`].
@@ -313,8 +327,10 @@ pub struct WritableDirs {
     /// Folders read.
     pub visited: usize,
     /// A bound in [`EnumerateOptions`] stopped the walk before every
-    /// folder was read.
+    /// folder was read, or some folder could not be listed in full.
     pub truncated: bool,
+    /// The folders that could not be listed in full.
+    pub incomplete: Vec<String>,
 }
 
 /// The folders under `roots` (each a folder path, read first) that the
@@ -355,13 +371,18 @@ pub fn enumerate_user_writable_dirs<S: DirectorySource>(
                 continue;
             }
         }
+        let listing = source.subdirectories(&path)?;
+        if !listing.complete {
+            out.truncated = true;
+            out.incomplete.push(path.clone());
+        }
         if depth >= bounds.max_depth {
-            if !source.subdirectories(&path)?.is_empty() {
+            if !listing.dirs.is_empty() {
                 out.truncated = true;
             }
             continue;
         }
-        for child in source.subdirectories(&path)? {
+        for child in listing.dirs {
             queue.push_back((child, depth + 1));
         }
     }
@@ -491,8 +512,11 @@ mod tests {
         assert!(early.path_user_writable());
     }
 
-    /// An in-memory folder tree.
-    struct Tree(Vec<(&'static str, Option<SecurityDescriptor>)>);
+    /// An in-memory folder tree. Folders in `unlistable` cannot be listed.
+    struct Tree(
+        Vec<(&'static str, Option<SecurityDescriptor>)>,
+        Vec<&'static str>,
+    );
 
     impl DirectorySource for Tree {
         type Error = ();
@@ -503,9 +527,12 @@ mod tests {
                 .find(|(p, _)| *p == path)
                 .and_then(|(_, sd)| sd.as_ref().map(read)))
         }
-        fn subdirectories(&mut self, path: &str) -> Result<Vec<String>, ()> {
+        fn subdirectories(&mut self, path: &str) -> Result<Listing, ()> {
+            if self.1.contains(&path) {
+                return Ok(Listing::default());
+            }
             let prefix = format!("{path}\\");
-            Ok(self
+            let dirs = self
                 .0
                 .iter()
                 .filter(|(p, _)| {
@@ -513,19 +540,26 @@ mod tests {
                         .is_some_and(|rest| !rest.is_empty() && !rest.contains('\\'))
                 })
                 .map(|(p, _)| (*p).to_owned())
-                .collect())
+                .collect();
+            Ok(Listing {
+                dirs,
+                complete: true,
+            })
         }
     }
 
     fn tree() -> Tree {
-        Tree(vec![
-            ("C:\\PF", Some(locked())),
-            ("C:\\PF\\App", Some(locked())),
-            ("C:\\PF\\App\\logs", Some(open())),
-            ("C:\\PF\\App\\logs\\old", Some(locked())),
-            ("C:\\PF\\Other", None),
-            ("C:\\PF\\Safe", Some(locked())),
-        ])
+        Tree(
+            vec![
+                ("C:\\PF", Some(locked())),
+                ("C:\\PF\\App", Some(locked())),
+                ("C:\\PF\\App\\logs", Some(open())),
+                ("C:\\PF\\App\\logs\\old", Some(locked())),
+                ("C:\\PF\\Other", None),
+                ("C:\\PF\\Safe", Some(locked())),
+            ],
+            Vec::new(),
+        )
     }
 
     #[test]
@@ -564,6 +598,25 @@ mod tests {
         .unwrap();
         assert_eq!(r.visited, 6);
         assert_eq!(r.dirs.len(), 2);
+    }
+
+    #[test]
+    fn an_unlistable_folder_marks_the_walk_incomplete() {
+        let mut cache = WritabilityCache::default();
+        let mut t = tree();
+        t.1.push("C:\\PF\\App");
+        let r = enumerate_user_writable_dirs(
+            &["C:\\PF".to_owned()],
+            &mut t,
+            &EvaluationOptions::default(),
+            &EnumerateOptions::default(),
+            &mut cache,
+        )
+        .unwrap();
+        // `App\logs` is never seen, so the result must say it is partial.
+        assert!(r.truncated);
+        assert_eq!(r.incomplete, ["C:\\PF\\App"]);
+        assert!(r.dirs.iter().all(|d| d.path != "C:\\PF\\App\\logs"));
     }
 
     #[test]

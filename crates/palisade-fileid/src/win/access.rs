@@ -33,10 +33,10 @@ use crate::fsctx::acl::{
     EvaluationOptions, ObjectKind, OwnerInfo, SecurityDescriptor, Writability, WriteRights,
 };
 use crate::fsctx::writable::{
-    AncestorRead, AssessOptions, DirectorySource, ReadDescriptor, WritabilityCache,
+    AncestorRead, AssessOptions, DirectorySource, Listing, ReadDescriptor, WritabilityCache,
     assess_ancestors,
 };
-use crate::fsctx::{FsType, NormalizedPath, normalize_win32};
+use crate::fsctx::{FsType, NormalizedPath, Root, normalize_win32};
 
 /// `FILE_FLAG_BACKUP_SEMANTICS`, needed to open a folder.
 const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
@@ -46,6 +46,10 @@ const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
 const READ_CONTROL: u32 = 0x0002_0000;
 /// `FILE_READ_ATTRIBUTES`.
 const FILE_READ_ATTRIBUTES: u32 = 0x0080;
+/// `FILE_ATTRIBUTE_REPARSE_POINT`.
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+/// `FILE_ATTRIBUTE_DIRECTORY`.
+const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x0010;
 
 /// Opens `path` (file or folder) to read its security descriptor, without
 /// following a final link or junction.
@@ -88,14 +92,38 @@ pub fn read_owner(
     Ok(info)
 }
 
-/// Writability of the file or folder at `path` and of every folder above
-/// it up to the volume root.
+/// Opens `path` to read its security descriptor, **following** links, so
+/// the handle is the object opening `path` reaches.
+fn open_target(path: &Path) -> io::Result<File> {
+    OpenOptions::new()
+        .access_mode(READ_CONTROL | FILE_READ_ATTRIBUTES)
+        .share_mode(0x7)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)
+}
+
+/// The `FILE_ATTRIBUTE_*` bits of the open `file`.
+fn attributes(file: &File) -> io::Result<u32> {
+    use std::os::windows::fs::MetadataExt as _;
+    Ok(file.metadata()?.file_attributes())
+}
+
+/// Writability of the file or folder that opening `path` reaches, and of
+/// every folder above it up to its volume root.
 ///
-/// `path` is normalised and its ancestors listed by
-/// [`NormalizedPath::ancestors`], immediate parent first. Each is opened
-/// without following links and its descriptor read; one that cannot be
-/// opened, read or parsed counts as user-writable. A path whose canonical
-/// form is too long for an ancestor also counts that ancestor as writable.
+/// Links are resolved the way the OS resolves them when the file is run:
+/// the target is opened **following** links, and its own final path
+/// (`GetFinalPathNameByHandleW`) gives the real chain of folders, so a
+/// junction, symbolic link, mount point or `subst` drive in `path` cannot
+/// hide a writable folder the file really lives in. Each folder on that
+/// chain is then opened without following a reparse point; one that is a
+/// reparse point, or that cannot be opened, read or parsed, counts as
+/// user-writable (it means the chain is not what it seems, and that fails
+/// closed). The lexical ancestors of `path`, when they differ from the
+/// final path's, are checked the same way and must also be safe, since the
+/// link objects themselves could be replaced.
+///
+/// Device paths (`\\.\pipe\…` and other DOS devices) are rejected.
 pub fn assess_file(
     path: &Path,
     options: &EvaluationOptions,
@@ -105,37 +133,78 @@ pub fn assess_file(
     let text = path
         .to_str()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path is not valid Unicode"))?;
-    let normalized =
+    let lexical =
         normalize_win32(text).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-    let target = open_for_security(path)?;
-    let kind = if target.metadata()?.is_dir() {
+    if matches!(lexical.root(), Root::DosDevice(_)) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "not a file-system path",
+        ));
+    }
+    let target = open_target(Path::new(&lexical.to_win32_string()))?;
+    if !super::sys::is_disk_file(&target) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "not a file on disk",
+        ));
+    }
+    let attrs = attributes(&target)?;
+    let kind = if attrs & FILE_ATTRIBUTE_DIRECTORY != 0 {
         ObjectKind::Directory
     } else {
         ObjectKind::File
     };
     let target_sd = descriptor_of(&target);
-    let ancestors = normalized.ancestors().map(|a| match a {
-        Ok(p) => read_ancestor(&p),
-        Err(_) => AncestorRead {
-            path: String::new(),
-            descriptor: None,
-        },
-    });
+    // The real chain, from the opened handle.
+    let final_text = super::sys::final_path_by_handle(&target, 0)
+        .or_else(|_| super::sys::final_path_by_handle(&target, 1))?;
+    let mut real =
+        normalize_win32(&final_text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    real.mark_long_names_verified();
+    let real_chain: Vec<AncestorRead> = real.ancestors().map(read_ancestor_result).collect();
+    // The lexical chain, if it names other folders.
+    let lexical_extra: Vec<AncestorRead> = if lexical.case_folded() == real.case_folded() {
+        Vec::new()
+    } else {
+        let real_keys: std::collections::BTreeSet<String> = real_chain
+            .iter()
+            .map(|a| crate::fsctx::fold_case(&a.path))
+            .collect();
+        lexical
+            .ancestors()
+            .map(read_ancestor_result)
+            .filter(|a| !real_keys.contains(&crate::fsctx::fold_case(&a.path)))
+            .collect()
+    };
     Ok(assess_ancestors(
         target_sd.as_ref(),
         kind,
-        ancestors,
+        real_chain.into_iter().chain(lexical_extra),
         options,
         assess,
         cache,
     ))
 }
 
+fn read_ancestor_result(a: Result<NormalizedPath, crate::fsctx::PathError>) -> AncestorRead {
+    match a {
+        Ok(p) => read_ancestor(&p),
+        Err(_) => AncestorRead {
+            path: String::new(),
+            descriptor: None,
+        },
+    }
+}
+
+/// One folder on a chain: its descriptor, read without following it. A
+/// reparse point counts as unreadable (user-writable), since the chain does
+/// not go through it as written.
 fn read_ancestor(p: &NormalizedPath) -> AncestorRead {
     let shown = p.to_win32_string();
-    let descriptor = open_for_security(Path::new(&shown))
-        .ok()
-        .and_then(|f| descriptor_of(&f));
+    let descriptor = open_for_security(Path::new(&shown)).ok().and_then(|f| {
+        let reparse = attributes(&f).map_or(true, |a| a & FILE_ATTRIBUTE_REPARSE_POINT != 0);
+        if reparse { None } else { descriptor_of(&f) }
+    });
     AncestorRead {
         path: shown,
         descriptor,
@@ -198,8 +267,16 @@ pub fn cross_check_writability(
     // A user SID no ACE names, so only the groups decide.
     let user = crate::fsctx::Sid::new(5, &[21, 0x5041_4c49, 0x5341_4445, 0x5445_5354, 0x7fff_fffe])
         .ok_or_else(|| io::Error::other("bad synthetic SID"))?;
+    // The evaluator leaves administrator SIDs out of the standard user, so
+    // the OS token does too; otherwise their rights would look "missed".
     let mut sids = vec![user];
-    sids.extend(options.standard_user.iter().copied());
+    sids.extend(
+        options
+            .standard_user
+            .iter()
+            .copied()
+            .filter(|s| !options.admins.contains(s)),
+    );
     let granted = access_check(descriptor, &sids)?;
     Ok(AccessCrossCheck {
         portable: w.standard_user,
@@ -226,35 +303,52 @@ impl DirectorySource for OsDirectories {
             .and_then(|f| descriptor_of(&f)))
     }
 
-    fn subdirectories(&mut self, path: &str) -> Result<Vec<String>, Self::Error> {
+    fn subdirectories(&mut self, path: &str) -> Result<Listing, Self::Error> {
+        // A root or folder that is itself a reparse point is not listed:
+        // listing it would follow it out of the tree.
+        let is_reparse = open_for_security(Path::new(path))
+            .and_then(|f| attributes(&f))
+            .map_or(true, |a| a & FILE_ATTRIBUTE_REPARSE_POINT != 0);
+        if is_reparse {
+            return Ok(Listing::default());
+        }
         let Ok(entries) = std::fs::read_dir(path) else {
-            return Ok(Vec::new());
+            return Ok(Listing::default());
         };
-        let mut out = Vec::new();
-        for entry in entries.flatten() {
-            let Ok(ft) = entry.file_type() else { continue };
+        let mut listing = Listing {
+            dirs: Vec::new(),
+            complete: true,
+        };
+        for entry in entries {
+            let Ok(entry) = entry else {
+                listing.complete = false;
+                continue;
+            };
+            let Ok(ft) = entry.file_type() else {
+                listing.complete = false;
+                continue;
+            };
             // `file_type` does not follow links: a junction or symbolic link
             // to a folder is a symlink here, never a directory.
-            if !ft.is_dir() || ft.is_symlink() || ft.is_symlink_dir() {
+            if ft.is_symlink() || ft.is_symlink_dir() || !ft.is_dir() {
                 continue;
             }
-            // Mount points are reparse points that are not symlinks; skip
-            // anything with the reparse attribute.
-            let reparse = entry
-                .metadata()
-                .map(|m| {
-                    use std::os::windows::fs::MetadataExt as _;
-                    m.file_attributes() & 0x400 != 0
-                })
-                .unwrap_or(true);
-            if reparse {
-                continue;
-            }
-            if let Some(p) = entry.path().to_str() {
-                out.push(p.to_owned());
+            // Mount points are reparse points that are not symlinks.
+            let reparse = entry.metadata().map(|m| {
+                use std::os::windows::fs::MetadataExt as _;
+                m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+            });
+            match reparse {
+                Ok(true) => {}
+                Ok(false) => match entry.path().to_str() {
+                    Some(p) => listing.dirs.push(p.to_owned()),
+                    // A name that is not valid UTF-16 cannot be walked here.
+                    None => listing.complete = false,
+                },
+                Err(_) => listing.complete = false,
             }
         }
-        out.sort();
-        Ok(out)
+        listing.dirs.sort();
+        Ok(listing)
     }
 }
