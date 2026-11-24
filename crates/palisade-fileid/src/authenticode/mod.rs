@@ -2,6 +2,11 @@
 //!
 //! - [`hash`]: the Authenticode image hash (#47), which identifies a PE file
 //!   independently of its embedded signature.
+//! - [`page`]: page hash tables (#47), built from a file and checked against
+//!   the table a signature carries.
+//! - [`hash_image_file`] and [`hash_image_reader`]: the flat hashes, the
+//!   Authenticode digests and the page hash tables of a file, in one
+//!   sequential read.
 //! - Signature parsing and verification (#48): [`verify_pe`],
 //!   [`verify_signatures`] and [`verify_certificate_table`] read every
 //!   `WIN_CERTIFICATE` entry, decode each PKCS#7 SignedData and its nested
@@ -91,6 +96,8 @@ mod chain;
 mod crypto;
 pub mod eku;
 pub mod hash;
+mod image;
+pub mod page;
 mod pkcs7;
 mod signature;
 mod trust;
@@ -108,6 +115,15 @@ pub use eku::Eku;
 pub use hash::{
     AuthenticodeError, AuthenticodeHashes, AuthenticodeStatus, HashRanges, HashScenario,
     NonConformance, RangeHasher, authenticode_hashes, hash_pe,
+};
+pub use image::{
+    HEADER_PREFIX_LEN, ImageHashOptions, ImageHashStatus, ImageHashes, hash_image_file,
+    hash_image_reader,
+};
+pub use page::{
+    PAGE_SIZE, PageHashCheck, PageHashError, PageHashMismatch, PageHashTables, PageHasher,
+    PageLayout, PageMismatchKind, page_hash_table, page_hash_tables, verify_page_hashes,
+    verify_signature_page_hashes,
 };
 pub use pkcs7::{MAX_CERTIFICATES, MAX_TIMESTAMPS, MAX_WARNINGS};
 pub use signature::{

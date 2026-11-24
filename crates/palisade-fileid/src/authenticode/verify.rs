@@ -4,7 +4,7 @@
 #![forbid(unsafe_code)]
 
 use super::crypto::{self, PublicKey, Scheme, Verified};
-use super::hash::{AuthenticodeError, AuthenticodeHashes, HashRanges, authenticode_hashes};
+use super::hash::{AuthenticodeError, AuthenticodeHashes, HashRanges, image_digests};
 use super::pkcs7::{self, CertKey, Certificate, SignedData, Warnings};
 use super::signature::{
     BadSignature, CertificateEntry, CertificateTableError, DigestAlgorithm, InvalidReason,
@@ -41,13 +41,13 @@ pub fn verify_pe(data: &[u8], options: &VerifyOptions) -> Result<SignatureReport
     // `data` is the buffer `info` was parsed from, so the length always
     // matches. Should it not, no image digest is available and every
     // signature reports `ImageDigestUnavailable`: never a false `Valid`.
-    let image = authenticode_hashes(data, &info, AlgorithmSet::ALL).unwrap_or_else(|_| {
-        AuthenticodeHashes {
+    let image =
+        image_digests(data, &info, AlgorithmSet::ALL).unwrap_or_else(|_| AuthenticodeHashes {
             digests: Vec::new(),
             hashed_bytes: 0,
             status: HashRanges::from_pe(&info).status().clone(),
-        }
-    });
+            page_hashes: None,
+        });
     Ok(verify_certificate_table(data, &info, &image, options))
 }
 
@@ -59,13 +59,13 @@ pub fn verify_signatures(
     info: &PeInfo,
     options: &VerifyOptions,
 ) -> Result<SignatureReport, AuthenticodeError> {
-    let image = authenticode_hashes(data, info, AlgorithmSet::ALL)?;
+    let image = image_digests(data, info, AlgorithmSet::ALL)?;
     Ok(verify_certificate_table(data, info, &image, options))
 }
 
 /// Verifies the signatures in the certificate table of `data`, comparing
 /// each signed image digest with `image`, the file's Authenticode digests
-/// (from [`authenticode_hashes`] or a [`super::RangeHasher`]). A signature
+/// (from [`super::authenticode_hashes`] or a [`super::RangeHasher`]). A signature
 /// whose digest algorithm is missing from `image` is reported as
 /// [`Unsupported::ImageDigestUnavailable`].
 #[must_use]

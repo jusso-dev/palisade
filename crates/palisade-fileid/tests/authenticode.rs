@@ -16,8 +16,8 @@ mod common;
 
 use common::*;
 use palisade_fileid::authenticode::{
-    AuthenticodeError, AuthenticodeStatus, HashRanges, HashScenario, NonConformance, RangeHasher,
-    authenticode_hashes, hash_pe,
+    AuthenticodeError, AuthenticodeStatus, HashRanges, HashScenario, NonConformance, PageHasher,
+    PageLayout, RangeHasher, authenticode_hashes, hash_pe,
 };
 use palisade_fileid::hash::{AlgorithmSet, HashAlgorithm, MultiHasher, hash_bytes};
 use palisade_fileid::pe::{self, DataDirectoryKind, FileRange, PeInfo, WarningKind};
@@ -427,14 +427,24 @@ fn one_read_pass_gives_flat_and_authenticode_hashes() {
     let image = fixtures().remove(8).1;
     let info = pe::parse(&image).unwrap();
     let mut image_hasher = RangeHasher::new(HashRanges::from_pe(&info), AlgorithmSet::DEFAULT);
+    let mut pages = PageHasher::new(
+        PageLayout::from_pe(&info).unwrap(),
+        AlgorithmSet::SHA1 | AlgorithmSet::SHA256,
+    )
+    .unwrap();
     let mut flat = MultiHasher::new(AlgorithmSet::DEFAULT);
     for chunk in image.chunks(97) {
         image_hasher.update(chunk);
+        pages.update(chunk);
         flat.update(chunk);
     }
     assert_eq!(flat.finalize(), hash_bytes(&image, AlgorithmSet::DEFAULT));
     let expected = authenticode_hashes(&image, &info, AlgorithmSet::MD5).unwrap();
-    assert_eq!(image_hasher.finalize().unwrap(), expected);
+    let mut streamed = image_hasher.finalize().unwrap();
+    // A `RangeHasher` alone computes no page hashes.
+    assert_eq!(streamed.page_hashes, None);
+    streamed.page_hashes = Some(Ok(pages.finalize().unwrap()));
+    assert_eq!(streamed, expected);
 }
 
 #[test]

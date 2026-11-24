@@ -1,11 +1,16 @@
-//! Fuzzes the Authenticode image hash: no input may panic, and for every
-//! image that parses, the hashed ranges must be sorted, disjoint, inside
-//! the file, and cover every byte except the checksum field, the
-//! certificate table entry and the certificate table.
+//! Fuzzes the Authenticode image hash and page hashes: no input may panic,
+//! and for every image that parses, the hashed ranges must be sorted,
+//! disjoint, inside the file, and cover every byte except the checksum
+//! field, the certificate table entry and the certificate table. Page hash
+//! tables, when the image has one, must be in strictly ascending file order
+//! inside the file and independent of chunking. Parsing only the header
+//! prefix must give the same ranges as parsing the whole file.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use palisade_fileid::authenticode::{HashRanges, RangeHasher, authenticode_hashes};
+use palisade_fileid::authenticode::{
+    HEADER_PREFIX_LEN, HashRanges, PageHasher, PageLayout, RangeHasher, authenticode_hashes,
+};
 use palisade_fileid::hash::AlgorithmSet;
 use palisade_fileid::pe::{self, DataDirectoryKind, ParseOptions};
 
@@ -57,5 +62,28 @@ fuzz_target!(|data: &[u8]| {
     for chunk in data.chunks(61) {
         hasher.update(chunk);
     }
-    assert_eq!(hasher.finalize().unwrap(), whole);
+    let streamed = hasher.finalize().unwrap();
+    assert_eq!(streamed.digests, whole.digests);
+    assert_eq!(streamed.status, whole.status);
+
+    // The header prefix alone gives the same ranges.
+    let prefix = &data[..data.len().min(HEADER_PREFIX_LEN)];
+    let from_prefix = pe::parse_prefix(prefix, len).unwrap();
+    assert_eq!(HashRanges::from_pe(&from_prefix), HashRanges::from_pe(&info));
+
+    // Page hash tables: ascending, inside the file, chunking-independent.
+    if let Some(Ok(tables)) = &whole.page_hashes {
+        for table in [&tables.sha1, &tables.sha256].into_iter().flatten() {
+            let offsets: Vec<u32> = table.entries().map(|(o, _)| o).collect();
+            assert_eq!(offsets.first(), Some(&0));
+            assert!(offsets.windows(2).all(|w| w[0] < w[1]));
+            assert!(offsets.last().is_some_and(|o| u64::from(*o) <= len));
+        }
+        let layout = PageLayout::from_pe(&info).unwrap();
+        let mut pages = PageHasher::new(layout, AlgorithmSet::SHA1 | AlgorithmSet::SHA256).unwrap();
+        for chunk in data.chunks(61) {
+            pages.update(chunk);
+        }
+        assert_eq!(&pages.finalize().unwrap(), tables);
+    }
 });

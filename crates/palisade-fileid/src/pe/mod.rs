@@ -692,6 +692,40 @@ pub fn parse(data: &[u8]) -> Result<PeInfo, PeError> {
 
 /// Like [`parse`], with a choice of whole-file analyses.
 pub fn parse_with(data: &[u8], options: &ParseOptions) -> Result<PeInfo, PeError> {
+    parse_impl(data, to_u64(data.len()), options)
+}
+
+/// Parses the headers of a PE image from `prefix`, the first bytes of a file
+/// that is `file_len` bytes long, so a large file can be identified while it
+/// is read in one sequential pass.
+///
+/// Everything that depends on the file's length (the certificate table
+/// checks, [`PeInfo::overlay`], [`PeInfo::file_size`] and the
+/// `SectionDataOutOfFile` warnings) uses `file_len`. Only `prefix` is read,
+/// so the resource tree, version info and debug directory are reported only
+/// when they lie inside it, and neither the checksum nor section entropy is
+/// computed ([`ParseOptions::metadata_only`]). The DOS, COFF and optional
+/// headers and the section table must be inside `prefix`.
+///
+/// `prefix` longer than `file_len` is cut to `file_len`.
+pub fn parse_prefix(prefix: &[u8], file_len: u64) -> Result<PeInfo, PeError> {
+    let prefix = prefix
+        .get(
+            ..usize::try_from(file_len)
+                .unwrap_or(usize::MAX)
+                .min(prefix.len()),
+        )
+        .unwrap_or(prefix);
+    parse_impl(
+        prefix,
+        file_len.max(to_u64(prefix.len())),
+        &ParseOptions::metadata_only(),
+    )
+}
+
+/// [`parse_with`] over `data`, the first bytes of a file of `file_len`
+/// bytes. Reads stay inside `data`; length checks use `file_len`.
+fn parse_impl(data: &[u8], file_len: u64, options: &ParseOptions) -> Result<PeInfo, PeError> {
     let mut warnings = Warnings::default();
 
     if data.len() < 64 {
@@ -734,9 +768,14 @@ pub fn parse_with(data: &[u8], options: &ParseOptions) -> Result<PeInfo, PeError
     let mut entropy_budget = options.section_entropy.then_some(data.len());
     for (index, section) in sections.iter_mut().enumerate() {
         let index = u16::try_from(index).unwrap_or(u16::MAX);
-        let Some(raw) =
-            section_raw_data(data, section, optional.file_alignment, index, &mut warnings)
-        else {
+        let Some(raw) = section_raw_data(
+            data,
+            file_len,
+            section,
+            optional.file_alignment,
+            index,
+            &mut warnings,
+        ) else {
             continue;
         };
         let Some(budget) = entropy_budget else {
@@ -792,11 +831,11 @@ pub fn parse_with(data: &[u8], options: &ParseOptions) -> Result<PeInfo, PeError
             let start = to_usize(d.virtual_address).unwrap_or(usize::MAX);
             let rejection = if d.size == 0 || d.virtual_address == 0 || start < headers_end {
                 Some(WarningKind::CertificateTableInvalid)
-            } else if end > to_u64(data.len()) {
+            } else if end > file_len {
                 Some(WarningKind::CertificateTableOutOfFile)
             } else if sections
                 .iter()
-                .filter_map(|s| in_file_data(s, optional.file_alignment, data.len()))
+                .filter_map(|s| in_file_data(s, optional.file_alignment, file_len))
                 .any(|(s_start, s_end)| range.offset < s_end && s_start < end)
             {
                 // The certificate table lies outside the image's mapped
@@ -817,7 +856,7 @@ pub fn parse_with(data: &[u8], options: &ParseOptions) -> Result<PeInfo, PeError
         });
 
     let overlay = find_overlay(
-        data.len(),
+        file_len,
         headers_end,
         optional.file_alignment,
         &sections,
@@ -850,7 +889,7 @@ pub fn parse_with(data: &[u8], options: &ParseOptions) -> Result<PeInfo, PeError
     }
 
     Ok(PeInfo {
-        file_size: to_u64(data.len()),
+        file_size: file_len,
         e_lfanew,
         coff,
         optional,
@@ -1062,6 +1101,7 @@ fn parse_sections(
 /// if there is none. Warns when the declared range runs past the end.
 fn section_raw_data<'a>(
     data: &'a [u8],
+    file_len: u64,
     section: &Section,
     file_alignment: u32,
     index: u16,
@@ -1070,7 +1110,7 @@ fn section_raw_data<'a>(
     let (start, size) = section.file_data(file_alignment)?;
     let start = to_usize(start)?;
     let end = start.saturating_add(to_usize(size)?);
-    if end > data.len() {
+    if to_u64(end) > file_len {
         warnings.push(start, WarningKind::SectionDataOutOfFile { index });
     }
     data.get(start..end.min(data.len()))
@@ -1081,15 +1121,14 @@ fn section_raw_data<'a>(
 /// `(start, end)` file range, or `None` if none of it is. A section that
 /// starts past the end of the input contributes nothing; one that runs past
 /// the end is cut there.
-fn in_file_data(s: &Section, file_alignment: u32, file_len: usize) -> Option<(u64, u64)> {
+fn in_file_data(s: &Section, file_alignment: u32, file_len: u64) -> Option<(u64, u64)> {
     let (start, size) = s.file_data(file_alignment)?;
     let start = u64::from(start);
-    let file_len = to_u64(file_len);
     (start < file_len).then(|| (start, start.saturating_add(u64::from(size)).min(file_len)))
 }
 
 fn find_overlay(
-    file_len: usize,
+    file_len: u64,
     headers_end: usize,
     file_alignment: u32,
     sections: &[Section],
@@ -1102,7 +1141,6 @@ fn find_overlay(
         .max()
         .unwrap_or(0)
         .max(to_u64(headers_end));
-    let file_len = to_u64(file_len);
     let cert_end = certificate_table.map_or(0, |c| c.offset.saturating_add(c.size));
     let start = sections_end.max(cert_end);
     (start < file_len).then(|| FileRange {

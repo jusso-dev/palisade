@@ -2,7 +2,7 @@
 
 File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes), signature and certificate chain extraction, and version-info metadata.
 
-**Status:** early. PE header and version-resource parsing, flat hashing, the Authenticode image hash, Authenticode signature verification and certificate chains, signer trust and signer identity work; the rest of [#3](https://github.com/jusso-dev/palisade/issues/3) is still to come.
+**Status:** early. PE header and version-resource parsing, flat hashing, the Authenticode image hash, page hashes, Authenticode signature verification and certificate chains, signer trust and signer identity work; the rest of [#3](https://github.com/jusso-dev/palisade/issues/3) is still to come.
 
 ## What is here
 
@@ -28,7 +28,28 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   computed. Images whose layout departs from the specification (gaps or
   overlaps between sections, data after or a misaligned certificate table,
   and so on) are reported as `AuthenticodeStatus::NonConformant`, and their
-  flat hash is the identity to use. Page hash checks are still to come (#47).
+  flat hash is the identity to use.
+- `authenticode::page`: page hash tables (#47). `page_hash_table(data, info,
+  alg)` builds the SHA-1 (version 1) or SHA-256 (version 2) table a signer
+  embeds: one entry per 4 KiB page (the headers minus the `CheckSum` field
+  and certificate table entry, then each section's raw data), each page
+  zero-padded, then a zero entry at the end of the section data. The tests
+  check it entry for entry against tables an open-source signer made over
+  synthetic images. `verify_signature_page_hashes` checks a signature's
+  table against the file and reports the first page that differs; it
+  checks only tables from signatures that verify cryptographically.
+  `AuthenticodeHashes::page_sha256` / `page_sha1` give the code integrity
+  "page hash" rule value (the header page's digest). On Windows CI a test
+  runs the OS policy cmdlets and compares every Authenticode and page hash
+  rule they emit with these values. Images that are not
+  Authenticode-conformant, or whose headers exceed one page, have no table.
+- One read for every digest: `authenticode::hash_image_file` and
+  `hash_image_reader` parse the PE headers from the first bytes
+  (`pe::parse_prefix`) and then compute the flat hashes, Authenticode
+  digests and page hash tables from the same sequential read. With
+  `ImageHashOptions::parallel` each digest runs on its own thread over the
+  same buffers. A file whose length changes while it is read is an error
+  (`HashError::SizeChanged`).
 - `authenticode` signatures
   ([#48](https://github.com/jusso-dev/palisade/issues/48)): `verify_pe`,
   `verify_signatures` and `verify_certificate_table` read every
@@ -248,9 +269,11 @@ one Ed25519 test certificate and one RSA-PSS signature value. The chain tests
 use test certificates in `tests/fixtures/chain` (cross-signed, forged-issuer,
 loop, depth, expired, ECC, self-signed and other chains, plus two
 signatures), with reference thumbprints and TBS hashes computed by Python's
-`hashlib`, independently of this crate. No private keys and no third-party
-binaries are committed; the `generate.sh` scripts document how every file was
-made and regenerate them.
+`hashlib`, independently of this crate. The page hash tests use page hash
+signatures in `tests/fixtures/page_hash`, made the same way as the
+signature fixtures over three more synthetic images. No private keys and no
+third-party binaries are committed; the `generate.sh` scripts document how
+every file was made and regenerate them.
 
 ```sh
 cargo test -p palisade-fileid
