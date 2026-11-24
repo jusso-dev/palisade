@@ -1,0 +1,260 @@
+{
+  "schema_version": "1.0.0",
+  "policy": {
+    "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+    "name": "Every action",
+    "revision": 1,
+    "mode": "enforce",
+    "rule_sets": [
+      "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60",
+      "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e70",
+      "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e80",
+      "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e90",
+      "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4ea0",
+      "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4eb0"
+    ]
+  },
+  "rule_sets": [
+    {
+      "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60",
+      "name": "Blocked tools",
+      "kind": "blocklist",
+      "rules": [
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e61",
+          "name": "Block a script host for users",
+          "object_types": [
+            "executable"
+          ],
+          "match": {
+            "criterion": {
+              "field": "hash.sha256",
+              "operator": "equals",
+              "values": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          },
+          "action": {
+            "type": "deny",
+            "kill_running": true,
+            "allow_request": true,
+            "request_template": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d9001"
+          },
+          "effects": {
+            "log": "always",
+            "upload": "immediate",
+            "notify": "custom",
+            "notification_text": "{file} from {publisher} was blocked by {rule}. Ask IT for {{help}}.",
+            "help_url": "https://help.example/blocked",
+            "severity": "high",
+            "tags": [
+              "lolbin",
+              "mitre:T1218.005"
+            ],
+            "suppress_duplicates_secs": 3600
+          }
+        }
+      ]
+    },
+    {
+      "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e70",
+      "name": "Allowed tools",
+      "kind": "allowlist",
+      "rules": [
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e71",
+          "name": "Allow a tool",
+          "match": {
+            "criterion": {
+              "field": "hash.sha256",
+              "operator": "equals",
+              "values": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          },
+          "action": {
+            "type": "allow"
+          },
+          "effects": {
+            "log": "summary",
+            "upload": "batched"
+          }
+        },
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e72",
+          "name": "Flag unsigned downloads",
+          "match": {
+            "all": [
+              {
+                "criterion": {
+                  "field": "hash.sha256",
+                  "operator": "equals",
+                  "values": [
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                  ]
+                }
+              },
+              {
+                "criterion": {
+                  "field": "path.directory",
+                  "operator": "starts_with",
+                  "values": [
+                    "%USERPROFILE%\\Downloads\\"
+                  ]
+                }
+              }
+            ]
+          },
+          "action": {
+            "type": "audit"
+          },
+          "effects": {
+            "severity": "low",
+            "tags": [
+              "unsigned"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e80",
+      "name": "Contained tools",
+      "kind": "containment",
+      "rules": [
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e81",
+          "name": "Contain a remote tool",
+          "object_types": [
+            "executable",
+            "script.powershell"
+          ],
+          "match": {
+            "criterion": {
+              "field": "hash.sha256",
+              "operator": "equals",
+              "values": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          },
+          "action": {
+            "type": "allow_contained",
+            "profile_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d9000"
+          }
+        }
+      ]
+    },
+    {
+      "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e90",
+      "name": "Elevation",
+      "kind": "elevation",
+      "rules": [
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e91",
+          "name": "Elevate a setup tool",
+          "object_types": [
+            "installer",
+            "executable"
+          ],
+          "match": {
+            "criterion": {
+              "field": "hash.sha256",
+              "operator": "equals",
+              "values": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          },
+          "action": {
+            "type": "allow_elevated",
+            "token_profile": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d9002",
+            "condition": "if_required",
+            "reason_prompt": "Why do you need administrator rights?",
+            "auth": "reauth"
+          },
+          "effects": {
+            "log": "sampled"
+          }
+        }
+      ]
+    },
+    {
+      "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4ea0",
+      "name": "Trusted installers",
+      "kind": "trust",
+      "rules": [
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4ea1",
+          "name": "Trust the software installer",
+          "object_types": [
+            "installer"
+          ],
+          "match": {
+            "criterion": {
+              "field": "hash.sha256",
+              "operator": "equals",
+              "values": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          },
+          "action": {
+            "type": "trust_source",
+            "mode": "chained",
+            "scope_paths": [
+              "%PROGRAMFILES%\\Vendor\\",
+              "C:\\Apps"
+            ],
+            "tag_output": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4eb0",
+      "name": "Mixed",
+      "kind": "mixed",
+      "rules": [
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4eb1",
+          "name": "Exclude scanner temporary modules",
+          "object_types": [
+            "library"
+          ],
+          "match": {
+            "criterion": {
+              "field": "hash.sha256",
+              "operator": "equals",
+              "values": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          },
+          "action": {
+            "type": "ignore"
+          }
+        },
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4eb2",
+          "name": "No opinion yet",
+          "match": {
+            "criterion": {
+              "field": "hash.sha256",
+              "operator": "equals",
+              "values": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          },
+          "action": {
+            "type": "defer"
+          },
+          "order": 10
+        }
+      ]
+    }
+  ]
+}

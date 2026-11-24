@@ -3,6 +3,7 @@
 
 pub mod condition;
 pub mod context;
+pub mod decision;
 pub mod dsl;
 pub mod facts;
 pub mod model;

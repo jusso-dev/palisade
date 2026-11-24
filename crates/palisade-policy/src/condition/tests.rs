@@ -6,7 +6,7 @@ use super::{CompiledMatch, TreeError};
 use crate::context::EvaluationContext;
 use crate::facts::{ObjectFacts, PathVariables};
 use crate::model::limits::{MAX_CRITERIA_PER_RULE, MAX_TREE_DEPTH};
-use crate::model::{Action, Criterion, Field, Match, Operator};
+use crate::model::{ActionKind, Criterion, Field, Match, Operator};
 use crate::ops::{EvalContext, Note, Tri};
 
 use Tri::{Match as Yes, NoMatch as No, Unknown};
@@ -43,7 +43,7 @@ fn eval_tree(tree: &Match) -> (Tri, crate::ops::Notes) {
     let e = compiled.eval(
         &ObjectFacts::new(),
         &EvalContext {
-            action: Action::Deny {},
+            action: ActionKind::Deny,
             variables: &variables,
             context: &context,
         },
@@ -211,7 +211,7 @@ fn only_match_makes_a_rule_match() {
     let compiled = CompiledMatch::compile(&leaf(Unknown)).unwrap();
     let variables = PathVariables::new();
     let context = context();
-    for action in [Action::Allow {}, Action::Deny {}, Action::Audit {}] {
+    for action in [ActionKind::Allow, ActionKind::Deny, ActionKind::Audit] {
         let e = compiled.eval(
             &ObjectFacts::new(),
             &EvalContext {
@@ -227,7 +227,7 @@ fn only_match_makes_a_rule_match() {
     let e = compiled.eval(
         &ObjectFacts::new(),
         &EvalContext {
-            action: Action::Allow {},
+            action: ActionKind::Allow,
             variables: &variables,
             context: &context,
         },
@@ -260,7 +260,7 @@ fn identity_and_context_together() {
             .eval(
                 &facts,
                 &EvalContext {
-                    action: Action::Allow {},
+                    action: ActionKind::Allow,
                     variables: &variables,
                     context,
                 },

@@ -1,7 +1,7 @@
 {
   "$defs": {
     "Action": {
-      "description": "The action of a rule (#34).\n\nEach action is an object with a `type`, so options can be added later as\noptional fields without a breaking change.",
+      "description": "The action of a rule (#34).\n\nEach action is an object with a `type`, and its options as optional\nkeys, so options can be added later without a breaking change.",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -21,6 +21,25 @@
           "additionalProperties": false,
           "description": "Block execution.",
           "properties": {
+            "allow_request": {
+              "description": "The end user may raise an approval request (#11). Needs a\nnotification, and is not valid in a mandatory rule set.",
+              "type": "boolean"
+            },
+            "kill_running": {
+              "description": "Terminate already-running instances that match when the policy is\napplied. Not valid for drivers or libraries.",
+              "type": "boolean"
+            },
+            "request_template": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RequestTemplateRef"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The approval request template to use. Only with `allow_request`."
+            },
             "type": {
               "const": "deny",
               "type": "string"
@@ -33,10 +52,129 @@
         },
         {
           "additionalProperties": false,
-          "description": "Record the match without changing the outcome.",
+          "description": "Record the match without changing the outcome. A non-terminal\nannotation, used for detection and tagging.",
           "properties": {
             "type": {
               "const": "audit",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Permit execution inside a containment profile (#14). The engine only\ncarries the reference.",
+          "properties": {
+            "profile_id": {
+              "$ref": "#/$defs/ContainmentProfileRef",
+              "description": "The containment profile the process runs under."
+            },
+            "type": {
+              "const": "allow_contained",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "profile_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Permit execution with an elevated token (#12). The engine only\ncarries the directive.",
+          "properties": {
+            "auth": {
+              "$ref": "#/$defs/ElevationAuth",
+              "description": "What the user must do to confirm."
+            },
+            "condition": {
+              "$ref": "#/$defs/ElevationCondition",
+              "description": "When to elevate."
+            },
+            "reason_prompt": {
+              "description": "If set, the user must give a reason, and this is the prompt shown:\none line of 1 to 256 characters, trimmed, with no control characters\n(including tab and line breaks) and no bidirectional formatting\ncharacters, so the prompt cannot be made to read differently.",
+              "maxLength": 256,
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "token_profile": {
+              "$ref": "#/$defs/TokenProfileRef",
+              "description": "The access token profile to build the token from."
+            },
+            "type": {
+              "const": "allow_elevated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "token_profile",
+            "condition"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Mark the matching process as a trusted installer, updater or source\n(#9, #114). This does not permit the process itself to run; an allow\nrule decides that. The engine returns the directive.",
+          "properties": {
+            "mode": {
+              "$ref": "#/$defs/TrustMode",
+              "description": "Which writes are trusted."
+            },
+            "scope_paths": {
+              "description": "The folders whose new content becomes trusted: 1 to 32 absolute paths\n(`C:\\...`, `\\\\server\\share\\...`, or a known path variable such as\n`%PROGRAMFILES%\\...`), each at most 1024 bytes, written with `\\`, and\nunique (compared as the engine compares paths).",
+              "items": {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 32,
+              "minItems": 1,
+              "type": "array"
+            },
+            "tag_output": {
+              "description": "Tag the files written with a persistent trust claim, so they stay\ntrusted after the process exits. Off by default.",
+              "type": "boolean"
+            },
+            "type": {
+              "const": "trust_source",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "mode",
+            "scope_paths"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Skip the object entirely: no decision is logged. Only for performance\nexclusions, never for executables or drivers, and validation always\nwarns.",
+          "properties": {
+            "type": {
+              "const": "ignore",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "No opinion. A first-match model continues with the next rule (#35).",
+          "properties": {
+            "type": {
+              "const": "defer",
               "type": "string"
             }
           },
@@ -65,6 +203,10 @@
         }
       ],
       "description": "A scalar value in `advanced`."
+    },
+    "ContainmentProfileRef": {
+      "$ref": "#/$defs/Uuid7",
+      "description": "The ID of a containment profile (#14, #173)."
     },
     "ControlLevel": {
       "description": "Whether a class of object is controlled.",
@@ -156,6 +298,131 @@
       ],
       "type": "object"
     },
+    "Effects": {
+      "additionalProperties": false,
+      "description": "The effect flags of one rule. Unset fields take the action's default.",
+      "properties": {
+        "help_url": {
+          "description": "A link shown with the notification: an `https` URL of at most 2048\nbytes. Only allowed when a notification is shown.",
+          "maxLength": 2048,
+          "minLength": 1,
+          "pattern": "^https://",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "log": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LogLevel"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Whether the decision produces a local event. `deny`, `audit`,\n`allow_elevated` and `trust_source` need an event per decision, so\n`summary` and `never` are not allowed on them."
+        },
+        "notification_text": {
+          "description": "The text of a `custom` notification: at most 2048 characters, with\nthe placeholders `{file}`, `{publisher}`, `{rule}`, `{user}` and\n`{hash}`. Write `{{` and `}}` for literal braces. Required with\n`notify: custom`, and only allowed with it.",
+          "maxLength": 2048,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "notify": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Notify"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Whether the user is shown a notification."
+        },
+        "severity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EventSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How serious the event is, for alerting (#16)."
+        },
+        "suppress_duplicates_secs": {
+          "description": "The local de-duplication window, in seconds, at most 604800. `0`\nturns de-duplication off. Detection counters still count every\noccurrence.",
+          "format": "uint32",
+          "maximum": 604800,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tags": {
+          "description": "Labels copied into the event, such as `lolbin` or\n`mitre:T1218.005`: each 1 to 128 characters, at most 64.",
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "upload": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Upload"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When the event is sent to the server."
+        }
+      },
+      "type": "object"
+    },
+    "ElevationAuth": {
+      "description": "The confirmation an `allow_elevated` action asks for.",
+      "oneOf": [
+        {
+          "const": "none",
+          "description": "No confirmation. The default.",
+          "type": "string"
+        },
+        {
+          "const": "reauth",
+          "description": "The user authenticates again.",
+          "type": "string"
+        },
+        {
+          "const": "mfa",
+          "description": "The user completes a multi-factor challenge.",
+          "type": "string"
+        }
+      ]
+    },
+    "ElevationCondition": {
+      "description": "When an `allow_elevated` action elevates.",
+      "oneOf": [
+        {
+          "const": "always",
+          "description": "Every time the object runs.",
+          "type": "string"
+        },
+        {
+          "const": "if_required",
+          "description": "Only when the object asks for administrator rights.",
+          "type": "string"
+        }
+      ]
+    },
     "EnforcementOverride": {
       "description": "How one rule relates to the policy mode (#36).",
       "oneOf": [
@@ -172,6 +439,36 @@
         {
           "const": "never_enforce",
           "description": "Never enforce this rule: it only reports what it would block.",
+          "type": "string"
+        }
+      ]
+    },
+    "EventSeverity": {
+      "description": "How serious an event is (#16).",
+      "oneOf": [
+        {
+          "const": "info",
+          "description": "Informational.",
+          "type": "string"
+        },
+        {
+          "const": "low",
+          "description": "Low.",
+          "type": "string"
+        },
+        {
+          "const": "medium",
+          "description": "Medium.",
+          "type": "string"
+        },
+        {
+          "const": "high",
+          "description": "High.",
+          "type": "string"
+        },
+        {
+          "const": "critical",
+          "description": "Critical.",
           "type": "string"
         }
       ]
@@ -431,6 +728,31 @@
         }
       ]
     },
+    "LogLevel": {
+      "description": "Whether a decision produces a local event.",
+      "oneOf": [
+        {
+          "const": "always",
+          "description": "Every decision produces an event.",
+          "type": "string"
+        },
+        {
+          "const": "summary",
+          "description": "Decisions are aggregated into periodic summaries per device, user,\nobject and rule. The default for allow rules.",
+          "type": "string"
+        },
+        {
+          "const": "sampled",
+          "description": "A sample of decisions produces events.",
+          "type": "string"
+        },
+        {
+          "const": "never",
+          "description": "No event.",
+          "type": "string"
+        }
+      ]
+    },
     "Match": {
       "description": "A condition tree (#33).\n\nEach node is an object with exactly one key: `all`, `any`, `not` or\n`criterion`.",
       "oneOf": [
@@ -564,6 +886,26 @@
         {
           "const": "enforce",
           "description": "Decisions take effect: blocked means blocked.",
+          "type": "string"
+        }
+      ]
+    },
+    "Notify": {
+      "description": "Whether the user is shown a notification (#11).",
+      "oneOf": [
+        {
+          "const": "none",
+          "description": "No notification.",
+          "type": "string"
+        },
+        {
+          "const": "default",
+          "description": "The policy's default notification.",
+          "type": "string"
+        },
+        {
+          "const": "custom",
+          "description": "The rule's `notification_text`.",
           "type": "string"
         }
       ]
@@ -922,6 +1264,10 @@
         }
       ]
     },
+    "RequestTemplateRef": {
+      "$ref": "#/$defs/Uuid7",
+      "description": "The ID of an approval request template (#11)."
+    },
     "Rule": {
       "additionalProperties": false,
       "description": "One rule: a match tree and the action taken when it matches.",
@@ -945,6 +1291,10 @@
             "string",
             "null"
           ]
+        },
+        "effects": {
+          "$ref": "#/$defs/Effects",
+          "description": "Logging, upload, notification, severity and tags (#34). Unset\nfields take the action's defaults."
         },
         "enabled": {
           "default": true,
@@ -1145,6 +1495,45 @@
         {
           "const": "utc",
           "description": "Coordinated Universal Time.",
+          "type": "string"
+        }
+      ]
+    },
+    "TokenProfileRef": {
+      "$ref": "#/$defs/Uuid7",
+      "description": "The ID of an access token profile for elevation (#12, #150)."
+    },
+    "TrustMode": {
+      "description": "How far trust from a `trust_source` action reaches (#114).",
+      "oneOf": [
+        {
+          "const": "direct",
+          "description": "Only files the designated process writes itself.",
+          "type": "string"
+        },
+        {
+          "const": "chained",
+          "description": "Files the designated process and all its descendants write.",
+          "type": "string"
+        }
+      ]
+    },
+    "Upload": {
+      "description": "When an event is sent to the server.",
+      "oneOf": [
+        {
+          "const": "immediate",
+          "description": "As soon as possible.",
+          "type": "string"
+        },
+        {
+          "const": "batched",
+          "description": "With the next batch.",
+          "type": "string"
+        },
+        {
+          "const": "local_only",
+          "description": "Never: kept in the local log only.",
           "type": "string"
         }
       ]

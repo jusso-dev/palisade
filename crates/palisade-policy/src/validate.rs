@@ -9,14 +9,19 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+mod actions;
+
+#[cfg(test)]
+pub(crate) use actions::scope_path_key;
+
 use crate::model::limits::{
     MAX_CRITERIA_PER_RULE, MAX_NAME_CHARS, MAX_RULE_SETS_PER_POLICY, MAX_RULES_PER_POLICY,
     MAX_TAGS, MAX_TEXT_CHARS, MAX_TREE_DEPTH, MAX_VALUE_BYTES, MAX_VALUES_PER_CRITERION,
 };
 use crate::model::settings::{ADVANCED_KEY_MAX_BYTES, is_valid_advanced_key, ranges};
 use crate::model::{
-    Action, Criterion, EnforcementOverride, FieldClass, Match, Metadata, PolicyDocument,
-    PrecedenceModel, Rule, RuleSetKind, Strength,
+    Action, ActionKind, Criterion, EnforcementOverride, FieldClass, Match, Metadata,
+    PolicyDocument, PrecedenceModel, Rule, RuleSetKind, Strength,
 };
 use crate::ops::{self, CompileErrorKind, CompiledCriterion, MAX_REGEXES_PER_POLICY};
 use crate::schema;
@@ -84,12 +89,14 @@ pub enum ErrorCode {
     DuplicateObjectType,
     /// Too many tags, or a tag that is empty, too long, or repeated.
     InvalidTag,
-    /// An allow rule's only identity is SHA-1 or MD5 (ADR 0008).
+    /// The only identity of a rule that lets an object run, trusts it or
+    /// excludes it is SHA-1 or MD5 (ADR 0008, #34).
     WeakHashOnlyAllow,
     /// The `allow_wins` model is not recommended for Essential Eight (ADR 0004).
     AllowWinsNotRecommended,
-    /// A path through a rule's tree has no positive identity criterion: an
-    /// allow rule's path of negations or context alone, or any rule's path
+    /// A path through a rule's tree has no positive identity criterion: a
+    /// path of negations or context alone in a rule that lets an object
+    /// run, trusts it or excludes it (#34), or any rule's path
     /// that includes a context criterion (#33). The message names the nodes
     /// on one such path.
     NoIdentityAnchor,
@@ -107,9 +114,29 @@ pub enum ErrorCode {
     PatternTooLarge,
     /// The policy holds more regular expressions than allowed (#32).
     TooManyRegexes,
-    /// An allow rule's strongest guaranteed identity is weak, such as a
-    /// file name or version-resource string (#31).
+    /// The strongest guaranteed identity of a rule that lets an object run,
+    /// trusts it or excludes it is weak, such as a file name or
+    /// version-resource string (#31, #34).
     WeakIdentity,
+    /// The action is not valid in a rule set of this kind (#34).
+    ActionNotValidInRuleSet,
+    /// The action, or one of its options, is not valid for an object type
+    /// the rule applies to (#34).
+    ActionNotValidForObjectType,
+    /// An action option is malformed or inconsistent (#34).
+    InvalidActionOption,
+    /// `log: never` or `log: summary` on an action that needs an event per
+    /// decision (#34).
+    LogLevelNotAllowed,
+    /// A notification text, notification setting or help URL is not valid (#34).
+    InvalidNotification,
+    /// An effect flag is outside its allowed range (#34).
+    InvalidEffect,
+    /// `effects` on an action that makes no decision (#34).
+    EffectsNotApplicable,
+    /// An `ignore` rule: a performance exclusion that needs the
+    /// `admin.exclusions` permission at the server (#34).
+    ExclusionNeedsPermission,
 }
 
 impl ErrorCode {
@@ -150,6 +177,14 @@ impl ErrorCode {
             Self::PatternTooLarge => "pattern_too_large",
             Self::TooManyRegexes => "too_many_regexes",
             Self::WeakIdentity => "weak_identity",
+            Self::ActionNotValidInRuleSet => "action_not_valid_in_rule_set",
+            Self::ActionNotValidForObjectType => "action_not_valid_for_object_type",
+            Self::InvalidActionOption => "invalid_action_option",
+            Self::LogLevelNotAllowed => "log_level_not_allowed",
+            Self::InvalidNotification => "invalid_notification",
+            Self::InvalidEffect => "invalid_effect",
+            Self::EffectsNotApplicable => "effects_not_applicable",
+            Self::ExclusionNeedsPermission => "exclusion_needs_permission",
         }
     }
 
@@ -157,7 +192,9 @@ impl ErrorCode {
     #[must_use]
     pub const fn severity(self) -> Severity {
         match self {
-            Self::AllowWinsNotRecommended | Self::WeakIdentity => Severity::Warning,
+            Self::AllowWinsNotRecommended | Self::WeakIdentity | Self::ExclusionNeedsPermission => {
+                Severity::Warning
+            }
             _ => Severity::Error,
         }
     }
@@ -433,7 +470,7 @@ impl Validator {
                         format!("rule ID {} is already used by {first}", rule.id),
                     );
                 }
-                if set.mandatory && !matches!(rule.action, Action::Deny {}) {
+                if set.mandatory && !matches!(rule.action, Action::Deny(_)) {
                     self.push(
                         ErrorCode::MandatoryRuleNotDeny,
                         &format!("{path}/action"),
@@ -448,6 +485,7 @@ impl Validator {
                     );
                 }
                 self.rule(&path, rule);
+                self.action(&path, set, rule);
             }
         }
     }
@@ -530,6 +568,8 @@ impl Validator {
 
         // The recursive analysis is bounded by the depth limit, so it only
         // runs on trees that passed it.
+        // Every action that lets an object run, trusts it or excludes it
+        // needs an identity, as an allow does (#34).
         if depth <= MAX_TREE_DEPTH {
             // The analysis is structural: it does not decide whether the
             // criteria on a path can all hold at once, so the messages name
@@ -540,11 +580,17 @@ impl Validator {
                 witness,
             } = guaranteed_identity(&rule.match_, "");
             let through = describe_witness(&witness);
-            match (rule.action, identity) {
-                (Action::Allow {}, Identity::None) => self.push(
+            let kind = rule.action.kind();
+            let rule_desc = if kind == ActionKind::Allow {
+                "this allow rule".to_owned()
+            } else {
+                format!("this `{kind}` rule")
+            };
+            match (kind.needs_identity(), identity) {
+                (true, Identity::None) => self.push(
                     ErrorCode::NoIdentityAnchor,
                     &tree,
-                    format!("this allow rule has a path through {through} with no positive identity criterion outside `not`, so the analysis cannot show that it identifies the object; every path through the tree needs one"),
+                    format!("{rule_desc} has a path through {through} with no positive identity criterion outside `not`, so the analysis cannot show that it identifies the object; every path through the tree needs one"),
                 ),
                 (_, Identity::None) if !context => self.push(
                     ErrorCode::NegationOnly,
@@ -556,15 +602,15 @@ impl Validator {
                     &tree,
                     format!("this rule has a path through {through} with no positive identity criterion, so the analysis cannot show that it identifies the object: user, device and session criteria narrow a rule, but every path through the tree also needs a positive identity criterion"),
                 ),
-                (Action::Allow {}, Identity::WeakHashOnly) => self.push(
+                (true, Identity::WeakHashOnly) => self.push(
                     ErrorCode::WeakHashOnlyAllow,
                     &tree,
-                    format!("this allow rule has a path through {through} whose only identity is SHA-1 or MD5, which are compatibility hashes (ADR 0008); require a SHA-256 or another identity on every path"),
+                    format!("{rule_desc} has a path through {through} whose only identity is SHA-1 or MD5, which are compatibility hashes (ADR 0008); require a SHA-256 or another identity on every path"),
                 ),
-                (Action::Allow {}, Identity::Weak) => self.push(
+                (true, Identity::Weak) => self.push(
                     ErrorCode::WeakIdentity,
                     &tree,
-                    format!("this allow rule has a path through {through} whose only identities are weak (file names, extensions or version-resource strings), which anyone can copy; add a hash, a publisher or a path"),
+                    format!("{rule_desc} has a path through {through} whose only identities are weak (file names, extensions or version-resource strings), which anyone can copy; add a hash, a publisher or a path"),
                 ),
                 _ => {}
             }
@@ -807,16 +853,22 @@ impl Validator {
         if let Some(ticket) = &m.ticket_ref {
             self.name(&format!("{base}/ticket_ref"), ticket);
         }
-        if m.tags.len() > MAX_TAGS {
+        self.tags(&format!("{base}/tags"), &m.tags);
+    }
+
+    /// Checks a list of tags: at most 64, each 1 to 128 characters, trimmed,
+    /// printable, and not repeated.
+    fn tags(&mut self, base: &str, tags: &[String]) {
+        if tags.len() > MAX_TAGS {
             self.push(
                 ErrorCode::InvalidTag,
-                &format!("{base}/tags"),
-                format!("{} tags; at most {MAX_TAGS} are allowed", m.tags.len()),
+                base,
+                format!("{} tags; at most {MAX_TAGS} are allowed", tags.len()),
             );
         }
         let mut seen = BTreeSet::new();
-        for (i, tag) in m.tags.iter().enumerate() {
-            let path = format!("{base}/tags/{i}");
+        for (i, tag) in tags.iter().enumerate() {
+            let path = format!("{base}/{i}");
             let chars = tag.chars().count();
             if tag.trim().is_empty()
                 || tag.trim() != tag

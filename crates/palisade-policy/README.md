@@ -2,7 +2,7 @@
 
 The policy model, conditions, precedence and evaluation, with a decision trace. Evaluation is pure and deterministic: no network or filesystem access.
 
-**Status:** the policy object model, its JSON Schema and validation are in place (#30), with a YAML front end (#190). Single criteria can be matched against an object's facts (#31, #32), and whole match trees can be evaluated, with context criteria for the user, device and session (#33). Precedence and the decision trace are still to come. Work is tracked in [#2](https://github.com/jusso-dev/palisade/issues/2).
+**Status:** the policy object model, its JSON Schema and validation are in place (#30), with a YAML front end (#190). Single criteria can be matched against an object's facts (#31, #32), and whole match trees can be evaluated, with context criteria for the user, device and session (#33). Rule actions, effect flags and the typed `Decision` are defined (#34). Precedence and the decision trace are still to come. Work is tracked in [#2](https://github.com/jusso-dev/palisade/issues/2).
 
 ## Modules
 
@@ -10,12 +10,42 @@ The policy model, conditions, precedence and evaluation, with a decision trace. 
 - `schema`: generates the JSON Schema (draft 2020-12) from the model. The generated schema is committed at [`schemas/policy/v1.json`](../../schemas/policy/v1.json).
 - `dsl`: reads and writes policy documents as YAML. The YAML form has the same fields as the JSON form, and the same JSON Schema validates both. Reading is strict and safe on untrusted input: YAML 1.2 only, no anchors, aliases, tags or merge keys, no duplicate keys or unknown fields, no scalar that YAML 1.1 and 1.2 type differently (such as `no` or `010`), and limits on size, depth, node count and parser lookahead. JSON input is read by a streaming JSON reader that builds the same tree under the same rules. Errors and warnings carry a line and column. Examples are in [`docs/examples/policies/`](../../docs/examples/policies/).
 - `validate`: `PolicyDocument::validate` reports every finding in one pass. Each finding has a stable code, a severity and the JSON Pointer of the field. It normalises hash values to lowercase hex, compiles every criterion, and flags rules that can match without a positive identity criterion (naming the criteria on one such path through the tree), rules that match on negations or context alone, allow rules whose only identity is weak, and unsupported regular expressions. A document that passes becomes a `ValidatedPolicy`.
+- `decision`: the typed `Decision` every consumer gets: outcome, the enforce-mode outcome (`would_have_been`), the deciding action and rule (`RuleRef`), `audit` annotations, the mode, directives, effects with defaults applied, a reason code and a trace ID. Its JSON form is stable and snapshot-tested. `Decision::from_rule` builds the enforce-mode decision of one deciding rule, and `Decision::implicit_deny` the decision when none decides. Combining rules is #35, and applying non-enforcing modes is #36.
 - `facts`: the facts about one object that criteria test (`ObjectFacts`): hashes, version-resource strings, the normalised path with its ACL safety, and the signatures with their verification status. Path variables (`%PROGRAMFILES%` and so on) are supplied per evaluation. Facts are computed elsewhere (#3, #4); this crate only reads them.
 - `context`: the user, device and session of one evaluation (`EvaluationContext`), which context criteria test: SIDs, group and tag sets, account names, host and domain names, the OS version, yes-or-no facts such as `user.is_admin`, and the session type. As with object facts, the agent collects them (#4); a fact that was not collected is unknown.
 - `condition`: compiles a rule's match tree (`CompiledMatch`) into an arena of compiled criteria and evaluates it with Kleene three-valued logic. `all` stops at the first `NoMatch` and `any` at the first `Match`, and the order of children never changes the result. Only `Match` makes a rule match, and `Unknown` counts as no match for every action. An allow rule therefore cannot allow on an unknown fact (it fails closed), but a deny rule does not block on one either. That is the default (`no_match`) that #32 sets for deny rules; the per-rule `unknown_as` option that can make a deny rule block on `Unknown` is part of precedence (#35).
 - `ops`: compiles one criterion (`CompiledCriterion`) and evaluates it against facts, giving `Match`, `NoMatch` or `Unknown` with notes for the decision trace. The module docs define the semantics: several values, negation of unknown facts, case folding and Unicode NFC, path normalisation and wildcards, alternate data streams, path variables, the path-ACL rule for allow rules, version comparison, and which signer statuses can match. Regular expressions use a linear-time engine; look-around and backreferences are rejected with a guided error.
 
 Each identity field has a strength (`Field::strength`, #31): strong for SHA-256-family and Authenticode SHA-256 hashes and the leaf thumbprint, medium for the publisher and full or directory paths, and weak for everything else. Path normalisation (`palisade_core::path`) is shared with the agent, so facts and rule values are normalised the same way.
+
+## Actions and effects
+
+An action is an object with a `type` and that action's options (#34). Each action is valid only in some rule set kinds and for some object types; validation reports a rule that breaks this table.
+
+| Action | Options | Decides? | Rule set kinds | Object types |
+|---|---|---|---|---|
+| `allow` | none | yes: allowed | allowlist, baseline, mixed | all |
+| `deny` | `kill_running`, `allow_request`, `request_template` | yes: blocked | blocklist, mixed | all; `kill_running` not for driver or library |
+| `audit` | none | no: an annotation | all | all |
+| `allow_contained` | `profile_id` (#14) | yes: allowed | allowlist, containment, mixed | not driver or library |
+| `allow_elevated` | `token_profile`, `condition` (`always`, `if_required`), `reason_prompt`, `auth` (`none`, `reauth`, `mfa`) (#12) | yes: allowed | elevation, mixed | executable, installer, script, control panel applet |
+| `trust_source` | `mode` (`direct`, `chained`), `scope_paths`, `tag_output` (#9, #114) | no: adds a directive | trust, mixed | executable, installer |
+| `ignore` | none | yes: ignored, nothing logged | mixed | not executable or driver |
+| `defer` | none | no: no opinion | all | all |
+
+An empty `object_types` list means every type, so a restricted action must list its types. `ignore` is for performance exclusions only: validation always warns (`exclusion_needs_permission`), and the server only accepts it from an administrator with the `admin.exclusions` permission (#10). Whether a path is user-writable is only known when a rule is evaluated (#54), so `ignore` never applies to executables or drivers. Every action that lets an object run, trusts it or excludes it needs a positive identity on every branch of its match tree, and only trusts a path users cannot write, as `allow` does. The engine passes the containment, elevation and trust-source directives through; their meaning belongs to the epics named.
+
+Every rule may have an `effects` block. Each flag is optional; an unset flag takes the action's default:
+
+| Action | `log` | `upload` | `notify` | `severity` | `suppress_duplicates_secs` |
+|---|---|---|---|---|---|
+| `allow`, `allow_contained` | `summary` | `batched` | `none` | `info` | 86400 |
+| `allow_elevated` | `always` | `immediate` | `none` | `info` | 600 |
+| `deny` | `always` | `immediate` | `default` | `medium` | 600 |
+| `audit` | `always` | `immediate` | `none` | `low` | 600 |
+| `trust_source` | `always` | `batched` | `none` | `info` | 600 |
+
+The de-duplication default follows the effective `log`: 86400 for `summary`, 0 for `never`, and 600 otherwise. `deny`, `audit`, `allow_elevated` and `trust_source` need an event per decision, so `log: never` and `log: summary` are errors on them. `notify: custom` needs a `notification_text` of at most 2048 characters with the placeholders `{file}`, `{publisher}`, `{rule}`, `{user}` and `{hash}` (`{{` and `}}` are literal braces). `help_url` must be an `https` URL whose host is a DNS name or a bracketed IPv6 address, with an optional port from 1 to 65535, no user information, and none of the characters RFC 3986 never allows (including `\`, which browsers read as `/`). A `reason_prompt` is one trimmed line of at most 256 characters. A `trust_source` scope path is a drive, UNC or known path variable (`%PROGRAMFILES%` and the others in `facts::PathVariable`) path; `%` is not allowed elsewhere in it, and paths must be unique when compared as the engine compares paths (without case or a trailing `\`). `tags` follow the metadata tag rules. `ignore` and `defer` make no decision, so they take no `effects`. A deny with `allow_request` needs a notification, cannot be mandatory, and may name a `request_template`. See [`docs/examples/policies/actions-and-effects.yaml`](../../docs/examples/policies/actions-and-effects.yaml).
 
 ## Schema versioning
 
@@ -42,6 +72,7 @@ An editor that uses the YAML language server then completes field names and enum
 - Unit tests per type for defaults, limits and every validation code.
 - Property tests over random valid documents (`model::arbitrary`): they validate, they match the JSON Schema, and they round-trip through JSON losslessly (10,000 cases; set `PROPTEST_CASES` to change).
 - YAML: property tests that random valid documents round-trip through YAML losslessly and byte-for-byte, and read the same as JSON (10,000 cases); unit tests for every strictness rule; and `tests/yaml.rs`, which checks the examples against the committed schema, reads every JSON fixture as YAML, and checks the codes, pointers and line:column of the fixtures in `tests/fixtures/yaml/`.
+- Actions: unit tests of the reader (options are checked as they are read, and an option of another action is an error at its key), the full validity matrix written out as a table, and each validation code. `Decision` JSON is compared with committed snapshots in `tests/snapshots/decision/`; after a deliberate change, regenerate them with `PALISADE_BLESS=1 cargo test -p palisade-policy decision::`.
 - Fixtures in `tests/fixtures/`: `valid/` documents pass the schema and validation; `invalid/` documents pass the schema but fail validation with the codes and paths in their `.expected` files; `malformed/` documents are rejected by the schema at the paths in their `.expected` files.
 
 ## Allowed dependencies

@@ -218,7 +218,7 @@ fn finance_example_keeps_the_admin_console_to_its_own_rule() {
     use palisade_policy::facts::{
         ObjectFacts, PathVariables, SignatureSource, SignerFact, SignerStatus,
     };
-    use palisade_policy::model::{Action, Field};
+    use palisade_policy::model::{ActionKind, Field};
     use palisade_policy::ops::EvalContext;
 
     let text = read(&manifest_dir().join("../../docs/examples/policies/finance-workstations.yaml"));
@@ -257,7 +257,7 @@ fn finance_example_keeps_the_admin_console_to_its_own_rule() {
         tree.eval(
             facts,
             &EvalContext {
-                action: Action::Allow {},
+                action: ActionKind::Allow,
                 variables: &variables,
                 context,
             },
