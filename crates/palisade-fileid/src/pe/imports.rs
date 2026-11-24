@@ -517,9 +517,21 @@ pub(super) fn parse_exports(
         .number_of_functions
         .min(MAX_EXPORT_SLOTS)
         .min(backed_slots);
-    // An export address table that the file does not hold in full is
-    // malformed, whether or not any name points into the missing part.
-    if info.number_of_functions.min(MAX_EXPORT_SLOTS) > backed_slots {
+    // A table the file does not hold in full is malformed, whether or not
+    // any entry points into the missing part, and however far past the
+    // scan caps it runs: the export address table (4 bytes per function),
+    // and the name pointer and ordinal tables (4 and 2 bytes per name).
+    let backed = |rva: u32, count: u32, size: u32| {
+        count == 0
+            || (rva != 0
+                && layout
+                    .backed_extent(rva)
+                    .is_some_and(|(_, n)| u64::from(n) >= u64::from(count) * u64::from(size)))
+    };
+    if !backed(functions, info.number_of_functions, 4)
+        || !backed(names, info.number_of_names, 4)
+        || !backed(ordinals, info.number_of_names, 2)
+    {
         bad.report(warnings);
         info.truncated = true;
     }

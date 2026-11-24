@@ -1349,8 +1349,9 @@ fn a_cut_value_is_never_a_keyword() {
     assert_eq!(m.ui_access, None);
     assert_eq!(m.auto_elevate, None);
     assert!(matches!(m.execution_level, Some(ExecutionLevel::Other(_))));
-    // The kept prefix is not re-trimmed into a shorter value.
-    assert_eq!(m.dpi_aware.unwrap().len(), pe::manifest::MAX_VALUE_LEN);
+    // The value is cut where it no longer fits: whitespace that cannot be
+    // kept is not, so what remains is the prefix, never a padded keyword.
+    assert_eq!(m.dpi_aware.as_deref(), Some("per monitor"));
 }
 
 #[test]
@@ -1419,4 +1420,129 @@ fn declarations_instructions_comments_and_characters_are_checked() {
             String::from_utf8_lossy(good)
         );
     }
+}
+
+// --- Round 5. -----------------------------------------------------------------
+
+fn settings(inner: &str) -> String {
+    format!(
+        "<assembly><application><windowsSettings>{inner}</windowsSettings></application></assembly>"
+    )
+}
+
+#[test]
+fn a_cut_is_detected_whatever_the_character_width() {
+    // A 2-, 3- and 4-byte character straddling the 1 KiB boundary, as text
+    // and as a character reference: always cut, never `true`.
+    for (spaces, ch) in [(1_020, "é"), (1_019, "€"), (1_018, "𝄞"), (1_020, "&#xe9;")] {
+        let pad = " ".repeat(spaces);
+        let xml = settings(&format!("<autoElevate>true{pad}{ch}invalid</autoElevate>"));
+        assert_eq!(
+            parse_manifest(xml.as_bytes()).unwrap().auto_elevate,
+            None,
+            "{ch}"
+        );
+    }
+    // Trailing padding alone is not a cut: the value is still `true`.
+    for spaces in [1_021, 5_000] {
+        let pad = " ".repeat(spaces);
+        let xml = settings(&format!("<autoElevate>true{pad}</autoElevate>"));
+        assert_eq!(
+            parse_manifest(xml.as_bytes()).unwrap().auto_elevate,
+            Some(true),
+            "{spaces}"
+        );
+    }
+    // Text that fits exactly is kept whole and not cut.
+    let exact = "x".repeat(pe::manifest::MAX_VALUE_LEN);
+    let m = parse_manifest(settings(&format!("<dpiAware>{exact}</dpiAware>")).as_bytes()).unwrap();
+    assert_eq!(m.dpi_aware.unwrap().len(), pe::manifest::MAX_VALUE_LEN);
+}
+
+#[test]
+fn only_xml_whitespace_is_whitespace() {
+    // U+00A0 is text in XML: outside the root it is an error, and around a
+    // keyword it makes the value something else.
+    for bad in ["\u{a0}<assembly/>", "<assembly/>\u{a0}"] {
+        assert!(
+            matches!(parse_manifest(bad.as_bytes()), Err(ManifestError::Xml(_))),
+            "{bad:?}"
+        );
+    }
+    let m = parse_manifest(level_manifest("\u{a0}asInvoker").as_bytes()).unwrap();
+    assert!(matches!(m.execution_level, Some(ExecutionLevel::Other(_))));
+    let m = parse_manifest(settings("<autoElevate>\u{a0}true</autoElevate>").as_bytes()).unwrap();
+    assert_eq!(m.auto_elevate, None);
+    // Tabs, CR and LF are whitespace.
+    let m =
+        parse_manifest(settings("<autoElevate>\t\r\ntrue\r\n</autoElevate>").as_bytes()).unwrap();
+    assert_eq!(m.auto_elevate, Some(true));
+}
+
+#[test]
+fn start_tags_and_declarations_are_checked_in_full() {
+    for bad in [
+        r#"<assembly b="1"c="2"/>"#,
+        r#"<assembly b="1<2"/>"#,
+        r#"<assembly b=1/>"#,
+        r#"<assembly b/>"#,
+        "<assembly>x]]>y</assembly>",
+        r#"<?xml version="1.0" encoding="UTF-8" NOT ?><assembly/>"#,
+        r#"<?xml version="1.0" version="1.0"?><assembly/>"#,
+        r#"<?xml encoding="UTF-8" version="1.0"?><assembly/>"#,
+        r#"<?xml version="1.0" standalone="maybe"?><assembly/>"#,
+        "<?xml version=\"1.0\"\u{1}?><assembly/>",
+        r#"<?xml?><assembly/>"#,
+    ] {
+        assert!(
+            parse_manifest(bad.as_bytes()).is_err(),
+            "{bad}: {:?}",
+            parse_manifest(bad.as_bytes())
+        );
+    }
+    for good in [
+        r#"<assembly  b = "1"	c='2' />"#,
+        r#"<?xml version="1.0" standalone="no"?><assembly/>"#,
+        r#"<?xml version='1.1' encoding='utf-8' standalone='yes' ?><assembly/>"#,
+    ] {
+        assert!(
+            parse_manifest(good.as_bytes()).is_ok(),
+            "{good}: {:?}",
+            parse_manifest(good.as_bytes())
+        );
+    }
+}
+
+#[test]
+fn line_ends_in_text_are_normalised() {
+    let m = parse_manifest(settings("<dpiAware>a\r\nb\rc</dpiAware>").as_bytes()).unwrap();
+    assert_eq!(m.dpi_aware.as_deref(), Some("a\nb\nc"));
+}
+
+#[test]
+fn oversized_export_tables_are_reported() {
+    // NumberOfFunctions beyond both the scan cap and the file: still
+    // malformed, though the cap is below what the file holds.
+    let functions = vec![0x1000_u32; 70_000];
+    let (mut image, start) = export_image(&[], &functions);
+    put32(&mut image, start + 20, 100_000);
+    let info = parse(&image);
+    assert!(
+        info.parse_warnings
+            .iter()
+            .any(|w| w.kind == WarningKind::ExportTableMalformed)
+    );
+    // NumberOfNames past the listing cap and past the file.
+    let names: Vec<(Vec<u8>, u16)> = (0..10_050)
+        .map(|i| (format!("N{i:05}").into_bytes(), 0))
+        .collect();
+    let (mut image, start) = export_image(&names, &[0x1000]);
+    put32(&mut image, start + 24, 1_000_000);
+    let info = parse(&image);
+    assert!(info.exports.as_ref().unwrap().truncated);
+    assert!(
+        info.parse_warnings
+            .iter()
+            .any(|w| w.kind == WarningKind::ExportTableMalformed)
+    );
 }

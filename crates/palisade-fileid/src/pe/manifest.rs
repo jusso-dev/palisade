@@ -165,6 +165,17 @@ impl fmt::Display for ManifestError {
 
 impl std::error::Error for ManifestError {}
 
+/// XML 1.0 `S`: space, tab, carriage return and line feed only. Unicode
+/// whitespace such as U+00A0 is ordinary text in XML.
+const fn is_xml_space(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\r' | '\n')
+}
+
+/// `s` without leading and trailing XML whitespace.
+fn xml_trim(s: &str) -> &str {
+    s.trim_matches(is_xml_space)
+}
+
 /// `s` cut to at most [`MAX_VALUE_LEN`] bytes on a character boundary, and
 /// whether anything was cut off. Not trimmed again afterwards: a cut value
 /// is never read as a keyword, whatever its prefix looks like.
@@ -188,7 +199,7 @@ struct Value {
 
 impl Value {
     fn new(s: &str) -> Self {
-        let (text, cut) = cut(s.trim());
+        let (text, cut) = cut(xml_trim(s));
         Self { text, cut }
     }
 
@@ -239,6 +250,114 @@ fn is_ncname(name: &str) -> bool {
     chars.next().is_some_and(start) && chars.all(rest)
 }
 
+/// Checks the inside of a start tag (`name attr="v" ...`, without `<`,
+/// `>` or a trailing `/`) against the XML 1.0 grammar: a valid name, then
+/// attributes each preceded by whitespace, as `Name Eq AttValue`, with no
+/// `<` in a value. The attribute parser in use is lenient about these, so
+/// they are checked here first.
+fn check_tag(raw: &[u8]) -> Result<(), ManifestError> {
+    let tag = std::str::from_utf8(raw).map_err(|_| ManifestError::NotUtf8)?;
+    let bad = |what: &str| Err(ManifestError::Xml(format!("malformed start tag: {what}")));
+    let name_end = tag.find(is_xml_space).unwrap_or(tag.len());
+    let (name, mut rest) = tag.split_at(name_end);
+    if !is_xml_name(name.as_bytes()) {
+        return bad("invalid element name");
+    }
+    loop {
+        let trimmed = rest.trim_start_matches(is_xml_space);
+        if trimmed.is_empty() {
+            return Ok(());
+        }
+        if trimmed.len() == rest.len() {
+            return bad("no whitespace before an attribute");
+        }
+        let eq = trimmed.find('=').unwrap_or(trimmed.len());
+        let attr = trimmed
+            .get(..eq)
+            .unwrap_or_default()
+            .trim_end_matches(is_xml_space);
+        if !is_xml_name(attr.as_bytes()) {
+            return bad("invalid attribute name");
+        }
+        let after = trimmed.get(eq..).unwrap_or_default();
+        let Some(after) = after.strip_prefix('=') else {
+            return bad("attribute without a value");
+        };
+        let after = after.trim_start_matches(is_xml_space);
+        let Some(quote) = after.chars().next().filter(|q| matches!(q, '"' | '\'')) else {
+            return bad("unquoted attribute value");
+        };
+        let body = after.get(1..).unwrap_or_default();
+        let Some(close) = body.find(quote) else {
+            return bad("unterminated attribute value");
+        };
+        let value = body.get(..close).unwrap_or_default();
+        if value.contains('<') {
+            return bad("`<` in an attribute value");
+        }
+        check_chars(value)?;
+        rest = body.get(close + 1..).unwrap_or_default();
+    }
+}
+
+/// Checks an XML declaration's content (`xml version="1.0" ...`) against
+/// the grammar: `version`, then optionally `encoding`, then optionally
+/// `standalone`, in that order, each once, with valid values.
+fn check_decl(raw: &[u8]) -> Result<(), ManifestError> {
+    let decl = std::str::from_utf8(raw).map_err(|_| ManifestError::NotUtf8)?;
+    let bad = || Err(ManifestError::Xml("malformed XML declaration".into()));
+    let Some(body) = decl.strip_prefix("xml") else {
+        return bad();
+    };
+    check_tag(format!("x{body}").as_bytes())?;
+    let mut order = Vec::new();
+    let mut rest = body;
+    loop {
+        rest = rest.trim_start_matches(is_xml_space);
+        if rest.is_empty() {
+            break;
+        }
+        let eq = rest.find('=').unwrap_or(rest.len());
+        let name = rest
+            .get(..eq)
+            .unwrap_or_default()
+            .trim_end_matches(is_xml_space);
+        let after = rest
+            .get(eq + 1..)
+            .unwrap_or_default()
+            .trim_start_matches(is_xml_space);
+        let quote = after.chars().next().unwrap_or('"');
+        let body = after.get(1..).unwrap_or_default();
+        let close = body.find(quote).unwrap_or(body.len());
+        let value = body.get(..close).unwrap_or_default();
+        let ok = match name {
+            "version" => order.is_empty() && matches!(value, "1.0" | "1.1"),
+            "encoding" => {
+                order == ["version"]
+                    && (value.eq_ignore_ascii_case("UTF-8") || value.eq_ignore_ascii_case("UTF8"))
+            }
+            "standalone" => {
+                matches!(order.as_slice(), ["version"] | ["version", "encoding"])
+                    && matches!(value, "yes" | "no")
+            }
+            _ => false,
+        };
+        if !ok {
+            if name == "encoding" && order == ["version"] {
+                return Err(ManifestError::NotUtf8);
+            }
+            return bad();
+        }
+        order.push(name);
+        rest = body.get(close + 1..).unwrap_or_default();
+    }
+    if order.first() == Some(&"version") {
+        Ok(())
+    } else {
+        bad()
+    }
+}
+
 /// Whether `c` is an XML 1.0 `Char`.
 const fn is_xml_char(c: char) -> bool {
     matches!(c, '\t' | '\n' | '\r' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..='\u{10FFFF}')
@@ -261,9 +380,7 @@ fn attrs<const N: usize>(
     e: &BytesStart<'_>,
     wanted: [&str; N],
 ) -> Result<[Option<Value>; N], ManifestError> {
-    if !is_xml_name(e.name().as_ref()) {
-        return Err(ManifestError::Xml("invalid element name".into()));
-    }
+    check_tag(e.as_ref())?;
     let mut out: [Option<Value>; N] = std::array::from_fn(|_| None);
     for a in e.attributes() {
         let a = a.map_err(|err| ManifestError::Xml(err.to_string()))?;
@@ -292,7 +409,7 @@ fn attrs<const N: usize>(
 }
 
 fn parse_bool(value: &str) -> Option<bool> {
-    let v = value.trim();
+    let v = xml_trim(value);
     if v.eq_ignore_ascii_case("true") {
         Some(true)
     } else if v.eq_ignore_ascii_case("false") {
@@ -331,24 +448,65 @@ const IDENTITY: [&str; 2] = ["assembly", "assemblyIdentity"];
 const SUPPORTED_OS: [&str; 4] = ["assembly", "compatibility", "application", "supportedOS"];
 const WINDOWS_SETTINGS: [&str; 3] = ["assembly", "application", "windowsSettings"];
 
-/// Appends a piece of a setting's text: leading whitespace is dropped while
-/// nothing else has arrived, so padding cannot crowd the value out, and the
-/// text never grows past one byte over [`MAX_VALUE_LEN`] (enough to know it
-/// was cut).
-fn append(text: &mut String, piece: &str) {
-    // `text` holds at most MAX_VALUE_LEN + 1 bytes; the extra byte is how
-    // a cut is detected.
-    let piece = if text.is_empty() {
-        piece.trim_start()
-    } else {
-        piece
-    };
-    let room = (MAX_VALUE_LEN + 1).saturating_sub(text.len());
-    let mut end = piece.len().min(room);
-    while !piece.is_char_boundary(end) {
-        end -= 1;
+/// A setting's text, gathered across text, references and CDATA.
+///
+/// Leading XML whitespace is dropped. Whitespace after the value is held
+/// back and kept only if more text follows it, so trailing padding is never
+/// stored and never counts towards the cap. Anything that does not fit in
+/// [`MAX_VALUE_LEN`] bytes is dropped and marks the text cut, so a cut is
+/// always detected, wherever a character boundary falls.
+#[derive(Default)]
+struct Text {
+    text: String,
+    /// Whitespace seen after the last non-space character, not yet kept.
+    pending: usize,
+    pending_text: String,
+    cut: bool,
+}
+
+impl Text {
+    fn clear(&mut self) {
+        *self = Self::default();
     }
-    text.push_str(piece.get(..end).unwrap_or_default());
+
+    fn push(&mut self, piece: &str) {
+        for c in piece.chars() {
+            if self.cut {
+                return;
+            }
+            if is_xml_space(c) {
+                if !self.text.is_empty() {
+                    self.pending = self.pending.saturating_add(1);
+                    // Held whitespace is bounded like the text: past the
+                    // cap it can only end up cut off anyway.
+                    if self.pending_text.len() <= MAX_VALUE_LEN {
+                        self.pending_text.push(c);
+                    }
+                }
+                continue;
+            }
+            let needed = self
+                .text
+                .len()
+                .saturating_add(self.pending)
+                .saturating_add(c.len_utf8());
+            if needed > MAX_VALUE_LEN {
+                self.cut = true;
+                return;
+            }
+            self.text.push_str(&self.pending_text);
+            self.pending_text.clear();
+            self.pending = 0;
+            self.text.push(c);
+        }
+    }
+
+    fn value(&self) -> Value {
+        Value {
+            text: self.text.clone(),
+            cut: self.cut,
+        }
+    }
 }
 
 /// Parses a manifest resource.
@@ -362,8 +520,8 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
     let data = data.strip_prefix(b"\xef\xbb\xbf").unwrap_or(data);
     let text = std::str::from_utf8(data).map_err(|_| ManifestError::NotUtf8)?;
     let mut reader = Reader::from_str(text);
-    // Text is kept as written and trimmed once it is joined, so whitespace
-    // next to a reference survives.
+    // Text is gathered as written (see `Text`), so whitespace next to a
+    // reference survives.
     let config = reader.config_mut();
     config.check_end_names = true;
     config.check_comments = true;
@@ -379,9 +537,9 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
     // written (`<x/>`, `<x></x>`, or a value that does not parse).
     let mut seen_text: Vec<TextField> = Vec::with_capacity(3);
     let mut text_field: Option<TextField> = None;
-    let mut text = String::new();
+    let mut text = Text::default();
     // Only whitespace may sit outside the root element.
-    let outside = |path: &Path, t: &str| path.0.is_empty() && !t.trim().is_empty();
+    let outside = |path: &Path, t: &str| path.0.is_empty() && !t.chars().all(is_xml_space);
     loop {
         let event = reader
             .read_event()
@@ -449,25 +607,32 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
                 }
             }
             Event::Text(t) => {
-                let raw = t.decode().map_err(|e| ManifestError::Xml(e.to_string()))?;
+                let raw = t
+                    .xml10_content()
+                    .map_err(|e| ManifestError::Xml(e.to_string()))?;
                 check_chars(&raw)?;
+                if raw.contains("]]>") {
+                    return Err(ManifestError::Xml("`]]>` in character data".into()));
+                }
                 if outside(&path, &raw) {
                     return Err(ManifestError::Xml("text outside the root element".into()));
                 }
                 if text_field.is_some() {
                     // References arrive as their own events, so the text is
                     // already plain.
-                    append(&mut text, &raw);
+                    text.push(&raw);
                 }
             }
             Event::CData(t) => {
-                let raw = t.decode().map_err(|e| ManifestError::Xml(e.to_string()))?;
+                let raw = t
+                    .xml10_content()
+                    .map_err(|e| ManifestError::Xml(e.to_string()))?;
                 check_chars(&raw)?;
                 if path.0.is_empty() {
                     return Err(ManifestError::Xml("CDATA outside the root element".into()));
                 }
                 if text_field.is_some() {
-                    append(&mut text, &raw);
+                    text.push(&raw);
                 }
             }
             Event::GeneralRef(r) => {
@@ -496,22 +661,13 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
                     ));
                 }
                 if text_field.is_some() {
-                    append(&mut text, &resolved);
+                    text.push(&resolved);
                 }
             }
             Event::End(_) => {
                 path.0.pop();
                 if let Some(field) = text_field.take() {
-                    // Leading whitespace was dropped as text arrived; the
-                    // trailing end is trimmed only if nothing was cut.
-                    let value = if text.len() > MAX_VALUE_LEN {
-                        Value {
-                            text: cut(&text).0,
-                            cut: true,
-                        }
-                    } else {
-                        Value::new(&text)
-                    };
+                    let value = text.value();
                     match field {
                         TextField::AutoElevate => out.auto_elevate = value.as_bool(),
                         TextField::DpiAware => out.dpi_aware = Some(value.text),
@@ -533,16 +689,7 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
                 if seen_anything {
                     return Err(ManifestError::Xml("misplaced XML declaration".into()));
                 }
-                let version = d.version().map_err(|e| ManifestError::Xml(e.to_string()))?;
-                if !matches!(version.as_ref(), b"1.0" | b"1.1") {
-                    return Err(ManifestError::Xml("bad XML version".into()));
-                }
-                if let Some(enc) = d.encoding() {
-                    let enc = enc.map_err(|e| ManifestError::Xml(e.to_string()))?;
-                    if !enc.eq_ignore_ascii_case(b"UTF-8") && !enc.eq_ignore_ascii_case(b"UTF8") {
-                        return Err(ManifestError::NotUtf8);
-                    }
-                }
+                check_decl(d.as_ref())?;
             }
             Event::PI(pi) => {
                 let target = pi.target();
