@@ -61,7 +61,7 @@ pub fn render(
             base_count,
         );
         out.push_str(&format!(
-            "\n### Change in third-party `unsafe` against the base branch\n\nFlagged: a new crate with more than {jump} `unsafe` keywords, or a new version with more than {jump} more than the version it replaces. The old count needs the old version's source, so it is shown only when that source is in the local registry cache.\n\n",
+            "\n### Change in third-party `unsafe` against the base branch\n\nFlagged: a new crate with more than {jump} `unsafe` keywords, or a new version with more than {jump} more than the version it replaces. Old counts come from the base commit's own locked packages.\n\n",
             jump = supply_chain::UNSAFE_JUMP
         ));
         if changes.is_empty() {
@@ -123,6 +123,43 @@ pub fn git_show(root: &Path, commit: &str, path: &str) -> Result<String, String>
         ));
     }
     String::from_utf8(output.stdout).map_err(|_| format!("{path} at {commit} is not UTF-8"))
+}
+
+/// `cargo metadata` for the base commit, from a temporary git worktree of it
+/// (detached, removed again before returning). `metadata` runs cargo
+/// metadata in a directory.
+pub fn base_metadata(
+    root: &Path,
+    commit: &str,
+    metadata: impl Fn(&Path) -> Result<Value, String>,
+) -> Result<Value, String> {
+    if commit.is_empty() || commit.starts_with('-') {
+        return Err(format!("not a commit: `{commit}`"));
+    }
+    let dir = std::env::temp_dir().join(format!("xtask-base-{}", std::process::id()));
+    let git = |args: &[&str]| -> Result<(), String> {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .output()
+            .map_err(|e| format!("cannot run git: {e}"))?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(format!(
+                "git {} failed: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&output.stderr).trim()
+            ))
+        }
+    };
+    let dir_str = dir.to_string_lossy().into_owned();
+    git(&["worktree", "add", "--detach", "--quiet", &dir_str, commit])?;
+    let result = metadata(&dir);
+    let removed = git(&["worktree", "remove", "--force", &dir_str]);
+    let value = result?;
+    removed?;
+    Ok(value)
 }
 
 /// `cargo tree --duplicates` over the whole workspace, every platform.

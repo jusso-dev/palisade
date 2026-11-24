@@ -41,7 +41,7 @@ less.
 | Advisories | `cargo deny check advisories`, `cargo xtask audit` (cargo-audit with the same ignores) | No known vulnerability, unsound or yanked crate. Unmaintained crates fail when a workspace crate depends on them directly. |
 | Audits | `cargo vet --locked` | Every crate is audited, covered by an imported audit, or exempted with a note (below). |
 | Repository rules | `cargo xtask check-supply-chain` | At most 10 crates in more than one version. Every advisory ignore has an ID, a reason and an `expiry` date that has not passed, and no `audit.toml` exists. Every skip has a `reason`, and every licence exception a `# reason:` comment. The cargo-vet criteria for each workspace crate, no `[policy]` entry that lowers what dependencies need, and a note on every exemption. |
-| Report | `cargo xtask deps-report` | On a PR that changes `Cargo.lock`, the job summary shows duplicates, `cargo tree -d`, third-party crates per workspace crate, every third-party crate's `unsafe` count with the change against the base branch, and the build scripts and proc-macros. A new crate with more than 100 `unsafe` keywords, or a version that adds more than 100 compared with the version it replaces, raises a warning on the run. The old count needs the old version's source; when it is not in the local cache, the change is shown without a warning rather than raising a false one. |
+| Report | `cargo xtask deps-report` | On a PR that changes `Cargo.lock`, the job summary shows duplicates, `cargo tree -d`, third-party crates per workspace crate, every third-party crate's `unsafe` count with the change against the base branch, and the build scripts and proc-macros. A new crate with more than 100 `unsafe` keywords, or a version that adds more than 100 compared with the version it replaces, raises a warning on the run. The old counts come from the base commit: the report checks it out in a temporary git worktree and runs `cargo metadata --locked` there, which downloads and unpacks its locked crates.io packages (checksum-verified; nothing is built). If that fails, the change is shown without a warning rather than raising a false one. |
 
 Advisories are also scanned daily (`audit.yml`), because a new advisory can affect `main`
 without any change here. A failure opens or updates an issue labelled `area:security`.
@@ -68,8 +68,14 @@ entry. Review the advisory again, and renew the date with a new reason or remove
 which passes the same IDs as `--ignore`, so both tools agree. A cargo-audit `audit.toml` anywhere
 in the repository fails `check-supply-chain`, because it would bypass these rules.
 
+An ignore has exactly these three keys. cargo-deny also accepts `allow`, which limits an ignore to
+some dependents, but cargo-audit cannot scope an ignore, so `allow` is rejected to keep the two
+tools in step. `cargo xtask audit` runs these checks before cargo-audit, so an expired or incomplete
+ignore also fails the daily audit.
+
 A licence exception works the same way, except that cargo-deny has no `reason` key for it: write a
-`# reason: ...` comment on the line above each entry in `[licenses] exceptions`.
+`# reason: ...` comment on the line directly above each entry in `[licenses] exceptions`, in the
+inline-array or the `[[licenses.exceptions]]` form. Each entry needs its own comment.
 
 ## cargo-vet
 

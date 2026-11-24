@@ -281,17 +281,27 @@ fn check_supply_chain(root: &Path) -> Result<Vec<String>, String> {
 }
 
 /// `cargo xtask audit`: cargo-audit with exactly the advisory ignores from
-/// `deny.toml`, so the two tools agree. Exits with cargo-audit's status.
+/// `deny.toml`, so the two tools agree. The ignores are checked first (ID,
+/// reason, an expiry date that has not passed, no scope), so an expired or
+/// incomplete ignore fails here too, including in the daily audit. Exits
+/// with cargo-audit's status.
 fn run_audit() -> ExitCode {
     let root = workspace_root();
-    let ignores =
-        match read(&root.join("deny.toml")).and_then(|s| supply_chain::ignored_advisories(&s)) {
-            Ok(ignores) => ignores,
-            Err(error) => {
-                eprintln!("audit: error: {error}");
-                return ExitCode::FAILURE;
-            }
-        };
+    let checked = read(&root.join("deny.toml")).and_then(|source| {
+        let violations = supply_chain::check_deny_toml(&source, &supply_chain::today_utc()?)?;
+        if violations.is_empty() {
+            supply_chain::ignored_advisories(&source)
+        } else {
+            Err(violations.join("\n"))
+        }
+    });
+    let ignores = match checked {
+        Ok(ignores) => ignores,
+        Err(error) => {
+            eprintln!("audit: error: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let mut command = Command::new(cargo);
     command.arg("audit").current_dir(&root);
@@ -331,9 +341,23 @@ fn deps_report(base: Option<&str>) -> ExitCode {
             None => (None, None),
         };
         let metadata = cargo_metadata(&root, &["--all-features"])?;
-        // Old versions' sources, when they are still in the registry cache
-        // next to the current ones.
-        let registries = supply_chain::registry_dirs(&metadata);
+        // The base commit's packages: `cargo metadata --locked` in a worktree
+        // of it makes Cargo download and unpack exactly its locked crates.io
+        // packages (checksum-verified, no build scripts run), so their
+        // `unsafe` can be counted. The worktree is removed afterwards.
+        let mut registries = supply_chain::registry_dirs(&metadata);
+        if let (Some(base), Some(_)) = (base, &base_lock) {
+            match report::base_metadata(&root, base, |dir| cargo_metadata(dir, &["--all-features"]))
+            {
+                Ok(base_metadata) => registries.extend(supply_chain::registry_dirs(&base_metadata)),
+                Err(error) => eprintln!(
+                    "::warning title=Base dependencies not unpacked::{}",
+                    error.replace(['\n', '\r', '%'], " ")
+                ),
+            }
+            registries.sort();
+            registries.dedup();
+        }
         let base_count = |name: &str, version: &str| {
             registries.iter().find_map(|dir| {
                 let crate_dir = dir.join(format!("{name}-{version}"));

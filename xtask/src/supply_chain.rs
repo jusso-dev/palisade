@@ -163,6 +163,16 @@ pub fn check_deny_toml(source: &str, today: &str) -> Result<Vec<String>, String>
             continue;
         };
         let id = entry.get("id").and_then(toml::Value::as_str).unwrap_or("");
+        // cargo-deny also accepts `allow`, which limits an ignore to some
+        // dependents. cargo-audit has no such scope and would ignore the
+        // advisory everywhere, so the two tools would disagree.
+        for key in entry.keys() {
+            if !["id", "reason", "expiry"].contains(&key.as_str()) {
+                v.push(format!(
+                    "{at} ({id}): `{key}` is not allowed; an ignore has only `id`, `reason` and `expiry`, so cargo-deny and cargo-audit ignore the same thing"
+                ));
+            }
+        }
         if !is_advisory_id(id) {
             v.push(format!(
                 "{at}: `id` must be an advisory ID such as RUSTSEC-2024-0001, not `{id}`"
@@ -200,18 +210,89 @@ pub fn check_deny_toml(source: &str, today: &str) -> Result<Vec<String>, String>
             }
         }
     }
-    let exceptions = deny
-        .get("licenses")
-        .and_then(|l| l.get("exceptions"))
-        .and_then(toml::Value::as_array)
-        .map_or(0, Vec::len);
-    let commented = exception_reason_comments(source);
-    if commented < exceptions {
-        v.push(format!(
-            "deny.toml: licenses.exceptions has {exceptions} entries but {commented} `# reason:` comments; put one on the line above each entry"
-        ));
+    for (i, start) in exception_starts(source)?.into_iter().enumerate() {
+        if !reason_comment_above(source, start) {
+            v.push(format!(
+                "deny.toml: licenses.exceptions[{i}] needs a `# reason: ...` comment on the line directly above it"
+            ));
+        }
     }
     Ok(v)
+}
+
+/// Byte offsets where each `[licenses] exceptions` entry starts, from the
+/// parser's spans, so inline arrays, multi-line entries and
+/// `[[licenses.exceptions]]` tables are all handled as TOML defines them.
+fn exception_starts(source: &str) -> Result<Vec<usize>, String> {
+    type Spanned = toml::Spanned<toml::Value>;
+    let invalid = |e: toml::de::Error| format!("deny.toml: invalid TOML: {e}");
+    let doc: BTreeMap<String, toml::Spanned<BTreeMap<String, Spanned>>> =
+        toml::from_str(source).map_err(invalid)?;
+    let Some(exceptions) = doc
+        .get("licenses")
+        .and_then(|l| l.get_ref().get("exceptions"))
+    else {
+        return Ok(Vec::new());
+    };
+    let Some(entries) = exceptions.get_ref().as_array() else {
+        return Ok(Vec::new());
+    };
+    let text = source.get(exceptions.span()).unwrap_or_default();
+    if text.trim_start().starts_with("[[") {
+        // Array of tables: the span covers the first `[[licenses.exceptions]]`
+        // header only, so find every header line.
+        let mut starts = Vec::new();
+        let mut offset = 0;
+        for line in source.split_inclusive('\n') {
+            let header = line.trim().split('#').next().unwrap_or("").trim();
+            if header.replace(' ', "") == "[[licenses.exceptions]]" {
+                starts.push(offset + line.len() - line.trim_start().len());
+            }
+            offset += line.len();
+        }
+        if starts.len() != entries.len() {
+            return Err(format!(
+                "deny.toml: found {} `[[licenses.exceptions]]` headers for {} entries",
+                starts.len(),
+                entries.len()
+            ));
+        }
+        return Ok(starts);
+    }
+    // Inline array: parse just the array, keeping each entry's span.
+    let wrapped = format!("x = {text}");
+    let array: BTreeMap<String, Vec<Spanned>> = toml::from_str(&wrapped).map_err(invalid)?;
+    let base = exceptions.span().start;
+    Ok(array
+        .get("x")
+        .into_iter()
+        .flatten()
+        .map(|entry| base + entry.span().start - "x = ".len())
+        .collect())
+}
+
+/// `true` if the line directly above the one holding `offset` is a
+/// non-empty `# reason: ...` comment.
+fn reason_comment_above(source: &str, offset: usize) -> bool {
+    let before = source.get(..offset).unwrap_or_default();
+    let Some(line_start) = before.rfind('\n') else {
+        return false;
+    };
+    // Text on the entry's own line before it must be whitespace only, so a
+    // comment above a line that also holds another entry does not count
+    // for both.
+    if !before
+        .get(line_start + 1..)
+        .unwrap_or_default()
+        .trim()
+        .is_empty()
+    {
+        return false;
+    }
+    let above = before.get(..line_start).unwrap_or_default();
+    let line = above.rsplit('\n').next().unwrap_or_default().trim();
+    line.strip_prefix("# reason:")
+        .is_some_and(|reason| !reason.trim().is_empty())
 }
 
 /// Advisory IDs ignored in `deny.toml`, to pass to cargo-audit as
@@ -230,34 +311,6 @@ pub fn ignored_advisories(source: &str) -> Result<Vec<String>, String> {
         .filter(|id| is_advisory_id(id))
         .map(str::to_owned)
         .collect())
-}
-
-/// `# reason:` comment lines inside the `exceptions = [ ... ]` array of the
-/// `[licenses]` table.
-fn exception_reason_comments(source: &str) -> usize {
-    let mut in_licenses = false;
-    let mut in_exceptions = false;
-    let mut count = 0;
-    for line in source.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('[') && !trimmed.starts_with("[[") && !in_exceptions {
-            in_licenses = trimmed == "[licenses]";
-            continue;
-        }
-        if in_licenses && !in_exceptions && trimmed.starts_with("exceptions") {
-            in_exceptions = !trimmed.ends_with(']');
-            continue;
-        }
-        if in_exceptions {
-            if trimmed.starts_with("# reason:") && trimmed.len() > "# reason:".len() {
-                count += 1;
-            }
-            if trimmed == "]" {
-                in_exceptions = false;
-            }
-        }
-    }
-    count
 }
 
 /// Repository-relative paths of tracked files named `audit.toml` (cargo-audit
@@ -759,7 +812,7 @@ exceptions = [
         let v = check_deny_toml(deny, "2026-11-24").unwrap();
         assert_eq!(v.len(), 4, "{v:?}");
         assert!(
-            v[3].contains("1 entries but 0 `# reason:` comments"),
+            v[3].contains("licenses.exceptions[0] needs a `# reason: ...`"),
             "{v:?}"
         );
     }
@@ -937,6 +990,60 @@ criteria = "safe-to-deploy"
                 ("new: `small` 0.1.0, 3 `unsafe`", false),
             ]
         );
+    }
+
+    #[test]
+    fn every_exception_needs_its_own_reason_in_any_toml_form() {
+        let check = |licenses: &str| {
+            check_deny_toml(&format!("[licenses]\n{licenses}"), "2026-11-24")
+                .unwrap()
+                .len()
+        };
+        // Inline, multi-line entries with a nested array, comments after
+        // the closing brackets.
+        assert_eq!(
+            check(
+                "exceptions = [\n    # reason: a\n    { crate = \"a\", allow = [\n        \"GPL-3.0\",\n    ] },\n    # reason: b\n    { crate = \"b\", allow = [\"MIT\"] }, # x\n] # end\n"
+            ),
+            0
+        );
+        // Two reasons above one entry do not cover an entry without one.
+        assert_eq!(
+            check(
+                "exceptions = [\n    # reason: a\n    # reason: again\n    { crate = \"a\", allow = [\"x\"] },\n    { crate = \"b\", allow = [\"y\"] },\n]\n"
+            ),
+            1
+        );
+        // Two entries on one line share no comment.
+        assert_eq!(
+            check(
+                "exceptions = [\n    # reason: a\n    { crate = \"a\", allow = [\"x\"] }, { crate = \"b\", allow = [\"y\"] },\n]\n"
+            ),
+            1
+        );
+        // Array of tables, and a commented `[licenses]` header.
+        let tables = "# reason: a\n[[licenses.exceptions]]\ncrate = \"a\"\nallow = [\"x\"]\n\n[[licenses.exceptions]] # no reason\ncrate = \"b\"\nallow = [\"y\"]\n";
+        let v = check_deny_toml(tables, "2026-11-24").unwrap();
+        assert_eq!(
+            v,
+            [
+                "deny.toml: licenses.exceptions[1] needs a `# reason: ...` comment on the line directly above it"
+            ]
+        );
+        assert_eq!(check("# c\nexceptions = []\n"), 0);
+        assert_eq!(
+            check("exceptions = [\n    # reason:\n    { crate = \"a\", allow = [\"x\"] },\n]"),
+            1
+        );
+    }
+
+    #[test]
+    fn ignores_may_not_be_scoped() {
+        let deny = r#"[advisories]
+ignore = [{ id = "RUSTSEC-2024-0001", reason = "r", expiry = "2027-01-01", allow = ["xtask"] }]"#;
+        let v = check_deny_toml(deny, "2026-11-24").unwrap();
+        assert_eq!(v.len(), 1);
+        assert!(v[0].contains("`allow` is not allowed"), "{v:?}");
     }
 
     #[test]
