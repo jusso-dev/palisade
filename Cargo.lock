@@ -493,6 +493,7 @@ version = "0.1.0"
 dependencies = [
  "boon",
  "palisade-core",
+ "palisade-fileid",
  "palisade-policy",
  "proptest",
  "schemars",

@@ -88,6 +88,17 @@ fn schema_and_validate_agree_on_cross_field_rules() {
         (by_schema, by_rust)
     };
     assert_eq!(check(&base()), (true, true));
+    for script in [
+        serde_json::json!({ "path": "a.ps1" }),
+        serde_json::json!({ "inline": true }),
+    ] {
+        let mut v = base();
+        v["script"] = script.clone();
+        assert_eq!(check(&v), (true, true), "{script}");
+    }
+    let mut v = base();
+    v["user"] = serde_json::json!({ "sid": "S-1-0x000100000000-1" });
+    assert_eq!(check(&v), (true, true), "hex authority sid");
     let mut cases = Vec::new();
     let mut v = base();
     v["category"] = "script".into();
@@ -119,6 +130,27 @@ fn schema_and_validate_agree_on_cross_field_rules() {
     let mut v = base();
     v["extra"] = 1.into();
     cases.push(("unknown field", v));
+    let mut v = base();
+    v["prev_hash"] = serde_json::Value::Null;
+    cases.push(("seq 1 with null prev_hash", v));
+    let mut v = base();
+    v["file"] = serde_json::Value::Null;
+    cases.push(("required field set null", v));
+    let mut v = base();
+    v["mode"] = serde_json::Value::Null;
+    cases.push(("optional field null", v));
+    let mut v = base();
+    v["script"] = serde_json::json!({});
+    cases.push(("script with neither path nor inline", v));
+    let mut v = base();
+    v["script"] = serde_json::json!({ "path": null, "inline": true });
+    cases.push(("script with null path", v));
+    let mut v = base();
+    v["ts"] = "2026-11-24T23:59:60.000000Z".into();
+    cases.push(("leap second", v));
+    let mut v = base();
+    v["user"] = serde_json::json!({ "sid": "s-1-5-18" });
+    cases.push(("lowercase sid", v));
     for (name, value) in cases {
         assert_eq!(check(&value), (false, false), "{name}");
     }

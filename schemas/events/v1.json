@@ -5,53 +5,30 @@
       "description": "Agent state.",
       "properties": {
         "cache": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/CacheStats"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/CacheStats",
           "description": "Identity cache counters."
         },
         "dropped_count": {
           "description": "Events dropped since the last report. Drops are always counted, never\nsilent.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         },
         "health": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/HealthStatus"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/HealthStatus",
           "description": "The overall health."
         },
         "tamper_attempts": {
           "description": "Tamper attempts since the last report.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         },
         "throttled_count": {
           "description": "Events throttled since the last report.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         }
       },
       "type": "object"
@@ -64,28 +41,19 @@
           "description": "Entries in the cache.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         },
         "hits": {
           "description": "Lookups answered from the cache.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         },
         "misses": {
           "description": "Lookups not answered from the cache.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         }
       },
       "type": "object"
@@ -292,31 +260,14 @@
           "description": "The alternate data stream name, if the target is a stream.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "created": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Timestamp"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/Timestamp",
           "description": "When the file was created."
         },
         "device_type": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/DeviceType"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/DeviceType",
           "description": "The kind of device the file is on."
         },
         "hashes": {
@@ -324,64 +275,34 @@
           "description": "The file's digests."
         },
         "modified": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Timestamp"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/Timestamp",
           "description": "When the file was last modified."
         },
         "object_type": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ObjectType"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/ObjectType",
           "description": "The object class."
         },
         "owner_sid": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Sid"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/Sid",
           "description": "The SID of the file owner."
         },
         "package_name": {
           "description": "For packaged apps: the package family or full name.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "path": {
           "description": "The path as reported, for example a device path.",
           "maxLength": 32767,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "path_normalised": {
           "description": "The path with drive letters and `%ENV%` substitutions.",
           "maxLength": 32767,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "signers": {
           "description": "The file's signatures, leaf first.",
@@ -395,17 +316,11 @@
           "description": "The size in bytes.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         },
         "user_writable_location": {
           "description": "Whether a standard user can write to the file's location.",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": "boolean"
         },
         "version_info": {
           "$ref": "#/$defs/VersionInfo",
@@ -426,42 +341,27 @@
         "authenticode_sha1": {
           "description": "SHA-1 signature digest. Interop only.",
           "pattern": "^[0-9a-f]{40}$",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "authenticode_sha256": {
           "description": "SHA-256 signature digest.",
           "pattern": "^[0-9a-f]{64}$",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "md5": {
           "description": "MD5 of the file. Interop only.",
           "pattern": "^[0-9a-f]{32}$",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "sha1": {
           "description": "SHA-1 of the file. Interop only.",
           "pattern": "^[0-9a-f]{40}$",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "sha256": {
           "description": "SHA-256 of the file.",
           "pattern": "^[0-9a-f]{64}$",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         }
       },
       "type": "object"
@@ -494,37 +394,25 @@
           "description": "The Palisade agent version.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "arch": {
           "description": "The CPU architecture, for example `x86_64` or `aarch64`.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "domain": {
           "description": "The directory domain the device is joined to.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "fqdn": {
           "description": "The fully qualified domain name.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "groups": {
           "description": "The device groups it belongs to, at most 64.",
@@ -552,28 +440,19 @@
           "description": "The host name. Dropped in anonymous mode (#228).",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "os": {
           "description": "The operating system, for example `Windows 11 Enterprise`.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "os_build": {
           "description": "The OS build, for example `26100.2314`.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         }
       },
       "required": [
@@ -742,189 +621,114 @@
         "catalog_sha1": {
           "description": "The SHA-1 digest used for catalog lookup. Interop only.",
           "pattern": "^[0-9a-f]{40}$",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "catalog_sha256": {
           "description": "The SHA-256 digest used for catalog lookup.",
           "pattern": "^[0-9a-f]{64}$",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "clsid": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Guid"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/Guid",
           "description": "The COM class ID, for COM activation events."
         },
         "fqbn": {
           "description": "The fully qualified binary name (publisher, product, file name and\nversion), verbatim.",
           "maxLength": 32767,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "managed_installer_enabled": {
           "description": "Whether the native policy trusts files from a managed installer.",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": "boolean"
         },
         "passes_managed_installer": {
           "description": "Whether the file carried a managed-installer origin claim.",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": "boolean"
         },
         "policy_audit_mode": {
           "description": "Whether the native policy was in audit mode.",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": "boolean"
         },
         "policy_count": {
           "description": "How many policies an activation or refresh covered.",
           "format": "uint32",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         },
         "policy_guid": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Guid"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/Guid",
           "description": "The native policy's GUID."
         },
         "policy_hash": {
           "description": "The native policy's hash.",
           "pattern": "^([0-9a-f]{2}){1,64}$",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "policy_id": {
           "description": "The native policy's ID string.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "policy_name": {
           "description": "The native policy's name.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "policy_options": {
           "description": "The native policy's option bits, as the OS reports them on activation.",
           "format": "uint32",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         },
         "requested_signing_level": {
           "description": "The signing level the caller requested (code 0 to 14).",
           "format": "uint8",
           "maximum": 255,
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         },
         "rule_guid": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Guid"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/Guid",
           "description": "The native rule's GUID."
         },
         "rule_hash": {
           "description": "The hash the rule-collection engine computed for hash rules. Its\nalgorithm depends on the file type, so it is not one of [`Hashes`].",
           "pattern": "^([0-9a-f]{2}){1,64}$",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "rule_name": {
           "description": "The native rule's name.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "rule_sddl": {
           "description": "The native rule's security descriptor (SDDL).",
           "maxLength": 32767,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "signing_scenario": {
           "description": "The signing scenario: 0 for kernel mode, 1 for user mode.",
           "format": "uint32",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         },
         "status_code": {
           "description": "The OS status code (an NTSTATUS value).",
           "format": "uint32",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         },
         "validated_signing_level": {
           "description": "The signing level the OS validated (code 0 to 14).",
           "format": "uint8",
           "maximum": 255,
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         }
       },
       "type": "object"
@@ -964,30 +768,17 @@
           "description": "The download URL.",
           "maxLength": 32767,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "motw_zone": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Zone"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/Zone",
           "description": "The zone in the file's mark of the web."
         },
         "referrer_url": {
           "description": "The referring page.",
           "maxLength": 32767,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         }
       },
       "type": "object"
@@ -1040,10 +831,7 @@
           "description": "The command line. Collected only when permitted, and redacted by\ndefault (#228).",
           "maxLength": 32767,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "hashes": {
           "$ref": "#/$defs/Hashes",
@@ -1053,70 +841,37 @@
           "description": "The image path as reported, for example a device path.",
           "maxLength": 32767,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "image_path_normalised": {
           "description": "The image path with drive letters and `%ENV%` substitutions.",
           "maxLength": 32767,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "integrity_level": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/IntegrityLevel"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/IntegrityLevel",
           "description": "The process integrity level."
         },
         "origin": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Origin"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/Origin",
           "description": "Where the image came from."
         },
         "owner_sid": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Sid"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/Sid",
           "description": "The SID of the process owner."
         },
         "pid": {
           "description": "The process ID.",
           "format": "uint32",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         },
         "process_key": {
           "description": "A key that identifies the process uniquely on the device, assigned\nby the agent's process tracker (#59). Process IDs are reused; this is not.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "signers": {
           "description": "The image's signatures, leaf first.",
@@ -1127,14 +882,7 @@
           "type": "array"
         },
         "token_elevation_type": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TokenElevationType"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/TokenElevationType",
           "description": "The token elevation type."
         },
         "version_info": {
@@ -1155,81 +903,41 @@
         "hash": {
           "description": "The SHA-256 of the policy bundle.",
           "pattern": "^[0-9a-f]{64}$",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "id": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/PolicyId"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/PolicyId",
           "description": "The policy ID."
         },
         "name": {
           "description": "The policy name.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "profile_id": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Uuid7"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/Uuid7",
           "description": "The profile the policy was assigned through."
         },
         "rule_id": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RuleId"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/RuleId",
           "description": "The rule that decided."
         },
         "rule_name": {
           "description": "The rule's name.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "rule_type": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Token"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/Token",
           "description": "The kind of rule, for example `hash`, `publisher` or `path`."
         },
         "version": {
           "description": "The policy revision.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         }
       },
       "type": "object"
@@ -1242,20 +950,10 @@
           "description": "The command line. Collected only when permitted, and redacted by\ndefault (#228).",
           "maxLength": 32767,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "grandparent": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ProcessSummary"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/ProcessSummary",
           "description": "A summary of the grandparent process."
         },
         "hashes": {
@@ -1266,81 +964,41 @@
           "description": "The image path as reported, for example a device path.",
           "maxLength": 32767,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "image_path_normalised": {
           "description": "The image path with drive letters and `%ENV%` substitutions.",
           "maxLength": 32767,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "integrity_level": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/IntegrityLevel"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/IntegrityLevel",
           "description": "The process integrity level."
         },
         "origin": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Origin"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/Origin",
           "description": "Where the image came from."
         },
         "owner_sid": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Sid"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/Sid",
           "description": "The SID of the process owner."
         },
         "parent": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ParentProcess"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/ParentProcess",
           "description": "The parent process, with the same fields."
         },
         "pid": {
           "description": "The process ID.",
           "format": "uint32",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         },
         "process_key": {
           "description": "A key that identifies the process uniquely on the device, assigned\nby the agent's process tracker (#59). Process IDs are reused; this is not.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "signers": {
           "description": "The image's signatures, leaf first.",
@@ -1351,14 +1009,7 @@
           "type": "array"
         },
         "token_elevation_type": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TokenElevationType"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/TokenElevationType",
           "description": "The token elevation type."
         },
         "version_info": {
@@ -1376,28 +1027,19 @@
           "description": "The image path.",
           "maxLength": 32767,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "pid": {
           "description": "The process ID.",
           "format": "uint32",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         },
         "process_key": {
           "description": "The process key (#59).",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         }
       },
       "type": "object"
@@ -1413,23 +1055,17 @@
     },
     "Script": {
       "additionalProperties": false,
-      "description": "A script.\n\nA script is either a file (`path`) or inline text (`inline`), never both.\nA file-backed script's digests and signatures are in [`Event::file`].",
+      "description": "A script.\n\nA script is either a file (`path`) or inline text (`inline: true`):\nexactly one of the two.\nA file-backed script's digests and signatures are in [`Event::file`].",
       "properties": {
         "amsi_content_sha256": {
           "description": "SHA-256 of the content passed to the antimalware scan interface.",
           "pattern": "^[0-9a-f]{64}$",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "content_sha256": {
           "description": "SHA-256 of the script content.",
           "pattern": "^[0-9a-f]{64}$",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "inline": {
           "description": "The script was inline text, not a file.",
@@ -1439,51 +1075,24 @@
           "description": "The interpreter that ran it.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "kind": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ScriptKind"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/ScriptKind",
           "description": "The kind of script."
         },
         "language_mode": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/LanguageMode"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/LanguageMode",
           "description": "The language mode it ran in."
         },
         "path": {
           "description": "The script file.",
           "maxLength": 32767,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "script_block_id": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Guid"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/Guid",
           "description": "The interpreter's script block ID."
         }
       },
@@ -1556,8 +1165,8 @@
       "type": "integer"
     },
     "Sid": {
-      "description": "A Windows security identifier in its standard text form.",
-      "pattern": "^S-1-(0|[1-9][0-9]{0,14})(-(0|[1-9][0-9]{0,9})){0,15}$",
+      "description": "A Windows security identifier in its canonical text form.",
+      "pattern": "^S-1-(0|[1-9][0-9]{0,9}|0x[0-9A-F]{12})(-(0|[1-9][0-9]{0,9})){0,15}$",
       "type": "string"
     },
     "Signer": {
@@ -1566,82 +1175,51 @@
       "properties": {
         "chain_valid": {
           "description": "Whether the certificate chain verified.",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": "boolean"
         },
         "issuer": {
           "description": "The issuing certificate's common name.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "issuer_tbs_hash": {
           "description": "The hash of the issuing certificate's to-be-signed part.",
           "pattern": "^([0-9a-f]{2}){1,64}$",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "leaf_thumbprint": {
           "description": "The leaf certificate's thumbprint.",
           "pattern": "^([0-9a-f]{2}){1,64}$",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "publisher": {
           "description": "The leaf certificate's subject common name.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "signature_type": {
           "description": "How the OS verified the signature (code 0 to 7).",
           "format": "uint8",
           "maximum": 255,
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         },
         "signing_level": {
           "description": "The signing level the OS validated (code 0 to 14).",
           "format": "uint8",
           "maximum": 255,
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         },
         "tbs_hash": {
           "description": "The hash of the leaf certificate's to-be-signed part.",
           "pattern": "^([0-9a-f]{2}){1,64}$",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "timestamp": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Timestamp"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/Timestamp",
           "description": "The signing time from a trusted timestamp."
         },
         "verification_error": {
@@ -1649,10 +1227,7 @@
           "format": "uint8",
           "maximum": 255,
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         }
       },
       "type": "object"
@@ -1662,33 +1237,20 @@
       "description": "The log an event was translated from.",
       "properties": {
         "activity_id": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Guid"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/Guid",
           "description": "The source's correlation activity ID, which groups related records."
         },
         "channel": {
           "description": "The log channel.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "event_id": {
           "description": "The source's own event ID.",
           "format": "uint32",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         },
         "kind": {
           "$ref": "#/$defs/SourceKind",
@@ -1698,10 +1260,7 @@
           "description": "The source's record number.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         }
       },
       "required": [
@@ -1741,7 +1300,7 @@
     "Timestamp": {
       "description": "An RFC 3339 UTC timestamp with exactly six fractional digits and `Z`.",
       "format": "date-time",
-      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6}Z$",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{6}Z$",
       "type": "string"
     },
     "Token": {
@@ -1777,82 +1336,47 @@
           "description": "The account's domain.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "elevated": {
           "description": "Whether the acting token was elevated.",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": "boolean"
         },
         "is_admin": {
           "description": "Whether the user is a local administrator.",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": "boolean"
         },
         "logon_id": {
           "description": "The logon ID (locally unique identifier) of the logon session.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         },
         "logon_type": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/LogonType"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/LogonType",
           "description": "How the session logged on."
         },
         "name": {
           "description": "The account name. Dropped or pseudonymised by redaction (#228).",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "session_id": {
           "description": "The logon session's terminal-services session ID.",
           "format": "uint32",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "integer"
         },
         "sid": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Sid"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/Sid",
           "description": "The security identifier."
         },
         "upn": {
           "description": "The user principal name.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         }
       },
       "type": "object"
@@ -1870,64 +1394,43 @@
           "description": "`CompanyName`.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "description": {
           "description": "`FileDescription`.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "file_version": {
           "description": "`FileVersion`.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "internal_name": {
           "description": "`InternalName`.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "original_filename": {
           "description": "`OriginalFilename`.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "product_name": {
           "description": "`ProductName`.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "product_version": {
           "description": "`ProductVersion`.",
           "maxLength": 256,
           "minLength": 1,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         }
       },
       "type": "object"
@@ -2377,16 +1880,32 @@
     {
       "properties": {
         "script": {
-          "not": {
+          "else": {
             "properties": {
               "inline": {
                 "const": true
               }
             },
             "required": [
-              "path",
               "inline"
             ]
+          },
+          "if": {
+            "required": [
+              "path"
+            ]
+          },
+          "then": {
+            "not": {
+              "properties": {
+                "inline": {
+                  "const": true
+                }
+              },
+              "required": [
+                "inline"
+              ]
+            }
           }
         }
       }
@@ -2399,14 +1918,7 @@
       "description": "The verb, for example `execute`, `load`, `install` or `activate`."
     },
     "agent": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/AgentInfo"
-        },
-        {
-          "type": "null"
-        }
-      ],
+      "$ref": "#/$defs/AgentInfo",
       "description": "Agent state, for agent events."
     },
     "category": {
@@ -2416,10 +1928,7 @@
     "clock_skew_ms": {
       "description": "The producer's last measured clock offset, in milliseconds.",
       "format": "int64",
-      "type": [
-        "integer",
-        "null"
-      ]
+      "type": "integer"
     },
     "clock_synced": {
       "description": "Whether the producer's wall clock was synchronised when `ts` was taken.",
@@ -2440,14 +1949,7 @@
       "description": "The registered type, for example `exec.decision`."
     },
     "file": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/File"
-        },
-        {
-          "type": "null"
-        }
-      ],
+      "$ref": "#/$defs/File",
       "description": "The file acted on."
     },
     "host": {
@@ -2459,25 +1961,11 @@
       "description": "Labels from policy tags."
     },
     "mode": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/EventMode"
-        },
-        {
-          "type": "null"
-        }
-      ],
+      "$ref": "#/$defs/EventMode",
       "description": "The enforcement mode, where one applies."
     },
     "native": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/Native"
-        },
-        {
-          "type": "null"
-        }
-      ],
+      "$ref": "#/$defs/Native",
       "description": "OS-native enforcement details."
     },
     "outcome": {
@@ -2485,33 +1973,16 @@
       "description": "What happened."
     },
     "policy": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/PolicyRef"
-        },
-        {
-          "type": "null"
-        }
-      ],
+      "$ref": "#/$defs/PolicyRef",
       "description": "The Palisade policy and rule that decided, if known."
     },
     "prev_hash": {
       "description": "The chain value of the producer's previous event. Absent only when\n`seq` is 0.",
       "pattern": "^[0-9a-f]{64}$",
-      "type": [
-        "string",
-        "null"
-      ]
+      "type": "string"
     },
     "process": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/Process"
-        },
-        {
-          "type": "null"
-        }
-      ],
+      "$ref": "#/$defs/Process",
       "description": "The process that acted."
     },
     "schema_version": {
@@ -2519,14 +1990,7 @@
       "description": "The schema version of this event."
     },
     "script": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/Script"
-        },
-        {
-          "type": "null"
-        }
-      ],
+      "$ref": "#/$defs/Script",
       "description": "The script, for script events."
     },
     "seq": {
@@ -2540,14 +2004,7 @@
       "description": "0 to 10. See [`Severity::syslog`] for the syslog mapping."
     },
     "source": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/Source"
-        },
-        {
-          "type": "null"
-        }
-      ],
+      "$ref": "#/$defs/Source",
       "description": "Where the event came from, for events translated from another log."
     },
     "tenant_id": {
@@ -2562,20 +2019,10 @@
       "description": "The producer's monotonic clock when the event was recorded, in\nmicroseconds since the agent started. It orders events even when the\nwall clock jumps.",
       "format": "uint64",
       "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "type": "integer"
     },
     "user": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/User"
-        },
-        {
-          "type": "null"
-        }
-      ],
+      "$ref": "#/$defs/User",
       "description": "The user, if any."
     }
   },

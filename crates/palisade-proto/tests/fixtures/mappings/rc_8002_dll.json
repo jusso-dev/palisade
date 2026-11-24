@@ -1,0 +1,22 @@
+{
+  "source": "os_legacy_rule_collection",
+  "record": {
+    "event_id": 8002,
+    "time_created": "2026-11-24T03:15:22.1234567Z",
+    "record_id": 1000,
+    "channel": "rule-collection/EXE and DLL",
+    "fields": {
+      "PolicyNameBuffer": "DLL",
+      "RuleId": "{F1E2D3C4-B5A6-4978-8695-A4B3C2D1E0F9}",
+      "RuleNameBuffer": "Example publisher rule",
+      "RuleSddlBuffer": "D:(A;;FX;;;S-1-1-0)",
+      "TargetUser": "S-1-5-21-1111111111-2222222222-3333333333-1001",
+      "TargetProcessId": "4242",
+      "FilePathBuffer": "%PROGRAMFILES%\\EXAMPLE\\LIB.DLL",
+      "FileHash": "6666666666666666666666666666666666666666666666666666666666666666",
+      "Fqbn": "O=EXAMPLE SOFTWARE LTD, L=SYDNEY, S=NSW, C=AU\\EXAMPLE SUITE\\TOOL.EXE\\1.2.3.4",
+      "TargetLogonId": "0x3E7",
+      "FullFilePathBuffer": "C:\\Program Files\\Example\\lib.dll"
+    }
+  }
+}

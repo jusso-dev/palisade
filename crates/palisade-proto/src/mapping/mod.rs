@@ -51,9 +51,13 @@
 //! - a `canonical_type` is not registered;
 //! - a target is not a writable canonical field (the table in `targets.rs`); this is how a
 //!   mapping that references a field that does not exist fails CI;
-//! - an entry cannot fill a field set its type requires;
-//! - a `*.decision` entry maps no user or process, or no file name (ISM-0585);
-//! - the `when` rules leave an entry unreachable or ambiguous.
+//! - an entry cannot fill a field set its type requires from its
+//!   `field_map` (signer records do not count: an unsigned file has none);
+//! - a `*.decision` entry maps none of the subject fields or none of the
+//!   object-name fields that [`Event::ism_0585_gaps`] accepts (ISM-0585);
+//! - a `when` has an empty or repeated value, or a value that an earlier
+//!   entry for the same event ID and field already matches (so the entry
+//!   could never apply to it), or an entry follows the fallback.
 //!
 //! Every shipped file is loaded by the tests, so these checks run in CI.
 
@@ -143,7 +147,8 @@ pub struct Envelope {
 /// produced without it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Dropped {
-    /// The source field, or `<field>[<index>]` for a signature record.
+    /// The source field, or `<field>[<index>]` for the signature record with
+    /// that (0-based) index.
     pub field: String,
     /// Why it was dropped.
     pub reason: &'static str,
@@ -266,16 +271,64 @@ struct When {
 }
 
 impl When {
+    /// Whether the condition holds. An empty field value counts as absent,
+    /// so it never matches. Values are lowercased when the file is loaded.
     fn holds(&self, record: &Record) -> bool {
-        let Some(value) = record.fields.get(&self.field) else {
+        let Some(value) = record.fields.get(&self.field).filter(|v| !v.is_empty()) else {
             return false;
         };
         let value = value.to_ascii_lowercase();
-        self.equals.iter().any(|v| v.to_ascii_lowercase() == value)
-            || self
-                .ends_with
-                .iter()
-                .any(|v| value.ends_with(&v.to_ascii_lowercase()))
+        self.equals.contains(&value) || self.ends_with.iter().any(|v| value.ends_with(v.as_str()))
+    }
+
+    /// Lowercases the values and rejects empty or repeated ones.
+    fn normalise(&mut self) -> Result<(), String> {
+        if self.field.is_empty() || (self.equals.is_empty() && self.ends_with.is_empty()) {
+            return Err(
+                "needs a `field` and at least one `equals` or `ends_with` value".to_owned(),
+            );
+        }
+        for list in [&mut self.equals, &mut self.ends_with] {
+            let mut seen = BTreeSet::new();
+            for v in list.iter_mut() {
+                if v.is_empty() {
+                    return Err(
+                        "an empty value matches nothing, because empty fields count as absent"
+                            .to_owned(),
+                    );
+                }
+                *v = v.to_ascii_lowercase();
+                if !seen.insert(v.clone()) {
+                    return Err(format!("`{v}` is listed twice"));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// A value of `self` that an earlier condition `before` already
+    /// matches, so the entry with `self` would never see it. Conditions on
+    /// different fields cannot be compared, and file order decides.
+    fn shadowed_by(&self, before: &Self) -> Option<String> {
+        if self.field != before.field {
+            return None;
+        }
+        let matched_before = |v: &str| {
+            before.equals.iter().any(|b| b == v)
+                || before.ends_with.iter().any(|b| v.ends_with(b.as_str()))
+        };
+        // Any text that ends with `v` also ends with every suffix of `v`.
+        let suffix_before = |v: &str| before.ends_with.iter().any(|b| v.ends_with(b.as_str()));
+        self.equals
+            .iter()
+            .find(|v| matched_before(v))
+            .map(|v| format!("equals `{v}`"))
+            .or_else(|| {
+                self.ends_with
+                    .iter()
+                    .find(|v| suffix_before(v))
+                    .map(|v| format!("ends_with `{v}`"))
+            })
     }
 }
 
@@ -357,7 +410,17 @@ const fn set_prefix(set: FieldSet) -> &'static str {
     }
 }
 
-/// Targets that name the object of a decision, for ISM-0585.
+/// Targets that identify the subject of a decision, for ISM-0585. These are
+/// the fields [`Event::ism_0585_gaps`] accepts.
+const SUBJECT_TARGETS: &[&str] = &[
+    "/user/sid",
+    "/user/name",
+    "/process/pid",
+    "/process/image_path",
+];
+
+/// Targets that name the object of a decision, for ISM-0585. These are the
+/// fields [`Event::ism_0585_gaps`] accepts.
 const OBJECT_NAME_TARGETS: &[&str] = &[
     "/file/path",
     "/file/package_name",
@@ -438,20 +501,36 @@ impl MappingSet {
                 ));
             }
             let built = build_entry(entry).map_err(|(field, message)| err(at(&field), message))?;
+            if let Some(when) = &built.when {
+                for earlier in list.iter().filter_map(|e| e.when.as_ref()) {
+                    if let Some(value) = when.shadowed_by(earlier) {
+                        return Err(err(
+                            at(".when"),
+                            format!(
+                                "{value} is already matched by an earlier entry for event {id}, so it can never apply here"
+                            ),
+                        ));
+                    }
+                }
+            }
             list.push(built);
         }
+        // Check every key before inserting any, so a rejected file leaves
+        // the set unchanged.
+        if let Some(id) = loaded
+            .keys()
+            .find(|id| self.entries.contains_key(&(doc.source, **id)))
+        {
+            return Err(err(
+                "entries".to_owned(),
+                format!(
+                    "{} event {id} is already mapped by another file",
+                    doc.source.as_str()
+                ),
+            ));
+        }
         for (id, list) in loaded {
-            let key = (doc.source, id);
-            if self.entries.contains_key(&key) {
-                return Err(err(
-                    "entries".to_owned(),
-                    format!(
-                        "{} event {id} is already mapped by another file",
-                        doc.source.as_str()
-                    ),
-                ));
-            }
-            self.entries.insert(key, list);
+            self.entries.insert((doc.source, id), list);
         }
         Ok(())
     }
@@ -654,6 +733,11 @@ fn insert_at(root: &mut Map<String, Value>, pointer: &str, value: Value) {
 
 type Incomplete = Option<(usize, u64)>;
 
+/// Reads the signature records of one record.
+///
+/// The OS reports each signature as one record carrying the total count and
+/// a 0-based index (`0 .. count`). An unsigned file is reported as exactly
+/// one record with a count of 0.
 fn map_signers(
     spec: &Signatures,
     record: &Record,
@@ -661,9 +745,22 @@ fn map_signers(
     dropped: &mut Vec<Dropped>,
 ) -> Result<(Vec<Value>, Incomplete), MapError> {
     let bad = |why: String| MapError::BadSignatures(why);
+    let max = u64::try_from(crate::events::MAX_SIGNERS).unwrap_or(u64::MAX);
+    // Bound the work before looking at any record.
+    if children.len() > crate::events::MAX_SIGNERS {
+        return Err(bad(format!(
+            "{} records, more than the {max} signatures an event can hold",
+            children.len()
+        )));
+    }
     let mut indexed: BTreeMap<u64, &Record> = BTreeMap::new();
     let mut announced: Option<u64> = None;
     for child in children {
+        if child.fields.len() > MAX_RECORD_FIELDS {
+            return Err(bad(format!(
+                "a record has more than {MAX_RECORD_FIELDS} fields"
+            )));
+        }
         if child.event_id != spec.event_id {
             return Err(bad(format!(
                 "expected event {}, got event {}",
@@ -687,25 +784,32 @@ fn map_signers(
             return Err(bad("the records disagree on the signature count".to_owned()));
         }
         announced = Some(count);
+        if count > max {
+            return Err(bad(format!(
+                "{count} announced signatures, more than {max}"
+            )));
+        }
         if count == 0 {
-            // An unsigned file is reported with one record and a count of 0.
+            if children.len() > 1 {
+                return Err(bad(
+                    "an unsigned file is reported by exactly one record".to_owned()
+                ));
+            }
             continue;
         }
         let index = number(&spec.index_field)?;
+        if index >= count {
+            return Err(bad(format!(
+                "signature index {index} is not below the count {count}"
+            )));
+        }
         if indexed.insert(index, child).is_some() {
             return Err(bad(format!("signature index {index} appears twice")));
         }
     }
     let announced = announced.unwrap_or(0);
-    let max = u64::try_from(crate::events::MAX_SIGNERS).unwrap_or(u64::MAX);
-    if announced > max || u64::try_from(indexed.len()).unwrap_or(u64::MAX) > announced {
-        return Err(bad(format!(
-            "{} records for {announced} announced signatures (at most {max})",
-            indexed.len()
-        )));
-    }
     let mut signers = Vec::new();
-    for (index, child) in indexed.values().enumerate() {
+    for (&index, child) in &indexed {
         let mut signer = Map::new();
         for (field, target, kind) in &spec.fields {
             let Some(raw) = child.fields.get(field) else {
@@ -734,14 +838,9 @@ fn map_signers(
 
 /// Checks one entry and resolves its targets. On error, returns the field
 /// path within the entry and a message.
-fn build_entry(doc: EntryDoc) -> Result<Entry, (String, String)> {
-    if let Some(when) = &doc.when {
-        if when.field.is_empty() || (when.equals.is_empty() && when.ends_with.is_empty()) {
-            return Err((
-                ".when".to_owned(),
-                "needs a `field` and at least one `equals` or `ends_with` value".to_owned(),
-            ));
-        }
+fn build_entry(mut doc: EntryDoc) -> Result<Entry, (String, String)> {
+    if let Some(when) = &mut doc.when {
+        when.normalise().map_err(|m| (".when".to_owned(), m))?;
     }
     let mut fields = Vec::new();
     let mut targets_seen = BTreeSet::new();
@@ -812,10 +911,8 @@ fn build_entry(doc: EntryDoc) -> Result<Entry, (String, String)> {
             })
         }
     };
-    let fills = |prefix: &str| {
-        targets_seen.iter().any(|t| t.starts_with(prefix))
-            || (signatures.is_some() && SIGNERS_POINTER.starts_with(prefix))
-    };
+    // Signer records do not fill a field set: an unsigned file has none.
+    let fills = |prefix: &str| targets_seen.iter().any(|t| t.starts_with(prefix));
     for &set in doc.canonical_type.required() {
         if !fills(set_prefix(set)) {
             return Err((
@@ -829,10 +926,10 @@ fn build_entry(doc: EntryDoc) -> Result<Entry, (String, String)> {
         }
     }
     if doc.canonical_type.as_str().ends_with(".decision") {
-        if !fills("/user/") && !fills("/process/") {
+        if !SUBJECT_TARGETS.iter().any(|t| targets_seen.contains(*t)) {
             return Err((
                 ".field_map".to_owned(),
-                "a decision must map a user or a process (ISM-0585)".to_owned(),
+                "a decision must map its subject: a user SID or name, or a process ID or image path (ISM-0585)".to_owned(),
             ));
         }
         if !OBJECT_NAME_TARGETS

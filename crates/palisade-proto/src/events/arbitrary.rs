@@ -56,11 +56,9 @@ fn token() -> impl Strategy<Value = Token> {
 
 fn sid() -> impl Strategy<Value = Sid> {
     (0u64..(1 << 48), vec(any::<u32>(), 0..=15)).prop_map(|(auth, subs)| {
-        let mut s = format!("S-1-{auth}");
-        for sub in subs {
-            s.push_str(&format!("-{sub}"));
-        }
-        s.parse().unwrap()
+        palisade_fileid::fsctx::sid::Sid::new(auth, &subs)
+            .unwrap()
+            .into()
     })
 }
 
@@ -329,7 +327,7 @@ fn file() -> BoxedStrategy<File> {
 
 fn script() -> BoxedStrategy<Script> {
     (
-        prop_oneof![Just((None, true)), of(long()).prop_map(|p| (p, false))],
+        prop_oneof![Just((None, true)), long().prop_map(|p| (Some(p), false))],
         of(select(ScriptKind::ALL.to_vec())),
         of(name()),
         of(bytes::<32>()),

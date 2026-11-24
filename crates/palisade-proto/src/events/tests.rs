@@ -98,12 +98,14 @@ fn timestamp_bounds_and_epoch() {
 }
 
 #[test]
-fn sids_are_checked() {
+fn sids_are_canonical() {
     for good in [
         "S-1-5-18",
         "S-1-0",
         "S-1-5-21-1004336348-1177238915-682003330-512",
-        "S-1-281474976710655-4294967295",
+        "S-1-4294967295-4294967295",
+        "S-1-0x000100000000-1",
+        "S-1-0xFFFFFFFFFFFF",
     ] {
         assert_eq!(good.parse::<Sid>().unwrap().as_str(), good);
     }
@@ -111,17 +113,55 @@ fn sids_are_checked() {
         "",
         "S-1",
         "S-1-",
-        "s-1-5-18",
+        "s-1-5-18",            // lowercase: normalise first
+        "S-1-0x5-18",          // hex authority below 2^32: written in decimal
+        "S-1-4294967296",      // 2^32 in decimal: written in hex
+        "S-1-0x000100000000a", // too many hex digits
+        "S-1-0x00010000000a",  // lowercase hex
         "S-2-5-18",
         "S-1-05-18",
         "S-1-5-018",
         "S-1-5-4294967296",
-        "S-1-281474976710656",
+        "S-1-0x1000000000000",
         "S-1-5-18-",
         "S-1-5-1-2-3-4-5-6-7-8-9-10-11-12-13-14-15-16",
         "S-1-5-+1",
     ] {
         assert!(bad.parse::<Sid>().is_err(), "accepted {bad:?}");
+    }
+}
+
+#[test]
+fn sids_normalise_os_spellings() {
+    for (raw, canonical) in [
+        ("s-1-5-18", "S-1-5-18"),
+        ("S-1-0x5-18", "S-1-5-18"),
+        ("S-1-0x100000000-1", "S-1-0x000100000000-1"),
+        ("S-1-0xabcdefabcdef", "S-1-0xABCDEFABCDEF"),
+    ] {
+        assert_eq!(Sid::normalise(raw).unwrap().as_str(), canonical, "{raw}");
+    }
+    // A large authority in decimal is read, and written back in hex.
+    assert_eq!(
+        Sid::normalise("S-1-4294967296").unwrap().as_str(),
+        "S-1-0x000100000000"
+    );
+    assert!(Sid::normalise("not a sid").is_err());
+}
+
+#[test]
+fn sids_agree_with_the_file_identity_parser() {
+    use palisade_fileid::fsctx::sid::Sid as FsSid;
+    for (auth, subs) in [
+        (5u64, vec![18u32]),
+        (1 << 32, vec![1]),
+        ((1 << 48) - 1, vec![]),
+        (0, vec![0; 15]),
+    ] {
+        let fs = FsSid::new(auth, &subs).unwrap();
+        let ours: Sid = fs.to_string().parse().unwrap();
+        assert_eq!(ours, Sid::from(fs));
+        assert_eq!(ours.as_str().parse::<FsSid>().unwrap(), fs);
     }
 }
 
@@ -194,6 +234,8 @@ fn text_and_lists_are_bounded() {
     assert!(Name::new("x".repeat(257)).is_err());
     // Characters, not bytes, as JSON Schema counts them.
     assert!(Name::new("\u{4e2d}".repeat(256)).is_ok());
+    assert!(serde_json::from_value::<Name>(serde_json::json!("x".repeat(2000))).is_err());
+    assert!(serde_json::from_value::<Name>(serde_json::json!("x".repeat(256))).is_ok());
     let too_many: Vec<String> = (0..33).map(|i| format!("\"10.0.0.{i}\"")).collect();
     let json = format!("[{}]", too_many.join(","));
     assert!(serde_json::from_str::<BoundedVec<IpAddress, 32>>(&json).is_err());
@@ -264,6 +306,45 @@ fn unknown_fields_are_rejected_everywhere() {
 }
 
 #[test]
+fn null_is_never_a_value() {
+    for patch in [
+        serde_json::json!({ "prev_hash": serde_json::Value::Null, "seq": 1 }),
+        serde_json::json!({ "file": serde_json::Value::Null }),
+        serde_json::json!({ "mode": serde_json::Value::Null }),
+        serde_json::json!({ "host": { "id": UUID, "name": serde_json::Value::Null } }),
+        serde_json::json!({ "script": { "path": serde_json::Value::Null, "inline": true } }),
+    ] {
+        let mut value = minimal_json();
+        for (k, v) in patch.as_object().unwrap() {
+            value[k] = v.clone();
+        }
+        assert!(
+            Event::from_json(&value.to_string()).is_err(),
+            "accepted {patch}"
+        );
+    }
+}
+
+#[test]
+fn version_peek_skips_other_values() {
+    for v in [
+        serde_json::json!(1),
+        serde_json::json!([1, 2, 3]),
+        serde_json::json!({ "a": [1, { "b": 2 }] }),
+        serde_json::json!(true),
+    ] {
+        let json = with(serde_json::json!({ "schema_version": v })).to_string();
+        assert!(
+            matches!(
+                Event::from_json(&json),
+                Err(LoadError::MissingSchemaVersion)
+            ),
+            "{v}"
+        );
+    }
+}
+
+#[test]
 fn versions_are_checked_before_fields() {
     let read = |v: &str| {
         Event::from_json(&with(serde_json::json!({ "schema_version": v, "extra": 1 })).to_string())
@@ -314,8 +395,14 @@ fn validate_reports_every_broken_rule() {
             (EventErrorCode::CategoryMismatch, "/category"),
             (EventErrorCode::MissingFieldSet(FieldSet::File), "/file"),
             (EventErrorCode::ChainLink, "/prev_hash"),
-            (EventErrorCode::ScriptPathAndInline, "/script/inline"),
+            (EventErrorCode::ScriptPathXorInline, "/script"),
         ]
+    );
+    let mut empty_script = minimal();
+    empty_script.script = Some(Script::default());
+    assert_eq!(
+        empty_script.validate().unwrap_err()[0].code,
+        EventErrorCode::ScriptPathXorInline
     );
     let mut first = minimal();
     first.prev_hash = Some(Hex::from_bytes([0; 32]));

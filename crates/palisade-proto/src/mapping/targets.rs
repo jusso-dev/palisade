@@ -23,7 +23,7 @@ use crate::events::{Guid, HexBytes, Md5Hex, Sha1Hex, Sha256Hex, Sid, Timestamp};
 pub(crate) enum Kind {
     /// Text of at most this many characters.
     Text(usize),
-    /// A security identifier.
+    /// A security identifier, in any spelling the OS writes.
     Sid,
     /// A GUID. Braces and uppercase are accepted and normalised.
     Guid,
@@ -176,7 +176,9 @@ impl Kind {
                 }
                 Some(Value::String(raw.to_owned()))
             }
-            Self::Sid => canonical::<Sid>(raw),
+            Self::Sid => Sid::normalise(raw)
+                .ok()
+                .map(|v| Value::String(v.to_string())),
             Self::Guid => {
                 let inner = raw
                     .strip_prefix('{')

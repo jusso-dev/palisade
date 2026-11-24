@@ -37,11 +37,11 @@
     {
       "event_id": 3089,
       "time_created": "2026-11-24T03:15:22.1234567Z",
-      "record_id": 1002,
+      "record_id": 1001,
       "channel": "code-integrity/Operational",
       "fields": {
         "TotalSignatureCount": "1",
-        "Signature": "1",
+        "Signature": "0",
         "CacheState": "0",
         "Hash": "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
         "PageHash": "false",

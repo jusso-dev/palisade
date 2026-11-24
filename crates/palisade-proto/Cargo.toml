@@ -11,6 +11,8 @@ publish.workspace = true
 
 [dependencies]
 palisade-core = { workspace = true, features = ["std", "schema"] }
+# The security identifier parser, so SIDs read the same way in both crates.
+palisade-fileid = { workspace = true }
 # The strict YAML reader for the registry and mapping files.
 palisade-policy = { workspace = true }
 schemars = { workspace = true }

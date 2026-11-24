@@ -31,11 +31,11 @@
     {
       "event_id": 8038,
       "time_created": "2026-11-24T03:15:22.1234567Z",
-      "record_id": 2002,
+      "record_id": 2001,
       "channel": "rule-collection/MSI and Script",
       "fields": {
         "TotalSignatureCount": "1",
-        "Signature": "1",
+        "Signature": "0",
         "PublisherName": "Example Software Ltd",
         "IssuerName": "Example Code Signing CA",
         "PublisherTBSHash": "1111111111111111111111111111111111111111111111111111111111111111",

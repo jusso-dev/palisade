@@ -272,7 +272,7 @@ fn required_field_sets_must_be_fillable() {
 #[test]
 fn decisions_need_the_ism_0585_fields() {
     let no_subject = GOOD_ENTRY.replace("      Pid: /process/pid\n", "");
-    assert!(load_error(&no_subject).contains("a user or a process"));
+    assert!(load_error(&no_subject).contains("must map its subject"));
     let no_object = GOOD_ENTRY.replace("/file/path", "/file/hashes/sha256");
     assert!(load_error(&no_object).contains("the name of its object"));
 }
@@ -314,6 +314,176 @@ fn every_builtin_file_loads() {
     let set = MappingSet::builtin().unwrap();
     assert!(!set.event_ids(SourceKind::OsCodeIntegrity).is_empty());
     assert!(!set.event_ids(SourceKind::OsLegacyRuleCollection).is_empty());
+}
+
+#[test]
+fn subject_lint_matches_the_ism_0585_checklist() {
+    // Only fields that `ism_0585_gaps` accepts count as the subject.
+    for weak in [
+        "/user/logon_id",
+        "/user/domain",
+        "/process/cmdline",
+        "/process/owner_sid",
+    ] {
+        let entry = GOOD_ENTRY.replace("/process/pid", weak);
+        assert!(
+            load_error(&entry).contains("must map its subject"),
+            "{weak}"
+        );
+    }
+    for strong in ["/user/sid", "/user/name", "/process/image_path"] {
+        let entry = GOOD_ENTRY.replace("/process/pid", strong);
+        assert!(
+            MappingSet::from_yaml("t.yaml", &file_with(&entry)).is_ok(),
+            "{strong}"
+        );
+    }
+}
+
+#[test]
+fn signatures_do_not_fill_the_file_field_set() {
+    let entry = "  - source_event_id: 1
+    canonical_type: exec.origin_check
+    action: origin_check
+    outcome: info
+    description: Check.
+    field_map:
+      Policy: /native/policy_name
+    signatures:
+      source_event_id: 2
+      count_field: C
+      index_field: I
+      field_map:
+        P: publisher
+";
+    assert!(load_error(entry).contains("requires the `file` field set"));
+}
+
+fn when_entry(when: &str, ty: &str) -> String {
+    format!(
+        "  - source_event_id: 1
+    when:
+{when}    canonical_type: {ty}
+    action: load
+    outcome: blocked
+    description: X.
+    field_map:
+      File: /file/path
+      Pid: /process/pid
+"
+    )
+}
+
+#[test]
+fn shadowed_and_empty_when_values_are_rejected() {
+    let dll = "      field: Kind\n      equals: [DLL]\n";
+    let first = when_entry(dll, "library.decision");
+    for (second, why) in [
+        (dll.to_owned(), "already matched"),
+        (
+            "      field: Kind\n      equals: [dll]\n".to_owned(),
+            "already matched",
+        ),
+        (
+            "      field: Kind\n      equals: [exe, Dll]\n".to_owned(),
+            "already matched",
+        ),
+    ] {
+        let text = format!("{first}{}", when_entry(&second, "exec.decision"));
+        let e = MappingSet::from_yaml("t.yaml", &file_with(&text))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("entries[1].when") && e.contains(why),
+            "{second}: {e}"
+        );
+    }
+    let sys = when_entry(
+        "      field: File\n      ends_with: [.sys]\n",
+        "driver.decision",
+    );
+    let later = when_entry(
+        "      field: File\n      ends_with: [driver.SYS]\n",
+        "exec.decision",
+    );
+    assert!(MappingSet::from_yaml("t.yaml", &file_with(&format!("{sys}{later}"))).is_err());
+    let exact = when_entry(
+        "      field: File\n      equals: [a.sys]\n",
+        "exec.decision",
+    );
+    assert!(MappingSet::from_yaml("t.yaml", &file_with(&format!("{sys}{exact}"))).is_err());
+    // A shorter suffix after a longer one still matches other values: allowed.
+    let long = when_entry(
+        "      field: File\n      ends_with: [x.sys]\n",
+        "driver.decision",
+    );
+    let short = when_entry(
+        "      field: File\n      ends_with: [.sys]\n",
+        "exec.decision",
+    );
+    assert!(MappingSet::from_yaml("t.yaml", &file_with(&format!("{long}{short}"))).is_ok());
+    // Different fields cannot be compared: file order decides.
+    let other = when_entry("      field: Other\n      equals: [DLL]\n", "exec.decision");
+    assert!(MappingSet::from_yaml("t.yaml", &file_with(&format!("{first}{other}"))).is_ok());
+    for bad in [
+        "      field: Kind\n      equals: [\"\"]\n",
+        "      field: Kind\n      ends_with: [\"\"]\n",
+        "      field: Kind\n      equals: [a, A]\n",
+    ] {
+        let e = load_error(&when_entry(bad, "exec.decision"));
+        assert!(e.contains("entries[0].when"), "{bad}: {e}");
+    }
+}
+
+#[test]
+fn a_rejected_file_leaves_the_set_unchanged() {
+    let mut set = MappingSet::from_yaml(
+        "a.yaml",
+        &file_with(&GOOD_ENTRY.replace("source_event_id: 1", "source_event_id: 5")),
+    )
+    .unwrap();
+    // Event 1 is new, event 5 collides: nothing from this file may be added.
+    let text = file_with(&format!(
+        "{GOOD_ENTRY}{}",
+        GOOD_ENTRY.replace("source_event_id: 1", "source_event_id: 5")
+    ));
+    assert!(set.add_yaml("b.yaml", &text).is_err());
+    assert_eq!(set.event_ids(SourceKind::OsCodeIntegrity), [5]);
+}
+
+#[test]
+fn an_empty_field_value_never_matches_when() {
+    let set = MappingSet::from_yaml(
+        "t.yaml",
+        &file_with(&when_entry(
+            "      field: Kind\n      ends_with: [x]\n",
+            "exec.decision",
+        )),
+    )
+    .unwrap();
+    let rec = record(1, &[("Kind", ""), ("File", "a"), ("Pid", "1")]);
+    assert!(matches!(
+        set.map(SourceKind::OsCodeIntegrity, &rec, &[], &envelope()),
+        Err(MapError::Unmapped { .. })
+    ));
+}
+
+#[test]
+fn dropped_signer_fields_name_the_signature_index() {
+    let rec = record(1, &[("File", "a"), ("Pid", "1")]);
+    let mut second = sig("1", "2", "B");
+    second.fields.insert("Tbs".to_owned(), "zz".to_owned());
+    let mapped = good_set()
+        .map(SourceKind::OsCodeIntegrity, &rec, &[second], &envelope())
+        .unwrap();
+    assert_eq!(
+        mapped
+            .dropped
+            .iter()
+            .map(|d| d.field.as_str())
+            .collect::<Vec<_>>(),
+        ["Tbs[1]"]
+    );
 }
 
 // ---------------------------------------------------------------- mapping
@@ -469,7 +639,7 @@ fn sig(index: &str, count: &str, publisher: &str) -> Record {
 #[test]
 fn signatures_are_ordered_by_index() {
     let rec = record(1, &[("File", "a"), ("Pid", "1")]);
-    let sigs = [sig("2", "2", "Second"), sig("1", "2", "First")];
+    let sigs = [sig("1", "2", "Second"), sig("0", "2", "First")];
     let mapped = good_set()
         .map(SourceKind::OsCodeIntegrity, &rec, &sigs, &envelope())
         .unwrap();
@@ -494,7 +664,7 @@ fn missing_signatures_are_reported_not_hidden() {
         .map(
             SourceKind::OsCodeIntegrity,
             &rec,
-            &[sig("1", "3", "Only")],
+            &[sig("0", "3", "Only")],
             &envelope(),
         )
         .unwrap();
@@ -521,17 +691,30 @@ fn inconsistent_signatures_are_rejected() {
     wrong_id.event_id = 3;
     let mut wrong_activity = sig("1", "1", "A");
     wrong_activity.activity_id = Some("00000000-0000-0000-0000-000000000001".parse().unwrap());
+    let mut wide = sig("0", "1", "A");
+    for i in 0..MAX_RECORD_FIELDS {
+        wide.fields.insert(format!("f{i}"), String::new());
+    }
+    let unsigned = || record(2, &[("Count", "0"), ("Index", "0")]);
+    let many: Vec<Record> = (0..65).map(|i| sig(&i.to_string(), "65", "A")).collect();
     for (sigs, why) in [
         (vec![wrong_id], "expected event 2"),
         (vec![wrong_activity], "activity ID"),
         (
-            vec![sig("1", "2", "A"), sig("1", "2", "B")],
+            vec![sig("0", "2", "A"), sig("0", "2", "B")],
             "appears twice",
         ),
-        (vec![sig("1", "1", "A"), sig("2", "2", "B")], "disagree"),
-        (vec![sig("1", "1", "A"), sig("2", "1", "B")], "announced"),
-        (vec![sig("1", "65", "A")], "at most 64"),
+        (vec![sig("0", "1", "A"), sig("1", "2", "B")], "disagree"),
+        (
+            vec![sig("0", "1", "A"), sig("1", "1", "B")],
+            "not below the count",
+        ),
+        (vec![sig("5", "2", "A")], "not below the count"),
+        (vec![sig("0", "65", "A")], "more than 64"),
+        (many, "more than the 64"),
         (vec![sig("x", "1", "A")], "not a number"),
+        (vec![unsigned(), unsigned()], "exactly one record"),
+        (vec![wide], "more than 256 fields"),
     ] {
         let err = map(&sigs).unwrap_err();
         assert!(

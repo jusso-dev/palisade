@@ -62,6 +62,18 @@ where
     deserializer.deserialize_str(V(expecting, std::marker::PhantomData))
 }
 
+/// Reads an optional field that, when present, must hold a value: `null` is
+/// rejected. Writers leave unset fields out, so `null` has no meaning, and
+/// accepting it would let a document pass the JSON Schema's presence rules
+/// in one reader and fail them in another.
+pub(crate) fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
 /// Implements serde through `Display` and `FromStr`, so the text form has one
 /// definition.
 macro_rules! string_serde {
@@ -137,8 +149,22 @@ impl<const MAX: usize> Serialize for Text<MAX> {
 
 impl<'de, const MAX: usize> Deserialize<'de> for Text<MAX> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let text = String::deserialize(deserializer)?;
-        Self::new(text).map_err(|e| de::Error::custom(e.message()))
+        struct V<const MAX: usize>;
+        impl<const MAX: usize> Visitor<'_> for V<MAX> {
+            type Value = Text<MAX>;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "non-empty text of at most {MAX} characters")
+            }
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Text<MAX>, E> {
+                // A character is at most 4 bytes, so longer input is rejected
+                // before it is copied.
+                if v.len() > MAX.saturating_mul(4) {
+                    return Err(E::custom("text is too long"));
+                }
+                Text::new(v).map_err(|e| E::custom(e.message()))
+            }
+        }
+        deserializer.deserialize_str(V::<MAX>)
     }
 }
 
@@ -199,6 +225,17 @@ impl<T, const MAX: usize> BoundedVec<T, MAX> {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    /// The number of items.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// The items, in order.
+    pub fn iter(&self) -> std::slice::Iter<'_, T> {
+        self.0.iter()
     }
 }
 
@@ -472,6 +509,9 @@ impl FromStr for Guid {
 
     fn from_str(s: &str) -> Result<Self, ValueError> {
         const ERR: ValueError = ValueError("expected a GUID in canonical lowercase form");
+        if s.len() != 36 {
+            return Err(ERR);
+        }
         let parts: Vec<&str> = s.split('-').collect();
         let &[a, b, c, d, e] = parts.as_slice() else {
             return Err(ERR);
@@ -524,14 +564,15 @@ impl JsonSchema for Guid {
 // Security identifier
 // ---------------------------------------------------------------------------
 
-/// A Windows security identifier in its standard text form, for example
+/// A Windows security identifier in its canonical text form, for example
 /// `S-1-5-21-1004336348-1177238915-682003330-512`.
 ///
-/// Accepted: `S-1-`, an identifier authority below 2^48 in decimal, then 0 to
-/// 15 sub-authorities that each fit in 32 bits, all without leading zeros.
-/// The JSON Schema pattern checks the shape and digit counts; the 2^48 and
-/// 2^32 bounds are checked only by the reader, so the pattern is slightly
-/// more permissive than deserialisation.
+/// The canonical form is the one the OS and [`palisade_fileid::fsctx::sid::Sid`]
+/// write: an uppercase `S-1-`, the identifier authority in decimal when it
+/// is below 2^32 and otherwise `0x` and 12 uppercase hex digits, then 0 to
+/// 15 sub-authorities in decimal, all without leading zeros. Only that form
+/// is accepted, so each SID has one spelling. Use [`Sid::normalise`] to read
+/// other spellings.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Sid(String);
 
@@ -541,33 +582,38 @@ impl Sid {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Reads any spelling the file-identity parser accepts (a lowercase
+    /// `s`, a hex authority of any width or case) and returns the canonical
+    /// form.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValueError`] if the text is not a SID.
+    pub fn normalise(text: &str) -> Result<Self, ValueError> {
+        text.parse::<palisade_fileid::fsctx::sid::Sid>()
+            .map(Self::from)
+            .map_err(|_| SID_ERROR)
+    }
 }
 
-fn decimal(part: &str, max: u64) -> Option<u64> {
-    let digits_only = !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
-    if !digits_only || (part.len() > 1 && part.starts_with('0')) {
-        return None;
+const SID_ERROR: ValueError = ValueError("expected a security identifier such as S-1-5-18");
+
+impl From<palisade_fileid::fsctx::sid::Sid> for Sid {
+    fn from(sid: palisade_fileid::fsctx::sid::Sid) -> Self {
+        Self(sid.to_string())
     }
-    part.parse::<u64>().ok().filter(|v| *v <= max)
 }
 
 impl FromStr for Sid {
     type Err = ValueError;
 
     fn from_str(s: &str) -> Result<Self, ValueError> {
-        const ERR: ValueError = ValueError("expected a security identifier such as S-1-5-18");
-        let rest = s.strip_prefix("S-1-").ok_or(ERR)?;
-        let mut parts = rest.split('-');
-        decimal(parts.next().ok_or(ERR)?, (1 << 48) - 1).ok_or(ERR)?;
-        let mut count = 0usize;
-        for part in parts {
-            decimal(part, u64::from(u32::MAX)).ok_or(ERR)?;
-            count += 1;
+        let sid = Self::normalise(s)?;
+        if sid.0 != s {
+            return Err(SID_ERROR);
         }
-        if count > 15 {
-            return Err(ERR);
-        }
-        Ok(Self(s.to_owned()))
+        Ok(sid)
     }
 }
 
@@ -590,11 +636,14 @@ impl JsonSchema for Sid {
         "Sid".into()
     }
 
+    /// The pattern checks the shape and digit counts. The bounds (a decimal
+    /// authority below 2^32, a hex one from 2^32 and below 2^48, and
+    /// sub-authorities below 2^32) are checked only by the reader.
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "A Windows security identifier in its standard text form.",
+            "description": "A Windows security identifier in its canonical text form.",
             "type": "string",
-            "pattern": "^S-1-(0|[1-9][0-9]{0,14})(-(0|[1-9][0-9]{0,9})){0,15}$"
+            "pattern": "^S-1-(0|[1-9][0-9]{0,9}|0x[0-9A-F]{12})(-(0|[1-9][0-9]{0,9})){0,15}$"
         })
     }
 }
@@ -803,7 +852,7 @@ impl JsonSchema for Timestamp {
             "description": "An RFC 3339 UTC timestamp with exactly six fractional digits and `Z`.",
             "type": "string",
             "format": "date-time",
-            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6}Z$"
+            "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{6}Z$"
         })
     }
 }

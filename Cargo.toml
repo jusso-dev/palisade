@@ -34,6 +34,7 @@ publish = false
 # crate first needs another. The allowed directions are enforced by
 # `cargo xtask check-deps`.
 palisade-core = { path = "crates/palisade-core", default-features = false }
+palisade-fileid = { path = "crates/palisade-fileid" }
 palisade-policy = { path = "crates/palisade-policy" }
 #
 # Third-party crates. Justify every new entry in the PR description.

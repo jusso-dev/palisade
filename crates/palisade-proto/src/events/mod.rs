@@ -76,6 +76,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub use palisade_core::{Mode, ObjectType, PolicyId, RuleId, SchemaVersion, ScriptKind, Uuid7};
 pub use registry_gen::EventType;
+pub(crate) use value::present;
 pub use value::{
     BoundedVec, Description, Guid, Hex, HexBytes, HostId, IpAddress, LabelKey, Labels, LongText,
     Md5Hex, Name, Severity, Sha1Hex, Sha256Hex, Sid, SyslogSeverity, TenantId, Text, Timestamp,
@@ -312,7 +313,11 @@ pub struct Event {
     /// 0 to 10. See [`Severity::syslog`] for the syslog mapping.
     pub severity: Severity,
     /// The enforcement mode, where one applies.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub mode: Option<EventMode>,
     /// A human-readable description of the event (ISM-0585).
     pub description: Description,
@@ -321,49 +326,93 @@ pub struct Event {
     /// The producer's monotonic clock when the event was recorded, in
     /// microseconds since the agent started. It orders events even when the
     /// wall clock jumps.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub ts_agent_monotonic: Option<u64>,
     /// Whether the producer's wall clock was synchronised when `ts` was taken.
     pub clock_synced: bool,
     /// The producer's last measured clock offset, in milliseconds.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub clock_skew_ms: Option<i64>,
     /// The tenant.
     pub tenant_id: TenantId,
     /// The device the event is about (ISM-0585: IT equipment).
     pub host: Host,
     /// The user, if any.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub user: Option<User>,
     /// The Palisade policy and rule that decided, if known.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub policy: Option<PolicyRef>,
     /// The producer's sequence number, starting at 0.
     pub seq: u64,
     /// The chain value of the producer's previous event. Absent only when
     /// `seq` is 0.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub prev_hash: Option<Sha256Hex>,
     /// Labels from policy tags.
     #[serde(default, skip_serializing_if = "Labels::is_empty")]
     pub labels: Labels,
     /// Where the event came from, for events translated from another log.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub source: Option<Source>,
     /// The process that acted.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub process: Option<Process>,
     /// The file acted on.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub file: Option<File>,
     /// The script, for script events.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub script: Option<Script>,
     /// OS-native enforcement details.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub native: Option<Native>,
     /// Agent state, for agent events.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub agent: Option<AgentInfo>,
 }
 
@@ -374,25 +423,53 @@ pub struct Host {
     /// The device ID from enrolment.
     pub id: HostId,
     /// The host name. Dropped in anonymous mode (#228).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub name: Option<Name>,
     /// The fully qualified domain name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub fqdn: Option<Name>,
     /// The directory domain the device is joined to.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub domain: Option<Name>,
     /// The operating system, for example `Windows 11 Enterprise`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub os: Option<Name>,
     /// The OS build, for example `26100.2314`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub os_build: Option<Name>,
     /// The CPU architecture, for example `x86_64` or `aarch64`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub arch: Option<Name>,
     /// The Palisade agent version.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub agent_version: Option<Name>,
     /// The device's IP addresses, at most 32.
     #[serde(default, skip_serializing_if = "BoundedVec::is_empty")]
@@ -407,31 +484,67 @@ pub struct Host {
 #[serde(deny_unknown_fields)]
 pub struct User {
     /// The security identifier.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub sid: Option<Sid>,
     /// The account name. Dropped or pseudonymised by redaction (#228).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub name: Option<Name>,
     /// The account's domain.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub domain: Option<Name>,
     /// The user principal name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub upn: Option<Name>,
     /// The logon session's terminal-services session ID.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub session_id: Option<u32>,
     /// The logon ID (locally unique identifier) of the logon session.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub logon_id: Option<u64>,
     /// How the session logged on.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub logon_type: Option<LogonType>,
     /// Whether the user is a local administrator.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub is_admin: Option<bool>,
     /// Whether the acting token was elevated.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub elevated: Option<bool>,
 }
 
@@ -469,28 +582,60 @@ pub enum LogonType {
 #[serde(deny_unknown_fields)]
 pub struct PolicyRef {
     /// The policy ID.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub id: Option<PolicyId>,
     /// The policy name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub name: Option<Name>,
     /// The policy revision.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub version: Option<u64>,
     /// The SHA-256 of the policy bundle.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub hash: Option<Sha256Hex>,
     /// The rule that decided.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub rule_id: Option<RuleId>,
     /// The rule's name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub rule_name: Option<Name>,
     /// The kind of rule, for example `hash`, `publisher` or `path`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub rule_type: Option<Token>,
     /// The profile the policy was assigned through.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub profile_id: Option<Uuid7>,
 }
 
@@ -501,16 +646,32 @@ pub struct Source {
     /// The kind of log.
     pub kind: SourceKind,
     /// The source's own event ID.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub event_id: Option<u32>,
     /// The source's record number.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub record_id: Option<u64>,
     /// The log channel.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub channel: Option<Name>,
     /// The source's correlation activity ID, which groups related records.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub activity_id: Option<Guid>,
 }
 
@@ -559,19 +720,39 @@ impl SourceKind {
 #[serde(deny_unknown_fields)]
 pub struct Hashes {
     /// SHA-256 of the file.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub sha256: Option<Sha256Hex>,
     /// SHA-1 of the file. Interop only.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub sha1: Option<Sha1Hex>,
     /// MD5 of the file. Interop only.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub md5: Option<Md5Hex>,
     /// SHA-256 signature digest.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub authenticode_sha256: Option<Sha256Hex>,
     /// SHA-1 signature digest. Interop only.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub authenticode_sha1: Option<Sha1Hex>,
 }
 
@@ -592,34 +773,74 @@ impl Hashes {
 #[serde(deny_unknown_fields)]
 pub struct Signer {
     /// The leaf certificate's subject common name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub publisher: Option<Name>,
     /// The issuing certificate's common name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub issuer: Option<Name>,
     /// The leaf certificate's thumbprint.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub leaf_thumbprint: Option<HexBytes>,
     /// The hash of the leaf certificate's to-be-signed part.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub tbs_hash: Option<HexBytes>,
     /// The hash of the issuing certificate's to-be-signed part.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub issuer_tbs_hash: Option<HexBytes>,
     /// Whether the certificate chain verified.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub chain_valid: Option<bool>,
     /// The signing time from a trusted timestamp.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub timestamp: Option<Timestamp>,
     /// How the OS verified the signature (code 0 to 7).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub signature_type: Option<u8>,
     /// The signing level the OS validated (code 0 to 14).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub signing_level: Option<u8>,
     /// Why verification failed, or 0 if it succeeded (code 0 to 28).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub verification_error: Option<u8>,
 }
 
@@ -636,25 +857,53 @@ impl Signer {
 #[serde(deny_unknown_fields)]
 pub struct VersionInfo {
     /// `OriginalFilename`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub original_filename: Option<Name>,
     /// `InternalName`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub internal_name: Option<Name>,
     /// `ProductName`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub product_name: Option<Name>,
     /// `CompanyName`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub company: Option<Name>,
     /// `FileVersion`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub file_version: Option<Name>,
     /// `ProductVersion`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub product_version: Option<Name>,
     /// `FileDescription`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub description: Option<Name>,
 }
 
@@ -723,13 +972,25 @@ pub enum Zone {
 #[serde(deny_unknown_fields)]
 pub struct Origin {
     /// The zone in the file's mark of the web.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub motw_zone: Option<Zone>,
     /// The download URL.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub host_url: Option<LongText>,
     /// The referring page.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub referrer_url: Option<LongText>,
 }
 
@@ -742,21 +1003,21 @@ macro_rules! process_struct {
         #[serde(deny_unknown_fields)]
         pub struct $name {
             /// The process ID.
-            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "present")]
             pub pid: Option<u32>,
             /// A key that identifies the process uniquely on the device, assigned
             /// by the agent's process tracker (#59). Process IDs are reused; this is not.
-            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "present")]
             pub process_key: Option<Name>,
             /// The image path as reported, for example a device path.
-            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "present")]
             pub image_path: Option<LongText>,
             /// The image path with drive letters and `%ENV%` substitutions.
-            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "present")]
             pub image_path_normalised: Option<LongText>,
             /// The command line. Collected only when permitted, and redacted by
             /// default (#228).
-            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "present")]
             pub cmdline: Option<LongText>,
             /// The image's digests.
             #[serde(default, skip_serializing_if = "Hashes::is_empty")]
@@ -768,16 +1029,16 @@ macro_rules! process_struct {
             #[serde(default, skip_serializing_if = "VersionInfo::is_empty")]
             pub version_info: VersionInfo,
             /// The process integrity level.
-            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "present")]
             pub integrity_level: Option<IntegrityLevel>,
             /// The token elevation type.
-            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "present")]
             pub token_elevation_type: Option<TokenElevationType>,
             /// The SID of the process owner.
-            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "present")]
             pub owner_sid: Option<Sid>,
             /// Where the image came from.
-            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "present")]
             pub origin: Option<Origin>,
             $($extra)*
         }
@@ -788,10 +1049,10 @@ process_struct!(
     /// The process that acted.
     Process {
         /// The parent process, with the same fields.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "present")]
         pub parent: Option<Box<ParentProcess>>,
         /// A summary of the grandparent process.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "present")]
         pub grandparent: Option<ProcessSummary>,
     }
 );
@@ -807,13 +1068,25 @@ process_struct!(
 #[serde(deny_unknown_fields)]
 pub struct ProcessSummary {
     /// The process ID.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub pid: Option<u32>,
     /// The process key (#59).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub process_key: Option<Name>,
     /// The image path.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub image_path: Option<LongText>,
 }
 
@@ -842,28 +1115,60 @@ pub enum DeviceType {
 #[serde(deny_unknown_fields)]
 pub struct File {
     /// The path as reported, for example a device path.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub path: Option<LongText>,
     /// The path with drive letters and `%ENV%` substitutions.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub path_normalised: Option<LongText>,
     /// For packaged apps: the package family or full name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub package_name: Option<Name>,
     /// The object class.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub object_type: Option<ObjectType>,
     /// The size in bytes.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub size: Option<u64>,
     /// When the file was created.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub created: Option<Timestamp>,
     /// When the file was last modified.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub modified: Option<Timestamp>,
     /// The SID of the file owner.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub owner_sid: Option<Sid>,
     /// The file's digests.
     #[serde(default, skip_serializing_if = "Hashes::is_empty")]
@@ -875,13 +1180,25 @@ pub struct File {
     #[serde(default, skip_serializing_if = "VersionInfo::is_empty")]
     pub version_info: VersionInfo,
     /// Whether a standard user can write to the file's location.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub user_writable_location: Option<bool>,
     /// The kind of device the file is on.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub device_type: Option<DeviceType>,
     /// The alternate data stream name, if the target is a stream.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub ads_name: Option<Name>,
 }
 
@@ -905,34 +1222,63 @@ pub enum LanguageMode {
 
 /// A script.
 ///
-/// A script is either a file (`path`) or inline text (`inline`), never both.
+/// A script is either a file (`path`) or inline text (`inline: true`):
+/// exactly one of the two.
 /// A file-backed script's digests and signatures are in [`Event::file`].
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Script {
     /// The script file.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub path: Option<LongText>,
     /// The script was inline text, not a file.
     #[serde(default, skip_serializing_if = "is_false")]
     pub inline: bool,
     /// The kind of script.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub kind: Option<ScriptKind>,
     /// The interpreter that ran it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub interpreter: Option<Name>,
     /// SHA-256 of the script content.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub content_sha256: Option<Sha256Hex>,
     /// The language mode it ran in.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub language_mode: Option<LanguageMode>,
     /// SHA-256 of the content passed to the antimalware scan interface.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub amsi_content_sha256: Option<Sha256Hex>,
     /// The interpreter's script block ID.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub script_block_id: Option<Guid>,
 }
 
@@ -953,69 +1299,153 @@ const fn is_false(value: &bool) -> bool {
 #[serde(deny_unknown_fields)]
 pub struct Native {
     /// The OS status code (an NTSTATUS value).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub status_code: Option<u32>,
     /// The signing level the caller requested (code 0 to 14).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub requested_signing_level: Option<u8>,
     /// The signing level the OS validated (code 0 to 14).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub validated_signing_level: Option<u8>,
     /// The signing scenario: 0 for kernel mode, 1 for user mode.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub signing_scenario: Option<u32>,
     /// The native policy's name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub policy_name: Option<Name>,
     /// The native policy's ID string.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub policy_id: Option<Name>,
     /// The native policy's GUID.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub policy_guid: Option<Guid>,
     /// The native policy's hash.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub policy_hash: Option<HexBytes>,
     /// The native policy's option bits, as the OS reports them on activation.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub policy_options: Option<u32>,
     /// How many policies an activation or refresh covered.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub policy_count: Option<u32>,
     /// The COM class ID, for COM activation events.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub clsid: Option<Guid>,
     /// The native rule's GUID.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub rule_guid: Option<Guid>,
     /// The native rule's name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub rule_name: Option<Name>,
     /// The native rule's security descriptor (SDDL).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub rule_sddl: Option<LongText>,
     /// The hash the rule-collection engine computed for hash rules. Its
     /// algorithm depends on the file type, so it is not one of [`Hashes`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub rule_hash: Option<HexBytes>,
     /// The fully qualified binary name (publisher, product, file name and
     /// version), verbatim.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub fqbn: Option<LongText>,
     /// The SHA-256 digest used for catalog lookup.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub catalog_sha256: Option<Sha256Hex>,
     /// The SHA-1 digest used for catalog lookup. Interop only.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub catalog_sha1: Option<Sha1Hex>,
     /// Whether the native policy was in audit mode.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub policy_audit_mode: Option<bool>,
     /// Whether the native policy trusts files from a managed installer.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub managed_installer_enabled: Option<bool>,
     /// Whether the file carried a managed-installer origin claim.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub passes_managed_installer: Option<bool>,
 }
 
@@ -1040,13 +1470,25 @@ pub enum HealthStatus {
 #[serde(deny_unknown_fields)]
 pub struct CacheStats {
     /// Entries in the cache.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub entries: Option<u64>,
     /// Lookups answered from the cache.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub hits: Option<u64>,
     /// Lookups not answered from the cache.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub misses: Option<u64>,
 }
 
@@ -1055,20 +1497,40 @@ pub struct CacheStats {
 #[serde(deny_unknown_fields)]
 pub struct AgentInfo {
     /// The overall health.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub health: Option<HealthStatus>,
     /// Identity cache counters.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub cache: Option<CacheStats>,
     /// Events throttled since the last report.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub throttled_count: Option<u64>,
     /// Events dropped since the last report. Drops are always counted, never
     /// silent.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub dropped_count: Option<u64>,
     /// Tamper attempts since the last report.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub tamper_attempts: Option<u64>,
 }
 
@@ -1156,8 +1618,8 @@ pub enum EventErrorCode {
     /// `prev_hash` is missing although `seq` is not 0, or present although
     /// `seq` is 0.
     ChainLink,
-    /// A script has both a `path` and `inline`.
-    ScriptPathAndInline,
+    /// A script has both a `path` and `inline`, or neither.
+    ScriptPathXorInline,
 }
 
 impl fmt::Display for EventError {
@@ -1184,8 +1646,12 @@ impl fmt::Display for EventError {
             EventErrorCode::ChainLink => {
                 write!(f, "{}: required exactly when `seq` is not 0", self.path)
             }
-            EventErrorCode::ScriptPathAndInline => {
-                write!(f, "{}: a script is a file or inline, not both", self.path)
+            EventErrorCode::ScriptPathXorInline => {
+                write!(
+                    f,
+                    "{}: a script is either a file (`path`) or `inline`",
+                    self.path
+                )
             }
         }
     }
@@ -1208,12 +1674,13 @@ impl Event {
     pub fn from_json(input: &str) -> Result<Self, LoadError> {
         #[derive(Deserialize)]
         struct Header {
-            schema_version: Option<serde_json::Value>,
+            #[serde(default)]
+            schema_version: VersionPeek,
         }
         let header: Header = serde_json::from_str(input).map_err(LoadError::Json)?;
-        let version: SchemaVersion = header
+        let version = header
             .schema_version
-            .and_then(|v| v.as_str()?.parse().ok())
+            .0
             .ok_or(LoadError::MissingSchemaVersion)?;
         check_version(version)?;
         serde_json::from_str(input).map_err(LoadError::Json)
@@ -1256,9 +1723,9 @@ impl Event {
         if self
             .script
             .as_ref()
-            .is_some_and(|s| s.inline && s.path.is_some())
+            .is_some_and(|s| s.inline == s.path.is_some())
         {
-            fail(EventErrorCode::ScriptPathAndInline, "/script/inline");
+            fail(EventErrorCode::ScriptPathXorInline, "/script");
         }
         if errors.is_empty() {
             Ok(())
@@ -1316,6 +1783,52 @@ impl Event {
             gaps.push("file name");
         }
         gaps
+    }
+}
+
+/// The `schema_version` of a document, read without keeping any other value:
+/// a string that parses as a version, or `None` for anything else. Values of
+/// other types are skipped without being built.
+#[derive(Default)]
+struct VersionPeek(Option<SchemaVersion>);
+
+impl<'de> Deserialize<'de> for VersionPeek {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::{IgnoredAny, MapAccess, SeqAccess, Visitor};
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = VersionPeek;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("any value")
+            }
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<VersionPeek, E> {
+                Ok(VersionPeek(v.parse().ok()))
+            }
+            fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<VersionPeek, E> {
+                Ok(VersionPeek(None))
+            }
+            fn visit_i64<E: serde::de::Error>(self, _: i64) -> Result<VersionPeek, E> {
+                Ok(VersionPeek(None))
+            }
+            fn visit_u64<E: serde::de::Error>(self, _: u64) -> Result<VersionPeek, E> {
+                Ok(VersionPeek(None))
+            }
+            fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<VersionPeek, E> {
+                Ok(VersionPeek(None))
+            }
+            fn visit_unit<E: serde::de::Error>(self) -> Result<VersionPeek, E> {
+                Ok(VersionPeek(None))
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<VersionPeek, A::Error> {
+                while seq.next_element::<IgnoredAny>()?.is_some() {}
+                Ok(VersionPeek(None))
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<VersionPeek, A::Error> {
+                while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+                Ok(VersionPeek(None))
+            }
+        }
+        deserializer.deserialize_any(V)
     }
 }
 

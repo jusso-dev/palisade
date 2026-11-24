@@ -10,8 +10,8 @@
 //! ```
 //!
 //! Every expected event must also pass the committed JSON Schema and the
-//! ISM-0585 field checklist, and every mapped source event ID must have at
-//! least one fixture.
+//! ISM-0585 field checklist, and every entry (every source event ID and
+//! each canonical type it can map to) must have a fixture.
 
 #![allow(clippy::unwrap_used)]
 
@@ -35,6 +35,9 @@ struct Fixture {
     /// Source fields the mapping must report as dropped.
     #[serde(default)]
     dropped: Vec<String>,
+    /// The `(received, announced)` signature counts, when records are missing.
+    #[serde(default)]
+    signatures_incomplete: Option<(usize, u64)>,
 }
 
 #[derive(Deserialize)]
@@ -126,13 +129,12 @@ fn golden_fixtures_map_to_expected_events() {
     let set = MappingSet::builtin().unwrap();
     let (schemas, index) = compiled_schema();
     let bless = std::env::var_os("PALISADE_BLESS").is_some();
-    let mut covered: BTreeSet<(SourceKind, u32)> = BTreeSet::new();
+    let mut covered: BTreeSet<(SourceKind, u32, EventType)> = BTreeSet::new();
     for path in fixtures() {
         let name = path.display().to_string();
         let fixture: Fixture = serde_json::from_str(&fs::read_to_string(&path).unwrap())
             .unwrap_or_else(|e| panic!("{name}: {e}"));
         let record = fixture.record.into_record();
-        covered.insert((fixture.source, record.event_id));
         let signatures: Vec<Record> = fixture
             .signatures
             .into_iter()
@@ -143,6 +145,11 @@ fn golden_fixtures_map_to_expected_events() {
             .unwrap_or_else(|e| panic!("{name}: {e}"));
         let dropped: Vec<&str> = mapped.dropped.iter().map(|d| d.field.as_str()).collect();
         assert_eq!(dropped, fixture.dropped, "{name}: dropped fields");
+        assert_eq!(
+            mapped.signatures_incomplete, fixture.signatures_incomplete,
+            "{name}: signature counts"
+        );
+        covered.insert((fixture.source, record.event_id, mapped.event.event_type));
 
         let value = serde_json::to_value(&mapped.event).unwrap();
         if let Err(e) = schemas.validate(&value, index) {
@@ -181,11 +188,14 @@ fn golden_fixtures_map_to_expected_events() {
         SourceKind::OsLegacyRuleCollection,
     ] {
         for id in set.event_ids(source) {
-            assert!(
-                covered.contains(&(source, id)),
-                "{} event {id} has no fixture",
-                source.as_str()
-            );
+            for ty in set.canonical_types(source, id) {
+                assert!(
+                    covered.contains(&(source, id, ty)),
+                    "{} event {id} as `{}` has no fixture",
+                    source.as_str(),
+                    ty.as_str()
+                );
+            }
         }
     }
 }

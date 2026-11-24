@@ -16,7 +16,8 @@
 //!
 //! - each `event_type` fixes its `category` and the field sets it requires;
 //! - `prev_hash` is present exactly when `seq` is not 0;
-//! - a script is a file or inline, not both.
+//! - a script is either a file (`path`) or `inline`: exactly one;
+//! - no field may be `null`: unset optional fields are left out.
 //!
 //! The `$id` names the major version only: every minor version of a major is
 //! a valid instance of the newest schema for that major (see the
@@ -34,6 +35,12 @@ pub const SCHEMA_ID: &str = "https://github.com/jusso-dev/palisade/schemas/event
 pub fn generate() -> Value {
     let generator = schemars::generate::SchemaSettings::draft2020_12().into_generator();
     let mut schema = generator.into_root_schema_for::<Event>();
+    // No field of the model is nullable: an unset optional field is left
+    // out, and readers reject `null`. So the `null` alternatives that the
+    // generator adds for `Option` fields are removed, and `required` then
+    // means "present with a value" in the schema as it does in the reader.
+    let mut no_null = schemars::transform::RecursiveTransform(drop_null);
+    schemars::transform::Transform::transform(&mut no_null, &mut schema);
     let object = schema.ensure_object();
     object.insert("$id".to_owned(), SCHEMA_ID.into());
     object.insert("title".to_owned(), "Palisade canonical event".into());
@@ -69,17 +76,52 @@ fn cross_field_rules() -> Vec<Value> {
         "then": { "not": { "required": ["prev_hash"] } },
         "else": { "required": ["prev_hash"] }
     }));
+    let inline = json!({
+        "properties": { "inline": { "const": true } },
+        "required": ["inline"]
+    });
     rules.push(json!({
         "properties": {
             "script": {
-                "not": {
-                    "properties": { "inline": { "const": true } },
-                    "required": ["path", "inline"]
-                }
+                "if": { "required": ["path"] },
+                "then": { "not": inline },
+                "else": inline
             }
         }
     }));
     rules
+}
+
+/// Removes the `null` alternative from one schema object: `"type": [T,
+/// "null"]` becomes `"type": T`, and `"anyOf": [S, {"type": "null"}]`
+/// becomes `S`.
+fn drop_null(schema: &mut schemars::Schema) {
+    let Some(object) = schema.as_object_mut() else {
+        return;
+    };
+    if let Some(Value::Array(types)) = object.get_mut("type") {
+        types.retain(|t| t != "null");
+        if let [only] = types.as_slice() {
+            let only = only.clone();
+            object.insert("type".to_owned(), only);
+        }
+    }
+    let single = match object.get_mut("anyOf") {
+        Some(Value::Array(options)) => {
+            options.retain(|o| o.get("type").is_none_or(|t| t != "null"));
+            match options.as_slice() {
+                [only] => Some(only.clone()),
+                _ => None,
+            }
+        }
+        _ => None,
+    };
+    if let Some(Value::Object(only)) = single {
+        object.remove("anyOf");
+        for (k, v) in only {
+            object.entry(k).or_insert(v);
+        }
+    }
 }
 
 /// Rebuilds every object with its keys in sorted order, so the committed

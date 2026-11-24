@@ -2,7 +2,7 @@
 # event type. `src/events/registry_gen.rs` and `REGISTRY.md` are generated
 # from this file. After editing it, regenerate both with:
 #
-#   PALISADE_BLESS=1 cargo test -p palisade-proto --test registry
+#   PALISADE_BLESS=1 cargo test -p palisade-proto --lib registry
 #
 # Each entry:
 #   type         dotted name, lowercase: `<area>.<what>`
