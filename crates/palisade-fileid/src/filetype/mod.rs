@@ -624,13 +624,20 @@ fn detect<R: Read + Seek + ?Sized>(
     // A read failure in the probe is kept, and reported with whatever the
     // rest finds (text, a script, a disc image), since the archive could
     // not be ruled out.
-    if text::is_shebang_zip(head) {
+    if let Some(script) = text::shebang_zip(head) {
         let mut probe = out.clone();
         if zip::classify(src, name, &mut probe, true) {
             *out = probe;
             return;
         }
         detect_unstructured(src, name, out);
+        // Whatever the rest looks like (binary, text, a disc image), the
+        // file is the script its `#!` line names.
+        if !out.is_executable_content() {
+            set(out, FileKind::Script(script));
+            out.heuristic = false;
+            out.extension_assisted = false;
+        }
         if out.parse_error.is_none() {
             out.parse_error = probe.parse_error;
         }

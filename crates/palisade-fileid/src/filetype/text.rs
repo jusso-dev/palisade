@@ -353,24 +353,21 @@ pub(super) fn system_area_is_script(area: &[u8], name: &NameInfo) -> bool {
 /// The longest shebang line looked past for a ZIP local file header.
 const MAX_SHEBANG_LINE: usize = 512;
 
-/// A `#!` line followed directly by a ZIP local file header. A `#![` line
-/// (after spaces or tabs) is not a shebang line, as in `markers`.
-pub(super) fn is_shebang_zip(head: &[u8]) -> bool {
-    let Some(nl) = head.iter().take(MAX_SHEBANG_LINE).position(|b| *b == b'\n') else {
-        return false;
-    };
-    let line = head.get(..nl).unwrap_or_default();
-    let Some(interpreter) = line.strip_prefix(b"#!") else {
-        return false;
-    };
-    let attribute = interpreter
+/// The script kind a `#!` line names, when that line is followed directly
+/// by a ZIP local file header. This one byte-level test decides the case:
+/// such a file is a zip application or the script the line names, and
+/// never depends on how the rest decodes as text (where `markers` takes
+/// `#![` for a Rust attribute). A Rust source file has no ZIP header on
+/// its second line.
+pub(super) fn shebang_zip(head: &[u8]) -> Option<ScriptKind> {
+    let nl = head
         .iter()
-        .find(|b| !matches!(b, b' ' | b'\t'))
-        .is_some_and(|b| *b == b'[');
-    !attribute
-        && head
-            .get(nl + 1..)
-            .is_some_and(|rest| rest.starts_with(b"PK\x03\x04"))
+        .take(MAX_SHEBANG_LINE)
+        .position(|b| *b == b'\n')?;
+    let interpreter = head.get(..nl)?.strip_prefix(b"#!")?;
+    head.get(nl + 1..)?
+        .starts_with(b"PK\x03\x04")
+        .then(|| shebang(&String::from_utf8_lossy(interpreter)))
 }
 
 /// The encoding, and the length of its byte order mark. `None` if the head

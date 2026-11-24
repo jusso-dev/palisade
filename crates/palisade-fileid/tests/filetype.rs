@@ -3585,17 +3585,6 @@ fn failed_pe_directory_reads_are_reported() {
 }
 
 #[test]
-fn rust_inner_attributes_do_not_start_a_zip_application() {
-    let c = classify(&zip(b"#![x]\n", &["__main__.py"]), None);
-    assert!(!c.flags.python_zipapp, "{c:?}");
-    assert!(
-        classify(&zip(b"#!/bin/sh\n", &["__main__.py"]), None)
-            .flags
-            .python_zipapp
-    );
-}
-
-#[test]
 fn a_short_head_is_the_reason_reported() {
     // Round 17: a compound file whose reader ends inside its header was
     // reported as a bad header, hiding that the read came up short.
@@ -3634,17 +3623,56 @@ fn failed_shebang_zip_probe_reads_survive_a_planted_descriptor() {
 }
 
 #[test]
-fn shebang_zip_needs_a_shebang_on_the_first_line() {
-    assert!(
-        !classify(&zip(b"#! \t[x]\n", &["__main__.py"]), None)
-            .flags
-            .python_zipapp
-    );
-    assert!(
-        classify(&zip(b"#! /usr/bin/python3\n", &["__main__.py"]), None)
-            .flags
-            .python_zipapp
-    );
+fn any_shebang_line_before_a_zip_stays_executable() {
+    // Round 18: a `#!` line with a `[`, a form feed or a NUL before it was
+    // taken for a ZIP's shebang by the probe and for a Rust attribute by
+    // the text rules, so an archive that was not a clean zip application
+    // fell through to `Unknown`. One byte-level test now decides.
+    for line in [
+        &b"#![x]\n"[..],
+        b"#! \t[x]\n",
+        b"#!\x0c[x]\n",
+        b"#!\r[x]\n",
+        b"#!\0[x]\n",
+        b"#!\x85[x]\n",
+    ] {
+        // A clean zip application runs under Python whatever its first
+        // line says.
+        let c = classify(&zip(line, &["__main__.py"]), None);
+        assert!(c.flags.python_zipapp, "{line:?} {c:?}");
+        // Anything else is the script the line names.
+        for names in [&["__main__.py"][..], &["x"]] {
+            let mut junk = zip(line, names);
+            junk.push(b'X');
+            for hint in [None, Some("a.pdf"), Some("disk.iso")] {
+                let c = classify(&junk, hint);
+                assert_eq!(
+                    (c.content_kind, c.confidence),
+                    (FileKind::Script(ScriptKind::Shell), Confidence::High),
+                    "{line:?} {hint:?}"
+                );
+                assert!(!c.flags.python_zipapp && c.is_executable_content());
+            }
+        }
+        // With a planted descriptor as well, and a reader that fails.
+        let mut data = line.to_vec();
+        data.extend_from_slice(b"PK\x03\x04");
+        data.resize(0x8800, 0);
+        data[0x8000..0x8007].copy_from_slice(b"\x01CD001\x01");
+        data.resize(HEAD_LEN + 100_000, 0);
+        let c = filetype::classify(&mut FailFrom(Cursor::new(data), HEAD_LEN as u64), None);
+        assert_eq!(
+            c.content_kind,
+            FileKind::Script(ScriptKind::Shell),
+            "{line:?}"
+        );
+        assert_eq!(
+            c.parse_error,
+            Some(ParseError::Io(io::ErrorKind::PermissionDenied))
+        );
+    }
+    // A Rust file with no ZIP after its first line is still not a script.
+    assert!(!classify(b"#![allow(dead_code)]\nfn main() {}\n", None).is_executable_content());
 }
 
 /// Seed inputs for the property tests and the fuzz target.
