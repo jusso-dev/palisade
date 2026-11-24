@@ -48,7 +48,7 @@ use tokio_rustls::TlsAcceptor;
 use tower::ServiceExt;
 
 use crate::config::{BindTarget, Config, ListenerKind, ListenerSettings, Profile};
-use crate::health::{Health, ListenerHealth};
+use crate::health::{DatabaseHealth, Health, ListenerHealth};
 use crate::http::{self, Peer};
 use crate::net::{self, HostAddr};
 use crate::tls::{self, Identity};
@@ -245,6 +245,7 @@ pub struct Server {
     routes: BTreeMap<ListenerKind, Router>,
     addrs: AddrSource,
     tuning: Tuning,
+    database: bool,
 }
 
 impl Server {
@@ -256,7 +257,17 @@ impl Server {
             routes: BTreeMap::new(),
             addrs: Arc::new(net::host_addrs),
             tuning: Tuning::default(),
+            database: false,
         }
+    }
+
+    /// Makes readiness depend on the database. Readiness starts with
+    /// `database_down`, before any listener binds, until a database check
+    /// records otherwise (see [`crate::db::watch`]).
+    #[must_use]
+    pub fn with_database(mut self) -> Self {
+        self.database = true;
+        self
     }
 
     /// Adds routes to one listener, next to the built-in probes. The
@@ -289,6 +300,9 @@ impl Server {
     /// Listeners that cannot bind yet keep retrying in the background.
     pub fn start(mut self) -> RunningServer {
         let health = Arc::new(Health::new(self.config.listeners.iter().map(|l| l.kind)));
+        if self.database {
+            health.set_database(DatabaseHealth::Down);
+        }
         let (phase_tx, phase_rx) = watch::channel(Phase::Running);
         let (drain_tx, drain_rx) = mpsc::channel::<()>(1);
         let mut supervisors = JoinSet::new();

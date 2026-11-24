@@ -21,7 +21,15 @@ pub struct Step {
     pub tool: Option<Tool>,
     /// Skipped by `--fast`.
     pub slow: bool,
+    /// An environment variable the step needs from the developer's
+    /// environment. Without it the step is skipped with a note, as the
+    /// tests it runs would skip themselves.
+    pub needs_env: Option<&'static str>,
 }
+
+/// Where the `postgres` job's tests find a disposable Postgres superuser
+/// connection.
+pub const POSTGRES_URL: &str = "PALISADE_TEST_DATABASE_ADMIN_URL";
 
 /// An external tool: the command that proves it is installed, and the
 /// install command for the version CI uses.
@@ -75,6 +83,7 @@ const fn step(job: &'static str, command: &'static str) -> Step {
         env: &[],
         tool: None,
         slow: false,
+        needs_env: None,
     }
 }
 
@@ -122,6 +131,14 @@ pub const STEPS: &[Step] = &[
         "bench",
         "cargo test --workspace --all-features --locked --bench criterion_eval --bench hash_and_parse",
     ),
+    Step {
+        tool: Some(NEXTEST),
+        needs_env: Some(POSTGRES_URL),
+        ..step(
+            "postgres",
+            "cargo nextest run -p palisade-server --test postgres --locked --profile ci",
+        )
+    },
     Step {
         env: &[("RUSTDOCFLAGS", "-D warnings")],
         slow: true,
@@ -208,9 +225,20 @@ struct Planned {
 /// fails, as in CI. Returns `true` if all passed.
 pub fn run(root: &std::path::Path, fast: bool, rust_version: &str) -> Result<bool, String> {
     let toolchain = msrv_toolchain(rust_version);
+    for s in STEPS {
+        if let Some(var) = s.needs_env {
+            if std::env::var_os(var).is_none() {
+                println!(
+                    "ci: [{}] skipped: set {var} to a disposable Postgres superuser URL to run it",
+                    s.job
+                );
+            }
+        }
+    }
     let mut selected: Vec<Planned> = STEPS
         .iter()
         .filter(|s| !(fast && s.slow))
+        .filter(|s| s.needs_env.is_none_or(|v| std::env::var_os(v).is_some()))
         .map(|s| Planned {
             job: s.job,
             command: s.command.to_owned(),
@@ -406,6 +434,24 @@ mod tests {
         .unwrap();
         assert!(ci.iter().any(|(job, _)| job == "msrv"));
         assert!(ci_source.contains(&format!("MSRV: \"{}\"", msrv_toolchain(rust_version))));
+    }
+
+    #[test]
+    fn postgres_step_reads_the_ci_job_env() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows/ci.yml");
+        let docs = YamlLoader::load_from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let job = &docs[0]["jobs"]["postgres"];
+        assert!(job["env"][POSTGRES_URL].as_str().is_some());
+        let image = job["services"]["postgres"]["image"].as_str().unwrap();
+        assert!(
+            image.starts_with("postgres@sha256:") && image.len() == 16 + 64,
+            "{image}"
+        );
+        let needs = docs[0]["jobs"]["ci-ok"]["needs"].as_vec().unwrap();
+        assert!(needs.iter().any(|n| n.as_str() == Some("postgres")));
+        let step = STEPS.iter().find(|s| s.job == "postgres").unwrap();
+        assert_eq!(step.needs_env, Some(POSTGRES_URL));
     }
 
     #[test]
