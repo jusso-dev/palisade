@@ -89,6 +89,7 @@ pub(crate) struct Signer<'a> {
     pub statement_type: Option<StatementType>,
     pub signing_time: Option<i64>,
     pub sig_alg: SignatureAlgorithm,
+    /// The signature value (`encryptedDigest`): what a timestamp covers.
     pub signature: &'a [u8],
     /// Nested signatures: the DER of each `ContentInfo`, with its offset.
     pub nested: Vec<(&'a [u8], usize)>,
@@ -173,8 +174,9 @@ fn parse_signed_data<'a>(sd: &Tlv<'a>) -> Result<SignedData<'a>> {
             }
         }
     }
-    // CRLs are not used for Authenticode verification (revocation is #50),
-    // but each must still be a valid DER element.
+    // CRLs embedded in a signature are not used: revocation data comes
+    // from the caller (#50, `revocation.rs`). Each must still be a valid
+    // DER element.
     if let Some(crls) = r.read_optional(tag::context_cons(1))? {
         let mut c = crls.reader();
         while !c.is_empty() {
@@ -385,29 +387,8 @@ fn parse_page_hash_table(data: &[u8], base: usize) -> Result<Option<PageHashes>>
 fn parse_signer_info<'a>(info: &Tlv<'a>, warnings: &mut Warnings) -> Result<Signer<'a>> {
     let mut r = info.expect(tag::SEQUENCE)?.reader();
     let version = read_small_uint(&mut r)?;
-    let sid = match r.peek_tag() {
-        Some(tag::SEQUENCE) => {
-            let ias = r.read(tag::SEQUENCE)?;
-            let mut i = ias.reader();
-            let issuer = i.read(tag::SEQUENCE)?;
-            asn1::validate(&issuer)?;
-            let serial = i.read(tag::INTEGER)?;
-            i.finish()?;
-            SignerIdentifier::IssuerAndSerial {
-                issuer: issuer.raw.to_vec(),
-                serial: asn1::integer_bytes(&serial)?.to_vec(),
-            }
-        }
-        _ => {
-            let ski = r.read(tag::context_prim(0))?;
-            SignerIdentifier::SubjectKeyId(ski.content.to_vec())
-        }
-    };
-    let expected_version = match sid {
-        SignerIdentifier::IssuerAndSerial { .. } => 1,
-        SignerIdentifier::SubjectKeyId(_) => 3,
-    };
-    if version != expected_version {
+    let sid = parse_sid(&mut r)?;
+    if version != sid_version(&sid) {
         warnings.push(SignatureWarning::SignerVersionMismatch(version));
     }
     let digest_alg = parse_digest_alg(&r.read(tag::SEQUENCE)?)?;
@@ -446,6 +427,38 @@ fn parse_signer_info<'a>(info: &Tlv<'a>, warnings: &mut Warnings) -> Result<Sign
     })
 }
 
+/// A SignerInfo's `sid`: `IssuerAndSerialNumber` or `[0]
+/// SubjectKeyIdentifier`.
+pub(crate) fn parse_sid(r: &mut Reader<'_>) -> Result<SignerIdentifier> {
+    Ok(match r.peek_tag() {
+        Some(tag::SEQUENCE) => {
+            let ias = r.read(tag::SEQUENCE)?;
+            let mut i = ias.reader();
+            let issuer = i.read(tag::SEQUENCE)?;
+            asn1::validate(&issuer)?;
+            let serial = i.read(tag::INTEGER)?;
+            i.finish()?;
+            SignerIdentifier::IssuerAndSerial {
+                issuer: issuer.raw.to_vec(),
+                serial: asn1::integer_bytes(&serial)?.to_vec(),
+            }
+        }
+        _ => {
+            let ski = r.read(tag::context_prim(0))?;
+            SignerIdentifier::SubjectKeyId(ski.content.to_vec())
+        }
+    })
+}
+
+/// The SignerInfo version that goes with a `sid` form: 1 for issuer and
+/// serial, 3 for a key identifier.
+pub(crate) const fn sid_version(sid: &SignerIdentifier) -> u32 {
+    match sid {
+        SignerIdentifier::IssuerAndSerial { .. } => 1,
+        SignerIdentifier::SubjectKeyId(_) => 3,
+    }
+}
+
 struct Authenticated<'a> {
     message_digest: &'a [u8],
     opus: Opus,
@@ -454,7 +467,7 @@ struct Authenticated<'a> {
 }
 
 /// Reads one `Attribute ::= SEQUENCE { type OID, values SET }`.
-fn read_attribute<'a>(r: &mut Reader<'a>) -> Result<(&'a [u8], Tlv<'a>)> {
+pub(crate) fn read_attribute<'a>(r: &mut Reader<'a>) -> Result<(&'a [u8], Tlv<'a>)> {
     let attr = r.read(tag::SEQUENCE)?;
     let mut a = attr.reader();
     let attr_type = read_oid(&mut a)?;
@@ -464,7 +477,7 @@ fn read_attribute<'a>(r: &mut Reader<'a>) -> Result<(&'a [u8], Tlv<'a>)> {
 }
 
 /// The single value of an attribute.
-fn single_value<'a>(attr_type: &[u8], values: &Tlv<'a>) -> Result<Tlv<'a>> {
+pub(crate) fn single_value<'a>(attr_type: &[u8], values: &Tlv<'a>) -> Result<Tlv<'a>> {
     let mut v = values.reader();
     let count_error = || SignatureError::AttributeValueCount(ObjectId::from_der(attr_type));
     if v.is_empty() {
@@ -631,7 +644,7 @@ fn parse_unauthenticated_attributes<'a>(
         let kind = match attr_type {
             oid::NESTED_SIGNATURE => None,
             oid::COUNTER_SIGNATURE => Some(TimestampKind::CounterSignature),
-            oid::RFC3161_TIMESTAMP => Some(TimestampKind::Rfc3161),
+            oid::RFC3161_TIMESTAMP | oid::TIMESTAMP_TOKEN => Some(TimestampKind::Rfc3161),
             other => {
                 asn1::validate(&values)?;
                 warnings.push(SignatureWarning::UnknownUnauthenticatedAttribute(
@@ -643,7 +656,8 @@ fn parse_unauthenticated_attributes<'a>(
         let mut v = values.reader();
         while !v.is_empty() {
             let value = v.read_any()?;
-            // Timestamps are kept for #50 and must be valid DER. Nested
+            // Timestamps are verified by `timestamp.rs` (#50) and must be
+            // valid DER. Nested
             // signatures are parsed (and so checked) by the walker, which
             // bounds their depth itself.
             if kind.is_some() {
@@ -669,7 +683,10 @@ fn parse_unauthenticated_attributes<'a>(
 /// The SignerInfo's signature algorithm. A digest it names must agree with
 /// the SignerInfo's digest algorithm (except for RSA-PSS, whose parameters
 /// are checked at verification).
-fn parse_signature_alg(id: &Tlv<'_>, signer_digest: &DigestId) -> Result<SignatureAlgorithm> {
+pub(crate) fn parse_signature_alg(
+    id: &Tlv<'_>,
+    signer_digest: &DigestId,
+) -> Result<SignatureAlgorithm> {
     let mut r = id.expect(tag::SEQUENCE)?.reader();
     let alg = read_oid(&mut r)?;
     let params = if r.is_empty() {

@@ -360,6 +360,7 @@ fn blank(status: SignatureStatus) -> SignatureInfo {
         pe_image_flags: None,
         page_hashes: None,
         timestamp_tokens: Vec::new(),
+        signature_value: Vec::new(),
         os_ci_issues: vec![OsCiIssue::SignerUnknown],
         warnings: Vec::new(),
     }
@@ -488,6 +489,7 @@ fn check(
         pe_image_flags: indirect.pe_image_flags,
         page_hashes: indirect.page_hashes.clone(),
         timestamp_tokens: signer.timestamps.clone(),
+        signature_value: signer.signature.to_vec(),
         os_ci_issues,
         warnings: warnings.0,
         ..blank(SignatureStatus::Valid)

@@ -30,6 +30,7 @@ pub(crate) mod tag {
     pub const OCTET_STRING: u8 = 0x04;
     pub const NULL: u8 = 0x05;
     pub const OID: u8 = 0x06;
+    pub const ENUMERATED: u8 = 0x0a;
     pub const UTC_TIME: u8 = 0x17;
     pub const GENERALIZED_TIME: u8 = 0x18;
     pub const SEQUENCE: u8 = 0x30;
@@ -354,9 +355,18 @@ pub(crate) fn integer_bytes<'a>(tlv: &Tlv<'a>) -> Result<&'a [u8]> {
 
 /// A small non-negative INTEGER (a version number).
 pub(crate) fn read_small_uint(reader: &mut Reader<'_>) -> Result<u32> {
-    let tlv = reader.read(tag::INTEGER)?;
-    let content = integer_bytes(&tlv)?;
+    small_uint(&reader.read(tag::INTEGER)?)
+}
+
+/// The value of a small non-negative integer element, whatever its tag (an
+/// `[n] IMPLICIT INTEGER`, for example): at most four content octets, and
+/// not negative.
+pub(crate) fn small_uint(tlv: &Tlv<'_>) -> Result<u32> {
+    let content = tlv.content;
     let invalid = tlv.error(Asn1ErrorKind::InvalidValue);
+    if content.is_empty() {
+        return Err(invalid);
+    }
     if content.len() > 4 || content.first().is_some_and(|b| b & 0x80 != 0) {
         return Err(invalid);
     }
@@ -902,6 +912,30 @@ pub(crate) mod oid {
     pub const SIGNING_TIME: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x09, 0x05];
     /// 1.2.840.113549.1.9.6 `counterSignature`.
     pub const COUNTER_SIGNATURE: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x09, 0x06];
+    /// 1.2.840.113549.1.7.1 `data`.
+    pub const DATA: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x01];
+    /// 1.2.840.113549.1.9.16.1.4 `id-ct-TSTInfo` (RFC 3161).
+    pub const TST_INFO: &[u8] = &[
+        0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x09, 0x10, 0x01, 0x04,
+    ];
+    /// 1.2.840.113549.1.9.16.2.14 `id-aa-timeStampToken` (RFC 3161, appendix A).
+    pub const TIMESTAMP_TOKEN: &[u8] = &[
+        0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x09, 0x10, 0x02, 0x0e,
+    ];
+    /// 1.2.840.113549.1.9.16.2.12 `id-aa-signingCertificate` (RFC 2634).
+    pub const SIGNING_CERTIFICATE: &[u8] = &[
+        0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x09, 0x10, 0x02, 0x0c,
+    ];
+    /// 1.2.840.113549.1.9.16.2.47 `id-aa-signingCertificateV2` (RFC 5035).
+    pub const SIGNING_CERTIFICATE_V2: &[u8] = &[
+        0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x09, 0x10, 0x02, 0x2f,
+    ];
+    /// 2.5.29.20 `cRLNumber`.
+    pub const CRL_NUMBER: &[u8] = &[0x55, 0x1d, 0x14];
+    /// 2.5.29.21 `reasonCode`.
+    pub const REASON_CODE: &[u8] = &[0x55, 0x1d, 0x15];
+    /// 2.5.29.24 `invalidityDate`.
+    pub const INVALIDITY_DATE: &[u8] = &[0x55, 0x1d, 0x18];
 
     /// 1.2.840.113549.2.2 MD2.
     pub const MD2: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x02, 0x02];
@@ -1171,6 +1205,14 @@ mod tests {
             MESSAGE_DIGEST,
             SIGNING_TIME,
             COUNTER_SIGNATURE,
+            DATA,
+            TST_INFO,
+            TIMESTAMP_TOKEN,
+            SIGNING_CERTIFICATE,
+            SIGNING_CERTIFICATE_V2,
+            CRL_NUMBER,
+            REASON_CODE,
+            INVALIDITY_DATE,
             MD2,
             MD5,
             SHA1,
@@ -1250,6 +1292,11 @@ mod tests {
         assert_eq!(dotted(AT_DOMAIN_COMPONENT), "0.9.2342.19200300.100.1.25");
         assert_eq!(dotted(AT_JURISDICTION_COUNTRY), "1.3.6.1.4.1.311.60.2.1.3");
         assert_eq!(dotted(AT_INITIALS), "2.5.4.43");
+        assert_eq!(dotted(TST_INFO), "1.2.840.113549.1.9.16.1.4");
+        assert_eq!(dotted(TIMESTAMP_TOKEN), "1.2.840.113549.1.9.16.2.14");
+        assert_eq!(dotted(SIGNING_CERTIFICATE_V2), "1.2.840.113549.1.9.16.2.47");
+        assert_eq!(dotted(REASON_CODE), "2.5.29.21");
+        assert_eq!(dotted(INVALIDITY_DATE), "2.5.29.24");
     }
 
     #[test]

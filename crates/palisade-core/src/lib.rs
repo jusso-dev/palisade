@@ -8,6 +8,7 @@ mod id;
 mod mode;
 mod object;
 pub mod path;
+mod verification;
 mod version;
 
 use core::fmt;
@@ -15,6 +16,7 @@ use core::fmt;
 pub use id::{PolicyId, RuleId, RuleSetId, Uuid7};
 pub use mode::Mode;
 pub use object::{ObjectType, ScriptKind};
+pub use verification::VerificationError;
 pub use version::SchemaVersion;
 
 /// A value could not be parsed from its text form.

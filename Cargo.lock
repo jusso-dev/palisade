@@ -1160,6 +1160,7 @@ dependencies = [
  "criterion",
  "libc",
  "md-5",
+ "palisade-core",
  "proptest",
  "ring",
  "serde",

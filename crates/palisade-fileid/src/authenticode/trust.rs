@@ -12,9 +12,9 @@
 //! "Trusted" here means: the signature is valid, its signer certificate
 //! chains to a configured anchor, every certificate in that chain permits
 //! code signing, and the signer's key usage (if restricted) allows digital
-//! signatures. Validity periods, timestamps and revocation are not checked
-//! yet (#50), and the OS trust store is not consulted (the `os-trust`
-//! cross-check in #48).
+//! signatures. Validity periods, timestamps and revocation are judged
+//! afterwards by [`super::evaluate_validity`] (#50), and the OS trust store
+//! is not consulted (the `os-trust` cross-check in #48).
 //!
 //! Everything here is plain data. Policy (#31) matches on it without
 //! depending on this crate's internals.
@@ -354,17 +354,22 @@ fn signer_trust(sig: &SignatureInfo, config: &TrustConfig, budget: &mut Budget) 
     }
 }
 
-/// The first trusted signature with the strongest digest, ranking each by
-/// the weaker of its image and signer digests (as #48 does).
-fn select_primary(signers: &[SignerTrust]) -> Option<usize> {
-    let rank = |d: Option<DigestAlgorithm>| match d {
+/// The rank of a digest for primary selection: SHA-2 above SHA-1 above
+/// anything else.
+pub(crate) const fn digest_rank(d: Option<DigestAlgorithm>) -> u8 {
+    match d {
         Some(a) if a.is_sha2() => 2,
         Some(DigestAlgorithm::Sha1) => 1,
         _ => 0,
-    };
+    }
+}
+
+/// The first trusted signature with the strongest digest, ranking each by
+/// the weaker of its image and signer digests (as #48 does).
+fn select_primary(signers: &[SignerTrust]) -> Option<usize> {
     let mut best: Option<(usize, u8)> = None;
     for (i, s) in signers.iter().enumerate().filter(|(_, s)| s.trusted) {
-        let r = rank(s.digest_alg).min(rank(s.signer_digest_alg));
+        let r = digest_rank(s.digest_alg).min(digest_rank(s.signer_digest_alg));
         if best.is_none_or(|(_, b)| r > b) {
             best = Some((i, r));
         }
@@ -372,7 +377,7 @@ fn select_primary(signers: &[SignerTrust]) -> Option<usize> {
     best.map(|(i, _)| i)
 }
 
-fn identity(
+pub(crate) fn identity(
     signature: usize,
     chain: &ChainReport,
     os_ci_compatible: bool,

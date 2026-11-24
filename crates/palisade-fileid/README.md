@@ -2,7 +2,7 @@
 
 File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes), signature and certificate chain extraction, and version-info metadata.
 
-**Status:** early. PE header and version-resource parsing, flat hashing, the Authenticode image hash, page hashes, Authenticode signature verification and certificate chains, signer trust and signer identity work; the rest of [#3](https://github.com/jusso-dev/palisade/issues/3) is still to come.
+**Status:** early. PE header and version-resource parsing, flat hashing, the Authenticode image hash, page hashes, Authenticode signature verification, certificate chains, signer trust and signer identity, and timestamps, expiry and revocation work; the rest of [#3](https://github.com/jusso-dev/palisade/issues/3) is still to come.
 
 ## What is here
 
@@ -100,7 +100,8 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
 
   A `Valid` signature is cryptographically sound and signs this file. It
   does **not** mean the signer is trusted: certificate chains, EKUs and
-  signer attributes are #49, and timestamps, expiry and revocation are #50.
+  signer attributes are judged by `evaluate_trust` (#49), and timestamps,
+  expiry and revocation by `evaluate_validity` (#50).
 
   Cryptography goes through one thin module over `ring` (ADR 0008), which
   verifies RSA PKCS#1 v1.5 (SHA-1, SHA-256, SHA-384, SHA-512; 1024 to 8192
@@ -247,11 +248,76 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     chain).
 
   `SignatureReport::primary` is still #48's choice by cryptographic
-  validity alone. Anything that decides trust must use
-  `TrustReport::primary`. Not checked yet: validity periods, timestamps
-  (including `requires_countersignature`) and revocation, which are #50.
-  The OS trust store is not consulted; that is the `os-trust` cross-check
-  in #48. Catalog signing is #51.
+  validity alone, and `TrustReport::primary` ignores time and revocation.
+  Anything that decides whether to allow a file must use
+  `ValidityReport::primary` (below). The OS trust store is not consulted;
+  that is the `os-trust` cross-check in #48. Catalog signing is #51.
+- `authenticode` timestamps, expiry, revocation and the error taxonomy
+  ([#50](https://github.com/jusso-dev/palisade/issues/50)):
+  - `verify_timestamps` parses and verifies every timestamp on a
+    signature: legacy Authenticode countersignatures (PKCS #9, whose
+    `messageDigest` must be the hash of the signature value, with the
+    `signingTime` as the time) and RFC 3161 tokens (both attribute OIDs),
+    whose `TSTInfo` gives `genTime`, `messageImprint` (which must be the
+    hash of the signature value), `policy`, `serialNumber`, `accuracy` and
+    `tsa`. Each timestamp's own signature is verified, its signer is bound
+    by the ESS `signingCertificate` attribute when present, and its
+    certificate must chain to an anchor of a separate **TSA** `TrustConfig`,
+    with the Time Stamping EKU in force for the whole chain and the time
+    (widened by its accuracy) inside every chain certificate's validity.
+    Every failure is a typed `TimestampStatus`; a copied or forged
+    timestamp is `ImprintMismatch`.
+  - `evaluate_validity(report, trust, context)` judges every signature:
+    the **trusted signing time** is the earliest valid timestamp (the
+    signer's own `signingTime` never counts). `ValidTimestamped` when that
+    time is inside every chain certificate's validity, even if one has
+    expired since; without a trusted time a signature is good only while
+    its chain is valid now. A leaf with the Lifetime Signing EKU is
+    `Expired` once expired, whatever the timestamp. `ExpiryPolicy` is
+    `Ignore`, `TimestampAware` (the default) or `Strict`. SHA-1 timestamps
+    after `sha1_timestamp_cutoff` are not used (code 20);
+    `sign_time_after` and `requires_countersignature` need a trusted time.
+    "Now" is never earlier than the caller's clock floor, so turning the
+    clock back cannot revive an expired signer; a clock before the floor is
+    reported as `clock_suspect`, and then "not yet valid" alone does not
+    fail.
+  - Revocation is **data from the caller**: no I/O happens here. A
+    `RevocationSet` holds offline entries from policy (by SHA-256
+    thumbprint, TBS hash, or issuer and serial; including an imported OS
+    disallowed list), revoked file hashes (code 19), and CRLs. `Crl::from_der`
+    parses a CRL strictly (at most 8 MiB and 100,000 entries, unprocessed
+    critical extensions rejected); a CRL is used only for certificates its
+    issuer issued, and only if its signature verifies with that issuer's
+    key (at most 32 CRL signature checks per file; a certificate a CRL
+    beyond that may cover fails closed). Only a current CRL (with
+    `nextUpdate`) can show a certificate is not revoked; any CRL's entries
+    revoke. Every certificate of the signer's and each TSA's chain is
+    checked, for chains that can pass at all. Every matching entry is
+    judged on its own: a certificate revoked after the trusted signing time
+    still counts for signatures made before
+    (`revocation_honours_timestamp`), unless the reason is a key, CA or AA
+    compromise and `strict_key_compromise` is set, so a later compromise
+    entry cannot hide behind an earlier, milder one. Hex is matched
+    ignoring case. With no trusted time, any entry revokes. `RevocationMode` and
+    `RevocationFailure` record how the caller fetched and whether a missing
+    answer fails open (default) or closed (code 1006).
+  - `CertificateOptions` pin one certificate (by thumbprint or TBS hash)
+    with an `ErrorIgnoreFlags` mask (ignore expiry, ignore revocation
+    unknown, ignore invalid usage, allow untrusted root). Allow untrusted
+    root relaxes only a complete chain: an incomplete one (issuers stripped
+    from the unsigned certificate set) always fails. Every relaxation used
+    is recorded in `SignatureValidity::relaxed` for the decision trace.
+  - Every outcome is one `VerificationError` from `palisade-core`: codes 0
+    to 28 are the OS code integrity `VerificationError` values with the
+    same meaning, and 1000 to 1006 are Palisade's own. `status_error` maps a
+    #48 `SignatureStatus` into it. `ValidityReport::primary` is the first
+    signature that passes everything, ranked by digest as in #48 and #49,
+    with its `SignerIdentity`.
+
+  Fetching CRLs and OCSP responses (and the response cache) belongs to the
+  agent and server; OCSP response parsing comes with them. Basic-constraint
+  and time-nesting relaxations would need chain building to change, so they
+  are not offered.
 
 ## Handling untrusted input
 
@@ -280,7 +346,10 @@ lengths, non-minimal and oversized lengths with a typed `Asn1Error`, and
 borrows from the input instead of allocating, so no declared length sizes an
 allocation. Fixed limits bound everything else: 16 `WIN_CERTIFICATE` entries,
 a 16 MiB table, nesting 8 deep, 32 signatures in total, 64 certificates and 8
-timestamps per signature, and 32 warnings per signature.
+timestamps per signature, and 32 warnings per signature. At most 32 timestamps
+are verified per file, timestamp chains share the file's budget of 512 checks
+with keys the file supplies, and CRLs are capped at 8 MiB and 100,000 entries
+(`timestamp_crl` fuzzes both parsers).
 
 The same rules apply to the path normaliser, the security descriptor parser
 and the `Zone.Identifier` parser, which are also fuzzed (`fsctx_parse`).
@@ -299,9 +368,13 @@ loop, depth, expired, ECC, self-signed and other chains, plus two
 signatures), with reference thumbprints and TBS hashes computed by Python's
 `hashlib`, independently of this crate. The page hash tests use page hash
 signatures in `tests/fixtures/page_hash`, made the same way as the
-signature fixtures over three more synthetic images. No private keys and no
-third-party binaries are committed; the `generate.sh` scripts document how
-every file was made and regenerate them.
+signature fixtures over three more synthetic images. The validity tests use
+signatures with fixed dates in `tests/fixtures/timestamp`: RFC 3161 and
+legacy timestamps, an expired signer, a Lifetime Signing signer, SHA-1, a
+TSA whose issuer restricts its EKU away, and CRLs (including one forged
+under the root's name). No private keys and no third-party binaries are
+committed; the `generate.sh` scripts document how every file was made and
+regenerate them.
 
 ```sh
 cargo test -p palisade-fileid
@@ -329,6 +402,9 @@ cargo +nightly fuzz run authenticode_ranges -- -dict=fuzz/pe.dict -max_total_tim
 cargo +nightly fuzz run authenticode_pkcs7 -- -dict=fuzz/pkcs7.dict -max_total_time=60
 cargo +nightly fuzz run fsctx_parse -- -max_total_time=60
 cargo +nightly fuzz run x509_chain -- -max_total_time=60
+PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/timestamp_crl" \
+  cargo test -p palisade-fileid --test validity -- --ignored write_timestamp_fuzz_seeds
+cargo +nightly fuzz run timestamp_crl -- -dict=fuzz/pkcs7.dict -max_total_time=60
 ```
 
 `benches/hash_and_parse.rs` (criterion) measures flat hashing, streamed
@@ -337,7 +413,8 @@ hashing, PE parsing and the Authenticode hash over the same synthetic inputs:
 
 ## Allowed dependencies
 
-`palisade-core`, plus the RustCrypto `sha2`, `sha1` and `md-5` crates,
+`palisade-core` (for the shared `VerificationError` table, with its `serde`
+feature), plus the RustCrypto `sha2`, `sha1` and `md-5` crates,
 `ring` for signature verification and the hash cache record MAC (ADR 0008),
 used only inside `authenticode/crypto.rs` and `hash/mac.rs`, and `serde`
 (derive only, no format crate) so certificate and chain reports serialise
