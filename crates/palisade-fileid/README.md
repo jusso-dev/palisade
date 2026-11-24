@@ -2,7 +2,7 @@
 
 File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes), signature and certificate chain extraction, and version-info metadata.
 
-**Status:** early. PE header and version-resource parsing, flat hashing and the Authenticode image hash work; the rest of [#3](https://github.com/jusso-dev/palisade/issues/3) is still to come.
+**Status:** early. PE header and version-resource parsing, flat hashing, the Authenticode image hash and Authenticode signature verification work; the rest of [#3](https://github.com/jusso-dev/palisade/issues/3) is still to come.
 
 ## What is here
 
@@ -28,8 +28,41 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   computed. Images whose layout departs from the specification (gaps or
   overlaps between sections, data after or a misaligned certificate table,
   and so on) are reported as `AuthenticodeStatus::NonConformant`, and their
-  flat hash is the identity to use. Page hashes and signature checks are
-  still to come (#47, #48).
+  flat hash is the identity to use. Page hash checks are still to come (#47).
+- `authenticode` signatures
+  ([#48](https://github.com/jusso-dev/palisade/issues/48)): `verify_pe`,
+  `verify_signatures` and `verify_certificate_table` read every
+  `WIN_CERTIFICATE` entry (revision 1.0 or 2.0, type PKCS_SIGNED_DATA; other
+  entries are recorded and skipped), decode each PKCS#7 SignedData and its
+  nested signatures (`1.3.6.1.4.1.311.2.4.1`), and check each one: the
+  `messageDigest` attribute against the `SpcIndirectDataContent`, the
+  signature over the authenticated attributes with the signer certificate's
+  key, and the signed image digest against the file's Authenticode digest.
+  The `SignatureReport` holds one `SignatureInfo` per signature (index and
+  total, kind, algorithms, key size, digest match, signature check, status,
+  program name, more-info URL, statement type, signing time, signer
+  certificate, every certificate in the blob, page hash table, timestamp
+  tokens, OS code integrity compatibility and warnings), the primary
+  signature (the first valid one with the strongest digest; SHA-2 beats
+  SHA-1) and the file's `SigningState` (`Unsigned`, `Valid` or
+  `Invalid(reason)`). `VerifyOptions::tolerate_digest_mismatch` (off by
+  default) reports the signer attributes of a mismatched signature, marked
+  `untrusted_signer_attrs`, and records every use in the report.
+
+  A `Valid` signature is cryptographically sound and signs this file. It
+  does **not** mean the signer is trusted: certificate chains, EKUs and
+  signer attributes are #49, and timestamps, expiry and revocation are #50.
+
+  Cryptography goes through one thin module over `ring` (ADR 0008), which
+  verifies RSA PKCS#1 v1.5 (SHA-1, SHA-256, SHA-384, SHA-512; 1024 to 8192
+  bits, 2048 and up for SHA-384), RSA-PSS (SHA-256, SHA-384, SHA-512, with
+  MGF1 over the same digest and a salt as long as it; 2048 to 8192 bits) and
+  ECDSA P-256 and P-384 with SHA-256 or SHA-384. **ECDSA P-521, Ed25519,
+  Ed448, other pairings and other PSS parameters are reported as
+  `Unsupported`, never as valid.** MD2 and MD5 signatures are parsed and
+  reported as `WeakAlgorithm`, never trusted. OS code integrity accepts only
+  RSA signers up to 4096 bits, so `os_ci_compatible()` is false, with the
+  reasons, for ECC signers, larger RSA keys and MD2 or MD5.
 
 ## Handling untrusted input
 
@@ -52,12 +85,25 @@ Every file this crate reads may be hostile, so the parser:
 - records the file offset of every structure, so later stages such as the
   Authenticode hash work on exactly the bytes that were parsed.
 
+Signature data gets the same treatment. Its ASN.1 is read by one small
+DER-only module (`authenticode/asn1.rs`), which rejects BER indefinite
+lengths, non-minimal and oversized lengths with a typed `Asn1Error`, and
+borrows from the input instead of allocating, so no declared length sizes an
+allocation. Fixed limits bound everything else: 16 `WIN_CERTIFICATE` entries,
+a 16 MiB table, nesting 8 deep, 32 signatures in total, 64 certificates and 8
+timestamps per signature, and 32 warnings per signature.
+
 The parser has no `unsafe` code, and its modules say `#![forbid(unsafe_code)]`.
 
 ## Testing and fuzzing
 
 Fixtures are synthetic PE images built byte by byte at test time
-(`tests/common`); no binaries are checked in.
+(`tests/common`); no PE binaries are checked in. The signature tests use
+small PKCS#7 signatures in `tests/fixtures/authenticode`, made over that
+synthetic image by osslsigncode with throwaway keys from a test-only CA, plus
+one Ed25519 test certificate and one RSA-PSS signature value. No private keys
+and no third-party binaries are committed; `generate.sh` there documents how
+every file was made and regenerates them.
 
 ```sh
 cargo test -p palisade-fileid
@@ -74,21 +120,34 @@ for t in pe_parse version_info_parse authenticode_ranges; do
   PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/$t" \
     cargo test -p palisade-fileid --test properties -- --ignored write_fuzz_seeds
 done
+PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/authenticode_pkcs7" \
+  cargo test -p palisade-fileid --test signature -- --ignored write_pkcs7_fuzz_seeds
 cargo +nightly fuzz run pe_parse -- -dict=fuzz/pe.dict -max_total_time=60
 cargo +nightly fuzz run version_info_parse -- -dict=fuzz/pe.dict -max_total_time=60
 cargo +nightly fuzz run authenticode_ranges -- -dict=fuzz/pe.dict -max_total_time=60
+cargo +nightly fuzz run authenticode_pkcs7 -- -dict=fuzz/pkcs7.dict -max_total_time=60
 ```
 
 Running the fuzz targets in CI is part of [#25](https://github.com/jusso-dev/palisade/issues/25).
 
 ## Allowed dependencies
 
-`palisade-core`, plus the RustCrypto `sha2`, `sha1` and `md-5` crates. The
-workspace rules are enforced by `cargo xtask check-deps`.
+`palisade-core`, plus the RustCrypto `sha2`, `sha1` and `md-5` crates, and
+`ring` for signature verification (ADR 0008), used only inside
+`authenticode/crypto.rs`. The workspace rules are enforced by
+`cargo xtask check-deps`.
+
+`ring` is not pure Rust (it has C and assembly), and on aarch64 Windows it
+depends on `windows-sys` for CPU-feature detection. `check-deps` bans
+`windows-sys` from `palisade-policy`'s graph, so a future `palisade-policy`
+dependency on this crate would be rejected. Resolving that needs an ADR 0003
+or 0008 amendment, either a narrowed carve-out or verification behind a
+separate crate (#19). Because every `ring` call is in one module, swapping
+the provider is a one-module change.
 
 ## Platform support
 
-Portable parsing and hashing on all platforms. OS trust APIs will live in a `win` module compiled only on Windows with the `os-trust` feature ([ADR 0003](../../docs/adr/0003-crate-boundaries-and-dependency-direction.md)).
+Portable parsing, hashing and signature verification on all platforms. OS trust APIs (including the cross-check against the OS trust-verification API that #48 describes) will live in a `win` module compiled only on Windows with the `os-trust` feature ([ADR 0003](../../docs/adr/0003-crate-boundaries-and-dependency-direction.md)).
 
 ## Feature flags
 
