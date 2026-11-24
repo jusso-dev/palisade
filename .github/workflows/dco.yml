@@ -1,0 +1,37 @@
+# Checks that every commit in a pull request carries a Developer Certificate
+# of Origin sign-off from its author (`git commit -s`), using
+# .github/scripts/check-dco.sh. See CONTRIBUTING.md#sign-off.
+#
+# The check is informational for now: branch protection does not require it.
+# Making it required is a repository setting (docs/repo-settings.md).
+name: DCO
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dco:
+    name: DCO
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The full history, so both ends of the pull request's range exist.
+          fetch-depth: 0
+      - name: Test the sign-off checker
+        run: bash .github/scripts/check-dco.test.sh
+      - name: Check sign-offs
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash .github/scripts/check-dco.sh "$BASE_SHA" "$HEAD_SHA"

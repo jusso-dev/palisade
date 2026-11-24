@@ -1,0 +1,89 @@
+# Keeps the repository's labels and milestones in line with
+# .github/labels.yml and .github/milestones.yml, using
+# .github/scripts/sync-labels.sh. See docs/repo-settings.md#labels-and-milestones.
+#
+# - Pull requests that touch those files: validate them and run the script's
+#   tests. Nothing is written.
+# - Push to main: apply the files. Labels that are not listed are deleted.
+# - Manual run: a dry run by default, which prints every change and writes
+#   nothing. Set `apply` to make the changes; that only works on main.
+name: Label sync
+
+on:
+  pull_request:
+    paths:
+      - .github/labels.yml
+      - .github/milestones.yml
+      - .github/dependabot.yml
+      - .github/ISSUE_TEMPLATE/**
+      - .github/scripts/sync-labels*.sh
+      - .github/workflows/labels.yml
+  push:
+    branches: [main]
+    paths:
+      - .github/labels.yml
+      - .github/milestones.yml
+      - .github/dependabot.yml
+      - .github/ISSUE_TEMPLATE/**
+      - .github/scripts/sync-labels*.sh
+      - .github/workflows/labels.yml
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Make the changes. Leave unticked for a dry run.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test the sync script
+        run: bash .github/scripts/sync-labels.test.sh
+      - name: Validate the labels and milestones files
+        run: bash .github/scripts/sync-labels.sh --validate
+
+  # The only job with a write scope. It runs the repository's own script from
+  # main or a manual run, never from a pull request.
+  sync:
+    needs: validate
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      # Changes are applied only from main, so a manual run on another branch
+      # is always a dry run.
+      APPLY: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.apply) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Sync labels and milestones
+        run: |
+          if [ "$APPLY" = true ]; then
+            bash .github/scripts/sync-labels.sh --apply
+          else
+            # Exit 1 means drift was found and printed; that is the expected
+            # result of a dry run, not a failure.
+            code=0
+            bash .github/scripts/sync-labels.sh --check || code=$?
+            if [ "$code" -eq 1 ]; then
+              echo "::notice::Dry run found changes. Rerun with apply ticked to make them."
+              exit 0
+            fi
+            exit "$code"
+          fi

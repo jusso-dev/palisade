@@ -1,6 +1,6 @@
 name: Rule type request
 description: Propose a new rule type or condition for Palisade policy.
-labels: [enhancement]
+labels: [needs-triage]
 body:
   - type: markdown
     attributes:

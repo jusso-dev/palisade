@@ -2,6 +2,8 @@
 # ecosystem. Security updates are raised as soon as an advisory is published
 # (enable "Dependabot security updates" in the repository settings).
 # Every Dependabot PR runs the full CI, including cargo-deny.
+# `labels` replaces Dependabot's default labels, which are not in
+# .github/labels.yml and would be deleted by the label sync.
 version: 2
 updates:
   - package-ecosystem: cargo
@@ -12,6 +14,7 @@ updates:
     groups:
       cargo-minor-and-patch:
         update-types: [minor, patch]
+    labels: ["area:security"]
     commit-message:
       prefix: "chore(deps)"
 
@@ -23,5 +26,6 @@ updates:
     groups:
       actions-minor-and-patch:
         update-types: [minor, patch]
+    labels: ["area:infra"]
     commit-message:
       prefix: "chore(ci)"

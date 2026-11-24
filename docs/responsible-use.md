@@ -31,8 +31,9 @@ Pull requests and issues that do any of the following are closed, and the conten
   into a ready-to-use tool, payload or step-by-step guide.
 - Detection-evasion techniques presented as something to use, rather than as a gap to close.
 
-Discussing *classes* of bypass in design documents and the threat model ([#18](https://github.com/jusso-dev/palisade/issues/18)) is fine and
-encouraged, as long as the aim is to defend against them.
+Discussing *classes* of bypass in design documents and the
+[threat model](security/threat-model.md) is fine and encouraged, as long as the aim is to defend
+against them.
 
 ## Found a bypass?
 
