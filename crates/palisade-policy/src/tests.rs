@@ -188,7 +188,7 @@ fn validation_reports_every_error_in_one_pass() {
 fn references_must_resolve_and_ids_must_be_unique() {
     let mut doc = with_rule(
         leaf(Field::HashSha256, Operator::Equals, &[&sha256('a')]),
-        Action::Deny {},
+        Action::deny(),
     );
     let mut copy = doc.rule_sets[0].clone();
     copy.name = "Copy".to_owned();
@@ -215,7 +215,7 @@ fn tree_limits_are_enforced() {
         deep = Match::All(vec![deep]);
     }
     assert_eq!(deep.depth(), 9);
-    let errors = with_rule(deep, Action::Deny {}).validate().unwrap_err();
+    let errors = with_rule(deep, Action::deny()).validate().unwrap_err();
     assert_eq!(
         codes(&errors),
         vec![(ErrorCode::TreeTooDeep, "/rule_sets/0/rules/0/match")]
@@ -226,7 +226,7 @@ fn tree_limits_are_enforced() {
             .map(|_| leaf(Field::HashSha256, Operator::Equals, &[&hash]))
             .collect(),
     );
-    let errors = with_rule(wide, Action::Deny {}).validate().unwrap_err();
+    let errors = with_rule(wide, Action::deny()).validate().unwrap_err();
     assert_eq!(
         codes(&errors),
         vec![(ErrorCode::TooManyCriteria, "/rule_sets/0/rules/0/match")]
@@ -235,7 +235,7 @@ fn tree_limits_are_enforced() {
     let values: Vec<&str> = std::iter::repeat_n(hash.as_str(), 26).collect();
     let errors = with_rule(
         leaf(Field::HashSha256, Operator::Equals, &values),
-        Action::Deny {},
+        Action::deny(),
     )
     .validate()
     .unwrap_err();
@@ -283,7 +283,7 @@ fn allow_rules_need_a_strong_positive_identity() {
         .unwrap_err();
     assert_eq!(errors[0].code, ErrorCode::NoIdentityAnchor);
     // On a deny rule, a negation alone matches almost everything (#32).
-    let errors = with_rule(negated, Action::Deny {}).validate().unwrap_err();
+    let errors = with_rule(negated, Action::deny()).validate().unwrap_err();
     assert_eq!(
         codes(&errors),
         vec![(ErrorCode::NegationOnly, "/rule_sets/0/rules/0/match")]
@@ -299,7 +299,7 @@ fn allow_rules_need_a_strong_positive_identity() {
         codes(&errors),
         vec![(ErrorCode::WeakHashOnlyAllow, "/rule_sets/0/rules/0/match")]
     );
-    assert!(with_rule(weak.clone(), Action::Deny {}).validate().is_ok());
+    assert!(with_rule(weak.clone(), Action::deny()).validate().is_ok());
 
     // `any` needs an identity on every branch.
     let path = leaf(Field::PathFull, Operator::Equals, &["C:\\Tools\\a.exe"]);
@@ -355,7 +355,7 @@ fn mandatory_is_only_for_blocklists_of_denies() {
         ]
     );
     doc.rule_sets[0].kind = RuleSetKind::Blocklist;
-    doc.rule_sets[0].rules[0].action = Action::Deny {};
+    doc.rule_sets[0].rules[0].action = Action::deny();
     assert!(doc.clone().validate().is_ok());
     // A mandatory deny cannot be turned into a report-only rule.
     doc.rule_sets[0].rules[0].enforcement_override =
@@ -423,7 +423,7 @@ fn text_limits_and_control_characters() {
 fn rule_count_limit_is_over_all_rule_sets() {
     let mut doc = with_rule(
         leaf(Field::HashSha256, Operator::Equals, &[&sha256('2')]),
-        Action::Deny {},
+        Action::deny(),
     );
     let template = doc.rule_sets[0].rules[0].clone();
     let mut second = doc.rule_sets[0].clone();
@@ -461,7 +461,7 @@ fn rule_shape_errors_have_codes_and_paths() {
             leaf(Field::HashSha256, Operator::Equals, &[&sha256('3')]),
             Match::Any(Vec::new()),
         ]),
-        Action::Deny {},
+        Action::deny(),
     );
     let rule = &mut doc.rule_sets[0].rules[0];
     rule.display_id = Some("R-12".to_owned());
@@ -762,7 +762,7 @@ fn hash_values_are_normalised_on_validation() {
     let upper = format!("0x{}", sha256('A'));
     let doc = with_rule(
         leaf(Field::HashSha256, Operator::Equals, &[&upper]),
-        Action::Deny {},
+        Action::deny(),
     );
     let validated = doc.validate().unwrap();
     let Match::Criterion(c) = &validated.document().rule_sets[0].rules[0].match_ else {
@@ -782,10 +782,12 @@ fn negation_alone_is_an_error_for_every_action() {
     let negated = leaf(Field::PathFull, Operator::NotEquals, &["C:\\Tools\\a.exe"]);
     for (action, code) in [
         (Action::Allow {}, ErrorCode::NoIdentityAnchor),
-        (Action::Deny {}, ErrorCode::NegationOnly),
+        (Action::deny(), ErrorCode::NegationOnly),
         (Action::Audit {}, ErrorCode::NegationOnly),
     ] {
-        let errors = with_rule(negated.clone(), action).validate().unwrap_err();
+        let errors = with_rule(negated.clone(), action.clone())
+            .validate()
+            .unwrap_err();
         assert_eq!(
             codes(&errors),
             vec![(code, "/rule_sets/0/rules/0/match")],
@@ -797,7 +799,7 @@ fn negation_alone_is_an_error_for_every_action() {
         leaf(Field::PathExtension, Operator::Equals, &["exe"]),
         negated,
     ]);
-    assert!(with_rule(anchored, Action::Deny {}).validate().is_ok());
+    assert!(with_rule(anchored, Action::deny()).validate().is_ok());
 }
 
 #[test]
@@ -813,7 +815,7 @@ fn weak_identity_allow_rules_warn() {
     assert_eq!(validated.warnings()[0].severity, Severity::Warning);
     // A deny rule may use a weak identity.
     assert!(
-        with_rule(name_only.clone(), Action::Deny {})
+        with_rule(name_only.clone(), Action::deny())
             .validate()
             .unwrap()
             .warnings()
@@ -863,7 +865,7 @@ fn regex_and_pattern_problems_are_reported() {
         ),
         leaf(Field::PathFull, Operator::StartsWith, &["%NOPE%\\x"]),
     ]);
-    let errors = with_rule(tree, Action::Deny {}).validate().unwrap_err();
+    let errors = with_rule(tree, Action::deny()).validate().unwrap_err();
     let base = "/rule_sets/0/rules/0/match/all";
     assert_eq!(
         codes(&errors),
@@ -904,7 +906,7 @@ fn regex_and_pattern_problems_are_reported() {
 #[test]
 fn regex_count_is_capped_per_policy() {
     let regex = |i: usize| leaf(Field::MetaProductName, Operator::Regex, &[&format!("a{i}")]);
-    let mut doc = with_rule(regex(0), Action::Deny {});
+    let mut doc = with_rule(regex(0), Action::deny());
     let rule = doc.rule_sets[0].rules[0].clone();
     // 81 rules of 25 values each: 2025 regular expressions.
     let values: Vec<String> = (0..25).map(|i| format!("a{i}")).collect();
@@ -951,7 +953,7 @@ fn value_counts_depend_on_the_operator() {
             &["1.0", "2.0", "3.0"],
         ),
     ]);
-    let errors = with_rule(tree, Action::Deny {}).validate().unwrap_err();
+    let errors = with_rule(tree, Action::deny()).validate().unwrap_err();
     let base = "/rule_sets/0/rules/0/match/all";
     assert_eq!(
         codes(&errors),
@@ -1005,8 +1007,10 @@ fn every_weak_hash_is_refused_as_the_only_allow_identity() {
 #[test]
 fn context_alone_is_no_identity_anchor_for_every_action() {
     let admins = leaf(Field::UserGroups, Operator::MemberOf, &["S-1-5-32-544"]);
-    for action in [Action::Allow {}, Action::Deny {}, Action::Audit {}] {
-        let errors = with_rule(admins.clone(), action).validate().unwrap_err();
+    for action in [Action::Allow {}, Action::deny(), Action::Audit {}] {
+        let errors = with_rule(admins.clone(), action.clone())
+            .validate()
+            .unwrap_err();
         assert_eq!(
             codes(&errors),
             vec![(ErrorCode::NoIdentityAnchor, "/rule_sets/0/rules/0/match")],
@@ -1024,8 +1028,10 @@ fn context_alone_is_no_identity_anchor_for_every_action() {
         admins.clone(),
         leaf(Field::UserIsElevated, Operator::IsTrue, &[]),
     ]);
-    for action in [Action::Allow {}, Action::Deny {}, Action::Audit {}] {
-        let validated = with_rule(narrowed.clone(), action).validate().unwrap();
+    for action in [Action::Allow {}, Action::deny(), Action::Audit {}] {
+        let validated = with_rule(narrowed.clone(), action.clone())
+            .validate()
+            .unwrap();
         assert!(validated.warnings().is_empty(), "{action:?}");
     }
     // A negated context criterion with an identity is fine too.
@@ -1033,7 +1039,7 @@ fn context_alone_is_no_identity_anchor_for_every_action() {
         leaf(Field::HashSha256, Operator::Equals, &[&sha256('c')]),
         Match::Not(Box::new(admins)),
     ]);
-    assert!(with_rule(not_admin, Action::Deny {}).validate().is_ok());
+    assert!(with_rule(not_admin, Action::deny()).validate().is_ok());
 }
 
 #[test]
@@ -1050,7 +1056,7 @@ fn no_identity_anchor_names_the_unanchored_path() {
             ))),
         ]),
     ]);
-    let errors = with_rule(tree.clone(), Action::Deny {})
+    let errors = with_rule(tree.clone(), Action::deny())
         .validate()
         .unwrap_err();
     assert_eq!(
@@ -1078,7 +1084,7 @@ fn no_identity_anchor_names_the_unanchored_path() {
         ))),
         leaf(Field::PathFull, Operator::NotEquals, &["C:\\x.exe"]),
     ]);
-    let errors = with_rule(tree, Action::Deny {}).validate().unwrap_err();
+    let errors = with_rule(tree, Action::deny()).validate().unwrap_err();
     assert_eq!(errors[0].code, ErrorCode::NegationOnly);
     assert!(
         errors[0]
@@ -1110,8 +1116,10 @@ fn non_allow_finding_does_not_depend_on_child_order() {
             "`match/any/0/criterion`",
         ),
     ] {
-        for action in [Action::Deny {}, Action::Audit {}] {
-            let errors = with_rule(tree.clone(), action).validate().unwrap_err();
+        for action in [Action::deny(), Action::Audit {}] {
+            let errors = with_rule(tree.clone(), action.clone())
+                .validate()
+                .unwrap_err();
             assert_eq!(
                 codes(&errors),
                 vec![(ErrorCode::NoIdentityAnchor, "/rule_sets/0/rules/0/match")],
@@ -1132,7 +1140,7 @@ fn non_allow_finding_does_not_depend_on_child_order() {
             negation.clone(),
         ]),
     ] {
-        let errors = with_rule(tree, Action::Deny {}).validate().unwrap_err();
+        let errors = with_rule(tree, Action::deny()).validate().unwrap_err();
         assert_eq!(errors[0].code, ErrorCode::NoIdentityAnchor);
     }
     // A context criterion on an anchored branch does not make an
@@ -1145,7 +1153,7 @@ fn non_allow_finding_does_not_depend_on_child_order() {
         Match::Any(vec![negation.clone(), anchored_context.clone()]),
         Match::Any(vec![anchored_context, negation]),
     ] {
-        let errors = with_rule(tree, Action::Deny {}).validate().unwrap_err();
+        let errors = with_rule(tree, Action::deny()).validate().unwrap_err();
         assert_eq!(errors[0].code, ErrorCode::NegationOnly);
     }
 }
@@ -1163,8 +1171,10 @@ fn identity_findings_name_a_structural_path() {
             leaf(Field::UserIsAdmin, Operator::IsFalse, &[]),
         ]),
     ]);
-    for action in [Action::Allow {}, Action::Deny {}] {
-        let errors = with_rule(tree.clone(), action).validate().unwrap_err();
+    for action in [Action::Allow {}, Action::deny()] {
+        let errors = with_rule(tree.clone(), action.clone())
+            .validate()
+            .unwrap_err();
         assert_eq!(errors[0].code, ErrorCode::NoIdentityAnchor);
         let message = &errors[0].message;
         assert!(
@@ -1201,7 +1211,7 @@ fn yes_or_no_criteria_take_no_values() {
         anchor.clone(),
         leaf(Field::UserIsAdmin, Operator::IsFalse, &[]),
     ]);
-    let doc = with_rule(ok, Action::Deny {});
+    let doc = with_rule(ok, Action::deny());
     // `values` is left out when it is empty, and may be left out on input.
     let json = doc.to_json_pretty().unwrap();
     assert!(json.contains(r#""operator": "is_false""#));
@@ -1213,7 +1223,7 @@ fn yes_or_no_criteria_take_no_values() {
         anchor.clone(),
         leaf(Field::UserIsAdmin, Operator::IsTrue, &["yes"]),
     ]);
-    let errors = with_rule(with_value, Action::Deny {})
+    let errors = with_rule(with_value, Action::deny())
         .validate()
         .unwrap_err();
     assert_eq!(
@@ -1228,7 +1238,7 @@ fn yes_or_no_criteria_take_no_values() {
         anchor,
         leaf(Field::UserGroups, Operator::MemberOf, &[]),
     ]);
-    let errors = with_rule(empty, Action::Deny {}).validate().unwrap_err();
+    let errors = with_rule(empty, Action::deny()).validate().unwrap_err();
     assert_eq!(
         codes(&errors),
         vec![(
@@ -1255,7 +1265,7 @@ fn context_values_are_checked_and_case_only_applies_to_text() {
             leaf(Field::SessionType, Operator::Equals, &["terminal"]),
             leaf(Field::UserName, Operator::Regex, &[".*"]),
         ]),
-        Action::Deny {},
+        Action::deny(),
     );
     let errors = doc.validate().unwrap_err();
     assert_eq!(
@@ -1293,13 +1303,13 @@ fn context_values_are_checked_and_case_only_applies_to_text() {
             Match::Criterion(sid),
             Match::Criterion(tag.clone()),
         ]),
-        Action::Deny {},
+        Action::deny(),
     );
     assert!(doc.validate().is_ok());
     tag.field = Field::UserIsAdmin;
     tag.operator = Operator::IsTrue;
     tag.values.clear();
-    let doc = with_rule(Match::Criterion(tag), Action::Deny {});
+    let doc = with_rule(Match::Criterion(tag), Action::deny());
     let errors = doc.validate().unwrap_err();
     assert!(
         codes(&errors).contains(&(

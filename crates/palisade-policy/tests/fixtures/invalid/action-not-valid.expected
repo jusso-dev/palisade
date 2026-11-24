@@ -1,0 +1,5 @@
+action_not_valid_in_rule_set /rule_sets/0/rules/0/action/type
+action_not_valid_in_rule_set /rule_sets/0/rules/1/action/type
+action_not_valid_for_object_type /rule_sets/0/rules/1/object_types/1
+action_not_valid_in_rule_set /rule_sets/0/rules/2/action/type
+action_not_valid_for_object_type /rule_sets/0/rules/2/object_types

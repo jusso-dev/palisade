@@ -1,0 +1,4 @@
+invalid_notification /rule_sets/0/rules/0/effects/notification_text
+invalid_notification /rule_sets/0/rules/0/effects/help_url
+invalid_action_option /rule_sets/0/rules/1/action/request_template
+invalid_notification /rule_sets/0/rules/1/effects/notify

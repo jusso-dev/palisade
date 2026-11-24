@@ -13,7 +13,7 @@ use crate::context::EvaluationContext;
 use crate::facts::{
     ObjectFacts, PathFact, PathVariable, PathVariables, SignatureSource, SignerFact, SignerStatus,
 };
-use crate::model::{Action, Criterion, Field, Operator, Strength};
+use crate::model::{ActionKind, Criterion, Field, Operator, Strength};
 
 use Tri::{Match, NoMatch, Unknown};
 
@@ -79,7 +79,7 @@ fn compile_err(field: Field, operator: Operator, values: &[&str]) -> CompileErro
 
 fn deny_ctx(variables: &PathVariables) -> EvalContext<'_> {
     EvalContext {
-        action: Action::Deny {},
+        action: ActionKind::Deny,
         variables,
         context: &NO_CONTEXT,
     }
@@ -245,7 +245,7 @@ fn negation_never_turns_unknown_into_a_match() {
                 value
             };
             let c = compile(field, op, &[value]);
-            for action in [Action::Allow {}, Action::Deny {}, Action::Audit {}] {
+            for action in [ActionKind::Allow, ActionKind::Deny, ActionKind::Audit] {
                 let vars = PathVariables::new();
                 let ctx = EvalContext {
                     action,
@@ -470,7 +470,7 @@ fn versions_parse_and_compare_symmetrically() {
         Operator::VersionBetween,
         &["2.0", "3.0"],
     );
-    for action in [Action::Allow {}, Action::Deny {}] {
+    for action in [ActionKind::Allow, ActionKind::Deny] {
         let vars = PathVariables::new();
         let ctx = EvalContext {
             action,
@@ -809,11 +809,44 @@ fn path_variables_expand_per_evaluation() {
 }
 
 #[test]
+fn every_action_that_runs_trusts_or_excludes_only_trusts_safe_paths() {
+    // #34: the path-ACL rule covers every action with `needs_identity`, so
+    // none of them can be used to trust a user-writable path.
+    let c = compile(Field::PathDirectory, Operator::Equals, &["C:\\Tools"]);
+    let vars = PathVariables::new();
+    for action in crate::model::ActionKind::ALL {
+        let ctx = EvalContext {
+            action,
+            variables: &vars,
+            context: &NO_CONTEXT,
+        };
+        for writable in [Some(true), None] {
+            let mut fact = PathFact::new("C:\\Tools\\a.exe", &VolumeMap::new());
+            fact.user_writable = writable;
+            let e = c.eval(&ObjectFacts::new().with_path(fact), &ctx);
+            if action.needs_identity() {
+                assert_eq!(e.result, Unknown, "{action} {writable:?}");
+                assert!(e.notes.contains(Note::PathAclUnsafe), "{action}");
+            } else {
+                assert_eq!(e.result, Match, "{action} {writable:?}");
+                assert!(!e.notes.contains(Note::PathAclUnsafe), "{action}");
+            }
+        }
+        // A path users cannot write matches for every action.
+        assert_eq!(
+            c.eval(&at_path("C:\\Tools\\a.exe"), &ctx).result,
+            Match,
+            "{action}"
+        );
+    }
+}
+
+#[test]
 fn allow_rules_only_trust_paths_users_cannot_write() {
     let c = compile(Field::PathDirectory, Operator::Equals, &["C:\\Tools"]);
     let vars = PathVariables::new();
     let allow = EvalContext {
-        action: Action::Allow {},
+        action: ActionKind::Allow,
         variables: &vars,
         context: &NO_CONTEXT,
     };
@@ -1118,7 +1151,7 @@ proptest! {
             context.device.tags = Some(vec![fact.clone()]);
             context.device.os_version = Some(fact.clone());
             let vars = PathVariables::new();
-            let ctx = EvalContext { action: Action::Allow {}, variables: &vars, context: &context };
+            let ctx = EvalContext { action: ActionKind::Allow, variables: &vars, context: &context };
             let _ = c.eval(&facts, &ctx);
         }
     }

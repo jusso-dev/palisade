@@ -950,7 +950,8 @@ fn actions_are_only_read_from_maps() {
         assert_eq!(at(&e), (16, 17), "{action}");
     }
     assert!(from_str(&with_action("{type: deny}")).is_ok());
-    let e = err(&with_action("{type: deny, kill_running: true}"));
+    // An option of another action is unknown for this one.
+    let e = err(&with_action("{type: allow, kill_running: true}"));
     assert!(e.message().contains("unknown field"), "{e}");
     // The JSON reader uses the same type, so it agrees.
     let json = serde_json::json!({"type": "deny"});
@@ -1373,7 +1374,7 @@ fn action_keys_are_checked_where_they_are() {
     }
     for (name, action) in [
         ("allow", crate::model::Action::Allow {}),
-        ("deny", crate::model::Action::Deny {}),
+        ("deny", crate::model::Action::deny()),
         ("audit", crate::model::Action::Audit {}),
     ] {
         let loaded = from_str(&with_action(&format!("{{type: {name}}}"))).unwrap();

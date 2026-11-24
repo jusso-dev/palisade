@@ -69,8 +69,10 @@
 //! On every other string field, `*` and `**` match any run of characters,
 //! and `?` matches one.
 //!
-//! **Path identity is only trusted where users cannot write.** In an allow
-//! rule, a positive `path.*` test that would match evaluates to `Unknown`,
+//! **Path identity is only trusted where users cannot write.** In a rule
+//! that lets an object run, trusts it or excludes it (an allow, and the
+//! other actions with [`ActionKind::needs_identity`], #34), a positive
+//! `path.*` test that would match evaluates to `Unknown`,
 //! with the note [`Note::PathAclUnsafe`], unless the facts show that no
 //! non-administrative principal can write the file or a directory above it.
 //! `Unknown` rather than `NoMatch`, so that the test also fails closed under
@@ -154,7 +156,7 @@ use crate::context::{
 };
 use crate::facts::{ObjectFacts, PathFact, PathVariable, PathVariables, SignerFact};
 use crate::model::limits::MAX_VALUE_BYTES;
-use crate::model::{Action, Criterion, Field, FieldClass, Operator};
+use crate::model::{ActionKind, Criterion, Field, FieldClass, Operator};
 
 /// The most memory a compiled regular expression or wildcard may use, in
 /// bytes. Larger patterns are rejected when the policy is validated.
@@ -221,8 +223,9 @@ impl Tri {
 pub enum Note {
     /// A fact the criterion needs was not provided.
     FactMissing = 0,
-    /// A path test in an allow rule matched a path that users may be able
-    /// to write, or whose permissions are unknown.
+    /// A path test in a rule that lets an object run, trusts it or excludes
+    /// it matched a path that users may be able to write, or whose
+    /// permissions are unknown.
     PathAclUnsafe = 1,
     /// The path contains a short (8.3) name the agent could not expand.
     ShortNameUnresolved = 2,
@@ -317,9 +320,11 @@ pub struct Evaluation {
 /// What an evaluation needs besides the object's facts.
 #[derive(Clone, Copy, Debug)]
 pub struct EvalContext<'a> {
-    /// The action of the rule the criterion belongs to. Allow rules only
-    /// trust a path where users cannot write.
-    pub action: Action,
+    /// The action of the rule the criterion belongs to. A rule that lets
+    /// an object run, trusts it or excludes it
+    /// ([`ActionKind::needs_identity`]) only trusts a path where users
+    /// cannot write.
+    pub action: ActionKind,
     /// The path variables, expanded for the user the process runs as.
     pub variables: &'a PathVariables,
     /// The user, device and session, for context criteria (#33).
@@ -615,10 +620,11 @@ impl CompiledCriterion {
                     return Tri::Unknown;
                 };
                 let raw = self.eval_path(path, ctx, notes);
-                // A path only identifies an object for an allow rule when
-                // users cannot replace what is at that path.
+                // A path only identifies an object for a rule that lets it
+                // run, trusts it or excludes it when users cannot replace
+                // what is at that path.
                 if raw == Tri::Match
-                    && matches!(ctx.action, Action::Allow {})
+                    && ctx.action.needs_identity()
                     && path.user_writable != Some(false)
                 {
                     notes.insert(Note::PathAclUnsafe);

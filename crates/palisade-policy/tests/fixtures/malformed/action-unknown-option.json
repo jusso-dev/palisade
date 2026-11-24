@@ -28,7 +28,7 @@
             }
           },
           "action": {
-            "type": "deny",
+            "type": "allow",
             "kill_running": true
           }
         }

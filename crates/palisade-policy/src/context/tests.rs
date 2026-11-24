@@ -7,7 +7,7 @@ use super::{
     normalize_object_id, normalize_principal, normalize_sid,
 };
 use crate::facts::{ObjectFacts, PathVariables};
-use crate::model::{Action, Criterion, Field, FieldClass, Operator};
+use crate::model::{ActionKind, Criterion, Field, FieldClass, Operator};
 use crate::ops::{CompileErrorKind, CompiledCriterion, EvalContext, Note, Tri};
 
 use Tri::{Match, NoMatch, Unknown};
@@ -37,7 +37,7 @@ fn compile_err(field: Field, operator: Operator, values: &[&str]) -> CompileErro
     }
 }
 
-fn eval_in(c: &CompiledCriterion, context: &EvaluationContext, action: Action) -> (Tri, bool) {
+fn eval_in(c: &CompiledCriterion, context: &EvaluationContext, action: ActionKind) -> (Tri, bool) {
     let variables = PathVariables::new();
     let ctx = EvalContext {
         action,
@@ -49,7 +49,7 @@ fn eval_in(c: &CompiledCriterion, context: &EvaluationContext, action: Action) -
 }
 
 fn eval(c: &CompiledCriterion, context: &EvaluationContext) -> Tri {
-    eval_in(c, context, Action::Deny {}).0
+    eval_in(c, context, ActionKind::Deny).0
 }
 
 /// A context with every fact collected.
@@ -132,7 +132,7 @@ fn every_context_field_is_unknown_when_not_collected() {
         let c = sample(field);
         for c in std::iter::once(c.clone()).chain(negated(&c)) {
             let compiled = CompiledCriterion::compile(&c).unwrap();
-            for action in [Action::Allow {}, Action::Deny {}, Action::Audit {}] {
+            for action in [ActionKind::Allow, ActionKind::Deny, ActionKind::Audit] {
                 let (result, missing) = eval_in(&compiled, &empty, action);
                 assert_eq!(result, Unknown, "{field:?} {:?}", c.operator);
                 assert!(missing, "{field:?}");
@@ -221,7 +221,7 @@ fn sids_compare_in_canonical_form() {
     let e = compiled.eval(
         &ObjectFacts::new(),
         &EvalContext {
-            action: Action::Deny {},
+            action: ActionKind::Deny,
             variables: &variables,
             context: &odd,
         },
@@ -369,10 +369,13 @@ fn user_name_matches_either_form() {
     let mut account_only = full();
     account_only.user.upn = None;
     let c = compile(Field::UserName, Operator::NotEquals, &["bob@example.org"]);
-    assert_eq!(eval_in(&c, &account_only, Action::Deny {}), (Unknown, true));
+    assert_eq!(
+        eval_in(&c, &account_only, ActionKind::Deny),
+        (Unknown, true)
+    );
     let c = compile(Field::UserName, Operator::Equals, &["EXAMPLE\\alice"]);
     // The account name decides, so the missing form is not even looked at.
-    assert_eq!(eval_in(&c, &account_only, Action::Deny {}), (Match, false));
+    assert_eq!(eval_in(&c, &account_only, ActionKind::Deny), (Match, false));
     // Regular expressions are not allowed on principal names (#32).
     assert_eq!(
         compile_err(Field::UserName, Operator::Regex, &["EXAMPLE\\\\.*"]),

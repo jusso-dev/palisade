@@ -53,10 +53,6 @@ fn metadata() -> impl Strategy<Value = Metadata> {
         })
 }
 
-fn object_type() -> impl Strategy<Value = ObjectType> {
-    proptest::sample::select(ObjectType::ALL.to_vec())
-}
-
 /// SIDs in every accepted spelling: either case of `S`, a decimal
 /// authority with leading zeros or a 48-bit hex one of 2^32 or more, and
 /// sub-authorities of up to 10 digits with leading zeros.
@@ -170,17 +166,38 @@ pub fn tree() -> impl Strategy<Value = Match> {
         })
 }
 
-fn rule(mandatory: bool) -> impl Strategy<Value = Rule> {
+fn rule(kind: RuleSetKind, mandatory: bool) -> impl Strategy<Value = Rule> {
+    // An action valid in the rule set, object types valid for it, and
+    // effects valid for it (#34).
     let action = if mandatory {
-        Just(Action::Deny {}).boxed()
+        deny_options(false).prop_map(Action::Deny).boxed()
     } else {
-        prop_oneof![
-            Just(Action::Allow {}),
-            Just(Action::Deny {}),
-            Just(Action::Audit {})
-        ]
-        .boxed()
+        let valid: Vec<_> = super::ActionKind::ALL
+            .into_iter()
+            .filter(|a| a.valid_in_rule_set(kind))
+            .collect();
+        proptest::sample::select(valid)
+            .prop_flat_map(action_strategy::action_of)
+            .boxed()
     };
+    let action_and_types = action.prop_flat_map(|action| {
+        let k = action.kind();
+        let kill = matches!(&action, Action::Deny(o) if o.kill_running);
+        let valid: Vec<ObjectType> = ObjectType::ALL
+            .into_iter()
+            .filter(|t| k.valid_for_object_type(*t))
+            .filter(|t| !kill || super::ActionKind::kill_running_valid_for(*t))
+            .collect();
+        // An empty list means every type, so it is only valid when every
+        // type is.
+        let min = usize::from(valid.len() < ObjectType::ALL.len());
+        let effects = action_strategy::effects(&action);
+        (
+            Just(action),
+            proptest::collection::btree_set(proptest::sample::select(valid), min..4),
+            effects,
+        )
+    });
     (
         (
             uuid7(),
@@ -188,12 +205,7 @@ fn rule(mandatory: bool) -> impl Strategy<Value = Rule> {
             name(),
             text(),
         ),
-        (
-            any::<bool>(),
-            proptest::collection::btree_set(object_type(), 0..4),
-            tree(),
-            action,
-        ),
+        (any::<bool>(), tree(), action_and_types),
         (
             proptest::option::of(any::<u32>()),
             proptest::option::of(any::<i32>()),
@@ -218,7 +230,7 @@ fn rule(mandatory: bool) -> impl Strategy<Value = Rule> {
         .prop_map(
             |(
                 (id, display_id, name, description),
-                (enabled, types, match_, action),
+                (enabled, match_, (action, types, effects)),
                 (order, priority, enforcement_override, metadata),
             )| Rule {
                 id: RuleId(id),
@@ -229,6 +241,7 @@ fn rule(mandatory: bool) -> impl Strategy<Value = Rule> {
                 object_types: types.into_iter().collect(),
                 match_,
                 action,
+                effects,
                 order,
                 priority,
                 enforcement_override,
@@ -257,7 +270,7 @@ fn rule_set() -> impl Strategy<Value = RuleSet> {
                 proptest::option::of("[0-9]{1,2}\\.[0-9]{1,2}"),
             ),
             (any::<bool>(), any::<bool>()),
-            vec(rule(mandatory), 0..4),
+            vec(rule(kind, mandatory), 0..4),
             metadata(),
         )
             .prop_map(
@@ -398,4 +411,186 @@ pub fn document() -> impl Strategy<Value = PolicyDocument> {
                     .flat_map(|s| &s.rules)
                     .all(|r| ids.insert(r.id.0))
         })
+}
+
+fn deny_options(allow_request: bool) -> impl Strategy<Value = super::DenyOptions> {
+    (
+        any::<bool>(),
+        if allow_request {
+            any::<bool>().boxed()
+        } else {
+            Just(false).boxed()
+        },
+        proptest::option::of(uuid7()),
+    )
+        .prop_map(
+            |(kill_running, allow_request, template)| super::DenyOptions {
+                kill_running,
+                allow_request,
+                request_template: template
+                    .filter(|_| allow_request)
+                    .map(super::RequestTemplateRef),
+            },
+        )
+}
+
+/// Strategies for actions and effect flags (#34).
+pub mod action_strategy {
+    use proptest::prelude::*;
+
+    use super::super::{
+        Action, ActionKind, ContainmentDirective, ContainmentProfileRef, Effects, ElevationAuth,
+        ElevationCondition, ElevationDirective, EventSeverity, LogLevel, Notify, TokenProfileRef,
+        TrustMode, TrustSourceDirective, Upload,
+    };
+    use super::{deny_options, uuid7};
+
+    /// An action of this kind, with valid options.
+    pub fn action_of(kind: ActionKind) -> BoxedStrategy<Action> {
+        match kind {
+            ActionKind::Allow => Just(Action::Allow {}).boxed(),
+            ActionKind::Deny => deny_options(true).prop_map(Action::Deny).boxed(),
+            ActionKind::Audit => Just(Action::Audit {}).boxed(),
+            ActionKind::AllowContained => uuid7()
+                .prop_map(|id| {
+                    Action::AllowContained(ContainmentDirective {
+                        profile_id: ContainmentProfileRef(id),
+                    })
+                })
+                .boxed(),
+            ActionKind::AllowElevated => (
+                uuid7(),
+                prop_oneof![
+                    Just(ElevationCondition::Always),
+                    Just(ElevationCondition::IfRequired)
+                ],
+                proptest::option::of("[A-Za-z0-9][A-Za-z0-9 ?.,\u{e9}-]{0,40}[A-Za-z0-9?]"),
+                prop_oneof![
+                    Just(ElevationAuth::None),
+                    Just(ElevationAuth::Reauth),
+                    Just(ElevationAuth::Mfa)
+                ],
+            )
+                .prop_map(|(id, condition, reason_prompt, auth)| {
+                    Action::AllowElevated(ElevationDirective {
+                        token_profile: TokenProfileRef(id),
+                        condition,
+                        reason_prompt,
+                        auth,
+                    })
+                })
+                .boxed(),
+            ActionKind::TrustSource => (
+                prop_oneof![Just(TrustMode::Direct), Just(TrustMode::Chained)],
+                proptest::collection::btree_set(scope_path(), 1..4),
+                any::<bool>(),
+            )
+                .prop_map(|(mode, paths, tag_output)| {
+                    Action::TrustSource(TrustSourceDirective {
+                        mode,
+                        // Unique without case, as validation requires.
+                        scope_paths: dedup_ci(paths.into_iter().collect()),
+                        tag_output,
+                    })
+                })
+                .boxed(),
+            ActionKind::Ignore => Just(Action::Ignore {}).boxed(),
+            ActionKind::Defer => Just(Action::Defer {}).boxed(),
+        }
+    }
+
+    fn dedup_ci(paths: Vec<String>) -> Vec<String> {
+        let mut seen = std::collections::BTreeSet::new();
+        paths
+            .into_iter()
+            .filter(|p| seen.insert(crate::validate::scope_path_key(p)))
+            .collect()
+    }
+
+    /// A valid trust-source scope path.
+    pub fn scope_path() -> impl Strategy<Value = String> {
+        prop_oneof![
+            "[A-Za-z]:\\\\([A-Za-z0-9_-]([A-Za-z0-9 _-]{0,10}[A-Za-z0-9_-])?\\\\){0,3}([A-Za-z0-9_-]([A-Za-z0-9 _-]{0,10}[A-Za-z0-9_-])?)?",
+            "\\\\\\\\[a-z0-9-]{1,10}\\\\[A-Za-z0-9$_-]{1,10}(\\\\[A-Za-z0-9_-]([A-Za-z0-9 _-]{0,10}[A-Za-z0-9_-])?){0,2}",
+            "%(PROGRAMFILES|WINDIR|LOCALAPPDATA)%(\\\\[A-Za-z0-9_-]([A-Za-z0-9 _-]{0,10}[A-Za-z0-9_-])?){0,3}",
+        ]
+    }
+
+    /// Effect flags valid for an action. A deny that allows requests needs
+    /// a notification; any other may hide it.
+    pub fn effects(action: &Action) -> BoxedStrategy<Effects> {
+        let kind = action.kind();
+        let needs_notification = matches!(action, Action::Deny(o) if o.allow_request);
+        if matches!(kind, ActionKind::Ignore | ActionKind::Defer) {
+            return Just(Effects::default()).boxed();
+        }
+        let log = proptest::sample::select(
+            [
+                LogLevel::Always,
+                LogLevel::Summary,
+                LogLevel::Sampled,
+                LogLevel::Never,
+            ]
+            .into_iter()
+            .filter(|l| l.allowed_for(kind))
+            .collect::<Vec<_>>(),
+        );
+        let notify = if needs_notification {
+            prop_oneof![Just(Notify::Default), Just(Notify::Custom)].boxed()
+        } else {
+            prop_oneof![
+                Just(Notify::None),
+                Just(Notify::Default),
+                Just(Notify::Custom)
+            ]
+            .boxed()
+        };
+        (
+            (
+                proptest::option::of(log),
+                proptest::option::of(prop_oneof![
+                    Just(Upload::Immediate),
+                    Just(Upload::Batched),
+                    Just(Upload::LocalOnly)
+                ]),
+                proptest::option::of(notify),
+                "[A-Za-z0-9\u{e9}][A-Za-z0-9 .,!\u{e9}]{0,29}( \\{(file|publisher|rule|user|hash)\\})?( \\{\\{x\\}\\})?",
+            ),
+            (
+                proptest::option::of("https://[a-z]{1,10}\\.example(/[a-z0-9_-]{0,10}){0,2}"),
+                proptest::option::of(prop_oneof![
+                    Just(EventSeverity::Info),
+                    Just(EventSeverity::Low),
+                    Just(EventSeverity::Medium),
+                    Just(EventSeverity::High),
+                    Just(EventSeverity::Critical)
+                ]),
+                proptest::collection::btree_set("[a-z][a-z0-9:._-]{0,20}", 0..3),
+                proptest::option::of(0u32..=604_800),
+            ),
+        )
+            .prop_map(
+                move |((log, upload, notify, text), (help_url, severity, tags, suppress))| {
+                    let mut e = Effects {
+                        log,
+                        upload,
+                        notify,
+                        notification_text: None,
+                        help_url,
+                        severity,
+                        tags: tags.into_iter().collect(),
+                        suppress_duplicates_secs: suppress,
+                    };
+                    let effective = e.notify_for(kind);
+                    if effective == Notify::Custom {
+                        e.notification_text = Some(text);
+                    }
+                    if effective == Notify::None {
+                        e.help_url = None;
+                    }
+                    e
+                },
+            )
+            .boxed()
+    }
 }

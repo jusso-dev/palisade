@@ -1,0 +1,103 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/jusso-dev/palisade/main/schemas/policy/v1.json
+#
+# Rule actions and effect flags (#34). Each rule set kind holds the actions
+# it is for; a `mixed` set holds any. Effect flags are optional: an unset
+# flag takes the action's default (see the palisade-policy README).
+schema_version: "1.0.0"
+policy:
+  id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5000
+  name: Actions and effects
+  revision: 1
+  mode: audit
+  rule_sets:
+    - 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5010
+    - 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5020
+    - 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5030
+    - 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5040
+
+rule_sets:
+  - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5010
+    name: Blocked tools
+    kind: blocklist
+    rules:
+      # Block a tool, stop copies already running, and let the user ask for
+      # an exception from a custom notification.
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5011
+        name: Block an unapproved remote-access tool
+        object_types: [executable]
+        match:
+          criterion:
+            field: signer.publisher
+            operator: equals
+            values: ["CN=Example Remote Tools Ltd"]
+        action:
+          type: deny
+          kill_running: true
+          allow_request: true
+        effects:
+          notify: custom
+          notification_text: "{file} is not approved here. Use the request button to ask IT."
+          help_url: https://help.example/remote-access
+          severity: high
+          tags: [remote-access]
+
+  - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5020
+    name: Detections
+    kind: mixed
+    rules:
+      # Audit rules never change the outcome: they tag the decision.
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5021
+        name: Flag programs started from Downloads
+        object_types: [executable]
+        match:
+          criterion:
+            field: path.directory
+            operator: starts_with
+            values: ['%USERPROFILE%\Downloads\']
+        action: {type: audit}
+        effects:
+          severity: low
+          tags: [downloads]
+
+  - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5030
+    name: Administrator tasks
+    kind: elevation
+    rules:
+      # Elevate one installer when it asks for administrator rights, after
+      # the user gives a reason and authenticates again.
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5031
+        name: Elevate the printer driver installer
+        object_types: [installer]
+        match:
+          criterion:
+            field: hash.sha256
+            operator: equals
+            values: [3f9a1c0d5e7b2a4c6e8f0a1b3c5d7e9f1a2b4c6d8e0f2a3b5c7d9e1f3a5b7c9d]
+        action:
+          type: allow_elevated
+          token_profile: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5f01
+          condition: if_required
+          reason_prompt: Why do you need to install this driver?
+          auth: reauth
+
+  - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5040
+    name: Trusted installers
+    kind: trust
+    rules:
+      # Files the software deployment agent and its child processes write
+      # under Program Files become trusted (#9). `%PROGRAMFILES%` covers both
+      # program-files directories. A separate allow rule lets the agent
+      # itself run.
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5041
+        name: Trust the software deployment agent
+        object_types: [executable]
+        match:
+          criterion:
+            field: signer.publisher
+            operator: equals
+            values: ["CN=Example Deployment Ltd"]
+        action:
+          type: trust_source
+          mode: chained
+          scope_paths: ['%PROGRAMFILES%\', 'D:\Apps\']
+          tag_output: true

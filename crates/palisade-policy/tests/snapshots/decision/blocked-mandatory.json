@@ -1,0 +1,33 @@
+{
+  "outcome": "blocked",
+  "would_have_been": "blocked",
+  "action": "deny",
+  "matched_rule": {
+    "rule_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e61",
+    "display_id": null,
+    "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60",
+    "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+    "policy_revision": 42
+  },
+  "annotations": [],
+  "mode": "enforce",
+  "directives": {
+    "containment": null,
+    "elevation": null,
+    "trust_source": null,
+    "kill_running": false,
+    "request": null
+  },
+  "effects": {
+    "log": "always",
+    "upload": "immediate",
+    "notify": "default",
+    "notification_text": null,
+    "help_url": null,
+    "severity": "medium",
+    "tags": [],
+    "suppress_duplicates_secs": 600
+  },
+  "reason_code": "mandatory_deny",
+  "trace_id": "0f1e2d3c4b5a69788796a5b4c3d2e1f0"
+}
