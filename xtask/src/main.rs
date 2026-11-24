@@ -10,6 +10,8 @@ mod ci;
 mod deps;
 mod junit;
 mod manifests;
+mod report;
+mod supply_chain;
 mod unsafe_code;
 mod workflows;
 
@@ -22,12 +24,21 @@ const HELP: &str = "\
 Usage: cargo xtask <command>
 
 Commands:
+  audit            Run cargo-audit, ignoring exactly the advisories deny.toml ignores
   ci [--fast]      Run the checks from .github/workflows/ci.yml locally (--fast skips docs,
                    feature-powerset and msrv)
   check-deps       Enforce the allowed dependency directions between crates
   check-manifests  Enforce workspace inheritance of package fields, lints and dependency versions,
                    and that every crate README documents its features
+  check-supply-chain
+                   Enforce the duplicate-version budget, deny.toml ignore expiry and reasons,
+                   the cargo-vet criteria and exemption notes, and no audit.toml
   check-unsafe     Enforce the unsafe-code allowlist (unsafe-allowlist.txt, ADR 0011)
+  deps-report [--base <commit>]
+                   Print the dependency report: duplicates, third-party crates per crate,
+                   third-party unsafe counts and code that runs at build time; with --base,
+                   only when Cargo.lock changed, adding cargo tree -d and unsafe changes
+  sbom             Reserved for the SBOM (#226); prints where it will be written and fails
   check-workflows  Enforce the CI runner and action policy for .github/workflows,
                    and that nothing under .github names a cloud-managed build service
   test-summary <label> <junit.xml>
@@ -43,6 +54,9 @@ fn main() -> ExitCode {
         }
     }
     match args.as_slice() {
+        [command, flag, base] if command == "deps-report" && flag == "--base" => {
+            return deps_report(Some(base));
+        }
         [command] if command == "ci" => return run_ci(false),
         [command, fast] if command == "ci" && fast == "--fast" => return run_ci(true),
         _ => {}
@@ -54,7 +68,17 @@ fn main() -> ExitCode {
     let result = match command {
         "check-deps" => run_check("check-deps", check_deps),
         "check-manifests" => run_check("check-manifests", check_manifests),
+        "audit" => return run_audit(),
+        "check-supply-chain" => run_check("check-supply-chain", check_supply_chain),
         "check-unsafe" => run_check("check-unsafe", check_unsafe),
+        "deps-report" => return deps_report(None),
+        "sbom" => {
+            eprintln!(
+                "sbom: not implemented yet. CycloneDX output is reserved at {SBOM_DIR}/<crate>.cdx.json; \
+                 generating and attesting it is #226 (release provenance), wired into the release pipeline (#24)."
+            );
+            return ExitCode::FAILURE;
+        }
         "check-workflows" => run_check("check-workflows", check_workflows),
         "help" | "--help" | "-h" => {
             print!("{HELP}");
@@ -232,6 +256,155 @@ fn check_unsafe(root: &Path) -> Result<Vec<String>, String> {
         }
     }
     Ok(violations)
+}
+
+/// Where `cargo xtask sbom` will write CycloneDX files (#226).
+const SBOM_DIR: &str = "target/dist/sbom";
+
+fn check_supply_chain(root: &Path) -> Result<Vec<String>, String> {
+    let metadata = cargo_metadata(root, &["--all-features"])?;
+    let mut violations = supply_chain::check_duplicates(
+        &supply_chain::duplicates(&metadata)?,
+        supply_chain::DUPLICATE_BUDGET,
+    );
+    violations.extend(supply_chain::check_deny_toml(
+        &read(&root.join("deny.toml"))?,
+        &supply_chain::today_utc()?,
+    )?);
+    violations.extend(supply_chain::check_vet_config(
+        &read(&root.join("supply-chain").join("config.toml"))?,
+        &supply_chain::member_names(&metadata)?,
+    )?);
+    let (paths, _) = unsafe_code::repository_files(root)?;
+    violations.extend(supply_chain::check_no_audit_toml(&paths));
+    Ok(violations)
+}
+
+/// `cargo xtask audit`: cargo-audit with exactly the advisory ignores from
+/// `deny.toml`, so the two tools agree. The ignores are checked first (ID,
+/// reason, an expiry date that has not passed, no scope), so an expired or
+/// incomplete ignore fails here too, including in the daily audit. Exits
+/// with cargo-audit's status.
+fn run_audit() -> ExitCode {
+    let root = workspace_root();
+    let checked = read(&root.join("deny.toml")).and_then(|source| {
+        let violations = supply_chain::check_deny_toml(&source, &supply_chain::today_utc()?)?;
+        if violations.is_empty() {
+            supply_chain::ignored_advisories(&source)
+        } else {
+            Err(violations.join("\n"))
+        }
+    });
+    let ignores = match checked {
+        Ok(ignores) => ignores,
+        Err(error) => {
+            eprintln!("audit: error: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let mut command = Command::new(cargo);
+    command.arg("audit").current_dir(&root);
+    for id in &ignores {
+        command.args(["--ignore", id]);
+    }
+    println!(
+        "audit: cargo audit, ignoring {} advisories from deny.toml",
+        ignores.len()
+    );
+    match command.status() {
+        Ok(status) if status.success() => ExitCode::SUCCESS,
+        Ok(_) => ExitCode::FAILURE,
+        Err(error) => {
+            eprintln!("audit: error: cannot run cargo audit: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `cargo xtask deps-report [--base <commit>]`: see `src/report.rs`.
+fn deps_report(base: Option<&str>) -> ExitCode {
+    let root = workspace_root();
+    let result = (|| -> Result<(String, Vec<String>), String> {
+        let (base_lock, tree) = match base {
+            Some(base) => {
+                let lock = report::git_show(&root, base, "Cargo.lock")?;
+                if lock == read(&root.join("Cargo.lock"))? {
+                    return Ok((
+                        "## Dependency report\n\n`Cargo.lock` is unchanged from the base branch.\n"
+                            .to_owned(),
+                        Vec::new(),
+                    ));
+                }
+                (Some(lock), Some(report::cargo_tree_duplicates(&root)?))
+            }
+            None => (None, None),
+        };
+        let metadata = cargo_metadata(&root, &["--all-features"])?;
+        // The base commit's packages: `cargo metadata --locked` in a worktree
+        // of it makes Cargo download and unpack exactly its locked crates.io
+        // packages (checksum-verified, no build scripts run), so their
+        // `unsafe` can be counted. The worktree is removed afterwards.
+        let mut registries = supply_chain::registry_dirs(&metadata);
+        let mut base_warnings = Vec::new();
+        if let (Some(base), Some(_)) = (base, &base_lock) {
+            match report::base_metadata(&root, base, |dir| cargo_metadata(dir, &["--all-features"]))
+            {
+                Ok(base_metadata) => {
+                    registries.extend(supply_chain::registry_dirs(&base_metadata));
+                }
+                Err(error) => base_warnings.push(format!(
+                    "::warning title=Base dependencies not unpacked::{}",
+                    error.replace(['\n', '\r', '%'], " ")
+                )),
+            }
+            registries.sort();
+            registries.dedup();
+        }
+        let base_count = |name: &str, version: &str| {
+            registries.iter().find_map(|dir| {
+                let crate_dir = dir.join(format!("{name}-{version}"));
+                // An incomplete scan is not a known baseline: a skipped file
+                // would make the base count too low and raise a false jump.
+                crate_dir
+                    .is_dir()
+                    .then(|| supply_chain::count_dir(&crate_dir, &unsafe_code::count_unsafe))
+                    .and_then(|(count, unreadable)| (unreadable == 0).then_some(count))
+            })
+        };
+        let (markdown, mut warnings) =
+            report::render(&metadata, base_lock.as_deref(), tree.as_deref(), base_count)?;
+        warnings.extend(base_warnings);
+        Ok((markdown, warnings))
+    })();
+    match result {
+        Ok((markdown, warnings)) => {
+            // Into the job summary on GitHub Actions, like test-summary;
+            // workflow commands go to stdout, where the runner reads them.
+            if let Some(summary) = std::env::var_os("GITHUB_STEP_SUMMARY") {
+                use std::io::Write as _;
+                let written = std::fs::OpenOptions::new()
+                    .append(true)
+                    .create(true)
+                    .open(&summary)
+                    .and_then(|mut f| f.write_all(markdown.as_bytes()));
+                if let Err(error) = written {
+                    eprintln!("deps-report: error: cannot write the step summary: {error}");
+                    return ExitCode::FAILURE;
+                }
+            } else {
+                print!("{markdown}");
+            }
+            for warning in warnings {
+                println!("{warning}");
+            }
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("deps-report: error: {error}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn check_workflows(root: &Path) -> Result<Vec<String>, String> {

@@ -26,7 +26,11 @@ jobs:
         with:
           tool: cargo-deny@0.22.0,cargo-audit@0.23.0
       - run: cargo deny --locked check advisories
-      - run: cargo audit
+      # cargo-audit with the same ignores as deny.toml.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+      - run: cargo xtask audit
 
   # Opens a tracking issue when the scan fails, or comments on the open one.
   # Only this job can write issues; it runs no repository code.

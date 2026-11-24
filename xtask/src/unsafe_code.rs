@@ -267,6 +267,27 @@ pub fn is_allowed_location(path: &str) -> bool {
         })
 }
 
+/// How many `unsafe` keywords the source contains (blocks, functions,
+/// impls, traits and `unsafe extern`), counting tokens rather than text, so
+/// comments and strings are not counted. `None` if it cannot be tokenised.
+pub fn count_unsafe(source: &str) -> Option<usize> {
+    // Third-party source is only counted, never trusted, so the raw
+    // tokeniser is enough here. An explicit stack instead of recursion, so
+    // deeply nested delimiters cannot overflow the stack.
+    let mut stack = vec![TokenStream::from_str(source).ok()?];
+    let mut count = 0;
+    while let Some(tokens) = stack.pop() {
+        for token in tokens {
+            match token {
+                TokenTree::Ident(i) if i == "unsafe" => count += 1,
+                TokenTree::Group(g) => stack.push(g.stream()),
+                _ => {}
+            }
+        }
+    }
+    Some(count)
+}
+
 /// `true` when the source has an attribute, anywhere, that relaxes
 /// `unsafe_code`.
 pub fn relaxes_unsafe_code(source: &str) -> Result<bool, String> {
@@ -829,6 +850,16 @@ mod tests {
         ] {
             assert!(relaxes(source), "{source}");
         }
+    }
+
+    #[test]
+    fn unsafe_keywords_are_counted_as_tokens() {
+        assert_eq!(
+            count_unsafe("unsafe fn f() { unsafe { g() } } // unsafe\nconst S: &str = \"unsafe\";"),
+            Some(2)
+        );
+        assert_eq!(count_unsafe("fn f() {}"), Some(0));
+        assert_eq!(count_unsafe("fn f() { \"open"), None);
     }
 
     #[test]

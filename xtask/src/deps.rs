@@ -206,6 +206,25 @@ pub fn member_targets(metadata: &Value) -> Result<Vec<(String, String, String)>,
     Ok(targets)
 }
 
+/// For each workspace crate, how many distinct third-party crates its
+/// normal (runtime) dependency tree reaches, on every platform.
+pub fn runtime_third_party_counts(metadata: &Value) -> Result<Vec<(String, usize)>, String> {
+    let graph = Graph::parse(metadata)?;
+    let mut counts = Vec::new();
+    for (id, name) in &graph.members {
+        let reached: BTreeSet<String> = graph
+            .runtime_closure(id)
+            .into_iter()
+            .filter_map(|(path, _)| path.last().cloned())
+            .filter(|dep| !graph.members.contains_key(dep))
+            .map(|dep| graph.name(&dep).to_owned())
+            .collect();
+        counts.push((name.clone(), reached.len()));
+    }
+    counts.sort();
+    Ok(counts)
+}
+
 fn lookup<T: Copy>(table: &[(&str, T)], name: &str) -> Option<T> {
     table.iter().find(|(n, _)| *n == name).map(|(_, v)| *v)
 }
@@ -548,6 +567,27 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn runtime_third_party_counts_follow_normal_edges_only() {
+        let mut pkgs = with(
+            good(),
+            "palisade-policy",
+            &[
+                ("palisade-core", "normal"),
+                ("helper", "normal"),
+                ("tool", "dev"),
+            ],
+        );
+        pkgs.push(("helper", false, &[("leaf", "normal")]));
+        pkgs.push(("leaf", false, &[]));
+        pkgs.push(("tool", false, &[]));
+        let counts = super::runtime_third_party_counts(&metadata(&pkgs)).unwrap();
+        let policy = counts.iter().find(|(n, _)| n == "palisade-policy").unwrap();
+        assert_eq!(policy.1, 2);
+        let core = counts.iter().find(|(n, _)| n == "palisade-core").unwrap();
+        assert_eq!(core.1, 0);
     }
 
     #[test]

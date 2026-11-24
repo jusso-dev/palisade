@@ -107,6 +107,7 @@ A quick start that installs Palisade on a disposable Windows virtual machine arr
 - [docs/responsible-use.md](docs/responsible-use.md): Palisade is defensive; what contributions are not accepted
 - [docs/ci.md](docs/ci.md): CI jobs and the runner policy
 - [docs/workspace.md](docs/workspace.md): crate layout, dependency, unsafe-code and feature-flag rules
+- [docs/dependencies.md](docs/dependencies.md): admitting dependencies, cargo-deny, cargo-audit, cargo-vet and the dependency report
 - [docs/repo-settings.md](docs/repo-settings.md): the repository settings the project relies on
 - [docs/NAMING.md](docs/NAMING.md): vendor-neutral terminology
 - [docs/adr/](docs/adr/README.md): architecture decision records, and the process for proposing one

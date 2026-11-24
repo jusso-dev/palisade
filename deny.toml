@@ -20,8 +20,14 @@ all-features = true
 # workspace crates, where we can act on them.
 yanked = "deny"
 unmaintained = "workspace"
-# Each ignore needs the advisory ID and a reason, for example:
-# { id = "RUSTSEC-0000-0000", reason = "not reachable: ...; revisit by YYYY-MM-DD" }
+# Each ignore is a table with the advisory ID, a reason and an expiry date,
+# for example:
+# { id = "RUSTSEC-0000-0000", reason = "not reachable: ...", expiry = "YYYY-MM-DD" }
+# cargo-deny reads `expiry` and fails once an ignored advisory is seen past
+# that date. `cargo xtask check-supply-chain` also requires all three fields
+# and fails on a passed date whether or not the advisory is seen.
+# This is the only place advisories are ignored: `cargo xtask audit` passes
+# these IDs to cargo-audit, and no audit.toml may exist.
 ignore = []
 
 [licenses]
@@ -45,7 +51,13 @@ allow = [
 confidence-threshold = 0.9
 # The allow list is policy, not an inventory, so unused entries are fine.
 unused-allowed-license = "allow"
-# Each exception needs a comment with the reason.
+# cargo-deny's exception tables have no `reason` key, so write the reason as
+# a `# reason: ...` comment on the line above each entry:
+# exceptions = [
+#     # reason: build-time tool only, never shipped
+#     { crate = "example", allow = ["GPL-3.0-only"] },
+# ]
+# `cargo xtask check-supply-chain` checks that every entry has one.
 exceptions = []
 
 [licenses.private]
@@ -65,7 +77,9 @@ deny = [
     { crate = "openssl", reason = "use rustls" },
     { crate = "openssl-sys", reason = "use rustls" },
 ]
-# Each skip needs a comment with the reason.
+# Each skip and skip-tree entry is a table with a `reason`, for example
+# { crate = "syn@2.0.119", reason = "..." }. `cargo xtask check-supply-chain`
+# enforces it, and also caps duplicated crates at 10 (cargo-deny only warns).
 skip = []
 skip-tree = []
 

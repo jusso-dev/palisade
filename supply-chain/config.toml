@@ -1,0 +1,695 @@
+
+# cargo-vet config file
+
+[cargo-vet]
+version = "0.10"
+
+[imports.bytecode-alliance]
+url = "https://raw.githubusercontent.com/bytecodealliance/wasmtime/main/supply-chain/audits.toml"
+
+[imports.isrg]
+url = "https://raw.githubusercontent.com/divviup/libprio-rs/main/supply-chain/audits.toml"
+
+[policy.palisade-agent]
+criteria = "safe-to-deploy"
+dev-criteria = "safe-to-run"
+
+[policy.palisade-cli]
+criteria = "safe-to-deploy"
+dev-criteria = "safe-to-run"
+
+[policy.palisade-console]
+criteria = "safe-to-deploy"
+dev-criteria = "safe-to-run"
+
+[policy.palisade-core]
+criteria = "safe-to-deploy"
+dev-criteria = "safe-to-run"
+
+[policy.palisade-driver]
+criteria = "safe-to-deploy"
+dev-criteria = "safe-to-run"
+
+[policy.palisade-fileid]
+criteria = "safe-to-deploy"
+dev-criteria = "safe-to-run"
+
+[policy.palisade-policy]
+criteria = "safe-to-deploy"
+dev-criteria = "safe-to-run"
+
+[policy.palisade-proto]
+criteria = "safe-to-deploy"
+dev-criteria = "safe-to-run"
+
+[policy.palisade-server]
+criteria = "safe-to-deploy"
+dev-criteria = "safe-to-run"
+
+[policy.palisade-tray]
+criteria = "safe-to-deploy"
+dev-criteria = "safe-to-run"
+
+[policy.xtask]
+criteria = "safe-to-run"
+dev-criteria = "safe-to-run"
+
+[[exemptions.ahash]]
+version = "0.8.12"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.aho-corasick]]
+version = "1.1.5"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23), raised from safe-to-run to safe-to-deploy because #251 (palisade-policy identity matching: regex operators) made it a normal dependency of a product crate before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.appendlist]]
+version = "1.4.0"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.arraydeque]]
+version = "0.5.1"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.autocfg]]
+version = "1.5.1"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.bitflags]]
+version = "2.13.2"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23) at safe-to-run; raised to safe-to-deploy because #252 (palisade-agent service host) made it a normal dependency of a shipped crate. Audit, or import an audit, before bumping."
+
+[[exemptions.block-buffer]]
+version = "0.12.1"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.boon]]
+version = "0.6.1"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.borrow-or-share]]
+version = "0.2.4"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.cc]]
+version = "1.11.3"
+criteria = "safe-to-deploy"
+notes = "Added by #247 (palisade-fileid Authenticode verification: ring and its build and platform dependencies) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.cfg-if]]
+version = "1.0.5"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.cpufeatures]]
+version = "0.3.1"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.crypto-common]]
+version = "0.2.2"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.digest]]
+version = "0.11.3"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.displaydoc]]
+version = "0.2.7"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.dyn-clone]]
+version = "1.0.20"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.equivalent]]
+version = "1.0.3"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.errno]]
+version = "0.3.15"
+criteria = "safe-to-deploy"
+notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.find-msvc-tools]]
+version = "0.1.15"
+criteria = "safe-to-deploy"
+notes = "Added by #247 (palisade-fileid Authenticode verification: ring and its build and platform dependencies) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.fluent-uri]]
+version = "0.3.2"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.foldhash]]
+version = "0.2.0"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.form_urlencoded]]
+version = "1.2.3"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.getrandom]]
+version = "0.2.17"
+criteria = "safe-to-deploy"
+notes = "Added by #247 (palisade-fileid Authenticode verification: ring and its build and platform dependencies) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.getrandom]]
+version = "0.3.4"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.hashbrown]]
+version = "0.17.2"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.hashlink]]
+version = "0.12.2"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.hybrid-array]]
+version = "0.4.15"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.icu_collections]]
+version = "2.1.1"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.icu_locale_core]]
+version = "2.1.1"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.icu_normalizer]]
+version = "2.1.1"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.icu_normalizer_data]]
+version = "2.1.1"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.icu_properties]]
+version = "2.1.2"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.icu_properties_data]]
+version = "2.1.2"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.icu_provider]]
+version = "2.1.1"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.idna]]
+version = "1.1.0"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.idna_adapter]]
+version = "1.2.1"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.indexmap]]
+version = "2.14.2"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.itoa]]
+version = "1.0.19"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.lazy_static]]
+version = "1.5.1"
+criteria = "safe-to-deploy"
+notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.libc]]
+version = "0.2.191"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.litemap]]
+version = "0.8.3"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.md-5]]
+version = "0.11.0"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.memchr]]
+version = "2.8.3"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.mio]]
+version = "1.2.5"
+criteria = "safe-to-deploy"
+notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.once_cell]]
+version = "1.21.4"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23) at safe-to-run; raised to safe-to-deploy because #252 (palisade-agent service host) made it a normal dependency of a shipped crate. Audit, or import an audit, before bumping."
+
+[[exemptions.percent-encoding]]
+version = "2.3.2"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.pin-project-lite]]
+version = "0.2.18"
+criteria = "safe-to-deploy"
+notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.potential_utf]]
+version = "0.1.6"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.ppv-lite86]]
+version = "0.2.21"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.proc-macro2]]
+version = "1.0.107"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.proptest]]
+version = "1.11.0"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.quote]]
+version = "1.0.47"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.r-efi]]
+version = "5.3.0"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.rand]]
+version = "0.9.5"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.rand_core]]
+version = "0.9.5"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.rand_xorshift]]
+version = "0.4.0"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.ref-cast]]
+version = "1.0.27"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.ref-cast-impl]]
+version = "1.0.27"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.regex]]
+version = "1.13.2"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.regex-automata]]
+version = "0.4.19"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23), raised from safe-to-run to safe-to-deploy because #251 (palisade-policy identity matching: regex operators) made it a normal dependency of a product crate before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.regex-syntax]]
+version = "0.8.12"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23), raised from safe-to-run to safe-to-deploy because #251 (palisade-policy identity matching: regex operators) made it a normal dependency of a product crate before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.ring]]
+version = "0.17.14"
+criteria = "safe-to-deploy"
+notes = "Added by #247 (palisade-fileid Authenticode verification: ring and its build and platform dependencies) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.schemars]]
+version = "1.2.3"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.schemars_derive]]
+version = "1.2.3"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.serde]]
+version = "1.0.229"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.serde_core]]
+version = "1.0.229"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.serde_derive]]
+version = "1.0.229"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.serde_derive_internals]]
+version = "0.30.0"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.serde_json]]
+version = "1.0.154"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.serde_spanned]]
+version = "1.1.3"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.sha1]]
+version = "0.11.0"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.sha2]]
+version = "0.11.0"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.sharded-slab]]
+version = "0.1.7"
+criteria = "safe-to-deploy"
+notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.shlex]]
+version = "2.0.1"
+criteria = "safe-to-deploy"
+notes = "Added by #247 (palisade-fileid Authenticode verification: ring and its build and platform dependencies) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.signal-hook-registry]]
+version = "1.4.8"
+criteria = "safe-to-deploy"
+notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.smallvec]]
+version = "1.16.6"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.stable_deref_trait]]
+version = "1.2.1"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.syn]]
+version = "2.0.119"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.syn]]
+version = "3.0.10"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.synstructure]]
+version = "0.14.0"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.thread_local]]
+version = "1.1.10"
+criteria = "safe-to-deploy"
+notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.tinystr]]
+version = "0.8.5"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.tinyvec]]
+version = "1.13.3"
+criteria = "safe-to-deploy"
+notes = "Added by #251 (palisade-policy identity matching: NFC normalisation of compared strings) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.tokio]]
+version = "1.54.1"
+criteria = "safe-to-deploy"
+notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.tokio-macros]]
+version = "2.7.2"
+criteria = "safe-to-deploy"
+notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.toml]]
+version = "1.2.2+spec-1.1.0"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.toml_datetime]]
+version = "1.1.3+spec-1.1.0"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.toml_parser]]
+version = "1.1.6+spec-1.1.0"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.toml_writer]]
+version = "1.2.0+spec-1.1.0"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.tracing]]
+version = "0.1.44"
+criteria = "safe-to-deploy"
+notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.tracing-core]]
+version = "0.1.36"
+criteria = "safe-to-deploy"
+notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.tracing-subscriber]]
+version = "0.3.23"
+criteria = "safe-to-deploy"
+notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.typenum]]
+version = "1.20.1"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.unicode-ident]]
+version = "1.0.27"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.unicode-normalization]]
+version = "0.1.26"
+criteria = "safe-to-deploy"
+notes = "Added by #251 (palisade-policy identity matching: NFC normalisation of compared strings) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.untrusted]]
+version = "0.9.0"
+criteria = "safe-to-deploy"
+notes = "Added by #247 (palisade-fileid Authenticode verification: ring and its build and platform dependencies) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.url]]
+version = "2.5.9"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.utf8_iter]]
+version = "1.1.0"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.utf_types]]
+version = "1.0.0"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.version_check]]
+version = "0.9.5"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.wasi]]
+version = "0.11.1+wasi-snapshot-preview1"
+criteria = "safe-to-deploy"
+notes = "Added by #247 (palisade-fileid Authenticode verification: ring and its build and platform dependencies) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.widestring]]
+version = "1.2.1"
+criteria = "safe-to-deploy"
+notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.windows-link]]
+version = "0.2.1"
+criteria = "safe-to-deploy"
+notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.windows-service]]
+version = "0.8.1"
+criteria = "safe-to-deploy"
+notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.windows-sys]]
+version = "0.52.0"
+criteria = "safe-to-deploy"
+notes = "Added by #247 (palisade-fileid Authenticode verification: ring and its build and platform dependencies) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.windows-sys]]
+version = "0.61.2"
+criteria = "safe-to-deploy"
+notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.windows-targets]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Added by #247 (palisade-fileid Authenticode verification: ring and its build and platform dependencies) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.windows_aarch64_gnullvm]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Added by #247 (palisade-fileid Authenticode verification: ring and its build and platform dependencies) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.windows_aarch64_msvc]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Added by #247 (palisade-fileid Authenticode verification: ring and its build and platform dependencies) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.windows_i686_gnu]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Added by #247 (palisade-fileid Authenticode verification: ring and its build and platform dependencies) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.windows_i686_gnullvm]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Added by #247 (palisade-fileid Authenticode verification: ring and its build and platform dependencies) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.windows_i686_msvc]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Added by #247 (palisade-fileid Authenticode verification: ring and its build and platform dependencies) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.windows_x86_64_gnu]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Added by #247 (palisade-fileid Authenticode verification: ring and its build and platform dependencies) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.windows_x86_64_gnullvm]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Added by #247 (palisade-fileid Authenticode verification: ring and its build and platform dependencies) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.windows_x86_64_msvc]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Added by #247 (palisade-fileid Authenticode verification: ring and its build and platform dependencies) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.winnow]]
+version = "1.0.5"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.writeable]]
+version = "0.6.4"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.yaml-rust2]]
+version = "0.13.2"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.yoke]]
+version = "0.8.4"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.yoke-derive]]
+version = "0.8.4"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.zerocopy]]
+version = "0.8.64"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.zerocopy-derive]]
+version = "0.8.64"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.zerofrom]]
+version = "0.1.8"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.zerofrom-derive]]
+version = "0.1.8"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.zerotrie]]
+version = "0.2.5"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.zerovec]]
+version = "0.11.9"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.zerovec-derive]]
+version = "0.11.7"
+criteria = "safe-to-run"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.zmij]]
+version = "1.0.23"
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."

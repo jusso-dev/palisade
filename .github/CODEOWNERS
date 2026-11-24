@@ -24,6 +24,7 @@
 /.cargo/                        @jusso-dev
 /deny.toml                      @jusso-dev
 /supply-chain/                  @jusso-dev
+/docs/dependencies.md           @jusso-dev
 /clippy.toml                    @jusso-dev
 # All of xtask: the repository checks, how they are run and their exit codes,
 # and the planned release commands (xtask/src/dist*, xtask/src/sign*).
