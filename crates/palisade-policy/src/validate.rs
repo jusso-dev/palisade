@@ -542,7 +542,7 @@ impl Validator {
                 (_, Identity::None) if negations_only => self.push(
                     ErrorCode::NegationOnly,
                     &tree,
-                    format!("this rule can match through {through}, on negations alone, which match almost every object; combine each negation with a positive criterion in an `all`"),
+                    format!("this rule can match through {through}, on negations alone, which match almost every object; combine each negation with a positive identity criterion (a hash, signer, path or version-resource test) in an `all`"),
                 ),
                 (_, Identity::None) => self.push(
                     ErrorCode::NoIdentityAnchor,

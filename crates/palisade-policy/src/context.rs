@@ -214,10 +214,13 @@ impl EvaluationContext {
     }
 }
 
-/// The canonical form of a SID: `S-1-`, the identifier authority in
-/// decimal, then 1 to 15 decimal sub-authorities. The authority may be
-/// written in decimal (below 2^32, as Windows writes it) or as `0x` and 12
-/// hex digits. `None` if `s` is not a SID.
+/// The canonical form of a SID (MS-DTYP 2.4.2.1): `S-1-`, the identifier
+/// authority, then 1 to 15 decimal sub-authorities without leading zeros.
+/// The authority is written in decimal when it is below 2^32, and otherwise
+/// as `0x` and 12 lowercase hex digits, as Windows writes it. On input it
+/// may be written either way, in any case, and decimal numbers may have
+/// leading zeros. The result is itself canonical: normalising it again
+/// gives the same text. `None` if `s` is not a SID.
 #[must_use]
 pub fn normalize_sid(s: &str) -> Option<String> {
     let mut parts = s.split('-');
@@ -240,7 +243,11 @@ pub fn normalize_sid(s: &str) -> Option<String> {
         }
         value
     };
-    let mut out = format!("S-1-{authority}");
+    let mut out = if authority < 1 << 32 {
+        format!("S-1-{authority}")
+    } else {
+        format!("S-1-0x{authority:012x}")
+    };
     let mut count = 0usize;
     for part in parts {
         let value = u32::try_from(decimal(part)?).ok()?;
@@ -254,18 +261,29 @@ pub fn normalize_sid(s: &str) -> Option<String> {
     (count > 0).then_some(out)
 }
 
-/// A decimal number of 1 to 10 digits, with no sign.
+/// A decimal number with no sign: one or more digits, of which at most 10
+/// are significant. Leading zeros are ignored.
 fn decimal(s: &str) -> Option<u64> {
-    if s.is_empty() || s.len() > 10 || !s.bytes().all(|b| b.is_ascii_digit()) {
+    if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
-    s.parse().ok()
+    let significant = s.trim_start_matches('0');
+    if significant.is_empty() {
+        return Some(0);
+    }
+    if significant.len() > 10 {
+        return None;
+    }
+    significant.parse().ok()
 }
 
 /// The canonical form of a cloud-directory object ID: a GUID in the
 /// `8-4-4-4-12` hex form, lowercase. `None` if `s` is not one.
 #[must_use]
 pub fn normalize_object_id(s: &str) -> Option<String> {
+    if s.len() != 36 {
+        return None;
+    }
     let groups: Vec<&str> = s.split('-').collect();
     let lengths = [8, 4, 4, 4, 12];
     let ok = groups.len() == lengths.len()

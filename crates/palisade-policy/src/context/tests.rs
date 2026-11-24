@@ -1,5 +1,7 @@
 //! Tests for context criteria (#33), with a mock context.
 
+use proptest::prelude::*;
+
 use super::{
     DeviceContext, EvaluationContext, SessionContext, SessionType, UserContext,
     normalize_object_id, normalize_principal, normalize_sid,
@@ -179,10 +181,29 @@ fn sids_compare_in_canonical_form() {
             Some("S-1-5-1-2-3-4-5-6-7-8-9-10-11-12-13-14-15"),
         ),
         ("S-1-5-1-2-3-4-5-6-7-8-9-10-11-12-13-14-15-16", None),
+        // Leading zeros never count towards the 10 significant digits.
+        (
+            "S-1-5-21-01004336348-1177238915-682003330-513",
+            Some("S-1-5-21-1004336348-1177238915-682003330-513"),
+        ),
+        ("S-1-00000000005-32-0000000544", Some("S-1-5-32-544")),
+        ("S-1-5-0", Some("S-1-5-0")),
+        ("S-1-5-000", Some("S-1-5-0")),
+        ("S-1-5-04294967295", Some("S-1-5-4294967295")),
+        ("S-1-5-14294967295", None),
+        // A 48-bit authority of 2^32 or more stays in hex, lowercase.
+        ("S-1-0x000100000000-1", Some("S-1-0x000100000000-1")),
+        ("s-1-0XFFFFFFFFFFFF-7", Some("S-1-0xffffffffffff-7")),
+        ("S-1-0x0000FFFFFFFF-1", Some("S-1-4294967295-1")),
+        ("S-1-0x00010000000-1", None),
         ("Administrators", None),
         ("", None),
     ] {
         assert_eq!(normalize_sid(raw).as_deref(), canonical, "{raw}");
+        // The canonical form is canonical.
+        if let Some(c) = canonical {
+            assert_eq!(normalize_sid(c).as_deref(), Some(c), "{c}");
+        }
     }
     let c = compile(
         Field::UserPrimaryGroup,
@@ -350,7 +371,8 @@ fn user_name_matches_either_form() {
     let c = compile(Field::UserName, Operator::NotEquals, &["bob@example.org"]);
     assert_eq!(eval_in(&c, &account_only, Action::Deny {}), (Unknown, true));
     let c = compile(Field::UserName, Operator::Equals, &["EXAMPLE\\alice"]);
-    assert_eq!(eval(&c, &account_only), Match);
+    // The account name decides, so the missing form is not even looked at.
+    assert_eq!(eval_in(&c, &account_only, Action::Deny {}), (Match, false));
     // Regular expressions are not allowed on principal names (#32).
     assert_eq!(
         compile_err(Field::UserName, Operator::Regex, &["EXAMPLE\\\\.*"]),
@@ -541,6 +563,44 @@ fn context_compatibility_table() {
             Operator::IsFalse,
         ] {
             assert!(!op.applies_to(field.class()), "{field:?} {op:?}");
+        }
+    }
+}
+
+proptest! {
+    #[test]
+    fn sid_normalisation_is_idempotent(
+        lower in any::<bool>(),
+        authority in prop_oneof![0u64..64, 0u64..(1 << 32), 0u64..(1 << 48)],
+        hex in any::<bool>(),
+        zeros in 0usize..4,
+        subs in proptest::collection::vec(any::<u32>(), 1..=15),
+    ) {
+        let pad = "0".repeat(zeros);
+        let authority = if hex {
+            format!("0x{authority:012X}")
+        } else if authority < 1 << 32 {
+            format!("{pad}{authority}")
+        } else {
+            format!("0x{authority:012x}")
+        };
+        let mut raw = format!("{}-1-{authority}", if lower { "s" } else { "S" });
+        for sub in &subs {
+            raw.push_str(&format!("-{pad}{sub}"));
+        }
+        let once = normalize_sid(&raw);
+        prop_assert!(once.is_some(), "{}", raw);
+        let once = once.unwrap();
+        prop_assert_eq!(normalize_sid(&once), Some(once.clone()));
+        // Every sub-authority survives, without its leading zeros.
+        let tail: Vec<String> = subs.iter().map(u32::to_string).collect();
+        prop_assert!(once.ends_with(&format!("-{}", tail.join("-"))), "{}", once);
+    }
+
+    #[test]
+    fn sid_normalisation_never_panics(s in "\\PC{0,80}") {
+        if let Some(once) = normalize_sid(&s) {
+            prop_assert_eq!(normalize_sid(&once), Some(once.clone()));
         }
     }
 }

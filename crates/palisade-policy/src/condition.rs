@@ -82,6 +82,38 @@ pub enum TreeError {
     },
 }
 
+impl core::fmt::Display for TreeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::TooDeep => write!(f, "the tree is nested more than {MAX_TREE_DEPTH} deep"),
+            Self::TooManyCriteria => {
+                write!(
+                    f,
+                    "the tree holds more than {MAX_CRITERIA_PER_RULE} criteria"
+                )
+            }
+            Self::EmptyGroup { pointer } => {
+                write!(f, "{pointer}: a group needs at least one condition")
+            }
+            Self::Criterion { pointer, errors } => {
+                write!(f, "{pointer}: ")?;
+                for (i, e) in errors.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str("; ")?;
+                    }
+                    match e.value {
+                        Some(v) => write!(f, "value {v}: {}", e.kind)?,
+                        None => write!(f, "{}", e.kind)?,
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl std::error::Error for TreeError {}
+
 /// The result of evaluating a tree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TreeEvaluation {

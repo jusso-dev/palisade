@@ -647,6 +647,9 @@ impl CompiledCriterion {
                 // must not let `not_member_of` match.
                 let mut result = Tri::NoMatch;
                 for member in members {
+                    if result == Tri::Match {
+                        break;
+                    }
                     result = result.or(match normalize_principal(member) {
                         Some(m) => Tri::from_bool(want.contains(&m)),
                         None => {
@@ -672,6 +675,9 @@ impl CompiledCriterion {
             (ContextFact::Names(account, upn), _) => {
                 let mut result = Tri::NoMatch;
                 for form in [account, upn] {
+                    if result == Tri::Match {
+                        break;
+                    }
                     result = result.or(match form {
                         Some(name) => self.eval_value(name, notes),
                         None => {

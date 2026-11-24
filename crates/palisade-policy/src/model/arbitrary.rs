@@ -57,6 +57,11 @@ fn object_type() -> impl Strategy<Value = ObjectType> {
     proptest::sample::select(ObjectType::ALL.to_vec())
 }
 
+/// SIDs in every accepted spelling: either case of `S`, a decimal
+/// authority with leading zeros or a 48-bit hex one of 2^32 or more, and
+/// sub-authorities of up to 10 digits with leading zeros.
+const SID: &str = "[sS]-1-(0{0,2}5|0[xX]0001[0-9a-fA-F]{8})(-0{0,2}[1-3]?[0-9]{1,9}){1,5}";
+
 fn value_for(class: FieldClass, operator: Operator) -> BoxedStrategy<String> {
     match (class, operator) {
         (FieldClass::Hash { hex_len }, _) => vec(
@@ -66,10 +71,10 @@ fn value_for(class: FieldClass, operator: Operator) -> BoxedStrategy<String> {
         .prop_map(|b| b.into_iter().map(char::from).collect())
         .boxed(),
         (FieldClass::Version, _) => "[0-9]{1,4}(\\.[0-9]{1,4}){0,3}".boxed(),
-        (FieldClass::Sid, _) => "S-1-5(-[0-9]{1,9}){1,5}".boxed(),
+        (FieldClass::Sid, _) => SID.boxed(),
         (FieldClass::PrincipalSet, _) => prop_oneof![
-            "S-1-5(-[0-9]{1,9}){1,5}",
-            "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+            SID,
+            "[0-9a-fA-F]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
         ]
         .boxed(),
         (FieldClass::TagSet, _) => "[a-z][a-z0-9:._-]{0,20}".boxed(),
