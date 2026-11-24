@@ -33,9 +33,10 @@ and the workspace `[lints]`, and takes every dependency from `[workspace.depende
 
 ## Unsafe code
 
-The workspace sets `unsafe_code = "forbid"`, so any `unsafe` fails to compile. When the first FFI
-module lands, ADR 0011 lowers the workspace level to `deny`, and only these locations may then
-relax the lint:
+The workspace sets `unsafe_code = "deny"` (ADR 0011 lowered it from `forbid` when the first FFI
+module, `palisade_fileid::win::trust`, landed), so any `unsafe` fails to compile unless the file
+relaxes the lint. Every crate root without an allowlisted module keeps `#![forbid(unsafe_code)]`.
+Only these locations may relax the lint:
 
 - `palisade_agent::ffi` and its submodules (`crates/palisade-agent/src/ffi.rs` or `ffi/`)
 - `palisade_tray::ffi` and its submodules

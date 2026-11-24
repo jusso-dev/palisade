@@ -303,10 +303,24 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   `SignatureReport::primary` is still #48's choice by cryptographic
   validity alone, and `TrustReport::primary` ignores time and revocation.
   Anything that decides whether to allow a file must use
-  `ValidityReport::primary` (below). The OS trust store is consulted only
-  through certificates the caller adds from it; reading the stores and the
-  OS trust-verification cross-check are the Windows backend's (`os-trust`,
-  #48). Catalog signing is `catalog` below.
+  `ValidityReport::primary` (below). The OS trust store is never consulted
+  for a decision; the `os-trust` cross-check below only compares. Catalog
+  signing is `catalog` below.
+- `authenticode::cross_check` and `win::trust` (the OS cross-check,
+  [#48](https://github.com/jusso-dev/palisade/issues/48)):
+  `win::trust::verify_file` (Windows, `os-trust` feature) asks the OS
+  trust-verification API about the primary signature and each secondary
+  (nested) signature of an open file, one call each, with no UI, no
+  revocation check and no network retrieval. `cross_check` (portable)
+  pairs each OS result with the signature the OS read and records whether
+  they agree. It is a diagnostic: it takes the report by reference and
+  never changes a verdict. An OS chain-trust failure (the test CA is
+  untrusted) counts as "signature intact", since the OS checks the digest
+  and signature first. This crate is stricter than the OS on
+  non-conformant images and MD5, which show up as `OsAcceptsRustRejects`;
+  `rust_accepts_os_rejects()` picks out the direction that could hide a
+  bug. `tests/os_trust.rs` runs the differential over every signature
+  fixture on the Windows CI runners.
 - `authenticode` timestamps, expiry, revocation and the error taxonomy
   ([#50](https://github.com/jusso-dev/palisade/issues/50)):
   - `verify_timestamps` parses and verifies every timestamp on a
@@ -687,6 +701,10 @@ or 0008 amendment, either a narrowed carve-out or verification behind a
 separate crate (#19). Because every `ring` call is in one module, swapping
 the provider is a one-module change.
 
+With the `os-trust` feature, on Windows only, `windows-sys` (the Windows API
+bindings, with only the API families `win` calls) is a direct dependency.
+`palisade-policy` never enables the feature, so its graph is unchanged.
+
 Dev-dependencies: `proptest` for the property tests, and `criterion` for the
 benchmarks.
 
@@ -696,8 +714,11 @@ Portable parsing, hashing, signature verification and file-system context
 logic on all platforms. OS-backed reads live in the `win` module, compiled
 only on Windows with the `os-trust` feature
 ([ADR 0003](../../docs/adr/0003-crate-boundaries-and-dependency-direction.md)).
-It holds the file-system context reads so far; the cross-check against the
-OS trust-verification API that #48 describes will live there too.
+It holds the file-system context reads and the OS trust-verification
+cross-check. It is the only part of the crate that may contain `unsafe` code
+(ADR 0011): each submodule that calls the Windows API (through `windows-sys`)
+is listed in `unsafe-allowlist.txt`, every `unsafe` block has a `// SAFETY:`
+comment, and each wrapper is tested on the Windows runners.
 
 ## Feature flags
 

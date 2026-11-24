@@ -3,7 +3,14 @@
 //! does not opt in ever builds it.
 //!
 //! - [`fsctx`]: file-system context reads (#54).
-
-#![forbid(unsafe_code)]
+//! - [`trust`]: the OS trust-verification cross-check (#48).
+//!
+//! This is the only part of the crate that may contain `unsafe` code (ADR
+//! 0011). Each submodule that calls the Windows API says
+//! `#![allow(unsafe_code)]` and is listed in `unsafe-allowlist.txt`; the
+//! others, and this file, keep the workspace's `deny`. Every `unsafe` block
+//! has a `// SAFETY:` comment, and each wrapper has tests that run on the
+//! Windows CI runners.
 
 pub mod fsctx;
+pub mod trust;
