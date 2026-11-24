@@ -168,10 +168,14 @@ Ratings are for confidentiality (C), integrity (I) and availability (A): H (high
 
 ## Actors and claims
 
+This table is what "users cannot disable or bypass" means for Palisade (ISM-0846): the claim
+column says which actors Palisade resists and under which conditions, and the last column says
+what Palisade does where it does not resist.
+
 | ID | Actor | Capabilities | Palisade's claim | Goal where not resisted |
 |---|---|---|---|---|
-| AC-01 | Standard user | Runs programs as themselves; writes to their profile and to user-writable folders; uses the tray and unprivileged CLI verbs. | **Resists fully with the driver present.** Cannot run code that policy blocks, or stop, reconfigure, uninstall or blind Palisade. **Driverless exception:** owner and other driver-only conditions only audit, so a path-plus-owner rule falls back to the broader native path allow; if ACL drift makes an allowed path user-writable, a standard user can run a payload from it (R-07, T-engine-11, AT-03.3). | |
-| AC-02 | Malware running as a standard user | As AC-01, plus automation, persistence in the user's profile, and injection into the user's own processes. | **Resists fully with the driver present**, as for AC-01, with the same driverless exception (R-07, T-engine-11, AT-03.3). Phishing a user for a single-use, device-bound unlock token is limited by token scope (T-tray-01). | |
+| AC-01 | Standard user | Runs programs as themselves; writes to their profile and to user-writable folders; uses the tray and unprivileged CLI verbs. | **Resists fully while the driver is enforcing.** Cannot run code that policy blocks, or stop, reconfigure, uninstall or blind Palisade. **Exception when driver-only conditions lapse:** without the driver, or while it is disconnected or its requests time out under the default `driver_failure_mode = fail_safe` (which a standard user can provoke by flooding the agent, T-driver-07), owner and other driver-only conditions only audit. A path-plus-owner rule then falls back to the broader native path allow, so if ACL drift makes an allowed path user-writable, a standard user can run a payload from it (R-07, T-engine-11, AT-03.3). `fail_secure` closes the timeout case ([ADR 0012](../adr/0012-fail-open-vs-fail-closed-defaults.md)). | |
+| AC-02 | Malware running as a standard user | As AC-01, plus automation, persistence in the user's profile, and injection into the user's own processes. | **Resists fully while the driver is enforcing**, as for AC-01, with the same exception when driver-only conditions lapse: no driver, or a disconnect or timeout under the default `fail_safe` (R-07, T-driver-07, T-engine-11, AT-03.3). Phishing a user for a single-use, device-bound unlock token is limited by token scope (T-tray-01). | |
 | AC-03 | Local administrator (legitimate) | Full control of the OS configuration; can load drivers, change services, debug processes and boot other media. | **Resists casual tampering without an unlock token**: stopping the service, uninstalling, editing configuration or deleting the cache (#220, #222). A signed native policy on a Secure Boot device resists removal (#85). **Does not resist a determined administrator**, who can disable the driver and then the agent ([ADR 0013](../adr/0013-protected-process-light-feasibility.md)). | Detect and alert: tamper events, heartbeat gaps at the server, binary-integrity failures. |
 | AC-04 | Malware with administrator or SYSTEM rights | As AC-03, automated and hostile; can read anything a SYSTEM process can. | **Does not claim to resist.** Listed as residual risk R-01. | Detect and alert. The native layer, especially a signed one, keeps enforcing until the attacker takes further steps. |
 | AC-05 | Kernel-level attacker, for example through a vulnerable signed driver (BYOVD) | Arbitrary kernel read and write; can remove callbacks and kill protected processes. | **Does not claim to resist.** The vulnerable driver blocklist (#87) and driver load control (#105) aim to stop the entry point. Residual risk R-02. | Detect and alert where any user-mode or server-side signal survives. |
@@ -194,8 +198,8 @@ Ratings are for confidentiality (C), integrity (I) and availability (A): H (high
 | TB-06 | Server / database | Queries and results | TLS, least-privilege roles, RLS ([ADR 0006](../adr/0006-server-database.md), #127) |
 | TB-07 | Server / signing keys | Digests to sign, signatures back; CSRs to the issuing CA | Signer back ends, key separation by purpose, audit (#224) |
 | TB-08 | Server / third-party integrations | Outbound events, tickets and lookups; inbound SSO, SCIM, callbacks and logs | Per-integration credentials, signed assertions and callbacks, SSRF guard (#204, #229) |
-| TB-09 | CI / release storage | Build outputs, signatures, SBOM, provenance and update metadata | Protected tags and environment, provenance, signing outside the build (#226) |
-| TB-10 | Release storage / agent | Update metadata and packages fetched by the agent | TUF-style metadata chain, pinned Authenticode publisher, length limits (#226) |
+| TB-09 | CI / release storage | Build outputs, signatures, SBOM, provenance and update metadata; root metadata signed offline and uploaded by maintainers | Protected tags and environment, provenance, signing outside the build, 2-of-3 threshold on root metadata (#226) |
+| TB-10 | Release storage / agent | Update metadata and packages fetched by the agent, directly or through mirrors and relays, which sit on the untrusted side of this boundary | TUF-style metadata chain, pinned Authenticode publisher, length limits (#226) |
 | TB-11 | Release job / code-signing key | Digests to sign, signatures back | Key in a hardware token or signing service, never a repository secret (#226) |
 | TB-12 | Maintainer workstation / source hosting | Pushes and pull requests | Two-factor authentication, pull-request-only `main`, required checks ([docs/repo-settings.md](../repo-settings.md)) |
 | TB-13 | Source hosting and package registry / CI runner | Source checkouts, crates, workflow triggers | Read-only job token, SHA-pinned actions, lockfile and `cargo deny` source checks ([docs/ci.md](../ci.md), #23) |
@@ -206,11 +210,13 @@ source hosting platform and the package registry.
 
 ## Data-flow diagrams
 
-In each diagram, subgraphs are trust zones and an arrow that leaves a subgraph crosses a trust
-boundary. Every arrow has a flow ID. A flow that stays inside one zone says "None (same zone)"
-in its Boundary column, and names the boundary that the zone's protection enforces, where there
-is one. The table under the diagram gives each flow's protocol,
-authentication, integrity protection, confidentiality protection and the boundary it crosses.
+In each data-flow diagram, every node sits in exactly one subgraph, every subgraph is one trust zone, and
+subgraphs are not nested. An arrow that leaves its subgraph crosses at least one trust boundary,
+and its row names each one: at level 0, which has no separate network zone, F-03 crosses both
+TB-04 and TB-05. Every arrow has a flow ID. A flow that stays inside one zone says "None (same
+zone)" in its Boundary column, and names the boundary that the zone's protection enforces, where
+there is one. The table under the diagram gives each flow's protocol, authentication, integrity
+protection, confidentiality protection and the boundary it crosses.
 
 ### Level 0: whole system
 
@@ -223,16 +229,22 @@ flowchart LR
     BROWSER["Browser: web console"]
     PAL["pal CLI, GitOps, CI gates"]
   end
-  subgraph SRV["Management server (level 1: server)"]
+  subgraph SRV["Server host (level 1: server)"]
     SERVER["Server: agent endpoints,<br/>REST API, ingest"]
+  end
+  subgraph DBZ["Database"]
     DB[("Postgres")]
+  end
+  subgraph KEYZ["Signing keys"]
     SIGNER["Signer and CAs"]
   end
   subgraph EXT["Operator's third parties"]
     INTEG["IdP, SIEM, ITSM,<br/>webhooks, reputation"]
   end
-  subgraph REL["Release pipeline (level 1: release)"]
+  subgraph REL["CI runners (level 1: release pipeline)"]
     CI["GitHub-hosted runners"]
+  end
+  subgraph RSTORE["Release storage"]
     STORE["Release storage and<br/>update metadata"]
   end
   BROWSER -->|"F-01 HTTPS"| SERVER
@@ -269,12 +281,10 @@ flowchart TB
   subgraph SYS["SYSTEM services"]
     AGENT["PalisadeAgent"]
     HEALTH["PalisadeHealth"]
-    subgraph STORE["Protected data directory (SYSTEM only)"]
-      CACHE[("Policy cache<br/>active, previous, pending")]
-      STATE[("Anti-rollback record, hash cache,<br/>time state, trust set")]
-      EVBUF[("Event buffer<br/>hash-chained")]
-      STAGE[("Update staging")]
-    end
+    CACHE[("Protected data directory:<br/>policy cache<br/>active, previous, pending")]
+    STATE[("Protected data directory:<br/>anti-rollback record, hash cache,<br/>time state, trust set")]
+    EVBUF[("Protected data directory:<br/>event buffer, hash-chained")]
+    STAGE[("Protected data directory:<br/>update staging")]
     MSI["Windows Installer service"]
   end
   subgraph KERN["Kernel mode"]
@@ -282,7 +292,9 @@ flowchart TB
     CI["OS code integrity enforcement<br/>(native policy)"]
     ETW["OS event providers<br/>(ETW, code integrity log)"]
   end
-  NET(("Network: server, relay, mirror"))
+  subgraph NETZ["Network"]
+    NET(("Server, relay, mirror"))
+  end
   UPROC -->|"E-01 process create, image load"| CI
   UPROC -->|"E-01 process create, image load"| DRV
   DRV <-->|"E-02 filter communication port"| AGENT
@@ -385,15 +397,21 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  subgraph DEV["Maintainer"]
+  subgraph DEV["Maintainer workstation"]
     M["Maintainer workstation"]
-    TOK["Code-signing key<br/>(hardware token or signing service)"]
-    TUFROOT["TUF root keys<br/>(offline, 2 of 3)"]
+  end
+  subgraph SIGNZ["Code-signing key"]
+    TOK["Hardware token or<br/>signing service"]
+  end
+  subgraph ROOTZ["Offline TUF root keys"]
+    TUFROOT["2 of 3 keys,<br/>held separately"]
   end
   subgraph GH["Source hosting"]
     REPO["Repository: main ruleset,<br/>protected tags"]
   end
-  REG[("crates.io")]
+  subgraph REGZ["Package registry"]
+    REG[("crates.io")]
+  end
   subgraph RUN["GitHub-hosted runner (ephemeral)"]
     PR["PR CI: read-only token"]
     RELJOB["Release job:<br/>protected environment"]
@@ -402,8 +420,12 @@ flowchart LR
     ART["Signed artefacts, SBOM,<br/>provenance"]
     META["TUF metadata: targets,<br/>snapshot, timestamp"]
   end
-  MIR["Mirrors and relays<br/>(untrusted caches)"]
-  UPD["Agent update client"]
+  subgraph MIRZ["Mirrors and relays (untrusted)"]
+    MIR["Untrusted caches"]
+  end
+  subgraph EPZ["Endpoint"]
+    UPD["Agent update client"]
+  end
   M -->|"P-01 git over HTTPS or SSH"| REPO
   REPO -->|"P-02 checkout"| PR
   REG -->|"P-03 HTTPS"| PR
@@ -502,7 +524,7 @@ LocalSystem service: event collection, inventory, policy cache, native policy de
 
 | ID | STRIDE | Threat | Preconditions | Impact | Likelihood | Mitigation issue | Status | Residual risk |
 |---|---|---|---|---|---|---|---|---|
-| T-agent-01 | S | A rogue server (DNS hijack, on-path attacker, inspecting proxy) answers check-ins and pushes policy or commands. | Network position between agent and server | H | L | #223, #225 | planned | A compromised real server is a different actor (T-signer-01, R-08). |
+| T-agent-01 | S | A rogue server (DNS hijack, on-path attacker, inspecting proxy) answers check-ins and pushes policy or commands. | Network position between agent and server | H | L | #223, #225 | planned | A compromised real server is a different actor (T-signer-01). |
 | T-agent-02 | S | A process that is not the tray or the signed CLI calls a privileged IPC verb. | Code execution in a user session | H | M | #220 | planned | A SYSTEM attacker can inject into a signed caller (R-01). |
 | T-agent-03 | S | The verified caller exits and its PID is reused by an attacker process between verification and the request. | Code execution in a user session | M | L | #220 | planned | None known. |
 | T-agent-04 | T | Agent binaries or DLLs in the install directory are replaced, or a DLL is planted beside them. | Local admin | H | M | #220 | planned | Without the driver an admin can still replace files; detection and restore follow (R-01). |
@@ -883,11 +905,10 @@ ATT&CK: T1036, T1564.004. Epics #2 and #3.
 Epics #3 and #8. The two branches are independent attacks on different objects.
 
 - **OR**: get content run or enforced that differs from what was checked
-  - AT-05.1 **AND**: executable image race. Blocking either step defeats it.
-    - AT-05.1a the decision is made on content read at one moment, not on what is mapped → decide on the file object that backs the image section, at section creation (#110, #111); T-driver-09; BYP-toctou-01
-    - AT-05.1b **OR**: the content changes after it was checked
-      - write between hash and map, pausing the agent's read with an opportunistic lock → deny-write share mode while hashing; hash cache keyed by volume ID, file ID and USN change stamp and invalidated on write (#46, #60); T-driver-09; BYP-toctou-01
-      - a stale hash-cache entry is reused after an in-place write → change-stamp binding and an HMAC per record (#46, [ADR 0007](../adr/0007-agent-local-store.md)); T-cache-06; BYP-fs-11
+  - AT-05.1 **OR**: executable image race: the code that is mapped is not the code that was checked. Each child is an independent path, so all three mitigations are needed.
+    - AT-05.1a the file is swapped or rewritten after the agent's hashing handle closes and before the image section is created, so the decision is about content that is no longer there → decide on the file object that backs the image section, at section creation, not on a path re-opened later (#110, #111); T-driver-09; BYP-toctou-01
+    - AT-05.1b the file is written while it is being hashed, pausing the agent's read with an opportunistic lock → concurrent-modification check: size, last-write time and USN change stamp are compared before and after the read, and a change means retry, then `Unstable` instead of a hash (#46); T-driver-09; BYP-toctou-01
+    - AT-05.1c a stale hash-cache entry is reused after an in-place write → hash cache keyed by volume ID, file ID and USN change stamp, invalidated on write, with an HMAC per record (#46, #60, [ADR 0007](../adr/0007-agent-local-store.md)); T-cache-06; BYP-fs-11
   - AT-05.2 policy bundle race: the bundle changes between verification and parsing → verify-then-parse on a private copy (#61, [ADR 0007](../adr/0007-agent-local-store.md)); T-cache-04; BYP-toctou-02
 
 ### AT-06 Policy tampering on the endpoint
@@ -1088,7 +1109,7 @@ One row per threat, in the same order as the STRIDE tables. `N/A` rows are omitt
 | T-driver-06 | Bounded, allocation-checked handling in the `no_std` driver; boot-loop detection disables the driver after repeated failed boots (#113); driver verifier runs in the VM harness; port and path handling are fuzzed. | #110, #113, #230 | FUZZ-path-normalise, BYP-drv-02 |
 | T-driver-07 | A kernel-side cache holds only file identity (hashes and signer, keyed by volume ID, file ID and change stamp), never a verdict, so every rule is evaluated for every request against the current policy and context; the identity cache does not depend on policy, so policy changes need no invalidation. Bounded request queue, per-process rate limits, `fail_secure` option; every timeout is an event. | #113, #42, #65 | BYP-drv-03 |
 | T-driver-08 | Small message surface, `// SAFETY:` comment on every unsafe block, driver depends only on `palisade-core` (ADR 0003), fuzzing of message decoders, driver verifier in the harness. | #110, #230 | FUZZ-driver-port |
-| T-driver-09 | Decide on the file object that backs the image section, at section creation, not on a path re-opened later; deny-write share mode while hashing; hash cache keyed by volume ID, file ID and USN change stamp and invalidated on write. | #110, #111, #46, #60 | BYP-toctou-01 |
+| T-driver-09 | Decide on the file object that backs the image section, at section creation, not on a path re-opened later; hashing compares size, last-write time and USN change stamp before and after the read and returns `Unstable` on a change; hash cache keyed by volume ID, file ID and USN change stamp and invalidated on write. | #110, #111, #46, #60 | BYP-toctou-01 |
 | T-driver-10 | Vulnerable driver blocklist in the mandatory-deny tier, driver load control and inventory, hypervisor-enforced code integrity recommended, heartbeat loss alerting at the server. | #87, #105 | BYP-drv-04, RT-drv-03 |
 | T-native-01 | Signed base policies only accept supplemental policies signed by the Palisade policy key; the agent inventories active policies and raises a tamper event for unknown ones. | #83, #85 | BYP-policy-04 |
 | T-native-02 | Recommend signed policies with Secure Boot; the agent re-deploys a removed or older native policy and raises `tamper.detected`, comparing the deployed version with the expected one; the application identity service's configuration is watched. | #85, #220 | BYP-tamper-09, BYP-policy-06, RT-native-01 |
@@ -1264,12 +1285,12 @@ least one reviewer other than the author. The review is recorded in the [Changel
 
 | ID | Risk | Threats and trees | Why it is accepted | Detect and alert | Owner |
 |---|---|---|---|---|---|
-| R-01 | An attacker with SYSTEM rights, or an administrator with debug privilege, can ultimately disable, inject into or read any user-mode agent, including its keys and decrypted state. | T-agent-06, T-agent-10, T-cache-09, AT-09 | No user-mode code can defend against its own host's highest privilege. | Heartbeat gap and missing check-ins at the server; tamper events sent before the attack completes. | #220 |
+| R-01 | An attacker with SYSTEM rights, or an administrator with debug privilege, can ultimately disable, inject into or read any user-mode agent, including its keys and decrypted state. | T-agent-02, T-agent-04, T-agent-06, T-agent-10, T-agent-17, T-cache-06, T-cache-09, T-driver-01, T-events-02, T-events-05, T-health-01, T-health-06, AT-09 | No user-mode code can defend against its own host's highest privilege. | Heartbeat gap and missing check-ins at the server; tamper events sent before the attack completes. | #220 |
 | R-02 | A kernel-level attacker (BYOVD or any kernel exploit) can remove the driver's callbacks and kill the agent. | T-driver-03, T-driver-10, AT-12 | Kernel code is fully trusted by the OS. | Vulnerable driver blocklist stops known entry points; heartbeat loss; hypervisor-enforced code integrity is recommended. | #87, #105 |
 | R-03 | Unsigned OS-native policies can be removed by any local administrator. Only signed policies with Secure Boot resist an administrator. | T-native-01, T-native-02, AT-06.7 | The OS defines this behaviour. Signing needs a key the operator manages. | The agent re-deploys and alerts; the console shows devices without signed policy. | #85 |
 | R-04 | Per-user rules in the legacy rule-collection format depend on a service an administrator can stop ([ADR 0002](../adr/0002-enforcement-strategy.md)). | T-native-02 | It is the only native format with per-user rules. | The agent watches the service and alerts. | #86, #220 |
-| R-05 | With physical access and no disk encryption, the disk can be edited offline (binaries, cache, driver start type). | T-agent-16, AT-10.5, AT-11.2 | Palisade cannot protect an unencrypted disk at rest. | Integrity checks at the next start; disk encryption state reported (#210). | #220 |
-| R-06 | Without protected process light (#221), SYSTEM can terminate the service; without the driver, an administrator can too. | T-agent-10, AT-09 | Protected process light needs a signing route that may not be open to this project ([ADR 0013](../adr/0013-protected-process-light-feasibility.md)). | As R-01. The native layer keeps enforcing. | #221 |
+| R-05 | With physical access and no disk encryption, the disk can be edited offline (binaries, cache, driver start type). | T-agent-16, T-cache-09, T-driver-02, AT-10.5, AT-11.2 | Palisade cannot protect an unencrypted disk at rest. | Integrity checks at the next start; disk encryption state reported (#210). | #220 |
+| R-06 | Without protected process light (#221), SYSTEM can terminate the service; without the driver, an administrator can too. | T-agent-06, T-agent-10, AT-09 | Protected process light needs a signing route that may not be open to this project ([ADR 0013](../adr/0013-protected-process-light-feasibility.md)). | As R-01. The native layer keeps enforcing. | #221 |
 | R-07 | Driver-only conditions (user, parent process, command line, owner) are not enforced until the driver ships, or while it is absent or disconnected under the default `fail_safe`. | T-driver-07, T-driver-09, T-engine-11, T-engine-13, AT-03.3, ADR 0012 weak point 3 | Boot safety and early rollout ([ADR 0002](../adr/0002-enforcement-strategy.md), [ADR 0012](../adr/0012-fail-open-vs-fail-closed-defaults.md)). | Each affected rule is reported as "not enforced"; `fail_secure` is available. | #8, #113 |
 | R-08 | A compromised server, a malicious administrator with wide scope, or a database-level attacker can get a permissive policy signed and pushed, unless dual control is on. | T-console-09, T-db-03, T-signer-01, AT-16 | The server must be able to sign policy to do its job. | Four-eyes approval, signing audit, agents report bundle kid and hash, staged rollout. | #142, #229 |
 | R-09 | Two bounded weak points in policy handling: the first-install audit window before any bundle arrives, and the one-step N-1 fallback when the active bundle is corrupt. | T-cache-03, T-cache-05, AT-06.5, AT-07.3 | Availability: deployment and disk corruption must not lock machines ([ADR 0012](../adr/0012-fail-open-vs-fail-closed-defaults.md)). | Built-in blocklists during the first-install window; `policy.lkg_loaded` critical event and rapid check-in. | #225 |
