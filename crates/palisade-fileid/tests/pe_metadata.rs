@@ -1210,7 +1210,7 @@ fn the_first_text_setting_wins_however_it_is_written() {
     .unwrap();
     assert_eq!(m.auto_elevate, None);
     let m = parse_manifest(settings("<dpiAware/><dpiAware>true</dpiAware>").as_bytes()).unwrap();
-    assert_eq!(m.dpi_aware, None);
+    assert_eq!(m.dpi_aware.as_deref(), Some(""));
     let m = parse_manifest(settings("<dpiAware></dpiAware><dpiAware>true</dpiAware>").as_bytes())
         .unwrap();
     assert_eq!(m.dpi_aware.as_deref(), Some(""));
@@ -1852,4 +1852,56 @@ fn xml_1_1_and_a_second_byte_order_mark_are_rejected() {
     let mut two = b"\xef\xbb\xbf\xef\xbb\xbf".to_vec();
     two.extend_from_slice(b"<assembly/>");
     assert!(parse_manifest(&two).is_err());
+}
+
+#[test]
+fn a_prefix_parse_skips_imports_exports_and_the_driver_verdict() {
+    // A native driver importing ntoskrnl.exe, with its import table in the
+    // last section, so every cut before the end of the file splits or
+    // drops it.
+    let imports: Vec<Import<'_>> = vec![("ntoskrnl.exe", vec![Ok("IoCreateDevice")])];
+    let image = with_directory(native(PeBuilder::default()), DIR_IMPORT, |rva| {
+        import_section(rva, &imports, true)
+    });
+    let full = parse(&image);
+    assert!(full.is_kernel_driver());
+    let headers_end = full.sections.last().unwrap().header_offset as usize + 40;
+    for cut in headers_end..image.len() {
+        let info = pe::parse_prefix(&image[..cut], image.len() as u64).unwrap();
+        assert!(
+            info.imports.is_none() && info.exports.is_none(),
+            "cut {cut:#x}"
+        );
+        assert!(info.manifest.is_none() && info.manifest_id.is_none());
+        assert_eq!(info.driver, pe::DriverClass::default(), "cut {cut:#x}");
+        assert!(
+            info.parse_warnings.is_empty(),
+            "cut {cut:#x}: {:?}",
+            info.parse_warnings
+        );
+    }
+    // The whole file as the prefix reads them, as a full parse does.
+    let info = pe::parse_prefix(&image, image.len() as u64).unwrap();
+    assert_eq!(info.imports, full.imports);
+    assert_eq!(info.driver, full.driver);
+
+    // Exports too.
+    let image = with_directory(PeBuilder::dll(), DIR_EXPORT, |rva| {
+        export_section(rva, "x.dll", &["DllRegisterServer"], &[])
+    });
+    let info = pe::parse_prefix(&image[..image.len() - 1], image.len() as u64).unwrap();
+    assert!(info.exports.is_none());
+    assert!(info.parse_warnings.is_empty(), "{:?}", info.parse_warnings);
+}
+
+#[test]
+fn an_empty_setting_is_empty_however_it_is_written() {
+    for xml in [
+        settings("<dpiAware/><dpiAwareness/>"),
+        settings("<dpiAware></dpiAware><dpiAwareness></dpiAwareness>"),
+    ] {
+        let m = parse_manifest(xml.as_bytes()).unwrap();
+        assert_eq!(m.dpi_aware.as_deref(), Some(""), "{xml}");
+        assert_eq!(m.dpi_awareness.as_deref(), Some(""), "{xml}");
+    }
 }

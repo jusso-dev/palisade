@@ -646,7 +646,8 @@ pub(super) fn parse_exports(
     let known_names = ordinal_table
         .map_or(0, |(_, n)| n / 2)
         .min(info.number_of_names);
-    if let Some((offset, _)) = ordinal_table {
+    // Only needed when the unnamed slots are listed at all.
+    if let Some((offset, _)) = ordinal_table.filter(|_| known_names == info.number_of_names) {
         for i in 0..known_names {
             let index = to_usize(i)
                 .and_then(|i| offset.checked_add(i.checked_mul(2)?))

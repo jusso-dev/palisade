@@ -134,8 +134,9 @@ pub struct ResourceSummary {
     pub manifest_entries: Vec<ResourceData>,
     /// The standard manifests (`RT_MANIFEST` IDs 1, 2 and 3) found by
     /// loader-style lookup, in ID order, with the language chosen as for
-    /// [`version_resource`](Self::version_resource). Parsing them is
-    /// deferred.
+    /// [`version_resource`](Self::version_resource). The first is parsed
+    /// into [`super::PeInfo::manifest`], and its ID is
+    /// [`super::PeInfo::manifest_id`].
     pub standard_manifests: Vec<ResourceData>,
     /// An `RT_ICON` or `RT_GROUP_ICON` resource exists.
     pub has_icons: bool,

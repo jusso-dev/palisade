@@ -811,8 +811,10 @@ pub fn parse_with(data: &[u8], options: &ParseOptions) -> Result<PeInfo, PeError
 /// [`PeErrorKind::PrefixTooShort`].
 ///
 /// When `prefix` is shorter than the file, the debug directory, the
-/// resource tree and the version info are **not** parsed (they are left
-/// empty, with no warning), because they can lie anywhere in the file.
+/// resource tree, the version info, the manifest, and the import and export
+/// tables are **not** parsed (they are left empty, with no warning),
+/// because they can lie anywhere in the file. The driver verdict needs the
+/// imports, so it is left at its default ([`DriverClass::default`]) too.
 /// Neither the checksum nor section entropy is computed
 /// ([`ParseOptions::metadata_only`]). When `prefix` holds the whole file
 /// the result is that of [`parse_with`] with
@@ -850,8 +852,9 @@ pub fn parse_prefix(prefix: &[u8], file_len: u64) -> Result<PeInfo, PeError> {
 
 /// [`parse_with`] over `data`, the first bytes of a file of `file_len`
 /// bytes. Reads stay inside `data`; length checks use `file_len`. The debug
-/// directory and resources are parsed only when `directories` is set, which
-/// must be only when `data` is the whole file.
+/// directory, resources (with the version info and manifest), imports,
+/// exports and the driver verdict are worked out only when `directories` is
+/// set, which must be only when `data` is the whole file.
 fn parse_impl(
     data: &[u8],
     file_len: u64,
@@ -1027,18 +1030,24 @@ fn parse_impl(
         data_directories
             .get(kind.index())
             .copied()
-            .filter(DataDirectory::is_present)
+            .filter(|d| directories && d.is_present())
     };
     let imports = directory(DataDirectoryKind::Import)
         .and_then(|d| imports::parse_imports(data, layout, d, optional.format, &mut warnings));
     let exports = directory(DataDirectoryKind::Export)
         .and_then(|d| imports::parse_exports(data, layout, d, &mut warnings));
-    let driver = driver::classify(
-        optional.subsystem,
-        coff.characteristics,
-        &sections,
-        imports.as_ref(),
-    );
+    // Without the import table the verdict would be a guess, so a prefix
+    // parse leaves it at its default rather than report a partial one.
+    let driver = if directories {
+        driver::classify(
+            optional.subsystem,
+            coff.characteristics,
+            &sections,
+            imports.as_ref(),
+        )
+    } else {
+        DriverClass::default()
+    };
 
     Ok(PeInfo {
         file_size: file_len,

@@ -115,8 +115,11 @@ pub struct Manifest {
     /// The `autoElevate` setting.
     pub auto_elevate: Option<bool>,
     /// The `dpiAware` setting, as written (`true`, `per monitor`, ...).
+    /// Empty when the element is empty, written `<dpiAware/>` or
+    /// `<dpiAware></dpiAware>`; `None` when there is none.
     pub dpi_aware: Option<String>,
-    /// The `dpiAwareness` setting, as written.
+    /// The `dpiAwareness` setting, as written, empty or `None` as for
+    /// [`Self::dpi_aware`].
     pub dpi_awareness: Option<String>,
     /// The manifest's own `assemblyIdentity` (a direct child of the root
     /// `assembly`), never a dependency's.
@@ -611,8 +614,14 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
                         b"dpiAwareness" => Some(TextField::DpiAwareness),
                         _ => None,
                     };
+                    // `<x/>` is the same as `<x></x>`: an empty value.
                     if let Some(f) = field.filter(|f| !seen_text.contains(f)) {
                         seen_text.push(f);
+                        match f {
+                            TextField::AutoElevate => out.auto_elevate = None,
+                            TextField::DpiAware => out.dpi_aware = Some(String::new()),
+                            TextField::DpiAwareness => out.dpi_awareness = Some(String::new()),
+                        }
                     }
                     path.0.pop();
                 }
