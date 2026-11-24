@@ -44,10 +44,17 @@ pub struct StreamEntry {
 }
 
 impl StreamEntry {
-    /// Whether this is the file's default (unnamed) data stream.
+    /// Whether this is a data stream (`$DATA`, compared without regard to
+    /// ASCII case, as the OS compares stream types).
+    #[must_use]
+    pub fn is_data(&self) -> bool {
+        self.kind.eq_ignore_ascii_case("$DATA")
+    }
+
+    /// Whether this is the file's default data stream: unnamed and `$DATA`.
     #[must_use]
     pub fn is_default(&self) -> bool {
-        self.name.is_empty()
+        self.name.is_empty() && self.is_data()
     }
 }
 
@@ -61,9 +68,12 @@ pub struct StreamList {
 }
 
 impl StreamList {
-    /// The named data streams: every stream except the default one.
+    /// The named data streams (alternate data streams): every named
+    /// `$DATA` stream. Unnamed and non-data streams are left out.
     pub fn alternate(&self) -> impl Iterator<Item = &StreamEntry> {
-        self.streams.iter().filter(|s| !s.is_default())
+        self.streams
+            .iter()
+            .filter(|s| !s.name.is_empty() && s.is_data())
     }
 }
 
@@ -302,6 +312,31 @@ mod tests {
             ["Zone.Identifier"]
         );
         assert!(!list.truncated);
+        // Unnamed or non-data streams are neither default nor alternate.
+        let mut odd = stream_record(0, "::$INDEX_ALLOCATION", 0);
+        while odd.len() % 8 != 0 {
+            odd.push(0);
+        }
+        let next = u32::try_from(odd.len()).unwrap();
+        odd[..4].copy_from_slice(&next.to_le_bytes());
+        let mut tail = stream_record(0, ":$EFS:$LOGGED_UTILITY_STREAM", 0);
+        while tail.len() % 8 != 0 {
+            tail.push(0);
+        }
+        let next2 = u32::try_from(tail.len()).unwrap();
+        tail[..4].copy_from_slice(&next2.to_le_bytes());
+        odd.extend(tail);
+        odd.extend(stream_record(0, ":lower:$data", 1));
+        let list = parse_stream_info(&odd).unwrap();
+        assert_eq!(list.streams.len(), 3);
+        assert!(!list.streams[0].is_default());
+        assert_eq!(
+            list.alternate()
+                .map(|s| s.name.as_str())
+                .collect::<Vec<_>>(),
+            ["lower"],
+            "a lower-case `$data` type is still data"
+        );
     }
 
     #[test]

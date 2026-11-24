@@ -588,3 +588,52 @@ fn digests_match_the_os_hash_tool() {
         }
     }
 }
+
+/// A named stream shares its host file's ID, USN and times, so it must
+/// never share the host's cache key: a same-sized `host.exe:payload` must
+/// not be answered with `host.exe`'s cached digest.
+#[test]
+fn a_named_stream_never_shares_its_host_files_key() {
+    let dir = scratch("adskey");
+    let host = dir.join("host.exe");
+    std::fs::write(&host, b"benign!!").unwrap();
+    let ads = format!("{}:payload", host.display());
+    std::fs::write(&ads, b"MALWARE!").unwrap();
+
+    let host_key = WinStamps.stamp(&open_for_hashing(&host).unwrap()).unwrap();
+    let ads_file = open_for_hashing(Path::new(&ads)).unwrap();
+    let facts = FileFacts::read(&ads_file).unwrap();
+    assert!(facts.named_stream);
+    assert!(facts.usn.is_none());
+    let ads_key = WinStamps.stamp(&ads_file).unwrap();
+    assert!(matches!(host_key, FileKey::Strong { .. }));
+    let FileKey::Weak { path, .. } = &ads_key else {
+        panic!("a named stream must get a weak key: {ads_key:?}")
+    };
+    assert!(path.ends_with(":PAYLOAD"), "{path}");
+    assert_ne!(host_key, ads_key);
+
+    // Through the cache: the host is cached, then the stream is looked up.
+    let cache = Mutex::new(HashCache::default());
+    let loc = FileLocation::default();
+    let run = |p: &str| {
+        let Through::Done { value, source, .. } =
+            hash_through(&cache, &WinStamps, p, HashVerifyMode::Cached, &loc, compute).unwrap()
+        else {
+            panic!("unstable")
+        };
+        (value.flat.unwrap().hashes, source)
+    };
+    let (h, _) = run(host.to_str().unwrap());
+    assert_eq!(h, hash_bytes(b"benign!!", AlgorithmSet::DEFAULT));
+    let (a, source) = run(&ads);
+    assert_eq!(
+        source,
+        ValueSource::Computed,
+        "never served from the host's entry"
+    );
+    assert_eq!(a, hash_bytes(b"MALWARE!", AlgorithmSet::DEFAULT));
+    // And the host's entry is still there.
+    let (_, source) = run(host.to_str().unwrap());
+    assert_eq!(source, ValueSource::Cache);
+}

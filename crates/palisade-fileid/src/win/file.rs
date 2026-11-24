@@ -135,6 +135,10 @@ pub struct FileFacts {
     pub volume_serial_32: Option<u32>,
     /// The volume's `FILE_*` capability flags.
     pub volume_flags: Option<u32>,
+    /// The handle is a **named stream** (`file.txt:name`), not a file's
+    /// default stream. Its file ID, USN and timestamps are the host file's,
+    /// so it never gets a strong key (see [`WinStamps::key_from`]).
+    pub named_stream: bool,
 }
 
 impl FileFacts {
@@ -164,7 +168,15 @@ impl FileFacts {
             && volume
                 .as_ref()
                 .is_some_and(|v| v.flags & FILE_SUPPORTS_USN_JOURNAL != 0);
-        let usn = if journal { read_usn(file) } else { None };
+        // The final path of a named-stream handle ends in `:name`. If it
+        // cannot be read, assume a named stream: that only weakens the key.
+        let named_stream =
+            sys::final_path_by_handle(file, VOLUME_NAME_GUID).map_or(true, |p| is_stream_path(&p));
+        let usn = if journal && !named_stream {
+            read_usn(file)
+        } else {
+            None
+        };
         Ok(Self {
             file_id,
             usn,
@@ -181,6 +193,7 @@ impl FileFacts {
             fs_type,
             volume_serial_32: volume.as_ref().map(|v| v.serial),
             volume_flags: volume.as_ref().map(|v| v.flags),
+            named_stream,
         })
     }
 
@@ -190,6 +203,15 @@ impl FileFacts {
     pub const fn is_placeholder(&self) -> bool {
         is_placeholder(self.attributes)
     }
+}
+
+/// Whether a final path (`\\?\Volume{…}\dir\file.txt:name`) names a
+/// named stream: a `:` in its last component.
+fn is_stream_path(final_path: &str) -> bool {
+    final_path
+        .rsplit('\\')
+        .next()
+        .is_some_and(|last| last.contains(':'))
 }
 
 const fn is_placeholder(attributes: u32) -> bool {
@@ -247,12 +269,18 @@ pub struct WinStamps;
 impl WinStamps {
     /// The key of the opened `file` from `facts`: strong when the file is
     /// local, its volume keeps an active change journal and reports 128-bit
-    /// file IDs; otherwise weak, keyed by the normalised final path of the
-    /// handle (the drive-letter form, or the volume GUID form for a volume
-    /// mounted without a drive letter).
+    /// file IDs, and the handle is a file's default stream; otherwise weak,
+    /// keyed by the normalised final path of the handle (the drive-letter
+    /// form, or the volume GUID form for a volume mounted without a drive
+    /// letter).
+    ///
+    /// A named stream shares its host file's ID, USN and timestamps, so a
+    /// strong key could not tell `file.exe` from a same-sized
+    /// `file.exe:payload`. Its weak key holds the stream name, so the two
+    /// never share a cache entry.
     pub fn key_from(file: &File, facts: &FileFacts) -> io::Result<FileKey> {
-        if let (Some((volume_serial, file_id)), Some((usn_journal_id, usn)), false) =
-            (facts.file_id, facts.usn, facts.remote)
+        if let (Some((volume_serial, file_id)), Some((usn_journal_id, usn)), false, false) =
+            (facts.file_id, facts.usn, facts.remote, facts.named_stream)
         {
             return Ok(FileKey::Strong {
                 volume_serial,
@@ -441,7 +469,7 @@ fn hash_mapped(file: &File, size: u64, options: &HashOptions) -> Result<FlatHash
     if size == 0 {
         return Ok(hasher.finalize());
     }
-    let mapping = match sys::Mapping::new(file) {
+    let mapping = match sys::Mapping::new(file, size) {
         Ok(m) => m,
         Err(e) => {
             let now = sys::standard_info(file)?.end_of_file;
@@ -465,11 +493,12 @@ fn hash_mapped(file: &File, size: u64, options: &HashOptions) -> Result<FlatHash
             .map_err(|_| invalid_input("window too large"))?;
         let view = match mapping.view(offset, len) {
             Ok(v) => v,
-            // A view past the end means the file shrank after its size was
-            // read (a mapped file itself cannot be truncated).
+            // The section is `size` bytes and holds the file at least that
+            // long, so a failed view inside it is an I/O error, unless the
+            // size has changed in a way the OS reports this way.
             Err(e) => {
                 let now = sys::standard_info(file)?.end_of_file;
-                if now < size {
+                if now != size {
                     return Err(HashError::SizeChanged {
                         expected: size,
                         actual: now,
@@ -565,16 +594,34 @@ pub fn hash_streams(path: &Path, options: &HashOptions) -> Result<StreamHashes, 
         return Ok(out);
     }
     let file_id = sys::file_id_info(&file)?;
+    if file_id.FileId.Identifier == [0; 16] {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "the file system reports no file ID, so streams cannot be bound to the file",
+        )
+        .into());
+    }
     // The literal final path of the opened file, in the drive or volume GUID
     // form, so appending a stream name cannot be changed by normalisation.
     let final_path = sys::final_path_by_handle(&file, VOLUME_NAME_DOS)
         .or_else(|_| sys::final_path_by_handle(&file, VOLUME_NAME_GUID))?;
-    for stream in list.alternate().filter(|s| s.kind == "$DATA") {
+    for stream in list.alternate() {
         let identity = format!("{base}:{}", stream.name);
         let stream_path = format!("{final_path}:{}:$DATA", stream.name);
         let handle = match open_for_hashing(Path::new(&stream_path)) {
             Ok(h) => h,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+            // Skipped only if the stream really is gone from this file: the
+            // path may instead have been moved or swapped for another file.
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                let still = list_streams(&file)?;
+                if still.alternate().any(|s| s.name == stream.name) {
+                    return Err(io::Error::other(
+                        "the file moved or changed while its streams were hashed",
+                    )
+                    .into());
+                }
+                continue;
+            }
             Err(e) => return Err(e.into()),
         };
         let same = sys::file_id_info(&handle)?;

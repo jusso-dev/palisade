@@ -437,19 +437,27 @@ pub(crate) struct Mapping {
 unsafe impl Send for Mapping {}
 
 impl Mapping {
-    /// Maps `file`, which must be open for reading and not empty.
-    pub(crate) fn new(file: &File) -> io::Result<Self> {
+    /// Maps the first `size` bytes of `file`, which must be open for
+    /// reading, and at least that long. The section is exactly `size` bytes,
+    /// so the file cannot be truncated below it while the mapping exists,
+    /// and the OS refuses to create it if the file is already shorter.
+    pub(crate) fn new(file: &File, size: u64) -> io::Result<Self> {
+        if size == 0 {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "empty mapping"));
+        }
+        let high = u32::try_from(size >> 32).unwrap_or(u32::MAX);
+        let low = u32::try_from(size & 0xFFFF_FFFF).unwrap_or(0);
         // SAFETY: `handle(file)` is an open handle borrowed for the call. A
         // null security descriptor and a null name create an unnamed
-        // mapping with default security; size 0 maps the whole file.
-        // `PAGE_READONLY` matches a handle opened for reading.
+        // mapping with default security, `size` bytes long. `PAGE_READONLY`
+        // matches a handle opened for reading.
         let h = unsafe {
             CreateFileMappingW(
                 handle(file),
                 std::ptr::null(),
                 PAGE_READONLY,
-                0,
-                0,
+                high,
+                low,
                 std::ptr::null(),
             )
         };
@@ -600,7 +608,12 @@ mod tests {
         let (dir, file) = temp_file("map", &content);
         let g = allocation_granularity();
         assert!(g.is_power_of_two());
-        let map = Mapping::new(&file).unwrap();
+        let map = Mapping::new(&file, 200_000).unwrap();
+        assert!(Mapping::new(&file, 0).is_err());
+        assert!(
+            Mapping::new(&file, 400_000).is_err(),
+            "longer than the file"
+        );
         let first = map.view(0, 1000).unwrap();
         let mut buf = vec![0_u8; 1000];
         first.copy_to(0, &mut buf).unwrap();
