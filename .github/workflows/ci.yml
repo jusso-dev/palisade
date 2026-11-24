@@ -118,7 +118,29 @@ jobs:
           tool: cargo-deny@0.22.0
       - run: cargo xtask check-deps
       - run: cargo xtask check-manifests
+      - run: cargo xtask check-unsafe
       - run: cargo deny --locked check
+
+  # Every feature of the portable crates builds on its own, so no feature
+  # silently depends on another being on (docs/workspace.md#feature-flags).
+  feature-powerset:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: cargo-hack@0.6.46
+      - run: >-
+          cargo hack check --each-feature --all-targets --locked
+          -p palisade-core -p palisade-fileid -p palisade-policy
+          -p palisade-proto -p palisade-server -p palisade-cli
 
   runner-guard:
     runs-on: ubuntu-latest
@@ -159,7 +181,7 @@ jobs:
   # The single required check from this workflow for branch protection.
   ci-ok:
     if: always()
-    needs: [fmt, clippy, test, msrv, docs, deps, runner-guard, workflow-lint]
+    needs: [fmt, clippy, test, msrv, docs, deps, feature-powerset, runner-guard, workflow-lint]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

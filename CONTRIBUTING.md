@@ -70,6 +70,7 @@ cargo test --workspace --all-features --locked
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked
 cargo xtask check-deps
 cargo xtask check-manifests
+cargo xtask check-unsafe
 cargo xtask check-workflows
 cargo deny --locked check
 ```
@@ -99,8 +100,9 @@ warning fails CI**, including the lints set to `warn`.
 - Today `unsafe_code` is `forbid` for the whole workspace, so no crate may contain `unsafe`.
 - When unsafe code is allowed is decided in
   [ADR 0011](docs/adr/0011-msrv-and-unsafe-code-policy.md). In short: `unsafe` only in a few named
-  FFI modules and the driver, every file that allows it listed in `unsafe-allowlist.txt`, which
-  needs maintainer review, and an automated check that the allowlist matches the code ([#23](https://github.com/jusso-dev/palisade/issues/23)).
+  FFI modules and the driver, and every file that allows it listed in `unsafe-allowlist.txt`, which
+  needs maintainer review. `cargo xtask check-unsafe` checks that the allowlist matches the code
+  ([docs/workspace.md](docs/workspace.md#unsafe-code)).
 - Every `unsafe` block needs a `// SAFETY:` comment that explains why it is sound. Clippy's
   `undocumented_unsafe_blocks` lint is already denied.
 

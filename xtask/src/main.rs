@@ -4,8 +4,11 @@
 //! so CI can run them as plain steps. The rules themselves live in the module
 //! for each command, next to their unit tests.
 
+#![forbid(unsafe_code)]
+
 mod deps;
 mod manifests;
+mod unsafe_code;
 mod workflows;
 
 use std::{
@@ -18,7 +21,9 @@ Usage: cargo xtask <command>
 
 Commands:
   check-deps       Enforce the allowed dependency directions between crates
-  check-manifests  Enforce workspace inheritance of package fields, lints and dependency versions
+  check-manifests  Enforce workspace inheritance of package fields, lints and dependency versions,
+                   and that every crate README documents its features
+  check-unsafe     Enforce the unsafe-code allowlist (unsafe-allowlist.txt, ADR 0011)
   check-workflows  Enforce the CI runner and action policy for .github/workflows
   help             Show this message
 ";
@@ -32,6 +37,7 @@ fn main() -> ExitCode {
     let result = match command {
         "check-deps" => run_check("check-deps", check_deps),
         "check-manifests" => run_check("check-manifests", check_manifests),
+        "check-unsafe" => run_check("check-unsafe", check_unsafe),
         "check-workflows" => run_check("check-workflows", check_workflows),
         "help" | "--help" | "-h" => {
             print!("{HELP}");
@@ -82,10 +88,56 @@ fn check_manifests(root: &Path) -> Result<Vec<String>, String> {
     let mut violations = Vec::new();
     for path in deps::member_manifest_paths(&metadata)? {
         let path = PathBuf::from(path);
-        violations.extend(manifests::check_member(
-            &path.display().to_string(),
-            &read(&path)?,
-        )?);
+        let shown = path.display().to_string();
+        let source = read(&path)?;
+        violations.extend(manifests::check_member(&shown, &source)?);
+        violations.extend(manifests::check_test_util(&shown, &source)?);
+        let readme = path.with_file_name("README.md");
+        if readme.exists() {
+            violations.extend(manifests::check_readme(
+                &readme.display().to_string(),
+                &read(&readme)?,
+                &manifests::feature_names(&shown, &source)?,
+            ));
+        } else {
+            violations.push(format!("{}: missing", readme.display()));
+        }
+    }
+    Ok(violations)
+}
+
+fn check_unsafe(root: &Path) -> Result<Vec<String>, String> {
+    let mut violations = Vec::new();
+    let mut files = Vec::new();
+    for path in unsafe_code::rust_files(root)? {
+        let source = read(&root.join(&path))?;
+        files.push((path, source));
+    }
+    let allowlist = unsafe_code::parse_allowlist(&read(&root.join("unsafe-allowlist.txt"))?);
+    violations.extend(unsafe_code::check_files(&files, &allowlist));
+
+    // Library and binary roots of the crates with no allowlisted module.
+    let metadata = cargo_metadata(root, &["--no-deps"])?;
+    for (name, kind, src_path) in deps::member_targets(&metadata)? {
+        if !unsafe_code::FORBID_AT_ROOT.contains(&name.as_str()) {
+            continue;
+        }
+        if !unsafe_code::forbids_unsafe_code(&read(Path::new(&src_path))?) {
+            violations.push(format!(
+                "{src_path}: the {kind} root of {name} must have #![forbid(unsafe_code)] (ADR 0011)"
+            ));
+        }
+    }
+
+    violations.extend(unsafe_code::check_workspace_lint(&read(
+        &root.join("Cargo.toml"),
+    )?)?);
+    let config = root.join(".cargo").join("config.toml");
+    if config.exists() {
+        violations.extend(unsafe_code::check_cargo_config(
+            ".cargo/config.toml",
+            &read(&config)?,
+        ));
     }
     Ok(violations)
 }

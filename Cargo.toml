@@ -75,8 +75,14 @@ overflow-checks = true
 [profile.release]
 lto = "thin"
 codegen-units = 1
+# ADR 0012: the agent unwinds, so a parser panic on one crafted file is caught
+# and that file is treated as unknown, instead of crashing the service. Cargo
+# applies `panic` to the whole profile; the no_std driver sets its own (#8).
+panic = "unwind"
 debug = "line-tables-only"
-# Symbols are stripped and published separately by the release pipeline (#22).
+# Debug info goes to separate files (PDBs on Windows), which the release
+# pipeline publishes as symbols (#22).
+split-debuginfo = "packed"
 strip = "none"
 
 # Decision logic and the parsers of untrusted input keep overflow checks
