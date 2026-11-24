@@ -156,6 +156,14 @@ fn parse_signed_data<'a>(sd: &Tlv<'a>) -> Result<SignedData<'a>> {
         let mut certs = set.reader();
         while !certs.is_empty() {
             let choice = certs.read_any()?;
+            // Every certificate is checked as DER, whether it is kept for
+            // #49, skipped, or over the limit.
+            asn1::validate(&choice)?;
+            if choice.tag == tag::SEQUENCE {
+                // The certificate signature is a BIT STRING with no unused
+                // bits; anything else is invalid DER, not an odd certificate.
+                certificate_signature_is_der(&choice)?;
+            }
             if choice.tag != tag::SEQUENCE {
                 warnings.push(SignatureWarning::NonX509Certificate);
             } else if certificates.len() < MAX_CERTIFICATES {
@@ -382,6 +390,7 @@ fn parse_signer_info<'a>(info: &Tlv<'a>, warnings: &mut Warnings) -> Result<Sign
             let ias = r.read(tag::SEQUENCE)?;
             let mut i = ias.reader();
             let issuer = i.read(tag::SEQUENCE)?;
+            asn1::validate(&issuer)?;
             let serial = i.read(tag::INTEGER)?;
             i.finish()?;
             SignerIdentifier::IssuerAndSerial {
@@ -634,6 +643,12 @@ fn parse_unauthenticated_attributes<'a>(
         let mut v = values.reader();
         while !v.is_empty() {
             let value = v.read_any()?;
+            // Timestamps are kept for #50 and must be valid DER. Nested
+            // signatures are parsed (and so checked) by the walker, which
+            // bounds their depth itself.
+            if kind.is_some() {
+                asn1::validate(&value)?;
+            }
             match kind {
                 None if nested.len() < MAX_NESTED_COLLECTED => {
                     nested.push((value.raw, value.offset));
@@ -690,6 +705,9 @@ fn parse_signature_alg(id: &Tlv<'_>, signer_digest: &DigestId) -> Result<Signatu
     };
     let other = |alg: &[u8]| SignatureAlgorithm::Other(ObjectId::from_der(alg));
     Ok(match alg {
+        oid::RSA_ENCRYPTION | oid::EC_PUBLIC_KEY if !null_or_absent(&params) => {
+            return Err(SignatureError::AlgorithmParameters);
+        }
         oid::RSA_ENCRYPTION => match signer_digest {
             Ok(_) => SignatureAlgorithm::RsaPkcs1(signer()?),
             Err(_) => other(alg),
@@ -793,6 +811,20 @@ pub(crate) struct Certificate<'a> {
     pub key: Option<CertKey<'a>>,
 }
 
+/// Checks that a certificate's last element, if it is a BIT STRING (the
+/// `signatureValue`), has no unused bits.
+fn certificate_signature_is_der(cert: &Tlv<'_>) -> Result<()> {
+    let mut r = cert.reader();
+    let mut last = None;
+    while !r.is_empty() {
+        last = Some(r.read_any()?);
+    }
+    if let Some(value) = last.filter(|t| t.tag == tag::BIT_STRING) {
+        asn1::bit_string_octets(&value)?;
+    }
+    Ok(())
+}
+
 /// Decodes the parts of `der` (one X.509 certificate) that signer matching
 /// needs.
 pub(crate) fn parse_certificate(
@@ -802,7 +834,7 @@ pub(crate) fn parse_certificate(
     let mut c = cert.reader();
     let tbs = c.read(tag::SEQUENCE)?;
     c.read(tag::SEQUENCE)?;
-    c.read(tag::BIT_STRING)?;
+    asn1::bit_string_octets(&c.read(tag::BIT_STRING)?)?;
     c.finish()?;
 
     let mut t = tbs.reader();

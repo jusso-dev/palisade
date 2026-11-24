@@ -382,8 +382,12 @@ pub enum SignatureWarning {
     /// More than one certificate matches the signer identifier; the first
     /// is used.
     AmbiguousSignerCertificate,
-    /// A certificate in the blob could not be parsed. It is kept in
-    /// [`SignatureInfo::certs_in_blob`] but cannot be the signer.
+    /// A certificate in the blob is valid DER but not a certificate this
+    /// crate can read (an unexpected structure, or SPKI parameters that are
+    /// not allowed for its key). It is kept in
+    /// [`SignatureInfo::certs_in_blob`] but cannot be the signer. Invalid
+    /// DER in any certificate makes the whole signature
+    /// [`SignatureStatus::Malformed`] instead.
     UnparseableCertificate(usize),
     /// The blob holds more than [`super::MAX_CERTIFICATES`] certificates;
     /// the rest were ignored.

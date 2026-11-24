@@ -1491,6 +1491,113 @@ fn fuzz_target_image_is_the_fixture_image() {
     assert_eq!(report.primary, Some(0));
 }
 
+// --- Round-4 review cases. ---------------------------------------------------
+
+fn expect_asn1(report: &SignatureReport, kind: Asn1ErrorKind) {
+    assert!(
+        matches!(malformed(report), SignatureError::Asn1(a) if a.kind == kind),
+        "{:?}",
+        only(report).status
+    );
+}
+
+#[test]
+fn every_certificate_must_be_valid_der() {
+    let blob = fixture("rsa2048-sha256.p7");
+    let certs = element(&blob, &sd(&[SD_CERTIFICATES]));
+    let ca_index = (0..2)
+        .find(|i| !element(certs, &[*i]).windows(6).any(|w| w == b"Signer"))
+        .unwrap();
+    // Invalid DER deep inside the CA certificate (not the signer): its
+    // subject Name gets an indefinite-length element.
+    let ca = element(certs, &[ca_index]).to_vec();
+    let subject_at = [0, 5];
+    let bad_subject = tlv(0x30, &[0x31, 0x80, 0x00, 0x00]);
+    let ca = replace(&ca, &subject_at, &bad_subject);
+    let b = replace(&blob, &sd(&[SD_CERTIFICATES, ca_index]), &ca);
+    expect_asn1(&verify_blob(&b), Asn1ErrorKind::IndefiniteLength);
+
+    // A skipped non-X.509 CertificateChoices entry with truncated content.
+    let (h, _) = header(certs, 0);
+    let mut content = certs[h..].to_vec();
+    content.extend(tlv(0xa1, &[0x30, 0x05, 0x02, 0x01]));
+    let b = replace(&blob, &sd(&[SD_CERTIFICATES]), &tlv(0xa0, &content));
+    expect_asn1(&verify_blob(&b), Asn1ErrorKind::Truncated);
+
+    // Hostile nesting inside a certificate is bounded, not followed.
+    let mut deep = vec![0x05, 0x00];
+    for _ in 0..100 {
+        deep = tlv(0x30, &deep);
+    }
+    let mut content = certs[h..].to_vec();
+    content.extend(deep);
+    let b = replace(&blob, &sd(&[SD_CERTIFICATES]), &tlv(0xa0, &content));
+    expect_asn1(&verify_blob(&b), Asn1ErrorKind::TooDeep);
+
+    // A certificate signatureValue BIT STRING with unused bits is invalid.
+    let leaf_index = 1 - ca_index;
+    let leaf = element(certs, &[leaf_index]).to_vec();
+    let sig_value = element(&leaf, &[2]).to_vec();
+    let (sh, _) = header(&sig_value, 0);
+    let mut padded = sig_value[sh..].to_vec();
+    padded[0] = 1;
+    let leaf = replace(&leaf, &[2], &tlv(0x03, &padded));
+    let b = replace(&blob, &sd(&[SD_CERTIFICATES, leaf_index]), &leaf);
+    expect_asn1(&verify_blob(&b), Asn1ErrorKind::InvalidValue);
+}
+
+#[test]
+fn signer_issuer_must_be_valid_der() {
+    let blob = fixture("rsa2048-sha256.p7");
+    let sid = element(&blob, &signer(&[1]));
+    let serial = element(sid, &[1]).to_vec();
+    let bad_issuer = tlv(0x30, &[0x31, 0x04, 0x30, 0x80, 0x00, 0x00]);
+    let b = replace(
+        &blob,
+        &signer(&[1]),
+        &tlv(0x30, &[bad_issuer, serial].concat()),
+    );
+    expect_asn1(&verify_blob(&b), Asn1ErrorKind::IndefiniteLength);
+}
+
+#[test]
+fn timestamp_tokens_must_be_valid_der() {
+    let blob = fixture("rsa2048-sha256.p7");
+    let si = element(&blob, &signer(&[]));
+    let (h, _) = header(si, 0);
+    for oid in [
+        vec![0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x09, 0x06],
+        vec![0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x03, 0x03, 0x01],
+    ] {
+        let token = tlv(0x30, &[0x30, 0x80, 0x00, 0x00]);
+        let attr = tlv(0x30, &[tlv(0x06, &oid), tlv(0x31, &token)].concat());
+        let mut content = si[h..].to_vec();
+        content.extend(tlv(0xa1, &attr));
+        let b = replace(&blob, &signer(&[]), &tlv(0x30, &content));
+        expect_asn1(&verify_blob(&b), Asn1ErrorKind::IndefiniteLength);
+    }
+}
+
+#[test]
+fn key_style_signature_algorithms_reject_parameters() {
+    let blob = fixture("rsa2048-sha256.p7");
+    // An unknown signer digest, so the algorithm cannot be resolved, but
+    // its parameters are still checked.
+    let unknown_digest = tlv(
+        0x30,
+        &tlv(0x06, &[0x2b, 0x06, 0x01, 0x04, 0x01, 0x83, 0x04, 0x01]),
+    );
+    let b = replace(&blob, &signer(&[2]), &unknown_digest);
+    for oid in [
+        vec![0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01],
+        vec![0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01],
+    ] {
+        let alg = tlv(0x30, &[tlv(0x06, &oid), vec![0x02, 0x01, 0x07]].concat());
+        let report = verify_blob(&replace(&b, &signer(&[SI_SIG_ALG]), &alg));
+        assert_eq!(malformed(&report), &SignatureError::AlgorithmParameters);
+    }
+}
+
 proptest! {
     #![proptest_config(ProptestConfig {
         cases: 256,
