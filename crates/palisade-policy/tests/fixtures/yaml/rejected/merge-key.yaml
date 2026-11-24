@@ -1,0 +1,6 @@
+schema_version: "1.0.0"
+policy:
+  <<: {mode: audit}
+  id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f
+  name: Merge
+  revision: 1

@@ -418,6 +418,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "yaml-rust2",
 ]
 
 [[package]]
