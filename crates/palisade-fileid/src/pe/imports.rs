@@ -187,9 +187,11 @@ fn name_at(data: &[u8], layout: Layout<'_>, rva: u32) -> Option<Name> {
 
 /// Up to `max` bytes of the NUL-terminated string at `rva`, and whether its
 /// NUL was found within them. At most `max + 1` bytes are looked at. A
-/// section's zero-filled tail (mapped, but past its raw data) reads as NUL.
-/// `None` if the RVA is zero or unmapped, or the string reaches unmapped
-/// memory or the end of the file before `max` bytes or a NUL.
+/// section's zero-filled tail (mapped, but past its declared raw data)
+/// reads as NUL, as it does in memory, including at the start (an empty
+/// string). `None` if the RVA is zero or unmapped, or the string runs into
+/// unmapped memory, or into the end of the input inside the declared raw
+/// data (a truncated file), before `max` bytes or a NUL.
 fn c_string<'a>(
     data: &'a [u8],
     layout: Layout<'_>,
@@ -198,6 +200,9 @@ fn c_string<'a>(
 ) -> Option<(&'a [u8], bool)> {
     if rva == 0 {
         return None;
+    }
+    if layout.zero_filled(rva) {
+        return Some((&[], true));
     }
     let (offset, available) = layout.backed_extent(rva)?;
     let len = to_usize(available)?.min(max.saturating_add(1));
@@ -209,10 +214,9 @@ fn c_string<'a>(
         return Some((raw.get(..max)?, false));
     }
     // The file-backed bytes ran out first: the string is terminated only if
-    // the next byte is mapped and zero-filled.
+    // the next byte is zero fill, not the end of a truncated input.
     let next = rva.checked_add(u32::try_from(raw.len()).ok()?)?;
-    let zero_filled = layout.section_for(next).is_some() && layout.backed_extent(next).is_none();
-    zero_filled.then_some((raw, true))
+    layout.zero_filled(next).then_some((raw, true))
 }
 
 /// A name read by [`name_at`].
@@ -434,7 +438,7 @@ pub(super) fn parse_exports(
     let field = |o| u32_at(header, o).unwrap_or(0);
     let base = field(16);
     let mut info = ExportInfo {
-        dll_name: name_at(data, layout, field(12)).map(|n| n.text),
+        dll_name: None,
         number_of_functions: field(20),
         number_of_names: field(24),
         ..ExportInfo::default()
@@ -451,6 +455,19 @@ pub(super) fn parse_exports(
         WarningKind::ExportTableMalformed,
     );
     let number_of_functions = info.number_of_functions;
+    match (field(12), name_at(data, layout, field(12))) {
+        (0, _) => {}
+        (_, Some(name)) => {
+            if name.cut {
+                info.truncated = true;
+            }
+            info.dll_name = Some(name.text);
+        }
+        (_, None) => {
+            bad.report(warnings);
+            info.truncated = true;
+        }
+    }
 
     // Like the loader, an index past `NumberOfFunctions`, or a slot holding
     // RVA 0, is not an export.
@@ -458,8 +475,9 @@ pub(super) fn parse_exports(
         if index >= number_of_functions {
             return Slot::Bad;
         }
-        let Some(rva) = functions
-            .checked_add(index.saturating_mul(4))
+        let Some(rva) = index
+            .checked_mul(4)
+            .and_then(|o| functions.checked_add(o))
             .and_then(|at| at_rva(data, layout, at, 4))
             .and_then(|b| u32_at(b, 0))
         else {
@@ -499,6 +517,12 @@ pub(super) fn parse_exports(
         .number_of_functions
         .min(MAX_EXPORT_SLOTS)
         .min(backed_slots);
+    // An export address table that the file does not hold in full is
+    // malformed, whether or not any name points into the missing part.
+    if info.number_of_functions.min(MAX_EXPORT_SLOTS) > backed_slots {
+        bad.report(warnings);
+        info.truncated = true;
+    }
     let mut named = vec![false; to_usize(slots).unwrap_or(0)];
     let listed_names = info
         .number_of_names

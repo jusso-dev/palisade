@@ -674,6 +674,23 @@ impl<'a> Layout<'a> {
         }
     }
 
+    /// Whether `rva` is mapped zero-filled memory: inside a section's mapped
+    /// span but past the raw data it declares (or in a section with none).
+    /// This depends only on the headers, never on the input's length, so a
+    /// truncated file is not mistaken for zero fill.
+    pub(crate) fn zero_filled(&self, rva: u32) -> bool {
+        let Some(s) = self.section_for(rva) else {
+            return false;
+        };
+        let Some(delta) = rva.checked_sub(s.virtual_address) else {
+            return false;
+        };
+        let backed = s.file_data(self.file_alignment).map_or(0, |(_, raw_size)| {
+            raw_size.min(mapped_span(s, self.section_alignment))
+        });
+        delta >= backed
+    }
+
     /// Maps the RVA range `rva..rva + len` to a file offset. The range must
     /// start inside the file-backed part of one section (or the headers) and
     /// end inside it too. A zero-length range must still start inside.

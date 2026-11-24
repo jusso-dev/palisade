@@ -165,32 +165,92 @@ impl fmt::Display for ManifestError {
 
 impl std::error::Error for ManifestError {}
 
-/// `s` trimmed, then cut to at most [`MAX_VALUE_LEN`] bytes on a character
-/// boundary. Trimming first means padding cannot push the value out.
-fn bounded(s: &str) -> String {
-    let mut s = s.trim().to_owned();
-    if s.len() > MAX_VALUE_LEN {
-        let mut end = MAX_VALUE_LEN;
-        while !s.is_char_boundary(end) {
-            end -= 1;
-        }
-        s.truncate(end);
+/// `s` cut to at most [`MAX_VALUE_LEN`] bytes on a character boundary, and
+/// whether anything was cut off. Not trimmed again afterwards: a cut value
+/// is never read as a keyword, whatever its prefix looks like.
+fn cut(s: &str) -> (String, bool) {
+    if s.len() <= MAX_VALUE_LEN {
+        return (s.to_owned(), false);
     }
-    s
+    let mut end = MAX_VALUE_LEN;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    (s.get(..end).unwrap_or_default().to_owned(), true)
 }
 
-/// Whether `name` is a valid XML name (with an optional `prefix:`). Names
-/// are checked by the rules for their first and later characters; a
-/// manifest's names are ASCII, so non-ASCII letters are accepted as the
-/// XML 1.0 fifth edition does.
+/// A trimmed attribute or text value, and whether it was cut to
+/// [`MAX_VALUE_LEN`].
+struct Value {
+    text: String,
+    cut: bool,
+}
+
+impl Value {
+    fn new(s: &str) -> Self {
+        let (text, cut) = cut(s.trim());
+        Self { text, cut }
+    }
+
+    /// The value as a boolean; a cut value is never one.
+    fn as_bool(&self) -> Option<bool> {
+        if self.cut {
+            None
+        } else {
+            parse_bool(&self.text)
+        }
+    }
+}
+
+/// Whether `name` is a qualified name as XML Namespaces defines it: an
+/// `NCName`, or `NCName:NCName`. So no leading, trailing or second colon.
 fn is_xml_name(name: &[u8]) -> bool {
-    let start = |c: char| c.is_alphabetic() || c == '_' || c == ':' || !c.is_ascii();
-    let rest = |c: char| start(c) || c.is_ascii_digit() || c == '-' || c == '.';
     let Ok(name) = std::str::from_utf8(name) else {
         return false;
     };
+    let mut parts = name.split(':');
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some(local), None, _) => is_ncname(local),
+        (Some(prefix), Some(local), None) => is_ncname(prefix) && is_ncname(local),
+        _ => false,
+    }
+}
+
+/// Whether `name` is an XML `NCName` (a name without colons), by the XML
+/// 1.0 fifth edition character classes.
+fn is_ncname(name: &str) -> bool {
+    let start = |c: char| {
+        c.is_ascii_alphabetic()
+            || c == '_'
+            || matches!(c,
+                '\u{C0}'..='\u{D6}' | '\u{D8}'..='\u{F6}' | '\u{F8}'..='\u{2FF}'
+                | '\u{370}'..='\u{37D}' | '\u{37F}'..='\u{1FFF}' | '\u{200C}'..='\u{200D}'
+                | '\u{2070}'..='\u{218F}' | '\u{2C00}'..='\u{2FEF}' | '\u{3001}'..='\u{D7FF}'
+                | '\u{F900}'..='\u{FDCF}' | '\u{FDF0}'..='\u{FFFD}' | '\u{10000}'..='\u{EFFFF}')
+    };
+    let rest = |c: char| {
+        start(c)
+            || c.is_ascii_digit()
+            || c == '-'
+            || c == '.'
+            || matches!(c, '\u{B7}' | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}')
+    };
     let mut chars = name.chars();
     chars.next().is_some_and(start) && chars.all(rest)
+}
+
+/// Whether `c` is an XML 1.0 `Char`.
+const fn is_xml_char(c: char) -> bool {
+    matches!(c, '\t' | '\n' | '\r' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..='\u{10FFFF}')
+}
+
+/// Fails if `text` has a character XML 1.0 does not allow.
+fn check_chars(text: &str) -> Result<(), ManifestError> {
+    if text.chars().all(is_xml_char) {
+        Ok(())
+    } else {
+        Err(ManifestError::Xml("character not allowed in XML".into()))
+    }
 }
 
 /// Every attribute of `e`, checked: each must have a valid name and be
@@ -200,11 +260,11 @@ fn is_xml_name(name: &[u8]) -> bool {
 fn attrs<const N: usize>(
     e: &BytesStart<'_>,
     wanted: [&str; N],
-) -> Result<[Option<String>; N], ManifestError> {
+) -> Result<[Option<Value>; N], ManifestError> {
     if !is_xml_name(e.name().as_ref()) {
         return Err(ManifestError::Xml("invalid element name".into()));
     }
-    let mut out: [Option<String>; N] = std::array::from_fn(|_| None);
+    let mut out: [Option<Value>; N] = std::array::from_fn(|_| None);
     for a in e.attributes() {
         let a = a.map_err(|err| ManifestError::Xml(err.to_string()))?;
         if !is_xml_name(a.key.as_ref()) {
@@ -214,6 +274,7 @@ fn attrs<const N: usize>(
         let value = a
             .normalized_value(XmlVersion::Implicit1_0)
             .map_err(|err| ManifestError::Xml(err.to_string()))?;
+        check_chars(&value)?;
         // A prefixed attribute (`x:level`) is another attribute: never the
         // schema's `level`.
         if a.key.prefix().is_some() {
@@ -224,7 +285,7 @@ fn attrs<const N: usize>(
             .position(|w| a.key.as_ref() == w.as_bytes())
             .and_then(|i| out.get_mut(i))
         {
-            *slot = Some(bounded(&value));
+            *slot = Some(Value::new(&value));
         }
     }
     Ok(out)
@@ -275,6 +336,8 @@ const WINDOWS_SETTINGS: [&str; 3] = ["assembly", "application", "windowsSettings
 /// text never grows past one byte over [`MAX_VALUE_LEN`] (enough to know it
 /// was cut).
 fn append(text: &mut String, piece: &str) {
+    // `text` holds at most MAX_VALUE_LEN + 1 bytes; the extra byte is how
+    // a cut is detected.
     let piece = if text.is_empty() {
         piece.trim_start()
     } else {
@@ -301,12 +364,16 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
     let mut reader = Reader::from_str(text);
     // Text is kept as written and trimmed once it is joined, so whitespace
     // next to a reference survives.
-    reader.config_mut().check_end_names = true;
+    let config = reader.config_mut();
+    config.check_end_names = true;
+    config.check_comments = true;
 
     let mut out = Manifest::default();
     let mut path = Path(Vec::new());
     let mut elements = 0_usize;
     let mut roots = 0_usize;
+    // Anything read yet (for the declaration, which must come first).
+    let mut seen_anything = false;
     let mut seen_execution_level = false;
     // Which text settings were met, so the first wins however it is
     // written (`<x/>`, `<x></x>`, or a value that does not parse).
@@ -383,6 +450,7 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
             }
             Event::Text(t) => {
                 let raw = t.decode().map_err(|e| ManifestError::Xml(e.to_string()))?;
+                check_chars(&raw)?;
                 if outside(&path, &raw) {
                     return Err(ManifestError::Xml("text outside the root element".into()));
                 }
@@ -394,6 +462,7 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
             }
             Event::CData(t) => {
                 let raw = t.decode().map_err(|e| ManifestError::Xml(e.to_string()))?;
+                check_chars(&raw)?;
                 if path.0.is_empty() {
                     return Err(ManifestError::Xml("CDATA outside the root element".into()));
                 }
@@ -405,7 +474,12 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
                 // Only character references and the five predefined
                 // entities are accepted; anything else is undefined.
                 let resolved = match r.resolve_char_ref() {
-                    Ok(Some(c)) => c.to_string(),
+                    Ok(Some(c)) if is_xml_char(c) => c.to_string(),
+                    Ok(Some(_)) => {
+                        return Err(ManifestError::Xml(
+                            "character reference to a character XML does not allow".into(),
+                        ));
+                    }
                     Ok(None) => {
                         let name = r.decode().map_err(|e| ManifestError::Xml(e.to_string()))?;
                         quick_xml::escape::resolve_predefined_entity(&name)
@@ -428,11 +502,20 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
             Event::End(_) => {
                 path.0.pop();
                 if let Some(field) = text_field.take() {
-                    let value = bounded(&text);
+                    // Leading whitespace was dropped as text arrived; the
+                    // trailing end is trimmed only if nothing was cut.
+                    let value = if text.len() > MAX_VALUE_LEN {
+                        Value {
+                            text: cut(&text).0,
+                            cut: true,
+                        }
+                    } else {
+                        Value::new(&text)
+                    };
                     match field {
-                        TextField::AutoElevate => out.auto_elevate = parse_bool(&value),
-                        TextField::DpiAware => out.dpi_aware = Some(value),
-                        TextField::DpiAwareness => out.dpi_awareness = Some(value),
+                        TextField::AutoElevate => out.auto_elevate = value.as_bool(),
+                        TextField::DpiAware => out.dpi_aware = Some(value.text),
+                        TextField::DpiAwareness => out.dpi_awareness = Some(value.text),
                     }
                 }
             }
@@ -445,8 +528,41 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
                 }
                 break;
             }
-            _ => {}
+            Event::Decl(d) => {
+                // Only as the very first thing, with a valid version.
+                if seen_anything {
+                    return Err(ManifestError::Xml("misplaced XML declaration".into()));
+                }
+                let version = d.version().map_err(|e| ManifestError::Xml(e.to_string()))?;
+                if !matches!(version.as_ref(), b"1.0" | b"1.1") {
+                    return Err(ManifestError::Xml("bad XML version".into()));
+                }
+                if let Some(enc) = d.encoding() {
+                    let enc = enc.map_err(|e| ManifestError::Xml(e.to_string()))?;
+                    if !enc.eq_ignore_ascii_case(b"UTF-8") && !enc.eq_ignore_ascii_case(b"UTF8") {
+                        return Err(ManifestError::NotUtf8);
+                    }
+                }
+            }
+            Event::PI(pi) => {
+                let target = pi.target();
+                if target.eq_ignore_ascii_case(b"xml")
+                    || !is_xml_name(target)
+                    || target.contains(&b':')
+                {
+                    return Err(ManifestError::Xml("bad processing instruction".into()));
+                }
+                let content =
+                    std::str::from_utf8(pi.as_ref()).map_err(|_| ManifestError::NotUtf8)?;
+                check_chars(content)?;
+            }
+            Event::Comment(c) => {
+                let content =
+                    std::str::from_utf8(c.as_ref()).map_err(|_| ManifestError::NotUtf8)?;
+                check_chars(content)?;
+            }
         }
+        seen_anything = true;
     }
     Ok(out)
 }
@@ -462,8 +578,15 @@ fn element(
         // The first element decides, even if it lacks one of them.
         if !*seen_execution_level {
             *seen_execution_level = true;
-            out.execution_level = level.map(|v| ExecutionLevel::parse(&v));
-            out.ui_access = ui_access.and_then(|v| parse_bool(&v));
+            // A cut level is kept as `Other`, never matched as a keyword.
+            out.execution_level = level.map(|v| {
+                if v.cut {
+                    ExecutionLevel::Other(v.text)
+                } else {
+                    ExecutionLevel::parse(&v.text)
+                }
+            });
+            out.ui_access = ui_access.and_then(|v| v.as_bool());
         }
     } else if path.is(&IDENTITY) {
         let [name, version, arch, token, kind] = attrs(
@@ -477,19 +600,20 @@ fn element(
             ],
         )?;
         if out.identity.is_none() {
+            let text = |v: Option<Value>| v.map(|v| v.text);
             out.identity = Some(AssemblyIdentity {
-                name,
-                version,
-                processor_architecture: arch,
-                public_key_token: token,
-                kind,
+                name: text(name),
+                version: text(version),
+                processor_architecture: text(arch),
+                public_key_token: text(token),
+                kind: text(kind),
             });
         }
     } else if path.is(&SUPPORTED_OS) {
         let [id] = attrs(e, ["Id"])?;
         if let Some(id) = id {
             if out.supported_os.len() < MAX_SUPPORTED_OS {
-                out.supported_os.push(id);
+                out.supported_os.push(id.text);
             } else {
                 out.truncated = true;
             }

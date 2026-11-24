@@ -1236,3 +1236,187 @@ fn only_the_process_manifest_decides_elevation() {
         (true, ElevationReason::InstallerFileName("setup"))
     );
 }
+
+// --- Round 4. -----------------------------------------------------------------
+
+/// The `.edata` image of `exports_of`, and the file offset where its
+/// section's raw data starts.
+fn export_image(entries: &[(Vec<u8>, u16)], functions: &[u32]) -> (Vec<u8>, usize) {
+    let image = with_directory(PeBuilder::dll(), DIR_EXPORT, |rva| {
+        raw_export_section(rva, entries, functions)
+    });
+    let info = parse(&image);
+    let start = info.sections.last().unwrap().pointer_to_raw_data as usize;
+    (image, start)
+}
+
+#[test]
+fn a_name_cut_by_the_end_of_the_file_is_not_complete() {
+    // "DllRegisterServerExtra", and the file ends right after
+    // "DllRegisterServer": the raw data the header declares runs on, so
+    // this is a truncated file, not zero fill. Nothing matches.
+    let entries = vec![(b"DllRegisterServerExtra".to_vec(), 0)];
+    let (image, _) = export_image(&entries, &[0x1000]);
+    let pos = image
+        .windows(22)
+        .position(|w| w == b"DllRegisterServerExtra")
+        .unwrap();
+    let cut = &image[..pos + 17];
+    let info = pe::parse(cut).unwrap();
+    let e = info.exports.as_ref().unwrap();
+    assert!(!e.notable.dll_register_server);
+    assert!(
+        e.exports
+            .iter()
+            .all(|x| x.name.as_deref() != Some("DllRegisterServer"))
+    );
+    assert!(e.truncated);
+}
+
+#[test]
+fn a_name_starting_in_the_zero_fill_is_empty() {
+    // Two names: "" in the zero-filled tail (past the raw data), then
+    // "DllRegisterServer". The empty name sorts first, as for the loader.
+    let entries = vec![(b"X".to_vec(), 0), (b"DllRegisterServer".to_vec(), 1)];
+    let mut b = PeBuilder::dll();
+    let section = b.sections.len();
+    let rva = SECTION_ALIGNMENT * (section as u32 + 1);
+    let mut body = raw_export_section(rva, &entries, &[0x1000, 0x1010]);
+    let size = body.len() as u32;
+    // Point the first name past the raw data, into the zero fill.
+    let names_at = 40 + 2 * 4;
+    let zero_rva = rva + 0x800;
+    body[names_at..names_at + 4].copy_from_slice(&zero_rva.to_le_bytes());
+    b = b.section(
+        ".edata",
+        body,
+        IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ,
+    );
+    b.sections.last_mut().unwrap().virtual_size = Some(0x1000);
+    let mut image = b.build();
+    let at = b.data_directory_offset(DIR_EXPORT);
+    put32(&mut image, at, rva);
+    put32(&mut image, at + 4, size);
+    let e = parse(&image).exports.unwrap();
+    assert_eq!(e.exports[0].name.as_deref(), Some(""));
+    assert!(e.notable.dll_register_server);
+}
+
+#[test]
+fn a_short_export_address_table_is_reported() {
+    // No names, and NumberOfFunctions far past what the section holds.
+    let (mut image, start) = export_image(&[], &[0x1000]);
+    put32(&mut image, start + 20, 50_000);
+    let info = parse(&image);
+    assert!(info.exports.as_ref().unwrap().truncated);
+    assert!(
+        info.parse_warnings
+            .iter()
+            .any(|w| w.kind == WarningKind::ExportTableMalformed)
+    );
+}
+
+#[test]
+fn the_export_module_name_is_checked() {
+    // Name RVA unmapped: a warning, no name.
+    let (mut image, start) = export_image(&[(b"F".to_vec(), 0)], &[0x1000]);
+    put32(&mut image, start + 12, 0x00f0_0000);
+    let info = parse(&image);
+    assert_eq!(info.exports.as_ref().unwrap().dll_name, None);
+    assert!(
+        info.parse_warnings
+            .iter()
+            .any(|w| w.kind == WarningKind::ExportTableMalformed)
+    );
+    // A long module name is cut and marked.
+    let long = "d".repeat(800);
+    let image = with_directory(PeBuilder::dll(), DIR_EXPORT, |rva| {
+        export_section(rva, &long, &["F"], &[])
+    });
+    let e = parse(&image).exports.unwrap();
+    assert_eq!(e.dll_name.unwrap().len(), pe::MAX_NAME_LEN);
+    assert!(e.truncated);
+}
+
+#[test]
+fn a_cut_value_is_never_a_keyword() {
+    let pad = " ".repeat(2_000);
+    let attr = format!("true{pad}invalid");
+    let xml = format!(
+        r#"<assembly><trustInfo><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator{pad}x" uiAccess="{attr}"/></requestedPrivileges></security></trustInfo><application><windowsSettings><autoElevate>true{pad}invalid</autoElevate><dpiAware>per monitor{pad}x</dpiAware></windowsSettings></application></assembly>"#
+    );
+    let m = parse_manifest(xml.as_bytes()).unwrap();
+    assert_eq!(m.ui_access, None);
+    assert_eq!(m.auto_elevate, None);
+    assert!(matches!(m.execution_level, Some(ExecutionLevel::Other(_))));
+    // The kept prefix is not re-trimmed into a shorter value.
+    assert_eq!(m.dpi_aware.unwrap().len(), pe::manifest::MAX_VALUE_LEN);
+}
+
+#[test]
+fn qualified_names_must_be_valid() {
+    // `<:trustInfo>` is not a valid name; it must not pass as `trustInfo`.
+    let shadow = r#"<assembly><:trustInfo><security><requestedPrivileges><requestedExecutionLevel level="asInvoker"/></requestedPrivileges></security></:trustInfo></assembly>"#;
+    assert!(matches!(
+        parse_manifest(shadow.as_bytes()),
+        Err(ManifestError::Xml(_))
+    ));
+    for bad in [
+        "<assembly:/>",
+        "<x:1bad/>",
+        "<a:b:c/>",
+        r#"<assembly :="1"/>"#,
+        r#"<assembly a:="1"/>"#,
+        "<\u{00a0}/>",
+        "<a\u{00a0}b/>",
+    ] {
+        assert!(
+            matches!(parse_manifest(bad.as_bytes()), Err(ManifestError::Xml(_))),
+            "{bad}"
+        );
+    }
+    // Valid prefixed and non-ASCII names still parse.
+    for good in [
+        r#"<x:assembly xmlns:x="urn:e"/>"#,
+        "<assemblé/>",
+        "<a.b-c_d/>",
+    ] {
+        assert!(parse_manifest(good.as_bytes()).is_ok(), "{good}");
+    }
+}
+
+#[test]
+fn declarations_instructions_comments_and_characters_are_checked() {
+    for bad in [
+        &b"<?xml NOT_VALID?><assembly/>"[..],
+        br#"<?xml version="2.0"?><assembly/>"#,
+        br#"<?xml version="1.0" encoding="UTF-16"?><assembly/>"#,
+        br#"<assembly/><?xml version="1.0"?>"#,
+        br#"<assembly><?xml version="1.0"?></assembly>"#,
+        b"<? ?><assembly/>",
+        b"<assembly><!-- a--b --></assembly>",
+        b"<assembly><!-- \x01 --></assembly>",
+        b"<assembly>\x01</assembly>",
+        b"<assembly><![CDATA[\x02]]></assembly>",
+        b"<assembly><application><windowsSettings><dpiAware>&#x1;</dpiAware></windowsSettings></application></assembly>",
+        br#"<assembly a="&#x1;"/>"#,
+    ] {
+        assert!(
+            parse_manifest(bad).is_err(),
+            "{:?}: {:?}",
+            String::from_utf8_lossy(bad),
+            parse_manifest(bad)
+        );
+    }
+    for good in [
+        &br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><assembly/>"#[..],
+        b"<?xml version='1.0'?><!-- c --><?app data?><assembly><!-- c --></assembly>",
+        b"<assembly>\t\r\n</assembly>",
+    ] {
+        assert!(
+            parse_manifest(good).is_ok(),
+            "{:?}",
+            String::from_utf8_lossy(good)
+        );
+    }
+}
