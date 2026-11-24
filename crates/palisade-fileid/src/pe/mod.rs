@@ -1,8 +1,9 @@
 //! A hardened PE32 / PE32+ parser (#45).
 //!
 //! [`parse`] reads headers, sections, data directories, the debug directory,
-//! the resource tree and the version resource from an in-memory image. The
-//! input is untrusted:
+//! the import and export tables, the resource tree, the version resource
+//! and the application manifest from an in-memory image, and classifies
+//! kernel drivers. The input is untrusted:
 //!
 //! - No input can make the parser panic. Every read is bounds-checked and
 //!   all offset arithmetic is checked.
@@ -20,6 +21,10 @@
 
 mod analysis;
 mod debug;
+mod driver;
+mod imports;
+pub mod manifest;
+mod name;
 mod read;
 mod resource;
 mod types;
@@ -29,6 +34,16 @@ use std::fmt;
 
 pub use analysis::{compute_checksum, shannon_entropy};
 pub use debug::{CodeViewPdb, DebugEntry, DebugInfo, DebugType, MAX_DEBUG_ENTRIES, MAX_PDB_PATH};
+pub use driver::{DriverClass, DriverSignal, KERNEL_MODULES};
+pub use imports::{
+    Export, ExportInfo, ExportTarget, ImportInfo, ImportedFunction, ImportedModule,
+    MAX_EXPORT_SLOTS, MAX_EXPORTS, MAX_IMPORT_DESCRIPTORS, MAX_IMPORT_MODULES,
+    MAX_IMPORTED_FUNCTIONS, MAX_NAME_LEN, NotableExports,
+};
+pub use manifest::{
+    AssemblyIdentity, Elevation, ElevationReason, ExecutionLevel, Manifest, ManifestError,
+};
+pub use name::NormalizedName;
 pub use resource::{
     MAX_KEPT_RESOURCES, MAX_RESOURCE_DEPTH, MAX_RESOURCE_ENTRIES, MAX_RESOURCE_NAME_UNITS,
     MAX_RESOURCE_TYPES, ResourceData, ResourceId, ResourceSummary, resource_type,
@@ -219,6 +234,15 @@ pub enum WarningKind {
     TooManyDebugEntries,
     /// The version resource could not be parsed, or parsed only in part.
     VersionInfo(version::VersionInfoIssue),
+    /// An import descriptor or its data is out of bounds or malformed.
+    ImportTableMalformed,
+    /// The import descriptor table has no all-zero terminator within the
+    /// mapped data or [`MAX_IMPORT_DESCRIPTORS`].
+    ImportTableTruncated,
+    /// The export directory's tables are out of bounds or malformed.
+    ExportTableMalformed,
+    /// The standard manifest could not be parsed.
+    Manifest(ManifestError),
 }
 
 /// Header fields from the COFF file header.
@@ -463,6 +487,15 @@ pub struct PeInfo {
     pub resources: Option<ResourceSummary>,
     /// The parsed version resource (`RT_VERSION`), if present.
     pub version_info: Option<VersionInfo>,
+    /// The import table, if the image has one.
+    pub imports: Option<ImportInfo>,
+    /// The export table, if the image has one.
+    pub exports: Option<ExportInfo>,
+    /// The application manifest: the first standard `RT_MANIFEST` (ID 1,
+    /// 2 or 3) that parses.
+    pub manifest: Option<Manifest>,
+    /// Kernel driver signals and the verdict.
+    pub driver: DriverClass,
     /// Non-fatal problems, at most [`MAX_WARNINGS`].
     pub parse_warnings: Vec<ParseWarning>,
     /// More than [`MAX_WARNINGS`] warnings occurred; the rest were dropped.
@@ -485,6 +518,34 @@ impl PeInfo {
     #[must_use]
     pub const fn timestamp_is_reproducible(&self) -> bool {
         self.debug.has_repro
+    }
+
+    /// Whether the image is a kernel-mode driver ([`PeInfo::driver`] has
+    /// the reasons).
+    #[must_use]
+    pub const fn is_kernel_driver(&self) -> bool {
+        self.driver.is_kernel_driver
+    }
+
+    /// The #45 elevation heuristic, for a file named `file_name` (the
+    /// final path component, if known). See
+    /// [`manifest::requires_elevation`].
+    #[must_use]
+    pub fn requires_elevation(&self, file_name: Option<&str>) -> Elevation {
+        let mut fields = Vec::new();
+        if let Some(v) = &self.version_info {
+            for field in [
+                version::VersionField::FileDescription,
+                version::VersionField::ProductName,
+                version::VersionField::InternalName,
+                version::VersionField::OriginalFileName,
+            ] {
+                if let Some(value) = v.get(field) {
+                    fields.push((field.event_name(), value));
+                }
+            }
+        }
+        manifest::requires_elevation(self.manifest.as_ref(), file_name, &fields)
     }
 
     /// The section whose mapped range contains `rva`: `VirtualAddress` up
@@ -919,15 +980,34 @@ fn parse_impl(
 
     let mut resources = None;
     let mut version_info = None;
+    let mut manifest = None;
     if let Some(dir) = data_directories
         .get(DataDirectoryKind::Resource.index())
         .filter(|d| directories && d.is_present())
     {
         if let Some(summary) = resource::walk(data, layout, *dir, &mut warnings) {
             version_info = version_from_resources(data, &summary, &mut warnings);
+            manifest = manifest_from_resources(data, &summary, &mut warnings);
             resources = Some(summary);
         }
     }
+
+    let directory = |kind: DataDirectoryKind| {
+        data_directories
+            .get(kind.index())
+            .copied()
+            .filter(DataDirectory::is_present)
+    };
+    let imports = directory(DataDirectoryKind::Import)
+        .and_then(|d| imports::parse_imports(data, layout, d, optional.format, &mut warnings));
+    let exports = directory(DataDirectoryKind::Export)
+        .and_then(|d| imports::parse_exports(data, layout, d, &mut warnings));
+    let driver = driver::classify(
+        optional.subsystem,
+        coff.characteristics,
+        &sections,
+        imports.as_ref(),
+    );
 
     Ok(PeInfo {
         file_size: file_len,
@@ -943,6 +1023,10 @@ fn parse_impl(
         debug,
         resources,
         version_info,
+        imports,
+        exports,
+        manifest,
+        driver,
         parse_warnings: warnings.list,
         parse_warnings_truncated: warnings.truncated,
     })
@@ -1234,4 +1318,28 @@ fn version_from_resources(
             None
         }
     }
+}
+
+/// The first standard manifest (`RT_MANIFEST` ID 1, 2 or 3, as the loader
+/// looks them up) that parses. Each one that does not is a warning.
+fn manifest_from_resources(
+    data: &[u8],
+    summary: &ResourceSummary,
+    warnings: &mut Warnings,
+) -> Option<Manifest> {
+    for entry in &summary.standard_manifests {
+        let at = entry
+            .file_offset
+            .and_then(|o| usize::try_from(o).ok())
+            .unwrap_or(usize::MAX);
+        let Some(raw) = entry.bytes(data) else {
+            warnings.push(at, WarningKind::ResourceOutOfBounds);
+            continue;
+        };
+        match manifest::parse_manifest(raw) {
+            Ok(m) => return Some(m),
+            Err(e) => warnings.push(at, WarningKind::Manifest(e)),
+        }
+    }
+    None
 }

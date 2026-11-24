@@ -51,6 +51,7 @@ libc = { version = "0.2.191", default-features = false }
 md-5 = { version = "0.11.0", default-features = false }
 proc-macro2 = { version = "1.0.107", default-features = false }
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
+quick-xml = { version = "0.41.0", default-features = false }
 regex-automata = { version = "0.4.19", default-features = false, features = ["std", "syntax", "perf", "unicode", "meta", "nfa-pikevm", "hybrid"] }
 regex-syntax = { version = "0.8.12", default-features = false, features = ["std", "unicode"] }
 ring = { version = "0.17.14", default-features = false, features = ["alloc"] }

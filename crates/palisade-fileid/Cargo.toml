@@ -22,10 +22,15 @@ os-trust = []
 md-5 = { workspace = true }
 # The shared verification-error table (#50, #58).
 palisade-core = { workspace = true, features = ["serde"] }
+# Bounded, streaming parsing of the RT_MANIFEST resource (#45). It never
+# expands DTD entities.
+quick-xml = { workspace = true }
 ring = { workspace = true }
 serde = { workspace = true }
 sha1 = { workspace = true }
 sha2 = { workspace = true }
+# NFC for version-info name matching (#45).
+unicode-normalization = { workspace = true }
 
 # `O_NONBLOCK`, so opening a path that has become a FIFO cannot block.
 [target.'cfg(unix)'.dependencies]

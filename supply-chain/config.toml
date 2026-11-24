@@ -699,6 +699,11 @@ version = "1.11.0"
 criteria = "safe-to-run"
 notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
 
+[[exemptions.quick-xml]]
+version = "0.41.0"
+criteria = "safe-to-deploy"
+notes = "Added by #45 (palisade-fileid: parsing the RT_MANIFEST resource). The crate says #![forbid(unsafe_code)], has no build script or proc-macro, and with default features off depends only on memchr. 0.41.0 is the first version without RUSTSEC-2026-0194 and RUSTSEC-2026-0195. Used without DTD support: entities other than the five predefined ones are rejected. Audit, or import an audit, before bumping."
+
 [[exemptions.quote]]
 version = "1.0.47"
 criteria = "safe-to-deploy"

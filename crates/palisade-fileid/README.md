@@ -13,6 +13,19 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   (stored and computed) and per-section entropy. It walks the resource tree and
   parses the version resource: `VS_FIXEDFILEINFO`, every `StringFileInfo`
   language block, language selection and the file-name fallback chain.
+  It also reads the import table (module and function names, capped at
+  10,000 functions; every module name is still checked) and the export
+  table (names, ordinals and forwarders; `CPlApplet`, `DllRegisterServer`,
+  `DllGetClassObject` and `ServiceMain` are found by the loader's binary
+  search over the whole name table). It classifies kernel drivers:
+  subsystem native plus a kernel import, an `INIT` section or
+  `IMAGE_FILE_SYSTEM`, with the reasons. It parses the application
+  manifest (`requestedExecutionLevel`, `uiAccess`, `autoElevate`,
+  `dpiAware`, assembly identity, `supportedOS`) with a bounded XML parser
+  that rejects DTDs and undefined entities, and gives the
+  `requires_elevation` heuristic with its reason. `NormalizedName` gives the
+  trimmed, whitespace-collapsed NFC and case-folded forms of a version
+  string for matching, keeping the original.
 - `hash`: flat SHA-256, SHA-1, MD5, SHA-384 and SHA-512, computed together in
   one streaming pass ([#46](https://github.com/jusso-dev/palisade/issues/46)).
   SHA-256 is the primary identity. SHA-1 and MD5 are not collision resistant
@@ -486,9 +499,11 @@ hashing, PE parsing and the Authenticode hash over the same synthetic inputs:
 `palisade-core` (for the shared `VerificationError` table, with its `serde`
 feature), plus the RustCrypto `sha2`, `sha1` and `md-5` crates,
 `ring` for signature verification and the hash cache record MAC (ADR 0008),
-used only inside `authenticode/crypto.rs` and `hash/mac.rs`, and `serde`
+used only inside `authenticode/crypto.rs` and `hash/mac.rs`, `serde`
 (derive only, no format crate) so certificate and chain reports serialise
-with stable field names. The workspace rules are enforced by
+with stable field names, `quick-xml` for the application manifest (no
+default features, no DTD support) and `unicode-normalization` for NFC. The
+workspace rules are enforced by
 `cargo xtask check-deps`.
 
 `ring` is not pure Rust (it has C and assembly), and on aarch64 Windows it
