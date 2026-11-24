@@ -1,9 +1,20 @@
 # cargo-nextest configuration. CI runs `cargo nextest run --profile ci`.
 # Reference: https://nexte.st/docs/configuration/
+# Conventions for tests themselves are in docs/testing.md.
+
+[profile.default]
+# Never retry: a test that passes only on a second try is a bug to fix, not
+# to hide.
+retries = 0
+# Report a test as slow after 60 s. It still runs to the end; the slowest
+# property tests take tens of seconds.
+slow-timeout = "60s"
 
 [profile.ci]
 # Run every test even after a failure, so one run reports all of them.
 fail-fast = false
+retries = 0
+slow-timeout = "60s"
 
 [profile.ci.junit]
 # Written to target/nextest/ci/junit.xml. `cargo xtask test-summary` turns it

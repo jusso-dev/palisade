@@ -7,7 +7,9 @@
 #![forbid(unsafe_code)]
 
 mod ci;
+mod coverage;
 mod deps;
+mod fuzz;
 mod junit;
 mod manifests;
 mod report;
@@ -24,9 +26,10 @@ const HELP: &str = "\
 Usage: cargo xtask <command>
 
 Commands:
-  audit            Run cargo-audit, ignoring exactly the advisories deny.toml ignores
-  ci [--fast]      Run the checks from .github/workflows/ci.yml locally (--fast skips docs,
-                   feature-powerset and msrv)
+  audit            Run cargo-audit over the root and fuzz lockfiles, ignoring exactly the
+                   advisories deny.toml ignores
+  ci [--fast]      Run the checks from .github/workflows/ci.yml locally (--fast skips coverage,
+                   fuzz, docs, feature-powerset and msrv)
   check-deps       Enforce the allowed dependency directions between crates
   check-manifests  Enforce workspace inheritance of package fields, lints and dependency versions,
                    and that every crate README documents its features
@@ -43,6 +46,11 @@ Commands:
                    and that nothing under .github names a cloud-managed build service
   test-summary <label> <junit.xml>
                    Summarise a nextest JUnit report for the GitHub job page
+  coverage-summary <label> <coverage.json>
+                   Summarise a cargo-llvm-cov JSON summary for the GitHub job page
+  fuzz [--seconds N] [--target NAME]
+                   Build every cargo-fuzz target, seed it from the test fixtures and run it for
+                   N seconds (default 60), or only NAME; needs the pinned nightly and cargo-fuzz
   help             Show this message
 ";
 
@@ -51,6 +59,14 @@ fn main() -> ExitCode {
     if let [command, label, path] = args.as_slice() {
         if command == "test-summary" {
             return test_summary(label, Path::new(path));
+        }
+        if command == "coverage-summary" {
+            return coverage_summary(label, Path::new(path));
+        }
+    }
+    if let [command, rest @ ..] = args.as_slice() {
+        if command == "fuzz" {
+            return run_fuzz(rest);
         }
     }
     match args.as_slice() {
@@ -142,26 +158,97 @@ fn test_summary(label: &str, path: &Path) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let markdown = junit::markdown(label, &report);
-    match std::env::var_os("GITHUB_STEP_SUMMARY") {
-        Some(summary) => {
-            use std::io::Write as _;
-            let written = std::fs::OpenOptions::new()
-                .append(true)
-                .create(true)
-                .open(&summary)
-                .and_then(|mut f| f.write_all(markdown.as_bytes()));
-            if let Err(error) = written {
-                eprintln!("test-summary: error: cannot write the step summary: {error}");
-                return ExitCode::FAILURE;
-            }
-        }
-        None => print!("{markdown}"),
+    if let Err(error) = write_step_summary(&junit::markdown(label, &report)) {
+        eprintln!("test-summary: error: {error}");
+        return ExitCode::FAILURE;
     }
     for annotation in junit::annotations(&report) {
         println!("{annotation}");
     }
     ExitCode::SUCCESS
+}
+
+/// Prints the per-crate table of a `cargo llvm-cov --json --summary-only`
+/// report to the job summary, and a warning for each crate below its
+/// coverage target. Coverage is not a gate: this fails only when the report
+/// cannot be read.
+fn coverage_summary(label: &str, path: &Path) -> ExitCode {
+    let root = workspace_root();
+    let report = read(path).and_then(|json| coverage::parse(&json, &root.to_string_lossy()));
+    let report = match report {
+        Ok(report) => report,
+        Err(error) => {
+            eprintln!("coverage-summary: error: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Err(error) = write_step_summary(&coverage::markdown(label, &report)) {
+        eprintln!("coverage-summary: error: {error}");
+        return ExitCode::FAILURE;
+    }
+    for annotation in coverage::annotations(label, &report) {
+        println!("{annotation}");
+    }
+    ExitCode::SUCCESS
+}
+
+/// `cargo xtask fuzz`: runs every fuzz target, then writes the results to
+/// the job summary. Fails if any target failed.
+fn run_fuzz(args: &[String]) -> ExitCode {
+    let args = match fuzz::parse_args(args) {
+        Ok(args) => args,
+        Err(error) => {
+            eprintln!("fuzz: error: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let outcomes = match fuzz::run(&workspace_root(), &args) {
+        Ok(outcomes) => outcomes,
+        Err(error) => {
+            println!(
+                "::error title=Fuzzing could not run::{}",
+                fuzz::escape_data(&error)
+            );
+            eprintln!("fuzz: error: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let summary = write_step_summary(&fuzz::markdown(args.seconds, &outcomes));
+    for annotation in fuzz::annotations(&outcomes) {
+        println!("{annotation}");
+    }
+    if let Err(error) = summary {
+        eprintln!("fuzz: error: {error}");
+        return ExitCode::FAILURE;
+    }
+    let failed = outcomes.iter().filter(|o| o.failure.is_some()).count();
+    if failed == 0 {
+        println!("fuzz: all {} targets passed", outcomes.len());
+        ExitCode::SUCCESS
+    } else {
+        eprintln!("fuzz: {failed} of {} targets failed", outcomes.len());
+        ExitCode::FAILURE
+    }
+}
+
+/// Appends Markdown to `$GITHUB_STEP_SUMMARY`, or prints it outside GitHub
+/// Actions.
+fn write_step_summary(markdown: &str) -> Result<(), String> {
+    match std::env::var_os("GITHUB_STEP_SUMMARY") {
+        Some(summary) => {
+            use std::io::Write as _;
+            std::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(&summary)
+                .and_then(|mut f| f.write_all(markdown.as_bytes()))
+                .map_err(|e| format!("cannot write the step summary: {e}"))
+        }
+        None => {
+            print!("{markdown}");
+            Ok(())
+        }
+    }
 }
 
 /// Runs one check and prints its outcome. Returns `true` when it passed.
@@ -281,10 +368,11 @@ fn check_supply_chain(root: &Path) -> Result<Vec<String>, String> {
 }
 
 /// `cargo xtask audit`: cargo-audit with exactly the advisory ignores from
-/// `deny.toml`, so the two tools agree. The ignores are checked first (ID,
+/// `deny.toml`, so the two tools agree, over the root `Cargo.lock` and the
+/// lockfile of every fuzz workspace in [`fuzz::PROJECTS`]. The ignores are checked first (ID,
 /// reason, an expiry date that has not passed, no scope), so an expired or
 /// incomplete ignore fails here too, including in the daily audit. Exits
-/// with cargo-audit's status.
+/// non-zero if any cargo-audit run fails.
 fn run_audit() -> ExitCode {
     let root = workspace_root();
     let checked = read(&root.join("deny.toml")).and_then(|source| {
@@ -302,23 +390,47 @@ fn run_audit() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let mut command = Command::new(cargo);
-    command.arg("audit").current_dir(&root);
-    for id in &ignores {
-        command.args(["--ignore", id]);
-    }
+    // The root lockfile, then each fuzz workspace's own lockfile.
+    let mut lockfiles = vec![None];
+    lockfiles.extend(
+        fuzz::PROJECTS
+            .iter()
+            .map(|p| Some(format!("{}/Cargo.lock", p.dir))),
+    );
     println!(
         "audit: cargo audit, ignoring {} advisories from deny.toml",
         ignores.len()
     );
-    match command.status() {
-        Ok(status) if status.success() => ExitCode::SUCCESS,
-        Ok(_) => ExitCode::FAILURE,
-        Err(error) => {
-            eprintln!("audit: error: cannot run cargo audit: {error}");
-            ExitCode::FAILURE
+    let mut passed = true;
+    let mut fetched = false;
+    for lockfile in &lockfiles {
+        let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+        let mut command = Command::new(cargo);
+        command.arg("audit").current_dir(&root);
+        if let Some(lockfile) = lockfile {
+            println!("audit: {lockfile}");
+            command.args(["--file", lockfile]);
         }
+        // The advisory database is fetched once, by the first run.
+        if fetched {
+            command.arg("--no-fetch");
+        }
+        for id in &ignores {
+            command.args(["--ignore", id]);
+        }
+        match command.status() {
+            Ok(status) => passed &= status.success(),
+            Err(error) => {
+                eprintln!("audit: error: cannot run cargo audit: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+        fetched = true;
+    }
+    if passed {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
     }
 }
 

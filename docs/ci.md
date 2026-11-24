@@ -18,9 +18,12 @@ type.
 | `fmt` | ubuntu-latest | `cargo fmt --all --check` |
 | `clippy` | ubuntu-latest, windows-latest | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, then the same for `palisade-core` and `palisade-driver` with `--no-default-features` (the `no_std` build), and for `palisade-core` with `--no-default-features --features schema` (`no_std` with serde and JSON Schema support) |
 | `test` | ubuntu-latest, macos-latest, windows-latest (x64), windows-11-arm (ARM64, native) | `cargo nextest run --workspace --all-features --locked --profile ci`, then the doctests with `cargo test --doc`, then `cargo xtask test-summary` (see [Test reports](#test-reports)) |
+| `coverage` | ubuntu-latest, windows-latest | `cargo llvm-cov nextest --workspace --all-features --locked --profile ci --json --summary-only`, then `cargo xtask coverage-summary` (see [Coverage, fuzzing and benchmarks](#coverage-fuzzing-and-benchmarks)) |
+| `fuzz` | ubuntu-latest | `cargo xtask fuzz`: every cargo-fuzz target, seeded from the test fixtures, for 60 s each, on the pinned nightly |
+| `bench` | ubuntu-latest | `cargo test --bench <name>` for every criterion bench: builds them and runs each benchmark once, without timing |
 | `msrv` | ubuntu-latest | `cargo +1.85.0 check --workspace --all-targets --all-features --locked`, after checking that the version matches `rust-version` in `Cargo.toml` |
 | `docs` | ubuntu-latest | `cargo doc --workspace --no-deps --all-features --locked` with `RUSTDOCFLAGS=-D warnings` |
-| `deps` | ubuntu-latest | `cargo xtask check-deps`, `cargo xtask check-manifests`, `cargo xtask check-unsafe`, `cargo deny --locked check`, `cargo xtask audit` (cargo-audit with the ignores from `deny.toml`) |
+| `deps` | ubuntu-latest | `cargo xtask check-deps`, `cargo xtask check-manifests`, `cargo xtask check-unsafe`, `cargo deny --locked check` for the root workspace and for each fuzz workspace (with the root `deny.toml`), `cargo xtask audit` (cargo-audit over the root and every fuzz lockfile, with the ignores from `deny.toml`) |
 | `supply-chain` | ubuntu-latest | `cargo vet --locked`, `cargo xtask check-supply-chain`, and on PRs `cargo xtask deps-report --base <base>` to the job summary ([dependencies.md](dependencies.md)) |
 | `feature-powerset` | ubuntu-latest | `cargo hack check --each-feature --all-targets --locked` on the portable crates (`core`, `fileid`, `policy`, `proto`, `server`, `cli`, `console`) |
 | `runner-guard` | ubuntu-latest | `cargo xtask check-workflows` ([Runner and action policy](#runner-and-action-policy)) |
@@ -33,8 +36,9 @@ was skipped, so new jobs are covered without changing the branch rules. The
 ruleset is in [repo-settings.md](repo-settings.md#branch-protection-for-main).
 Requiring the one aggregate check, instead of each job by name, is how the
 required set in #21 (fmt, both clippy runs, the tests, msrv, deps, docs and
-runner-guard) is enforced: a matrix job's check names change whenever the
-matrix does, and the aggregate cannot be left out of date.
+runner-guard), and the coverage, fuzz and bench jobs from #25, is enforced:
+a matrix job's check names change whenever the matrix does, and the
+aggregate cannot be left out of date.
 
 The `test` matrix runs the whole workspace on every runner. On Linux and the
 other desktop OS that means the portable crates, plus the Windows-only crates
@@ -50,6 +54,42 @@ tests fail, and `cargo xtask test-summary` turns the report into a table on
 the job's summary page and one error annotation per failed test. Failure
 names are escaped, so a test name cannot inject a workflow command. If the
 tests did not build, there is no report, and the step only warns.
+
+#### Coverage, fuzzing and benchmarks
+
+Details and local commands are in [testing.md](testing.md).
+
+- `coverage` runs the same nextest suite instrumented by cargo-llvm-cov, and
+  `cargo xtask coverage-summary` writes line, function and region coverage
+  per crate to the job summary. It is reported, not enforced: a crate below
+  its target (80% lines for `palisade-policy` and `palisade-fileid`) gets a
+  warning annotation and the job still passes.
+- `fuzz` runs `cargo xtask fuzz`. It builds every target of every project
+  listed in `xtask/src/fuzz.rs`, each from its fuzz workspace's committed
+  `Cargo.lock`, seeds
+  each corpus from the crate's synthetic fixtures, and runs each target for
+  60 s. A crash, hang, leak or out-of-memory input fails the job, and the job
+  summary shows each failing input up to 64 KiB as base64, with the command
+  that reproduces it. The nightly toolchain is pinned by date. cargo-fuzz has
+  no prebuilt binary in the install action, so it is built from crates.io
+  with `cargo install --locked` (`fallback: cargo-install`, which passes no
+  token).
+- `bench` builds every criterion bench and runs each benchmark once in test
+  mode, so a bench that no longer builds or panics fails. Timings are not
+  measured on shared runners. A unit test fails if a `benches/*.rs` file is
+  not named in the job.
+
+### `fuzz.yml` (weekly on Sunday at 04:41 UTC, and on demand)
+
+| Job | Runners | What it runs |
+|---|---|---|
+| `fuzz` | ubuntu-latest | `cargo xtask fuzz --seconds 1800 --target <name>`, one job per target of every fuzz project (target names are unique, so the name selects the project) |
+| `report` | ubuntu-latest | On failure, opens an issue titled "Scheduled fuzzing found a failure" with the `area:security` label, or comments on the open one |
+
+Longer runs find what the 60 s PR run cannot. A unit test in
+`xtask/src/fuzz.rs` keeps the matrix in step with the target list. Only
+`report` has `issues: write`, and it runs no repository code. The failing
+input is in the failed job's summary.
 
 ### `pr-title.yml` (pull requests, including title edits)
 
@@ -104,21 +144,25 @@ checkout). Details:
 
 ### `audit.yml` (daily at 03:17 UTC, and on demand)
 
-Runs `cargo deny check advisories` and `cargo xtask audit` (cargo-audit with the same ignores) against `main`. Both
+Runs `cargo deny check advisories` and `cargo xtask audit` (cargo-audit with the same ignores) against `main`, for the root workspace and every fuzz workspace's lockfile. Both
 also run on every PR (the `deps` job). A new advisory can affect `main`
 without any change here, which is why this is also scheduled. On failure, a second job opens an issue titled "Scheduled advisory
 audit is failing" with the `area:security` label, or comments on the open
-one. That job and the `sync` job in `labels.yml` are the only places with
-`issues: write`.
+one. That job, the `report` job in `fuzz.yml` and the `sync` job in `labels.yml`
+are the only places with `issues: write`.
 
 ### Dependabot (`.github/dependabot.yml`)
 
-Weekly updates for Cargo dependencies and for the pinned action SHAs, with
-minor and patch bumps grouped into one PR per ecosystem. Security updates are
+Weekly updates for Cargo dependencies (the workspace, and each fuzz
+workspace's own lockfile) and for the pinned action SHAs, with minor and
+patch bumps grouped into one PR per manifest. Security updates are
 opened as soon as an advisory is published. Dependabot PRs run the full CI
 like any other PR, including `DCO`, cargo-deny, cargo-audit and cargo-vet, so
-a bump merges only once the new version is audited or exempted with a note
-([dependencies.md](dependencies.md#cargo-vet)). They are labelled
+a bump of the root workspace merges only once the new version is audited or
+exempted with a note ([dependencies.md](dependencies.md#cargo-vet)).
+cargo-deny and cargo-audit also check each fuzz workspace's lockfile; cargo-vet
+covers only the root workspace, so a fuzz-only bump is reviewed in its PR.
+The fuzz crates are never shipped ([testing.md](testing.md#fuzzing)). They are labelled
 `area:security` (Cargo) or `area:infra` (actions), because the label sync
 deletes Dependabot's default labels.
 
@@ -160,7 +204,8 @@ Other hardening:
 - Rust caches are written only from `main` (`save-if`), so PR builds,
   including forks, cannot poison them.
 - Superseded PR runs are cancelled; pushes to `main` always finish.
-- Every job has a `timeout-minutes` (30, or 60 for the test matrix).
+- Every job has a `timeout-minutes` (30, or 60 for the test and coverage
+  matrices and the weekly fuzz jobs).
 - CI sets `CARGO_TERM_COLOR=always`, `CARGO_INCREMENTAL=0` and
   `RUST_BACKTRACE=1`.
 - Every Cargo command uses `--locked`, so CI builds exactly `Cargo.lock`.
@@ -175,14 +220,15 @@ automatically. One command runs every check in `ci.yml`, with the same
 command lines:
 
 ```sh
-cargo xtask ci          # everything, including docs, feature-powerset and msrv
-cargo xtask ci --fast   # skips the three slow steps
+cargo xtask ci          # everything, including coverage, fuzz, docs, feature-powerset and msrv
+cargo xtask ci --fast   # skips those five slow steps
 ```
 
 It runs every step even after one fails, and lists the failed ones at the
 end. Before it starts, it checks that the extra tools are installed
 (cargo-nextest, cargo-deny, cargo-audit, cargo-vet, cargo-hack, actionlint, zizmor and,
-without `--fast`, the MSRV toolchain), and prints the install command for
+without `--fast`, cargo-llvm-cov, the fuzzing nightly with cargo-fuzz, and the
+MSRV toolchain), and prints the install command for
 each one that is missing, at the version CI uses. Jobs that differ only by
 runner run once, on your machine. A unit test in `xtask/src/ci.rs` compares
 its steps with `ci.yml`, so the two cannot drift.
@@ -202,10 +248,16 @@ cargo xtask check-manifests
 cargo xtask check-unsafe
 cargo xtask check-workflows
 cargo deny --locked check          # needs cargo-deny 0.22
+cargo deny --locked --manifest-path crates/palisade-fileid/fuzz/Cargo.toml --config deny.toml check
+cargo deny --locked --manifest-path crates/palisade-proto/fuzz/Cargo.toml --config deny.toml check
 cargo xtask audit                  # cargo-audit 0.23, with deny.toml's ignores
 cargo vet --locked                 # needs cargo-vet 0.10
 cargo xtask check-supply-chain
 cargo xtask deps-report            # add --base origin/main to compare
+cargo llvm-cov nextest --workspace --all-features --locked --profile ci \
+  --json --summary-only --output-path target/llvm-cov-summary.json   # needs cargo-llvm-cov 0.9
+cargo xtask fuzz                   # needs nightly-2026-11-20 and cargo-fuzz 0.13
+cargo test --workspace --all-features --locked --bench criterion_eval --bench hash_and_parse
 cargo hack check --each-feature --all-targets --locked \
   -p palisade-core -p palisade-fileid -p palisade-policy \
   -p palisade-proto -p palisade-server -p palisade-cli \
@@ -235,9 +287,14 @@ same tests, without the JUnit report.
 Each of these arrives with the work it depends on, and runs on GitHub-hosted
 runners like everything else:
 
-- Uploading the JUnit report as an artefact. That needs an action outside the
-  allowlist, so it waits for the test infrastructure work (#25). The summary
-  and annotations above already show the results on the run.
+- Uploading reports as artefacts (the JUnit XML, the lcov coverage report,
+  fuzz crash inputs, the dependency report) and posting summaries as PR
+  comments. Artefacts need an action outside the allowlist, and comments need
+  a write token on pull requests, so both stay with #25. Every one of these
+  is in the job summary instead: test results, the coverage table, fuzz
+  findings as base64, and the dependency report.
+- A coverage no-decrease gate for `palisade-policy`, and the benchmark
+  regression comparison against `main` with its performance budget (#25).
 - A Postgres service container for server tests, with the first server tests
   (#126, #127).
 - The mdBook build and link check, with the documentation site (#27).

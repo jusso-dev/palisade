@@ -58,7 +58,14 @@ unused-allowed-license = "allow"
 #     { crate = "example", allow = ["GPL-3.0-only"] },
 # ]
 # `cargo xtask check-supply-chain` checks that every entry has one.
-exceptions = []
+# The root workspace does not use libfuzzer-sys, so `cargo deny check` there
+# warns that the exception is unused. The fuzz workspaces are checked against
+# this same file (`--manifest-path crates/<crate>/fuzz/Cargo.toml --config
+# deny.toml`), where it is used.
+exceptions = [
+    # reason: LLVM's permissive licence, for libFuzzer in the fuzz workspaces (crates/*/fuzz) only; never shipped
+    { crate = "libfuzzer-sys", allow = ["NCSA"] },
+]
 
 [licenses.private]
 # Workspace crates are unpublished (`publish = false`); their own licence is

@@ -87,6 +87,80 @@ jobs:
           LABEL: ${{ matrix.os }}
         run: cargo xtask test-summary "$LABEL" target/nextest/ci/junit.xml
 
+  # Line, function and region coverage of the same tests, instrumented by
+  # cargo-llvm-cov, as a per-crate table on the job summary page. Reported,
+  # not gated: a crate below its target only gets a warning (docs/testing.md).
+  coverage:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # rust-toolchain.toml includes llvm-tools-preview, which cargo-llvm-cov needs.
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: cargo-nextest@0.9.152,cargo-llvm-cov@0.9.2
+      - run: >-
+          cargo llvm-cov nextest --workspace --all-features --locked --profile ci
+          --json --summary-only --output-path target/llvm-cov-summary.json
+      - name: Coverage summary
+        shell: bash
+        env:
+          LABEL: ${{ matrix.os }}
+        run: cargo xtask coverage-summary "$LABEL" target/llvm-cov-summary.json
+
+  # Every cargo-fuzz target, seeded from the synthetic test fixtures, for 60 s
+  # each. A finding fails the job and is written to the job summary with a
+  # reproducer. fuzz.yml runs the same targets for longer every week.
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      # libFuzzer needs nightly. Keep in step with TOOLCHAIN in xtask/src/fuzz.rs.
+      - run: rustup toolchain install nightly-2026-11-20 --profile minimal
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: cargo-fuzz@0.13.2
+          # The action has no prebuilt cargo-fuzz. Build it from crates.io
+          # with `cargo install --locked`, which needs no token.
+          fallback: cargo-install
+      - run: cargo xtask fuzz
+
+  # The criterion benchmarks build, and each runs once in test mode. Timings
+  # are not measured here: shared hosted runners are too noisy to compare.
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Name every bench target, so only the benches run (`--benches` would
+      # rerun the library tests). A test in xtask/src/ci.rs keeps the list complete.
+      - run: >-
+          cargo test --workspace --all-features --locked
+          --bench criterion_eval --bench hash_and_parse
+
   msrv:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -135,6 +209,15 @@ jobs:
       - run: cargo xtask check-manifests
       - run: cargo xtask check-unsafe
       - run: cargo deny --locked check
+      # Each fuzz project is a separate workspace with its own lockfile,
+      # checked against the same deny.toml. A test in xtask/src/fuzz.rs keeps
+      # this in step with the fuzz projects.
+      - run: >-
+          cargo deny --locked --manifest-path crates/palisade-fileid/fuzz/Cargo.toml
+          --config deny.toml check
+      - run: >-
+          cargo deny --locked --manifest-path crates/palisade-proto/fuzz/Cargo.toml
+          --config deny.toml check
       # The same advisory database, read by a second tool on every PR, with
       # the same ignores as deny.toml; the daily audit.yml catches advisories
       # published after a merge.
@@ -232,7 +315,7 @@ jobs:
   # The single required check from this workflow for branch protection.
   ci-ok:
     if: always()
-    needs: [fmt, clippy, test, msrv, docs, deps, supply-chain, feature-powerset, runner-guard, workflow-lint]
+    needs: [fmt, clippy, test, coverage, fuzz, bench, msrv, docs, deps, supply-chain, feature-powerset, runner-guard, workflow-lint]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

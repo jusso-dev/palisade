@@ -52,7 +52,7 @@ Review the diff after each run. A bless writes whatever the code produces.
 
 ## Fuzzing
 
-`fuzz/` is a separate cargo-fuzz workspace. `trust_set_decode` feeds arbitrary bytes to the trust-set decoders and the acceptance rule. Run it from this directory with `cargo +nightly fuzz run trust_set_decode`.
+`fuzz/` is a separate cargo-fuzz workspace. `trust_set_decode` feeds arbitrary bytes to the trust-set decoders and the acceptance rule. Run it from this directory with `cargo +nightly fuzz run trust_set_decode`, or from the repository root with `cargo xtask fuzz --target trust_set_decode`, which also seeds the corpus from `tests/trust_set.rs` (`write_trust_set_fuzz_seeds`). CI runs it with every other fuzz target ([docs/testing.md](../../docs/testing.md#fuzzing)).
 
 ## Allowed dependencies
 

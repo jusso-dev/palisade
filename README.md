@@ -106,6 +106,7 @@ A quick start that installs Palisade on a disposable Windows virtual machine arr
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md): Contributor Covenant 2.1
 - [docs/responsible-use.md](docs/responsible-use.md): Palisade is defensive; what contributions are not accepted
 - [docs/ci.md](docs/ci.md): CI jobs and the runner policy
+- [docs/testing.md](docs/testing.md): kinds of test, conventions, fuzzing, coverage and benchmarks
 - [docs/workspace.md](docs/workspace.md): crate layout, dependency, unsafe-code and feature-flag rules
 - [docs/dependencies.md](docs/dependencies.md): admitting dependencies, cargo-deny, cargo-audit, cargo-vet and the dependency report
 - [docs/repo-settings.md](docs/repo-settings.md): the repository settings the project relies on

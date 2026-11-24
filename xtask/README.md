@@ -6,7 +6,7 @@ the pinned toolchain and needs no other tools.
 
 | Command | What it does |
 |---|---|
-| `ci [--fast]` | Runs every check in `.github/workflows/ci.yml` locally, with the same commands. `--fast` skips docs, feature-powerset and msrv. A unit test keeps its step list identical to `ci.yml`. Steps: `src/ci.rs`. |
+| `ci [--fast]` | Runs every check in `.github/workflows/ci.yml` locally, with the same commands. `--fast` skips coverage, fuzz, docs, feature-powerset and msrv. A unit test keeps its step list identical to `ci.yml`. Steps: `src/ci.rs`. |
 | `check-deps` | The allowed dependency directions between workspace crates, and crates banned from the `palisade-policy` and `palisade-agent` dependency trees. Rules: `src/deps.rs`. |
 | `check-manifests` | Every member crate inherits version, edition, MSRV, licence, repository, authors, `publish` and lints from the workspace, and takes every dependency from `[workspace.dependencies]`. `test-util` is never on by default and only dev-dependencies may enable it (an explicit `--features test-util` on the command line still can). Every crate README has no HTML comments, opens with a purpose paragraph, has the required sections and documents every feature. Rules: `src/manifests.rs`. |
 | `audit` | Runs cargo-audit with exactly the advisory ignores from `deny.toml`. |
@@ -16,6 +16,8 @@ the pinned toolchain and needs no other tools.
 | `deps-report [--base <commit>]` | The dependency report on the CI job summary: duplicates, `cargo tree -d`, third-party crates per crate, third-party `unsafe` counts and their change, build scripts and proc-macros. Code: `src/report.rs`. |
 | `sbom` | Reserved for #226; prints where the CycloneDX files will go (`target/dist/sbom/`) and fails. |
 | `test-summary <label> <junit.xml>` | Turns a nextest JUnit report into the CI job summary and one annotation per failed test. Code: `src/junit.rs`. |
+| `coverage-summary <label> <coverage.json>` | Turns a `cargo llvm-cov --json --summary-only` report into a per-crate coverage table on the job summary, with a warning for each crate below its target. Code: `src/coverage.rs`. |
+| `fuzz [--seconds N] [--target NAME]` | Builds every cargo-fuzz target, seeds its corpus from the test fixtures, runs it for `N` seconds (default 60) and writes the results, with a base64 reproducer for each finding, to the job summary. Needs the pinned nightly and cargo-fuzz. Its tests keep the target list in step with each fuzz `Cargo.toml` and `fuzz.yml`. Code: `src/fuzz.rs`; see `docs/testing.md`. |
 
 Each command prints one line per violation and exits non-zero if there are
 any. Each rule set has unit tests with passing and failing fixtures:

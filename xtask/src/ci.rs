@@ -51,6 +51,14 @@ const HACK: Tool = Tool {
     check: &["cargo", "hack", "--version"],
     install: "cargo install --locked cargo-hack@0.6.46",
 };
+const LLVM_COV: Tool = Tool {
+    check: &["cargo", "llvm-cov", "--version"],
+    install: "cargo install --locked cargo-llvm-cov@0.9.2",
+};
+const FUZZ: Tool = Tool {
+    check: &["cargo", "+nightly-2026-11-20", "fuzz", "--version"],
+    install: "rustup toolchain install nightly-2026-11-20 --profile minimal && cargo install --locked cargo-fuzz@0.13.2",
+};
 const ACTIONLINT: Tool = Tool {
     check: &["actionlint", "-version"],
     install: "see https://github.com/rhysd/actionlint/releases (CI uses 1.7.12)",
@@ -98,6 +106,23 @@ pub const STEPS: &[Step] = &[
         "cargo test --workspace --all-features --locked --doc",
     ),
     Step {
+        tool: Some(LLVM_COV),
+        slow: true,
+        ..step(
+            "coverage",
+            "cargo llvm-cov nextest --workspace --all-features --locked --profile ci --json --summary-only --output-path target/llvm-cov-summary.json",
+        )
+    },
+    Step {
+        tool: Some(FUZZ),
+        slow: true,
+        ..step("fuzz", "cargo xtask fuzz")
+    },
+    step(
+        "bench",
+        "cargo test --workspace --all-features --locked --bench criterion_eval --bench hash_and_parse",
+    ),
+    Step {
         env: &[("RUSTDOCFLAGS", "-D warnings")],
         slow: true,
         ..step(
@@ -111,6 +136,20 @@ pub const STEPS: &[Step] = &[
     Step {
         tool: Some(DENY),
         ..step("deps", "cargo deny --locked check")
+    },
+    Step {
+        tool: Some(DENY),
+        ..step(
+            "deps",
+            "cargo deny --locked --manifest-path crates/palisade-fileid/fuzz/Cargo.toml --config deny.toml check",
+        )
+    },
+    Step {
+        tool: Some(DENY),
+        ..step(
+            "deps",
+            "cargo deny --locked --manifest-path crates/palisade-proto/fuzz/Cargo.toml --config deny.toml check",
+        )
     },
     Step {
         tool: Some(AUDIT),
@@ -293,6 +332,7 @@ mod tests {
             || command.starts_with("grep ")
             || command.starts_with("cargo xtask test-summary ")
             || command.starts_with("cargo xtask deps-report ")
+            || command.starts_with("cargo xtask coverage-summary ")
             || command.starts_with("archive=")
             || command.starts_with("echo ")
             || command.starts_with("exit ")
@@ -340,10 +380,13 @@ mod tests {
         let path =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows/ci.yml");
         let source = std::fs::read_to_string(path).unwrap();
-        for tool in [NEXTEST, DENY, AUDIT, VET, HACK, ZIZMOR] {
+        for tool in [NEXTEST, DENY, AUDIT, VET, HACK, LLVM_COV, FUZZ, ZIZMOR] {
             let pinned = tool.install.rsplit(' ').next().unwrap();
             assert!(source.contains(pinned), "ci.yml does not install {pinned}");
         }
+        let nightly = format!("+{}", crate::fuzz::TOOLCHAIN);
+        assert_eq!(FUZZ.check[1], nightly);
+        assert!(FUZZ.install.ends_with(crate::fuzz::CARGO_FUZZ));
         assert!(source.contains("ACTIONLINT_VERSION: \"1.7.12\""));
     }
 
@@ -368,6 +411,40 @@ mod tests {
     #[test]
     fn fast_skips_only_slow_steps() {
         let slow: Vec<&str> = STEPS.iter().filter(|s| s.slow).map(|s| s.job).collect();
-        assert_eq!(slow, ["docs", "feature-powerset"]);
+        assert_eq!(slow, ["coverage", "fuzz", "docs", "feature-powerset"]);
+    }
+
+    /// The `bench` job names every bench target, so a new one cannot be
+    /// left out of CI.
+    #[test]
+    fn bench_step_names_every_bench_target() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let mut found = Vec::new();
+        for entry in std::fs::read_dir(root.join("crates")).unwrap() {
+            let benches = entry.unwrap().path().join("benches");
+            let Ok(files) = std::fs::read_dir(&benches) else {
+                continue;
+            };
+            for file in files {
+                let path = file.unwrap().path();
+                if path.extension().is_some_and(|e| e == "rs") {
+                    found.push(path.file_stem().unwrap().to_string_lossy().into_owned());
+                }
+            }
+        }
+        found.sort();
+        let step = STEPS.iter().find(|s| s.job == "bench").unwrap();
+        let mut named: Vec<String> = step
+            .command
+            .split(" --bench ")
+            .skip(1)
+            .map(|n| n.split(' ').next().unwrap().to_owned())
+            .collect();
+        named.sort();
+        assert!(!found.is_empty());
+        assert_eq!(
+            named, found,
+            "the bench step must name every crates/*/benches/*.rs"
+        );
     }
 }

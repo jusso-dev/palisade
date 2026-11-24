@@ -35,13 +35,21 @@ less.
 | Check | Tool | Enforces |
 |---|---|---|
 | Lockfile | Cargo | `Cargo.lock` is committed, and every Cargo command uses `--locked`. |
-| Licences | `cargo deny check licenses` | Only the licences in `deny.toml` (Apache-2.0, MIT, BSD-2/3-Clause, ISC, Unicode-3.0, Zlib, CC0-1.0, MPL-2.0). GPL, AGPL and LGPL fail unless an exception with a reason is added. `confidence-threshold = 0.9`. |
+| Licences | `cargo deny check licenses` | Only the licences in `deny.toml` (Apache-2.0, MIT, BSD-2/3-Clause, ISC, Unicode-3.0, Zlib, CC0-1.0, MPL-2.0), plus the exceptions listed there with a reason. GPL, AGPL and LGPL fail unless an exception with a reason is added. `confidence-threshold = 0.9`. |
 | Sources | `cargo deny check sources` | crates.io only. Git dependencies and other registries fail. |
 | Bans | `cargo deny check bans` | No wildcard versions. `openssl` and `openssl-sys` are denied (use rustls). Duplicate versions warn. |
 | Advisories | `cargo deny check advisories`, `cargo xtask audit` (cargo-audit with the same ignores) | No known vulnerability, unsound or yanked crate. Unmaintained crates fail when a workspace crate depends on them directly. |
 | Audits | `cargo vet --locked` | Every crate is audited, covered by an imported audit, or exempted with a note (below). |
 | Repository rules | `cargo xtask check-supply-chain` | At most 10 crates in more than one version. Every advisory ignore has an ID, a reason and an `expiry` date that has not passed, and no `audit.toml` exists. Every skip has a `reason`, and every licence exception a `# reason:` comment. The cargo-vet criteria for each workspace crate, no `[policy]` entry that lowers what dependencies need, and a note on every exemption. |
 | Report | `cargo xtask deps-report` | On a PR that changes `Cargo.lock`, the job summary shows duplicates, `cargo tree -d`, third-party crates per workspace crate, every third-party crate's `unsafe` count with the change against the base branch, and the build scripts and proc-macros. A new crate with more than 100 `unsafe` keywords, or a version that adds more than 100 compared with the version it replaces, raises a warning on the run. The old counts come from the base commit: the report checks it out in a temporary git worktree and runs `cargo metadata --locked` there, which downloads and unpacks its locked crates.io packages (checksum-verified; nothing is built). If that fails, the change is shown without a warning rather than raising a false one. |
+
+The fuzz targets (`crates/*/fuzz`) are separate workspaces with their own `Cargo.lock`. The
+licence, source, ban and advisory checks run on them too, with this same `deny.toml`, and
+`cargo xtask audit` scans their lockfiles. Their one licence exception is `NCSA` for
+`libfuzzer-sys` (LLVM's permissive licence), which the root workspace does not use, so
+`cargo deny check` there warns that the exception is unused. cargo-vet covers only the root
+workspace; fuzz crates are never shipped, and a fuzz-only dependency is reviewed in its PR
+([testing.md](testing.md#fuzzing)).
 
 Advisories are also scanned daily (`audit.yml`), because a new advisory can affect `main`
 without any change here. A failure opens or updates an issue labelled `area:security`.
