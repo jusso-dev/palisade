@@ -354,19 +354,22 @@ pub(super) fn system_area_is_script(area: &[u8], name: &NameInfo) -> bool {
 const MAX_SHEBANG_LINE: usize = 512;
 
 /// A `#!` line followed directly by a ZIP local file header. A `#![` line
-/// is not a shebang line, as in `markers`.
+/// (after spaces or tabs) is not a shebang line, as in `markers`.
 pub(super) fn is_shebang_zip(head: &[u8]) -> bool {
-    head.starts_with(b"#!")
-        && !head
-            .get(2..)
-            .unwrap_or_default()
-            .trim_ascii_start()
-            .starts_with(b"[")
+    let Some(nl) = head.iter().take(MAX_SHEBANG_LINE).position(|b| *b == b'\n') else {
+        return false;
+    };
+    let line = head.get(..nl).unwrap_or_default();
+    let Some(interpreter) = line.strip_prefix(b"#!") else {
+        return false;
+    };
+    let attribute = interpreter
+        .iter()
+        .find(|b| !matches!(b, b' ' | b'\t'))
+        .is_some_and(|b| *b == b'[');
+    !attribute
         && head
-            .iter()
-            .take(MAX_SHEBANG_LINE)
-            .position(|b| *b == b'\n')
-            .and_then(|nl| head.get(nl + 1..))
+            .get(nl + 1..)
             .is_some_and(|rest| rest.starts_with(b"PK\x03\x04"))
 }
 

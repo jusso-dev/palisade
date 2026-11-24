@@ -568,7 +568,9 @@ pub fn classify<R: Read + Seek + ?Sized>(
             detect(&mut src, &name, &mut out);
             // The reader ended before the length it reported: the result
             // describes only part of the file, so it is not established.
-            if src.head_short() && out.parse_error.is_none() {
+            // That is the reason reported, over any structure error it
+            // caused (a compound file header cut short, say).
+            if src.head_short() {
                 out.parse_error = Some(ParseError::Io(io::ErrorKind::UnexpectedEof));
             }
             apply_name_hints(&name, &mut out);
@@ -620,16 +622,30 @@ fn detect<R: Read + Seek + ?Sized>(
     // is binary, so this is checked before the text test, and only once:
     // anything but a clean zip application is classified as text below.
     // A read failure in the probe is kept, and reported with whatever the
-    // text path finds, since the archive could not be ruled out.
-    let mut probe_error = None;
+    // rest finds (text, a script, a disc image), since the archive could
+    // not be ruled out.
     if text::is_shebang_zip(head) {
         let mut probe = out.clone();
         if zip::classify(src, name, &mut probe, true) {
             *out = probe;
             return;
         }
-        probe_error = probe.parse_error;
+        detect_unstructured(src, name, out);
+        if out.parse_error.is_none() {
+            out.parse_error = probe.parse_error;
+        }
+        return;
     }
+    detect_unstructured(src, name, out);
+}
+
+/// Content with no structure-defining magic at offset 0: Python bytecode,
+/// disc images (and scripts with a planted volume descriptor), then text.
+fn detect_unstructured<R: Read + Seek + ?Sized>(
+    src: &mut Source<'_, R>,
+    name: &NameInfo,
+    out: &mut Classification,
+) {
     let head = src.head();
     // Bytecode has a magic at offset 0, so it is checked before the volume
     // descriptors deeper in.
@@ -676,9 +692,6 @@ fn detect<R: Read + Seek + ?Sized>(
         return;
     }
     text::classify(src, name, out);
-    if out.parse_error.is_none() {
-        out.parse_error = probe_error;
-    }
 }
 
 /// Applies the rules where the name decides between kinds that content

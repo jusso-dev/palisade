@@ -3595,6 +3595,58 @@ fn rust_inner_attributes_do_not_start_a_zip_application() {
     );
 }
 
+#[test]
+fn a_short_head_is_the_reason_reported() {
+    // Round 17: a compound file whose reader ends inside its header was
+    // reported as a bad header, hiding that the read came up short.
+    let msi = cfb(installer_clsid(0x000c_1084));
+    for limit in [8, 20, 51, 600] {
+        let c = classify_ending_early(&msi, limit, 0);
+        assert_eq!(
+            (c.content_kind, c.parse_error),
+            (FileKind::OtherCfb, EOF),
+            "limit {limit}"
+        );
+    }
+    // A file that really is that short keeps its structure error.
+    assert_eq!(
+        classify(&msi[..20], None).parse_error,
+        Some(ParseError::CfbHeader)
+    );
+}
+
+#[test]
+fn failed_shebang_zip_probe_reads_survive_a_planted_descriptor() {
+    // Round 17: with a volume descriptor in the head as well, the probe's
+    // read error was dropped on the disc image paths.
+    let mut data = b"#!/bin/sh\nPK\x03\x04".to_vec();
+    data.resize(0x8800, 0);
+    data[0x8000..0x8007].copy_from_slice(b"\x01CD001\x01");
+    data.resize(HEAD_LEN + 100_000, 0);
+    let denied = Some(ParseError::Io(io::ErrorKind::PermissionDenied));
+    for name in [None, Some("tool.sh"), Some("disk.iso")] {
+        let mut reader = FailFrom(Cursor::new(data.clone()), HEAD_LEN as u64);
+        let c = filetype::classify(&mut reader, name.map(OsStr::new));
+        assert_eq!(c.parse_error, denied, "{name:?} {c:?}");
+    }
+    // With a reader that does not fail, the archive is ruled out cleanly.
+    assert_eq!(classify(&data, None).parse_error, None);
+}
+
+#[test]
+fn shebang_zip_needs_a_shebang_on_the_first_line() {
+    assert!(
+        !classify(&zip(b"#! \t[x]\n", &["__main__.py"]), None)
+            .flags
+            .python_zipapp
+    );
+    assert!(
+        classify(&zip(b"#! /usr/bin/python3\n", &["__main__.py"]), None)
+            .flags
+            .python_zipapp
+    );
+}
+
 /// Seed inputs for the property tests and the fuzz target.
 fn seeds() -> Vec<Vec<u8>> {
     let dll = PeBuilder {
