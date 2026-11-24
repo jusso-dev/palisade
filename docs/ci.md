@@ -20,7 +20,7 @@ type.
 | `test` | ubuntu-latest, macos-latest, windows-latest (x64), windows-11-arm (ARM64, native) | `cargo nextest run --workspace --all-features --locked --profile ci`, then the doctests with `cargo test --doc`, then `cargo xtask test-summary` (see [Test reports](#test-reports)) |
 | `msrv` | ubuntu-latest | `cargo +1.85.0 check --workspace --all-targets --all-features --locked`, after checking that the version matches `rust-version` in `Cargo.toml` |
 | `docs` | ubuntu-latest | `cargo doc --workspace --no-deps --all-features --locked` with `RUSTDOCFLAGS=-D warnings` |
-| `deps` | ubuntu-latest | `cargo xtask check-deps`, `cargo xtask check-manifests`, `cargo xtask check-unsafe`, `cargo deny --locked check`, `cargo audit` |
+| `deps` | ubuntu-latest | `cargo xtask check-deps`, `cargo xtask check-manifests`, `cargo xtask check-unsafe`, `cargo deny --locked check`, `cargo xtask audit` (cargo-audit with the ignores from `deny.toml`) |
 | `supply-chain` | ubuntu-latest | `cargo vet --locked`, `cargo xtask check-supply-chain`, and on PRs `cargo xtask deps-report --base <base>` to the job summary ([dependencies.md](dependencies.md)) |
 | `feature-powerset` | ubuntu-latest | `cargo hack check --each-feature --all-targets --locked` on the portable crates (`core`, `fileid`, `policy`, `proto`, `server`, `cli`, `console`) |
 | `runner-guard` | ubuntu-latest | `cargo xtask check-workflows` ([Runner and action policy](#runner-and-action-policy)) |
@@ -104,7 +104,7 @@ checkout). Details:
 
 ### `audit.yml` (daily at 03:17 UTC, and on demand)
 
-Runs `cargo deny check advisories` and `cargo audit` against `main`. Both
+Runs `cargo deny check advisories` and `cargo xtask audit` (cargo-audit with the same ignores) against `main`. Both
 also run on every PR (the `deps` job). A new advisory can affect `main`
 without any change here, which is why this is also scheduled. On failure, a second job opens an issue titled "Scheduled advisory
 audit is failing" with the `area:security` label, or comments on the open
@@ -202,7 +202,7 @@ cargo xtask check-manifests
 cargo xtask check-unsafe
 cargo xtask check-workflows
 cargo deny --locked check          # needs cargo-deny 0.22
-cargo audit                        # needs cargo-audit 0.23
+cargo xtask audit                  # cargo-audit 0.23, with deny.toml's ignores
 cargo vet --locked                 # needs cargo-vet 0.10
 cargo xtask check-supply-chain
 cargo xtask deps-report            # add --base origin/main to compare

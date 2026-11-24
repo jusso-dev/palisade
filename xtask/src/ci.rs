@@ -114,7 +114,7 @@ pub const STEPS: &[Step] = &[
     },
     Step {
         tool: Some(AUDIT),
-        ..step("deps", "cargo audit")
+        ..step("deps", "cargo xtask audit")
     },
     Step {
         tool: Some(VET),

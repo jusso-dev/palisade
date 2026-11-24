@@ -24,6 +24,7 @@ const HELP: &str = "\
 Usage: cargo xtask <command>
 
 Commands:
+  audit            Run cargo-audit, ignoring exactly the advisories deny.toml ignores
   ci [--fast]      Run the checks from .github/workflows/ci.yml locally (--fast skips docs,
                    feature-powerset and msrv)
   check-deps       Enforce the allowed dependency directions between crates
@@ -31,7 +32,7 @@ Commands:
                    and that every crate README documents its features
   check-supply-chain
                    Enforce the duplicate-version budget, deny.toml ignore expiry and reasons,
-                   and the cargo-vet criteria and exemption notes
+                   the cargo-vet criteria and exemption notes, and no audit.toml
   check-unsafe     Enforce the unsafe-code allowlist (unsafe-allowlist.txt, ADR 0011)
   deps-report [--base <commit>]
                    Print the dependency report: duplicates, third-party crates per crate,
@@ -67,6 +68,7 @@ fn main() -> ExitCode {
     let result = match command {
         "check-deps" => run_check("check-deps", check_deps),
         "check-manifests" => run_check("check-manifests", check_manifests),
+        "audit" => return run_audit(),
         "check-supply-chain" => run_check("check-supply-chain", check_supply_chain),
         "check-unsafe" => run_check("check-unsafe", check_unsafe),
         "deps-report" => return deps_report(None),
@@ -269,17 +271,45 @@ fn check_supply_chain(root: &Path) -> Result<Vec<String>, String> {
         &read(&root.join("deny.toml"))?,
         &supply_chain::today_utc()?,
     )?);
-    let members: Vec<String> = deps::member_targets(&metadata)?
-        .into_iter()
-        .map(|(name, _, _)| name)
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .collect();
     violations.extend(supply_chain::check_vet_config(
         &read(&root.join("supply-chain").join("config.toml"))?,
-        &members,
+        &supply_chain::member_names(&metadata)?,
     )?);
+    let (paths, _) = unsafe_code::repository_files(root)?;
+    violations.extend(supply_chain::check_no_audit_toml(&paths));
     Ok(violations)
+}
+
+/// `cargo xtask audit`: cargo-audit with exactly the advisory ignores from
+/// `deny.toml`, so the two tools agree. Exits with cargo-audit's status.
+fn run_audit() -> ExitCode {
+    let root = workspace_root();
+    let ignores =
+        match read(&root.join("deny.toml")).and_then(|s| supply_chain::ignored_advisories(&s)) {
+            Ok(ignores) => ignores,
+            Err(error) => {
+                eprintln!("audit: error: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let mut command = Command::new(cargo);
+    command.arg("audit").current_dir(&root);
+    for id in &ignores {
+        command.args(["--ignore", id]);
+    }
+    println!(
+        "audit: cargo audit, ignoring {} advisories from deny.toml",
+        ignores.len()
+    );
+    match command.status() {
+        Ok(status) if status.success() => ExitCode::SUCCESS,
+        Ok(_) => ExitCode::FAILURE,
+        Err(error) => {
+            eprintln!("audit: error: cannot run cargo audit: {error}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// `cargo xtask deps-report [--base <commit>]`: see `src/report.rs`.
@@ -301,15 +331,39 @@ fn deps_report(base: Option<&str>) -> ExitCode {
             None => (None, None),
         };
         let metadata = cargo_metadata(&root, &["--all-features"])?;
-        report::render(&metadata, base_lock.as_deref(), tree.as_deref())
+        // Old versions' sources, when they are still in the registry cache
+        // next to the current ones.
+        let registries = supply_chain::registry_dirs(&metadata);
+        let base_count = |name: &str, version: &str| {
+            registries.iter().find_map(|dir| {
+                let crate_dir = dir.join(format!("{name}-{version}"));
+                crate_dir
+                    .is_dir()
+                    .then(|| supply_chain::count_dir(&crate_dir, &unsafe_code::count_unsafe).0)
+            })
+        };
+        report::render(&metadata, base_lock.as_deref(), tree.as_deref(), base_count)
     })();
     match result {
         Ok((markdown, warnings)) => {
-            print!("{markdown}");
-            // Workflow commands go to stderr, which the runner also reads,
-            // so stdout stays clean for the job summary.
+            // Into the job summary on GitHub Actions, like test-summary;
+            // workflow commands go to stdout, where the runner reads them.
+            if let Some(summary) = std::env::var_os("GITHUB_STEP_SUMMARY") {
+                use std::io::Write as _;
+                let written = std::fs::OpenOptions::new()
+                    .append(true)
+                    .create(true)
+                    .open(&summary)
+                    .and_then(|mut f| f.write_all(markdown.as_bytes()));
+                if let Err(error) = written {
+                    eprintln!("deps-report: error: cannot write the step summary: {error}");
+                    return ExitCode::FAILURE;
+                }
+            } else {
+                print!("{markdown}");
+            }
             for warning in warnings {
-                eprintln!("{warning}");
+                println!("{warning}");
             }
             ExitCode::SUCCESS
         }

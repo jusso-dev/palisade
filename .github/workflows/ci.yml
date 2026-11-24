@@ -135,13 +135,14 @@ jobs:
       - run: cargo xtask check-manifests
       - run: cargo xtask check-unsafe
       - run: cargo deny --locked check
-      # The same advisory database, read by a second tool on every PR; the
-      # daily audit.yml catches advisories published after a merge.
-      - run: cargo audit
+      # The same advisory database, read by a second tool on every PR, with
+      # the same ignores as deny.toml; the daily audit.yml catches advisories
+      # published after a merge.
+      - run: cargo xtask audit
 
   # cargo-vet audits, plus the rules cargo-deny and cargo-vet do not check
-  # themselves (duplicate budget, ignore expiry, criteria per crate). The
-  # dependency report goes to the job summary of every run.
+  # themselves (duplicate budget, ignore expiry, criteria per crate). On every
+  # pull request run, the dependency report goes to the job summary.
   supply-chain:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -168,7 +169,7 @@ jobs:
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: cargo xtask deps-report --base "$BASE_SHA" >> "$GITHUB_STEP_SUMMARY"
+        run: cargo xtask deps-report --base "$BASE_SHA"
 
   # Every feature of the portable crates builds on its own, so no feature
   # silently depends on another being on (docs/workspace.md#feature-flags).

@@ -21,6 +21,7 @@ pub fn render(
     metadata: &Value,
     base_lock: Option<&str>,
     tree_duplicates: Option<&str>,
+    base_count: impl Fn(&str, &str) -> Option<usize>,
 ) -> Result<(String, Vec<String>), String> {
     let mut out = String::from("## Dependency report\n\n");
     let mut warnings = Vec::new();
@@ -54,10 +55,13 @@ pub fn render(
 
     let inventory = supply_chain::unsafe_inventory(metadata, unsafe_code::count_unsafe);
     if let Some(base_lock) = base_lock {
-        let changes =
-            supply_chain::unsafe_changes(&supply_chain::lock_packages(base_lock)?, &inventory);
+        let changes = supply_chain::unsafe_changes(
+            &supply_chain::lock_packages(base_lock)?,
+            &inventory,
+            base_count,
+        );
         out.push_str(&format!(
-            "\n### Change in third-party `unsafe` against the base branch\n\nFlagged: a new crate with more than {jump} `unsafe` keywords, or a new version with more than {jump} more than the version it replaces.\n\n",
+            "\n### Change in third-party `unsafe` against the base branch\n\nFlagged: a new crate with more than {jump} `unsafe` keywords, or a new version with more than {jump} more than the version it replaces. The old count needs the old version's source, so it is shown only when that source is in the local registry cache.\n\n",
             jump = supply_chain::UNSAFE_JUMP
         ));
         if changes.is_empty() {
@@ -133,6 +137,8 @@ pub fn cargo_tree_duplicates(root: &Path) -> Result<String, String> {
             "--all-features",
             "--target",
             "all",
+            "--color",
+            "never",
         ])
         .current_dir(root)
         .output()
@@ -169,7 +175,7 @@ mod tests {
 
     #[test]
     fn report_without_base_has_every_section_but_the_diff() {
-        let (md, warnings) = render(&metadata(), None, None).unwrap();
+        let (md, warnings) = render(&metadata(), None, None, |_, _| None).unwrap();
         assert!(
             md.contains("### Duplicate versions (1 of a budget of 10)"),
             "{md}"
@@ -189,13 +195,20 @@ mod tests {
     #[test]
     fn report_with_base_adds_tree_and_unsafe_changes() {
         let base = "version = 4\n[[package]]\nname = \"old\"\nversion = \"1.0.0\"\nsource = \"registry+x\"\n";
-        let (md, _) = render(&metadata(), Some(base), Some("syn v2.0.0\n```\n")).unwrap();
+        let (md, _) = render(
+            &metadata(),
+            Some(base),
+            Some("syn v2.0.0\n```\n"),
+            |_, _| None,
+        )
+        .unwrap();
         assert!(
             md.contains("<summary><code>cargo tree -d</code></summary>"),
             "{md}"
         );
         assert!(md.contains("syn v2.0.0\n'''"), "{md}");
         assert!(md.contains("- new: `syn` 2.0.0, 0 `unsafe`"), "{md}");
+        assert!(md.contains("- new: `syn` 3.0.0, 0 `unsafe`"), "{md}");
         assert!(md.contains("- removed: `old` 1.0.0"), "{md}");
     }
 

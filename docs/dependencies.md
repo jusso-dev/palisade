@@ -38,10 +38,10 @@ less.
 | Licences | `cargo deny check licenses` | Only the licences in `deny.toml` (Apache-2.0, MIT, BSD-2/3-Clause, ISC, Unicode-3.0, Zlib, CC0-1.0, MPL-2.0). GPL, AGPL and LGPL fail unless an exception with a reason is added. `confidence-threshold = 0.9`. |
 | Sources | `cargo deny check sources` | crates.io only. Git dependencies and other registries fail. |
 | Bans | `cargo deny check bans` | No wildcard versions. `openssl` and `openssl-sys` are denied (use rustls). Duplicate versions warn. |
-| Advisories | `cargo deny check advisories`, `cargo audit` | No known vulnerability, unsound or yanked crate. Unmaintained crates fail when a workspace crate depends on them directly. |
+| Advisories | `cargo deny check advisories`, `cargo xtask audit` (cargo-audit with the same ignores) | No known vulnerability, unsound or yanked crate. Unmaintained crates fail when a workspace crate depends on them directly. |
 | Audits | `cargo vet --locked` | Every crate is audited, covered by an imported audit, or exempted with a note (below). |
-| Repository rules | `cargo xtask check-supply-chain` | At most 10 crates in more than one version. Every advisory ignore has an ID, a reason and an expiry date that has not passed. Every skip and licence exception has a reason. The cargo-vet criteria for each crate, and a note on every exemption. |
-| Report | `cargo xtask deps-report` | On a PR that changes `Cargo.lock`, the job summary shows duplicates, `cargo tree -d`, third-party crates per workspace crate, every third-party crate's `unsafe` count with the change against the base branch, and the build scripts and proc-macros. A new crate with more than 100 `unsafe` keywords, or a version that adds more than 100, raises a warning on the run. |
+| Repository rules | `cargo xtask check-supply-chain` | At most 10 crates in more than one version. Every advisory ignore has an ID, a reason and an `expiry` date that has not passed, and no `audit.toml` exists. Every skip has a `reason`, and every licence exception a `# reason:` comment. The cargo-vet criteria for each workspace crate, no `[policy]` entry that lowers what dependencies need, and a note on every exemption. |
+| Report | `cargo xtask deps-report` | On a PR that changes `Cargo.lock`, the job summary shows duplicates, `cargo tree -d`, third-party crates per workspace crate, every third-party crate's `unsafe` count with the change against the base branch, and the build scripts and proc-macros. A new crate with more than 100 `unsafe` keywords, or a version that adds more than 100 compared with the version it replaces, raises a warning on the run. The old count needs the old version's source; when it is not in the local cache, the change is shown without a warning rather than raising a false one. |
 
 Advisories are also scanned daily (`audit.yml`), because a new advisory can affect `main`
 without any change here. A failure opens or updates an issue labelled `area:security`.
@@ -56,12 +56,20 @@ Only when the vulnerable code cannot be reached, and only for a limited time. Ad
 
 ```toml
 ignore = [
-    { id = "RUSTSEC-2026-0001", reason = "only the parser is used, not the affected writer", expires = "2027-01-31" },
+    { id = "RUSTSEC-2026-0001", reason = "only the parser is used, not the affected writer", expiry = "2027-01-31" },
 ]
 ```
 
-`cargo xtask check-supply-chain` fails once the date has passed. Then review the advisory again,
-and renew the date with a new reason or remove the ignore.
+`expiry` is cargo-deny's own key: it fails the advisory check once the date has passed. `cargo
+xtask check-supply-chain` also fails then, and requires the ID, the reason and the date on every
+entry. Review the advisory again, and renew the date with a new reason or remove the ignore.
+
+`deny.toml` is the only place an advisory is ignored. CI runs cargo-audit as `cargo xtask audit`,
+which passes the same IDs as `--ignore`, so both tools agree. A cargo-audit `audit.toml` anywhere
+in the repository fails `check-supply-chain`, because it would bypass these rules.
+
+A licence exception works the same way, except that cargo-deny has no `reason` key for it: write a
+`# reason: ...` comment on the line above each entry in `[licenses] exceptions`.
 
 ## cargo-vet
 

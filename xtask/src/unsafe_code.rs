@@ -271,19 +271,21 @@ pub fn is_allowed_location(path: &str) -> bool {
 /// impls, traits and `unsafe extern`), counting tokens rather than text, so
 /// comments and strings are not counted. `None` if it cannot be tokenised.
 pub fn count_unsafe(source: &str) -> Option<usize> {
-    fn count(tokens: TokenStream) -> usize {
-        tokens
-            .into_iter()
-            .map(|t| match t {
-                TokenTree::Ident(i) if i == "unsafe" => 1,
-                TokenTree::Group(g) => count(g.stream()),
-                _ => 0,
-            })
-            .sum()
-    }
     // Third-party source is only counted, never trusted, so the raw
-    // tokeniser is enough here.
-    TokenStream::from_str(source).ok().map(count)
+    // tokeniser is enough here. An explicit stack instead of recursion, so
+    // deeply nested delimiters cannot overflow the stack.
+    let mut stack = vec![TokenStream::from_str(source).ok()?];
+    let mut count = 0;
+    while let Some(tokens) = stack.pop() {
+        for token in tokens {
+            match token {
+                TokenTree::Ident(i) if i == "unsafe" => count += 1,
+                TokenTree::Group(g) => stack.push(g.stream()),
+                _ => {}
+            }
+        }
+    }
+    Some(count)
 }
 
 /// `true` when the source has an attribute, anywhere, that relaxes
