@@ -49,7 +49,8 @@ what it does not.
   one issue that owns it.
 - **Status** has three values:
   - `planned`: the design exists (an ADR or an issue), but there is no code on `main` yet.
-  - `implemented`: the mitigation is on `main` and has unit or integration tests.
+  - `implemented`: the mitigation is on `main`, and the verification column names an existing
+    test, fuzz target or CI check that exercises it.
   - `verified`: a #230 bypass scenario or a recorded red-team test shows the mitigation holding
     end to end on the Windows VM harness (#26). Nothing is `verified` yet, because the harness
     does not exist yet.
@@ -72,7 +73,8 @@ Every Palisade component and the paths between them:
 - on the server: the agent endpoints, the REST API, the web console, the database, the signer,
   the certificate authorities, event ingest and outbound or inbound integrations;
 - the CI and release pipeline, from source to the agent's update client;
-- the shared policy engine and file-identity parsers, which every component relies on.
+- the shared policy engine and file-identity parsers, which every component relies on;
+- script and interpreter control (#7), which the interpreter bypass tree depends on.
 
 ### Not modelled
 
@@ -135,6 +137,7 @@ The architecture is the one in the [README](../../README.md#architecture-planned
 | Integrations | `palisade-server` | Server | #16, #188, #198 to #206 |
 | CI and release pipeline | `.github/workflows/`, `xtask` | GitHub-hosted runners only | [docs/ci.md](../ci.md), #21, #24, #226 |
 | Policy engine and file identity | `palisade-policy`, `palisade-fileid`, `palisade-core` | Inside the agent, server and CLI | [ADR 0003](../adr/0003-crate-boundaries-and-dependency-direction.md), [ADR 0011](../adr/0011-msrv-and-unsafe-code-policy.md) |
+| Script and interpreter control | Script-host adapters, AMSI provider, interpreter rules in `palisade-agent` | Inside script hosts and the agent | #7 |
 
 Three design decisions shape the whole model:
 
@@ -194,14 +197,19 @@ Ratings are for confidentiality (C), integrity (I) and availability (A): H (high
 | TB-09 | CI / release storage | Build outputs, signatures, SBOM, provenance and update metadata | Protected tags and environment, provenance, signing outside the build (#226) |
 | TB-10 | Release storage / agent | Update metadata and packages fetched by the agent | TUF-style metadata chain, pinned Authenticode publisher, length limits (#226) |
 | TB-11 | Release job / code-signing key | Digests to sign, signatures back | Key in a hardware token or signing service, never a repository secret (#226) |
+| TB-12 | Maintainer workstation / source hosting | Pushes and pull requests | Two-factor authentication, pull-request-only `main`, required checks ([docs/repo-settings.md](../repo-settings.md)) |
+| TB-13 | Source hosting and package registry / CI runner | Source checkouts, crates, workflow triggers | Read-only job token, SHA-pinned actions, lockfile and `cargo deny` source checks ([docs/ci.md](../ci.md), #23) |
 
-TB-11 is an addition to the list in #219. Signing keys for releases sit outside the server, so
-they need their own boundary.
+TB-11 to TB-13 are additions to the list in #219. Release signing keys sit outside the server,
+so they need their own boundary, and the release pipeline diagram needs named boundaries for the
+source hosting platform and the package registry.
 
 ## Data-flow diagrams
 
 In each diagram, subgraphs are trust zones and an arrow that leaves a subgraph crosses a trust
-boundary. Every arrow has a flow ID. The table under the diagram gives each flow's protocol,
+boundary. Every arrow has a flow ID. A flow that stays inside one zone says "None (same zone)"
+in its Boundary column, and names the boundary that the zone's protection enforces, where there
+is one. The table under the diagram gives each flow's protocol,
 authentication, integrity protection, confidentiality protection and the boundary it crosses.
 
 ### Level 0: whole system
@@ -299,9 +307,9 @@ flowchart TB
 | E-03 | Tray ↔ agent | Named pipe `\\.\pipe\palisade-agent`, protobuf messages, remote clients rejected | Agent: client PID, session, token SID by impersonation, image signature. Tray: checks the pipe server is the signed agent service | Schema-validated messages, 64 KiB limit, rate limit | Pipe DACL; local only | TB-02, TB-03 |
 | E-04 | CLI ↔ agent | Same pipe | As E-03, plus an unlock token or CLI password for privileged verbs (#222) | As E-03 | As E-03; secrets read from stdin, never from arguments | TB-02, TB-03 |
 | E-05 | Health service ↔ agent | SYSTEM-only named pipe and a process-handle wait | Caller verification as E-03 | Schema-validated heartbeat | Pipe DACL (SYSTEM only) | None (same zone) |
-| E-06 | Agent ↔ policy cache and state | NTFS file I/O | Directory ACL: SYSTEM only (#220); driver protection when present | Bundle signatures verified on a private copy; HMAC on hash-cache and anti-rollback records ([ADR 0007](../adr/0007-agent-local-store.md)) | Optional AES-256-GCM with a DPAPI- or TPM-wrapped key (#225) | TB-02 |
-| E-07 | Agent → event buffer | NTFS file I/O | As E-06 | HMAC chain; chain head reported at check-in (#220) | As E-06 | TB-02 |
-| E-08 | Agent → update staging → installer | NTFS file I/O; Windows Installer | As E-06 | TUF chain and Authenticode publisher verified, then re-verified before installation (#226) | None needed: packages are public | TB-02 |
+| E-06 | Agent ↔ policy cache and state | NTFS file I/O | Directory ACL: SYSTEM only (#220); driver protection when present | Bundle signatures verified on a private copy; HMAC on hash-cache and anti-rollback records ([ADR 0007](../adr/0007-agent-local-store.md)) | Optional AES-256-GCM with a DPAPI- or TPM-wrapped key (#225) | None (same zone); the directory ACL enforces TB-02 against user processes |
+| E-07 | Agent → event buffer | NTFS file I/O | As E-06 | HMAC chain; chain head reported at check-in (#220) | As E-06 | None (same zone); as E-06 |
+| E-08 | Agent → update staging → installer | NTFS file I/O; Windows Installer | As E-06 | TUF chain and Authenticode publisher verified, then re-verified before installation (#226) | None needed: packages are public | None (same zone); as E-06 |
 | E-09 | Agent → OS policy store | The OS's policy refresh interface | Runs as SYSTEM | Signed native policies where configured (#85) | None needed | TB-01 |
 | E-10 | OS event providers → agent | ETW sessions and event log API | OS-controlled provider and session security | OS-provided | Local only | TB-01 |
 | E-11 | User-writable files → agent | File reads by handle | N/A: untrusted input | Treated as untrusted; parsed by safe Rust with limits ([ADR 0011](../adr/0011-msrv-and-unsafe-code-policy.md)) | N/A | TB-02 |
@@ -341,16 +349,17 @@ flowchart LR
   AG <-->|"S-01 gRPC or HTTPS, mTLS"| AL
   BR -->|"S-02 HTTPS"| WL
   APIC -->|"S-03 HTTPS"| WL
-  AL --> API
-  WL --> API
-  AL --> ING
+  AL -->|"S-12 in-process"| API
+  WL -->|"S-12 in-process"| API
+  AL -->|"S-12 in-process"| ING
   API <-->|"S-04 Postgres over TLS"| DB
   ING -->|"S-04 Postgres over TLS"| DB
   JOBS <-->|"S-04 Postgres over TLS"| DB
   API -->|"S-05 sign digest"| SIG
   JOBS -->|"S-05 sign digest"| SIG
   API -->|"S-06 CSR"| ICA
-  ROOT -.->|"S-07 removable media"| SIG
+  ROOT -.->|"S-07 intermediate certificate"| ICA
+  ROOT -.->|"S-07 signed trust set"| API
   IDP <-->|"S-08 OIDC, SAML, SCIM"| WL
   JOBS -->|"S-09 HTTPS, syslog over TLS"| OUT
   OUT -->|"S-10 signed callbacks"| WL
@@ -365,11 +374,12 @@ flowchart LR
 | S-04 | Server components ↔ database | Postgres wire protocol over TLS | Runtime role (`NOBYPASSRLS`, not the owner); migrations use a separate owner role ([ADR 0006](../adr/0006-server-database.md)) | TLS; append-only audit table | TLS; envelope-encrypted sensitive columns (#227) | TB-06 |
 | S-05 | API and jobs → signer | PKCS#11, KMS API or in-process (lab only) | HSM PIN or workload identity from a secret source | Domain-separated digest in, signature out (#225) | Only digests cross | TB-07 |
 | S-06 | Enrolment and renewal → issuing CA | In-process or PKCS#11 | As S-05 | CSR with proof of possession; issued certificate | Public data | TB-07 |
-| S-07 | Offline root → server | Manual transfer of signed intermediates and trust sets | Physical custody and ceremony (#224) | Root signature | Public data | TB-07 |
+| S-07 | Offline root → issuing CA (intermediate certificate) and API (trust set for distribution) | Manual transfer on removable media | Physical custody and ceremony (#224) | Root signature, checked on import | Public data | TB-07 |
 | S-08 | Identity provider ↔ server | OIDC authorisation code with PKCE, SAML 2.0, SCIM 2.0 over HTTPS | Client secret; signed assertions; SCIM bearer token | Signed assertions; replay cache; TLS | TLS | TB-08 |
 | S-09 | Jobs → outbound integrations | HTTPS; syslog over TLS | Per-integration credentials, envelope-encrypted at rest (#227) | TLS; HMAC-signed webhook bodies (#188) | TLS | TB-08 |
 | S-10 | ITSM and approval callbacks → server | HTTPS | Signed callback or single-use link plus re-authentication (#144) | Signature bound to the request ID | TLS | TB-08 |
 | S-11 | Inbound log sources → ingest | Syslog over TLS; plain UDP only if the operator allows it, marked low trust (#207) | Client certificate allowlist | TLS | TLS | TB-08 |
+| S-12 | Listeners → API handlers and ingest | In-process calls | Identity already established by the listener (certificate, session or token), passed as a typed value | Memory safety of the server process (safe Rust, ADR 0011) | In-process | None (same zone) |
 
 ### Level 1: release pipeline
 
@@ -403,35 +413,39 @@ flowchart LR
   RELJOB -->|"P-06 upload"| ART
   RELJOB -->|"P-06 upload"| META
   TUFROOT -.->|"P-07 root metadata"| META
-  ART --> MIR
-  META --> MIR
+  ART -->|"P-09 HTTPS cache fill"| MIR
+  META -->|"P-09 HTTPS cache fill"| MIR
   MIR -->|"P-08 HTTPS"| UPD
   ART -->|"P-08 HTTPS"| UPD
+  META -->|"P-08 HTTPS"| UPD
 ```
 
 | Flow | From → to | Protocol | Authentication | Integrity | Confidentiality | Boundary |
 |---|---|---|---|---|---|---|
-| P-01 | Maintainer → repository | Git over HTTPS or SSH | Account with two-factor authentication; pull requests only on `main` ([docs/repo-settings.md](../repo-settings.md)) | Required checks; signed commits recommended (#226) | None needed: public repository | Maintainer / source hosting |
-| P-02 | Repository → PR CI | Checkout at a commit SHA | Read-only job token; no secrets for fork pull requests; `persist-credentials: false` | Commit SHA; actions pinned by SHA ([docs/ci.md](../ci.md)) | None needed | Source hosting / runner |
-| P-03 | Registry → runner | HTTPS | Registry server certificate | `Cargo.lock` checksums; `cargo deny` source and advisory checks (#23) | None needed | Registry / runner |
-| P-04 | Protected tag → release job | Workflow trigger | Required reviewers on the `release` environment (#226) | Tag protection; provenance records the commit | None needed | Source hosting / runner |
+| P-01 | Maintainer → repository | Git over HTTPS or SSH | Account with two-factor authentication; pull requests only on `main` ([docs/repo-settings.md](../repo-settings.md)) | Required checks; signed commits recommended (#226) | None needed: public repository | TB-12 |
+| P-02 | Repository → PR CI | Checkout at a commit SHA | Read-only job token; no secrets for fork pull requests; `persist-credentials: false` | Commit SHA; actions pinned by SHA ([docs/ci.md](../ci.md)) | None needed | TB-13 |
+| P-03 | Registry → runner | HTTPS | Registry server certificate | `Cargo.lock` checksums; `cargo deny` source and advisory checks (#23) | None needed | TB-13 |
+| P-04 | Protected tag → release job | Workflow trigger | Required reviewers on the `release` environment (#226) | Tag protection; provenance records the commit | None needed | TB-13 |
 | P-05 | Release job ↔ code-signing key | Signing service API or hardware token | Signing service credentials scoped to the release environment, or token PIN | Hash of the artefact checked before signing | Only digests cross | TB-11 |
 | P-06 | Release job → release storage | HTTPS to the hosting platform | Job token with write access, only in the release environment | Authenticode with RFC 3161 timestamp, build provenance, signed SBOM, TUF targets (#226) | None needed: public | TB-09 |
 | P-07 | TUF root keys → metadata | Offline signing, manual upload | Threshold of 2 of 3 maintainer keys | Root signatures | None needed | TB-09 |
-| P-08 | Storage or mirror → agent | HTTPS | Server authentication only; mirrors are untrusted | Full TUF chain, version monotonicity, expiry, length and hash, pinned publisher (#226) | None needed | TB-10 |
+| P-08 | Storage or mirror → agent: metadata and packages | HTTPS | Server authentication only; mirrors are untrusted | Full TUF chain, version monotonicity, expiry, length and hash, pinned publisher (#226) | None needed | TB-10 |
+| P-09 | Release storage → mirrors and relays | HTTPS | Server authentication only | None relied on: mirrors are untrusted caches, and the agent verifies everything (P-08) | None needed | TB-10 (mirrors are outside release storage) |
 
 ## STRIDE per component
 
 Every component has a row for each of the six STRIDE categories, and some have more than one.
 Mitigations and verification are listed per threat in [Mitigation mapping](#mitigation-mapping).
+Every attack-tree leaf below names at least one of these threats, so each bypass technique also
+has a row in the mitigation table.
 
 Summary by status:
 
 | Component | Threats | Planned | Implemented | Verified |
 |---|---|---|---|---|
-| `driver` | 8 | 8 | 0 | 0 |
-| `native` | 5 | 5 | 0 | 0 |
-| `agent` | 14 | 14 | 0 | 0 |
+| `driver` | 10 | 10 | 0 | 0 |
+| `native` | 7 | 7 | 0 | 0 |
+| `agent` | 17 | 17 | 0 | 0 |
 | `health` | 6 | 6 | 0 | 0 |
 | `tray` | 7 | 7 | 0 | 0 |
 | `cli` | 8 | 8 | 0 | 0 |
@@ -445,9 +459,10 @@ Summary by status:
 | `ca` | 7 | 7 | 0 | 0 |
 | `ingest` | 8 | 8 | 0 | 0 |
 | `integ` | 10 | 10 | 0 | 0 |
+| `script` | 8 | 8 | 0 | 0 |
 | `ci` | 11 | 7 | 4 | 0 |
-| `engine` | 9 | 6 | 3 | 0 |
-| **Total** | **154** | **147** | **7** | **0** |
+| `engine` | 13 | 10 | 3 | 0 |
+| **Total** | **173** | **166** | **7** | **0** |
 
 ### Kernel driver (`palisade-driver`, optional minifilter)
 
@@ -463,6 +478,8 @@ Pre-execution decisions for the conditions the OS-native policy cannot express (
 | T-driver-06 | D | A crafted path, reparse-point loop or very long name makes the driver hang or stop the machine, possibly on every boot. | Standard user can create files | H | M | #110, #113, #230 | planned | A kernel bug is always possible; recovery keeps the machine usable. |
 | T-driver-07 | D | The attacker slows the agent (exec flood, large files) so driver requests time out and `fail_safe` lets driver-only rules lapse. | Code execution as a standard user | M | M | #113, #42, #65 | planned | With the default `fail_safe`, driver-only rules are not enforced while the agent is unresponsive (R-07). The native layer keeps enforcing. |
 | T-driver-08 | E | A memory-safety bug in the driver's message or I/O handling gives kernel code execution. | Access to file-system callbacks (any user) or to the port (SYSTEM) | H | L | #110, #230 | planned | The driver is the one crate where unsafe code is pervasive (ADR 0011). |
+| T-driver-09 | T | An executable's content changes between the moment it is hashed and the moment its image section is mapped, so the code that runs is not the code that was checked. | Write access to the file, for example in a user-writable folder | H | M | #110, #111, #46, #60 | planned | Until the driver ships, the native layer's own section-time check is the only defence for this race. |
+| T-driver-10 | E | A known vulnerable signed driver is loaded to gain kernel code execution and remove Palisade's callbacks or kill the agent (BYOVD). | Administrator rights to load a driver | H | M | #87, #105 | planned | Kernel code is fully trusted; unknown vulnerable drivers and kernel exploits are not stopped (R-02). |
 
 ### OS-native policy layer (compiled code integrity and rule-collection policies)
 
@@ -476,6 +493,8 @@ The kernel-enforced baseline from ADR 0002. Not a Palisade process, but Palisade
 | T-native-04 | I | N/A: Compiled policies describe what is allowed, and an attacker who reads them learns the gaps. Palisade never relies on policy secrecy, so this is not treated as a threat. Server-side secrets never enter native policies. | | | | | | |
 | T-native-05 | D | A bad policy blocks boot-critical drivers or the OS's own components, so the device cannot boot. | Policy author mistake, or a malicious admin | H | M | #91, #135 | planned | A policy that passes the linter can still break a rare device. |
 | T-native-06 | E | Code runs despite policy through signing-level edge cases or a script host that does not enforce code integrity. | Standard user | H | M | #87, #93, #230 | planned | New unenlightened hosts appear over time. |
+| T-native-07 | E | A signed OS binary that can run arbitrary code (a LOLBin: mshta, msbuild, installutil, regsvr32, rundll32, cscript, wscript, wmic, certutil and similar) is allowed by a publisher rule and used as a proxy. | Standard user | H | H | #87, #100, #93, #39 | planned | New proxy binaries appear over time (R-16). |
+| T-native-08 | E | An allowed executable loads an attacker DLL: side-loaded beside a copy of the executable in a writable folder, or found earlier in the DLL search order (current directory, a user-writable `PATH` entry, a missing DLL). | Standard user can write to a folder the loader searches | H | H | #104, #8, #191, #212 | planned | Until DLL enforcement is on, only executables are checked. |
 
 ### Agent service (`palisade-agent`, `PalisadeAgent`)
 
@@ -497,6 +516,9 @@ LocalSystem service: event collection, inventory, policy cache, native policy de
 | T-agent-12 | D | A crafted file triggers a parser panic on every scan, blinding the agent in a loop. | Standard user can drop files | M | M | #45, #230 | planned | A panic that unwinding cannot catch (stack overflow) restarts the service (ADR 0012 row 1). |
 | T-agent-13 | E | The agent, running as SYSTEM, follows a junction or symbolic link planted by a user while hashing, inventorying or writing output, and reads or writes a protected file. | Standard user can create links in a scanned path | H | M | #54, #60, #220 | planned | New file-system redirection primitives appear over time. |
 | T-agent-14 | E | A memory-safety bug in the IPC or bundle decoder gives code execution as SYSTEM. | Access to the pipe (any interactive user) | H | L | #220, #230 | planned | Bugs in third-party decoders (protobuf) are tracked by the advisory scan (#23). |
+| T-agent-15 | T | The wall clock or the time source is changed to start a scheduled grant early, extend it, or revive an expired exception, token or window. | Local admin, a spoofed time source, or physical access | M | M | #220, #222, #225 | planned | A genuine, unredeemed override code or token can be redeemed outside its window, and opt-in offline scheduling can be stretched until the next check-in (R-10). |
+| T-agent-16 | T | Palisade is tampered with while it is not running: in safe mode, from other boot media, or by changing the boot configuration to allow unsigned drivers. | Local admin or physical access | H | M | #220, #210 | planned | Without disk encryption, offline edits cannot be prevented (R-05). |
+| T-agent-17 | T | The agent is uninstalled through the installer (`msiexec /x`) or the OS's installed-apps settings page without authorisation. | Local admin | H | H | #222 | planned | SYSTEM can remove the services and files by other means (R-01). |
 
 ### Health and watchdog service (`PalisadeHealth`)
 
@@ -567,7 +589,7 @@ Queued events awaiting upload, hash-chained (#220, #63), and the `Palisade/Opera
 |---|---|---|---|---|---|---|---|---|
 | T-events-01 | S | A user writes fake events to the local log channel to mislead an investigator. | Standard user | L | M | #220 | planned | None: the local channel is a convenience copy. |
 | T-events-02 | T | Queued events are edited or deleted before upload to hide activity. | SYSTEM | H | L | #220 | planned | A SYSTEM attacker holding the chain key can rewrite the part of the chain not yet reported (R-01). |
-| T-events-03 | T | The unreported tail of the chain is dropped (for example by cutting power or the network before upload). | SYSTEM, or control of the network | M | M | #220, #197 | planned | Events between the last check-in and the attack can be lost; the gap in sequence numbers is visible. |
+| T-events-03 | T | The unreported tail of the chain is dropped (for example by cutting power or the network before upload). | SYSTEM, or control of the network | M | M | #220, #197 | planned | Events between the last check-in and the attack can be lost; the gap in sequence numbers is visible (R-17). |
 | T-events-04 | R | An event lacks the user, process or policy version needed to attribute it. | Any event | M | M | #196, #63 | planned | Pseudonymised usernames need re-identification (#228). |
 | T-events-05 | I | Buffered events contain command lines, usernames and paths readable by administrators or offline. | Admin, or offline access | M | M | #228, #220, #225 | planned | SYSTEM reads all (R-01). |
 | T-events-06 | D | A flood of low-value events evicts important ones or fills the disk while offline. | Standard user | M | M | #63, #197 | planned | Long offline periods can drop low-priority events; the drop count is reported. |
@@ -586,7 +608,7 @@ Agent self-update: metadata check, download, verify, stage, install, health chec
 | T-update-04 | T | The staged package is swapped between verification and installation. | Write access to the staging directory | H | L | #226, #220 | planned | None if the install reads the verified copy. |
 | T-update-05 | R | An update is installed without a record. | Any update | L | L | #66 | planned | None. |
 | T-update-06 | I | N/A: Release artefacts and update metadata are public by design. The only device data sent is the version, which check-in also reports. | | | | | | |
-| T-update-07 | D | An endless or oversized download exhausts disk or bandwidth. | Mirror control | M | L | #226 | planned | None. |
+| T-update-07 | D | An endless or oversized download exhausts disk or bandwidth. | Mirror control | M | L | #226 | planned | None known. |
 | T-update-08 | D | A faulty release breaks agents across the fleet. | A bad release | H | M | #226, #66 | planned | The first ring can be affected. |
 | T-update-09 | E | The installer runs as SYSTEM with an attacker-chosen package or custom action. | Ability to influence the package path | H | L | #226, #57 | planned | None if only verified packages from the protected directory run. |
 
@@ -699,6 +721,21 @@ Outbound and inbound connections to services the operator configures (#16, #188,
 | T-integ-09 | E | A webhook URL is pointed at internal services (SSRF). | Admin with integration permission | H | M | #229 | planned | None. |
 | T-integ-10 | E | Provisioning (SCIM or claim mapping) grants an administrator role. | Identity provider write access | H | L | #204, #131 | planned | A compromised identity provider can grant mapped roles (R-13). |
 
+### Script and interpreter control (host adapters, AMSI provider, interpreter rules)
+
+Control of scripts and interpreters from epic #7: PowerShell language mode, script hosts, AMSI and dynamic-code control, and other interpreters. Added to the list in #219 because the interpreter bypass tree needs threats to map to.
+
+| ID | STRIDE | Threat | Preconditions | Impact | Likelihood | Mitigation issue | Status | Residual risk |
+|---|---|---|---|---|---|---|---|---|
+| T-script-01 | S | A script carries a signature block that does not cover what runs, or is signed by a signer the policy does not trust, and is treated as signed. | Standard user can write scripts | H | M | #95, #52 | planned | Hosts that ignore signatures are covered by T-native-06. |
+| T-script-02 | T | A script file is changed between the check and the host reading it. | Write access to the script | M | M | #93, #96 | planned | Hosts that read a file twice cannot be fully fixed from outside. |
+| T-script-03 | R | Script and command-line activity leaves no record, so an interpreter-based attack cannot be reconstructed. | Any script run | M | M | #97 | planned | Hosts without telemetry hooks are only seen as process starts. |
+| T-script-04 | I | Script telemetry captures secrets typed into commands or embedded in scripts. | Telemetry enabled | M | M | #97, #228 | planned | Redaction patterns can miss a new secret format. |
+| T-script-05 | D | A slow or crashing AMSI provider stalls every script host on the device. | Large or crafted script content | M | M | #96, #65 | planned | A stalled host delays users until the timeout. |
+| T-script-06 | E | PowerShell is started as version 2 to avoid language-mode and logging controls, or constrained language mode is escaped through type compilation or COM objects. | Standard user | H | H | #94, #107 | planned | New escapes appear over time (R-16). |
+| T-script-07 | E | Code is loaded reflectively from memory (`Assembly.Load(byte[])`), so no file is ever checked. | Code execution in an allowed host | H | M | #96, #109 | planned | Native in-memory loaders are out of reach of file-based control. |
+| T-script-08 | E | A user-installed interpreter, an installer fetched from a URL (`msiexec /i http://...`) or interpreter arguments run unapproved code, or execution policy and encoded commands are relied on as a control. | Standard user | H | H | #92, #98, #99, #94 | planned | Interpreters that the registry does not know are treated as unknown executables. |
+
 ### CI and release pipeline
 
 GitHub-hosted runners only, release signing, update metadata, SBOM and provenance (#21, #23, #24, #226).
@@ -731,7 +768,11 @@ Pure, deterministic decision code and file parsers used by the agent, server and
 | T-engine-06 | R | A decision cannot be explained or reproduced later. | Any decision | M | M | #41 | planned | None. |
 | T-engine-07 | I | A block message reveals policy internals (which paths are trusted). | Standard user | L | M | #147, #41 | planned | Some detail is intended so users can ask for help. |
 | T-engine-08 | D | Crafted input (PE tables, policy YAML) consumes excessive CPU or memory. | Standard user (files), policy author (YAML) | M | M | #45, #190, #42 | implemented | PE parsing limits are per table; the full evaluation budget is #42. |
-| T-engine-09 | E | A memory-safety bug in a file parser gives code execution in the SYSTEM agent. | Crafted file on the endpoint | H | L | #230 | implemented | Logic bugs and panics remain possible; panics are contained (T-agent-12). |
+| T-engine-09 | E | A memory-safety bug in a file parser gives code execution in the SYSTEM agent. | Crafted file on the endpoint | H | L | #19, #45, #25, #230 | implemented | Logic bugs and panics remain possible; panics are contained (T-agent-12). The fuzz targets are not yet run in CI (#25), and parsers still to come need their own targets (#230). |
+| T-engine-10 | E | A path rule allows a folder that has a user-writable descendant (`%WINDIR%\Temp`, `%WINDIR%\Tasks`, `%WINDIR%\System32\spool\drivers\color`), or a folder whose ACL is later loosened, so a user copies a payload there and runs it. | Standard user | H | H | #54, #212, #124, #87 | planned | ACLs can change between checks; the drift report finds it later. |
+| T-engine-11 | S | A user gains owner-based trust for a file by owning it, or by taking ownership of a file in a trusted location. | Standard user | H | M | #117 | planned | None known. |
+| T-engine-12 | E | A trusted installer or updater writes or fetches an attacker file, which then inherits trust. | Ability to influence an installer or updater (custom action, download source) | H | M | #114, #116, #119 | planned | A trusted updater that is itself compromised passes its trust on until it is revoked. |
+| T-engine-13 | E | A parent-process trust rule is abused: a trusted parent spawns a shell or interpreter, or the attacker spoofs the reported parent process ID. | Standard user | H | M | #118, #175, #111 | planned | Until the driver ships, parent conditions can only be audited (ADR 0002, R-07). |
 
 ## Bypass attack trees
 
@@ -746,7 +787,9 @@ Verification IDs:
 - `RT-*` are entries in the #230 red-team checklist, for techniques that cannot be automated
   safely;
 - `TEST-*` are unit or integration tests owned by the named issue;
-- `TEST:` followed by a test name is a test that already exists on `main`.
+- `TEST:` followed by a test name is a test that already exists on `main`;
+- `fuzz:` followed by a name is a cargo-fuzz target that already exists on `main`;
+- `CI:` followed by a command is a check that already runs in CI.
 
 The `BYP`, `FUZZ`, `RT` and `TEST-*` names are proposals. #230 fixes the final names, and
 `xtask threat-coverage` (still to come) checks that each one links back to a threat.
@@ -766,7 +809,7 @@ flowchart TD
   ORA --> AT18["AT-18 Interpreter abuse"]
   ORA --> AT19["AT-19 Trust-source abuse"]
   B --> ORB{"OR"}
-  ORB --> AT06["AT-06 Policy cache tampering"]
+  ORB --> AT06["AT-06 Policy tampering on the endpoint"]
   ORB --> AT07["AT-07 Policy rollback"]
   ORB --> AT08["AT-08 Clock rollback"]
   ORB --> AT09["AT-09 Stop, kill, suspend, debug"]
@@ -785,38 +828,38 @@ flowchart TD
 ATT&CK: T1218 (System Binary Proxy Execution), T1127.001, T1047, T1140. Epics #6 and #7.
 
 - **OR**: run attacker code through a signed OS binary
-  - AT-01.1 `mshta` runs an HTML application or inline script → recommended block rules (#87), HTML application adapter (#93); T-native-06; BYP-lol-01
-  - AT-01.2 `msbuild` compiles and runs an inline task → recommended block rules (#87), toolchains allowed only in developer profiles (#165); T-native-06; BYP-lol-02
-  - AT-01.3 `installutil` runs installer classes from any assembly → recommended block rules (#87); T-native-06; BYP-lol-03
-  - AT-01.4 `regsvr32` loads a local or remote scriptlet → recommended block rules (#87), script-host child-process rules (#100), COM and scriptlet control (#107); T-native-06; BYP-lol-04
-  - AT-01.5 `rundll32` runs a `javascript:` URL or an export of an arbitrary DLL → DLL control (#104), recommended block rules (#87); T-native-06; BYP-lol-05
-  - AT-01.6 `cscript` or `wscript` runs `.js`, `.vbs` or `.wsf` → script host adapters (#93), per-type script modes (#92); T-native-06; BYP-lol-06
-  - AT-01.7 `wmic` runs an XSL stylesheet containing script → recommended block rules (#87), managed LOLBin hardening set (#100); T-native-06; BYP-lol-07
-  - AT-01.8 **AND**: `certutil` decodes or downloads a payload, then the payload is run
-    - decode or download → allowed by itself; only audited (#97)
-    - run the decoded file from a user-writable path → implicit deny of unknown files (#39), path ACL checks (#212); T-engine-04; BYP-lol-08
-  - AT-01.9 any other proxy binary (developer hosts, interactive compilers, add-in hosts, the OS's application deployment engine, old versions of signed tools) → block-list ingestion and updates (#87); new ones are residual risk R-16; BYP-lol-09
+  - AT-01.1 `mshta` runs an HTML application or inline script → recommended block rules (#87), HTML application adapter (#93); T-native-07; BYP-lol-01
+  - AT-01.2 `msbuild` compiles and runs an inline task → recommended block rules (#87), toolchains allowed only in developer profiles (#165); T-native-07; BYP-lol-02
+  - AT-01.3 `installutil` runs installer classes from any assembly → recommended block rules (#87); T-native-07; BYP-lol-03
+  - AT-01.4 `regsvr32` loads a local or remote scriptlet → recommended block rules (#87), script-host child-process rules (#100), COM and scriptlet control (#107); T-native-07; BYP-lol-04
+  - AT-01.5 `rundll32` runs a `javascript:` URL or an export of an arbitrary DLL → DLL control (#104), recommended block rules (#87); T-native-07; BYP-lol-05
+  - AT-01.6 `cscript` or `wscript` runs `.js`, `.vbs` or `.wsf` → script host adapters (#93), per-type script modes (#92); T-native-07; BYP-lol-06
+  - AT-01.7 `wmic` runs an XSL stylesheet containing script → recommended block rules (#87), managed LOLBin hardening set (#100); T-native-07; BYP-lol-07
+  - AT-01.8 **AND**: `certutil` decodes or downloads a payload, then the payload is run. Blocking either step defeats it.
+    - AT-01.8a decode or download a payload with `certutil` → `certutil` network and decode use in the managed LOLBin hardening set (#100); T-native-07; BYP-lol-08
+    - AT-01.8b run the decoded file from a user-writable path → implicit deny of unknown files (#39), path-rule ACL checks (#212); T-engine-10; BYP-lol-08
+  - AT-01.9 any other proxy binary (developer hosts, interactive compilers, add-in hosts, the OS's application deployment engine, old versions of signed tools) → block-list ingestion and updates (#87); new ones are residual risk R-16; T-native-07; BYP-lol-09
 
 ### AT-02 DLL search-order hijacking and side-loading
 
 ATT&CK: T1574.001, T1574.002. Epic #8.
 
-- **AND**: an allowed EXE loads an attacker DLL
-  - AT-02.1 **OR**: an allowed EXE runs from a writable folder
-    - a publisher or hash rule allows the EXE wherever it is copied → lint warning for publisher-only allow rules without a path or version condition (#191), path ACL checks (#54, #212); T-engine-01; BYP-dll-01
-    - the EXE already lives in a writable folder → writable-path report (#212); BYP-dll-01
-  - AT-02.2 the attacker plants a DLL beside it, or in a folder earlier in the search order → DLL enforcement: the DLL itself must be allowed (#104, #8); T-native-06; BYP-dll-02
-  - AT-02.3 the loader picks the attacker DLL (search order, missing DLL, side-loading) → the decision is made on every image load, whatever path the loader took (#104, #111); BYP-dll-02
+- **AND**: an allowed executable loads an attacker DLL. Blocking either branch defeats it.
+  - AT-02.1 **OR**: the attacker puts a DLL where an allowed executable's loader will find it
+    - AT-02.1a side-loading: copy an allowed executable (a publisher or hash rule allows it wherever it is) to a writable folder, and put the DLL beside it → lint warning for publisher-only allow rules without a path or version condition (#191), writable-path report (#212); T-native-08; BYP-dll-01
+    - AT-02.1b search-order hijack: an allowed executable in a protected folder searches the current directory, a user-writable `PATH` entry or a writable application folder, or looks for a DLL that does not exist → writable-path report (#212), path ACL checks (#54); T-native-08; BYP-dll-03
+  - AT-02.2 the loader maps the attacker DLL → DLL enforcement: every image load is decided on its own, wherever the loader found it, so the DLL itself must be allowed (#104, #8, #111); T-native-08; BYP-dll-02
 
 ### AT-03 User-writable subfolders inside allowed paths
 
 ISM-1392 and ISM-1746. Epic #6.
 
-- **AND**: run a payload from inside an allowed folder
-  - AT-03.1 a path rule allows a folder such as `%WINDIR%\*` → path-rule ACL validation: a rule whose folder has a user-writable descendant is a lint error (#54, #212); T-engine-04; BYP-path-01
-  - AT-03.2 a user-writable subfolder exists there (`%WINDIR%\Temp`, `%WINDIR%\Tasks`, `%WINDIR%\System32\spool\drivers\color`, `%WINDIR%\tracing`) → default deny exceptions for known writable subfolders in shipped templates (#124, #87), writable-path discovery scenario (#230); BYP-path-02
-  - AT-03.3 the user copies a payload there and runs it → owner-based trust: a file owned by a non-administrator is not trusted by path alone (#117); BYP-path-03
-  - AT-03.4 an installer later loosens a folder's ACL → ACL re-check and drift reports (#212); RT-path-01
+- **AND**: run a payload from inside an allowed folder. Blocking any branch defeats it.
+  - AT-03.1 a path rule allows a folder such as `%WINDIR%\*` → path-rule ACL validation: a rule whose folder has a user-writable descendant is a lint error (#54, #212); T-engine-10; BYP-path-01
+  - AT-03.2 **OR**: a user-writable subfolder exists under it
+    - AT-03.2a a built-in writable subfolder (`%WINDIR%\Temp`, `%WINDIR%\Tasks`, `%WINDIR%\System32\spool\drivers\color`, `%WINDIR%\tracing`) → default deny exceptions for known writable subfolders in shipped templates (#124, #87), writable-path discovery scenario (#230); T-engine-10; BYP-path-02
+    - AT-03.2b an installer later loosens a folder's ACL → ACL re-checks and drift reports (#212); T-engine-10; RT-path-01
+  - AT-03.3 the user copies a payload there and the path rule trusts it → owner-based trust: a file owned by a non-administrator is not trusted by path alone (#117); T-engine-11; BYP-path-03
 
 ### AT-04 File-system tricks
 
@@ -835,24 +878,30 @@ ATT&CK: T1036, T1564.004. Epics #2 and #3.
   - AT-04.10 volume GUID paths and mount points → canonical volume identity (#54); T-engine-04; BYP-fs-10
   - AT-04.11 copy to a new extension → content-based file type detection (#44); T-engine-01; BYP-fs-12
 
-### AT-05 TOCTOU: the file changes between check and use
+### AT-05 TOCTOU: content changes between check and use
 
-Epics #3 and #8.
+Epics #3 and #8. The two branches are independent attacks on different objects.
 
-- **AND**: run content that differs from what was checked
-  - AT-05.1 the decision is made on content read at one moment → hash the file object that backs the image section, at section creation (#110, #111), not a path re-opened later; BYP-toctou-01
-  - AT-05.2 **OR**: the file is changed after hashing and before mapping
-    - write between hash and map, pausing the agent's read with an opportunistic lock → deny-write share mode while hashing; hash cache keyed by file ID plus USN change stamp and invalidated on write (#46, #60); BYP-toctou-01
-    - a stale hash-cache entry is reused → change-stamp binding and HMAC per record (#46, [ADR 0007](../adr/0007-agent-local-store.md)); T-cache-06; BYP-fs-11
-  - AT-05.3 the policy bundle changes between verification and parsing → verify-then-parse on a private copy (#61, [ADR 0007](../adr/0007-agent-local-store.md)); T-cache-04; BYP-toctou-02
+- **OR**: get content run or enforced that differs from what was checked
+  - AT-05.1 **AND**: executable image race. Blocking either step defeats it.
+    - AT-05.1a the decision is made on content read at one moment, not on what is mapped → decide on the file object that backs the image section, at section creation (#110, #111); T-driver-09; BYP-toctou-01
+    - AT-05.1b **OR**: the content changes after it was checked
+      - write between hash and map, pausing the agent's read with an opportunistic lock → deny-write share mode while hashing; hash cache keyed by volume ID, file ID and USN change stamp and invalidated on write (#46, #60); T-driver-09; BYP-toctou-01
+      - a stale hash-cache entry is reused after an in-place write → change-stamp binding and an HMAC per record (#46, [ADR 0007](../adr/0007-agent-local-store.md)); T-cache-06; BYP-fs-11
+  - AT-05.2 policy bundle race: the bundle changes between verification and parsing → verify-then-parse on a private copy (#61, [ADR 0007](../adr/0007-agent-local-store.md)); T-cache-04; BYP-toctou-02
 
-### AT-06 Policy cache tampering
+### AT-06 Policy tampering on the endpoint
 
-Owned by #220 and #225.
+Owned by #220 and #225. The two top-level branches need different access: Palisade's store is
+SYSTEM-only, while the deployed OS-native policy lives in OS policy locations that an
+administrator controls.
 
 ```mermaid
 flowchart TD
-  R["AT-06 Make the agent enforce a weaker policy<br/>by changing its local store"] --> AND1{"AND"}
+  R["AT-06 Make the endpoint enforce a weaker policy<br/>by changing what is stored on it"] --> OR0{"OR"}
+  OR0 --> S["AT-06.A Change Palisade's own store"]
+  OR0 --> E6["AT-06.7 Remove or replace the deployed native policy<br/>(local admin; no access to Palisade's store needed)<br/>→ signed native policy, re-deploy and alert (#85, #220)<br/>T-native-02, R-03, BYP-tamper-09"]
+  S --> AND1{"AND"}
   AND1 --> W["AT-06.1 Gain write access to the<br/>SYSTEM-only data directory<br/>→ ACLs and driver protection (#220)<br/>T-cache-02, BYP-tamper-04"]
   AND1 --> OR1{"OR"}
   OR1 --> E1["AT-06.2 Edit or replace the active bundle<br/>→ signature verified at load and every 15 min (#225)<br/>T-cache-02, BYP-policy-01"]
@@ -860,7 +909,6 @@ flowchart TD
   OR1 --> E3["AT-06.4 Delete the cache to reach the<br/>first-install audit path<br/>→ 'policy ever accepted' check (#225, ADR 0012)<br/>T-cache-05, BYP-tamper-04"]
   OR1 --> E4["AT-06.5 Corrupt the active bundle so N-1 loads<br/>→ bounded fallback, critical event (#225)<br/>T-cache-03, R-09, BYP-policy-02"]
   OR1 --> E5["AT-06.6 Edit hash-cache records<br/>→ HMAC per record (#46)<br/>T-cache-06, BYP-fs-11"]
-  OR1 --> E6["AT-06.7 Remove the deployed native policy<br/>→ signed native policy, re-deploy and alert (#85, #220)<br/>T-native-02, BYP-tamper-09"]
 ```
 
 ### AT-07 Policy rollback
@@ -870,7 +918,7 @@ Owned by #225.
 - **OR**: get an older, more permissive policy enforced
   - AT-07.1 replay an older signed bundle captured from traffic or storage → anti-rollback record of the highest accepted version (#225); T-cache-03; BYP-policy-03
   - AT-07.2 reset the anti-rollback record → mirrored copies, mismatch raises `tamper.policy.rollback_suspected` (#225); T-cache-05; BYP-tamper-04
-  - AT-07.3 corrupt the active bundle to force N-1 → bounded one-step exception with a critical event and a rapid check-in ([ADR 0012](../adr/0012-fail-open-vs-fail-closed-defaults.md), #225); R-09; BYP-policy-02
+  - AT-07.3 corrupt the active bundle to force N-1 → bounded one-step exception with a critical event and a rapid check-in ([ADR 0012](../adr/0012-fail-open-vs-fail-closed-defaults.md), #225); R-09; T-cache-03; BYP-policy-02
   - AT-07.4 redeploy an older native policy → the agent compares the deployed native policy version with the expected one and re-deploys (#83, #85); T-native-02; BYP-policy-06
   - AT-07.5 get the server to re-sign old content → only through a new, higher, audited version (#133, #225); T-console-09; RT-console-01
 
@@ -879,10 +927,10 @@ Owned by #225.
 ISM-0988. Owned by #220, #222 and #225; rules in [ADR 0012](../adr/0012-fail-open-vs-fail-closed-defaults.md).
 
 - **OR**: revive or extend an expired exception, token, window or rule
-  - AT-08.1 set the wall clock back while the agent runs → anchored time and the floor are used, not the wall clock (#220); T-cache-07; BYP-clock-01
-  - AT-08.2 set the clock while the agent is stopped, to start a scheduled grant early → offline-started rule: scheduled grants stay closed until check-in (#220); BYP-clock-02
-  - AT-08.3 spoof the time source at boot → as AT-08.2, plus the skew latch (#220); BYP-clock-03
-  - AT-08.4 redeem a genuine, unredeemed override code outside its window → accepted risk R-10: single use, floor check, monotonic session timer (#120, #222); BYP-clock-04
+  - AT-08.1 set the wall clock back while the agent runs → anchored time and the floor are used, not the wall clock (#220); T-agent-15; BYP-clock-01
+  - AT-08.2 set the clock while the agent is stopped, to start a scheduled grant early → offline-started rule: scheduled grants stay closed until check-in (#220); T-agent-15; BYP-clock-02
+  - AT-08.3 spoof the time source at boot → as AT-08.2, plus the skew latch (#220); T-agent-15; BYP-clock-03
+  - AT-08.4 redeem a genuine, unredeemed override code outside its window → accepted risk R-10: single use, floor check, monotonic session timer (#120, #222); T-agent-15; BYP-clock-04
   - AT-08.5 reset the protected time state (floor, redeemed-code list, skew latch) → protected storage that only moves in the closed direction (#220); T-cache-07; BYP-clock-05
 
 ### AT-09 Stop, kill, suspend or debug the agent
@@ -908,25 +956,25 @@ Owned by #8 and #220.
   - AT-10.2 detach its instance from a volume → instance teardown is refused for protected volumes and raises an event (#110); T-driver-02; BYP-tamper-02
   - AT-10.3 change its service key, start type or altitude → registry callback; the agent checks presence, version and altitude (#110, #220); T-driver-02; BYP-tamper-03
   - AT-10.4 load another filter above it → driver load control and filter inventory (#105); T-driver-03; BYP-drv-01
-  - AT-10.5 stop it loading at boot by editing the disk offline → residual risk R-05; the agent reports the missing driver and `driver_failure_mode` applies (#113); RT-boot-01
+  - AT-10.5 stop it loading at boot by editing the disk offline → residual risk R-05; the agent reports the missing driver and `driver_failure_mode` applies (#113); T-agent-16; RT-boot-01
 
 ### AT-11 Safe mode or offline boot
 
 ATT&CK: T1562.009. Owned by #220. Disk encryption guidance is in [Assumptions](#assumptions).
 
 - **OR**: tamper while Palisade is not running
-  - AT-11.1 boot into safe mode → services registered for safe boot, `tamper.boot.safe_mode` event (#220); BYP-boot-01
-  - AT-11.2 boot other media (a preinstallation environment or another OS) and edit the disk → disk encryption with a TPM protector, Secure Boot ([Assumptions](#assumptions)); residual risk R-05; binary and cache integrity checks at the next start (#220); RT-boot-01
-  - AT-11.3 change the boot configuration to allow test-signed or unsigned drivers → Secure Boot; the agent reports the boot configuration (#210); RT-boot-02
+  - AT-11.1 boot into safe mode → services registered for safe boot, `tamper.boot.safe_mode` event (#220); T-agent-16; BYP-boot-01
+  - AT-11.2 boot other media (a preinstallation environment or another OS) and edit the disk → disk encryption with a TPM protector, Secure Boot ([Assumptions](#assumptions)); residual risk R-05; binary and cache integrity checks at the next start (#220); T-agent-16; RT-boot-01
+  - AT-11.3 change the boot configuration to allow test-signed or unsigned drivers → Secure Boot; the agent reports the boot configuration (#210); T-agent-16; RT-boot-02
 
 ### AT-12 BYOVD: a vulnerable signed driver kills the agent from the kernel
 
 ATT&CK: T1068. Owned by #87 and #105. Residual risk R-02.
 
-- **AND**: use kernel access to disable Palisade
-  - AT-12.1 obtain administrator rights to load a driver → out of reach for AC-01 and AC-02 (#161 removes standing admin rights); RT-drv-03
-  - AT-12.2 load a known vulnerable signed driver → vulnerable driver blocklist (#87), driver load control (#105), hypervisor-enforced code integrity recommended; BYP-drv-04
-  - AT-12.3 use it to remove callbacks or kill the agent → not preventable (R-02); detected by heartbeat loss and server-side alerting (#62, #201); RT-drv-03
+- **AND**: use kernel access to disable Palisade. Blocking any step defeats it.
+  - AT-12.1 obtain administrator rights to load a driver → out of reach for AC-01 and AC-02 (#161 removes standing admin rights); T-driver-10; RT-drv-03
+  - AT-12.2 load a known vulnerable signed driver → vulnerable driver blocklist (#87), driver load control (#105), hypervisor-enforced code integrity recommended; T-driver-10; BYP-drv-04
+  - AT-12.3 use it to remove callbacks or kill the agent → not preventable (R-02); detected by heartbeat loss and server-side alerting (#62, #201); T-driver-10; RT-drv-03
 
 ### AT-13 Token theft or impersonation to reach agent IPC
 
@@ -935,9 +983,9 @@ ATT&CK: T1134. Owned by #220.
 - **OR**: call a privileged IPC verb without authority
   - AT-13.1 connect with an unsigned client → image signature check against the pinned publisher (#220); T-agent-02; BYP-tamper-08
   - AT-13.2 inject into the signed tray or CLI → privileged verbs also need an unlock token or CLI password (#220, #222); T-agent-02; RT-ipc-01
-  - AT-13.3 create the pipe first (pipe squatting) → first-instance flag at agent start; the tray checks the server process (#220); T-tray-02; BYP-tamper-07
-  - AT-13.4 steal an administrator's token and impersonate them → where policy requires an unlock token, an admin SID alone is not enough (#222); RT-ipc-02
-  - AT-13.5 connect from another machine → remote clients are rejected (#220); BYP-tamper-19
+  - AT-13.3 create the pipe first (pipe squatting) → first-instance flag at agent start; clients check the server process before writing (#220); T-tray-02; BYP-tamper-07
+  - AT-13.4 steal an administrator's token and impersonate them → where policy requires an unlock token, an admin SID alone is not enough (#222); T-agent-02; RT-ipc-02
+  - AT-13.5 connect from another machine → remote clients are rejected (#220); T-agent-02; BYP-tamper-19
   - AT-13.6 reuse a verified caller's PID → handle held for the connection, creation time checked (#220); T-agent-03; BYP-tamper-11
 
 ### AT-14 Uninstall through the installer or the OS's installed-apps page
@@ -945,8 +993,8 @@ ATT&CK: T1134. Owned by #220.
 Owned by #222.
 
 - **OR**: remove the agent without authorisation
-  - AT-14.1 run the installer's uninstall (`msiexec /x`) → a deferred custom action requires `UNLOCK_TOKEN` (#222); BYP-tamper-20
-  - AT-14.2 uninstall from the OS's installed-apps settings page → the same custom action; the entry can be hidden (#222); BYP-tamper-20
+  - AT-14.1 run the installer's uninstall (`msiexec /x`) → a deferred custom action requires `UNLOCK_TOKEN` (#222); T-agent-17; BYP-tamper-20
+  - AT-14.2 uninstall from the OS's installed-apps settings page → the same custom action; the entry can be hidden (#222); T-agent-17; BYP-tamper-20
   - AT-14.3 delete the services and files by hand → service DACL, file protection, watchdog repair (#220); T-agent-04; BYP-tamper-12
   - AT-14.4 install an older version over it → a downgrade needs a signed `allow_downgrade` entry and an unlock token (#222, #226); T-update-02; BYP-update-02
 
@@ -968,9 +1016,9 @@ Owned by #10 (approvals and four-eyes, #142) and #229 (audit). Residual risk R-0
   - AT-16.1 switch groups to audit or allow-all → four-eyes approval for high-impact changes (#142, #229), audit (#132), alerting (#201); T-console-09; RT-console-01
   - AT-16.2 delete blocklists → the mandatory-deny tier cannot be overridden by policy (#125); deletion is a four-eyes action (#229); T-console-09; RT-console-01
   - AT-16.3 add broad allow rules → lint (#191), staged rollout rings (#135), approvals; T-console-09; RT-console-01
-  - AT-16.4 issue unlock tokens for many devices → `agent.unlock.issue` permission, mandatory reason, four-eyes for uninstall (#222); T-api-07; RT-console-02
+  - AT-16.4 issue unlock tokens for many devices → `agent.unlock.issue` permission, mandatory reason, four-eyes for uninstall (#222); T-console-09; RT-console-02
   - AT-16.5 push malicious binaries as an update → not possible: update metadata keys are not on the server (#226); T-update-01; BYP-update-01
-  - AT-16.6 change policy rows directly in the database → T-db-03 (#229); RT-db-01
+  - AT-16.6 change policy rows directly in the database → audit chain and dual control (#229); T-db-03; RT-db-01
 
 ### AT-17 Update channel compromise
 
@@ -979,33 +1027,35 @@ ATT&CK: T1195.002. Owned by #226.
 - **OR**: get attacker code installed by the update client
   - AT-17.1 serve a malicious package from a mirror or relay → TUF metadata chain and pinned publisher (#226); T-update-01; BYP-update-01
   - AT-17.2 roll back or freeze metadata → version monotonicity and expiry (#226); T-update-02, T-update-03; BYP-update-02, BYP-update-03
-  - AT-17.3 **AND**: steal both the targets key and the code-signing key → threshold root rotation (#226), signing key in hardware (#226, #224); T-ci-02; RT-ci-02
+  - AT-17.3 **AND**: steal both the targets key and the code-signing key. Protecting either key defeats it.
+    - AT-17.3a steal the targets metadata key → key held only in the release job, threshold root rotation on compromise (#226); T-update-01; RT-ci-02
+    - AT-17.3b steal the code-signing key → key in hardware or a signing service, never a repository secret (#226, #224); T-ci-02; RT-ci-02
   - AT-17.4 compromise the build → GitHub-hosted runners only, provenance attestations (#21, #226); T-ci-07; RT-ci-01
-  - AT-17.5 compromise a dependency → source and advisory checks (#23); residual risk R-15; T-ci-05
+  - AT-17.5 compromise a dependency → source and advisory checks (#23); residual risk R-15; T-ci-05; CI: `cargo deny --locked check`
 
 ### AT-18 Interpreter abuse
 
 ATT&CK: T1059.001, T1562.010, T1620. Epic #7.
 
 - **OR**: run unapproved code inside an allowed interpreter
-  - AT-18.1 PowerShell version 2 downgrade → downgrade protection and removal of the old engine (#94); BYP-ps-01
-  - AT-18.2 escape constrained language mode (type compilation, COM objects) → lockdown contract (#94), COM control (#107); T-native-06; BYP-ps-03
+  - AT-18.1 PowerShell version 2 downgrade → downgrade protection and removal of the old engine (#94); T-script-06; BYP-ps-01
+  - AT-18.2 escape constrained language mode (type compilation, COM objects) → lockdown contract (#94), COM control (#107); T-script-06; BYP-ps-03
   - AT-18.3 use a script host that does not enforce code integrity → host adapters (#93), recommended block rules (#87); T-native-06; BYP-ps-04
-  - AT-18.4 load code reflectively from memory (`Assembly.Load(byte[])`) → AMSI provider and dynamic-code control (#96, #109); BYP-ps-05
-  - AT-18.5 run a user-installed interpreter (for example Python) → interpreter identification, per-type modes and argument rules (#92, #98, #99); BYP-int-01
-  - AT-18.6 use encoded commands or `-ExecutionPolicy Bypass` → execution policy is never relied on; command-line rules (#94, #99); BYP-ps-06
+  - AT-18.4 load code reflectively from memory (`Assembly.Load(byte[])`) → AMSI provider and dynamic-code control (#96, #109); T-script-07; BYP-ps-05
+  - AT-18.5 run a user-installed interpreter (for example Python) → interpreter identification, per-type modes and argument rules (#92, #98, #99); T-script-08; BYP-int-01
+  - AT-18.6 use encoded commands or `-ExecutionPolicy Bypass` → execution policy is never relied on; command-line rules (#94, #99); T-script-08; BYP-ps-06
 
 ### AT-19 Trust-source abuse
 
 ATT&CK: T1134.004, T1218.007. Epic #9.
 
 - **OR**: get an attacker file trusted through a trusted installer, updater or parent
-  - AT-19.1 a trusted installer writes an attacker file (custom action) → direct versus chained inheritance, installer scope (#114, #116); BYP-trust-01
-  - AT-19.2 a trusted updater fetches an attacker payload → updater catalogue checks the updater's own signature rules (#119); BYP-trust-02
-  - AT-19.3 a trusted parent spawns a shell or interpreter → created-by rules exclude shells and interpreters by default; child-process control (#118, #175); BYP-trust-03
-  - AT-19.4 spoof the parent process ID → use the real creator from process-creation callbacks, not the reported parent (#111, #118); BYP-trust-04
-  - AT-19.5 take ownership of a file to gain owner-based trust → only administrator owners are trusted; ownership changes on overwrite (#117); BYP-trust-05
-  - AT-19.6 install from a URL (`msiexec /i http://...`) → installer rules (#98); BYP-trust-06
+  - AT-19.1 a trusted installer writes an attacker file (custom action) → direct versus chained inheritance, installer scope (#114, #116); T-engine-12; BYP-trust-01
+  - AT-19.2 a trusted updater fetches an attacker payload → updater catalogue checks the updater's own signature rules (#119); T-engine-12; BYP-trust-02
+  - AT-19.3 a trusted parent spawns a shell or interpreter → created-by rules exclude shells and interpreters by default; child-process control (#118, #175); T-engine-13; BYP-trust-03
+  - AT-19.4 spoof the parent process ID → use the real creator from process-creation callbacks, not the reported parent (#111, #118); T-engine-13; BYP-trust-04
+  - AT-19.5 take ownership of a file to gain owner-based trust → only administrator owners are trusted; ownership changes on overwrite (#117); T-engine-11; BYP-trust-05
+  - AT-19.6 install from a URL (`msiexec /i http://...`) → installer rules (#98); T-script-08; BYP-trust-06
 
 ## Privacy threats (LINDDUN-lite)
 
@@ -1013,14 +1063,14 @@ Shared with #228, which owns the mitigations and the data inventory.
 
 | ID | LINDDUN category | Threat | Mitigation | Issue |
 |---|---|---|---|---|
-| P-01 | Linking | Events from one person on several devices can be joined into a profile of their work. | Pseudonymised usernames with a per-tenant key; re-identification needs the `privacy.reidentify` permission and is audited. | #228 |
-| P-02 | Identifying | Usernames and profile paths in events identify the user directly. | `collect.username` and `collect.file_paths_user_profile` settings; generalised profile paths in uploads. | #228 |
-| P-03 | Non-repudiation (unwanted) | Detailed command lines and allow events give a complete record of what a person ran, beyond what application control needs. | Allow events summarised by default; command lines redacted by default; retention per data class. | #228 |
-| P-04 | Detecting | A third party learns which files a device has from reputation lookups or blocked-file uploads. | Integrations and blocked-binary archiving are off by default; the "data leaving your environment" page lists every field sent. | #206, #228 |
-| P-05 | Data disclosure | Secrets typed on command lines (passwords, tokens, connection strings) are collected. | Built-in and custom redaction patterns applied before storage and upload; rules still evaluate the unredacted line on the device. | #228 |
-| P-06 | Unawareness | Users do not know what is collected about them. | The tray "About this device" view shows the collection settings, the server and the organisation's notice. | #228 |
-| P-07 | Non-compliance | Data is kept longer than needed, or cannot be exported or deleted on request. | Configurable retention with warnings below the ISM-1988 minimum; `pal privacy export` and `delete`; legal hold. | #228 |
-| P-08 | Data disclosure | The project itself collects data through update checks, crash upload or analytics. | No phone-home: Palisade only contacts endpoints the operator configures, and a CI test checks it. | #228 |
+| PV-01 | Linking | Events from one person on several devices can be joined into a profile of their work. | Pseudonymised usernames with a per-tenant key; re-identification needs the `privacy.reidentify` permission and is audited. | #228 |
+| PV-02 | Identifying | Usernames and profile paths in events identify the user directly. | `collect.username` and `collect.file_paths_user_profile` settings; generalised profile paths in uploads. | #228 |
+| PV-03 | Non-repudiation (unwanted) | Detailed command lines and allow events give a complete record of what a person ran, beyond what application control needs. | Allow events summarised by default; command lines redacted by default; retention per data class. | #228 |
+| PV-04 | Detecting | A third party learns which files a device has from reputation lookups or blocked-file uploads. | Integrations and blocked-binary archiving are off by default; the "data leaving your environment" page lists every field sent. | #206, #228 |
+| PV-05 | Data disclosure | Secrets typed on command lines (passwords, tokens, connection strings) are collected. | Built-in and custom redaction patterns applied before storage and upload; rules still evaluate the unredacted line on the device. | #228 |
+| PV-06 | Unawareness | Users do not know what is collected about them. | The tray "About this device" view shows the collection settings, the server and the organisation's notice. | #228 |
+| PV-07 | Non-compliance | Data is kept longer than needed, or cannot be exported or deleted on request. | Configurable retention with warnings below the ISM-1988 minimum; `pal privacy export` and `delete`; legal hold. | #228 |
+| PV-08 | Data disclosure | The project itself collects data through update checks, crash upload or analytics. | No phone-home: Palisade only contacts endpoints the operator configures, and a CI test checks it. | #228 |
 
 ## Mitigation mapping
 
@@ -1034,15 +1084,19 @@ One row per threat, in the same order as the STRIDE tables. `N/A` rows are omitt
 | T-driver-04 | The driver keeps a bounded ring of verdict records with sequence numbers; the agent drains it on reconnect and emits a gap event for missing sequence numbers. | #110, #63 | BYP-tamper-01 (events after service restart) |
 | T-driver-05 | Only the agent can connect (T-driver-01); messages carry only the fields the decision needs. | #110, #228 | RT-drv-02 |
 | T-driver-06 | Bounded, allocation-checked handling in the `no_std` driver; boot-loop detection disables the driver after repeated failed boots (#113); driver verifier runs in the VM harness; port and path handling are fuzzed. | #110, #113, #230 | FUZZ-path-normalise, BYP-drv-02 |
-| T-driver-07 | Kernel-side verdict cache keyed by file ID and change stamp, bounded request queue, per-process rate limits, `fail_secure` option; every timeout is an event. | #113, #42, #65 | BYP-drv-03 |
+| T-driver-07 | A kernel-side cache holds only context-independent results (file identity: hashes and signer, keyed by volume ID, file ID and change stamp), never a final verdict; rules that depend on user, parent, command line or path are evaluated for every request, and the cache is cleared on every policy or override-state change. Bounded request queue, per-process rate limits, `fail_secure` option; every timeout is an event. | #113, #42, #65 | BYP-drv-03 |
 | T-driver-08 | Small message surface, `// SAFETY:` comment on every unsafe block, driver depends only on `palisade-core` (ADR 0003), fuzzing of message decoders, driver verifier in the harness. | #110, #230 | FUZZ-driver-port |
+| T-driver-09 | Decide on the file object that backs the image section, at section creation, not on a path re-opened later; deny-write share mode while hashing; hash cache keyed by volume ID, file ID and USN change stamp and invalidated on write. | #110, #111, #46, #60 | BYP-toctou-01 |
+| T-driver-10 | Vulnerable driver blocklist in the mandatory-deny tier, driver load control and inventory, hypervisor-enforced code integrity recommended, heartbeat loss alerting at the server. | #87, #105 | BYP-drv-04, RT-drv-03 |
 | T-native-01 | Signed base policies only accept supplemental policies signed by the Palisade policy key; the agent inventories active policies and raises a tamper event for unknown ones. | #83, #85 | BYP-policy-04 |
 | T-native-02 | Recommend signed policies with Secure Boot; the agent re-deploys a removed policy and raises `tamper.detected`; the application identity service's configuration is watched. | #85, #220 | BYP-tamper-09, RT-native-01 |
 | T-native-03 | The agent ingests the code integrity and rule-collection channels and raises a tamper event when a channel is disabled or cleared. | #58, #220 | BYP-tamper-10 |
 | T-native-05 | Pre-deployment linter and limits, staged rollout rings, audit-first transitions, OS boot-stop recovery and automatic rollback. | #91, #135 | BYP-policy-05 |
-| T-native-06 | Recommended block rules for known gaps, script-host adapters, and the bypass suite re-tests known edge cases on every change. | #87, #93, #230 | BYP-ps-03, BYP-lol-01 |
+| T-native-06 | Recommended block rules for known gaps, script-host adapters, and the bypass suite re-tests known edge cases on every change. | #87, #93, #230 | BYP-ps-03, BYP-ps-04, BYP-lol-01 |
+| T-native-07 | Recommended block rules in the mandatory-deny tier, script-host child-process rules and the managed LOLBin hardening set, implicit deny for the unknown payload the proxy would run. | #87, #100, #93, #39 | BYP-lol-01, BYP-lol-02, BYP-lol-03, BYP-lol-04, BYP-lol-05, BYP-lol-06, BYP-lol-07, BYP-lol-08, BYP-lol-09 |
+| T-native-08 | DLL enforcement: every image load is decided on its own, wherever the loader found it; lint warning for publisher-only allow rules with no path or version condition; writable-path reports. | #104, #8, #191, #212 | BYP-dll-01, BYP-dll-02, BYP-dll-03 |
 | T-agent-01 | mTLS with server pinning against the trust set, never the OS root store by default (ADR 0005); bundles and commands are signed end to end (ADR 0008). | #223, #225 | BYP-policy-01, TEST-transport-pin (#223) |
-| T-agent-02 | Caller verification on every connection: client PID and session, image path, pinned-publisher signature for privileged verbs, token SID by impersonation. | #220 | BYP-tamper-08 |
+| T-agent-02 | Caller verification on every connection: client PID and session, image path, pinned-publisher signature for privileged verbs, token SID by impersonation; remote clients rejected; privileged verbs also need an unlock token or CLI password where policy says so, so an administrator SID alone is not enough. | #220 | BYP-tamper-08, BYP-tamper-19, RT-ipc-01, RT-ipc-02 |
 | T-agent-03 | Keep the process handle open for the life of the connection and check creation time. | #220 | BYP-tamper-11 |
 | T-agent-04 | SYSTEM-owned install directory, driver file protection, periodic Authenticode check of every binary against the pinned publisher, restore from protected copy, `strong` mode DLL signature policy. | #220 | BYP-tamper-12 |
 | T-agent-05 | Registry callback denies writes to protected keys; without the driver a change watch restores known-good values and raises an event. | #220 | BYP-tamper-03, BYP-tamper-06 (IFEO redirect) |
@@ -1050,11 +1104,14 @@ One row per threat, in the same order as the STRIDE tables. `N/A` rows are omitt
 | T-agent-07 | Every privileged verb writes a hash-chained local event with actor, token ID and reason; tamper events bypass de-duplication and upload with priority. | #220, #222 | BYP-tamper-13 |
 | T-agent-08 | Unprivileged verbs return only the caller's own items and status; policy export is a privileged operation (#222). | #220, #228 | RT-agent-02 |
 | T-agent-09 | Full-memory dumps disabled by default, secrets in zeroising wrappers, minidumps exclude marked regions. | #227 | RT-agent-03 |
-| T-agent-10 | Service DACL lets administrators query only, SCM recovery actions, mutual watchdog, driver handle protection. | #220, #221 | BYP-tamper-01 |
+| T-agent-10 | Service DACL lets administrators query only, SCM recovery actions, mutual watchdog, driver handle protection. | #220, #221 | BYP-tamper-01, RT-agent-01 |
 | T-agent-11 | Bounded blocking pool, cancellable hashing, CPU and I/O budgets; decisions never wait on the network (ADR 0009); the native layer is unaffected. | #65, #42 | BYP-drv-03 |
-| T-agent-12 | Per-file `catch_unwind` boundary, unparseable files treated as unknown (implicit deny in enforce mode), per-file panics do not trip the subsystem breaker (ADR 0012). | #45, #230 | FUZZ-pe, BYP-tamper-14 |
+| T-agent-12 | Per-file `catch_unwind` boundary, unparseable files treated as unknown (implicit deny in enforce mode), per-file panics do not trip the subsystem breaker (ADR 0012). | #45, #230 | fuzz: `pe_parse`, BYP-tamper-14 |
 | T-agent-13 | Open files by handle without following reparse points where the decision does not need it, verify the final path of the handle, write only inside the SYSTEM-only data directory, impersonate the caller for caller-supplied paths. | #54, #60, #220 | BYP-fs-03, RT-agent-04 |
 | T-agent-14 | Safe Rust outside the `ffi` modules (ADR 0011), 64 KiB message limit, schema-validated messages, per-client rate limit, fuzz target for IPC messages. | #220, #230 | FUZZ-ipc |
+| T-agent-15 | Time rules from ADR 0012: anchored server time and a floor that never decreases; offline-started agents keep scheduled grants closed; skew latch and `tamper.clock.skew`. | #220, #222, #225 | BYP-clock-01, BYP-clock-02, BYP-clock-03, BYP-clock-04 |
+| T-agent-16 | Services registered for safe boot and a `tamper.boot.safe_mode` event; binary and cache integrity checks at the next start; Secure Boot and disk encryption (Assumptions); boot configuration reported by compliance probes. | #220, #210 | BYP-boot-01, RT-boot-01, RT-boot-02 |
+| T-agent-17 | A deferred custom action requires a valid `UNLOCK_TOKEN` before uninstall proceeds; the entry can be hidden; `uninstall.blocked` is logged. | #222 | BYP-tamper-20 |
 | T-health-01 | The watchdog waits on the agent's process handle, not just the heartbeat, and the heartbeat pipe has the same caller verification as the agent pipe. | #220 | BYP-tamper-01 |
 | T-health-02 | Same file, service DACL and registry protection as the agent; the agent watches the watchdog. | #220 | BYP-tamper-12 |
 | T-health-03 | Verify the pinned-publisher signature of every file before restoring it, and keep the backup in the SYSTEM-only data directory. | #220 | BYP-tamper-12 |
@@ -1062,7 +1119,7 @@ One row per threat, in the same order as the STRIDE tables. `N/A` rows are omitt
 | T-health-06 | SCM recovery actions restart both, driver handle protection stops the kill, and the gap shows up as a heartbeat gap at the server. | #220 | BYP-tamper-01 |
 | T-health-07 | Repair uses only compiled-in values and verified files, never values read back from the registry. | #220 | RT-health-01 |
 | T-tray-01 | The tray never asks for an account password; unlock tokens are device- and operation-bound and single-use, so a phished token is narrow; help text tells users where real prompts come from. | #146, #222 | RT-tray-01 |
-| T-tray-02 | The agent creates the pipe at start with `FILE_FLAG_FIRST_PIPE_INSTANCE`; the tray checks that the pipe server process is the signed agent service. | #220 | BYP-tamper-07 (pipe squatting) |
+| T-tray-02 | The agent creates the pipe at start with `FILE_FLAG_FIRST_PIPE_INSTANCE`. Before writing any bytes, the tray and CLI check that the pipe server process is the signed agent service running as SYSTEM, and they connect with identification-level impersonation only, so a squatted pipe cannot act with their token. | #220 | BYP-tamper-07 (pipe squatting) |
 | T-tray-03 | The tray holds no authority: every request is re-validated by the agent, which uses the caller's token, not claims in the message. | #146, #220 | RT-tray-02 |
 | T-tray-04 | Requests carry the SID from pipe impersonation, the session ID and the time, and are logged on both sides. | #140 | RT-tray-03 |
 | T-tray-05 | The agent filters by the caller's SID and session; "My activity" is local and per user. | #228, #68 | BYP-tamper-15 |
@@ -1076,13 +1133,13 @@ One row per threat, in the same order as the STRIDE tables. `N/A` rows are omitt
 | T-cli-06 | Privileged operation, allowlist-based config export, redaction pass, encrypted archive. | #227 | RT-cli-03 |
 | T-cli-07 | Lockout is time-limited and an admin can unlock remotely; unlock tokens still work. | #222 | BYP-tamper-16 |
 | T-cli-08 | Output goes only to the protected data directory, or the agent impersonates the caller for caller paths. | #220 | RT-agent-04 |
-| T-cache-01 | Signature from an active trust-set key is verified on a private copy before any parsing (ADR 0007). | #225 | BYP-policy-01 (tampered bundle) |
+| T-cache-01 | Signature from an active trust-set key is verified on a private copy before any parsing; tenant and target must match this device (ADR 0007, #225). | #225 | BYP-policy-01 (tampered bundle) |
 | T-cache-02 | Signature check at load and every 15 minutes, N-1 fallback with a critical event, emergency policy if both fail, SYSTEM-only directory, driver file protection. | #225, #220 | BYP-policy-01, BYP-tamper-04 (cache delete/modify) |
-| T-cache-03 | Anti-rollback record of the highest accepted version, kept in protected storage and mirrored in the registry; lower versions rejected with `policy.rollback_rejected`. | #225 | BYP-policy-03 (older version) |
+| T-cache-03 | Anti-rollback record of the highest accepted version, kept in protected storage and mirrored in the registry; lower versions rejected with `policy.rollback_rejected`; the N-1 fallback raises a critical event and a rapid check-in; deployed native policy versions are compared with the expected one. | #225 | BYP-policy-03 (older version), BYP-policy-02, BYP-policy-06 |
 | T-cache-04 | The agent reads the whole file into private memory, verifies, then decodes that copy; no memory mapping (ADR 0007). | #61 | BYP-toctou-02 |
 | T-cache-05 | "A policy was ever accepted" checks the record, both cache files and the registry mirror; a mismatch raises `tamper.policy.rollback_suspected` (ADR 0012). | #225 | BYP-tamper-04 |
 | T-cache-06 | Each record is authenticated with HMAC-SHA-256 over volume ID, file ID, change stamp and hashes; a failed record is discarded and the file re-hashed (ADR 0007). | #46 | BYP-fs-11 (modify after allow) |
-| T-cache-07 | State is in protected storage and only moves in the closed direction; the floor never decreases (ADR 0012). | #220, #222 | BYP-clock-01 |
+| T-cache-07 | State is in protected storage and only moves in the closed direction; the floor never decreases (ADR 0012). | #220, #222 | BYP-clock-05 |
 | T-cache-08 | Driver-based protection records the actor process; the user-mode fallback records the time and the restore. | #220 | BYP-tamper-04 |
 | T-cache-09 | `tamper.config_read_level` 1 by default, optional AES-256-GCM with a DPAPI- or TPM-wrapped key, Argon2id for stored stop codes. | #220, #225, #222 | RT-cache-01 |
 | T-cache-10 | Rapid check-in fetches a fresh bundle; the critical event tells the admin. | #225 | BYP-policy-02 |
@@ -1095,14 +1152,14 @@ One row per threat, in the same order as the STRIDE tables. `N/A` rows are omitt
 | T-events-06 | Size caps, de-duplication and summaries, tamper events exempt from de-duplication and kept first. | #63, #197 | BYP-tamper-18 |
 | T-events-07 | A clear raises a tamper event; the buffer, not the channel, is the upload source. | #220 | BYP-tamper-10 |
 | T-update-01 | TUF-style metadata chain from an offline root plus the pinned Authenticode publisher; mirrors are untrusted caches. | #226 | BYP-update-01 (tampered metadata) |
-| T-update-02 | Version monotonicity in metadata; a downgrade needs a signed `allow_downgrade` entry and an unlock token with the `downgrade` operation. | #226 | BYP-update-02 (rollback metadata) |
+| T-update-02 | Version monotonicity in metadata; a downgrade needs a signed `allow_downgrade` entry and an unlock token with the `downgrade` operation. | #226 | BYP-update-02 (rollback metadata and installer downgrade) |
 | T-update-03 | Short-lived timestamp metadata; expired metadata raises `update.metadata_stale` while enforcement continues. | #226 | BYP-update-03 |
-| T-update-04 | Stage inside the protected data directory, re-verify immediately before installation, install from the verified handle. | #226, #220 | BYP-update-04 |
+| T-update-04 | Stage inside the SYSTEM-only, driver-protected data directory; hold a deny-write handle on the package from verification until the installer has finished; re-verify the signature immediately before starting the installer. | #226, #220 | BYP-update-04 |
 | T-update-05 | Update events with versions, hashes and outcome; the server compares reported versions with the rollout plan. | #66 | BYP-update-01 |
 | T-update-07 | Length limits from signed metadata; downloads beyond the stated length are aborted. | #226 | BYP-update-05 |
 | T-update-08 | Rings, batch rates, automatic halt at a failure threshold, post-install health check with automatic rollback. | #226, #66 | BYP-update-06 |
 | T-update-09 | Only packages that passed metadata and signature checks, from the protected staging directory, are installed. | #226, #57 | BYP-update-04 |
-| T-api-01 | Non-exportable, TPM-backed key where available; clone detection by concurrent use and changed hardware facts; revocation is immediate. | #223 | TEST-enrol-clone (#223) |
+| T-api-01 | Non-exportable, TPM-backed key where available; clone detection by concurrent use and changed hardware facts; reseal flag clears identity on golden images; revocation is immediate. | #223 | TEST-enrol-clone (#223), RT-enrol-01 |
 | T-api-02 | Codes scoped to tenant and group, hashed with a pepper, expiry and use limits, source-address allowlist, rate limits, audit events. | #223 | TEST-enrol-code (#223) |
 | T-api-03 | Scoped, expiring tokens stored as hashes, shown once; per-tenant IP allowlist; last-used tracking. | #187, #227, #229 | TEST-api-token (#187) |
 | T-api-04 | Authorisation middleware checks permission and object scope on every route; deny-by-default route table test; Postgres RLS fails closed (ADR 0006); device certificate tenant must match the URL tenant. | #229, #127 | TEST-route-permissions (#229) |
@@ -1110,7 +1167,7 @@ One row per threat, in the same order as the STRIDE tables. `N/A` rows are omitt
 | T-api-06 | Hash-chained admin audit with actor, auth method, source address, before and after, reason; signed chain head. | #229, #132 | TEST-audit-chain (#229) |
 | T-api-07 | Secret fields redacted unless a specific permission is held, and plaintext secrets are never stored; scope filtering on every query. | #222, #227, #229 | TEST-api-redaction (#222) |
 | T-api-08 | Rate limits per token, address and route class; enrolment limits; check-in jitter; endpoints keep enforcing during an outage (ADR 0009). | #229, #223, #62 | TEST-rate-limit (#229) |
-| T-api-09 | The policy YAML front end bounds input size, nesting depth, node count and lookahead; the `regex` crate is linear-time. | #190, #229 | TEST: `palisade-policy` `dsl::tests::input_size_depth_and_node_count_are_bounded` |
+| T-api-09 | The policy YAML front end bounds input size, nesting depth, node count and lookahead; the `regex` crate is linear-time. | #190, #229 | TEST: `palisade-policy` `dsl::tests::input_size_depth_and_node_count_are_bounded`; TEST-api-limits (#229) for upload size and regex caps |
 | T-api-10 | Privilege-escalation guard: a role can only grant permissions it holds; RBAC checks are server-side. | #131, #229 | TEST-rbac-escalation (#131) |
 | T-api-11 | Compile-time checked, parameterised `sqlx` queries only; CI check for string-built SQL; RLS limits the blast radius (ADR 0006). | #127, #229 | TEST-sql-lint (#229) |
 | T-console-01 | SSO with MFA, local accounts with TOTP, breached-password check, lockout and throttling, generic errors. | #130, #229 | TEST-login-lockout (#229) |
@@ -1121,7 +1178,7 @@ One row per threat, in the same order as the STRIDE tables. `N/A` rows are omitt
 | T-console-06 | Per-person SSO accounts, break-glass accounts with TOTP and an alert on every use, audit of every action. | #229, #130 | TEST-audit-chain (#229) |
 | T-console-07 | Scoped roles enforced server-side; RLS (ADR 0006). | #131, #127 | TEST-route-permissions (#229) |
 | T-console-08 | Backoff rather than permanent lock, per-address limits, SSO and break-glass accounts. | #229 | TEST-login-lockout (#229) |
-| T-console-09 | Optional four-eyes approval for high-impact changes, staged rollout rings, immutable versioned policy history, mandatory-deny tier that no policy can override (ADR 0004), audit and alerting. | #142, #229, #133, #135 | RT-console-01 |
+| T-console-09 | Optional four-eyes approval for high-impact changes (including bulk unlock-token issue), staged rollout rings, immutable versioned policy history, mandatory-deny tier that no policy can override (ADR 0004), audit and alerting. | #142, #229, #133, #135 | RT-console-01, RT-console-02 |
 | T-console-10 | Support access is time-boxed, scoped, approved by the tenant and audited. | #128 | TEST-tenant-support (#128) |
 | T-db-01 | TLS to Postgres required in production mode, with certificate verification. | #227 | TEST-db-tls (#227) |
 | T-db-02 | Runtime role has INSERT and SELECT only on the audit table, a trigger rejects UPDATE and DELETE, the chain head is signed hourly and can be exported to an external sink. | #229 | TEST-audit-append-only (#229) |
@@ -1162,11 +1219,19 @@ One row per threat, in the same order as the STRIDE tables. `N/A` rows are omitt
 | T-integ-08 | Asynchronous queues, timeouts, retry with backoff. | #188, #199 | TEST-webhook-retry (#188) |
 | T-integ-09 | Block private, loopback and link-local targets unless allowlisted, resolve once and pin, no redirects to blocked ranges. | #229 | TEST-ssrf (#229) |
 | T-integ-10 | Role mapping is explicit and audited; high-impact roles can be excluded from provisioning. | #204, #131 | TEST-scim (#204) |
+| T-script-01 | Signature verification covers the whole content as the host will run it, with the same certificate rules as executables. | #95, #52 | BYP-ps-07 |
+| T-script-02 | Decide on content passed through AMSI where the host supports it, otherwise on a deny-write handle held during the check. | #93, #96 | BYP-ps-08 |
+| T-script-03 | Script block, module and command-line telemetry collected into Palisade events. | #97 | BYP-ps-09 |
+| T-script-04 | Redaction before storage and upload, shared with command-line redaction (#228). | #97, #228 | TEST-redaction (#228) |
+| T-script-05 | Bounded scan time and size, the provider never waits on the network (ADR 0009), and failures follow the configured fail mode with an event. | #96, #65 | BYP-ps-10 |
+| T-script-06 | Downgrade protection and removal of the old engine, the lockdown contract for untrusted scripts, COM object control. | #94, #107 | BYP-ps-01, BYP-ps-03 |
+| T-script-07 | AMSI provider and dynamic-code control for .NET reflection loading. | #96, #109 | BYP-ps-05 |
+| T-script-08 | Interpreter identification and per-type modes, installer rules, argument and command-line rules; execution policy is never relied on. | #92, #98, #99, #94 | BYP-int-01, BYP-ps-06, BYP-trust-06 |
 | T-ci-01 | Pull-request-only `main`, required checks, protected release tags, required reviewers on the release environment, offline 2-of-3 TUF root. | #226 | RT-ci-01 |
 | T-ci-02 | Key held in a hardware token or signing service, never a repository secret; signing only in the protected release job. | #226, #24 | RT-ci-02 |
 | T-ci-03 | `cargo xtask check-workflows` allows only GitHub-hosted runner labels, rejects `pull_request_target`, requires read-only top-level permissions; fork workflows need approval. | #21 | TEST: `xtask` `workflows::tests::self_hosted_runner_fails`, `pull_request_target_fails_in_every_form` |
 | T-ci-04 | Action allowlist and full-SHA pinning in `check-workflows` and in the repository settings. | #21 | TEST: `xtask` `workflows::tests::unpinned_or_unknown_actions_fail` |
-| T-ci-05 | `cargo deny` bans unknown registries and git sources and wildcards, advisory checks daily and per PR, `--locked` builds, reviewed dependency updates. | #23 | TEST: `cargo deny --locked check` in CI (`deps` job) |
+| T-ci-05 | `cargo deny` bans unknown registries and git sources and wildcards, advisory checks daily and per PR, `--locked` builds, reviewed dependency updates. | #23 | CI: `cargo deny --locked check` (`deps` job in `ci.yml`) |
 | T-ci-06 | Caches are only written from `main` (`save-if`). | #21 | None yet: a `save-if` rule in `cargo xtask check-workflows` (#21) |
 | T-ci-07 | Build provenance attestations from GitHub-hosted runners, hash checks before signing, reproducible-build comparison. | #226 | TEST-provenance (#226) |
 | T-ci-08 | SLSA provenance, SBOM per release, `pal verify`. | #226 | TEST-provenance (#226) |
@@ -1175,13 +1240,17 @@ One row per threat, in the same order as the STRIDE tables. `N/A` rows are omitt
 | T-ci-11 | Read-only top-level permissions, `persist-credentials: false` on checkout, both checked by `check-workflows`. | #21 | TEST: `xtask` `workflows::tests::missing_or_broad_permissions_fail`, `checkout_must_not_persist_credentials` |
 | T-engine-01 | Renamed-binary detection, lint warnings for allow rules that rely only on mutable metadata, path rules restricted to admin-only writable locations. | #55, #191 | BYP-fs-01 (rename), BYP-fs-12 (new extension) |
 | T-engine-02 | Validation rejects an allow rule whose only identity is SHA-1 or MD5 (ADR 0008). | #40 | TEST: `palisade-policy` `tests::allow_rules_need_a_strong_positive_identity` |
-| T-engine-03 | Image hash per the format specification, page hashes, optional cross-check against the OS trust API on Windows. | #47, #48 | FUZZ-pe, FUZZ-authenticode |
-| T-engine-04 | One normalisation routine used for every path rule, comparison on the final, normalised, case-folded path; fuzz target for path normalisation. | #54, #32 | FUZZ-path-normalise, BYP-fs-04 to BYP-fs-10 |
+| T-engine-03 | Image hash per the format specification, page hashes, optional cross-check against the OS trust API on Windows. | #47, #48 | fuzz: `authenticode_ranges`; FUZZ-authenticode (signature parser, #230) |
+| T-engine-04 | One normalisation routine used for every path rule, comparison on the final, normalised, case-folded path; fuzz target for path normalisation. | #54, #32 | FUZZ-path-normalise, BYP-fs-02, BYP-fs-04, BYP-fs-05, BYP-fs-06, BYP-fs-07, BYP-fs-08, BYP-fs-09, BYP-fs-10 |
 | T-engine-05 | Deny-wins default and a mandatory-deny tier no model can override (ADR 0004). | #35, #125 | TEST-precedence (#35) |
 | T-engine-06 | Decision trace naming the rule, model and inputs; deterministic engine with injected time (ADR 0009). | #41 | TEST-trace (#41) |
 | T-engine-07 | User-facing messages use a reduced explanation; the full trace is for admins. | #147, #41 | RT-engine-01 |
 | T-engine-08 | The YAML front end bounds size, depth, nodes and lookahead; PE debug entries and path lengths are capped. | #45, #190, #42 | TEST: `palisade-policy` `dsl::tests::input_size_depth_and_node_count_are_bounded`, `palisade-fileid` `pe::debug::tests::rsds_path_scan_is_capped` |
-| T-engine-09 | No unsafe code: the workspace sets `unsafe_code = "forbid"` and the parser modules also carry `#![forbid(unsafe_code)]` (ADR 0011). Fuzz targets are planned in #230. | #230 | Compile-time lint in `Cargo.toml` `[workspace.lints.rust]`; FUZZ-pe planned (#230) |
+| T-engine-09 | No unsafe code in the parsers: the workspace sets `unsafe_code = "forbid"`, a member crate cannot relax it, and the parser modules also carry `#![forbid(unsafe_code)]` (#19, ADR 0011). Property tests feed random and mutated images to the PE and version-info parsers on every test run; coverage-guided fuzz targets exist for them (#45). | #19, #45, #25, #230 | TEST: `xtask` `manifests::tests::own_package_fields_and_lints_fail`; `palisade-fileid` `properties` tests `parse_never_panics_on_random_bytes`, `parse_never_panics_on_mutated_images`, `version_info_never_panics`; fuzz: `pe_parse`, `version_info_parse`, `authenticode_ranges` |
+| T-engine-10 | Path-rule ACL validation (a user-writable descendant is a lint error), default deny exceptions for known writable subfolders in shipped templates, ACL re-checks and drift reports (ISM-1392, ISM-1746). | #54, #212, #124, #87 | BYP-path-01, BYP-path-02, RT-path-01 |
+| T-engine-11 | Only administrator owners are trusted; ownership changes to the writer on overwrite, so a user's copy is never trusted by owner. | #117 | BYP-path-03, BYP-trust-05 |
+| T-engine-12 | Direct versus chained inheritance with scope limits, the updater catalogue checks the updater's own signature rules, and provenance is recorded per file (#115). | #114, #116, #119 | BYP-trust-01, BYP-trust-02 |
+| T-engine-13 | Created-by rules exclude shells and interpreters by default, child-process control, and the real creator is taken from process-creation callbacks, not the reported parent. | #118, #175, #111 | BYP-trust-03, BYP-trust-04 |
 
 ## Residual-risk register
 
@@ -1194,21 +1263,21 @@ least one reviewer other than the author. The review is recorded in the [Changel
 | ID | Risk | Threats and trees | Why it is accepted | Detect and alert | Owner |
 |---|---|---|---|---|---|
 | R-01 | An attacker with SYSTEM rights, or an administrator with debug privilege, can ultimately disable, inject into or read any user-mode agent, including its keys and decrypted state. | T-agent-06, T-agent-10, T-cache-09, AT-09 | No user-mode code can defend against its own host's highest privilege. | Heartbeat gap and missing check-ins at the server; tamper events sent before the attack completes. | #220 |
-| R-02 | A kernel-level attacker (BYOVD or any kernel exploit) can remove the driver's callbacks and kill the agent. | T-driver-03, AT-12 | Kernel code is fully trusted by the OS. | Vulnerable driver blocklist stops known entry points; heartbeat loss; hypervisor-enforced code integrity is recommended. | #87, #105 |
+| R-02 | A kernel-level attacker (BYOVD or any kernel exploit) can remove the driver's callbacks and kill the agent. | T-driver-03, T-driver-10, AT-12 | Kernel code is fully trusted by the OS. | Vulnerable driver blocklist stops known entry points; heartbeat loss; hypervisor-enforced code integrity is recommended. | #87, #105 |
 | R-03 | Unsigned OS-native policies can be removed by any local administrator. Only signed policies with Secure Boot resist an administrator. | T-native-01, T-native-02, AT-06.7 | The OS defines this behaviour. Signing needs a key the operator manages. | The agent re-deploys and alerts; the console shows devices without signed policy. | #85 |
 | R-04 | Per-user rules in the legacy rule-collection format depend on a service an administrator can stop ([ADR 0002](../adr/0002-enforcement-strategy.md)). | T-native-02 | It is the only native format with per-user rules. | The agent watches the service and alerts. | #86, #220 |
-| R-05 | With physical access and no disk encryption, the disk can be edited offline (binaries, cache, driver start type). | AT-10.5, AT-11.2 | Palisade cannot protect an unencrypted disk at rest. | Integrity checks at the next start; disk encryption state reported (#210). | #220 |
+| R-05 | With physical access and no disk encryption, the disk can be edited offline (binaries, cache, driver start type). | T-agent-16, AT-10.5, AT-11.2 | Palisade cannot protect an unencrypted disk at rest. | Integrity checks at the next start; disk encryption state reported (#210). | #220 |
 | R-06 | Without protected process light (#221), SYSTEM can terminate the service; without the driver, an administrator can too. | T-agent-10, AT-09 | Protected process light needs a signing route that may not be open to this project ([ADR 0013](../adr/0013-protected-process-light-feasibility.md)). | As R-01. The native layer keeps enforcing. | #221 |
-| R-07 | Driver-only conditions (user, parent process, command line, owner) are not enforced until the driver ships, or while it is absent or disconnected under the default `fail_safe`. | T-driver-07, ADR 0012 weak point 3 | Boot safety and early rollout ([ADR 0002](../adr/0002-enforcement-strategy.md), [ADR 0012](../adr/0012-fail-open-vs-fail-closed-defaults.md)). | Each affected rule is reported as "not enforced"; `fail_secure` is available. | #8, #113 |
+| R-07 | Driver-only conditions (user, parent process, command line, owner) are not enforced until the driver ships, or while it is absent or disconnected under the default `fail_safe`. | T-driver-07, T-driver-09, T-engine-13, ADR 0012 weak point 3 | Boot safety and early rollout ([ADR 0002](../adr/0002-enforcement-strategy.md), [ADR 0012](../adr/0012-fail-open-vs-fail-closed-defaults.md)). | Each affected rule is reported as "not enforced"; `fail_secure` is available. | #8, #113 |
 | R-08 | A compromised server, a malicious administrator with wide scope, or a database-level attacker can get a permissive policy signed and pushed, unless dual control is on. | T-console-09, T-db-03, T-signer-01, AT-16 | The server must be able to sign policy to do its job. | Four-eyes approval, signing audit, agents report bundle kid and hash, staged rollout. | #142, #229 |
 | R-09 | Two bounded weak points in policy handling: the first-install audit window before any bundle arrives, and the one-step N-1 fallback when the active bundle is corrupt. | T-cache-03, T-cache-05, AT-06.5, AT-07.3 | Availability: deployment and disk corruption must not lock machines ([ADR 0012](../adr/0012-fail-open-vs-fail-closed-defaults.md)). | Built-in blocklists during the first-install window; `policy.lkg_loaded` critical event and rapid check-in. | #225 |
-| R-10 | Someone who can change the clock can redeem a genuine, unredeemed override code or unlock token outside its window; with opt-in offline scheduling, they can also stretch scheduled grants until the next check-in. | T-cache-07, AT-08.4 | Offline override must work without a server ([ADR 0012](../adr/0012-fail-open-vs-fail-closed-defaults.md) "Accepted risk"). | Single use, floor check, skew latch, `tamper.clock.skew`, offline use visible in uploaded events. | #220, #222 |
+| R-10 | Someone who can change the clock can redeem a genuine, unredeemed override code or unlock token outside its window; with opt-in offline scheduling, they can also stretch scheduled grants until the next check-in. | T-agent-15, T-cache-07, AT-08.4 | Offline override must work without a server ([ADR 0012](../adr/0012-fail-open-vs-fail-closed-defaults.md) "Accepted risk"). | Single use, floor check, skew latch, `tamper.clock.skew`, offline use visible in uploaded events. | #220, #222 |
 | R-11 | Compromise of the offline root CA key or the update metadata root has no clean recovery: devices must be re-enrolled or re-provisioned. | T-ca-03, T-update-01 | Every PKI has a root of trust. | Ceremonies are audited; the runbook says so plainly (#224). | #224, #226 |
 | R-12 | On devices without a TPM, the device key is protected by software only, and SYSTEM can copy it. | T-api-01, AT-15.3 | Not every device has a TPM. | Keys report their protection type; `enrol.require_hardware_key`; clone detection. | #223 |
 | R-13 | A compromised identity provider or directory is trusted for login, provisioning and group membership. | T-integ-03, T-integ-10 | Delegating identity is the point of SSO. | Audit of membership-driven changes; alerts on sensitive groups and role grants. | #204 |
 | R-14 | The project has one maintainer. Required code-owner review cannot be enforced, and a compromised maintainer account can merge and release. | T-ci-01 | One-person project ([docs/repo-settings.md](../repo-settings.md)). | Provenance and `pal verify`; TUF root threshold keys held separately. | #226 |
 | R-15 | A malicious release of an already-trusted dependency passes the supply-chain checks until an advisory exists. | T-ci-05, AT-17.5 | No practical check proves a dependency benign. | Daily advisory scan, dependency review on update, SBOM per release. | #23 |
-| R-16 | New bypass techniques (new proxy binaries, new path forms, parser differentials) appear over time. | AT-01.9, T-engine-03, T-engine-04 | The threat landscape moves. | Bypass regression suite; block-list updates; review cadence below. | #87, #230 |
+| R-16 | New bypass techniques (new proxy binaries, new path forms, parser differentials) appear over time. | T-native-07, T-script-06, T-engine-03, T-engine-04, AT-01.9 | The threat landscape moves. | Bypass regression suite; block-list updates; review cadence below. | #87, #230 |
 | R-17 | Events between the last check-in and an attacker's takeover of the endpoint can be lost. | T-events-03 | Events are uploaded in batches. | Sequence and chain-head gaps are visible at the server. | #197, #220 |
 
 ## Assumptions
@@ -1258,7 +1327,8 @@ Each review is a changelog entry that says what changed and who reviewed it.
 - A mitigation moves from `planned` to `implemented` in the pull request that lands it, with the
   test name in the verification column.
 - `xtask threat-coverage` (#219, becoming blocking with #230) will parse the mitigation table and
-  fail CI when a threat marked `implemented` or `verified` has no linked test.
+  fail CI when a threat marked `implemented` or `verified` has no `TEST:`, `fuzz:` or `CI:`
+  entry, or a `verified` threat has no `BYP-*` or `RT-*` entry.
 
 ### Disclosure
 
@@ -1272,4 +1342,4 @@ needs an actor this model says Palisade does not resist.
 
 | Version | Date | Change | Reviewed by |
 |---|---|---|---|
-| 0.1.0 | 2026-11-24 | First version: scope, assets, actors, trust boundaries, four data-flow diagrams, STRIDE tables for 18 components, 19 attack trees, privacy threats, mitigation mapping, residual-risk register, assumptions and process. | Author only; independent review pending |
+| 0.1.0 | 2026-11-24 | First version: scope, assets, actors, trust boundaries, four data-flow diagrams, STRIDE tables for 19 components, 19 attack trees, privacy threats, mitigation mapping, residual-risk register, assumptions and process. | Author only; independent review pending |
