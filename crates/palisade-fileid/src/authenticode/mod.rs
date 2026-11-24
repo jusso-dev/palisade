@@ -57,6 +57,9 @@
 //!   [`VendorHint`]. [`SignatureReport::primary`] is the #48 choice by
 //!   cryptographic validity alone; trust decisions must use
 //!   [`TrustReport::primary`].
+//! - [`extract_certificates`] lists the certificates a signed PE image,
+//!   cabinet or PKCS#7 file carries, and [`CertificateBundle`] gathers them
+//!   into a trust bundle.
 //!
 //! # Timestamps, expiry and revocation (#50)
 //!
@@ -102,6 +105,7 @@
 #![forbid(unsafe_code)]
 
 pub(crate) mod asn1;
+mod certs;
 mod chain;
 mod crypto;
 pub mod eku;
@@ -118,9 +122,14 @@ pub(crate) mod verify;
 mod x509;
 
 pub use asn1::{Asn1Error, Asn1ErrorKind, ObjectId};
+pub use certs::{
+    CabinetError, CertSelection, CertificateBundle, ExtractError, ExtractWarning, ExtractedCert,
+    Extraction, MAX_BUNDLE_CERTIFICATES, MAX_EXTRACT_INPUT, MAX_EXTRACT_NESTING,
+    MAX_EXTRACTED_SIGNATURES, SignedFileKind, extract_certificates,
+};
 pub use chain::{
-    AnchorRef, AnchorSource, CertOrigin, ChainCert, ChainIssue, ChainPath, ChainReport,
-    MAX_CHAIN_ISSUES, MAX_CHAIN_LENGTH, MAX_CHAIN_PATHS, MAX_EMBEDDED_CERTIFICATES,
+    AnchorRef, AnchorSource, CertOrigin, CertificatePin, ChainCert, ChainIssue, ChainPath,
+    ChainReport, MAX_CHAIN_ISSUES, MAX_CHAIN_LENGTH, MAX_CHAIN_PATHS, MAX_EMBEDDED_CERTIFICATES,
     MAX_FILE_SIGNATURE_CHECKS, MAX_SIGNATURE_CHECKS, MAX_TRUST_CHECKS, TrustAnchor, TrustConfig,
     WellKnownRoot, WellKnownRootError, build_chain,
 };
@@ -157,13 +166,14 @@ pub use timestamp::{
     TimestampInfo, TimestampStatus, TimestampWarning, parse_timestamp_time, verify_timestamps,
 };
 pub use trust::{
-    FilePublisherOsRule, IdentityIssue, NameSource, OsRuleRoot, PublisherName, PublisherOsRule,
-    SignerIdentity, SignerTrust, TrustReport, UntrustedReason, VendorHint, evaluate_trust,
+    FilePublisherOsRule, IdentityIssue, NameSource, OsRuleRoot, PackagePublisherError,
+    PublisherName, PublisherOsRule, SignerIdentity, SignerTrust, TrustReport, UntrustedReason,
+    VendorHint, evaluate_trust,
 };
 pub use validity::{
-    CertificateOptions, CertificatePin, ChainRevocation, ErrorIgnoreFlags, ExpiryPolicy,
-    IgnoreFlag, RelaxedCheck, SignatureValidity, TimeValidity, ValidityContext, ValidityPolicy,
-    ValidityReport, ValidityWarning, evaluate_validity, status_error,
+    CertificateOptions, ChainRevocation, ErrorIgnoreFlags, ExpiryPolicy, IgnoreFlag, RelaxedCheck,
+    SignatureValidity, TimeValidity, ValidityContext, ValidityPolicy, ValidityReport,
+    ValidityWarning, evaluate_validity, status_error,
 };
 pub use verify::{
     MAX_CERTIFICATE_ENTRIES, MAX_CERTIFICATE_TABLE_SIZE, MAX_NESTING_DEPTH, MAX_SIGNATURES,

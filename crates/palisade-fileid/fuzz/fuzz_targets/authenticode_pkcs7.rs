@@ -2,13 +2,16 @@
 //! is a certificate table, attached to the fixture image the test
 //! signatures were made over (`PeBuilder::default()` from `tests/common`).
 //! No input may panic, and every report must respect the documented limits
-//! and never call a signature valid unless every check passed.
+//! and never call a signature valid unless every check passed. The same
+//! image, and the table as a bare PKCS#7 blob, also go through certificate
+//! extraction (#49).
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
 use palisade_fileid::authenticode::{
-    MAX_CERTIFICATE_ENTRIES, MAX_CERTIFICATES, MAX_NESTING_DEPTH, MAX_SIGNATURES, MAX_TIMESTAMPS,
-    MAX_WARNINGS, SignatureCheck, SignatureStatus, SigningState, VerifyOptions, verify_pe,
+    CertSelection, MAX_CERTIFICATE_ENTRIES, MAX_CERTIFICATES, MAX_EXTRACTED_SIGNATURES,
+    MAX_NESTING_DEPTH, MAX_SIGNATURES, MAX_TIMESTAMPS, MAX_WARNINGS, SignatureCheck,
+    SignatureStatus, SigningState, VerifyOptions, extract_certificates, verify_pe,
 };
 
 // The tests' fixture builder, so the image is byte for byte the one the
@@ -29,6 +32,22 @@ fuzz_target!(|table: &[u8]| {
     let dir = common::PeBuilder::default().data_directory_offset(4);
     image[dir..dir + 4].copy_from_slice(&at.to_le_bytes());
     image[dir + 4..dir + 8].copy_from_slice(&(table.len() as u32).to_le_bytes());
+
+    for input in [image.as_slice(), table] {
+        for selection in [CertSelection::All, CertSelection::Leaf, CertSelection::Root] {
+            if let Ok(out) = extract_certificates(input, selection) {
+                assert!(out.signatures <= MAX_EXTRACTED_SIGNATURES);
+                assert!(
+                    out.certificates
+                        .iter()
+                        .all(|c| c.signature < out.signatures)
+                );
+                if selection == CertSelection::Leaf {
+                    assert!(out.certificates.iter().all(|c| c.is_signer));
+                }
+            }
+        }
+    }
 
     for tolerate in [false, true] {
         let options = VerifyOptions {

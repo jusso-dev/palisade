@@ -20,11 +20,11 @@ use std::collections::HashMap;
 
 use common::*;
 use palisade_fileid::authenticode::{
-    AnchorSource, AttributeKind, CertOrigin, CertSummary, CertificateError, ChainIssue, ChainPath,
-    Curve, DigestAlgorithm, IdentityIssue, KeyAlgorithm, MAX_CHAIN_LENGTH,
-    MAX_EMBEDDED_CERTIFICATES, NameSource, ObjectId, OsRuleRoot, SignatureAlgorithm,
-    SignatureReport, TrustConfig, UntrustedReason, VerifyOptions, build_chain, eku, evaluate_trust,
-    verify_pe,
+    AnchorSource, AttributeKind, CertOrigin, CertSummary, CertificateError, CertificatePin,
+    ChainIssue, ChainPath, Curve, DigestAlgorithm, IdentityIssue, KeyAlgorithm, MAX_CHAIN_LENGTH,
+    MAX_EMBEDDED_CERTIFICATES, NameSource, ObjectId, OsRuleRoot, PackagePublisherError,
+    SignatureAlgorithm, SignatureReport, TrustConfig, UntrustedReason, VerifyOptions, build_chain,
+    eku, evaluate_trust, verify_pe,
 };
 use palisade_fileid::pe;
 use palisade_fileid::pe::version::{FileVersionQuad, VersionField};
@@ -2183,4 +2183,181 @@ fn write_x509_chain_fuzz_seeds() {
         chain.extend(std::fs::read(format!("{FIXTURES}/{name}.der")).unwrap());
     }
     std::fs::write(dir.join("seed-leaf-inter-root"), chain).unwrap();
+}
+
+#[test]
+fn os_store_anchors_report_their_source() {
+    let mut cfg = TrustConfig::new();
+    cfg.add_os_store_anchor("machine root", &der("root"))
+        .unwrap();
+    let report = build_chain(&chain_of(&["leaf", "inter"]), 0, &cfg).unwrap();
+    assert!(report.full_chain.anchored);
+    assert_eq!(report.anchor_source, AnchorSource::OsStore);
+    assert_eq!(cfg.anchors()[0].source, AnchorSource::OsStore);
+    // An OS-store intermediate completes the chain too, and says where it
+    // came from.
+    cfg.add_os_store_intermediate(&der("inter")).unwrap();
+    assert_eq!(cfg.intermediate_source(0), Some(AnchorSource::OsStore));
+    assert_eq!(cfg.intermediate_source(1), None);
+    let report = build_chain(&chain_of(&["leaf"]), 0, &cfg).unwrap();
+    assert!(report.full_chain.anchored);
+    assert_eq!(report.anchor_source, AnchorSource::OsStore);
+    // A policy anchor for the same root wins nothing by itself: the anchor
+    // reached is the first configured with that certificate.
+    let mut both = config(&["root"]);
+    both.add_os_store_anchor("machine root", &der("root"))
+        .unwrap();
+    let report = build_chain(&chain_of(&["leaf", "inter"]), 0, &both).unwrap();
+    assert_eq!(report.anchor_source, AnchorSource::Policy);
+    let json =
+        serde_json::to_value(build_chain(&chain_of(&["leaf", "inter"]), 0, &cfg).unwrap()).unwrap();
+    assert_eq!(json["anchor_source"], "os_store");
+    assert_eq!(json["basic_constraints_ignored"], serde_json::json!([]));
+}
+
+#[test]
+fn ignoring_basic_constraints_lets_a_pinned_non_ca_issue() {
+    let chain = chain_of(&["leaf-under-not-ca", "inter-not-ca", "root"]);
+    // Without the relaxation the non-CA cannot issue (as above).
+    let strict = build_chain(&chain, 0, &config(&["root"])).unwrap();
+    assert!(!strict.full_chain.anchored);
+    assert!(strict.basic_constraints_ignored.is_empty());
+    // Pinned by thumbprint (uppercase, as OS tooling prints it).
+    let mut cfg = config(&["root"]);
+    cfg.ignore_basic_constraints(CertificatePin::Sha256Thumbprint(
+        cert("inter-not-ca").sha256_thumbprint.to_ascii_uppercase(),
+    ));
+    let r = build_chain(&chain, 0, &cfg).unwrap();
+    assert!(r.full_chain.anchored, "{:?}", r.issues);
+    assert_eq!(r.full_chain.certs, [0, 1, 2]);
+    assert_eq!(r.basic_constraints_ignored, [1]);
+    assert!(!r.issues.contains(&ChainIssue::IssuerNotCa { issuer: 1 }));
+    // By TBS hash, the same.
+    let mut cfg = config(&["root"]);
+    cfg.ignore_basic_constraints(CertificatePin::TbsHash(
+        cert("inter-not-ca").tbs_hash_sha256,
+    ));
+    let r = build_chain(&chain, 0, &cfg).unwrap();
+    assert!(r.full_chain.anchored);
+    assert_eq!(r.basic_constraints_ignored, [1]);
+    // A pin on another certificate relaxes nothing.
+    let mut cfg = config(&["root"]);
+    cfg.ignore_basic_constraints(CertificatePin::Sha256Thumbprint(
+        cert("inter").sha256_thumbprint,
+    ));
+    let r = build_chain(&chain, 0, &cfg).unwrap();
+    assert!(!r.full_chain.anchored);
+    assert!(r.basic_constraints_ignored.is_empty());
+}
+
+#[test]
+fn ignoring_basic_constraints_relaxes_path_length() {
+    let chain = chain_of(&["leaf-too-deep", "inter-sub", "inter", "root"]);
+    let mut cfg = config(&["root"]);
+    cfg.ignore_basic_constraints(CertificatePin::Sha256Thumbprint(
+        cert("inter").sha256_thumbprint,
+    ));
+    let r = build_chain(&chain, 0, &cfg).unwrap();
+    assert!(r.full_chain.anchored, "{:?}", r.issues);
+    assert_eq!(r.full_chain.certs, [0, 1, 2, 3]);
+    // Only `inter`'s link to `inter-sub` needed it.
+    assert_eq!(r.basic_constraints_ignored, [2]);
+}
+
+#[test]
+fn ignoring_basic_constraints_keeps_every_other_check() {
+    // Key usage still applies: the pinned signer has no keyCertSign.
+    let mut cfg = config(&["leaf-pinned"]);
+    cfg.ignore_basic_constraints(CertificatePin::Sha256Thumbprint(
+        cert("leaf-pinned").sha256_thumbprint,
+    ));
+    let r = build_chain(
+        &chain_of(&["leaf-issued-by-pinned", "leaf-pinned"]),
+        0,
+        &cfg,
+    )
+    .unwrap();
+    assert!(!r.full_chain.anchored);
+    assert!(r.issues.contains(&ChainIssue::IssuerKeyUsage { issuer: 1 }));
+    // The signature must still verify: a forged child under the pinned
+    // non-CA's name does not link.
+    let mut cfg = config(&["root"]);
+    cfg.ignore_basic_constraints(CertificatePin::Sha256Thumbprint(
+        cert("inter-not-ca").sha256_thumbprint,
+    ));
+    let forged = clone_with_issuer(&der("leaf-under-not-ca"), &der("inter-not-ca"), 9);
+    let r = build_chain(&[forged, der("inter-not-ca"), der("root")], 0, &cfg).unwrap();
+    assert!(!r.full_chain.anchored);
+    assert!(r.basic_constraints_ignored.is_empty());
+    // Untrusted searches record a relaxed link only when the chain takes
+    // it, and the relaxation never anchors a chain on its own.
+    let mut cfg = TrustConfig::new();
+    cfg.ignore_basic_constraints(CertificatePin::Sha256Thumbprint(
+        cert("inter-not-ca").sha256_thumbprint,
+    ));
+    let r = build_chain(
+        &chain_of(&["leaf-under-not-ca", "inter-not-ca", "root"]),
+        0,
+        &cfg,
+    )
+    .unwrap();
+    assert!(!r.full_chain.anchored);
+    assert!(r.chain_complete);
+    assert_eq!(r.basic_constraints_ignored, [1]);
+    assert_eq!(r.anchor_source, AnchorSource::None);
+}
+
+#[test]
+fn package_publisher_display_names_attach_only_to_their_signer() {
+    let report = signed(&p7("leaf-inter-root"));
+    let trust = evaluate_trust(&report, &config(&["root"]), None);
+    let mut id = trust.identity.unwrap();
+    assert_eq!(id.package_display_name, None);
+    let dn = id.publisher_dn.clone().unwrap();
+    // Another publisher's DN: refused, nothing changes.
+    assert_eq!(
+        id.attach_package_publisher("CN=Someone Else, O=Elsewhere", "Someone"),
+        Err(PackagePublisherError::PublisherMismatch)
+    );
+    assert_eq!(id.package_display_name, None);
+    // A display name that cannot be shown safely.
+    assert_eq!(
+        id.attach_package_publisher(&dn, " \u{7}bell "),
+        Err(PackagePublisherError::UnusableDisplayName)
+    );
+    assert_eq!(
+        id.attach_package_publisher(&dn, "   "),
+        Err(PackagePublisherError::UnusableDisplayName)
+    );
+    // The signer's own DN: attached, trimmed.
+    id.attach_package_publisher(&format!(" {dn} "), " Palisade Tests ")
+        .unwrap();
+    assert_eq!(id.package_display_name.as_deref(), Some("Palisade Tests"));
+    // Without a usable DN nothing can be compared.
+    id.publisher_dn = None;
+    assert_eq!(
+        id.attach_package_publisher(&dn, "x"),
+        Err(PackagePublisherError::NoSignerDn)
+    );
+}
+
+#[test]
+fn chains_report_time_nesting_violations() {
+    // `inter-expired` was valid only in 2001; `leaf-expired-ca`, which it
+    // issued, is valid from 2026: not time nested.
+    let r = build_chain(
+        &chain_of(&["leaf-expired-ca", "inter-expired", "root"]),
+        0,
+        &config(&["root"]),
+    )
+    .unwrap();
+    assert!(r.full_chain.anchored);
+    assert_eq!(r.full_chain.certs, [0, 1, 2]);
+    // The leaf is outside its issuer's period; the intermediate (2001) is
+    // also outside the root's (2026 on).
+    assert_eq!(r.time_nesting_violations, [0, 1]);
+    // `leaf`, `inter` and `root` were made together with equal periods:
+    // nested.
+    let r = build_chain(&chain_of(&["leaf", "inter", "root"]), 0, &config(&["root"])).unwrap();
+    assert!(r.time_nesting_violations.is_empty());
 }

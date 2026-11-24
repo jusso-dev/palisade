@@ -69,11 +69,10 @@
 use palisade_core::VerificationError;
 use serde::Serialize;
 
-use super::chain::{ChainReport, TrustConfig};
+use super::chain::{CertificatePin, ChainReport, TrustConfig};
 use super::eku;
 use super::revocation::{
     CertRevocation, Coverage, CrlCache, RevocationFailure, RevocationSet, RevokedCertificate,
-    tbs_matches,
 };
 use super::signature::{
     BadSignature, KeyAlgorithm, SignatureInfo, SignatureReport, SignatureStatus, SigningState,
@@ -159,29 +158,6 @@ impl IgnoreFlag {
             Self::IgnoreRevocationUnknown => ErrorIgnoreFlags::IGNORE_REVOCATION_UNKNOWN,
             Self::IgnoreInvalidUsage => ErrorIgnoreFlags::IGNORE_INVALID_USAGE,
             Self::AllowUntrustedRoot => ErrorIgnoreFlags::ALLOW_UNTRUSTED_ROOT,
-        }
-    }
-}
-
-/// How [`CertificateOptions`] names its certificate: only by forms that
-/// bind its key.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CertificatePin {
-    /// The SHA-256 thumbprint, lowercase hex.
-    Sha256Thumbprint(String),
-    /// A TBS hash, lowercase hex, under the certificate's own digest or
-    /// SHA-256.
-    TbsHash(String),
-}
-
-impl CertificatePin {
-    /// Whether this pins `cert`. Hex is compared ignoring case.
-    #[must_use]
-    pub fn matches(&self, cert: &CertSummary) -> bool {
-        match self {
-            Self::Sha256Thumbprint(t) => cert.sha256_thumbprint.eq_ignore_ascii_case(t),
-            Self::TbsHash(h) => tbs_matches(cert, h),
         }
     }
 }

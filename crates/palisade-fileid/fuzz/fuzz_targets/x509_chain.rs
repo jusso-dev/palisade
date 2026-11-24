@@ -2,13 +2,16 @@
 //! split on a marker into up to 64 certificates (as many as a signature
 //! keeps); the first is the
 //! signer, and the last is also configured as a trust anchor when it
-//! parses. No input may panic, and every report must respect the
-//! documented limits.
+//! parses. The chain is built again with the second certificate's basic
+//! constraints relaxed (a pinned exemption). No input may panic, and every
+//! report must respect the documented limits; a relaxation may only ever
+//! be reported for a certificate on the full chain.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
 use palisade_fileid::authenticode::{
-    CertSummary, MAX_CHAIN_ISSUES, MAX_CHAIN_LENGTH, MAX_CHAIN_PATHS, TrustConfig, build_chain,
+    CertSummary, CertificatePin, MAX_CHAIN_ISSUES, MAX_CHAIN_LENGTH, MAX_CHAIN_PATHS, TrustConfig,
+    build_chain,
 };
 
 /// Separates certificates in the input.
@@ -48,6 +51,16 @@ fuzz_target!(|data: &[u8]| {
     let Ok(report) = build_chain(&certs, 0, &config) else {
         return;
     };
+    check(&report);
+    if let Some(second) = certs.get(1).and_then(|d| CertSummary::from_der(d).ok()) {
+        config.ignore_basic_constraints(CertificatePin::Sha256Thumbprint(second.sha256_thumbprint));
+        if let Ok(relaxed) = build_chain(&certs, 0, &config) {
+            check(&relaxed);
+        }
+    }
+});
+
+fn check(report: &palisade_fileid::authenticode::ChainReport) {
     assert!(report.as_provided.certs.len() <= MAX_CHAIN_LENGTH);
     assert!(report.full_chain.certs.len() <= MAX_CHAIN_LENGTH);
     assert!(report.alternatives.len() < MAX_CHAIN_PATHS);
@@ -56,8 +69,19 @@ fuzz_target!(|data: &[u8]| {
     for path in std::iter::once(&report.full_chain).chain(&report.alternatives) {
         assert!(path.certs.iter().all(|i| *i < report.certificates.len()));
         if path.anchored {
-            assert!(report.certificates[*path.certs.last().unwrap()].anchor.is_some());
+            assert!(
+                report.certificates[*path.certs.last().unwrap()]
+                    .anchor
+                    .is_some()
+            );
         }
     }
     assert_eq!(report.anchored_to.is_some(), report.full_chain.anchored);
-});
+    for i in report
+        .basic_constraints_ignored
+        .iter()
+        .chain(&report.time_nesting_violations)
+    {
+        assert!(report.full_chain.certs.contains(i));
+    }
+}
