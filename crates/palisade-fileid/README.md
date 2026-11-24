@@ -35,9 +35,11 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   swapped mid-way cannot pair one file's key with another's content. It
   uses the cache or hashes the file, rehashes a file that changed while it
   was read, up to three times, before giving up as `Unstable`, and never
-  caches a digest whose size differs from the key's. A rename moves a
-  file's USN, so it misses unless the change journal consumer carries the
-  entry over (`HashCache::rekey_after_rename`). `HashLimiter` bounds
+  caches a digest whose size differs from the key's. Each attempt rewinds the
+  handle first. A rename moves a file's USN, so it misses unless the change
+  journal consumer carries the entry over (`HashCache::key_of` finds the
+  cached key by file ID; `HashCache::rekey_after_rename` accepts only a
+  later USN with the same journal, size and last-write time). `HashLimiter` bounds
   concurrent hashes (default: half the CPUs). `HashMetrics` counts bytes
   hashed, hit ratio, average latency, evictions, tamper events and unstable
   files. `skip_for_inventory` leaves cloud placeholders unread during

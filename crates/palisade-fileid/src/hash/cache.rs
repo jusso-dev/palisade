@@ -388,50 +388,56 @@ impl HashCache {
         self.enforce_bounds();
     }
 
-    /// For the change journal consumer (#60): the journal shows that the
-    /// file cached under `old` was renamed and nothing else, so its key is
-    /// now `new` and its path `new_path`. The entry is carried over.
+    /// The key cached for the file with this ID, if any: for the change
+    /// journal consumer (#60), which knows a file only by its ID and needs
+    /// the cached key (and so its USN) to decide what a journal record
+    /// means for it.
+    #[must_use]
+    pub fn key_of(&self, volume_serial: u64, file_id: [u8; 16]) -> Option<&FileKey> {
+        self.entries
+            .get(&Identity::File {
+                volume_serial,
+                file_id,
+            })
+            .map(|e| &e.key)
+    }
+
+    /// For the change journal consumer (#60): every journal record for the
+    /// file after its cached USN, up to `new`'s, is a rename and nothing
+    /// else, so its key is now `new` and its path `new_path`. The entry is
+    /// carried over.
     ///
-    /// Only a strong key can be rekeyed, and only to a key for the same
-    /// file (volume and file ID) with the same journal, last-write time and
-    /// size; anything else could let a stale entry describe changed
-    /// content, so the entry is dropped instead. Returns whether it was
-    /// kept.
-    pub fn rekey_after_rename(
-        &mut self,
-        old: &FileKey,
-        new: FileKey,
-        new_path: Option<String>,
-    ) -> bool {
-        let id = Identity::of(old);
-        let same_file = match (old, &new) {
+    /// The consumer must have checked that: find the cached key with
+    /// [`Self::key_of`], and read the journal from its USN. Only a strong
+    /// entry can be rekeyed, and only to a strong key for the same file
+    /// (volume and file ID) with the same journal, last-write time and
+    /// size, and a **later** USN. Anything else could let a stale entry
+    /// describe changed content, so the file's entry is dropped instead.
+    /// Returns whether it was kept.
+    pub fn rekey_after_rename(&mut self, new: FileKey, new_path: Option<String>) -> bool {
+        let id = Identity::of(&new);
+        let carried = match (self.entries.get(&id).map(|e| &e.key), &new) {
             (
-                FileKey::Strong {
-                    volume_serial: v1,
-                    file_id: f1,
+                Some(FileKey::Strong {
                     usn_journal_id: j1,
+                    usn: u1,
                     last_write: w1,
                     size: s1,
                     ..
-                },
+                }),
                 FileKey::Strong {
-                    volume_serial: v2,
-                    file_id: f2,
                     usn_journal_id: j2,
+                    usn: u2,
                     last_write: w2,
                     size: s2,
                     ..
                 },
-            ) => v1 == v2 && f1 == f2 && j1 == j2 && w1 == w2 && s1 == s2,
+            ) => j1 == j2 && u1 < u2 && w1 == w2 && s1 == s2,
             _ => false,
         };
-        let value = self
-            .entries
-            .get(&id)
-            .filter(|e| e.key == *old)
-            .map(|e| e.value.clone());
+        let value = self.entries.get(&id).map(|e| e.value.clone());
         match value {
-            Some(value) if same_file => {
+            Some(value) if carried => {
                 self.insert(new, new_path, value);
                 true
             }
@@ -901,7 +907,8 @@ pub enum Through {
     /// (`HashStatus::Unstable` in #46). Nothing was cached, and any entry
     /// for the file was dropped.
     Unstable {
-        /// Hashing attempts made: 1 plus [`MAX_UNSTABLE_RETRIES`].
+        /// Hashing attempts made: 1 plus [`MAX_UNSTABLE_RETRIES`] when the
+        /// file kept changing, fewer when a size mismatch stopped it early.
         attempts: u32,
     },
 }
@@ -937,8 +944,9 @@ impl<S: fmt::Debug + fmt::Display, H: fmt::Debug + fmt::Display> std::error::Err
 /// 2. The handle is stamped. If `mode` allows ([`HashVerifyMode::must_recompute`])
 ///    and the cache has a valid value for that key, it is returned and the
 ///    file is not read.
-/// 3. Otherwise `compute` hashes the handle, and the handle is stamped
-///    again. If the two stamps differ, the file changed while it was read:
+/// 3. Otherwise the handle is rewound ([`FileStamp::rewind`]), `compute`
+///    hashes it from its first byte, and the handle is stamped again.
+///    `compute` may be called more than once on the same handle. If the two stamps differ, the file changed while it was read:
 ///    the hash is thrown away and retried, up to [`MAX_UNSTABLE_RETRIES`]
 ///    times. Then the result is [`Through::Unstable`], and any entry for the
 ///    file is dropped.
@@ -984,6 +992,8 @@ where
     let mut attempts = 0;
     loop {
         attempts += 1;
+        // Each attempt reads the whole file from its first byte.
+        stamps.rewind(&file).map_err(ThroughError::Stamp)?;
         let started = Instant::now();
         let value = compute(&file).map_err(ThroughError::Hash)?;
         let elapsed = started.elapsed();

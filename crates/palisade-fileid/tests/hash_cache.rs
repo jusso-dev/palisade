@@ -144,40 +144,65 @@ fn a_rename_misses_unless_the_journal_consumer_rekeys_it() {
     cache.insert(old.clone(), Some("C:\\old.exe".into()), value(b"abc"));
     assert_eq!(cache.get(&strong(1, 11), None), Err(Miss::Changed));
 
-    // The journal consumer saw a rename and nothing else: it carries the
+    // The journal consumer knows only the file ID: it finds the cached key,
+    // checks the journal from that USN shows only a rename, and carries the
     // entry over to the new key and path.
     cache.insert(old.clone(), Some("C:\\old.exe".into()), value(b"abc"));
+    assert_eq!(cache.key_of(0xabcd, [1; 16]), Some(&old));
+    assert_eq!(cache.key_of(0xabcd, [2; 16]), None);
     let renamed = strong(1, 11);
-    assert!(cache.rekey_after_rename(&old, renamed.clone(), Some("C:\\new.exe".into())));
+    assert!(cache.rekey_after_rename(renamed.clone(), Some("C:\\new.exe".into())));
     assert_eq!(cache.get(&renamed, None).unwrap(), &value(b"abc"));
     assert_eq!(cache.path_of(&renamed), Some("C:\\new.exe"));
     assert_eq!(cache.len(), 1);
 
-    // Anything but a pure rename drops the entry instead.
-    let mut grown = strong(1, 12);
-    if let FileKey::Strong { size, .. } = &mut grown {
-        *size += 1;
+    // Anything but a later USN with the same content markers drops the
+    // entry instead.
+    let with = |usn: i64, f: &dyn Fn(&mut FileKey)| {
+        let mut k = strong(1, usn);
+        f(&mut k);
+        k
+    };
+    let cases: [(&str, FileKey); 5] = [
+        (
+            "grown",
+            with(12, &|k| {
+                if let FileKey::Strong { size, .. } = k {
+                    *size += 1
+                }
+            }),
+        ),
+        (
+            "rewritten",
+            with(12, &|k| {
+                if let FileKey::Strong { last_write, .. } = k {
+                    last_write.0 += 1
+                }
+            }),
+        ),
+        (
+            "new journal",
+            with(12, &|k| {
+                if let FileKey::Strong { usn_journal_id, .. } = k {
+                    *usn_journal_id += 1
+                }
+            }),
+        ),
+        ("same USN", strong(1, 10)),
+        ("earlier USN", strong(1, 9)),
+    ];
+    for (why, new) in cases {
+        cache.clear();
+        cache.insert(old.clone(), None, value(b"abc"));
+        assert!(!cache.rekey_after_rename(new, None), "{why}");
+        assert!(cache.is_empty(), "{why}");
     }
-    assert!(!cache.rekey_after_rename(&renamed, grown, None));
-    assert!(cache.is_empty());
-    cache.insert(old.clone(), None, value(b"abc"));
-    assert!(
-        !cache.rekey_after_rename(&old, strong(2, 11), None),
-        "another file"
-    );
-    assert!(cache.is_empty());
-    cache.insert(old.clone(), None, value(b"abc"));
-    assert!(
-        !cache.rekey_after_rename(&strong(1, 9), strong(1, 11), None),
-        "stale old key"
-    );
-    assert!(cache.is_empty());
+    // Nothing cached for the file: nothing to carry over.
+    assert!(!cache.rekey_after_rename(strong(2, 11), None));
+    // Weak keys are never rekeyed.
     let w = weak("C:\\a.exe", 1);
     cache.insert(w.clone(), None, value(b"abc"));
-    assert!(
-        !cache.rekey_after_rename(&w, weak("C:\\b.exe", 1), None),
-        "weak keys"
-    );
+    assert!(!cache.rekey_after_rename(weak("C:\\a.exe", 2), None));
     assert!(cache.is_empty());
 }
 
@@ -496,6 +521,9 @@ impl FileStamp for Script {
     fn open(&self, _: &str) -> Result<(), String> {
         Ok(())
     }
+    fn rewind(&self, _: &()) -> Result<(), String> {
+        Ok(())
+    }
     fn stamp(&self, _: &()) -> Result<FileKey, String> {
         let next = self.0.borrow_mut().pop_front();
         if let Some(k) = next {
@@ -747,6 +775,9 @@ fn the_same_handle_is_stamped_and_hashed() {
             self.0.set(self.0.get() + 1);
             Ok(self.0.get())
         }
+        fn rewind(&self, _: &u32) -> Result<(), String> {
+            Ok(())
+        }
         fn stamp(&self, file: &u32) -> Result<FileKey, String> {
             self.1.borrow_mut().push(*file);
             Ok(strong(1, 1))
@@ -780,6 +811,9 @@ fn errors_are_passed_through() {
         type Error = &'static str;
         fn open(&self, _: &str) -> Result<(), &'static str> {
             Err("no such file")
+        }
+        fn rewind(&self, _: &()) -> Result<(), &'static str> {
+            Ok(())
         }
         fn stamp(&self, _: &()) -> Result<FileKey, &'static str> {
             Err("no such file")
@@ -903,6 +937,9 @@ impl FileStamp for Metadata {
     fn open(&self, path: &str) -> std::io::Result<Self::File> {
         Ok((std::fs::File::open(path)?, path.to_owned()))
     }
+    fn rewind(&self, (file, _): &Self::File) -> std::io::Result<()> {
+        std::io::Seek::seek(&mut &*file, std::io::SeekFrom::Start(0)).map(|_| ())
+    }
     fn stamp(&self, (file, path): &Self::File) -> std::io::Result<FileKey> {
         let m = file.metadata()?;
         let nanos = |t: std::io::Result<std::time::SystemTime>| {
@@ -968,5 +1005,49 @@ fn appending_a_byte_misses_and_an_unchanged_file_is_not_read() {
     assert_ne!(first, second);
     assert_eq!(second.flat.unwrap().hashes.size, 200_001);
     assert_eq!(reads.get(), 2);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A real file that changes while the first attempt reads it, then
+/// settles: the retry reads the whole file again through the same handle.
+#[test]
+fn a_retry_reads_the_whole_file_again() {
+    use palisade_fileid::hash::{HashOptions, HashStatus, hash_reader};
+    let dir = std::env::temp_dir().join(format!("palisade-hash-retry-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("tool.exe");
+    std::fs::write(&path, vec![0x11; 100_000]).unwrap();
+    let path_str = path.to_str().unwrap().to_owned();
+    let cache = Mutex::new(HashCache::default());
+    let attempt = Cell::new(0);
+    let t = hash_through(
+        &cache,
+        &Metadata,
+        &path_str,
+        HashVerifyMode::Cached,
+        &FileLocation::default(),
+        |(file, _): &(std::fs::File, String)| {
+            attempt.set(attempt.get() + 1);
+            let status = hash_reader(file, &HashOptions::default());
+            if attempt.get() == 1 {
+                // A writer replaces the content, with a new size, while
+                // the first attempt is running.
+                std::fs::write(&path, vec![0x22; 150_000]).unwrap();
+            }
+            match status {
+                Ok(HashStatus::Complete(h)) => Ok(CacheValue::from_flat(h, 1, FileTime(0))),
+                other => Err(format!("{other:?}")),
+            }
+        },
+    )
+    .unwrap();
+    let (v, src, _) = done(t);
+    assert_eq!(attempt.get(), 2);
+    assert_eq!(src, ValueSource::Computed);
+    let flat = v.flat.unwrap().hashes;
+    assert_eq!(
+        flat,
+        hash_bytes(&vec![0x22; 150_000], AlgorithmSet::DEFAULT)
+    );
     std::fs::remove_dir_all(&dir).unwrap();
 }

@@ -11,8 +11,10 @@
 //!
 //! A rename also moves the file's USN, so on its own it is a miss (which
 //! fails safe: the file is hashed again). The journal consumer (#60), which
-//! can see that a journal record is a rename and nothing else, may carry
-//! the entry over with [`super::HashCache::rekey_after_rename`].
+//! can see that every journal record since the cached USN is a rename and
+//! nothing else, may carry the entry over: it finds the cached key with
+//! [`super::HashCache::key_of`] and calls
+//! [`super::HashCache::rekey_after_rename`].
 //!
 //! Without a journal (FAT, exFAT, ReFS without one, network shares) the
 //! key falls back to the normalised path, size, last-write and creation
@@ -180,4 +182,10 @@ pub trait FileStamp {
 
     /// The current key of the opened `file`.
     fn stamp(&self, file: &Self::File) -> Result<FileKey, Self::Error>;
+
+    /// Moves `file` back to its first byte. [`super::cache::hash_through`]
+    /// calls it before every hashing attempt, so a retry after a change
+    /// reads the whole file again rather than from where the last attempt
+    /// stopped. A backend that reads by position can do nothing here.
+    fn rewind(&self, file: &Self::File) -> Result<(), Self::Error>;
 }
