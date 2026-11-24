@@ -72,8 +72,8 @@ expect_writes() {
 # GitHub state that matches the fixtures exactly.
 in_sync_labels='[{"name":"area:core","color":"0E8A16","description":"Policy model"},
   {"name":"needs-triage","color":"ededed","description":"Not yet triaged"}]'
-in_sync_milestones='[{"number":1,"title":"M0 Foundations","description":"Workspace and CI"},
-  {"number":2,"title":"M1 Audit & Inventory","description":"Audit mode"}]'
+in_sync_milestones='[{"number":1,"title":"M0 Foundations","description":"Workspace and CI","state":"open"},
+  {"number":2,"title":"M1 Audit & Inventory","description":"Audit mode","state":"open"}]'
 set_github() { printf '%s' "$1" >"$FAKE_DIR/labels.json"; printf '%s' "$2" >"$FAKE_DIR/milestones.json"; }
 
 # --- --validate ----------------------------------------------------------
@@ -122,6 +122,19 @@ bad_label '- name: Blocked
   color: "0e8a16"
   description: d' "duplicate names ignoring case" "more than once"
 bad_label 'name: x' "not a list" "must be a list"
+bad_label "- name: x
+  color: \"0e8a16\"
+  description: d
+---
+- name: y
+  color: \"0e8a16\"
+  description: d" "more than one YAML document" "exactly one YAML document"
+bad_label "- name: $(printf 'n%.0s' $(seq 51))
+  color: \"0e8a16\"
+  description: d" "name over 50 characters" "longer than 50"
+bad_label '- name: x
+  color: "0e8a16"
+  description: "line one\nline two"' "control character in a description" "control characters"
 
 printf -- '- title: M0\n  description: a\n- title: M0\n  description: b\n' >"$work/dup-milestones.yml"
 out=$(bash "$script" --validate --labels "$cfg/labels.yml" --milestones "$work/dup-milestones.yml" \
@@ -134,6 +147,25 @@ printf 'name: Feature\nlabels: [enhancement]\nbody: []\n' >"$cfg/templates/featu
 run validate
 expect_code 2 "template applies an unlisted label"
 expect_out "feature.yml: applies label \`enhancement\`" "template applies an unlisted label"
+set_github "$in_sync_labels" "$in_sync_milestones"
+run apply --repo o/r
+expect_code 2 "--apply refuses while a template uses an unlisted label"
+expect_writes 0 "--apply refuses while a template uses an unlisted label"
+rm "$cfg/templates/feature.yml"
+
+printf 'name: Feature\nlabels: [enhancement]\nbody: []\n' >"$cfg/templates/feature.yaml"
+run validate
+expect_code 2 "a .yaml template is checked too"
+expect_out "feature.yaml: applies label" "a .yaml template is checked too"
+rm "$cfg/templates/feature.yaml"
+
+printf 'name: Feature\nlabels: "needs-triage, enhancement"\nbody: []\n' >"$cfg/templates/feature.yml"
+run validate
+expect_code 2 "comma-separated string of labels"
+expect_out "applies label \`enhancement\`" "comma-separated string of labels"
+printf 'name: Feature\nlabels: "needs-triage"\nbody: []\n' >"$cfg/templates/feature.yml"
+run validate
+expect_code 0 "a single listed label as a string"
 rm "$cfg/templates/feature.yml"
 
 printf 'version: 2\nupdates:\n  - package-ecosystem: cargo\n' >"$cfg/dependabot.yml"
@@ -148,8 +180,10 @@ run check
 expect_code 2 "--check without a repository"
 expect_out "--repo" "--check without a repository"
 
-run check --repo 'bad repo'
-expect_code 2 "malformed --repo"
+for bad in 'bad repo' 'o/..' 'o/.' '../r' 'o.x/r' 'o/r/x'; do
+  run check --repo "$bad"
+  expect_code 2 "malformed --repo $bad"
+done
 
 set_github "$in_sync_labels" "$in_sync_milestones"
 run check --repo o/r
@@ -157,10 +191,18 @@ expect_code 0 "in sync (colour case ignored)"
 expect_out "match the files" "in sync"
 expect_writes 0 "in sync"
 
+# Closed milestones, listed or not, never cause a change or a failure.
+set_github "$in_sync_labels" '[{"number":1,"title":"M0 Foundations","description":"Workspace and CI","state":"closed"},
+  {"number":2,"title":"M1 Audit & Inventory","description":"Audit mode","state":"open"},
+  {"number":7,"title":"Retired","description":"","state":"closed"}]'
+run apply --repo o/r
+expect_code 0 "closed listed and closed unlisted milestones"
+expect_writes 0 "closed listed milestone is not recreated; closed unlisted one is ignored"
+
 set_github '[{"name":"Area:Core","color":"0e8a16","description":"old"},
   {"name":"wontfix","color":"ffffff","description":""}]' \
-  '[{"number":1,"title":"M0 Foundations","description":"old"},
-    {"number":9,"title":"Old milestone","description":""}]'
+  '[{"number":1,"title":"M0 Foundations","description":"old","state":"open"},
+    {"number":9,"title":"Old milestone","description":"","state":"open"}]'
 run check --repo o/r
 expect_code 1 "drift reported by --check"
 expect_out "update label: Area:Core -> area:core" "case-only rename and description change"
@@ -181,8 +223,10 @@ grep -qF -- "-X POST repos/o/r/milestones" <<<"$writes" || fail "missing milesto
 grep -qF -- "-X PATCH repos/o/r/milestones/1" <<<"$writes" || fail "milestone updated by number: $writes"
 if grep -qF -- "milestones/9" <<<"$writes"; then fail "unlisted milestone must never be changed: $writes"; fi
 
-set_github '[{"name":"good first issue","color":"ededed","description":"x"}]' "$in_sync_milestones"
-printf -- '- name: good first issue\n  color: "7057ff"\n  description: x\n' >"$cfg/labels.yml"
+set_github '[{"name":"area:core","color":"0e8a16","description":"Policy model"},
+  {"name":"needs-triage","color":"ededed","description":"Not yet triaged"},
+  {"name":"good first issue","color":"ededed","description":"x"}]' "$in_sync_milestones"
+printf -- '- name: good first issue\n  color: "7057ff"\n  description: x\n' >>"$cfg/labels.yml"
 run apply --repo o/r
 expect_code 0 "--apply with nothing left over"
 grep -qF -- "repos/o/r/labels/good%20first%20issue" "$FAKE_DIR/writes" \

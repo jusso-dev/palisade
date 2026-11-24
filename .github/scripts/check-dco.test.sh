@@ -88,9 +88,36 @@ commit "fix: on main" -s
 git -C "$repo" merge -q --no-ff --no-edit topic
 expect 0 "merge commits are skipped"
 
+new_repo nameless
+commit "feat: one" -m "Signed-off-by: <ada@example.org>"
+expect 1 "sign-off without a name"
+
+# Dependabot authors at a noreply address and signs off as support@github.com.
+bot_commit() {
+  git -C "$repo" -c user.name='dependabot[bot]' \
+    -c user.email='49699333+dependabot[bot]@users.noreply.github.com' \
+    commit -q --allow-empty -m "chore(deps): bump a crate" \
+    -m "Signed-off-by: ${1:-dependabot[bot] <support@github.com>}"
+}
+new_repo bot-flag
+bot_commit
+expect 0 "Dependabot commit with --dependabot" --dependabot base HEAD
+expect 1 "Dependabot commit without --dependabot" base HEAD
+
+new_repo bot-wrong-signoff
+bot_commit "Someone Else <someone@example.org>"
+expect 1 "Dependabot commit signed off by someone else" --dependabot base HEAD
+
+new_repo bot-flag-human
+commit "feat: one" -m "Signed-off-by: dependabot[bot] <support@github.com>"
+expect 1 "--dependabot does not let a human use the bot sign-off" --dependabot base HEAD
+commit "fix: two" -s
+expect 1 "--dependabot still checks every commit" --dependabot base HEAD
+
 new_repo usage
 expect 2 "no arguments" base
 expect 2 "unknown ref" base no-such-ref
+expect 2 "flag only" --dependabot base
 
 if [ "$failures" -ne 0 ]; then
   echo "$failures check-dco test(s) failed"

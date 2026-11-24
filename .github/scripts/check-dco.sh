@@ -4,18 +4,31 @@
 # email matches the commit's author email (ignoring case). `git commit -s`
 # adds one. Merge commits are skipped. See CONTRIBUTING.md#sign-off.
 #
-# Usage: check-dco.sh <base> <head>
+# Usage: check-dco.sh [--dependabot] <base> <head>
 #   Checks the commits reachable from <head> but not from <base>, run inside
 #   the repository.
+#   --dependabot: the pull request was opened by Dependabot. Its commits are
+#   authored as dependabot[bot] at a noreply address but signed off as
+#   dependabot[bot] <support@github.com>, so for commits authored at that
+#   noreply address that sign-off is accepted too. The workflow passes this
+#   flag only when GitHub says Dependabot opened the pull request, because
+#   anyone can put the bot's address in a commit.
 # Exit 0 if every commit is signed off (or there are none), 1 if any is not,
 # 2 on a usage or git error.
 set -euo pipefail
 export LC_ALL=C
 
+dependabot=0
+if [ "${1:-}" = --dependabot ]; then
+  dependabot=1
+  shift
+fi
 if [ "$#" -ne 2 ]; then
-  echo "usage: $0 <base> <head>" >&2
+  echo "usage: $0 [--dependabot] <base> <head>" >&2
   exit 2
 fi
+bot_author='49699333+dependabot[bot]@users.noreply.github.com'
+bot_signoff='support@github.com'
 base=$1
 head=$2
 
@@ -41,10 +54,16 @@ for commit in $commits; do
   subject=$(git show -s --format='%s' "$commit")
   # One sign-off value per line, for example `Ada Lovelace <ada@example.org>`.
   signoffs=$(git show -s --format='%(trailers:key=Signed-off-by,valueonly,separator=%x0A)' "$commit")
+  # The email a sign-off must carry for this commit.
+  want=$author_email
+  if [ "$dependabot" -eq 1 ] && [ "$author_email" = "$bot_author" ]; then
+    want=$bot_signoff
+  fi
   signed=0
   while IFS= read -r line; do
-    [[ "$line" =~ \<([^<>]+)\>[[:space:]]*$ ]] || continue
-    if [ "$(printf '%s' "${BASH_REMATCH[1]}" | lower)" = "$author_email" ]; then
+    # `Name <email>`: a non-empty name, then the email in angle brackets.
+    [[ "$line" =~ ^[[:space:]]*[^\<\>[:space:]][^\<\>]*[[:space:]]\<([^\<\>[:space:]]+)\>[[:space:]]*$ ]] || continue
+    if [ "$(printf '%s' "${BASH_REMATCH[1]}" | lower)" = "$want" ]; then
       signed=1
       break
     fi

@@ -15,8 +15,10 @@
 #
 # Labels: missing ones are created, colours and descriptions are updated, and
 # labels that are not listed are DELETED (GitHub removes them from every issue).
-# Milestones: matched by title. Missing ones are created and descriptions are
-# updated. Milestones that are not listed are reported, never deleted or closed.
+# Milestones: matched by title, open or closed. Missing ones are created and
+# descriptions are updated. An open milestone that is not listed is reported and
+# fails the run; nothing is ever deleted or closed. Closed unlisted milestones
+# (finished, retired work) are ignored.
 #
 # Exit codes: 0 in sync (or --validate passed, or --apply finished with nothing
 # left over), 1 drift found (--check) or unlisted milestones remain (--apply),
@@ -56,9 +58,12 @@ for tool in jq yq; do
   command -v "$tool" >/dev/null || die "$tool is required"
 done
 
-# Reads a YAML file as compact JSON.
+# Reads a single-document YAML file as compact JSON.
 yaml_json() {
+  local docs
   [ -f "$1" ] || die "no such file: $1"
+  docs=$(yq ea '[.] | length' "$1") || die "cannot parse $1"
+  [ "$docs" = 1 ] || die "$1 must hold exactly one YAML document"
   yq -o=json -I=0 '.' "$1" || die "cannot parse $1"
 }
 
@@ -71,12 +76,16 @@ problems=$(jq -r '
     (to_entries[] | .key as $i | .value |
       if type != "object" then "label \($i + 1): must be a mapping" else
         (keys - ["name", "color", "description"] | .[] | "label \($i + 1): unknown key `\(.)`"),
-        (if (.name | type) != "string" or .name == "" then "label \($i + 1): `name` must be a non-empty string" else empty end),
+        (if (.name | type) != "string" or .name == "" then "label \($i + 1): `name` must be a non-empty string"
+          elif (.name | length) > 50 then "label \($i + 1): `name` is longer than 50 characters"
+          else empty end),
         (if (.color | type) != "string" or (.color | test("^[0-9a-f]{6}$") | not)
           then "label \($i + 1): `color` must be a quoted string of 6 lowercase hex digits" else empty end),
         (if (.description | type) != "string" then "label \($i + 1): `description` must be a string"
           elif (.description | length) > 100 then "label \($i + 1): `description` is longer than 100 characters"
-          else empty end)
+          else empty end),
+        (if [.name, .description] | map(strings | test("[[:cntrl:]]")) | any
+          then "label \($i + 1): `name` and `description` must not contain control characters" else empty end)
       end),
     (map(select(type == "object" and (.name | type) == "string") | .name | ascii_downcase)
       | group_by(.) | map(select(length > 1) | .[0]) | .[] | "label `\(.)` is listed more than once")
@@ -87,7 +96,9 @@ problems+=$'\n'$(jq -r '
       if type != "object" then "milestone \($i + 1): must be a mapping" else
         (keys - ["title", "description"] | .[] | "milestone \($i + 1): unknown key `\(.)`"),
         (if (.title | type) != "string" or .title == "" then "milestone \($i + 1): `title` must be a non-empty string" else empty end),
-        (if (.description | type) != "string" then "milestone \($i + 1): `description` must be a string" else empty end)
+        (if (.description | type) != "string" then "milestone \($i + 1): `description` must be a string" else empty end),
+        (if [.title, .description] | map(strings | test("[[:cntrl:]]")) | any
+          then "milestone \($i + 1): `title` and `description` must not contain control characters" else empty end)
       end),
     (map(select(type == "object") | .title) | group_by(.) | map(select(length > 1) | .[0]) | .[]
       | "milestone `\(.)` is listed more than once")
@@ -95,27 +106,30 @@ problems+=$'\n'$(jq -r '
 
 # Issue templates and Dependabot may only apply labels that are listed, or
 # the sync would delete the label they rely on.
-# Prints a problem for each label in the JSON array $2 that is not listed.
+# This runs in every mode, so a local --apply cannot delete a label that a
+# template still uses.
+# Prints a problem for each label in $2 (a JSON list, or a comma-separated
+# string as issue forms allow) that is not listed.
 unlisted() {
   jq -r --arg where "$1" --argjson want "$want_labels" '
     ([$want | arrays | .[] | objects | .name]) as $names
-    | .[] | select(. as $l | $names | index($l) | not)
+    | (if type == "string" then split(",") | map(gsub("^ +| +$"; ""))
+       elif type == "array" then . else ["<not a list>"] end)
+    | .[] | select(type != "string" or (. as $l | $names | index($l) | not))
     | "\($where): applies label `\(.)`, which is not in the labels file"' <<<"$2"
 }
-if [ "$mode" = validate ]; then
-  if [ -d "$templates_dir" ]; then
-    for template in "$templates_dir"/*.yml; do
-      [ -f "$template" ] || continue
-      [ "$(basename "$template")" = config.yml ] && continue
-      used=$(yq -o=json -I=0 '.labels // []' "$template") || die "cannot parse $template"
-      problems+=$'\n'$(unlisted "$(basename "$template")" "$used")
-    done
-  fi
-  if [ -f "$dependabot_file" ]; then
-    used=$(yq -o=json -I=0 '[.updates[] | .labels // ["dependencies"] | .[]] | unique' "$dependabot_file") \
-      || die "cannot parse $dependabot_file"
-    problems+=$'\n'$(unlisted "$(basename "$dependabot_file")" "$used")
-  fi
+if [ -d "$templates_dir" ]; then
+  for template in "$templates_dir"/*.yml "$templates_dir"/*.yaml; do
+    [ -f "$template" ] || continue
+    case $(basename "$template") in config.yml|config.yaml) continue ;; esac
+    used=$(yq -o=json -I=0 '.labels // []' "$template") || die "cannot parse $template"
+    problems+=$'\n'$(unlisted "$(basename "$template")" "$used")
+  done
+fi
+if [ -f "$dependabot_file" ]; then
+  used=$(yq -o=json -I=0 '[.updates[] | .labels // ["dependencies"] | .[]] | unique' "$dependabot_file") \
+    || die "cannot parse $dependabot_file"
+  problems+=$'\n'$(unlisted "$(basename "$dependabot_file")" "$used")
 fi
 
 problems=$(sed '/^$/d' <<<"$problems")
@@ -129,7 +143,10 @@ if [ "$mode" = validate ]; then
 fi
 
 [ -n "$repo" ] || die "--repo OWNER/NAME is required (or set GITHUB_REPOSITORY)"
-[[ "$repo" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || die "bad --repo: $repo"
+# Owner: letters, digits and hyphens. Name: also `.` and `_`, but not `.` or `..`.
+if ! [[ "$repo" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]] || [[ "${repo#*/}" =~ ^\.+$ ]]; then
+  die "bad --repo: $repo"
+fi
 command -v gh >/dev/null || die "gh is required"
 
 # Fetches every page of a list endpoint as one JSON array.
@@ -163,7 +180,7 @@ plan+=$'\n'$(jq -c -n --argjson want "$want_milestones" --argjson have "$have_mi
         elif ($cur.description // "") != $w.description
           then {op: "update-milestone", number: $cur.number} + $w
         else empty end),
-    ($have[] | select(.title as $t | $want | map(.title) | index($t) | not)
+    ($have[] | select(.state != "closed" and (.title as $t | $want | map(.title) | index($t) | not))
       | {op: "unlisted-milestone", title, number})')
 plan=$(sed '/^$/d' <<<"$plan")
 

@@ -224,14 +224,15 @@ The `Label sync` workflow (`.github/workflows/labels.yml`) runs
   or Dependabot applies a label that is not listed, because the sync would delete it.
 - On a push to `main` it applies the files. Missing labels are created, colours and descriptions
   are updated, and **labels that are not listed are deleted**, which removes them from every
-  issue. Missing milestones are created and their descriptions updated. A milestone that is not
-  listed is reported and the run fails, but it is never deleted or closed.
+  issue. Missing milestones are created and their descriptions updated. An open milestone that is
+  not listed is reported and the run fails, but it is never deleted or closed; close it by hand,
+  or add it to the file. Closed milestones that are not listed are ignored.
 - Run it by hand from the Actions tab for a dry run that prints every change and writes nothing.
   Tick `apply` to make the changes. Changes are only ever applied from `main`; a manual run on any
   other branch is always a dry run.
 
-Only the sync job has a write scope, `issues: write`, which covers labels and milestones. It never
-runs on a pull request.
+Only the sync job has a write scope, `issues: write`, which covers labels and milestones, plus
+`contents: read` for the checkout. It never runs on a pull request.
 
 To dry-run locally, with the GitHub CLI signed in to an account that can read the repository:
 
@@ -252,6 +253,7 @@ The `DCO` workflow (`.github/workflows/dco.yml`) runs
 [`.github/scripts/check-dco.sh`](../.github/scripts/check-dco.sh) on every pull request. It fails
 if any non-merge commit lacks a `Signed-off-by:` trailer whose email matches the commit author
 ([CONTRIBUTING.md](../CONTRIBUTING.md#sign-off)). It needs no token scope beyond `contents: read`.
+Dependabot's pull requests pass it with the bot's own sign-off ([docs/ci.md](ci.md#dcoyml-pull-requests)).
 
 The check is **informational**: the `main` ruleset does not require it yet. Requiring sign-off is
 decided by an ADR under [#28](https://github.com/jusso-dev/palisade/issues/28). Once that ADR is
