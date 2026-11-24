@@ -288,36 +288,40 @@ pub fn normalize_win32(input: &str) -> Result<NormalizedPath, PathError> {
             .strip_prefix(".\\")
             .or_else(|| after.strip_prefix("?\\"));
         if let Some(rest) = device {
-            // Win32 trimming would otherwise reach the server and share of
-            // `\\.\UNC\server\share` before they are known to be UNC names.
-            let mut raw = rest.split('\\').filter(|p| !p.is_empty());
-            if raw.next().is_some_and(|d| d.eq_ignore_ascii_case("UNC")) {
-                for name in raw.take(2) {
-                    check_unc_name(name)?;
-                }
-            }
             let mut notes = PathNotes {
                 prefix: Prefix::Device,
                 ..PathNotes::default()
             };
-            let (comps, ends_sep) = win32_components(rest, 0, &mut notes)?;
-            let (root, used) = identify_device(&comps, 0, &mut notes)?;
+            let w = win32_components(rest, 0, &mut notes)?;
+            let (root, used) = identify_device(&w.names, 0, &mut notes)?;
+            if matches!(root, Root::Unc { .. }) {
+                // In a device path nothing is protected, so Win32 trimming
+                // may have reached the server or share, whichever route
+                // (`UNC`, `GLOBALROOT\Device\Mup`, after `..`) led there.
+                // A trimmed server or share is ambiguous.
+                for i in used.saturating_sub(2)..used {
+                    if w.trimmed.get(i).copied().unwrap_or(true) {
+                        let name = w.names.get(i).cloned().unwrap_or_default();
+                        return Err(PathError::InvalidComponent(name));
+                    }
+                }
+            }
             // `\\.\C:\.` and `\\.\C:\a\..` name the root directory: a separator
-            // followed the volume, even though `.` and `..` removed what came
-            // after it.
-            let after_root = rest
-                .trim_start_matches('\\')
-                .split_once('\\')
-                .is_some_and(|(_, tail)| !tail.is_empty());
-            return finish(root, comps, used, ends_sep || after_root, notes, false);
+            // followed the volume in the input, even though `.` and `..`
+            // removed what came after it. `\\.\X:\..\C:` does not.
+            let root_dir = used
+                .checked_sub(1)
+                .and_then(|i| w.sep_after.get(i).copied())
+                .unwrap_or(false);
+            return finish_with(root, w.names, used, w.ends_sep, root_dir, notes, false);
         }
         if after == "." || after == "?" {
             return Err(PathError::DeviceNotDirectory);
         }
         let mut notes = PathNotes::default();
-        let (comps, ends_sep) = win32_components(after, 2, &mut notes)?;
-        let (root, used) = unc_root(&comps, 0, &mut notes)?;
-        return finish(root, comps, used, ends_sep, notes, false);
+        let w = win32_components(after, 2, &mut notes)?;
+        let (root, used) = unc_root(&w.names, 0, &mut notes)?;
+        return finish(root, w.names, used, w.ends_sep, notes, false);
     }
 
     let mut chars = s.chars();
@@ -328,9 +332,9 @@ pub fn normalize_win32(input: &str) -> Result<NormalizedPath, PathError> {
             }
             let rest = chars.as_str();
             let mut notes = PathNotes::default();
-            let (comps, ends_sep) = win32_components(rest, 0, &mut notes)?;
+            let w = win32_components(rest, 0, &mut notes)?;
             let root = Root::Drive(letter.to_ascii_uppercase());
-            finish(root, comps, 0, ends_sep, notes, true)
+            finish(root, w.names, 0, w.ends_sep, notes, true)
         }
         (Some(letter), Some(':'), _) if !letter.is_ascii_alphabetic() => {
             Err(PathError::InvalidDrive)
@@ -395,6 +399,18 @@ fn literal_components(rest: &str) -> Result<(Vec<String>, bool), PathError> {
     Ok((comps, ends_sep))
 }
 
+/// The components left after Win32 normalisation.
+struct Win32Components {
+    /// The component names.
+    names: Vec<String>,
+    /// Per component: trimming removed a dot or space from it.
+    trimmed: Vec<bool>,
+    /// Per component: a separator followed it in the input.
+    sep_after: Vec<bool>,
+    /// The input ended with a separator.
+    ends_sep: bool,
+}
+
 /// Applies Win32 normalisation to the part of a path after its prefix.
 /// The first `protected` components (the UNC server and share) are kept
 /// as they are and cannot be removed by `..`.
@@ -402,26 +418,32 @@ fn win32_components(
     rest: &str,
     protected: usize,
     notes: &mut PathNotes,
-) -> Result<(Vec<String>, bool), PathError> {
+) -> Result<Win32Components, PathError> {
     let ends_sep = rest.ends_with('\\');
     let parts: Vec<&str> = rest.split('\\').filter(|p| !p.is_empty()).collect();
-    let mut comps: Vec<String> = Vec::with_capacity(parts.len());
+    let mut names: Vec<String> = Vec::with_capacity(parts.len());
+    let mut trimmed: Vec<bool> = Vec::with_capacity(parts.len());
+    let mut sep_after: Vec<bool> = Vec::with_capacity(parts.len());
     let last_index = parts.len().checked_sub(1);
     for (i, part) in parts.iter().enumerate() {
+        let followed_by_separator = Some(i) != last_index || ends_sep;
         if i < protected {
             // The server and share are not trimmed or collapsed. A name
             // that Win32 trimming might change is ambiguous, so it is
             // rejected rather than guessed.
             check_unc_name(part)?;
-            comps.push((*part).to_owned());
+            names.push((*part).to_owned());
+            trimmed.push(false);
+            sep_after.push(followed_by_separator);
             continue;
         }
-        let followed_by_separator = Some(i) != last_index || ends_sep;
         match *part {
             "." => {}
             ".." => {
-                if comps.len() > protected {
-                    comps.pop();
+                if names.len() > protected {
+                    names.pop();
+                    trimmed.pop();
+                    sep_after.pop();
                 }
             }
             name => {
@@ -431,36 +453,50 @@ fn win32_components(
                     return Err(PathError::InvalidComponent(name.to_owned()));
                 }
                 let mut name = name.to_owned();
+                let mut was_trimmed = false;
                 if followed_by_separator && name.ends_with('.') {
                     name.pop();
                     notes.trimmed = true;
+                    was_trimmed = true;
                 }
-                comps.push(name);
+                names.push(name);
+                trimmed.push(was_trimmed);
+                sep_after.push(followed_by_separator);
             }
         }
     }
-    if !ends_sep && comps.len() > protected {
+    if !ends_sep && names.len() > protected {
         // The final trim applies to whatever ends the path, even a
         // component that was followed by `\.` or `\..` in the input.
-        if let Some(last) = comps.last_mut() {
-            let trimmed = last.trim_end_matches(['.', ' ']).len();
-            if trimmed != last.len() {
-                last.truncate(trimmed);
+        if let Some(last) = names.last_mut() {
+            let kept = last.trim_end_matches(['.', ' ']).len();
+            if kept != last.len() {
+                last.truncate(kept);
                 notes.trimmed = true;
+                if let Some(t) = trimmed.last_mut() {
+                    *t = true;
+                }
             }
             if last.is_empty() {
-                comps.pop();
+                names.pop();
+                trimmed.pop();
+                sep_after.pop();
             }
         }
     }
-    for c in comps.iter().skip(protected) {
+    for c in names.iter().skip(protected) {
         // One-dot trimming can turn `...` into `..`, which no longer
         // means "parent" but cannot name a file either.
         if c == "." || c == ".." {
             return Err(PathError::InvalidComponent(c.clone()));
         }
     }
-    Ok((comps, ends_sep))
+    Ok(Win32Components {
+        names,
+        trimmed,
+        sep_after,
+        ends_sep,
+    })
 }
 
 /// Reads a UNC server and share from `comps[at..]`.
@@ -763,6 +799,21 @@ fn finish(
     comps: Vec<String>,
     used: usize,
     ends_sep: bool,
+    notes: PathNotes,
+    drive_win32: bool,
+) -> Result<NormalizedPath, PathError> {
+    finish_with(root, comps, used, ends_sep, ends_sep, notes, drive_win32)
+}
+
+/// As [`finish`]. `root_dir` says whether a separator followed the root in
+/// the input, so an empty remainder names the root directory rather than
+/// the volume or device itself.
+fn finish_with(
+    root: Root,
+    comps: Vec<String>,
+    used: usize,
+    ends_sep: bool,
+    root_dir: bool,
     mut notes: PathNotes,
     drive_win32: bool,
 ) -> Result<NormalizedPath, PathError> {
@@ -770,7 +821,7 @@ fn finish(
     // A device prefix followed by just a volume (`\\.\C:`, `\\?\Volume{…}`)
     // opens the volume itself, not its root directory. A plain `C:\` and a
     // UNC share always name the root directory.
-    if rest.is_empty() && !ends_sep && !drive_win32 && !matches!(root, Root::Unc { .. }) {
+    if rest.is_empty() && !root_dir && !drive_win32 && !matches!(root, Root::Unc { .. }) {
         return Err(PathError::DeviceNotDirectory);
     }
     let last = rest.len().checked_sub(1);
@@ -1225,6 +1276,30 @@ mod tests {
             normalize_win32(r"\\.\C:\a\..").unwrap().components().len(),
             0
         );
+        for volume in [
+            r"\\.\GLOBALROOT\Device\HarddiskVolume3",
+            r"//?/GLOBALROOT/Device/HarddiskVolume3",
+            r"\\.\GLOBALROOT\??\C:",
+            r"\\.\.\C:",
+            r"\\.\X:\..\C:",
+        ] {
+            assert_eq!(
+                normalize_win32(volume),
+                Err(PathError::DeviceNotDirectory),
+                "{volume}"
+            );
+        }
+        assert!(normalize_win32(r"\\.\GLOBALROOT\Device\HarddiskVolume3\").is_ok());
+        // Streams on device paths.
+        for (dev, plain) in [
+            (r"\\.\C:\dir\file.txt:evil.exe", r"C:\dir\file.txt:evil.exe"),
+            (r"//?/C:/file.txt:evil.exe", r"C:\file.txt:evil.exe"),
+            (r"\\.\UNC\server\share\f.txt:s", r"\\server\share\f.txt:s"),
+        ] {
+            let p = normalize_win32(dev).unwrap();
+            assert!(p.stream().is_some(), "{dev}");
+            assert_eq!(p.case_folded(), key(plain));
+        }
         assert_eq!(
             normalize_win32(r"\\.\C:"),
             Err(PathError::DeviceNotDirectory)
@@ -1266,6 +1341,12 @@ mod tests {
             r"\\.\UNC\server.\share\x",
             r"\\.\UNC\server \share\x",
             r"\\.\unc\server\share.\x",
+            r"\\.\.\UNC\server.\share\x",
+            r"\\.\UNC.\server.\share\x",
+            r"\\.\X\..\UNC\server.\share\x",
+            r"\\.\UNC\a\b\..\..\server.\share\x",
+            r"\\.\.\UNC\server\share ",
+            r"\\.\GLOBALROOT\Device\Mup\server.\share\x",
         ] {
             assert!(
                 matches!(normalize_win32(bad), Err(PathError::InvalidComponent(_))),

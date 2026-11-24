@@ -26,6 +26,10 @@ use std::path::Path;
 use crate::fsctx::motw::{MAX_ZONE_IDENTIFIER_BYTES, Motw, parse_zone_identifier};
 use crate::fsctx::path::{NormalizedPath, normalize_win32};
 
+/// `ERROR_INVALID_NAME`: the file name, directory name or volume label
+/// syntax is incorrect.
+const ERROR_INVALID_NAME: i32 = 123;
+
 /// The final path of `path`, normalised.
 ///
 /// Fails if the file cannot be opened, or its final path is not valid
@@ -48,34 +52,46 @@ pub fn final_path(path: &Path) -> io::Result<NormalizedPath> {
 
 /// Reads and parses the `Zone.Identifier` stream of `path`.
 ///
-/// Returns `Ok(None)` if the file has no such stream. At most
+/// Returns `Ok(None)` if the file has no such stream, or is on a file
+/// system without alternate data streams (FAT, exFAT, CDFS), and an error if
+/// the file itself does not exist. At most
 /// [`MAX_ZONE_IDENTIFIER_BYTES`] plus one byte are read, so the parser can
 /// report truncation.
 ///
 /// `path` must name a file or directory, not a stream, and should be its
 /// final path (see [`final_path`]). The stream name is appended to `path`
-/// as given, so a path that Win32 normalisation would change (a trailing
-/// dot, space or separator) can miss the stream; such paths are rejected.
+/// as given, so a path that Win32 normalisation would change can miss the
+/// stream. Such paths are rejected: an empty path, a trailing separator,
+/// and, unless the path is a literal `\\?\` path, a trailing dot or space.
 pub fn read_motw(path: &Path) -> io::Result<Option<Motw>> {
     let text = path
         .to_str()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path is not valid Unicode"))?;
-    if text.ends_with(['.', ' ', '\\', '/'])
-        || text
-            .rsplit(['\\', '/'])
-            .next()
-            .is_some_and(|n| n.contains(':'))
+    // In a literal `\\?\` path, only `\` separates components, and a
+    // trailing dot or space is part of the name.
+    let verbatim = text.starts_with(r"\\?\");
+    let separators: &[char] = if verbatim { &['\\'] } else { &['\\', '/'] };
+    let last = text.rsplit(separators).next().unwrap_or("");
+    if text.is_empty()
+        || text.ends_with(separators)
+        || (!verbatim && text.ends_with(['.', ' ']))
+        || last.contains(':')
     {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "path must be a final path to a file or directory, not a stream",
         ));
     }
+    // A missing file is an error, not "no mark".
+    std::fs::symlink_metadata(path)?;
     let mut stream = OsString::from(path.as_os_str());
     stream.push(":Zone.Identifier");
     let file = match File::open(&stream) {
         Ok(f) => f,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        // ERROR_INVALID_NAME: the file exists (checked above), so it is the
+        // stream syntax the file system rejects, as FAT, exFAT and CDFS do.
+        Err(e) if e.raw_os_error() == Some(ERROR_INVALID_NAME) => return Ok(None),
         Err(e) => return Err(e),
     };
     let limit = u64::try_from(MAX_ZONE_IDENTIFIER_BYTES)
@@ -146,6 +162,9 @@ mod tests {
         dotted.push(".");
         assert!(read_motw(Path::new(&dotted)).is_err());
         assert!(read_motw(Path::new(&ads)).is_err());
+        assert!(read_motw(Path::new("")).is_err());
+        // A missing file is an error, not "no mark".
+        assert!(read_motw(&dir.join("missing.exe")).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

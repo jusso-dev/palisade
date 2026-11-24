@@ -78,7 +78,10 @@ impl PathForms {
     /// holds no short-name candidate (so it is also `long_path`).
     #[must_use]
     pub fn from_original(original: &str) -> Self {
-        let normalized = normalize_win32(original);
+        Self::from_normalized(original, normalize_win32(original))
+    }
+
+    fn from_normalized(original: &str, normalized: Result<NormalizedPath, PathError>) -> Self {
         let mut forms = Self {
             original: original.to_owned(),
             normalized: normalized.clone(),
@@ -103,6 +106,13 @@ impl PathForms {
             }
         }
         forms
+    }
+
+    /// As [`Self::from_original`], for an NT object path as the kernel
+    /// reports image paths (`\Device\HarddiskVolume3\...`).
+    #[must_use]
+    pub fn from_nt(original: &str) -> Self {
+        Self::from_normalized(original, normalize_nt(original))
     }
 
     /// The form to match rules against: the final path if known, otherwise
@@ -186,6 +196,10 @@ mod tests {
         let bad = PathForms::from_original(r"relative\x.exe");
         assert_eq!(bad.normalized, Err(PathError::NotFullyQualified));
         assert_eq!(bad.canonical(), None);
+
+        let nt = PathForms::from_nt(r"\Device\HarddiskVolume3\Windows\x.exe");
+        assert!(nt.nt_path.is_some());
+        assert!(nt.canonical().is_some());
 
         let ctx = FsContext::from_path(r"C:\x.exe");
         assert!(ctx.motw.is_none());

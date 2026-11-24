@@ -263,7 +263,8 @@ pub fn parse_zone_identifier(bytes: &[u8]) -> Motw {
     let mut saw_section = false;
     let mut seen = [false; KNOWN_KEYS.len()];
     for raw in text.lines() {
-        let line = raw.trim();
+        // Some writers leave NUL padding after the text.
+        let line = raw.trim_matches(|c: char| c.is_whitespace() || c == '\0');
         if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
             continue;
         }
@@ -279,7 +280,7 @@ pub fn parse_zone_identifier(bytes: &[u8]) -> Motw {
             continue;
         };
         let key = key.trim().to_ascii_lowercase();
-        let value = value.trim();
+        let value = value.trim_matches(|c: char| c.is_whitespace() || c == '\0');
         let Some(index) = KNOWN_KEYS.iter().position(|k| *k == key) else {
             continue;
         };
@@ -420,6 +421,13 @@ mod tests {
         assert_eq!(m.zone, Some(Zone::Other(1000)));
         assert!(m.claims_external_origin());
         assert_eq!(Zone::from_id(3).id(), 3);
+    }
+
+    #[test]
+    fn nul_padding_is_ignored() {
+        let m = parse_zone_identifier(b"[ZoneTransfer]\r\nZoneId=3\0\0");
+        assert_eq!(m.zone, Some(Zone::Internet));
+        assert!(m.warnings.is_empty(), "{:?}", m.warnings);
     }
 
     #[test]

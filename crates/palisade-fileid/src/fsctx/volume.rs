@@ -288,9 +288,9 @@ impl VolumeInfo {
         if matches!(self.fs_type, Some(FsType::Network)) {
             return LocationClass::Network;
         }
-        if matches!(self.fs_type, Some(FsType::Cdfs | FsType::Udf)) {
-            return LocationClass::Optical;
-        }
+        // Pluggable and virtual disks are checked before the file system:
+        // a USB disk or a VHD can be formatted with UDF, and is still a
+        // USB disk or a VHD.
         if self.is_hotplug == Some(true) || self.bus_type.is_some_and(BusType::is_user_pluggable) {
             return LocationClass::Removable;
         }
@@ -299,6 +299,9 @@ impl VolumeInfo {
         }
         if self.bus_type.is_some_and(BusType::is_virtual) {
             return LocationClass::VirtualDisk;
+        }
+        if matches!(self.fs_type, Some(FsType::Cdfs | FsType::Udf)) {
+            return LocationClass::Optical;
         }
         // A disk that is neither the OS volume nor known to be a local,
         // non-pluggable disk stays unknown. External USB disks and attached
@@ -371,6 +374,16 @@ mod tests {
             fixed(BusType::FileBackedVirtual, true).location_class(),
             LocationClass::OsVolume
         );
+        // UDF on a USB disk or a VHD is still removable or virtual.
+        let mut udf_usb = fixed(BusType::Usb, false);
+        udf_usb.fs_type = Some(FsType::Udf);
+        assert_eq!(udf_usb.location_class(), LocationClass::Removable);
+        let mut udf_vhd = fixed(BusType::FileBackedVirtual, false);
+        udf_vhd.fs_type = Some(FsType::Udf);
+        assert_eq!(udf_vhd.location_class(), LocationClass::VirtualDisk);
+        let mut udf_sata = fixed(BusType::Sata, false);
+        udf_sata.fs_type = Some(FsType::Udf);
+        assert_eq!(udf_sata.location_class(), LocationClass::Optical);
         let mut hot = fixed(BusType::Sata, false);
         hot.is_hotplug = Some(true);
         assert_eq!(hot.location_class(), LocationClass::Removable);

@@ -420,11 +420,12 @@ impl SecurityDescriptor {
     }
 
     /// Serialises to the self-relative form [`Self::from_self_relative`]
-    /// reads: header, owner, group, then the DACL (revision 2). ACEs of
-    /// unknown type cannot be serialised and are written as nothing, so
-    /// this is for building fixtures, not for round-tripping hostile input.
+    /// reads: header, owner, group, then the DACL (revision 2, or 4 when it
+    /// holds object ACEs). It is for building fixtures, not for
+    /// round-tripping hostile input.
     ///
-    /// Returns `None` if the DACL would exceed the 64 KiB an ACL can hold.
+    /// Returns `None` if the DACL would exceed the 64 KiB an ACL can hold,
+    /// or holds an ACE of unknown type, which cannot be serialised.
     #[must_use]
     pub fn to_self_relative(&self) -> Option<Vec<u8>> {
         let owner = self.owner.map(|s| s.to_bytes()).unwrap_or_default();
@@ -472,7 +473,9 @@ fn write_acl(aces: &[Ace]) -> Option<Vec<u8>> {
             AceKind::DenyConditional => 0x0A,
             AceKind::AllowObject => 0x05,
             AceKind::DenyObject => 0x06,
-            AceKind::Unknown(_) => continue,
+            // An unknown ACE cannot be written back; dropping it would
+            // silently remove a fail-closed entry.
+            AceKind::Unknown(_) => return None,
         };
         let sid = ace.sid?.to_bytes();
         let mut entry = vec![ace_type, ace.flags, 0, 0];
@@ -491,7 +494,16 @@ fn write_acl(aces: &[Ace]) -> Option<Vec<u8>> {
         count = count.checked_add(1)?;
     }
     let size = u16::try_from(body.len().checked_add(8)?).ok()?;
-    let mut out = vec![2, 0];
+    // Object ACEs need `ACL_REVISION_DS` (4).
+    let revision = if aces
+        .iter()
+        .any(|a| matches!(a.kind, AceKind::AllowObject | AceKind::DenyObject))
+    {
+        4
+    } else {
+        2
+    };
+    let mut out = vec![revision, 0];
     out.extend_from_slice(&size.to_le_bytes());
     out.extend_from_slice(&count.to_le_bytes());
     out.extend_from_slice(&[0, 0]);
@@ -849,7 +861,9 @@ pub struct ObjectWritability {
     /// conditional, object or unknown ACE, or the descriptor was unreadable.
     pub uncertain: WriteRights,
     /// The rights of the synthetic standard user
-    /// ([`EvaluationOptions::standard_user`]).
+    /// ([`EvaluationOptions::standard_user`]), including owner rights when
+    /// the owner is one of its SIDs, and anything an unknown owner or ACE
+    /// type might grant.
     pub standard_user: WriteRights,
     /// Each non-administrator principal that may hold at least one right,
     /// in SID order (an unknown principal last).
@@ -1051,7 +1065,10 @@ pub fn evaluate(
     // grant. Both are reported as uncertain, for an unknown principal.
     let mut unknown = WriteRights::NONE;
     if sd.owner.is_none() {
-        let in_owner_token = |s: &Sid| *s == well_known::OWNER_RIGHTS || *s == well_known::EVERYONE;
+        // Only `OWNER RIGHTS`: the unknown owner might not hold `Everyone`,
+        // so a deny for `Everyone` is not assumed to stop it, and grants to
+        // `Everyone` are already reported for `Everyone`.
+        let in_owner_token = |s: &Sid| *s == well_known::OWNER_RIGHTS;
         let (r, _) = token_rights(aces, &in_owner_token, relevant);
         unknown = r.union(if owner_rights_ace {
             WriteRights::NONE
@@ -1075,9 +1092,25 @@ pub fn evaluate(
         });
     }
 
+    // The synthetic standard user is the owner if the owner SID is one of
+    // its groups, as the OS access check decides ownership against every
+    // SID in a token.
     let standard: BTreeSet<Sid> = options.standard_user.iter().copied().collect();
-    let in_standard = |s: &Sid| standard.contains(s) && !admins.contains(s);
-    let (standard_user, standard_uncertain) = token_rights(aces, &in_standard, relevant);
+    let standard_is_owner = owner.is_some_and(|o| standard.contains(&o));
+    let in_standard = |s: &Sid| {
+        (standard.contains(s) && !admins.contains(s))
+            || (standard_is_owner && *s == well_known::OWNER_RIGHTS)
+    };
+    let (mut standard_user, mut standard_uncertain) = token_rights(aces, &in_standard, relevant);
+    if standard_is_owner && !owner_rights_ace {
+        standard_user = standard_user.union(WriteRights::WRITE_DAC);
+        standard_uncertain = standard_uncertain.difference(WriteRights::WRITE_DAC);
+    }
+    // What an unknown owner or an unknown ACE type might grant may reach
+    // the standard user too.
+    let unknown_new = unknown.difference(standard_user);
+    standard_user = standard_user.union(unknown);
+    standard_uncertain = standard_uncertain.union(unknown_new);
 
     let mut rights = standard_user;
     let mut uncertain = standard_uncertain;
@@ -1442,6 +1475,56 @@ mod tests {
         assert_eq!(w.principals[0].principal, Principal::Unknown);
         let d = SecurityDescriptor::new(None, Some(vec![]));
         assert_eq!(eval_file(&d).rights, WriteRights::WRITE_DAC);
+    }
+
+    #[test]
+    fn standard_user_includes_owner_and_unknown_rights() {
+        // The owner is a group the standard user is in.
+        let d = sd(wk::USERS, vec![Ace::allow(wk::USERS, RX)]);
+        let w = eval_file(&d);
+        assert_eq!(w.standard_user, WriteRights::WRITE_DAC);
+        let d = sd(
+            wk::USERS,
+            vec![Ace::allow(wk::OWNER_RIGHTS, mask::FILE_WRITE_DATA)],
+        );
+        assert_eq!(eval_file(&d).standard_user, WriteRights::WRITE_DATA);
+        // An unknown ACE type reaches the standard user too.
+        let d = sd(
+            wk::ADMINISTRATORS,
+            vec![Ace {
+                kind: AceKind::Unknown(0x13),
+                flags: 0,
+                mask: 0,
+                sid: None,
+            }],
+        );
+        let w = eval_file(&d);
+        assert_eq!(w.standard_user, WriteRights::relevant(ObjectKind::File));
+        assert_eq!(w.uncertain, w.rights);
+        // A deny for Everyone does not hide OWNER RIGHTS grants from an
+        // unknown owner.
+        let d = SecurityDescriptor::new(
+            None,
+            Some(vec![
+                Ace::deny(wk::EVERYONE, mask::FILE_WRITE_DATA),
+                Ace::allow(wk::OWNER_RIGHTS, mask::FILE_WRITE_DATA),
+            ]),
+        );
+        assert!(eval_file(&d).rights.contains(WriteRights::WRITE_DATA));
+    }
+
+    #[test]
+    fn serialising_unknown_aces_fails() {
+        let d = sd(
+            wk::ADMINISTRATORS,
+            vec![Ace {
+                kind: AceKind::Unknown(0x13),
+                flags: 0,
+                mask: 0,
+                sid: None,
+            }],
+        );
+        assert_eq!(d.to_self_relative(), None);
     }
 
     #[test]
