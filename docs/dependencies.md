@@ -94,7 +94,11 @@ dependencies) are exempted the same way, with a note that names #247. Identity m
 added 2 more (`unicode-normalization` and `tinyvec`), exempted with a note that names #251. It
 also made `regex-automata`, `regex-syntax` and `aho-corasick` normal dependencies of
 `palisade-policy`, so their baseline exemptions were raised from `safe-to-run` to
-`safe-to-deploy`, with a note saying so. The exemptions are the backlog.
+`safe-to-deploy`, with a note saying so. The agent service host (#252) added 16 more (the async
+runtime, logging and the Windows service crates), exempted with a note that names #252, and made
+`bitflags` and `once_cell` normal dependencies of a shipped crate, so their baseline exemptions were
+raised to `safe-to-deploy` the same way. The
+exemptions are the backlog.
 Each one is removed when the crate is audited, or when an imported audit covers it
 (`cargo vet prune` removes exemptions that are no longer needed).
 
