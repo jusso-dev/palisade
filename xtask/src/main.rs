@@ -85,7 +85,8 @@ fn check_deps(root: &Path) -> Result<Vec<String>, String> {
 
 fn check_manifests(root: &Path) -> Result<Vec<String>, String> {
     let metadata = cargo_metadata(root, &["--no-deps"])?;
-    let mut violations = Vec::new();
+    let mut violations =
+        manifests::check_workspace_test_util("Cargo.toml", &read(&root.join("Cargo.toml"))?)?;
     for path in deps::member_manifest_paths(&metadata)? {
         let path = PathBuf::from(path);
         let shown = path.display().to_string();
@@ -107,11 +108,12 @@ fn check_manifests(root: &Path) -> Result<Vec<String>, String> {
 }
 
 fn check_unsafe(root: &Path) -> Result<Vec<String>, String> {
-    let mut violations = Vec::new();
+    let (paths, mut violations) = unsafe_code::repository_files(root)?;
     let mut files = Vec::new();
-    for path in unsafe_code::rust_files(root)? {
-        let source = read(&root.join(&path))?;
-        files.push((path, source));
+    for path in &paths {
+        if path.ends_with(".rs") {
+            files.push((path.clone(), read(&root.join(path))?));
+        }
     }
     let allowlist = unsafe_code::parse_allowlist(&read(&root.join("unsafe-allowlist.txt"))?);
     violations.extend(unsafe_code::check_files(&files, &allowlist));
@@ -122,9 +124,11 @@ fn check_unsafe(root: &Path) -> Result<Vec<String>, String> {
         if !unsafe_code::FORBID_AT_ROOT.contains(&name.as_str()) {
             continue;
         }
-        if !unsafe_code::forbids_unsafe_code(&read(Path::new(&src_path))?) {
+        let forbids = unsafe_code::forbids_unsafe_code(&read(Path::new(&src_path))?)
+            .map_err(|e| format!("{src_path}: cannot tokenise: {e}"))?;
+        if !forbids {
             violations.push(format!(
-                "{src_path}: the {kind} root of {name} must have #![forbid(unsafe_code)] (ADR 0011)"
+                "{src_path}: the {kind} root of {name} must start with #![forbid(unsafe_code)] (ADR 0011)"
             ));
         }
     }
@@ -132,12 +136,18 @@ fn check_unsafe(root: &Path) -> Result<Vec<String>, String> {
     violations.extend(unsafe_code::check_workspace_lint(&read(
         &root.join("Cargo.toml"),
     )?)?);
-    let config = root.join(".cargo").join("config.toml");
-    if config.exists() {
-        violations.extend(unsafe_code::check_cargo_config(
-            ".cargo/config.toml",
-            &read(&config)?,
-        ));
+    // Cargo reads `.cargo/config.toml` and `.cargo/config` from the build
+    // directory and every parent, so check them wherever they are.
+    for path in &paths {
+        let is_config = unsafe_code::CARGO_CONFIG_FILES
+            .iter()
+            .any(|c| path == c || path.ends_with(&format!("/{c}")));
+        if is_config {
+            violations.extend(unsafe_code::check_cargo_config(
+                path,
+                &read(&root.join(path))?,
+            ));
+        }
     }
     Ok(violations)
 }

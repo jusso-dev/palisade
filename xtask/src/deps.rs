@@ -522,6 +522,35 @@ mod tests {
     }
 
     #[test]
+    fn member_targets_lists_lib_bin_and_proc_macro_roots_of_members_only() {
+        let doc = json!({
+            "workspace_members": ["id#a"],
+            "packages": [
+                {"id": "id#a", "name": "a", "targets": [
+                    {"kind": ["lib"], "src_path": "/a/src/lib.rs"},
+                    {"kind": ["bin"], "src_path": "/a/src/main.rs"},
+                    {"kind": ["test"], "src_path": "/a/tests/t.rs"},
+                    {"kind": ["custom-build"], "src_path": "/a/build.rs"},
+                ]},
+                {"id": "id#dep", "name": "dep", "targets": [
+                    {"kind": ["proc-macro"], "src_path": "/dep/src/lib.rs"},
+                ]},
+            ],
+        });
+        assert_eq!(
+            super::member_targets(&doc).unwrap(),
+            [
+                ("a".to_owned(), "lib".to_owned(), "/a/src/lib.rs".to_owned()),
+                (
+                    "a".to_owned(),
+                    "bin".to_owned(),
+                    "/a/src/main.rs".to_owned()
+                ),
+            ]
+        );
+    }
+
+    #[test]
     fn metadata_without_resolve_is_an_error() {
         let mut doc = metadata(&good());
         doc["resolve"] = Value::Null;

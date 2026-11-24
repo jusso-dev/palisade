@@ -31,8 +31,11 @@
 
 # Unsafe code.
 /unsafe-allowlist.txt           @jusso-dev
+/crates/palisade-agent/src/ffi.rs @jusso-dev
 /crates/palisade-agent/src/ffi/ @jusso-dev
+/crates/palisade-tray/src/ffi.rs  @jusso-dev
 /crates/palisade-tray/src/ffi/  @jusso-dev
+/crates/palisade-fileid/src/win.rs @jusso-dev
 /crates/palisade-fileid/src/win/ @jusso-dev
 /crates/palisade-driver/        @jusso-dev
 

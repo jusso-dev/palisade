@@ -40,18 +40,28 @@ relax the lint:
 - the whole `palisade-driver` crate
 
 Every file that relaxes the lint (`allow`, `expect` or `warn`, as an inner or outer attribute,
-including inside `cfg_attr`) must be listed in [`unsafe-allowlist.txt`](../unsafe-allowlist.txt),
-which needs code owner review. `cargo xtask check-unsafe` fails if:
+including inside `cfg_attr` and macro bodies) must be listed in
+[`unsafe-allowlist.txt`](../unsafe-allowlist.txt), which needs code owner review.
+`cargo xtask check-unsafe` fails if:
 
 - a file relaxes the lint and is not listed;
-- a listed file no longer relaxes it, does not exist, or is outside the locations above;
+- a listed file no longer relaxes it, does not exist, is listed twice, or is outside the
+  locations above;
 - the library or binary root of `palisade-core`, `-policy`, `-proto`, `-server`, `-console`,
-  `-cli` or `xtask` lacks `#![forbid(unsafe_code)]`;
-- the workspace level is anything but `forbid` or `deny`, or `.cargo/config.toml` passes
-  rustflags that change `unsafe_code` or cap lints.
+  `-cli` or `xtask` does not start with `#![forbid(unsafe_code)]` (a `forbid` inside a nested
+  module or function does not count);
+- the workspace level is anything but `forbid` or `deny`, or the lint is set twice under both
+  spellings (`unsafe_code` and `unsafe-code`);
+- a Cargo config file in the repository (`.cargo/config.toml`, or the legacy `.cargo/config`)
+  has any string that names the lint in either spelling or caps lints;
+- a tracked file is a symbolic link, or a Rust file cannot be tokenised.
 
-The check reads source text, skipping comments and string literals, so a doc comment that quotes
-the attribute does not count. Every `unsafe` block also needs a `// SAFETY:` comment
+The files scanned are the ones git tracks or would track (ignored build output is skipped), and
+each is tokenised with `proc-macro2`, the tokeniser procedural macros use, so comments and
+literals are never mistaken for attributes. What text scanning cannot see is left to review: an
+attribute a macro builds from its parameters (`#[$a($b)]`), a module loaded from an untracked file
+through `#[path]` or `include!`, and code a build script generates. The workspace `forbid` still
+applies to all of these. Every `unsafe` block also needs a `// SAFETY:` comment
 (`clippy::undocumented_unsafe_blocks = "deny"`).
 
 ## Feature flags
@@ -61,10 +71,13 @@ the attribute does not count. Every `unsafe` block also needs a `// SAFETY:` com
 - **Documented.** Every feature, including optional dependencies that act as features, is listed in
   the `## Feature flags` section of the crate README. Enforced by `cargo xtask check-manifests`.
 - **Each feature builds on its own.** CI runs `cargo hack check --each-feature --all-targets` on the
-  portable crates (the `feature-powerset` job).
+  portable crates, `core`, `fileid`, `policy`, `proto`, `server`, `cli` and `console` (the
+  `feature-powerset` job).
 - **`test-util` never reaches a release build.** It may hold fixtures and mocks. It is never in
-  `default`, and only `[dev-dependencies]` may enable it on another crate. No other feature may
-  turn on a dependency's `test-util`. Enforced by `cargo xtask check-manifests`.
+  `default`, no other feature of the crate turns it on (so `default` cannot reach it indirectly),
+  and only `[dev-dependencies]` may enable it on another crate. No `[workspace.dependencies]`
+  entry may enable it, because members inherit those features in every table. Enforced by
+  `cargo xtask check-manifests`.
 
 The planned flag names, each added with the code that needs it:
 

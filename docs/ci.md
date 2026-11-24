@@ -21,7 +21,7 @@ type.
 | `msrv` | ubuntu-latest | `cargo +1.85.0 check --workspace --all-targets --all-features --locked`, after checking that the version matches `rust-version` in `Cargo.toml` |
 | `docs` | ubuntu-latest | `cargo doc --workspace --no-deps --all-features --locked` with `RUSTDOCFLAGS=-D warnings` |
 | `deps` | ubuntu-latest | `cargo xtask check-deps`, `cargo xtask check-manifests`, `cargo xtask check-unsafe`, `cargo deny --locked check` |
-| `feature-powerset` | ubuntu-latest | `cargo hack check --each-feature --all-targets --locked` on the portable crates (`core`, `fileid`, `policy`, `proto`, `server`, `cli`) |
+| `feature-powerset` | ubuntu-latest | `cargo hack check --each-feature --all-targets --locked` on the portable crates (`core`, `fileid`, `policy`, `proto`, `server`, `cli`, `console`) |
 | `runner-guard` | ubuntu-latest | `cargo xtask check-workflows` |
 | `workflow-lint` | ubuntu-latest | `actionlint` (checksum-verified release) and `zizmor --offline` |
 | `ci-ok` | ubuntu-latest | Passes only if every job above succeeded |
@@ -154,7 +154,8 @@ cargo xtask check-workflows
 cargo deny --locked check          # needs cargo-deny 0.22
 cargo hack check --each-feature --all-targets --locked \
   -p palisade-core -p palisade-fileid -p palisade-policy \
-  -p palisade-proto -p palisade-server -p palisade-cli   # needs cargo-hack 0.6
+  -p palisade-proto -p palisade-server -p palisade-cli \
+  -p palisade-console                                    # needs cargo-hack 0.6
 bash .github/scripts/check-pr-title.test.sh
 bash .github/scripts/check-pr-title.sh "docs: example title"
 bash .github/scripts/check-dco.test.sh

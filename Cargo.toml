@@ -39,6 +39,7 @@ palisade-core = { path = "crates/palisade-core", default-features = false }
 boon = { version = "0.6.1" }
 libc = { version = "0.2.191", default-features = false }
 md-5 = { version = "0.11.0", default-features = false }
+proc-macro2 = { version = "1.0.107", default-features = false }
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 ring = { version = "0.17.14", default-features = false, features = ["alloc"] }
 schemars = { version = "1.2.3", default-features = false, features = ["derive"] }

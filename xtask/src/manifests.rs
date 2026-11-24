@@ -140,24 +140,48 @@ pub fn check_test_util(path: &str, source: &str) -> Result<Vec<String>, String> 
             }
         }
     }
-    // A non-test feature that turns on a dependency's `test-util`
-    // (`dep/test-util` or `dep?/test-util`) would leak it too.
+    // Only `test-util` itself may turn on `test-util`: this crate's own
+    // (`"test-util"`, which also covers `default` reaching it through another
+    // feature) or a dependency's (`dep/test-util` or `dep?/test-util`).
     for (feature, enables) in features.into_iter().flatten() {
-        if feature == TEST_UTIL {
+        if feature == TEST_UTIL || feature == "default" {
             continue;
         }
         let leaks = enables.as_array().into_iter().flatten().any(|e| {
-            e.as_str()
-                .and_then(|e| e.split_once('/'))
-                .is_some_and(|(_, f)| f == TEST_UTIL)
+            e.as_str().is_some_and(|e| {
+                e == TEST_UTIL || e.split_once('/').is_some_and(|(_, f)| f == TEST_UTIL)
+            })
         });
         if leaks {
             v.push(format!(
-                "{path}: feature `{feature}` enables a dependency's `{TEST_UTIL}`; only `{TEST_UTIL}` itself may"
+                "{path}: feature `{feature}` enables `{TEST_UTIL}`; only `{TEST_UTIL}` itself may"
             ));
         }
     }
     Ok(v)
+}
+
+/// No entry in the root `[workspace.dependencies]` enables `test-util`:
+/// members inherit those features in every dependency table, including
+/// `[dependencies]`.
+pub fn check_workspace_test_util(path: &str, source: &str) -> Result<Vec<String>, String> {
+    let manifest: Table = source
+        .parse()
+        .map_err(|e| format!("{path}: invalid TOML: {e}"))?;
+    let deps = manifest
+        .get("workspace")
+        .and_then(|w| w.get("dependencies"))
+        .and_then(Value::as_table);
+    Ok(deps
+        .into_iter()
+        .flatten()
+        .filter(|(_, spec)| spec.get("features").is_some_and(enables_test_util))
+        .map(|(dep, _)| {
+            format!(
+                "{path}: workspace.dependencies.{dep} enables `{TEST_UTIL}`; enable it in a member's [dev-dependencies] instead"
+            )
+        })
+        .collect())
 }
 
 fn enables_test_util(features: &Value) -> bool {
@@ -260,7 +284,9 @@ fn is_workspace_dependency(spec: &Value) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{check_member, check_readme, check_test_util, feature_names};
+    use super::{
+        check_member, check_readme, check_test_util, check_workspace_test_util, feature_names,
+    };
 
     const PACKAGE: &str = r#"
 [package]
@@ -379,6 +405,36 @@ toml = { workspace = true }
             "{v:?}"
         );
         assert!(v[3].contains("feature `extra`"), "{v:?}");
+    }
+
+    #[test]
+    fn test_util_cannot_be_reached_through_another_feature() {
+        // `default` reaches `test-util` through `full`; `full` is reported.
+        let source = format!(
+            "{PACKAGE}[features]\ndefault = [\"full\"]\nfull = [\"std\", \"test-util\"]\nstd = []\ntest-util = []\n"
+        );
+        let v = check_test_util("x", &source).unwrap();
+        assert_eq!(
+            v,
+            ["x: feature `full` enables `test-util`; only `test-util` itself may"]
+        );
+    }
+
+    #[test]
+    fn workspace_dependencies_must_not_enable_test_util() {
+        let source = "[workspace.dependencies]\nok = { version = \"1\", features = [\"std\"] }\nbad = { path = \"crates/bad\", features = [\"test-util\"] }\nplain = \"1\"\n";
+        let v = check_workspace_test_util("Cargo.toml", source).unwrap();
+        assert_eq!(v.len(), 1);
+        assert!(
+            v[0].starts_with("Cargo.toml: workspace.dependencies.bad enables"),
+            "{v:?}"
+        );
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../Cargo.toml");
+        let root = std::fs::read_to_string(root).unwrap();
+        assert_eq!(
+            check_workspace_test_util("Cargo.toml", &root).unwrap(),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
