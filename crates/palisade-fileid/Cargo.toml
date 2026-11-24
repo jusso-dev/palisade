@@ -20,6 +20,8 @@ os-trust = []
 
 [dependencies]
 md-5 = { workspace = true }
+# The shared verification-error table (#50, #58).
+palisade-core = { workspace = true, features = ["serde"] }
 ring = { workspace = true }
 serde = { workspace = true }
 sha1 = { workspace = true }

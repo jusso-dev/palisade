@@ -204,9 +204,9 @@ pub enum SignatureCheck {
     NotChecked,
 }
 
-/// The verdict on one signature, from the checks in this module. Timestamp,
-/// expiry and revocation states are added by #50; the certificate chain is
-/// #49.
+/// The verdict on one signature, from the checks in this module. The
+/// certificate chain is judged by [`super::evaluate_trust`] (#49), and
+/// timestamps, expiry and revocation by [`super::evaluate_validity`] (#50).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SignatureStatus {
@@ -324,16 +324,19 @@ impl PageHashes {
 }
 
 /// The kind of a timestamp carried in an unauthenticated attribute.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TimestampKind {
-    /// A PKCS#9 countersignature (1.2.840.113549.1.9.6).
+    /// A legacy Authenticode timestamp: a PKCS#9 countersignature
+    /// (1.2.840.113549.1.9.6).
     CounterSignature,
-    /// An RFC 3161 timestamp token (1.3.6.1.4.1.311.3.3.1).
+    /// An RFC 3161 timestamp token (1.3.6.1.4.1.311.3.3.1, or
+    /// 1.2.840.113549.1.9.16.2.14).
     Rfc3161,
 }
 
-/// A timestamp found on a signature, kept for the timestamp module (#50),
-/// which parses and verifies it.
+/// A timestamp found on a signature. [`super::verify_timestamps`] parses
+/// and verifies it (#50).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TimestampToken {
     /// Which attribute it came from.
@@ -360,7 +363,8 @@ pub enum OsCiIssue {
 
 /// Something unusual about one signature that does not by itself change its
 /// status.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum SignatureWarning {
     /// Bytes follow the SignedData inside its `WIN_CERTIFICATE` entry. A
@@ -483,8 +487,12 @@ pub struct SignatureInfo {
     pub pe_image_flags: Option<u8>,
     /// The page hash table, if the signature carries one (#47).
     pub page_hashes: Option<PageHashes>,
-    /// Timestamps in the unauthenticated attributes, for #50.
+    /// Timestamps in the unauthenticated attributes, verified by
+    /// [`super::verify_timestamps`] (#50).
     pub timestamp_tokens: Vec<TimestampToken>,
+    /// The SignerInfo's signature value (`encryptedDigest`): what a
+    /// timestamp covers. Empty if the signature did not parse.
+    pub signature_value: Vec<u8>,
     /// Why the signer cannot back an OS-native code integrity signer rule;
     /// empty when it can.
     pub os_ci_issues: Vec<OsCiIssue>,
@@ -502,7 +510,8 @@ impl SignatureInfo {
 }
 
 /// Why a signature could not be parsed.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum SignatureError {
     /// The DER encoding is invalid.

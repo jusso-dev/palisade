@@ -6,6 +6,7 @@ Shared types for every Palisade crate. It does no I/O, so the kernel driver can 
 - `SchemaVersion`: a strict `MAJOR.MINOR.PATCH` version, with the "same major, any minor" reader rule.
 - `Mode`: the enforcement mode (#36).
 - `ObjectType` and `ScriptKind`: the classes of object a decision is about (ISM-1657, ISM-1658).
+- `VerificationError`: the signature verification-error taxonomy (#50). Codes 0 to 28 are the OS code integrity `VerificationError` values with the same meanings, so Palisade and OS events correlate; codes from 1000 are Palisade-specific. One table, shared by `palisade-fileid` (#50) and the OS event decoder (#58), and never renumbered.
 - `path`: lexical normalisation of Windows paths (#32). Prefixes such as `\\?\` and `\??\`, device paths (through a `VolumeMap`), mixed and repeated separators, `.` and `..`, and stream-type suffixes are folded into one canonical form, so the agent's facts and the policy's values compare equal. Normalisation is idempotent.
 
 Hashes, timestamps, error types and `Decision` are still to come (#2, #3, #34).

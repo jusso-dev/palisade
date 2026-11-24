@@ -490,3 +490,102 @@ mod path {
         }
     }
 }
+
+mod verification {
+    use alloc::string::ToString;
+
+    use crate::VerificationError;
+
+    #[test]
+    fn os_codes_match_the_os_table() {
+        // The OS code integrity `VerificationError` values, 0 to 28, in
+        // order. #58 decodes OS events with this table, so it must not
+        // drift.
+        let os = [
+            "ok",
+            "invalid_hash",
+            "shared_writable_sections",
+            "not_signed",
+            "revoked",
+            "expired",
+            "weak_hash_algorithm",
+            "untrusted_root",
+            "generic",
+            "signing_time_untrusted",
+            "page_hashes_required",
+            "page_hash_mismatch",
+            "not_valid_for_protected_process_light",
+            "not_valid_for_protected_process",
+            "missing_arm_eku",
+            "certified_driver_check_failed",
+            "default_policy_signing_level_not_met",
+            "custom_policy_signing_level_not_met",
+            "custom_signers_not_met",
+            "revoked_by_hash",
+            "sha1_timestamp_past_cutoff",
+            "policy_failed",
+            "not_isolated_user_mode_signed",
+            "unsupported_key_algorithm",
+            "pre_release_root_not_allowed",
+            "anti_cheat_policy_violation",
+            "explicitly_denied",
+            "chain_tampered",
+            "resource_page_hash_mismatch",
+        ];
+        for (code, name) in (0_u16..).zip(os) {
+            let e = VerificationError::from_code(code).unwrap();
+            assert_eq!(e.as_str(), name);
+            assert!(e.is_os_code());
+        }
+        assert_eq!(VerificationError::from_code(29), None);
+        assert_eq!(VerificationError::from_code(999), None);
+    }
+
+    #[test]
+    fn palisade_codes_start_at_1000() {
+        let own = [
+            (1000, VerificationError::DigestMismatch),
+            (1001, VerificationError::MalformedSignature),
+            (1002, VerificationError::ChainIncomplete),
+            (1003, VerificationError::MissingRequiredEku),
+            (1004, VerificationError::KeyTooSmall),
+            (1005, VerificationError::CountersignatureRequired),
+            (1006, VerificationError::RevocationUnavailable),
+        ];
+        for (code, e) in own {
+            assert_eq!(e.code(), code);
+            assert!(!e.is_os_code());
+            assert_eq!(VerificationError::from_code(code), Some(e));
+        }
+        assert_eq!(VerificationError::from_code(1007), None);
+    }
+
+    #[test]
+    fn codes_and_names_are_unique_and_round_trip() {
+        let all = VerificationError::ALL;
+        for (i, a) in all.iter().enumerate() {
+            assert_eq!(a.to_string().parse::<VerificationError>(), Ok(*a));
+            for b in &all[i + 1..] {
+                assert_ne!(a.code(), b.code());
+                assert_ne!(a.as_str(), b.as_str());
+            }
+        }
+        // `ALL` is in numeric order.
+        assert!(all.windows(2).all(|w| w[0].code() < w[1].code()));
+        assert!(VerificationError::Ok.is_ok());
+        assert!("Expired".parse::<VerificationError>().is_err());
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_uses_the_name() {
+        assert_eq!(
+            serde_json::to_string(&VerificationError::Sha1TimestampPastCutoff).unwrap(),
+            "\"sha1_timestamp_past_cutoff\""
+        );
+        assert_eq!(
+            serde_json::from_str::<VerificationError>("\"revoked_by_hash\"").unwrap(),
+            VerificationError::RevokedByHash
+        );
+    }
+}

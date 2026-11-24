@@ -58,9 +58,19 @@
 //!   cryptographic validity alone; trust decisions must use
 //!   [`TrustReport::primary`].
 //!
-//! Timestamps, expiry and revocation are #50; the OS trust store
-//! cross-check is the `os-trust` item of #48; catalogs are #51.
-//! [`SignatureInfo::timestamp_tokens`] carries what #50 needs.
+//! # Timestamps, expiry and revocation (#50)
+//!
+//! - [`verify_timestamps`] verifies a signature's RFC 3161 and legacy
+//!   countersignature timestamps against a TSA [`TrustConfig`].
+//! - [`evaluate_validity`] judges every signature as of when it was made:
+//!   the trusted signing time, expiry ([`ExpiryPolicy`], Lifetime Signing),
+//!   revocation data the caller supplies ([`RevocationSet`], [`Crl`]), and
+//!   per-certificate relaxations. Every outcome is one
+//!   [`VerificationError`] code, shared with the OS event decoder (#58).
+//!   Allow decisions must use [`ValidityReport::primary`].
+//!
+//! The OS trust store cross-check is the `os-trust` item of #48; catalogs
+//! are #51.
 //!
 //! # Untrusted input
 //!
@@ -99,8 +109,11 @@ pub mod hash;
 mod image;
 pub mod page;
 mod pkcs7;
+mod revocation;
 mod signature;
+mod timestamp;
 mod trust;
+mod validity;
 mod verify;
 mod x509;
 
@@ -125,7 +138,13 @@ pub use page::{
     PageLayout, PageMismatchKind, page_hash_table, page_hash_tables, verify_page_hashes,
     verify_signature_page_hashes,
 };
+pub use palisade_core::VerificationError;
 pub use pkcs7::{MAX_CERTIFICATES, MAX_TIMESTAMPS, MAX_WARNINGS};
+pub use revocation::{
+    CertRevocation, CertificateMatch, Coverage, Crl, CrlEntry, CrlError, MAX_CRL_CHECKS,
+    MAX_CRL_ENTRIES, MAX_CRL_SIZE, MAX_CRLS, RevocationFailure, RevocationMode, RevocationReason,
+    RevocationSet, RevocationSource, RevokedCertificate,
+};
 pub use signature::{
     BadSignature, CertificateEntry, CertificateTableError, Curve, DigestAlgorithm, InvalidReason,
     KeyAlgorithm, OsCiIssue, PageHashes, ReportWarning, SignatureAlgorithm, SignatureCheck,
@@ -133,9 +152,18 @@ pub use signature::{
     SignatureWarning, SignerAttributes, SignerIdentifier, SigningState, StatementType,
     TimestampKind, TimestampToken, Unsupported, VerifyOptions,
 };
+pub use timestamp::{
+    MAX_FILE_TIMESTAMPS, MAX_TIMESTAMP_WARNINGS, MAX_TOKEN_CERTIFICATES, TimestampError,
+    TimestampInfo, TimestampStatus, TimestampWarning, parse_timestamp_time, verify_timestamps,
+};
 pub use trust::{
     FilePublisherOsRule, IdentityIssue, NameSource, OsRuleRoot, PublisherName, PublisherOsRule,
     SignerIdentity, SignerTrust, TrustReport, UntrustedReason, VendorHint, evaluate_trust,
+};
+pub use validity::{
+    CertificateOptions, CertificatePin, ChainRevocation, ErrorIgnoreFlags, ExpiryPolicy,
+    IgnoreFlag, RelaxedCheck, SignatureValidity, TimeValidity, ValidityContext, ValidityPolicy,
+    ValidityReport, ValidityWarning, evaluate_validity, status_error,
 };
 pub use verify::{
     MAX_CERTIFICATE_ENTRIES, MAX_CERTIFICATE_TABLE_SIZE, MAX_NESTING_DEPTH, MAX_SIGNATURES,

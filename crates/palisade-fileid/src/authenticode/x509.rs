@@ -828,7 +828,7 @@ pub(crate) fn signature_digest(alg: &SignatureAlgorithm) -> Option<DigestAlgorit
 }
 
 /// A certificate's `signatureAlgorithm`.
-fn signature_algorithm(id: &Tlv<'_>) -> Result<SignatureAlgorithm> {
+pub(crate) fn signature_algorithm(id: &Tlv<'_>) -> Result<SignatureAlgorithm> {
     let mut r = id.reader();
     let alg = read_oid(&mut r)?;
     let params = if r.is_empty() {
@@ -881,7 +881,7 @@ fn signature_algorithm(id: &Tlv<'_>) -> Result<SignatureAlgorithm> {
 
 /// `Name ::= SEQUENCE OF RelativeDistinguishedName`, each a non-empty
 /// `SET OF AttributeTypeAndValue`.
-fn parse_name(name: &Tlv<'_>) -> Result<DistinguishedName> {
+pub(crate) fn parse_name(name: &Tlv<'_>) -> Result<DistinguishedName> {
     let mut rdns = Vec::new();
     let mut r = name.reader();
     while !r.is_empty() {

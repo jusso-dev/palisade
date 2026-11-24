@@ -84,6 +84,10 @@ const X509_SEEDS: Seed = Seed {
     test: "chain",
     name: "write_x509_chain_fuzz_seeds",
 };
+const TIMESTAMP_SEEDS: Seed = Seed {
+    test: "validity",
+    name: "write_timestamp_fuzz_seeds",
+};
 const TRUST_SET_SEEDS: Seed = Seed {
     test: "trust_set",
     name: "write_trust_set_fuzz_seeds",
@@ -124,6 +128,11 @@ pub const PROJECTS: &[Project] = &[
                 name: "x509_chain",
                 dict: Some("pkcs7.dict"),
                 seeds: &[X509_SEEDS],
+            },
+            Target {
+                name: "timestamp_crl",
+                dict: Some("pkcs7.dict"),
+                seeds: &[TIMESTAMP_SEEDS],
             },
         ],
     },
