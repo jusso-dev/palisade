@@ -9,7 +9,8 @@
 //! changes it.
 //!
 //! The calls never show UI (`WTD_UI_NONE`), never check revocation
-//! (`WTD_REVOKE_NONE`) and never fetch anything from the network
+//! (`WTD_REVOKE_NONE`, plus `WTD_REVOCATION_CHECK_NONE` so not even cached
+//! revocation data is consulted) and never fetch anything from the network
 //! (`WTD_CACHE_ONLY_URL_RETRIEVAL`), so a cross-check cannot stall on a
 //! slow or hostile URL in a certificate. Every verify is followed by a
 //! close (`WTD_STATEACTION_CLOSE`), even when it fails, so no OS state is
@@ -31,8 +32,8 @@ use std::path::Path;
 use windows_sys::Win32::Security::WinTrust::{
     WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_DATA, WINTRUST_FILE_INFO,
     WINTRUST_SIGNATURE_SETTINGS, WSS_GET_SECONDARY_SIG_COUNT, WSS_VERIFY_SPECIFIC,
-    WTD_CACHE_ONLY_URL_RETRIEVAL, WTD_CHOICE_FILE, WTD_REVOKE_NONE, WTD_STATEACTION_CLOSE,
-    WTD_STATEACTION_VERIFY, WTD_UI_NONE, WinVerifyTrust,
+    WTD_CACHE_ONLY_URL_RETRIEVAL, WTD_CHOICE_FILE, WTD_REVOCATION_CHECK_NONE, WTD_REVOKE_NONE,
+    WTD_STATEACTION_CLOSE, WTD_STATEACTION_VERIFY, WTD_UI_NONE, WinVerifyTrust,
 };
 
 use crate::authenticode::{MAX_OS_SIGNATURES, OsSignatureResult, OsTrustResult};
@@ -66,7 +67,7 @@ fn verify_index(file: &File, wide_path: &[u16], index: u32) -> (u32, u32) {
         fdwRevocationChecks: WTD_REVOKE_NONE,
         dwUnionChoice: WTD_CHOICE_FILE,
         dwStateAction: WTD_STATEACTION_VERIFY,
-        dwProvFlags: WTD_CACHE_ONLY_URL_RETRIEVAL,
+        dwProvFlags: WTD_CACHE_ONLY_URL_RETRIEVAL | WTD_REVOCATION_CHECK_NONE,
         pSignatureSettings: &raw mut settings,
         ..WINTRUST_DATA::default()
     };
@@ -112,6 +113,8 @@ fn verify_index(file: &File, wide_path: &[u16], index: u32) -> (u32, u32) {
 ///
 /// `file` must be open for reading. `path` should be the path it was
 /// opened from; the OS uses its extension to pick the signature format.
+/// The OS reads through `file`'s handle and may move its file position, so
+/// a caller that reads `file` afterwards must seek first.
 /// Fails only if `path` contains a NUL character. Every OS result,
 /// including "no signature", is a result, not an error.
 ///
@@ -145,11 +148,24 @@ mod tests {
     use super::*;
     use crate::authenticode::{OsVerdict, code};
 
+    /// A directory this test created, removed when dropped, even if the
+    /// test panics.
+    struct Scratch(std::path::PathBuf);
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
     #[test]
     fn a_file_without_a_signature() {
-        let dir = std::env::temp_dir().join(format!("palisade-win-trust-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("plain.txt");
+        let dir = Scratch(
+            std::env::temp_dir().join(format!("palisade-win-trust-{}", std::process::id())),
+        );
+        let _ = std::fs::remove_dir_all(&dir.0);
+        std::fs::create_dir(&dir.0).unwrap();
+        let path = dir.0.join("plain.txt");
         std::fs::write(&path, b"not a signed file").unwrap();
         let file = File::open(&path).unwrap();
         let r = verify_file(&file, &path).unwrap();
@@ -158,8 +174,6 @@ mod tests {
         assert_ne!(r.signatures[0].verdict(), OsVerdict::Trusted);
         assert_ne!(r.signatures[0].code, code::S_OK);
         assert_eq!(r.secondary_count, 0);
-        drop(file);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

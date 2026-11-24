@@ -168,6 +168,13 @@ fn corpus_differential() {
             "{fixture}: {os:?} {check:#?}"
         );
         assert!(!check.secondary_count_differs, "{fixture}: {check:#?}");
+        // Every OS code the fixtures produce is classified: a code nobody
+        // classified would hide a rejection.
+        assert_eq!(
+            check.not_comparable().count(),
+            0,
+            "{fixture}: {os:?} {check:#?}"
+        );
         assert!(
             !check
                 .comparisons
