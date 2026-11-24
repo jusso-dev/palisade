@@ -101,6 +101,7 @@ A quick start that installs Palisade on a disposable Windows virtual machine arr
 
 - [CONTRIBUTING.md](CONTRIBUTING.md): development setup, coding standards, tests and pull requests
 - [SECURITY.md](SECURITY.md): how to report a vulnerability privately
+- [docs/security/threat-model.md](docs/security/threat-model.md): STRIDE threat model, attack trees and residual risks
 - [SUPPORT.md](SUPPORT.md): where to ask questions, and what support to expect
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md): Contributor Covenant 2.1
 - [docs/responsible-use.md](docs/responsible-use.md): Palisade is defensive; what contributions are not accepted
