@@ -5,12 +5,12 @@
 
 use super::crypto::{self, PublicKey, Scheme, Verified};
 use super::hash::{AuthenticodeError, AuthenticodeHashes, HashRanges, image_digests};
-use super::pkcs7::{self, CertKey, Certificate, SignedData, Warnings};
+use super::pkcs7::{self, CertKey, Certificate, SignedData, Signer, Warnings};
 use super::signature::{
     BadSignature, CertificateEntry, CertificateTableError, DigestAlgorithm, InvalidReason,
     KeyAlgorithm, OsCiIssue, ReportWarning, SignatureAlgorithm, SignatureCheck, SignatureInfo,
     SignatureKind, SignatureReport, SignatureStatus, SignatureWarning, SignerAttributes,
-    SigningState, Unsupported, VerifyOptions,
+    SignerIdentifier, SigningState, Unsupported, VerifyOptions,
 };
 use crate::hash::{AlgorithmSet, hash_bytes};
 use crate::pe::{self, DataDirectoryKind, ParseOptions, PeError, PeInfo};
@@ -336,7 +336,7 @@ impl Walker<'_> {
 }
 
 /// A placeholder [`SignatureInfo`]; the walker fills in the position fields.
-fn blank(status: SignatureStatus) -> SignatureInfo {
+pub(crate) fn blank(status: SignatureStatus) -> SignatureInfo {
     SignatureInfo {
         index: 0,
         total: 0,
@@ -380,21 +380,7 @@ fn check(
     let signer = &sd.signer;
     let indirect = &sd.indirect;
 
-    // Find the signer certificate.
-    let mut signer_cert: Option<(usize, Certificate<'_>)> = None;
-    for (i, der) in sd.certificates.iter().enumerate() {
-        match pkcs7::parse_certificate(der) {
-            Ok(cert) if pkcs7::matches(&cert, &signer.sid) => {
-                if signer_cert.is_some() {
-                    warnings.push(SignatureWarning::AmbiguousSignerCertificate);
-                } else {
-                    signer_cert = Some((i, cert));
-                }
-            }
-            Ok(_) => {}
-            Err(_) => warnings.push(SignatureWarning::UnparseableCertificate(i)),
-        }
-    }
+    let signer_cert = find_signer_cert(&sd.certificates, &signer.sid, &mut warnings);
 
     let image_alg = indirect.digest_alg.as_ref().ok().copied();
     let signer_alg = signer.digest_alg.as_ref().ok().copied();
@@ -408,7 +394,11 @@ fn check(
         warnings.push(SignatureWarning::DigestAlgorithmsDiffer);
     }
 
-    let signature_valid = check_signature(sd, signer_cert.as_ref().map(|(_, c)| c));
+    let signature_valid = check_signature(
+        signer,
+        indirect.content,
+        signer_cert.as_ref().map(|(_, c)| c),
+    );
 
     // Compare the signed image digest with the file.
     let digest_match = match indirect.digest_alg {
@@ -496,9 +486,38 @@ fn check(
     }
 }
 
-/// The `messageDigest` attribute check, then the signature itself.
-fn check_signature(sd: &SignedData<'_>, cert: Option<&Certificate<'_>>) -> SignatureCheck {
-    let signer = &sd.signer;
+/// The certificate among `certificates` that `sid` names, with its index.
+/// Records a warning for every certificate that does not parse, and for a
+/// second match (the first is used).
+pub(crate) fn find_signer_cert<'a>(
+    certificates: &[&'a [u8]],
+    sid: &SignerIdentifier,
+    warnings: &mut Warnings,
+) -> Option<(usize, Certificate<'a>)> {
+    let mut signer_cert: Option<(usize, Certificate<'a>)> = None;
+    for (i, der) in certificates.iter().enumerate() {
+        match pkcs7::parse_certificate(der) {
+            Ok(cert) if pkcs7::matches(&cert, sid) => {
+                if signer_cert.is_some() {
+                    warnings.push(SignatureWarning::AmbiguousSignerCertificate);
+                } else {
+                    signer_cert = Some((i, cert));
+                }
+            }
+            Ok(_) => {}
+            Err(_) => warnings.push(SignatureWarning::UnparseableCertificate(i)),
+        }
+    }
+    signer_cert
+}
+
+/// The `messageDigest` attribute check against `content` (the content
+/// octets of the signed content), then the signature itself.
+pub(crate) fn check_signature(
+    signer: &Signer<'_>,
+    content: &[u8],
+    cert: Option<&Certificate<'_>>,
+) -> SignatureCheck {
     let signer_alg = match &signer.digest_alg {
         Ok(alg) => *alg,
         Err(oid) => return SignatureCheck::Unsupported(Unsupported::UnknownDigest(oid.clone())),
@@ -506,7 +525,7 @@ fn check_signature(sd: &SignedData<'_>, cert: Option<&Certificate<'_>>) -> Signa
     let Some(hash_alg) = signer_alg.hash_algorithm() else {
         return SignatureCheck::Unsupported(Unsupported::WeakAlgorithm(signer_alg));
     };
-    let content_digest = hash_bytes(sd.indirect.content, AlgorithmSet::from(hash_alg));
+    let content_digest = hash_bytes(content, AlgorithmSet::from(hash_alg));
     let matches = content_digest
         .get(hash_alg)
         .is_some_and(|d| d.as_bytes() == signer.message_digest);
@@ -559,7 +578,7 @@ pub(crate) fn scheme(
     }
 }
 
-fn os_ci_issues(
+pub(crate) fn os_ci_issues(
     key_alg: Option<&KeyAlgorithm>,
     key_bits: Option<u32>,
     weak: Option<DigestAlgorithm>,
@@ -590,7 +609,7 @@ fn strength(sig: &SignatureInfo) -> u8 {
 }
 
 /// The first valid signature with the strongest digest.
-fn select_primary(signatures: &[SignatureInfo]) -> Option<usize> {
+pub(crate) fn select_primary(signatures: &[SignatureInfo]) -> Option<usize> {
     let mut best: Option<(usize, u8)> = None;
     for sig in signatures.iter().filter(|s| s.status.is_valid()) {
         let s = strength(sig);

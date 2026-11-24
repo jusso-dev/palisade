@@ -70,7 +70,7 @@
 //!   Allow decisions must use [`ValidityReport::primary`].
 //!
 //! The OS trust store cross-check is the `os-trust` item of #48; catalogs
-//! are #51.
+//! are [`crate::catalog`] (#51).
 //!
 //! # Untrusted input
 //!
@@ -101,20 +101,20 @@
 
 #![forbid(unsafe_code)]
 
-mod asn1;
+pub(crate) mod asn1;
 mod chain;
 mod crypto;
 pub mod eku;
 pub mod hash;
 mod image;
 pub mod page;
-mod pkcs7;
+pub(crate) mod pkcs7;
 mod revocation;
 mod signature;
 mod timestamp;
 mod trust;
 mod validity;
-mod verify;
+pub(crate) mod verify;
 mod x509;
 
 pub use asn1::{Asn1Error, Asn1ErrorKind, ObjectId};

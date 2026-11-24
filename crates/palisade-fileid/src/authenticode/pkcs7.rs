@@ -112,23 +112,74 @@ pub(crate) struct SignedData<'a> {
 /// be exactly one element; `base` is its offset, for errors. Returns the
 /// SignedData and the number of bytes after the element.
 pub(crate) fn parse_content_info(der: &[u8], base: usize) -> Result<(SignedData<'_>, &[u8])> {
+    let (envelope, indirect, trailing) = parse_envelope(
+        der,
+        base,
+        oid::SPC_INDIRECT_DATA,
+        SignatureError::NotIndirectData,
+        parse_indirect_data,
+    )?;
+    Ok((
+        SignedData {
+            signer_digest_listed: envelope.signer_digest_listed,
+            indirect,
+            certificates: envelope.certificates,
+            signer: envelope.signer,
+            warnings: envelope.warnings,
+        },
+        trailing,
+    ))
+}
+
+/// The parts of a SignedData that do not depend on its content type.
+#[derive(Debug)]
+pub(crate) struct Envelope<'a> {
+    /// Whether `digestAlgorithms` lists the signer's digest algorithm.
+    pub signer_digest_listed: bool,
+    /// Every X.509 certificate, DER-encoded, in blob order.
+    pub certificates: Vec<&'a [u8]>,
+    pub signer: Signer<'a>,
+    pub warnings: Warnings,
+}
+
+/// Decodes a `ContentInfo` holding a SignedData whose content type must be
+/// `content_type` (an OID's content octets); `mismatch` makes the error for
+/// any other. `content` decodes the encapsulated content (one SEQUENCE,
+/// whose content octets the `messageDigest` attribute covers), and the
+/// SignerInfo's `contentType` attribute must name `content_type` too.
+/// Returns the envelope, the decoded content and the bytes after the
+/// element. Used for Authenticode (`SPC_INDIRECT_DATA`) and for catalogs
+/// (`szOID_CTL`, #51).
+pub(crate) fn parse_envelope<'a, C>(
+    der: &'a [u8],
+    base: usize,
+    content_type: &[u8],
+    mismatch: fn(ObjectId) -> SignatureError,
+    content: impl FnOnce(&Tlv<'a>, &mut Warnings) -> Result<C>,
+) -> Result<(Envelope<'a>, C, &'a [u8])> {
     let mut outer = Reader::new(der, base);
     let content_info = outer.read(tag::SEQUENCE)?;
     let trailing = outer.remaining();
     let mut ci = content_info.reader();
-    let content_type = read_oid(&mut ci)?;
-    if content_type != oid::SIGNED_DATA {
+    let outer_type = read_oid(&mut ci)?;
+    if outer_type != oid::SIGNED_DATA {
         return Err(SignatureError::NotSignedData(ObjectId::from_der(
-            content_type,
+            outer_type,
         )));
     }
     let explicit = ci.read(tag::context_cons(0))?;
     ci.finish()?;
     let signed_data = asn1::single(explicit.content, explicit.content_offset, tag::SEQUENCE)?;
-    Ok((parse_signed_data(&signed_data)?, trailing))
+    let (envelope, decoded) = parse_signed_data(&signed_data, content_type, mismatch, content)?;
+    Ok((envelope, decoded, trailing))
 }
 
-fn parse_signed_data<'a>(sd: &Tlv<'a>) -> Result<SignedData<'a>> {
+fn parse_signed_data<'a, C>(
+    sd: &Tlv<'a>,
+    expected_type: &[u8],
+    mismatch: fn(ObjectId) -> SignatureError,
+    content: impl FnOnce(&Tlv<'a>, &mut Warnings) -> Result<C>,
+) -> Result<(Envelope<'a>, C)> {
     let mut warnings = Warnings::default();
     let mut r = sd.reader();
     // PKCS#7 v1.5 SignedData is version 1. Higher versions (CMS) are read
@@ -140,17 +191,15 @@ fn parse_signed_data<'a>(sd: &Tlv<'a>) -> Result<SignedData<'a>> {
     let encap = r.read(tag::SEQUENCE)?;
     let mut e = encap.reader();
     let content_type = read_oid(&mut e)?;
-    if content_type != oid::SPC_INDIRECT_DATA {
-        return Err(SignatureError::NotIndirectData(ObjectId::from_der(
-            content_type,
-        )));
+    if content_type != expected_type {
+        return Err(mismatch(ObjectId::from_der(content_type)));
     }
     let explicit = e
         .read_optional(tag::context_cons(0))?
         .ok_or(SignatureError::MissingContent)?;
     e.finish()?;
-    let indirect = asn1::single(explicit.content, explicit.content_offset, tag::SEQUENCE)?;
-    let indirect = parse_indirect_data(&indirect, &mut warnings)?;
+    let inner = asn1::single(explicit.content, explicit.content_offset, tag::SEQUENCE)?;
+    let decoded = content(&inner, &mut warnings)?;
 
     let mut certificates = Vec::new();
     if let Some(set) = r.read_optional(tag::context_cons(0))? {
@@ -197,18 +246,20 @@ fn parse_signed_data<'a>(sd: &Tlv<'a>) -> Result<SignedData<'a>> {
         }
     }
     let signer = match (count, first) {
-        (1, Some(info)) => parse_signer_info(&info, &mut warnings)?,
+        (1, Some(info)) => parse_signer_info(&info, expected_type, &mut warnings)?,
         _ => return Err(SignatureError::SignerCount(count)),
     };
 
     let signer_digest_listed = digest_set_lists(&digest_algorithms, &signer.digest_alg)?;
-    Ok(SignedData {
-        signer_digest_listed,
-        indirect,
-        certificates,
-        signer,
-        warnings,
-    })
+    Ok((
+        Envelope {
+            signer_digest_listed,
+            certificates,
+            signer,
+            warnings,
+        },
+        decoded,
+    ))
 }
 
 /// Checks every identifier in the `digestAlgorithms` set and returns
@@ -384,7 +435,11 @@ fn parse_page_hash_table(data: &[u8], base: usize) -> Result<Option<PageHashes>>
     }))
 }
 
-fn parse_signer_info<'a>(info: &Tlv<'a>, warnings: &mut Warnings) -> Result<Signer<'a>> {
+fn parse_signer_info<'a>(
+    info: &Tlv<'a>,
+    content_type: &[u8],
+    warnings: &mut Warnings,
+) -> Result<Signer<'a>> {
     let mut r = info.expect(tag::SEQUENCE)?.reader();
     let version = read_small_uint(&mut r)?;
     let sid = parse_sid(&mut r)?;
@@ -404,7 +459,7 @@ fn parse_signer_info<'a>(info: &Tlv<'a>, warnings: &mut Warnings) -> Result<Sign
     if let Some(first) = signed_attrs.first_mut() {
         *first = tag::SET;
     }
-    let auth = parse_authenticated_attributes(&attrs, warnings)?;
+    let auth = parse_authenticated_attributes(&attrs, content_type, warnings)?;
     let sig_alg = parse_signature_alg(&sig_alg_id, &digest_alg)?;
 
     let mut nested = Vec::new();
@@ -492,6 +547,7 @@ pub(crate) fn single_value<'a>(attr_type: &[u8], values: &Tlv<'a>) -> Result<Tlv
 
 fn parse_authenticated_attributes<'a>(
     attrs: &Tlv<'a>,
+    expected_type: &[u8],
     warnings: &mut Warnings,
 ) -> Result<Authenticated<'a>> {
     let mut r = attrs.reader();
@@ -547,7 +603,7 @@ fn parse_authenticated_attributes<'a>(
     }
     let content_type = content_type
         .ok_or_else(|| SignatureError::MissingAttribute(ObjectId::from_der(oid::CONTENT_TYPE)))?;
-    if content_type != oid::SPC_INDIRECT_DATA {
+    if content_type != expected_type {
         return Err(SignatureError::ContentTypeMismatch(ObjectId::from_der(
             content_type,
         )));

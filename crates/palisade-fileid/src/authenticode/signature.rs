@@ -211,7 +211,11 @@ pub enum SignatureCheck {
 #[non_exhaustive]
 pub enum SignatureStatus {
     /// The signature is cryptographically valid and its digest matches the
-    /// image.
+    /// image. For a [`SignatureKind::Catalog`] signature, which signs a
+    /// trust list rather than an image, it means only that the signature
+    /// over the catalog's CTL is cryptographically valid (`digest_match`
+    /// is `None`): a member file is catalog-signed only when a valid
+    /// catalog also lists its digest (see [`crate::catalog`]).
     Valid,
     /// The signature is cryptographically valid, but the image digest it
     /// signs does not match the file: the file was changed after signing.
@@ -252,6 +256,9 @@ pub enum SignatureKind {
     /// A SignedData in another signature's `szOID_NESTED_SIGNATURE`
     /// (1.3.6.1.4.1.311.2.4.1) unauthenticated attribute.
     Nested,
+    /// The signature of a catalog file (#51, [`crate::catalog`]): a
+    /// SignedData over a certificate trust list of member digests.
+    Catalog,
 }
 
 /// The `SpcStatementType` authenticated attribute.
@@ -430,7 +437,8 @@ pub enum SignatureWarning {
     WarningsTruncated,
 }
 
-/// One Authenticode signature: an embedded SignedData or a nested one.
+/// One Authenticode signature: an embedded SignedData, a nested one, or a
+/// catalog's ([`SignatureKind::Catalog`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignatureInfo {
     /// Position in [`SignatureReport::signatures`]: embedded signatures in
@@ -441,15 +449,20 @@ pub struct SignatureInfo {
     /// Where the signature was found.
     pub kind: SignatureKind,
     /// The `WIN_CERTIFICATE` entry it came from, an index into
-    /// [`SignatureReport::entries`].
+    /// [`SignatureReport::entries`]. 0 for a catalog signature, which has
+    /// no entry.
     pub entry: usize,
     /// For a nested signature, the index of the signature that carries it.
     pub parent: Option<usize>,
     /// 0 for an embedded signature, 1 and up for nested ones.
     pub depth: u8,
     /// The image digest algorithm (`SpcIndirectDataContent.messageDigest`).
+    /// For a [`SignatureKind::Catalog`] signature, the SignerInfo's digest
+    /// algorithm, the one that hashes the CTL (its `messageDigest`); not
+    /// any member's digest algorithm.
     pub digest_alg: Option<DigestAlgorithm>,
-    /// The image digest the signature signs.
+    /// The image digest the signature signs. `None` for a catalog
+    /// signature.
     pub signed_image_digest: Option<Vec<u8>>,
     /// The SignerInfo's digest algorithm, used for the `messageDigest`
     /// attribute and the signature.
@@ -461,7 +474,8 @@ pub struct SignatureInfo {
     /// The signer key's size in bits (the RSA modulus, or the curve size).
     pub key_bits: Option<u32>,
     /// Whether the signed image digest equals the file's Authenticode
-    /// digest under the same algorithm. `None` if it could not be computed.
+    /// digest under the same algorithm. `None` if it could not be computed,
+    /// and always `None` for a catalog signature, which signs no image.
     pub digest_match: Option<bool>,
     /// The cryptographic check.
     pub signature_valid: SignatureCheck,
@@ -520,6 +534,9 @@ pub enum SignatureError {
     NotSignedData(ObjectId),
     /// The signed content type is not `SPC_INDIRECT_DATA_OBJID`.
     NotIndirectData(ObjectId),
+    /// The signed content type of a catalog is not `szOID_CTL`
+    /// (1.3.6.1.4.1.311.10.1).
+    NotCatalog(ObjectId),
     /// The indirect data is not `SPC_PE_IMAGE_DATA_OBJID`, so it does not
     /// sign a PE image.
     NotPeImageData(ObjectId),
@@ -537,7 +554,8 @@ pub enum SignatureError {
     /// An authenticated attribute that must have exactly one value has
     /// another number of values.
     AttributeValueCount(ObjectId),
-    /// The `contentType` attribute does not name `SPC_INDIRECT_DATA_OBJID`.
+    /// The `contentType` attribute does not name the signed content type
+    /// (`SPC_INDIRECT_DATA_OBJID`, or `szOID_CTL` for a catalog).
     ContentTypeMismatch(ObjectId),
     /// The signature algorithm implies a digest other than the SignerInfo's
     /// digest algorithm.
@@ -557,6 +575,7 @@ impl fmt::Display for SignatureError {
             Self::NotIndirectData(o) => {
                 write!(f, "signed content type {o} is not SPC_INDIRECT_DATA")
             }
+            Self::NotCatalog(o) => write!(f, "signed content type {o} is not szOID_CTL"),
             Self::NotPeImageData(o) => write!(f, "indirect data type {o} is not SPC_PE_IMAGE_DATA"),
             Self::MissingContent => f.write_str("the SignedData has no content"),
             Self::SignerCount(n) => write!(f, "{n} SignerInfos; Authenticode requires exactly one"),
@@ -565,7 +584,10 @@ impl fmt::Display for SignatureError {
             Self::DuplicateAttribute(o) => write!(f, "authenticated attribute {o} appears twice"),
             Self::AttributeValueCount(o) => write!(f, "attribute {o} must have exactly one value"),
             Self::ContentTypeMismatch(o) => {
-                write!(f, "contentType attribute {o} is not SPC_INDIRECT_DATA")
+                write!(
+                    f,
+                    "contentType attribute {o} does not name the signed content"
+                )
             }
             Self::InconsistentDigestAlgorithms => {
                 f.write_str("the signature algorithm's digest differs from the signer's")
@@ -613,7 +635,8 @@ pub enum InvalidReason {
 
 /// The signing state of a file.
 ///
-/// Catalog signing (`CatalogValid`) comes with #51.
+/// Catalog signing (`CatalogValid`, from [`crate::catalog`] lookups) is
+/// still to come (#51).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SigningState {
