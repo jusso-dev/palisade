@@ -478,13 +478,13 @@ Summary by status:
 | `console` | 10 | 10 | 0 | 0 |
 | `db` | 8 | 8 | 0 | 0 |
 | `signer` | 6 | 6 | 0 | 0 |
-| `ca` | 7 | 7 | 0 | 0 |
+| `ca` | 8 | 8 | 0 | 0 |
 | `ingest` | 8 | 8 | 0 | 0 |
 | `integ` | 10 | 10 | 0 | 0 |
 | `script` | 8 | 8 | 0 | 0 |
 | `ci` | 11 | 7 | 4 | 0 |
 | `engine` | 13 | 10 | 3 | 0 |
-| **Total** | **173** | **166** | **7** | **0** |
+| **Total** | **174** | **167** | **7** | **0** |
 
 ### Kernel driver (`palisade-driver`, optional minifilter)
 
@@ -710,6 +710,7 @@ Device and relay certificates, and trust-set manifests (#224).
 | T-ca-05 | I | With TLS 1.2, client certificates (device and tenant IDs) are visible to a passive observer. | Passive network observer | L | M | #223 | planned | TLS 1.2 deployments expose device identifiers on the wire. |
 | T-ca-06 | D | The CA is unavailable, so certificates expire and devices cannot connect. | CA outage | M | L | #224, #223 | planned | Expired devices keep enforcing but stop reporting. |
 | T-ca-07 | E | A device certificate carries extra key usages and is used to pose as a relay or server. | A device certificate | M | L | #223 | planned | None. |
+| T-ca-08 | T | A crafted or fast-forwarded trust set is fed to the agent: malformed bytes aimed at the decoder, or a set signed with a stolen trust-set key whose `trust_version` is so high that no later set, not even a root-signed one, can be newer. | A network position, or a stolen trust-set key | H | L | #224, #220 | planned | Within one step a stolen trust-set key can still publish sets until the root signs a set without it. |
 
 ### Event ingest (agent events and inbound log sources)
 
@@ -1216,7 +1217,7 @@ One row per threat, in the same order as the STRIDE tables. `N/A` rows are omitt
 | T-signer-03 | Each signing is audited with kid and digest; agents report applied bundle kid and hash at check-in. | #224 | TEST-audit-chain (#229) |
 | T-signer-04 | PKCS#11 or KMS keys that cannot be exported; file keys are encrypted PKCS#8 with a passphrase from a secret source. | #224, #227 | RT-signer-02 |
 | T-signer-05 | Endpoints keep enforcing their current policy (ADR 0012); health checks and high-availability guidance. | #138 | TEST-ha (#138) |
-| T-signer-06 | Key separation by purpose; agents accept a trust set only from the pinned root or the endorsed trust-set key. | #224 | TEST-trustset (#224) |
+| T-signer-06 | Key separation by purpose; agents accept a trust set only from the pinned root or the endorsed trust-set key. The `palisade-proto` `pki` module implements the rule and the signer refuses cross-purpose signing; the agent does not use it yet (#220, #223). | #224 | TEST: `palisade-proto` `pki::tests::first_trust_set_must_be_signed_by_the_pinned_root`, `chained_endorsement_and_rotation_of_the_trust_set_key`, `signer_refuses_cross_purpose_signing`; TEST-trustset (#224, agent end to end) |
 | T-ca-01 | Agents pin server SPKI hashes from the trust set; EKU constraints separate client, relay and server certificates. | #224, #223 | TEST-transport-pin (#223) |
 | T-ca-02 | Each enrolled device or relay record is bound to its certificate's SPKI SHA-256 fingerprint, and the server checks the presented certificate's serial **and** public-key fingerprint against that record on every connection, so certificates minted with a reused serial and a new key are refused; compromise runbook and emergency rotation. | #224, #223 | RT-ca-01 |
 | T-ca-03 | Root key offline, used only in documented ceremonies with the `pal pki` commands. | #224 | RT-ca-02 |
@@ -1224,6 +1225,7 @@ One row per threat, in the same order as the STRIDE tables. `N/A` rows are omitt
 | T-ca-05 | TLS 1.3 is preferred and encrypts client certificates; the strict profile can require it. | #223 | TEST-tls-profile (#223) |
 | T-ca-06 | Renewal at two thirds of lifetime with alerts, re-enrolment grace period. | #224, #223 | TEST-renewal (#224) |
 | T-ca-07 | Device certificates carry clientAuth only; relays have their own profile. | #223 | TEST-eku (#223) |
+| T-ca-08 | One canonical binary encoding with bounded counts and lengths, checked before any signature; `trust_version` must be strictly greater than the current one and at most 1,000,000 greater; `issued_at` may not go backwards or be in the future beyond the skew tolerance. The agent does not use it yet (#220, #223). | #224, #220 | TEST: `palisade-proto` `pki::tests::rollback_and_replay_are_rejected`, `version_fast_forward_is_capped`, `mutated_envelopes_are_canonical_or_rejected`; fuzz: `trust_set_decode` |
 | T-ingest-01 | The device ID comes from the authenticated certificate, never from the payload. | #126, #223 | TEST-ingest-identity (#126) |
 | T-ingest-02 | TLS syslog with client allowlists; each source has a trust level that is shown with its events. | #207 | TEST-syslog-tls (#207) |
 | T-ingest-03 | Schema limits on field sizes and counts, safe Rust decoding, fuzz target for the ingest API. | #196, #230 | FUZZ-ingest |

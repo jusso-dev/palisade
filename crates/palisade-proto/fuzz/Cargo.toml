@@ -1,0 +1,28 @@
+# Coverage-guided fuzz targets for the palisade-proto decoders of untrusted
+# input (cargo-fuzz, libFuzzer). This is a separate workspace, so the main
+# build, tests and lint checks never compile it and nightly is needed only
+# here.
+#
+#   cargo +nightly fuzz run trust_set_decode    # from crates/palisade-proto
+[package]
+name = "palisade-proto-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0 OR MIT"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+palisade-proto = { path = ".." }
+
+[[bin]]
+name = "trust_set_decode"
+path = "fuzz_targets/trust_set_decode.rs"
+test = false
+doc = false
+bench = false
