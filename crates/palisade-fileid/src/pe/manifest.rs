@@ -32,7 +32,8 @@
 //! whitespace is dropped as it arrives, so padding cannot crowd a value
 //! out.
 //!
-//! The whole document must be well formed: one root element, every element
+//! Only XML 1.0 in UTF-8 is read (with at most one byte order mark); XML
+//! 1.1 and UTF-16 manifests are errors. The whole document must be well formed: one root element, every element
 //! closed, every element and attribute name a valid XML name, every
 //! attribute well formed, unique and free of undefined entities, even on
 //! elements whose settings are not read.
@@ -134,8 +135,7 @@ pub struct Manifest {
 pub enum ManifestError {
     /// Larger than [`MAX_MANIFEST_SIZE`].
     TooLarge(usize),
-    /// Not valid UTF-8 (after any UTF-8 byte order mark), or UTF-16, which
-    /// is not supported.
+    /// Not valid UTF-8, or UTF-16, which is not supported.
     NotUtf8,
     /// It has a `<!DOCTYPE>`, which manifests never need and which could
     /// define entities.
@@ -303,6 +303,11 @@ fn check_tag(raw: &[u8]) -> Result<(), ManifestError> {
 /// Checks an XML declaration's content (`xml version="1.0" ...`) against
 /// the grammar: `version`, then optionally `encoding`, then optionally
 /// `standalone`, in that order, each once, with valid values.
+///
+/// Only XML 1.0 is accepted. XML 1.1 reads some characters differently
+/// (NEL and LS are line ends, so `"\u{85}asInvoker"` would be `asInvoker`),
+/// and reading a manifest differently from the OS could make a file look
+/// less likely to elevate than it is, so an XML 1.1 manifest is an error.
 fn check_decl(raw: &[u8]) -> Result<(), ManifestError> {
     let decl = std::str::from_utf8(raw).map_err(|_| ManifestError::NotUtf8)?;
     let bad = || Err(ManifestError::Xml("malformed XML declaration".into()));
@@ -331,7 +336,12 @@ fn check_decl(raw: &[u8]) -> Result<(), ManifestError> {
         let close = body.find(quote).unwrap_or(body.len());
         let value = body.get(..close).unwrap_or_default();
         let ok = match name {
-            "version" => order.is_empty() && matches!(value, "1.0" | "1.1"),
+            "version" => {
+                if order.is_empty() && value == "1.1" {
+                    return Err(ManifestError::Xml("XML 1.1 is not supported".into()));
+                }
+                order.is_empty() && value == "1.0"
+            }
             "encoding" => {
                 order == ["version"]
                     && (value.eq_ignore_ascii_case("UTF-8") || value.eq_ignore_ascii_case("UTF8"))
@@ -517,7 +527,8 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
     if data.starts_with(&[0xff, 0xfe]) || data.starts_with(&[0xfe, 0xff]) {
         return Err(ManifestError::NotUtf8);
     }
-    let data = data.strip_prefix(b"\xef\xbb\xbf").unwrap_or(data);
+    // One UTF-8 byte order mark is skipped by the reader itself. A second
+    // one is then text outside the root element, and an error.
     let text = std::str::from_utf8(data).map_err(|_| ManifestError::NotUtf8)?;
     let mut reader = Reader::from_str(text);
     // Text is gathered as written (see `Text`), so whitespace next to a

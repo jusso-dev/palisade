@@ -81,6 +81,10 @@ fn check_bounds(data: &[u8], info: &PeInfo) {
         assert!(imports.function_count <= pe::MAX_IMPORTED_FUNCTIONS);
         let kept: usize = imports.all_module_names.iter().map(String::len).sum();
         assert!(kept <= pe::MAX_MODULE_NAME_BYTES);
+        // A cut module name is only a prefix, so the lists are incomplete.
+        if imports.modules.iter().any(|m| m.name_cut) {
+            assert!(imports.truncated);
+        }
         let listed: usize = imports.modules.iter().map(|m| m.functions.len()).sum();
         assert_eq!(listed, imports.function_count);
     }

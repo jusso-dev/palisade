@@ -232,8 +232,11 @@ fn an_unterminated_or_unmapped_import_table_is_reported() {
         WarningKind::DirectoryNotMapped(pe::DataDirectoryKind::Import)
     )));
 
-    // A descriptor table filling its section with no terminator.
-    let image = with_directory(PeBuilder::default(), DIR_IMPORT, |_| vec![0xff; 0x200]);
+    // A descriptor table filling its whole mapped section (so no zero fill
+    // follows it) with no terminator.
+    let image = with_directory(PeBuilder::default(), DIR_IMPORT, |_| {
+        vec![0xff; SECTION_ALIGNMENT as usize]
+    });
     let info = parse(&image);
     let imports = info.imports.unwrap();
     assert!(imports.truncated && imports.modules.is_empty());
@@ -1503,7 +1506,7 @@ fn start_tags_and_declarations_are_checked_in_full() {
     for good in [
         r#"<assembly  b = "1"	c='2' />"#,
         r#"<?xml version="1.0" standalone="no"?><assembly/>"#,
-        r#"<?xml version='1.1' encoding='utf-8' standalone='yes' ?><assembly/>"#,
+        r#"<?xml version='1.0' encoding='utf-8' standalone='yes' ?><assembly/>"#,
     ] {
         assert!(
             parse_manifest(good.as_bytes()).is_ok(),
@@ -1545,4 +1548,308 @@ fn oversized_export_tables_are_reported() {
             .iter()
             .any(|w| w.kind == WarningKind::ExportTableMalformed)
     );
+}
+
+// --- Review follow-up: loader parity at the edges. ---------------------------
+
+/// An image whose last section holds `body`, with data directory `index`
+/// at `dir_offset..dir_offset + dir_size` inside it. The section's
+/// `SizeOfRawData` is cut to `raw_len` and its `VirtualSize` is large, so
+/// everything past `raw_len` is zero fill in memory. The file bytes past
+/// `raw_len` are `0xff`, so a parser that reads them instead of the zero
+/// fill fails.
+fn zero_fill_image(
+    builder: PeBuilder,
+    index: usize,
+    body: impl FnOnce(u32) -> Vec<u8>,
+    dir: (u32, u32),
+    raw_len: u32,
+) -> Vec<u8> {
+    let section = builder.sections.len();
+    let rva = SECTION_ALIGNMENT * (section as u32 + 1);
+    let mut data = body(rva);
+    data.truncate(raw_len as usize);
+    data.resize(0x400, 0xff);
+    let mut b = builder.section(
+        ".idata",
+        data,
+        IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ,
+    );
+    b.sections.last_mut().unwrap().virtual_size = Some(0x2000);
+    let mut image = b.build();
+    let at = b.data_directory_offset(index);
+    put32(&mut image, at, rva + dir.0);
+    put32(&mut image, at + 4, dir.1);
+    let header = b.section_table_offset() + section * 40;
+    put32(&mut image, header + 16, raw_len);
+    image
+}
+
+/// One PE32+ import of `a.dll`, ordinal 7, laid out as thunks, name, then
+/// the descriptor table (descriptor 0, then the terminator).
+fn tail_import_table(rva: u32) -> Vec<u8> {
+    let mut out = vec![0_u8; 64];
+    put64(&mut out, 0, (1 << 63) | 7);
+    out[16..22].copy_from_slice(b"a.dll\0");
+    put32(&mut out, 24, rva);
+    put32(&mut out, 24 + 12, rva + 16);
+    put32(&mut out, 24 + 16, rva);
+    out
+}
+
+#[test]
+fn an_import_terminator_in_the_zero_fill_ends_the_table() {
+    // The raw data ends right after descriptor 0, so the terminator is in
+    // the zero-filled tail: in memory it is all zeros.
+    let image = zero_fill_image(
+        PeBuilder::default(),
+        DIR_IMPORT,
+        tail_import_table,
+        (24, 40),
+        44,
+    );
+    let info = parse(&image);
+    let i = info.imports.as_ref().unwrap();
+    assert_eq!(i.modules.len(), 1);
+    assert_eq!(i.modules[0].functions, [ImportedFunction::Ordinal(7)]);
+    assert!(!i.truncated);
+    assert!(info.parse_warnings.is_empty(), "{:?}", info.parse_warnings);
+
+    // The same bytes, but the file ends there while the header declares
+    // more raw data: a truncated file, not zero fill.
+    let image = with_directory(PeBuilder::default(), DIR_IMPORT, |rva| {
+        let mut out = tail_import_table(rva);
+        out.resize(0x200, 0xff);
+        out
+    });
+    let at = DIR_IMPORT;
+    let start = parse(&image).sections.last().unwrap().pointer_to_raw_data as usize;
+    let mut image = image[..start + 44].to_vec();
+    let dir = PeBuilder::default().data_directory_offset(at);
+    put32(&mut image, dir, SECTION_ALIGNMENT * 2 + 24);
+    put32(&mut image, dir + 4, 40);
+    let info = pe::parse(&image).unwrap();
+    assert!(info.imports.as_ref().unwrap().truncated);
+    assert!(
+        info.parse_warnings
+            .iter()
+            .any(|w| w.kind == WarningKind::ImportTableTruncated),
+        "{:?}",
+        info.parse_warnings
+    );
+}
+
+/// Descriptor 0, the terminator, `a.dll`, then one PE32+ ordinal thunk
+/// at offset 48, ending at offset 56.
+fn tail_thunk_table(rva: u32) -> Vec<u8> {
+    let mut out = vec![0_u8; 64];
+    put32(&mut out, 12, rva + 40);
+    put32(&mut out, 16, rva + 48);
+    out[40..46].copy_from_slice(b"a.dll\0");
+    put64(&mut out, 48, (1 << 63) | 7);
+    out
+}
+
+#[test]
+fn a_null_thunk_in_the_zero_fill_ends_the_list() {
+    let image = zero_fill_image(
+        PeBuilder::default(),
+        DIR_IMPORT,
+        tail_thunk_table,
+        (0, 40),
+        56,
+    );
+    let info = parse(&image);
+    let i = info.imports.as_ref().unwrap();
+    assert_eq!(i.modules[0].functions, [ImportedFunction::Ordinal(7)]);
+    assert!(!i.truncated);
+    assert!(info.parse_warnings.is_empty(), "{:?}", info.parse_warnings);
+
+    // A thunk straddling the end of the raw data reads its high half from
+    // the zero fill: here it is the null thunk itself.
+    let image = zero_fill_image(
+        PeBuilder::default(),
+        DIR_IMPORT,
+        |rva| {
+            let mut out = tail_thunk_table(rva);
+            put64(&mut out, 56, 0);
+            out
+        },
+        (0, 40),
+        60,
+    );
+    let info = parse(&image);
+    assert!(!info.imports.as_ref().unwrap().truncated);
+
+    // A file that ends there while declaring more raw data has no
+    // terminator.
+    let image = with_directory(PeBuilder::default(), DIR_IMPORT, |rva| {
+        let mut out = tail_thunk_table(rva);
+        out.resize(0x200, 0xff);
+        out
+    });
+    let start = parse(&image).sections.last().unwrap().pointer_to_raw_data as usize;
+    let info = pe::parse(&image[..start + 56]).unwrap();
+    assert!(info.imports.as_ref().unwrap().truncated);
+}
+
+#[test]
+fn a_cut_module_name_never_matches_exactly() {
+    // 512 `a` and `.dll`: the kept prefix is not the module's name.
+    let long = format!("{}.dll", "a".repeat(pe::MAX_NAME_LEN));
+    let exact = format!("{}.sys", "b".repeat(pe::MAX_NAME_LEN - 4));
+    let imports: Vec<Import<'_>> = vec![
+        (long.as_str(), vec![Err(1)]),
+        (exact.as_str(), vec![Err(1)]),
+    ];
+    let image = with_directory(PeBuilder::default(), DIR_IMPORT, |rva| {
+        import_section(rva, &imports, true)
+    });
+    let info = parse(&image);
+    let i = info.imports.as_ref().unwrap();
+    assert!(i.modules[0].name_cut);
+    assert_eq!(i.modules[0].name.len(), pe::MAX_NAME_LEN);
+    assert!(!i.imports_module(&"a".repeat(pe::MAX_NAME_LEN)));
+    assert!(!i.all_module_names.iter().any(|n| n.starts_with('a')));
+    assert!(i.truncated);
+    // A complete name of exactly 512 bytes still matches.
+    assert_eq!(exact.len(), pe::MAX_NAME_LEN);
+    assert!(!i.modules[1].name_cut);
+    assert!(i.imports_module(&exact.to_uppercase()));
+}
+
+#[test]
+fn an_export_table_at_rva_zero_is_not_read_from_the_headers() {
+    // AddressOfFunctions = 0, and a name pointing at slot 15: RVA 60 is
+    // `e_lfanew` in the DOS header, never an export.
+    let entries = vec![(b"DllRegisterServer".to_vec(), 15)];
+    let image = with_directory(PeBuilder::dll(), DIR_EXPORT, |rva| {
+        let mut body = raw_export_section(rva, &entries, &[0x1000; 16]);
+        put32(&mut body, 28, 0);
+        body
+    });
+    let info = parse(&image);
+    let e = info.exports.as_ref().unwrap();
+    assert!(e.exports.is_empty(), "{:?}", e.exports);
+    assert!(!e.notable.dll_register_server);
+    assert!(e.truncated);
+    assert!(
+        info.parse_warnings
+            .iter()
+            .any(|w| w.kind == WarningKind::ExportTableMalformed)
+    );
+}
+
+#[test]
+fn a_forwarder_must_end_inside_the_export_directory() {
+    let target = "OTHER.Target";
+    let body = |rva| export_section(rva, "x.dll", &["Fwd"], &[(0, target)]);
+    let full = body(SECTION_ALIGNMENT * 2);
+    let start = (full.len() - target.len() - 1) as u32;
+    for (size, malformed) in [
+        // Only the first byte of the string is inside the directory.
+        (start + 1, true),
+        // The NUL is the directory's last byte.
+        (start + target.len() as u32 + 1, false),
+    ] {
+        let image = zero_fill_image(
+            PeBuilder::dll(),
+            DIR_EXPORT,
+            body,
+            (0, size),
+            full.len() as u32,
+        );
+        let info = parse(&image);
+        let e = info.exports.as_ref().unwrap();
+        assert!(
+            matches!(&e.exports[0].target, ExportTarget::Forwarder(f) if f == target),
+            "{:?}",
+            e.exports
+        );
+        assert_eq!(e.truncated, malformed, "{size}");
+        assert_eq!(
+            info.parse_warnings
+                .iter()
+                .any(|w| w.kind == WarningKind::ExportTableMalformed),
+            malformed,
+            "{:?}",
+            info.parse_warnings
+        );
+    }
+}
+
+#[test]
+fn named_slots_past_the_listing_are_not_reported_as_unnamed() {
+    // 10,001 names, each for its own slot. Name 5 cannot be read, and name
+    // 10,000 is past the listing cap: neither slot is an unnamed export.
+    let n = pe::MAX_EXPORTS + 1;
+    let entries: Vec<(Vec<u8>, u16)> = (0..n)
+        .map(|i| (format!("N{i:05}").into_bytes(), i as u16))
+        .collect();
+    let functions = vec![0x1000_u32; n];
+    let image = with_directory(PeBuilder::dll(), DIR_EXPORT, |rva| {
+        let mut body = raw_export_section(rva, &entries, &functions);
+        let names_at = 40 + n * 4;
+        put32(&mut body, names_at + 5 * 4, 0x00f0_0000);
+        body
+    });
+    let e = parse(&image).exports.unwrap();
+    assert!(e.truncated);
+    assert_eq!(e.exports.len(), pe::MAX_EXPORTS - 1);
+    assert!(e.exports.iter().all(|x| x.name.is_some()), "unnamed listed");
+
+    // If the ordinal table is not all in the file, no slot is known to be
+    // unnamed, so none is listed as one.
+    let entries = vec![(b"A".to_vec(), 0)];
+    let image = with_directory(PeBuilder::dll(), DIR_EXPORT, |rva| {
+        let mut body = raw_export_section(rva, &entries, &[0x1000, 0x1010]);
+        put32(&mut body, 24, 0x10_0000); // NumberOfNames
+        body
+    });
+    let e = parse(&image).exports.unwrap();
+    assert!(
+        e.exports.iter().all(|x| x.name.is_some()),
+        "{:?}",
+        e.exports
+    );
+}
+
+#[test]
+fn a_bad_unnamed_slot_between_good_ones_hides_nothing() {
+    // The middle slot is a forwarder RVA inside the (large) directory, but
+    // past the section, so its string cannot be read.
+    let image = with_directory(PeBuilder::dll(), DIR_EXPORT, |rva| {
+        raw_export_section(rva, &[], &[0x1000, rva + 0x8_0000, 0x1020])
+    });
+    let mut image = image;
+    let dir = PeBuilder::dll().data_directory_offset(DIR_EXPORT);
+    put32(&mut image, dir + 4, 0x10_0000);
+    let info = parse(&image);
+    let e = info.exports.as_ref().unwrap();
+    let ordinals: Vec<u32> = e.exports.iter().map(|x| x.ordinal).collect();
+    assert_eq!(ordinals, [1, 3]);
+    assert!(
+        info.parse_warnings
+            .iter()
+            .any(|w| w.kind == WarningKind::ExportTableMalformed)
+    );
+}
+
+#[test]
+fn xml_1_1_and_a_second_byte_order_mark_are_rejected() {
+    // XML 1.1 reads NEL as a line end, so this would be `true` there; it is
+    // rejected rather than read by the XML 1.0 rules.
+    let xml = format!(
+        "<?xml version=\"1.1\"?>{}",
+        settings("<autoElevate>\u{85}true</autoElevate>")
+    );
+    assert!(parse_manifest(xml.as_bytes()).is_err());
+    assert!(parse_manifest(br#"<?xml version="1.1"?><assembly/>"#).is_err());
+
+    let mut one = b"\xef\xbb\xbf".to_vec();
+    one.extend_from_slice(b"<assembly/>");
+    assert!(parse_manifest(&one).is_ok());
+    let mut two = b"\xef\xbb\xbf\xef\xbb\xbf".to_vec();
+    two.extend_from_slice(b"<assembly/>");
+    assert!(parse_manifest(&two).is_err());
 }

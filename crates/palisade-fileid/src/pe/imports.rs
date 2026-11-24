@@ -62,6 +62,9 @@ pub enum ImportedFunction {
 pub struct ImportedModule {
     /// The module name as written (`KERNEL32.dll`).
     pub name: String,
+    /// The name was longer than [`MAX_NAME_LEN`], so [`Self::name`] is only
+    /// its start. A cut name never matches in [`ImportInfo::imports_module`].
+    pub name_cut: bool,
     /// The functions imported from it that were listed.
     pub functions: Vec<ImportedFunction>,
     /// How many functions were counted for it. Once the table-wide
@@ -75,9 +78,11 @@ pub struct ImportedModule {
 pub struct ImportInfo {
     /// The listed modules, in table order.
     pub modules: Vec<ImportedModule>,
-    /// Every module name in the table (within [`MAX_IMPORT_DESCRIPTORS`]
-    /// and [`MAX_MODULE_NAME_BYTES`]), ASCII-lowercased, in table order with
-    /// duplicates kept once. Past the byte cap [`Self::truncated`] is set.
+    /// Every complete module name in the table (within
+    /// [`MAX_IMPORT_DESCRIPTORS`] and [`MAX_MODULE_NAME_BYTES`]),
+    /// ASCII-lowercased, in table order with duplicates kept once. A name cut
+    /// at [`MAX_NAME_LEN`] is not kept. Past either limit [`Self::truncated`]
+    /// is set.
     pub all_module_names: Vec<String>,
     /// The [`super::KERNEL_MODULES`] imported anywhere in the table (within
     /// [`MAX_IMPORT_DESCRIPTORS`]), lowercase, in that list's order. This is
@@ -93,10 +98,13 @@ pub struct ImportInfo {
 
 impl ImportInfo {
     /// Whether an import descriptor names `module` (ASCII case-insensitive,
-    /// as the loader compares module names). A kernel module is found
-    /// anywhere in the table; any other module among the listed modules and
-    /// the names kept in [`Self::all_module_names`] (check
-    /// [`Self::truncated`]).
+    /// as the loader compares module names), matching whole names only.
+    /// A kernel module is found anywhere in the table. Any other module is
+    /// found among the listed modules and the names kept in
+    /// [`Self::all_module_names`], so `false` for one is reliable only when
+    /// [`Self::truncated`] is not set: past [`MAX_IMPORT_DESCRIPTORS`], the
+    /// [`MAX_MODULE_NAME_BYTES`] budget, or for a name cut at
+    /// [`MAX_NAME_LEN`], a module can be imported and still not be found.
     #[must_use]
     pub fn imports_module(&self, module: &str) -> bool {
         let wanted = module.to_ascii_lowercase();
@@ -105,7 +113,7 @@ impl ImportInfo {
             || self
                 .modules
                 .iter()
-                .any(|m| m.name.eq_ignore_ascii_case(&wanted))
+                .any(|m| !m.name_cut && m.name.eq_ignore_ascii_case(&wanted))
     }
 }
 
@@ -250,6 +258,29 @@ impl Once {
     }
 }
 
+/// `N` bytes of mapped memory at `rva`, as the loader lays it out:
+/// file-backed bytes, and zeros where they are in a section's zero-filled
+/// tail. `None` if any byte is unmapped, or past the end of a truncated
+/// input inside the declared raw data (which is never taken for zero fill).
+fn mapped<const N: usize>(data: &[u8], layout: Layout<'_>, rva: u32) -> Option<[u8; N]> {
+    let mut out = [0_u8; N];
+    let mut done = 0;
+    while done < N {
+        let at = rva.checked_add(u32::try_from(done).ok()?)?;
+        if let Some((offset, available)) = layout.backed_extent(at) {
+            let n = to_usize(available)?.min(N - done);
+            out.get_mut(done..done + n)?
+                .copy_from_slice(bytes(data, offset, n)?);
+            done += n;
+        } else if layout.zero_filled(at) {
+            done += 1;
+        } else {
+            return None;
+        }
+    }
+    Some(out)
+}
+
 /// `len` file-backed bytes at `rva`.
 fn at_rva<'a>(data: &'a [u8], layout: Layout<'_>, rva: u32, len: usize) -> Option<&'a [u8]> {
     if rva == 0 {
@@ -284,16 +315,32 @@ pub(super) fn parse_imports(
     let mut kernel = [false; super::KERNEL_MODULES.len()];
     let thunk_size = if format == PeFormat::Pe32Plus { 8 } else { 4 };
     let available = to_usize(available).unwrap_or(0);
+    let backed = available / DESCRIPTOR_SIZE;
     let mut terminated = false;
     for i in 0..MAX_IMPORT_DESCRIPTORS {
-        let at = i.saturating_mul(DESCRIPTOR_SIZE);
-        if at.saturating_add(DESCRIPTOR_SIZE) > available {
+        // Two descriptors past the file-backed ones, as for thunks: one may
+        // straddle the end of the raw data, and the next is then wholly in
+        // the zero fill (a terminator) if there is one.
+        if i >= backed.saturating_add(2) {
             break;
         }
-        let Some(d) = bytes(data, start.saturating_add(at), DESCRIPTOR_SIZE) else {
+        let at = i.saturating_mul(DESCRIPTOR_SIZE);
+        // Past the file-backed bytes, the table goes on in mapped memory:
+        // a section's zero-filled tail reads as zeros, so a terminator
+        // there ends the table, as in memory. A truncated input does not.
+        let d = if at.saturating_add(DESCRIPTOR_SIZE) <= available {
+            bytes(data, start.saturating_add(at), DESCRIPTOR_SIZE)
+                .and_then(|d| <[u8; DESCRIPTOR_SIZE]>::try_from(d).ok())
+        } else {
+            u32::try_from(at)
+                .ok()
+                .and_then(|at| dir.virtual_address.checked_add(at))
+                .and_then(|rva| mapped::<DESCRIPTOR_SIZE>(data, layout, rva))
+        };
+        let Some(d) = d else {
             break;
         };
-        let field = |o| u32_at(d, o).unwrap_or(0);
+        let field = |o| u32_at(&d, o).unwrap_or(0);
         // The loader stops at a descriptor with no name or no import
         // address table.
         if field(12) == 0 || field(16) == 0 {
@@ -313,7 +360,8 @@ pub(super) fn parse_imports(
         for (found, module) in kernel.iter_mut().zip(super::KERNEL_MODULES) {
             *found |= !name.cut && lower == module;
         }
-        if !seen.contains(&lower) {
+        // A cut name is only a prefix: kept for display, never matched.
+        if !name.cut && !seen.contains(&lower) {
             if name_bytes.saturating_add(lower.len()) > MAX_MODULE_NAME_BYTES {
                 info.truncated = true;
             } else {
@@ -332,6 +380,7 @@ pub(super) fn parse_imports(
         };
         let mut module = ImportedModule {
             name: name.text,
+            name_cut: name.cut,
             functions: Vec::new(),
             function_count: 0,
         };
@@ -362,18 +411,44 @@ fn read_thunks(
     module: &mut ImportedModule,
     info: &mut ImportInfo,
 ) -> bool {
-    let Some((start, available)) = (rva != 0).then(|| layout.backed_extent(rva)).flatten() else {
+    if rva == 0 {
         info.truncated = true;
         return false;
-    };
-    let count = to_usize(available).unwrap_or(0) / thunk_size;
-    for i in 0..count {
-        let at = start.saturating_add(i.saturating_mul(thunk_size));
+    }
+    let (start, available) = layout
+        .backed_extent(rva)
+        .map_or((0, 0), |(s, n)| (s, to_usize(n).unwrap_or(0)));
+    let backed = available / thunk_size;
+    // Two slots past the file-backed ones are read from mapped memory: one
+    // may straddle the end of the section's raw data, and the next is then
+    // wholly in its zero-filled tail, which reads as a null thunk, as in
+    // memory. A truncated input does not.
+    for i in 0..backed.saturating_add(2) {
+        let raw = if i < backed {
+            let at = start.saturating_add(i.saturating_mul(thunk_size));
+            if thunk_size == 8 {
+                u64_at(data, at)
+            } else {
+                u32_at(data, at).map(u64::from)
+            }
+        } else {
+            let at = u32::try_from(i.saturating_mul(thunk_size))
+                .ok()
+                .and_then(|at| rva.checked_add(at));
+            if thunk_size == 8 {
+                at.and_then(|at| mapped::<8>(data, layout, at))
+                    .map(u64::from_le_bytes)
+            } else {
+                at.and_then(|at| mapped::<4>(data, layout, at))
+                    .map(|b| u64::from(u32::from_le_bytes(b)))
+            }
+        };
+        let Some(v) = raw else {
+            break;
+        };
         let (value, by_ordinal) = if thunk_size == 8 {
-            let v = u64_at(data, at).unwrap_or(0);
             (v & 0x7fff_ffff_ffff_ffff, v >> 63 == 1)
         } else {
-            let v = u64::from(u32_at(data, at).unwrap_or(0));
             (v & 0x7fff_ffff, v >> 31 == 1)
         };
         if value == 0 && !by_ordinal {
@@ -471,8 +546,10 @@ pub(super) fn parse_exports(
 
     // Like the loader, an index past `NumberOfFunctions`, or a slot holding
     // RVA 0, is not an export.
+    // A table at RVA 0 is absent: adding an index to it would read the
+    // headers as the table.
     let slot_at = |index: u32| -> Slot {
-        if index >= number_of_functions {
+        if index >= number_of_functions || functions == 0 {
             return Slot::Bad;
         }
         let Some(rva) = index
@@ -486,21 +563,43 @@ pub(super) fn parse_exports(
         if rva == 0 {
             Slot::Unused
         } else if (dir_start..dir_end).contains(&u64::from(rva)) {
-            match name_at(data, layout, rva) {
-                Some(name) => Slot::Export(ExportTarget::Forwarder(name.text), name.cut),
+            // The loader takes any RVA inside the directory as a forwarder
+            // and reads its string wherever it ends, so one whose string
+            // runs past the directory is still a forwarder, but the table
+            // is malformed.
+            let inside = dir_end.saturating_sub(u64::from(rva));
+            match c_string(data, layout, rva, MAX_NAME_LEN) {
+                Some((raw, terminated)) => {
+                    // The string and its NUL, which comes after at least
+                    // the bytes kept (and one more if it was cut).
+                    let needed = u64::try_from(raw.len())
+                        .unwrap_or(u64::MAX)
+                        .saturating_add(if terminated { 1 } else { 2 });
+                    let flaw = if needed > inside {
+                        Flaw::PastDirectory
+                    } else if terminated {
+                        Flaw::None
+                    } else {
+                        Flaw::Cut
+                    };
+                    let text = String::from_utf8_lossy(raw).into_owned();
+                    Slot::Export(ExportTarget::Forwarder(text), flaw)
+                }
                 None => Slot::Bad,
             }
         } else {
-            Slot::Export(ExportTarget::Rva(rva), false)
+            Slot::Export(ExportTarget::Rva(rva), Flaw::None)
         }
     };
     let name_rva_at = |i: u32| -> Option<u32> {
+        let names = (names != 0).then_some(names)?;
         u32_at(
             at_rva(data, layout, names.checked_add(i.checked_mul(4)?)?, 4)?,
             0,
         )
     };
     let ordinal_at = |i: u32| -> Option<u16> {
+        let ordinals = (ordinals != 0).then_some(ordinals)?;
         u16_at(
             at_rva(data, layout, ordinals.checked_add(i.checked_mul(2)?)?, 2)?,
             0,
@@ -535,7 +634,28 @@ pub(super) fn parse_exports(
         bad.report(warnings);
         info.truncated = true;
     }
+    // Which slots some name points to, from the whole ordinal table, not
+    // only the listed names: a slot named past the listing cap, or by a
+    // name that cannot be read, is not an unnamed export. If the file does
+    // not hold the whole ordinal table, which slots are unnamed is unknown,
+    // so none are listed as unnamed.
     let mut named = vec![false; to_usize(slots).unwrap_or(0)];
+    let ordinal_table = (ordinals != 0)
+        .then(|| layout.backed_extent(ordinals))
+        .flatten();
+    let known_names = ordinal_table
+        .map_or(0, |(_, n)| n / 2)
+        .min(info.number_of_names);
+    if let Some((offset, _)) = ordinal_table {
+        for i in 0..known_names {
+            let index = to_usize(i)
+                .and_then(|i| offset.checked_add(i.checked_mul(2)?))
+                .and_then(|at| u16_at(data, at));
+            if let Some(slot) = index.and_then(|index| named.get_mut(usize::from(index))) {
+                *slot = true;
+            }
+        }
+    }
     let listed_names = info
         .number_of_names
         .min(u32::try_from(MAX_EXPORTS).unwrap_or(u32::MAX));
@@ -553,17 +673,12 @@ pub(super) fn parse_exports(
         if name.cut {
             info.truncated = true;
         }
-        let Slot::Export(target, cut) = slot_at(u32::from(index)) else {
+        let Slot::Export(target, flaw) = slot_at(u32::from(index)) else {
             bad.report(warnings);
             info.truncated = true;
             continue;
         };
-        if cut {
-            info.truncated = true;
-        }
-        if let Some(slot) = named.get_mut(usize::from(index)) {
-            *slot = true;
-        }
+        flaw.record(&mut info.truncated, &mut bad, warnings);
         info.exports.push(Export {
             name: Some(name.text),
             ordinal: base.wrapping_add(u32::from(index)),
@@ -577,7 +692,12 @@ pub(super) fn parse_exports(
         info.truncated = true;
     }
     // Unnamed exports, by ordinal.
-    for index in 0..slots {
+    let unnamed_slots = if known_names == info.number_of_names {
+        slots
+    } else {
+        0
+    };
+    for index in 0..unnamed_slots {
         if to_usize(index)
             .and_then(|i| named.get(i))
             .copied()
@@ -587,16 +707,14 @@ pub(super) fn parse_exports(
         }
         match slot_at(index) {
             Slot::Unused => {}
-            Slot::Export(target, cut) => {
+            Slot::Export(target, flaw) => {
                 // Checked only when there is one to add, so exactly the cap
                 // is not "over".
                 if info.exports.len() >= MAX_EXPORTS {
                     info.truncated = true;
                     break;
                 }
-                if cut {
-                    info.truncated = true;
-                }
+                flaw.record(&mut info.truncated, &mut bad, warnings);
                 info.exports.push(Export {
                     name: None,
                     ordinal: base.wrapping_add(index),
@@ -662,8 +780,33 @@ pub(super) fn parse_exports(
 enum Slot {
     /// RVA 0: no export at this ordinal.
     Unused,
-    /// An export, and whether its forwarder string was cut.
-    Export(ExportTarget, bool),
-    /// Past the table, unreadable, or a forwarder that cannot be read.
+    /// An export, and what is wrong with its forwarder string, if anything.
+    Export(ExportTarget, Flaw),
+    /// Past the table (or a table at RVA 0), unreadable, or a forwarder
+    /// that cannot be read.
     Bad,
+}
+
+/// What is wrong with an export's forwarder string.
+#[derive(Clone, Copy)]
+enum Flaw {
+    None,
+    /// Longer than [`MAX_NAME_LEN`]; the text kept is its start.
+    Cut,
+    /// It ends past the export directory, where the format says it must
+    /// not.
+    PastDirectory,
+}
+
+impl Flaw {
+    fn record(self, truncated: &mut bool, bad: &mut Once, warnings: &mut Warnings) {
+        match self {
+            Self::None => {}
+            Self::Cut => *truncated = true,
+            Self::PastDirectory => {
+                *truncated = true;
+                bad.report(warnings);
+            }
+        }
+    }
 }

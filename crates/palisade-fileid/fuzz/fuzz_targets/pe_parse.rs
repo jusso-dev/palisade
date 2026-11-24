@@ -55,6 +55,10 @@ fuzz_target!(|data: &[u8]| {
             assert!(imports.all_module_names.len() <= pe::MAX_IMPORT_DESCRIPTORS);
             let kept: usize = imports.all_module_names.iter().map(String::len).sum();
             assert!(kept <= pe::MAX_MODULE_NAME_BYTES);
+            // A cut module name is only a prefix, so the lists are incomplete.
+            if imports.modules.iter().any(|m| m.name_cut) {
+                assert!(imports.truncated);
+            }
             assert!(imports.kernel_modules.len() <= pe::KERNEL_MODULES.len());
             for m in &imports.modules {
                 assert!(m.name.len() <= pe::MAX_NAME_LEN * 3);
