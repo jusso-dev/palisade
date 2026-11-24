@@ -118,8 +118,8 @@ events, arrive with the code that produces that output (#25).
 Every parser of untrusted input has a coverage-guided fuzz target. The targets live in a
 separate cargo-fuzz workspace per crate (`crates/<crate>/fuzz/`), so normal builds never compile
 them, and only they need a nightly toolchain. Today that is `crates/palisade-fileid/fuzz`, with
-five targets: `pe_parse`, `version_info_parse`, `authenticode_ranges`, `authenticode_pkcs7` and
-`fsctx_parse`. Each fuzz workspace has its own committed `Cargo.lock`. Dependabot keeps it up to
+six targets: `pe_parse`, `version_info_parse`, `authenticode_ranges`, `authenticode_pkcs7`,
+`fsctx_parse` and `x509_chain`. Each fuzz workspace has its own committed `Cargo.lock`. Dependabot keeps it up to
 date, cargo-deny checks it against the root `deny.toml` on every PR and daily, and
 `cargo xtask audit` runs cargo-audit over it. cargo-vet covers only the root workspace, so a
 fuzz-only dependency is reviewed in its PR instead

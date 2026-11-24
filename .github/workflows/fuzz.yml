@@ -24,7 +24,7 @@ jobs:
       matrix:
         # Every target in xtask/src/fuzz.rs; a unit test there keeps this
         # list complete.
-        target: [pe_parse, version_info_parse, authenticode_ranges, authenticode_pkcs7, fsctx_parse]
+        target: [pe_parse, version_info_parse, authenticode_ranges, authenticode_pkcs7, fsctx_parse, x509_chain]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

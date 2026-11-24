@@ -2151,3 +2151,36 @@ fn decode_base64(text: &str) -> Vec<u8> {
     }
     out
 }
+
+/// Writes seed inputs for the `x509_chain` fuzz target: each committed
+/// certificate on its own, and the leaf, intermediate and root joined with the
+/// target's certificate marker, so the fuzzer starts from a real chain.
+///
+/// ```sh
+/// PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/x509_chain" \
+///     cargo test -p palisade-fileid --test chain -- --ignored write_x509_chain_fuzz_seeds
+/// ```
+#[test]
+#[ignore = "writes files; run on demand to seed the fuzz corpus"]
+fn write_x509_chain_fuzz_seeds() {
+    /// Must match `MARKER` in `fuzz/fuzz_targets/x509_chain.rs`.
+    const MARKER: &[u8] = b"\xff\xfeCERT";
+    let dir = std::env::var_os("PALISADE_FUZZ_SEED_DIR").expect("set PALISADE_FUZZ_SEED_DIR");
+    let dir = std::path::Path::new(&dir);
+    std::fs::create_dir_all(dir).unwrap();
+    for entry in std::fs::read_dir(FIXTURES).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|e| e == "der") {
+            let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+            std::fs::copy(&path, dir.join(format!("seed-{name}"))).unwrap();
+        }
+    }
+    let mut chain = Vec::new();
+    for (i, name) in ["leaf", "inter", "root"].iter().enumerate() {
+        if i > 0 {
+            chain.extend_from_slice(MARKER);
+        }
+        chain.extend(std::fs::read(format!("{FIXTURES}/{name}.der")).unwrap());
+    }
+    std::fs::write(dir.join("seed-leaf-inter-root"), chain).unwrap();
+}

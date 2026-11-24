@@ -80,6 +80,10 @@ const FSCTX_SEEDS: Seed = Seed {
     test: "fsctx",
     name: "write_fsctx_fuzz_seeds",
 };
+const X509_SEEDS: Seed = Seed {
+    test: "chain",
+    name: "write_x509_chain_fuzz_seeds",
+};
 
 /// Every fuzz project in the repository.
 pub const PROJECTS: &[Project] = &[Project {
@@ -110,6 +114,11 @@ pub const PROJECTS: &[Project] = &[Project {
             name: "fsctx_parse",
             dict: None,
             seeds: &[FSCTX_SEEDS],
+        },
+        Target {
+            name: "x509_chain",
+            dict: Some("pkcs7.dict"),
+            seeds: &[X509_SEEDS],
         },
     ],
 }];
