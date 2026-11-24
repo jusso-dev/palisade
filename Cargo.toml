@@ -38,7 +38,11 @@ palisade-fileid = { path = "crates/palisade-fileid" }
 palisade-policy = { path = "crates/palisade-policy" }
 #
 # Third-party crates. Justify every new entry in the PR description.
+axum = { version = "0.8.9", default-features = false }
 boon = { version = "0.6.1" }
+clap = { version = "4.6.9", default-features = false, features = ["std", "derive", "env", "error-context", "help", "usage"] }
+hyper-util = { version = "0.1.21", default-features = false, features = ["http1", "http2", "server-auto", "server-graceful", "service", "tokio"] }
+if-addrs = { version = "0.15.0", default-features = false }
 libc = { version = "0.2.191", default-features = false }
 md-5 = { version = "0.11.0", default-features = false }
 proc-macro2 = { version = "1.0.107", default-features = false }
@@ -46,18 +50,24 @@ proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 regex-automata = { version = "0.4.19", default-features = false, features = ["std", "syntax", "perf", "unicode", "meta", "nfa-pikevm", "hybrid"] }
 regex-syntax = { version = "0.8.12", default-features = false, features = ["std", "unicode"] }
 ring = { version = "0.17.14", default-features = false, features = ["alloc"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 schemars = { version = "1.2.3", default-features = false, features = ["derive"] }
 serde = { version = "1.0.229", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1.0.154", default-features = false, features = ["std"] }
 sha1 = { version = "0.11.0", default-features = false }
 sha2 = { version = "0.11.0", default-features = false }
+socket2 = { version = "0.6.5", default-features = false }
 tokio = { version = "1.54.1", default-features = false }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
 toml = { version = "1.2.2", default-features = false, features = ["std", "parse", "serde"] }
+tower = { version = "0.5.3", default-features = false }
+tower-http = { version = "0.6.11", default-features = false }
 tracing = { version = "0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "std"] }
 unicode-normalization = { version = "0.1.26", default-features = false, features = ["std"] }
 windows-service = { version = "0.8.1" }
 yaml-rust2 = { version = "0.13.2", default-features = false }
+zeroize = { version = "1.8.2", default-features = false, features = ["alloc"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
