@@ -8,9 +8,9 @@
 //! `test-util` feature is never on by default and never enabled through a
 //! normal or build dependency, so no ordinary build turns it on. It does not
 //! see build commands: `--features test-util` or `--all-features` still can.
-//! And it checks every crate README ([`check_readme`]): it opens with a
-//! purpose paragraph, the required sections are present, and every feature
-//! the crate has is documented. HTML comments in a README do not count.
+//! And it checks every crate README ([`check_readme`]): it has no HTML
+//! comments, it opens with a purpose paragraph, the required sections are
+//! present, and every feature the crate has is documented.
 
 use toml::{Table, Value};
 
@@ -271,35 +271,45 @@ fn implicit_features(manifest: &Table) -> Vec<String> {
     names
 }
 
-/// Checks a crate README: it states the crate's purpose in a paragraph
-/// before its first `## ` section, every section in [`README_SECTIONS`] is
-/// present, and every feature in `features` is named in backticks in the
-/// `## Feature flags` section.
+/// Checks a crate README: it has no HTML comment, it states the crate's
+/// purpose in a paragraph before its first `## ` section, every section in
+/// [`README_SECTIONS`] is present, and every feature in `features` is named
+/// in backticks in the `## Feature flags` section.
 ///
-/// HTML comments are not shown on the rendered page, so they do not count
-/// ([`without_comment_blocks`], [`without_inline_comments`]):
-///
-/// - Sections and the `## ` lines that end the intro and the feature section
-///   are read after comment blocks are blanked. Blanking only empties whole
-///   lines, so it can hide a heading but never make one up.
-/// - The purpose paragraph and feature names must also be visible outside
-///   inline comments on their own line.
+/// The rendered page hides a comment, so a section, paragraph or feature
+/// name inside one must not count. Where a comment starts and ends depends on
+/// the whole Markdown block structure (a `<!--` in a code span or fence is
+/// text, one in a list item or quote can span lines), which these line-based
+/// checks do not model. So any `<!--` is rejected, and the other checks
+/// read the text as written. A README that must show the characters can
+/// write them as `&lt;!--`.
 pub fn check_readme(path: &str, readme: &str, features: &[String]) -> Vec<String> {
-    let blanked = without_comment_blocks(readme);
     let mut v = Vec::new();
-    if !has_purpose_paragraph(&blanked) {
+    if let Some(line) = readme.lines().position(|l| l.contains("<!--")) {
+        v.push(format!(
+            "{path}:{}: HTML comments are not allowed in a crate README; check-manifests cannot tell what they hide",
+            line + 1
+        ));
+    }
+    if !has_purpose_paragraph(readme) {
         v.push(format!(
             "{path}: missing the purpose paragraph before the first `## ` section"
         ));
     }
     for section in README_SECTIONS {
-        if !blanked.iter().any(|l| l.trim_end() == *section) {
+        if !readme.lines().any(|l| l.trim_end() == *section) {
             v.push(format!("{path}: missing section `{section}`"));
         }
     }
-    let visible = without_inline_comments(&feature_section(&blanked));
+    let feature_section: String = readme
+        .lines()
+        .skip_while(|l| l.trim_end() != "## Feature flags")
+        .skip(1)
+        .take_while(|l| !l.starts_with("## "))
+        .collect::<Vec<_>>()
+        .join("\n");
     for feature in features {
-        if !visible.contains(&format!("`{feature}`")) {
+        if !feature_section.contains(&format!("`{feature}`")) {
             v.push(format!(
                 "{path}: feature `{feature}` is not documented under `## Feature flags`"
             ));
@@ -308,115 +318,22 @@ pub fn check_readme(path: &str, readme: &str, features: &[String]) -> Vec<String
     v
 }
 
-/// The lines after `## Feature flags`, up to the next `## ` line.
-fn feature_section(lines: &[&str]) -> String {
-    lines
-        .iter()
-        .copied()
-        .skip_while(|l| l.trim_end() != "## Feature flags")
-        .skip(1)
-        .take_while(|l| !l.starts_with("## "))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// The lines of `readme`, with every line of an HTML comment block replaced
-/// by an empty line. This follows CommonMark's HTML block of type 2: a line
-/// that starts with `<!--` after at most three spaces opens it, and it runs
-/// through the first line, the opening one included, that contains `-->`
-/// (so `<!-->` and `<!--->` close on their own line), or to the end of the
-/// file. The rest of that last line belongs to the block, so it is not a
-/// heading either. Inside a fenced code block, `<!--` is code.
-///
-/// A `<!--` anywhere else (in a paragraph, a code span or an indented code
-/// block) does not open a block. A heading on a later line is a real heading
-/// then, so it is kept.
-fn without_comment_blocks(readme: &str) -> Vec<&str> {
-    let mut out = Vec::new();
-    let mut fence: Option<(char, usize)> = None;
-    let mut in_comment = false;
-    for line in readme.lines() {
-        if in_comment {
-            in_comment = !line.contains("-->");
-            out.push("");
-        } else if let Some((ch, len)) = fence {
-            if closes_fence(line, ch, len) {
-                fence = None;
-            }
-            out.push(line);
-        } else if let Some(open) = opens_fence(line) {
-            fence = Some(open);
-            out.push(line);
-        } else if block_start(line).is_some_and(|rest| rest.starts_with("<!--")) {
-            in_comment = !line.contains("-->");
-            out.push("");
-        } else {
-            out.push(line);
-        }
-    }
-    out
-}
-
-/// The line without up to three leading spaces, or `None` if it is indented
-/// further (four spaces, or a tab, make it an indented code block line).
-fn block_start(line: &str) -> Option<&str> {
-    let rest = line.trim_start_matches(' ');
-    let indent = line.len() - rest.len();
-    (indent <= 3 && !rest.starts_with('\t')).then_some(rest)
-}
-
-/// A CommonMark fence opening: at least three backticks or tildes, and for
-/// backticks no backtick after them on the line.
-fn opens_fence(line: &str) -> Option<(char, usize)> {
-    let rest = block_start(line)?;
-    let ch = rest.chars().next().filter(|c| matches!(c, '`' | '~'))?;
-    let len = rest.len() - rest.trim_start_matches(ch).len();
-    (len >= 3 && !(ch == '`' && rest[len..].contains('`'))).then_some((ch, len))
-}
-
-/// A closing fence for an opening of `len` times `ch`: at least as many of
-/// the same character, then only spaces or tabs.
-fn closes_fence(line: &str, ch: char, len: usize) -> bool {
-    block_start(line).is_some_and(|rest| {
-        let after = rest.trim_start_matches(ch);
-        rest.len() - after.len() >= len && after.trim_matches([' ', '\t']).is_empty()
-    })
-}
-
-/// `text` with each `<!-- ... -->` that starts and ends on one line, or runs
-/// from `<!--` to the end of its line, replaced by a space, so the text on
-/// either side does not join. Only used to look for content (a feature name,
-/// the purpose paragraph), never for headings, so removing a `<!--` that was
-/// really inside a code span only makes the check stricter.
-fn without_inline_comments(text: &str) -> String {
-    text.lines()
-        .map(|line| {
-            let mut out = String::with_capacity(line.len());
-            let mut rest = line;
-            while let Some(start) = rest.find("<!--") {
-                out.push_str(&rest[..start]);
-                out.push(' ');
-                // From `start + 2`, so that `<!-->` and `<!--->` are closed.
-                rest = rest[start + 2..]
-                    .find("-->")
-                    .map_or("", |end| &rest[start + 2 + end + 3..]);
-            }
-            out.push_str(rest);
-            out
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// Some visible text, other than headings, before the first `## ` line.
-/// `lines` already has comment blocks blanked.
-fn has_purpose_paragraph(lines: &[&str]) -> bool {
-    let intro: Vec<&str> = lines
-        .iter()
-        .copied()
+/// Some text, other than headings and HTML comments, before the first `## `
+/// line. ([`check_readme`] rejects any comment anyway; ignoring them here
+/// keeps this message about the paragraph.)
+fn has_purpose_paragraph(readme: &str) -> bool {
+    let intro: Vec<&str> = readme
+        .lines()
         .take_while(|l| !l.starts_with("## "))
         .collect();
-    without_inline_comments(&intro.join("\n"))
+    let mut intro = intro.join("\n");
+    while let Some(start) = intro.find("<!--") {
+        let end = intro[start..]
+            .find("-->")
+            .map_or(intro.len(), |e| start + e + 3);
+        intro.replace_range(start..end, "");
+    }
+    intro
         .lines()
         .any(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#'))
 }
@@ -660,10 +577,19 @@ toml = { workspace = true }
     #[test]
     fn readme_without_a_purpose_paragraph_fails() {
         // A crate with no features still needs its purpose stated.
-        let only_headings = README.replace("Purpose.\n\n", "<!-- TODO -->\n### Overview\n\n");
+        let only_headings = README.replace("Purpose.\n\n", "### Overview\n\n");
         assert_eq!(
             check_readme("x/README.md", &only_headings, &[]),
             ["x/README.md: missing the purpose paragraph before the first `## ` section"]
+        );
+        // A comment is not a purpose paragraph (and is reported itself).
+        let only_comment = README.replace("Purpose.\n\n", "<!-- TODO -->\n### Overview\n\n");
+        assert_eq!(
+            check_readme("x/README.md", &only_comment, &[]),
+            [
+                "x/README.md:3: HTML comments are not allowed in a crate README; check-manifests cannot tell what they hide",
+                "x/README.md: missing the purpose paragraph before the first `## ` section",
+            ]
         );
         assert_eq!(
             check_readme("x/README.md", README, &[]),
@@ -691,155 +617,40 @@ toml = { workspace = true }
     }
 
     #[test]
-    fn html_comments_do_not_count_as_readme_content() {
+    fn html_comments_are_rejected() {
         let std = ["std".to_owned()];
-        // A section that exists only inside a comment is missing.
+        let comment = |l: usize| {
+            format!(
+                "x/README.md:{l}: HTML comments are not allowed in a crate README; check-manifests cannot tell what they hide"
+            )
+        };
+        // A section that exists only inside a comment.
         let hidden = README.replace("## Stability", "<!--\n## Stability\n-->");
-        assert_eq!(
-            check_readme("x/README.md", &hidden, &std),
-            ["x/README.md: missing section `## Stability`"]
-        );
-        // Text after `-->` on the comment's last line is not a heading.
-        let trailing = README.replace("## Stability", "<!-- x -->## Stability");
-        assert_eq!(
-            check_readme("x/README.md", &trailing, &std),
-            ["x/README.md: missing section `## Stability`"]
-        );
-        // A feature named only inside a comment is undocumented.
-        let commented = README.replace("- `std` (default): std.", "<!-- Document `std` here -->");
-        assert_eq!(
-            check_readme("x/README.md", &commented, &std),
-            ["x/README.md: feature `std` is not documented under `## Feature flags`"]
-        );
-        // An unterminated comment hides everything after it.
-        let unterminated = README.replace("## Stability", "<!-- ## Stability");
-        assert_eq!(
-            check_readme("x/README.md", &unterminated, &std),
-            ["x/README.md: missing section `## Stability`"]
-        );
-        // Visible text next to comments still counts.
-        let visible = README.replace(
-            "## Feature flags\n\n",
-            "## Feature flags\n\n<!-- `serde` later -->\n",
-        );
-        assert_eq!(
-            check_readme("x/README.md", &visible, &std),
-            Vec::<String>::new()
-        );
-    }
-
-    #[test]
-    fn removing_a_comment_never_makes_up_a_heading() {
-        let std = ["std".to_owned()];
-        // CommonMark needs a space after `##`, so neither line is a heading.
-        for fake in ["##<!-- x -->Stability", "##<!--\nx\n-->Stability"] {
-            let readme = README.replace("## Stability", fake);
-            assert_eq!(
-                check_readme("x/README.md", &readme, &std),
-                ["x/README.md: missing section `## Stability`"],
-                "{fake}"
-            );
-        }
-    }
-
-    #[test]
-    fn comment_markers_in_code_do_not_hide_headings() {
-        let serde = ["std".to_owned(), "serde".to_owned()];
-        let undocumented =
-            ["x/README.md: feature `serde` is not documented under `## Feature flags`"];
-        // A `<!--` in a code span, then a later `-->`: `## Notes` is a real
-        // heading, so `serde` is under it, not under `## Feature flags`.
-        let span = README.replace(
-            "## Stability",
-            "## Notes\n\nClosing `-->`; `serde` later.\n\n## Stability",
-        );
-        let span = span.replace("- `std` (default): std.", "- `std` (default): std. `<!--`");
-        assert_eq!(check_readme("x/README.md", &span, &serde), undocumented);
-        // The same in a fenced code block, which a longer fence closes.
-        for fence in ["```md\n<!--\n````", "~~~\n<!--\n~~~"] {
-            let fenced = README.replace(
-                "## Stability",
-                &format!("{fence}\n\n## Notes\n\n-->\n- `serde`\n\n## Stability"),
-            );
-            assert_eq!(
-                check_readme("x/README.md", &fenced, &serde),
-                undocumented,
-                "{fence}"
-            );
-        }
-        // An intro of only a heading, with a `<!--` code span in it, has no
-        // purpose paragraph, whatever follows the next `## ` line.
-        let intro = README.replace(
-            "# x\n\nPurpose.\n\n",
-            "# x\n\n### Syntax `<!--`\n## Usage\n\nSee `-->`.\nBody text.\n\n",
-        );
-        assert_eq!(
-            check_readme("x/README.md", &intro, &["std".to_owned()]),
-            ["x/README.md: missing the purpose paragraph before the first `## ` section"]
-        );
-    }
-
-    #[test]
-    fn comment_blocks_follow_commonmark() {
-        let std = ["std".to_owned()];
-        // `<!-->` and `<!--->` are complete comments.
-        for empty in ["<!-->", "<!--->"] {
-            let readme = README.replace("## Stability", &format!("{empty}\n## Stability"));
-            assert_eq!(
-                check_readme("x/README.md", &readme, &std),
-                Vec::<String>::new(),
-                "{empty}"
-            );
-        }
-        // Up to three spaces still open a block; four make it code, so the
-        // heading after it is real.
-        let three = README.replace("## Stability", "   <!--\n## Stability\n-->");
-        assert_eq!(
-            check_readme("x/README.md", &three, &std),
-            ["x/README.md: missing section `## Stability`"]
-        );
-        let four = README.replace("## Stability", "    <!--\n## Stability\n-->");
-        assert_eq!(
-            check_readme("x/README.md", &four, &std),
-            Vec::<String>::new()
-        );
-        // A `<!--` inside a paragraph opens no block: the heading is real.
-        let inline = README.replace("Unstable.", "Unstable <!--\n## Stability\n-->");
-        let inline = inline.replacen("## Stability\n\nUnstable", "## Other\n\nUnstable", 1);
-        assert_eq!(
-            check_readme("x/README.md", &inline, &std),
-            Vec::<String>::new()
-        );
-        // A commented-out heading does not end the feature section.
-        let old = README.replace(
-            "- `std` (default): std.",
-            "<!--\n## Old flags\n-->\n- `std` (default): std.",
-        );
-        assert_eq!(
-            check_readme("x/README.md", &old, &std),
-            Vec::<String>::new()
-        );
-        // A feature in an inline comment is not documented.
-        let hidden = README.replace("- `std` (default): std.", "- std <!-- `std` -->");
-        assert_eq!(
-            check_readme("x/README.md", &hidden, &std),
-            ["x/README.md: feature `std` is not documented under `## Feature flags`"]
-        );
-    }
-
-    #[test]
-    fn a_commented_out_heading_does_not_end_the_intro() {
-        // The purpose paragraph follows a comment that holds a `## ` line.
+        assert_eq!(check_readme("x/README.md", &hidden, &std), [comment(17)]);
+        // A feature named only inside a comment.
+        let feature = README.replace("- `std` (default): std.", "<!-- Document `std` here -->");
+        assert_eq!(check_readme("x/README.md", &feature, &std), [comment(15)]);
+        // A commented-out heading before the purpose paragraph.
         let draft = README.replace("Purpose.", "<!--\n## Draft\n-->\n\nPurpose.");
+        assert_eq!(check_readme("x/README.md", &draft, &std)[0], comment(3));
+        // Every place a comment can hide: in a list item, a quote, a code
+        // span, mid-line, empty, unterminated.
+        for text in [
+            "- `std` (default): std. <!--\n  `serde`\n-->",
+            "> <!--\n> `serde`\n> -->",
+            "- `std` (default): std. `<!--`",
+            "- `std` <!-->",
+            "<!-- ## Stability",
+        ] {
+            let readme = README.replace("- `std` (default): std.", text);
+            let v = check_readme("x/README.md", &readme, &std);
+            assert!(v.contains(&comment(15)), "{text}: {v:?}");
+        }
+        // The escaped form is plain text.
+        let escaped = README.replace("Unstable.", "Unstable. Write `&lt;!--` to show it.");
         assert_eq!(
-            check_readme("x/README.md", &draft, &["std".to_owned()]),
+            check_readme("x/README.md", &escaped, &std),
             Vec::<String>::new()
-        );
-        // An intro of only headings and comments is still rejected.
-        let empty = README.replace("Purpose.", "<!--\n## Draft\nPurpose.\n-->\n### Overview");
-        assert_eq!(
-            check_readme("x/README.md", &empty, &["std".to_owned()]),
-            ["x/README.md: missing the purpose paragraph before the first `## ` section"]
         );
     }
 

@@ -12,8 +12,10 @@ The members are the ten crates under `crates/` plus `xtask`. `palisade-driver` i
 `default-members`, so a plain `cargo build` at the root does not build it. `--workspace` still
 includes it. Every crate has a README with its purpose, allowed dependencies, platform support,
 feature flags and stability level. `cargo xtask check-manifests` fails if the purpose paragraph
-(text before the first `## ` section) or one of those sections is missing. HTML comments do not
-count, because the rendered page does not show them.
+(text before the first `## ` section) or one of those sections is missing. A crate README may not
+contain an HTML comment (`<!--`): the rendered page hides it, and a line-based check cannot tell
+where one ends, so a section or feature inside it could be counted. Write `&lt;!--` to show the
+characters.
 
 ## Shared settings
 
