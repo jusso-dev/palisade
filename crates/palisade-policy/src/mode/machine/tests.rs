@@ -243,7 +243,7 @@ fn only_enforce_to_audit_can_be_permanent_and_only_with_the_permission() {
         .unwrap();
     assert_eq!(changes[0].expires_at, None);
     assert_eq!(m.time_box(), None);
-    assert_eq!(m.current(now), Mode::Audit);
+    assert_eq!(m.current(now).0, Mode::Audit);
 
     for to in [Mode::Learning, Mode::Monitor, Mode::Disabled] {
         let mut m = ModeMachine::new(Mode::Enforce);
@@ -283,11 +283,13 @@ fn a_time_box_reverts_on_the_wall_clock() {
     )
     .unwrap();
     clock.advance(3_599);
-    assert_eq!(m.current(clock.now()), Mode::Audit);
+    assert_eq!(m.current(clock.now()), (Mode::Audit, None));
     assert_eq!(m.tick(clock.now()), None);
     clock.advance(1);
-    assert_eq!(m.current(clock.now()), Mode::Enforce);
-    let change = m.tick(clock.now()).unwrap();
+    // The read that observes the expiry reports it, and closes the box.
+    let (mode, change) = m.current(clock.now());
+    assert_eq!(mode, Mode::Enforce);
+    let change = change.unwrap();
     assert_eq!(
         (change.old, change.new, change.cause),
         (Mode::Audit, Mode::Enforce, Cause::Expired)
@@ -312,11 +314,11 @@ fn setting_the_wall_clock_back_does_not_extend_a_time_box() {
         clock.wall -= 365 * DAY;
     }
     assert_eq!(clock.monotonic - 1_000, 3_000);
-    assert_eq!(m.current(clock.now()), Mode::Monitor);
+    assert_eq!(m.current(clock.now()), (Mode::Monitor, None));
     clock.advance(600);
     // The monotonic budget has run out, whatever the wall clock says.
-    assert_eq!(m.current(clock.now()), Mode::Enforce);
     assert_eq!(m.tick(clock.now()).unwrap().new, Mode::Enforce);
+    assert_eq!(m.current(clock.now()), (Mode::Enforce, None));
 }
 
 #[test]
@@ -330,7 +332,9 @@ fn setting_the_wall_clock_forward_only_ends_a_time_box_early() {
     )
     .unwrap();
     clock.wall += 8 * DAY;
-    assert_eq!(m.current(clock.now()), Mode::Enforce);
+    let (mode, change) = m.current(clock.now());
+    assert_eq!(mode, Mode::Enforce);
+    assert_eq!(change.unwrap().cause, Cause::Expired);
 }
 
 #[test]
@@ -347,7 +351,43 @@ fn a_monotonic_clock_that_restarted_ends_a_time_box() {
         wall_secs: clock.wall + 60,
         monotonic_secs: 5,
     };
-    assert_eq!(m.current(restarted), Mode::Enforce);
+    let (mode, change) = m.current(restarted);
+    assert_eq!(mode, Mode::Enforce);
+    assert_eq!(change.unwrap().cause, Cause::Expired);
+}
+
+/// Regression test (#270 review): once a read has observed a time box
+/// ending, the weaker mode must not come back. Before, `current` left the box
+/// stored, so a later read with the wall clock set back (and the monotonic
+/// budget not yet used) returned the weaker mode again, and no expiry was
+/// recorded.
+#[test]
+fn an_observed_expiry_is_final_even_if_the_clock_is_set_back() {
+    let mut clock = SimClock::start();
+    let mut m = ModeMachine::new(Mode::Enforce);
+    m.transition(
+        &full(Mode::Audit, clock.now(), 3_600),
+        &Governance::default(),
+        clock.now(),
+    )
+    .unwrap();
+    // The wall clock jumps past the expiry well before the monotonic budget.
+    clock.monotonic += 60;
+    clock.wall += 2 * 3_600;
+    let (mode, change) = m.current(clock.now());
+    assert_eq!(mode, Mode::Enforce);
+    let change = change.unwrap();
+    assert_eq!((change.old, change.new), (Mode::Audit, Mode::Enforce));
+    assert_eq!(change.cause, Cause::Expired);
+    assert_eq!(m, ModeMachine::new(Mode::Enforce));
+    // The wall clock is set back before the expiry; monotonic time is still
+    // well inside the budget. The device stays in enforce, with no second
+    // record.
+    clock.wall -= 3 * 3_600;
+    clock.monotonic += 1;
+    assert_eq!(m.current(clock.now()), (Mode::Enforce, None));
+    assert_eq!(m.tick(clock.now()), None);
+    assert_eq!(m.time_box(), None);
 }
 
 #[test]
@@ -381,7 +421,11 @@ fn changes_inside_a_time_box_keep_or_end_it() {
         .map(|c| c.into_iter().map(|c| (c.old, c.new)).collect::<Vec<_>>());
     // The expiry happens first, and then enforce -> audit needs a box.
     assert_eq!(changes, Err(TransitionError::ReasonRequired));
-    assert_eq!(m.current(clock.now()), Mode::Enforce);
+    // The rejected request left the machine unchanged; this read observes
+    // the expiry.
+    let (mode, change) = m.current(clock.now());
+    assert_eq!(mode, Mode::Enforce);
+    assert_eq!(change.unwrap().cause, Cause::Expired);
 
     // Returning to enforce ends the box.
     let mut m = ModeMachine::new(Mode::Enforce);
@@ -567,7 +611,14 @@ proptest! {
                     wall_secs: i64::MIN,
                     monotonic_secs: b.started_monotonic + b.budget_secs,
                 };
-                prop_assert_eq!(m.current(late), b.prior);
+                let mut probe = m;
+                prop_assert_eq!(probe.current(late).0, b.prior);
+                // Observing the expiry is final: the box is gone and the
+                // rollback target is stored, even with the clock set back.
+                prop_assert_eq!(probe.time_box(), None);
+                prop_assert_eq!(probe.stored(), b.prior);
+                let early = Now { wall_secs: i64::MIN, monotonic_secs: b.started_monotonic };
+                prop_assert_eq!(probe.current(early), (b.prior, None));
             } else if before.stored() == Mode::Enforce && m.stored() != Mode::Enforce {
                 // Leaving enforce with no box: only the permitted
                 // permanent move to audit.

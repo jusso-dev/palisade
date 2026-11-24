@@ -271,8 +271,9 @@ impl ModeMachine {
         }
     }
 
-    /// The mode as last stored. It may be a time-boxed mode that has ended;
-    /// [`current`](Self::current) accounts for that.
+    /// The mode as last stored. It may be a time-boxed mode that has ended
+    /// but not yet been observed; use [`current`](Self::current) to read the
+    /// mode in force.
     #[must_use]
     pub const fn stored(&self) -> Mode {
         self.mode
@@ -284,16 +285,24 @@ impl ModeMachine {
         self.time_box.as_ref()
     }
 
-    /// The mode at `now`: the rollback target if the time box has ended.
-    #[must_use]
-    pub const fn current(&self, now: Now) -> Mode {
-        match self.time_box {
-            Some(b) if b.has_ended(now) => b.prior,
-            _ => self.mode,
-        }
+    /// The mode in force at `now`, with the expiry record if this read is
+    /// the one that observed the time box ending.
+    ///
+    /// Observing an expiry is final: the box is closed and the rollback
+    /// target becomes the stored mode, exactly as [`tick`](Self::tick) does.
+    /// A later read with the wall clock set back, or before the monotonic
+    /// budget has run out, can therefore never bring the weaker mode back.
+    /// Reading the mode is how the expiry is noticed, so it needs `&mut`.
+    #[must_use = "the expiry record, if any, is the `mode_changed` event (#16)"]
+    pub fn current(&mut self, now: Now) -> (Mode, Option<ModeChanged>) {
+        let expired = self.tick(now);
+        (self.mode, expired)
     }
 
     /// Ends the time box if it has ended at `now`, and reports the change.
+    /// Once a box has ended it stays ended: the box is removed and its
+    /// rollback target is stored.
+    #[must_use = "the expiry record is the `mode_changed` event (#16)"]
     pub fn tick(&mut self, now: Now) -> Option<ModeChanged> {
         let b = self.time_box.filter(|b| b.has_ended(now))?;
         let old = self.mode;
