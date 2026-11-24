@@ -1,18 +1,38 @@
 //! The `palisade-agent` binary. See the crate README for details.
 
+#![forbid(unsafe_code)]
+
 use std::process::ExitCode;
 
-#[cfg(windows)]
-fn main() -> ExitCode {
-    eprintln!(
-        "palisade-agent {}: not implemented yet, see https://github.com/jusso-dev/palisade/issues/4",
-        env!("CARGO_PKG_VERSION")
-    );
-    ExitCode::FAILURE
-}
+use palisade_agent::{
+    cli::{self, Mode},
+    host,
+};
 
-#[cfg(not(windows))]
 fn main() -> ExitCode {
-    eprintln!("palisade-agent runs only on Windows; this is a non-Windows stub build");
-    ExitCode::FAILURE
+    let args = match cli::parse(std::env::args_os().skip(1)) {
+        Ok(args) => args,
+        Err(e) => {
+            eprintln!("palisade-agent: {e}\n\n{}", cli::USAGE);
+            return ExitCode::from(2);
+        }
+    };
+    match args.mode {
+        Mode::Help => {
+            println!("{}", cli::USAGE);
+            ExitCode::SUCCESS
+        }
+        Mode::Version => {
+            println!("palisade-agent {}", env!("CARGO_PKG_VERSION"));
+            ExitCode::SUCCESS
+        }
+        Mode::Console => host::run_console(&args),
+        #[cfg(windows)]
+        Mode::Service => palisade_agent::service::run_service(args),
+        #[cfg(not(windows))]
+        Mode::Service => {
+            eprintln!("palisade-agent: --service is only available on Windows; use --console");
+            ExitCode::FAILURE
+        }
+    }
 }
