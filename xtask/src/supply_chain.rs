@@ -493,10 +493,13 @@ pub struct UnsafeChange {
 /// Compares the base branch's locked packages with the current graph.
 /// `current` is the `unsafe` inventory of the current graph; `base_count`
 /// gives the `unsafe` count of a base package (`None` when its source is not
-/// available locally). Versions are matched per crate: the removed and the
-/// added versions of a crate are each sorted by version and paired in order,
-/// so a bump in one of two duplicate versions is compared with the version
-/// it replaced. Unpaired versions are reported as added or removed.
+/// available locally, or its scan was incomplete). Versions are matched per
+/// crate: each added version is first paired with a removed version on the
+/// same semver-compatible line (same major, or same minor for `0.x`), so a
+/// bump in one duplicate is compared with the version it replaced even when
+/// another duplicate is removed in the same change. The remaining versions
+/// are then paired in version order, and anything left over is reported as
+/// added or removed.
 pub fn unsafe_changes(
     base: &BTreeSet<(String, String)>,
     current: &[(String, String, usize, usize)],
@@ -521,9 +524,28 @@ pub fn unsafe_changes(
             .collect();
         before.sort_by_key(|v| version_key(v));
         after.sort_by_key(|(v, _)| version_key(v));
-        let pairs = before.len().min(after.len());
-        for (old, (new, count)) in before.iter().zip(after.iter()) {
-            let (old, new, count) = (*old, *new, *count);
+        // Pair same-line upgrades first, then whatever is left in order.
+        let mut paired: Vec<(&str, &str, usize)> = Vec::new();
+        let mut rest_after = Vec::new();
+        for (new, count) in after {
+            match before
+                .iter()
+                .position(|old| compat_line(old) == compat_line(new))
+            {
+                Some(i) => paired.push((before.remove(i), new, count)),
+                None => rest_after.push((new, count)),
+            }
+        }
+        let pairs = before.len().min(rest_after.len());
+        paired.extend(
+            before
+                .iter()
+                .zip(rest_after.iter())
+                .map(|(old, (new, count))| (*old, *new, *count)),
+        );
+        paired.sort_by_key(|(_, new, _)| version_key(new));
+        let after = rest_after;
+        for (old, new, count) in paired {
             let (line, big_jump) = match base_count(name, old) {
                 Some(was) => (
                     format!("changed: `{name}` {old} -> {new}, `unsafe` {was} -> {count}"),
@@ -554,6 +576,16 @@ pub fn unsafe_changes(
         }
     }
     out
+}
+
+/// The semver-compatible line of a version: `(major, None)` for `1.x`, and
+/// `(0, Some(minor))` for `0.minor.x`.
+fn compat_line(version: &str) -> (u64, Option<u64>) {
+    let core = version.split(['-', '+']).next().unwrap_or(version);
+    let mut parts = core.split('.').map(|p| p.parse::<u64>().unwrap_or(0));
+    let major = parts.next().unwrap_or(0);
+    let minor = parts.next().unwrap_or(0);
+    (major, (major == 0).then_some(minor))
 }
 
 /// A sort key for a version such as `1.0.107` or `1.0.1+wasi-0.2.4`: the
@@ -943,6 +975,25 @@ criteria = "safe-to-deploy"
             lines(&unsafe_changes(&base1, &current, count)),
             [("changed: `syn` 3.0.10 -> 3.0.11, `unsafe` 55 -> 60", false)]
         );
+        // One duplicate is removed while the other is upgraded: the upgrade
+        // is compared with the version on its own line, not the removed one.
+        let base2 = base(&[("dep", "1.0.0"), ("dep", "2.0.0")]);
+        let current2 = inv(&[("dep", "2.0.1", 1001)]);
+        let by_version = |_: &str, v: &str| match v {
+            "1.0.0" => Some(1000),
+            "2.0.0" => Some(0),
+            _ => None,
+        };
+        assert_eq!(
+            lines(&unsafe_changes(&base2, &current2, by_version)),
+            [
+                ("changed: `dep` 2.0.0 -> 2.0.1, `unsafe` 0 -> 1001", true),
+                ("removed: `dep` 1.0.0", false),
+            ]
+        );
+        // `0.x` lines are per minor: 0.2 -> 0.3 is not paired with 0.3's line.
+        assert_eq!(compat_line("0.2.9"), (0, Some(2)));
+        assert_eq!(compat_line("1.4.0+x"), (1, None));
         // One duplicate is dropped while the other stays.
         let current = inv(&[("syn", "3.0.10", 60)]);
         assert_eq!(

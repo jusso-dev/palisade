@@ -364,9 +364,12 @@ fn deps_report(base: Option<&str>) -> ExitCode {
         let base_count = |name: &str, version: &str| {
             registries.iter().find_map(|dir| {
                 let crate_dir = dir.join(format!("{name}-{version}"));
+                // An incomplete scan is not a known baseline: a skipped file
+                // would make the base count too low and raise a false jump.
                 crate_dir
                     .is_dir()
-                    .then(|| supply_chain::count_dir(&crate_dir, &unsafe_code::count_unsafe).0)
+                    .then(|| supply_chain::count_dir(&crate_dir, &unsafe_code::count_unsafe))
+                    .and_then(|(count, unreadable)| (unreadable == 0).then_some(count))
             })
         };
         let (markdown, mut warnings) =
