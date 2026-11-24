@@ -90,8 +90,11 @@ Audits are imported from two public sets run by non-profit open-source organisat
 cargo-vet was adopted, 6 crates were covered by imported audits, and the other 93 were recorded as
 exemptions with the note "Baseline when cargo-vet was adopted". The 17 crates that the Authenticode
 verifier (#247) brought in while cargo-vet was in review (`ring` and its build and platform
-dependencies) are exempted the same way, with a note that names #247. The exemptions are the
-backlog.
+dependencies) are exempted the same way, with a note that names #247. Identity matching (#251)
+added 2 more (`unicode-normalization` and `tinyvec`), exempted with a note that names #251. It
+also made `regex-automata`, `regex-syntax` and `aho-corasick` normal dependencies of
+`palisade-policy`, so their baseline exemptions were raised from `safe-to-run` to
+`safe-to-deploy`, with a note saying so. The exemptions are the backlog.
 Each one is removed when the crate is audited, or when an imported audit covers it
 (`cargo vet prune` removes exemptions that are no longer needed).
 

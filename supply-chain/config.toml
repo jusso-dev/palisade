@@ -61,8 +61,8 @@ notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, b
 
 [[exemptions.aho-corasick]]
 version = "1.1.5"
-criteria = "safe-to-run"
-notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23), raised from safe-to-run to safe-to-deploy because #251 (palisade-policy identity matching: regex operators) made it a normal dependency of a product crate before cargo-vet landed. Audit, or import an audit, before bumping."
 
 [[exemptions.appendlist]]
 version = "1.4.0"
@@ -331,13 +331,13 @@ notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, b
 
 [[exemptions.regex-automata]]
 version = "0.4.19"
-criteria = "safe-to-run"
-notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23), raised from safe-to-run to safe-to-deploy because #251 (palisade-policy identity matching: regex operators) made it a normal dependency of a product crate before cargo-vet landed. Audit, or import an audit, before bumping."
 
 [[exemptions.regex-syntax]]
 version = "0.8.12"
-criteria = "safe-to-run"
-notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+criteria = "safe-to-deploy"
+notes = "Baseline when cargo-vet was adopted (#23), raised from safe-to-run to safe-to-deploy because #251 (palisade-policy identity matching: regex operators) made it a normal dependency of a product crate before cargo-vet landed. Audit, or import an audit, before bumping."
 
 [[exemptions.ring]]
 version = "0.17.14"
@@ -429,6 +429,11 @@ version = "0.8.5"
 criteria = "safe-to-run"
 notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
 
+[[exemptions.tinyvec]]
+version = "1.13.3"
+criteria = "safe-to-deploy"
+notes = "Added by #251 (palisade-policy identity matching: NFC normalisation of compared strings) before cargo-vet landed. Audit, or import an audit, before bumping."
+
 [[exemptions.toml]]
 version = "1.2.2+spec-1.1.0"
 criteria = "safe-to-deploy"
@@ -458,6 +463,11 @@ notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, b
 version = "1.0.27"
 criteria = "safe-to-deploy"
 notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.unicode-normalization]]
+version = "0.1.26"
+criteria = "safe-to-deploy"
+notes = "Added by #251 (palisade-policy identity matching: NFC normalisation of compared strings) before cargo-vet landed. Audit, or import an audit, before bumping."
 
 [[exemptions.untrusted]]
 version = "0.9.0"
