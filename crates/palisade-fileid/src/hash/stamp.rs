@@ -3,11 +3,16 @@
 //!
 //! A cached digest may be reused only while the file is provably the same
 //! file, unchanged. On a volume with a change journal that is the
-//! **strong** key: volume serial, 128-bit file ID, the file's last USN,
-//! last-write time and size. Any write moves the USN, so a match means
-//! the content is the one that was hashed. A rename keeps the file ID and
-//! the USN record the rename adds is the only change, so the agent's
-//! journal consumer (#60) decides whether a rename evicts.
+//! **strong** key: volume serial, 128-bit file ID, the journal's ID, the
+//! file's last USN, last-write time and size. Any write moves the USN, so
+//! a match means the content is the one that was hashed. The journal ID
+//! is part of the key because a deleted and recreated journal restarts its
+//! USNs, so an old USN could otherwise come round again.
+//!
+//! A rename also moves the file's USN, so on its own it is a miss (which
+//! fails safe: the file is hashed again). The journal consumer (#60), which
+//! can see that a journal record is a rename and nothing else, may carry
+//! the entry over with [`super::HashCache::rekey_after_rename`].
 //!
 //! Without a journal (FAT, exFAT, ReFS without one, network shares) the
 //! key falls back to the normalised path, size, last-write and creation
@@ -41,6 +46,8 @@ pub enum FileKey {
         volume_serial: u64,
         /// The 128-bit file ID.
         file_id: [u8; 16],
+        /// The volume's change journal ID (`UsnJournalID`).
+        usn_journal_id: u64,
         /// The file's last update sequence number.
         usn: i64,
         /// The last-write time.
@@ -87,6 +94,7 @@ impl FileKey {
             Self::Strong {
                 volume_serial,
                 file_id,
+                usn_journal_id,
                 usn,
                 last_write,
                 size,
@@ -94,6 +102,7 @@ impl FileKey {
                 out.push(1);
                 out.extend_from_slice(&volume_serial.to_le_bytes());
                 out.extend_from_slice(file_id);
+                out.extend_from_slice(&usn_journal_id.to_le_bytes());
                 out.extend_from_slice(&usn.to_le_bytes());
                 out.extend_from_slice(&last_write.0.to_le_bytes());
                 out.extend_from_slice(&size.to_le_bytes());
@@ -118,7 +127,7 @@ impl FileKey {
     /// An estimate of the key's memory use, for the cache's byte budget.
     pub(crate) fn weight(&self) -> usize {
         match self {
-            Self::Strong { .. } => 48,
+            Self::Strong { .. } => 56,
             Self::Weak { path, .. } => 32usize.saturating_add(path.len()),
         }
     }
@@ -145,15 +154,30 @@ impl fmt::Display for FileKey {
     }
 }
 
-/// Reads a file's [`FileKey`], implemented by the OS backend (#54).
+/// Opens files and reads their [`FileKey`]; implemented by the OS
+/// backend (#54).
 ///
-/// The hash cache uses it twice per lookup: before a digest is trusted, and
-/// around a fresh hash so a file that changed while it was read is never
-/// cached ([`super::cache::hash_through`]).
+/// Everything is done through **one opened handle**. The key read before
+/// hashing, the bytes hashed and the key read after hashing must all come
+/// from the same file object, never from three separate path lookups:
+/// otherwise a link or junction swapped between them could pair one file's
+/// key with another file's digest, and the cache would then vouch for the
+/// wrong file. [`super::cache::hash_through`] opens the file once, stamps
+/// that handle, hashes through it, and stamps it again.
+///
+/// On Windows the backend opens the file with sharing for read, write and
+/// delete, and reads the key from the handle
+/// (`GetFileInformationByHandleEx` with `FileIdInfo`, and
+/// `FSCTL_READ_FILE_USN_DATA`).
 pub trait FileStamp {
+    /// An opened file.
+    type File;
     /// The error the backend reports.
     type Error;
 
-    /// The current key of the file at `path`.
-    fn stamp(&self, path: &str) -> Result<FileKey, Self::Error>;
+    /// Opens the file at `path` for reading.
+    fn open(&self, path: &str) -> Result<Self::File, Self::Error>;
+
+    /// The current key of the opened `file`.
+    fn stamp(&self, file: &Self::File) -> Result<FileKey, Self::Error>;
 }

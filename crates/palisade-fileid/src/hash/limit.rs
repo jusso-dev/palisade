@@ -76,6 +76,7 @@ impl Default for HashLimiter {
 }
 
 /// A slot taken from a [`HashLimiter`], given back when dropped.
+#[must_use = "the slot is given back as soon as the permit is dropped"]
 #[derive(Debug)]
 pub struct HashPermit<'a> {
     limiter: &'a HashLimiter,

@@ -24,6 +24,7 @@ fn strong(file: u8, usn: i64) -> FileKey {
     FileKey::Strong {
         volume_serial: 0xabcd,
         file_id: [file; 16],
+        usn_journal_id: 77,
         usn,
         last_write: FileTime(1_000),
         size: 3,
@@ -56,38 +57,32 @@ fn a_hit_needs_every_key_component_to_match() {
     cache.insert(base.clone(), Some("C:\\a.exe".into()), value(b"abc"));
     assert_eq!(cache.get(&base, None).unwrap(), &value(b"abc"));
 
-    let FileKey::Strong {
-        volume_serial,
-        file_id,
-        usn,
-        last_write,
-        size,
-    } = base.clone()
-    else {
-        unreachable!()
+    let k = |f: &dyn Fn(&mut FileKey)| {
+        let mut k = base.clone();
+        f(&mut k);
+        k
     };
     let changed = [
-        FileKey::Strong {
-            usn: usn + 1,
-            volume_serial,
-            file_id,
-            last_write,
-            size,
-        },
-        FileKey::Strong {
-            last_write: FileTime(last_write.0 + 1),
-            volume_serial,
-            file_id,
-            usn,
-            size,
-        },
-        FileKey::Strong {
-            size: size + 1,
-            volume_serial,
-            file_id,
-            usn,
-            last_write,
-        },
+        k(&|k| {
+            if let FileKey::Strong { usn, .. } = k {
+                *usn += 1
+            }
+        }),
+        k(&|k| {
+            if let FileKey::Strong { usn_journal_id, .. } = k {
+                *usn_journal_id += 1
+            }
+        }),
+        k(&|k| {
+            if let FileKey::Strong { last_write, .. } = k {
+                last_write.0 += 1
+            }
+        }),
+        k(&|k| {
+            if let FileKey::Strong { size, .. } = k {
+                *size += 1
+            }
+        }),
     ];
     for k in changed {
         cache.insert(base.clone(), None, value(b"abc"));
@@ -98,24 +93,92 @@ fn a_hit_needs_every_key_component_to_match() {
     // Another file, or another volume, is a different identity.
     cache.insert(base.clone(), None, value(b"abc"));
     assert_eq!(cache.get(&strong(2, 10), None), Err(Miss::NotCached));
-    let other_volume = FileKey::Strong {
-        volume_serial: 1,
-        file_id,
-        usn,
-        last_write,
-        size,
-    };
+    let other_volume = k(&|k| {
+        if let FileKey::Strong { volume_serial, .. } = k {
+            *volume_serial = 1;
+        }
+    });
     assert_eq!(cache.get(&other_volume, None), Err(Miss::NotCached));
     assert_eq!(cache.len(), 1);
 }
 
 #[test]
-fn a_rename_keeps_the_entry_and_records_the_new_path() {
-    let mut cache = HashCache::default();
+fn a_new_path_to_the_same_key_is_recorded_and_counted() {
+    // A hard link: another path to the same file, same key.
+    let mut cache = HashCache::new(CacheConfig {
+        max_entries: 10,
+        max_bytes: 4_000,
+    });
     let k = strong(1, 10);
-    cache.insert(k.clone(), Some("C:\\old.exe".into()), value(b"abc"));
-    assert!(cache.get(&k, Some("C:\\new.exe")).is_ok());
-    assert_eq!(cache.path_of(&k), Some("C:\\new.exe"));
+    cache.insert(k.clone(), None, value(b"abc"));
+    let before = cache.bytes();
+    let long = format!("C:\\{}", "d".repeat(1_000));
+    assert!(cache.get(&k, Some(&long)).is_ok());
+    assert_eq!(cache.path_of(&k), Some(long.as_str()));
+    assert_eq!(cache.bytes(), before + long.len());
+    // Back to a short path: the bytes come back down.
+    assert!(cache.get(&k, Some("C:\\a")).is_ok());
+    assert_eq!(cache.bytes(), before + 4);
+    // A path that pushes the cache past its byte bound evicts older
+    // entries, never the one just used.
+    cache.insert(strong(2, 1), None, value(b"abc"));
+    cache.insert(strong(3, 1), None, value(b"abc"));
+    assert_eq!(cache.len(), 3);
+    // Sized so the three entries no longer fit, but `k` alone does.
+    let huge = "e".repeat(4_000 - before);
+    assert!(cache.get(&k, Some(&huge)).is_ok());
+    assert!(cache.bytes() <= 4_000, "{}", cache.bytes());
+    assert!(cache.peek(&k).is_some());
+    assert!(
+        cache.peek(&strong(2, 1)).is_none(),
+        "the oldest is evicted first"
+    );
+    assert!(cache.metrics().snapshot().evictions >= 1);
+}
+
+#[test]
+fn a_rename_misses_unless_the_journal_consumer_rekeys_it() {
+    // A rename moves the file's USN, so on its own it is a miss.
+    let mut cache = HashCache::default();
+    let old = strong(1, 10);
+    cache.insert(old.clone(), Some("C:\\old.exe".into()), value(b"abc"));
+    assert_eq!(cache.get(&strong(1, 11), None), Err(Miss::Changed));
+
+    // The journal consumer saw a rename and nothing else: it carries the
+    // entry over to the new key and path.
+    cache.insert(old.clone(), Some("C:\\old.exe".into()), value(b"abc"));
+    let renamed = strong(1, 11);
+    assert!(cache.rekey_after_rename(&old, renamed.clone(), Some("C:\\new.exe".into())));
+    assert_eq!(cache.get(&renamed, None).unwrap(), &value(b"abc"));
+    assert_eq!(cache.path_of(&renamed), Some("C:\\new.exe"));
+    assert_eq!(cache.len(), 1);
+
+    // Anything but a pure rename drops the entry instead.
+    let mut grown = strong(1, 12);
+    if let FileKey::Strong { size, .. } = &mut grown {
+        *size += 1;
+    }
+    assert!(!cache.rekey_after_rename(&renamed, grown, None));
+    assert!(cache.is_empty());
+    cache.insert(old.clone(), None, value(b"abc"));
+    assert!(
+        !cache.rekey_after_rename(&old, strong(2, 11), None),
+        "another file"
+    );
+    assert!(cache.is_empty());
+    cache.insert(old.clone(), None, value(b"abc"));
+    assert!(
+        !cache.rekey_after_rename(&strong(1, 9), strong(1, 11), None),
+        "stale old key"
+    );
+    assert!(cache.is_empty());
+    let w = weak("C:\\a.exe", 1);
+    cache.insert(w.clone(), None, value(b"abc"));
+    assert!(
+        !cache.rekey_after_rename(&w, weak("C:\\b.exe", 1), None),
+        "weak keys"
+    );
+    assert!(cache.is_empty());
 }
 
 #[test]
@@ -130,6 +193,13 @@ fn weak_keys_fall_back_to_the_path() {
         cache.get(&weak("\\\\server\\share\\a.exe", 2), None),
         Err(Miss::Changed)
     );
+    // So is a changed creation time.
+    cache.insert(k.clone(), None, value(b"abc"));
+    let mut created = k.clone();
+    if let FileKey::Weak { creation, .. } = &mut created {
+        creation.0 += 1;
+    }
+    assert_eq!(cache.get(&created, None), Err(Miss::Changed));
     cache.insert(k.clone(), None, value(b"abc"));
     assert!(cache.evict_path("\\\\server\\share\\a.exe"));
     assert!(cache.is_empty());
@@ -149,11 +219,15 @@ fn outdated_tiers_are_ignored_and_others_kept() {
     let mut cache = HashCache::default();
     let mut old = value(b"abc");
     old.flat.as_mut().unwrap().version = 0;
-    cache.insert(strong(1, 1), None, old);
+    cache.insert(strong(1, 1), None, old.clone());
     assert!(
         cache.is_empty(),
         "a value with only outdated tiers is not stored"
     );
+    // And it still replaces a current entry for the same file.
+    cache.insert(strong(1, 1), None, value(b"abc"));
+    cache.insert(strong(1, 1), None, old);
+    assert!(cache.is_empty());
 
     // A value whose image tier is outdated keeps its flat tier.
     let mut mixed = value(b"abc");
@@ -417,8 +491,12 @@ impl Script {
 }
 
 impl FileStamp for Script {
+    type File = ();
     type Error = String;
-    fn stamp(&self, _: &str) -> Result<FileKey, String> {
+    fn open(&self, _: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn stamp(&self, _: &()) -> Result<FileKey, String> {
         let next = self.0.borrow_mut().pop_front();
         if let Some(k) = next {
             *self.1.borrow_mut() = k.clone();
@@ -444,7 +522,7 @@ fn a_warm_cache_reads_nothing() {
     let cache = Mutex::new(HashCache::default());
     let stamps = Script::new(&[strong(1, 1)]);
     let reads = Cell::new(0);
-    let compute = || {
+    let compute = |_: &()| {
         reads.set(reads.get() + 1);
         Ok::<_, String>(value(b"abc"))
     };
@@ -497,7 +575,7 @@ fn recompute_mode_rehashes_and_reports_disagreement() {
             "C:\\a.exe",
             HashVerifyMode::Recompute,
             &FileLocation::default(),
-            || Ok::<_, String>(value(b"new")),
+            |_: &()| Ok::<_, String>(value(b"new")),
         )
         .unwrap(),
     );
@@ -506,6 +584,8 @@ fn recompute_mode_rehashes_and_reports_disagreement() {
     // The fresh value replaced it.
     let k = weak("C:\\a.exe", 1);
     assert_eq!(cache.lock().unwrap().get(&k, None).unwrap(), &value(b"new"));
+    // Recompute never counts a lookup: no hit, though an entry exists.
+    assert_eq!(cache.lock().unwrap().metrics().snapshot().hits, 1);
     // Agreement is not reported.
     let (_, _, disagreed) = done(
         hash_through(
@@ -514,7 +594,7 @@ fn recompute_mode_rehashes_and_reports_disagreement() {
             "C:\\a.exe",
             HashVerifyMode::Recompute,
             &FileLocation::default(),
-            || Ok::<_, String>(value(b"new")),
+            |_: &()| Ok::<_, String>(value(b"new")),
         )
         .unwrap(),
     );
@@ -534,7 +614,7 @@ fn a_file_changing_while_hashed_is_retried_then_unstable() {
         "C:\\a.exe",
         HashVerifyMode::Cached,
         &FileLocation::default(),
-        || {
+        |_: &()| {
             attempts.set(attempts.get() + 1);
             Ok::<_, String>(value(b"abc"))
         },
@@ -543,6 +623,24 @@ fn a_file_changing_while_hashed_is_retried_then_unstable() {
     assert_eq!(t, Through::Unstable { attempts: 4 });
     assert_eq!(attempts.get(), 4);
     assert!(cache.lock().unwrap().is_empty(), "nothing is cached");
+    // An entry cached earlier for the file is dropped too.
+    let cache = Mutex::new(HashCache::default());
+    cache
+        .lock()
+        .unwrap()
+        .insert(strong(1, 0), None, value(b"abc"));
+    let stamps = Script::new(&keys);
+    let t = hash_through(
+        &cache,
+        &stamps,
+        "C:\\a.exe",
+        HashVerifyMode::Recompute,
+        &FileLocation::default(),
+        |_: &()| Ok::<_, String>(value(b"abc")),
+    )
+    .unwrap();
+    assert!(matches!(t, Through::Unstable { .. }));
+    assert!(cache.lock().unwrap().is_empty());
     assert_eq!(cache.lock().unwrap().metrics().snapshot().unstable, 1);
 
     // It settles on the second attempt: cached under the settled key.
@@ -555,7 +653,7 @@ fn a_file_changing_while_hashed_is_retried_then_unstable() {
             "p",
             HashVerifyMode::Cached,
             &FileLocation::default(),
-            || Ok::<_, String>(value(b"abc")),
+            |_: &()| Ok::<_, String>(value(b"abc")),
         )
         .unwrap(),
     );
@@ -564,11 +662,126 @@ fn a_file_changing_while_hashed_is_retried_then_unstable() {
 }
 
 #[test]
+fn a_file_that_settles_on_a_new_key_is_not_a_disagreement() {
+    // Recompute mode, with a cached entry for the first key. The file
+    // changes during the first attempt and settles under a new key: the
+    // fresh digest differs from the old entry, but that is a change, not a
+    // disagreement about the same key.
+    let cache = Mutex::new(HashCache::default());
+    cache
+        .lock()
+        .unwrap()
+        .insert(strong(1, 1), None, value(b"old"));
+    let stamps = Script::new(&[strong(1, 1), strong(1, 2), strong(1, 2)]);
+    let (_, src, disagreed) = done(
+        hash_through(
+            &cache,
+            &stamps,
+            "p",
+            HashVerifyMode::Recompute,
+            &FileLocation::default(),
+            |_: &()| Ok::<_, String>(value(b"new")),
+        )
+        .unwrap(),
+    );
+    assert_eq!((src, disagreed), (ValueSource::Computed, false));
+    let guard = cache.lock().unwrap();
+    assert!(guard.peek(&strong(1, 1)).is_none());
+    assert_eq!(guard.peek(&strong(1, 2)), Some(&value(b"new")));
+}
+
+#[test]
+fn a_fresh_value_without_sha256_is_not_a_disagreement() {
+    let cache = Mutex::new(HashCache::default());
+    cache
+        .lock()
+        .unwrap()
+        .insert(strong(1, 1), None, value(b"abc"));
+    let md5_only = CacheValue::from_flat(hash_bytes(b"abc", AlgorithmSet::MD5), 1, FileTime(1));
+    let (_, _, disagreed) = done(
+        hash_through(
+            &cache,
+            &Script::new(&[strong(1, 1)]),
+            "p",
+            HashVerifyMode::Recompute,
+            &FileLocation::default(),
+            |_: &()| Ok::<_, String>(md5_only.clone()),
+        )
+        .unwrap(),
+    );
+    assert!(!disagreed);
+}
+
+#[test]
+fn a_value_for_another_size_is_never_cached() {
+    // The key says 3 bytes; the digest covers 4. Whatever was read is not
+    // the file the key describes, so nothing is cached and the old entry is
+    // dropped.
+    let cache = Mutex::new(HashCache::default());
+    cache
+        .lock()
+        .unwrap()
+        .insert(strong(1, 1), None, value(b"abc"));
+    let t = hash_through(
+        &cache,
+        &Script::new(&[strong(1, 1)]),
+        "p",
+        HashVerifyMode::Recompute,
+        &FileLocation::default(),
+        |_: &()| Ok::<_, String>(value(b"abcd")),
+    )
+    .unwrap();
+    assert_eq!(t, Through::Unstable { attempts: 1 });
+    assert!(cache.lock().unwrap().is_empty());
+}
+
+#[test]
+fn the_same_handle_is_stamped_and_hashed() {
+    // A stamp source whose handles are numbered: `hash_through` must open
+    // once and use that one handle throughout.
+    struct Handles(Cell<u32>, RefCell<Vec<u32>>);
+    impl FileStamp for Handles {
+        type File = u32;
+        type Error = String;
+        fn open(&self, _: &str) -> Result<u32, String> {
+            self.0.set(self.0.get() + 1);
+            Ok(self.0.get())
+        }
+        fn stamp(&self, file: &u32) -> Result<FileKey, String> {
+            self.1.borrow_mut().push(*file);
+            Ok(strong(1, 1))
+        }
+    }
+    let stamps = Handles(Cell::new(0), RefCell::new(Vec::new()));
+    let hashed = RefCell::new(Vec::new());
+    let cache = Mutex::new(HashCache::default());
+    hash_through(
+        &cache,
+        &stamps,
+        "p",
+        HashVerifyMode::Cached,
+        &FileLocation::default(),
+        |f: &u32| {
+            hashed.borrow_mut().push(*f);
+            Ok::<_, String>(value(b"abc"))
+        },
+    )
+    .unwrap();
+    assert_eq!(stamps.0.get(), 1, "opened once");
+    assert_eq!(*stamps.1.borrow(), [1, 1]);
+    assert_eq!(*hashed.borrow(), [1]);
+}
+
+#[test]
 fn errors_are_passed_through() {
     struct Failing;
     impl FileStamp for Failing {
+        type File = ();
         type Error = &'static str;
-        fn stamp(&self, _: &str) -> Result<FileKey, &'static str> {
+        fn open(&self, _: &str) -> Result<(), &'static str> {
+            Err("no such file")
+        }
+        fn stamp(&self, _: &()) -> Result<FileKey, &'static str> {
             Err("no such file")
         }
     }
@@ -579,7 +792,7 @@ fn errors_are_passed_through() {
         "p",
         HashVerifyMode::Cached,
         &FileLocation::default(),
-        || Ok::<_, String>(value(b"")),
+        |_: &()| Ok::<_, String>(value(b"")),
     );
     assert!(r.unwrap_err().to_string().contains("no such file"));
     let r = hash_through(
@@ -588,7 +801,7 @@ fn errors_are_passed_through() {
         "p",
         HashVerifyMode::Cached,
         &FileLocation::default(),
-        || Err::<CacheValue, _>("disk on fire"),
+        |_: &()| Err::<CacheValue, _>("disk on fire"),
     );
     assert!(r.unwrap_err().to_string().contains("disk on fire"));
     assert!(cache.lock().unwrap().is_empty());
@@ -685,16 +898,20 @@ fn values_carry_their_versions() {
 struct Metadata;
 
 impl FileStamp for Metadata {
+    type File = (std::fs::File, String);
     type Error = std::io::Error;
-    fn stamp(&self, path: &str) -> std::io::Result<FileKey> {
-        let m = std::fs::metadata(path)?;
+    fn open(&self, path: &str) -> std::io::Result<Self::File> {
+        Ok((std::fs::File::open(path)?, path.to_owned()))
+    }
+    fn stamp(&self, (file, path): &Self::File) -> std::io::Result<FileKey> {
+        let m = file.metadata()?;
         let nanos = |t: std::io::Result<std::time::SystemTime>| {
             t.ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map_or(0, |d| d.as_nanos() as u64)
         };
         Ok(FileKey::Weak {
-            path: path.to_owned(),
+            path: path.clone(),
             size: m.len(),
             last_write: FileTime(nanos(m.modified())),
             creation: FileTime(0),
@@ -704,7 +921,7 @@ impl FileStamp for Metadata {
 
 #[test]
 fn appending_a_byte_misses_and_an_unchanged_file_is_not_read() {
-    use palisade_fileid::hash::{HashOptions, HashStatus, hash_file};
+    use palisade_fileid::hash::{HashOptions, HashStatus, hash_reader};
     let dir = std::env::temp_dir().join(format!("palisade-hash-cache-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("tool.exe");
@@ -713,9 +930,9 @@ fn appending_a_byte_misses_and_an_unchanged_file_is_not_read() {
 
     let cache = Mutex::new(HashCache::default());
     let reads = Cell::new(0);
-    let compute = || {
+    let compute = |(file, _): &(std::fs::File, String)| {
         reads.set(reads.get() + 1);
-        match hash_file(&path, &HashOptions::default()) {
+        match hash_reader(file, &HashOptions::default()) {
             Ok(HashStatus::Complete(h)) => Ok(CacheValue::from_flat(h, 1, FileTime(0))),
             other => Err(format!("{other:?}")),
         }

@@ -104,6 +104,12 @@ pub struct ImageTier {
 }
 
 impl ImageTier {
+    /// The image digest for `alg`, if computed.
+    #[must_use]
+    pub fn get(&self, alg: HashAlgorithm) -> Option<&Digest> {
+        self.digests.iter().find(|d| d.algorithm() == alg)
+    }
+
     /// The tier for the Authenticode `hashes` of an image, at the current
     /// tier version.
     #[must_use]
@@ -163,10 +169,14 @@ impl CacheValue {
     }
 
     fn weight(&self) -> usize {
-        let digests = |d: &[Digest]| d.iter().map(|d| 16 + d.as_bytes().len()).sum::<usize>();
+        let digests = |d: &[Digest]| {
+            d.iter()
+                .fold(0_usize, |n, d| n.saturating_add(16 + d.as_bytes().len()))
+        };
         let flat = self.flat.as_ref().map_or(0, |t| digests(&t.hashes.digests));
         let image = self.image.as_ref().map_or(0, |t| digests(&t.digests));
-        flat + image + self.fileid_lib_version.len()
+        flat.saturating_add(image)
+            .saturating_add(self.fileid_lib_version.len())
     }
 }
 
@@ -233,8 +243,6 @@ pub enum Miss {
     /// An entry was cached, but the file changed since (a key component
     /// differs). The entry was dropped.
     Changed,
-    /// The entry's tiers are all of an older version. It was dropped.
-    Outdated,
 }
 
 /// The cache. Not synchronised: share it behind a [`Mutex`], as
@@ -293,11 +301,12 @@ impl HashCache {
     }
 
     /// The value cached for the file whose current key is `key`, if it is
-    /// still valid. `path` is where the file was seen now: on a hit through
-    /// a strong key (the same file ID after a rename) it is recorded as the
-    /// entry's latest path.
+    /// still valid, and marks it recently used. `path` is where the file was
+    /// seen now (through a hard link, say); it is recorded as the entry's
+    /// latest path, and the byte bound is enforced again.
     ///
-    /// A hit or miss is counted in [`Self::metrics`].
+    /// A hit or miss is counted in [`Self::metrics`]. A miss for a changed
+    /// file drops the stale entry.
     pub fn get(&mut self, key: &FileKey, path: Option<&str>) -> Result<&CacheValue, Miss> {
         let id = Identity::of(key);
         let Some(entry) = self.entries.get(&id) else {
@@ -309,25 +318,37 @@ impl HashCache {
             self.metrics.record_miss();
             return Err(Miss::Changed);
         }
-        let value = entry.value.clone().current();
-        if value.is_empty() {
-            self.remove(&id);
-            self.metrics.record_miss();
-            return Err(Miss::Outdated);
-        }
         self.metrics.record_hit();
         let tick = self.next_tick();
-        let entry = self.entries.get_mut(&id).ok_or(Miss::NotCached)?;
+        let Some(entry) = self.entries.get_mut(&id) else {
+            return Err(Miss::NotCached);
+        };
         self.order.remove(&entry.tick);
-        self.order.insert(tick, id);
+        self.order.insert(tick, id.clone());
         entry.tick = tick;
-        if let Some(p) = path {
-            if entry.path.as_deref() != Some(p) {
-                entry.path = Some(p.to_owned());
-            }
+        if let Some(p) = path.filter(|p| entry.path.as_deref() != Some(*p)) {
+            let old = entry.path.as_ref().map_or(0, String::len);
+            entry.path = Some(p.to_owned());
+            entry.weight = entry.weight.saturating_sub(old).saturating_add(p.len());
+            self.bytes = self.bytes.saturating_sub(old).saturating_add(p.len());
+            // The entry just used is the newest, so it is evicted last.
+            self.enforce_bounds();
         }
-        entry.value = value;
-        Ok(&entry.value)
+        self.entries
+            .get(&id)
+            .map(|e| &e.value)
+            .ok_or(Miss::NotCached)
+    }
+
+    /// The value cached for `key`, without counting a lookup or changing
+    /// recency: for comparing with a fresh hash when the cache is not
+    /// trusted to skip one ([`HashVerifyMode::must_recompute`]).
+    #[must_use]
+    pub fn peek(&self, key: &FileKey) -> Option<&CacheValue> {
+        self.entries
+            .get(&Identity::of(key))
+            .filter(|e| e.key == *key)
+            .map(|e| &e.value)
     }
 
     /// The latest path recorded for the file `key` identifies (whatever its
@@ -338,14 +359,15 @@ impl HashCache {
     }
 
     /// Caches `value` for the file whose current key is `key`, replacing any
-    /// entry for the same file. Tiers of an older version are not stored.
+    /// entry for the same file. Tiers of an older version are not stored;
+    /// if no tier is left, the old entry is still dropped.
     pub fn insert(&mut self, key: FileKey, path: Option<String>, value: CacheValue) {
+        let id = Identity::of(&key);
+        self.remove(&id);
         let value = value.current();
         if value.is_empty() {
             return;
         }
-        let id = Identity::of(&key);
-        self.remove(&id);
         let weight = ENTRY_OVERHEAD
             .saturating_add(key.weight())
             .saturating_add(path.as_ref().map_or(0, String::len))
@@ -363,6 +385,64 @@ impl HashCache {
                 weight,
             },
         );
+        self.enforce_bounds();
+    }
+
+    /// For the change journal consumer (#60): the journal shows that the
+    /// file cached under `old` was renamed and nothing else, so its key is
+    /// now `new` and its path `new_path`. The entry is carried over.
+    ///
+    /// Only a strong key can be rekeyed, and only to a key for the same
+    /// file (volume and file ID) with the same journal, last-write time and
+    /// size; anything else could let a stale entry describe changed
+    /// content, so the entry is dropped instead. Returns whether it was
+    /// kept.
+    pub fn rekey_after_rename(
+        &mut self,
+        old: &FileKey,
+        new: FileKey,
+        new_path: Option<String>,
+    ) -> bool {
+        let id = Identity::of(old);
+        let same_file = match (old, &new) {
+            (
+                FileKey::Strong {
+                    volume_serial: v1,
+                    file_id: f1,
+                    usn_journal_id: j1,
+                    last_write: w1,
+                    size: s1,
+                    ..
+                },
+                FileKey::Strong {
+                    volume_serial: v2,
+                    file_id: f2,
+                    usn_journal_id: j2,
+                    last_write: w2,
+                    size: s2,
+                    ..
+                },
+            ) => v1 == v2 && f1 == f2 && j1 == j2 && w1 == w2 && s1 == s2,
+            _ => false,
+        };
+        let value = self
+            .entries
+            .get(&id)
+            .filter(|e| e.key == *old)
+            .map(|e| e.value.clone());
+        match value {
+            Some(value) if same_file => {
+                self.insert(new, new_path, value);
+                true
+            }
+            _ => {
+                self.remove(&id);
+                false
+            }
+        }
+    }
+
+    fn enforce_bounds(&mut self) {
         while self.entries.len() > self.config.max_entries
             || (self.bytes > self.config.max_bytes && self.entries.len() > 1)
         {
@@ -386,7 +466,9 @@ impl HashCache {
         })
     }
 
-    /// Drops the weak-key entry for this path, if any.
+    /// Drops the weak-key entry for this path, if any. `path` must be the
+    /// same normalised match key as in [`FileKey::Weak`]: the lookup is an
+    /// exact string match.
     pub fn evict_path(&mut self, path: &str) -> bool {
         self.remove(&Identity::Path(path.to_owned()))
     }
@@ -667,6 +749,7 @@ fn decode_body(body: &[u8]) -> Option<CacheRecord> {
         1 => FileKey::Strong {
             volume_serial: r.u64()?,
             file_id: r.array()?,
+            usn_journal_id: r.u64()?,
             usn: i64::from_le_bytes(r.array()?),
             last_write: FileTime(r.u64()?),
             size: r.u64()?,
@@ -807,14 +890,16 @@ pub enum Through {
         /// Where it came from.
         source: ValueSource,
         /// Under [`HashVerifyMode::Recompute`], or a rehash because of the
-        /// location: a cached value existed for the same key and its flat
-        /// SHA-256 differs from the fresh one. The file changed without its
+        /// location: a cached value existed for the same key as the fresh
+        /// hash, both have a flat SHA-256, and they differ. The file changed without its
         /// key changing (a weak key's timestamps restored, or a stale or
         /// tampered entry). The fresh value replaces it; report the event.
         cache_disagreed: bool,
     },
-    /// The file changed while it was being hashed on every attempt
-    /// (`HashStatus::Unstable` in #46). Nothing was cached.
+    /// The file kept changing while it was being hashed, on every attempt,
+    /// or the bytes hashed did not match the size its key records
+    /// (`HashStatus::Unstable` in #46). Nothing was cached, and any entry
+    /// for the file was dropped.
     Unstable {
         /// Hashing attempts made: 1 plus [`MAX_UNSTABLE_RETRIES`].
         attempts: u32,
@@ -824,7 +909,7 @@ pub enum Through {
 /// Why [`hash_through`] failed.
 #[derive(Debug)]
 pub enum ThroughError<S, H> {
-    /// Reading the file's stamp failed.
+    /// Opening the file or reading its stamp failed.
     Stamp(S),
     /// Hashing failed.
     Hash(H),
@@ -846,18 +931,28 @@ impl<S: fmt::Debug + fmt::Display, H: fmt::Debug + fmt::Display> std::error::Err
 
 /// Gets the value for the file at `path` from `cache`, or computes it.
 ///
-/// 1. The file is stamped. If `mode` allows ([`HashVerifyMode::must_recompute`])
+/// 1. The file is opened once ([`FileStamp::open`]). Everything after uses
+///    that handle, so a link or junction swapped mid-way cannot pair one
+///    file's key with another file's content.
+/// 2. The handle is stamped. If `mode` allows ([`HashVerifyMode::must_recompute`])
 ///    and the cache has a valid value for that key, it is returned and the
 ///    file is not read.
-/// 2. Otherwise `compute` hashes it, and the file is stamped again. If the
-///    two stamps differ, the file changed while it was read: the hash is
-///    thrown away and retried, up to [`MAX_UNSTABLE_RETRIES`] times, and
-///    then the result is [`Through::Unstable`].
-/// 3. A stable value is cached and returned.
+/// 3. Otherwise `compute` hashes the handle, and the handle is stamped
+///    again. If the two stamps differ, the file changed while it was read:
+///    the hash is thrown away and retried, up to [`MAX_UNSTABLE_RETRIES`]
+///    times. Then the result is [`Through::Unstable`], and any entry for the
+///    file is dropped.
+/// 4. A value whose flat hashes cover a different size than the key
+///    records is never cached; it is [`Through::Unstable`] too.
+/// 5. A stable value is cached and returned.
+///
+/// Under a recompute mode the cache is consulted without counting a lookup
+/// ([`HashCache::peek`]), and only to set `cache_disagreed`. That compares
+/// the flat SHA-256 of an entry for the **same** key as the fresh hash, and
+/// only when both have one.
 ///
 /// The lock is held only to look up and to insert, never while hashing.
-/// The time spent hashing and the bytes hashed (the flat tier's size) are
-/// added to the cache's metrics.
+/// The time spent hashing and the bytes hashed are added to the metrics.
 pub fn hash_through<S, H, F>(
     cache: &Mutex<HashCache>,
     stamps: &S,
@@ -868,51 +963,56 @@ pub fn hash_through<S, H, F>(
 ) -> Result<Through, ThroughError<S::Error, H>>
 where
     S: FileStamp,
-    F: FnMut() -> Result<CacheValue, H>,
+    F: FnMut(&S::File) -> Result<CacheValue, H>,
 {
-    let mut key = stamps.stamp(path).map_err(ThroughError::Stamp)?;
-    let recompute = mode.must_recompute(&key, location);
-    let cached = {
-        let mut guard = lock(cache);
-        guard.get(&key, Some(path)).ok().cloned()
-    };
-    if let (false, Some(value)) = (recompute, &cached) {
-        return Ok(Through::Done {
-            value: value.clone(),
-            source: ValueSource::Cache,
-            cache_disagreed: false,
-        });
+    let file = stamps.open(path).map_err(ThroughError::Stamp)?;
+    let mut key = stamps.stamp(&file).map_err(ThroughError::Stamp)?;
+    if !mode.must_recompute(&key, location) {
+        if let Ok(value) = lock(cache).get(&key, Some(path)) {
+            return Ok(Through::Done {
+                value: value.clone(),
+                source: ValueSource::Cache,
+                cache_disagreed: false,
+            });
+        }
     }
+    let sha256 = |v: &CacheValue| {
+        v.flat
+            .as_ref()
+            .and_then(|t| t.hashes.get(HashAlgorithm::Sha256).cloned())
+    };
     let mut attempts = 0;
     loop {
         attempts += 1;
         let started = Instant::now();
-        let value = compute().map_err(ThroughError::Hash)?;
+        let value = compute(&file).map_err(ThroughError::Hash)?;
         let elapsed = started.elapsed();
-        let after = stamps.stamp(path).map_err(ThroughError::Stamp)?;
-        {
-            let guard = lock(cache);
-            let bytes = value.flat.as_ref().map_or(0, |t| t.hashes.size);
-            guard.metrics.record_hash(bytes, elapsed);
-        }
-        if after == key {
-            let sha256 = |v: &CacheValue| {
-                v.flat
-                    .as_ref()
-                    .and_then(|t| t.hashes.get(HashAlgorithm::Sha256).cloned())
-            };
-            let cache_disagreed = cached
-                .as_ref()
-                .is_some_and(|c| sha256(c).is_some() && sha256(c) != sha256(&value));
-            lock(cache).insert(key, Some(path.to_owned()), value.clone());
+        let after = stamps.stamp(&file).map_err(ThroughError::Stamp)?;
+        let hashed = value.flat.as_ref().map(|t| t.hashes.size);
+        lock(cache)
+            .metrics
+            .record_hash(hashed.unwrap_or(0), elapsed);
+        let size_matches = hashed.is_none_or(|n| n == after.size());
+        if after == key && size_matches {
+            let mut guard = lock(cache);
+            let cache_disagreed = guard
+                .peek(&key)
+                .and_then(sha256)
+                .zip(sha256(&value))
+                .is_some_and(|(cached, fresh)| cached != fresh);
+            guard.insert(key, Some(path.to_owned()), value.clone());
             return Ok(Through::Done {
                 value,
                 source: ValueSource::Computed,
                 cache_disagreed,
             });
         }
-        if attempts > MAX_UNSTABLE_RETRIES {
-            lock(cache).metrics.record_unstable();
+        if attempts > MAX_UNSTABLE_RETRIES || after == key {
+            let mut guard = lock(cache);
+            guard.metrics.record_unstable();
+            // Neither key can be trusted any more.
+            guard.remove(&Identity::of(&key));
+            guard.remove(&Identity::of(&after));
             return Ok(Through::Unstable { attempts });
         }
         key = after;
