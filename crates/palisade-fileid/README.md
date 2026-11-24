@@ -18,6 +18,34 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   SHA-256 is the primary identity. SHA-1 and MD5 are not collision resistant
   and are computed only for interop; they must never be the sole basis of an
   allow decision ([ADR 0008](../../docs/adr/0008-cryptographic-algorithms.md)).
+
+  The hash cache (#46) keeps digests while a file is unchanged.
+  `hash::HashCache` is an LRU bounded by entries and bytes (defaults 1,000,000
+  and 256 MiB). Entries are keyed by a `FileKey`: volume serial, 128-bit file ID,
+  change journal ID, USN, last-write time and size. On volumes without a change journal the key
+  is the normalised path, size and times, marked weak. Any change to a key
+  component is a miss. Values are tiered (flat hashes, Authenticode image
+  digests), and each tier carries a version, so a library change invalidates
+  only the tiers it affects. Persisted records carry an HMAC-SHA-256 tag under
+  an agent-held key. A record that fails it is discarded and counted as a
+  tamper event, and the file is rehashed. `HashVerifyMode` (`Cached`,
+  `Recompute`, `RecomputeUntrustedLocations`) says when a cached digest may
+  be used at execution time. `hash::hash_through` opens a file once and
+  stamps, hashes and stamps again through that one handle, so a link
+  swapped mid-way cannot pair one file's key with another's content. It
+  uses the cache or hashes the file, rehashes a file that changed while it
+  was read, up to three times, before giving up as `Unstable`, and never
+  caches a digest whose size differs from the key's. Each attempt rewinds the
+  handle first. A rename moves a file's USN, so it misses unless the change
+  journal consumer carries the entry over (`HashCache::key_of` finds the
+  cached key by file ID; `HashCache::rekey_after_rename` accepts only a
+  later USN with the same journal, size and last-write time). `HashLimiter` bounds
+  concurrent hashes (default: half the CPUs). `HashMetrics` counts bytes
+  hashed, hit ratio, average latency, evictions, tamper events and unstable
+  files. `skip_for_inventory` leaves cloud placeholders unread during
+  inventory scans. Opening files and reading file IDs, USNs and
+  attributes from the handle is the Windows backend's job: it implements
+  `hash::FileStamp`.
 - `authenticode`: the Authenticode PE image hash
   ([#47](https://github.com/jusso-dev/palisade/issues/47)), which stays the
   same when a file is signed, re-signed or stripped. `HashRanges::from_pe`
@@ -310,9 +338,10 @@ hashing, PE parsing and the Authenticode hash over the same synthetic inputs:
 ## Allowed dependencies
 
 `palisade-core`, plus the RustCrypto `sha2`, `sha1` and `md-5` crates,
-`ring` for signature verification (ADR 0008), used only inside
-`authenticode/crypto.rs`, and `serde` (derive only, no format crate) so
-certificate and chain reports serialise with stable field names. The workspace rules are enforced by
+`ring` for signature verification and the hash cache record MAC (ADR 0008),
+used only inside `authenticode/crypto.rs` and `hash/mac.rs`, and `serde`
+(derive only, no format crate) so certificate and chain reports serialise
+with stable field names. The workspace rules are enforced by
 `cargo xtask check-deps`.
 
 `ring` is not pure Rust (it has C and assembly), and on aarch64 Windows it

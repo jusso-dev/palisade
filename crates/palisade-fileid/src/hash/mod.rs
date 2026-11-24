@@ -13,8 +13,37 @@
 //! The digest of an empty input is a well-known constant that any attacker
 //! can produce, so [`FlatHashes::empty`] flags it and rules must never trust
 //! it.
+//!
+//! The rest of #46 lives in submodules:
+//!
+//! - [`stamp`]: the [`FileKey`] that identifies one version of a file, and
+//!   the [`FileStamp`] trait the OS backend implements to read it;
+//! - [`cache`]: the [`HashCache`] (an LRU bounded by entries and bytes,
+//!   with tiered, versioned values and MAC-protected persisted records), the
+//!   [`HashVerifyMode`] policy setting and [`hash_through`], which ties
+//!   them together and detects files that change while they are hashed;
+//! - [`limit`]: [`HashLimiter`], the `max_parallel_hashes` bound;
+//! - [`metrics`]: bytes hashed, cache hit ratio, average latency, and tamper
+//!   and unstable-file counts, for health reporting (#67);
+//! - [`skip_for_inventory`]: which files an inventory scan must not read,
+//!   because reading them would recall them from cloud storage.
 
 #![forbid(unsafe_code)]
+
+pub mod cache;
+pub mod limit;
+mod mac;
+pub mod metrics;
+pub mod stamp;
+
+pub use cache::{
+    CacheConfig, CacheRecord, CacheValue, FileLocation, FlatTier, HashCache, HashVerifyMode,
+    ImageTier, Miss, RecordError, Through, ThroughError, ValueSource, hash_through,
+};
+pub use limit::{HashLimiter, HashPermit, default_max_parallel_hashes};
+pub use mac::{MAC_LEN, MIN_KEY_LEN, MacKey, MacKeyTooShort};
+pub use metrics::{HashMetrics, HashMetricsSnapshot};
+pub use stamp::{FileKey, FileStamp, FileTime};
 
 use std::fmt;
 use std::fs::File;
@@ -530,9 +559,6 @@ impl HashOptions {
 }
 
 /// The outcome of hashing a file or stream.
-///
-/// More outcomes (deferred cloud placeholders, files modified while being
-/// hashed) arrive with the Windows backend (#46), so match with a wildcard.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum HashStatus {
@@ -545,6 +571,58 @@ pub enum HashStatus {
         /// The configured limit, in bytes.
         limit: u64,
     },
+    /// The file was not read, on purpose. See [`skip_for_inventory`].
+    Deferred(DeferReason),
+    /// The file kept changing while it was hashed, on every attempt, so no
+    /// digest describes it. See [`cache::hash_through`].
+    Unstable,
+}
+
+/// Why a file was not hashed ([`HashStatus::Deferred`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum DeferReason {
+    /// The file is a cloud placeholder (offline, or recalled on access).
+    /// Reading it would download it, so an inventory scan leaves it.
+    CloudPlaceholder,
+}
+
+/// `FILE_ATTRIBUTE_OFFLINE`.
+pub const FILE_ATTRIBUTE_OFFLINE: u32 = 0x0000_1000;
+/// `FILE_ATTRIBUTE_RECALL_ON_OPEN`.
+pub const FILE_ATTRIBUTE_RECALL_ON_OPEN: u32 = 0x0004_0000;
+/// `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS`.
+pub const FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: u32 = 0x0040_0000;
+
+/// Why hashing is happening, which decides whether a cloud placeholder may
+/// be read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HashPurpose {
+    /// A background inventory scan (#60). Placeholders are skipped.
+    Inventory,
+    /// An execution decision. The OS recalls the file to run it anyway, so
+    /// it is always hashed.
+    Execution,
+}
+
+/// Whether a file with these Windows file attributes must be left unread,
+/// and why: `Some(DeferReason::CloudPlaceholder)` for an offline or
+/// recall-on-access file during an inventory scan, `None` otherwise.
+///
+/// The attributes come from the OS backend (#54). Sparse files are not
+/// skipped on their own: a sparse file that is not a placeholder reads
+/// locally.
+#[must_use]
+pub const fn skip_for_inventory(attributes: u32, purpose: HashPurpose) -> Option<DeferReason> {
+    let placeholder = attributes
+        & (FILE_ATTRIBUTE_OFFLINE
+            | FILE_ATTRIBUTE_RECALL_ON_OPEN
+            | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS)
+        != 0;
+    match purpose {
+        HashPurpose::Inventory if placeholder => Some(DeferReason::CloudPlaceholder),
+        _ => None,
+    }
 }
 
 /// Why hashing failed.
