@@ -40,6 +40,24 @@ fn admin_url() -> Option<String> {
     }
 }
 
+/// The refused `PG*` variables already set in this test process. The hosted
+/// Windows x64 runner sets `PGPASSWORD` for its bundled PostgreSQL, so on that
+/// runner the server's environment check (rightly) refuses before any
+/// connection is tried. Tests that expect a connection
+/// attempt check for this and assert the refusal instead. Tests cannot clear
+/// the variables: changing the process environment is `unsafe` and races
+/// with other tests.
+fn inherited_refused_env() -> Vec<&'static str> {
+    db::refused_env(|n| std::env::var_os(n).is_some())
+}
+
+#[track_caller]
+fn assert_refused_for(e: &db::DbError, names: &[&str]) {
+    for n in names {
+        assert!(e.0.contains(n), "the refusal should name {n}: {}", e.0);
+    }
+}
+
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
 /// A database with its owner and runtime roles, made by the bootstrap
@@ -735,6 +753,12 @@ async fn readiness_reports_an_unreachable_database_as_down() {
         ),
         &dir,
     );
+    let inherited = inherited_refused_env();
+    if !inherited.is_empty() {
+        let e = Database::connect_runtime(&settings).unwrap_err();
+        assert_refused_for(&e, &inherited);
+        return;
+    }
     let database = Database::connect_runtime(&settings).unwrap();
     let health = std::sync::Arc::new(Health::new([]));
     let watcher = tokio::spawn(db::watch(
@@ -1498,6 +1522,12 @@ async fn serve_starts_not_ready_when_the_database_is_unreachable() {
         &dir,
     );
     assert!(settings.auto_migrate);
+    let inherited = inherited_refused_env();
+    if !inherited.is_empty() {
+        let e = db::start(&settings).await.unwrap_err();
+        assert_refused_for(&e, &inherited);
+        return;
+    }
     let database = db::start(&settings).await.unwrap();
     assert_eq!(db::health_check(&database).await.0, DatabaseHealth::Down);
     database.close().await;
