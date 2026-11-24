@@ -112,6 +112,10 @@ const TAG_SEEDS: Seed = Seed {
     test: "tags",
     name: "write_tag_fuzz_seeds",
 };
+const SCRIPT_SEEDS: Seed = Seed {
+    test: "script",
+    name: "write_script_fuzz_seeds",
+};
 const TRUST_SET_SEEDS: Seed = Seed {
     test: "trust_set",
     name: "write_trust_set_fuzz_seeds",
@@ -189,6 +193,11 @@ pub const PROJECTS: &[Project] = &[
                 name: "fuzz_tags",
                 dict: None,
                 seeds: &[TAG_SEEDS],
+            },
+            Target {
+                name: "script_sig",
+                dict: Some("script.dict"),
+                seeds: &[SCRIPT_SEEDS],
             },
         ],
     },
