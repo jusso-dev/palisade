@@ -138,6 +138,14 @@ pub struct ResourceSummary {
     /// into [`super::PeInfo::manifest`], and its ID is
     /// [`super::PeInfo::manifest_id`].
     pub standard_manifests: Vec<ResourceData>,
+    /// The lowest standard manifest ID (1, 2 or 3) whose directory entry
+    /// exists under `RT_MANIFEST`, whether or not a leaf under it can be
+    /// read, or that cannot be ruled out (the `RT_MANIFEST` entry has the
+    /// wrong shape, or the root or `RT_MANIFEST` directory is cut short).
+    /// When no leaf of it is readable it is missing from
+    /// [`standard_manifests`](Self::standard_manifests), and a higher ID
+    /// must not be taken in its place.
+    pub first_standard_manifest_id: Option<u16>,
     /// An `RT_ICON` or `RT_GROUP_ICON` resource exists.
     pub has_icons: bool,
 }
@@ -303,15 +311,21 @@ impl<'a> Tree<'a> {
     /// Bounded by the directory's own `u16` count and the tree length, with
     /// no shared budget. Warns when the IDs are not strictly ascending.
     fn id_entries(&self, offset: u32, warnings: &mut Warnings) -> Vec<Entry> {
+        self.id_entries_checked(offset, warnings).0
+    }
+
+    /// [`Self::id_entries`], and whether every entry the directory declares
+    /// was read (`false` if its header or some entry is out of bounds).
+    fn id_entries_checked(&self, offset: u32, warnings: &mut Warnings) -> (Vec<Entry>, bool) {
         let Some(offset) = to_usize(offset) else {
-            return Vec::new();
+            return (Vec::new(), false);
         };
         let (Some(named), Some(ids)) = (
             u16_at(self.bytes, offset.saturating_add(12)),
             u16_at(self.bytes, offset.saturating_add(14)),
         ) else {
             warnings.push(self.file_offset(offset), WarningKind::ResourceOutOfBounds);
-            return Vec::new();
+            return (Vec::new(), false);
         };
         let first = offset
             .saturating_add(DIRECTORY_SIZE)
@@ -320,6 +334,7 @@ impl<'a> Tree<'a> {
         let mut out = Vec::with_capacity(usize::from(ids).min(fits));
         let mut previous: Option<u32> = None;
         let mut sorted = true;
+        let mut complete = true;
         for i in 0..usize::from(ids) {
             let at = first.saturating_add(i.saturating_mul(ENTRY_SIZE));
             let (Some(name_field), Some(target)) = (
@@ -327,6 +342,7 @@ impl<'a> Tree<'a> {
                 u32_at(self.bytes, at.saturating_add(4)),
             ) else {
                 warnings.push(self.file_offset(at), WarningKind::ResourceOutOfBounds);
+                complete = false;
                 break;
             };
             if previous.is_some_and(|p| name_field <= p) {
@@ -345,7 +361,7 @@ impl<'a> Tree<'a> {
                 WarningKind::ResourceDirectoryNotSorted,
             );
         }
-        out
+        (out, complete)
     }
 
     /// The ID entry `id` of the directory at `offset`, if it has the
@@ -365,20 +381,38 @@ impl<'a> Tree<'a> {
 
     /// Loader-style lookup of type `type_id` → name ID `name_id`. Returns
     /// the chosen leaf (language-neutral first, otherwise the first numeric
-    /// language) and the numeric-language leaves, at most
-    /// [`MAX_KEPT_RESOURCES`].
+    /// language), the numeric-language leaves, at most
+    /// [`MAX_KEPT_RESOURCES`], and whether an entry for `name_id` may
+    /// exist: `true` when it does (even one of the wrong shape, or with no
+    /// readable leaf), and also when that cannot be ruled out, because the
+    /// entry for `type_id` has the wrong shape or a directory on the way
+    /// could not be read in full.
     fn lookup_standard(
         &self,
         type_id: u16,
         name_id: u16,
         warnings: &mut Warnings,
-    ) -> (Option<ResourceData>, Vec<ResourceData>) {
-        let Some(type_dir) = self.find_id(0, type_id, true, warnings) else {
-            return (None, Vec::new());
+    ) -> (Option<ResourceData>, Vec<ResourceData>, bool) {
+        let (types, types_complete) = self.id_entries_checked(0, warnings);
+        let Some(type_dir) = types
+            .into_iter()
+            .find(|e| e.name_field == u32::from(type_id))
+        else {
+            return (None, Vec::new(), !types_complete);
         };
-        let Some(name_dir) = self.find_id(type_dir.target_offset(), name_id, true, warnings) else {
-            return (None, Vec::new());
+        if !type_dir.is_directory() {
+            return (None, Vec::new(), true);
+        }
+        let (names, names_complete) = self.id_entries_checked(type_dir.target_offset(), warnings);
+        let Some(name_dir) = names
+            .into_iter()
+            .find(|e| e.name_field == u32::from(name_id))
+        else {
+            return (None, Vec::new(), !names_complete);
         };
+        if !name_dir.is_directory() {
+            return (None, Vec::new(), true);
+        }
         let mut languages = Vec::new();
         let mut neutral = None;
         for entry in self.id_entries(name_dir.target_offset(), warnings) {
@@ -417,7 +451,7 @@ impl<'a> Tree<'a> {
             }
         }
         let chosen = neutral.or_else(|| languages.first().cloned());
-        (chosen, languages)
+        (chosen, languages, true)
     }
 
     /// Every leaf on the standard path type `type_id` → any name → any
@@ -501,15 +535,17 @@ pub(super) fn walk(
 
     let version_entries = tree.lookup_type(resource_type::VERSION, warnings);
     let manifest_entries = tree.lookup_type(resource_type::MANIFEST, warnings);
-    let (version_resource, version_languages) =
+    let (version_resource, version_languages, _) =
         tree.lookup_standard(resource_type::VERSION, VS_VERSION_INFO_ID, warnings);
-    let standard_manifests = STANDARD_MANIFEST_IDS
-        .iter()
-        .filter_map(|id| {
-            tree.lookup_standard(resource_type::MANIFEST, *id, warnings)
-                .0
-        })
-        .collect();
+    let mut standard_manifests = Vec::new();
+    let mut first_standard_manifest_id = None;
+    for id in STANDARD_MANIFEST_IDS {
+        let (chosen, _, present) = tree.lookup_standard(resource_type::MANIFEST, id, warnings);
+        if present && first_standard_manifest_id.is_none() {
+            first_standard_manifest_id = Some(id);
+        }
+        standard_manifests.extend(chosen);
+    }
 
     let mut summary = ResourceSummary {
         offset: to_u64(start),
@@ -518,6 +554,7 @@ pub(super) fn walk(
         version_languages,
         manifest_entries,
         standard_manifests,
+        first_standard_manifest_id,
         ..ResourceSummary::default()
     };
     let mut general = General {

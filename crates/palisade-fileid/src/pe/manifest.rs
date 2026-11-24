@@ -12,7 +12,8 @@
 //! [`MAX_VALUE_LEN`]).
 //!
 //! Each setting is read only at its place in the manifest schema, by local
-//! name (namespace prefixes are ignored):
+//! name (which namespace a name is in is not checked, but every prefix used
+//! must be declared, so an undeclared prefix makes the manifest malformed):
 //!
 //! | Setting | Path |
 //! |---|---|
@@ -542,6 +543,9 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
 
     let mut out = Manifest::default();
     let mut path = Path(Vec::new());
+    // The namespace prefixes each open element declares, in step with
+    // `path`.
+    let mut scopes: Vec<Vec<Vec<u8>>> = Vec::new();
     let mut elements = 0_usize;
     let mut roots = 0_usize;
     // Anything read yet (for the declaration, which must come first).
@@ -575,6 +579,7 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
                 if path.0.len() >= MAX_DEPTH {
                     return Err(ManifestError::TooDeep);
                 }
+                bind_prefixes(e, &mut scopes)?;
                 path.0.push(e.local_name().as_ref().to_vec());
                 element(e, &path, &mut out, &mut seen_execution_level)?;
                 // Text belongs to a setting only directly inside it.
@@ -624,6 +629,7 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
                         }
                     }
                     path.0.pop();
+                    scopes.pop();
                 }
             }
             Event::Text(t) => {
@@ -686,6 +692,7 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
             }
             Event::End(_) => {
                 path.0.pop();
+                scopes.pop();
                 if let Some(field) = text_field.take() {
                     let value = text.value();
                     match field {
@@ -732,6 +739,45 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
         seen_anything = true;
     }
     Ok(out)
+}
+
+/// Records the namespace prefixes `e` declares (`xmlns:p="..."`) as a new
+/// scope, then checks that its own prefix and its attributes' prefixes are
+/// declared, as XML Namespaces requires. `xml` is always bound and `xmlns`
+/// only declares. A name with an undeclared prefix is not namespace
+/// well formed, so the manifest is an error rather than read by its local
+/// name.
+fn bind_prefixes(e: &BytesStart<'_>, scopes: &mut Vec<Vec<Vec<u8>>>) -> Result<(), ManifestError> {
+    let bad = |what: &str| Err(ManifestError::Xml(format!("namespace prefix: {what}")));
+    let mut declared = Vec::new();
+    let mut used = Vec::new();
+    for a in e.attributes() {
+        let a = a.map_err(|err| ManifestError::Xml(err.to_string()))?;
+        let key = a.key.as_ref();
+        if let Some(prefix) = key.strip_prefix(b"xmlns:") {
+            // Undeclaring a prefix (`xmlns:p=""`) is not allowed in XML
+            // Namespaces 1.0, and `xmlns` itself cannot be declared.
+            if a.value.is_empty() || prefix == b"xmlns" {
+                return bad("bad declaration");
+            }
+            declared.push(prefix.to_vec());
+        } else if let Some(prefix) = a.key.prefix() {
+            used.push(prefix.as_ref().to_vec());
+        }
+    }
+    scopes.push(declared);
+    if let Some(prefix) = e.name().prefix() {
+        used.push(prefix.as_ref().to_vec());
+    }
+    for prefix in used {
+        if prefix == b"xmlns" {
+            return bad("`xmlns` used as a prefix");
+        }
+        if prefix != b"xml" && !scopes.iter().any(|s| s.contains(&prefix)) {
+            return bad("undeclared");
+        }
+    }
+    Ok(())
 }
 
 fn element(
@@ -808,11 +854,19 @@ pub enum ElevationReason {
     /// OS refuses to start such a file, so it is not treated as `asInvoker`;
     /// the installer heuristics still apply.
     UnknownLevel(String),
-    /// There is no execution level in a manifest, and the file name
-    /// contains this installer word.
+    /// A manifest is present but requests no execution level. The
+    /// installer heuristics apply only when there is no manifest, so they
+    /// are not used.
+    ManifestWithoutLevel,
+    /// The process manifest (ID 1) is present but could not be read or
+    /// parsed, so what it requests is unknown. Treated as requiring
+    /// elevation, and never decided from another manifest or from the
+    /// installer heuristics.
+    ManifestUnreadable,
+    /// There is no manifest, and the file name contains this installer
+    /// word.
     InstallerFileName(&'static str),
-    /// There is no execution level in a manifest, and this version field
-    /// mentions installing.
+    /// There is no manifest, and this version field mentions installing.
     InstallerVersionInfo(&'static str),
     /// Nothing suggests elevation.
     None,
@@ -833,12 +887,16 @@ const INSTALLER_WORDS: [&str; 4] = ["setup", "install", "update", "patch"];
 
 /// Whether starting a file is expected to ask for administrator rights:
 /// true if its manifest requests `requireAdministrator`, or if it has no
-/// (or an unrecognised) requested execution level and the installer
-/// heuristics match (its file
-/// name contains setup, install, update or patch, or its version info
-/// mentions installing). The OS applies the installer heuristics only to
-/// 32-bit images without an execution level; the caller decides whether
-/// that applies.
+/// manifest (or one with an unrecognised execution level) and the
+/// installer heuristics match (its file name contains setup, install,
+/// update or patch, or its version info mentions installing). A manifest
+/// without an execution level is [`ElevationReason::ManifestWithoutLevel`]
+/// and is not counted. `manifest` is the parsed process manifest, or
+/// `None` when there is none; a process manifest that is present but
+/// cannot be read is decided by [`super::PeInfo::requires_elevation`]
+/// ([`ElevationReason::ManifestUnreadable`]), never passed as `None`. The
+/// OS applies the installer heuristics only to 32-bit images; the caller
+/// decides whether that applies.
 ///
 /// `version_fields` are `(field name, value)` pairs, such as
 /// `("FileDescription", "Foo Installer")`.
@@ -848,42 +906,41 @@ pub fn requires_elevation(
     file_name: Option<&str>,
     version_fields: &[(&'static str, &str)],
 ) -> Elevation {
-    match manifest.and_then(|m| m.execution_level.as_ref()) {
-        Some(ExecutionLevel::RequireAdministrator) => {
-            return Elevation {
+    let Some(manifest) = manifest else {
+        return match installer_heuristic(file_name, version_fields) {
+            Some(reason) => Elevation {
                 requires_elevation: true,
-                reason: ElevationReason::RequireAdministrator,
-            };
-        }
-        Some(ExecutionLevel::HighestAvailable) => {
-            return Elevation {
+                reason,
+            },
+            None => Elevation {
                 requires_elevation: false,
-                reason: ElevationReason::HighestAvailable,
-            };
-        }
-        Some(ExecutionLevel::AsInvoker) => {
-            return Elevation {
-                requires_elevation: false,
-                reason: ElevationReason::ManifestAsInvoker,
-            };
-        }
+                reason: ElevationReason::None,
+            },
+        };
+    };
+    match &manifest.execution_level {
+        Some(ExecutionLevel::RequireAdministrator) => Elevation {
+            requires_elevation: true,
+            reason: ElevationReason::RequireAdministrator,
+        },
+        Some(ExecutionLevel::HighestAvailable) => Elevation {
+            requires_elevation: false,
+            reason: ElevationReason::HighestAvailable,
+        },
+        Some(ExecutionLevel::AsInvoker) => Elevation {
+            requires_elevation: false,
+            reason: ElevationReason::ManifestAsInvoker,
+        },
         Some(ExecutionLevel::Other(level)) => {
             let heuristic = installer_heuristic(file_name, version_fields);
-            return Elevation {
+            Elevation {
                 requires_elevation: heuristic.is_some(),
                 reason: heuristic.unwrap_or(ElevationReason::UnknownLevel(level.clone())),
-            };
+            }
         }
-        None => {}
-    }
-    match installer_heuristic(file_name, version_fields) {
-        Some(reason) => Elevation {
-            requires_elevation: true,
-            reason,
-        },
         None => Elevation {
             requires_elevation: false,
-            reason: ElevationReason::None,
+            reason: ElevationReason::ManifestWithoutLevel,
         },
     }
 }

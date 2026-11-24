@@ -130,8 +130,9 @@ fn with_directory(
     index: usize,
     body: impl FnOnce(u32) -> Vec<u8>,
 ) -> Vec<u8> {
-    let section = builder.sections.len() + usize::from(builder.debug.is_some());
-    assert!(builder.resources.is_empty(), "resources must come last");
+    // `build` appends the generated debug and resource sections after the
+    // ones added here, so they do not move this one.
+    let section = builder.sections.len();
     let rva = SECTION_ALIGNMENT * (section as u32 + 1);
     let data = body(rva);
     let size = data.len() as u32;
@@ -1885,12 +1886,22 @@ fn a_prefix_parse_skips_imports_exports_and_the_driver_verdict() {
     assert_eq!(info.imports, full.imports);
     assert_eq!(info.driver, full.driver);
 
-    // Exports too.
+    // Exports too: read from the whole file, skipped from a short prefix.
     let image = with_directory(PeBuilder::dll(), DIR_EXPORT, |rva| {
         export_section(rva, "x.dll", &["DllRegisterServer"], &[])
     });
+    let info = pe::parse_prefix(&image, image.len() as u64).unwrap();
+    assert!(info.exports.unwrap().notable.dll_register_server);
     let info = pe::parse_prefix(&image[..image.len() - 1], image.len() as u64).unwrap();
     assert!(info.exports.is_none());
+    assert!(info.parse_warnings.is_empty(), "{:?}", info.parse_warnings);
+
+    // And the manifest, which the import fixture above does not have.
+    let image = with_manifest(ELEVATED.as_bytes()).build();
+    let info = pe::parse_prefix(&image, image.len() as u64).unwrap();
+    assert!(info.manifest.is_some() && info.manifest_id == Some(1));
+    let info = pe::parse_prefix(&image[..image.len() - 1], image.len() as u64).unwrap();
+    assert!(info.manifest.is_none() && info.manifest_id.is_none());
     assert!(info.parse_warnings.is_empty(), "{:?}", info.parse_warnings);
 }
 
@@ -1904,4 +1915,455 @@ fn an_empty_setting_is_empty_however_it_is_written() {
         assert_eq!(m.dpi_aware.as_deref(), Some(""), "{xml}");
         assert_eq!(m.dpi_awareness.as_deref(), Some(""), "{xml}");
     }
+}
+
+// --- Review follow-up: fail conservative. ---------------------------------------
+
+#[test]
+fn a_fixture_directory_points_at_its_own_section_with_debug_info() {
+    // `PeBuilder::build` appends the debug section after the sections
+    // added here, so the fixture's RVA must not count it in advance.
+    let builder = PeBuilder {
+        debug: Some(DebugSpec {
+            pdb_guid: [3; 16],
+            pdb_age: 1,
+            pdb_path: "x.pdb".into(),
+            repro: false,
+            pogo: false,
+        }),
+        ..PeBuilder::default()
+    };
+    let image = with_directory(builder, DIR_IMPORT, |rva| {
+        import_section(rva, &[("a.dll", vec![Err(1)])], true)
+    });
+    let info = parse(&image);
+    assert!(info.parse_warnings.is_empty(), "{:?}", info.parse_warnings);
+    assert!(info.imports.unwrap().imports_module("a.dll"));
+    assert!(info.debug.codeview.is_some());
+}
+
+#[test]
+fn a_lossy_module_name_never_matches_exactly() {
+    // `a\xff.dll` renders as `a\u{fffd}.dll`, which is not what the image
+    // says: it is shown, but never matches, and the table is incomplete.
+    let image = with_directory(PeBuilder::default(), DIR_IMPORT, |rva| {
+        let mut body = import_section(rva, &[("aX.dll", vec![Err(1)])], true);
+        let at = body.windows(6).position(|w| w == b"aX.dll").unwrap();
+        body[at + 1] = 0xff;
+        body
+    });
+    let i = parse(&image).imports.unwrap();
+    assert_eq!(i.modules[0].name, "a\u{fffd}.dll");
+    assert!(i.modules[0].name_lossy);
+    assert!(!i.imports_module("a\u{fffd}.dll"));
+    assert!(i.all_module_names.is_empty());
+    assert!(i.truncated);
+    // A valid name still matches case-insensitively.
+    let image = with_directory(PeBuilder::default(), DIR_IMPORT, |rva| {
+        import_section(rva, &[("aX.dll", vec![Err(1)])], true)
+    });
+    let i = parse(&image).imports.unwrap();
+    assert!(!i.modules[0].name_lossy && !i.truncated);
+    assert!(i.imports_module("AX.DLL"));
+}
+
+/// An image with two adjacent sections after `builder`'s: `.a`, a whole
+/// page of file-backed bytes (so no zero fill follows it and `.b` is mapped
+/// right after it), then `.b`. `build` gets the RVAs of `.a` and `.b` and
+/// returns their bodies. Data directory `index` is set to `dir` (an offset
+/// into `.a`), 40 bytes long.
+fn adjacent_image(
+    builder: PeBuilder,
+    index: usize,
+    dir: u32,
+    build: impl FnOnce(u32, u32) -> (Vec<u8>, Vec<u8>),
+) -> Vec<u8> {
+    let a = SECTION_ALIGNMENT * (builder.sections.len() as u32 + 1);
+    let (mut head, tail) = build(a, a + SECTION_ALIGNMENT);
+    assert!(head.len() <= SECTION_ALIGNMENT as usize);
+    head.resize(SECTION_ALIGNMENT as usize, 0xee);
+    let b = builder
+        .section(
+            ".a",
+            head,
+            IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ,
+        )
+        .section(
+            ".b",
+            tail,
+            IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ,
+        );
+    let mut image = b.build();
+    let at = b.data_directory_offset(index);
+    put32(&mut image, at, a + dir);
+    put32(&mut image, at + 4, 40);
+    image
+}
+
+const PAGE: usize = SECTION_ALIGNMENT as usize;
+
+#[test]
+fn import_descriptors_run_on_into_an_adjacent_section() {
+    // One descriptor fills `.a`'s last 20 bytes; two more and the
+    // terminator are in `.b`. All four are in mapped memory.
+    let start = PAGE - 20;
+    let image = adjacent_image(PeBuilder::default(), DIR_IMPORT, start as u32, |_, b| {
+        let mut table = vec![0_u8; 80];
+        let mut tail = vec![0_u8; 0x200];
+        for i in 0..3 {
+            let name = 0x100 + i * 0x10;
+            tail[name..name + 5]
+                .copy_from_slice(format!("{}.dll", (b'a' + i as u8) as char).as_bytes());
+            let thunk = 0x80 + i * 0x10;
+            put64(&mut tail, thunk, (1 << 63) | (i as u64 + 1));
+            put32(&mut table, i * 20, b + thunk as u32);
+            put32(&mut table, i * 20 + 12, b + name as u32);
+            put32(&mut table, i * 20 + 16, b + thunk as u32);
+        }
+        let mut head = vec![0xee_u8; PAGE];
+        head[start..].copy_from_slice(&table[..20]);
+        tail[..60].copy_from_slice(&table[20..]);
+        (head, tail)
+    });
+    let info = parse(&image);
+    assert!(info.parse_warnings.is_empty(), "{:?}", info.parse_warnings);
+    let i = info.imports.unwrap();
+    assert_eq!(i.modules.len(), 3);
+    assert!(!i.truncated);
+    assert!(i.imports_module("c.dll"));
+}
+
+#[test]
+fn thunks_and_names_run_on_into_an_adjacent_section() {
+    // PE32 thunks: one in `.a`'s last 4 bytes, then three live ones and the
+    // null thunk in `.b`.
+    let image = adjacent_image(PeBuilder::pe32(), DIR_IMPORT, 0, |a, _| {
+        let mut head = vec![0_u8; 0x100];
+        let thunk = a + PAGE as u32 - 4;
+        put32(&mut head, 0, thunk);
+        put32(&mut head, 12, a + 0x80);
+        put32(&mut head, 16, thunk);
+        head[0x80..0x86].copy_from_slice(b"a.dll\0");
+        head.resize(PAGE, 0xee);
+        put32(&mut head, PAGE - 4, 0x8000_0001);
+        let mut tail = vec![0_u8; 0x200];
+        for i in 0..3 {
+            put32(&mut tail, i * 4, 0x8000_0002 + i as u32);
+        }
+        (head, tail)
+    });
+    let info = parse(&image);
+    assert!(info.parse_warnings.is_empty(), "{:?}", info.parse_warnings);
+    let i = info.imports.unwrap();
+    assert_eq!(i.modules[0].function_count, 4);
+    assert!(!i.truncated);
+
+    // A module name that ends at `.a`'s last byte, with its NUL in `.b`.
+    let name = b"ntoskrnl.exe";
+    let image = adjacent_image(native(PeBuilder::default()), DIR_IMPORT, 0, |a, _| {
+        let mut head = vec![0_u8; 0x100];
+        put32(&mut head, 0, a + 0x80);
+        put32(&mut head, 12, a + (PAGE - name.len()) as u32);
+        put32(&mut head, 16, a + 0x80);
+        put64(&mut head, 0x80, (1 << 63) | 1);
+        head.resize(PAGE, 0xee);
+        head[PAGE - name.len()..].copy_from_slice(name);
+        (head, vec![0_u8; 0x200])
+    });
+    let info = parse(&image);
+    assert!(info.parse_warnings.is_empty(), "{:?}", info.parse_warnings);
+    let i = info.imports.as_ref().unwrap();
+    assert_eq!(i.modules[0].name, "ntoskrnl.exe");
+    assert!(i.imports_module("ntoskrnl.exe") && !i.truncated);
+    assert!(info.is_kernel_driver());
+
+    // The same name followed by unmapped memory (no `.b`) is unreadable,
+    // never complete.
+    let image = with_directory(native(PeBuilder::default()), DIR_IMPORT, |a| {
+        let mut head = vec![0_u8; 0x100];
+        put32(&mut head, 0, a + 0x80);
+        put32(&mut head, 12, a + (PAGE - name.len()) as u32);
+        put32(&mut head, 16, a + 0x80);
+        put64(&mut head, 0x80, (1 << 63) | 1);
+        head.resize(PAGE, 0xee);
+        head[PAGE - name.len()..].copy_from_slice(name);
+        head
+    });
+    let info = parse(&image);
+    let i = info.imports.as_ref().unwrap();
+    assert!(i.modules.is_empty() && i.truncated);
+    assert!(
+        info.parse_warnings
+            .iter()
+            .any(|w| w.kind == WarningKind::ImportTableMalformed)
+    );
+}
+
+#[test]
+fn a_notable_export_name_runs_on_into_an_adjacent_section() {
+    // `CPlApplet` ends at `.a`'s last byte; its NUL is `.b`'s first.
+    let image = adjacent_image(PeBuilder::dll(), DIR_EXPORT, 0, |a, _| {
+        let mut head = raw_export_section(a, &[(b"X".to_vec(), 0)], &[0x1000]);
+        head.resize(PAGE, 0xee);
+        let at = PAGE - 9;
+        head[at..].copy_from_slice(b"CPlApplet");
+        let names = 40 + 4;
+        put32(&mut head, names, a + at as u32);
+        (head, vec![0_u8; 0x200])
+    });
+    let info = parse(&image);
+    assert!(info.parse_warnings.is_empty(), "{:?}", info.parse_warnings);
+    let e = info.exports.unwrap();
+    assert!(e.notable.cpl_applet);
+    assert_eq!(e.exports[0].name.as_deref(), Some("CPlApplet"));
+}
+
+#[test]
+fn an_unrepresentable_export_ordinal_is_rejected_not_wrapped() {
+    // Base u32::MAX: slot 0 is ordinal u32::MAX, slot 1 would wrap to 0.
+    let entries = vec![(b"A".to_vec(), 0), (b"B".to_vec(), 1)];
+    let image = with_directory(PeBuilder::dll(), DIR_EXPORT, |rva| {
+        let mut body = raw_export_section(rva, &entries, &[0x1000, 0x1010, 0x1020]);
+        put32(&mut body, 16, u32::MAX);
+        body
+    });
+    let info = parse(&image);
+    let e = info.exports.as_ref().unwrap();
+    let listed: Vec<(Option<&str>, u32)> = e
+        .exports
+        .iter()
+        .map(|x| (x.name.as_deref(), x.ordinal))
+        .collect();
+    assert_eq!(listed, [(Some("A"), u32::MAX)]);
+    assert!(e.truncated);
+    assert!(
+        info.parse_warnings
+            .iter()
+            .any(|w| w.kind == WarningKind::ExportTableMalformed)
+    );
+    // Unnamed slots too.
+    let image = with_directory(PeBuilder::dll(), DIR_EXPORT, |rva| {
+        let mut body = raw_export_section(rva, &[], &[0x1000, 0x1010]);
+        put32(&mut body, 16, u32::MAX);
+        body
+    });
+    let e = parse(&image).exports.unwrap();
+    let ordinals: Vec<u32> = e.exports.iter().map(|x| x.ordinal).collect();
+    assert_eq!(ordinals, [u32::MAX]);
+    assert!(e.truncated);
+    // An ordinary base is unchanged: Base 1, index 1 is ordinal 2.
+    let e = exports_of(&[], &[0x1000, 0x1010]).exports.unwrap();
+    let ordinals: Vec<u32> = e.exports.iter().map(|x| x.ordinal).collect();
+    assert_eq!(ordinals, [1, 2]);
+    assert!(!e.truncated);
+}
+
+#[test]
+fn a_bad_forwarder_found_only_by_the_notable_search_is_reported() {
+    // `DllRegisterServer` sorts after 10,000 padding names, so the
+    // listing never reaches it, and its forwarder string runs past the
+    // export directory.
+    let mut names: Vec<String> = (0..pe::MAX_EXPORTS).map(|i| format!("A{i:05}")).collect();
+    names.push("DllRegisterServer".into());
+    let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let target = "OTHER.Target";
+    let last = refs.len() - 1;
+    let mut start = 0;
+    let mut image = with_directory(PeBuilder::dll(), DIR_EXPORT, |rva| {
+        let body = export_section(rva, "x.dll", &refs, &[(last, target)]);
+        start = (body.len() - target.len() - 1) as u32;
+        body
+    });
+    // Only the first byte of the string is inside the directory.
+    let dir = PeBuilder::dll().data_directory_offset(DIR_EXPORT);
+    put32(&mut image, dir + 4, start + 1);
+    let info = parse(&image);
+    let e = info.exports.as_ref().unwrap();
+    assert!(e.notable.dll_register_server);
+    assert!(
+        e.exports
+            .iter()
+            .all(|x| x.name.as_deref() != Some("DllRegisterServer"))
+    );
+    assert!(e.truncated);
+    assert!(
+        info.parse_warnings
+            .iter()
+            .any(|w| w.kind == WarningKind::ExportTableMalformed),
+        "{:?}",
+        info.parse_warnings
+    );
+}
+
+#[test]
+fn an_unreadable_name_on_the_notable_search_path_is_reported() {
+    // 20,001 sorted names, so the search's first probe (name 10,000) is
+    // past the listing cap, and it points at unmapped memory.
+    let n = 2 * pe::MAX_EXPORTS + 1;
+    let entries: Vec<(Vec<u8>, u16)> = (0..n)
+        .map(|i| (format!("A{i:05}").into_bytes(), i as u16))
+        .collect();
+    let functions = vec![0x1000_u32; n];
+    let image = with_directory(PeBuilder::dll(), DIR_EXPORT, |rva| {
+        let mut body = raw_export_section(rva, &entries, &functions);
+        let names = 40 + n * 4;
+        put32(&mut body, names + pe::MAX_EXPORTS * 4, 0x00f0_0000);
+        body
+    });
+    let info = parse(&image);
+    let e = info.exports.as_ref().unwrap();
+    assert!(!e.notable.dll_register_server);
+    // "Not found" is not reliable here, so the table says so, although
+    // the listing met no bad entry.
+    assert!(e.truncated);
+    assert!(
+        info.parse_warnings
+            .iter()
+            .any(|w| w.kind == WarningKind::ExportTableMalformed)
+    );
+}
+
+#[test]
+fn the_ordinal_pre_scan_is_bounded() {
+    // More names than the pre-scan budget: no slot is listed as unnamed,
+    // and the result is marked incomplete. The tables are left unfilled
+    // (all zero): only their sizes matter here.
+    let n = pe::MAX_ORDINAL_SCAN + 1;
+    let image = with_directory(PeBuilder::dll(), DIR_EXPORT, |rva| {
+        let mut body = raw_export_section(rva, &[], &[0x1000, 0x1010]);
+        let names_at = body.len();
+        body.resize(names_at + n as usize * 6, 0);
+        put32(&mut body, 24, n);
+        put32(&mut body, 32, rva + names_at as u32);
+        put32(&mut body, 36, rva + names_at as u32 + n * 4);
+        body
+    });
+    let e = parse(&image).exports.unwrap();
+    assert!(
+        e.exports.iter().all(|x| x.name.is_some()),
+        "{:?}",
+        e.exports.len()
+    );
+    assert!(e.truncated);
+}
+
+#[test]
+fn an_undeclared_namespace_prefix_is_malformed() {
+    let level = |open: &str, close: &str| {
+        format!(
+            r#"<assembly{open}><x:trustInfo><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator"/></requestedPrivileges></security></x:trustInfo>{close}</assembly>"#
+        )
+    };
+    // Undeclared: not namespace well formed.
+    assert!(parse_manifest(level("", "").as_bytes()).is_err());
+    // Declared on an ancestor: read by its local name.
+    let m = parse_manifest(level(r#" xmlns:x="urn:example:asm.v3""#, "").as_bytes()).unwrap();
+    assert_eq!(
+        m.execution_level,
+        Some(ExecutionLevel::RequireAdministrator)
+    );
+    // A declaration goes out of scope with its element.
+    let sibling = r#"<assembly><a xmlns:x="urn:e"/><x:b/></assembly>"#;
+    assert!(parse_manifest(sibling.as_bytes()).is_err());
+    // Prefixed attributes too, and `xmlns` cannot be a prefix of an
+    // element or be undeclared.
+    for bad in [
+        r#"<assembly x:level="1"/>"#,
+        r#"<xmlns:a/>"#,
+        r#"<assembly xmlns:x=""/>"#,
+    ] {
+        assert!(parse_manifest(bad.as_bytes()).is_err(), "{bad}");
+    }
+    // `xml` is always bound.
+    assert!(parse_manifest(br#"<assembly xml:lang="en"/>"#).is_ok());
+}
+
+#[test]
+fn a_manifest_without_a_level_is_not_no_manifest() {
+    // A valid process manifest with an identity and no execution level:
+    // the installer heuristics apply only when there is no manifest.
+    let xml = r#"<assembly><assemblyIdentity name="Setup.Tool" version="1.0.0.0"/></assembly>"#;
+    let info = parse(&with_manifest(xml.as_bytes()).build());
+    assert_eq!(info.manifest_id, Some(1));
+    let e = info.requires_elevation(Some("setup.exe"));
+    assert_eq!(
+        (e.requires_elevation, e.reason),
+        (false, ElevationReason::ManifestWithoutLevel)
+    );
+    // No manifest at all: the heuristic applies.
+    let e = parse(&PeBuilder::default().build()).requires_elevation(Some("setup.exe"));
+    assert_eq!(e.reason, ElevationReason::InstallerFileName("setup"));
+    // requireAdministrator is unchanged.
+    let e = parse(&with_manifest(level_manifest("requireAdministrator").as_bytes()).build())
+        .requires_elevation(Some("setup.exe"));
+    assert_eq!(e.reason, ElevationReason::RequireAdministrator);
+}
+
+#[test]
+fn an_unreadable_process_manifest_is_never_replaced_by_id_2() {
+    // ID 1's only language entry points past the resource tree, so no
+    // leaf of it can be read. ID 2 is a readable decoy.
+    let image = PeBuilder {
+        resources: vec![
+            Leaf {
+                type_id: 24,
+                name_id: 1,
+                lang: 0x0409,
+                data: level_manifest("requireAdministrator").into_bytes(),
+            },
+            Leaf {
+                type_id: 24,
+                name_id: 2,
+                lang: 0x0409,
+                data: level_manifest("asInvoker").into_bytes(),
+            },
+        ],
+        ..PeBuilder::default()
+    }
+    .build();
+    let rsrc = parse(&image).sections.last().unwrap().pointer_to_raw_data as usize;
+    // The tree is root, type 24, names 1 and 2, then their language
+    // directories (one entry each). Point ID 1's language entry far out.
+    let lang_dir_1 = rsrc + (16 + 8) + (16 + 2 * 8);
+    let mut image = image;
+    put32(&mut image, lang_dir_1 + 16 + 4, 0x7fff_0000);
+    let info = parse(&image);
+    assert_eq!((info.manifest.as_ref(), info.manifest_id), (None, Some(1)));
+    let e = info.requires_elevation(Some("tool.exe"));
+    assert_eq!(
+        (e.requires_elevation, e.reason),
+        (true, ElevationReason::ManifestUnreadable)
+    );
+    // ID 1's name entry is a leaf where a directory belongs: the loader
+    // cannot use it, but it is there, so ID 2 still does not stand in.
+    put32(&mut image, lang_dir_1 + 16 + 4, 0x7fff_0000);
+    let type_dir = rsrc + 16 + 8;
+    let target = u32::from_le_bytes(
+        image[type_dir + 16 + 4..type_dir + 16 + 8]
+            .try_into()
+            .unwrap(),
+    );
+    put32(&mut image, type_dir + 16 + 4, target & 0x7fff_ffff);
+    let info = parse(&image);
+    assert_eq!((info.manifest.as_ref(), info.manifest_id), (None, Some(1)));
+    assert_eq!(
+        info.requires_elevation(None).reason,
+        ElevationReason::ManifestUnreadable
+    );
+    // A process manifest that does not parse fails closed too.
+    let image = with_manifest(b"<assembly>").build();
+    let e = parse(&image).requires_elevation(Some("tool.exe"));
+    assert_eq!(e.reason, ElevationReason::ManifestUnreadable);
+    // With ID 1 genuinely absent, ID 2 is still reported.
+    let image = PeBuilder {
+        resources: vec![Leaf {
+            type_id: 24,
+            name_id: 2,
+            lang: 0x0409,
+            data: level_manifest("asInvoker").into_bytes(),
+        }],
+        ..PeBuilder::dll()
+    }
+    .build();
+    assert_eq!(parse(&image).manifest_id, Some(2));
 }

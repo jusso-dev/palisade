@@ -38,7 +38,7 @@ pub use driver::{DriverClass, DriverSignal, KERNEL_MODULES};
 pub use imports::{
     Export, ExportInfo, ExportTarget, ImportInfo, ImportedFunction, ImportedModule,
     MAX_EXPORT_SLOTS, MAX_EXPORTS, MAX_IMPORT_DESCRIPTORS, MAX_IMPORT_MODULES,
-    MAX_IMPORTED_FUNCTIONS, MAX_MODULE_NAME_BYTES, MAX_NAME_LEN, NotableExports,
+    MAX_IMPORTED_FUNCTIONS, MAX_MODULE_NAME_BYTES, MAX_NAME_LEN, MAX_ORDINAL_SCAN, NotableExports,
 };
 pub use manifest::{
     AssemblyIdentity, Elevation, ElevationReason, ExecutionLevel, Manifest, ManifestError,
@@ -494,12 +494,16 @@ pub struct PeInfo {
     pub exports: Option<ExportInfo>,
     /// The application manifest: the lowest standard `RT_MANIFEST` ID
     /// present (1, 2 or 3), parsed. `None` when there is none, or when it
-    /// does not parse (with a [`WarningKind::Manifest`] warning); a higher
-    /// ID is never used in its place.
+    /// cannot be read or does not parse (with a warning); a higher ID is
+    /// never used in its place. An ID counts as present when its directory
+    /// entry exists, even if no data under it can be read.
     pub manifest: Option<Manifest>,
     /// The `RT_MANIFEST` ID [`Self::manifest`] was read from: 1 is the
     /// process manifest the OS reads at process creation (and so the one
-    /// that decides elevation); 2 and 3 are DLL isolation manifests.
+    /// that decides elevation); 2 and 3 are DLL isolation manifests. Set
+    /// even when [`Self::manifest`] is `None` because that manifest could
+    /// not be read or parsed, and set to the lower ID when the resource
+    /// tree is too damaged to rule it out, so a higher ID never stands in.
     pub manifest_id: Option<u16>,
     /// Kernel driver signals and the verdict.
     pub driver: DriverClass,
@@ -536,7 +540,10 @@ impl PeInfo {
 
     /// The #45 elevation heuristic, for a file named `file_name` (the
     /// final path component, if known), from the process manifest (ID 1)
-    /// only. See [`manifest::requires_elevation`].
+    /// only. See [`manifest::requires_elevation`]. A process manifest that
+    /// is present but cannot be read or parsed is
+    /// [`ElevationReason::ManifestUnreadable`] and counts as requiring
+    /// elevation.
     #[must_use]
     pub fn requires_elevation(&self, file_name: Option<&str>) -> Elevation {
         let mut fields = Vec::new();
@@ -558,6 +565,14 @@ impl PeInfo {
             .manifest
             .as_ref()
             .filter(|_| self.manifest_id == Some(1));
+        // Present but unreadable: what it asks for is unknown, so fail
+        // closed rather than read it as "no manifest".
+        if self.manifest_id == Some(1) && process_manifest.is_none() {
+            return Elevation {
+                requires_elevation: true,
+                reason: ElevationReason::ManifestUnreadable,
+            };
+        }
         manifest::requires_elevation(process_manifest, file_name, &fields)
     }
 
@@ -1362,20 +1377,29 @@ fn version_from_resources(
 }
 
 /// The manifest with the lowest standard `RT_MANIFEST` ID present (1, 2 or
-/// 3, found by loader-style lookup), and that ID. If it does not parse, no
-/// other manifest is used in its place: a decoy at a higher ID must not
-/// stand in for the one the OS reads.
+/// 3, found by loader-style lookup), and that ID. If it cannot be read or
+/// does not parse, no other manifest is used in its place: a decoy at a
+/// higher ID must not stand in for the one the OS reads.
 fn manifest_from_resources(
     data: &[u8],
     summary: &ResourceSummary,
     warnings: &mut Warnings,
 ) -> (Option<Manifest>, Option<u16>) {
-    let Some(entry) = summary.standard_manifests.first() else {
+    let Some(first) = summary.first_standard_manifest_id else {
         return (None, None);
     };
-    let id = match entry.name {
-        ResourceId::Id(id) => Some(id),
-        ResourceId::Name(_) => None,
+    let id = Some(first);
+    let Some(entry) = summary
+        .standard_manifests
+        .iter()
+        .find(|e| e.name == ResourceId::Id(first))
+    else {
+        // The ID is there, but no data entry under it can be read.
+        warnings.push(
+            usize::try_from(summary.offset).unwrap_or(usize::MAX),
+            WarningKind::ResourceOutOfBounds,
+        );
+        return (None, id);
     };
     let at = entry
         .file_offset

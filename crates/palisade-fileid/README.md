@@ -18,11 +18,14 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   that cap) and the export
   table (names, ordinals and forwarders; `CPlApplet`, `DllRegisterServer`,
   `DllGetClassObject` and `ServiceMain` are found by the loader's binary
-  search over the whole name table). Kernel modules are found anywhere in
+  search over the whole name table; a name the search cannot read leaves
+  the answer unknown and marks the table truncated and malformed, so a
+  `false` is reliable only when `ExportInfo::truncated` is not set). Kernel modules are found anywhere in
   the first 65,536 import descriptors (`MAX_IMPORT_DESCRIPTORS`). Any other
   module is found only among the names kept: descriptors past that limit
   are not read, at most 1 MiB of module names is kept
-  (`MAX_MODULE_NAME_BYTES`), and a name cut at 512 bytes never matches. So
+  (`MAX_MODULE_NAME_BYTES`), and a name cut at 512 bytes, or one that is
+  not valid UTF-8, never matches. So
   a negative `ImportInfo::imports_module` answer is reliable only when
   `ImportInfo::truncated` is not set. It classifies kernel drivers:
   subsystem native plus a kernel import, an `INIT` section or
@@ -30,8 +33,10 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   manifest (`requestedExecutionLevel`, `uiAccess`, `autoElevate`,
   `dpiAware`, assembly identity, `supportedOS`) with a bounded XML parser
   that rejects DTDs and undefined entities (XML 1.0 in UTF-8 only; XML 1.1
-  and UTF-16 manifests are errors), and gives the
-  `requires_elevation` heuristic with its reason. `NormalizedName` gives the
+  and UTF-16 manifests are errors, and so is an undeclared namespace
+  prefix), and gives the `requires_elevation` heuristic with its reason. The
+  installer heuristics apply only when there is no manifest; a process
+  manifest that is present but unreadable counts as requiring elevation. `NormalizedName` gives the
   trimmed, whitespace-collapsed NFC and case-folded forms of a version
   string for matching, keeping the original.
 - `hash`: flat SHA-256, SHA-1, MD5, SHA-384 and SHA-512, computed together in
