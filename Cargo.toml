@@ -20,7 +20,7 @@ default-members = [
 version = "0.1.0"
 edition = "2024"
 # MSRV. CI checks the workspace on this exact version (the `msrv` job).
-rust-version = "1.85"
+rust-version = "1.94"
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/jusso-dev/palisade"
 authors = ["Palisade contributors"]
@@ -41,8 +41,9 @@ palisade-policy = { path = "crates/palisade-policy" }
 axum = { version = "0.8.9", default-features = false }
 boon = { version = "0.6.1" }
 clap = { version = "4.6.9", default-features = false, features = ["std", "derive", "env", "error-context", "help", "usage"] }
-# Benchmarks only (dev-dependency). 0.7 is the last release that builds on the
-# 1.85 MSRV; the default plotting and parallel features are left out.
+# Benchmarks only (dev-dependency). 0.7 was chosen when the MSRV was 1.85;
+# moving to a newer release is a separate change. The default plotting and
+# parallel features are left out.
 criterion = { version = "0.7.0", default-features = false, features = ["cargo_bench_support"] }
 hyper-util = { version = "0.1.21", default-features = false, features = ["http1", "http2", "server-auto", "service", "tokio"] }
 if-addrs = { version = "0.15.0", default-features = false }
@@ -91,6 +92,12 @@ cast_possible_truncation = "warn"
 cast_possible_wrap = "warn"
 cast_sign_loss = "warn"
 checked_conversions = "warn"
+# Clippy applies these from MSRV 1.94 (let-chains, `is_multiple_of`,
+# `as_chunks`). They are allowed until the existing code is rewritten for
+# them in a follow-up under #19, after the parallel work in progress lands.
+collapsible_if = "allow"
+manual_is_multiple_of = "allow"
+chunks_exact_to_as_chunks = "allow"
 
 [profile.dev]
 overflow-checks = true

@@ -131,3 +131,12 @@ The planned flag names, each added with the code that needs it:
 and the Windows x64, Windows ARM64 and Linux x64 targets. `rust-version` in `[workspace.package]`
 is the MSRV, never newer than stable minus 2. Every bump is recorded in the changelog, or in an ADR
 if it drops a platform (ADR 0011). The `msrv` CI job checks the workspace on exactly that version.
+
+There is no changelog yet, so MSRV bumps are recorded here:
+
+- 2026-11-24: 1.85 → 1.94. `sqlx` 0.9, the Postgres layer for #127, needs 1.94. `sqlx` 0.8 still
+  builds on 1.85, but it brings older versions of the hashing, random-number and Windows binding
+  crates and takes the tree over the duplicate budget in `cargo xtask check-supply-chain`.
+  At 1.94 Clippy also applies `collapsible_if`, `manual_is_multiple_of` and
+  `chunks_exact_to_as_chunks` to existing code. They are allowed in `[workspace.lints.clippy]`
+  until a follow-up under #19 rewrites that code.
