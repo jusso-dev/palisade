@@ -21,18 +21,21 @@
 //!   never trip the breaker: they keep retrying at the maximum backoff. Panics
 //!   that a subsystem catches itself, such as one per parsed file, never reach
 //!   the supervisor and do not count (ADR 0012).
-//! - **Agent state** is derived from the subsystems: `Starting` until every
-//!   subsystem has had its first outcome, then `FailSafe` if a critical
-//!   subsystem has failed, `Degraded` if any subsystem is not running, and
-//!   `Running` otherwise. A dependency that fails or restarts does not stop
-//!   its running dependents.
+//! - **Agent state** is derived from the subsystems. `FailSafe` as soon as
+//!   a critical subsystem has failed, even during startup. Otherwise
+//!   `Starting` until every subsystem has had its first outcome, then
+//!   `Degraded` if any subsystem is not running, and `Running` if all are. A
+//!   dependency that fails or restarts does not stop its running dependents.
 //! - **Shutdown** first stops every subsystem that is not running (waiting,
 //!   restarting or failed), so nothing starts during shutdown. It then stops
 //!   the running subsystems in reverse start order, so dependents stop
-//!   before what they depend on. Each gets
-//!   [`Subsystem::stop_timeout`],
+//!   before what they depend on. Each gets [`Subsystem::stop_timeout`],
 //!   capped by the overall budget; a subsystem that misses its deadline is
-//!   aborted, so shutdown always finishes within the budget.
+//!   aborted, so shutdown always finishes within the budget. A running
+//!   subsystem that fails while others are still stopping is not restarted,
+//!   and its failure is reported in the [`ShutdownReport`].
+//! - **Timeouts** longer than about ten years are capped, so no deadline
+//!   computation can overflow.
 
 use std::{
     collections::VecDeque,
@@ -81,6 +84,11 @@ impl Default for RestartPolicy {
 }
 
 impl RestartPolicy {
+    /// Whether a panic at `at` has left the panic window by `now`.
+    fn expired(&self, now: Instant, at: Instant) -> bool {
+        now.duration_since(at) > self.panic_window
+    }
+
     /// The delay before restart number `failures` (1-based) in a row.
     pub fn backoff(&self, failures: u32) -> Duration {
         let shift = failures.saturating_sub(1).min(31);
@@ -325,6 +333,7 @@ impl SupervisorHandle {
                 .collect();
             (shared.lifecycle.state().clone(), rows)
         };
+        let now = Instant::now();
         let subsystems = rows
             .into_iter()
             .map(|(i, slot)| {
@@ -338,7 +347,11 @@ impl SupervisorHandle {
                     criticality: subsystem.criticality(),
                     status: slot.status,
                     restarts: slot.starts.saturating_sub(1),
-                    recent_panics: slot.panics.len(),
+                    recent_panics: slot
+                        .panics
+                        .iter()
+                        .filter(|&&t| !self.inner.policy.expired(now, t))
+                        .count(),
                     health,
                 }
             })
@@ -348,13 +361,13 @@ impl SupervisorHandle {
 
     /// Stops every subsystem in reverse start order within `budget`.
     pub async fn shutdown(mut self, budget: Duration) -> ShutdownReport {
-        let overall = Instant::now() + budget;
+        let overall = after(Instant::now(), budget);
         self.inner.draining.send_replace(true);
         self.inner.set_agent_state(AgentState::Stopping);
         let mut outcomes = Vec::with_capacity(self.runners.len());
         for &i in self.inner.order.iter().rev() {
             let slot = &self.inner.slots[i];
-            let deadline = overall.min(Instant::now() + slot.subsystem.stop_timeout());
+            let deadline = overall.min(after(Instant::now(), slot.subsystem.stop_timeout()));
             slot.stop.send_replace(Some(deadline));
             if let Some(runner) = self.runners[i].take() {
                 // A runner only awaits timers and channels, and aborts its
@@ -529,6 +542,21 @@ impl Inner {
                     .iter()
                     .any(|&d| settled[d] && !running(d));
         }
+        let critical: Vec<String> = self
+            .order
+            .iter()
+            .filter(|&&i| self.slots[i].subsystem.criticality() == Criticality::Critical)
+            .filter_map(|&i| match &slots[i].status {
+                SubsystemStatus::Failed { reason } => Some(format!(
+                    "critical subsystem {} failed: {reason}",
+                    self.name(i)
+                )),
+                _ => None,
+            })
+            .collect();
+        if !critical.is_empty() {
+            return AgentState::FailSafe(critical.join("; "));
+        }
         if starting && settled.iter().any(|s| !s) {
             return AgentState::Starting;
         }
@@ -537,13 +565,6 @@ impl Inner {
             let name = self.name(i);
             let reason = match &slots[i].status {
                 SubsystemStatus::Running => continue,
-                SubsystemStatus::Failed { reason }
-                    if self.slots[i].subsystem.criticality() == Criticality::Critical =>
-                {
-                    return AgentState::FailSafe(format!(
-                        "critical subsystem {name} failed: {reason}"
-                    ));
-                }
                 SubsystemStatus::Failed { reason } => format!("{name} failed: {reason}"),
                 SubsystemStatus::Restarting { reason, .. } => {
                     format!("{name} restarting after: {reason}")
@@ -591,6 +612,7 @@ impl Inner {
         self.update(|shared| {
             let slot = &mut shared.slots[i];
             slot.settled = true;
+            let panicked = matches!(failure, Failure::Panic(_));
             let reason = match failure {
                 Failure::Error(message) => {
                     tracing::warn!(subsystem = name, error = %message, "subsystem failed");
@@ -602,14 +624,14 @@ impl Inner {
                     while slot
                         .panics
                         .front()
-                        .is_some_and(|&t| now.duration_since(t) >= self.policy.panic_window)
+                        .is_some_and(|&t| self.policy.expired(now, t))
                     {
                         slot.panics.pop_front();
                     }
                     format!("panicked: {message}")
                 }
             };
-            if slot.panics.len() >= self.policy.panic_limit {
+            if panicked && slot.panics.len() >= self.policy.panic_limit {
                 tracing::error!(
                     subsystem = name,
                     panics = slot.panics.len(),
@@ -623,7 +645,7 @@ impl Inner {
                     ),
                 };
             } else {
-                let at = now + self.policy.backoff(consecutive);
+                let at = after(now, self.policy.backoff(consecutive));
                 retry_at = Some(at);
                 slot.status = SubsystemStatus::Restarting {
                     reason,
@@ -643,6 +665,16 @@ impl Inner {
     }
 }
 
+/// Longest delay the supervisor schedules. Longer timeouts, budgets or
+/// backoffs from a custom [`Subsystem`] or [`RestartPolicy`] are capped to
+/// this, so adding them to the clock cannot overflow.
+const MAX_DELAY: Duration = Duration::from_secs(10 * 365 * 24 * 3600);
+
+/// `now + delay`, capped at [`MAX_DELAY`] and never panicking.
+fn after(now: Instant, delay: Duration) -> Instant {
+    now.checked_add(delay.min(MAX_DELAY)).unwrap_or(now)
+}
+
 /// Kahn's algorithm, taking the lowest registration index first. Returns the
 /// indices left over if there is a cycle.
 fn start_order(slots: &[Slot]) -> Result<Vec<usize>, Vec<usize>> {
@@ -656,10 +688,25 @@ fn start_order(slots: &[Slot]) -> Result<Vec<usize>, Vec<usize>> {
                 placed[i] = true;
                 order.push(i);
             }
-            None => return Err((0..slots.len()).filter(|&i| !placed[i]).collect()),
+            None => return Err(cycle_members(slots, placed)),
         }
     }
     Ok(order)
+}
+
+/// The unplaced subsystems left after removing, repeatedly, those that no
+/// other unplaced subsystem depends on. What is left lies on a cycle or
+/// between two.
+fn cycle_members(slots: &[Slot], placed: Vec<bool>) -> Vec<usize> {
+    let mut left: Vec<bool> = placed.iter().map(|p| !p).collect();
+    loop {
+        let sink = (0..slots.len())
+            .find(|&i| left[i] && !(0..slots.len()).any(|j| left[j] && slots[j].deps.contains(&i)));
+        match sink {
+            Some(i) => left[i] = false,
+            None => return (0..slots.len()).filter(|&i| left[i]).collect(),
+        }
+    }
 }
 
 fn panic_message(error: JoinError) -> String {
@@ -713,14 +760,14 @@ async fn run_slot(sup: Arc<Inner>, i: usize) {
         let (ready_tx, mut ready_rx) = watch::channel(false);
         let ctx = SubsystemContext::new(name, ready_tx, slot.stop.subscribe());
         let mut task = tokio::spawn(Arc::clone(&slot.subsystem).run(ctx));
-        let start_deadline = Instant::now() + slot.subsystem.start_timeout();
+        let start_deadline = after(Instant::now(), slot.subsystem.start_timeout());
         let mut ready_open = true;
         let mut ready_since = None;
         let mut deadline = None;
         let end = loop {
             tokio::select! {
                 result = &mut task => break RunEnd::Finished(result),
-                changed = ready_rx.changed(), if ready_open && ready_since.is_none() => {
+                changed = ready_rx.changed(), if ready_open && ready_since.is_none() && deadline.is_none() => {
                     if changed.is_err() {
                         ready_open = false;
                     } else if *ready_rx.borrow_and_update() {
@@ -761,14 +808,28 @@ async fn run_slot(sup: Arc<Inner>, i: usize) {
         };
         slot.up.send_replace(false);
 
-        if deadline.is_some() || stop.borrow().is_some() {
+        let stopping = deadline.is_some() || stop.borrow().is_some();
+        if stopping || *draining.borrow() {
+            // Shutdown has begun. A run that ends before its own stop
+            // request failed while others were stopping; report it, and do
+            // not restart it.
             let outcome = match end {
                 RunEnd::StopDeadline | RunEnd::StartTimeout => StopOutcome::Aborted,
-                RunEnd::Finished(Ok(Ok(()))) => StopOutcome::Clean,
+                RunEnd::Finished(Ok(Ok(()))) if stopping => StopOutcome::Clean,
+                RunEnd::Finished(Ok(Ok(()))) => {
+                    StopOutcome::Error("exited before its stop request".to_owned())
+                }
                 RunEnd::Finished(Ok(Err(e))) => StopOutcome::Error(e.message().to_owned()),
                 RunEnd::Finished(Err(e)) if e.is_panic() => StopOutcome::Panicked(panic_message(e)),
                 RunEnd::Finished(Err(_)) => StopOutcome::Aborted,
             };
+            if !stopping {
+                tracing::warn!(
+                    subsystem = name,
+                    ?outcome,
+                    "subsystem ended during shutdown"
+                );
+            }
             return sup.finish(i, outcome);
         }
 

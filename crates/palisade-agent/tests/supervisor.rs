@@ -45,12 +45,17 @@ enum Behaviour {
     SlowStop(Duration),
     /// Panics while stopping.
     PanicOnStop,
+    /// Returns an error while stopping.
+    ErrorOnStop,
+    /// Panics this long after becoming ready, once; then behaves normally.
+    PanicOnceAfter(Duration),
 }
 
 type Log = Arc<Mutex<Vec<(String, Instant)>>>;
 
 struct Probe {
     name: &'static str,
+    timeouts: (Duration, Duration),
     criticality: Criticality,
     deps: Vec<&'static str>,
     behaviour: Behaviour,
@@ -62,6 +67,7 @@ impl Probe {
     fn new(name: &'static str, behaviour: Behaviour, log: &Log) -> Self {
         Self {
             name,
+            timeouts: (Duration::from_secs(30), Duration::from_secs(2)),
             criticality: Criticality::NonCritical,
             deps: Vec::new(),
             behaviour,
@@ -72,6 +78,11 @@ impl Probe {
 
     fn critical(mut self) -> Self {
         self.criticality = Criticality::Critical;
+        self
+    }
+
+    fn timeouts(mut self, start: Duration, stop: Duration) -> Self {
+        self.timeouts = (start, stop);
         self
     }
 
@@ -102,11 +113,11 @@ impl Subsystem for Probe {
     }
 
     fn stop_timeout(&self) -> Duration {
-        Duration::from_secs(2)
+        self.timeouts.1
     }
 
     fn start_timeout(&self) -> Duration {
-        Duration::from_secs(30)
+        self.timeouts.0
     }
 
     fn health(&self) -> Health {
@@ -135,6 +146,12 @@ impl Subsystem for Probe {
                     panic!("injected panic after ready");
                 }
                 Behaviour::ExitEarly => return Ok(()),
+                Behaviour::PanicOnceAfter(d) if run == 1 => {
+                    tokio::select! {
+                        () = sleep(d) => panic!("injected late panic"),
+                        _ = ctx.stopped() => return Ok(()),
+                    }
+                }
                 _ => {}
             }
             let deadline = ctx.stopped().await;
@@ -143,6 +160,7 @@ impl Subsystem for Probe {
             match self.behaviour {
                 Behaviour::SlowStop(d) => sleep(d).await,
                 Behaviour::PanicOnStop => panic!("injected panic on stop"),
+                Behaviour::ErrorOnStop => return Err(SubsystemError::new("flush failed")),
                 _ => {}
             }
             self.record("stopped");
@@ -703,4 +721,193 @@ async fn a_cancelled_shutdown_still_stops_everything() {
     assert_eq!(Arc::strong_count(&store), 1);
     assert_eq!(Arc::strong_count(&events_probe), 1);
     assert_eq!(store.runs.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn a_cycle_names_only_the_subsystems_on_it() {
+    let log = Log::default();
+    let err = Supervisor::new(
+        vec![
+            arc(Probe::new("a", Behaviour::Normal, &log).after(&["b"])),
+            arc(Probe::new("b", Behaviour::Normal, &log).after(&["a"])),
+            arc(Probe::new("d", Behaviour::Normal, &log).after(&["a"])),
+        ],
+        RestartPolicy::default(),
+    )
+    .unwrap_err();
+    assert_eq!(err, SupervisorError::DependencyCycle(vec!["a", "b"]));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failure_while_others_stop_is_reported_not_hidden() {
+    let log = Log::default();
+    let handle = Supervisor::new(
+        vec![
+            // Started first, so stopped last. It panics 1 s into shutdown,
+            // while `events` is still stopping.
+            arc(Probe::new(
+                "store",
+                Behaviour::PanicOnceAfter(Duration::from_secs(11)),
+                &log,
+            )),
+            arc(
+                Probe::new("events", Behaviour::SlowStop(Duration::from_secs(2)), &log)
+                    .timeouts(Duration::from_secs(30), Duration::from_secs(5)),
+            ),
+            arc(Probe::new("ipc", Behaviour::ErrorOnStop, &log)),
+        ],
+        RestartPolicy::default(),
+    )
+    .unwrap()
+    .start();
+    wait_state(&handle, |s| *s == AgentState::Running).await;
+    sleep(Duration::from_secs(10)).await;
+    let report = handle.shutdown(Duration::from_secs(20)).await;
+    assert_eq!(
+        report.outcomes,
+        [
+            ("ipc", StopOutcome::Error("flush failed".into())),
+            ("events", StopOutcome::Clean),
+            ("store", StopOutcome::Panicked("injected late panic".into())),
+        ]
+    );
+    assert!(!report.is_clean());
+    // Not restarted during shutdown.
+    assert_eq!(
+        events(&log).iter().filter(|e| *e == "start:store").count(),
+        1
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn recent_panics_age_out_of_the_window() {
+    let log = Log::default();
+    let handle = Supervisor::new(
+        vec![arc(Probe::new("inventory", Behaviour::PanicFirst(2), &log))],
+        RestartPolicy::default(),
+    )
+    .unwrap()
+    .start();
+    wait_state(&handle, |s| *s == AgentState::Running).await;
+    assert_eq!(handle.report().subsystems[0].recent_panics, 2);
+    sleep(Duration::from_secs(9 * 60)).await;
+    assert_eq!(handle.report().subsystems[0].recent_panics, 2);
+    sleep(Duration::from_secs(2 * 60)).await;
+    assert_eq!(handle.report().subsystems[0].recent_panics, 0);
+    assert_eq!(handle.report().subsystems[0].restarts, 2);
+    handle.shutdown(Duration::from_secs(5)).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_critical_failure_is_fail_safe_even_while_others_start() {
+    let log = Log::default();
+    let handle = Supervisor::new(
+        vec![
+            arc(Probe::new("policy", Behaviour::PanicFirst(3), &log).critical()),
+            arc(Probe::new(
+                "inventory",
+                Behaviour::SlowReady(Duration::from_secs(3600)),
+                &log,
+            )
+            .timeouts(Duration::from_secs(7200), Duration::from_secs(2))),
+        ],
+        RestartPolicy::default(),
+    )
+    .unwrap()
+    .start();
+    // Three panics take 1 s + 2 s of backoff; `inventory` is still starting.
+    let state = wait_state(&handle, |s| matches!(s, AgentState::FailSafe(_))).await;
+    assert!(
+        state
+            .to_string()
+            .contains("critical subsystem policy failed")
+    );
+    assert_eq!(status_of(&handle, "inventory"), SubsystemStatus::Starting);
+    assert!(Instant::now() - at(&log, "start:policy") < Duration::from_secs(10));
+    handle.shutdown(Duration::from_secs(5)).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn huge_timeouts_do_not_overflow() {
+    let log = Log::default();
+    let policy = RestartPolicy {
+        initial_backoff: Duration::MAX,
+        max_backoff: Duration::MAX,
+        ..RestartPolicy::default()
+    };
+    let handle = Supervisor::new(
+        vec![
+            arc(Probe::new("a", Behaviour::Normal, &log).timeouts(Duration::MAX, Duration::MAX)),
+            arc(Probe::new("b", Behaviour::Fail, &log).timeouts(Duration::MAX, Duration::MAX)),
+        ],
+        policy,
+    )
+    .unwrap()
+    .start();
+    wait_state(&handle, |s| matches!(s, AgentState::Degraded(_))).await;
+    let report = handle.shutdown(Duration::MAX).await;
+    assert_eq!(
+        report.outcomes,
+        [("b", StopOutcome::NotRunning), ("a", StopOutcome::Clean)]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn errors_never_trip_the_breaker_even_with_a_zero_limit() {
+    let log = Log::default();
+    let policy = RestartPolicy {
+        panic_limit: 0,
+        ..RestartPolicy::default()
+    };
+    let handle = Supervisor::new(
+        vec![arc(Probe::new("store", Behaviour::Fail, &log))],
+        policy,
+    )
+    .unwrap()
+    .start();
+    sleep(Duration::from_secs(60)).await;
+    assert!(matches!(
+        status_of(&handle, "store"),
+        SubsystemStatus::Restarting { .. }
+    ));
+    handle.shutdown(Duration::from_secs(5)).await;
+}
+
+/// Health of a running subsystem, including one whose check panics.
+struct BadHealth;
+
+impl Subsystem for BadHealth {
+    fn name(&self) -> &'static str {
+        "bad_health"
+    }
+
+    fn criticality(&self) -> Criticality {
+        Criticality::NonCritical
+    }
+
+    fn health(&self) -> Health {
+        panic!("health check bug")
+    }
+
+    fn run(self: Arc<Self>, ctx: SubsystemContext) -> BoxFuture<Result<(), SubsystemError>> {
+        Box::pin(async move {
+            ctx.set_ready();
+            ctx.stopped().await;
+            Ok(())
+        })
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_panicking_health_check_reports_unhealthy() {
+    let handle = Supervisor::new(vec![Arc::new(BadHealth)], RestartPolicy::default())
+        .unwrap()
+        .start();
+    wait_state(&handle, |s| *s == AgentState::Running).await;
+    assert_eq!(
+        handle.report().subsystems[0].health,
+        Some(Health::Unhealthy("health check panicked".into()))
+    );
+    assert_eq!(handle.state(), AgentState::Running);
+    assert!(handle.shutdown(Duration::from_secs(1)).await.is_clean());
 }

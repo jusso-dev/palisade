@@ -10,9 +10,11 @@
 //! that exists but cannot be read or parsed stops the agent from starting
 //! instead of running with defaults, because the defaults could be weaker
 //! than what the file asked for (for example `fail_mode`). The OS-native
-//! policy keeps enforcing while the agent is down (ADR 0012).
+//! policy keeps enforcing while the agent is down (ADR 0012). Only a file
+//! that does not exist (first install) falls back to the defaults.
 
 use std::{
+    ffi::OsStr,
     fmt,
     fs::File,
     io::{self, Read},
@@ -202,25 +204,49 @@ pub struct LoadedConfig {
     pub source: Option<PathBuf>,
 }
 
-/// The install-time configuration path: `%ProgramData%\Palisade\agent.toml`
-/// on Windows, `None` elsewhere.
-pub fn default_path() -> Option<PathBuf> {
+/// The install-time configuration path on Windows:
+/// `%ProgramData%\Palisade\agent.toml`. `None` on other OSes.
+///
+/// On Windows, `ProgramData` must be set to an absolute path. An unset,
+/// empty or relative value is an error rather than a reason to skip the
+/// file, so a changed environment can neither point the agent at a file
+/// relative to its working directory nor make it skip the install-time file
+/// and run on weaker defaults.
+pub fn default_path() -> Result<Option<PathBuf>, ConfigError> {
     if cfg!(windows) {
-        std::env::var_os("ProgramData")
-            .map(|dir| PathBuf::from(dir).join("Palisade").join("agent.toml"))
+        install_path(std::env::var_os("ProgramData").as_deref()).map(Some)
     } else {
-        None
+        Ok(None)
     }
+}
+
+/// `<program_data>\Palisade\agent.toml`, if `program_data` is an absolute
+/// path.
+pub fn install_path(program_data: Option<&OsStr>) -> Result<PathBuf, ConfigError> {
+    let dir = Path::new(program_data.unwrap_or_default());
+    if dir.as_os_str().is_empty() {
+        return Err(ConfigError::new(ConfigErrorKind::NoInstallDir(
+            "ProgramData is not set".to_owned(),
+        )));
+    }
+    if !dir.is_absolute() {
+        return Err(ConfigError::new(ConfigErrorKind::NoInstallDir(format!(
+            "ProgramData is not an absolute path: {}",
+            dir.display()
+        ))));
+    }
+    Ok(dir.join("Palisade").join("agent.toml"))
 }
 
 /// Loads the configuration.
 ///
 /// An `explicit` path (from `--config`) must exist. Otherwise the
-/// [`default_path`] is used if it exists, and built-in defaults if not.
+/// [`default_path`] is used if it exists, and built-in defaults if not
+/// (first install, before the installer has written the file).
 pub fn load(explicit: Option<&Path>) -> Result<LoadedConfig, ConfigError> {
     let (path, required) = match explicit {
         Some(path) => (path.to_path_buf(), true),
-        None => match default_path() {
+        None => match default_path()? {
             Some(path) => (path, false),
             None => return Ok(defaults()),
         },
@@ -291,6 +317,8 @@ pub enum ConfigErrorKind {
     NotUtf8,
     /// The file is not valid TOML, has an unknown key or a wrong type.
     Parse(String),
+    /// The install-time configuration directory cannot be determined.
+    NoInstallDir(String),
     /// A value is out of range.
     Invalid {
         /// The dotted key.
@@ -333,6 +361,9 @@ impl fmt::Display for ConfigError {
             }
             ConfigErrorKind::NotUtf8 => f.write_str("configuration is not valid UTF-8"),
             ConfigErrorKind::Parse(message) => write!(f, "invalid configuration: {message}"),
+            ConfigErrorKind::NoInstallDir(message) => {
+                write!(f, "cannot locate the configuration file: {message}")
+            }
             ConfigErrorKind::Invalid { field, message } => write!(f, "{field} {message}"),
         }
     }
@@ -528,7 +559,29 @@ mod tests {
     #[cfg(not(windows))]
     #[test]
     fn no_default_path_off_windows() {
-        assert_eq!(default_path(), None);
+        assert_eq!(default_path().unwrap(), None);
         assert_eq!(load(None).unwrap(), defaults());
+    }
+
+    #[test]
+    fn install_path_requires_an_absolute_program_data() {
+        for bad in [None, Some(""), Some("ProgramData"), Some("./ProgramData")] {
+            let err = install_path(bad.map(OsStr::new)).unwrap_err();
+            assert!(
+                matches!(err.kind(), ConfigErrorKind::NoInstallDir(_)),
+                "{bad:?} gave {err}"
+            );
+        }
+        // Drive-relative and root-relative paths are not absolute on Windows.
+        #[cfg(windows)]
+        for bad in ["\\ProgramData", "C:ProgramData"] {
+            assert!(install_path(Some(OsStr::new(bad))).is_err(), "{bad}");
+        }
+        let base = std::env::temp_dir();
+        assert!(base.is_absolute());
+        assert_eq!(
+            install_path(Some(base.as_os_str())).unwrap(),
+            base.join("Palisade").join("agent.toml")
+        );
     }
 }

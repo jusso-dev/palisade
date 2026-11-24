@@ -11,6 +11,14 @@
 //! `INTERROGATE` is answered. The remaining controls listed in #56 (power,
 //! session and device events, `PARAMCHANGE`) arrive with the subsystems that
 //! consume them, and gating `STOP` through the tamper guard is #220.
+//!
+//! **Note for #220.** The wrapper crate frees the control-handler closure
+//! once a `STOP`, `SHUTDOWN` or `PRESHUTDOWN` handler call returns, whatever
+//! the result. That is sound here only because the handler reports
+//! `StopPending`, with no controls accepted, before it returns, so the SCM
+//! never calls it again. Refusing `STOP` while staying `Running` would let
+//! the SCM call a freed closure. Gating must therefore stop accepting `STOP`
+//! while locked, or use a handler of its own in `palisade_agent::ffi`.
 
 use std::{
     panic::AssertUnwindSafe,
@@ -60,11 +68,14 @@ static EXIT: Mutex<Option<ExitCode>> = Mutex::new(None);
 pub fn run_service(args: Args) -> ExitCode {
     let _ = ARGS.set(args);
     match service_dispatcher::start(SERVICE_NAME, service_main_entry) {
+        // `service_main` stores the code before it reports `Stopped`, which
+        // is what lets the dispatcher return, so it is set by now. If it is
+        // not, something went wrong: report failure.
         Ok(()) => EXIT
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take()
-            .unwrap_or(ExitCode::SUCCESS),
+            .unwrap_or(ExitCode::FAILURE),
         Err(windows_service::Error::Winapi(e))
             if e.raw_os_error() == Some(ERROR_FAILED_SERVICE_CONTROLLER_CONNECT) =>
         {
@@ -84,15 +95,24 @@ pub fn run_service(args: Args) -> ExitCode {
 /// The `ServiceMain` callback. The SCM start arguments are not read (see the
 /// module docs), so no raw pointer is dereferenced.
 extern "system" fn service_main_entry(_argc: u32, _argv: *mut *mut u16) {
-    // A panic must not unwind into the SCM's thread.
-    let code = std::panic::catch_unwind(service_main).unwrap_or(ExitCode::FAILURE);
+    // A panic must not unwind into the SCM's thread. If one escapes before
+    // the handler is registered, no status was ever reported and the
+    // dispatcher returns on its own.
+    if std::panic::catch_unwind(service_main).is_err() {
+        set_exit(ExitCode::FAILURE);
+    }
+}
+
+fn set_exit(code: ExitCode) {
     *EXIT.lock().unwrap_or_else(PoisonError::into_inner) = Some(code);
 }
 
 /// Registers the control handler, runs the agent and always reports
 /// `Stopped` at the end, even after a panic: the dispatcher in
 /// [`run_service`] returns only once the service has reported `Stopped`.
-fn service_main() -> ExitCode {
+/// The exit code is stored first, and nothing else runs after `Stopped` is
+/// reported, because the process may exit at any point after that.
+fn service_main() {
     let (tx, rx) = mpsc::unbounded_channel();
     let handler = move |control| {
         let request = match control {
@@ -120,7 +140,8 @@ fn service_main() -> ExitCode {
         Ok(status) => status,
         Err(e) => {
             eprintln!("palisade-agent: cannot register the service control handler: {e}");
-            return ExitCode::FAILURE;
+            set_exit(ExitCode::FAILURE);
+            return;
         }
     };
     // Set before any status is reported, so before any control is accepted.
@@ -129,12 +150,12 @@ fn service_main() -> ExitCode {
     reporter.report(ServiceState::StartPending, WAIT_HINT_SLACK, 0);
     let exit =
         std::panic::catch_unwind(AssertUnwindSafe(|| run(&reporter, rx))).unwrap_or(EXIT_PANICKED);
-    reporter.report(ServiceState::Stopped, Duration::ZERO, exit);
-    if exit == 0 {
+    set_exit(if exit == 0 {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
-    }
+    });
+    reporter.report(ServiceState::Stopped, Duration::ZERO, exit);
 }
 
 /// Runs the agent and returns the service-specific exit code (0 for success).

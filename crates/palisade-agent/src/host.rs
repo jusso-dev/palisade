@@ -59,7 +59,18 @@ impl StopRequest {
 
 /// Builds the multi-threaded runtime: `min(4, cores)` workers unless
 /// configured, and a bounded blocking pool for file I/O and hashing.
+///
+/// Sizes that [`AgentConfig::validate`](crate::config::AgentConfig::validate)
+/// rejects are an `InvalidInput` error here too, rather than a panic in the
+/// runtime builder.
 pub fn build_runtime(runtime: &RuntimeConfig) -> io::Result<Runtime> {
+    let check = AgentConfig {
+        runtime: *runtime,
+        ..AgentConfig::default()
+    };
+    check
+        .validate()
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
     let cores = std::thread::available_parallelism().map_or(1, usize::from);
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(runtime.effective_worker_threads(cores))
@@ -193,31 +204,52 @@ pub fn supervisor(loaded: &LoadedConfig) -> Result<Supervisor, SupervisorError> 
     Supervisor::new(builtin_subsystems(loaded), RestartPolicy::default())
 }
 
-/// Resolves on Ctrl-C, or on `SIGTERM` on Unix.
-pub async fn console_stop_signal() -> StopRequest {
+/// Console stop signals: Ctrl-C everywhere, and `SIGTERM` on Unix.
+///
+/// The OS handlers are installed by [`ConsoleSignals::register`], not when
+/// [`ConsoleSignals::recv`] is first polled. Register before starting the
+/// supervisor, so a signal sent as soon as the agent reports `Running` is
+/// already caught rather than killing the process.
+#[derive(Debug)]
+pub struct ConsoleSignals {
     #[cfg(unix)]
-    {
-        use tokio::signal::unix::{SignalKind, signal};
-        match signal(SignalKind::terminate()) {
-            Ok(mut term) => {
-                tokio::select! {
-                    r = tokio::signal::ctrl_c() => return ctrl_c_result(r),
-                    _ = term.recv() => return StopRequest::REQUESTED,
-                }
-            }
-            Err(e) => tracing::warn!(error = %e, "cannot listen for SIGTERM"),
-        }
-    }
-    ctrl_c_result(tokio::signal::ctrl_c().await)
+    interrupt: tokio::signal::unix::Signal,
+    #[cfg(unix)]
+    terminate: tokio::signal::unix::Signal,
+    #[cfg(windows)]
+    ctrl_c: tokio::signal::windows::CtrlC,
 }
 
-fn ctrl_c_result(result: io::Result<()>) -> StopRequest {
-    if let Err(e) = result {
-        // Without a signal handler the agent could never be stopped cleanly
-        // from the console, so stop at once rather than run unstoppable.
-        tracing::error!(error = %e, "cannot listen for Ctrl-C; stopping");
+impl ConsoleSignals {
+    /// Installs the handlers. Must be called inside a tokio runtime.
+    pub fn register() -> io::Result<Self> {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            Ok(Self {
+                interrupt: signal(SignalKind::interrupt())?,
+                terminate: signal(SignalKind::terminate())?,
+            })
+        }
+        #[cfg(windows)]
+        {
+            Ok(Self {
+                ctrl_c: tokio::signal::windows::ctrl_c()?,
+            })
+        }
     }
-    StopRequest::REQUESTED
+
+    /// Resolves on the first signal.
+    pub async fn recv(mut self) -> StopRequest {
+        #[cfg(unix)]
+        tokio::select! {
+            _ = self.interrupt.recv() => {}
+            _ = self.terminate.recv() => {}
+        }
+        #[cfg(windows)]
+        self.ctrl_c.recv().await;
+        StopRequest::REQUESTED
+    }
 }
 
 /// Loads configuration and starts logging. Errors are printed to standard
@@ -256,11 +288,25 @@ pub fn run_console(args: &Args) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let (_, report) = runtime.block_on(run_until(
-        supervisor,
-        || tracing::info!("running in console mode; press Ctrl-C to stop"),
-        console_stop_signal(),
-    ));
+    let outcome = runtime.block_on(async {
+        let signals = ConsoleSignals::register()?;
+        Ok::<_, io::Error>(
+            run_until(
+                supervisor,
+                || tracing::info!("running in console mode; press Ctrl-C to stop"),
+                signals.recv(),
+            )
+            .await,
+        )
+    });
+    let report = match outcome {
+        Ok((_, report)) => report,
+        Err(e) => {
+            tracing::error!(error = %e, "cannot listen for Ctrl-C");
+            finish_runtime(runtime);
+            return ExitCode::FAILURE;
+        }
+    };
     finish_runtime(runtime);
     if report.is_clean() {
         ExitCode::SUCCESS

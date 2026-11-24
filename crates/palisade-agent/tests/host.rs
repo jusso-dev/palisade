@@ -1,9 +1,13 @@
 //! The platform-independent host loop and the console binary.
 
+// Test code: helpers outside `#[test]` functions may unwrap, since a failure
+// there should fail the test loudly.
+#![allow(clippy::unwrap_used)]
+
 use std::{process::Command, time::Duration};
 
 use palisade_agent::{
-    config::{AgentConfig, LoadedConfig},
+    config::{AgentConfig, LoadedConfig, RuntimeConfig},
     host::{self, StopReason, StopRequest},
     lifecycle::AgentState,
     supervisor::StopOutcome,
@@ -33,6 +37,23 @@ async fn run_until_starts_then_stops_on_request() {
 fn budgets_match_the_service_contract() {
     assert_eq!(StopRequest::REQUESTED.budget, Duration::from_secs(20));
     assert_eq!(StopRequest::SYSTEM_SHUTDOWN.budget, Duration::from_secs(10));
+}
+
+#[test]
+fn runtime_rejects_zero_sizes_instead_of_panicking() {
+    for runtime in [
+        RuntimeConfig {
+            worker_threads: Some(0),
+            ..RuntimeConfig::default()
+        },
+        RuntimeConfig {
+            max_blocking_threads: 0,
+            ..RuntimeConfig::default()
+        },
+    ] {
+        let err = host::build_runtime(&runtime).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
 }
 
 #[test]
@@ -112,12 +133,20 @@ fn service_mode_outside_the_scm_explains_itself() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("--console"));
 }
 
-/// Console mode runs until `SIGTERM` and then stops cleanly. Ctrl-C cannot be
-/// sent to a child process portably, so this test is Unix-only; the signal
-/// handling it exercises is shared with Ctrl-C.
+/// Console mode runs until `SIGINT` (Ctrl-C) or `SIGTERM` and then stops
+/// cleanly. The signal is sent the moment `Running` is logged, so this also
+/// checks that the handlers are installed before supervision starts. Signals
+/// cannot be sent to a child process portably, so this test is Unix-only.
 #[cfg(unix)]
 #[test]
 fn console_mode_runs_until_terminated() {
+    for signal in ["-TERM", "-INT"] {
+        console_mode_stops_on(signal);
+    }
+}
+
+#[cfg(unix)]
+fn console_mode_stops_on(signal: &str) {
     use std::{
         io::{BufRead, BufReader},
         process::Stdio,
@@ -143,11 +172,11 @@ fn console_mode_runs_until_terminated() {
         }
     }
     let pid = child.id().to_string();
-    let killed = Command::new("kill").args(["-TERM", &pid]).status().unwrap();
+    let killed = Command::new("kill").args([signal, &pid]).status().unwrap();
     assert!(killed.success());
     seen.extend(lines.map_while(Result::ok));
     let status = child.wait().unwrap();
-    assert!(status.success(), "exit {status}: {seen:#?}");
+    assert!(status.success(), "{signal}: exit {status}: {seen:#?}");
     let log = seen.join("\n");
     assert!(log.contains("configuration loaded"), "{log}");
     assert!(log.contains("running in console mode"), "{log}");
