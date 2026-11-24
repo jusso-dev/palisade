@@ -368,7 +368,7 @@ flowchart LR
 
 | Flow | From → to | Protocol | Authentication | Integrity | Confidentiality | Boundary |
 |---|---|---|---|---|---|---|
-| S-01 | Agents and relays ↔ agent listener | gRPC over HTTP/2, HTTPS and JSON fallback, on a separate listener from the console (#229) | Device or relay certificate chained to the issuing CA, serial checked against the database (#223) | TLS; signed payloads | TLS | TB-05 |
+| S-01 | Agents and relays ↔ agent listener | gRPC over HTTP/2, HTTPS and JSON fallback, on a separate listener from the console (#229) | Device or relay certificate chained to the issuing CA; serial and SPKI SHA-256 fingerprint checked against the enrolled device or relay record (#223) | TLS; signed payloads | TLS | TB-05 |
 | S-02 | Browser → console and API listener | HTTPS | SSO or local account with MFA; `__Host-` session cookie (#229) | TLS; CSRF token | TLS; HSTS | TB-05 |
 | S-03 | API clients → API listener | HTTPS | Scoped API token or OAuth2 client credentials (#187) | TLS | TLS | TB-05 |
 | S-04 | Server components ↔ database | Postgres wire protocol over TLS | Runtime role (`NOBYPASSRLS`, not the owner); migrations use a separate owner role ([ADR 0006](../adr/0006-server-database.md)) | TLS; append-only audit table | TLS; envelope-encrypted sensitive columns (#227) | TB-06 |
@@ -1197,7 +1197,7 @@ One row per threat, in the same order as the STRIDE tables. `N/A` rows are omitt
 | T-signer-05 | Endpoints keep enforcing their current policy (ADR 0012); health checks and high-availability guidance. | #138 | TEST-ha (#138) |
 | T-signer-06 | Key separation by purpose; agents accept a trust set only from the pinned root or the endorsed trust-set key. | #224 | TEST-trustset (#224) |
 | T-ca-01 | Agents pin server SPKI hashes from the trust set; EKU constraints separate client, relay and server certificates. | #224, #223 | TEST-transport-pin (#223) |
-| T-ca-02 | Each enrolled device record is bound to its certificate's SPKI SHA-256 fingerprint, and the server checks the presented certificate's serial **and** public-key fingerprint against that record on every connection, so certificates minted with a reused serial and a new key are refused; compromise runbook and emergency rotation. | #224, #223 | RT-ca-01 |
+| T-ca-02 | Each enrolled device or relay record is bound to its certificate's SPKI SHA-256 fingerprint, and the server checks the presented certificate's serial **and** public-key fingerprint against that record on every connection, so certificates minted with a reused serial and a new key are refused; compromise runbook and emergency rotation. | #224, #223 | RT-ca-01 |
 | T-ca-03 | Root key offline, used only in documented ceremonies with the `pal pki` commands. | #224 | RT-ca-02 |
 | T-ca-04 | Every key event, issuance and ceremony is in the admin audit log. | #224 | TEST-audit-chain (#229) |
 | T-ca-05 | TLS 1.3 is preferred and encrypts client certificates; the strict profile can require it. | #223 | TEST-tls-profile (#223) |
