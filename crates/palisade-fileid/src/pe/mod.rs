@@ -25,7 +25,7 @@ mod driver;
 mod imports;
 pub mod manifest;
 mod name;
-mod read;
+pub(crate) mod read;
 mod resource;
 mod types;
 pub mod version;

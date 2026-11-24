@@ -10,6 +10,7 @@
 #   cargo +nightly fuzz run x509_chain
 #   cargo +nightly fuzz run timestamp_crl
 #   cargo +nightly fuzz run fuzz_ctl
+#   cargo +nightly fuzz run fuzz_classify
 [package]
 name = "palisade-fileid-fuzz"
 version = "0.0.0"
@@ -78,6 +79,13 @@ bench = false
 [[bin]]
 name = "fuzz_ctl"
 path = "fuzz_targets/fuzz_ctl.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_classify"
+path = "fuzz_targets/fuzz_classify.rs"
 test = false
 doc = false
 bench = false
