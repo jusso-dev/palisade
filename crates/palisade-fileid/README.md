@@ -2,7 +2,7 @@
 
 File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes), signature and certificate chain extraction, and version-info metadata.
 
-**Status:** early. PE header and version-resource parsing, flat hashing, the Authenticode image hash, page hashes, Authenticode signature verification, certificate chains, signer trust and signer identity, and timestamps, expiry and revocation work; the rest of [#3](https://github.com/jusso-dev/palisade/issues/3) is still to come.
+**Status:** early. PE header and version-resource parsing, flat hashing, the Authenticode image hash, page hashes, Authenticode signature verification, certificate chains, signer trust and signer identity, timestamps, expiry and revocation, and catalog parsing, catalog signatures and the catalog member index work; the rest of [#3](https://github.com/jusso-dev/palisade/issues/3) is still to come.
 
 ## What is here
 
@@ -251,7 +251,7 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   validity alone, and `TrustReport::primary` ignores time and revocation.
   Anything that decides whether to allow a file must use
   `ValidityReport::primary` (below). The OS trust store is not consulted;
-  that is the `os-trust` cross-check in #48. Catalog signing is #51.
+  that is the `os-trust` cross-check in #48. Catalog signing is `catalog` below.
 - `authenticode` timestamps, expiry, revocation and the error taxonomy
   ([#50](https://github.com/jusso-dev/palisade/issues/50)):
   - `verify_timestamps` parses and verifies every timestamp on a
@@ -318,6 +318,58 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   agent and server; OCSP response parsing comes with them. Basic-constraint
   and time-nesting relaxations would need chain building to change, so they
   are not offered.
+- `catalog`: catalog-signed files
+  ([#51](https://github.com/jusso-dev/palisade/issues/51)). A catalog
+  (`.cat`) is a PKCS#7 SignedData over a certificate trust list (CTL,
+  `szOID_CTL`) of member digests.
+  - `parse_catalog` decodes one and verifies its signature with the
+    Authenticode machinery above: the same DER reader, SignedData decoder
+    (content type `szOID_CTL` instead of `SPC_INDIRECT_DATA`, and the
+    `contentType` attribute must agree), signer certificate lookup,
+    `messageDigest` check (over the CTL) and signature check. The
+    signature is a `SignatureKind::Catalog` entry in a `SignatureReport`,
+    so `evaluate_trust` gives its chain, trust and signer identity
+    unchanged. Nested signatures on a catalog are reported and not read.
+  - `parse_ctl` decodes the CTL: subject usage (must include
+    `szOID_CATALOG_LIST`), list identifier, sequence number, effective
+    dates, subject algorithm (`szOID_CATALOG_LIST_MEMBER` for v1 SHA-1
+    catalogs, `..._MEMBER2` for v2 SHA-256), each member's tag,
+    `SPC_INDIRECT_DATA` digest (algorithm, digest and data type:
+    `SPC_PE_IMAGE_DATA` for PE members, whose digest is the Authenticode
+    hash; other types for flat-hashed files), `CAT_NAMEVALUE` pairs
+    (`File`, `OSAttr`, `HWID*` and others, text or binary) and
+    `CAT_MEMBERINFO`, plus catalog-wide name-value extensions (`OS`).
+    DER is strict (an encoded default version or `critical` FALSE is
+    rejected), an unknown critical extension rejects the catalog, and
+    limits bound members (262,144), attributes (64 per member), name-value
+    pairs (32), value bytes (8 KiB) and warnings (64).
+  - `CatalogStoreBuilder` loads catalogs from bytes, files or a directory
+    tree (`*.cat`, name order, links not followed, bounded depth and entry
+    count) into a `CatalogStore`, within `StoreLimits` (catalogs, bytes
+    per catalog and in total, indexed members). Each `CatalogSource`
+    (`System`, `DriverStore`, `Policy`) is its own namespace with its own
+    `TrustConfig`, so an organisation catalog is trusted only under the
+    organisation's anchors. The catalog ID is the file's SHA-256, and each
+    `CatalogRecord` holds the path, source, status, signer (chain, trust
+    and identity, shared between catalogs with the same certificates),
+    member counts, subject algorithm, `os_attr`, effective date and
+    claimed signing time. Only catalogs whose signature is valid are
+    indexed, in sorted in-memory tables (44 bytes per SHA-256 member, 32
+    per SHA-1 member). Every limit fails closed: what is not indexed
+    matches nothing.
+  - `CatalogStore::lookup` takes a file's `FileDigests` (Authenticode
+    SHA-256 and SHA-1 for a conformant PE image, flat SHA-256 and SHA-1
+    for a non-empty file) and tries them in that order. An Authenticode
+    digest matches only PE members and a flat digest only other members.
+    Each catalog that lists the file is returned once, trusted catalogs
+    first, with which digest matched; SHA-1 matches say so, because no
+    allow decision may rest on SHA-1 alone (ADR 0008).
+
+  Still to come in #51: the persistent on-disk index and incremental
+  updates, the lookup settings, the authoring helper and the OS catalog
+  database cross-check (`CryptCATAdmin*`, behind `os-trust`). Folding a
+  catalog match into the file's signing state (`CatalogValid`) is #55;
+  catalog timestamps and expiry are #50.
 
 ## Handling untrusted input
 
@@ -352,7 +404,9 @@ with keys the file supplies, and CRLs are capped at 8 MiB and 100,000 entries
 (`timestamp_crl` fuzzes both parsers).
 
 The same rules apply to the path normaliser, the security descriptor parser
-and the `Zone.Identifier` parser, which are also fuzzed (`fsctx_parse`).
+and the `Zone.Identifier` parser, which are also fuzzed (`fsctx_parse`), and
+to catalog files, which are capped at 64 MiB and fuzzed with lookups
+(`fuzz_ctl`).
 
 The parser has no `unsafe` code, and its modules say `#![forbid(unsafe_code)]`.
 
@@ -372,7 +426,13 @@ signature fixtures over three more synthetic images. The validity tests use
 signatures with fixed dates in `tests/fixtures/timestamp`: RFC 3161 and
 legacy timestamps, an expired signer, a Lifetime Signing signer, SHA-1, a
 TSA whose issuer restricts its EKU away, and CRLs (including one forged
-under the root's name). No private keys and no third-party binaries are
+under the root's name). The catalog tests use small catalogs in
+`tests/fixtures/catalog` (v1 SHA-1, v2 SHA-256, the v2 list signed with
+SHA-1, and an organisation catalog under its own test root). The tests
+build each unsigned catalog byte by byte, listing the synthetic PE image and
+a short text file, and osslsigncode signs them with throwaway test keys; a
+test checks that each fixture signs exactly that content. No OS catalog is
+committed. No private keys and no third-party binaries are
 committed; the `generate.sh` scripts document how every file was made and
 regenerate them.
 
@@ -396,6 +456,8 @@ for t in pe_parse version_info_parse authenticode_ranges; do
 done
 PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/authenticode_pkcs7" \
   cargo test -p palisade-fileid --test signature -- --ignored write_pkcs7_fuzz_seeds
+PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/fuzz_ctl" \
+  cargo test -p palisade-fileid --test catalog -- --ignored write_ctl_fuzz_seeds
 cargo +nightly fuzz run pe_parse -- -dict=fuzz/pe.dict -max_total_time=60
 cargo +nightly fuzz run version_info_parse -- -dict=fuzz/pe.dict -max_total_time=60
 cargo +nightly fuzz run authenticode_ranges -- -dict=fuzz/pe.dict -max_total_time=60
@@ -405,6 +467,7 @@ cargo +nightly fuzz run x509_chain -- -max_total_time=60
 PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/timestamp_crl" \
   cargo test -p palisade-fileid --test validity -- --ignored write_timestamp_fuzz_seeds
 cargo +nightly fuzz run timestamp_crl -- -dict=fuzz/pkcs7.dict -max_total_time=60
+cargo +nightly fuzz run fuzz_ctl -- -max_total_time=60
 ```
 
 `benches/hash_and_parse.rs` (criterion) measures flat hashing, streamed

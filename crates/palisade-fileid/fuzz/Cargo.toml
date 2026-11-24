@@ -9,6 +9,7 @@
 #   cargo +nightly fuzz run fsctx_parse
 #   cargo +nightly fuzz run x509_chain
 #   cargo +nightly fuzz run timestamp_crl
+#   cargo +nightly fuzz run fuzz_ctl
 [package]
 name = "palisade-fileid-fuzz"
 version = "0.0.0"
@@ -70,6 +71,13 @@ bench = false
 [[bin]]
 name = "timestamp_crl"
 path = "fuzz_targets/timestamp_crl.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_ctl"
+path = "fuzz_targets/fuzz_ctl.rs"
 test = false
 doc = false
 bench = false
