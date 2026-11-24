@@ -22,9 +22,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Every target in xtask/src/fuzz.rs; a unit test there keeps this
-        # list complete.
-        target: [pe_parse, version_info_parse, authenticode_ranges, authenticode_pkcs7, fsctx_parse, x509_chain]
+        # Every target of every project in xtask/src/fuzz.rs; a unit test
+        # there keeps this list complete. Target names are unique across
+        # projects, so `--target` alone selects the project.
+        target: [pe_parse, version_info_parse, authenticode_ranges, authenticode_pkcs7, fsctx_parse, x509_chain, trust_set_decode]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

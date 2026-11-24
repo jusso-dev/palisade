@@ -84,44 +84,59 @@ const X509_SEEDS: Seed = Seed {
     test: "chain",
     name: "write_x509_chain_fuzz_seeds",
 };
+const TRUST_SET_SEEDS: Seed = Seed {
+    test: "trust_set",
+    name: "write_trust_set_fuzz_seeds",
+};
 
 /// Every fuzz project in the repository.
-pub const PROJECTS: &[Project] = &[Project {
-    dir: "crates/palisade-fileid/fuzz",
-    package: "palisade-fileid",
-    targets: &[
-        Target {
-            name: "pe_parse",
-            dict: Some("pe.dict"),
-            seeds: &[PE_SEEDS],
-        },
-        Target {
-            name: "version_info_parse",
-            dict: Some("pe.dict"),
-            seeds: &[PE_SEEDS],
-        },
-        Target {
-            name: "authenticode_ranges",
-            dict: Some("pe.dict"),
-            seeds: &[PE_SEEDS],
-        },
-        Target {
-            name: "authenticode_pkcs7",
-            dict: Some("pkcs7.dict"),
-            seeds: &[PKCS7_SEEDS],
-        },
-        Target {
-            name: "fsctx_parse",
+pub const PROJECTS: &[Project] = &[
+    Project {
+        dir: "crates/palisade-fileid/fuzz",
+        package: "palisade-fileid",
+        targets: &[
+            Target {
+                name: "pe_parse",
+                dict: Some("pe.dict"),
+                seeds: &[PE_SEEDS],
+            },
+            Target {
+                name: "version_info_parse",
+                dict: Some("pe.dict"),
+                seeds: &[PE_SEEDS],
+            },
+            Target {
+                name: "authenticode_ranges",
+                dict: Some("pe.dict"),
+                seeds: &[PE_SEEDS],
+            },
+            Target {
+                name: "authenticode_pkcs7",
+                dict: Some("pkcs7.dict"),
+                seeds: &[PKCS7_SEEDS],
+            },
+            Target {
+                name: "fsctx_parse",
+                dict: None,
+                seeds: &[FSCTX_SEEDS],
+            },
+            Target {
+                name: "x509_chain",
+                dict: Some("pkcs7.dict"),
+                seeds: &[X509_SEEDS],
+            },
+        ],
+    },
+    Project {
+        dir: "crates/palisade-proto/fuzz",
+        package: "palisade-proto",
+        targets: &[Target {
+            name: "trust_set_decode",
             dict: None,
-            seeds: &[FSCTX_SEEDS],
-        },
-        Target {
-            name: "x509_chain",
-            dict: Some("pkcs7.dict"),
-            seeds: &[X509_SEEDS],
-        },
-    ],
-}];
+            seeds: &[TRUST_SET_SEEDS],
+        }],
+    },
+];
 
 /// What to run: the time per target, and optionally a single target.
 #[derive(Debug, PartialEq, Eq)]
@@ -585,6 +600,21 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// `--target`, `fuzz.yml`'s matrix and `target/fuzz-smoke/<target>/`
+    /// name a target without its project, so names must be unique.
+    #[test]
+    fn target_names_are_unique_across_projects() {
+        let mut names: Vec<&str> = PROJECTS
+            .iter()
+            .flat_map(|p| p.targets)
+            .map(|t| t.name)
+            .collect();
+        let count = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), count, "fuzz target names must be unique");
     }
 
     #[test]

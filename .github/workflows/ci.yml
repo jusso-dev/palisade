@@ -209,11 +209,14 @@ jobs:
       - run: cargo xtask check-manifests
       - run: cargo xtask check-unsafe
       - run: cargo deny --locked check
-      # The fuzz targets are a separate workspace with their own lockfile,
+      # Each fuzz project is a separate workspace with its own lockfile,
       # checked against the same deny.toml. A test in xtask/src/fuzz.rs keeps
       # this in step with the fuzz projects.
       - run: >-
           cargo deny --locked --manifest-path crates/palisade-fileid/fuzz/Cargo.toml
+          --config deny.toml check
+      - run: >-
+          cargo deny --locked --manifest-path crates/palisade-proto/fuzz/Cargo.toml
           --config deny.toml check
       # The same advisory database, read by a second tool on every PR, with
       # the same ignores as deny.toml; the daily audit.yml catches advisories

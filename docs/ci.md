@@ -23,7 +23,7 @@ type.
 | `bench` | ubuntu-latest | `cargo test --bench <name>` for every criterion bench: builds them and runs each benchmark once, without timing |
 | `msrv` | ubuntu-latest | `cargo +1.85.0 check --workspace --all-targets --all-features --locked`, after checking that the version matches `rust-version` in `Cargo.toml` |
 | `docs` | ubuntu-latest | `cargo doc --workspace --no-deps --all-features --locked` with `RUSTDOCFLAGS=-D warnings` |
-| `deps` | ubuntu-latest | `cargo xtask check-deps`, `cargo xtask check-manifests`, `cargo xtask check-unsafe`, `cargo deny --locked check` for the root workspace and for the fuzz workspace (with the root `deny.toml`), `cargo xtask audit` (cargo-audit over both lockfiles, with the ignores from `deny.toml`) |
+| `deps` | ubuntu-latest | `cargo xtask check-deps`, `cargo xtask check-manifests`, `cargo xtask check-unsafe`, `cargo deny --locked check` for the root workspace and for each fuzz workspace (with the root `deny.toml`), `cargo xtask audit` (cargo-audit over the root and every fuzz lockfile, with the ignores from `deny.toml`) |
 | `supply-chain` | ubuntu-latest | `cargo vet --locked`, `cargo xtask check-supply-chain`, and on PRs `cargo xtask deps-report --base <base>` to the job summary ([dependencies.md](dependencies.md)) |
 | `feature-powerset` | ubuntu-latest | `cargo hack check --each-feature --all-targets --locked` on the portable crates (`core`, `fileid`, `policy`, `proto`, `server`, `cli`, `console`) |
 | `runner-guard` | ubuntu-latest | `cargo xtask check-workflows` ([Runner and action policy](#runner-and-action-policy)) |
@@ -64,8 +64,9 @@ Details and local commands are in [testing.md](testing.md).
   per crate to the job summary. It is reported, not enforced: a crate below
   its target (80% lines for `palisade-policy` and `palisade-fileid`) gets a
   warning annotation and the job still passes.
-- `fuzz` runs `cargo xtask fuzz`. It builds every target listed in
-  `xtask/src/fuzz.rs` from the fuzz workspace's committed `Cargo.lock`, seeds
+- `fuzz` runs `cargo xtask fuzz`. It builds every target of every project
+  listed in `xtask/src/fuzz.rs`, each from its fuzz workspace's committed
+  `Cargo.lock`, seeds
   each corpus from the crate's synthetic fixtures, and runs each target for
   60 s. A crash, hang, leak or out-of-memory input fails the job, and the job
   summary shows each failing input up to 64 KiB as base64, with the command
@@ -82,7 +83,7 @@ Details and local commands are in [testing.md](testing.md).
 
 | Job | Runners | What it runs |
 |---|---|---|
-| `fuzz` | ubuntu-latest | `cargo xtask fuzz --seconds 1800 --target <name>`, one job per target |
+| `fuzz` | ubuntu-latest | `cargo xtask fuzz --seconds 1800 --target <name>`, one job per target of every fuzz project (target names are unique, so the name selects the project) |
 | `report` | ubuntu-latest | On failure, opens an issue titled "Scheduled fuzzing found a failure" with the `area:security` label, or comments on the open one |
 
 Longer runs find what the 60 s PR run cannot. A unit test in
@@ -143,7 +144,7 @@ checkout). Details:
 
 ### `audit.yml` (daily at 03:17 UTC, and on demand)
 
-Runs `cargo deny check advisories` and `cargo xtask audit` (cargo-audit with the same ignores) against `main`, for the root workspace and the fuzz workspace's lockfile. Both
+Runs `cargo deny check advisories` and `cargo xtask audit` (cargo-audit with the same ignores) against `main`, for the root workspace and every fuzz workspace's lockfile. Both
 also run on every PR (the `deps` job). A new advisory can affect `main`
 without any change here, which is why this is also scheduled. On failure, a second job opens an issue titled "Scheduled advisory
 audit is failing" with the `area:security` label, or comments on the open
@@ -152,14 +153,14 @@ are the only places with `issues: write`.
 
 ### Dependabot (`.github/dependabot.yml`)
 
-Weekly updates for Cargo dependencies (the workspace, and the fuzz
+Weekly updates for Cargo dependencies (the workspace, and each fuzz
 workspace's own lockfile) and for the pinned action SHAs, with minor and
 patch bumps grouped into one PR per manifest. Security updates are
 opened as soon as an advisory is published. Dependabot PRs run the full CI
 like any other PR, including `DCO`, cargo-deny, cargo-audit and cargo-vet, so
 a bump of the root workspace merges only once the new version is audited or
 exempted with a note ([dependencies.md](dependencies.md#cargo-vet)).
-cargo-deny and cargo-audit also check the fuzz workspace's lockfile; cargo-vet
+cargo-deny and cargo-audit also check each fuzz workspace's lockfile; cargo-vet
 covers only the root workspace, so a fuzz-only bump is reviewed in its PR.
 The fuzz crates are never shipped ([testing.md](testing.md#fuzzing)). They are labelled
 `area:security` (Cargo) or `area:infra` (actions), because the label sync
@@ -248,6 +249,7 @@ cargo xtask check-unsafe
 cargo xtask check-workflows
 cargo deny --locked check          # needs cargo-deny 0.22
 cargo deny --locked --manifest-path crates/palisade-fileid/fuzz/Cargo.toml --config deny.toml check
+cargo deny --locked --manifest-path crates/palisade-proto/fuzz/Cargo.toml --config deny.toml check
 cargo xtask audit                  # cargo-audit 0.23, with deny.toml's ignores
 cargo vet --locked                 # needs cargo-vet 0.10
 cargo xtask check-supply-chain

@@ -117,15 +117,19 @@ events, arrive with the code that produces that output (#25).
 
 Every parser of untrusted input has a coverage-guided fuzz target. The targets live in a
 separate cargo-fuzz workspace per crate (`crates/<crate>/fuzz/`), so normal builds never compile
-them, and only they need a nightly toolchain. Today that is `crates/palisade-fileid/fuzz`, with
-six targets: `pe_parse`, `version_info_parse`, `authenticode_ranges`, `authenticode_pkcs7`,
-`fsctx_parse` and `x509_chain`. Each fuzz workspace has its own committed `Cargo.lock`. Dependabot keeps it up to
-date, cargo-deny checks it against the root `deny.toml` on every PR and daily, and
+them, and only they need a nightly toolchain. There are two projects:
+
+- `crates/palisade-fileid/fuzz`, with six targets: `pe_parse`, `version_info_parse`,
+  `authenticode_ranges`, `authenticode_pkcs7`, `fsctx_parse` and `x509_chain`.
+- `crates/palisade-proto/fuzz`, with one target: `trust_set_decode`.
+
+Target names are unique across projects, so `--target` names one without its project. Each fuzz
+workspace has its own committed `Cargo.lock`. Dependabot keeps it up to date, cargo-deny checks it against the root `deny.toml` on every PR and daily, and
 `cargo xtask audit` runs cargo-audit over it. cargo-vet covers only the root workspace, so a
 fuzz-only dependency is reviewed in its PR instead
 ([dependencies.md](dependencies.md)). The fuzz crates are never shipped.
 
-One command builds every target, seeds its corpus from the synthetic test fixtures, and runs it:
+One command builds every target of every project, seeds its corpus from the synthetic test fixtures, and runs it:
 
 ```sh
 rustup toolchain install nightly-2026-11-20 --profile minimal
@@ -155,16 +159,19 @@ finding:
    on every PR, not only under the fuzzer.
 
 `xtask/src/fuzz.rs` lists every fuzz project and target. Its tests fail if a target is missing
-from the list, from a project's `Cargo.toml` or from `fuzz.yml`'s matrix, or if a project has no
-committed lockfile. To add a target:
+from the list, from a project's `Cargo.toml` or from `fuzz.yml`'s matrix, if two projects use the
+same target name, if a `crates/*/fuzz` project is not listed, or if a project has no committed
+lockfile. To add a target:
 
 1. Add the target to `fuzz_targets/` and as a `[[bin]]` in the project's `Cargo.toml`.
 2. Add it to `PROJECTS` in `xtask/src/fuzz.rs`, with its dictionary and the ignored tests that
    write its seed inputs (they read the output directory from `PALISADE_FUZZ_SEED_DIR`).
 3. Add it to the matrix in `.github/workflows/fuzz.yml`.
 
-For a new crate's fuzz project, also add it to `.github/dependabot.yml`, and add its cargo-deny
-step to the `deps` job in `ci.yml` and to `audit.yml`. The tests in `xtask/src/fuzz.rs` fail
+For a new crate's fuzz project, also add it to `PROJECTS` with the package whose tests write its
+seeds, commit its `Cargo.lock` (and keep `Cargo.lock` out of its `.gitignore`), add it to
+`.github/dependabot.yml`, and add its cargo-deny step to the `deps` job in `ci.yml`, to
+`audit.yml` and to `xtask/src/ci.rs`. The tests in `xtask/src/fuzz.rs` fail
 until all of these are in place. A seed writer that writes nothing fails the run, because libtest
 passes when `--exact` matches no test.
 
