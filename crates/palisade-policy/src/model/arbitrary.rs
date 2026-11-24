@@ -66,6 +66,23 @@ fn value_for(class: FieldClass, operator: Operator) -> BoxedStrategy<String> {
         .prop_map(|b| b.into_iter().map(char::from).collect())
         .boxed(),
         (FieldClass::Version, _) => "[0-9]{1,4}(\\.[0-9]{1,4}){0,3}".boxed(),
+        (FieldClass::Sid, _) => "S-1-5(-[0-9]{1,9}){1,5}".boxed(),
+        (FieldClass::PrincipalSet, _) => prop_oneof![
+            "S-1-5(-[0-9]{1,9}){1,5}",
+            "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        ]
+        .boxed(),
+        (FieldClass::TagSet, _) => "[a-z][a-z0-9:._-]{0,20}".boxed(),
+        (FieldClass::SessionType, _) => proptest::sample::select(
+            crate::context::SessionType::ALL
+                .iter()
+                .map(|t| t.as_str().to_owned())
+                .collect::<Vec<_>>(),
+        )
+        .boxed(),
+        // Never used: yes-or-no operators take no values.
+        (FieldClass::Bool, _) => Just(String::new()).boxed(),
+        (FieldClass::PrincipalName, _) => "[A-Z]{1,8}\\\\[a-z0-9.]{1,12}".boxed(),
         // Simple patterns that are always valid regular expressions.
         (_, Operator::Regex | Operator::NotRegex) => {
             "[A-Za-z0-9]{1,10}(\\.\\*|\\+)?[A-Za-z0-9]{0,10}".boxed()
@@ -91,15 +108,12 @@ fn value_for(class: FieldClass, operator: Operator) -> BoxedStrategy<String> {
 pub fn criterion() -> impl Strategy<Value = Criterion> {
     proptest::sample::select(Field::ALL.to_vec()).prop_flat_map(|field| {
         let class = field.class();
-        let operators: Vec<Operator> = OPERATORS
+        let operators: Vec<Operator> = Operator::ALL
             .iter()
             .copied()
             .filter(|op| op.applies_to(class))
             .collect();
-        let case = if matches!(
-            class,
-            FieldClass::Path | FieldClass::FileName | FieldClass::Text
-        ) {
+        let case = if class.has_case() {
             proptest::option::of(any::<bool>()).boxed()
         } else {
             Just(None).boxed()
@@ -120,25 +134,6 @@ pub fn criterion() -> impl Strategy<Value = Criterion> {
         })
     })
 }
-
-const OPERATORS: [Operator; 16] = [
-    Operator::Equals,
-    Operator::NotEquals,
-    Operator::StartsWith,
-    Operator::EndsWith,
-    Operator::Contains,
-    Operator::NotContains,
-    Operator::Wildcard,
-    Operator::NotWildcard,
-    Operator::Regex,
-    Operator::NotRegex,
-    Operator::VersionEq,
-    Operator::VersionGt,
-    Operator::VersionGe,
-    Operator::VersionLt,
-    Operator::VersionLe,
-    Operator::VersionBetween,
-];
 
 /// A match tree within the depth and size limits.
 ///

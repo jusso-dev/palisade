@@ -88,10 +88,44 @@
     },
     "Criterion": {
       "additionalProperties": false,
-      "description": "A test of one fact about the object: `field operator values`.\n\nValues are combined with OR for positive operators and with AND for\nnegative ones (#32): `not_in [a, b]` means neither `a` nor `b`.",
+      "allOf": [
+        {
+          "else": {
+            "properties": {
+              "values": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "values"
+            ]
+          },
+          "if": {
+            "properties": {
+              "operator": {
+                "enum": [
+                  "is_true",
+                  "is_false"
+                ]
+              }
+            },
+            "required": [
+              "operator"
+            ]
+          },
+          "then": {
+            "properties": {
+              "values": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ],
+      "description": "A test of one fact about the object or its context: `field operator\nvalues`.\n\nValues are combined with OR for positive operators and with AND for\nnegative ones (#32): `not_contains [a, b]` means neither `a` nor `b`.",
       "properties": {
         "case_sensitive": {
-          "description": "Compare strings case-sensitively. Unset means the field's default\n(#32), which is case-insensitive for every field defined so far.\nHashes and versions have no case, and reject this option.",
+          "description": "Compare strings case-sensitively. Unset means the field's default\n(#32), which is case-insensitive for every field defined so far.\nOnly text, paths, file names, account names and tags have a case;\nother fields (hashes, versions, SIDs, group sets, yes-or-no facts and\nsession types) reject this option.",
           "type": [
             "boolean",
             "null"
@@ -106,21 +140,19 @@
           "description": "How it is compared."
         },
         "values": {
-          "description": "1 to 25 values. Each is at most 2048 bytes of UTF-8; the schema can\nonly bound the length in characters, so validation checks the bytes.",
+          "description": "1 to 25 values. Each is at most 2048 bytes of UTF-8; the schema can\nonly bound the length in characters, so validation checks the bytes.\n`is_true` and `is_false` take no values, and the key may be left out.",
           "items": {
             "maxLength": 2048,
             "minLength": 1,
             "type": "string"
           },
           "maxItems": 25,
-          "minItems": 1,
           "type": "array"
         }
       },
       "required": [
         "field",
-        "operator",
-        "values"
+        "operator"
       ],
       "type": "object"
     },
@@ -265,6 +297,136 @@
         {
           "const": "meta.product_version",
           "description": "The product version from the version resource.",
+          "type": "string"
+        },
+        {
+          "const": "user.sid",
+          "description": "Context (#33): the SID of the user the process runs as.",
+          "type": "string"
+        },
+        {
+          "const": "user.name",
+          "description": "Context (#33): the user's account name, as `DOMAIN\\user` or as a\nuser principal name (`user@example.org`). Either form can match.\nRegular expressions are not allowed: match principals by SID where\nyou can (#32).",
+          "type": "string"
+        },
+        {
+          "const": "user.groups",
+          "description": "Context (#33): the groups in the user's token, as SIDs, and the\nuser's cloud-directory groups, as object IDs.",
+          "type": "string"
+        },
+        {
+          "const": "user.primary_group",
+          "description": "Context (#33): the SID of the user's primary group.",
+          "type": "string"
+        },
+        {
+          "const": "user.is_admin",
+          "description": "Context (#33): the token holds the local Administrators group,\nenabled or filtered by UAC.",
+          "type": "string"
+        },
+        {
+          "const": "user.is_elevated",
+          "description": "Context (#33): the token is elevated.",
+          "type": "string"
+        },
+        {
+          "const": "user.is_service_account",
+          "description": "Context (#33): the user is a service account.",
+          "type": "string"
+        },
+        {
+          "const": "user.is_system",
+          "description": "Context (#33): the user is the local system account.",
+          "type": "string"
+        },
+        {
+          "const": "device.hostname",
+          "description": "Context (#33): the device's host name.",
+          "type": "string"
+        },
+        {
+          "const": "device.fqdn",
+          "description": "Context (#33): the device's fully qualified domain name.",
+          "type": "string"
+        },
+        {
+          "const": "device.domain",
+          "description": "Context (#33): the DNS name of the device's domain.",
+          "type": "string"
+        },
+        {
+          "const": "device.netbios",
+          "description": "Context (#33): the device's NetBIOS name.",
+          "type": "string"
+        },
+        {
+          "const": "device.ad_site",
+          "description": "Context (#33): the directory site the device is in.",
+          "type": "string"
+        },
+        {
+          "const": "device.groups",
+          "description": "Context (#33): the device's computer groups, as SIDs, and its\ncloud-directory device groups, as object IDs.",
+          "type": "string"
+        },
+        {
+          "const": "device.tags",
+          "description": "Context (#33): the Palisade tags assigned to the device.",
+          "type": "string"
+        },
+        {
+          "const": "device.os_version",
+          "description": "Context (#33): the operating system version.",
+          "type": "string"
+        },
+        {
+          "const": "device.os_edition",
+          "description": "Context (#33): the operating system edition.",
+          "type": "string"
+        },
+        {
+          "const": "device.arch",
+          "description": "Context (#33): the processor architecture, such as `x64` or `arm64`.",
+          "type": "string"
+        },
+        {
+          "const": "device.is_server",
+          "description": "Context (#33): the device runs a server edition.",
+          "type": "string"
+        },
+        {
+          "const": "device.is_domain_controller",
+          "description": "Context (#33): the device is a domain controller.",
+          "type": "string"
+        },
+        {
+          "const": "device.is_laptop",
+          "description": "Context (#33): the device is a laptop.",
+          "type": "string"
+        },
+        {
+          "const": "device.is_vdi",
+          "description": "Context (#33): the device is a virtual desktop.",
+          "type": "string"
+        },
+        {
+          "const": "device.is_terminal_server",
+          "description": "Context (#33): the device is a multi-session terminal server.",
+          "type": "string"
+        },
+        {
+          "const": "session.type",
+          "description": "Context (#33): how the session was started: `console`, `rdp`,\n`remote_shell`, `service`, `batch` or `network`.",
+          "type": "string"
+        },
+        {
+          "const": "session.client_hostname",
+          "description": "Context (#33): the host name of the client connected to the session,\non a multi-session host.",
+          "type": "string"
+        },
+        {
+          "const": "session.is_remote",
+          "description": "Context (#33): the session is remote.",
           "type": "string"
         }
       ]
@@ -514,6 +676,26 @@
         {
           "const": "version_between",
           "description": "Version within `[min, max]`, both inclusive. Takes exactly two\nvalues, the minimum first.",
+          "type": "string"
+        },
+        {
+          "const": "member_of",
+          "description": "The set holds any of the values (#33).",
+          "type": "string"
+        },
+        {
+          "const": "not_member_of",
+          "description": "The set holds none of the values (#33).",
+          "type": "string"
+        },
+        {
+          "const": "is_true",
+          "description": "The fact is true. Takes no values (#33).",
+          "type": "string"
+        },
+        {
+          "const": "is_false",
+          "description": "The fact is false. Takes no values (#33). On an unknown fact it is\nunknown, like every other test.",
           "type": "string"
         }
       ]

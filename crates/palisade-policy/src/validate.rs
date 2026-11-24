@@ -63,7 +63,8 @@ pub enum ErrorCode {
     InvalidValue,
     /// The operator cannot be used on the field.
     OperatorFieldMismatch,
-    /// `case_sensitive` was set on a field that has no case (hashes, versions).
+    /// `case_sensitive` was set on a field that has no case, such as a hash,
+    /// a version or a SID.
     CaseSensitivityNotApplicable,
     /// A setting is outside its allowed range.
     SettingOutOfRange,
@@ -87,7 +88,10 @@ pub enum ErrorCode {
     WeakHashOnlyAllow,
     /// The `allow_wins` model is not recommended for Essential Eight (ADR 0004).
     AllowWinsNotRecommended,
-    /// An allow rule's tree contains no positive identity criterion.
+    /// A rule can match without a positive identity criterion: an allow
+    /// rule through negations or context alone, or any rule through context
+    /// criteria alone (#33). The message names the criteria of one such way
+    /// of matching.
     NoIdentityAnchor,
     /// A deny or audit rule can match on negations alone, which match
     /// almost every object (#32).
@@ -526,27 +530,34 @@ impl Validator {
         // The recursive analysis is bounded by the depth limit, so it only
         // runs on trees that passed it.
         if depth <= MAX_TREE_DEPTH {
-            let identity = guaranteed_identity(&rule.match_);
+            let Guarantee { identity, witness } = guaranteed_identity(&rule.match_, "");
+            let through = describe_witness(&witness);
+            let negations_only = witness.iter().all(|w| w.negation);
             match (rule.action, identity) {
                 (Action::Allow {}, Identity::None) => self.push(
                     ErrorCode::NoIdentityAnchor,
                     &tree,
-                    "an allow rule must identify the object on every way it can match: each `any` branch needs a positive identity criterion outside `not`",
+                    format!("this allow rule can match through {through} without identifying the object: every way of matching needs a positive identity criterion outside `not`"),
                 ),
-                (_, Identity::None) => self.push(
+                (_, Identity::None) if negations_only => self.push(
                     ErrorCode::NegationOnly,
                     &tree,
-                    "this rule can match on negations alone, which match almost every object; combine each negation with a positive criterion in an `all`",
+                    format!("this rule can match through {through}, on negations alone, which match almost every object; combine each negation with a positive criterion in an `all`"),
+                ),
+                (_, Identity::None) => self.push(
+                    ErrorCode::NoIdentityAnchor,
+                    &tree,
+                    format!("this rule can match through {through} without identifying the object: user, device and session criteria narrow a rule, but every way of matching also needs a positive identity criterion"),
                 ),
                 (Action::Allow {}, Identity::WeakHashOnly) => self.push(
                     ErrorCode::WeakHashOnlyAllow,
                     &tree,
-                    "this allow rule can match on SHA-1 or MD5 alone, which are compatibility hashes (ADR 0008); require a SHA-256 or another identity on every branch",
+                    format!("this allow rule can match through {through} on SHA-1 or MD5 alone, which are compatibility hashes (ADR 0008); require a SHA-256 or another identity on every branch"),
                 ),
                 (Action::Allow {}, Identity::Weak) => self.push(
                     ErrorCode::WeakIdentity,
                     &tree,
-                    "this allow rule can match on weak identities alone (file names, extensions or version-resource strings), which anyone can copy; add a hash, a publisher or a path",
+                    format!("this allow rule can match through {through} on weak identities alone (file names, extensions or version-resource strings), which anyone can copy; add a hash, a publisher or a path"),
                 ),
                 _ => {}
             }
@@ -566,9 +577,7 @@ impl Validator {
                 ),
             );
         }
-        if c.case_sensitive.is_some()
-            && matches!(class, FieldClass::Hash { .. } | FieldClass::Version)
-        {
+        if c.case_sensitive.is_some() && !class.has_case() {
             self.push(
                 ErrorCode::CaseSensitivityNotApplicable,
                 &format!("{base}/case_sensitive"),
@@ -831,26 +840,101 @@ enum Identity {
     Sound,
 }
 
+/// One node on a way of matching that has only the guaranteed identity.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Step {
+    /// The JSON Pointer of the node, relative to the rule's `match`.
+    pointer: String,
+    /// The node is a negation: a `not`, or a criterion with a negative
+    /// operator.
+    negation: bool,
+}
+
+/// The weakest identity a tree guarantees, and a witness: the nodes that
+/// one of its weakest ways of matching depends on.
+struct Guarantee {
+    identity: Identity,
+    witness: Vec<Step>,
+}
+
 /// A conservative analysis: `all` guarantees the strongest of its children,
 /// `any` only the weakest, and `not` guarantees nothing, because a negated
-/// test never says what the object is. Context criteria are #33.
-fn guaranteed_identity(node: &Match) -> Identity {
+/// test never says what the object is. A context criterion (#33) says
+/// nothing about the object either.
+///
+/// The witness of `all` joins its children's witnesses, since a way of
+/// matching `all` goes through every child; the witness of `any` is its
+/// weakest child's. With at most 32 criteria, a witness is short.
+fn guaranteed_identity(node: &Match, pointer: &str) -> Guarantee {
     match node {
-        Match::All(children) => children
-            .iter()
-            .map(guaranteed_identity)
-            .max()
-            .unwrap_or(Identity::None),
+        Match::All(children) => {
+            let parts: Vec<Guarantee> = children
+                .iter()
+                .enumerate()
+                .map(|(i, c)| guaranteed_identity(c, &format!("{pointer}/all/{i}")))
+                .collect();
+            Guarantee {
+                identity: parts
+                    .iter()
+                    .map(|g| g.identity)
+                    .max()
+                    .unwrap_or(Identity::None),
+                witness: parts.into_iter().flat_map(|g| g.witness).collect(),
+            }
+        }
         Match::Any(children) => children
             .iter()
-            .map(guaranteed_identity)
-            .min()
-            .unwrap_or(Identity::None),
-        Match::Not(_) => Identity::None,
-        Match::Criterion(c) if !c.operator.is_positive() => Identity::None,
-        Match::Criterion(c) if c.field.is_weak_hash() => Identity::WeakHashOnly,
-        Match::Criterion(c) if c.field.strength() == Strength::Weak => Identity::Weak,
-        Match::Criterion(_) => Identity::Sound,
+            .enumerate()
+            .map(|(i, c)| guaranteed_identity(c, &format!("{pointer}/any/{i}")))
+            // The first of the weakest, so the witness is stable.
+            .reduce(|weakest, g| {
+                if g.identity < weakest.identity {
+                    g
+                } else {
+                    weakest
+                }
+            })
+            .unwrap_or(Guarantee {
+                identity: Identity::None,
+                witness: Vec::new(),
+            }),
+        Match::Not(_) => Guarantee {
+            identity: Identity::None,
+            witness: vec![Step {
+                pointer: format!("{pointer}/not"),
+                negation: true,
+            }],
+        },
+        Match::Criterion(c) => {
+            let identity = match c.field.strength() {
+                _ if !c.operator.is_positive() => Identity::None,
+                None => Identity::None,
+                Some(_) if c.field.is_weak_hash() => Identity::WeakHashOnly,
+                Some(Strength::Weak) => Identity::Weak,
+                Some(_) => Identity::Sound,
+            };
+            Guarantee {
+                identity,
+                witness: vec![Step {
+                    pointer: format!("{pointer}/criterion"),
+                    negation: !c.operator.is_positive(),
+                }],
+            }
+        }
+    }
+}
+
+/// Names the nodes of a witness for a message, such as
+/// `` `/all/0/criterion` and `/all/1/not` ``. The root is `match` itself.
+fn describe_witness(witness: &[Step]) -> String {
+    let names: Vec<String> = witness
+        .iter()
+        .map(|s| format!("`match{}`", s.pointer))
+        .collect();
+    match names.as_slice() {
+        [] => "`match`".to_owned(),
+        [one] => one.clone(),
+        [init @ .., last] => format!("{} and {last}", init.join(", ")),
     }
 }
 

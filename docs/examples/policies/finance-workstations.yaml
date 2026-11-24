@@ -49,3 +49,29 @@ rule_sets:
         metadata:
           justification: Core line-of-business application.
           ticket_ref: CHG-1042
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4f12
+        name: Ledger admin console for administrators only
+        # Context criteria narrow a rule; they never identify the object.
+        # The publisher and file name identify it; the user's groups and
+        # session decide who may run it. Group values are SIDs, not names.
+        object_types: [executable]
+        match:
+          all:
+            - criterion:
+                field: signer.publisher
+                operator: equals
+                values:
+                  - "CN=Example Accounting Pty Ltd, O=Example Accounting Pty Ltd, C=AU"
+            - criterion:
+                field: meta.original_filename
+                operator: equals
+                values: [LedgerAdmin.exe]
+            - criterion:
+                field: user.groups
+                operator: member_of
+                values: [S-1-5-32-544]
+            - not:
+                criterion:
+                  field: session.is_remote
+                  operator: is_true
+        action: {type: allow}

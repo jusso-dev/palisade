@@ -37,7 +37,9 @@ impl ObjectFacts {
     /// Hash values are hex digits in either case.
     ///
     /// Returns `false`, and records nothing, for a path or signer field:
-    /// those come from [`Self::path`] and [`Self::signers`].
+    /// those come from [`Self::path`] and [`Self::signers`]. Nor for a
+    /// context field, which comes from the
+    /// [`EvaluationContext`](crate::context::EvaluationContext).
     pub fn set(&mut self, field: Field, value: impl Into<String>) -> bool {
         if is_stored(field) {
             self.values.insert(field, value.into());
@@ -48,7 +50,7 @@ impl ObjectFacts {
     }
 
     /// The same as [`Self::set`], for building facts in one expression.
-    /// A path or signer field is ignored.
+    /// A path, signer or context field is ignored.
     #[must_use]
     pub fn with(mut self, field: Field, value: impl Into<String>) -> Self {
         self.set(field, value);
@@ -79,10 +81,12 @@ impl ObjectFacts {
 
 /// Whether a field's fact is stored in [`ObjectFacts::set`]'s map.
 const fn is_stored(field: Field) -> bool {
-    !matches!(
-        field,
-        Field::SignerPublisher | Field::SignerIssuer | Field::SignerLeafThumbprint
-    ) && !matches!(field.class(), FieldClass::Path | FieldClass::FileName)
+    !field.is_context()
+        && !matches!(
+            field,
+            Field::SignerPublisher | Field::SignerIssuer | Field::SignerLeafThumbprint
+        )
+        && !matches!(field.class(), FieldClass::Path | FieldClass::FileName)
 }
 
 /// The path of an object, normalised, with the facts that decide whether

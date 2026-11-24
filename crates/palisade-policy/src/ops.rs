@@ -11,8 +11,9 @@
 //! fact the criterion needs is missing or cannot be trusted. A negative
 //! operator is the Kleene negation of its positive form, so a negated test
 //! of an unknown fact is `Unknown`, never `Match`: "does not contain X" is
-//! not satisfied by a value nobody computed. How a rule treats `Unknown`
-//! depends on its effect (#33, #35); an allow rule treats it as no match.
+//! not satisfied by a value nobody computed. A whole tree combines these
+//! results with the same logic, and a rule only matches on `Match`
+//! ([`crate::condition`]), so `Unknown` never allows.
 //!
 //! # Several values
 //!
@@ -113,12 +114,44 @@
 //! with an expired but timestamped certificate, or catalog-signed take
 //! part: a revoked, untrusted, expired or digest-mismatched signature never
 //! vouches for an object, and an unsigned object matches no signer.
+//!
+//! # Context
+//!
+//! Context criteria (#33) test the user, device and session in
+//! [`EvalContext::context`] rather than the object. They follow the same
+//! rules: a fact that was not collected is `Unknown`, and so is its
+//! negation.
+//!
+//! - SIDs (`user.sid`, `user.primary_group`) are compared in canonical
+//!   form: `s-1-5-32-544` equals `S-1-5-32-544`, and leading zeros are
+//!   ignored. A SID fact that is not a SID is `Unknown`, with
+//!   [`Note::FactMalformed`].
+//! - Sets (`user.groups`, `device.groups`, `device.tags`) take `member_of`
+//!   and `not_member_of`: `member_of` matches if the set holds any value,
+//!   `not_member_of` if it holds none. Group members are SIDs or
+//!   cloud-directory object IDs (GUIDs, in any case); a member of the fact
+//!   that is neither is unknown, with [`Note::FactMalformed`], so it never
+//!   lets `not_member_of` match. Tags are text, and case-insensitive unless
+//!   `case_sensitive: true`.
+//! - `user.name` is tested against both the account name (`DOMAIN\user`)
+//!   and the user principal name, and matches if either does. A form that
+//!   was not collected counts as `Unknown`, so a negative test only matches
+//!   when both forms are known. Regular expressions are not allowed on it
+//!   (#32); match principals by SID where you can.
+//! - Yes-or-no facts take `is_true` and `is_false`, with no values.
+//! - `session.type` takes `equals` and `not_equals` with the names
+//!   `console`, `rdp`, `remote_shell`, `service`, `batch` and `network`.
+//! - The other device and session facts are text or versions, compared as
+//!   above.
 
 use regex_automata::meta::Regex;
 use unicode_normalization::UnicodeNormalization;
 
 use palisade_core::path::{NormalizedPath, normalize};
 
+use crate::context::{
+    ContextFact, EvaluationContext, SessionType, normalize_principal, normalize_sid,
+};
 use crate::facts::{ObjectFacts, PathFact, PathVariable, PathVariables, SignerFact};
 use crate::model::{Action, Criterion, Field, FieldClass, Operator};
 
@@ -248,6 +281,11 @@ impl Notes {
         self.0 |= 1 << (note as u8);
     }
 
+    /// Adds every note in `other`.
+    pub fn extend(&mut self, other: Self) {
+        self.0 |= other.0;
+    }
+
     /// Whether the set holds `note`.
     #[must_use]
     pub const fn contains(self, note: Note) -> bool {
@@ -283,6 +321,8 @@ pub struct EvalContext<'a> {
     pub action: Action,
     /// The path variables, expanded for the user the process runs as.
     pub variables: &'a PathVariables,
+    /// The user, device and session, for context criteria (#33).
+    pub context: &'a EvaluationContext,
 }
 
 /// A version: four 16-bit parts, compared part by part.
@@ -427,6 +467,16 @@ enum Values {
     Version(Vec<Version>),
     /// One inclusive range.
     VersionRange(Version, Version),
+    /// Canonical SIDs.
+    Sid(Vec<String>),
+    /// Canonical SIDs and object IDs, for `member_of` on a principal set.
+    Principals(Vec<String>),
+    /// NFC-normalised, case-folded tags, for `member_of` on a tag set.
+    Tags(Vec<String>),
+    /// Session types.
+    Session(Vec<SessionType>),
+    /// The value a yes-or-no fact must have.
+    Bool(bool),
 }
 
 /// A value on `path.full` or `path.directory`.
@@ -513,6 +563,15 @@ impl CompiledCriterion {
     }
 
     fn eval_positive(&self, facts: &ObjectFacts, ctx: &EvalContext<'_>, notes: &mut Notes) -> Tri {
+        if self.field.is_context() {
+            return match ctx.context.fact(self.field) {
+                Some(fact) => self.eval_context(fact, notes),
+                None => {
+                    notes.insert(Note::FactMissing);
+                    Tri::Unknown
+                }
+            };
+        }
         match self.field {
             Field::SignerPublisher | Field::SignerIssuer | Field::SignerLeafThumbprint => {
                 self.eval_signers(facts.signers.as_deref(), notes)
@@ -575,6 +634,64 @@ impl CompiledCriterion {
         result
     }
 
+    /// A fact about the user, device or session.
+    fn eval_context(&self, fact: ContextFact<'_>, notes: &mut Notes) -> Tri {
+        match (fact, &self.values) {
+            (ContextFact::Bool(have), Values::Bool(want)) => Tri::from_bool(have == *want),
+            (ContextFact::Session(have), Values::Session(want)) => {
+                Tri::from_bool(want.contains(&have))
+            }
+            (ContextFact::Set(members), Values::Principals(want)) => {
+                // A member that is neither a SID nor an object ID could be
+                // any principal, so it is unknown rather than skipped: it
+                // must not let `not_member_of` match.
+                let mut result = Tri::NoMatch;
+                for member in members {
+                    result = result.or(match normalize_principal(member) {
+                        Some(m) => Tri::from_bool(want.contains(&m)),
+                        None => {
+                            notes.insert(Note::FactMalformed);
+                            Tri::Unknown
+                        }
+                    });
+                }
+                result
+            }
+            (ContextFact::Set(members), Values::Tags(want)) => Tri::from_bool(
+                members
+                    .iter()
+                    .any(|m| want.contains(&fold(m, self.case_sensitive))),
+            ),
+            (ContextFact::Text(fact), Values::Sid(want)) => match normalize_sid(fact) {
+                Some(have) => Tri::from_bool(want.contains(&have)),
+                None => {
+                    notes.insert(Note::FactMalformed);
+                    Tri::Unknown
+                }
+            },
+            (ContextFact::Names(account, upn), _) => {
+                let mut result = Tri::NoMatch;
+                for form in [account, upn] {
+                    result = result.or(match form {
+                        Some(name) => self.eval_value(name, notes),
+                        None => {
+                            notes.insert(Note::FactMissing);
+                            Tri::Unknown
+                        }
+                    });
+                }
+                result
+            }
+            (ContextFact::Text(fact), _) => self.eval_value(fact, notes),
+            // A fact of another shape than the field's values: the
+            // collector produced something this field does not hold.
+            _ => {
+                notes.insert(Note::FactMalformed);
+                Tri::Unknown
+            }
+        }
+    }
+
     /// A hash, text or version fact.
     fn eval_value(&self, fact: &str, notes: &mut Notes) -> Tri {
         match &self.values {
@@ -614,8 +731,18 @@ impl CompiledCriterion {
                 let fact = fold(fact, self.case_sensitive);
                 Tri::from_bool(values.iter().any(|v| self.text_op(&fact, v)))
             }
-            // Only built for path fields, which `eval_path_form` handles.
-            Values::PathLiteral(_) | Values::PathWildcard(_) => Tri::Unknown,
+            // Only built for path fields, which `eval_path_form` handles,
+            // and for context fields, which `eval_context` handles.
+            Values::PathLiteral(_)
+            | Values::PathWildcard(_)
+            | Values::Sid(_)
+            | Values::Principals(_)
+            | Values::Tags(_)
+            | Values::Session(_)
+            | Values::Bool(_) => {
+                notes.insert(Note::FactMalformed);
+                Tri::Unknown
+            }
         }
     }
 
@@ -846,6 +973,25 @@ fn compile_values(
                 _ => Values::Version(versions),
             }
         }
+        FieldClass::Sid => Values::Sid(each(values, |v| {
+            normalize_sid(v).ok_or_else(|| invalid("expected a SID, such as `S-1-5-32-544`"))
+        })?),
+        FieldClass::PrincipalSet => Values::Principals(each(values, |v| {
+            normalize_principal(v).ok_or_else(|| {
+                invalid(
+                    "expected a SID, such as `S-1-5-32-544`, or a directory object ID, such as `00000000-0000-0000-0000-000000000000`",
+                )
+            })
+        })?),
+        FieldClass::TagSet => Values::Tags(each(values, |v| Ok(fold(v, case_sensitive)))?),
+        FieldClass::SessionType => Values::Session(each(values, |v| {
+            SessionType::from_name(v).ok_or_else(|| {
+                invalid("expected one of `console`, `rdp`, `remote_shell`, `service`, `batch`, `network`")
+            })
+        })?),
+        // The operator alone says what the fact must be; the number of
+        // values (none) is checked with the operator.
+        FieldClass::Bool => Values::Bool(operator == Operator::IsTrue),
         _ if operator == Operator::Regex => Values::Regex(each(values, |v| {
             compile_regex(&v.nfc().collect::<String>(), case_sensitive)
         })?),
@@ -879,7 +1025,7 @@ fn compile_values(
                 Ok(fold(&v.replace('/', "\\"), case_sensitive))
             })?),
         },
-        FieldClass::FileName | FieldClass::Text => {
+        FieldClass::FileName | FieldClass::Text | FieldClass::PrincipalName => {
             let check = |v: &str| {
                 if field == Field::PathExtension && v.starts_with('.') {
                     return Err(invalid("write the extension without its leading `.`"));
