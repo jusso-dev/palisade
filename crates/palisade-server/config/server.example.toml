@@ -62,3 +62,29 @@ grace_secs = 30
 [log]
 # error, warn, info, debug or trace.
 level = "info"
+
+# Postgres (#127). Optional: without this section the server runs without a
+# database. See the README for the two roles and sql/bootstrap.sql.
+[database]
+host = "127.0.0.1"
+port = 5432
+name = "palisade"
+# The runtime role: owns nothing, cannot bypass row-level security.
+user = "palisade_app"
+# A secret file holding only the password (chmod 600 on Unix).
+password_file = "secrets/db-runtime.password"
+# verify-full (default), verify-ca, require or disable.
+tls = "verify-full"
+# Extra trusted CA certificates for the database server (PEM).
+# ca_file = "tls/db-ca.crt"
+max_connections = 16
+connect_timeout_secs = 5
+# Apply pending migrations at start. Defaults to true when
+# [database.migration] is set; set false for controlled change windows.
+auto_migrate = true
+
+# The migration role: owns the schema. Used only by `migrate up` and
+# auto_migrate, never to serve requests.
+[database.migration]
+user = "palisade_owner"
+password_file = "secrets/db-owner.password"

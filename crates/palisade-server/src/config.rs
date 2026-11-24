@@ -49,6 +49,7 @@ struct RawConfig {
     listen: RawListen,
     shutdown: RawShutdown,
     log: RawLog,
+    database: Option<RawDatabase>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -96,6 +97,29 @@ struct RawShutdown {
 #[serde(default, deny_unknown_fields)]
 struct RawLog {
     level: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct RawDatabase {
+    host: Option<String>,
+    port: Option<u16>,
+    name: Option<String>,
+    user: Option<String>,
+    password_file: Option<PathBuf>,
+    tls: Option<String>,
+    ca_file: Option<PathBuf>,
+    max_connections: Option<u32>,
+    connect_timeout_secs: Option<u64>,
+    auto_migrate: Option<bool>,
+    migration: Option<RawDbLogin>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct RawDbLogin {
+    user: Option<String>,
+    password_file: Option<PathBuf>,
 }
 
 // ---------------------------------------------------------------------------
@@ -213,6 +237,15 @@ struct ListenerDefaults {
 }
 
 const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 30;
+const DEFAULT_DB_PORT: u16 = 5432;
+const DEFAULT_DB_MAX_CONNECTIONS: u32 = 16;
+const MAX_DB_CONNECTIONS: u32 = 1000;
+const DEFAULT_DB_CONNECT_TIMEOUT_SECS: u64 = 5;
+const MAX_DB_CONNECT_TIMEOUT_SECS: u64 = 300;
+/// Longest Postgres identifier, in bytes (`NAMEDATALEN - 1`).
+const MAX_PG_IDENTIFIER: usize = 63;
+/// Longest database host name.
+const MAX_DB_HOST: usize = 253;
 const DEFAULT_GRACE_SECS: u64 = 30;
 const DEFAULT_METRICS_PORT: u16 = 9464;
 
@@ -265,6 +298,71 @@ pub struct ListenerSettings {
     pub client_ca_file: Option<PathBuf>,
 }
 
+/// How the connection to Postgres is protected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DbTls {
+    /// No TLS. Only for a database on the same host or a private test
+    /// network.
+    Disable,
+    /// TLS, without checking the server certificate.
+    Require,
+    /// TLS, with the server certificate checked against the trusted roots.
+    VerifyCa,
+    /// TLS, with the certificate checked and its name matched to `host`.
+    VerifyFull,
+}
+
+impl DbTls {
+    /// The name used in the configuration.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Disable => "disable",
+            Self::Require => "require",
+            Self::VerifyCa => "verify-ca",
+            Self::VerifyFull => "verify-full",
+        }
+    }
+}
+
+/// A Postgres login: a role name and the file that holds its password.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DbLogin {
+    /// The role name.
+    pub user: String,
+    /// The password file. A secret: read with the secret-file rules and
+    /// never logged.
+    pub password_file: PathBuf,
+}
+
+/// The validated `[database]` section.
+#[derive(Debug, Clone)]
+pub struct DatabaseSettings {
+    /// Host name or IP address of the Postgres server.
+    pub host: String,
+    /// TCP port.
+    pub port: u16,
+    /// Database name.
+    pub name: String,
+    /// The runtime login the server uses for every request. It must not
+    /// own the tables and must not be able to bypass row-level security.
+    pub runtime: DbLogin,
+    /// The login that owns the schema and runs migrations. Needed by
+    /// `migrate` and by `auto_migrate`; the server never serves requests
+    /// with it.
+    pub migration: Option<DbLogin>,
+    /// Transport protection.
+    pub tls: DbTls,
+    /// Extra trusted CA certificates (PEM) for the database server.
+    pub ca_file: Option<PathBuf>,
+    /// Pool size for the runtime login.
+    pub max_connections: u32,
+    /// Time allowed to get a connection (including connecting).
+    pub connect_timeout: Duration,
+    /// Apply pending migrations at start, with the migration login. Defaults
+    /// to on when `[database.migration]` is configured.
+    pub auto_migrate: bool,
+}
+
 /// The validated server configuration.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -278,6 +376,8 @@ pub struct Config {
     pub shutdown_grace: Duration,
     /// Log verbosity.
     pub log_level: LevelFilter,
+    /// The database, when configured.
+    pub database: Option<DatabaseSettings>,
 }
 
 /// A loaded configuration plus non-fatal findings.
@@ -378,7 +478,7 @@ pub fn load_str(
     for (name, value) in env {
         apply_env(&mut raw, name, value, &mut errors, &mut warnings);
     }
-    let config = validate(raw, base, &mut errors);
+    let config = validate(raw, base, &mut errors, &mut warnings);
     match config {
         Some(config) if errors.is_empty() => Ok(Loaded { config, warnings }),
         _ => Err(ConfigError(errors)),
@@ -419,6 +519,58 @@ fn apply_env(
             set_env_int(&mut raw.shutdown.grace_secs, name, value, errors);
         }
         ["LOG", "LEVEL"] => raw.log.level = text(),
+        ["DATABASE", "MIGRATION", key] => {
+            if !matches!(*key, "USER" | "PASSWORD_FILE") {
+                warnings.push(format!("ignoring unknown environment variable {name}"));
+                return;
+            }
+            let db = raw.database.get_or_insert_with(RawDatabase::default);
+            let login = db.migration.get_or_insert_with(RawDbLogin::default);
+            if *key == "USER" {
+                login.user = text();
+            } else {
+                login.password_file = path();
+            }
+        }
+        ["DATABASE", key] => {
+            // As for listeners, the key is checked first, so an unknown
+            // variable never enables the database section.
+            const KEYS: [&str; 10] = [
+                "HOST",
+                "PORT",
+                "NAME",
+                "USER",
+                "PASSWORD_FILE",
+                "TLS",
+                "CA_FILE",
+                "MAX_CONNECTIONS",
+                "CONNECT_TIMEOUT_SECS",
+                "AUTO_MIGRATE",
+            ];
+            if !KEYS.contains(key) {
+                warnings.push(format!("ignoring unknown environment variable {name}"));
+                return;
+            }
+            let db = raw.database.get_or_insert_with(RawDatabase::default);
+            match *key {
+                "HOST" => db.host = text(),
+                "PORT" => set_env_int(&mut db.port, name, value, errors),
+                "NAME" => db.name = text(),
+                "USER" => db.user = text(),
+                "PASSWORD_FILE" => db.password_file = path(),
+                "TLS" => db.tls = text(),
+                "CA_FILE" => db.ca_file = path(),
+                "MAX_CONNECTIONS" => set_env_int(&mut db.max_connections, name, value, errors),
+                "CONNECT_TIMEOUT_SECS" => {
+                    set_env_int(&mut db.connect_timeout_secs, name, value, errors);
+                }
+                _ => match value.trim() {
+                    "true" => db.auto_migrate = Some(true),
+                    "false" => db.auto_migrate = Some(false),
+                    _ => errors.push(format!("{name}: expected `true` or `false`, got `{value}`")),
+                },
+            }
+        }
         ["LISTEN", which, key] => {
             // The key is checked before the listener section is created, so
             // an unknown variable never enables a listener.
@@ -486,7 +638,12 @@ fn set_env_int<T: std::str::FromStr>(
 // Validation.
 // ---------------------------------------------------------------------------
 
-fn validate(raw: RawConfig, base: &Path, errors: &mut Vec<String>) -> Option<Config> {
+fn validate(
+    raw: RawConfig,
+    base: &Path,
+    errors: &mut Vec<String>,
+    warnings: &mut Vec<String>,
+) -> Option<Config> {
     let profile = match raw.deployment.profile.as_deref() {
         None | Some("standard") => Some(Profile::Standard),
         Some("overlay") => Some(Profile::Overlay),
@@ -541,12 +698,187 @@ fn validate(raw: RawConfig, base: &Path, errors: &mut Vec<String>) -> Option<Con
         }
     };
 
-    Some(Config {
+    let start = errors.len();
+    let database = raw
+        .database
+        .and_then(|d| validate_database(d, base, errors, warnings));
+    let database_ok = errors.len() == start;
+
+    let config = Config {
         profile: profile?,
         tls: tls?,
         listeners,
         shutdown_grace: Duration::from_secs(grace_secs),
         log_level: log_level?,
+        database,
+    };
+    database_ok.then_some(config)
+}
+
+fn validate_database(
+    raw: RawDatabase,
+    base: &Path,
+    errors: &mut Vec<String>,
+    warnings: &mut Vec<String>,
+) -> Option<DatabaseSettings> {
+    let start = errors.len();
+    let host = match raw.host.as_deref().map(str::trim) {
+        None | Some("") => {
+            errors.push("database.host: is required".to_owned());
+            None
+        }
+        // An IP address (IPv6 with or without brackets) or a DNS name. No
+        // port (that is `database.port`) and no Unix socket path.
+        Some(h) => {
+            let unbracketed = h
+                .strip_prefix('[')
+                .and_then(|x| x.strip_suffix(']'))
+                .unwrap_or(h);
+            if let Ok(ip) = unbracketed.parse::<IpAddr>() {
+                Some(ip.to_string())
+            } else if h.len() <= MAX_DB_HOST && ServerName::try_from(h.to_owned()).is_ok() {
+                Some(h.to_owned())
+            } else {
+                errors.push(format!(
+                    "database.host: `{h}` is not an IP address or host name; set the port with `database.port`"
+                ));
+                None
+            }
+        }
+    };
+    let port = match raw.port {
+        Some(0) => {
+            errors.push("database.port: must be between 1 and 65535".to_owned());
+            None
+        }
+        p => Some(p.unwrap_or(DEFAULT_DB_PORT)),
+    };
+    let name = pg_identifier(raw.name, "database.name", errors);
+    let runtime = db_login(raw.user, raw.password_file, "database", base, errors);
+    let has_migration_section = raw.migration.is_some();
+    let migration = raw
+        .migration
+        .and_then(|m| db_login(m.user, m.password_file, "database.migration", base, errors));
+    if let (Some(r), Some(m)) = (&runtime, &migration) {
+        if r.user == m.user {
+            errors.push(format!(
+                "database.migration.user: must differ from database.user (`{}`); the server must not serve requests as the role that owns the schema (ADR 0006)",
+                r.user
+            ));
+        }
+    }
+    let tls = match raw.tls.as_deref() {
+        None | Some("verify-full") => Some(DbTls::VerifyFull),
+        Some("verify-ca") => Some(DbTls::VerifyCa),
+        Some("require") => Some(DbTls::Require),
+        Some("disable") => Some(DbTls::Disable),
+        Some(other) => {
+            errors.push(format!(
+                "database.tls: expected `verify-full`, `verify-ca`, `require` or `disable`, got `{other}`"
+            ));
+            None
+        }
+    };
+    let ca_file = match (raw.ca_file, tls) {
+        (Some(p), _) if p.as_os_str().is_empty() => {
+            errors.push("database.ca_file: must not be empty".to_owned());
+            None
+        }
+        (Some(p), Some(DbTls::VerifyCa | DbTls::VerifyFull)) => Some(resolve_path(base, p)),
+        (Some(_), Some(_)) => {
+            errors.push(
+                "database.ca_file: is only used with tls = \"verify-ca\" or \"verify-full\""
+                    .to_owned(),
+            );
+            None
+        }
+        _ => None,
+    };
+    if let Some(mode @ (DbTls::Disable | DbTls::Require)) = tls {
+        warnings.push(format!(
+            "database.tls = \"{}\": the database server is not authenticated; use \"verify-full\" outside a test setup",
+            mode.as_str()
+        ));
+    }
+    let max_connections = raw.max_connections.unwrap_or(DEFAULT_DB_MAX_CONNECTIONS);
+    if max_connections == 0 || max_connections > MAX_DB_CONNECTIONS {
+        errors.push(format!(
+            "database.max_connections: must be between 1 and {MAX_DB_CONNECTIONS}, got {max_connections}"
+        ));
+    }
+    let timeout = raw
+        .connect_timeout_secs
+        .unwrap_or(DEFAULT_DB_CONNECT_TIMEOUT_SECS);
+    if timeout == 0 || timeout > MAX_DB_CONNECT_TIMEOUT_SECS {
+        errors.push(format!(
+            "database.connect_timeout_secs: must be between 1 and {MAX_DB_CONNECT_TIMEOUT_SECS}, got {timeout}"
+        ));
+    }
+    // On by default when the migration login is configured (#127), so a
+    // server that is older than its database's schema never needs a manual
+    // step. Explicitly `true` without that login is an error.
+    let auto_migrate = raw.auto_migrate.unwrap_or(has_migration_section);
+    // A [database.migration] section with its own errors already says so.
+    if auto_migrate && !has_migration_section {
+        errors.push(
+            "database.auto_migrate: needs the [database.migration] login, which owns the schema"
+                .to_owned(),
+        );
+    }
+    if errors.len() != start {
+        return None;
+    }
+    Some(DatabaseSettings {
+        host: host?,
+        port: port?,
+        name: name?,
+        runtime: runtime?,
+        migration,
+        tls: tls?,
+        ca_file,
+        max_connections,
+        connect_timeout: Duration::from_secs(timeout),
+        auto_migrate,
+    })
+}
+
+/// A role or database name: 1 to 63 bytes, no control characters. It is
+/// only ever passed to Postgres as a connection parameter, never into SQL.
+fn pg_identifier(value: Option<String>, key: &str, errors: &mut Vec<String>) -> Option<String> {
+    match value {
+        None => {
+            errors.push(format!("{key}: is required"));
+            None
+        }
+        Some(v)
+            if v.is_empty() || v.len() > MAX_PG_IDENTIFIER || v.chars().any(char::is_control) =>
+        {
+            errors.push(format!(
+                "{key}: must be 1 to {MAX_PG_IDENTIFIER} bytes without control characters"
+            ));
+            None
+        }
+        Some(v) => Some(v),
+    }
+}
+
+fn db_login(
+    user: Option<String>,
+    password_file: Option<PathBuf>,
+    section: &str,
+    base: &Path,
+    errors: &mut Vec<String>,
+) -> Option<DbLogin> {
+    let user = pg_identifier(user, &format!("{section}.user"), errors);
+    let password_file = required_path(
+        password_file,
+        &format!("{section}.password_file"),
+        base,
+        errors,
+    );
+    Some(DbLogin {
+        user: user?,
+        password_file: password_file?,
     })
 }
 
@@ -852,7 +1184,37 @@ impl Config {
             "listen": listeners,
             "shutdown": { "grace_secs": self.shutdown_grace.as_secs() },
             "log": { "level": self.log_level.to_string().to_lowercase() },
+            "database": self.database.as_ref().map(DatabaseSettings::effective_json),
         })
+    }
+}
+
+impl DatabaseSettings {
+    fn effective_json(&self) -> Value {
+        let login = |l: &DbLogin| {
+            json!({
+                "user": l.user,
+                "password_file": format!("{} (secret file; contents never shown)", l.password_file.display()),
+            })
+        };
+        let mut v = json!({
+            "host": self.host,
+            "port": self.port,
+            "name": self.name,
+            "user": self.runtime.user,
+            "password_file": login(&self.runtime)["password_file"],
+            "tls": self.tls.as_str(),
+            "max_connections": self.max_connections,
+            "connect_timeout_secs": self.connect_timeout.as_secs(),
+            "auto_migrate": self.auto_migrate,
+        });
+        if let Some(ca) = &self.ca_file {
+            v["ca_file"] = json!(ca.display().to_string());
+        }
+        if let Some(m) = &self.migration {
+            v["migration"] = login(m);
+        }
+        v
     }
 }
 
@@ -1181,11 +1543,225 @@ mod tests {
         assert_eq!(v["log"]["level"], "info");
     }
 
+    const DB: &str = r#"
+        [database]
+        host = "db.internal"
+        name = "palisade"
+        user = "palisade_app"
+        password_file = "secrets/db-runtime.password"
+        ca_file = "tls/db-ca.crt"
+
+        [database.migration]
+        user = "palisade_owner"
+        password_file = "secrets/db-owner.password"
+    "#;
+
+    #[test]
+    fn database_section_gets_defaults() {
+        let l = load_ok(&format!("{MINIMAL}{DB}"), &[]);
+        assert!(l.warnings.is_empty(), "{:?}", l.warnings);
+        let d = l.config.database.unwrap();
+        assert_eq!(d.port, 5432);
+        assert_eq!(d.tls, DbTls::VerifyFull, "verify-full by default");
+        assert_eq!(d.max_connections, 16);
+        assert_eq!(d.connect_timeout, Duration::from_secs(5));
+        assert!(d.auto_migrate, "on by default with a migration login");
+        let off = load_ok(
+            &format!("{MINIMAL}{DB}").replace(
+                "[database.migration]",
+                "auto_migrate = false\n[database.migration]",
+            ),
+            &[],
+        );
+        assert!(!off.config.database.unwrap().auto_migrate);
+        let no_login = format!("{MINIMAL}{DB}");
+        let (runtime_only, _) = no_login.split_once("[database.migration]").unwrap();
+        assert!(
+            !load_ok(runtime_only, &[])
+                .config
+                .database
+                .unwrap()
+                .auto_migrate
+        );
+        assert_eq!(
+            d.runtime.password_file,
+            Path::new("/etc/palisade/secrets/db-runtime.password")
+        );
+        assert_eq!(d.migration.unwrap().user, "palisade_owner");
+        assert_eq!(
+            d.ca_file.as_deref(),
+            Some(Path::new("/etc/palisade/tls/db-ca.crt"))
+        );
+    }
+
+    #[test]
+    fn database_is_optional() {
+        assert!(load_ok(MINIMAL, &[]).config.database.is_none());
+    }
+
+    #[test]
+    fn database_env_overrides() {
+        let c = load_ok(
+            MINIMAL,
+            &[
+                ("PALISADE_DATABASE__HOST", "127.0.0.1"),
+                ("PALISADE_DATABASE__PORT", "55432"),
+                ("PALISADE_DATABASE__NAME", "p"),
+                ("PALISADE_DATABASE__USER", "app"),
+                ("PALISADE_DATABASE__PASSWORD_FILE", "/run/secrets/app"),
+                ("PALISADE_DATABASE__TLS", "disable"),
+                ("PALISADE_DATABASE__AUTO_MIGRATE", "true"),
+                ("PALISADE_DATABASE__MIGRATION__USER", "owner"),
+                (
+                    "PALISADE_DATABASE__MIGRATION__PASSWORD_FILE",
+                    "/run/secrets/owner",
+                ),
+            ],
+        );
+        assert_eq!(c.warnings.len(), 1, "disable warns: {:?}", c.warnings);
+        assert!(c.warnings[0].contains("not authenticated"));
+        let d = c.config.database.unwrap();
+        assert_eq!(
+            (d.port, d.tls, d.auto_migrate),
+            (55432, DbTls::Disable, true)
+        );
+        assert_eq!(
+            d.migration.unwrap().password_file,
+            Path::new("/run/secrets/owner")
+        );
+    }
+
+    #[test]
+    fn unknown_database_env_var_does_not_enable_the_section() {
+        let l = load_ok(
+            MINIMAL,
+            &[
+                ("PALISADE_DATABASE__PASSWORD", "hunter2"),
+                ("PALISADE_DATABASE__MIGRATION__PASSWORD", "hunter2"),
+            ],
+        );
+        assert_eq!(l.warnings.len(), 2);
+        assert!(l.config.database.is_none());
+        assert!(l.warnings.iter().all(|w| !w.contains("hunter2")));
+    }
+
+    #[test]
+    fn database_password_values_are_rejected() {
+        let e = load_err(&format!("{MINIMAL}[database]\npassword = \"x\"\n"), &[]);
+        assert!(e[0].contains("unknown field"), "{e:?}");
+    }
+
+    #[test]
+    fn database_problems_are_reported_at_once() {
+        let e = load_err(
+            &format!(
+                "{MINIMAL}[database]\nport = 0\nname = \"\"\ntls = \"prefer\"\nmax_connections = 0\nconnect_timeout_secs = 0\nauto_migrate = true\nca_file = \"x\"\n"
+            ),
+            &[("PALISADE_DATABASE__AUTO_MIGRATE", "yes")],
+        );
+        let joined = e.join("\n");
+        for needle in [
+            "PALISADE_DATABASE__AUTO_MIGRATE",
+            "database.host",
+            "database.port",
+            "database.name",
+            "database.user",
+            "database.password_file",
+            "database.tls",
+            "database.max_connections",
+            "database.connect_timeout_secs",
+            "database.auto_migrate",
+        ] {
+            assert!(joined.contains(needle), "missing {needle} in:\n{joined}");
+        }
+    }
+
+    #[test]
+    fn database_host_is_an_address_or_a_name() {
+        for (host, want) in [
+            ("db.internal", "db.internal"),
+            ("10.0.0.5", "10.0.0.5"),
+            ("[fd00::5]", "fd00::5"),
+            ("fd00::5", "fd00::5"),
+        ] {
+            let text = format!("{MINIMAL}{DB}").replace("db.internal", host);
+            let d = load_ok(&text, &[]).config.database.unwrap();
+            assert_eq!(d.host, want);
+        }
+        for bad in [
+            "127.0.0.1:5432",
+            "db internal",
+            "/var/run/postgresql",
+            "db..internal",
+        ] {
+            let text = format!("{MINIMAL}{DB}").replace("db.internal", bad);
+            let e = load_err(&text, &[]);
+            assert!(
+                e.iter().any(|m| m.starts_with("database.host")),
+                "{bad}: {e:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_incomplete_migration_section_is_one_error() {
+        let text = format!("{MINIMAL}{DB}").replace("user = \"palisade_owner\"\n", "");
+        let e = load_err(&text, &[]);
+        assert_eq!(e, ["database.migration.user: is required"], "{e:?}");
+    }
+
+    #[test]
+    fn runtime_and_migration_roles_must_differ() {
+        let text = format!("{MINIMAL}{DB}").replace("palisade_owner", "palisade_app");
+        let e = load_err(&text, &[]);
+        assert!(e[0].contains("must differ"), "{e:?}");
+    }
+
+    #[test]
+    fn empty_ca_file_is_its_own_error() {
+        let text = format!("{MINIMAL}{DB}").replace("\"tls/db-ca.crt\"", "\"\"");
+        let e = load_err(&text, &[]);
+        assert_eq!(e, ["database.ca_file: must not be empty"], "{e:?}");
+    }
+
+    #[test]
+    fn ca_file_needs_a_verifying_mode() {
+        let text = format!("{MINIMAL}{DB}").replace(
+            "name = \"palisade\"",
+            "name = \"palisade\"\ntls = \"require\"",
+        );
+        let e = load_err(&text, &[]);
+        assert!(e.iter().any(|m| m.contains("database.ca_file")), "{e:?}");
+    }
+
+    #[test]
+    fn effective_json_shows_database_password_paths_only() {
+        let v = load_ok(&format!("{MINIMAL}{DB}"), &[])
+            .config
+            .effective_json();
+        let d = &v["database"];
+        assert_eq!(d["tls"], "verify-full");
+        assert!(d["password_file"].as_str().unwrap().contains("never shown"));
+        assert!(
+            d["migration"]["password_file"]
+                .as_str()
+                .unwrap()
+                .contains("never shown")
+        );
+        assert_eq!(
+            load_ok(MINIMAL, &[]).config.effective_json()["database"],
+            Value::Null
+        );
+    }
+
     #[test]
     fn example_config_is_valid() {
         let text = include_str!("../config/server.example.toml");
         let l = load_ok(text, &[]);
         assert!(l.warnings.is_empty());
         assert_eq!(l.config.listeners.len(), 3);
+        let db = l.config.database.unwrap();
+        assert!(db.auto_migrate && db.migration.is_some());
+        assert_eq!(db.tls, DbTls::VerifyFull);
     }
 }

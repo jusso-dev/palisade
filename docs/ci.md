@@ -21,6 +21,7 @@ type.
 | `coverage` | ubuntu-latest, windows-latest | `cargo llvm-cov nextest --workspace --all-features --locked --profile ci --json --summary-only`, then `cargo xtask coverage-summary` (see [Coverage, fuzzing and benchmarks](#coverage-fuzzing-and-benchmarks)) |
 | `fuzz` | ubuntu-latest | `cargo xtask fuzz`: every cargo-fuzz target, seeded from the test fixtures, for 60 s each, on the pinned nightly |
 | `bench` | ubuntu-latest | `cargo test --bench <name>` for every criterion bench: builds them and runs each benchmark once, without timing |
+| `postgres` | ubuntu-latest | `cargo nextest run -p palisade-server --test postgres --locked --profile ci` against a Postgres 17 service container (official image, pinned by digest), with `PALISADE_TEST_DATABASE_ADMIN_URL` set. Elsewhere those tests skip themselves. `cargo xtask ci` runs this step only when that variable is set locally |
 | `msrv` | ubuntu-latest | `cargo +1.94.0 check --workspace --all-targets --all-features --locked`, after checking that the version matches `rust-version` in `Cargo.toml` |
 | `docs` | ubuntu-latest | `cargo doc --workspace --no-deps --all-features --locked` with `RUSTDOCFLAGS=-D warnings` |
 | `deps` | ubuntu-latest | `cargo xtask check-deps`, `cargo xtask check-manifests`, `cargo xtask check-unsafe`, `cargo deny --locked check` for the root workspace and for each fuzz workspace (with the root `deny.toml`), `cargo xtask audit` (cargo-audit over the root and every fuzz lockfile, with the ignores from `deny.toml`) |
@@ -241,6 +242,8 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo clippy -p palisade-core -p palisade-driver --no-default-features --all-targets --locked -- -D warnings
 cargo clippy -p palisade-core --no-default-features --features schema --all-targets --locked -- -D warnings
 cargo nextest run --workspace --all-features --locked --profile ci   # needs cargo-nextest 0.9
+PALISADE_TEST_DATABASE_ADMIN_URL=postgres://postgres:<pw>@127.0.0.1:5432/postgres \
+  cargo nextest run -p palisade-server --test postgres --locked --profile ci  # needs a disposable Postgres 16+
 cargo test --workspace --all-features --locked --doc
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked
 cargo xtask check-deps

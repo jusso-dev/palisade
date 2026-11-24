@@ -2,10 +2,13 @@
 
 The central management server: policy distribution, approvals, inventory and event storage.
 
-**Status:** process skeleton. The binary starts, loads and validates its configuration, serves
-TLS on separate admin, agent and metrics listeners, answers liveness and readiness probes, and
-shuts down gracefully. It has no agent, API or database functionality yet. Work is tracked in
-[#126](https://github.com/jusso-dev/palisade/issues/126) (epic
+**Status:** process skeleton with a database foundation. The binary starts, loads and validates
+its configuration, serves TLS on separate admin, agent and metrics listeners, answers liveness and
+readiness probes, and shuts down gracefully. It connects to Postgres, applies its embedded
+migrations, and isolates tenants with row-level security (see [Database](#database)). It has no
+agent or API functionality yet. Work is tracked in
+[#126](https://github.com/jusso-dev/palisade/issues/126) and
+[#127](https://github.com/jusso-dev/palisade/issues/127) (epic
 [#10](https://github.com/jusso-dev/palisade/issues/10)).
 
 ## Commands
@@ -13,15 +16,20 @@ shuts down gracefully. It has no agent, API or database functionality yet. Work 
 ```text
 palisade-server serve         --config <PATH>   # run until SIGTERM or Ctrl-C
 palisade-server check-config  --config <PATH>   # validate, then print the effective config
+palisade-server migrate up      --config <PATH> # apply pending migrations, then verify
+palisade-server migrate status  --config <PATH> # applied vs embedded migrations, as JSON
+palisade-server migrate verify  --config <PATH> # checksums and row-level security checks
 palisade-server version
 ```
 
 `--config` can also come from `PALISADE_CONFIG`. Exit codes: `0` success (including a
-completed shutdown), `1` runtime failure, `2` invalid configuration or command line.
+completed shutdown), `1` runtime failure, `2` invalid configuration or command line. `migrate
+status` exits `3` when migrations are pending.
 
 `check-config` runs every check `serve` runs before it binds a socket: the TOML and environment
 overrides, value ranges, the certificate chain and private key, the agent CA bundle, the TLS
-policy, and that each `public_url` host is a subject alternative name (DNS or IP) of the server
+policy, the database password files and CA file, the refused `PG*` variables (see
+[Database](#database)), and that each `public_url` host is a subject alternative name (DNS or IP) of the server
 certificate. It reports every problem at once, prints placement warnings (see
 [Overlay deployments](#overlay-deployments)), and prints the effective configuration as JSON
 with secret files shown by path only.
@@ -52,6 +60,18 @@ as warnings and ignored, so variables meant for other Palisade components do not
 | `listen.agent.client_ca_file` | required | CA bundle that agent client certificates must chain to |
 | `shutdown.grace_secs` | `30` | Up to 3600 |
 | `log.level` | `info` | `error`, `warn`, `info`, `debug`, `trace` |
+| `database.host` | required if `[database]` is present | Host name or IP address |
+| `database.port` | `5432` | |
+| `database.name` | required | Database name |
+| `database.user` | required | The **runtime** role. Must not own the schema or bypass RLS |
+| `database.password_file` | required | A secret file holding the runtime role's password |
+| `database.tls` | `verify-full` | `verify-full`, `verify-ca`, `require` or `disable`. The last two warn |
+| `database.ca_file` | none | Extra trusted CA certificates (PEM). Only with `verify-*` |
+| `database.max_connections` | `16` | Runtime pool size, 1 to 1000 |
+| `database.connect_timeout_secs` | `5` | 1 to 300 |
+| `database.auto_migrate` | on if `[database.migration]` is set | Apply pending migrations at start |
+| `database.migration.user` | none | The **migration** role, which owns the schema |
+| `database.migration.password_file` | none | A secret file holding its password |
 
 `<name>` is `admin` (console, REST API, SSO callbacks), `agent` (agent traffic) or `metrics`
 (probes with full detail, and later the metrics exposition). `admin` and `agent` are required.
@@ -62,9 +82,11 @@ address family); serving every surface on one port with path routing is not supp
 ### Secret files
 
 Secrets are only ever given as file paths, never as values, so the configuration file, the
-environment, `check-config` output and the logs never contain them. Today the only secret is
-`tls.key_file`. It must be a regular file of at most 64 KiB, and on Unix it must not grant any
+environment, `check-config` output and the logs never contain them. The secrets are `tls.key_file`
+and the database password files. It must be a regular file of at most 64 KiB, and on Unix it must not grant any
 access to the group or others (`chmod 600` or stricter); otherwise the server refuses to start.
+The database password files (`database.password_file`, `database.migration.password_file`) follow
+the same rules, with a limit of 4 KiB; a trailing newline is not part of the password.
 Its contents are held in zeroising buffers while loading, and error messages name the path and
 the problem, never any content. Windows ACL checks, a redaction layer for log fields, and other
 secret kinds are part of [#227](https://github.com/jusso-dev/palisade/issues/227).
@@ -160,8 +182,82 @@ Every listener serves:
 | `listener_unbound:<name>` | An address of the listener is not bound yet | 503 |
 | `public_exposure:<name>` | `deployment.profile = "overlay"` and the listener is reachable on a public address | 200, status `degraded` |
 | `shutting_down` | Shutdown has started | 503 |
+| `database_down` | `[database]` is configured and the runtime role cannot reach it (also before the first check) | 503 |
+| `database_schema:<verdict>` | The schema is `behind` (pending migrations), `newer` than this binary, or `damaged` | 503 |
+| `database_role_unsafe` | The runtime role, or any role it is a member of, is a superuser, has `BYPASSRLS`, or owns or can create objects in the schema; or it is not in `palisade_runtime` | 503 |
 
-Database, migration and job-runner readiness join this list with their issues.
+The database is checked every 5 seconds. Job-runner readiness joins this list with #126.
+
+## Database
+
+Postgres 16 or later, through `sqlx` ([ADR 0006](../../docs/adr/0006-server-database.md)).
+Without a `[database]` section the server runs without one, as before, and logs a warning.
+
+**Roles.** Two logins, never the same role:
+
+- The **migration role** owns the database, the `palisade` schema and every table. Only
+  `migrate up` and `auto_migrate` use it.
+- The **runtime role** serves every request. It owns nothing, is `NOSUPERUSER NOBYPASSRLS`, and
+  gets its table privileges through the `palisade_runtime` group role, which the migrations
+  grant to. These properties are checked through role membership too, because a role can
+  `SET ROLE` to any role it is a member of: no role the runtime login can reach may be a
+  superuser, have `BYPASSRLS`, or own the schema or any table, function or type in it (an owner
+  of `palisade.current_tenant_ids()` could replace it). `serve` refuses to start, and readiness
+  reports `database_role_unsafe`, if any check fails.
+
+[`sql/bootstrap.sql`](sql/bootstrap.sql) creates the three roles and the database; run it once as
+a database administrator with `psql` (the file shows the command), then set the two passwords
+with `\password`. `palisade-server` never needs a superuser.
+
+**Migrations.** Forward-only numbered SQL files in [`migrations/`](migrations/), embedded in the
+binary with `sqlx::migrate!`. Each runs in a transaction, as the migration role. Before anything
+is created, `migrate up` checks that role: not a superuser, not linked to `palisade_runtime` by
+membership in either direction, and the owner of the `palisade` schema once it exists. A run as
+the wrong role changes nothing. The history
+lives in `palisade._sqlx_migrations` with a SHA-384 checksum per file, so an edited migration is a
+hard error. At start, `serve` refuses a database whose schema is newer than the binary, and with
+`auto_migrate` applies pending migrations first; otherwise it starts not ready until someone runs
+`migrate up`. `serve` also refuses a damaged schema. `migrate verify` also checks the structure that ADR 0006 requires: every table with
+a `tenant_id` column (and the tenant table) has row-level security enabled and forced and has a
+policy and `tenant_id uuid NOT NULL`, every foreign key between tenant-owned tables includes
+`tenant_id`, and no role a `palisade_runtime` login can act as owns anything in the schema or is
+a superuser or `BYPASSRLS`. New migrations must stay forward-only and avoid long table rewrites
+(expand/contract).
+
+**Tables so far.** `tenant` (a tree with one `root`, `organisation` and `template` kinds, a
+`settings` object) and `computer_group` (a tree per tenant). Each has `created_at`, `updated_at`
+and `revision`, maintained by a trigger: inserts start at revision 1 and every update adds 1, so
+a client can use the revision for optimistic concurrency (#185). A row's `id` and `tenant_id`
+never change. The rest of the schema arrives with the issues that use it.
+
+**Tenant isolation.** Every tenant-owned table has `tenant_id uuid NOT NULL`, `FORCE ROW LEVEL
+SECURITY` (the policies apply to the table owner too), and a policy
+`tenant_id = ANY (palisade.current_tenant_ids())`, for reads and writes. The function reads the
+`palisade.tenant_ids` setting; when it is unset or empty, no rows match. The only way the server
+code runs a tenant-scoped query is `Database::tenant_tx(scope)`, which begins a transaction and
+sets the scope with `set_config(..., true)`, the function form of `SET LOCAL`. The scope ends with
+the transaction, so a pooled connection never carries it to the next request. Foreign keys
+between tenant-owned tables include `tenant_id`, so a row can never reference another tenant's
+row.
+
+**What row-level security does and does not protect.** It stops a bug in a handler (a missing
+`WHERE`, a wrong ID) from reading or changing another tenant's rows: the database filters every
+query, whatever the code asks. The runtime role cannot turn it off: it does not own the tables, so
+it cannot `DISABLE` or `NO FORCE` row-level security or change the policies, and with
+`row_security = off` a filtered query fails rather than returning everything. It does **not**
+protect against a compromised server process. That process holds the runtime role and chooses
+the scope itself, so it can ask for any tenant (threat model AC-08). The integration tests
+demonstrate both sides.
+
+**Environment.** The Postgres client library reads some `PG*` environment variables. The server
+refuses to start, and `migrate` refuses to run, while `PGPASSWORD`, `PGPASSFILE`, `PGOPTIONS`,
+`PGSSLKEY`, `PGSSLCERT`, `PGSSLMODE`, `PGSSLROOTCERT` or `PGHOSTADDR` is set, because these would
+override the configuration (a password outside a `*_file`, or a session setting such as
+`row_security`).
+
+**Queries.** Fixed SQL strings with typed bind parameters only. Compile-time-checked queries
+(`query!`) need a live database or committed offline metadata; they are not used yet, and adopting
+them, with a lint against string-built SQL, is part of #229.
 
 ## Overlay deployments
 
@@ -220,11 +316,13 @@ either way. A second signal during the drain exits `1` immediately.
 ## Not here yet
 
 Tracked in [#126](https://github.com/jusso-dev/palisade/issues/126) unless noted:
-`migrate`, `create-admin`, `backup` and `restore` subcommands; `/version` with git SHA and
-schema version; single-port mode; compression, CORS, rate-limit, auth and tenant layers;
+`create-admin`, `backup` and `restore` subcommands (also
+[#138](https://github.com/jusso-dev/palisade/issues/138)); `/version` with git SHA and schema
+version; single-port mode; compression, CORS, rate-limit, auth and tenant layers;
 the metrics exposition and OTLP; runtime log-level changes; clock-skew health; the job runner
-and scheduler; relay role. Elsewhere: database and migrations
-([#127](https://github.com/jusso-dev/palisade/issues/127)), enrolment and device certificate
+and scheduler; relay role. Elsewhere: the rest of the schema, secrets at rest, soft delete, retention and
+partitioning ([#127](https://github.com/jusso-dev/palisade/issues/127) and the issues that own
+each table), the audit log ([#132](https://github.com/jusso-dev/palisade/issues/132)), enrolment and device certificate
 checks ([#223](https://github.com/jusso-dev/palisade/issues/223)), agent RPCs
 ([#62](https://github.com/jusso-dev/palisade/issues/62)), REST conventions
 ([#185](https://github.com/jusso-dev/palisade/issues/185)), certificate hot reload

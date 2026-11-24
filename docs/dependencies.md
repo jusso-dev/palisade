@@ -105,7 +105,10 @@ also made `regex-automata`, `regex-syntax` and `aho-corasick` normal dependencie
 `safe-to-deploy`, with a note saying so. The agent service host (#252) added 16 more (the async
 runtime, logging and the Windows service crates), exempted with a note that names #252, and made
 `bitflags` and `once_cell` normal dependencies of a shipped crate, so their baseline exemptions were
-raised to `safe-to-deploy` the same way. The
+raised to `safe-to-deploy` the same way. The server's Postgres layer (#127) added 72 more (`sqlx`
+with its Postgres driver, migration support and the rustls-based TLS with the OS trust store),
+exempted with a note that names #127, and raised 31 baseline exemptions (`syn`, `url`, the
+Unicode and ICU crates and their helpers) to `safe-to-deploy` the same way. The
 exemptions are the backlog.
 Each one is removed when the crate is audited, or when an imported audit covers it
 (`cargo vet prune` removes exemptions that are no longer needed).

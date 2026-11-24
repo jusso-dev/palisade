@@ -61,6 +61,7 @@ serde_json = { version = "1.0.154", default-features = false, features = ["std"]
 sha1 = { version = "0.11.0", default-features = false }
 sha2 = { version = "0.11.0", default-features = false }
 socket2 = { version = "0.6.5", default-features = false }
+sqlx = { version = "0.9.1", default-features = false, features = ["macros", "migrate", "postgres", "runtime-tokio", "tls-rustls-ring-native-roots", "uuid"] }
 tokio = { version = "1.54.1", default-features = false }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
 toml = { version = "1.2.2", default-features = false, features = ["std", "parse", "serde"] }
