@@ -2,7 +2,8 @@
 //!
 //! ADR 0008 picks `ring` for signature verification and requires call sites
 //! to go through a thin `crypto` module, so swapping the provider later is a
-//! one-module change. Nothing else in the crate names `ring`.
+//! one-module change. Outside this module, only the hash cache's MAC
+//! module (`hash/mac.rs`) names `ring`.
 //!
 //! What `ring` 0.17 verifies, and so what Palisade verifies:
 //!
