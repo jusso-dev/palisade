@@ -5,9 +5,11 @@ pub mod condition;
 pub mod context;
 pub mod decision;
 pub mod dsl;
+pub mod evaluate;
 pub mod facts;
 pub mod model;
 pub mod ops;
+pub mod precedence;
 pub mod schema;
 pub mod validate;
 

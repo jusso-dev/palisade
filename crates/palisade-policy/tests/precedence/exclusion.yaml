@@ -1,0 +1,59 @@
+description: >-
+  A library is excluded by an ignore rule, which decides before the
+  precedence model, so a matching deny is overridden under every model.
+object:
+  type: library
+  sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  publisher: Example Ltd
+rule_sets:
+  - name: Libraries
+    kind: mixed
+    rules:
+      - name: exclude vendor libraries
+        object_types: [library]
+        match: {criterion: {field: signer.publisher, operator: equals, values: [Example Ltd]}}
+        action: {type: ignore}
+      - name: deny this library
+        match: {criterion: {field: hash.sha256, operator: equals, values: [aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]}}
+        action: {type: deny}
+        order: 100100
+        priority: 1
+      - name: audit libraries
+        match: {criterion: {field: hash.sha256, operator: equals, values: [aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]}}
+        action: {type: audit}
+expect:
+  - model: deny_wins
+    outcome: ignored
+    reason: exclusion
+    rule: exclude vendor libraries
+    overridden: [deny this library]
+    annotations: [audit libraries]
+    trust_sources: []
+  - model: allow_wins
+    outcome: ignored
+    reason: exclusion
+    rule: exclude vendor libraries
+    overridden: [deny this library]
+    annotations: [audit libraries]
+    trust_sources: []
+  - model: specificity
+    outcome: ignored
+    reason: exclusion
+    rule: exclude vendor libraries
+    overridden: [deny this library]
+    annotations: [audit libraries]
+    trust_sources: []
+  - model: first_match
+    outcome: ignored
+    reason: exclusion
+    rule: exclude vendor libraries
+    overridden: [deny this library]
+    annotations: [audit libraries]
+    trust_sources: []
+  - model: priority
+    outcome: ignored
+    reason: exclusion
+    rule: exclude vendor libraries
+    overridden: [deny this library]
+    annotations: [audit libraries]
+    trust_sources: []

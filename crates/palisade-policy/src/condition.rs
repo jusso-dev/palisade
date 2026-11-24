@@ -28,14 +28,22 @@
 //! `Match` does. `Unknown` counts as no match for every action. For an allow
 //! rule that fails closed: an unknown fact never allows. For a deny rule it
 //! means the rule does not apply, so an unknown fact does not block either;
-//! that is the default (`no_match`) that #32 sets for deny rules. The
-//! per-rule `unknown_as` option, which can make a deny rule block on
-//! `Unknown`, and the mandatory-deny defaults are part of precedence (#35).
+//! that is the default (`no_match`) that #32 sets for deny rules.
+//!
+//! A deny rule can change both halves (#35). `unknown_as: match` makes it
+//! apply on `Unknown` as well, which the pipeline in [`crate::evaluate`]
+//! checks. `on_unparseable: match` is applied here, by
+//! [`CompiledMatch::eval_with`] and [`Unparseable::FavourMatch`]: a
+//! criterion that is `Unknown` only because its version fact is not a
+//! version becomes `Match` where the tree would match with it, and
+//! `NoMatch` under an odd number of `not` nodes. So it always counts
+//! towards the deny applying, and the rest of the tree is evaluated as
+//! usual.
 
 use crate::facts::ObjectFacts;
 use crate::model::Match;
 use crate::model::limits::{MAX_CRITERIA_PER_RULE, MAX_TREE_DEPTH};
-use crate::ops::{CompileError, CompiledCriterion, EvalContext, Notes, Tri};
+use crate::ops::{CompileError, CompiledCriterion, EvalContext, Note, Notes, Tri};
 
 /// A match tree ready to be evaluated. Build one with
 /// [`CompiledMatch::compile`].
@@ -115,6 +123,18 @@ impl core::fmt::Display for TreeError {
 }
 
 impl std::error::Error for TreeError {}
+
+/// How a criterion whose version fact is not a version is read (#32, #35).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Unparseable {
+    /// It is `Unknown`, like any other fact that cannot be trusted. The
+    /// default, and the only choice for a rule that is not a deny.
+    #[default]
+    Unknown,
+    /// It counts towards the tree matching: `Match`, or `NoMatch` under an
+    /// odd number of `not` nodes. A deny rule's `on_unparseable: match`.
+    FavourMatch,
+}
 
 /// The result of evaluating a tree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -224,24 +244,41 @@ impl CompiledMatch {
     /// Evaluates the tree against one object's facts and the context.
     #[must_use]
     pub fn eval(&self, facts: &ObjectFacts, ctx: &EvalContext<'_>) -> TreeEvaluation {
-        let mut notes = Notes::default();
-        let root = index(self.nodes.len() - 1);
-        let result = self.eval_node(root, facts, ctx, &mut notes);
-        TreeEvaluation { result, notes }
+        self.eval_with(facts, ctx, Unparseable::Unknown)
     }
 
-    fn eval_node(
+    /// Evaluates the tree, reading criteria on unparseable versions as
+    /// `unparseable` says. With [`Unparseable::Unknown`] this is
+    /// [`eval`](Self::eval).
+    #[must_use]
+    pub fn eval_with(
         &self,
-        id: u32,
         facts: &ObjectFacts,
         ctx: &EvalContext<'_>,
-        notes: &mut Notes,
-    ) -> Tri {
+        unparseable: Unparseable,
+    ) -> TreeEvaluation {
+        let mut eval = Eval {
+            facts,
+            ctx,
+            unparseable,
+            notes: Notes::default(),
+        };
+        let root = index(self.nodes.len() - 1);
+        let result = self.eval_node(root, false, &mut eval);
+        TreeEvaluation {
+            result,
+            notes: eval.notes,
+        }
+    }
+
+    /// Evaluates one node. `negated` is whether an odd number of `not`
+    /// nodes are above it.
+    fn eval_node(&self, id: u32, negated: bool, eval: &mut Eval<'_, '_>) -> Tri {
         match self.nodes[id as usize] {
             Node::All { start, len } => {
                 let mut result = Tri::Match;
                 for &child in self.group(start, len) {
-                    result = result.and(self.eval_node(child, facts, ctx, notes));
+                    result = result.and(self.eval_node(child, negated, eval));
                     if result == Tri::NoMatch {
                         break;
                     }
@@ -251,18 +288,27 @@ impl CompiledMatch {
             Node::Any { start, len } => {
                 let mut result = Tri::NoMatch;
                 for &child in self.group(start, len) {
-                    result = result.or(self.eval_node(child, facts, ctx, notes));
+                    result = result.or(self.eval_node(child, negated, eval));
                     if result == Tri::Match {
                         break;
                     }
                 }
                 result
             }
-            Node::Not(child) => self.eval_node(child, facts, ctx, notes).not(),
+            Node::Not(child) => self.eval_node(child, !negated, eval).not(),
             Node::Leaf(leaf) => {
-                let evaluation = self.leaves[leaf as usize].eval(facts, ctx);
-                notes.extend(evaluation.notes);
-                evaluation.result
+                let evaluation = self.leaves[leaf as usize].eval(eval.facts, eval.ctx);
+                eval.notes.extend(evaluation.notes);
+                if evaluation.result == Tri::Unknown
+                    && eval.unparseable == Unparseable::FavourMatch
+                    && evaluation.notes.contains(Note::VersionUnparseable)
+                {
+                    // Each criterion tests one fact, so this `Unknown` comes
+                    // from the unparseable version and nothing else.
+                    Tri::from_bool(!negated)
+                } else {
+                    evaluation.result
+                }
             }
         }
     }
@@ -270,6 +316,14 @@ impl CompiledMatch {
     fn group(&self, start: u32, len: u32) -> &[u32] {
         &self.children[start as usize..(start + len) as usize]
     }
+}
+
+/// The inputs of one evaluation, and the notes gathered so far.
+struct Eval<'f, 'c> {
+    facts: &'f ObjectFacts,
+    ctx: &'f EvalContext<'c>,
+    unparseable: Unparseable,
+    notes: Notes,
 }
 
 /// The number of criteria in a tree, counted without recursion.

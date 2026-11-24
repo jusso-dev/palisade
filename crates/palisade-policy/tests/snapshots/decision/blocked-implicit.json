@@ -3,12 +3,13 @@
   "would_have_been": "blocked",
   "action": "deny",
   "matched_rule": null,
+  "overridden": [],
   "annotations": [],
   "mode": "enforce",
   "directives": {
     "containment": null,
     "elevation": null,
-    "trust_source": null,
+    "trust_sources": [],
     "kill_running": false,
     "request": null
   },

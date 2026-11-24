@@ -15,6 +15,7 @@
 
 pub mod action;
 pub mod effects;
+pub mod precedence;
 pub(crate) mod settings;
 mod tree;
 
@@ -24,10 +25,11 @@ pub(crate) mod arbitrary;
 pub use action::{
     Action, ActionKind, ContainmentDirective, ContainmentProfileRef, DenyOptions, ElevationAuth,
     ElevationCondition, ElevationDirective, RequestTemplateRef, TokenProfileRef, TrustMode,
-    TrustSourceDirective,
+    TrustSourceDirective, UnknownAs,
 };
 pub use effects::{Effects, EventSeverity, LogLevel, Notify, ResolvedEffects, Upload};
 pub use palisade_core::{Mode, ObjectType, PolicyId, RuleId, RuleSetId, SchemaVersion, ScriptKind};
+pub use precedence::{AllowTiebreak, PrecedenceOptions, PriorityDirection, TierTiebreak};
 pub use settings::{AdvancedValue, ControlLevel, PolicySettings, TimeZoneBasis};
 pub use tree::{Criterion, Field, FieldClass, Match, Operator, Strength};
 
@@ -91,6 +93,10 @@ pub struct Policy {
     /// How matching rules are combined (#35, ADR 0004).
     #[serde(default)]
     pub precedence_model: PrecedenceModel,
+    /// Settings of the precedence models (#35). An option the selected
+    /// model does not use is ignored, with a warning.
+    #[serde(default, skip_serializing_if = "PrecedenceOptions::is_default")]
+    pub precedence_options: PrecedenceOptions,
     /// The base enforcement mode (#36).
     pub mode: Mode,
     /// Typed settings. Every field has a documented default.
@@ -108,7 +114,8 @@ pub struct Policy {
 /// How the matching rules of the ordinary rule sets are combined (#35).
 ///
 /// The mandatory-deny tier and the implicit deny for unmatched files apply
-/// under every model (ADR 0004).
+/// under every model (ADR 0004). The semantics of each model are in
+/// [`crate::precedence`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PrecedenceModel {
@@ -227,8 +234,12 @@ pub struct Rule {
     /// fields take the action's defaults.
     #[serde(default, skip_serializing_if = "Effects::is_empty")]
     pub effects: Effects,
-    /// Position for the `first_match` model (#35).
+    /// Position for the `first_match` model (#35): 0 to 1000000, lowest
+    /// first. Rules of custom (not read-only) rule sets use 100001 to
+    /// 999989; the other ranges are reserved for system, curated and
+    /// catch-all rules.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(max = 1_000_000))]
     pub order: Option<u32>,
     /// Priority for the `priority` model (#35).
     #[serde(default, skip_serializing_if = "Option::is_none")]

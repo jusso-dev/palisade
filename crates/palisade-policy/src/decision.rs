@@ -9,10 +9,11 @@
 //! This module builds the decision of one terminal rule
 //! ([`Decision::from_rule`]) and the implicit deny for an object no rule
 //! decides ([`Decision::implicit_deny`]), both as enforce mode sees them.
-//! Combining several matching rules, collecting `audit` annotations and
-//! trust-source grants is the precedence pipeline (#35); applying a
-//! non-enforcing mode, which changes [`Decision::outcome`] and keeps the
-//! enforce-mode result in [`Decision::would_have_been`], is #36.
+//! The pipeline in [`crate::evaluate`] combines the matching rules (#35):
+//! it adds the `audit` annotations, the rules the deciding rule overrode,
+//! and the trust-source grants. Applying a non-enforcing mode, which
+//! changes [`Decision::outcome`] and keeps the enforce-mode result in
+//! [`Decision::would_have_been`], is #36.
 
 use core::fmt;
 
@@ -237,9 +238,10 @@ pub struct Directives {
     pub containment: Option<Containment>,
     /// Run with this elevation (#12).
     pub elevation: Option<Elevation>,
-    /// Treat the process as a trusted source (#9). Set by the precedence
-    /// pipeline from a matching `trust_source` rule (#35).
-    pub trust_source: Option<TrustGrant>,
+    /// Treat the process as a trusted source (#9): the grant of every
+    /// matching `trust_source` rule, by rule ID. Only an allowed object
+    /// gets grants (#35).
+    pub trust_sources: Vec<TrustGrant>,
     /// Terminate running instances that match.
     pub kill_running: bool,
     /// The user may ask for approval.
@@ -281,6 +283,7 @@ pub struct Decision {
     would_have_been: Outcome,
     action: ActionKind,
     matched_rule: Option<RuleRef>,
+    overridden: Vec<RuleRef>,
     annotations: Vec<RuleRef>,
     mode: Mode,
     directives: Directives,
@@ -322,6 +325,7 @@ impl Decision {
             would_have_been: outcome,
             action: kind,
             matched_rule: Some(RuleRef::new(policy, set, rule)),
+            overridden: Vec::new(),
             annotations: Vec::new(),
             mode: Mode::Enforce,
             directives: Directives::of(&rule.action),
@@ -341,6 +345,7 @@ impl Decision {
             would_have_been: Outcome::Blocked,
             action: ActionKind::Deny,
             matched_rule: None,
+            overridden: Vec::new(),
             annotations: Vec::new(),
             mode: Mode::Enforce,
             directives: Directives::default(),
@@ -376,10 +381,36 @@ impl Decision {
         self.matched_rule.as_ref()
     }
 
-    /// The `audit` rules that also matched.
+    /// The rules that matched and would have decided or attached a
+    /// grant, but lost to [`matched_rule`](Self::matched_rule), by rule
+    /// ID (#35). Empty when one rule matched alone.
+    #[must_use]
+    pub fn overridden(&self) -> &[RuleRef] {
+        &self.overridden
+    }
+
+    /// The `audit` rules that also matched, by rule ID.
     #[must_use]
     pub fn annotations(&self) -> &[RuleRef] {
         &self.annotations
+    }
+
+    /// Adds what the pipeline gathered besides the deciding rule (#35).
+    /// Each list is sorted by rule ID, so the decision does not depend on
+    /// the order in which rules were evaluated.
+    pub(crate) fn with_context(
+        mut self,
+        mut overridden: Vec<RuleRef>,
+        mut annotations: Vec<RuleRef>,
+        mut trust_sources: Vec<TrustGrant>,
+    ) -> Self {
+        overridden.sort_by_key(|r| r.rule_id);
+        annotations.sort_by_key(|r| r.rule_id);
+        trust_sources.sort_by_key(|g| g.rule.rule_id);
+        self.overridden = overridden;
+        self.annotations = annotations;
+        self.directives.trust_sources = trust_sources;
+        self
     }
 
     /// The effective mode the decision was made in (#36).

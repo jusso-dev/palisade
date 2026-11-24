@@ -1,0 +1,66 @@
+description: >-
+  An installer is allowed and is also a trusted source. The grant is
+  attached to the decision under every model, and the audit rule is an
+  annotation.
+object:
+  type: installer
+  sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  publisher: Example Ltd
+rule_sets:
+  - name: Installers
+    kind: mixed
+    rules:
+      - name: installer allow
+        object_types: [installer]
+        match: {criterion: {field: hash.sha256, operator: equals, values: [aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]}}
+        action: {type: allow}
+        order: 100100
+        priority: 1
+      - name: installer trust
+        object_types: [installer]
+        match: {criterion: {field: hash.sha256, operator: equals, values: [aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]}}
+        action: {type: trust_source, mode: chained, scope_paths: ['%PROGRAMFILES%\Example']}
+      - name: audit installs
+        match: {criterion: {field: signer.publisher, operator: equals, values: [Example Ltd]}}
+        action: {type: audit}
+      - name: other publisher deny
+        match: {criterion: {field: signer.publisher, operator: equals, values: [Other Ltd]}}
+        action: {type: deny}
+        order: 100200
+        priority: 2
+expect:
+  - model: deny_wins
+    outcome: allowed
+    reason: explicit_allow
+    rule: installer allow
+    overridden: []
+    annotations: [audit installs]
+    trust_sources: [installer trust]
+  - model: allow_wins
+    outcome: allowed
+    reason: explicit_allow
+    rule: installer allow
+    overridden: []
+    annotations: [audit installs]
+    trust_sources: [installer trust]
+  - model: specificity
+    outcome: allowed
+    reason: explicit_allow
+    rule: installer allow
+    overridden: []
+    annotations: [audit installs]
+    trust_sources: [installer trust]
+  - model: first_match
+    outcome: allowed
+    reason: explicit_allow
+    rule: installer allow
+    overridden: []
+    annotations: [audit installs]
+    trust_sources: [installer trust]
+  - model: priority
+    outcome: allowed
+    reason: explicit_allow
+    rule: installer allow
+    overridden: []
+    annotations: [audit installs]
+    trust_sources: [installer trust]

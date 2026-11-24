@@ -312,6 +312,7 @@ fn every_field_is_always_present() {
         "would_have_been",
         "action",
         "matched_rule",
+        "overridden",
         "annotations",
         "mode",
         "directives",
@@ -328,7 +329,7 @@ fn every_field_is_always_present() {
     for key in [
         "containment",
         "elevation",
-        "trust_source",
+        "trust_sources",
         "kill_running",
         "request",
     ] {
@@ -421,10 +422,11 @@ fn directives_of_each_action() {
         kill_running: false,
         allow_request: true,
         request_template: None,
+        ..DenyOptions::default()
     }));
     assert_eq!(d.request, Some(RequestDirective { template: None }));
     assert!(!d.kill_running);
-    // A trust source does not decide; its grant is added by #35.
+    // A trust source does not decide; the pipeline adds its grant (#35).
     let t = Directives::of(&Action::TrustSource(crate::model::TrustSourceDirective {
         mode: TrustMode::Direct,
         scope_paths: vec!["C:\\A".to_owned()],

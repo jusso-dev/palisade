@@ -207,7 +207,7 @@ fn rule(kind: RuleSetKind, mandatory: bool) -> impl Strategy<Value = Rule> {
         ),
         (any::<bool>(), tree(), action_and_types),
         (
-            proptest::option::of(any::<u32>()),
+            proptest::option::of(0u32..=1_000_000),
             proptest::option::of(any::<i32>()),
             if mandatory {
                 // Mandatory rules always block (ADR 0004).
@@ -365,23 +365,25 @@ pub fn document() -> impl Strategy<Value = PolicyDocument> {
     ]);
     let model = proptest::sample::select(vec![
         PrecedenceModel::DenyWins,
+        PrecedenceModel::AllowWins,
         PrecedenceModel::Specificity,
         PrecedenceModel::FirstMatch,
         PrecedenceModel::Priority,
     ]);
     (
         (uuid7(), name(), text(), any::<u64>(), model, mode),
-        settings(),
+        (settings(), precedence_options()),
         vec(rule_set(), 0..4),
         metadata(),
     )
         .prop_map(
             |(
                 (id, name, description, revision, precedence_model, mode),
-                settings,
-                sets,
+                (settings, precedence_options),
+                mut sets,
                 metadata,
             )| {
+                fit_to_model(precedence_model, &mut sets);
                 let rule_sets = sets.iter().map(|s| s.id).collect();
                 PolicyDocument {
                     schema_version: CURRENT,
@@ -391,6 +393,7 @@ pub fn document() -> impl Strategy<Value = PolicyDocument> {
                         description,
                         revision,
                         precedence_model,
+                        precedence_options,
                         mode,
                         settings,
                         rule_sets,
@@ -413,6 +416,74 @@ pub fn document() -> impl Strategy<Value = PolicyDocument> {
         })
 }
 
+/// Any precedence options. Options the model does not use only warn.
+pub fn precedence_options() -> impl Strategy<Value = super::PrecedenceOptions> {
+    use super::{AllowTiebreak, PriorityDirection, TierTiebreak};
+    (
+        prop_oneof![
+            Just(AllowTiebreak::MostRestrictive),
+            Just(AllowTiebreak::MostPermissive)
+        ],
+        any::<bool>(),
+        any::<bool>(),
+        prop_oneof![Just(TierTiebreak::Deny), Just(TierTiebreak::Allow)],
+        prop_oneof![
+            Just(PriorityDirection::LowerWins),
+            Just(PriorityDirection::HigherWins)
+        ],
+    )
+        .prop_map(
+            |(
+                allow_tiebreak,
+                granularity_tiebreak,
+                curated_first,
+                same_tier_tiebreak,
+                direction,
+            )| {
+                super::PrecedenceOptions {
+                    allow_tiebreak,
+                    granularity_tiebreak,
+                    curated_first,
+                    same_tier_tiebreak,
+                    priority_direction: direction,
+                }
+            },
+        )
+}
+
+/// Gives every rule the model decides an `order` or a `priority`, and
+/// moves custom orders into the custom range, as validation requires,
+/// keeping the generated value where it is valid.
+pub fn fit_to_model(model: super::PrecedenceModel, sets: &mut [RuleSet]) {
+    use crate::validate::order_ranges::CUSTOM;
+    for set in sets.iter_mut().filter(|s| !s.mandatory) {
+        let curated = set.read_only;
+        for rule in &mut set.rules {
+            let decides = crate::precedence::Verdict::of(&rule.action).is_some();
+            match model {
+                // Every custom rule with an order uses the custom range;
+                // every rule that decides has one.
+                PrecedenceModel::FirstMatch if decides || rule.order.is_some() => {
+                    let order = rule.order.unwrap_or(*CUSTOM.start());
+                    rule.order = Some(if curated || CUSTOM.contains(&order) {
+                        order
+                    } else {
+                        CUSTOM.start() + order % (CUSTOM.end() - CUSTOM.start() + 1)
+                    });
+                }
+                PrecedenceModel::FirstMatch => {}
+                _ if !decides => {}
+                PrecedenceModel::Priority => {
+                    rule.priority = Some(rule.priority.unwrap_or_default());
+                }
+                PrecedenceModel::DenyWins
+                | PrecedenceModel::AllowWins
+                | PrecedenceModel::Specificity => {}
+            }
+        }
+    }
+}
+
 fn deny_options(allow_request: bool) -> impl Strategy<Value = super::DenyOptions> {
     (
         any::<bool>(),
@@ -422,14 +493,27 @@ fn deny_options(allow_request: bool) -> impl Strategy<Value = super::DenyOptions
             Just(false).boxed()
         },
         proptest::option::of(uuid7()),
+        any::<bool>(),
+        any::<bool>(),
     )
         .prop_map(
-            |(kill_running, allow_request, template)| super::DenyOptions {
-                kill_running,
-                allow_request,
-                request_template: template
-                    .filter(|_| allow_request)
-                    .map(super::RequestTemplateRef),
+            |(kill_running, allow_request, template, unknown, unparseable)| {
+                let unknown_as = |b| {
+                    if b {
+                        super::UnknownAs::Match
+                    } else {
+                        super::UnknownAs::NoMatch
+                    }
+                };
+                super::DenyOptions {
+                    kill_running,
+                    allow_request,
+                    request_template: template
+                        .filter(|_| allow_request)
+                        .map(super::RequestTemplateRef),
+                    unknown_as: unknown_as(unknown),
+                    on_unparseable: unknown_as(unparseable),
+                }
             },
         )
 }

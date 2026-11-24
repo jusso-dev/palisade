@@ -29,6 +29,10 @@
               "description": "Terminate already-running instances that match when the policy is\napplied. Not valid for drivers or libraries.",
               "type": "boolean"
             },
+            "on_unparseable": {
+              "$ref": "#/$defs/UnknownAs",
+              "description": "Whether a version fact that is not a version counts towards the\nrule applying (#32, #35). With `match`, each version criterion on\nsuch a fact is taken in whichever direction makes the deny apply,\nalso under `not`. The rest of the tree is evaluated as usual.\n`no_match`, the default, leaves the criterion `Unknown`, which\n`unknown_as` then decides."
+            },
             "request_template": {
               "anyOf": [
                 {
@@ -43,6 +47,10 @@
             "type": {
               "const": "deny",
               "type": "string"
+            },
+            "unknown_as": {
+              "$ref": "#/$defs/UnknownAs",
+              "description": "Whether the rule blocks when its match tree is `Unknown` because a\nfact is missing or cannot be trusted (#32, #35). `no_match`, the\ndefault, means an unknown fact does not block; `match` makes the\ndeny fail closed."
             }
           },
           "required": [
@@ -203,6 +211,21 @@
         }
       ],
       "description": "A scalar value in `advanced`."
+    },
+    "AllowTiebreak": {
+      "description": "Which allow decides among allows of different kinds.",
+      "oneOf": [
+        {
+          "const": "most_restrictive",
+          "description": "`allow_contained`, then `allow`, then `allow_elevated` (with\n`condition: always` before `if_required`). The default.",
+          "type": "string"
+        },
+        {
+          "const": "most_permissive",
+          "description": "The reverse: `allow_elevated` (`if_required` before `always`), then\n`allow`, then `allow_contained`.",
+          "type": "string"
+        }
+      ]
     },
     "ContainmentProfileRef": {
       "$ref": "#/$defs/Uuid7",
@@ -1087,6 +1110,10 @@
           "default": "deny_wins",
           "description": "How matching rules are combined (#35, ADR 0004)."
         },
+        "precedence_options": {
+          "$ref": "#/$defs/PrecedenceOptions",
+          "description": "Settings of the precedence models (#35). An option the selected\nmodel does not use is ignored, with a warning."
+        },
         "revision": {
           "description": "Monotonic revision, raised by the server on every change (#10).",
           "format": "uint64",
@@ -1235,7 +1262,7 @@
       "type": "object"
     },
     "PrecedenceModel": {
-      "description": "How the matching rules of the ordinary rule sets are combined (#35).\n\nThe mandatory-deny tier and the implicit deny for unmatched files apply\nunder every model (ADR 0004).",
+      "description": "How the matching rules of the ordinary rule sets are combined (#35).\n\nThe mandatory-deny tier and the implicit deny for unmatched files apply\nunder every model (ADR 0004). The semantics of each model are in\n[`crate::precedence`].",
       "oneOf": [
         {
           "const": "deny_wins",
@@ -1260,6 +1287,48 @@
         {
           "const": "priority",
           "description": "The rule with the winning numeric priority decides.",
+          "type": "string"
+        }
+      ]
+    },
+    "PrecedenceOptions": {
+      "additionalProperties": false,
+      "description": "Settings of the precedence models. Each is optional in a document.",
+      "properties": {
+        "allow_tiebreak": {
+          "$ref": "#/$defs/AllowTiebreak",
+          "description": "Which allow decides when several allow rules of different kinds\ncould (`deny_wins`, `allow_wins` and `specificity`). The default,\n`most_restrictive`, ranks `allow_contained` over `allow` over\n`allow_elevated`."
+        },
+        "curated_first": {
+          "description": "`first_match` only: rules of curated (read-only) rule sets are\nevaluated before every custom rule, whatever their `order`. On by\ndefault.",
+          "type": "boolean"
+        },
+        "granularity_tiebreak": {
+          "description": "`allow_wins` only: within one rule set, a rule with a more specific\nidentity beats a less specific one before allow-over-deny applies,\nso a denied file in an allowed folder stays denied. Off by default.",
+          "type": "boolean"
+        },
+        "priority_direction": {
+          "$ref": "#/$defs/PriorityDirection",
+          "description": "`priority` only: whether the lowest or the highest `priority`\nnumber wins. `lower_wins` by default."
+        },
+        "same_tier_tiebreak": {
+          "$ref": "#/$defs/TierTiebreak",
+          "description": "`specificity` only: which action wins between rules of the same\nspecificity. `deny` by default."
+        }
+      },
+      "type": "object"
+    },
+    "PriorityDirection": {
+      "description": "Which `priority` number wins.",
+      "oneOf": [
+        {
+          "const": "lower_wins",
+          "description": "The lowest number wins. The default.",
+          "type": "string"
+        },
+        {
+          "const": "higher_wins",
+          "description": "The highest number wins.",
           "type": "string"
         }
       ]
@@ -1332,8 +1401,9 @@
           "type": "array"
         },
         "order": {
-          "description": "Position for the `first_match` model (#35).",
+          "description": "Position for the `first_match` model (#35): 0 to 1000000, lowest\nfirst. Rules of custom (not read-only) rule sets use 100001 to\n999989; the other ranges are reserved for system, curated and\ncatch-all rules.",
           "format": "uint32",
+          "maximum": 1000000,
           "minimum": 0,
           "type": [
             "integer",
@@ -1484,6 +1554,21 @@
       "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
       "type": "string"
     },
+    "TierTiebreak": {
+      "description": "Which action wins between rules of the same specificity.",
+      "oneOf": [
+        {
+          "const": "deny",
+          "description": "A deny beats an allow. The default.",
+          "type": "string"
+        },
+        {
+          "const": "allow",
+          "description": "An allow beats a deny.",
+          "type": "string"
+        }
+      ]
+    },
     "TimeZoneBasis": {
       "description": "The clock that schedules are interpreted in.",
       "oneOf": [
@@ -1514,6 +1599,21 @@
         {
           "const": "chained",
           "description": "Files the designated process and all its descendants write.",
+          "type": "string"
+        }
+      ]
+    },
+    "UnknownAs": {
+      "description": "How a deny rule treats a result it cannot decide (#32, #35).",
+      "oneOf": [
+        {
+          "const": "no_match",
+          "description": "The rule does not apply. The default.",
+          "type": "string"
+        },
+        {
+          "const": "match",
+          "description": "The rule applies, so the deny blocks.",
           "type": "string"
         }
       ]

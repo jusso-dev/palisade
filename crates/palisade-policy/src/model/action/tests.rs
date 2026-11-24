@@ -17,11 +17,13 @@ fn every_action_reads_and_writes_its_documented_form() {
         (serde_json::json!({"type": "allow"}), Action::Allow {}),
         (serde_json::json!({"type": "deny"}), Action::deny()),
         (
-            serde_json::json!({"type": "deny", "kill_running": true, "allow_request": true, "request_template": ID}),
+            serde_json::json!({"type": "deny", "kill_running": true, "allow_request": true, "request_template": ID, "unknown_as": "match", "on_unparseable": "match"}),
             Action::Deny(DenyOptions {
                 kill_running: true,
                 allow_request: true,
                 request_template: Some(RequestTemplateRef(id())),
+                unknown_as: UnknownAs::Match,
+                on_unparseable: UnknownAs::Match,
             }),
         ),
         (serde_json::json!({"type": "audit"}), Action::Audit {}),
@@ -83,7 +85,7 @@ fn an_option_of_another_action_is_rejected() {
     );
     let e = read(serde_json::json!({"type": "deny", "profile_id": ID})).unwrap_err();
     assert!(
-        e.contains("unknown field `profile_id` for action `deny`, expected one of `kill_running`, `allow_request`, `request_template`"),
+        e.contains("unknown field `profile_id` for action `deny`, expected one of `kill_running`, `allow_request`, `request_template`, `unknown_as`, `on_unparseable`"),
         "{e}"
     );
     // Before `type`: found once `type` is known.
@@ -191,6 +193,8 @@ fn option_keys_match_what_is_written() {
             kill_running: true,
             allow_request: true,
             request_template: Some(RequestTemplateRef(id())),
+            unknown_as: UnknownAs::Match,
+            on_unparseable: UnknownAs::Match,
         }),
         Action::Audit {},
         Action::AllowContained(ContainmentDirective {

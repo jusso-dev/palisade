@@ -133,6 +133,37 @@ pub struct DenyOptions {
     /// The approval request template to use. Only with `allow_request`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_template: Option<RequestTemplateRef>,
+    /// Whether the rule blocks when its match tree is `Unknown` because a
+    /// fact is missing or cannot be trusted (#32, #35). `no_match`, the
+    /// default, means an unknown fact does not block; `match` makes the
+    /// deny fail closed.
+    #[serde(default, skip_serializing_if = "UnknownAs::is_no_match")]
+    pub unknown_as: UnknownAs,
+    /// Whether a version fact that is not a version counts towards the
+    /// rule applying (#32, #35). With `match`, each version criterion on
+    /// such a fact is taken in whichever direction makes the deny apply,
+    /// also under `not`. The rest of the tree is evaluated as usual.
+    /// `no_match`, the default, leaves the criterion `Unknown`, which
+    /// `unknown_as` then decides.
+    #[serde(default, skip_serializing_if = "UnknownAs::is_no_match")]
+    pub on_unparseable: UnknownAs,
+}
+
+/// How a deny rule treats a result it cannot decide (#32, #35).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UnknownAs {
+    /// The rule does not apply. The default.
+    #[default]
+    NoMatch,
+    /// The rule applies, so the deny blocks.
+    Match,
+}
+
+impl UnknownAs {
+    const fn is_no_match(&self) -> bool {
+        matches!(self, Self::NoMatch)
+    }
 }
 
 /// The directive of an `allow_contained` action.
@@ -274,7 +305,13 @@ impl ActionKind {
     #[must_use]
     pub const fn option_keys(self) -> &'static [&'static str] {
         match self {
-            Self::Deny => &["kill_running", "allow_request", "request_template"],
+            Self::Deny => &[
+                "kill_running",
+                "allow_request",
+                "request_template",
+                "unknown_as",
+                "on_unparseable",
+            ],
             Self::AllowContained => &["profile_id"],
             Self::AllowElevated => &["token_profile", "condition", "reason_prompt", "auth"],
             Self::TrustSource => &["mode", "scope_paths", "tag_output"],
@@ -401,7 +438,7 @@ mod de {
     use super::{
         Action, ActionKind, ContainmentDirective, ContainmentProfileRef, DenyOptions,
         ElevationAuth, ElevationCondition, ElevationDirective, RequestTemplateRef, TokenProfileRef,
-        TrustMode, TrustSourceDirective,
+        TrustMode, TrustSourceDirective, UnknownAs,
     };
 
     /// Every key any action has.
@@ -419,9 +456,11 @@ mod de {
         Mode,
         ScopePaths,
         TagOutput,
+        UnknownAs,
+        OnUnparseable,
     }
 
-    const KEYS: [(&str, Key); 12] = [
+    const KEYS: [(&str, Key); 14] = [
         ("type", Key::Type),
         ("kill_running", Key::KillRunning),
         ("allow_request", Key::AllowRequest),
@@ -434,9 +473,11 @@ mod de {
         ("mode", Key::Mode),
         ("scope_paths", Key::ScopePaths),
         ("tag_output", Key::TagOutput),
+        ("unknown_as", Key::UnknownAs),
+        ("on_unparseable", Key::OnUnparseable),
     ];
 
-    const KEY_NAMES: [&str; 12] = [
+    const KEY_NAMES: [&str; 14] = [
         "type",
         "kill_running",
         "allow_request",
@@ -449,6 +490,8 @@ mod de {
         "mode",
         "scope_paths",
         "tag_output",
+        "unknown_as",
+        "on_unparseable",
     ];
 
     impl Key {
@@ -561,6 +604,8 @@ mod de {
         mode: Option<TrustMode>,
         scope_paths: Option<Vec<String>>,
         tag_output: Option<bool>,
+        unknown_as: Option<UnknownAs>,
+        on_unparseable: Option<UnknownAs>,
     }
 
     /// Reads the value of a key that has no default into its slot.
@@ -618,6 +663,8 @@ mod de {
                     Key::Mode => read(m, &mut o.mode)?,
                     Key::ScopePaths => read(m, &mut o.scope_paths)?,
                     Key::TagOutput => read(m, &mut o.tag_output)?,
+                    Key::UnknownAs => read(m, &mut o.unknown_as)?,
+                    Key::OnUnparseable => read(m, &mut o.on_unparseable)?,
                 }
             }
             let kind = kind.ok_or_else(|| de::Error::missing_field("type"))?;
@@ -634,6 +681,8 @@ mod de {
                     kill_running: o.kill_running.unwrap_or_default(),
                     allow_request: o.allow_request.unwrap_or_default(),
                     request_template: o.request_template,
+                    unknown_as: o.unknown_as.unwrap_or_default(),
+                    on_unparseable: o.on_unparseable.unwrap_or_default(),
                 }),
                 ActionKind::AllowContained => Action::AllowContained(ContainmentDirective {
                     profile_id: required(o.profile_id, "profile_id")?,
