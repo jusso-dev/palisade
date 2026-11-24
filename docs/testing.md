@@ -221,8 +221,10 @@ The `bench` job in CI builds every bench and runs each benchmark once in test mo
 measures nothing. Shared hosted runners vary too much from run to run for their timings to be
 compared. A test in `xtask/src/ci.rs` fails if a `benches/*.rs` file is missing from the job.
 
-criterion 0.7 is used because later releases need a newer Rust than the 1.85 MSRV, and the `msrv`
-job builds every target, including benches. Its plotting and parallel features are off.
+criterion 0.7 was chosen because later releases needed a newer Rust than the MSRV of the time
+(1.85), and the `msrv` job builds every target, including benches. The MSRV is now 1.94
+([workspace.md](workspace.md#toolchain-and-msrv)); moving to a newer criterion is a separate
+change. Its plotting and parallel features are off.
 
 Benchmarks over whole policies (100 to 100k rules), 100 MB and 1 GB files and bundle loading,
 the regression comparison against `main`, and the performance-budget test, arrive with the code

@@ -21,7 +21,7 @@ type.
 | `coverage` | ubuntu-latest, windows-latest | `cargo llvm-cov nextest --workspace --all-features --locked --profile ci --json --summary-only`, then `cargo xtask coverage-summary` (see [Coverage, fuzzing and benchmarks](#coverage-fuzzing-and-benchmarks)) |
 | `fuzz` | ubuntu-latest | `cargo xtask fuzz`: every cargo-fuzz target, seeded from the test fixtures, for 60 s each, on the pinned nightly |
 | `bench` | ubuntu-latest | `cargo test --bench <name>` for every criterion bench: builds them and runs each benchmark once, without timing |
-| `msrv` | ubuntu-latest | `cargo +1.85.0 check --workspace --all-targets --all-features --locked`, after checking that the version matches `rust-version` in `Cargo.toml` |
+| `msrv` | ubuntu-latest | `cargo +1.94.0 check --workspace --all-targets --all-features --locked`, after checking that the version matches `rust-version` in `Cargo.toml` |
 | `docs` | ubuntu-latest | `cargo doc --workspace --no-deps --all-features --locked` with `RUSTDOCFLAGS=-D warnings` |
 | `deps` | ubuntu-latest | `cargo xtask check-deps`, `cargo xtask check-manifests`, `cargo xtask check-unsafe`, `cargo deny --locked check` for the root workspace and for each fuzz workspace (with the root `deny.toml`), `cargo xtask audit` (cargo-audit over the root and every fuzz lockfile, with the ignores from `deny.toml`) |
 | `supply-chain` | ubuntu-latest | `cargo vet --locked`, `cargo xtask check-supply-chain`, and on PRs `cargo xtask deps-report --base <base>` to the job summary ([dependencies.md](dependencies.md)) |
@@ -263,7 +263,7 @@ cargo hack check --each-feature --all-targets --locked \
   -p palisade-proto -p palisade-server -p palisade-cli \
   -p palisade-console                                    # needs cargo-hack 0.6
 actionlint -color && zizmor --offline .github/workflows
-cargo +1.85.0 check --workspace --all-targets --all-features --locked
+cargo +1.94.0 check --workspace --all-targets --all-features --locked
 bash .github/scripts/check-pr-title.test.sh
 bash .github/scripts/check-pr-title.sh "docs: example title"
 bash .github/scripts/check-dco.test.sh
