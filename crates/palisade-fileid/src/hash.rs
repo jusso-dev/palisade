@@ -518,7 +518,7 @@ impl Default for HashOptions {
 }
 
 impl HashOptions {
-    fn validate(&self) -> Result<(), HashError> {
+    pub(crate) fn validate(&self) -> Result<(), HashError> {
         if !(MIN_BUFFER_SIZE..=MAX_BUFFER_SIZE).contains(&self.buffer_size) {
             return Err(HashError::InvalidBufferSize(self.buffer_size));
         }
@@ -557,6 +557,16 @@ pub enum HashError {
     NoAlgorithms,
     /// The path is not a regular file (a directory, pipe or device).
     NotAFile,
+    /// The input did not have the length its metadata gave: the file grew
+    /// or shrank while it was read, so its digests would describe no single
+    /// version of it.
+    SizeChanged {
+        /// The length the metadata gave.
+        expected: u64,
+        /// The bytes actually read (when the file grew, as soon as that
+        /// was seen).
+        actual: u64,
+    },
     /// Reading the input failed.
     Io(io::Error),
 }
@@ -570,6 +580,10 @@ impl fmt::Display for HashError {
             ),
             Self::NoAlgorithms => f.write_str("no hash algorithms selected"),
             Self::NotAFile => f.write_str("not a regular file"),
+            Self::SizeChanged { expected, actual } => write!(
+                f,
+                "file changed size while being hashed: expected {expected} bytes, read {actual}"
+            ),
             Self::Io(e) => write!(f, "read failed while hashing: {e}"),
         }
     }
@@ -673,7 +687,7 @@ pub fn hash_file(path: &Path, options: &HashOptions) -> Result<HashStatus, HashE
 /// which is the only kind of handle [`hash_file`] goes on to read. Opening a
 /// named pipe on Windows does not wait for the server, so no flag is needed
 /// there.
-fn open_without_blocking(path: &Path) -> io::Result<File> {
+pub(crate) fn open_without_blocking(path: &Path) -> io::Result<File> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]

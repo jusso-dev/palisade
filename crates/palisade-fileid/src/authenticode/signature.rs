@@ -299,8 +299,9 @@ pub struct SignerAttributes {
     pub signer_cert: usize,
 }
 
-/// The page hash table from an `SpcSerializedObject` moniker, handed to the
-/// page hash checks (#47), which are not implemented yet.
+/// A page hash table: the one an `SpcSerializedObject` moniker in a
+/// signature carries, or one built from a file ([`super::page`]). Check a
+/// signed one with [`super::verify_signature_page_hashes`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageHashes {
     /// SHA-1 (version 1, 1.3.6.1.4.1.311.2.3.1) or SHA-256 (version 2,

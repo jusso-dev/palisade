@@ -1,0 +1,3 @@
+# Signatures are DER, and the scripts are run as committed: never convert
+# line endings on checkout.
+* -text

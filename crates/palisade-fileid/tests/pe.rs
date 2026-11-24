@@ -9,8 +9,8 @@ mod common;
 
 use common::*;
 use palisade_fileid::pe::{
-    self, DataDirectoryKind, DllCharacteristics, Machine, PeErrorKind, PeFormat, Subsystem,
-    WarningKind,
+    self, DataDirectoryKind, DllCharacteristics, Machine, ParseOptions, PeErrorKind, PeFormat,
+    Subsystem, WarningKind,
 };
 
 #[test]
@@ -452,4 +452,114 @@ fn metadata_only_skips_whole_file_scans() {
     assert!(quick.parse_warnings.is_empty());
     assert_eq!(quick.coff, full.coff);
     assert_eq!(quick.optional, full.optional);
+}
+
+// --- Parsing from a prefix (`parse_prefix`). -----------------------------------
+
+/// A rich image: version info, debug directory, overlay and a certificate
+/// table, so every length-dependent field is exercised.
+fn rich_signed_image() -> Vec<u8> {
+    let version = VersionSpec {
+        fixed: Some(fixed_info((1, 2, 3, 4), (1, 2, 0, 0))),
+        tables: vec![("040904B0", all_standard_strings())],
+        translations: vec![(0x0409, 0x04b0)],
+    };
+    let mut b = with_version(&version);
+    b.debug = Some(DebugSpec {
+        pdb_guid: [7; 16],
+        pdb_age: 2,
+        pdb_path: "out\\tool.pdb".into(),
+        repro: true,
+        pogo: false,
+    });
+    b.certificate = Some(vec![0x11; 40]);
+    b.build()
+}
+
+#[test]
+fn prefix_holding_the_whole_file_is_a_metadata_parse() {
+    let image = rich_signed_image();
+    let full = pe::parse_with(&image, &ParseOptions::metadata_only()).unwrap();
+    assert!(full.version_info.is_some() && full.debug.codeview.is_some());
+    assert_eq!(pe::parse_prefix(&image, image.len() as u64).unwrap(), full);
+    // A longer buffer is cut to the file length.
+    let mut longer = image.clone();
+    longer.extend_from_slice(&[0; 100]);
+    assert_eq!(pe::parse_prefix(&longer, image.len() as u64).unwrap(), full);
+}
+
+#[test]
+fn prefix_parse_keeps_every_length_dependent_field() {
+    let image = rich_signed_image();
+    let full = pe::parse_with(&image, &ParseOptions::metadata_only()).unwrap();
+    let headers_end = full.sections.last().unwrap().header_offset as usize + 40;
+    // Every cut from just after the section table to one byte short of the
+    // whole file.
+    for cut in headers_end..image.len() {
+        let info = pe::parse_prefix(&image[..cut], image.len() as u64).unwrap();
+        assert_eq!(info.file_size, full.file_size, "cut {cut:#x}");
+        assert_eq!(info.sections, full.sections, "cut {cut:#x}");
+        assert_eq!(info.data_directories, full.data_directories);
+        assert_eq!(
+            info.certificate_table, full.certificate_table,
+            "cut {cut:#x}"
+        );
+        assert_eq!(info.certificate_table_issue, None);
+        assert_eq!(info.overlay, full.overlay, "cut {cut:#x}");
+        // Directories that can lie anywhere are skipped, without warnings.
+        assert!(info.version_info.is_none() && info.resources.is_none());
+        assert_eq!(info.debug, pe::DebugInfo::default());
+        assert!(
+            info.parse_warnings.is_empty(),
+            "cut {cut:#x}: {:?}",
+            info.parse_warnings
+        );
+    }
+}
+
+#[test]
+fn prefix_parse_checks_against_the_file_length() {
+    let image = rich_signed_image();
+    let cut = 0x400;
+    // A file shorter than the certificate table says: rejected, as a full
+    // parse of a truncated file would be.
+    let short = image.len() as u64 - 1;
+    let info = pe::parse_prefix(&image[..cut], short).unwrap();
+    assert_eq!(info.certificate_table, None);
+    assert_eq!(
+        info.certificate_table_issue,
+        Some(WarningKind::CertificateTableOutOfFile)
+    );
+    // A file longer than the parsed data has an overlay after the table.
+    let long = image.len() as u64 + 16;
+    let info = pe::parse_prefix(&image[..cut], long).unwrap();
+    assert_eq!(
+        info.overlay.map(|o| (o.offset, o.size)),
+        Some((image.len() as u64, 16))
+    );
+    // A section running past the file is reported against the file length.
+    let tiny = 0x500;
+    let info = pe::parse_prefix(&image[..cut], tiny).unwrap();
+    assert!(
+        info.parse_warnings
+            .iter()
+            .any(|w| matches!(w.kind, WarningKind::SectionDataOutOfFile { .. }))
+    );
+    // The headers and section table must be in the prefix.
+    let table_end = pe::parse(&image)
+        .unwrap()
+        .sections
+        .last()
+        .unwrap()
+        .header_offset
+        + 40;
+    for cut in [0x100, table_end as usize - 1] {
+        let err = pe::parse_prefix(&image[..cut], image.len() as u64).unwrap_err();
+        assert!(
+            matches!(err.kind, PeErrorKind::PrefixTooShort { needed } if needed == table_end)
+                || matches!(err.kind, PeErrorKind::TruncatedOptionalHeader),
+            "cut {cut:#x}: {err}"
+        );
+    }
+    assert!(pe::parse_prefix(&image[..table_end as usize], image.len() as u64).is_ok());
 }
