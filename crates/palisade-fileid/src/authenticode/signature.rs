@@ -209,6 +209,14 @@ pub enum SignatureStatus {
     /// The signature is cryptographically valid, but the image digest it
     /// signs does not match the file: the file was changed after signing.
     DigestMismatch,
+    /// The signature is cryptographically valid and its digest matches the
+    /// best-effort digest of an image whose layout departs from the
+    /// Authenticode specification (#47): data after the certificate table,
+    /// a misaligned table, overlapping sections and so on. Such a match is
+    /// not authoritative (bytes can be moved across the certificate table
+    /// without changing it), so it is **never** treated as valid; the flat
+    /// hash is the file's identity.
+    NonConformantImage,
     /// The signature's cryptography failed.
     BadSignature(BadSignature),
     /// The signature uses a broken digest (MD2, MD5). Parsed and reported,

@@ -52,6 +52,7 @@ leaf() {
 rsa() { openssl genpkey -algorithm RSA -pkeyopt "rsa_keygen_bits:$2" -out "$1.key" 2>/dev/null; leaf "$1" "$1.key"; }
 ec() { openssl ecparam -name "$2" -genkey -noout -out "$1.key"; leaf "$1" "$1.key"; }
 
+rsa rsa1024 1024
 rsa rsa2048 2048
 rsa rsa4096 4096
 rsa rsa8192 8192
@@ -85,6 +86,7 @@ sign rsa2048-md5 rsa2048.chain rsa2048.key -h md5
 sign rsa2048-page-hashes rsa2048.chain rsa2048.key -h sha256 -ph
 sign rsa2048-timestamp rsa2048.chain rsa2048.key -h sha256 \
   -TSA-certs tsa.chain -TSA-key tsa.key -TSA-time 1700000000
+sign rsa1024-sha256 rsa1024.chain rsa1024.key -h sha256
 sign rsa4096-sha256 rsa4096.chain rsa4096.key -h sha256
 sign rsa8192-sha256 rsa8192.chain rsa8192.key -h sha256
 sign p256-sha256 p256.chain p256.key -h sha256
@@ -102,7 +104,7 @@ osslsigncode extract-signature -in dual.exe -out "$out/rsa2048-sha1-nested-sha25
 # Sanity check with osslsigncode itself: every signature but the P-521 and
 # MD5 ones must verify against the test CA. (Timestamp chains are not
 # checked; the TSA certificate is newer than the timestamp.)
-for f in rsa2048-sha256 rsa2048-sha384-commercial rsa2048-sha512 rsa2048-page-hashes \
+for f in rsa1024-sha256 rsa2048-sha256 rsa2048-sha384-commercial rsa2048-sha512 rsa2048-page-hashes \
   rsa4096-sha256 rsa8192-sha256 p256-sha256 p384-sha384 dual; do
   osslsigncode verify -CAfile ca.crt -in "$f.exe" >/dev/null
 done

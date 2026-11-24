@@ -19,8 +19,6 @@ pub const MAX_CERTIFICATES: usize = 64;
 pub const MAX_TIMESTAMPS: usize = 8;
 /// The most warnings kept for one signature.
 pub const MAX_WARNINGS: usize = 32;
-/// The most distinct entries kept from a `digestAlgorithms` set.
-const MAX_DIGEST_SET: usize = 16;
 /// The most nested SignedData values collected from one SignerInfo. Further
 /// ones are counted against [`super::MAX_SIGNATURES`] by the caller anyway,
 /// so collecting one more than the limit is enough to report it.
@@ -172,7 +170,7 @@ fn parse_signed_data<'a>(sd: &Tlv<'a>) -> Result<SignedData<'a>> {
     if let Some(crls) = r.read_optional(tag::context_cons(1))? {
         let mut c = crls.reader();
         while !c.is_empty() {
-            c.read(tag::SEQUENCE)?;
+            asn1::validate(&c.read(tag::SEQUENCE)?)?;
         }
     }
 
@@ -193,11 +191,7 @@ fn parse_signed_data<'a>(sd: &Tlv<'a>) -> Result<SignedData<'a>> {
         _ => return Err(SignatureError::SignerCount(count)),
     };
 
-    let listed = digest_set(&digest_algorithms)?;
-    let signer_digest_listed = signer
-        .digest_alg
-        .as_ref()
-        .is_ok_and(|alg| listed.contains(&Ok(*alg)));
+    let signer_digest_listed = digest_set_lists(&digest_algorithms, &signer.digest_alg)?;
     Ok(SignedData {
         signer_digest_listed,
         indirect,
@@ -207,19 +201,17 @@ fn parse_signed_data<'a>(sd: &Tlv<'a>) -> Result<SignedData<'a>> {
     })
 }
 
-/// The `digestAlgorithms` set, each identifier checked. Duplicates are
-/// kept once, so the result is bounded by the six known algorithms plus
-/// [`MAX_DIGEST_SET`] unknown ones.
-fn digest_set(set: &Tlv<'_>) -> Result<Vec<DigestId>> {
+/// Checks every identifier in the `digestAlgorithms` set and returns
+/// whether it lists `wanted` (known or unknown).
+fn digest_set_lists(set: &Tlv<'_>, wanted: &DigestId) -> Result<bool> {
     let mut r = set.reader();
-    let mut out = Vec::new();
+    let mut found = false;
     while !r.is_empty() {
-        let id = parse_digest_alg(&r.read(tag::SEQUENCE)?)?;
-        if out.len() < MAX_DIGEST_SET && !out.contains(&id) {
-            out.push(id);
+        if parse_digest_alg(&r.read(tag::SEQUENCE)?)? == *wanted {
+            found = true;
         }
     }
-    Ok(out)
+    Ok(found)
 }
 
 /// A DigestAlgorithmIdentifier: an OID with absent or NULL parameters.
@@ -274,9 +266,7 @@ fn parse_indirect_data<'a>(seq: &Tlv<'a>, warnings: &mut Warnings) -> Result<Ind
             let mut f = file.reader();
             let link = f.read_any()?;
             f.finish()?;
-            if link.tag == tag::context_cons(1) {
-                page_hashes = parse_page_hash_moniker(&link, warnings)?;
-            }
+            page_hashes = parse_spc_link(&link, warnings)?;
         }
         v.finish()?;
     }
@@ -301,6 +291,37 @@ fn parse_indirect_data<'a>(seq: &Tlv<'a>, warnings: &mut Warnings) -> Result<Ind
         pe_image_flags,
         page_hashes,
     })
+}
+
+/// An `SpcLink` (`[0] IMPLICIT IA5String url`, `[1] IMPLICIT
+/// SpcSerializedObject moniker`, or `[2] EXPLICIT SpcString file`), checked
+/// in full. Returns the page hash table if it is the page hash moniker.
+fn parse_spc_link(link: &Tlv<'_>, warnings: &mut Warnings) -> Result<Option<PageHashes>> {
+    match link.tag {
+        t if t == tag::context_prim(0) => Ok(None),
+        t if t == tag::context_cons(1) => parse_page_hash_moniker(link, warnings),
+        t if t == tag::context_cons(2) => {
+            let mut f = link.reader();
+            let text = f.read_any()?;
+            f.finish()?;
+            if text.tag != tag::context_prim(0) && text.tag != tag::context_prim(1) {
+                return Err(text
+                    .error(asn1::Asn1ErrorKind::UnexpectedTag {
+                        expected: tag::context_prim(0),
+                        found: text.tag,
+                    })
+                    .into());
+            }
+            spc_text(&text, warnings)?;
+            Ok(None)
+        }
+        found => Err(link
+            .error(asn1::Asn1ErrorKind::UnexpectedTag {
+                expected: tag::context_cons(1),
+                found,
+            })
+            .into()),
+    }
 }
 
 /// `SpcSerializedObject` (`[1] IMPLICIT SEQUENCE { classId OCTET STRING,
@@ -494,9 +515,12 @@ fn parse_authenticated_attributes<'a>(
                     return Err(duplicate());
                 }
             }
-            other => warnings.push(SignatureWarning::UnknownAuthenticatedAttribute(
-                ObjectId::from_der(other),
-            )),
+            other => {
+                asn1::validate(&values)?;
+                warnings.push(SignatureWarning::UnknownAuthenticatedAttribute(
+                    ObjectId::from_der(other),
+                ));
+            }
         }
     }
     let content_type = content_type
@@ -525,11 +549,15 @@ fn parse_opus_info(value: &Tlv<'_>, warnings: &mut Warnings) -> Result<Opus> {
         let mut n = name.reader();
         let inner = n.read_any()?;
         n.finish()?;
-        if inner.tag == tag::context_prim(0) || inner.tag == tag::context_prim(1) {
-            opus.program_name = Some(spc_text(&inner, warnings)?);
-        } else {
-            warnings.push(SignatureWarning::UnreadLinkForm);
+        if inner.tag != tag::context_prim(0) && inner.tag != tag::context_prim(1) {
+            return Err(inner
+                .error(asn1::Asn1ErrorKind::UnexpectedTag {
+                    expected: tag::context_prim(0),
+                    found: inner.tag,
+                })
+                .into());
         }
+        opus.program_name = Some(spc_text(&inner, warnings)?);
     }
     if let Some(more) = r.read_optional(tag::context_cons(1))? {
         let mut m = more.reader();
@@ -542,6 +570,8 @@ fn parse_opus_info(value: &Tlv<'_>, warnings: &mut Warnings) -> Result<Opus> {
             }
             opus.more_info_url = Some(text.text);
         } else {
+            // A moniker or file link: checked, but not a URL.
+            parse_spc_link(&link, warnings)?;
             warnings.push(SignatureWarning::UnreadLinkForm);
         }
     }
@@ -594,6 +624,7 @@ fn parse_unauthenticated_attributes<'a>(
             oid::COUNTER_SIGNATURE => Some(TimestampKind::CounterSignature),
             oid::RFC3161_TIMESTAMP => Some(TimestampKind::Rfc3161),
             other => {
+                asn1::validate(&values)?;
                 warnings.push(SignatureWarning::UnknownUnauthenticatedAttribute(
                     ObjectId::from_der(other),
                 ));
@@ -632,6 +663,9 @@ fn parse_signature_alg(id: &Tlv<'_>, signer_digest: &DigestId) -> Result<Signatu
         Some(r.read_any()?)
     };
     r.finish()?;
+    if let Some(p) = &params {
+        asn1::validate(p)?;
+    }
     let null_or_absent = |params: &Option<Tlv<'_>>| match params {
         None => true,
         Some(p) => p.tag == tag::NULL && p.content.is_empty(),
@@ -704,9 +738,16 @@ fn parse_pss_params(params: Option<&Tlv<'_>>) -> Result<Option<SignatureAlgorith
         let id = asn1::single(mgf.content, mgf.content_offset, tag::SEQUENCE)?;
         let mut m = id.reader();
         mgf_known = read_oid(&mut m)? == oid::MGF1;
-        let hash = m.read(tag::SEQUENCE)?;
-        m.finish()?;
-        mgf1_digest = parse_digest_alg(&hash)?;
+        if mgf_known {
+            let hash = m.read(tag::SEQUENCE)?;
+            m.finish()?;
+            mgf1_digest = parse_digest_alg(&hash)?;
+        } else {
+            // Another mask function: its parameters are checked, not read.
+            while !m.is_empty() {
+                asn1::validate(&m.read_any()?)?;
+            }
+        }
     }
     if let Some(salt) = r.read_optional(tag::context_cons(2))? {
         let mut t = salt.reader();
@@ -820,6 +861,20 @@ fn parse_spki<'a>(spki: &Tlv<'a>) -> std::result::Result<Spki<'a>, asn1::Asn1Err
         Some(a.read_any()?)
     };
     a.finish()?;
+    if let Some(p) = &params {
+        asn1::validate(p)?;
+    }
+    let invalid_params = || Err(asn1::err(asn1::Asn1ErrorKind::InvalidValue, alg_id.offset));
+    // rsaEncryption takes NULL (or, leniently, absent) parameters; the
+    // Edwards curves take none.
+    let null_or_absent = params
+        .as_ref()
+        .is_none_or(|p| p.tag == tag::NULL && p.content.is_empty());
+    match alg {
+        oid::RSA_ENCRYPTION if !null_or_absent => return invalid_params(),
+        oid::ED25519 | oid::ED448 if params.is_some() => return invalid_params(),
+        _ => {}
+    }
     Ok(match alg {
         oid::RSA_ENCRYPTION | oid::RSASSA_PSS => {
             let rsa = asn1::single(key, key_bits_tlv.content_offset, tag::SEQUENCE)?;

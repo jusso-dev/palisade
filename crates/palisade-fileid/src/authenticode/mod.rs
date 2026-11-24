@@ -23,7 +23,12 @@
 //!    verifies with its public key;
 //! 4. the image digest in the indirect data equals the file's Authenticode
 //!    digest under the same algorithm;
-//! 5. neither digest is MD2 or MD5.
+//! 5. neither digest is MD2 or MD5;
+//! 6. the image layout conforms to the Authenticode specification (#47).
+//!    On a non-conformant image (data after or a misaligned certificate
+//!    table, gaps or overlaps between sections, and so on) a matching
+//!    digest is reported as [`SignatureStatus::NonConformantImage`], never
+//!    as valid.
 //!
 //! It does **not** mean the signer is trusted. Building and validating the
 //! certificate chain, EKUs and signer attributes is #49; timestamps, expiry

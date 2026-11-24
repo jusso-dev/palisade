@@ -61,6 +61,9 @@ pub enum Asn1ErrorKind {
     LengthTooLarge,
     /// A multi-octet (high) tag number. Nothing Authenticode uses needs one.
     HighTagNumber,
+    /// Constructed elements nested more than 64 levels deep inside an
+    /// element that is only checked, not interpreted.
+    TooDeep,
     /// A different element was found where a specific one is required.
     UnexpectedTag {
         /// The tag required.
@@ -89,6 +92,7 @@ impl fmt::Display for Asn1ErrorKind {
             Self::NonMinimalLength => f.write_str("length is not minimally encoded"),
             Self::LengthTooLarge => f.write_str("length is too large"),
             Self::HighTagNumber => f.write_str("multi-octet tag numbers are not supported"),
+            Self::TooDeep => f.write_str("elements are nested too deeply"),
             Self::UnexpectedTag { expected, found } => {
                 write!(f, "expected tag {expected:#04x}, found {found:#04x}")
             }
@@ -385,15 +389,51 @@ pub(crate) fn bit_string_octets<'a>(tlv: &Tlv<'a>) -> Result<&'a [u8]> {
 }
 
 /// The first content octet of a BIT STRING of flags (bit 0 is the most
-/// significant bit, as ASN.1 numbers them), or 0 when it is empty.
+/// significant bit, as ASN.1 numbers them), or 0 when it is empty. The
+/// unused bits of the last octet must be zero (X.690 11.2.1).
 pub(crate) fn bit_string_flags(tlv: &Tlv<'_>) -> Result<u8> {
     let content = tlv.expect(tag::BIT_STRING)?.content;
+    let invalid = tlv.error(Asn1ErrorKind::InvalidValue);
     match content {
-        [unused, rest @ ..] if *unused < 8 && (*unused == 0 || !rest.is_empty()) => {
+        [0, rest @ ..] => Ok(rest.first().copied().unwrap_or(0)),
+        [unused @ 1..=7, rest @ ..] => {
+            let last = rest.last().ok_or(invalid)?;
+            if last & ((1_u8 << unused) - 1) != 0 {
+                return Err(invalid);
+            }
             Ok(rest.first().copied().unwrap_or(0))
         }
-        _ => Err(tlv.error(Asn1ErrorKind::InvalidValue)),
+        _ => Err(invalid),
     }
+}
+
+/// How deep [`validate`] follows constructed elements.
+pub(crate) const MAX_DEPTH: usize = 64;
+
+/// Checks that `tlv`, and every element inside it when it is constructed,
+/// is well-formed DER as far as this reader enforces (tags and lengths),
+/// without interpreting it. Used for parts of a signature that are kept or
+/// skipped rather than decoded. Iterative, with at most [`MAX_DEPTH`]
+/// readers on the stack, so hostile nesting cannot exhaust the call stack.
+pub(crate) fn validate(tlv: &Tlv<'_>) -> Result<()> {
+    let mut stack: Vec<Reader<'_>> = Vec::new();
+    if tlv.tag & 0x20 != 0 {
+        stack.push(tlv.reader());
+    }
+    while let Some(top) = stack.last_mut() {
+        if top.is_empty() {
+            stack.pop();
+            continue;
+        }
+        let child = top.read_any()?;
+        if child.tag & 0x20 != 0 {
+            if stack.len() >= MAX_DEPTH {
+                return Err(child.error(Asn1ErrorKind::TooDeep));
+            }
+            stack.push(child.reader());
+        }
+    }
+    Ok(())
 }
 
 /// The longest text read from a signature, in characters. Longer strings are
@@ -907,12 +947,43 @@ mod tests {
     }
 
     #[test]
+    fn validation_walks_nested_elements() {
+        let ok = read_one(&[0x30, 0x06, 0x31, 0x02, 0x05, 0x00, 0x04, 0x00]).unwrap();
+        validate(&ok).unwrap();
+        // A truncated element two levels down.
+        let bad = read_one(&[0x30, 0x04, 0x31, 0x02, 0x04, 0x05]).unwrap();
+        assert_eq!(validate(&bad).unwrap_err().kind, Asn1ErrorKind::Truncated);
+        // A BER indefinite length inside a primitive-looking wrapper.
+        let ber = read_one(&[0xa0, 0x04, 0x30, 0x80, 0x00, 0x00]).unwrap();
+        assert_eq!(
+            validate(&ber).unwrap_err().kind,
+            Asn1ErrorKind::IndefiniteLength
+        );
+        // Primitive elements are not looked inside.
+        validate(&read_one(&[0x04, 0x02, 0x30, 0x80]).unwrap()).unwrap();
+        // Nesting beyond the limit.
+        let mut deep = vec![0x05, 0x00];
+        for _ in 0..=MAX_DEPTH {
+            deep = [header(tag::SEQUENCE, deep.len()), deep].concat();
+        }
+        assert_eq!(
+            validate(&read_one(&deep).unwrap()).unwrap_err().kind,
+            Asn1ErrorKind::TooDeep
+        );
+    }
+
+    #[test]
     fn bit_strings() {
         let key = read_one(&[0x03, 0x03, 0x00, 0xab, 0xcd]).unwrap();
         assert_eq!(bit_string_octets(&key).unwrap(), &[0xab, 0xcd]);
         let padded = read_one(&[0x03, 0x02, 0x01, 0xfe]).unwrap();
         assert!(bit_string_octets(&padded).is_err());
         assert_eq!(bit_string_flags(&padded).unwrap(), 0xfe);
+        // Unused bits must be zero.
+        let dirty = read_one(&[0x03, 0x02, 0x07, 0xff]).unwrap();
+        assert!(bit_string_flags(&dirty).is_err());
+        let clean = read_one(&[0x03, 0x02, 0x07, 0x80]).unwrap();
+        assert_eq!(bit_string_flags(&clean).unwrap(), 0x80);
         let empty = read_one(&[0x03, 0x01, 0x00]).unwrap();
         assert_eq!(bit_string_flags(&empty).unwrap(), 0);
         let bad = read_one(&[0x03, 0x01, 0x03]).unwrap();

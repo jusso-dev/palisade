@@ -1,5 +1,6 @@
 //! Fuzzes Authenticode signature parsing and verification (#48): the input
-//! is a certificate table, attached to a small fixed PE image built here.
+//! is a certificate table, attached to the fixture image the test
+//! signatures were made over (`PeBuilder::default()` from `tests/common`).
 //! No input may panic, and every report must respect the documented limits
 //! and never call a signature valid unless every check passed.
 #![no_main]
@@ -10,49 +11,22 @@ use palisade_fileid::authenticode::{
     MAX_WARNINGS, SignatureCheck, SignatureStatus, SigningState, VerifyOptions, verify_pe,
 };
 
-/// A minimal PE32+ image with one 0x200-byte section and no certificate
-/// table: the same layout as `PeBuilder::default()` in the tests.
+// The tests' fixture builder, so the image is byte for byte the one the
+// fixture signatures (and so the seed corpus) were made over, and valid
+// signatures stay reachable.
+#[path = "../../tests/common/mod.rs"]
+mod common;
+
+/// `PeBuilder::default()` with no certificate table.
 fn base_image() -> Vec<u8> {
-    let mut out = vec![0_u8; 0x400];
-    let put16 = |b: &mut [u8], at: usize, v: u16| b[at..at + 2].copy_from_slice(&v.to_le_bytes());
-    let put32 = |b: &mut [u8], at: usize, v: u32| b[at..at + 4].copy_from_slice(&v.to_le_bytes());
-    out[..2].copy_from_slice(b"MZ");
-    put32(&mut out, 0x3c, 0x40);
-    out[0x40..0x44].copy_from_slice(b"PE\0\0");
-    let coff = 0x44;
-    put16(&mut out, coff, 0x8664);
-    put16(&mut out, coff + 2, 1);
-    put16(&mut out, coff + 16, 240);
-    put16(&mut out, coff + 18, 0x22);
-    let o = coff + 20;
-    put16(&mut out, o, 0x20b);
-    put32(&mut out, o + 16, 0x1000);
-    put32(&mut out, o + 20, 0x1000);
-    out[o + 24..o + 32].copy_from_slice(&0x1_4000_0000_u64.to_le_bytes());
-    put32(&mut out, o + 32, 0x1000);
-    put32(&mut out, o + 36, 0x200);
-    put16(&mut out, o + 40, 6);
-    put16(&mut out, o + 48, 6);
-    put32(&mut out, o + 56, 0x2000);
-    put32(&mut out, o + 60, 0x400);
-    put16(&mut out, o + 68, 2);
-    put32(&mut out, o + 108, 16);
-    let s = o + 240;
-    out[s..s + 8].copy_from_slice(b".text\0\0\0");
-    put32(&mut out, s + 8, 0x100);
-    put32(&mut out, s + 12, 0x1000);
-    put32(&mut out, s + 16, 0x200);
-    put32(&mut out, s + 20, 0x400);
-    put32(&mut out, s + 36, 0x6000_0020);
-    out.extend((0..0x200).map(|i| i as u8));
-    out
+    common::PeBuilder::default().build()
 }
 
 fuzz_target!(|table: &[u8]| {
     let mut image = base_image();
     let at = image.len() as u32;
     image.extend_from_slice(table);
-    let dir = 0x44 + 20 + 112 + 4 * 8;
+    let dir = common::PeBuilder::default().data_directory_offset(4);
     image[dir..dir + 4].copy_from_slice(&at.to_le_bytes());
     image[dir + 4..dir + 8].copy_from_slice(&(table.len() as u32).to_le_bytes());
 

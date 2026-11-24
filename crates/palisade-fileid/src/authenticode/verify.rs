@@ -432,6 +432,9 @@ fn check(
             (SignatureCheck::NotChecked, _) => {
                 SignatureStatus::BadSignature(BadSignature::SignatureInvalid)
             }
+            (SignatureCheck::Valid, Some(true)) if !image.status.is_conformant() => {
+                SignatureStatus::NonConformantImage
+            }
             (SignatureCheck::Valid, Some(true)) => SignatureStatus::Valid,
             (SignatureCheck::Valid, Some(false)) => SignatureStatus::DigestMismatch,
             (SignatureCheck::Valid, None) => {

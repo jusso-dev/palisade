@@ -23,12 +23,12 @@ mod common;
 
 use common::*;
 use palisade_fileid::authenticode::{
-    Asn1ErrorKind, BadSignature, CertificateTableError, Curve, DigestAlgorithm, InvalidReason,
-    KeyAlgorithm, MAX_CERTIFICATE_ENTRIES, MAX_NESTING_DEPTH, MAX_SIGNATURES, MAX_WARNINGS,
-    OsCiIssue, ReportWarning, SignatureAlgorithm, SignatureCheck, SignatureError, SignatureKind,
-    SignatureReport, SignatureStatus, SignatureWarning, SignerIdentifier, SigningState,
-    StatementType, TimestampKind, Unsupported, VerifyOptions, authenticode_hashes,
-    verify_certificate_table, verify_pe, verify_signatures,
+    Asn1ErrorKind, AuthenticodeStatus, BadSignature, CertificateTableError, Curve, DigestAlgorithm,
+    InvalidReason, KeyAlgorithm, MAX_CERTIFICATE_ENTRIES, MAX_NESTING_DEPTH, MAX_SIGNATURES,
+    MAX_WARNINGS, NonConformance, OsCiIssue, ReportWarning, SignatureAlgorithm, SignatureCheck,
+    SignatureError, SignatureKind, SignatureReport, SignatureStatus, SignatureWarning,
+    SignerIdentifier, SigningState, StatementType, TimestampKind, Unsupported, VerifyOptions,
+    authenticode_hashes, verify_certificate_table, verify_pe, verify_signatures,
 };
 use palisade_fileid::hash::{AlgorithmSet, HashAlgorithm};
 use palisade_fileid::pe;
@@ -1196,6 +1196,299 @@ fn subject_key_identifier_signers_are_matched() {
         only(&verify_blob(&b)).status,
         SignatureStatus::BadSignature(BadSignature::SignerCertificateNotFound)
     );
+}
+
+// --- Round-3 review cases. ---------------------------------------------------
+
+#[test]
+fn small_rsa_keys_verify_with_a_warning() {
+    let report = verify_blob(&fixture("rsa1024-sha256.p7"));
+    let sig = only(&report);
+    assert_eq!(sig.status, SignatureStatus::Valid, "{sig:#?}");
+    assert_eq!(sig.key_bits, Some(1024));
+    assert_eq!(sig.warnings, [SignatureWarning::SmallRsaKey(1024)]);
+    // OS code integrity has no lower bound to report; ADR 0008's floor is
+    // a warning here and a policy decision later.
+    assert!(sig.os_ci_compatible());
+}
+
+#[test]
+fn non_conformant_images_are_never_valid() {
+    // On a non-conformant layout the Authenticode digest is a best effort:
+    // bytes can be moved across the certificate table without changing it.
+    // So even an exact match with a sound signature is not `Valid`. The
+    // digests here are the real ones; only the layout verdict differs.
+    let image = image_with_table(pkcs7_entry(&fixture("rsa2048-sha256.p7")));
+    let info = pe::parse(&image).unwrap();
+    let mut hashes = authenticode_hashes(&image, &info, AlgorithmSet::EMPTY).unwrap();
+    hashes.status =
+        AuthenticodeStatus::NonConformant(vec![NonConformance::CertificateTableMisaligned {
+            offset: info.certificate_table.unwrap().offset,
+        }]);
+    let options = VerifyOptions {
+        tolerate_digest_mismatch: true,
+    };
+    let report = verify_certificate_table(&image, &info, &hashes, &options);
+    assert!(report.warnings.contains(&ReportWarning::NonConformantImage));
+    let sig = only(&report);
+    assert_eq!(sig.signature_valid, SignatureCheck::Valid);
+    assert_eq!(sig.digest_match, Some(true));
+    assert_eq!(sig.status, SignatureStatus::NonConformantImage);
+    assert!(sig.signer.is_none() && !sig.untrusted_signer_attrs);
+    assert_eq!(report.primary, None);
+    assert_eq!(
+        report.signing_state,
+        SigningState::Invalid(InvalidReason::Signature(
+            SignatureStatus::NonConformantImage
+        ))
+    );
+
+    // End to end: data appended after the table makes the image
+    // non-conformant, and the signature is not valid.
+    let mut appended = image.clone();
+    appended.extend_from_slice(&[0; 8]);
+    let report = verify(&appended);
+    assert!(!report.image_status.is_conformant());
+    assert!(!only(&report).status.is_valid());
+    assert_eq!(
+        report.signing_state,
+        SigningState::Invalid(InvalidReason::Signature(only(&report).status.clone()))
+    );
+}
+
+#[test]
+fn signer_digest_listing_is_exact() {
+    let blob = fixture("rsa2048-sha256.p7");
+    let sha256 = element(&blob, &sd(&[1, 0])).to_vec();
+    let unknown = |i: u8| {
+        tlv(
+            0x30,
+            &tlv(0x06, &[0x2b, 0x06, 0x01, 0x04, 0x01, 0x83, 0x01, i]),
+        )
+    };
+    // Many unknown digests before the signer's: still listed.
+    let mut set: Vec<u8> = (0..40).flat_map(unknown).collect();
+    set.extend_from_slice(&sha256);
+    let report = verify_blob(&replace(&blob, &sd(&[1]), &tlv(0x31, &set)));
+    let sig = only(&report);
+    assert_eq!(sig.status, SignatureStatus::Valid);
+    assert!(
+        !sig.warnings
+            .contains(&SignatureWarning::SignerDigestNotListed)
+    );
+    // Not listed at all.
+    let report = verify_blob(&replace(&blob, &sd(&[1]), &tlv(0x31, &unknown(1))));
+    assert!(
+        only(&report)
+            .warnings
+            .contains(&SignatureWarning::SignerDigestNotListed)
+    );
+    // Invalid DER in the set.
+    let report = verify_blob(&replace(&blob, &sd(&[1]), &tlv(0x31, &[0x30, 0x80, 0, 0])));
+    assert!(matches!(
+        malformed(&report),
+        SignatureError::Asn1(a) if a.kind == Asn1ErrorKind::IndefiniteLength
+    ));
+}
+
+/// Inserts `crls` as the `[1]` element after the certificates.
+fn with_crls(blob: &[u8], crls: &[u8]) -> Vec<u8> {
+    let signed = element(blob, &SIGNED_DATA);
+    let (h, _) = header(signed, 0);
+    let certs = element(blob, &sd(&[SD_CERTIFICATES]));
+    let certs_end = h + locate(signed, &[SD_CERTIFICATES]) - h + certs.len();
+    let mut content = signed[h..certs_end].to_vec();
+    content.extend_from_slice(&tlv(0xa1, crls));
+    content.extend_from_slice(&signed[certs_end..]);
+    replace(blob, &SIGNED_DATA, &tlv(0x30, &content))
+}
+
+#[test]
+fn crls_must_be_valid_der() {
+    let blob = fixture("rsa2048-sha256.p7");
+    let good_crl = tlv(0x30, &tlv(0x30, &[0x02, 0x01, 0x01]));
+    let report = verify_blob(&with_crls(&blob, &good_crl));
+    assert_eq!(only(&report).status, SignatureStatus::Valid);
+    let bad_crl = tlv(0x30, &[0x30, 0x03, 0x02, 0x05, 0x01]);
+    let report = verify_blob(&with_crls(&blob, &bad_crl));
+    assert!(matches!(
+        malformed(&report),
+        SignatureError::Asn1(a) if a.kind == Asn1ErrorKind::Truncated
+    ));
+}
+
+#[test]
+fn pe_image_data_must_be_strict_der() {
+    let blob = fixture("rsa2048-sha256.p7");
+    let value = indirect(&[0, 1]);
+    let flags_at = [&value[..], &[0]].concat();
+    let file_at = [&value[..], &[1]].concat();
+    let check = |b: Vec<u8>, kind: Asn1ErrorKind| {
+        let report = verify_blob(&b);
+        assert!(
+            matches!(malformed(&report), SignatureError::Asn1(a) if a.kind == kind),
+            "{:?}",
+            only(&report).status
+        );
+    };
+    // Unused flag bits that are not zero.
+    check(
+        replace(&blob, &flags_at, &[0x03, 0x02, 0x07, 0xff]),
+        Asn1ErrorKind::InvalidValue,
+    );
+    // A [2] file link holding a truncated SpcString.
+    check(
+        replace(&blob, &file_at, &tlv(0xa0, &tlv(0xa2, &[0x80, 0x05]))),
+        Asn1ErrorKind::Truncated,
+    );
+    // A [2] file link holding an indefinite-length element.
+    check(
+        replace(&blob, &file_at, &tlv(0xa0, &tlv(0xa2, &[0x30, 0x80, 0, 0]))),
+        Asn1ErrorKind::IndefiniteLength,
+    );
+    // A [2] file link with an odd-length BMPString.
+    check(
+        replace(&blob, &file_at, &tlv(0xa0, &tlv(0xa2, &[0x80, 0x01, 0x41]))),
+        Asn1ErrorKind::InvalidValue,
+    );
+    // An SpcLink form that does not exist.
+    check(
+        replace(&blob, &file_at, &tlv(0xa0, &[0x05, 0x00])),
+        Asn1ErrorKind::UnexpectedTag {
+            expected: 0xa1,
+            found: 0x05,
+        },
+    );
+    // A well-formed URL link parses. It changes the signed content, so the
+    // message digest no longer matches, but it is not malformed.
+    let report = verify_blob(&replace(
+        &blob,
+        &file_at,
+        &tlv(0xa0, &tlv(0x80, b"https://x.test")),
+    ));
+    assert_eq!(
+        only(&report).status,
+        SignatureStatus::BadSignature(BadSignature::MessageDigestMismatch)
+    );
+}
+
+#[test]
+fn skipped_values_must_be_valid_der() {
+    let blob = fixture("rsa2048-sha256.p7");
+    // An unknown unauthenticated attribute with a truncated value.
+    let oid = tlv(0x06, &[0x2b, 0x06, 0x01, 0x04, 0x01, 0x83, 0x02, 0x01]);
+    let attr = tlv(0x30, &[oid, tlv(0x31, &[0x30, 0x02, 0x04, 0x09])].concat());
+    let si = element(&blob, &signer(&[]));
+    let (h, _) = header(si, 0);
+    let mut content = si[h..].to_vec();
+    content.extend(tlv(0xa1, &attr));
+    let report = verify_blob(&replace(&blob, &signer(&[]), &tlv(0x30, &content)));
+    assert!(matches!(
+        malformed(&report),
+        SignatureError::Asn1(a) if a.kind == Asn1ErrorKind::Truncated
+    ));
+    // An unknown signature algorithm with indefinite-length parameters.
+    let alg = tlv(
+        0x30,
+        &[
+            tlv(0x06, &[0x2b, 0x06, 0x01, 0x04, 0x01, 0x83, 0x02, 0x02]),
+            vec![0x30, 0x80, 0, 0],
+        ]
+        .concat(),
+    );
+    let report = verify_blob(&replace(&blob, &signer(&[SI_SIG_ALG]), &alg));
+    assert!(matches!(
+        malformed(&report),
+        SignatureError::Asn1(a) if a.kind == Asn1ErrorKind::IndefiniteLength
+    ));
+}
+
+#[test]
+fn pss_parameter_edge_cases() {
+    let blob = fixture("rsa2048-sha256.p7");
+    let pss_oid = tlv(
+        0x06,
+        &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0a],
+    );
+    let with_params = |params: Vec<u8>| {
+        let alg = tlv(0x30, &[pss_oid.clone(), params].concat());
+        verify_blob(&replace(&blob, &signer(&[SI_SIG_ALG]), &alg))
+    };
+    // An unknown mask function with non-digest parameters: unsupported.
+    let mgf = tlv(
+        0x30,
+        &[
+            tlv(0x06, &[0x2b, 0x06, 0x01, 0x04, 0x01, 0x83, 0x03, 0x01]),
+            vec![0x02, 0x01, 0x05],
+        ]
+        .concat(),
+    );
+    let report = with_params(tlv(0x30, &tlv(0xa1, &mgf)));
+    assert!(matches!(
+        only(&report).status,
+        SignatureStatus::Unsupported(Unsupported::SignatureAlgorithm(SignatureAlgorithm::Other(
+            _
+        )))
+    ));
+    // Truncated parameters: malformed.
+    let report = with_params(tlv(0x30, &[0xa2, 0x03, 0x02, 0x05]));
+    assert!(matches!(malformed(&report), SignatureError::Asn1(_)));
+    // Missing parameters: malformed.
+    let alg = tlv(0x30, &pss_oid);
+    let report = verify_blob(&replace(&blob, &signer(&[SI_SIG_ALG]), &alg));
+    assert_eq!(malformed(&report), &SignatureError::AlgorithmParameters);
+}
+
+#[test]
+fn spki_parameters_are_checked() {
+    let blob = fixture("rsa2048-sha256.p7");
+    let certs = element(&blob, &sd(&[SD_CERTIFICATES]));
+    let leaf_index = (0..2)
+        .find(|i| element(certs, &[*i]).windows(6).any(|w| w == b"Signer"))
+        .unwrap();
+    let cert = element(certs, &[leaf_index]).to_vec();
+    let rsa_oid = tlv(
+        0x06,
+        &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01],
+    );
+    let with_spki_alg = |alg: Vec<u8>| {
+        let c = replace(&cert, &[0, 6, 0], &alg);
+        verify_blob(&replace(&blob, &sd(&[SD_CERTIFICATES, leaf_index]), &c))
+    };
+    // rsaEncryption with absent parameters is accepted.
+    let report = with_spki_alg(tlv(0x30, &rsa_oid));
+    assert_eq!(only(&report).status, SignatureStatus::Valid);
+    // With bogus parameters, the certificate cannot be the signer.
+    let report = with_spki_alg(tlv(
+        0x30,
+        &[rsa_oid.clone(), vec![0x02, 0x01, 0x01]].concat(),
+    ));
+    let sig = only(&report);
+    assert_eq!(
+        sig.status,
+        SignatureStatus::BadSignature(BadSignature::SignerCertificateNotFound)
+    );
+    assert!(
+        sig.warnings
+            .contains(&SignatureWarning::UnparseableCertificate(leaf_index))
+    );
+}
+
+#[test]
+fn fuzz_target_image_is_the_fixture_image() {
+    // The fuzz target appends its input to `PeBuilder::default()` (through
+    // the same module) and points the security directory at it. A valid
+    // seed must stay valid that way, or the fuzzer never reaches `Valid`.
+    let table = pkcs7_entry(&fixture("rsa2048-sha256.p7"));
+    let mut image = PeBuilder::default().build();
+    let at = image.len() as u32;
+    image.extend_from_slice(&table);
+    let dir = PeBuilder::default().data_directory_offset(4);
+    image[dir..dir + 4].copy_from_slice(&at.to_le_bytes());
+    image[dir + 4..dir + 8].copy_from_slice(&(table.len() as u32).to_le_bytes());
+    let report = verify(&image);
+    assert_eq!(report.signing_state, SigningState::Valid);
+    assert_eq!(report.primary, Some(0));
 }
 
 proptest! {
