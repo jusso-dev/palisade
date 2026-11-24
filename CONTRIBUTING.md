@@ -215,6 +215,15 @@ Signed-off-by: Ada Lovelace <ada@example.org>
   `git push --force-with-lease`.
 - Never sign off on someone else's behalf.
 
+**Maintainer exemption.** Pull requests opened by the repository owner's account do not need
+sign-off, and the `DCO` check passes them with a notice. The owner holds the copyright and the
+right to licence their own changes, so a sign-off adds nothing. This also covers changes prepared
+by AI coding agents working for the owner: the owner authorises each one by opening and merging the
+pull request from their own account, and agents never add a `Signed-off-by:` line in the owner's
+name. The exemption is decided by GitHub's record of who opened the pull request
+(`author_association` is `OWNER`), not by anything in the commits, so it cannot be claimed by
+copying the owner's name or email. Everyone else, including collaborators, signs off as above.
+
 The `DCO` check (`.github/workflows/dco.yml`) reports every commit in a pull request that has no
 matching sign-off. It is informational for now. The decision to require sign-off, with no CLA, is
 recorded in a separate ADR under [#28](https://github.com/jusso-dev/palisade/issues/28). Once
@@ -236,7 +245,8 @@ not checked again.
 
 - The `ci-ok` check and the `PR title` check must pass. The `main` branch ruleset makes both
   required ([docs/repo-settings.md](docs/repo-settings.md)). The `DCO` check must pass too,
-  although it is not yet a required check.
+  although it is not yet a required check. It passes pull requests opened by the repository owner
+  (see [Sign-off](#sign-off)).
 - Changes to CI, supply-chain policy, unsafe code, the driver and signing need the maintainer's
   review ([`.github/CODEOWNERS`](.github/CODEOWNERS)).
 - Workflow changes must pass `cargo xtask check-workflows`: GitHub-hosted runners only, allowlisted

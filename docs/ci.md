@@ -63,6 +63,11 @@ accepts that sign-off for commits authored at the bot's noreply address only.
 The pull request author comes from GitHub, not from the commits, so a commit
 that copies the bot's address gains nothing.
 
+Pull requests opened by the repository owner pass with a notice and are not
+checked ([CONTRIBUTING.md](../CONTRIBUTING.md#sign-off)). The workflow reads
+GitHub's `author_association` for the pull request, which commits cannot
+change. The checker's own tests still run on those pull requests.
+
 ### `labels.yml` (label and milestone changes, and on demand)
 
 | Job | Runners | What it runs |

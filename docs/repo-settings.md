@@ -254,6 +254,9 @@ The `DCO` workflow (`.github/workflows/dco.yml`) runs
 if any non-merge commit lacks a `Signed-off-by:` trailer whose email matches the commit author
 ([CONTRIBUTING.md](../CONTRIBUTING.md#sign-off)). It needs no token scope beyond `contents: read`.
 Dependabot's pull requests pass it with the bot's own sign-off ([docs/ci.md](ci.md#dcoyml-pull-requests)).
+Pull requests opened by the repository owner pass without sign-off
+([CONTRIBUTING.md](../CONTRIBUTING.md#sign-off)). The exemption follows GitHub's `author_association`, so
+transferring the repository moves it to the new owner.
 
 The check is **informational**: the `main` ruleset does not require it yet. Requiring sign-off is
 decided by an ADR under [#28](https://github.com/jusso-dev/palisade/issues/28). Once that ADR is
