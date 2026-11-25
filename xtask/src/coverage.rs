@@ -28,7 +28,7 @@ impl Count {
 
     /// The percentage with one decimal, or `-` when there is nothing to
     /// cover.
-    fn percent(self) -> String {
+    pub fn percent(self) -> String {
         if self.count == 0 {
             return "-".to_owned();
         }

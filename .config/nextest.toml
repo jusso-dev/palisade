@@ -10,6 +10,18 @@ retries = 0
 # property tests take tens of seconds.
 slow-timeout = "60s"
 
+# Tests against a real Postgres (`palisade-server`'s `postgres` test binary,
+# #127). Each test creates its own database and roles (per-test DB), so they
+# may run in parallel; the group caps how many run at once, so the server's
+# connection limit is never the reason a test fails. The other jobs run them
+# too, where they skip themselves without PALISADE_TEST_DATABASE_ADMIN_URL.
+[test-groups]
+postgres = { max-threads = 4 }
+
+[[profile.default.overrides]]
+filter = "package(palisade-server) & binary(postgres)"
+test-group = "postgres"
+
 [profile.ci]
 # Run every test even after a failure, so one run reports all of them.
 fail-fast = false

@@ -1,0 +1,64 @@
+# Benchmark regression gate (#25): every criterion bench at a base commit and
+# at the head, on the same runner in the same job, compared by
+# `cargo xtask bench-compare`. A median more than 10% slower, with
+# non-overlapping 95% confidence intervals, fails the job; the table is in
+# the job summary. Timings from different runs of hosted runners are not
+# comparable, so the base is always measured again here, never stored.
+#
+# - Weekly: `main` against `main` one week earlier.
+# - On demand (workflow_dispatch): the chosen branch against `base`
+#   (default `main`), e.g. before merging a change to a hot path.
+name: Benchmarks
+
+on:
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Branch, tag or commit to compare against
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The base commit too, to benchmark it.
+          fetch-depth: 0
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+      - name: Choose the base commit
+        id: base
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_BASE: ${{ inputs.base }}
+        run: |
+          if [ "$EVENT" = schedule ]; then
+            sha=$(git rev-list -n 1 --before="7 days ago" HEAD)
+          else
+            case "$INPUT_BASE" in
+              -*|*[!A-Za-z0-9._/-]*) echo "::error::not a branch, tag or commit: $INPUT_BASE"; exit 1 ;;
+            esac
+            sha=$(git rev-parse --verify --end-of-options "origin/$INPUT_BASE^{commit}" 2>/dev/null \
+              || git rev-parse --verify --end-of-options "$INPUT_BASE^{commit}")
+          fi
+          test -n "$sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - env:
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+        run: cargo xtask bench-compare --base "$BASE_SHA"
