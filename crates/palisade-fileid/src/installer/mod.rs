@@ -580,8 +580,8 @@ pub struct InstallerIdentity {
     /// The string pool's codepage (0 is the neutral codepage), if the pool
     /// could be read.
     pub codepage: Option<u32>,
-    /// The `Property` table fields (empty for patches and transforms,
-    /// which usually have none).
+    /// The `Property` table fields (empty for patches and transforms, whose
+    /// tables are not read as a database's).
     pub properties: Properties,
     /// The summary information.
     pub summary: SummaryFields,
@@ -592,7 +592,7 @@ pub struct InstallerIdentity {
     pub patch: Option<PatchInfo>,
     /// For a transform, what it applies to.
     pub transform: Option<TransformInfo>,
-    /// Embedded executable content.
+    /// Embedded executable content (databases and merge modules only).
     pub embedded: EmbeddedContent,
     /// The package's signature. `None` when it has no
     /// `\u{5}DigitalSignature` stream.
@@ -650,15 +650,20 @@ pub fn parse_installer(data: &[u8]) -> Result<InstallerIdentity, InstallerError>
     let root = cf.root.clone();
     let db = Database::open(cf, &root);
     let mut warnings = Vec::new();
+    // Only databases (and merge modules) have the full table set. A
+    // transform's table streams are row-wise deltas, not tables, and a
+    // patch carries only its own metadata table, so their table catalog is
+    // not reported on.
+    let is_database = base_kind == InstallerKind::Msi;
     if let Err(e) = &db.strings {
-        if base_kind != InstallerKind::Msp {
+        if is_database {
             warnings.push(InstallerWarning::Table(e.clone()));
         }
     } else if db.strings.as_ref().is_ok_and(|p| p.lossy) {
         warnings.push(InstallerWarning::LossyStrings);
     }
     if let Some(e) = &db.catalog_error {
-        if db.strings.is_ok() {
+        if db.strings.is_ok() && is_database {
             warnings.push(InstallerWarning::Table(e.clone()));
         }
     }
@@ -706,7 +711,11 @@ pub fn parse_installer(data: &[u8]) -> Result<InstallerIdentity, InstallerError>
         .map(SummaryFields::from_info)
         .unwrap_or_default();
 
-    let properties = read_properties(&db, &mut warnings);
+    let properties = if is_database {
+        read_properties(&db, &mut warnings)
+    } else {
+        Properties::default()
+    };
     let package_code = match kind {
         InstallerKind::Msi | InstallerKind::Msm => {
             summary_fields.revision.as_deref().map(GuidText::new)
@@ -716,7 +725,11 @@ pub fn parse_installer(data: &[u8]) -> Result<InstallerIdentity, InstallerError>
     let patch =
         (kind == InstallerKind::Msp).then(|| read_patch(&db, &summary_fields, &mut warnings));
     let transform = (kind == InstallerKind::Mst).then(|| read_transform(&summary_fields));
-    let embedded = read_embedded(&db, &mut warnings);
+    let embedded = if is_database {
+        read_embedded(&db, &mut warnings)
+    } else {
+        EmbeddedContent::default()
+    };
 
     let content = content_digests(&db.cf, &root);
     let signature = read_signature(&db.cf, &root, &content, &mut warnings);
@@ -901,11 +914,21 @@ fn read_patch(
     };
     match table {
         Ok(Some(table)) => {
-            if let (Ok(p), Ok(v)) = (
+            let cols = (
+                table.string_column("Company"),
                 table.string_column("Property"),
                 table.string_column("Value"),
-            ) {
+            );
+            if let (Ok(c), Ok(p), Ok(v)) = cols {
+                if table.row_count() > MAX_INVENTORY_ROWS {
+                    warnings.push(InstallerWarning::InventoryTruncated("MsiPatchMetadata"));
+                }
                 for row in table.rows().take(MAX_INVENTORY_ROWS) {
+                    // The standard properties have no company; a row with a
+                    // company is that company's own property, not these.
+                    if row.get(c).and_then(|&x| db.text(x)).is_some() {
+                        continue;
+                    }
                     let (Some(k), Some(val)) = (
                         row.get(p).and_then(|&x| db.text(x)),
                         row.get(v).and_then(|&x| db.text(x)),
@@ -927,12 +950,24 @@ fn read_patch(
                         _ => {}
                     }
                 }
+            } else {
+                push_table_warning(
+                    warnings,
+                    schema("MsiPatchMetadata", "Company/Property/Value"),
+                );
             }
         }
         Ok(None) => {}
         Err(e) => push_table_warning(warnings, e),
     }
     out
+}
+
+fn schema(table: &str, column: &'static str) -> TableError {
+    TableError::Schema {
+        table: table.into(),
+        column,
+    }
 }
 
 fn read_transform(summary: &SummaryFields) -> TransformInfo {
@@ -987,6 +1022,8 @@ fn read_embedded(db: &Database<'_>, warnings: &mut Vec<InstallerWarning>) -> Emb
                         });
                     }
                 }
+            } else {
+                push_table_warning(warnings, schema("Binary", "Name"));
             }
         }
         Ok(None) => {}
@@ -1055,6 +1092,8 @@ fn read_embedded(db: &Database<'_>, warnings: &mut Vec<InstallerWarning>) -> Emb
                         });
                     }
                 }
+            } else {
+                push_table_warning(warnings, schema("Media", "Cabinet"));
             }
         }
         Ok(None) => {}
@@ -1266,21 +1305,32 @@ fn read_signature(
     // signature's digest algorithm; otherwise the signature cannot be
     // valid, whatever its content digest says.
     if let Some(ex) = ex {
-        // A broken digest (MD5) never backs the metadata check.
-        let expected = report
-            .signatures
-            .first()
-            .and_then(|s| s.digest_alg)
-            .filter(|a| !a.is_broken())
-            .and_then(|a| a.hash_algorithm())
-            .and_then(|a| metadata_digest(root, a));
-        let stored = Some(cf.stream(ex));
-        let ok = matches!((&expected, &stored), (Some(e), Some(s)) if e.as_bytes() == s.as_slice());
-        if !ok {
+        // The metadata hash must match under the digest of every valid
+        // signature (a broken digest never backs it), so whichever
+        // signature trust evaluation picks, the metadata it vouches for is
+        // checked under that signature's own algorithm.
+        if !metadata_backs_every_signature(&report, root, &cf.stream(ex)) {
             demote(&mut report, SignatureStatus::DigestMismatch);
         }
     }
     Some(report)
+}
+
+/// Whether `stored` (the `MsiDigitalSignatureEx` content) is the metadata
+/// hash under the digest of every valid signature in `report`. A broken
+/// digest never backs it.
+fn metadata_backs_every_signature(report: &SignatureReport, root: &Entry, stored: &[u8]) -> bool {
+    report
+        .signatures
+        .iter()
+        .filter(|s| s.status.is_valid())
+        .all(|s| {
+            s.digest_alg
+                .filter(|a| !a.is_broken())
+                .and_then(|a| a.hash_algorithm())
+                .and_then(|a| metadata_digest(root, a))
+                .is_some_and(|d| d.as_bytes() == stored)
+        })
 }
 
 /// Marks every valid signature in `report` as `status` and clears the
@@ -1290,6 +1340,9 @@ fn demote(report: &mut SignatureReport, status: SignatureStatus) {
         if sig.status.is_valid() {
             sig.status = status.clone();
             sig.signer = None;
+            // What failed is outside the signed digest; the digest itself
+            // is no longer reported as matching the package.
+            sig.digest_match = Some(false);
         }
     }
     report.primary = None;
@@ -1427,6 +1480,72 @@ mod tests {
         ] {
             assert_eq!(custom_action_kind(ty), kind, "{ty}");
         }
+    }
+
+    #[test]
+    fn the_metadata_hash_must_match_under_every_valid_signature() {
+        use crate::authenticode::DigestAlgorithm;
+        use crate::authenticode::verify::blank;
+        let data = include_bytes!("../../tests/fixtures/installer/product-dse.msi");
+        let cf = CompoundFile::parse(data).unwrap();
+        let root = cf.root.clone();
+        let ex = root
+            .children
+            .iter()
+            .find(|c| is_special_stream(c, DIGITAL_SIGNATURE_EX))
+            .unwrap();
+        let stored = cf.stream(ex);
+        let report = |algs: &[(DigestAlgorithm, bool)]| SignatureReport {
+            entries: Vec::new(),
+            signatures: algs
+                .iter()
+                .map(|&(a, valid)| {
+                    let mut s = blank(if valid {
+                        SignatureStatus::Valid
+                    } else {
+                        SignatureStatus::DigestMismatch
+                    });
+                    s.digest_alg = Some(a);
+                    s
+                })
+                .collect(),
+            primary: None,
+            signing_state: crate::authenticode::SigningState::Unsigned,
+            tolerate_digest_mismatch: false,
+            image_status: AuthenticodeStatus::Conformant,
+            warnings: Vec::new(),
+        };
+        use DigestAlgorithm::{Md5, Sha1, Sha256};
+        assert!(metadata_backs_every_signature(
+            &report(&[(Sha256, true)]),
+            &root,
+            &stored
+        ));
+        // A valid nested SHA-1 signature with a SHA-256 metadata hash: the
+        // nested one is not backed, so the package must not verify.
+        assert!(!metadata_backs_every_signature(
+            &report(&[(Sha256, true), (Sha1, true)]),
+            &root,
+            &stored
+        ));
+        // ... and the reverse order.
+        assert!(!metadata_backs_every_signature(
+            &report(&[(Sha1, true), (Sha256, true)]),
+            &root,
+            &stored
+        ));
+        // An invalid signature does not count either way.
+        assert!(metadata_backs_every_signature(
+            &report(&[(Sha256, true), (Sha1, false)]),
+            &root,
+            &stored
+        ));
+        // A broken digest never backs it.
+        assert!(!metadata_backs_every_signature(
+            &report(&[(Md5, true)]),
+            &root,
+            &stored
+        ));
     }
 
     #[test]

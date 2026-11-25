@@ -1138,3 +1138,227 @@ fn oversized_signature_streams_are_never_valid() {
     );
     assert_ne!(a.normalised_sha256, b.normalised_sha256);
 }
+
+// ---------------------------------------------------------------------------
+// Round 7 review.
+
+#[test]
+fn tableless_patches_and_transforms_have_no_table_warnings() {
+    for clsid in [CLSID_PATCH, CLSID_TRANSFORM] {
+        let mut b = MsiBuilder {
+            clsid,
+            ..MsiBuilder::default()
+        };
+        b.summary_prop(
+            9,
+            Prop::Str("{11111111-2222-3333-4444-555555555555}".into()),
+        );
+        // A summary-only package: no string pool, no tables at all.
+        let mut cfb = b.cfb();
+        cfb.children.retain(|n| n.name().first() != Some(&0x4840));
+        let id = parse_installer(&cfb.build()).unwrap();
+        assert!(
+            !id.warnings
+                .iter()
+                .any(|w| matches!(w, InstallerWarning::Table(_))),
+            "{:?}",
+            id.warnings
+        );
+        assert!(id.embedded.custom_actions.is_empty());
+    }
+    // A transform's table streams are deltas, not tables: never read as a
+    // database's, so they cannot add properties or inventory.
+    let mut t = product();
+    t.clsid = CLSID_TRANSFORM;
+    let id = parse_installer(&t.build()).unwrap();
+    assert!(id.properties.product_code.is_none());
+    assert!(id.embedded.binaries.is_empty());
+}
+
+fn patch_metadata(rows: Vec<Vec<Cell>>) -> MsiBuilder {
+    let mut p = MsiBuilder {
+        clsid: CLSID_PATCH,
+        ..MsiBuilder::default()
+    };
+    p.table(
+        "MsiPatchMetadata",
+        &[
+            ("Company", 0x3d48),
+            ("Property", key_col(72)),
+            ("Value", str_col(0, false)),
+        ],
+        rows,
+    );
+    p
+}
+
+#[test]
+fn patch_metadata_rows_by_company_are_not_the_standard_ones() {
+    let p = patch_metadata(vec![
+        vec![s("Contoso"), s("DisplayName"), s("Company specific")],
+        vec![Cell::Null, s("DisplayName"), s("Standard")],
+    ]);
+    let id = parse_installer(&p.build()).unwrap();
+    assert_eq!(id.patch.unwrap().display_name.as_deref(), Some("Standard"));
+
+    let many: Vec<_> = (0..MAX_INVENTORY_ROWS + 1)
+        .map(|i| vec![Cell::Null, s(&format!("P{i}")), s("v")])
+        .collect();
+    let id = parse_installer(&patch_metadata(many).build()).unwrap();
+    assert!(
+        id.warnings
+            .contains(&InstallerWarning::InventoryTruncated("MsiPatchMetadata"))
+    );
+}
+
+#[test]
+fn inventory_schema_problems_are_reported() {
+    // `Binary.Name` and `Media.Cabinet` as integer columns.
+    let mut b = product();
+    b.tables[1].columns[0].1 = KEY_I2;
+    b.tables[1].rows = vec![vec![Cell::Int(1), Cell::Null]];
+    let media = b.tables.iter_mut().find(|t| t.name == "Media").unwrap();
+    media.columns[3].1 = I2_NULL;
+    for row in &mut media.rows {
+        row[3] = Cell::Int(5);
+    }
+    let id = parse_installer(&b.build()).unwrap();
+    for table in ["Binary", "Media"] {
+        assert!(
+            id.warnings.iter().any(|w| matches!(
+                w,
+                InstallerWarning::Table(palisade_fileid::installer::database::TableError::Schema { table: t, .. }) if t == table
+            )),
+            "{table}: {:?}",
+            id.warnings
+        );
+    }
+}
+
+#[test]
+fn version_4_directory_sector_count_must_match() {
+    let mut v4 = product();
+    v4.cfb_version = 4;
+    let data = v4.build();
+    assert!(parse_installer(&data).is_ok());
+    for n in [0_u32, 2, 1000] {
+        let mut bad = data.clone();
+        set_u32(&mut bad, 0x28, n);
+        assert!(parse_installer(&bad).is_err(), "{n}");
+    }
+}
+
+#[test]
+fn an_invalid_nested_signature_does_not_affect_a_valid_one() {
+    // The DSE fixture's SHA-256 signature, with the SHA-1 fixture's
+    // signature (over a package without the Ex stream) nested under it.
+    // The nested one does not match this package; the outer one still
+    // does, and only valid signatures must back the metadata hash (that
+    // rule is unit-tested in `installer::tests`).
+    let dse = fixture("product-dse.msi");
+    let sha1 = fixture("product-sha1.msi");
+    let get = |data: &[u8], name: &str| {
+        let cf = palisade_fileid::installer::cfb::CompoundFile::parse(data).unwrap();
+        let e = cf
+            .root
+            .children
+            .iter()
+            .find(|c| c.is_named(name))
+            .unwrap()
+            .clone();
+        cf.stream(&e)
+    };
+    let nested = nest_signature(
+        &get(&dse, "\u{5}DigitalSignature"),
+        &get(&sha1, "\u{5}DigitalSignature"),
+    );
+    let mut b = product();
+    b.extra.push(Node::stream("\u{5}DigitalSignature", nested));
+    b.extra.push(Node::stream(
+        "\u{5}MsiDigitalSignatureEx",
+        get(&dse, "\u{5}MsiDigitalSignatureEx"),
+    ));
+    let id = parse_installer(&b.build()).unwrap();
+    let report = id.signature.as_ref().unwrap();
+    assert_eq!(report.signatures.len(), 2);
+    assert_eq!(report.signatures[0].status, SignatureStatus::Valid);
+    assert_eq!(report.signatures[1].status, SignatureStatus::DigestMismatch);
+    assert!(id.signature_valid());
+}
+
+// DER, to nest one signature in another's unauthenticated attributes.
+
+fn der_header(der: &[u8], at: usize) -> (usize, usize) {
+    let first = der[at + 1];
+    if first < 0x80 {
+        (2, usize::from(first))
+    } else {
+        let n = usize::from(first & 0x7f);
+        let len = der[at + 2..at + 2 + n]
+            .iter()
+            .fold(0, |acc, b| (acc << 8) | usize::from(*b));
+        (2 + n, len)
+    }
+}
+
+fn der_tlv(tag: u8, content: &[u8]) -> Vec<u8> {
+    let mut out = vec![tag];
+    let len = content.len();
+    if len < 0x80 {
+        out.push(len as u8);
+    } else {
+        let bytes = len.to_be_bytes();
+        let skip = bytes.iter().take_while(|b| **b == 0).count();
+        out.push(0x80 | (bytes.len() - skip) as u8);
+        out.extend_from_slice(&bytes[skip..]);
+    }
+    out.extend_from_slice(content);
+    out
+}
+
+fn der_children(der: &[u8]) -> Vec<(usize, usize)> {
+    let (h, l) = der_header(der, 0);
+    let mut out = Vec::new();
+    let mut pos = h;
+    while pos < h + l {
+        let (ch, cl) = der_header(der, pos);
+        out.push((pos, ch + cl));
+        pos += ch + cl;
+    }
+    out
+}
+
+fn der_edit(der: &[u8], path: &[usize], f: &dyn Fn(&[u8]) -> Vec<u8>) -> Vec<u8> {
+    let Some((&first, rest)) = path.split_first() else {
+        return f(der);
+    };
+    let mut out = Vec::new();
+    for (i, (at, len)) in der_children(der).into_iter().enumerate() {
+        let child = &der[at..at + len];
+        if i == first {
+            out.extend(der_edit(child, rest, f));
+        } else {
+            out.extend_from_slice(child);
+        }
+    }
+    der_tlv(der[0], &out)
+}
+
+fn nest_signature(outer: &[u8], inner: &[u8]) -> Vec<u8> {
+    let oid = der_tlv(
+        0x06,
+        &[0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x04, 0x01],
+    );
+    let attr = der_tlv(0x30, &[oid, der_tlv(0x31, inner)].concat());
+    let unsigned = der_tlv(0xa1, &attr);
+    let (eat, elen) = der_children(outer)[1];
+    let explicit = &outer[eat..eat + elen];
+    let (sat, slen) = der_children(explicit)[0];
+    let signer_infos = der_children(&explicit[sat..sat + slen]).len() - 1;
+    der_edit(outer, &[1, 0, signer_infos, 0], &|si| {
+        let (h, l) = der_header(si, 0);
+        let mut body = si[h..h + l].to_vec();
+        body.extend_from_slice(&unsigned);
+        der_tlv(si[0], &body)
+    })
+}

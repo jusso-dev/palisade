@@ -458,7 +458,18 @@ impl<'a> Parser<'a> {
 
     fn load_directory(&mut self) -> Result<()> {
         let start = u32_at(self.data, 0x30);
-        let sectors = self.chain(start, None)?;
+        // Version 4 states how many directory sectors there are; the chain
+        // must be exactly that long (version 3 states 0, checked earlier).
+        let count = if self.version == 4 {
+            let n = u32_at(self.data, 0x28);
+            if n == 0 || n > self.sector_count {
+                return Err(CfbError::BadHeader("directory sector count"));
+            }
+            Some(usize::try_from(n).map_err(|_| CfbError::BadHeader("directory sector count"))?)
+        } else {
+            None
+        };
+        let sectors = self.chain(start, count)?;
         let per = self.sector_len / DIR_ENTRY_LEN;
         if sectors.len().saturating_mul(per) > MAX_DIRECTORY_ENTRIES {
             return Err(CfbError::TooComplex);
