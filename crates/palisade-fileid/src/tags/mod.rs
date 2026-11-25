@@ -49,7 +49,9 @@
 //!   report then has [`CONTENT_SCAN_TIMEOUT`].
 //! - A read error, or a file that ends before the length its reader
 //!   reported (truncated while being scanned), ends the scan with
-//!   [`CONTENT_SCAN_ERROR`], after the bytes that did arrive are scanned.
+//!   [`CONTENT_SCAN_ERROR`]. Bytes that did arrive in a chunk are scanned
+//!   first. A short read of the start-of-file filter or the PE headers
+//!   stops at once, because what they decide could not be established.
 //! - A rule's `unless_start` filter is checked before anything else, and a
 //!   filter that could not be checked counts as matched, so a budget or a
 //!   size limit can never let a filtered rule through.
@@ -127,9 +129,10 @@ pub struct ScanLimits {
     /// Files over this size are scanned in part ([`CONTENT_SCAN_PARTIAL`]).
     /// Default 32 MiB.
     pub max_file_size: u64,
-    /// The most bytes read, counting the PE header probe and the overlap
-    /// between chunks. Default 40 MiB, which covers a full scan of a file
-    /// of `max_file_size`.
+    /// The most bytes read from the reader, counting the start-of-file
+    /// filter and PE header probes, which re-read the first bytes. The
+    /// overlap between chunks is kept in memory, not read again. Default
+    /// 40 MiB, which covers a full scan of a file of `max_file_size`.
     pub max_scan_bytes: u64,
     /// The most candidate checks and pattern byte comparisons. Default
     /// 64 Mi.

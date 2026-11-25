@@ -87,7 +87,7 @@ pub enum PatternSource {
 
 /// Where a string's first byte may be, as a file offset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[non_exhaustive]
 pub enum Location {
     /// Anywhere in the scanned bytes.
@@ -473,6 +473,9 @@ fn check_location(location: Location) -> Result<(), RuleErrorKind> {
 
 /// Two to four segments of `[a-z0-9-]`, each 1 to 32 bytes, joined by `:`.
 fn check_tag(tag: &str) -> Result<(), RuleErrorKind> {
+    if tag.len() > MAX_TAG_LEN {
+        return Err(RuleErrorKind::BadTag);
+    }
     let segments: Vec<&str> = tag.split(':').collect();
     let ok = tag.len() <= MAX_TAG_LEN
         && (2..=4).contains(&segments.len())

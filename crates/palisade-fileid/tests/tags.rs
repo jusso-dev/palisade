@@ -674,6 +674,10 @@ mod scanning {
         // Unknown fields are rejected, so a typo cannot silently drop a limit.
         let typo = json.replace("\"require_pe\"", "\"requires_pe\"");
         assert!(serde_json::from_str::<RuleSetSource>(&typo).is_err());
+        // Inside a location too.
+        let extra = json.replace("\"end\":9", "\"end\":9,\"max\":4");
+        assert_ne!(extra, json);
+        assert!(serde_json::from_str::<RuleSetSource>(&extra).is_err());
     }
 
     #[test]
@@ -764,6 +768,66 @@ mod scanning {
                 SeekFrom::Current(d) => self.pos.checked_add_signed(d).unwrap(),
             };
             Ok(self.pos)
+        }
+    }
+
+    #[test]
+    fn a_match_across_the_size_limit_is_found() {
+        // Just over the size limit, the tail overlaps the start, and a
+        // frozen-application cookie that straddles the limit is found.
+        let d = ScanLimits::default();
+        let cookie = frozen_python_cookie();
+        let len = d.max_file_size + 84;
+        let at = len - cookie.len() as u64;
+        assert!(at < d.max_file_size && at + 8 > d.max_file_size);
+        let mut file = Sparse::new(len, vec![(at, cookie)]);
+        let r = tags::scan(&mut file, &builtin(), &limits());
+        assert_eq!(r.status, ScanStatus::Partial);
+        assert_eq!(r.tags, [SCRIPT_FROZEN_PYTHON, CONTENT_SCAN_PARTIAL]);
+        // Each byte is read once, plus the short start-of-file probes.
+        assert!(file.read <= len + 4096, "{}", file.read);
+    }
+
+    #[test]
+    fn offsets_from_the_file_never_seek_past_its_end() {
+        /// Refuses any seek past the end.
+        struct Strict(Cursor<Vec<u8>>);
+        impl Read for Strict {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                self.0.read(buf)
+            }
+        }
+        impl Seek for Strict {
+            fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+                let len = self.0.get_ref().len() as u64;
+                let to = match pos {
+                    SeekFrom::Start(p) => p,
+                    SeekFrom::End(d) => len.checked_add_signed(d).unwrap(),
+                    SeekFrom::Current(d) => self.0.position().checked_add_signed(d).unwrap(),
+                };
+                if to > len {
+                    return Err(io::ErrorKind::InvalidInput.into());
+                }
+                self.0.seek(SeekFrom::Start(to))
+            }
+        }
+        // `MZ` with an `e_lfanew` past the end, and an empty file.
+        let mut mz = vec![0_u8; 0x80];
+        mz[..2].copy_from_slice(b"MZ");
+        mz[0x3c..0x40].copy_from_slice(&0x9000_u32.to_le_bytes());
+        mz.extend_from_slice(&seven_zip());
+        let rules = org(vec![RuleSource {
+            unless_start: Some(PatternSource::Hex("FF FE".into())),
+            ..org_rule(
+                "a:b",
+                vec![s(PatternSource::Text("xyz".into()), Location::Anywhere)],
+                Condition::Any,
+            )
+        }]);
+        for (data, want) in [(mz, vec![ARCHIVE_EMBEDDED_ARCHIVE]), (Vec::new(), vec![])] {
+            let r = tags::scan(&mut Strict(Cursor::new(data)), &rules, &limits());
+            assert_eq!(r.status, ScanStatus::Complete);
+            assert_eq!(r.tags, want);
         }
     }
 

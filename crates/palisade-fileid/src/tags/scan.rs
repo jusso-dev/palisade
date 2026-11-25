@@ -103,11 +103,15 @@ pub(super) fn run<R: Read + Seek + ?Sized>(
         .prefixes()
         .and_then(|()| scan.probe_pe())
         .and_then(|()| {
-            if partial {
-                let tail = len.saturating_sub(TAIL_SCAN_LEN).max(limits.max_file_size);
+            let tail = len.saturating_sub(TAIL_SCAN_LEN);
+            if partial && tail > limits.max_file_size {
                 scan.region(0, limits.max_file_size)?;
                 scan.region(tail, len)
             } else {
+                // The start and the tail meet or overlap, so one pass
+                // covers both, and a match across `max_file_size` is not
+                // cut in two. A file over the limit is still reported as
+                // partial.
                 scan.region(0, len)
             }
         });
@@ -156,6 +160,13 @@ impl<R: Read + Seek + ?Sized> Scan<'_, R> {
     /// as scanned in full.
     fn read_at(&mut self, offset: u64, len: usize) -> Result<Vec<u8>, Stop> {
         let len = usize::try_from(self.len.saturating_sub(offset)).map_or(len, |a| a.min(len));
+        // Nothing to read: no seek, so an offset taken from the file (such
+        // as `e_lfanew`) never moves the reader past its end.
+        if len == 0 {
+            return Ok(Vec::new());
+        }
+        // A slow reader cannot carry the scan far past its time limit.
+        self.check_clock()?;
         let cost = u64::try_from(len).unwrap_or(u64::MAX);
         let total = self.bytes.saturating_add(cost);
         if total > self.limits.max_scan_bytes {
