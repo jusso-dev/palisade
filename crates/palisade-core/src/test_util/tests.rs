@@ -220,6 +220,10 @@ fn streams_on_directories_and_malformed_stream_paths() {
         fs.open(r"C:\Tools\tool.exe:").unwrap_err().kind(),
         ErrorKind::InvalidInput
     );
+    assert_eq!(
+        fs.open(r"C:\missing.txt:").unwrap_err().kind(),
+        ErrorKind::InvalidInput
+    );
     assert!(fs.open(r"C:\Tools\tool.exe::$DATA").is_ok());
     // Owners, descriptors and stream lists belong to the base file.
     assert_eq!(

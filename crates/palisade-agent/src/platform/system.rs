@@ -98,15 +98,24 @@ fn unsupported(what: &str) -> PlatformError {
     )
 }
 
-/// Whether `path` names an alternate data stream (`file:name`, on
-/// Windows). The colon of a drive letter does not count.
+/// Whether `path` names a named data stream (`file:name` or
+/// `file:name:$DATA`, on Windows): those are data even on a directory.
+/// `file::$DATA` and other stream types, such as a directory's
+/// `::$INDEX_ALLOCATION`, do not count, nor does a drive letter's colon.
 fn names_a_stream(path: &str) -> bool {
     if !cfg!(windows) {
         return false;
     }
     let name_start = path.rfind(['\\', '/']).map_or(0, |i| i + 1);
     let name = path.get(name_start..).unwrap_or_default();
-    name.find(':').is_some_and(|i| !(name_start == 0 && i == 1))
+    let Some(i) = name.find(':').filter(|&i| !(name_start == 0 && i == 1)) else {
+        return false;
+    };
+    let rest = name.get(i + 1..).unwrap_or_default();
+    match rest.split_once(':') {
+        None => !rest.is_empty(),
+        Some((stream, kind)) => !stream.is_empty() && kind.eq_ignore_ascii_case("$DATA"),
+    }
 }
 
 /// The path must be absolute, so a relative path cannot be resolved against

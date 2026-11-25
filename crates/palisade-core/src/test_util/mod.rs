@@ -261,8 +261,9 @@ impl FileSystem for MockFileSystem {
     type File = MockOpenFile;
 
     fn open(&self, path: &str) -> Result<MockOpenFile> {
-        let (base, part) = split_stream(path);
-        let file = self.file(base)?;
+        let (_, part) = split_stream(path);
+        // A malformed stream name is invalid whether or not the file exists.
+        let file = self.base_file(path)?;
         let (data, is_dir) = match part {
             // A directory opens, for its metadata; reading it fails.
             StreamPart::None => (file.data.clone(), file.metadata.is_dir),
