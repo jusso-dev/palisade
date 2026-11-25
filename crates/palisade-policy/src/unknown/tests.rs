@@ -2547,6 +2547,211 @@ proptest! {
         prop_assert!(level(&m) >= level(&b));
         prop_assert!(m.prompt.fallback >= a.prompt.fallback.max(b.prompt.fallback));
     }
+
+    /// Over policies with random fallbacks and effects, the merged policy
+    /// is valid, and for every object its level, counted at the prompt's
+    /// fallback where that is weaker (`Level::floor`, as the preset checks
+    /// count it), is at least each side's. Where both sides make the same
+    /// kind of decision, the merged effects log and rate it at least as
+    /// strongly.
+    #[test]
+    fn merged_decisions_are_at_least_as_strict_as_both(
+        a in arb_full_policy(),
+        b in arb_full_policy(),
+        t in prop::sample::select(ObjectType::ALL.to_vec()),
+        locations in prop::collection::btree_set(prop::sample::select(LocationClass::ALL.to_vec()), 1..3),
+        origins in prop::collection::btree_set(prop::sample::select(OriginClass::ALL.to_vec()), 1..3),
+        session in prop::option::of(prop::sample::select(SessionType::ALL.to_vec())),
+        containment in prop::option::of(any::<bool>()),
+    ) {
+        let m = a.stricter(&b);
+        let validated = |u: &UnknownPolicy| {
+            let mut d = doc(serde_json::json!({}));
+            d.policy.unknown = u.clone();
+            d.validate()
+        };
+        let (Ok(va), Ok(vb)) = (validated(&a), validated(&b)) else { return Ok(()) };
+        let vm = validated(&m);
+        prop_assert!(vm.is_ok(), "{:?}", vm.err());
+        let vm = vm.unwrap();
+        let floor = |p: &UnknownPolicy| {
+            let fallback = match p.prompt.fallback { Level::Prompt => Level::Block, f => f };
+            resolve_level(p, t, &locations, &origins).0.floor(fallback)
+        };
+        prop_assert!(floor(&m) >= floor(&a), "{:?} < {:?}", floor(&m), floor(&a));
+        prop_assert!(floor(&m) >= floor(&b), "{:?} < {:?}", floor(&m), floor(&b));
+        let mut context = EvaluationContext::new();
+        context.session.session_type = session;
+        context.device.containment_available = containment;
+        let facts = ObjectFacts::new()
+            .with(Field::HashSha256, sha('a'))
+            .with_location_class(locations.clone())
+            .with_origin(origins.clone());
+        let dm = decide_with(&vm, t, &facts, &context);
+        for v in [&va, &vb] {
+            let d = decide_with(v, t, &facts, &context);
+            if d.reason_code() == dm.reason_code() {
+                if d.effects().log == LogLevel::Always {
+                    prop_assert_eq!(dm.effects().log, LogLevel::Always);
+                }
+                prop_assert!(dm.effects().severity >= d.effects().severity);
+                prop_assert!(dm.effects().suppress_duplicates_secs <= d.effects().suppress_duplicates_secs);
+            }
+        }
+    }
+}
+
+#[test]
+fn a_detect_floor_is_kept_when_the_other_layer_prompts() {
+    // The reviewers' case: outer detects in `temp` with a permissive
+    // fallback, inner prompts everywhere. A service on the device must
+    // still get at least `detect`, never a silent allow.
+    let outer: UnknownPolicy = serde_json::from_value(serde_json::json!({
+        "default": "detect", "by_location": {"other_fixed": "prompt"}, "prompt": {"fallback": "allow"},
+    })).unwrap();
+    let inner: UnknownPolicy = serde_json::from_value(serde_json::json!({
+        "default": "prompt", "prompt": {"fallback": "allow"},
+    }))
+    .unwrap();
+    let m = inner.stricter(&outer);
+    assert_eq!(m.prompt.fallback, Level::Detect);
+    let mut d = doc(serde_json::json!({}));
+    d.policy.unknown = m;
+    let v = d.validate().unwrap();
+    let mut service = EvaluationContext::new();
+    service.session.session_type = Some(SessionType::Service);
+    let got = decide_with(
+        &v,
+        ObjectType::Executable,
+        &object(&[LocationClass::Temp], &[]),
+        &service,
+    );
+    assert_eq!(got.reason_code(), ReasonCode::UnknownDetected);
+}
+
+#[test]
+fn merged_notification_settings_stay_valid_and_unset_effects_keep_their_defaults() {
+    let eff = |v: serde_json::Value| -> UnknownPolicy {
+        serde_json::from_value(serde_json::json!({"effects": v})).unwrap()
+    };
+    let valid = |u: UnknownPolicy| {
+        let mut d = doc(serde_json::json!({}));
+        d.policy.unknown = u;
+        d.validate().map(|_| ()).map_err(|e| format!("{e:?}"))
+    };
+    for (inner, outer) in [
+        (
+            serde_json::json!({"notify": "default"}),
+            serde_json::json!({"notify": "custom", "notification_text": "Blocked {file}"}),
+        ),
+        (
+            serde_json::json!({"notify": "none"}),
+            serde_json::json!({"notify": "default", "help_url": "https://help.example.org/u"}),
+        ),
+        (
+            serde_json::json!({"help_url": "https://help.example.org/u"}),
+            serde_json::json!({"notify": "none"}),
+        ),
+    ] {
+        let m = eff(inner.clone()).stricter(&eff(outer.clone()));
+        assert_eq!(valid(m), Ok(()), "{inner} over {outer}");
+    }
+    // Even a side whose text does not belong to its notification (built in
+    // code, not validated) merges into a valid policy.
+    let odd = UnknownPolicy {
+        effects: crate::model::Effects {
+            notify: Some(Notify::None),
+            notification_text: Some("Blocked {file}".into()),
+            help_url: Some("https://help.example.org/u".into()),
+            ..crate::model::Effects::default()
+        },
+        ..UnknownPolicy::default()
+    };
+    let m = odd.stricter(&UnknownPolicy::default());
+    assert_eq!(
+        (
+            m.effects.notification_text.as_deref(),
+            m.effects.help_url.as_deref()
+        ),
+        (None, None)
+    );
+    assert_eq!(valid(m), Ok(()));
+    // A weaker explicit setting cannot undercut an outer layer's defaults.
+    let weak = eff(
+        serde_json::json!({"log": "sampled", "upload": "local_only", "severity": "info", "suppress_duplicates_secs": 604800}),
+    );
+    let m = weak.stricter(&UnknownPolicy::default());
+    assert_eq!(m.effects.log, Some(LogLevel::Always));
+    assert_eq!(m.effects.upload, Some(Upload::Immediate));
+    assert_eq!(m.effects.severity, Some(EventSeverity::Medium));
+    assert_eq!(m.effects.suppress_duplicates_secs, Some(600));
+}
+
+fn arb_effects() -> impl Strategy<Value = crate::model::Effects> {
+    (
+        prop::option::of(prop::sample::select(vec![
+            LogLevel::Always,
+            LogLevel::Sampled,
+        ])),
+        prop::option::of(prop::sample::select(vec![
+            Upload::Immediate,
+            Upload::Batched,
+            Upload::LocalOnly,
+        ])),
+        prop::option::of(prop::sample::select(vec![
+            Notify::None,
+            Notify::Default,
+            Notify::Custom,
+        ])),
+        any::<bool>(),
+        prop::option::of(prop::sample::select(vec![
+            EventSeverity::Info,
+            EventSeverity::Medium,
+            EventSeverity::Critical,
+        ])),
+        prop::option::of(0u32..604_800),
+    )
+        .prop_map(|(log, upload, notify, link, severity, suppress)| {
+            let notify_eff = notify.unwrap_or(Notify::Default);
+            crate::model::Effects {
+                log,
+                upload,
+                notify,
+                notification_text: (notify == Some(Notify::Custom))
+                    .then(|| "Blocked {file}".to_owned()),
+                help_url: (link && notify_eff != Notify::None)
+                    .then(|| "https://help.example.org/u".to_owned()),
+                severity,
+                tags: Vec::new(),
+                suppress_duplicates_secs: suppress,
+            }
+        })
+}
+
+/// Unknown policies with random prompt fallbacks, restrict levels (with a
+/// profile) and effects.
+fn arb_full_policy() -> impl Strategy<Value = UnknownPolicy> {
+    (
+        arb_policy(),
+        prop::sample::select(vec![
+            Level::Block,
+            Level::Restrict,
+            Level::Detect,
+            Level::Allow,
+        ]),
+        arb_effects(),
+    )
+        .prop_map(|(mut p, fallback, effects)| {
+            p.prompt.fallback = fallback;
+            p.restrict_profile = Some(
+                PROFILE
+                    .parse()
+                    .map(crate::model::ContainmentProfileRef)
+                    .unwrap(),
+            );
+            p.effects = effects;
+            p
+        })
 }
 
 #[test]

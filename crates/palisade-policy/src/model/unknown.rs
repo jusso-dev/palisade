@@ -365,28 +365,71 @@ impl PromptSettings {
     }
 }
 
-/// The stricter combination of two layers' effects: per flag, the nearer
-/// layer's (`a`) value where it sets one, except that the higher severity,
-/// the more immediate upload and `always` logging win. Tags are joined.
+/// The stricter combination of two layers' effects. A flag that neither
+/// side sets stays unset, so it keeps its per-level default and the merge
+/// changes nothing for layers that leave effects alone. Where a side sets
+/// a flag, it is compared with what the other side would get (a deny's
+/// default where it is unset), so a weaker explicit setting cannot undercut
+/// the other side's effective `log`, `upload`, `severity` or
+/// de-duplication window:
+///
+/// - `log`: `always` over `sampled` over the rest;
+/// - `upload`: the more immediate; `severity`: the higher;
+/// - `suppress_duplicates_secs`: the shorter window;
+/// - `notify`, with its text and link: the nearer layer's (`a`) choice if
+///   it makes one, else the other's, keeping a text only with `custom` and
+///   a link only with a notification, so the result is always valid;
+/// - tags are joined, up to the limit.
 fn stricter_effects(a: &Effects, b: &Effects) -> Effects {
-    use super::{LogLevel, Upload};
+    use super::{ActionKind, LogLevel, Notify, Upload};
+    let ra = a.resolve(ActionKind::Deny);
+    let rb = b.resolve(ActionKind::Deny);
     let upload_rank = |u: Upload| match u {
         Upload::Immediate => 2,
         Upload::Batched => 1,
         Upload::LocalOnly => 0,
     };
-    let pick = |x: Option<Upload>, y: Option<Upload>| match (x, y) {
-        (Some(x), Some(y)) => Some(if upload_rank(x) >= upload_rank(y) {
-            x
+    let log_rank = |l: LogLevel| match l {
+        LogLevel::Always => 3,
+        LogLevel::Sampled => 2,
+        LogLevel::Summary => 1,
+        LogLevel::Never => 0,
+    };
+    // Set only if either side sets it; then the stronger effective value.
+    let either = |x: bool, y: bool| x || y;
+    let log = either(a.log.is_some(), b.log.is_some()).then(|| {
+        if log_rank(ra.log) >= log_rank(rb.log) {
+            ra.log
         } else {
-            y
-        }),
-        (x, y) => x.or(y),
+            rb.log
+        }
+    });
+    let upload = either(a.upload.is_some(), b.upload.is_some()).then(|| {
+        if upload_rank(ra.upload) >= upload_rank(rb.upload) {
+            ra.upload
+        } else {
+            rb.upload
+        }
+    });
+    let severity =
+        either(a.severity.is_some(), b.severity.is_some()).then(|| ra.severity.max(rb.severity));
+    let suppress_duplicates_secs = either(
+        a.suppress_duplicates_secs.is_some(),
+        b.suppress_duplicates_secs.is_some(),
+    )
+    .then(|| ra.suppress_duplicates_secs.min(rb.suppress_duplicates_secs));
+    // The notification comes whole from one side.
+    let from = if a.notify.is_some() || a.notification_text.is_some() || a.help_url.is_some() {
+        a
+    } else {
+        b
     };
-    let log = match (a.log, b.log) {
-        (Some(LogLevel::Always), _) | (_, Some(LogLevel::Always)) => Some(LogLevel::Always),
-        (x, y) => x.or(y),
-    };
+    let shown = from.notify_for(ActionKind::Deny);
+    let notification_text = from
+        .notification_text
+        .clone()
+        .filter(|_| shown == Notify::Custom);
+    let help_url = from.help_url.clone().filter(|_| shown != Notify::None);
     let mut tags = a.tags.clone();
     for t in &b.tags {
         if !tags.contains(t) && tags.len() < super::limits::MAX_TAGS {
@@ -395,16 +438,13 @@ fn stricter_effects(a: &Effects, b: &Effects) -> Effects {
     }
     Effects {
         log,
-        upload: pick(a.upload, b.upload),
-        notify: a.notify.or(b.notify),
-        notification_text: a
-            .notification_text
-            .clone()
-            .or_else(|| b.notification_text.clone()),
-        help_url: a.help_url.clone().or_else(|| b.help_url.clone()),
-        severity: a.severity.max(b.severity),
+        upload,
+        notify: from.notify,
+        notification_text,
+        help_url,
+        severity,
         tags,
-        suppress_duplicates_secs: a.suppress_duplicates_secs.or(b.suppress_duplicates_secs),
+        suppress_duplicates_secs,
     }
 }
 
@@ -597,6 +637,33 @@ impl UnknownPolicy {
     /// layer, where it sets one.
     #[must_use]
     pub fn stricter(&self, other: &Self) -> Self {
+        let mut out = self.merged(other);
+        // Where the merged policy prompts, an object can end in the merged
+        // fallback. Each side gave that object a level no higher than
+        // `prompt`, and one below `prompt` can only be `allow` or `detect`,
+        // which the fallback must not undercut. So if the merged policy
+        // prompts anywhere and either side detects anywhere, the fallback
+        // is at least `detect`. (A side's own prompt ends in its own
+        // fallback, which the merged fallback already covers.)
+        let detects = |p: &Self| {
+            core::iter::once(p.default)
+                .chain(p.by_location.values().copied())
+                .chain(p.by_origin.values().copied())
+                .chain(p.by_type.values().copied())
+                .any(|l| l == Level::Detect)
+        };
+        let prompts = core::iter::once(out.default)
+            .chain(out.by_location.values().copied())
+            .chain(out.by_origin.values().copied())
+            .chain(out.by_type.values().copied())
+            .any(|l| l == Level::Prompt);
+        if prompts && (detects(self) || detects(other)) {
+            out.prompt.fallback = out.prompt.fallback.max(Level::Detect);
+        }
+        out
+    }
+
+    fn merged(&self, other: &Self) -> Self {
         fn merge<K: Ord + Copy>(
             a: &BTreeMap<K, Level>,
             a_default: Level,

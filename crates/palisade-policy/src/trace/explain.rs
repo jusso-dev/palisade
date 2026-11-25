@@ -201,7 +201,7 @@ pub fn explain(trace: &Trace, verbosity: Verbosity) -> ExplainDoc {
     let blocked = trace
         .decision
         .as_ref()
-        .is_some_and(|d| d.would_have_been() == Outcome::Blocked);
+        .is_some_and(|d| d.would_have_been().stops());
     // "Why not allowed?" lists the near misses that would have let the
     // object run: for a block or a would-block, and at `detailed` for
     // anything. Other near misses (a deny that nearly matched) are
@@ -295,6 +295,13 @@ fn summary(trace: &Trace) -> Message {
         ReasonCode::SelfAllow => Message::new("summary-self-allow"),
         ReasonCode::Exclusion => Message::new("summary-excluded").arg("rule", rule),
         ReasonCode::InstanceLimit => Message::new("summary-instance-limit").arg("rule", rule),
+        ReasonCode::AuditModeWouldBlock | ReasonCode::OverrideSession
+            if d.would_have_been() == Outcome::PendingUser =>
+        {
+            Message::new("summary-would-ask")
+                .arg("mode", mode_name(d.mode()))
+                .arg("object", object)
+        }
         ReasonCode::AuditModeWouldBlock | ReasonCode::OverrideSession => {
             let id = if d.outcome() == Outcome::AllowedOverride {
                 "summary-override"
@@ -439,6 +446,7 @@ const fn mode_step_name(k: ModeStepKind) -> &'static str {
         ModeStepKind::RuleSetOverride => "rule_set_override",
         ModeStepKind::RuleOverride => "rule_override",
         ModeStepKind::Session => "session",
+        ModeStepKind::BootPhase => "boot_phase",
         ModeStepKind::Effective => "effective",
         ModeStepKind::Applied => "applied",
     }
@@ -574,6 +582,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     (
         "summary-restrict-unavailable",
         "Blocked: no rule decides this { $object }, and it could not be contained on this device.",
+    ),
+    (
+        "summary-would-ask",
+        "Allowed in { $mode } mode. In enforce mode you would be asked whether this { $object } may run.",
     ),
     (
         "summary-self-allow",
