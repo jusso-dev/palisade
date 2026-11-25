@@ -35,6 +35,10 @@ const SIGN_SCRIPT: &str = concat!(
 /// needs is missing.
 fn powershell(script: &str, args: &[(&str, &std::path::Path)]) -> Option<()> {
     let mut cmd = Command::new("powershell.exe");
+    // A parent PowerShell 7 (as on CI runners) leaves its module path in
+    // the environment, which stops Windows PowerShell from loading its own
+    // built-in modules; let it use its default.
+    cmd.env_remove("PSModulePath");
     cmd.args([
         "-NoProfile",
         "-NonInteractive",
