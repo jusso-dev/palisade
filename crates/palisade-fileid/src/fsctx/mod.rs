@@ -13,13 +13,16 @@
 //! - [`acl`]: security descriptors, owner classification and the
 //!   user-writability decision for a file and its ancestor folders;
 //! - [`volume`]: file system, drive and bus types, and the location class;
-//! - [`motw`]: the `Zone.Identifier` mark-of-the-web.
+//! - [`motw`]: the `Zone.Identifier` mark-of-the-web;
+//! - [`ntfs`]: the stream list and change-journal records the OS returns;
+//! - [`writable`]: the per-descriptor writability cache, streaming
+//!   ancestor assessment and `enumerate_user_writable_dirs`.
 //!
 //! The OS reads live in the Windows-only `palisade_fileid::win::fsctx`
 //! module (ADR 0003), compiled only on Windows with the `os-trust` feature.
-//! It reads a file's final path and its `Zone.Identifier` stream so far.
-//! Reading the owner and DACL, the drive and bus type, volume GUIDs and DFS
-//! targets, and the OS access check, are still to come (#54). [`FsContext`] keeps every attribute
+//! It reads a file's final path, its `Zone.Identifier` stream, owners and
+//! security descriptors, writability of real paths, and the OS access
+//! check (`palisade_fileid::win::access`). [`FsContext`] keeps every attribute
 //! optional, so a caller fills in what it could read and leaves the rest
 //! `None`, and a consumer never mistakes "not read" for "absent".
 
@@ -27,15 +30,17 @@
 
 pub mod acl;
 pub mod motw;
+pub mod ntfs;
 pub mod path;
 pub mod sid;
 pub mod vars;
 pub mod volume;
+pub mod writable;
 
 pub use acl::{
     Ace, AceKind, AdminSids, Ancestor, DescriptorError, EvaluationOptions, ObjectKind,
     ObjectWritability, OwnerInfo, OwnerTrustClass, Principal, PrincipalRights, SecurityDescriptor,
-    Writability, WriteRights, assess_path, evaluate,
+    Writability, WriteRights, assess_path, evaluate, sanitized_self_relative,
 };
 pub use motw::{Motw, MotwWarning, Zone, parse_zone_identifier};
 pub use path::{

@@ -23,10 +23,11 @@
 //! refuse to trust it ([`super::cache::HashVerifyMode`]).
 //!
 //! Reading these values needs OS calls (`GetFileInformationByHandleEx`
-//! with `FileIdInfo`, and `FSCTL_READ_FILE_USN_DATA`). They belong to the
-//! agent's Windows backend, which implements [`FileStamp`] (#54, #29). This
-//! module only defines the types, so the cache logic is portable and
-//! tested everywhere.
+//! with `FileIdInfo`, `FSCTL_QUERY_USN_JOURNAL` and
+//! `FSCTL_READ_FILE_USN_DATA`). The Windows backend,
+//! `palisade_fileid::win::file::WinStamps` (with the `os-trust` feature),
+//! implements [`FileStamp`] with them. This module only defines the types,
+//! so the cache logic is portable and tested everywhere.
 
 #![forbid(unsafe_code)]
 

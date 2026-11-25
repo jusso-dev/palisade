@@ -1211,6 +1211,7 @@ dependencies = [
  "sha1",
  "sha2",
  "unicode-normalization",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

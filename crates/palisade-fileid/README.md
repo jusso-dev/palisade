@@ -69,9 +69,22 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   concurrent hashes (default: half the CPUs). `HashMetrics` counts bytes
   hashed, hit ratio, average latency, evictions, tamper events and unstable
   files. `skip_for_inventory` leaves cloud placeholders unread during
-  inventory scans. Opening files and reading file IDs, USNs and
-  attributes from the handle is the Windows backend's job: it implements
-  `hash::FileStamp`.
+  inventory scans.
+- `win::file` (Windows, `os-trust` feature): the hash cache's Windows
+  backend (#46). `open_for_hashing` shares read, write and delete and sets
+  `FILE_FLAG_SEQUENTIAL_SCAN`, so hashing never blocks a writer.
+  `WinStamps` implements `hash::FileStamp` from the opened handle: the
+  strong key from `FileIdInfo`, the change journal ID and the file's USN, or
+  the weak key (the normalised final path of the handle) when the volume
+  has no active journal. `FileFacts` reads the file ID, USN, the four
+  timestamps, attributes, link count, size and volume. `hash_open_file`
+  hashes an open handle through a memory mapping, 8 MiB at a time, for
+  files of 16 MiB or more on a local fixed volume, and with buffered reads
+  otherwise, and defers cloud placeholders during inventory scans.
+  `hash_streams` hashes each alternate data stream on its own as a
+  `path:stream` identity. The variable-length OS records (the stream list
+  and the USN record) are parsed by the portable `fsctx::ntfs`, which is
+  bounded, tested and fuzzed on every OS.
 - `authenticode`: the Authenticode PE image hash
   ([#47](https://github.com/jusso-dev/palisade/issues/47)), which stays the
   same when a file is signed, re-signed or stripped. `HashRanges::from_pe`
@@ -171,10 +184,31 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     file less trusted, never more. Location classes fail closed to `Unknown`
     when an input is missing. Owners count only on NTFS or ReFS local fixed
     disks, never on removable media, virtual disks or network shares.
+  - `fsctx::writable`: `WritabilityCache` evaluates each distinct
+    security descriptor once (keyed by the SHA-256 of its bytes and the
+    object kind; `evict` for security-change journal records, #60).
+    `assess_ancestors` is `assess_path` over an iterator, so the chain is
+    not built first, and can stop at the first user-writable folder.
+    `enumerate_user_writable_dirs` walks folders breadth first, bounded in
+    depth and count, through a `DirectorySource`, and lists the ones a
+    principal set may write to (for #17 and #212).
   - `win::fsctx` (Windows, `os-trust` feature): reads a file's final path
     (links resolved, short names expanded) and its `Zone.Identifier` stream.
-    Owner and DACL reads, drive and bus type, volume GUIDs, DFS and the OS
-    access check are still to come (#54).
+  - `win::security` and `win::access` (Windows, `os-trust` feature): the
+    owner, group and DACL from a handle (`GetSecurityInfo`), account names
+    (`LookupAccountSidW`, cached), owner classification that is reported
+    only on local NTFS or ReFS, writability of a real path and every folder
+    above it (the folders the opened file really lives in, from its
+    final path, plus the path's own folders; a final link or any reparse
+    point on a chain fails closed), and the OS access check
+    (`AuthzAccessCheck` with a synthetic token of the standard user's SIDs).
+    `cross_check_writability` compares that check with the portable
+    evaluator: the evaluator must never miss a right the OS grants.
+    `OsDirectories` lets `enumerate_user_writable_dirs` walk real folders
+    without following junctions or mount points. Windows tests build a
+    weak-ACL fixture tree (a user-writable folder under a locked one, an
+    explicit deny, a `WRITE_DAC` grant to Users) and compare every result
+    with the OS access check, and check the stock system folders too.
 - `authenticode` certificate chains, signer trust and identity
   ([#49](https://github.com/jusso-dev/palisade/issues/49)):
   - `CertSummary::from_der` parses an X.509 v1, v2 or v3 certificate. It
@@ -303,10 +337,24 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   `SignatureReport::primary` is still #48's choice by cryptographic
   validity alone, and `TrustReport::primary` ignores time and revocation.
   Anything that decides whether to allow a file must use
-  `ValidityReport::primary` (below). The OS trust store is consulted only
-  through certificates the caller adds from it; reading the stores and the
-  OS trust-verification cross-check are the Windows backend's (`os-trust`,
-  #48). Catalog signing is `catalog` below.
+  `ValidityReport::primary` (below). The OS trust store is never consulted
+  for a decision; the `os-trust` cross-check below only compares. Catalog
+  signing is `catalog` below.
+- `authenticode::cross_check` and `win::trust` (the OS cross-check,
+  [#48](https://github.com/jusso-dev/palisade/issues/48)):
+  `win::trust::verify_file` (Windows, `os-trust` feature) asks the OS
+  trust-verification API about the primary signature and each secondary
+  (nested) signature of an open file, one call each, with no UI, no
+  revocation check and no network retrieval. `cross_check` (portable)
+  pairs each OS result with the signature the OS read and records whether
+  they agree. It is a diagnostic: it takes the report by reference and
+  never changes a verdict. An OS chain-trust failure (the test CA is
+  untrusted) counts as "signature intact", since the OS checks the digest
+  and signature first. This crate is stricter than the OS on
+  non-conformant images and MD5, which show up as `OsAcceptsRustRejects`;
+  `rust_accepts_os_rejects()` picks out the direction that could hide a
+  bug. `tests/os_trust.rs` runs the differential over every signature
+  fixture on the Windows CI runners.
 - `authenticode` timestamps, expiry, revocation and the error taxonomy
   ([#50](https://github.com/jusso-dev/palisade/issues/50)):
   - `verify_timestamps` parses and verifies every timestamp on a
@@ -680,6 +728,10 @@ or 0008 amendment, either a narrowed carve-out or verification behind a
 separate crate (#19). Because every `ring` call is in one module, swapping
 the provider is a one-module change.
 
+With the `os-trust` feature, on Windows only, `windows-sys` (the Windows API
+bindings, with only the API families `win` calls) is a direct dependency.
+`palisade-policy` never enables the feature, so its graph is unchanged.
+
 Dev-dependencies: `proptest` for the property tests, and `criterion` for the
 benchmarks.
 
@@ -689,8 +741,11 @@ Portable parsing, hashing, signature verification and file-system context
 logic on all platforms. OS-backed reads live in the `win` module, compiled
 only on Windows with the `os-trust` feature
 ([ADR 0003](../../docs/adr/0003-crate-boundaries-and-dependency-direction.md)).
-It holds the file-system context reads so far; the cross-check against the
-OS trust-verification API that #48 describes will live there too.
+It holds the file-system context reads and the OS trust-verification
+cross-check. It is the only part of the crate that may contain `unsafe` code
+(ADR 0011): each submodule that calls the Windows API (through `windows-sys`)
+is listed in `unsafe-allowlist.txt`, every `unsafe` block has a `// SAFETY:`
+comment, and each wrapper is tested on the Windows runners.
 
 ## Feature flags
 
