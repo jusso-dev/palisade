@@ -27,10 +27,13 @@ type.
 | `deps` | ubuntu-latest | `cargo xtask check-deps`, `cargo xtask check-manifests`, `cargo xtask check-unsafe`, `cargo deny --locked check` for the root workspace and for each fuzz workspace (with the root `deny.toml`), `cargo xtask audit` (cargo-audit over the root and every fuzz lockfile, with the ignores from `deny.toml`) |
 | `supply-chain` | ubuntu-latest | `cargo vet --locked`, `cargo xtask check-supply-chain`, and on PRs `cargo xtask deps-report --base <base>` to the job summary ([dependencies.md](dependencies.md)) |
 | `feature-powerset` | ubuntu-latest | `cargo hack check --each-feature --all-targets --locked` on the portable crates (`core`, `fileid`, `policy`, `proto`, `server`, `cli`, `console`) |
-| `runner-guard` | ubuntu-latest | `cargo xtask check-workflows` ([Runner and action policy](#runner-and-action-policy)), and `cargo xtask adr lint` (ADR format and index, [docs/adr/PROCESS.md](adr/PROCESS.md#index-and-tooling)) |
+| `runner-guard` | ubuntu-latest | `cargo xtask check-workflows` ([Runner and action policy](#runner-and-action-policy)), `cargo xtask adr lint` (ADR format and index, [docs/adr/PROCESS.md](adr/PROCESS.md#index-and-tooling)), and the tests of the snapshot script (`bash .github/scripts/main-snapshot.test.sh`) |
 | `doc-checks` | ubuntu-latest | `cargo xtask threat-coverage`: the threat model's tables are complete and consistent, and every test, fuzz target and CI check it cites exists ([threat model](security/threat-model.md#keeping-it-current)) |
 | `workflow-lint` | ubuntu-latest | `actionlint` (checksum-verified release) and `zizmor --offline` |
+| `package` | windows-latest (x64), windows-11-arm (ARM64, native) | `cargo xtask dist --msi --sign none`, then the same with `--bump-patch`, then `packaging/wix/smoke-test.ps1`: install, upgrade, downgrade, repair and removal of the package on the runner ([packaging.md](packaging.md#tests-in-ci)) |
+| `server-image` | ubuntu-latest | `cargo xtask dist` (the Linux server binary), `podman build` of `packaging/server/Containerfile`, and `palisade-server version` in the image |
 | `ci-ok` | ubuntu-latest | Passes only if every job above succeeded |
+| `snapshot-prepare`, `snapshot`, `snapshot-finish` | ubuntu-latest; windows-latest and windows-11-arm | Pushes to `main` only, after `ci-ok`: the [`main-snapshot`](#main-snapshot) pre-release |
 
 **Branch protection requires `ci-ok`** (and the `PR title` check below). It
 depends on every other job and fails if any of them failed, was cancelled or
@@ -80,6 +83,30 @@ Details and local commands are in [testing.md](testing.md).
   mode, so a bench that no longer builds or panics fails. Timings are not
   measured on shared runners. A unit test fails if a `benches/*.rs` file is
   not named in the job.
+
+#### `main-snapshot`
+
+Every push to `main` whose CI passed replaces the files of one rolling pre-release, tagged
+`main-snapshot`, with that commit's unsigned packages (`Palisade-<version>-x64.msi` and
+`-arm64.msi`) and their `.msi.sha256` checksums (#22). The release is marked as a pre-release,
+never as the latest release, and its notes say the builds are unsigned, untested snapshots and
+not for production use, and name the commit and the run. Files of an older version are removed,
+so there is only ever one set.
+
+Only the three snapshot jobs have a write scope (`contents: write`, to edit the release and
+move the tag), and they run only on `push` to `main`, never on pull requests, so fork code
+never runs with it. `snapshot-prepare` creates the release on first use and marks it as being
+updated, `snapshot` builds and uploads each architecture's package on its own runner, and
+`snapshot-finish` points the tag at the commit, removes older files, checks all four files are
+there and writes the notes. The commands are in `.github/scripts/main-snapshot.sh`, which uses
+the preinstalled `gh` CLI; its tests (`main-snapshot.test.sh`, a fake `gh`) run in
+`runner-guard`. Pushes to `main` queue rather than cancel each other (`concurrency`), so two
+snapshots never interleave.
+
+The `snapshot` job builds the packages again instead of reusing the `package` job's: passing
+files between jobs needs an artefact action, and only three actions are allowed (see below).
+The packages are built from the same commit with the same command. Pull requests build and test
+the packages in `package` and publish nothing.
 
 ### `fuzz.yml` (weekly on Sunday at 04:41 UTC, and on demand)
 
@@ -226,7 +253,7 @@ command lines:
 
 ```sh
 cargo xtask ci          # everything, including coverage, fuzz, docs, feature-powerset and msrv
-cargo xtask ci --fast   # skips those five slow steps
+cargo xtask ci --fast   # skips those slow steps, and the package and server-image builds
 ```
 
 It runs every step even after one fails, and lists the failed ones at the
@@ -235,8 +262,12 @@ end. Before it starts, it checks that the extra tools are installed
 without `--fast`, cargo-llvm-cov, the fuzzing nightly with cargo-fuzz, and the
 MSRV toolchain), and prints the install command for
 each one that is missing, at the version CI uses. Jobs that differ only by
-runner run once, on your machine. A unit test in `xtask/src/ci.rs` compares
-its steps with `ci.yml`, so the two cannot drift.
+runner run once, on your machine. Steps whose job runs only on one OS run
+only there: on Windows, `ci` builds both packages (the `package` job, without
+its smoke test, which installs a service); on Linux, it builds the server
+binary and image (the `server-image` job, with podman). Elsewhere they are
+skipped with a note, and `--fast` skips them. A unit test in `xtask/src/ci.rs`
+compares its steps with `ci.yml`, so the two cannot drift.
 
 The same checks, one by one:
 
@@ -279,6 +310,10 @@ bash .github/scripts/check-dco.test.sh
 bash .github/scripts/check-dco.sh origin/main HEAD
 bash .github/scripts/sync-labels.test.sh   # needs jq and yq v4
 bash .github/scripts/sync-labels.sh --validate
+bash .github/scripts/main-snapshot.test.sh
+cargo xtask dist --msi --sign none --out target/dist/current   # Windows, needs the .NET runtime
+cargo xtask dist --out target/dist/server                      # Linux x64
+podman build --file packaging/server/Containerfile --tag palisade-server:ci target/dist/server
 ```
 
 To check Windows-only code from Linux or another desktop OS:

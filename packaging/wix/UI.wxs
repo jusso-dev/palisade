@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The installer's user interface: one licence dialog for interactive first
+  installs, progress, and the dialogs Windows Installer requires (error,
+  files in use, exit, cancel, fatal error). A silent install (/qn) shows
+  none of it.
+
+  Written out here instead of using a WiX UI extension, because the
+  extension's dialogs include a print button implemented in a native custom
+  action DLL, and this package has no custom action code (#22).
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <!-- The FilesInUse dialog's list needs the table, even when empty (ICE20). -->
+    <EnsureTable Id="ListBox" />
+
+    <UI Id="PalisadeUI">
+      <TextStyle Id="Palisade_Normal" FaceName="Segoe UI" Size="9" />
+      <TextStyle Id="Palisade_Title" FaceName="Segoe UI" Size="11" Bold="yes" />
+      <Property Id="DefaultUIFont" Value="Palisade_Normal" />
+      <Property Id="ErrorDialog" Value="ErrorDlg" />
+
+      <Dialog Id="LicenseDlg" Width="370" Height="270" Title="[ProductName] Setup">
+        <Control Id="Title" Type="Text" X="15" Y="8" Width="340" Height="18" Transparent="yes" NoPrefix="yes"
+                 Text="{\Palisade_Title}[ProductName] [ProductVersion]" />
+        <Control Id="Description" Type="Text" X="15" Y="28" Width="340" Height="14" NoPrefix="yes"
+                 Text="Read the notice and the licence terms before installing." />
+        <Control Id="LicenseText" Type="ScrollableText" X="15" Y="46" Width="340" Height="150" Sunken="yes" TabSkip="no">
+          <Text SourceFile="$(var.LicenseRtf)" />
+        </Control>
+        <Control Id="Accept" Type="CheckBox" X="15" Y="204" Width="340" Height="18" CheckBoxValue="1" Property="LicenseAccepted"
+                 Text="I understand the notice and accept the licence terms" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Install" Type="PushButton" X="212" Y="243" Width="80" Height="17" Default="yes" ElevationShield="yes" Text="&amp;Install"
+                 DisableCondition="LicenseAccepted &lt;&gt; &quot;1&quot;" EnableCondition="LicenseAccepted = &quot;1&quot;">
+          <Publish Event="EndDialog" Value="Return" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="Cancel">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+
+      <Dialog Id="ProgressDlg" Width="370" Height="270" Title="[ProductName] Setup" Modeless="yes">
+        <Control Id="Title" Type="Text" X="15" Y="8" Width="340" Height="18" Transparent="yes" NoPrefix="yes"
+                 Text="{\Palisade_Title}Installing [ProductName]" />
+        <Control Id="ActionText" Type="Text" X="15" Y="100" Width="340" Height="12">
+          <Subscribe Event="ActionText" Attribute="Text" />
+        </Control>
+        <Control Id="ProgressBar" Type="ProgressBar" X="15" Y="115" Width="340" Height="10" ProgressBlocks="yes" Text="Progress">
+          <Subscribe Event="SetProgress" Attribute="Progress" />
+        </Control>
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Default="yes" Cancel="yes" Text="Cancel">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+
+      <Dialog Id="CancelDlg" Width="260" Height="85" Title="[ProductName] Setup" NoMinimize="yes">
+        <Control Id="Text" Type="Text" X="15" Y="15" Width="230" Height="30" Text="Cancel the [ProductName] setup?" />
+        <Control Id="No" Type="PushButton" X="132" Y="57" Width="56" Height="17" Default="yes" Cancel="yes" Text="&amp;No">
+          <Publish Event="EndDialog" Value="Return" />
+        </Control>
+        <Control Id="Yes" Type="PushButton" X="72" Y="57" Width="56" Height="17" Text="&amp;Yes">
+          <Publish Event="EndDialog" Value="Exit" />
+        </Control>
+      </Dialog>
+
+      <Dialog Id="ErrorDlg" Width="270" Height="105" Title="[ProductName] Setup" ErrorDialog="yes">
+        <Control Id="ErrorText" Type="Text" X="15" Y="15" Width="240" Height="60" TabSkip="no" NoPrefix="yes" Text="Information text" />
+        <Control Id="A" Type="PushButton" X="100" Y="80" Width="56" Height="17" TabSkip="yes" Text="Cancel">
+          <Publish Event="EndDialog" Value="ErrorAbort" />
+        </Control>
+        <Control Id="C" Type="PushButton" X="100" Y="80" Width="56" Height="17" TabSkip="yes" Text="Cancel">
+          <Publish Event="EndDialog" Value="ErrorCancel" />
+        </Control>
+        <Control Id="I" Type="PushButton" X="100" Y="80" Width="56" Height="17" TabSkip="yes" Text="Ignore">
+          <Publish Event="EndDialog" Value="ErrorIgnore" />
+        </Control>
+        <Control Id="N" Type="PushButton" X="100" Y="80" Width="56" Height="17" TabSkip="yes" Text="No">
+          <Publish Event="EndDialog" Value="ErrorNo" />
+        </Control>
+        <Control Id="O" Type="PushButton" X="100" Y="80" Width="56" Height="17" TabSkip="yes" Text="OK">
+          <Publish Event="EndDialog" Value="ErrorOk" />
+        </Control>
+        <Control Id="R" Type="PushButton" X="100" Y="80" Width="56" Height="17" TabSkip="yes" Text="Retry">
+          <Publish Event="EndDialog" Value="ErrorRetry" />
+        </Control>
+        <Control Id="Y" Type="PushButton" X="100" Y="80" Width="56" Height="17" TabSkip="yes" Text="Yes">
+          <Publish Event="EndDialog" Value="ErrorYes" />
+        </Control>
+      </Dialog>
+
+      <Dialog Id="FilesInUse" Width="370" Height="270" Title="[ProductName] Setup" KeepModeless="yes">
+        <Control Id="Text" Type="Text" X="15" Y="15" Width="340" Height="30"
+                 Text="These programs use files that need updating. Close them and select Retry, or select Exit to stop." />
+        <Control Id="List" Type="ListBox" X="15" Y="50" Width="340" Height="170" Property="FileInUseProcess" Sunken="yes" TabSkip="yes" />
+        <Control Id="Exit" Type="PushButton" X="166" Y="243" Width="56" Height="17" Text="E&amp;xit">
+          <Publish Event="EndDialog" Value="Exit" />
+        </Control>
+        <Control Id="Ignore" Type="PushButton" X="235" Y="243" Width="56" Height="17" Text="&amp;Ignore">
+          <Publish Event="EndDialog" Value="Ignore" />
+        </Control>
+        <Control Id="Retry" Type="PushButton" X="304" Y="243" Width="56" Height="17" Default="yes" Cancel="yes" Text="&amp;Retry">
+          <Publish Event="EndDialog" Value="Retry" />
+        </Control>
+      </Dialog>
+
+      <Dialog Id="ExitDlg" Width="370" Height="270" Title="[ProductName] Setup">
+        <Control Id="Title" Type="Text" X="15" Y="8" Width="340" Height="18" Transparent="yes" NoPrefix="yes"
+                 Text="{\Palisade_Title}[ProductName] setup finished" />
+        <Control Id="Finish" Type="PushButton" X="304" Y="243" Width="56" Height="17" Default="yes" Cancel="yes" Text="&amp;Finish">
+          <Publish Event="EndDialog" Value="Return" />
+        </Control>
+      </Dialog>
+
+      <Dialog Id="UserExitDlg" Width="370" Height="270" Title="[ProductName] Setup">
+        <Control Id="Title" Type="Text" X="15" Y="8" Width="340" Height="36" Transparent="yes" NoPrefix="yes"
+                 Text="{\Palisade_Title}Setup was cancelled. Nothing was changed." />
+        <Control Id="Finish" Type="PushButton" X="304" Y="243" Width="56" Height="17" Default="yes" Cancel="yes" Text="&amp;Finish">
+          <Publish Event="EndDialog" Value="Exit" />
+        </Control>
+      </Dialog>
+
+      <Dialog Id="FatalErrorDlg" Width="370" Height="270" Title="[ProductName] Setup">
+        <Control Id="Title" Type="Text" X="15" Y="8" Width="340" Height="36" Transparent="yes" NoPrefix="yes"
+                 Text="{\Palisade_Title}Setup failed. Nothing was changed. Run msiexec with /l*v to write a log." />
+        <Control Id="Finish" Type="PushButton" X="304" Y="243" Width="56" Height="17" Default="yes" Cancel="yes" Text="&amp;Finish">
+          <Publish Event="EndDialog" Value="Exit" />
+        </Control>
+      </Dialog>
+
+      <InstallUISequence>
+        <Show Dialog="LicenseDlg" Before="ProgressDlg" Condition="NOT Installed" />
+        <Show Dialog="ProgressDlg" Before="ExecuteAction" />
+        <Show Dialog="ExitDlg" OnExit="success" />
+        <Show Dialog="UserExitDlg" OnExit="cancel" />
+        <Show Dialog="FatalErrorDlg" OnExit="error" />
+      </InstallUISequence>
+      <AdminUISequence>
+        <Show Dialog="ProgressDlg" Before="ExecuteAction" />
+        <Show Dialog="ExitDlg" OnExit="success" />
+        <Show Dialog="UserExitDlg" OnExit="cancel" />
+        <Show Dialog="FatalErrorDlg" OnExit="error" />
+      </AdminUISequence>
+    </UI>
+  </Fragment>
+</Wix>

@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Palisade Windows Installer package (#22). Built by `cargo xtask dist
+  - -msi`, which passes the variables used here; see docs/packaging.md.
+
+  Only standard Windows Installer 5 tables are used: no WiX extension, and no
+  custom action code. The custom actions set properties, plus one that runs
+  the operating system's service-control tool (see ConfigureRecovery).
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Palisade"
+           Manufacturer="Palisade Project"
+           Version="$(var.MsiVersion)"
+           UpgradeCode="$(var.UpgradeCode)"
+           Scope="perMachine"
+           InstallerVersion="500"
+           Language="1033"
+           Compressed="yes">
+
+    <!-- A new product code every build. Same-version packages (snapshot
+         builds of main) replace each other in place instead of installing
+         side by side; an older package is refused. -->
+    <!-- Removing the old version inside the install transaction
+         (afterInstallInitialize) means a failed upgrade rolls back to it,
+         instead of leaving neither version installed. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes" Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="A newer version of [ProductName] is already installed. Remove it first to install this version." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Property Id="ARPCOMMENTS" Value="Palisade $(var.SemVer). An educational, personal-development project." />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/jusso-dev/palisade" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <!-- Public properties (docs/packaging.md). All are optional. -->
+    <Property Id="SERVER_URL" Secure="yes" />
+    <Property Id="ENROLL_TOKEN" Secure="yes" Hidden="yes" />
+    <Property Id="GROUP_KEY" Secure="yes" />
+    <Property Id="PROXY" Secure="yes" />
+    <Property Id="MODE" Secure="yes" />
+    <Property Id="NO_TRAY" Secure="yes" />
+    <Property Id="SKIP_ENROLL" Secure="yes" />
+    <Property Id="ALLOW_UNINSTALL" Secure="yes" Hidden="yes" />
+    <Property Id="ADD_TO_PATH" Secure="yes" />
+
+    <!-- Settings an upgrade or repair keeps when they are not given again:
+         each is read from the settings key into R_<name>, then copied to
+         the public property if that was not set on the command line. The
+         enrolment token is never kept; enrolment consumes it (#57).
+
+         All of it runs in the elevated execute sequence only. The key is
+         readable by SYSTEM and Administrators only, so in an interactive
+         install the user-interface sequence, which runs unelevated, would
+         read nothing, default MODE to audit, and the elevated part would
+         then skip the search and write those empty values back. -->
+    <Property Id="R_SERVER_URL" Secure="yes">
+      <RegistrySearch Root="HKLM" Key="SOFTWARE\Palisade\Agent" Name="ServerUrl" Type="raw" Bitness="always64" />
+    </Property>
+    <Property Id="R_GROUP_KEY" Secure="yes">
+      <RegistrySearch Root="HKLM" Key="SOFTWARE\Palisade\Agent" Name="GroupKey" Type="raw" Bitness="always64" />
+    </Property>
+    <Property Id="R_PROXY" Secure="yes">
+      <RegistrySearch Root="HKLM" Key="SOFTWARE\Palisade\Agent" Name="Proxy" Type="raw" Bitness="always64" />
+    </Property>
+    <Property Id="R_MODE" Secure="yes">
+      <RegistrySearch Root="HKLM" Key="SOFTWARE\Palisade\Agent" Name="Mode" Type="raw" Bitness="always64" />
+    </Property>
+    <Property Id="R_SKIP_ENROLL" Secure="yes">
+      <RegistrySearch Root="HKLM" Key="SOFTWARE\Palisade\Agent" Name="SkipEnroll" Type="raw" Bitness="always64" />
+    </Property>
+    <Property Id="R_NO_TRAY" Secure="yes">
+      <RegistrySearch Root="HKLM" Key="SOFTWARE\Palisade\Agent" Name="NoTray" Type="raw" Bitness="always64" />
+    </Property>
+    <Property Id="R_ADD_TO_PATH" Secure="yes">
+      <RegistrySearch Root="HKLM" Key="SOFTWARE\Palisade\Agent" Name="AddToPath" Type="raw" Bitness="always64" />
+    </Property>
+    <SetProperty Id="SERVER_URL" Value="[R_SERVER_URL]" After="AppSearch" Sequence="execute" Condition="NOT SERVER_URL AND R_SERVER_URL" />
+    <SetProperty Id="GROUP_KEY" Value="[R_GROUP_KEY]" After="AppSearch" Sequence="execute" Condition="NOT GROUP_KEY AND R_GROUP_KEY" />
+    <SetProperty Id="PROXY" Value="[R_PROXY]" After="AppSearch" Sequence="execute" Condition="NOT PROXY AND R_PROXY" />
+    <SetProperty Id="SKIP_ENROLL" Value="[R_SKIP_ENROLL]" After="AppSearch" Sequence="execute" Condition="NOT SKIP_ENROLL AND R_SKIP_ENROLL" />
+    <SetProperty Id="NO_TRAY" Value="[R_NO_TRAY]" After="AppSearch" Sequence="execute" Condition="NOT NO_TRAY AND R_NO_TRAY" />
+    <SetProperty Id="ADD_TO_PATH" Value="[R_ADD_TO_PATH]" After="AppSearch" Sequence="execute" Condition="NOT ADD_TO_PATH AND R_ADD_TO_PATH" />
+    <!-- MODE: the given value, else the kept one, else audit. -->
+    <SetProperty Action="KeepMode" Id="MODE" Value="[R_MODE]" After="AppSearch" Sequence="execute" Condition="NOT MODE AND R_MODE" />
+    <SetProperty Action="DefaultMode" Id="MODE" Value="audit" After="KeepMode" Sequence="execute" Condition="NOT MODE" />
+
+    <InstallUISequence>
+      <AppSearch Suppress="yes" />
+    </InstallUISequence>
+
+    <!-- Launch conditions run in both sequences. In the user-interface
+         sequence MODE is only set if it was given; in the execute sequence
+         it always is, after the kept or default value is applied. -->
+    <Launch Condition="Installed OR NOT SERVER_URL OR SERVER_URL &lt;&lt; &quot;https://&quot;"
+            Message="SERVER_URL must be an https:// URL." />
+    <Launch Condition="Installed OR NOT MODE OR MODE = &quot;audit&quot; OR MODE = &quot;monitor&quot; OR MODE = &quot;learning&quot; OR MODE = &quot;enforce&quot; OR MODE = &quot;disabled&quot;"
+            Message="MODE must be one of: audit, monitor, learning, enforce, disabled." />
+    <!-- In the execute sequence, after the kept or default MODE is set,
+         a value the launch condition did not see is checked again. Never
+         on removal, so a damaged stored value cannot block uninstalling. -->
+    <CustomAction Id="CheckMode" Error="MODE must be one of: audit, monitor, learning, enforce, disabled." />
+    <InstallExecuteSequence>
+      <Custom Action="CheckMode" After="DefaultMode" Condition="NOT (REMOVE ~= &quot;ALL&quot;) AND NOT (MODE = &quot;audit&quot; OR MODE = &quot;monitor&quot; OR MODE = &quot;learning&quot; OR MODE = &quot;enforce&quot; OR MODE = &quot;disabled&quot;)" />
+    </InstallExecuteSequence>
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Palisade" />
+    </StandardDirectory>
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="DATAFOLDER" Name="Palisade">
+        <Directory Id="POLICYDIR" Name="policy" />
+        <Directory Id="QUEUEDIR" Name="queue" />
+        <Directory Id="LOGSDIR" Name="logs" />
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="Palisade" Level="1" AllowAbsent="no">
+      <ComponentRef Id="Agent" />
+      <ComponentRef Id="Tray" />
+      <ComponentRef Id="TrayAutostart" />
+      <ComponentRef Id="Cli" />
+      <ComponentRef Id="CliPath" />
+      <ComponentRef Id="Data" />
+      <ComponentRef Id="Settings" />
+      <ComponentRef Id="SettingServerUrl" />
+      <ComponentRef Id="SettingGroupKey" />
+      <ComponentRef Id="SettingProxy" />
+      <ComponentRef Id="SettingMode" />
+      <ComponentRef Id="SettingSkipEnroll" />
+      <ComponentRef Id="SettingNoTray" />
+      <ComponentRef Id="SettingAddToPath" />
+    </Feature>
+
+    <Component Id="Agent" Directory="INSTALLFOLDER">
+      <File Id="AgentExe" Source="$(var.BinDir)\palisade-agent.exe" KeyPath="yes" />
+      <!-- Runs as LocalSystem for now; splitting privileges is #18. -->
+      <ServiceInstall Name="PalisadeAgent"
+                      DisplayName="Palisade Agent"
+                      Description="Palisade application allowlisting agent. An educational project; see the licence notice."
+                      Type="ownProcess"
+                      Start="auto"
+                      ErrorControl="normal"
+                      Arguments="--service"
+                      Vital="yes">
+        <ServiceConfig DelayedAutoStart="yes" ServiceSid="unrestricted" OnInstall="yes" OnReinstall="yes" />
+      </ServiceInstall>
+      <!-- Stopped before files change, on install, upgrade and removal;
+           started again once the new files are in place. -->
+      <ServiceControl Name="PalisadeAgent" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+    </Component>
+
+    <!-- Recovery: restart after 0, 5 and 30 seconds; the failure count
+         resets after a day. Windows Installer's own failure-actions table
+         cannot set restart actions (it opens the service without the start
+         right they need, and fails with error 5), so the operating system's
+         service-control tool sets them, as SYSTEM, right after the service
+         is installed. On removal the service, and its settings, go. -->
+    <CustomAction Id="ConfigureRecovery" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="no" Return="check"
+                  ExeCommand="&quot;[System64Folder]sc.exe&quot; failure PalisadeAgent reset= 86400 actions= restart/0/restart/5000/restart/30000" />
+    <InstallExecuteSequence>
+      <Custom Action="ConfigureRecovery" After="InstallServices" Condition="NOT (REMOVE ~= &quot;ALL&quot;)" />
+    </InstallExecuteSequence>
+
+    <Component Id="Tray" Directory="INSTALLFOLDER">
+      <File Id="TrayExe" Source="$(var.BinDir)\palisade-tray.exe" KeyPath="yes" />
+    </Component>
+
+    <!-- Every user's session starts the notifier at sign-in, unless NO_TRAY=1. -->
+    <Component Id="TrayAutostart" Directory="INSTALLFOLDER" Condition="NOT (NO_TRAY = &quot;1&quot;)">
+      <RegistryValue Root="HKLM" Key="$(var.RunKey)" Name="Palisade" Type="string" Value="&quot;[INSTALLFOLDER]palisade-tray.exe&quot;" KeyPath="yes" />
+    </Component>
+
+    <Component Id="Cli" Directory="INSTALLFOLDER">
+      <File Id="CliExe" Source="$(var.BinDir)\pal.exe" KeyPath="yes" />
+    </Component>
+
+    <Component Id="CliPath" Directory="INSTALLFOLDER" Condition="ADD_TO_PATH = &quot;1&quot;">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Palisade\Agent" Name="PathEntry" Type="integer" Value="1" KeyPath="yes" />
+      <Environment Id="PathEntry" Name="PATH" Value="[INSTALLFOLDER]" Part="last" Action="set" System="yes" Permanent="no" />
+    </Component>
+
+    <!-- %ProgramData%\Palisade: SYSTEM and Administrators full control,
+         nothing inherited, so other users have no access. The policy cache,
+         queue and logs below inherit it. Files the agent writes there are
+         not the installer's, so upgrades and repairs keep them. -->
+    <!-- Each folder gets the protected DACL and owner itself, not only by
+         inheritance: a standard user may create folders under ProgramData
+         before the install, and an explicit ACL on a pre-created folder
+         would survive inheritance from its parent. Hardening against links
+         planted there is #18. -->
+    <Component Id="Data" Directory="DATAFOLDER" Guid="635CDB37-B102-40D7-AC50-14583362E93A">
+      <CreateFolder>
+        <PermissionEx Sddl="O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+      </CreateFolder>
+      <CreateFolder Directory="POLICYDIR">
+        <PermissionEx Sddl="O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+      </CreateFolder>
+      <CreateFolder Directory="QUEUEDIR">
+        <PermissionEx Sddl="O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+      </CreateFolder>
+      <CreateFolder Directory="LOGSDIR">
+        <PermissionEx Sddl="O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+      </CreateFolder>
+    </Component>
+
+    <!-- HKLM\SOFTWARE\Palisade\Agent: the install-time settings, for the
+         agent's enrolment bootstrap (#57). SYSTEM and Administrators only.
+         The enrolment token is not among them: a verbose installer log records
+         every registry value written, hidden property or not, so the
+         package never writes the token anywhere. Handing it to the agent,
+         stored with machine-scoped data protection, is #57. -->
+    <Component Id="Settings" Directory="INSTALLFOLDER" Guid="A64E8849-FD5C-4FB8-BE18-3B0F2C5AE112">
+      <!-- The ACL is set through the value row: Windows Installer secures
+           the key that holds a value, and does not apply one given on the
+           key-creation row. -->
+      <RegistryKey Root="HKLM" Key="SOFTWARE\Palisade\Agent" ForceCreateOnInstall="yes" ForceDeleteOnUninstall="yes">
+        <RegistryValue Name="Version" Type="string" Value="$(var.SemVer)" KeyPath="yes">
+          <PermissionEx Sddl="O:SYG:SYD:PAI(A;CI;KA;;;SY)(A;CI;KA;;;BA)" />
+        </RegistryValue>
+      </RegistryKey>
+    </Component>
+    <Component Id="SettingServerUrl" Directory="INSTALLFOLDER" Condition="SERVER_URL">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Palisade\Agent" Name="ServerUrl" Type="string" Value="[SERVER_URL]" KeyPath="yes" />
+    </Component>
+    <Component Id="SettingGroupKey" Directory="INSTALLFOLDER" Condition="GROUP_KEY">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Palisade\Agent" Name="GroupKey" Type="string" Value="[GROUP_KEY]" KeyPath="yes" />
+    </Component>
+    <Component Id="SettingProxy" Directory="INSTALLFOLDER" Condition="PROXY">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Palisade\Agent" Name="Proxy" Type="string" Value="[PROXY]" KeyPath="yes" />
+    </Component>
+    <Component Id="SettingMode" Directory="INSTALLFOLDER">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Palisade\Agent" Name="Mode" Type="string" Value="[MODE]" KeyPath="yes" />
+    </Component>
+    <Component Id="SettingSkipEnroll" Directory="INSTALLFOLDER" Condition="SKIP_ENROLL = &quot;1&quot;">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Palisade\Agent" Name="SkipEnroll" Type="string" Value="1" KeyPath="yes" />
+    </Component>
+    <Component Id="SettingNoTray" Directory="INSTALLFOLDER" Condition="NO_TRAY = &quot;1&quot;">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Palisade\Agent" Name="NoTray" Type="string" Value="1" KeyPath="yes" />
+    </Component>
+    <Component Id="SettingAddToPath" Directory="INSTALLFOLDER" Condition="ADD_TO_PATH = &quot;1&quot;">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Palisade\Agent" Name="AddToPath" Type="string" Value="1" KeyPath="yes" />
+    </Component>
+
+    <UIRef Id="PalisadeUI" />
+  </Package>
+</Wix>

@@ -10,6 +10,7 @@ mod adr;
 mod ci;
 mod coverage;
 mod deps;
+mod dist;
 mod fuzz;
 mod junit;
 mod manifests;
@@ -36,7 +37,7 @@ Commands:
   audit            Run cargo-audit over the root and fuzz lockfiles, ignoring exactly the
                    advisories deny.toml ignores
   ci [--fast]      Run the checks from .github/workflows/ci.yml locally (--fast skips coverage,
-                   fuzz, docs, feature-powerset and msrv)
+                   fuzz, docs, feature-powerset, msrv, package and server-image)
   check-deps       Enforce the allowed dependency directions between crates
   check-manifests  Enforce workspace inheritance of package fields, lints and dependency versions,
                    and that every crate README documents its features
@@ -44,6 +45,11 @@ Commands:
                    Enforce the duplicate-version budget, deny.toml ignore expiry and reasons,
                    the cargo-vet criteria and exemption notes, and no audit.toml
   check-unsafe     Enforce the unsafe-code allowlist (unsafe-allowlist.txt, ADR 0011)
+  dist [--target <triple>] [--msi] [--sign none] [--out <dir>] [--bump-patch]
+       [--compare-sizes <sizes.json>]
+                   Release-build the Windows binaries (with --msi, the installer package) or the
+                   Linux server, with symbols and size reports, as CI does (docs/packaging.md)
+  dist driver      Explain how the optional kernel driver is packaged (local-only, #8)
   deps-report [--base <commit>]
                    Print the dependency report: duplicates, third-party crates per crate,
                    third-party unsafe counts and code that runs at build time; with --base,
@@ -79,6 +85,9 @@ fn main() -> ExitCode {
         }
         if command == "adr" {
             return run_adr(rest);
+        }
+        if command == "dist" {
+            return run_dist(rest);
         }
     }
     match args.as_slice() {
@@ -241,6 +250,31 @@ fn run_fuzz(args: &[String]) -> ExitCode {
     } else {
         eprintln!("fuzz: {failed} of {} targets failed", outcomes.len());
         ExitCode::FAILURE
+    }
+}
+
+/// `cargo xtask dist`: see `src/dist/mod.rs`.
+fn run_dist(args: &[String]) -> ExitCode {
+    let request = match dist::parse_args(args) {
+        Ok(request) => request,
+        Err(error) => {
+            eprintln!("dist: error: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match request {
+        dist::Request::Driver => {
+            eprintln!("{}", dist::DRIVER_NOTE);
+            ExitCode::FAILURE
+        }
+        dist::Request::Build(args) => match dist::run(&workspace_root(), &args) {
+            Ok(_) => ExitCode::SUCCESS,
+            Err(error) => {
+                println!("::error title=dist::{}", fuzz::escape_data(&error));
+                eprintln!("dist: error: {error}");
+                ExitCode::FAILURE
+            }
+        },
     }
 }
 

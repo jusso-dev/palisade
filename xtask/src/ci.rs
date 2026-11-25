@@ -25,6 +25,10 @@ pub struct Step {
     /// environment. Without it the step is skipped with a note, as the
     /// tests it runs would skip themselves.
     pub needs_env: Option<&'static str>,
+    /// The only OS family the step runs on, as `std::env::consts::FAMILY`
+    /// or `OS` names it (`windows`, `linux`). Elsewhere it is skipped with
+    /// a note, as CI runs it only on that runner.
+    pub only_on: Option<&'static str>,
 }
 
 /// Where the `postgres` job's tests find a disposable Postgres superuser
@@ -84,8 +88,23 @@ const fn step(job: &'static str, command: &'static str) -> Step {
         tool: None,
         slow: false,
         needs_env: None,
+        only_on: None,
     }
 }
+
+/// `true` when a step limited to `os` runs on this machine.
+fn runs_here(os: Option<&str>) -> bool {
+    os.is_none_or(|os| os == std::env::consts::FAMILY || os == std::env::consts::OS)
+}
+
+const PODMAN: Tool = Tool {
+    check: &["podman", "--version"],
+    install: "install podman (CI uses the one on the ubuntu-latest image)",
+};
+const DOTNET: Tool = Tool {
+    check: &["dotnet", "--list-runtimes"],
+    install: "install the .NET runtime (CI uses the one on the hosted Windows images); WiX itself is fetched and checked by `cargo xtask dist`",
+};
 
 /// Every local step, in CI job order. The MSRV check is added by [`run`],
 /// because its toolchain comes from `Cargo.toml`.
@@ -187,7 +206,52 @@ pub const STEPS: &[Step] = &[
     },
     step("runner-guard", "cargo xtask check-workflows"),
     step("runner-guard", "cargo xtask adr lint"),
+    Step {
+        // `bash` on Windows is often missing, or a shim for a Linux subsystem.
+        only_on: Some("unix"),
+        ..step("runner-guard", "bash .github/scripts/main-snapshot.test.sh")
+    },
     step("doc-checks", "cargo xtask threat-coverage"),
+    // `package` installs a service and writes to HKLM, so its smoke test
+    // stays on the CI runner; locally only the packages are built.
+    Step {
+        tool: Some(DOTNET),
+        slow: true,
+        only_on: Some("windows"),
+        ..step(
+            "package",
+            "cargo xtask dist --msi --sign none --out target/dist/current",
+        )
+    },
+    Step {
+        tool: Some(DOTNET),
+        slow: true,
+        only_on: Some("windows"),
+        ..step(
+            "package",
+            "cargo xtask dist --msi --bump-patch --out target/dist/next",
+        )
+    },
+    Step {
+        slow: true,
+        only_on: Some("linux"),
+        ..step("server-image", "cargo xtask dist --out target/dist/server")
+    },
+    Step {
+        tool: Some(PODMAN),
+        slow: true,
+        only_on: Some("linux"),
+        ..step(
+            "server-image",
+            "podman build --file packaging/server/Containerfile --tag palisade-server:ci target/dist/server",
+        )
+    },
+    Step {
+        tool: Some(PODMAN),
+        slow: true,
+        only_on: Some("linux"),
+        ..step("server-image", "podman run --rm palisade-server:ci version")
+    },
     Step {
         tool: Some(ACTIONLINT),
         ..step("workflow-lint", "actionlint -color")
@@ -228,6 +292,11 @@ struct Planned {
 pub fn run(root: &std::path::Path, fast: bool, rust_version: &str) -> Result<bool, String> {
     let toolchain = msrv_toolchain(rust_version);
     for s in STEPS {
+        if let Some(os) = s.only_on.filter(|os| !runs_here(Some(os))) {
+            if !(fast && s.slow) {
+                println!("ci: [{}] skipped: runs on {os} only: {}", s.job, s.command);
+            }
+        }
         if let Some(var) = s.needs_env {
             if std::env::var_os(var).is_none() {
                 println!(
@@ -241,6 +310,7 @@ pub fn run(root: &std::path::Path, fast: bool, rust_version: &str) -> Result<boo
         .iter()
         .filter(|s| !(fast && s.slow))
         .filter(|s| s.needs_env.is_none_or(|v| std::env::var_os(v).is_some()))
+        .filter(|s| runs_here(s.only_on))
         .map(|s| Planned {
             job: s.job,
             command: s.command.to_owned(),
@@ -366,6 +436,11 @@ mod tests {
             || command.starts_with("archive=")
             || command.starts_with("echo ")
             || command.starts_with("exit ")
+            // The package smoke test installs a service; CI runners only.
+            || command.starts_with("./packaging/wix/smoke-test.ps1 ")
+            // The main-only snapshot publishing jobs.
+            || command.starts_with(".github/scripts/main-snapshot.sh ")
+            || command == "cargo xtask dist --msi --sign none --out target/dist/snapshot"
     }
 
     #[test]
@@ -459,7 +534,108 @@ mod tests {
     #[test]
     fn fast_skips_only_slow_steps() {
         let slow: Vec<&str> = STEPS.iter().filter(|s| s.slow).map(|s| s.job).collect();
-        assert_eq!(slow, ["coverage", "fuzz", "docs", "feature-powerset"]);
+        assert_eq!(
+            slow,
+            [
+                "coverage",
+                "fuzz",
+                "docs",
+                "feature-powerset",
+                "package",
+                "package",
+                "server-image",
+                "server-image",
+                "server-image"
+            ]
+        );
+    }
+
+    /// Steps limited to one OS are the ones whose CI job runs only there.
+    #[test]
+    fn os_limited_steps_match_their_runners() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows/ci.yml");
+        let docs = YamlLoader::load_from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        for s in STEPS {
+            let job = &docs[0]["jobs"][s.job];
+            let mut runners: Vec<String> = match job["runs-on"].as_str() {
+                Some(r) if r.starts_with("${{") => job["strategy"]["matrix"]["include"]
+                    .as_vec()
+                    .into_iter()
+                    .flatten()
+                    .map(|e| e["os"].as_str().unwrap().to_owned())
+                    .chain(
+                        job["strategy"]["matrix"]["os"]
+                            .as_vec()
+                            .into_iter()
+                            .flatten()
+                            .map(|o| o.as_str().unwrap().to_owned()),
+                    )
+                    .collect(),
+                Some(r) => vec![r.to_owned()],
+                None => panic!("{}: no runs-on", s.job),
+            };
+            runners.dedup();
+            let all_windows = runners.iter().all(|r| r.starts_with("windows"));
+            match s.only_on {
+                Some("windows") => assert!(all_windows, "{}: {runners:?}", s.command),
+                Some("linux") => assert!(
+                    runners.iter().all(|r| r.starts_with("ubuntu")),
+                    "{}: {runners:?}",
+                    s.command
+                ),
+                Some("unix") => assert!(
+                    runners
+                        .iter()
+                        .all(|r| r.starts_with("ubuntu") || r.starts_with("macos")),
+                    "{}: {runners:?}",
+                    s.command
+                ),
+                Some(other) => panic!("unknown OS {other}"),
+                None => assert!(!all_windows, "{} runs only on Windows in CI", s.command),
+            }
+        }
+        assert!(runs_here(None));
+    }
+
+    /// `ci-ok` waits for every other job except the main-only snapshot
+    /// jobs, which run after it.
+    #[test]
+    fn ci_ok_needs_every_other_job() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows/ci.yml");
+        let docs = YamlLoader::load_from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let jobs = docs[0]["jobs"].as_hash().unwrap();
+        let mut needs: Vec<&str> = docs[0]["jobs"]["ci-ok"]["needs"]
+            .as_vec()
+            .unwrap()
+            .iter()
+            .map(|n| n.as_str().unwrap())
+            .collect();
+        needs.sort_unstable();
+        let mut others: Vec<&str> = jobs
+            .keys()
+            .map(|k| k.as_str().unwrap())
+            .filter(|k| *k != "ci-ok" && !k.starts_with("snapshot"))
+            .collect();
+        others.sort_unstable();
+        assert_eq!(needs, others);
+        for snapshot in ["snapshot-prepare", "snapshot", "snapshot-finish"] {
+            let job = &docs[0]["jobs"][snapshot];
+            assert_eq!(
+                job["if"].as_str(),
+                Some("github.event_name == 'push' && github.ref == 'refs/heads/main'"),
+                "{snapshot}"
+            );
+            assert_eq!(job["permissions"]["contents"].as_str(), Some("write"));
+        }
+        // No other job can write.
+        for (name, job) in jobs {
+            let name = name.as_str().unwrap();
+            if !name.starts_with("snapshot") {
+                assert!(job["permissions"].is_badvalue(), "{name} sets permissions");
+            }
+        }
     }
 
     /// The `bench` job names every bench target, so a new one cannot be
