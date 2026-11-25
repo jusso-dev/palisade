@@ -642,8 +642,12 @@ impl CompiledCriterion {
         if c.case_sensitive.is_some() && !class.has_case() {
             return Err(whole(CompileErrorKind::CaseSensitivityNotApplicable));
         }
-        if let Some(kind) = option_problem(c) {
-            return Err(whole(kind));
+        let options = option_problems(c);
+        if !options.is_empty() {
+            return Err(options
+                .into_iter()
+                .map(|kind| CompileError { value: None, kind })
+                .collect());
         }
         // Before any value is compiled, so an oversized pattern costs
         // nothing.
@@ -1215,29 +1219,31 @@ fn join(base: &str, rest: &str) -> String {
     out
 }
 
-/// What is wrong with a criterion's options, if anything: each option only
-/// applies to some fields and operators. Validation reports the same.
-pub(crate) fn option_problem(c: &Criterion) -> Option<CompileErrorKind> {
-    let class = c.field.class();
+/// Every option of a criterion that does not apply to it, in field order:
+/// each option only applies to some fields and operators. `safety_critical`
+/// depends on the rule set, so validation checks it separately.
+/// Validation reports the same.
+pub(crate) fn option_problems(c: &Criterion) -> Vec<CompileErrorKind> {
+    let mut out = Vec::new();
     if c.anchored.is_some() && !c.operator.is_regex() {
-        return Some(CompileErrorKind::OptionNotApplicable(
+        out.push(CompileErrorKind::OptionNotApplicable(
             "anchored",
             "`regex` and `not_regex`",
         ));
     }
     if c.match_ads.is_some() && !(c.field == Field::PathFull && c.operator.is_positive()) {
-        return Some(CompileErrorKind::OptionNotApplicable(
+        out.push(CompileErrorKind::OptionNotApplicable(
             "match_ads",
             "positive tests of `path.full`",
         ));
     }
-    if c.include_sub_ous.is_some() && class != FieldClass::DistinguishedName {
-        return Some(CompileErrorKind::OptionNotApplicable(
+    if c.include_sub_ous.is_some() && c.field.class() != FieldClass::DistinguishedName {
+        out.push(CompileErrorKind::OptionNotApplicable(
             "include_sub_ous",
             "`user.ou` and `device.ou`",
         ));
     }
-    None
+    out
 }
 
 /// Why a criterion value is too long, if it is: more than

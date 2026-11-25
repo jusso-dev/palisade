@@ -55,3 +55,8 @@ criterion = { field = "path.full", operator = "regex", values = ["C:\\\\x\\\\.*"
 path = "C:\\x\\a.txt:payload"
 user_writable = false
 expect = "no_match"
+
+[[case]]
+name = "a pattern above the compiled size limit is rejected"
+criterion = { field = "meta.product_name", operator = "regex", values = ["\\w{1000}\\w{1000}\\w{1000}"] }
+error = "pattern_too_large"

@@ -6,8 +6,11 @@
 //!
 //! An IPv4 address written in IPv6 form (`::ffff:192.0.2.1`) is the IPv4
 //! address: [`canonical`] maps it, on both sides, so a rule written for one
-//! form matches a fact in the other. Otherwise IPv4 and IPv6 never match
-//! each other.
+//! form matches a fact in the other. A CIDR block is checked in the form it
+//! is written in, so `::ffff:10.0.0.0/104` is `10.0.0.0/8` and
+//! `::ffff:10.0.0.0/8` is rejected for its host bits. An IPv6 block wider
+//! than `::ffff:0:0/96`, such as `::/0`, holds the IPv4 addresses it covers
+//! in mapped form. Otherwise IPv4 and IPv6 never match each other.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -60,14 +63,18 @@ impl IpRange {
         let (addr, prefix) = s
             .split_once('/')
             .ok_or_else(|| "expected an address, `/` and a prefix length".to_owned())?;
-        let addr = parse_ip(addr).ok_or_else(|| format!("`{addr}` is not an IP address"))?;
-        let bits = if addr.is_ipv4() { 32 } else { 128 };
-        let prefix: u32 = prefix
+        // The prefix applies to the address as written; an IPv4-mapped
+        // IPv6 block is mapped to IPv4 only after it is checked.
+        let written: IpAddr = addr
             .parse()
-            .ok()
-            .filter(|p| (0..=bits).contains(p) && !prefix.starts_with('+'))
+            .map_err(|_| format!("`{addr}` is not an IP address"))?;
+        let bits: u32 = if written.is_ipv4() { 32 } else { 128 };
+        let prefix: u32 = Some(prefix)
+            .filter(|p| !p.is_empty() && p.len() <= 3 && p.bytes().all(|b| b.is_ascii_digit()))
+            .and_then(|p| p.parse().ok())
+            .filter(|p| *p <= bits)
             .ok_or_else(|| format!("the prefix length must be 0 to {bits}"))?;
-        match addr {
+        let block = match written {
             IpAddr::V4(v4) => {
                 let n = u32::from(v4);
                 let mask = u32::MAX.checked_shl(32 - prefix).unwrap_or(0);
@@ -77,10 +84,10 @@ impl IpRange {
                         Ipv4Addr::from(n & mask)
                     ));
                 }
-                Ok(Self {
-                    first: addr,
+                Self {
+                    first: written,
                     last: IpAddr::V4(Ipv4Addr::from(n | !mask)),
-                })
+                }
             }
             IpAddr::V6(v6) => {
                 let n = u128::from(v6);
@@ -91,11 +98,20 @@ impl IpRange {
                         Ipv6Addr::from(n & mask)
                     ));
                 }
-                Ok(Self {
-                    first: addr,
+                Self {
+                    first: written,
                     last: IpAddr::V6(Ipv6Addr::from(n | !mask)),
-                })
+                }
             }
+        };
+        // A block within `::ffff:0:0/96` is IPv4. One that is wider, such as
+        // `::/0`, stays IPv6, and `contains` tests an IPv4 address against
+        // it in its mapped form.
+        let (first, last) = (canonical(block.first), canonical(block.last));
+        if first.is_ipv4() == last.is_ipv4() {
+            Ok(Self { first, last })
+        } else {
+            Ok(block)
         }
     }
 
@@ -125,12 +141,17 @@ impl IpRange {
             .ok_or_else(|| "the end must be of the same family and not below the start".to_owned())
     }
 
-    /// Whether the range holds `ip`.
+    /// Whether the range holds `ip`. An IPv4 address is in an IPv6 range
+    /// if its mapped form (`::ffff:a.b.c.d`) is.
     #[must_use]
     pub fn contains(&self, ip: IpAddr) -> bool {
         match (self.first, self.last, canonical(ip)) {
             (IpAddr::V4(a), IpAddr::V4(b), IpAddr::V4(x)) => a <= x && x <= b,
             (IpAddr::V6(a), IpAddr::V6(b), IpAddr::V6(x)) => a <= x && x <= b,
+            (IpAddr::V6(a), IpAddr::V6(b), IpAddr::V4(x)) => {
+                let x = x.to_ipv6_mapped();
+                a <= x && x <= b
+            }
             _ => false,
         }
     }

@@ -6,3 +6,6 @@ invalid_value /rule_sets/0/rules/0/match/all/5/criterion/values/1
 invalid_value /rule_sets/0/rules/0/match/all/6/criterion/values/0
 invalid_value /rule_sets/0/rules/0/match/all/7/criterion/values/1
 option_not_applicable /rule_sets/0/rules/0/match/all/8/criterion/safety_critical
+option_not_applicable /rule_sets/0/rules/0/match/all/9/criterion/anchored
+option_not_applicable /rule_sets/0/rules/0/match/all/9/criterion/match_ads
+option_not_applicable /rule_sets/0/rules/0/match/all/9/criterion/include_sub_ous

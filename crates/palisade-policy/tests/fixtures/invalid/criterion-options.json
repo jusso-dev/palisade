@@ -106,6 +106,18 @@
                   ],
                   "safety_critical": true
                 }
+              },
+              {
+                "criterion": {
+                  "field": "meta.product_name",
+                  "operator": "equals",
+                  "values": [
+                    "x"
+                  ],
+                  "anchored": true,
+                  "match_ads": true,
+                  "include_sub_ous": false
+                }
               }
             ]
           },

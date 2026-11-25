@@ -1120,3 +1120,42 @@ fn new_facts_are_read_from_their_place() {
     }
     assert_eq!(EvaluationContext::EMPTY, EvaluationContext::new());
 }
+
+/// Every ordered operator against a value below, at and above the fact,
+/// for each kind of ordered fact, so no comparison can point the wrong way.
+#[test]
+fn ordered_operators_compare_in_the_right_direction() {
+    let ctx = full();
+    // (field, below, at, above) for facts 22631, `medium` and 2026-11-25.
+    let kinds = [
+        (Field::DeviceOsBuild, "22630", "22631", "22632"),
+        (Field::UserIntegrityLevel, "low", "medium", "medium_plus"),
+        (Field::TimeDate, "2026-11-24", "2026-11-25", "2026-11-26"),
+    ];
+    for (field, below, at, above) in kinds {
+        for (operator, expect) in [
+            (Operator::Eq, [NoMatch, Match, NoMatch]),
+            (Operator::Ne, [Match, NoMatch, Match]),
+            (Operator::Gt, [Match, NoMatch, NoMatch]),
+            (Operator::Ge, [Match, Match, NoMatch]),
+            (Operator::Lt, [NoMatch, NoMatch, Match]),
+            (Operator::Le, [NoMatch, Match, Match]),
+        ] {
+            for (value, expected) in [below, at, above].into_iter().zip(expect) {
+                let c = compile(field, operator, &[value]);
+                assert_eq!(eval(&c, &ctx), expected, "{field:?} {operator:?} {value}");
+            }
+        }
+        // `between` includes both ends, and excludes a range beside the fact.
+        for (range, expected) in [
+            ([below, at], Match),
+            ([at, above], Match),
+            ([at, at], Match),
+            ([below, below], NoMatch),
+            ([above, above], NoMatch),
+        ] {
+            let c = compile(field, Operator::Between, &range);
+            assert_eq!(eval(&c, &ctx), expected, "{field:?} between {range:?}");
+        }
+    }
+}

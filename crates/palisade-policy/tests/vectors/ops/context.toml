@@ -14,6 +14,42 @@ context = { "session.id" = 1 }
 expect = "no_match"
 
 [[case]]
+name = "numeric eq"
+criterion = { field = "device.os_build", operator = "eq", values = ["19045", "22631"] }
+context = { "device.os_build" = 22631 }
+expect = "match"
+
+[[case]]
+name = "numeric gt, at the bound"
+criterion = { field = "device.os_build", operator = "gt", values = ["22631"] }
+context = { "device.os_build" = 22631 }
+expect = "no_match"
+
+[[case]]
+name = "numeric gt, above the bound"
+criterion = { field = "device.os_build", operator = "gt", values = ["22630"] }
+context = { "device.os_build" = 22631 }
+expect = "match"
+
+[[case]]
+name = "numeric le, at the bound"
+criterion = { field = "device.os_build", operator = "le", values = ["22631"] }
+context = { "device.os_build" = 22631 }
+expect = "match"
+
+[[case]]
+name = "numeric le, below the fact"
+criterion = { field = "device.os_build", operator = "le", values = ["22630"] }
+context = { "device.os_build" = 22631 }
+expect = "no_match"
+
+[[case]]
+name = "numeric lt, at the bound"
+criterion = { field = "session.id", operator = "lt", values = ["1"] }
+context = { "session.id" = 1 }
+expect = "no_match"
+
+[[case]]
 name = "numeric on an unknown fact"
 criterion = { field = "device.os_build", operator = "ge", values = ["1"] }
 expect = "unknown"

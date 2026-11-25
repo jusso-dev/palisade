@@ -603,10 +603,7 @@ impl Validator {
                         "rules in a mandatory rule set block under every mode (ADR 0004) and cannot be `never_enforce`",
                     );
                 }
-                self.rule(&path, rule);
-                if !set.mandatory {
-                    self.safety_critical_outside_mandatory(&path, &rule.match_);
-                }
+                self.rule(&path, rule, set.mandatory);
                 self.action(&path, set, rule);
                 if let Some(scope) = &rule.scope {
                     self.scope(
@@ -620,7 +617,9 @@ impl Validator {
         }
     }
 
-    fn rule(&mut self, base: &str, rule: &Rule) {
+    /// Checks one rule. `mandatory` is whether its rule set is a mandatory
+    /// blocklist, the only place `safety_critical` applies.
+    fn rule(&mut self, base: &str, rule: &Rule, mandatory: bool) {
         if let Some(display_id) = &rule.display_id {
             let digits = display_id.strip_prefix("R-").unwrap_or_default();
             if !(6..=12).contains(&digits.len()) || !digits.bytes().all(|b| b.is_ascii_digit()) {
@@ -701,7 +700,7 @@ impl Validator {
             );
         }
         for (c, path) in ordered {
-            self.criterion(&path, c);
+            self.criterion(&path, c, mandatory);
         }
 
         // The recursive analysis is bounded by the depth limit, so it only
@@ -755,37 +754,7 @@ impl Validator {
         }
     }
 
-    /// `safety_critical` only means something in a mandatory blocklist,
-    /// where it makes an unknown fact count towards the deny (#32, #87).
-    /// Anywhere else it would do nothing, or make a rule fail open.
-    fn safety_critical_outside_mandatory(&mut self, base: &str, tree: &Match) {
-        let mut stack = vec![(tree, format!("{base}/match"))];
-        while let Some((node, path)) = stack.pop() {
-            match node {
-                Match::All(children) | Match::Any(children) => {
-                    let key = if matches!(node, Match::All(_)) {
-                        "all"
-                    } else {
-                        "any"
-                    };
-                    for (i, child) in children.iter().enumerate().rev() {
-                        stack.push((child, format!("{path}/{key}/{i}")));
-                    }
-                }
-                Match::Not(child) => stack.push((child, format!("{path}/not"))),
-                Match::Criterion(c) if c.safety_critical => self.push(
-                    ErrorCode::OptionNotApplicable,
-                    &format!("{path}/criterion/safety_critical"),
-                    "`safety_critical` only applies in a mandatory blocklist",
-                ),
-                // Resolved by the hierarchy before evaluation (#37); the
-                // expanded tree is validated again.
-                Match::Criterion(_) | Match::Ref(_) => {}
-            }
-        }
-    }
-
-    fn criterion(&mut self, base: &str, c: &Criterion) {
+    fn criterion(&mut self, base: &str, c: &Criterion, mandatory: bool) {
         let class = c.field.class();
         if !c.operator.applies_to_field(c.field) {
             self.push(
@@ -806,17 +775,24 @@ impl Validator {
                 format!("`{}` has no case to compare", serde_name(&c.field)),
             );
         }
-        let options_ok = match ops::option_problem(c) {
-            Some(kind) => {
-                let option = match &kind {
-                    CompileErrorKind::OptionNotApplicable(option, _) => *option,
-                    _ => "",
-                };
-                self.compile_error(&format!("{base}/{option}"), &kind);
-                false
+        let problems = ops::option_problems(c);
+        let options_ok = problems.is_empty();
+        for kind in &problems {
+            if let CompileErrorKind::OptionNotApplicable(option, _) = kind {
+                self.compile_error(&format!("{base}/{option}"), kind);
             }
-            None => true,
-        };
+        }
+        // `safety_critical` makes an unknown fact count towards a deny, which
+        // only fails closed in a mandatory blocklist (#32, #87). Anywhere
+        // else it would do nothing, or make a rule fail open. It does not
+        // change how the criterion compiles.
+        if c.safety_critical && !mandatory {
+            self.push(
+                ErrorCode::OptionNotApplicable,
+                &format!("{base}/safety_critical"),
+                "`safety_critical` only applies in a mandatory blocklist",
+            );
+        }
         let (min, max) = c.operator.value_count();
         if c.values.len() < min || c.values.len() > max {
             let expected = if min == max {
