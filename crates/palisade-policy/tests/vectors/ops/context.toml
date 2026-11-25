@@ -97,6 +97,23 @@ context = { "net.ip" = ["172.16.0.1", "10.4.4.4"] }
 expect = "match"
 
 [[case]]
+name = "IPv4-mapped IPv6 CIDR is an IPv4 block"
+criterion = { field = "session.client_ip", operator = "ip_in_cidr", values = ["::ffff:10.0.0.0/104"] }
+context = { "session.client_ip" = "10.200.1.1" }
+expect = "match"
+
+[[case]]
+name = "a wide IPv6 block holds IPv4 addresses"
+criterion = { field = "net.ip", operator = "ip_in_cidr", values = ["::/0"] }
+context = { "net.ip" = ["10.0.0.1"] }
+expect = "match"
+
+[[case]]
+name = "IPv4-mapped CIDR with host bits in its IPv6 form is rejected"
+criterion = { field = "net.ip", operator = "ip_in_cidr", values = ["::ffff:10.0.0.0/8"] }
+error = "invalid_value"
+
+[[case]]
 name = "CIDR with host bits is rejected"
 criterion = { field = "net.ip", operator = "ip_in_cidr", values = ["10.1.2.3/8"] }
 error = "invalid_value"

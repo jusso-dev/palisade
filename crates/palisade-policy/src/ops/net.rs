@@ -291,6 +291,50 @@ mod tests {
     }
 
     #[test]
+    fn cidr_blocks_are_checked_as_written() {
+        // IPv4-mapped IPv6 blocks (`/96` and narrower) are IPv4 blocks.
+        for (mapped, v4) in [
+            ("::ffff:10.0.0.0/104", "10.0.0.0/8"),
+            ("::ffff:0:0/96", "0.0.0.0/0"),
+            ("::ffff:192.0.2.1/128", "192.0.2.1/32"),
+        ] {
+            let r = IpRange::parse_cidr(mapped).unwrap();
+            assert_eq!(r, IpRange::parse_cidr(v4).unwrap(), "{mapped}");
+            assert!(r.first().is_ipv4() && r.last().is_ipv4(), "{mapped}");
+        }
+        let mapped = IpRange::parse_cidr("::ffff:10.0.0.0/104").unwrap();
+        assert!(mapped.contains(ip("10.1.1.1")));
+        assert!(mapped.contains(ip("::ffff:10.1.1.1")));
+        assert!(!mapped.contains(ip("11.0.0.0")));
+        // The prefix applies to the address as written, so these have bits
+        // set after it in their IPv6 form, or after the prefix itself.
+        for bad in [
+            "::ffff:10.0.0.0/8",
+            "::ffff:0.0.0.0/0",
+            "::ffff:0:0/95",
+            "::ffff:10.1.2.3/104",
+            "2001:db8::1/32",
+            "10.0.0.0/08x",
+        ] {
+            assert!(IpRange::parse_cidr(bad).is_err(), "{bad}");
+        }
+        // An IPv6 block wider than the mapped range stays IPv6, and holds
+        // the IPv4 addresses it covers in their mapped form.
+        for wide in ["::/0", "::/80", "::fffe:0:0/95"] {
+            let r = IpRange::parse_cidr(wide).unwrap();
+            assert!(r.first().is_ipv6() && r.last().is_ipv6(), "{wide}");
+            assert!(r.contains(ip("10.0.0.1")), "{wide}");
+            assert!(r.contains(ip("::ffff:10.0.0.1")), "{wide}");
+        }
+        // Disjoint IPv6 blocks hold no IPv4 address.
+        for disjoint in ["::/95", "2001:db8::/32", "fe80::/10"] {
+            let r = IpRange::parse_cidr(disjoint).unwrap();
+            assert!(!r.contains(ip("10.0.0.1")), "{disjoint}");
+        }
+        assert!(IpRange::parse_cidr("::/80").unwrap().contains(ip("::1")));
+    }
+
+    #[test]
     fn ranges() {
         let r = IpRange::parse_range("192.168.1.10-20").unwrap();
         assert!(r.contains(ip("192.168.1.10")));
