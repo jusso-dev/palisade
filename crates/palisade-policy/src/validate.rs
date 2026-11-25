@@ -12,6 +12,7 @@ use std::fmt;
 mod actions;
 mod mode;
 mod precedence;
+mod scope;
 
 pub use precedence::order_ranges;
 
@@ -180,6 +181,17 @@ pub enum ErrorCode {
     /// `allow_child_suppress: true` on a mandatory rule set, whose rules
     /// can never be suppressed (#37, ADR 0004).
     SuppressNotAllowed,
+    /// A scope is malformed: a value not valid for its kind, a list over
+    /// its limit, an unknown location profile, or an option on rules it
+    /// does not apply to (#38).
+    InvalidScope,
+    /// A schedule is malformed: a window, a date range or a window-close
+    /// option (#38).
+    InvalidSchedule,
+    /// `user_pattern` in a position where a spoofed account name would
+    /// make a rule that lets an object run apply, or keep a deny from
+    /// applying (#38).
+    UserPatternNotAllowed,
 }
 
 impl ErrorCode {
@@ -241,6 +253,9 @@ impl ErrorCode {
             Self::UnresolvedRef => "unresolved_ref",
             Self::InvalidCategory => "invalid_category",
             Self::SuppressNotAllowed => "suppress_not_allowed",
+            Self::InvalidScope => "invalid_scope",
+            Self::InvalidSchedule => "invalid_schedule",
+            Self::UserPatternNotAllowed => "user_pattern_not_allowed",
         }
     }
 
@@ -455,6 +470,7 @@ impl Validator {
             );
         }
         self.precedence(doc);
+        let profiles = self.policy_scopes(doc);
 
         // Rule set IDs must be unique, and every reference must resolve.
         let mut set_ids = BTreeMap::new();
@@ -584,6 +600,14 @@ impl Validator {
                 }
                 self.rule(&path, rule);
                 self.action(&path, set, rule);
+                if let Some(scope) = &rule.scope {
+                    self.scope(
+                        &format!("{path}/scope"),
+                        scope,
+                        scope::Covered::of(rule.action.kind()),
+                        &profiles,
+                    );
+                }
             }
         }
     }
@@ -846,6 +870,13 @@ impl Validator {
             s.decision_cache_ttl_secs.into(),
             0,
             ranges::DECISION_CACHE_TTL_MAX.into(),
+        );
+        range(
+            self,
+            "group_cache_max_age_secs",
+            s.group_cache_max_age_secs.into(),
+            ranges::GROUP_CACHE_MAX_AGE_MIN.into(),
+            ranges::GROUP_CACHE_MAX_AGE_MAX.into(),
         );
         range(
             self,

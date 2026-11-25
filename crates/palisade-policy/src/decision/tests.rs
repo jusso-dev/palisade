@@ -319,6 +319,7 @@ fn every_field_is_always_present() {
         "directives",
         "effects",
         "reason_code",
+        "scope_notes",
         "trace_id",
     ];
     let mut sorted = keys.clone();

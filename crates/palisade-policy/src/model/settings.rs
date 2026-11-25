@@ -26,11 +26,16 @@ pub mod ranges {
     pub const ANCESTOR_DEPTH_MAX: u8 = 16;
     /// Most entries in `advanced`.
     pub const ADVANCED_KEYS_MAX: usize = 256;
+    /// Shortest `group_cache_max_age_secs` (one hour).
+    pub const GROUP_CACHE_MAX_AGE_MIN: u32 = 3_600;
+    /// Longest `group_cache_max_age_secs`, and the default (one day).
+    pub const GROUP_CACHE_MAX_AGE_MAX: u32 = 86_400;
 }
 
 use ranges::{
     ADVANCED_KEYS_MAX, ANCESTOR_DEPTH_MAX, ANCESTOR_DEPTH_MIN, DECISION_CACHE_TTL_MAX,
-    OVERRIDE_MINUTES_MAX, OVERRIDE_SLOTS_MAX, POLL_INTERVAL_MAX, POLL_INTERVAL_MIN,
+    GROUP_CACHE_MAX_AGE_MAX, GROUP_CACHE_MAX_AGE_MIN, OVERRIDE_MINUTES_MAX, OVERRIDE_SLOTS_MAX,
+    POLL_INTERVAL_MAX, POLL_INTERVAL_MIN,
 };
 
 /// Settings that apply to the whole policy. Every field is optional in a
@@ -63,8 +68,13 @@ pub struct PolicySettings {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     #[schemars(length(max = OVERRIDE_SLOTS_MAX), inner(range(max = OVERRIDE_MINUTES_MAX)))]
     pub override_durations: Vec<u32>,
-    /// Which clock schedules use.
+    /// Which clock schedules use, unless a schedule sets its own (#38).
     pub time_zone_basis: TimeZoneBasis,
+    /// How old cached group memberships that are not in the token
+    /// (cloud-directory groups) may be before scopes treat them as unknown,
+    /// in seconds (#38). From 3600 to 86400.
+    #[schemars(range(min = GROUP_CACHE_MAX_AGE_MIN, max = GROUP_CACHE_MAX_AGE_MAX))]
+    pub group_cache_max_age_secs: u32,
     /// How many ancestors process criteria may inspect (#31).
     #[schemars(range(min = ANCESTOR_DEPTH_MIN, max = ANCESTOR_DEPTH_MAX))]
     pub max_ancestor_depth: u8,
@@ -166,6 +176,7 @@ impl Default for PolicySettings {
             decision_cache_ttl_secs: 300,
             override_durations: Vec::new(),
             time_zone_basis: TimeZoneBasis::DeviceLocal,
+            group_cache_max_age_secs: GROUP_CACHE_MAX_AGE_MAX,
             max_ancestor_depth: 8,
             advanced: BTreeMap::new(),
             allow_unknown_advanced: false,
@@ -193,6 +204,9 @@ pub enum TimeZoneBasis {
     DeviceLocal,
     /// Coordinated Universal Time.
     Utc,
+    /// The time zone of the session's user, if the agent can read it, and
+    /// otherwise the device's (#38).
+    UserLocal,
 }
 
 /// A scalar value in `advanced`.

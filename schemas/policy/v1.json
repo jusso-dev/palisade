@@ -227,6 +227,71 @@
         }
       ]
     },
+    "ClientFilter": {
+      "additionalProperties": false,
+      "description": "The client connected to a remote desktop session, for per-client\nscoping on multi-session hosts. Each list that is set must match.",
+      "properties": {
+        "device_sets": {
+          "description": "Device sets (#37) the client device is in.",
+          "items": {
+            "$ref": "#/$defs/LibraryRef"
+          },
+          "maxItems": 1000,
+          "type": "array"
+        },
+        "hostname": {
+          "description": "Wildcards on the client's host name.",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 1000,
+          "type": "array"
+        },
+        "ip": {
+          "description": "Address blocks (`10.0.0.0/8`) or ranges (`10.0.0.1-10.0.0.9`) for\nthe client's address.",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 1000,
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "CloudObject": {
+      "additionalProperties": false,
+      "description": "An object in a cloud directory: a group of users or of devices.",
+      "properties": {
+        "object_id": {
+          "description": "The object's ID, a GUID.",
+          "type": "string"
+        },
+        "tenant_id": {
+          "description": "The tenant's ID, a GUID.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tenant_id",
+        "object_id"
+      ],
+      "type": "object"
+    },
+    "Combine": {
+      "description": "How a scope's dimensions combine.",
+      "oneOf": [
+        {
+          "const": "all",
+          "description": "Every dimension that is set must match. The default.",
+          "type": "string"
+        },
+        {
+          "const": "any",
+          "description": "At least one dimension that is set must match.",
+          "type": "string"
+        }
+      ]
+    },
     "ContainmentProfileRef": {
       "$ref": "#/$defs/Uuid7",
       "description": "The ID of a containment profile (#14, #173)."
@@ -318,6 +383,155 @@
       "required": [
         "field",
         "operator"
+      ],
+      "type": "object"
+    },
+    "Date": {
+      "description": "A calendar date, `YYYY-MM-DD`.",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+      "type": "string"
+    },
+    "DateRange": {
+      "additionalProperties": false,
+      "description": "An inclusive range of dates. `to` unset means the single day `from`.",
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/Date",
+          "description": "The first day."
+        },
+        "to": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Date"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The last day, on or after `from`."
+        }
+      },
+      "required": [
+        "from"
+      ],
+      "type": "object"
+    },
+    "DeviceRef": {
+      "description": "A device or group of devices (#38).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The device's Palisade ID.",
+          "properties": {
+            "device_id": {
+              "$ref": "#/$defs/Uuid7"
+            }
+          },
+          "required": [
+            "device_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A wildcard on the host name or the fully qualified domain name,\nsuch as `FIN-*`. Case-insensitive.",
+          "properties": {
+            "hostname_pattern": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "hostname_pattern"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A device set from the library (#37), static or dynamic. The server\nworks out which sets a device is in.",
+          "properties": {
+            "device_set": {
+              "$ref": "#/$defs/LibraryRef"
+            }
+          },
+          "required": [
+            "device_set"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A directory computer group, by SID.",
+          "properties": {
+            "directory_computer_group": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "directory_computer_group"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A cloud-directory device group.",
+          "properties": {
+            "cloud_device_group": {
+              "$ref": "#/$defs/CloudObject"
+            }
+          },
+          "required": [
+            "cloud_device_group"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A directory organisational unit.",
+          "properties": {
+            "ou": {
+              "$ref": "#/$defs/OuRef"
+            }
+          },
+          "required": [
+            "ou"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A device tag, such as `site=sydney`. Case-insensitive.",
+          "properties": {
+            "tag": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "tag"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DirectoryGroup": {
+      "additionalProperties": false,
+      "description": "A directory group.",
+      "properties": {
+        "name": {
+          "description": "The display name, for people. Never matched.",
+          "maxLength": 128,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sid": {
+          "description": "The group's SID.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sid"
       ],
       "type": "object"
     },
@@ -774,6 +988,32 @@
       ],
       "type": "object"
     },
+    "LocationProfile": {
+      "additionalProperties": false,
+      "description": "A named network location, such as `corporate`: every test must match\n(#38). The agent evaluates the profiles when the network changes and on\nevery heartbeat, and scopes test the result with `location_profile`.",
+      "properties": {
+        "all": {
+          "description": "The tests, all of which must match. No `location_profile` tests.",
+          "items": {
+            "$ref": "#/$defs/NetworkRef"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "type": "array"
+        },
+        "name": {
+          "description": "The profile's name: 1 to 64 characters, letters, digits, `_`, `.`\nor `-`. Compared without case.",
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "all"
+      ],
+      "type": "object"
+    },
     "LogLevel": {
       "description": "Whether a decision produces a local event.",
       "oneOf": [
@@ -1072,6 +1312,102 @@
       },
       "type": "object"
     },
+    "NetworkRef": {
+      "description": "A network location test (#38). Address tests match when any local\ninterface address does.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "An address block, such as `10.20.0.0/16` or `2001:db8::/32`.",
+          "properties": {
+            "cidr": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "cidr"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "An inclusive address range, such as `10.0.0.10-10.0.0.99`.",
+          "properties": {
+            "range": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "range"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A connection-specific DNS suffix, such as `corp.example.org`. Also\nmatches suffixes below it. Case-insensitive.",
+          "properties": {
+            "dns_suffix": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "dns_suffix"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A default gateway's hardware address, such as `00-1a-2b-3c-4d-5e`.",
+          "properties": {
+            "gateway_mac": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "gateway_mac"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Whether the management server is reachable.",
+          "properties": {
+            "server_reachable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "server_reachable"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A named location profile of the policy (`location_profiles`).",
+          "properties": {
+            "location_profile": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "location_profile"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A network set from the library (#37): address blocks, ranges and DNS\nsuffixes.",
+          "properties": {
+            "network_set": {
+              "$ref": "#/$defs/LibraryRef"
+            }
+          },
+          "required": [
+            "network_set"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "Notify": {
       "description": "Whether the user is shown a notification (#11).",
       "oneOf": [
@@ -1118,6 +1454,26 @@
         "com_object"
       ],
       "type": "string"
+    },
+    "OnWindowClose": {
+      "description": "What happens to processes a scheduled allow let run, when its schedule\ncloses. The engine sends a directive; the agent and the tray act on it\n(#4, #11).",
+      "oneOf": [
+        {
+          "const": "none",
+          "description": "Nothing: they keep running. The default.",
+          "type": "string"
+        },
+        {
+          "const": "warn",
+          "description": "Warn the user.",
+          "type": "string"
+        },
+        {
+          "const": "warn_then_terminate",
+          "description": "Warn the user, then terminate them after the grace period.",
+          "type": "string"
+        }
+      ]
     },
     "Operator": {
       "description": "How a criterion compares the fact with its values (#32). Positive\noperators match if any value matches; negative operators (`not_*`)\nmatch if no value does, and never match a fact that is unknown.",
@@ -1234,6 +1590,24 @@
         }
       ]
     },
+    "OuRef": {
+      "additionalProperties": false,
+      "description": "A directory organisational unit.",
+      "properties": {
+        "dn": {
+          "description": "The OU's distinguished name, such as `OU=Finance,DC=corp,DC=example`.",
+          "type": "string"
+        },
+        "include_sub_ous": {
+          "description": "Also match devices in OUs below it.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "dn"
+      ],
+      "type": "object"
+    },
     "Pin": {
       "description": "`latest` (the newest version) or one version number.",
       "oneOf": [
@@ -1262,6 +1636,14 @@
         "id": {
           "$ref": "#/$defs/PolicyId",
           "description": "Stable ID. Renaming the policy never changes it."
+        },
+        "location_profiles": {
+          "description": "Named network locations that scopes test with `location_profile`\n(#38).",
+          "items": {
+            "$ref": "#/$defs/LocationProfile"
+          },
+          "maxItems": 64,
+          "type": "array"
         },
         "metadata": {
           "$ref": "#/$defs/Metadata",
@@ -1296,6 +1678,14 @@
           "minimum": 0,
           "type": "integer"
         },
+        "rule_set_scopes": {
+          "description": "The scopes of rule set assignments (#38): each rule of the set must\nalso be in every one of them. At most one entry per rule set.",
+          "items": {
+            "$ref": "#/$defs/RuleSetScope"
+          },
+          "maxItems": 1000,
+          "type": "array"
+        },
         "rule_sets": {
           "description": "The rule sets that apply, in order, by ID.",
           "items": {
@@ -1303,6 +1693,17 @@
           },
           "maxItems": 1000,
           "type": "array"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Scope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Who, where and when the whole policy applies (#38). Every rule must\nalso be in this scope."
         },
         "settings": {
           "$ref": "#/$defs/PolicySettings",
@@ -1312,6 +1713,7 @@
             "decision_cache_ttl_secs": 300,
             "dll_control": "enforce",
             "driver_control": "enforce",
+            "group_cache_max_age_secs": 86400,
             "max_ancestor_depth": 8,
             "poll_interval_secs": 900,
             "script_control": "enforce",
@@ -1375,6 +1777,14 @@
           "default": "enforce",
           "description": "Control level for drivers."
         },
+        "group_cache_max_age_secs": {
+          "default": 86400,
+          "description": "How old cached group memberships that are not in the token\n(cloud-directory groups) may be before scopes treat them as unknown,\nin seconds (#38). From 3600 to 86400.",
+          "format": "uint32",
+          "maximum": 86400,
+          "minimum": 3600,
+          "type": "integer"
+        },
         "max_ancestor_depth": {
           "default": 8,
           "description": "How many ancestors process criteria may inspect (#31).",
@@ -1432,7 +1842,7 @@
         "time_zone_basis": {
           "$ref": "#/$defs/TimeZoneBasis",
           "default": "device_local",
-          "description": "Which clock schedules use."
+          "description": "Which clock schedules use, unless a schedule sets its own (#38)."
         }
       },
       "type": "object"
@@ -1494,6 +1904,102 @@
       },
       "type": "object"
     },
+    "PrincipalRef": {
+      "description": "A user or group (#38). Each is an object with one key, the kind.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A user or group SID, such as `S-1-5-32-544`.",
+          "properties": {
+            "sid": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sid"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A well-known account or group.",
+          "properties": {
+            "well_known": {
+              "$ref": "#/$defs/WellKnown"
+            }
+          },
+          "required": [
+            "well_known"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A local group, by name, resolved on the device. Case-insensitive.",
+          "properties": {
+            "local_group": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "local_group"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A directory group, by SID. The name is for display only.",
+          "properties": {
+            "directory_group": {
+              "$ref": "#/$defs/DirectoryGroup"
+            }
+          },
+          "required": [
+            "directory_group"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A cloud-directory group, by tenant and object ID.",
+          "properties": {
+            "cloud_group": {
+              "$ref": "#/$defs/CloudObject"
+            }
+          },
+          "required": [
+            "cloud_group"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A wildcard on the `DOMAIN\\user` account name, such as `*\\svc_*`.\nNames can be spoofed, so a pattern may only narrow a rule that lets\nan object run, and only widen a deny (validation).",
+          "properties": {
+            "user_pattern": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "user_pattern"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A principal set from the library (#37): SIDs and object IDs.",
+          "properties": {
+            "principal_set": {
+              "$ref": "#/$defs/LibraryRef"
+            }
+          },
+          "required": [
+            "principal_set"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "PriorityDirection": {
       "description": "Which `priority` number wins.",
       "oneOf": [
@@ -1508,6 +2014,75 @@
           "type": "string"
         }
       ]
+    },
+    "RefList": {
+      "additionalProperties": false,
+      "description": "An `include` and an `exclude` list. An empty `include` means every\nentry; a match in `exclude` always wins.",
+      "properties": {
+        "exclude": {
+          "description": "Never matches when any entry matches, whatever `include` says.",
+          "items": {
+            "$ref": "#/$defs/PrincipalRef"
+          },
+          "maxItems": 1000,
+          "type": "array"
+        },
+        "include": {
+          "description": "Matches when any entry matches. Empty means everyone or everything.",
+          "items": {
+            "$ref": "#/$defs/PrincipalRef"
+          },
+          "maxItems": 1000,
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "RefList2": {
+      "additionalProperties": false,
+      "description": "An `include` and an `exclude` list. An empty `include` means every\nentry; a match in `exclude` always wins.",
+      "properties": {
+        "exclude": {
+          "description": "Never matches when any entry matches, whatever `include` says.",
+          "items": {
+            "$ref": "#/$defs/DeviceRef"
+          },
+          "maxItems": 1000,
+          "type": "array"
+        },
+        "include": {
+          "description": "Matches when any entry matches. Empty means everyone or everything.",
+          "items": {
+            "$ref": "#/$defs/DeviceRef"
+          },
+          "maxItems": 1000,
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "RefList3": {
+      "additionalProperties": false,
+      "description": "An `include` and an `exclude` list. An empty `include` means every\nentry; a match in `exclude` always wins.",
+      "properties": {
+        "exclude": {
+          "description": "Never matches when any entry matches, whatever `include` says.",
+          "items": {
+            "$ref": "#/$defs/NetworkRef"
+          },
+          "maxItems": 1000,
+          "type": "array"
+        },
+        "include": {
+          "description": "Matches when any entry matches. Empty means everyone or everything.",
+          "items": {
+            "$ref": "#/$defs/NetworkRef"
+          },
+          "maxItems": 1000,
+          "type": "array"
+        }
+      },
+      "type": "object"
     },
     "RequestTemplateRef": {
       "$ref": "#/$defs/Uuid7",
@@ -1593,6 +2168,17 @@
             "integer",
             "null"
           ]
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Scope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Who, where and when the rule applies (#38). Unset means everyone,\neverywhere, always, within the policy's and the rule set's scopes."
         }
       },
       "required": [
@@ -1758,10 +2344,261 @@
         }
       ]
     },
+    "RuleSetScope": {
+      "additionalProperties": false,
+      "description": "The scopes of one rule-set assignment: every one must match for the\nset's rules to apply.",
+      "properties": {
+        "rule_set": {
+          "$ref": "#/$defs/RuleSetId",
+          "description": "The rule set, which the policy must reference."
+        },
+        "scopes": {
+          "description": "From 1 to 8 scopes, all of which must match. In an effective policy\n(#37) the contributing policy's own scope is added, so up to 9.",
+          "items": {
+            "$ref": "#/$defs/Scope"
+          },
+          "maxItems": 9,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "rule_set",
+        "scopes"
+      ],
+      "type": "object"
+    },
+    "Schedule": {
+      "additionalProperties": false,
+      "description": "When a scope is active (#38).\n\nTimes are wall-clock times in the schedule's time zone. A window starts\non one of its days at `start` and lasts until `end` (which may be on\nthe next day: `22:00` to `06:00` wraps midnight) or for `duration_mins`.\nWith no windows, every time of day is in. `dates` and `except_dates`\ntest the local date of the moment being decided.",
+      "properties": {
+        "dates": {
+          "description": "Absolute date ranges. Empty means every date.",
+          "items": {
+            "$ref": "#/$defs/DateRange"
+          },
+          "maxItems": 1000,
+          "type": "array"
+        },
+        "except_dates": {
+          "description": "Dates on which the schedule is never active, such as holidays.",
+          "items": {
+            "$ref": "#/$defs/DateRange"
+          },
+          "maxItems": 1000,
+          "type": "array"
+        },
+        "grace_secs": {
+          "description": "Seconds between the warning and termination, for\n`warn_then_terminate`. Default 300.",
+          "format": "uint32",
+          "maximum": 86400,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "on_window_close": {
+          "$ref": "#/$defs/OnWindowClose",
+          "description": "Only for rules that let an object run: what happens to running\nprocesses when the schedule closes."
+        },
+        "timezone_basis": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeZoneBasis"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The clock the times are read on. Unset means the policy's\n`settings.time_zone_basis`."
+        },
+        "windows": {
+          "description": "The weekly windows. Empty means all day, every day.",
+          "items": {
+            "$ref": "#/$defs/Window"
+          },
+          "maxItems": 64,
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "SchemaVersion": {
       "description": "A semantic version MAJOR.MINOR.PATCH, without pre-release or build suffixes.",
       "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
       "type": "string"
+    },
+    "Scope": {
+      "additionalProperties": false,
+      "description": "Who, where and when a rule applies (#38).\n\nEvery field is optional. An empty scope applies to everyone, everywhere,\nalways. A scope only ever narrows: a rule applies when its match tree\nmatches **and** every scope on the way to it matches (the policy's, its\nrule set assignment's, and its own).",
+      "properties": {
+        "combine": {
+          "$ref": "#/$defs/Combine",
+          "description": "How the dimensions that are set combine: `all` (the default) needs\nevery one to match, `any` needs one."
+        },
+        "devices": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefList2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Devices."
+        },
+        "max_instances_per_session": {
+          "description": "Only on the scope of a rule that lets an object run: at most this\nmany instances per session. `0`, the default, means no limit.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "negate": {
+          "description": "Apply when the scope does **not** match.",
+          "type": "boolean"
+        },
+        "network": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefList3"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The device's network location."
+        },
+        "principals": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefList"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Users and groups."
+        },
+        "schedule": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Schedule"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When the scope is active, written in place. At most one of\n`schedule` and `schedule_set`."
+        },
+        "schedule_set": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LibraryRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When the scope is active, as a schedule from the library (#37)."
+        },
+        "sessions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionFilter"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The session type and, on a multi-session host, the connecting client."
+        },
+        "subject": {
+          "$ref": "#/$defs/ScopeSubject",
+          "description": "Whose token `principals` is tested against."
+        }
+      },
+      "type": "object"
+    },
+    "ScopeSubject": {
+      "description": "Whose token a scope's `principals` is tested against.",
+      "oneOf": [
+        {
+          "const": "process_user",
+          "description": "The user the process runs as. The default.",
+          "type": "string"
+        },
+        {
+          "const": "session_user",
+          "description": "The user logged on to the process's session, for example to scope a\nservice running as SYSTEM on behalf of the interactive user.",
+          "type": "string"
+        },
+        {
+          "const": "parent_process_user",
+          "description": "The user the parent process runs as.",
+          "type": "string"
+        }
+      ]
+    },
+    "SessionFilter": {
+      "additionalProperties": false,
+      "description": "Session criteria (#38).",
+      "properties": {
+        "client": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClientFilter"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The connecting client, on a multi-session host."
+        },
+        "types": {
+          "description": "The session types. Empty means every type.",
+          "items": {
+            "$ref": "#/$defs/SessionType"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "SessionType": {
+      "description": "How a session was started.",
+      "oneOf": [
+        {
+          "const": "console",
+          "description": "The physical console.",
+          "type": "string"
+        },
+        {
+          "const": "rdp",
+          "description": "A remote desktop session.",
+          "type": "string"
+        },
+        {
+          "const": "remote_shell",
+          "description": "A remote shell, such as a remote PowerShell session.",
+          "type": "string"
+        },
+        {
+          "const": "service",
+          "description": "A service.",
+          "type": "string"
+        },
+        {
+          "const": "batch",
+          "description": "A batch job, such as a scheduled task.",
+          "type": "string"
+        },
+        {
+          "const": "network",
+          "description": "A network logon.",
+          "type": "string"
+        }
+      ]
     },
     "TierTiebreak": {
       "description": "Which action wins between rules of the same specificity.",
@@ -1778,6 +2615,11 @@
         }
       ]
     },
+    "TimeOfDay": {
+      "description": "A wall-clock time, `HH:MM`, from 00:00 to 24:00.",
+      "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+      "type": "string"
+    },
     "TimeZoneBasis": {
       "description": "The clock that schedules are interpreted in.",
       "oneOf": [
@@ -1789,6 +2631,11 @@
         {
           "const": "utc",
           "description": "Coordinated Universal Time.",
+          "type": "string"
+        },
+        {
+          "const": "user_local",
+          "description": "The time zone of the session's user, if the agent can read it, and\notherwise the device's (#38).",
           "type": "string"
         }
       ]
@@ -1851,6 +2698,146 @@
       "description": "A UUID version 7 in canonical lowercase form.",
       "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
       "type": "string"
+    },
+    "Weekday": {
+      "description": "A day of the week.",
+      "oneOf": [
+        {
+          "const": "mon",
+          "description": "Monday.",
+          "type": "string"
+        },
+        {
+          "const": "tue",
+          "description": "Tuesday.",
+          "type": "string"
+        },
+        {
+          "const": "wed",
+          "description": "Wednesday.",
+          "type": "string"
+        },
+        {
+          "const": "thu",
+          "description": "Thursday.",
+          "type": "string"
+        },
+        {
+          "const": "fri",
+          "description": "Friday.",
+          "type": "string"
+        },
+        {
+          "const": "sat",
+          "description": "Saturday.",
+          "type": "string"
+        },
+        {
+          "const": "sun",
+          "description": "Sunday.",
+          "type": "string"
+        }
+      ]
+    },
+    "WellKnown": {
+      "description": "A well-known account or group, with a fixed SID.",
+      "oneOf": [
+        {
+          "const": "everyone",
+          "description": "`S-1-1-0`.",
+          "type": "string"
+        },
+        {
+          "const": "authenticated_users",
+          "description": "`S-1-5-11`.",
+          "type": "string"
+        },
+        {
+          "const": "administrators",
+          "description": "The local Administrators group, `S-1-5-32-544`.",
+          "type": "string"
+        },
+        {
+          "const": "users",
+          "description": "The local Users group, `S-1-5-32-545`.",
+          "type": "string"
+        },
+        {
+          "const": "system",
+          "description": "The local system account, `S-1-5-18`.",
+          "type": "string"
+        },
+        {
+          "const": "local_service",
+          "description": "`S-1-5-19`.",
+          "type": "string"
+        },
+        {
+          "const": "network_service",
+          "description": "`S-1-5-20`.",
+          "type": "string"
+        },
+        {
+          "const": "interactive",
+          "description": "Interactive logons, `S-1-5-4`.",
+          "type": "string"
+        },
+        {
+          "const": "remote_desktop_users",
+          "description": "`S-1-5-32-555`.",
+          "type": "string"
+        },
+        {
+          "const": "domain_controllers",
+          "description": "Any domain's Domain Controllers group (relative ID 516), or the\nEnterprise Domain Controllers group, `S-1-5-9`.",
+          "type": "string"
+        }
+      ]
+    },
+    "Window": {
+      "additionalProperties": false,
+      "description": "One weekly window.",
+      "properties": {
+        "days": {
+          "description": "The days the window starts on. At least one, each once.",
+          "items": {
+            "$ref": "#/$defs/Weekday"
+          },
+          "maxItems": 7,
+          "minItems": 1,
+          "type": "array"
+        },
+        "duration_mins": {
+          "description": "How long it lasts, in minutes, from 1 to 10080.",
+          "format": "uint32",
+          "maximum": 10080,
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "end": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeOfDay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When it ends, `HH:MM`. At or before `start` means the next day.\nExactly one of `end` and `duration_mins`."
+        },
+        "start": {
+          "$ref": "#/$defs/TimeOfDay",
+          "description": "When the window starts, `HH:MM`."
+        }
+      },
+      "required": [
+        "days",
+        "start"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://github.com/jusso-dev/palisade/schemas/policy/v1.json",

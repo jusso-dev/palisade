@@ -538,7 +538,7 @@ fn inactive_rules_that_would_match_are_listed() {
     assert_eq!(t.inactive_matches.len(), 1);
     assert_eq!(t.inactive_matches[0].name, "Retired allow");
     assert_eq!(t.inactive_matches[0].reason, InactiveReason::Disabled);
-    // Scopes arrive with #38: nothing is ever rejected yet.
+    // No rule in the fixture has a scope (#38).
     assert!(t.scope_rejections.is_empty());
     snapshot("inactive", &t);
     explained("inactive", &t);
@@ -979,6 +979,7 @@ fn explain_messages_all_have_english_templates() {
         "stage",
         "overridden",
         "inactive",
+        "scope-rejected",
         "tray-with-reason",
     ];
     let mut checked = 0;
@@ -2424,4 +2425,327 @@ fn the_suggestion_follows_the_precedence_model() {
     let doc = explain(&t, Verbosity::Normal);
     assert_eq!(doc.suggestion.as_ref().unwrap().args["effect"], "allow");
     assert!(render_text(&doc, &Catalog::english()).contains("it would allow this file"));
+}
+
+// --- Scopes (#38) ------------------------------------------------------------
+
+/// A policy with one allow for hash `a` scoped to `scope`, and an allow for
+/// hash `a` from publisher `Example Ltd`, unscoped, as a fallback.
+fn scoped_policy(scope: serde_json::Value) -> ValidatedPolicy {
+    validated(policy_doc(
+        "enforce",
+        vec![(
+            1,
+            "allowlist",
+            false,
+            vec![
+                with(
+                    rule(
+                        1,
+                        "Admins only",
+                        crit("hash.sha256", "equals", &[&sha('a')]),
+                        serde_json::json!({"type": "allow"}),
+                    ),
+                    "scope",
+                    scope,
+                ),
+                rule(
+                    2,
+                    "Example publisher",
+                    serde_json::json!({"all": [
+                        crit("signer.publisher", "equals", &["Example Ltd"]),
+                        crit("meta.product_name", "equals", &["Example Tools"]),
+                    ]}),
+                    serde_json::json!({"type": "allow"}),
+                ),
+            ],
+        )],
+    ))
+}
+
+#[test]
+fn rules_out_of_scope_are_listed_as_rejected_and_nowhere_else() {
+    let p = scoped_policy(serde_json::json!({
+        "principals": {"include": [{"sid": IT_ADMINS}]}
+    }));
+    let mut o = object('a', "Other Ltd", "Other", "C:\\Apps\\x.exe", Some(false));
+    o.context.scope.process_token = Some(
+        crate::scope::Token::new()
+            .with_user(Some("S-1-5-21-1000-2000-3000-1001"), None)
+            .with_groups([("S-1-5-32-545", false)]),
+    );
+    let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Full);
+    assert_eq!(t.decision.as_ref().unwrap().outcome(), Outcome::Blocked);
+    assert_eq!(t.scope_rejections.len(), 1);
+    let r = &t.scope_rejections[0];
+    assert_eq!(r.name, "Admins only");
+    assert_eq!(r.level, "rule");
+    assert_eq!(r.dimension, Some("principals"));
+    // It behaves as absent: not matched, and not a near miss.
+    assert!(t.matched.iter().all(|m| m.name != "Admins only"));
+    assert!(t.near_misses.iter().all(|m| m.name != "Admins only"));
+    let doc = explain(&t, Verbosity::Detailed);
+    let c = Catalog::english();
+    assert!(
+        doc.paragraphs
+            .iter()
+            .any(|m| m.id == "scope-rejected" && c.format(m).contains("principals")),
+        "{doc:?}"
+    );
+    // An administrator is in scope: the rule decides and is not rejected.
+    o.context.scope.process_token = Some(
+        crate::scope::Token::new()
+            .with_user(Some("S-1-5-21-1000-2000-3000-1001"), None)
+            .with_groups([(IT_ADMINS, false)]),
+    );
+    let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Standard);
+    assert!(t.scope_rejections.is_empty());
+    assert_eq!(t.decisive.as_ref().unwrap().name, "Admins only");
+}
+
+#[test]
+fn stale_groups_and_an_untrusted_clock_warn() {
+    let p = scoped_policy(serde_json::json!({
+        "principals": {"include": [{"cloud_group": {
+            "tenant_id": "6f1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+            "object_id": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4e"
+        }}]},
+        "schedule": {"timezone_basis": "utc", "windows": [{"days": ["mon"], "start": "00:00", "end": "00:00"}]}
+    }));
+    let mut o = object('a', "Other Ltd", "Other", "C:\\Apps\\x.exe", Some(false));
+    o.context.scope.process_token = Some(crate::scope::Token::new().with_cloud_groups(
+        0,
+        [(
+            "6f1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+            "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4e",
+        )],
+    ));
+    o.context.scope.time = Some(crate::scope::TrustedTime {
+        unix_secs: 1_789_948_800,
+        trusted: false,
+    });
+    let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Standard);
+    let codes: Vec<WarningCode> = t.warnings.iter().map(|w| w.code).collect();
+    assert!(codes.contains(&WarningCode::ScopeStale), "{codes:?}");
+    assert!(codes.contains(&WarningCode::ClockUntrusted), "{codes:?}");
+    assert_eq!(
+        t.decision.as_ref().unwrap().scope_notes(),
+        &[
+            crate::scope::ScopeNote::ScopeStale,
+            crate::scope::ScopeNote::ClockUntrusted
+        ]
+    );
+}
+
+#[test]
+fn the_trace_agrees_with_the_evaluator_on_scoped_rules() {
+    // Whatever the scope does, the matched list is the evaluator's.
+    for scope in [
+        serde_json::json!({"principals": {"include": [{"sid": IT_ADMINS}]}}),
+        serde_json::json!({"principals": {"exclude": [{"sid": IT_ADMINS}]}}),
+        serde_json::json!({"sessions": {"types": ["console"]}, "negate": true}),
+    ] {
+        let p = scoped_policy(scope);
+        for groups in [vec![], vec![(IT_ADMINS, false)], vec![(IT_ADMINS, true)]] {
+            let mut o = object(
+                'a',
+                "Example Ltd",
+                "Example Tools",
+                "C:\\Apps\\x.exe",
+                Some(false),
+            );
+            o.context.scope.process_token = Some(
+                crate::scope::Token::new()
+                    .with_user(Some("S-1-5-21-1000-2000-3000-1001"), None)
+                    .with_groups(groups.iter().copied()),
+            );
+            o.context.session.session_type = Some(crate::context::SessionType::Rdp);
+            let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Standard);
+            let vars = PathVariables::new();
+            let subject = Subject {
+                object_type: ObjectType::Executable,
+                facts: &o.facts,
+                variables: &vars,
+                context: &o.context,
+            };
+            let tracer = Tracer::new(&p).unwrap();
+            let mut expect = tracer.evaluator().matching_ids(&subject);
+            expect.sort();
+            let got: Vec<_> = t.matched.iter().map(|m| m.rule.rule_id).collect();
+            assert_eq!(got, expect);
+            // A rejected rule never also matched.
+            for r in &t.scope_rejections {
+                assert!(!got.contains(&r.rule.rule_id));
+            }
+        }
+    }
+}
+
+#[test]
+fn an_unknown_scope_is_no_near_miss_and_warnings_name_only_matching_rules() {
+    // The scoped allow's tree matches; its cloud group is stale, so its
+    // scope is unknown. An unrelated rule with a stale scope and a tree
+    // that does not match gets no warning.
+    let stale_scope = serde_json::json!({"principals": {"include": [{"cloud_group": {
+        "tenant_id": "6f1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+        "object_id": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4e"
+    }}]}});
+    let p = validated(policy_doc(
+        "enforce",
+        vec![(
+            1,
+            "mixed",
+            false,
+            vec![
+                with(
+                    rule(
+                        1,
+                        "Stale allow",
+                        crit("hash.sha256", "equals", &[&sha('a')]),
+                        serde_json::json!({"type": "allow"}),
+                    ),
+                    "scope",
+                    stale_scope.clone(),
+                ),
+                with(
+                    rule(
+                        2,
+                        "Unrelated",
+                        crit("hash.sha256", "equals", &[&sha('f')]),
+                        serde_json::json!({"type": "allow"}),
+                    ),
+                    "scope",
+                    stale_scope.clone(),
+                ),
+                with(
+                    rule(
+                        3,
+                        "Fail-closed deny",
+                        crit("hash.sha256", "equals", &[&sha('a')]),
+                        serde_json::json!({"type": "deny", "unknown_as": "match"}),
+                    ),
+                    "scope",
+                    stale_scope,
+                ),
+            ],
+        )],
+    ));
+    let mut o = object('a', "Other Ltd", "Other", "C:\\Apps\\x.exe", Some(false));
+    o.context.scope.process_token = Some(crate::scope::Token::new().with_cloud_groups(
+        0,
+        [(
+            "6f1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+            "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4e",
+        )],
+    ));
+    o.context.scope.time = Some(crate::scope::TrustedTime {
+        unix_secs: 1_789_948_800,
+        trusted: true,
+    });
+    let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Full);
+    assert!(
+        t.near_misses.iter().all(|n| n.name != "Stale allow"),
+        "{:?}",
+        t.near_misses
+    );
+    let stale = t
+        .warnings
+        .iter()
+        .find(|w| w.code == WarningCode::ScopeStale)
+        .unwrap();
+    let names: Vec<u32> = stale
+        .rules
+        .iter()
+        .map(|r| r.display_id.unwrap().to_string()[2..].parse().unwrap())
+        .collect();
+    assert_eq!(names, vec![1, 3]);
+    let deny = t
+        .matched
+        .iter()
+        .find(|m| m.name == "Fail-closed deny")
+        .unwrap();
+    assert!(deny.via_unknown);
+}
+
+#[test]
+fn an_instance_limit_block_suggests_no_allow() {
+    let p = validated(policy_doc(
+        "enforce",
+        vec![(
+            1,
+            "allowlist",
+            false,
+            vec![with(
+                rule(
+                    1,
+                    "Licensed",
+                    crit("hash.sha256", "equals", &[&sha('a')]),
+                    serde_json::json!({"type": "allow"}),
+                ),
+                "scope",
+                serde_json::json!({"max_instances_per_session": 1}),
+            )],
+        )],
+    ));
+    let mut o = object('a', "Other Ltd", "Other", "C:\\Apps\\x.exe", Some(false));
+    o.context.scope.instances_in_session = Some(1);
+    let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Standard);
+    let d = t.decision.as_ref().unwrap();
+    assert_eq!(d.reason_code(), ReasonCode::InstanceLimit);
+    assert!(t.allow_suggestion.is_none());
+    let doc = explain(&t, Verbosity::Detailed);
+    assert_eq!(doc.summary.id, "summary-instance-limit");
+}
+
+#[test]
+fn the_tracer_resolves_library_sets() {
+    #[derive(Debug)]
+    struct Admins;
+    impl crate::scope::ScopeLibrary for Admins {
+        fn principal_set(&self, _: &crate::scope::SetRef) -> Option<Vec<String>> {
+            Some(vec![IT_ADMINS.to_owned()])
+        }
+        fn network_set(&self, _: &crate::scope::SetRef) -> Option<Vec<String>> {
+            None
+        }
+        fn schedule_set(&self, _: &crate::scope::SetRef) -> Option<crate::scope::Schedule> {
+            None
+        }
+    }
+    let p = scoped_policy(
+        serde_json::json!({"principals": {"include": [{"principal_set": {
+            "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e70"
+        }}]}}),
+    );
+    let mut o = object('a', "Other Ltd", "Other", "C:\\Apps\\x.exe", Some(false));
+    o.context.scope.process_token = Some(
+        crate::scope::Token::new()
+            .with_user(Some("S-1-5-21-1000-2000-3000-1001"), None)
+            .with_groups([(IT_ADMINS, false)]),
+    );
+    let vars = PathVariables::new();
+    let subject = Subject {
+        object_type: ObjectType::Executable,
+        facts: &o.facts,
+        variables: &vars,
+        context: &o.context,
+    };
+    let state = enforce(&p);
+    let opts = TraceOptions::at(TraceLevel::Standard);
+    let with = Tracer::with_library(&p, &Admins).unwrap().trace(
+        &subject,
+        &ObjectExtras::default(),
+        &state,
+        TRACE,
+        &opts,
+    );
+    assert_eq!(with.decisive.as_ref().unwrap().name, "Admins only");
+    let without =
+        Tracer::new(&p)
+            .unwrap()
+            .trace(&subject, &ObjectExtras::default(), &state, TRACE, &opts);
+    assert_eq!(
+        without.decision.as_ref().unwrap().outcome(),
+        Outcome::Blocked
+    );
 }

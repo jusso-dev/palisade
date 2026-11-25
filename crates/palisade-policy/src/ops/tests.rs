@@ -46,12 +46,23 @@ static NO_CONTEXT: EvaluationContext = EvaluationContext {
         is_laptop: None,
         is_vdi: None,
         is_terminal_server: None,
+        dn: None,
     },
     session: crate::context::SessionContext {
         session_type: None,
         client_hostname: None,
         is_remote: None,
+        client_ip: None,
     },
+    network: crate::context::NetworkContext {
+        addresses: None,
+        macs: None,
+        dns_suffixes: None,
+        gateway_macs: None,
+        server_reachable: None,
+        locations: None,
+    },
+    scope: crate::scope::ScopeFacts::EMPTY,
 };
 
 const SHA: &str = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";

@@ -12,6 +12,7 @@ publish.workspace = true
 [dependencies]
 # Keyed digests of withheld facts in decision traces (#41).
 hmac = { workspace = true }
+jiff = { workspace = true }
 palisade-core = { workspace = true, features = ["std", "schema"] }
 regex-automata = { workspace = true }
 regex-syntax = { workspace = true }

@@ -86,12 +86,15 @@ fn full() -> EvaluationContext {
             is_laptop: Some(true),
             is_vdi: Some(false),
             is_terminal_server: Some(false),
+            dn: Some("CN=WS-0042,OU=Finance,DC=corp,DC=example,DC=org".to_owned()),
         },
         session: SessionContext {
             session_type: Some(SessionType::Rdp),
             client_hostname: Some("THIN-07".to_owned()),
             is_remote: Some(true),
+            client_ip: Some("10.1.2.3".parse().unwrap()),
         },
+        ..EvaluationContext::default()
     }
 }
 

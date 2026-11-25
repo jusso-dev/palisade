@@ -1,0 +1,10 @@
+unknown_rule_set /policy/rule_set_scopes/0/rule_set
+user_pattern_not_allowed /rule_sets/0/rules/0/scope/principals/include/0
+invalid_scope /rule_sets/0/rules/0/scope/network/include/0
+invalid_scope /rule_sets/0/rules/0/scope/network/include/1
+user_pattern_not_allowed /rule_sets/0/rules/1/scope/principals/exclude/0
+invalid_schedule /rule_sets/0/rules/1/scope/schedule/windows/0/days
+invalid_schedule /rule_sets/0/rules/1/scope/schedule/windows/1
+invalid_schedule /rule_sets/0/rules/1/scope/schedule/except_dates/0/to
+invalid_schedule /rule_sets/0/rules/1/scope/schedule/on_window_close
+invalid_scope /rule_sets/0/rules/1/scope/max_instances_per_session

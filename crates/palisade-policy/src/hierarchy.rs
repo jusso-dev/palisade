@@ -535,6 +535,10 @@ pub enum HierarchyCode {
     InvalidMembership,
     /// The library is still referenced.
     InUse,
+    /// One rule set is contributed with different scopes, by two
+    /// policies or by a policy and a node, so no single scope says who it
+    /// applies to (#38).
+    ConflictingScope,
 }
 
 impl HierarchyCode {
@@ -569,6 +573,7 @@ impl HierarchyCode {
             Self::TooMany => "too_many",
             Self::InvalidMembership => "invalid_membership",
             Self::InUse => "in_use",
+            Self::ConflictingScope => "conflicting_scope",
         }
     }
 }

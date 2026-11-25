@@ -280,7 +280,9 @@ pub struct Trace {
     /// Disabled rules that would have matched. Standard and full.
     pub inactive_matches: Vec<InactiveMatch>,
     /// Rules whose tree matched but whose scope excluded the subject.
-    /// Standard and full. Empty until scopes exist (#38).
+    /// Standard and full: every enabled rule whose tree matched but whose
+    /// scopes (#38) took it out, by rule ID. Such a rule behaves as
+    /// absent, so it is in no other list.
     pub scope_rejections: Vec<ScopeRejection>,
     /// Facts the evaluation needed but did not have, and what that did to
     /// the decision. Standard and full.
@@ -320,6 +322,8 @@ pub struct Omitted {
     pub near_misses: u32,
     /// Inactive matches past [`limits::MAX_INACTIVE`].
     pub inactive_matches: u32,
+    /// Scope rejections past [`limits::MAX_INACTIVE`].
+    pub scope_rejections: u32,
 }
 
 /// A pipeline stage (#35).
@@ -645,7 +649,22 @@ impl<'p> Tracer<'p> {
     /// Returns [`BuildError`] if a tree does not compile, which validation
     /// rules out.
     pub fn new(validated: &'p ValidatedPolicy) -> Result<Self, BuildError> {
-        let evaluator = Evaluator::new(validated)?;
+        Self::with_library(validated, &crate::scope::NoLibrary)
+    }
+
+    /// Compiles the policy for evaluation and tracing, resolving the
+    /// library sets scopes reference through `library` (#37, #38), as
+    /// [`Evaluator::with_library`] does.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BuildError`] if a tree does not compile, which validation
+    /// rules out.
+    pub fn with_library(
+        validated: &'p ValidatedPolicy,
+        library: &dyn crate::scope::ScopeLibrary,
+    ) -> Result<Self, BuildError> {
+        let evaluator = Evaluator::with_library(validated, library)?;
         let doc = validated.document();
         let policy = &doc.policy;
         let sets: BTreeMap<_, _> = doc.rule_sets.iter().map(|s| (s.id, s)).collect();
@@ -793,6 +812,26 @@ impl<'p> Tracer<'p> {
             }
         }
         let result = |i: usize| results[i].as_ref();
+        // The scopes of every enabled rule whose type applies (#38), as
+        // the evaluator read them. A rule they take out is absent.
+        let scopes: Vec<Option<crate::scope::ScopeEvaluation>> = self
+            .rules
+            .iter()
+            .enumerate()
+            .map(|(i, r)| {
+                let applies = r.rule.enabled && result(i).is_some_and(|x| x.type_applies);
+                if applies {
+                    self.evaluator.scope_of(r.rule.id, subject)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let out_of_scope = |i: usize| scopes[i].as_ref().is_some_and(|s| s.result == Tri::NoMatch);
+        // A rule whose scopes are not `Match` cannot be a near miss: its
+        // criteria are not what kept it from applying.
+        let scope_open = |i: usize| scopes[i].as_ref().is_none_or(|s| s.result == Tri::Match);
+        let scope_unknown = |i: usize| scopes[i].as_ref().is_some_and(|s| s.result == Tri::Unknown);
 
         let matched_ids: BTreeSet<RuleId> =
             self.evaluator.matching_ids(subject).into_iter().collect();
@@ -816,7 +855,12 @@ impl<'p> Tracer<'p> {
             .iter()
             .take(MAX_MATCHED)
             .map(|r| {
-                let res = self.by_id.get(&r.rule.id).and_then(|&i| result(i));
+                let i = self.by_id.get(&r.rule.id).copied();
+                let res = i.and_then(result);
+                // It applied only through an unknown: its tree's, or its
+                // scopes' (a deny with `unknown_as: match`).
+                let via_unknown = res.is_some_and(|x| x.applies && x.tree == Tri::Unknown)
+                    || i.is_some_and(scope_unknown);
                 MatchedRule {
                     rule: r.reference,
                     name: clip(&r.rule.name).0,
@@ -827,7 +871,7 @@ impl<'p> Tracer<'p> {
                     order: r.rule.order,
                     priority: r.rule.priority,
                     role: role_of(r.reference, decision_ref),
-                    via_unknown: res.is_some_and(|x| x.applies && x.tree == Tri::Unknown),
+                    via_unknown,
                 }
             })
             .collect();
@@ -856,13 +900,54 @@ impl<'p> Tracer<'p> {
             })
             .collect();
 
-        // Unknown facts and warnings, over the enabled rules.
+        // Scope rejections: the tree matched, the scopes did not.
+        let mut rejected: Vec<(&TracedRule<'p>, crate::scope::ScopeFailure)> = self
+            .rules
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| result(*i).is_some_and(|x| x.tree == Tri::Match))
+            .filter_map(|(i, r)| Some((r, scopes[i].as_ref()?.failure?)))
+            .collect();
+        rejected.sort_by_key(|(r, _)| r.rule.id);
+        trace.omitted.scope_rejections = count(rejected.len().saturating_sub(MAX_INACTIVE));
+        trace.scope_rejections = rejected
+            .iter()
+            .take(MAX_INACTIVE)
+            .map(|(r, f)| ScopeRejection {
+                rule: r.reference,
+                name: clip(&r.rule.name).0,
+                level: scope_level_name(f.level),
+                dimension: f.dimension.map(dimension_name),
+            })
+            .collect();
+
+        // Unknown facts and warnings, over the enabled rules in scope.
         let mut unknown: BTreeMap<Field, UnknownTally> = BTreeMap::new();
         let mut warn: BTreeMap<WarningCode, BTreeMap<RuleId, RuleRef>> = BTreeMap::new();
         let mut used: BTreeSet<Field> = BTreeSet::new();
         for (i, r) in self.rules.iter().enumerate() {
             let Some(res) = result(i) else { continue };
             if !r.rule.enabled || !res.type_applies {
+                continue;
+            }
+            // A scope note is worth a warning on a rule whose tree did not
+            // rule it out: the note is why it applied or not.
+            if let Some(s) = scopes[i].as_ref().filter(|_| res.tree != Tri::NoMatch) {
+                for (note, code) in [
+                    (crate::scope::ScopeNote::ScopeStale, WarningCode::ScopeStale),
+                    (
+                        crate::scope::ScopeNote::ClockUntrusted,
+                        WarningCode::ClockUntrusted,
+                    ),
+                ] {
+                    if s.notes.contains(note) {
+                        warn.entry(code)
+                            .or_default()
+                            .insert(r.reference.rule_id, r.reference);
+                    }
+                }
+            }
+            if out_of_scope(i) {
                 continue;
             }
             let contributing = r.contributing(res);
@@ -997,14 +1082,29 @@ impl<'p> Tracer<'p> {
             ];
         }
 
-        // A draft allow for a block or a would-block.
-        if decision_ref.is_some_and(|d| d.would_have_been() == Outcome::Blocked) {
+        // A draft allow for a block or a would-block. Not for an instance
+        // limit (#38): an allow already decided, and another allow would
+        // not change what limits it.
+        if decision_ref.is_some_and(|d| {
+            d.would_have_been() == Outcome::Blocked
+                && d.reason_code() != crate::decision::ReasonCode::InstanceLimit
+        }) {
             trace.allow_suggestion = suggest(subject, privacy, &matched, extras);
         }
 
         if full {
-            trace.near_misses =
-                self.near_misses(&results, &matched_ids, subject, privacy, &mut trace.omitted);
+            let in_scope: Vec<Option<RuleResult>> = results
+                .iter()
+                .enumerate()
+                .map(|(i, r)| if scope_open(i) { r.clone() } else { None })
+                .collect();
+            trace.near_misses = self.near_misses(
+                &in_scope,
+                &matched_ids,
+                subject,
+                privacy,
+                &mut trace.omitted,
+            );
             trace.facts_used = used
                 .into_iter()
                 .map(|f| Observed::new(f, observe(f, subject), privacy))
@@ -1059,6 +1159,26 @@ impl<'p> Tracer<'p> {
                 }
             })
             .collect()
+    }
+}
+
+/// The name of a scope level in a trace.
+const fn scope_level_name(l: crate::scope::ScopeLevel) -> &'static str {
+    match l {
+        crate::scope::ScopeLevel::Policy => "policy",
+        crate::scope::ScopeLevel::RuleSet => "rule_set",
+        crate::scope::ScopeLevel::Rule => "rule",
+    }
+}
+
+/// The name of a scope dimension in a trace.
+const fn dimension_name(d: crate::scope::Dimension) -> &'static str {
+    match d {
+        crate::scope::Dimension::Principals => "principals",
+        crate::scope::Dimension::Devices => "devices",
+        crate::scope::Dimension::Network => "network",
+        crate::scope::Dimension::Sessions => "sessions",
+        crate::scope::Dimension::Schedule => "schedule",
     }
 }
 

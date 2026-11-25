@@ -541,12 +541,20 @@ impl FactsSnapshot {
                 is_laptop: c.device_is_laptop,
                 is_vdi: c.device_is_vdi,
                 is_terminal_server: c.device_is_terminal_server,
+                dn: None,
             },
             session: SessionContext {
                 session_type,
                 client_hostname: c.session_client_hostname.clone(),
                 is_remote: c.session_is_remote,
+                client_ip: None,
             },
+            // Recorded snapshots carry no network location or scope facts
+            // (#38) yet, so a scope that needs one is unknown in a replay:
+            // a scoped allow does not apply, as on a device that did not
+            // collect them.
+            network: crate::context::NetworkContext::default(),
+            scope: crate::scope::ScopeFacts::default(),
         };
         Ok(Inputs {
             facts,
@@ -870,6 +878,9 @@ pub struct SimulationReport {
 #[derive(Debug)]
 pub struct Simulator<'p> {
     current: &'p ValidatedPolicy,
+    /// The library sets scopes reference (#38), for the current policy and
+    /// every candidate.
+    library: &'p dyn crate::scope::ScopeLibrary,
     evaluator: Evaluator<'p>,
     tracer: Tracer<'p>,
     threads: usize,
@@ -882,10 +893,25 @@ impl<'p> Simulator<'p> {
     ///
     /// [`BuildError`] if a tree does not compile.
     pub fn new(current: &'p ValidatedPolicy) -> Result<Self, BuildError> {
+        Self::with_library(current, &crate::scope::NoLibrary)
+    }
+
+    /// A simulator for `current` that resolves the library sets scopes
+    /// reference through `library` (#37, #38), for the current policy and
+    /// every candidate.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildError`] if a tree does not compile.
+    pub fn with_library(
+        current: &'p ValidatedPolicy,
+        library: &'p dyn crate::scope::ScopeLibrary,
+    ) -> Result<Self, BuildError> {
         Ok(Self {
             current,
-            evaluator: Evaluator::new(current)?,
-            tracer: Tracer::new(current)?,
+            library,
+            evaluator: Evaluator::with_library(current, library)?,
+            tracer: Tracer::with_library(current, library)?,
             threads: std::thread::available_parallelism()
                 .map_or(1, std::num::NonZeroUsize::get)
                 .min(MAX_THREADS),
@@ -960,7 +986,7 @@ impl<'p> Simulator<'p> {
             .map_err(SimError::Candidate)?;
         let cand_eval = resolved
             .as_ref()
-            .map(Evaluator::new)
+            .map(|r| Evaluator::with_library(r, self.library))
             .transpose()
             .map_err(|e| SimError::Candidate(CandidateError::Build(e)))?;
         let cur_mode = self.current.document().policy.mode;

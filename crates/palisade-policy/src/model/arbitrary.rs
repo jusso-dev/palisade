@@ -249,6 +249,7 @@ fn rule(kind: RuleSetKind, mandatory: bool) -> impl Strategy<Value = Rule> {
                 } else {
                     EnforcementOverride::Inherit
                 },
+                scope: None,
                 action,
                 metadata,
             },
@@ -374,7 +375,12 @@ fn settings() -> impl Strategy<Value = PolicySettings> {
             60u32..=604_800,
             0u32..=86_400,
             vec(0u32..=10_080, 0..=5),
-            prop_oneof![Just(TimeZoneBasis::DeviceLocal), Just(TimeZoneBasis::Utc)],
+            prop_oneof![
+                Just(TimeZoneBasis::DeviceLocal),
+                Just(TimeZoneBasis::Utc),
+                Just(TimeZoneBasis::UserLocal)
+            ],
+            3_600u32..=86_400,
             1u8..=16,
         ),
         btree_map(
@@ -390,7 +396,7 @@ fn settings() -> impl Strategy<Value = PolicySettings> {
         .prop_map(
             |(
                 (script_control, script_control_by_kind, dll_control, driver_control, capture),
-                (poll, ttl, overrides, tz, depth),
+                (poll, ttl, overrides, tz, cache_age, depth),
                 advanced,
             )| PolicySettings {
                 script_control,
@@ -402,12 +408,249 @@ fn settings() -> impl Strategy<Value = PolicySettings> {
                 decision_cache_ttl_secs: ttl,
                 override_durations: overrides,
                 time_zone_basis: tz,
+                group_cache_max_age_secs: cache_age,
                 max_ancestor_depth: depth,
                 // Unknown keys are only valid with the opt-in.
                 allow_unknown_advanced: !advanced.is_empty(),
                 advanced,
             },
         )
+}
+
+/// A scope that is valid on a rule of any action: no `user_pattern`, no
+/// per-session options, and a location profile only by the one name every
+/// generated policy defines.
+pub fn scope() -> impl Strategy<Value = crate::scope::Scope> {
+    use crate::context::SessionType;
+    use crate::scope::{
+        ClientFilter, CloudObject, Combine, DateRange, DeviceRef, DirectoryGroup, NetworkRef,
+        OuRef, Pin, PrincipalRef, RefList, Schedule, Scope, ScopeSubject, SessionFilter, SetRef,
+        TimeOfDay, Weekday, WellKnown, Window,
+    };
+    let set = (uuid7(), proptest::option::of(1u32..1000))
+        .prop_map(|(id, v)| SetRef {
+            id: crate::library::LibraryId(id),
+            pin: v.map_or(Pin::Latest, Pin::Version),
+        })
+        .boxed();
+    let guid = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+    let cloud = (guid, guid)
+        .prop_map(|(tenant_id, object_id)| CloudObject {
+            tenant_id,
+            object_id,
+        })
+        .boxed();
+    let principal = prop_oneof![
+        "S-1-5-21-[1-9][0-9]{0,8}-[1-9][0-9]{0,8}-[1-9][0-9]{0,8}-[1-9][0-9]{0,5}"
+            .prop_map(PrincipalRef::Sid),
+        proptest::sample::select(WellKnown::ALL.to_vec()).prop_map(PrincipalRef::WellKnown),
+        "[A-Za-z][A-Za-z ]{0,20}[a-z]".prop_map(PrincipalRef::LocalGroup),
+        (
+            "S-1-5-21-1-2-3-[1-9][0-9]{0,4}",
+            proptest::option::of("[A-Za-z]{1,20}")
+        )
+            .prop_map(|(sid, name)| PrincipalRef::DirectoryGroup(DirectoryGroup { sid, name })),
+        cloud.clone().prop_map(PrincipalRef::CloudGroup),
+        set.clone().prop_map(PrincipalRef::PrincipalSet),
+    ];
+    let device = prop_oneof![
+        uuid7().prop_map(DeviceRef::DeviceId),
+        "[A-Z]{2,5}-[*?0-9]{1,4}".prop_map(DeviceRef::HostnamePattern),
+        set.clone().prop_map(DeviceRef::DeviceSet),
+        "S-1-5-21-1-2-3-[1-9][0-9]{0,4}".prop_map(DeviceRef::DirectoryComputerGroup),
+        cloud.prop_map(DeviceRef::CloudDeviceGroup),
+        ("OU=[A-Za-z]{1,10},DC=[a-z]{1,8},DC=org", any::<bool>()).prop_map(
+            |(dn, include_sub_ous)| DeviceRef::Ou(OuRef {
+                dn,
+                include_sub_ous
+            })
+        ),
+        "[a-z]{1,8}=[a-z0-9]{1,8}".prop_map(DeviceRef::Tag),
+    ];
+    let network = prop_oneof![
+        (0u8..=255, 0u8..=255).prop_map(|(a, b)| NetworkRef::Cidr(format!("10.{a}.{b}.0/24"))),
+        (0u8..=255, 1u8..=100)
+            .prop_map(|(a, n)| NetworkRef::Range(format!("10.0.{a}.1-10.0.{a}.{n}"))),
+        "[a-z]{1,8}\\.example\\.org".prop_map(NetworkRef::DnsSuffix),
+        any::<[u8; 6]>().prop_map(|m| NetworkRef::GatewayMac(
+            m.iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<Vec<_>>()
+                .join("-")
+        )),
+        any::<bool>().prop_map(NetworkRef::ServerReachable),
+        Just(NetworkRef::LocationProfile("corporate".to_owned())),
+        set.clone().prop_map(NetworkRef::NetworkSet),
+    ];
+    fn list<T: core::fmt::Debug + Clone>(
+        s: impl Strategy<Value = T> + Clone,
+    ) -> impl Strategy<Value = Option<RefList<T>>> {
+        proptest::option::of(
+            (vec(s.clone(), 0..3), vec(s, 0..3))
+                .prop_map(|(include, exclude)| RefList { include, exclude }),
+        )
+    }
+    let time = (0u16..1440).prop_map(|m| {
+        TimeOfDay::from_minutes(m)
+            .unwrap_or(TimeOfDay::from_minutes(0).unwrap_or_else(|| unreachable!()))
+    });
+    let window = (
+        proptest::sample::subsequence(
+            vec![
+                Weekday::Mon,
+                Weekday::Tue,
+                Weekday::Wed,
+                Weekday::Thu,
+                Weekday::Fri,
+                Weekday::Sat,
+                Weekday::Sun,
+            ],
+            1..=7,
+        ),
+        time.clone(),
+        prop_oneof![
+            time.prop_map(|t| (Some(t), None)),
+            (1u32..=10_080).prop_map(|d| (None, Some(d))),
+        ],
+    )
+        .prop_map(|(days, start, (end, duration_mins))| Window {
+            days,
+            start,
+            end,
+            duration_mins,
+        });
+    let date = (2000i16..2100, 1i8..=12, 1i8..=28)
+        .prop_filter_map("a date", |(y, m, d)| {
+            jiff::civil::Date::new(y, m, d).ok().map(crate::scope::Date)
+        })
+        .boxed();
+    let range = (date.clone(), proptest::option::of(0i32..400)).prop_map(|(from, len)| DateRange {
+        from,
+        to: len.map(|n| {
+            crate::scope::Date(
+                from.0
+                    .checked_add(jiff::Span::new().days(n))
+                    .unwrap_or(from.0),
+            )
+        }),
+    });
+    let schedule = (
+        proptest::option::of(prop_oneof![
+            Just(TimeZoneBasis::DeviceLocal),
+            Just(TimeZoneBasis::Utc),
+            Just(TimeZoneBasis::UserLocal)
+        ]),
+        vec(window, 0..3),
+        vec(range.clone(), 0..2),
+        vec(range, 0..2),
+    )
+        .prop_map(|(timezone_basis, windows, dates, except_dates)| Schedule {
+            timezone_basis,
+            windows,
+            dates,
+            except_dates,
+            ..Schedule::default()
+        });
+    let sessions = proptest::option::of(
+        (
+            proptest::sample::subsequence(SessionType::ALL.to_vec(), 0..=3),
+            proptest::option::of(
+                (
+                    vec("THIN-[0-9*]{1,3}", 0..2),
+                    vec(Just("10.50.0.0/16".to_owned()), 0..2),
+                    vec(set.clone(), 0..2),
+                )
+                    .prop_map(|(hostname, ip, device_sets)| ClientFilter {
+                        hostname,
+                        ip,
+                        device_sets,
+                    }),
+            ),
+        )
+            .prop_map(|(types, client)| SessionFilter { types, client }),
+    );
+    (
+        list(principal),
+        list(device),
+        list(network),
+        sessions,
+        prop_oneof![
+            Just((None, None)),
+            schedule.prop_map(|s| (Some(s), None)),
+            set.prop_map(|s| (None, Some(s))),
+        ],
+        any::<bool>(),
+        proptest::sample::select(vec![
+            ScopeSubject::ProcessUser,
+            ScopeSubject::SessionUser,
+            ScopeSubject::ParentProcessUser,
+        ]),
+        any::<bool>(),
+    )
+        .prop_map(
+            |(
+                principals,
+                devices,
+                network,
+                sessions,
+                (schedule, schedule_set),
+                any,
+                subject,
+                negate,
+            )| {
+                let mut s = Scope {
+                    principals,
+                    devices,
+                    network,
+                    sessions,
+                    schedule,
+                    schedule_set,
+                    combine: if any { Combine::Any } else { Combine::All },
+                    negate: false,
+                    subject,
+                    max_instances_per_session: 0,
+                };
+                // A negated scope needs a dimension.
+                s.negate = negate && s.has_dimension();
+                s
+            },
+        )
+}
+
+/// A document that passes [`PolicyDocument::validate`], with scopes on
+/// some rules, on the policy and on a rule set assignment (#38). The
+/// properties of [`document`] that assume every rule is a candidate do not
+/// hold here; the ones about the document's form do.
+pub fn scoped_document() -> impl Strategy<Value = PolicyDocument> {
+    (
+        document(),
+        proptest::option::of(scope()),
+        vec(scope(), 1..3),
+        any::<bool>(),
+        vec(proptest::option::of(scope()), 0..8),
+    )
+        .prop_map(|(mut doc, scope, set_scopes, assign, rule_scopes)| {
+            let p = &mut doc.policy;
+            p.scope = scope;
+            p.location_profiles = vec![crate::scope::LocationProfile {
+                name: "corporate".to_owned(),
+                all: vec![
+                    crate::scope::NetworkRef::DnsSuffix("corp.example.org".to_owned()),
+                    crate::scope::NetworkRef::ServerReachable(true),
+                ],
+            }];
+            if let (Some(first), true) = (p.rule_sets.first(), assign) {
+                p.rule_set_scopes = vec![crate::scope::RuleSetScope {
+                    rule_set: *first,
+                    scopes: set_scopes,
+                }];
+            }
+            let rules = doc.rule_sets.iter_mut().flat_map(|s| s.rules.iter_mut());
+            for (rule, scope) in rules.zip(rule_scopes) {
+                rule.scope = scope;
+            }
+            doc
+        })
 }
 
 /// A document that passes [`PolicyDocument::validate`].
@@ -456,6 +699,9 @@ pub fn document() -> impl Strategy<Value = PolicyDocument> {
                         mode_options,
                         settings,
                         rule_sets,
+                        scope: None,
+                        rule_set_scopes: Vec::new(),
+                        location_profiles: Vec::new(),
                         metadata,
                     },
                     rule_sets: sets,

@@ -1,5 +1,5 @@
 {
-  "content_hash": "afc4ad5c8dc2a21651f8a1877564fd1a8b7598234a6739f8d7a31bc4cadc2b2a",
+  "content_hash": "0c4c62d85033d3c580988c757cc14406728a8451deafd286b5327cf6160d5ada",
   "document": {
     "policy": {
       "id": "01936b2e-0014-7b3d-9f21-0a1b2c3d4e5f",
@@ -18,6 +18,7 @@
         "decision_cache_ttl_secs": 300,
         "dll_control": "enforce",
         "driver_control": "enforce",
+        "group_cache_max_age_secs": 86400,
         "max_ancestor_depth": 8,
         "poll_interval_secs": 900,
         "script_control": "enforce",
