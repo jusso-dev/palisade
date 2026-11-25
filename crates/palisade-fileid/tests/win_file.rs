@@ -40,6 +40,48 @@ impl std::ops::Deref for Scratch {
     }
 }
 
+/// Makes sure the volume of the temporary folder keeps an active change
+/// journal, so tests can require strong keys. On CI (the `CI` variable is
+/// set, as on the hosted runners) a missing journal is created with the OS
+/// tool; elsewhere the machine is left alone and the test is told to skip
+/// the strong-key checks by a `false` return.
+fn ensure_journal() -> bool {
+    use std::sync::OnceLock;
+    static READY: OnceLock<bool> = OnceLock::new();
+    *READY.get_or_init(|| {
+        let probe =
+            std::env::temp_dir().join(format!("palisade-journal-probe-{}", std::process::id()));
+        std::fs::write(&probe, b"x").unwrap();
+        let active = |p: &Path| {
+            FileFacts::read(&open_for_hashing(p).unwrap())
+                .unwrap()
+                .usn
+                .is_some()
+        };
+        let mut ok = active(&probe);
+        if !ok && std::env::var_os("CI").is_some() {
+            let drive: String = std::env::temp_dir()
+                .to_str()
+                .unwrap()
+                .chars()
+                .take(2)
+                .collect();
+            let status = std::process::Command::new("fsutil")
+                .args(["usn", "createjournal", "m=33554432", "a=4194304", &drive])
+                .status()
+                .unwrap();
+            eprintln!("fsutil usn createjournal {drive}: {status}");
+            ok = active(&probe);
+            assert!(ok, "no change journal on {drive} even after creating one");
+        }
+        let _ = std::fs::remove_file(&probe);
+        if !ok {
+            eprintln!("no active change journal here; strong-key checks skipped (not on CI)");
+        }
+        ok
+    })
+}
+
 fn scratch(name: &str) -> Scratch {
     let dir = std::env::temp_dir().join(format!("palisade-win-file-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -88,6 +130,10 @@ fn facts_and_strong_keys_from_the_handle() {
         u64::from(facts.volume_serial_32.unwrap()),
         volume_serial & 0xFFFF_FFFF
     );
+    if !ensure_journal() {
+        return;
+    }
+    let facts = FileFacts::read(&file).unwrap();
     let (_, usn) = facts
         .usn
         .expect("an active change journal on the system volume");
@@ -171,6 +217,9 @@ fn writers_are_not_blocked_while_a_file_is_open_for_hashing() {
 
 #[test]
 fn cache_flow_on_ntfs() {
+    if !ensure_journal() {
+        return;
+    }
     let dir = scratch("cache");
     let path = dir.join("tool.exe");
     std::fs::write(&path, b"original").unwrap();
@@ -262,7 +311,8 @@ fn cache_flow_on_ntfs() {
 
 /// A separate writer process that appends to the file for as long as it
 /// runs (#46 test plan: "a writer process modifies the file during
-/// hashing"). It is killed when dropped, even if the test panics.
+/// hashing"). It is this test binary, re-run as [`writer_child`]. It is
+/// killed when dropped, even if the test panics.
 struct Writer(std::process::Child);
 
 impl Drop for Writer {
@@ -273,16 +323,30 @@ impl Drop for Writer {
 }
 
 fn spawn_writer(path: &Path) -> Writer {
-    // The path goes in through the environment, so no quoting can break it.
-    let script = "$f = [IO.File]::Open($env:PALISADE_TARGET, 'Append', 'Write', 'ReadWrite, Delete'); \
-         while ($true) { $f.WriteByte(120); $f.Flush(); Start-Sleep -Milliseconds 2 }";
     Writer(
-        std::process::Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", script])
-            .env("PALISADE_TARGET", path)
+        std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--ignored", "--exact", "writer_child", "--nocapture"])
+            .env("PALISADE_WRITER_TARGET", path)
+            .stdout(std::process::Stdio::null())
             .spawn()
             .unwrap(),
     )
+}
+
+/// The writer process: appends a byte every millisecond until killed.
+/// Run only by [`spawn_writer`].
+#[test]
+#[ignore = "the writer process for a_concurrent_writer_makes_the_hash_unstable"]
+fn writer_child() {
+    let Some(target) = std::env::var_os("PALISADE_WRITER_TARGET") else {
+        return;
+    };
+    let mut f = OpenOptions::new().append(true).open(target).unwrap();
+    loop {
+        f.write_all(b"x").unwrap();
+        f.flush().unwrap();
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 #[test]
@@ -594,6 +658,9 @@ fn digests_match_the_os_hash_tool() {
 /// not be answered with `host.exe`'s cached digest.
 #[test]
 fn a_named_stream_never_shares_its_host_files_key() {
+    if !ensure_journal() {
+        return;
+    }
     let dir = scratch("adskey");
     let host = dir.join("host.exe");
     std::fs::write(&host, b"benign!!").unwrap();

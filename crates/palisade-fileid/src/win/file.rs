@@ -259,17 +259,74 @@ fn volume_root(file: &File) -> io::Result<String> {
 fn read_usn(file: &File) -> Option<(u64, i64)> {
     let record = sys::read_file_usn_bytes(file).ok()?;
     let facts = parse_usn_record(&record).ok()?;
-    // `FSCTL_QUERY_USN_JOURNAL` needs a handle to the volume itself. Its
-    // control code requires no access right (`FILE_ANY_ACCESS`), so the
-    // volume is opened with none, which needs no privilege.
-    let root = volume_root(file).ok()?;
-    let volume = OpenOptions::new()
-        .access_mode(0)
-        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
-        .open(root)
-        .ok()?;
-    let journal = sys::usn_journal_id(&volume).ok()?;
+    let journal = journal_id_attempts(file)
+        .into_iter()
+        .find_map(|(_, r)| r.ok())?;
     Some((journal, facts.usn))
+}
+
+/// Ways to get the journal ID of the volume `file` is on, tried in order
+/// until one works: `FSCTL_QUERY_USN_JOURNAL` on the file's own handle,
+/// then on the volume device (by volume GUID, then by drive letter),
+/// opened with no access rights and then with read access (which needs
+/// administrator rights). Each attempt is labelled, so a test can report
+/// which one the system accepts. Stops at the first success.
+pub(crate) fn journal_id_attempts(file: &File) -> Vec<(&'static str, io::Result<u64>)> {
+    let mut out: Vec<(&'static str, io::Result<u64>)> = Vec::new();
+    let r = sys::usn_journal_id(file);
+    let ok = r.is_ok();
+    out.push(("file handle", r));
+    if ok {
+        return out;
+    }
+    let root = match volume_root(file) {
+        Ok(r) => r,
+        Err(e) => {
+            out.push(("volume root", Err(e)));
+            return out;
+        }
+    };
+    // The same volume by drive letter (`\\.\C:`), when it has one.
+    let drive = sys::final_path_by_handle(file, VOLUME_NAME_DOS)
+        .ok()
+        .and_then(|p| {
+            let p = p.strip_prefix(r"\\?\").unwrap_or(&p).to_owned();
+            let mut chars = p.chars();
+            match (chars.next(), chars.next()) {
+                (Some(letter), Some(':')) if letter.is_ascii_alphabetic() => {
+                    Some(format!(r"\\.\{letter}:"))
+                }
+                _ => None,
+            }
+        });
+    let mut devices = vec![("volume GUID", root)];
+    if let Some(d) = drive {
+        devices.push(("drive letter", d));
+    }
+    // No access rights first (enough for this control code); then
+    // `GENERIC_READ`, which needs administrator rights on a volume.
+    for (device_label, device) in &devices {
+        for (access_label, access) in [("no access", 0_u32), ("read", 0x8000_0000)] {
+            let r = OpenOptions::new()
+                .access_mode(access)
+                .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+                .open(device)
+                .and_then(|v| sys::usn_journal_id(&v));
+            let ok = r.is_ok();
+            out.push((
+                if access == 0 {
+                    device_label
+                } else {
+                    access_label
+                },
+                r,
+            ));
+            if ok {
+                return out;
+            }
+        }
+    }
+    out
 }
 
 /// The [`FileStamp`] backend: opens with [`open_for_hashing`] and stamps
@@ -677,6 +734,34 @@ pub fn peak_working_set_bytes() -> io::Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Which journal-ID query the system accepts; at least one must, on
+    /// the runners' system volume.
+    #[test]
+    fn journal_id_on_the_system_volume() {
+        let windir = std::env::var("WINDIR").unwrap();
+        let f = open_for_hashing(&Path::new(&windir).join(r"System32\cmd.exe")).unwrap();
+        let mut attempts = journal_id_attempts(&f);
+        for (label, r) in &attempts {
+            eprintln!("journal ID via {label}: {r:?}");
+        }
+        // The hosted runners may come without an active journal on the
+        // system volume. On CI, create one (the runners are elevated) and
+        // try again; elsewhere leave the machine alone.
+        if !attempts.iter().any(|(_, r)| r.is_ok()) && std::env::var_os("CI").is_some() {
+            let drive: String = windir.chars().take(2).collect();
+            let status = std::process::Command::new("fsutil")
+                .args(["usn", "createjournal", "m=33554432", "a=4194304", &drive])
+                .status()
+                .unwrap();
+            eprintln!("fsutil usn createjournal {drive}: {status}");
+            attempts = journal_id_attempts(&f);
+            for (label, r) in &attempts {
+                eprintln!("journal ID via {label}: {r:?}");
+            }
+            assert!(attempts.iter().any(|(_, r)| r.is_ok()), "{attempts:?}");
+        }
+    }
 
     #[test]
     fn stream_paths() {
