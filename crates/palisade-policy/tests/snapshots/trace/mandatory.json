@@ -1,0 +1,375 @@
+{
+  "trace_schema_version": "1.0.0",
+  "trace_id": "41414141414141414141414141414141",
+  "level": "full",
+  "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+  "policy_revision": 7,
+  "bundle_hash": null,
+  "object_type": "executable",
+  "effective_mode": "enforce",
+  "mode_resolution": [
+    {
+      "kind": "device_mode",
+      "applied": false,
+      "mode": "enforce",
+      "detail": "device mode enforce"
+    },
+    {
+      "kind": "mandatory_deny",
+      "applied": true,
+      "mode": "enforce",
+      "detail": "a mandatory deny enforces in every mode"
+    },
+    {
+      "kind": "effective",
+      "applied": true,
+      "mode": "enforce",
+      "detail": ""
+    },
+    {
+      "kind": "applied",
+      "applied": false,
+      "mode": "enforce",
+      "detail": "blocked; a mandatory deny is never relaxed"
+    }
+  ],
+  "precedence_model": "deny_wins",
+  "stages": [
+    {
+      "name": "mandatory_deny",
+      "outcome": "decided",
+      "candidates": 1,
+      "duration_ns": null
+    },
+    {
+      "name": "exclusion",
+      "outcome": "skipped",
+      "candidates": 0,
+      "duration_ns": null
+    },
+    {
+      "name": "session_override",
+      "outcome": "skipped",
+      "candidates": 0,
+      "duration_ns": null
+    },
+    {
+      "name": "policy",
+      "outcome": "skipped",
+      "candidates": 1,
+      "duration_ns": null
+    },
+    {
+      "name": "attribute",
+      "outcome": "skipped",
+      "candidates": 0,
+      "duration_ns": null
+    },
+    {
+      "name": "unknown",
+      "outcome": "skipped",
+      "candidates": 0,
+      "duration_ns": null
+    }
+  ],
+  "decisive": {
+    "rule": {
+      "rule_id": "01936b2e-000a-7b3d-9f21-0a1b2c3d4e61",
+      "display_id": "R-000010",
+      "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0002",
+      "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+      "policy_revision": 7
+    },
+    "name": "Known bad",
+    "stage": "mandatory_deny",
+    "action": "deny",
+    "specificity_tier": 1,
+    "criteria": [
+      {
+        "pointer": "/match/criterion",
+        "field": "hash.sha256",
+        "operator": "equals",
+        "under_not": false,
+        "result": "match",
+        "needed": "match",
+        "raw_result": "match",
+        "notes": [],
+        "expected": [
+          "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        ],
+        "expected_truncated": false,
+        "contributing": true,
+        "observed": {
+          "field": "hash.sha256",
+          "known": true,
+          "values": [
+            "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          ],
+          "withheld": false,
+          "digests": [],
+          "truncated": false
+        }
+      }
+    ]
+  },
+  "matched": [
+    {
+      "rule": {
+        "rule_id": "01936b2e-0001-7b3d-9f21-0a1b2c3d4e61",
+        "display_id": "R-000001",
+        "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+        "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+        "policy_revision": 7
+      },
+      "name": "Example signed tools",
+      "stage": "policy",
+      "action": "allow",
+      "specificity_tier": 3,
+      "specificity_depth": 0,
+      "order": null,
+      "priority": null,
+      "role": "overridden",
+      "via_unknown": false
+    },
+    {
+      "rule": {
+        "rule_id": "01936b2e-0006-7b3d-9f21-0a1b2c3d4e61",
+        "display_id": "R-000006",
+        "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+        "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+        "policy_revision": 7
+      },
+      "name": "Watch Example",
+      "stage": "annotation",
+      "action": "audit",
+      "specificity_tier": 4,
+      "specificity_depth": 0,
+      "order": null,
+      "priority": null,
+      "role": "annotation",
+      "via_unknown": false
+    },
+    {
+      "rule": {
+        "rule_id": "01936b2e-000a-7b3d-9f21-0a1b2c3d4e61",
+        "display_id": "R-000010",
+        "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0002",
+        "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+        "policy_revision": 7
+      },
+      "name": "Known bad",
+      "stage": "mandatory_deny",
+      "action": "deny",
+      "specificity_tier": 1,
+      "specificity_depth": 0,
+      "order": null,
+      "priority": null,
+      "role": "decided",
+      "via_unknown": false
+    }
+  ],
+  "near_misses": [
+    {
+      "rule": {
+        "rule_id": "01936b2e-0003-7b3d-9f21-0a1b2c3d4e61",
+        "display_id": "R-000003",
+        "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+        "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+        "policy_revision": 7
+      },
+      "name": "Tools folder",
+      "stage": "policy",
+      "action": "allow",
+      "tree": "no_match",
+      "matched_criteria": 1,
+      "total_criteria": 2,
+      "failing": [
+        {
+          "pointer": "/match/all/1/criterion",
+          "field": "path.directory",
+          "operator": "starts_with",
+          "under_not": false,
+          "result": "no_match",
+          "needed": "match",
+          "raw_result": "no_match",
+          "notes": [],
+          "expected": [
+            "C:\\Tools"
+          ],
+          "expected_truncated": false,
+          "contributing": true,
+          "observed": {
+            "field": "path.directory",
+            "known": true,
+            "values": [
+              "C:\\Apps"
+            ],
+            "withheld": false,
+            "digests": [],
+            "truncated": false
+          }
+        }
+      ],
+      "failing_omitted": 0
+    }
+  ],
+  "inactive_matches": [],
+  "scope_rejections": [],
+  "unknown_facts": [],
+  "facts_used": [
+    {
+      "field": "hash.sha256",
+      "known": true,
+      "values": [
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ],
+      "withheld": false,
+      "digests": [],
+      "truncated": false
+    },
+    {
+      "field": "signer.publisher",
+      "known": true,
+      "values": [
+        "Example Ltd"
+      ],
+      "withheld": false,
+      "digests": [],
+      "truncated": false
+    },
+    {
+      "field": "path.directory",
+      "known": true,
+      "values": [
+        "C:\\Apps"
+      ],
+      "withheld": false,
+      "digests": [],
+      "truncated": false
+    },
+    {
+      "field": "path.file_name",
+      "known": true,
+      "values": [
+        "tool.exe"
+      ],
+      "withheld": false,
+      "digests": [],
+      "truncated": false
+    },
+    {
+      "field": "meta.product_name",
+      "known": true,
+      "values": [
+        "Example Tools"
+      ],
+      "withheld": false,
+      "digests": [],
+      "truncated": false
+    },
+    {
+      "field": "user.groups",
+      "known": false,
+      "values": [],
+      "withheld": false,
+      "digests": [],
+      "truncated": false
+    }
+  ],
+  "warnings": [],
+  "inheritance": [
+    {
+      "node": "policy",
+      "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+      "name": "Trace"
+    },
+    {
+      "node": "rule_set",
+      "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0002",
+      "name": "Set 2"
+    },
+    {
+      "node": "rule",
+      "id": "01936b2e-000a-7b3d-9f21-0a1b2c3d4e61",
+      "name": "Known bad"
+    }
+  ],
+  "allow_suggestion": {
+    "action": "allow",
+    "object_types": [
+      "executable"
+    ],
+    "identity": "hash",
+    "match": {
+      "criterion": {
+        "field": "hash.sha256",
+        "operator": "equals",
+        "values": [
+          "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        ]
+      }
+    },
+    "caveats": [
+      "mandatory_deny_matched"
+    ]
+  },
+  "omitted": {
+    "matched": 0,
+    "near_misses": 0,
+    "inactive_matches": 0
+  },
+  "decision": {
+    "outcome": "blocked",
+    "would_have_been": "blocked",
+    "action": "deny",
+    "matched_rule": {
+      "rule_id": "01936b2e-000a-7b3d-9f21-0a1b2c3d4e61",
+      "display_id": "R-000010",
+      "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0002",
+      "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+      "policy_revision": 7
+    },
+    "overridden": [
+      {
+        "rule_id": "01936b2e-0001-7b3d-9f21-0a1b2c3d4e61",
+        "display_id": "R-000001",
+        "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+        "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+        "policy_revision": 7
+      }
+    ],
+    "annotations": [
+      {
+        "rule_id": "01936b2e-0006-7b3d-9f21-0a1b2c3d4e61",
+        "display_id": "R-000006",
+        "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+        "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+        "policy_revision": 7
+      }
+    ],
+    "mode": "enforce",
+    "learning_candidate": false,
+    "directives": {
+      "containment": null,
+      "elevation": null,
+      "trust_sources": [],
+      "kill_running": false,
+      "request": null
+    },
+    "effects": {
+      "log": "always",
+      "upload": "immediate",
+      "notify": "default",
+      "notification_text": null,
+      "help_url": null,
+      "severity": "medium",
+      "tags": [],
+      "suppress_duplicates_secs": 600
+    },
+    "reason_code": "mandatory_deny",
+    "trace_id": "41414141414141414141414141414141",
+    "overridden_omitted": 0,
+    "annotations_omitted": 0,
+    "trust_sources_omitted": 0
+  }
+}

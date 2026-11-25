@@ -1,0 +1,343 @@
+{
+  "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+  "policy_revision": 7,
+  "device_mode": "audit",
+  "protection": "override_active",
+  "lockdown": false,
+  "override_session": "audit",
+  "disconnected": false,
+  "modes": [
+    {
+      "object_type": "executable",
+      "mode": "audit"
+    },
+    {
+      "object_type": "library",
+      "mode": "audit"
+    },
+    {
+      "object_type": "driver",
+      "mode": "audit"
+    },
+    {
+      "object_type": "script.powershell",
+      "mode": "audit"
+    },
+    {
+      "object_type": "script.batch",
+      "mode": "audit"
+    },
+    {
+      "object_type": "script.cmd",
+      "mode": "audit"
+    },
+    {
+      "object_type": "script.vbscript",
+      "mode": "audit"
+    },
+    {
+      "object_type": "script.jscript",
+      "mode": "audit"
+    },
+    {
+      "object_type": "script.wsf",
+      "mode": "audit"
+    },
+    {
+      "object_type": "script.wsc",
+      "mode": "audit"
+    },
+    {
+      "object_type": "script.python",
+      "mode": "audit"
+    },
+    {
+      "object_type": "script.java",
+      "mode": "audit"
+    },
+    {
+      "object_type": "script.reg",
+      "mode": "audit"
+    },
+    {
+      "object_type": "script.other",
+      "mode": "audit"
+    },
+    {
+      "object_type": "installer",
+      "mode": "audit"
+    },
+    {
+      "object_type": "compiled_html",
+      "mode": "audit"
+    },
+    {
+      "object_type": "html_application",
+      "mode": "audit"
+    },
+    {
+      "object_type": "control_panel_applet",
+      "mode": "audit"
+    },
+    {
+      "object_type": "packaged_app",
+      "mode": "audit"
+    },
+    {
+      "object_type": "command",
+      "mode": "audit"
+    },
+    {
+      "object_type": "com_object",
+      "mode": "audit"
+    }
+  ],
+  "settings": [
+    {
+      "key": "allow_unknown_advanced",
+      "value": false,
+      "source": "default"
+    },
+    {
+      "key": "capture_command_line",
+      "value": false,
+      "source": "default"
+    },
+    {
+      "key": "decision_cache_ttl_secs",
+      "value": 300,
+      "source": "default"
+    },
+    {
+      "key": "dll_control",
+      "value": "enforce",
+      "source": "default"
+    },
+    {
+      "key": "driver_control",
+      "value": "enforce",
+      "source": "default"
+    },
+    {
+      "key": "max_ancestor_depth",
+      "value": 8,
+      "source": "default"
+    },
+    {
+      "key": "mode",
+      "value": "audit",
+      "source": "policy"
+    },
+    {
+      "key": "poll_interval_secs",
+      "value": 900,
+      "source": "default"
+    },
+    {
+      "key": "precedence_model",
+      "value": "deny_wins",
+      "source": "default"
+    },
+    {
+      "key": "script_control",
+      "value": "enforce",
+      "source": "default"
+    },
+    {
+      "key": "time_zone_basis",
+      "value": "device_local",
+      "source": "default"
+    }
+  ],
+  "rules": [
+    {
+      "rule": {
+        "rule_id": "01936b2e-0001-7b3d-9f21-0a1b2c3d4e61",
+        "display_id": "R-000001",
+        "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+        "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+        "policy_revision": 7
+      },
+      "name": "Example signed tools",
+      "action": "allow",
+      "stage": "policy",
+      "active": true,
+      "inactive_reason": null,
+      "rule_set_mode": null,
+      "provenance": [
+        {
+          "node": "policy",
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+          "name": "Trace"
+        },
+        {
+          "node": "rule_set",
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+          "name": "Set 1"
+        }
+      ]
+    },
+    {
+      "rule": {
+        "rule_id": "01936b2e-0002-7b3d-9f21-0a1b2c3d4e61",
+        "display_id": "R-000002",
+        "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+        "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+        "policy_revision": 7
+      },
+      "name": "Pinned build",
+      "action": "allow",
+      "stage": "policy",
+      "active": true,
+      "inactive_reason": null,
+      "rule_set_mode": null,
+      "provenance": [
+        {
+          "node": "policy",
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+          "name": "Trace"
+        },
+        {
+          "node": "rule_set",
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+          "name": "Set 1"
+        }
+      ]
+    },
+    {
+      "rule": {
+        "rule_id": "01936b2e-0003-7b3d-9f21-0a1b2c3d4e61",
+        "display_id": "R-000003",
+        "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+        "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+        "policy_revision": 7
+      },
+      "name": "Tools folder",
+      "action": "allow",
+      "stage": "policy",
+      "active": true,
+      "inactive_reason": null,
+      "rule_set_mode": null,
+      "provenance": [
+        {
+          "node": "policy",
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+          "name": "Trace"
+        },
+        {
+          "node": "rule_set",
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+          "name": "Set 1"
+        }
+      ]
+    },
+    {
+      "rule": {
+        "rule_id": "01936b2e-0004-7b3d-9f21-0a1b2c3d4e61",
+        "display_id": "R-000004",
+        "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+        "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+        "policy_revision": 7
+      },
+      "name": "Block script hosts for standard users",
+      "action": "deny",
+      "stage": "policy",
+      "active": true,
+      "inactive_reason": null,
+      "rule_set_mode": null,
+      "provenance": [
+        {
+          "node": "policy",
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+          "name": "Trace"
+        },
+        {
+          "node": "rule_set",
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+          "name": "Set 1"
+        }
+      ]
+    },
+    {
+      "rule": {
+        "rule_id": "01936b2e-0005-7b3d-9f21-0a1b2c3d4e61",
+        "display_id": "R-000005",
+        "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+        "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+        "policy_revision": 7
+      },
+      "name": "Retired allow",
+      "action": "allow",
+      "stage": "policy",
+      "active": false,
+      "inactive_reason": "disabled",
+      "rule_set_mode": null,
+      "provenance": [
+        {
+          "node": "policy",
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+          "name": "Trace"
+        },
+        {
+          "node": "rule_set",
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+          "name": "Set 1"
+        }
+      ]
+    },
+    {
+      "rule": {
+        "rule_id": "01936b2e-0006-7b3d-9f21-0a1b2c3d4e61",
+        "display_id": "R-000006",
+        "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+        "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+        "policy_revision": 7
+      },
+      "name": "Watch Example",
+      "action": "audit",
+      "stage": "annotation",
+      "active": true,
+      "inactive_reason": null,
+      "rule_set_mode": null,
+      "provenance": [
+        {
+          "node": "policy",
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+          "name": "Trace"
+        },
+        {
+          "node": "rule_set",
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+          "name": "Set 1"
+        }
+      ]
+    },
+    {
+      "rule": {
+        "rule_id": "01936b2e-000a-7b3d-9f21-0a1b2c3d4e61",
+        "display_id": "R-000010",
+        "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0002",
+        "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+        "policy_revision": 7
+      },
+      "name": "Known bad",
+      "action": "deny",
+      "stage": "mandatory_deny",
+      "active": true,
+      "inactive_reason": null,
+      "rule_set_mode": null,
+      "provenance": [
+        {
+          "node": "policy",
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+          "name": "Trace"
+        },
+        {
+          "node": "rule_set",
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0002",
+          "name": "Set 2"
+        }
+      ]
+    }
+  ]
+}

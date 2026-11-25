@@ -1,0 +1,21 @@
+**Blocked by rule 'Block script hosts for standard users' \(R\-000004\).**
+
+_you are not in S\-1\-5\-21\-1000\-2000\-3000\-1100_
+
+Effective mode: enforce.
+
+Mode step effective: enforce.
+
+Mode step applied: enforce (blocked; the deciding rule enforces).
+
+Decided at stage policy, under the deny\_wins precedence model.
+
+### What would allow this?
+
+A rule allowing this exact file by its hash would allow it. A deny rule also matches, so the precedence model may still block it.
+
+### Matching rules
+
+| Rule | Name | Action | Stage | Role |
+|---|---|---|---|---|
+| R\-000004 | Block script hosts for standard users | deny | policy | decided |

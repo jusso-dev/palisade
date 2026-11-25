@@ -499,5 +499,24 @@ impl Decision {
     }
 }
 
+// For the decision trace (#41), which bounds its size.
+impl Decision {
+    /// The same decision with `overridden`, `annotations` and
+    /// `directives.trust_sources` cut to their first `n` entries, and the
+    /// number cut from each.
+    pub(crate) fn with_lists_cut(&self, n: usize) -> (Self, [usize; 3]) {
+        let mut d = self.clone();
+        let cut = [
+            d.overridden.len().saturating_sub(n),
+            d.annotations.len().saturating_sub(n),
+            d.directives.trust_sources.len().saturating_sub(n),
+        ];
+        d.overridden.truncate(n);
+        d.annotations.truncate(n);
+        d.directives.trust_sources.truncate(n);
+        (d, cut)
+    }
+}
+
 #[cfg(test)]
 mod tests;

@@ -1,0 +1,71 @@
+# Recorded decision inputs for the simulator tests (#41). Run against the
+# fixture policy in `src/trace/tests.rs`.
+facts_schema_version: "1.0.0"
+snapshots:
+  - event_id: e1
+    device_id: dev-1
+    timestamp: 1700000100
+    object_type: executable
+    facts:
+      values:
+        hash.sha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+        meta.product_name: Example Tools
+      path: {path: 'C:\Apps\tool.exe', user_writable: false}
+      signers: [{status: valid, publisher: Example Ltd}]
+  - event_id: e2
+    device_id: dev-1
+    timestamp: 1700000200
+    object_type: executable
+    facts:
+      values:
+        hash.sha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      path: {path: 'C:\Apps\x.exe', user_writable: false}
+      signers: [{status: valid, publisher: Other Ltd}]
+    context:
+      user_sid: S-1-5-21-1000-2000-3000-1001
+  - event_id: e3
+    device_id: dev-2
+    timestamp: 1700000300
+    object_type: executable
+    facts:
+      values:
+        hash.sha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+  - event_id: e4
+    device_id: dev-1
+    timestamp: 1700000400
+    object_type: executable
+    facts:
+      values:
+        hash.sha256: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      path: {path: 'C:\Apps\script.exe', user_writable: false}
+      signers: [{status: valid, publisher: Example Ltd}]
+    context:
+      user_sid: S-1-5-21-1000-2000-3000-1001
+      user_groups: []
+  - event_id: e5
+    device_id: dev-2
+    timestamp: 1700000500
+    object_type: executable
+    facts:
+      values:
+        hash.sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      path: {path: 'C:\Apps\y.exe', user_writable: false}
+      signers: [{status: valid, publisher: Other Ltd}]
+  - event_id: e6
+    device_id: dev-3
+    timestamp: 1700000600
+    object_type: executable
+    facts:
+      values:
+        hash.sha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    device_state: {mode: disabled}
+  - event_id: e7
+    device_id: dev-3
+    timestamp: 1600000000
+    object_type: executable
+    facts:
+      values:
+        hash.sha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+        meta.product_name: Example Tools
+      path: {path: 'C:\Apps\tool.exe', user_writable: false}
+      signers: [{status: valid, publisher: Example Ltd}]

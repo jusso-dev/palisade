@@ -1,0 +1,87 @@
+{
+  "trace_schema_version": "1.0.0",
+  "trace_id": "41414141414141414141414141414141",
+  "level": "minimal",
+  "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+  "policy_revision": 7,
+  "bundle_hash": null,
+  "object_type": "executable",
+  "effective_mode": "enforce",
+  "mode_resolution": [],
+  "precedence_model": "deny_wins",
+  "stages": [],
+  "decisive": {
+    "rule": {
+      "rule_id": "01936b2e-0001-7b3d-9f21-0a1b2c3d4e61",
+      "display_id": "R-000001",
+      "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+      "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+      "policy_revision": 7
+    },
+    "name": "Example signed tools",
+    "stage": "policy",
+    "action": "allow",
+    "specificity_tier": 3,
+    "criteria": []
+  },
+  "matched": [],
+  "near_misses": [],
+  "inactive_matches": [],
+  "scope_rejections": [],
+  "unknown_facts": [],
+  "facts_used": [],
+  "warnings": [],
+  "inheritance": [],
+  "allow_suggestion": null,
+  "omitted": {
+    "matched": 0,
+    "near_misses": 0,
+    "inactive_matches": 0
+  },
+  "decision": {
+    "outcome": "allowed",
+    "would_have_been": "allowed",
+    "action": "allow",
+    "matched_rule": {
+      "rule_id": "01936b2e-0001-7b3d-9f21-0a1b2c3d4e61",
+      "display_id": "R-000001",
+      "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+      "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+      "policy_revision": 7
+    },
+    "overridden": [],
+    "annotations": [
+      {
+        "rule_id": "01936b2e-0006-7b3d-9f21-0a1b2c3d4e61",
+        "display_id": "R-000006",
+        "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+        "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+        "policy_revision": 7
+      }
+    ],
+    "mode": "enforce",
+    "learning_candidate": false,
+    "directives": {
+      "containment": null,
+      "elevation": null,
+      "trust_sources": [],
+      "kill_running": false,
+      "request": null
+    },
+    "effects": {
+      "log": "summary",
+      "upload": "batched",
+      "notify": "none",
+      "notification_text": null,
+      "help_url": null,
+      "severity": "info",
+      "tags": [],
+      "suppress_duplicates_secs": 86400
+    },
+    "reason_code": "explicit_allow",
+    "trace_id": "41414141414141414141414141414141",
+    "overridden_omitted": 0,
+    "annotations_omitted": 0,
+    "trust_sources_omitted": 0
+  }
+}

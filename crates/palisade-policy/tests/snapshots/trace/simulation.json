@@ -1,0 +1,269 @@
+{
+  "policy": [
+    "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+    7
+  ],
+  "candidate_revision": 8,
+  "summary": {
+    "events": 7,
+    "newly_blocked": 3,
+    "newly_allowed": 0,
+    "changed_attribution": 0,
+    "changed_outcome": 0,
+    "unchanged": 4
+  },
+  "changes": [
+    {
+      "event_id": "e2",
+      "device_id": "dev-1",
+      "user": "S-1-5-21-1000-2000-3000-1001",
+      "object": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "current": {
+        "outcome": "allowed_audit",
+        "would_have_been": "blocked",
+        "rule": null,
+        "reason_code": "audit_mode_would_block",
+        "mode": "audit"
+      },
+      "candidate": {
+        "outcome": "blocked",
+        "would_have_been": "blocked",
+        "rule": null,
+        "reason_code": "implicit_deny_unknown",
+        "mode": "enforce"
+      },
+      "change": "newly_blocked"
+    },
+    {
+      "event_id": "e4",
+      "device_id": "dev-1",
+      "user": "S-1-5-21-1000-2000-3000-1001",
+      "object": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "current": {
+        "outcome": "allowed_audit",
+        "would_have_been": "blocked",
+        "rule": {
+          "rule_id": "01936b2e-0004-7b3d-9f21-0a1b2c3d4e61",
+          "display_id": "R-000004",
+          "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+          "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+          "policy_revision": 7
+        },
+        "reason_code": "audit_mode_would_block",
+        "mode": "audit"
+      },
+      "candidate": {
+        "outcome": "blocked",
+        "would_have_been": "blocked",
+        "rule": {
+          "rule_id": "01936b2e-0004-7b3d-9f21-0a1b2c3d4e61",
+          "display_id": "R-000004",
+          "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+          "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+          "policy_revision": 8
+        },
+        "reason_code": "explicit_deny",
+        "mode": "enforce"
+      },
+      "change": "newly_blocked"
+    },
+    {
+      "event_id": "e5",
+      "device_id": "dev-2",
+      "user": null,
+      "object": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "current": {
+        "outcome": "allowed_audit",
+        "would_have_been": "blocked",
+        "rule": null,
+        "reason_code": "audit_mode_would_block",
+        "mode": "audit"
+      },
+      "candidate": {
+        "outcome": "blocked",
+        "would_have_been": "blocked",
+        "rule": null,
+        "reason_code": "implicit_deny_unknown",
+        "mode": "enforce"
+      },
+      "change": "newly_blocked"
+    }
+  ],
+  "changes_omitted": 0,
+  "by_device": [
+    {
+      "key": "dev-1",
+      "counts": {
+        "events": 3,
+        "blocked": 0,
+        "would_block": 2,
+        "newly_blocked": 2,
+        "newly_allowed": 0,
+        "changed_attribution": 0,
+        "changed_outcome": 0
+      }
+    },
+    {
+      "key": "dev-2",
+      "counts": {
+        "events": 2,
+        "blocked": 1,
+        "would_block": 1,
+        "newly_blocked": 1,
+        "newly_allowed": 0,
+        "changed_attribution": 0,
+        "changed_outcome": 0
+      }
+    },
+    {
+      "key": "dev-3",
+      "counts": {
+        "events": 2,
+        "blocked": 0,
+        "would_block": 0,
+        "newly_blocked": 0,
+        "newly_allowed": 0,
+        "changed_attribution": 0,
+        "changed_outcome": 0
+      }
+    }
+  ],
+  "by_user": [
+    {
+      "key": "S-1-5-21-1000-2000-3000-1001",
+      "counts": {
+        "events": 2,
+        "blocked": 0,
+        "would_block": 2,
+        "newly_blocked": 2,
+        "newly_allowed": 0,
+        "changed_attribution": 0,
+        "changed_outcome": 0
+      }
+    },
+    {
+      "key": "(unknown)",
+      "counts": {
+        "events": 5,
+        "blocked": 1,
+        "would_block": 1,
+        "newly_blocked": 1,
+        "newly_allowed": 0,
+        "changed_attribution": 0,
+        "changed_outcome": 0
+      }
+    }
+  ],
+  "by_rule": [
+    {
+      "key": "(implicit deny)",
+      "counts": {
+        "events": 2,
+        "blocked": 0,
+        "would_block": 2,
+        "newly_blocked": 2,
+        "newly_allowed": 0,
+        "changed_attribution": 0,
+        "changed_outcome": 0
+      }
+    },
+    {
+      "key": "01936b2e-0004-7b3d-9f21-0a1b2c3d4e61",
+      "counts": {
+        "events": 1,
+        "blocked": 0,
+        "would_block": 1,
+        "newly_blocked": 1,
+        "newly_allowed": 0,
+        "changed_attribution": 0,
+        "changed_outcome": 0
+      }
+    },
+    {
+      "key": "01936b2e-000a-7b3d-9f21-0a1b2c3d4e61",
+      "counts": {
+        "events": 1,
+        "blocked": 1,
+        "would_block": 0,
+        "newly_blocked": 0,
+        "newly_allowed": 0,
+        "changed_attribution": 0,
+        "changed_outcome": 0
+      }
+    },
+    {
+      "key": "01936b2e-0001-7b3d-9f21-0a1b2c3d4e61",
+      "counts": {
+        "events": 2,
+        "blocked": 0,
+        "would_block": 0,
+        "newly_blocked": 0,
+        "newly_allowed": 0,
+        "changed_attribution": 0,
+        "changed_outcome": 0
+      }
+    },
+    {
+      "key": "(not evaluated)",
+      "counts": {
+        "events": 1,
+        "blocked": 0,
+        "would_block": 0,
+        "newly_blocked": 0,
+        "newly_allowed": 0,
+        "changed_attribution": 0,
+        "changed_outcome": 0
+      }
+    }
+  ],
+  "by_object": [
+    {
+      "key": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "counts": {
+        "events": 4,
+        "blocked": 0,
+        "would_block": 1,
+        "newly_blocked": 1,
+        "newly_allowed": 0,
+        "changed_attribution": 0,
+        "changed_outcome": 0
+      }
+    },
+    {
+      "key": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "counts": {
+        "events": 1,
+        "blocked": 0,
+        "would_block": 1,
+        "newly_blocked": 1,
+        "newly_allowed": 0,
+        "changed_attribution": 0,
+        "changed_outcome": 0
+      }
+    },
+    {
+      "key": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "counts": {
+        "events": 1,
+        "blocked": 0,
+        "would_block": 1,
+        "newly_blocked": 1,
+        "newly_allowed": 0,
+        "changed_attribution": 0,
+        "changed_outcome": 0
+      }
+    },
+    {
+      "key": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "counts": {
+        "events": 1,
+        "blocked": 1,
+        "would_block": 0,
+        "newly_blocked": 0,
+        "newly_allowed": 0,
+        "changed_attribution": 0,
+        "changed_outcome": 0
+      }
+    }
+  ]
+}

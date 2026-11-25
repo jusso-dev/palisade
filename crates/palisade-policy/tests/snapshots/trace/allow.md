@@ -1,0 +1,20 @@
+**Allowed by rule 'Example signed tools' \(R\-000001\).**
+
+Effective mode: enforce.
+
+Mode step effective: enforce.
+
+Mode step applied: enforce (the outcome is the enforce\-mode outcome).
+
+Decided at stage policy, under the deny\_wins precedence model.
+
+### Why not allowed?
+
+- Rule 'Tools folder' \(R\-000003\) would allow this file, but the path.directory on this file is `C:\Apps` (expected starts\_with `C:\Tools`).
+
+### Matching rules
+
+| Rule | Name | Action | Stage | Role |
+|---|---|---|---|---|
+| R\-000001 | Example signed tools | allow | policy | decided |
+| R\-000006 | Watch Example | audit | annotation | annotation |

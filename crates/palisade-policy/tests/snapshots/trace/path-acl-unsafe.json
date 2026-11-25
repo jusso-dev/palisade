@@ -1,0 +1,342 @@
+{
+  "trace_schema_version": "1.0.0",
+  "trace_id": "41414141414141414141414141414141",
+  "level": "full",
+  "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+  "policy_revision": 7,
+  "bundle_hash": null,
+  "object_type": "executable",
+  "effective_mode": "enforce",
+  "mode_resolution": [
+    {
+      "kind": "device_mode",
+      "applied": false,
+      "mode": "enforce",
+      "detail": "device mode enforce"
+    },
+    {
+      "kind": "effective",
+      "applied": true,
+      "mode": "enforce",
+      "detail": ""
+    },
+    {
+      "kind": "applied",
+      "applied": false,
+      "mode": "enforce",
+      "detail": "blocked; no rule allows it, and the mode enforces"
+    }
+  ],
+  "precedence_model": "deny_wins",
+  "stages": [
+    {
+      "name": "mandatory_deny",
+      "outcome": "passed",
+      "candidates": 0,
+      "duration_ns": null
+    },
+    {
+      "name": "exclusion",
+      "outcome": "passed",
+      "candidates": 0,
+      "duration_ns": null
+    },
+    {
+      "name": "session_override",
+      "outcome": "skipped",
+      "candidates": 0,
+      "duration_ns": null
+    },
+    {
+      "name": "policy",
+      "outcome": "passed",
+      "candidates": 0,
+      "duration_ns": null
+    },
+    {
+      "name": "attribute",
+      "outcome": "skipped",
+      "candidates": 0,
+      "duration_ns": null
+    },
+    {
+      "name": "unknown",
+      "outcome": "decided",
+      "candidates": 0,
+      "duration_ns": null
+    }
+  ],
+  "decisive": null,
+  "matched": [
+    {
+      "rule": {
+        "rule_id": "01936b2e-0006-7b3d-9f21-0a1b2c3d4e61",
+        "display_id": "R-000006",
+        "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+        "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+        "policy_revision": 7
+      },
+      "name": "Watch Example",
+      "stage": "annotation",
+      "action": "audit",
+      "specificity_tier": 4,
+      "specificity_depth": 0,
+      "order": null,
+      "priority": null,
+      "role": "annotation",
+      "via_unknown": false
+    }
+  ],
+  "near_misses": [
+    {
+      "rule": {
+        "rule_id": "01936b2e-0001-7b3d-9f21-0a1b2c3d4e61",
+        "display_id": "R-000001",
+        "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+        "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+        "policy_revision": 7
+      },
+      "name": "Example signed tools",
+      "stage": "policy",
+      "action": "allow",
+      "tree": "no_match",
+      "matched_criteria": 1,
+      "total_criteria": 2,
+      "failing": [
+        {
+          "pointer": "/match/all/1/criterion",
+          "field": "meta.product_name",
+          "operator": "equals",
+          "under_not": false,
+          "result": "no_match",
+          "needed": "match",
+          "raw_result": "no_match",
+          "notes": [],
+          "expected": [
+            "Example Tools"
+          ],
+          "expected_truncated": false,
+          "contributing": true,
+          "observed": {
+            "field": "meta.product_name",
+            "known": true,
+            "values": [
+              "Other"
+            ],
+            "withheld": false,
+            "digests": [],
+            "truncated": false
+          }
+        }
+      ],
+      "failing_omitted": 0
+    },
+    {
+      "rule": {
+        "rule_id": "01936b2e-0003-7b3d-9f21-0a1b2c3d4e61",
+        "display_id": "R-000003",
+        "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+        "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+        "policy_revision": 7
+      },
+      "name": "Tools folder",
+      "stage": "policy",
+      "action": "allow",
+      "tree": "unknown",
+      "matched_criteria": 1,
+      "total_criteria": 2,
+      "failing": [
+        {
+          "pointer": "/match/all/1/criterion",
+          "field": "path.directory",
+          "operator": "starts_with",
+          "under_not": false,
+          "result": "unknown",
+          "needed": "match",
+          "raw_result": "unknown",
+          "notes": [
+            "path_acl_unsafe"
+          ],
+          "expected": [
+            "C:\\Tools"
+          ],
+          "expected_truncated": false,
+          "contributing": true,
+          "observed": {
+            "field": "path.directory",
+            "known": true,
+            "values": [
+              "C:\\Tools"
+            ],
+            "withheld": false,
+            "digests": [],
+            "truncated": false
+          }
+        }
+      ],
+      "failing_omitted": 0
+    }
+  ],
+  "inactive_matches": [],
+  "scope_rejections": [],
+  "unknown_facts": [
+    {
+      "field": "path.directory",
+      "notes": [
+        "path_acl_unsafe"
+      ],
+      "effects": [
+        "allow_not_applied"
+      ],
+      "rules": [
+        {
+          "rule_id": "01936b2e-0003-7b3d-9f21-0a1b2c3d4e61",
+          "display_id": "R-000003",
+          "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+          "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+          "policy_revision": 7
+        }
+      ],
+      "rules_omitted": 0
+    }
+  ],
+  "facts_used": [
+    {
+      "field": "hash.sha256",
+      "known": true,
+      "values": [
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "withheld": false,
+      "digests": [],
+      "truncated": false
+    },
+    {
+      "field": "signer.publisher",
+      "known": true,
+      "values": [
+        "Example Ltd"
+      ],
+      "withheld": false,
+      "digests": [],
+      "truncated": false
+    },
+    {
+      "field": "path.directory",
+      "known": true,
+      "values": [
+        "C:\\Tools"
+      ],
+      "withheld": false,
+      "digests": [],
+      "truncated": false
+    },
+    {
+      "field": "path.file_name",
+      "known": true,
+      "values": [
+        "tool.exe"
+      ],
+      "withheld": false,
+      "digests": [],
+      "truncated": false
+    },
+    {
+      "field": "meta.product_name",
+      "known": true,
+      "values": [
+        "Other"
+      ],
+      "withheld": false,
+      "digests": [],
+      "truncated": false
+    },
+    {
+      "field": "user.groups",
+      "known": false,
+      "values": [],
+      "withheld": false,
+      "digests": [],
+      "truncated": false
+    }
+  ],
+  "warnings": [
+    {
+      "code": "path_acl_unsafe",
+      "rules": [
+        {
+          "rule_id": "01936b2e-0003-7b3d-9f21-0a1b2c3d4e61",
+          "display_id": "R-000003",
+          "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+          "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+          "policy_revision": 7
+        }
+      ],
+      "rules_omitted": 0,
+      "details": []
+    }
+  ],
+  "inheritance": [],
+  "allow_suggestion": {
+    "action": "allow",
+    "object_types": [
+      "executable"
+    ],
+    "identity": "hash",
+    "match": {
+      "criterion": {
+        "field": "hash.sha256",
+        "operator": "equals",
+        "values": [
+          "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        ]
+      }
+    },
+    "caveats": []
+  },
+  "omitted": {
+    "matched": 0,
+    "near_misses": 0,
+    "inactive_matches": 0
+  },
+  "decision": {
+    "outcome": "blocked",
+    "would_have_been": "blocked",
+    "action": "deny",
+    "matched_rule": null,
+    "overridden": [],
+    "annotations": [
+      {
+        "rule_id": "01936b2e-0006-7b3d-9f21-0a1b2c3d4e61",
+        "display_id": "R-000006",
+        "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+        "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+        "policy_revision": 7
+      }
+    ],
+    "mode": "enforce",
+    "learning_candidate": false,
+    "directives": {
+      "containment": null,
+      "elevation": null,
+      "trust_sources": [],
+      "kill_running": false,
+      "request": null
+    },
+    "effects": {
+      "log": "always",
+      "upload": "immediate",
+      "notify": "default",
+      "notification_text": null,
+      "help_url": null,
+      "severity": "medium",
+      "tags": [],
+      "suppress_duplicates_secs": 600
+    },
+    "reason_code": "implicit_deny_unknown",
+    "trace_id": "41414141414141414141414141414141",
+    "overridden_omitted": 0,
+    "annotations_omitted": 0,
+    "trust_sources_omitted": 0
+  }
+}

@@ -1,0 +1,65 @@
+# Policy-as-code tests for staged-rollout.yaml (#41).
+policy_tests_version: "1.0.0"
+tests:
+  - name: the known bypass tool is blocked even in audit
+    given:
+      object_type: script.powershell
+      facts:
+        values:
+          hash.sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      outcome: blocked
+      reason_code: mandatory_deny
+      rule: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4f31
+
+  - name: the remote access tool is only reported
+    given:
+      object_type: script.powershell
+      facts:
+        signers: [{status: valid, publisher: Example Remote Ltd}]
+    expect:
+      outcome: allowed_audit
+      would_have_been: blocked
+      rule: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4f41
+
+  - name: the retired script host is enforced in audit
+    given:
+      object_type: executable
+      facts:
+        values:
+          hash.sha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    expect:
+      outcome: blocked
+      mode: enforce
+      rule: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4f42
+
+  - name: an unknown executable is blocked because executables enforce
+    given:
+      object_type: executable
+      facts:
+        values:
+          hash.sha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    expect:
+      outcome: blocked
+      no_rule: true
+
+  - name: an unknown script only reports while connected
+    given:
+      object_type: script.powershell
+      facts:
+        values:
+          hash.sha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    expect:
+      outcome: allowed_audit
+      reason_code: audit_mode_would_block
+
+  - name: a disconnected device enforces
+    given:
+      object_type: script.powershell
+      facts:
+        values:
+          hash.sha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      device_state: {disconnected: true}
+    expect:
+      outcome: blocked
+      mode: enforce

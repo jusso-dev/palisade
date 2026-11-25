@@ -1,0 +1,110 @@
+{
+  "window": [
+    1700000000,
+    1700086400
+  ],
+  "events": 6,
+  "events_outside_window": 1,
+  "devices": [
+    {
+      "device_id": "dev-1",
+      "events": 3,
+      "would_block": 2,
+      "ready": false
+    },
+    {
+      "device_id": "dev-2",
+      "events": 2,
+      "would_block": 1,
+      "ready": true
+    },
+    {
+      "device_id": "dev-3",
+      "events": 1,
+      "would_block": 0,
+      "ready": true
+    }
+  ],
+  "devices_omitted": 0,
+  "ready_devices": 2,
+  "top_objects": [
+    {
+      "object": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "would_block": 1,
+      "devices": 1,
+      "blocked_by": null,
+      "recommended_rule": {
+        "action": "allow",
+        "object_types": [
+          "executable"
+        ],
+        "identity": "hash",
+        "match": {
+          "criterion": {
+            "field": "hash.sha256",
+            "operator": "equals",
+            "values": [
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            ]
+          }
+        },
+        "caveats": []
+      }
+    },
+    {
+      "object": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "would_block": 1,
+      "devices": 1,
+      "blocked_by": null,
+      "recommended_rule": {
+        "action": "allow",
+        "object_types": [
+          "executable"
+        ],
+        "identity": "hash",
+        "match": {
+          "criterion": {
+            "field": "hash.sha256",
+            "operator": "equals",
+            "values": [
+              "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            ]
+          }
+        },
+        "caveats": []
+      }
+    },
+    {
+      "object": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "would_block": 1,
+      "devices": 1,
+      "blocked_by": "01936b2e-0004-7b3d-9f21-0a1b2c3d4e61",
+      "recommended_rule": {
+        "action": "allow",
+        "object_types": [
+          "executable"
+        ],
+        "identity": "hash",
+        "match": {
+          "criterion": {
+            "field": "hash.sha256",
+            "operator": "equals",
+            "values": [
+              "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+            ]
+          }
+        },
+        "caveats": [
+          "deny_rule_matched"
+        ]
+      }
+    }
+  ],
+  "gate": {
+    "would_block_events": 3,
+    "devices_affected": 2,
+    "days": 1,
+    "ack_required": true,
+    "message": "3 would-block events across 2 devices in the last 1 day"
+  }
+}

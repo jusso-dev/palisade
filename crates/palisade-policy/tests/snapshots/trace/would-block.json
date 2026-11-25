@@ -1,0 +1,132 @@
+{
+  "trace_schema_version": "1.0.0",
+  "trace_id": "41414141414141414141414141414141",
+  "level": "standard",
+  "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+  "policy_revision": 7,
+  "bundle_hash": null,
+  "object_type": "executable",
+  "effective_mode": "audit",
+  "mode_resolution": [
+    {
+      "kind": "device_mode",
+      "applied": false,
+      "mode": "audit",
+      "detail": "device mode audit"
+    },
+    {
+      "kind": "effective",
+      "applied": true,
+      "mode": "audit",
+      "detail": ""
+    },
+    {
+      "kind": "applied",
+      "applied": true,
+      "mode": "audit",
+      "detail": "would have blocked; runs because the mode does not enforce"
+    }
+  ],
+  "precedence_model": "deny_wins",
+  "stages": [
+    {
+      "name": "mandatory_deny",
+      "outcome": "passed",
+      "candidates": 0,
+      "duration_ns": null
+    },
+    {
+      "name": "exclusion",
+      "outcome": "passed",
+      "candidates": 0,
+      "duration_ns": null
+    },
+    {
+      "name": "session_override",
+      "outcome": "skipped",
+      "candidates": 0,
+      "duration_ns": null
+    },
+    {
+      "name": "policy",
+      "outcome": "passed",
+      "candidates": 0,
+      "duration_ns": null
+    },
+    {
+      "name": "attribute",
+      "outcome": "skipped",
+      "candidates": 0,
+      "duration_ns": null
+    },
+    {
+      "name": "unknown",
+      "outcome": "decided",
+      "candidates": 0,
+      "duration_ns": null
+    }
+  ],
+  "decisive": null,
+  "matched": [],
+  "near_misses": [],
+  "inactive_matches": [],
+  "scope_rejections": [],
+  "unknown_facts": [],
+  "facts_used": [],
+  "warnings": [],
+  "inheritance": [],
+  "allow_suggestion": {
+    "action": "allow",
+    "object_types": [
+      "executable"
+    ],
+    "identity": "hash",
+    "match": {
+      "criterion": {
+        "field": "hash.sha256",
+        "operator": "equals",
+        "values": [
+          "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        ]
+      }
+    },
+    "caveats": []
+  },
+  "omitted": {
+    "matched": 0,
+    "near_misses": 0,
+    "inactive_matches": 0
+  },
+  "decision": {
+    "outcome": "allowed_audit",
+    "would_have_been": "blocked",
+    "action": "deny",
+    "matched_rule": null,
+    "overridden": [],
+    "annotations": [],
+    "mode": "audit",
+    "learning_candidate": false,
+    "directives": {
+      "containment": null,
+      "elevation": null,
+      "trust_sources": [],
+      "kill_running": false,
+      "request": null
+    },
+    "effects": {
+      "log": "always",
+      "upload": "immediate",
+      "notify": "none",
+      "notification_text": null,
+      "help_url": null,
+      "severity": "medium",
+      "tags": [],
+      "suppress_duplicates_secs": 600
+    },
+    "reason_code": "audit_mode_would_block",
+    "trace_id": "41414141414141414141414141414141",
+    "overridden_omitted": 0,
+    "annotations_omitted": 0,
+    "trust_sources_omitted": 0
+  }
+}
