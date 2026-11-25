@@ -541,5 +541,14 @@ impl<'p> Evaluator<'p> {
     }
 }
 
+// The decision trace (#41, `crate::trace`) lists the rules that applied as
+// `evaluate` found them, so it can never disagree with the evaluator.
+impl Evaluator<'_> {
+    /// The IDs of the enabled rules that apply to the subject.
+    pub(crate) fn matching_ids(&self, subject: &Subject<'_>) -> Vec<RuleId> {
+        self.matching(subject).iter().map(|r| r.rule.id).collect()
+    }
+}
+
 #[cfg(test)]
 mod tests;

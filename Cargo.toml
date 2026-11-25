@@ -45,6 +45,7 @@ clap = { version = "4.6.9", default-features = false, features = ["std", "derive
 # moving to a newer release is a separate change. The default plotting and
 # parallel features are left out.
 criterion = { version = "0.7.0", default-features = false, features = ["cargo_bench_support"] }
+hmac = { version = "0.13.0", default-features = false }
 hyper-util = { version = "0.1.21", default-features = false, features = ["http1", "http2", "server-auto", "service", "tokio"] }
 if-addrs = { version = "0.15.0", default-features = false }
 libc = { version = "0.2.191", default-features = false }

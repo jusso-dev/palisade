@@ -10,13 +10,16 @@ authors.workspace = true
 publish.workspace = true
 
 [dependencies]
+# Keyed digests of withheld facts in decision traces (#41).
+hmac = { workspace = true }
 palisade-core = { workspace = true, features = ["std", "schema"] }
 regex-automata = { workspace = true }
 regex-syntax = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-# SHA-256 of the effective policy's canonical form (#37). Already used by palisade-fileid.
+# SHA-256 of the effective policy's canonical form (#37), trace IDs from event
+# IDs, and the digest of withheld facts (#41).
 sha2 = { workspace = true }
 unicode-normalization = { workspace = true }
 yaml-rust2 = { workspace = true }
@@ -28,6 +31,10 @@ proptest = { workspace = true }
 
 [[bench]]
 name = "criterion_eval"
+harness = false
+
+[[bench]]
+name = "simulate"
 harness = false
 
 [lints]

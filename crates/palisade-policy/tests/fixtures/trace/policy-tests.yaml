@@ -1,0 +1,45 @@
+# Policy-as-code tests for the fixture policy in `src/trace/tests.rs`
+# (#41). The last test is wrong on purpose, to check failure reporting.
+policy_tests_version: "1.0.0"
+tests:
+  - name: signed tools run
+    given:
+      object_type: executable
+      facts:
+        values: {meta.product_name: Example Tools}
+        path: {path: 'C:\Apps\tool.exe', user_writable: false}
+        signers: [{status: valid, publisher: Example Ltd}]
+    expect: {outcome: allowed, rule: R-000001, reason_code: explicit_allow}
+  - name: a standard user cannot run the script host
+    given:
+      object_type: executable
+      facts:
+        path: {path: 'C:\Apps\script.exe', user_writable: false}
+      context: {user_groups: []}
+    expect: {outcome: blocked, rule: R-000004}
+  - name: an administrator is not blocked by the script host rule
+    given:
+      object_type: executable
+      facts:
+        path: {path: 'C:\Apps\script.exe', user_writable: false}
+      context: {user_groups: [S-1-5-21-1000-2000-3000-1100]}
+    expect: {outcome: blocked, no_rule: true, reason_code: implicit_deny_unknown}
+  - name: known bad is blocked by the mandatory tier
+    given:
+      object_type: executable
+      facts:
+        values: {hash.sha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd}
+    expect: {reason_code: mandatory_deny, rule: R-000010}
+  - name: an audit device reports a would-block
+    given:
+      object_type: executable
+      facts:
+        values: {hash.sha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}
+      device_state: {mode: audit}
+    expect: {outcome: allowed_audit, would_have_been: blocked, mode: audit}
+  - name: a deliberately wrong expectation
+    given:
+      object_type: executable
+      facts:
+        values: {hash.sha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}
+    expect: {outcome: allowed}

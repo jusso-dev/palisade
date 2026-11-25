@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="6" failures="1">
+  <testsuite name="fixture" tests="6" failures="1">
+    <testcase classname="fixture" name="signed tools run"/>
+    <testcase classname="fixture" name="a standard user cannot run the script host"/>
+    <testcase classname="fixture" name="an administrator is not blocked by the script host rule"/>
+    <testcase classname="fixture" name="known bad is blocked by the mandatory tier"/>
+    <testcase classname="fixture" name="an audit device reports a would-block"/>
+    <testcase classname="fixture" name="a deliberately wrong expectation">
+      <failure message="outcome: expected allowed, got blocked">Blocked: no rule allows this executable.
+Effective mode: enforce.
+Decided at stage unknown, under the deny_wins precedence model.
+The signer.publisher fact was unknown, so a rule that would let this run did not apply.
+The signer.publisher fact was unknown, so an audit rule did not annotate.
+The path.directory fact was unknown, so a rule that would let this run did not apply.
+The path.file_name fact was unknown, so a deny rule did not apply.
+The meta.product_name fact was unknown, so a rule that would let this run did not apply.
+The user.groups fact was unknown, so a deny rule did not apply.
+
+What would allow this?
+Draft: a rule allowing this exact file by its hash. Added to the policy, it would allow this file.
+</failure>
+    </testcase>
+  </testsuite>
+</testsuites>

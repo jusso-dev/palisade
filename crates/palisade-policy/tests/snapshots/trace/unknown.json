@@ -1,0 +1,347 @@
+{
+  "trace_schema_version": "1.0.0",
+  "trace_id": "41414141414141414141414141414141",
+  "level": "full",
+  "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+  "policy_revision": 7,
+  "bundle_hash": null,
+  "object_type": "executable",
+  "effective_mode": "enforce",
+  "mode_resolution": [
+    {
+      "kind": "device_mode",
+      "applied": false,
+      "mode": "enforce",
+      "detail": "device mode enforce"
+    },
+    {
+      "kind": "effective",
+      "applied": true,
+      "mode": "enforce",
+      "detail": ""
+    },
+    {
+      "kind": "applied",
+      "applied": false,
+      "mode": "enforce",
+      "detail": "blocked; no rule allows it, and the mode enforces"
+    }
+  ],
+  "precedence_model": "deny_wins",
+  "stages": [
+    {
+      "name": "mandatory_deny",
+      "outcome": "passed",
+      "candidates": 0,
+      "duration_ns": null
+    },
+    {
+      "name": "exclusion",
+      "outcome": "passed",
+      "candidates": 0,
+      "duration_ns": null
+    },
+    {
+      "name": "session_override",
+      "outcome": "skipped",
+      "candidates": 0,
+      "duration_ns": null
+    },
+    {
+      "name": "policy",
+      "outcome": "passed",
+      "candidates": 0,
+      "duration_ns": null
+    },
+    {
+      "name": "attribute",
+      "outcome": "skipped",
+      "candidates": 0,
+      "duration_ns": null
+    },
+    {
+      "name": "unknown",
+      "outcome": "decided",
+      "candidates": 0,
+      "duration_ns": null
+    }
+  ],
+  "decisive": null,
+  "matched": [],
+  "near_misses": [
+    {
+      "rule": {
+        "rule_id": "01936b2e-0003-7b3d-9f21-0a1b2c3d4e61",
+        "display_id": "R-000003",
+        "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+        "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+        "policy_revision": 7
+      },
+      "name": "Tools folder",
+      "stage": "policy",
+      "action": "allow",
+      "tree": "unknown",
+      "matched_criteria": 1,
+      "total_criteria": 2,
+      "failing": [
+        {
+          "pointer": "/match/all/0/criterion",
+          "field": "signer.publisher",
+          "operator": "equals",
+          "under_not": false,
+          "result": "unknown",
+          "needed": "match",
+          "raw_result": "unknown",
+          "notes": [
+            "fact_missing"
+          ],
+          "expected": [
+            "Example Ltd"
+          ],
+          "expected_truncated": false,
+          "contributing": true,
+          "observed": {
+            "field": "signer.publisher",
+            "known": false,
+            "values": [],
+            "withheld": false,
+            "digests": [],
+            "truncated": false
+          }
+        }
+      ],
+      "failing_omitted": 0
+    },
+    {
+      "rule": {
+        "rule_id": "01936b2e-0004-7b3d-9f21-0a1b2c3d4e61",
+        "display_id": "R-000004",
+        "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+        "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+        "policy_revision": 7
+      },
+      "name": "Block script hosts for standard users",
+      "stage": "policy",
+      "action": "deny",
+      "tree": "unknown",
+      "matched_criteria": 1,
+      "total_criteria": 2,
+      "failing": [
+        {
+          "pointer": "/match/all/1/not/criterion",
+          "field": "user.groups",
+          "operator": "member_of",
+          "under_not": true,
+          "result": "unknown",
+          "needed": "no_match",
+          "raw_result": "unknown",
+          "notes": [
+            "fact_missing"
+          ],
+          "expected": [
+            "S-1-5-21-1000-2000-3000-1100"
+          ],
+          "expected_truncated": false,
+          "contributing": true,
+          "observed": {
+            "field": "user.groups",
+            "known": false,
+            "values": [],
+            "withheld": false,
+            "digests": [],
+            "truncated": false
+          }
+        }
+      ],
+      "failing_omitted": 0
+    }
+  ],
+  "inactive_matches": [],
+  "scope_rejections": [],
+  "unknown_facts": [
+    {
+      "field": "signer.publisher",
+      "notes": [
+        "fact_missing"
+      ],
+      "effects": [
+        "allow_not_applied",
+        "annotation_not_applied"
+      ],
+      "rules": [
+        {
+          "rule_id": "01936b2e-0001-7b3d-9f21-0a1b2c3d4e61",
+          "display_id": "R-000001",
+          "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+          "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+          "policy_revision": 7
+        },
+        {
+          "rule_id": "01936b2e-0003-7b3d-9f21-0a1b2c3d4e61",
+          "display_id": "R-000003",
+          "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+          "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+          "policy_revision": 7
+        },
+        {
+          "rule_id": "01936b2e-0006-7b3d-9f21-0a1b2c3d4e61",
+          "display_id": "R-000006",
+          "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+          "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+          "policy_revision": 7
+        }
+      ],
+      "rules_omitted": 0
+    },
+    {
+      "field": "meta.product_name",
+      "notes": [
+        "fact_missing"
+      ],
+      "effects": [
+        "allow_not_applied"
+      ],
+      "rules": [
+        {
+          "rule_id": "01936b2e-0001-7b3d-9f21-0a1b2c3d4e61",
+          "display_id": "R-000001",
+          "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+          "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+          "policy_revision": 7
+        }
+      ],
+      "rules_omitted": 0
+    },
+    {
+      "field": "user.groups",
+      "notes": [
+        "fact_missing"
+      ],
+      "effects": [
+        "deny_not_applied"
+      ],
+      "rules": [
+        {
+          "rule_id": "01936b2e-0004-7b3d-9f21-0a1b2c3d4e61",
+          "display_id": "R-000004",
+          "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+          "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+          "policy_revision": 7
+        }
+      ],
+      "rules_omitted": 0
+    }
+  ],
+  "facts_used": [
+    {
+      "field": "hash.sha256",
+      "known": true,
+      "values": [
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "withheld": false,
+      "digests": [],
+      "truncated": false
+    },
+    {
+      "field": "signer.publisher",
+      "known": false,
+      "values": [],
+      "withheld": false,
+      "digests": [],
+      "truncated": false
+    },
+    {
+      "field": "path.directory",
+      "known": true,
+      "values": [
+        "C:\\Tools"
+      ],
+      "withheld": false,
+      "digests": [],
+      "truncated": false
+    },
+    {
+      "field": "path.file_name",
+      "known": true,
+      "values": [
+        "script.exe"
+      ],
+      "withheld": false,
+      "digests": [],
+      "truncated": false
+    },
+    {
+      "field": "meta.product_name",
+      "known": false,
+      "values": [],
+      "withheld": false,
+      "digests": [],
+      "truncated": false
+    },
+    {
+      "field": "user.groups",
+      "known": false,
+      "values": [],
+      "withheld": false,
+      "digests": [],
+      "truncated": false
+    }
+  ],
+  "warnings": [],
+  "inheritance": [],
+  "allow_suggestion": {
+    "action": "allow",
+    "object_types": [
+      "executable"
+    ],
+    "identity": "hash",
+    "match": {
+      "criterion": {
+        "field": "hash.sha256",
+        "operator": "equals",
+        "values": [
+          "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        ]
+      }
+    },
+    "caveats": []
+  },
+  "omitted": {
+    "matched": 0,
+    "near_misses": 0,
+    "inactive_matches": 0
+  },
+  "decision": {
+    "outcome": "blocked",
+    "would_have_been": "blocked",
+    "action": "deny",
+    "matched_rule": null,
+    "overridden": [],
+    "annotations": [],
+    "mode": "enforce",
+    "learning_candidate": false,
+    "directives": {
+      "containment": null,
+      "elevation": null,
+      "trust_sources": [],
+      "kill_running": false,
+      "request": null
+    },
+    "effects": {
+      "log": "always",
+      "upload": "immediate",
+      "notify": "default",
+      "notification_text": null,
+      "help_url": null,
+      "severity": "medium",
+      "tags": [],
+      "suppress_duplicates_secs": 600
+    },
+    "reason_code": "implicit_deny_unknown",
+    "trace_id": "41414141414141414141414141414141",
+    "overridden_omitted": 0,
+    "annotations_omitted": 0,
+    "trust_sources_omitted": 0
+  }
+}

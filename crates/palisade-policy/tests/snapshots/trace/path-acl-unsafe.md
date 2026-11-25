@@ -1,0 +1,28 @@
+**Blocked: no rule allows this executable.**
+
+Effective mode: enforce.
+
+Mode step effective: enforce.
+
+Mode step applied: enforce (blocked; no rule allows it, and the mode enforces).
+
+Decided at stage unknown, under the deny\_wins precedence model.
+
+The path.directory fact was unknown, so a rule that would let this run did not apply.
+
+Warning: a path rule did not count, because users may be able to write the path: R\-000003.
+
+### Why not allowed?
+
+- Rule 'Example signed tools' \(R\-000001\) would allow this file, but the meta.product\_name on this file is `Other` (expected equals `Example Tools`).
+- Rule 'Tools folder' \(R\-000003\) would allow this file, but the path is user-writable.
+
+### What would allow this?
+
+Draft: a rule allowing this exact file by its hash. Added to the policy, it would allow this file.
+
+### Matching rules
+
+| Rule | Name | Action | Stage | Role |
+|---|---|---|---|---|
+| R\-000006 | Watch Example | audit | annotation | annotation |

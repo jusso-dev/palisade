@@ -1,0 +1,1 @@
+Allowed in audit mode. In enforce mode it would be blocked: no rule allows this executable.

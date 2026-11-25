@@ -1,0 +1,43 @@
+# Recorded decision inputs for staged-rollout.yaml (#41), as an agent
+# exports them. Timestamps are seconds since 1970; the readiness window in
+# tests/simulation.rs is the 7 days up to 1700604800.
+facts_schema_version: "1.0.0"
+snapshots:
+  - event_id: ws-01-0001
+    device_id: ws-01
+    timestamp: 1700000100
+    object_type: script.powershell
+    facts:
+      values: {hash.sha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc}
+      path: {path: 'C:\Scripts\cleanup.ps1', user_writable: false}
+  - event_id: ws-01-0002
+    device_id: ws-01
+    timestamp: 1700000200
+    object_type: script.powershell
+    facts:
+      values: {hash.sha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc}
+      path: {path: 'C:\Scripts\cleanup.ps1', user_writable: false}
+  - event_id: ws-02-0001
+    device_id: ws-02
+    timestamp: 1700000300
+    object_type: script.powershell
+    facts:
+      signers: [{status: valid, publisher: Example Remote Ltd}]
+  - event_id: ws-02-0002
+    device_id: ws-02
+    timestamp: 1700000400
+    object_type: executable
+    facts:
+      values: {hash.sha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}
+  - event_id: ws-03-0001
+    device_id: ws-03
+    timestamp: 1700000500
+    object_type: script.powershell
+    facts:
+      values: {hash.sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+  - event_id: ws-03-0002
+    device_id: ws-03
+    timestamp: 1600000000
+    object_type: script.powershell
+    facts:
+      values: {hash.sha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd}

@@ -1,0 +1,23 @@
+**Allowed by an override session. Otherwise rule 'Block script hosts for standard users' \(R\-000004\) would block it.**
+
+_you are not in S\-1\-5\-21\-1000\-2000\-3000\-1100_
+
+Effective mode: audit.
+
+Mode step session: audit (override session audit).
+
+Mode step effective: audit (lowered by the override session).
+
+Mode step applied: audit (would have blocked; runs because of the override session).
+
+Decided at stage policy, under the deny\_wins precedence model.
+
+### What would allow this?
+
+Draft: a rule allowing this exact file by its hash. A deny rule also matches, and under deny_wins a deny beats every allow, so no allow rule can stop it blocking this file in enforce mode.
+
+### Matching rules
+
+| Rule | Name | Action | Stage | Role |
+|---|---|---|---|---|
+| R\-000004 | Block script hosts for standard users | deny | policy | decided |
