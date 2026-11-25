@@ -968,3 +968,31 @@ fn an_issuer_ocsp_answer_about_the_responder_is_budgeted() {
     // known, so its answer is not used, and the leaf fails closed.
     assert_eq!(run(MAX_CRL_CHECKS), CertRevocation::NotChecked);
 }
+
+#[test]
+fn responses_not_claiming_the_issuer_cost_nothing_to_rule_out() {
+    use palisade_fileid::authenticode::MAX_CRL_CHECKS;
+    let (leaf, root) = (cert("leaf"), cert("root"));
+    let good = response("good-delegated");
+    let now = now_of(&good);
+    // The root's answer revoking the responder, relabelled as if another
+    // responder (by name) had signed it: it cannot be the issuer's own, so
+    // ruling it out needs no signature check.
+    let mut other = response("revoked-responder-by-root");
+    other.responder = ResponderId::ByName(leaf.subject.der.clone());
+    let mut set = RevocationSet::new();
+    set.mode = RevocationMode::OnlineRequired;
+    set.add_ocsp(good.clone());
+    for _ in 0..(2 * MAX_CRL_CHECKS) {
+        set.add_ocsp(other.clone());
+    }
+    // Were each charged a check, the budget would run out: NotChecked.
+    assert_eq!(set.state_of(&[&leaf, &root], 0, now), CertRevocation::Good);
+    // The genuine issuer-signed answer still revokes the responder, and the
+    // check made for it is shared with the response's own signer check.
+    set.add_ocsp(response("revoked-responder-by-root"));
+    assert_eq!(
+        set.state_of(&[&leaf, &root], 0, now),
+        CertRevocation::Unknown
+    );
+}

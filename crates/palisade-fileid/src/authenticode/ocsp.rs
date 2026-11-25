@@ -389,7 +389,6 @@ impl OcspResponse {
                 true
             }
         };
-        let mut ran_out = false;
         // The issuer signed it.
         if self.names_responder(issuer) {
             if !spend() {
@@ -399,6 +398,21 @@ impl OcspResponse {
                 return Signer::Issuer;
             }
         }
+        self.signer_for_delegates(issuer, budget)
+    }
+
+    /// [`Self::signer_for`] without the issuer's own signature (already
+    /// known not to be it): a delegated responder, or nobody.
+    pub(crate) fn signer_for_delegates(&self, issuer: &CertSummary, budget: &mut usize) -> Signer {
+        let mut spend = || {
+            if *budget == 0 {
+                false
+            } else {
+                *budget -= 1;
+                true
+            }
+        };
+        let mut ran_out = false;
         // A delegated responder, issued by the issuer.
         for (index, r) in self.certificates.iter().enumerate() {
             let eligible = self.names_responder(r)
@@ -470,7 +484,7 @@ impl OcspResponse {
         self.names_responder(issuer) && self.signature_valid(issuer)
     }
 
-    fn names_responder(&self, cert: &CertSummary) -> bool {
+    pub(crate) fn names_responder(&self, cert: &CertSummary) -> bool {
         match &self.responder {
             ResponderId::ByName(name) => cert.subject.der == *name,
             ResponderId::ByKey(hash) => subject_public_key(cert)
