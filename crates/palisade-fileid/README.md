@@ -198,7 +198,9 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     owner, group and DACL from a handle (`GetSecurityInfo`), account names
     (`LookupAccountSidW`, cached), owner classification that is reported
     only on local NTFS or ReFS, writability of a real path and every folder
-    above it (links never followed), and the OS access check
+    above it (the folders the opened file really lives in, from its
+    final path, plus the path's own folders; a final link or any reparse
+    point on a chain fails closed), and the OS access check
     (`AuthzAccessCheck` with a synthetic token of the standard user's SIDs).
     `cross_check_writability` compares that check with the portable
     evaluator: the evaluator must never miss a right the OS grants.

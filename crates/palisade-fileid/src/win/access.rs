@@ -50,6 +50,9 @@ const FILE_READ_ATTRIBUTES: u32 = 0x0080;
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
 /// `FILE_ATTRIBUTE_DIRECTORY`.
 const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x0010;
+/// `SECURITY_SQOS_PRESENT` with `SECURITY_ANONYMOUS` (0): if a path turns
+/// out to name a named pipe, its server can never impersonate the caller.
+const SQOS_ANONYMOUS: u32 = 0x0010_0000;
 
 /// Opens `path` (file or folder) to read its security descriptor, without
 /// following a final link or junction.
@@ -57,7 +60,7 @@ pub fn open_for_security(path: &Path) -> io::Result<File> {
     OpenOptions::new()
         .access_mode(READ_CONTROL | FILE_READ_ATTRIBUTES)
         .share_mode(0x7)
-        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT | SQOS_ANONYMOUS)
         .open(path)
 }
 
@@ -98,8 +101,37 @@ fn open_target(path: &Path) -> io::Result<File> {
     OpenOptions::new()
         .access_mode(READ_CONTROL | FILE_READ_ATTRIBUTES)
         .share_mode(0x7)
-        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | SQOS_ANONYMOUS)
         .open(path)
+}
+
+/// Whether `root` names a volume that holds files: a drive, a UNC share,
+/// a volume GUID, or an NT disk volume (`\Device\HarddiskVolumeN`, or a
+/// shadow copy of one). Pipes, mailslots, consoles and other devices are
+/// not.
+fn is_file_system_root(root: &Root) -> bool {
+    match root {
+        Root::Drive(_) | Root::Unc { .. } | Root::VolumeGuid(_) => true,
+        Root::NtDevice(name) => {
+            let n = name.to_ascii_lowercase();
+            n.starts_with("harddiskvolume")
+        }
+        Root::DosDevice(_) => false,
+    }
+}
+
+/// Whether two open handles are the same file system object (same volume
+/// serial and 128-bit file ID). `false` if either ID cannot be read, or is
+/// all zero.
+fn same_object(a: &File, b: &File) -> bool {
+    match (super::sys::file_id_info(a), super::sys::file_id_info(b)) {
+        (Ok(x), Ok(y)) => {
+            x.FileId.Identifier != [0; 16]
+                && x.VolumeSerialNumber == y.VolumeSerialNumber
+                && x.FileId.Identifier == y.FileId.Identifier
+        }
+        _ => false,
+    }
 }
 
 /// The `FILE_ATTRIBUTE_*` bits of the open `file`.
@@ -115,15 +147,25 @@ fn attributes(file: &File) -> io::Result<u32> {
 /// the target is opened **following** links, and its own final path
 /// (`GetFinalPathNameByHandleW`) gives the real chain of folders, so a
 /// junction, symbolic link, mount point or `subst` drive in `path` cannot
-/// hide a writable folder the file really lives in. Each folder on that
-/// chain is then opened without following a reparse point; one that is a
-/// reparse point, or that cannot be opened, read or parsed, counts as
-/// user-writable (it means the chain is not what it seems, and that fails
-/// closed). The lexical ancestors of `path`, when they differ from the
-/// final path's, are checked the same way and must also be safe, since the
-/// link objects themselves could be replaced.
+/// hide a writable folder the file really lives in. Each folder on a chain
+/// is opened without following a reparse point; one that is a reparse
+/// point, or that cannot be opened, read or parsed, counts as
+/// user-writable (the chain is not what it seems, so this fails closed).
+/// The lexical ancestors of `path` that are not on the real chain are
+/// checked the same way, since the link objects could be replaced.
 ///
-/// Device paths (`\\.\pipe\…` and other DOS devices) are rejected.
+/// If `path` **itself** is a link, junction or other reparse point that
+/// leads to another object, the target counts as user-writable too: the
+/// link object could be retargeted, or lead through folders neither chain
+/// shows. Assess the target's own path instead to judge the target.
+///
+/// Only paths on a volume are accepted: device paths (`\\.\pipe\…`,
+/// `\\?\GLOBALROOT\Device\NamedPipe\…` and the like) are rejected, and
+/// every open asks for anonymous impersonation, so even a path that leads
+/// to a named pipe cannot lend its server the caller's identity.
+///
+/// Ancestors are read lazily: with [`AssessOptions::stop_at_first_writable`]
+/// nothing is read past the first user-writable folder.
 pub fn assess_file(
     path: &Path,
     options: &EvaluationOptions,
@@ -135,13 +177,14 @@ pub fn assess_file(
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path is not valid Unicode"))?;
     let lexical =
         normalize_win32(text).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-    if matches!(lexical.root(), Root::DosDevice(_)) {
+    if !is_file_system_root(lexical.root()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "not a file-system path",
         ));
     }
-    let target = open_target(Path::new(&lexical.to_win32_string()))?;
+    let shown = lexical.to_win32_string();
+    let target = open_target(Path::new(&shown))?;
     if !super::sys::is_disk_file(&target) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -154,32 +197,41 @@ pub fn assess_file(
     } else {
         ObjectKind::File
     };
-    let target_sd = descriptor_of(&target);
+    // The object `path` names, without following it. If that is not the
+    // object opening `path` reaches, `path` is a link: fail closed.
+    let is_link = match open_for_security(Path::new(&shown)) {
+        Ok(stub) => !same_object(&stub, &target),
+        Err(_) => true,
+    };
+    let target_sd = if is_link {
+        None
+    } else {
+        descriptor_of(&target)
+    };
     // The real chain, from the opened handle.
     let final_text = super::sys::final_path_by_handle(&target, 0)
         .or_else(|_| super::sys::final_path_by_handle(&target, 1))?;
     let mut real =
         normalize_win32(&final_text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     real.mark_long_names_verified();
-    let real_chain: Vec<AncestorRead> = real.ancestors().map(read_ancestor_result).collect();
-    // The lexical chain, if it names other folders.
-    let lexical_extra: Vec<AncestorRead> = if lexical.case_folded() == real.case_folded() {
-        Vec::new()
-    } else {
-        let real_keys: std::collections::BTreeSet<String> = real_chain
-            .iter()
-            .map(|a| crate::fsctx::fold_case(&a.path))
-            .collect();
-        lexical
-            .ancestors()
-            .map(read_ancestor_result)
-            .filter(|a| !real_keys.contains(&crate::fsctx::fold_case(&a.path)))
-            .collect()
-    };
+    // Which folders to read, decided from the paths alone: the real chain,
+    // then the lexical ancestors not on it. Nothing is opened yet.
+    let mut seen = std::collections::BTreeSet::new();
+    let mut chain = Vec::new();
+    for a in real.ancestors().chain(lexical.ancestors()) {
+        match &a {
+            Ok(p) => {
+                if seen.insert(p.case_folded()) {
+                    chain.push(a);
+                }
+            }
+            Err(_) => chain.push(a),
+        }
+    }
     Ok(assess_ancestors(
         target_sd.as_ref(),
         kind,
-        real_chain.into_iter().chain(lexical_extra),
+        chain.into_iter().map(read_ancestor_result),
         options,
         assess,
         cache,

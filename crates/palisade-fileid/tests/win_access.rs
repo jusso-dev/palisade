@@ -40,12 +40,23 @@ impl Drop for Scratch {
     }
 }
 
+/// A fresh scratch folder, named by its long final path: `%TEMP%` on the
+/// runners holds an 8.3 short name (`RUNNER~1`), while the assessment
+/// reports final paths, so the fixture must use the same form.
 fn scratch(name: &str) -> Scratch {
     let dir =
         std::env::temp_dir().join(format!("palisade-win-access-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir(&dir).unwrap();
-    Scratch(dir)
+    let long = palisade_fileid::win::fsctx::final_path(&dir)
+        .unwrap()
+        .to_win32_string();
+    Scratch(PathBuf::from(long))
+}
+
+/// Paths compared as the OS compares names.
+fn same_path(a: &str, b: &Path) -> bool {
+    a.eq_ignore_ascii_case(b.to_str().unwrap())
 }
 
 /// Opens `path` (file or folder) with `WRITE_OWNER` and `WRITE_DAC` to set
@@ -188,9 +199,12 @@ fn path_assessment_of_the_fixture() {
     std::fs::write(&inside, b"x").unwrap();
     let w = assess_file(&inside, &opts, AssessOptions::default(), &mut cache).unwrap();
     assert!(w.file_user_writable, "inherits Users modify");
-    assert_eq!(
-        w.first_user_writable_ancestor.as_deref(),
-        Some(logs.to_str().unwrap())
+    assert!(
+        w.first_user_writable_ancestor
+            .as_deref()
+            .is_some_and(|a| same_path(a, &logs)),
+        "{:?}",
+        w.first_user_writable_ancestor
     );
     assert!(w.path_user_writable());
     assert!(
@@ -207,8 +221,10 @@ fn path_assessment_of_the_fixture() {
     // Its folders up to the scratch root are locked; above that, the temp
     // folder is user-writable on any stock image.
     let first = w.first_user_writable_ancestor.clone().unwrap();
+    let lower = first.to_ascii_lowercase();
     assert!(
-        !first.starts_with(app.to_str().unwrap()) && !first.starts_with(dir.0.to_str().unwrap()),
+        !lower.starts_with(&app.to_str().unwrap().to_ascii_lowercase())
+            && !lower.starts_with(&dir.0.to_str().unwrap().to_ascii_lowercase()),
         "{first}"
     );
 
@@ -421,4 +437,53 @@ fn links_cannot_hide_a_writable_folder() {
         .is_err()
     );
     let _ = app;
+}
+
+/// The final component of a path being a link counts as writable: the link
+/// object could be retargeted, whatever its target's DACL.
+#[test]
+fn a_final_link_is_never_trusted() {
+    let dir = scratch("finallink");
+    let (pf, app, _logs, _denied, _file) = fixture(&dir.0);
+    let opts = EvaluationOptions::default();
+    let mut cache = WritabilityCache::default();
+    // A junction inside the locked `PF` to the locked `App`.
+    let junction = pf.join("Alias");
+    assert!(
+        std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&app)
+            .status()
+            .unwrap()
+            .success()
+    );
+    // `App` itself is locked, but reached through a link it is not trusted.
+    let direct = assess_file(&app, &opts, AssessOptions::default(), &mut cache).unwrap();
+    assert!(!direct.file_user_writable, "{:?}", direct.target);
+    let via = assess_file(&junction, &opts, AssessOptions::default(), &mut cache).unwrap();
+    assert!(
+        via.file_user_writable,
+        "a final junction must fail closed: {:?}",
+        via.target
+    );
+    assert!(via.target.unreadable);
+    let _ = std::fs::remove_dir(&junction);
+}
+
+#[test]
+fn device_paths_are_rejected() {
+    let opts = EvaluationOptions::default();
+    let mut cache = WritabilityCache::default();
+    for p in [
+        r"\\.\pipe\x",
+        r"\\?\GLOBALROOT\Device\NamedPipe\x",
+        r"\\?\GLOBALROOT\Device\Mailslot\x",
+        r"\\.\NUL",
+    ] {
+        assert!(
+            assess_file(Path::new(p), &opts, AssessOptions::default(), &mut cache).is_err(),
+            "{p}"
+        );
+    }
 }
