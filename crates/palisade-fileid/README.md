@@ -69,9 +69,22 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   concurrent hashes (default: half the CPUs). `HashMetrics` counts bytes
   hashed, hit ratio, average latency, evictions, tamper events and unstable
   files. `skip_for_inventory` leaves cloud placeholders unread during
-  inventory scans. Opening files and reading file IDs, USNs and
-  attributes from the handle is the Windows backend's job: it implements
-  `hash::FileStamp`.
+  inventory scans.
+- `win::file` (Windows, `os-trust` feature): the hash cache's Windows
+  backend (#46). `open_for_hashing` shares read, write and delete and sets
+  `FILE_FLAG_SEQUENTIAL_SCAN`, so hashing never blocks a writer.
+  `WinStamps` implements `hash::FileStamp` from the opened handle: the
+  strong key from `FileIdInfo`, the change journal ID and the file's USN, or
+  the weak key (the normalised final path of the handle) when the volume
+  has no active journal. `FileFacts` reads the file ID, USN, the four
+  timestamps, attributes, link count, size and volume. `hash_open_file`
+  hashes an open handle through a memory mapping, 8 MiB at a time, for
+  files of 16 MiB or more on a local fixed volume, and with buffered reads
+  otherwise, and defers cloud placeholders during inventory scans.
+  `hash_streams` hashes each alternate data stream on its own as a
+  `path:stream` identity. The variable-length OS records (the stream list
+  and the USN record) are parsed by the portable `fsctx::ntfs`, which is
+  bounded, tested and fuzzed on every OS.
 - `authenticode`: the Authenticode PE image hash
   ([#47](https://github.com/jusso-dev/palisade/issues/47)), which stays the
   same when a file is signed, re-signed or stripped. `HashRanges::from_pe`

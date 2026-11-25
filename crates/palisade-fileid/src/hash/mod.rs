@@ -755,8 +755,10 @@ pub fn hash_reader<R: Read>(mut reader: R, options: &HashOptions) -> Result<Hash
 /// The file is opened with [`File::open`]. On Windows its default share mode
 /// already lets other processes read, write and delete the file while it is
 /// hashed. This portable version does not add `FILE_FLAG_SEQUENTIAL_SCAN`,
-/// skip cloud placeholders, or detect concurrent modification; those belong
-/// to the Windows backend (#46).
+/// skip cloud placeholders, or detect concurrent modification. The Windows
+/// backend does (`palisade_fileid::win::file`, with the `os-trust`
+/// feature): `open_for_hashing`, `hash_open_file` and `WinStamps` with
+/// [`cache::hash_through`].
 pub fn hash_file(path: &Path, options: &HashOptions) -> Result<HashStatus, HashError> {
     options.validate()?;
     // Pipes, devices and directories have no stable content to identify.

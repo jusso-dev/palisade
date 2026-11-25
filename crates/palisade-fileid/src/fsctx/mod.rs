@@ -13,7 +13,8 @@
 //! - [`acl`]: security descriptors, owner classification and the
 //!   user-writability decision for a file and its ancestor folders;
 //! - [`volume`]: file system, drive and bus types, and the location class;
-//! - [`motw`]: the `Zone.Identifier` mark-of-the-web.
+//! - [`motw`]: the `Zone.Identifier` mark-of-the-web;
+//! - [`ntfs`]: the stream list and change-journal records the OS returns.
 //!
 //! The OS reads live in the Windows-only `palisade_fileid::win::fsctx`
 //! module (ADR 0003), compiled only on Windows with the `os-trust` feature.
@@ -27,6 +28,7 @@
 
 pub mod acl;
 pub mod motw;
+pub mod ntfs;
 pub mod path;
 pub mod sid;
 pub mod vars;
