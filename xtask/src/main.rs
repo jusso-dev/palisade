@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 mod adr;
+mod banned_terms;
 mod bench_compare;
 mod ci;
 mod clippy_config;
@@ -16,6 +17,7 @@ mod coverage_gate;
 mod deps;
 mod devcontainer;
 mod dist;
+mod docs;
 mod fuzz;
 mod fuzz_locks;
 mod hooks;
@@ -46,13 +48,17 @@ Commands:
   audit            Run cargo-audit over the root and fuzz lockfiles, ignoring exactly the
                    advisories deny.toml ignores
   ci [--fast]      Run the checks from .github/workflows/ci.yml locally (--fast skips coverage,
-                   fuzz, docs, feature-powerset, msrv, package, sign-test and server-image)
+                   fuzz, docs, the book build, feature-powerset, msrv, package, sign-test and
+                   server-image)
   bench-compare --base <commit>
                    Run every criterion bench at <commit> and at the working tree, and fail if a
                    median is more than 10% slower outside the noise (bench.yml)
   check-commit-msg <file>
                    Check a commit message file against Conventional Commits (the
                    opt-in commit-msg hook in .githooks/ runs this)
+  check-banned-terms [--digest <term>]
+                   No commercial vendor or product names in any file or path
+                   (docs/banned-terms.txt, docs/NAMING.md); --digest prints a list line
   check-deps       Enforce the allowed dependency directions between crates
   check-fuzz-locks Check that every crates/*/fuzz/Cargo.lock is current (cargo metadata --locked)
   check-testdata   Fail if any file in the repository that starts like an executable (MZ) is not
@@ -72,6 +78,17 @@ Commands:
                    Authenticode-sign and verify files (docs/releasing.md#code-signing)
   release <prepare|check-tag|notes|checksums|verify-checksums|provenance|verify> ...
                    The release pipeline's steps (docs/releasing.md)
+  docs generate    Regenerate the reference pages in docs/book/src/reference/generated
+  docs check       Fail if the generated pages are stale, or a doc page is not in the book,
+                   is not accessible, or has an untested example
+  docs build [--site-url <path>]
+                   Build the book into target/book (warnings are errors), then check every
+                   internal link; needs mdbook, mdbook-mermaid-ssr, a headless browser and lychee
+  docs publish <dir> --version <latest|vX.Y>
+                   Assemble the GitHub Pages tree: the book and the Rust API docs under
+                   <dir>/<version>/, the version list and the root redirect
+  docs version-for-ref <git ref>
+                   Print the docs version for a ref: latest for main, vX.Y for tag vX.Y.Z
   deps-report [--base <commit>]
                    Print the dependency report: duplicates, third-party crates per crate,
                    third-party unsafe counts and code that runs at build time; with --base,
@@ -113,6 +130,12 @@ fn main() -> ExitCode {
         }
         if command == "adr" {
             return run_adr(rest);
+        }
+        if command == "docs" {
+            return run_docs(rest);
+        }
+        if command == "check-banned-terms" {
+            return run_banned_terms(rest);
         }
         if command == "dist" {
             return run_dist(rest);
@@ -955,6 +978,110 @@ fn deps_report(base: Option<&str>) -> ExitCode {
         }
         Err(error) => {
             eprintln!("deps-report: error: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `cargo xtask check-banned-terms [--digest <term>]`.
+fn run_banned_terms(args: &[String]) -> ExitCode {
+    match args {
+        [] => {
+            if run_check("check-banned-terms", check_banned_terms) {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
+        [flag, term] if flag == "--digest" => match banned_terms::digest_line(term) {
+            Ok(line) => {
+                println!("{line}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("check-banned-terms: error: {error}");
+                ExitCode::FAILURE
+            }
+        },
+        _ => {
+            eprint!("{HELP}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn check_banned_terms(root: &Path) -> Result<Vec<String>, String> {
+    let list = banned_terms::parse_list(&read(&root.join(banned_terms::LIST_PATH))?)
+        .map_err(|errors| errors.join("\n"))?;
+    let (files, mut violations) = unsafe_code::repository_files(root)?;
+    violations.extend(banned_terms::check(root, &files, &list)?);
+    Ok(violations)
+}
+
+/// `cargo xtask docs <generate|check|build|publish|version-for-ref>`.
+fn run_docs(args: &[String]) -> ExitCode {
+    let root = workspace_root();
+    let target =
+        std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| root.join("target"), PathBuf::from);
+    // `Ok(None)`: done, nothing to report. `Ok(Some(v))`: a check that
+    // passed if `v` is empty.
+    let result: Result<Option<Vec<String>>, String> = (|| match args {
+        [c] if c == "generate" => {
+            let pages = docs::generate(&root, &docs::cli_help(&root)?)?;
+            docs::write(&root, &pages)?;
+            println!("docs: wrote {} generated pages", pages.len());
+            Ok(None)
+        }
+        [c] if c == "check" => {
+            let pages = docs::generate(&root, &docs::cli_help(&root)?)?;
+            let (files, mut v) = unsafe_code::repository_files(&root)?;
+            v.extend(docs::stale(&root, &pages)?);
+            v.extend(docs::check_sources(&root, &files)?);
+            Ok(Some(v))
+        }
+        [c, rest @ ..] if c == "build" => {
+            let site_url = match rest {
+                [] => None,
+                [flag, url] if flag == "--site-url" => Some(url.as_str()),
+                _ => return Err("usage: cargo xtask docs build [--site-url <path>]".to_owned()),
+            };
+            let (files, _) = unsafe_code::repository_files(&root)?;
+            docs::build(&root, &files, site_url).map(Some)
+        }
+        [c, dir, flag, version] if c == "publish" && flag == "--version" => {
+            let versions = docs::publish::publish(
+                Path::new(dir),
+                version,
+                &root.join(docs::OUT),
+                &target.join("doc"),
+            )?;
+            println!(
+                "docs: published {version}; versions: {}",
+                versions.join(", ")
+            );
+            Ok(None)
+        }
+        [c, git_ref] if c == "version-for-ref" => {
+            println!("{}", docs::publish::version_for_ref(git_ref)?);
+            Ok(None)
+        }
+        _ => Err(format!("unknown docs command\n\n{HELP}")),
+    })();
+    match result {
+        Ok(None) => ExitCode::SUCCESS,
+        Ok(Some(v)) if v.is_empty() => {
+            println!("docs: ok");
+            ExitCode::SUCCESS
+        }
+        Ok(Some(v)) => {
+            for violation in &v {
+                eprintln!("docs: {violation}");
+            }
+            eprintln!("docs: {} problem(s)", v.len());
+            ExitCode::FAILURE
+        }
+        Err(error) => {
+            eprintln!("docs: error: {error}");
             ExitCode::FAILURE
         }
     }

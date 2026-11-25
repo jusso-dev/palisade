@@ -1,0 +1,91 @@
+# Publishes the documentation site (#27, docs/ci.md#publishing) to the
+# `gh-pages` branch, which GitHub Pages serves (docs/repo-settings.md#github-pages).
+# `main` is published as `latest/`, and each release tag vX.Y.Z as `vX.Y/`.
+#
+# The Pages deployment actions are not on the action allowlist, so this
+# pushes the built site with git instead. The job builds from the commit
+# that triggered it with read-only credentials; only the last step gets a
+# token, and only to push the site directory to `gh-pages`.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One publish at a time, in order, so two pushes cannot race on gh-pages.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  publish:
+    # Only from main or a release tag: a manual run on a branch fails here.
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      LYCHEE_VERSION: "0.24.2"
+      LYCHEE_SHA256: 1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a
+      RUSTDOCFLAGS: -D warnings
+      GIT_REF: ${{ github.ref }}
+      REPOSITORY: ${{ github.repository }}
+      SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      # No Rust cache: what is published is built from scratch, so a
+      # poisoned cache cannot reach the site.
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: mdbook@0.5.2,mdbook-mermaid-ssr@0.3.0
+      - name: Install lychee (checksum-verified release)
+        run: |
+          archive="lychee-x86_64-unknown-linux-gnu.tar.gz"
+          curl -sSfL -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/lycheeverse/lychee/releases/download/lychee-v${LYCHEE_VERSION}/$archive"
+          echo "$LYCHEE_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" --strip-components=1 lychee-x86_64-unknown-linux-gnu/lychee
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Choose the version directory
+        run: echo "DOCS_VERSION=$(cargo xtask docs version-for-ref "$GIT_REF")" >> "$GITHUB_ENV"
+      - run: cargo xtask docs check
+      - run: cargo xtask docs build --site-url "/palisade/$DOCS_VERSION/"
+      - run: cargo doc --workspace --no-deps --all-features --locked --lib
+      - name: Assemble the site from the current gh-pages branch
+        run: |
+          site="$RUNNER_TEMP/site"
+          if git ls-remote --exit-code --heads "https://github.com/$REPOSITORY.git" gh-pages > /dev/null; then
+            git clone --quiet --depth 1 --branch gh-pages "https://github.com/$REPOSITORY.git" "$site"
+          else
+            git init --quiet --initial-branch gh-pages "$site"
+          fi
+          cargo xtask docs publish "$site" --version "$DOCS_VERSION"
+      - name: Push to gh-pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$RUNNER_TEMP/site"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all
+          if git diff --cached --quiet; then
+            echo "The site is unchanged."
+            exit 0
+          fi
+          git commit --quiet -m "docs: publish $DOCS_VERSION from $SHA"
+          # The token is passed for this one command, not stored in the clone.
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
+            push "https://github.com/$REPOSITORY.git" HEAD:gh-pages

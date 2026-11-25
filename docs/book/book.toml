@@ -1,0 +1,34 @@
+# The documentation site (#27). Build it with `cargo xtask docs build`,
+# which stages the repository's Markdown into target/book-src first; see
+# xtask/src/docs/stage.rs. `mdbook build docs/book` on its own does not
+# work, because the chapters live outside `src/`.
+[book]
+title = "Palisade"
+description = "Palisade: an educational Windows application allowlisting project"
+authors = ["Palisade contributors"]
+language = "en"
+src = "src"
+
+[build]
+create-missing = false
+
+# Renders every Mermaid diagram to SVG at build time with a headless
+# browser, and fails the build on a diagram that does not parse.
+[preprocessor.mermaid-ssr]
+on-error = "fail"
+security-level = "strict"
+
+[output.html]
+git-repository-url = "https://github.com/jusso-dev/palisade"
+edit-url-template = "https://github.com/jusso-dev/palisade/edit/main/{path}"
+additional-css = ["theme/palisade.css"]
+additional-js = ["theme/palisade.js"]
+# Off: it would also curl the quotes inside the pre-rendered Mermaid SVGs'
+# styles, which breaks their font and clips the labels.
+smart-punctuation = false
+
+[output.html.search]
+enable = true
+
+[output.html.print]
+enable = true

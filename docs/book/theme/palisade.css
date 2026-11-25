@@ -1,0 +1,31 @@
+/* The disclaimer banner and version switcher from theme/header.hbs. */
+.palisade-disclaimer {
+    /* mdBook pulls `.page` up by the menu bar's height to hide the
+       hover placeholder above the menu bar; push the banner back down. */
+    margin: var(--menu-bar-height) calc(0px - var(--page-padding)) 0;
+    padding: 0.6em 1em;
+    border-bottom: 2px solid #b45309;
+    background: #fffbeb;
+    color: #451a03;
+    font-size: 0.9em;
+    line-height: 1.4;
+}
+.navy .palisade-disclaimer,
+.coal .palisade-disclaimer,
+.ayu .palisade-disclaimer {
+    background: #451a03;
+    color: #fffbeb;
+}
+.palisade-versions {
+    margin: 0 calc(0px - var(--page-padding));
+    display: flex;
+    gap: 0.5em;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 0.25em 1em;
+    font-size: 0.85em;
+}
+/* No switcher without a published version list (a local build). */
+.palisade-versions:has(select[hidden]) {
+    display: none;
+}

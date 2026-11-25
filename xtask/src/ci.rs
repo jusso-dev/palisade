@@ -79,6 +79,16 @@ const ACTIONLINT: Tool = Tool {
     check: &["actionlint", "-version"],
     install: "see https://github.com/rhysd/actionlint/releases (CI uses 1.7.12)",
 };
+/// `docs build` checks for each of its tools itself (`crate::docs::TOOLS`)
+/// and names every one that is missing; this only gates the step.
+const MDBOOK: Tool = Tool {
+    check: &["mdbook", "--version"],
+    install: "mdbook 0.5.2, mdbook-mermaid-ssr 0.3.0 and lychee 0.24.2; see docs/ci.md#documentation-site",
+};
+const TYPOS: Tool = Tool {
+    check: &["typos", "--version"],
+    install: "cargo install --locked typos-cli@1.52.2",
+};
 const ZIZMOR: Tool = Tool {
     check: &["zizmor", "--version"],
     install: "cargo install --locked zizmor@1.33.1",
@@ -182,6 +192,17 @@ pub const STEPS: &[Step] = &[
             "cargo doc --workspace --no-deps --all-features --locked",
         )
     },
+    step("docs-book", "cargo xtask docs check"),
+    Step {
+        tool: Some(MDBOOK),
+        slow: true,
+        ..step("docs-book", "cargo xtask docs build")
+    },
+    Step {
+        tool: Some(TYPOS),
+        ..step("spelling", "typos")
+    },
+    step("banned-terms", "cargo xtask check-banned-terms"),
     step("deps", "cargo xtask check-deps"),
     step("deps", "cargo xtask check-manifests"),
     step("deps", "cargo xtask check-unsafe"),
@@ -568,6 +589,24 @@ mod tests {
         assert_eq!(FUZZ.check[1], nightly);
         assert!(FUZZ.install.ends_with(crate::fuzz::CARGO_FUZZ));
         assert!(source.contains("ACTIONLINT_VERSION: \"1.7.12\""));
+        assert!(source.contains("typos@1.52.2") && TYPOS.install.ends_with("typos-cli@1.52.2"));
+        // The docs tools: `docs build` checks for them, and ci.yml installs
+        // the same versions.
+        for tool in crate::docs::TOOLS {
+            let pinned = format!("{}@{}", tool.name, tool.version);
+            let in_ci = source.contains(&pinned)
+                || source.contains(&format!(
+                    "{}_VERSION: \"{}\"",
+                    tool.name.to_uppercase(),
+                    tool.version
+                ));
+            assert!(
+                in_ci,
+                "ci.yml does not install {} {}",
+                tool.name, tool.version
+            );
+            assert!(tool.install.contains(tool.version), "{}", tool.name);
+        }
     }
 
     #[test]
@@ -615,6 +654,7 @@ mod tests {
                 "coverage",
                 "fuzz",
                 "docs",
+                "docs-book",
                 "feature-powerset",
                 "package",
                 "package",

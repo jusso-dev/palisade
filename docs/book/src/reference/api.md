@@ -1,0 +1,18 @@
+# API reference
+
+> **Planned.** The REST API is designed in epic [#15](https://github.com/jusso-dev/palisade/issues/15)
+> (foundation and conventions in [#185](https://github.com/jusso-dev/palisade/issues/185), the
+> resource catalogue in [#186](https://github.com/jusso-dev/palisade/issues/186)). There is no
+> OpenAPI document yet.
+
+When the API lands, its OpenAPI document will be committed next to the code, and this page will
+be generated from it by `cargo xtask docs generate`, as the policy, event and CLI references are
+today. CI then fails if the page is stale.
+
+What exists today:
+
+- The **server's operational endpoints**: liveness and readiness probes and the metrics listener,
+  documented in the [server README](../../../../crates/palisade-server/README.md#probes).
+- The **agent-server protocol** decision: [ADR 0005](../../../adr/0005-agent-server-protocol.md).
+- The **wire types** shared by agent and server: the
+  [event reference](generated/events/index.md), generated from `schemas/events/v1.json`.
