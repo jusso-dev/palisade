@@ -90,8 +90,19 @@ fn check(report: &palisade_fileid::authenticode::ChainReport) {
         let c = &report.certificates[*i];
         let legacy = report.full_chain.anchored && c.anchor.is_some() && c.cert.version < 3;
         let ca = c.cert.basic_constraints.map_or(legacy, |b| b.ca);
-        let has_pathlen = c.cert.basic_constraints.is_some_and(|b| b.path_len.is_some());
-        assert!(!ca || has_pathlen);
-        assert!(*i != report.leaf);
+        let pos = report.full_chain.certs.iter().position(|x| x == i).unwrap();
+        assert!(pos > 0);
+        // Non-self-issued intermediates below it on the chain.
+        let below = report.full_chain.certs[1..pos]
+            .iter()
+            .map(|x| &report.certificates[*x].cert)
+            .filter(|x| x.subject.der != x.issuer.der)
+            .count();
+        let exceeded = c
+            .cert
+            .basic_constraints
+            .and_then(|b| b.path_len)
+            .is_some_and(|max| below as u64 > u64::from(max));
+        assert!(!ca || exceeded);
     }
 }

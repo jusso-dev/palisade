@@ -590,6 +590,28 @@ fn degenerate_cabinet_headers_are_errors() {
     }
 }
 
+#[test]
+fn certificates_past_the_limit_are_reported() {
+    use palisade_fileid::authenticode::MAX_CERTIFICATES;
+    let p7 = read("chain/leaf-inter-root.p7");
+    // 64 certificates: none dropped.
+    let mut certs = chain_certs();
+    while certs.len() < MAX_CERTIFICATES {
+        certs.push(read("chain/root.der"));
+    }
+    let out = extract_certificates(&replace_certificates(&p7, &certs), CertSelection::All).unwrap();
+    assert!(!out.warnings.contains(&ExtractWarning::LimitReached));
+    // One more: dropped, and said so.
+    certs.push(read("chain/cross-root.der"));
+    let out = extract_certificates(&replace_certificates(&p7, &certs), CertSelection::All).unwrap();
+    assert!(out.warnings.contains(&ExtractWarning::LimitReached));
+    assert!(
+        out.certificates
+            .iter()
+            .all(|c| c.cert.der != read("chain/cross-root.der"))
+    );
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
 

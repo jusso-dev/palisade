@@ -204,8 +204,10 @@ pub enum ExtractWarning {
         /// The signature.
         signature: usize,
     },
-    /// More than [`MAX_EXTRACTED_SIGNATURES`] signatures (counting those
-    /// that could not be read), more than [`MAX_EXTRACTED_SIGNATURES`]
+    /// More than [`super::MAX_CERTIFICATES`] certificates in one
+    /// SignedData, more than [`MAX_EXTRACTED_SIGNATURES`] signatures
+    /// (counting those that could not be read), more than
+    /// [`MAX_EXTRACTED_SIGNATURES`]
     /// nested signature values on one signer, nesting deeper than
     /// [`MAX_EXTRACT_NESTING`], more than [`super::MAX_CERTIFICATE_ENTRIES`]
     /// certificate table entries, or more than
@@ -231,6 +233,11 @@ pub struct Extraction {
 }
 
 /// Extracts the certificates of a signed file. See the module docs.
+///
+/// At most [`super::MAX_CERTIFICATES`] (64) certificates are read from any
+/// one SignedData, including a certificate bag (`.p7b`) with no signer; any
+/// more are left out and [`ExtractWarning::LimitReached`] is recorded. A
+/// larger bag must be split before it is read.
 pub fn extract_certificates(
     data: &[u8],
     selection: CertSelection,
@@ -553,8 +560,12 @@ impl<'a> Walker<'a> {
             while !c.is_empty() {
                 let choice = c.read_any()?;
                 asn1::validate(&choice)?;
-                if choice.tag == tag::SEQUENCE && certs.len() < super::MAX_CERTIFICATES {
-                    certs.push(choice.raw);
+                if choice.tag == tag::SEQUENCE {
+                    if certs.len() < super::MAX_CERTIFICATES {
+                        certs.push(choice.raw);
+                    } else {
+                        self.warn(ExtractWarning::LimitReached);
+                    }
                 }
             }
         }

@@ -2395,3 +2395,51 @@ fn relaxations_are_reported_only_where_the_chosen_chain_needs_them() {
     .unwrap();
     assert_eq!(r.basic_constraints_ignored, [2]);
 }
+
+#[test]
+fn validity_keeps_a_checked_package_display_name_for_the_same_primary() {
+    use palisade_fileid::authenticode::{
+        RevocationSet, ValidityContext, ValidityPolicy, evaluate_validity,
+    };
+    let report = signed(&p7("leaf-inter-root"));
+    let mut trust = evaluate_trust(&report, &config(&["root"]), None);
+    let dn = trust
+        .identity
+        .as_ref()
+        .unwrap()
+        .publisher_dn
+        .clone()
+        .unwrap();
+    trust
+        .identity
+        .as_mut()
+        .unwrap()
+        .attach_package_publisher(&dn, "Palisade Tests")
+        .unwrap();
+    let policy = ValidityPolicy::default();
+    let revocation = RevocationSet::new();
+    let tsa = TrustConfig::new();
+    let leaf = cert("leaf");
+    let ctx = ValidityContext {
+        now: leaf.not_before + 86_400,
+        clock_floor: None,
+        policy: &policy,
+        revocation: &revocation,
+        tsa_trust: &tsa,
+        file_digests: &[],
+        version: None,
+    };
+    let v = evaluate_validity(&report, &trust, &ctx);
+    assert_eq!(v.primary, trust.primary);
+    assert_eq!(
+        v.identity.unwrap().package_display_name.as_deref(),
+        Some("Palisade Tests")
+    );
+    // When the trust identity belongs to another signature than the
+    // validity primary, nothing is carried over.
+    let mut other = trust.clone();
+    other.identity.as_mut().unwrap().signature = 7;
+    let v = evaluate_validity(&report, &other, &ctx);
+    assert_eq!(v.primary, Some(0));
+    assert_eq!(v.identity.unwrap().package_display_name, None);
+}
