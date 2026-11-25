@@ -242,8 +242,22 @@ pub enum PromptOption {
     Block,
 }
 
-/// What the user must do before an answer counts.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+/// What the user must do before an answer counts. Ordered from the
+/// weakest to the strongest.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Reauth {
     /// Nothing more.
@@ -318,6 +332,80 @@ impl PromptSettings {
     pub fn is_default(&self) -> bool {
         self == &Self::default()
     }
+
+    /// The stricter combination of two layers' prompt settings: see
+    /// [`UnknownPolicy::stricter`]. The timeout is the nearer layer's
+    /// (`self`).
+    #[must_use]
+    pub fn stricter(&self, other: &Self) -> Self {
+        let mut options: Vec<PromptOption> = self
+            .options
+            .iter()
+            .filter(|o| other.options.contains(o))
+            .copied()
+            .collect();
+        if options.is_empty() {
+            options.push(PromptOption::Block);
+        }
+        Self {
+            options,
+            require_justification: self.require_justification || other.require_justification,
+            reauth: self.reauth.max(other.reauth),
+            timeout_secs: self.timeout_secs,
+            fallback: self.fallback.max(other.fallback),
+            local_approval_scope: if self.local_approval_scope == ApprovalScope::User
+                || other.local_approval_scope == ApprovalScope::User
+            {
+                ApprovalScope::User
+            } else {
+                ApprovalScope::Device
+            },
+            temp_approval_days: self.temp_approval_days.min(other.temp_approval_days),
+        }
+    }
+}
+
+/// The stricter combination of two layers' effects: per flag, the nearer
+/// layer's (`a`) value where it sets one, except that the higher severity,
+/// the more immediate upload and `always` logging win. Tags are joined.
+fn stricter_effects(a: &Effects, b: &Effects) -> Effects {
+    use super::{LogLevel, Upload};
+    let upload_rank = |u: Upload| match u {
+        Upload::Immediate => 2,
+        Upload::Batched => 1,
+        Upload::LocalOnly => 0,
+    };
+    let pick = |x: Option<Upload>, y: Option<Upload>| match (x, y) {
+        (Some(x), Some(y)) => Some(if upload_rank(x) >= upload_rank(y) {
+            x
+        } else {
+            y
+        }),
+        (x, y) => x.or(y),
+    };
+    let log = match (a.log, b.log) {
+        (Some(LogLevel::Always), _) | (_, Some(LogLevel::Always)) => Some(LogLevel::Always),
+        (x, y) => x.or(y),
+    };
+    let mut tags = a.tags.clone();
+    for t in &b.tags {
+        if !tags.contains(t) && tags.len() < super::limits::MAX_TAGS {
+            tags.push(t.clone());
+        }
+    }
+    Effects {
+        log,
+        upload: pick(a.upload, b.upload),
+        notify: a.notify.or(b.notify),
+        notification_text: a
+            .notification_text
+            .clone()
+            .or_else(|| b.notification_text.clone()),
+        help_url: a.help_url.clone().or_else(|| b.help_url.clone()),
+        severity: a.severity.max(b.severity),
+        tags,
+        suppress_duplicates_secs: a.suppress_duplicates_secs.or(b.suppress_duplicates_secs),
+    }
 }
 
 /// What happens to files that were on the device when the agent was
@@ -352,7 +440,10 @@ pub enum DriverBootPolicy {
 
 /// A compliance preset: a named starting configuration. Changes that make
 /// the policy weaker than its preset raise a compliance warning (#17).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+/// Ordered from the least to the most demanding.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum CompliancePreset {
     /// Essential Eight maturity level 1: block in user profiles, temporary
@@ -484,17 +575,26 @@ impl UnknownPolicy {
     }
 
     /// The strictest combination of `self` and `other`, for building an
-    /// effective policy from several layers (#37): every level, entry and
-    /// fallback takes the more restrictive of the two (an entry only one
-    /// side sets is kept, so it can only make an object stricter than the
-    /// other side's `default`, never weaker), the stricter `preexisting`
-    /// and boot policies, and `allow_request` only if both allow it. A
-    /// preset is kept if either side has one. Prompt, containment profile
-    /// and effects come from `self`, the nearer layer, unless it has none.
+    /// effective policy from several layers (#37). Every part that can
+    /// let an unknown object run takes the more restrictive side, so the
+    /// result is never weaker than either side for any object or answer:
     ///
-    /// An entry that only `other` sets can be weaker than `self`'s default.
-    /// Combining it with `self.default` keeps the result at least as strict
-    /// as both sides for every object.
+    /// - levels, entries and the prompt fallback: the more restrictive (an
+    ///   entry only one side sets is compared with the other side's
+    ///   `default`); a level a type cannot take becomes `block`;
+    /// - the prompt: only the answers both sides offer (or `block`), a
+    ///   justification if either asks, the stronger re-authentication, a
+    ///   user scope if either uses it, and the shorter temporary approval;
+    /// - `allow_request` only if both allow it; the stricter
+    ///   `preexisting_policy` and `driver_boot_policy`; the more demanding
+    ///   compliance preset;
+    /// - effects: per flag, the nearer layer's value, except that the
+    ///   higher severity and the more immediate upload win, and `always`
+    ///   logging is kept; tags are joined.
+    ///
+    /// What cannot be compared, the containment profile and the prompt's
+    /// timeout and notification wording, comes from `self`, the nearer
+    /// layer, where it sets one.
     #[must_use]
     pub fn stricter(&self, other: &Self) -> Self {
         fn merge<K: Ord + Copy>(
@@ -513,7 +613,7 @@ impl UnknownPolicy {
         }
         let default = self.default.max(other.default);
         Self {
-            preset: self.preset.or(other.preset),
+            preset: self.preset.max(other.preset),
             default,
             by_location: merge(
                 &self.by_location,
@@ -542,19 +642,8 @@ impl UnknownPolicy {
                 })
                 .collect(),
             restrict_profile: self.restrict_profile.or(other.restrict_profile),
-            prompt: PromptSettings {
-                fallback: self.prompt.fallback.max(other.prompt.fallback),
-                ..if self.prompt.is_default() {
-                    other.prompt.clone()
-                } else {
-                    self.prompt.clone()
-                }
-            },
-            effects: if self.effects.is_empty() {
-                other.effects.clone()
-            } else {
-                self.effects.clone()
-            },
+            prompt: self.prompt.stricter(&other.prompt),
+            effects: stricter_effects(&self.effects, &other.effects),
             allow_request: self.allow_request && other.allow_request,
             preexisting_policy: if self.preexisting_policy == PreexistingPolicy::BaselineOnly
                 || other.preexisting_policy == PreexistingPolicy::BaselineOnly

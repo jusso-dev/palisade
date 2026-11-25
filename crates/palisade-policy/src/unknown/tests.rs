@@ -2548,3 +2548,109 @@ proptest! {
         prop_assert!(m.prompt.fallback >= a.prompt.fallback.max(b.prompt.fallback));
     }
 }
+
+#[test]
+fn a_nearer_layer_cannot_loosen_prompt_controls_or_the_preset() {
+    let outer: UnknownPolicy = serde_json::from_value(serde_json::json!({
+        "preset": "e8_ml3",
+        "default": "prompt",
+        "prompt": {"options": ["request_approval", "block"], "require_justification": true,
+                   "reauth": "mfa", "local_approval_scope": "user", "temp_approval_days": 7},
+        "effects": {"severity": "critical", "upload": "immediate", "log": "always"},
+    }))
+    .unwrap();
+    let inner: UnknownPolicy = serde_json::from_value(serde_json::json!({
+        "preset": "e8_ml1",
+        "default": "prompt",
+        "prompt": {"options": ["allow_once", "allow_always_local", "block"], "reauth": "none",
+                   "local_approval_scope": "device", "temp_approval_days": 90, "timeout_secs": 30},
+        "effects": {"severity": "low", "upload": "batched", "log": "sampled", "tags": ["inner"]},
+    }))
+    .unwrap();
+    let m = inner.stricter(&outer);
+    assert_eq!(m.preset, Some(CompliancePreset::E8Ml3));
+    assert_eq!(m.prompt.options, vec![PromptOption::Block]);
+    assert!(m.prompt.require_justification);
+    assert_eq!(m.prompt.reauth, Reauth::Mfa);
+    assert_eq!(m.prompt.local_approval_scope, ApprovalScope::User);
+    assert_eq!(m.prompt.temp_approval_days, 7);
+    assert_eq!(m.prompt.timeout_secs, 30, "the nearer layer's timeout");
+    assert_eq!(m.effects.severity, Some(EventSeverity::Critical));
+    assert_eq!(m.effects.upload, Some(Upload::Immediate));
+    assert_eq!(m.effects.log, Some(LogLevel::Always));
+    assert_eq!(m.effects.tags, vec!["inner".to_owned()]);
+    // Overlapping options are kept in the nearer layer's order.
+    let a = PromptSettings {
+        options: vec![PromptOption::Block, PromptOption::AllowOnce],
+        ..PromptSettings::default()
+    };
+    let b = PromptSettings {
+        options: vec![
+            PromptOption::AllowOnce,
+            PromptOption::RequestApproval,
+            PromptOption::Block,
+        ],
+        ..PromptSettings::default()
+    };
+    assert_eq!(
+        a.stricter(&b).options,
+        vec![PromptOption::Block, PromptOption::AllowOnce]
+    );
+}
+
+fn arb_prompt() -> impl Strategy<Value = PromptSettings> {
+    (
+        prop::sample::subsequence(
+            vec![
+                PromptOption::AllowOnce,
+                PromptOption::AllowAlwaysLocal,
+                PromptOption::RequestApproval,
+                PromptOption::Block,
+            ],
+            1..=4,
+        ),
+        any::<bool>(),
+        prop::sample::select(vec![Reauth::None, Reauth::Password, Reauth::Mfa]),
+        prop::sample::select(vec![ApprovalScope::User, ApprovalScope::Device]),
+        1u16..=90,
+        prop::sample::select(vec![Level::Block, Level::Detect, Level::Allow]),
+    )
+        .prop_map(
+            |(
+                options,
+                require_justification,
+                reauth,
+                local_approval_scope,
+                temp_approval_days,
+                fallback,
+            )| PromptSettings {
+                options,
+                require_justification,
+                reauth,
+                local_approval_scope,
+                temp_approval_days,
+                fallback,
+                ..PromptSettings::default()
+            },
+        )
+}
+
+proptest! {
+    /// Every prompt control of the merge is at least as strict as each
+    /// side's, and the merged policy is still valid.
+    #[test]
+    fn merged_prompts_are_stricter_and_valid(a in arb_prompt(), b in arb_prompt()) {
+        let m = a.stricter(&b);
+        prop_assert!(m.options.iter().all(|o| *o == PromptOption::Block || (a.options.contains(o) && b.options.contains(o))));
+        prop_assert!(!m.options.is_empty());
+        prop_assert!(m.require_justification >= (a.require_justification || b.require_justification));
+        prop_assert!(m.reauth >= a.reauth.max(b.reauth));
+        prop_assert!(m.temp_approval_days <= a.temp_approval_days.min(b.temp_approval_days));
+        if a.local_approval_scope == ApprovalScope::User || b.local_approval_scope == ApprovalScope::User {
+            prop_assert_eq!(m.local_approval_scope, ApprovalScope::User);
+        }
+        let mut d = doc(serde_json::json!({}));
+        d.policy.unknown = UnknownPolicy { prompt: m, ..UnknownPolicy::default() };
+        prop_assert!(d.validate().is_ok());
+    }
+}

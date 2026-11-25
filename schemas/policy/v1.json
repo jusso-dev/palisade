@@ -308,7 +308,7 @@
       ]
     },
     "CompliancePreset": {
-      "description": "A compliance preset: a named starting configuration. Changes that make\nthe policy weaker than its preset raise a compliance warning (#17).",
+      "description": "A compliance preset: a named starting configuration. Changes that make\nthe policy weaker than its preset raise a compliance warning (#17).\nOrdered from the least to the most demanding.",
       "oneOf": [
         {
           "const": "e8_ml1",
@@ -2372,7 +2372,7 @@
       "type": "object"
     },
     "Reauth": {
-      "description": "What the user must do before an answer counts.",
+      "description": "What the user must do before an answer counts. Ordered from the\nweakest to the strongest.",
       "oneOf": [
         {
           "const": "none",

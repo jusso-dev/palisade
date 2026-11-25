@@ -2375,3 +2375,25 @@ fn the_effective_unknown_policy_is_the_strictest_of_the_layers() {
             .is_default()
     );
 }
+
+#[test]
+fn within_a_layer_the_lowest_slot_gives_what_cannot_be_compared() {
+    let mut nodes = base_nodes();
+    set_node(
+        &mut nodes,
+        20,
+        json!({"assignments": assign(&[(50, 0), (51, 1)])}),
+    );
+    let profile = |n: u32| json!({"default": "detect", "restrict_profile": id(n)});
+    let h = validated(&snapshot(
+        nodes,
+        vec![
+            policy_with(50, "enforce", vec![], json!({"unknown": profile(80)})),
+            policy_with(51, "enforce", vec![], json!({"unknown": profile(81)})),
+        ],
+        vec![],
+    ));
+    let e = effective(&h, 20);
+    let u = &e.policy().unwrap().document().policy.unknown;
+    assert_eq!(u.restrict_profile.unwrap().to_string(), id(80));
+}
