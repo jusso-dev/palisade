@@ -271,7 +271,7 @@ impl AppxBuilder {
     }
 
     /// The unsigned archive, in `style`.
-    pub fn build_with(&self, style: ZipStyle) -> Vec<u8> {
+    pub fn build_with(&self, style: &ZipStyle) -> Vec<u8> {
         write_zip_with(&self.all_files(), style)
     }
 
@@ -297,7 +297,7 @@ impl AppxBuilder {
 }
 
 /// How [`write_zip_with`] lays an archive out.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ZipStyle {
     /// Data descriptors (with their signature) after each member, with
     /// zero CRC and sizes in the local headers, as packaging tools write.
@@ -305,18 +305,30 @@ pub struct ZipStyle {
     /// ZIP64 end records, and ZIP64 extra fields with every central
     /// size and offset marked `0xffffffff`.
     pub zip64: bool,
+    /// Extra bytes appended to the first member's central extra field
+    /// (for negative tests; every length and offset stays consistent).
+    pub central_extra_tail: Vec<u8>,
+    /// Extra bytes put in the first member's local extra field.
+    pub local_extra: Vec<u8>,
 }
 
 /// Writes `files` as a ZIP archive in order.
 pub fn write_zip(files: &[File]) -> Vec<u8> {
-    write_zip_with(files, ZipStyle::default())
+    write_zip_with(files, &ZipStyle::default())
 }
 
 /// Writes `files` as a ZIP archive in order, in `style`.
-pub fn write_zip_with(files: &[File], style: ZipStyle) -> Vec<u8> {
+pub fn write_zip_with(files: &[File], style: &ZipStyle) -> Vec<u8> {
     let mut out = Vec::new();
     let mut central = Vec::new();
-    for f in files {
+    for (index, f) in files.iter().enumerate() {
+        let first = index == 0;
+        let local_extra: &[u8] = if first { &style.local_extra } else { &[] };
+        let tail: &[u8] = if first {
+            &style.central_extra_tail
+        } else {
+            &[]
+        };
         let (method, body) = AppxBuilder::compressed(f);
         let crc = crc32(&f.data);
         let offset = out.len() as u32;
@@ -336,8 +348,9 @@ pub fn write_zip_with(files: &[File], style: ZipStyle) -> Vec<u8> {
             out.extend_from_slice(&(f.data.len() as u32).to_le_bytes());
         }
         out.extend_from_slice(&(name.len() as u16).to_le_bytes());
-        out.extend_from_slice(&0_u16.to_le_bytes());
+        out.extend_from_slice(&(local_extra.len() as u16).to_le_bytes());
         out.extend_from_slice(name);
+        out.extend_from_slice(local_extra);
         out.extend_from_slice(&body);
         if style.descriptors {
             out.extend_from_slice(&0x0807_4b50_u32.to_le_bytes());
@@ -367,7 +380,8 @@ pub fn write_zip_with(files: &[File], style: ZipStyle) -> Vec<u8> {
             central.extend_from_slice(&(f.data.len() as u32).to_le_bytes());
         }
         central.extend_from_slice(&(name.len() as u16).to_le_bytes());
-        central.extend_from_slice(&(if style.zip64 { 28_u16 } else { 0 }).to_le_bytes());
+        let zip64_len: u16 = if style.zip64 { 28 } else { 0 };
+        central.extend_from_slice(&(zip64_len + tail.len() as u16).to_le_bytes());
         central.extend_from_slice(&[0; 6]);
         central.extend_from_slice(&[0; 4]);
         if style.zip64 {
@@ -383,6 +397,7 @@ pub fn write_zip_with(files: &[File], style: ZipStyle) -> Vec<u8> {
             central.extend_from_slice(&(body.len() as u64).to_le_bytes());
             central.extend_from_slice(&u64::from(offset).to_le_bytes());
         }
+        central.extend_from_slice(tail);
     }
     let cd_offset = out.len() as u32;
     out.extend_from_slice(&central);

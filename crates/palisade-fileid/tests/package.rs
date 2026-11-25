@@ -770,19 +770,28 @@ fn manifests_are_strict() {
     assert_eq!(parse_package(&b.build()).unwrap().name, "Palisade.TestApp");
 }
 
-const DESCRIPTORS: ZipStyle = ZipStyle {
-    descriptors: true,
-    zip64: false,
-};
-const ZIP64: ZipStyle = ZipStyle {
-    descriptors: true,
-    zip64: true,
-};
+fn descriptors() -> ZipStyle {
+    ZipStyle {
+        descriptors: true,
+        ..ZipStyle::default()
+    }
+}
+
+fn zip64() -> ZipStyle {
+    ZipStyle {
+        descriptors: true,
+        zip64: true,
+        ..ZipStyle::default()
+    }
+}
 
 #[test]
 fn descriptor_and_zip64_layouts_verify() {
-    for (name, style) in [("app-desc.msix", DESCRIPTORS), ("app-zip64.msix", ZIP64)] {
-        let unsigned = AppxBuilder::package().build_with(style);
+    for (name, style) in [
+        ("app-desc.msix", descriptors()),
+        ("app-zip64.msix", zip64()),
+    ] {
+        let unsigned = AppxBuilder::package().build_with(&style);
         let a = Archive::parse(&unsigned).unwrap();
         assert_eq!(a.zip64, style.zip64, "{name}");
         assert_eq!(parse_package(&unsigned).unwrap().name, "Palisade.TestApp");
@@ -801,7 +810,7 @@ fn descriptor_and_zip64_layouts_verify() {
         );
     }
     // A data descriptor without its signature is refused.
-    let mut bad = AppxBuilder::package().build_with(DESCRIPTORS);
+    let mut bad = AppxBuilder::package().build_with(&descriptors());
     let sig = 0x0807_4b50_u32.to_le_bytes();
     let at = bad.windows(4).position(|w| w == sig).unwrap();
     bad[at] = 0;
@@ -824,12 +833,12 @@ fn write_unsigned_packages() {
     std::fs::write(dir.join("bundle.msixbundle"), AppxBuilder::bundle().build()).unwrap();
     std::fs::write(
         dir.join("app-desc-unsigned.msix"),
-        AppxBuilder::package().build_with(DESCRIPTORS),
+        AppxBuilder::package().build_with(&descriptors()),
     )
     .unwrap();
     std::fs::write(
         dir.join("app-zip64-unsigned.msix"),
-        AppxBuilder::package().build_with(ZIP64),
+        AppxBuilder::package().build_with(&zip64()),
     )
     .unwrap();
 }
@@ -933,27 +942,104 @@ fn round_two_review_cases() {
     let map = palisade_fileid::package::blockmap::parse(patched.as_bytes()).unwrap();
     assert!(palisade_fileid::package::blockmap::verify(&map, &archive).is_err());
 
-    // Extra data after a ZIP64 block, or a ZIP64 block nothing calls for,
-    // is refused.
-    let zip64 = AppxBuilder::package().build_with(ZIP64);
-    let a = Archive::parse(&zip64).unwrap();
-    let first = &a.members[0];
-    let (at, len) = first.central_raw;
-    let name_len = u16::from_le_bytes([zip64[at + 28], zip64[at + 29]]) as usize;
-    let extra_len = u16::from_le_bytes([zip64[at + 30], zip64[at + 31]]) as usize;
-    assert_eq!(extra_len, 28);
-    let extra_end = at + 46 + name_len + extra_len;
-    let mut trailing = zip64[..extra_end].to_vec();
-    trailing.extend_from_slice(&[0xfe, 0xca, 0, 0]);
-    trailing.extend_from_slice(&zip64[extra_end..]);
-    // Fix the extra length, the central directory size and offsets.
-    trailing[at + 30] = 32;
-    let _ = len;
-    assert!(Archive::parse(&trailing).is_err());
-    let plain = AppxBuilder::package().build();
-    let a = Archive::parse(&plain).unwrap();
-    let (at, _) = a.members[0].central_raw;
-    assert_eq!(plain[at + 30], 0);
+    // Extra data: the builder writes it with every length and offset
+    // consistent, so only the extra-field rules can refuse it.
+    let unknown = [0xfe, 0xca, 0, 0];
+    let zip64_block = {
+        let mut v = vec![1, 0, 8, 0];
+        v.extend_from_slice(&0_u64.to_le_bytes());
+        v
+    };
+    let check = |style: ZipStyle, ok: bool, what: &str| {
+        let data = AppxBuilder::package().build_with(&style);
+        assert_eq!(Archive::parse(&data).is_ok(), ok, "{what}");
+    };
+    check(zip64(), true, "plain ZIP64");
+    // A block after the central ZIP64 block.
+    check(
+        ZipStyle {
+            central_extra_tail: unknown.to_vec(),
+            ..zip64()
+        },
+        false,
+        "trailing central block",
+    );
+    // A central block that nothing calls for.
+    check(
+        ZipStyle {
+            central_extra_tail: unknown.to_vec(),
+            ..ZipStyle::default()
+        },
+        false,
+        "unneeded central block",
+    );
+    check(
+        ZipStyle {
+            central_extra_tail: zip64_block.clone(),
+            ..ZipStyle::default()
+        },
+        false,
+        "unneeded central ZIP64 block",
+    );
+    // Local extra data: none is allowed with a data descriptor, and
+    // without one only a needed ZIP64 block (never needed here).
+    check(
+        ZipStyle {
+            local_extra: zip64_block.clone(),
+            ..descriptors()
+        },
+        false,
+        "local ZIP64 block with a descriptor",
+    );
+    check(
+        ZipStyle {
+            local_extra: zip64_block,
+            ..ZipStyle::default()
+        },
+        false,
+        "unneeded local ZIP64 block",
+    );
+    check(
+        ZipStyle {
+            local_extra: unknown.to_vec(),
+            ..ZipStyle::default()
+        },
+        false,
+        "local unknown block",
+    );
+}
+
+#[test]
+fn the_block_map_total_is_capped() {
+    // A block map whose files add up to more than a package may hold is
+    // refused before anything is inflated. The archive is the real test
+    // package; only the map's sizes (and block counts) are changed, so the
+    // size checks fail later than the total does.
+    let data = AppxBuilder::package().build();
+    let archive = Archive::parse(&data).unwrap();
+    let huge = palisade_fileid::package::MAX_PACKAGE_SIZE / 2 + 1;
+    let blocks = huge.div_ceil(65536);
+    let mut xml = String::from(
+        "<BlockMap xmlns=\"http://schemas.microsoft.com/appx/2010/blockmap\" HashMethod=\"http://www.w3.org/2001/04/xmlenc#sha256\">",
+    );
+    let hash = "A".repeat(43) + "=";
+    for name in ["AppxManifest.xml", "app\\tool.exe"] {
+        xml.push_str(&format!(
+            "<File Name=\"{name}\" Size=\"{huge}\" LfhSize=\"30\">"
+        ));
+        for _ in 0..blocks {
+            xml.push_str(&format!("<Block Hash=\"{hash}\"/>"));
+        }
+        xml.push_str("</File>");
+    }
+    xml.push_str("</BlockMap>");
+    let start = std::time::Instant::now();
+    let map = palisade_fileid::package::blockmap::parse(xml.as_bytes()).unwrap();
+    assert!(matches!(
+        palisade_fileid::package::blockmap::verify(&map, &archive),
+        Err(BlockMapError::Size(s)) if s == "(total)"
+    ));
+    assert!(start.elapsed() < std::time::Duration::from_secs(10));
 }
 
 #[test]

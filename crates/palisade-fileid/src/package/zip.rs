@@ -667,6 +667,52 @@ pub fn crc(data: &[u8]) -> u32 {
 mod tests {
     use super::*;
 
+    fn block(id: u16, body: &[u8]) -> Vec<u8> {
+        let mut v = id.to_le_bytes().to_vec();
+        v.extend_from_slice(&u16::try_from(body.len()).unwrap().to_le_bytes());
+        v.extend_from_slice(body);
+        v
+    }
+
+    #[test]
+    fn zip64_extra_accepts_exactly_the_needed_block() {
+        let all = [true, true, true];
+        let none = [false, false, false];
+        let body: Vec<u8> = [1_u64, 2, 3].iter().flat_map(|v| v.to_le_bytes()).collect();
+        assert_eq!(
+            zip64_extra(&block(1, &body), all),
+            Some([Some(1), Some(2), Some(3)])
+        );
+        // Only the uncompressed size called for: one value.
+        assert_eq!(
+            zip64_extra(&block(1, &7_u64.to_le_bytes()), [true, false, false]),
+            Some([Some(7), None, None])
+        );
+        assert_eq!(zip64_extra(&[], none), Some([None; 3]));
+        // Missing when needed.
+        assert_eq!(zip64_extra(&[], all), None);
+        // Present when not needed, even empty.
+        assert_eq!(zip64_extra(&block(1, &[]), none), None);
+        assert_eq!(zip64_extra(&block(1, &body), none), None);
+        // Another block after it, or before it, or instead of it.
+        let mut trailing = block(1, &body);
+        trailing.extend(block(0xcafe, &[0; 4]));
+        assert_eq!(zip64_extra(&trailing, all), None);
+        let mut leading = block(0xcafe, &[0; 4]);
+        leading.extend(block(1, &body));
+        assert_eq!(zip64_extra(&leading, all), None);
+        assert_eq!(zip64_extra(&block(0xcafe, &body), all), None);
+        // Values left over (a disk number), or too few.
+        let mut extra_body = body.clone();
+        extra_body.extend_from_slice(&0_u32.to_le_bytes());
+        assert_eq!(zip64_extra(&block(1, &extra_body), all), None);
+        assert_eq!(zip64_extra(&block(1, &body[..16]), all), None);
+        // A length running past the field.
+        let mut short = block(1, &body);
+        short.truncate(10);
+        assert_eq!(zip64_extra(&short, all), None);
+    }
+
     #[test]
     fn crc_known_value() {
         assert_eq!(crc(b"123456789"), 0xcbf4_3926);

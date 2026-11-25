@@ -238,6 +238,16 @@ pub fn verify(map: &BlockMap, archive: &Archive<'_>) -> Result<(), BlockMapError
             return Err(BlockMapError::Duplicate(f.name.clone()));
         }
     }
+    // A budget first: the whole uncompressed size the block map lists may
+    // not exceed what a package may be at all, whatever the archive
+    // claims, so a small archive cannot make us inflate more.
+    let total = listed
+        .values()
+        .try_fold(0_u64, |a, f| a.checked_add(f.size))
+        .filter(|&t| t <= super::MAX_PACKAGE_SIZE);
+    if total.is_none() {
+        return Err(BlockMapError::Size("(total)".into()));
+    }
     // Every member is listed (by its part name), or is one of the four
     // that are not; and every listed file is exactly one member (part
     // names are unique in the archive).
@@ -277,16 +287,7 @@ pub fn verify(map: &BlockMap, archive: &Archive<'_>) -> Result<(), BlockMapError
             .map_or_else(String::new, |f| f.name.clone());
         return Err(BlockMapError::Unlisted(name));
     }
-    // Only then the content, one member at a time, within a budget: the
-    // whole uncompressed size the block map lists may not exceed what a
-    // package may be at all, whatever sizes the archive claims.
-    let total = listed
-        .values()
-        .try_fold(0_u64, |a, f| a.checked_add(f.size))
-        .filter(|&t| t <= super::MAX_PACKAGE_SIZE);
-    if total.is_none() {
-        return Err(BlockMapError::Size("(total)".into()));
-    }
+    // Only then the content, one member at a time.
     for m in &archive.members {
         if let Some(f) = listed.get(&fold(&m.part)) {
             if !UNMAPPED.iter().any(|u| fold(u) == fold(&m.part)) {
