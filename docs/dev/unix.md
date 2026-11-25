@@ -33,21 +33,22 @@ runners, so this is a quick local check, not a replacement.
 [`.devcontainer/`](../../.devcontainer) defines a Linux image with:
 
 - the toolchain pinned in `rust-toolchain.toml`, its components and targets, plus the Windows GNU
-  target and the pinned nightly for fuzzing;
+  target, the MSRV toolchain and the pinned nightly for fuzzing;
 - the tools CI uses, at the versions CI installs: cargo-nextest, cargo-deny, cargo-audit,
-  cargo-vet, cargo-hack, cargo-llvm-cov, cargo-fuzz and zizmor;
+  cargo-vet, cargo-hack, cargo-llvm-cov, cargo-fuzz, zizmor and actionlint (the release
+  archive, checked against its SHA-256, as the CI job does);
 - the documentation tools: mdBook, lychee and typos;
 - a Postgres 17 service (the image and digest the CI `postgres` job uses), with
   `PALISADE_TEST_DATABASE_ADMIN_URL` set, so the server's database tests run instead of skipping.
 
 Open the repository in any editor that supports dev containers, or run it with the dev container
-CLI. Everything is built from source with `cargo install --locked`, so the first build takes a
-while. xtask tests check that the image's toolchain and tool versions match
+CLI. The cargo tools are built from source with `cargo install --locked`, so the first build takes
+a while; actionlint is the one prebuilt binary, checked against its published SHA-256. xtask tests check that the image's toolchain and tool versions match
 `rust-toolchain.toml` and CI.
 
-`cargo xtask ci` runs every CI check inside the container (`--fast` skips the slow ones).
-`actionlint` is not in the image; `cargo xtask ci` says how to install it if you want the
-workflow lint locally.
+`cargo xtask ci` runs every CI check inside the container, and `--fast` skips the slow ones. The
+image has every tool it checks for, and an xtask test fails if a CI step needs one the image
+lacks. The Postgres step runs because the container sets `PALISADE_TEST_DATABASE_ADMIN_URL`.
 
 Optional: building the image with `--build-arg WITH_XWIN=1` adds `cargo-xwin`, which can check the
 `x86_64-pc-windows-msvc` target from Linux (`cargo xwin check --target x86_64-pc-windows-msvc`).

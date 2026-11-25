@@ -12,6 +12,14 @@ FROM rust@sha256:3b199fd6db7d709274df56565b8f4003f9e30d7bfcff9d53148c86053b7855e
 
 ARG RUST_TOOLCHAIN=1.100.0
 ARG FUZZ_TOOLCHAIN=nightly-2026-11-20
+# The MSRV (`rust-version` in the root Cargo.toml), for the `msrv` step of
+# `cargo xtask ci`.
+ARG MSRV_TOOLCHAIN=1.94.0
+# actionlint, for the `workflow-lint` step, as the CI job installs it: the
+# release archive, checked against its published SHA-256.
+ARG ACTIONLINT_VERSION=1.7.12
+ARG ACTIONLINT_SHA256_AMD64=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+ARG ACTIONLINT_SHA256_ARM64=325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6
 
 # System packages: Git, a C toolchain for build scripts, the MinGW-w64 linker
 # for the Windows GNU target, Postgres client tools for the server tests,
@@ -29,11 +37,25 @@ RUN rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal \
         --component rustfmt,clippy,llvm-tools-preview \
         --target x86_64-pc-windows-msvc,aarch64-pc-windows-msvc,x86_64-unknown-linux-gnu,x86_64-pc-windows-gnu \
     && rustup default "$RUST_TOOLCHAIN" \
-    && rustup toolchain install "$FUZZ_TOOLCHAIN" --profile minimal
+    && rustup toolchain install "$FUZZ_TOOLCHAIN" --profile minimal \
+    && rustup toolchain install "$MSRV_TOOLCHAIN" --profile minimal
+
+RUN case "$(dpkg --print-architecture)" in \
+        amd64) arch=amd64; sum="$ACTIONLINT_SHA256_AMD64" ;; \
+        arm64) arch=arm64; sum="$ACTIONLINT_SHA256_ARM64" ;; \
+        *) echo "no actionlint build for this architecture" >&2; exit 1 ;; \
+    esac \
+    && archive="actionlint_${ACTIONLINT_VERSION}_linux_${arch}.tar.gz" \
+    && curl -sSfL -o "/tmp/$archive" \
+        "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$archive" \
+    && echo "$sum  /tmp/$archive" | sha256sum --check --strict \
+    && tar -xzf "/tmp/$archive" -C /usr/local/bin actionlint \
+    && rm "/tmp/$archive"
 
 # The cargo tools CI uses, at the versions CI installs (xtask/src/ci.rs),
-# and the documentation tools (#27). Built from source with `--locked`, so
-# no prebuilt binary from outside the crate registry is trusted.
+# and the documentation tools (#27), built from source with `--locked`.
+# actionlint (above) is the one prebuilt binary, checked against its
+# published SHA-256, as CI does.
 RUN cargo install --locked \
         cargo-nextest@0.9.152 \
         cargo-deny@0.22.0 \

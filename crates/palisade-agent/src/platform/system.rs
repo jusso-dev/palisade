@@ -98,6 +98,17 @@ fn unsupported(what: &str) -> PlatformError {
     )
 }
 
+/// Whether `path` names an alternate data stream (`file:name`, on
+/// Windows). The colon of a drive letter does not count.
+fn names_a_stream(path: &str) -> bool {
+    if !cfg!(windows) {
+        return false;
+    }
+    let name_start = path.rfind(['\\', '/']).map_or(0, |i| i + 1);
+    let name = path.get(name_start..).unwrap_or_default();
+    name.find(':').is_some_and(|i| !(name_start == 0 && i == 1))
+}
+
 /// The path must be absolute, so a relative path cannot be resolved against
 /// the agent's working directory.
 fn absolute(path: &str) -> Result<&Path> {
@@ -118,7 +129,11 @@ impl FileSystem for StdFileSystem {
     fn open(&self, path: &str) -> Result<StdFile> {
         let p = absolute(path)?;
         let file = open_shared(p).map_err(|e| io_error(&e, path))?;
-        let is_dir = file.metadata().map_err(|e| io_error(&e, path))?.is_dir();
+        // On Windows a handle to a directory's named stream still reports
+        // the directory attribute, but the stream is data: decide from the
+        // path, as `palisade_core::test_util::MockFileSystem` does.
+        let is_dir =
+            !names_a_stream(path) && file.metadata().map_err(|e| io_error(&e, path))?.is_dir();
         Ok(StdFile { file, is_dir })
     }
 
@@ -179,8 +194,8 @@ impl OpenFile for StdFile {
     fn metadata(&self) -> Result<FileMetadata> {
         let m = self.file.metadata().map_err(|e| io_error(&e, "metadata"))?;
         Ok(FileMetadata {
-            size: if m.is_dir() { 0 } else { m.len() },
-            is_dir: m.is_dir(),
+            size: if self.is_dir { 0 } else { m.len() },
+            is_dir: self.is_dir,
             created: m.created().ok().map(|t| UtcTime(utc_micros(t))),
             modified: m.modified().ok().map(|t| UtcTime(utc_micros(t))),
             file_id: None,
@@ -195,6 +210,11 @@ impl OpenFile for StdFile {
                 ErrorKind::InvalidInput,
                 "cannot read a directory",
             ));
+        }
+        // The OS cannot seek past `i64::MAX`, and no file is that long:
+        // such an offset is past the end, as it is for the mocks.
+        if i64::try_from(offset).is_err() {
+            return Ok(0);
         }
         self.file
             .seek(SeekFrom::Start(offset))
@@ -324,7 +344,14 @@ impl Environment for StdEnvironment {
         let interfaces = if_addrs::get_if_addrs().map_err(|e| io_error(&e, "interfaces"))?;
         Ok(interfaces
             .into_iter()
-            .filter(|i| !i.is_loopback() && i.oper_status != if_addrs::IfOperStatus::Down)
+            // Up, or a virtual or tunnel interface that reports no state.
+            .filter(|i| {
+                !i.is_loopback()
+                    && matches!(
+                        i.oper_status,
+                        if_addrs::IfOperStatus::Up | if_addrs::IfOperStatus::Unknown
+                    )
+            })
             .map(|i| {
                 let (addr, prefix_len) = match i.addr {
                     if_addrs::IfAddr::V4(a) => (IpAddr::V4(a.ip), a.prefixlen),

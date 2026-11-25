@@ -50,6 +50,55 @@ mod tests {
         assert!(dockerfile.contains(crate::fuzz::CARGO_FUZZ));
     }
 
+    /// `cargo xtask ci` checks every tool before it runs a step, so the
+    /// image must have all of them, including the MSRV toolchain and
+    /// actionlint, which are not cargo-installed.
+    #[test]
+    fn the_image_has_every_tool_xtask_ci_needs() {
+        let dockerfile = read(".devcontainer/Dockerfile");
+        let cargo: toml::Table = read("Cargo.toml").parse().unwrap();
+        let rust_version = cargo["workspace"]["package"]["rust-version"]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            arg(&dockerfile, "MSRV_TOOLCHAIN"),
+            crate::ci::msrv_toolchain(rust_version)
+        );
+        let ci = read(".github/workflows/ci.yml");
+        let ci_env = |name: &str| {
+            ci.lines()
+                .find_map(|l| l.trim().strip_prefix(&format!("{name}: ")))
+                .unwrap()
+                .trim_matches('"')
+                .to_owned()
+        };
+        assert_eq!(
+            arg(&dockerfile, "ACTIONLINT_VERSION"),
+            ci_env("ACTIONLINT_VERSION")
+        );
+        assert_eq!(
+            arg(&dockerfile, "ACTIONLINT_SHA256_AMD64"),
+            ci_env("ACTIONLINT_SHA256")
+        );
+        assert!(dockerfile.contains("sha256sum --check --strict"));
+        for step in crate::ci::STEPS {
+            let Some(tool) = step.tool else { continue };
+            let program = tool.check[0];
+            let covered = match program {
+                "cargo" => {
+                    let sub = tool
+                        .check
+                        .iter()
+                        .find(|w| !w.starts_with('+') && **w != "cargo");
+                    let sub = sub.unwrap();
+                    dockerfile.contains(&format!("cargo-{sub}@"))
+                }
+                other => dockerfile.contains(other),
+            };
+            assert!(covered, "the image lacks the tool for `{}`", step.command);
+        }
+    }
+
     #[test]
     fn tool_versions_match_ci() {
         let dockerfile = read(".devcontainer/Dockerfile");

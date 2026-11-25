@@ -178,6 +178,24 @@ fn captured_environment_describes_this_machine() {
     }
 }
 
+/// On NTFS a directory can have named streams; they are data, not
+/// directories. The Windows runners exercise this.
+#[cfg(windows)]
+#[test]
+fn a_directory_stream_is_data() {
+    let dir = TempDir::new("dirstream");
+    let stream = format!("{}:note", dir.0.display());
+    std::fs::write(&stream, b"dir stream").unwrap();
+    let mut file = StdFileSystem.open(&stream).unwrap();
+    let meta = file.metadata().unwrap();
+    assert!(!meta.is_dir);
+    assert_eq!(meta.size, 10);
+    let mut buf = [0u8; 10];
+    assert_eq!(file.read_at(0, &mut buf).unwrap(), 10);
+    assert_eq!(&buf, b"dir stream");
+    contract::directory(&StdFileSystem, dir.0.to_str().unwrap()).unwrap();
+}
+
 #[cfg(windows)]
 mod windows {
     use palisade_agent::platform::windows::{self, WindowsRegistry};

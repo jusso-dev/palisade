@@ -6,7 +6,7 @@
 //! its OS implementations (on Windows CI for the Windows ones), so the mocks
 //! cannot drift from real behaviour.
 
-use alloc::{format, string::String, vec::Vec};
+use alloc::{format, string::String, vec, vec::Vec};
 
 use crate::platform::{
     Clock, Environment, ErrorKind, FileSystem, Hive, OpenFile, ProcessInfo, ProcessKey,
@@ -46,7 +46,7 @@ pub fn clock<C: Clock + ?Sized>(clock: &C) -> Outcome {
 /// - opening `missing` fails with [`ErrorKind::NotFound`];
 /// - the open file's size is the length of `contents`;
 /// - reading in small chunks returns `contents`, then 0 at the end;
-/// - a read at an offset past the end returns 0;
+/// - a read at an offset past the end returns 0, up to `u64::MAX`;
 /// - the alternate data streams, if listed, have non-empty names without a
 ///   `:`. An implementation that cannot list them yet may answer
 ///   [`ErrorKind::Unsupported`].
@@ -90,10 +90,14 @@ pub fn file_system<F: FileSystem + ?Sized>(
         })?;
     }
     ensure(read == contents, || "read different contents".into())?;
-    let past = file
-        .read_at(len.saturating_add(100), &mut buf)
-        .map_err(|e| format!("read past the end: {e}"))?;
-    ensure(past == 0, || format!("read past the end returned {past}"))?;
+    for offset in [len.saturating_add(100), 1 << 63, u64::MAX] {
+        let past = file
+            .read_at(offset, &mut buf)
+            .map_err(|e| format!("read at {offset}, past the end: {e}"))?;
+        ensure(past == 0, || {
+            format!("read at {offset}, past the end, returned {past}")
+        })?;
+    }
     let streams = match fs.streams(path) {
         Ok(streams) => streams,
         Err(e) if e.kind() == ErrorKind::Unsupported => Vec::new(),
@@ -221,7 +225,8 @@ pub fn processes<P: ProcessInfo + ?Sized>(processes: &P, process: ProcessKey) ->
 ///   [`ErrorKind::NotFound`];
 /// - a key path or value name with a NUL character fails with
 ///   [`ErrorKind::InvalidInput`], so it can never be read as a shorter,
-///   different name.
+///   different name; so does a key path with a leading `\\` or an empty
+///   component (`a\\\\b`).
 ///
 /// # Errors
 ///
@@ -317,6 +322,17 @@ pub fn registry<R: Registry + ?Sized>(
     for (what, result) in checks {
         ensure(result == Err(ErrorKind::InvalidInput), || {
             format!("{what} gave {result:?}, not InvalidInput")
+        })?;
+    }
+    let doubled = key.replacen('\\', "\\\\", 1);
+    let mut bad = vec![format!("\\{key}")];
+    if doubled != key {
+        bad.push(doubled);
+    }
+    for path in bad {
+        let got = registry.key_exists(hive, &path).map_err(|e| e.kind());
+        ensure(got == Err(ErrorKind::InvalidInput), || {
+            format!("key_exists {path:?} gave {got:?}, not InvalidInput")
         })?;
     }
     Ok(())

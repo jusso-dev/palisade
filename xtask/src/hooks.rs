@@ -25,6 +25,18 @@ mod tests {
         /// which prints `help` (whether it lists `check-banned-terms`
         /// depends on `banned_terms`).
         fn new(tag: &str, cargo_status: i32, typos: Option<i32>, banned_terms: bool) -> Self {
+            Self::with_help(tag, cargo_status, typos, banned_terms, 0)
+        }
+
+        /// As [`Sandbox::new`], with `cargo xtask help` exiting with
+        /// `help_status` (non-zero: xtask does not build).
+        fn with_help(
+            tag: &str,
+            cargo_status: i32,
+            typos: Option<i32>,
+            banned_terms: bool,
+            help_status: i32,
+        ) -> Self {
             let dir =
                 std::env::temp_dir().join(format!("palisade-hooks-{tag}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
@@ -44,7 +56,7 @@ mod tests {
                 &dir.join("bin/cargo"),
                 &format!(
                     "echo \"cargo $* @ $PWD\" >> \"{log}\"\n\
-                     if [ \"$1 $2\" = \"xtask help\" ]; then printf '{help}'; exit 0; fi\n\
+                     if [ \"$1 $2\" = \"xtask help\" ]; then printf '{help}'; exit {help_status}; fi\n\
                      exit {cargo_status}\n",
                     log = dir.join("calls.log").display(),
                 ),
@@ -155,13 +167,23 @@ mod tests {
     }
 
     #[test]
+    fn pre_commit_fails_when_xtask_cannot_run() {
+        let sandbox = Sandbox::with_help("broken", 0, Some(0), true, 101);
+        let out = sandbox.run("pre-commit", &[]);
+        assert!(!out.status.success());
+        let err = stderr(&out);
+        assert!(err.contains("cargo xtask does not run"), "{err}");
+        assert!(!err.contains("skipped check-banned-terms"), "{err}");
+    }
+
+    #[test]
     fn commit_msg_hands_the_message_file_to_xtask() {
         let sandbox = Sandbox::new("msg", 0, None, false);
         let out = sandbox.run("commit-msg", &[".git/COMMIT_EDITMSG"]);
         assert!(out.status.success(), "{}", stderr(&out));
         assert_eq!(
             sandbox.calls(),
-            ["cargo xtask check-commit-msg .git/COMMIT_EDITMSG @ <repo>"]
+            ["cargo xtask check-commit-msg <repo>/.git/COMMIT_EDITMSG @ <repo>"]
         );
 
         let failing = Sandbox::new("msg-fail", 1, None, false);

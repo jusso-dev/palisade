@@ -53,9 +53,24 @@ fn no_nul(text: &str) -> Result<()> {
     }
 }
 
+/// Rejects what the OS rejects as a bad path (a leading `\\`, or an empty
+/// component such as `a\\\\b`) with `InvalidInput`, like the mock, instead
+/// of passing on the OS's `ERROR_BAD_PATHNAME`.
+fn key_path_ok(path: &str) -> Result<()> {
+    no_nul(path)?;
+    let trimmed = path.strip_suffix('\\').unwrap_or(path);
+    if path.starts_with('\\') || (!trimmed.is_empty() && trimmed.split('\\').any(str::is_empty)) {
+        return Err(PlatformError::new(
+            ErrorKind::InvalidInput,
+            "a registry key path has an empty component",
+        ));
+    }
+    Ok(())
+}
+
 /// Opens `path` for reading. `Ok(None)` if it does not exist.
 fn open(hive: Hive, path: &str) -> Result<Option<Key>> {
-    no_nul(path)?;
+    key_path_ok(path)?;
     match root(hive).open(path) {
         Ok(key) => Ok(Some(key)),
         Err(e) if kind(e.code().0) == ErrorKind::NotFound => Ok(None),

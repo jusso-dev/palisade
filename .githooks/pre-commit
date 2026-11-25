@@ -35,18 +35,23 @@ else
 fi
 
 # The banned-terms check lands with the documentation site (#27). Until it
-# does, `cargo xtask help` does not list it, and this step is skipped.
-# The help text is captured first: `grep -q` in a pipeline could stop
-# reading early and make `cargo` fail with SIGPIPE under pipefail.
-help=$(cargo xtask help 2>/dev/null || true)
-if [[ "$help" == *check-banned-terms* ]]; then
-  note "cargo xtask check-banned-terms"
-  if ! cargo xtask check-banned-terms; then
-    note "a banned term was found; see docs/NAMING.md"
-    failed=1
+# does, `cargo xtask help` does not list it, and this step is skipped. If
+# xtask itself cannot run (a build error, a stale Cargo.lock), that is a
+# failure, not a reason to skip. The help text is captured first, rather
+# than piped to `grep -q`, so SIGPIPE under pipefail cannot skip the check.
+if help=$(cargo xtask help); then
+  if [[ "$help" == *check-banned-terms* ]]; then
+    note "cargo xtask check-banned-terms"
+    if ! cargo xtask check-banned-terms; then
+      note "a banned term was found; see docs/NAMING.md"
+      failed=1
+    fi
+  else
+    note "skipped check-banned-terms: this checkout has no such xtask command yet (#27)"
   fi
 else
-  note "skipped check-banned-terms: this checkout has no such xtask command yet (#27)"
+  note "cargo xtask does not run; fix it before committing (see the error above)"
+  failed=1
 fi
 
 exit "$failed"

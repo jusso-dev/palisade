@@ -179,16 +179,77 @@ fn mock_streams_open_by_name_with_or_without_the_type() {
 
 #[test]
 fn drive_letters_are_not_streams() {
-    assert_eq!(split_stream(r"C:\a\b"), (r"C:\a\b", None));
-    assert_eq!(split_stream("C:"), ("C:", None));
-    assert_eq!(split_stream(r"C:\a\b:s"), (r"C:\a\b", Some("s")));
-    assert_eq!(split_stream("b:s"), ("b:s", None));
+    use StreamPart::{Invalid, Main, Named, None};
+    for (path, base, part) in [
+        (r"C:\a\b", r"C:\a\b", None),
+        ("C:", "C:", None),
+        (r"C:\a\b:s", r"C:\a\b", Named("s")),
+        ("b:s", "b:s", None),
+        (r"\\srv\share\f:s", r"\\srv\share\f", Named("s")),
+        (r"C:\a\b:s:$Data", r"C:\a\b", Named("s")),
+        (r"C:\a\b::$data", r"C:\a\b", Main),
+        (r"C:\a\b:", r"C:\a\b", Invalid),
+        (r"C:\a\b:s:$BITMAP", r"C:\a\b", Invalid),
+        (r"C:\a\b:s:", r"C:\a\b", Invalid),
+    ] {
+        assert_eq!(split_stream(path), (base, part), "{path}");
+    }
+}
+
+#[test]
+fn streams_on_directories_and_malformed_stream_paths() {
+    let mut fs = sample_fs();
+    fs.insert(r"C:\Tools:note", MockFile::new(b"dir stream".to_vec()));
+    // A named stream of a directory is data that can be read.
+    let mut s = fs.open(r"C:\Tools:note").unwrap();
+    let meta = s.metadata().unwrap();
+    assert!(!meta.is_dir);
+    assert_eq!(meta.size, 10);
+    let mut buf = [0u8; 10];
+    assert_eq!(s.read_at(0, &mut buf).unwrap(), 10);
+    assert_eq!(&buf, b"dir stream");
+    // The directory itself is still a directory, with the stream listed.
+    assert!(fs.open(r"C:\Tools").unwrap().metadata().unwrap().is_dir);
+    assert_eq!(fs.streams(r"C:\Tools").unwrap()[0].name, "note");
+    // A directory has no unnamed data stream; `file:` is malformed.
     assert_eq!(
-        split_stream(r"\\srv\share\f:s"),
-        (r"\\srv\share\f", Some("s"))
+        fs.open(r"C:\Tools::$DATA").unwrap_err().kind(),
+        ErrorKind::NotFound
     );
-    assert_eq!(split_stream(r"C:\a\b:s:$Data"), (r"C:\a\b", Some("s")));
-    assert_eq!(split_stream(r"C:\a\b::$data"), (r"C:\a\b", Some("")));
+    assert_eq!(
+        fs.open(r"C:\Tools\tool.exe:").unwrap_err().kind(),
+        ErrorKind::InvalidInput
+    );
+    assert!(fs.open(r"C:\Tools\tool.exe::$DATA").is_ok());
+    // Owners, descriptors and stream lists belong to the base file.
+    assert_eq!(
+        fs.owner_sid(r"C:\Tools\tool.exe:Zone.Identifier")
+            .unwrap()
+            .as_deref(),
+        Some("S-1-5-32-544")
+    );
+    assert!(
+        fs.security_descriptor(r"C:\Tools\tool.exe::$DATA")
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(
+        fs.owner_sid(r"C:\Tools\tool.exe:").unwrap_err().kind(),
+        ErrorKind::InvalidInput
+    );
+    // Inserting at a stream path adds a stream, not a separate file.
+    fs.insert(r"C:\new.txt:evil.exe", MockFile::new(b"MZ".to_vec()));
+    assert_eq!(fs.open(r"C:\new.txt").unwrap().metadata().unwrap().size, 0);
+    assert_eq!(
+        fs.open(r"C:\new.txt:evil.exe")
+            .unwrap()
+            .metadata()
+            .unwrap()
+            .size,
+        2
+    );
+    fs.insert(r"C:\new.txt::$DATA", MockFile::new(b"main".to_vec()));
+    assert_eq!(fs.open(r"C:\new.txt").unwrap().metadata().unwrap().size, 4);
 }
 
 #[test]
@@ -582,6 +643,26 @@ fn mock_registry_meets_the_contract() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn registry_key_paths_follow_the_os_rules() {
+    let mut reg = MockRegistry::new();
+    reg.create_key(Hive::LocalMachine, r"SOFTWARE\Palisade");
+    assert!(
+        reg.key_exists(Hive::LocalMachine, r"SOFTWARE\Palisade\")
+            .unwrap()
+    );
+    assert!(reg.key_exists(Hive::LocalMachine, "").unwrap());
+    for bad in [r"\SOFTWARE", r"SOFTWARE\\Palisade", r"SOFTWARE\\", r"\"] {
+        assert_eq!(
+            reg.key_exists(Hive::LocalMachine, bad).unwrap_err().kind(),
+            ErrorKind::InvalidInput,
+            "{bad}"
+        );
+        assert!(reg.value(Hive::LocalMachine, bad, "x").is_err(), "{bad}");
+        assert!(reg.subkeys(Hive::LocalMachine, bad).is_err(), "{bad}");
+    }
 }
 
 #[test]

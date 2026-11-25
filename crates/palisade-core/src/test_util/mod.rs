@@ -172,10 +172,27 @@ impl MockFileSystem {
         Self::default()
     }
 
-    /// Adds or replaces the file at `path`.
+    /// Adds or replaces the file at `path`. A path with a named stream
+    /// (`file:name`) instead sets that stream of the file, creating an empty
+    /// file if there is none; `file::$DATA` sets the file's contents.
     pub fn insert(&mut self, path: &str, mut file: MockFile) {
-        file.metadata.size = u64::try_from(file.data.len()).unwrap_or(u64::MAX);
-        self.files.insert(fold(path), file);
+        let (base, part) = split_stream(path);
+        match part {
+            StreamPart::Named(name) => {
+                let target = self.files.entry(fold(base)).or_default();
+                target.streams.retain(|n, _| fold(n) != fold(name));
+                target.streams.insert(name.to_string(), file.data);
+            }
+            StreamPart::Main => {
+                let target = self.files.entry(fold(base)).or_default();
+                target.metadata.size = u64::try_from(file.data.len()).unwrap_or(u64::MAX);
+                target.data = file.data;
+            }
+            StreamPart::None | StreamPart::Invalid => {
+                file.metadata.size = u64::try_from(file.data.len()).unwrap_or(u64::MAX);
+                self.files.insert(fold(path), file);
+            }
+        }
     }
 
     /// Removes the file at `path`.
@@ -190,29 +207,53 @@ impl MockFileSystem {
     }
 }
 
-/// Splits `C:\dir\file:stream` into the file and the stream name. The colon
-/// of a drive letter is not a stream separator.
-fn split_stream(path: &str) -> (&str, Option<&str>) {
+/// The stream part of a path, as NTFS reads it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StreamPart<'a> {
+    /// No stream: the file, or the directory.
+    None,
+    /// The unnamed data stream, spelled `file::$DATA`.
+    Main,
+    /// A named data stream, `file:name` or `file:name:$DATA`.
+    Named(&'a str),
+    /// A malformed stream part, such as a bare trailing `file:`.
+    Invalid,
+}
+
+/// Splits `C:\dir\file:stream` into the file and the stream part. The colon
+/// of a drive letter is not a stream separator. The `$DATA` type is matched
+/// case-insensitively, as Windows does.
+fn split_stream(path: &str) -> (&str, StreamPart<'_>) {
     let name_start = path.rfind(['\\', '/']).map_or(0, |i| i + 1);
     let name = path.get(name_start..).unwrap_or_default();
-    match name.find(':') {
-        Some(i) if !(name_start == 0 && i == 1) => {
-            let at = name_start + i;
-            let stream = path.get(at + 1..).unwrap_or_default();
-            // The stream type is matched case-insensitively, as Windows does.
-            let stream = match stream.len().checked_sub(6) {
-                Some(cut)
-                    if stream
-                        .get(cut..)
-                        .is_some_and(|t| t.eq_ignore_ascii_case(":$DATA")) =>
-                {
-                    stream.get(..cut).unwrap_or_default()
-                }
-                _ => stream,
-            };
-            (path.get(..at).unwrap_or_default(), Some(stream))
+    let Some(i) = name.find(':').filter(|&i| !(name_start == 0 && i == 1)) else {
+        return (path, StreamPart::None);
+    };
+    let at = name_start + i;
+    let base = path.get(..at).unwrap_or_default();
+    let rest = path.get(at + 1..).unwrap_or_default();
+    let part = match rest.split_once(':') {
+        None if rest.is_empty() => StreamPart::Invalid,
+        None => StreamPart::Named(rest),
+        Some(("", t)) if t.eq_ignore_ascii_case("$DATA") => StreamPart::Main,
+        Some((n, t)) if !n.is_empty() && t.eq_ignore_ascii_case("$DATA") => StreamPart::Named(n),
+        Some(_) => StreamPart::Invalid,
+    };
+    (base, part)
+}
+
+impl MockFileSystem {
+    /// The file a path names, ignoring any stream part: owners, descriptors
+    /// and stream lists belong to the file, not to one of its streams.
+    fn base_file(&self, path: &str) -> Result<&MockFile> {
+        let (base, part) = split_stream(path);
+        if part == StreamPart::Invalid {
+            return Err(PlatformError::new(
+                ErrorKind::InvalidInput,
+                "malformed stream name",
+            ));
         }
-        _ => (path, None),
+        self.file(base)
     }
 }
 
@@ -220,41 +261,57 @@ impl FileSystem for MockFileSystem {
     type File = MockOpenFile;
 
     fn open(&self, path: &str) -> Result<MockOpenFile> {
-        let (base, stream) = split_stream(path);
+        let (base, part) = split_stream(path);
         let file = self.file(base)?;
-        let data = match stream {
+        let (data, is_dir) = match part {
             // A directory opens, for its metadata; reading it fails.
-            None | Some("") => file.data.clone(),
-            Some(name) => file
-                .streams
-                .iter()
-                .find(|(n, _)| fold(n) == fold(name))
-                .map(|(_, d)| d.clone())
-                .ok_or_else(|| PlatformError::not_found(path))?,
+            StreamPart::None => (file.data.clone(), file.metadata.is_dir),
+            // A directory has no unnamed data stream.
+            StreamPart::Main if file.metadata.is_dir => {
+                return Err(PlatformError::not_found(path));
+            }
+            StreamPart::Main => (file.data.clone(), false),
+            // A named stream is data, on a file or a directory alike.
+            StreamPart::Named(name) => {
+                let data = file
+                    .streams
+                    .iter()
+                    .find(|(n, _)| fold(n) == fold(name))
+                    .map(|(_, d)| d.clone())
+                    .ok_or_else(|| PlatformError::not_found(path))?;
+                (data, false)
+            }
+            StreamPart::Invalid => {
+                return Err(PlatformError::new(
+                    ErrorKind::InvalidInput,
+                    "malformed stream name",
+                ));
+            }
         };
-        let size = if file.metadata.is_dir {
+        let size = if is_dir {
             0
         } else {
             u64::try_from(data.len()).unwrap_or(u64::MAX)
         };
         let metadata = FileMetadata {
             size,
+            is_dir,
             ..file.metadata.clone()
         };
         Ok(MockOpenFile { data, metadata })
     }
 
     fn owner_sid(&self, path: &str) -> Result<Option<String>> {
-        Ok(self.file(path)?.owner.clone())
+        Ok(self.base_file(path)?.owner.clone())
     }
 
     fn security_descriptor(&self, path: &str) -> Result<Option<Vec<u8>>> {
-        Ok(self.file(path)?.descriptor.clone())
+        Ok(self.base_file(path)?.descriptor.clone())
     }
 
     fn streams(&self, path: &str) -> Result<Vec<StreamInfo>> {
         Ok(self
-            .file(path)?
+            .base_file(path)?
             .streams
             .iter()
             .map(|(name, data)| StreamInfo {
@@ -569,7 +626,8 @@ impl From<Hive> for HiveKey {
     }
 }
 
-/// `a\\b\` and `a\b` are the same key.
+/// `a\b\` and `a\b` are the same key. Callers have checked the path with
+/// [`key_path_ok`].
 fn key_path(path: &str) -> String {
     let parts: Vec<&str> = path.split('\\').filter(|p| !p.is_empty()).collect();
     parts.join("\\")
@@ -644,14 +702,29 @@ fn no_nul(text: &str) -> Result<()> {
     }
 }
 
+/// Checks a key path as the OS does: no NUL, no leading `\`, and no empty
+/// component (`a\\b`). One trailing `\` is allowed, and the empty path names
+/// the hive root.
+fn key_path_ok(path: &str) -> Result<()> {
+    no_nul(path)?;
+    let trimmed = path.strip_suffix('\\').unwrap_or(path);
+    if path.starts_with('\\') || (!trimmed.is_empty() && trimmed.split('\\').any(str::is_empty)) {
+        return Err(PlatformError::new(
+            ErrorKind::InvalidInput,
+            "a registry key path has an empty component",
+        ));
+    }
+    Ok(())
+}
+
 impl Registry for MockRegistry {
     fn key_exists(&self, hive: Hive, path: &str) -> Result<bool> {
-        no_nul(path)?;
+        key_path_ok(path)?;
         Ok(self.find(hive, path).is_some())
     }
 
     fn value(&self, hive: Hive, path: &str, name: &str) -> Result<Option<RegistryValue>> {
-        no_nul(path)?;
+        key_path_ok(path)?;
         no_nul(name)?;
         Ok(self.find(hive, path).flatten().and_then(|values| {
             values
@@ -662,7 +735,7 @@ impl Registry for MockRegistry {
     }
 
     fn subkeys(&self, hive: Hive, path: &str) -> Result<Vec<String>> {
-        no_nul(path)?;
+        key_path_ok(path)?;
         if self.find(hive, path).is_none() {
             return Err(PlatformError::not_found(path));
         }
