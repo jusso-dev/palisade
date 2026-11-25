@@ -38,7 +38,13 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   installer heuristics apply only when there is no manifest; a process
   manifest that is present but unreadable counts as requiring elevation. `NormalizedName` gives the
   trimmed, whitespace-collapsed NFC and case-folded forms of a version
-  string for matching, keeping the original.
+  string for matching, keeping the original. `pe::legacy::parse` reads the
+  identity of 16-bit NE and 32-bit LE / LX files: the format, the target OS,
+  the module name (the first resident name) and the description (the first
+  non-resident name). A name outside the file or its declared table is absent,
+  with a warning. Bytes that are not printable ASCII become U+FFFD and are
+  flagged, so a rule never matches a guessed code page. Big-endian linear
+  headers are identified but their names are not read.
 - `hash`: flat SHA-256, SHA-1, MD5, SHA-384 and SHA-512, computed together in
   one streaming pass ([#46](https://github.com/jusso-dev/palisade/issues/46)).
   SHA-256 is the primary identity. SHA-1 and MD5 are not collision resistant

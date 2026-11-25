@@ -119,9 +119,9 @@ Every parser of untrusted input has a coverage-guided fuzz target. The targets l
 separate cargo-fuzz workspace per crate (`crates/<crate>/fuzz/`), so normal builds never compile
 them, and only they need a nightly toolchain. There are two projects:
 
-- `crates/palisade-fileid/fuzz`, with ten targets: `pe_parse`, `version_info_parse`,
+- `crates/palisade-fileid/fuzz`, with eleven targets: `pe_parse`, `version_info_parse`,
   `authenticode_ranges`, `authenticode_pkcs7`, `fsctx_parse`, `x509_chain`, `timestamp_crl`,
-  `fuzz_ctl`, `fuzz_classify` and `fuzz_msi_tables`.
+  `fuzz_ctl`, `fuzz_classify`, `fuzz_msi_tables` and `legacy_parse`.
 - `crates/palisade-proto/fuzz`, with one target: `trust_set_decode`.
 
 Target names are unique across projects, so `--target` names one without its project. Each fuzz

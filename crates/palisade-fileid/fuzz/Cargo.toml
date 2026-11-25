@@ -11,6 +11,7 @@
 #   cargo +nightly fuzz run timestamp_crl
 #   cargo +nightly fuzz run fuzz_ctl
 #   cargo +nightly fuzz run fuzz_classify
+#   cargo +nightly fuzz run legacy_parse
 #   cargo +nightly fuzz run fuzz_msi_tables
 [package]
 name = "palisade-fileid-fuzz"
@@ -94,6 +95,13 @@ bench = false
 [[bin]]
 name = "fuzz_msi_tables"
 path = "fuzz_targets/fuzz_msi_tables.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "legacy_parse"
+path = "fuzz_targets/legacy_parse.rs"
 test = false
 doc = false
 bench = false
