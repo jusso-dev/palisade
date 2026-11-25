@@ -585,16 +585,15 @@ fn review_campaigns_list_due_rules_and_review_updates_them() {
     );
     // Attest the first, renew the second, retire the fifth.
     let rules = &mut d.rule_sets[0].rules;
-    review(&mut rules[0], &ReviewAction::Attest, "bob", NOW);
+    review(&mut rules[0], &ReviewAction::Attest, "bob", NOW).unwrap();
     review(
         &mut rules[1],
-        &ReviewAction::Renew {
-            expires_at: Some(t(90)),
-        },
+        &ReviewAction::Renew { expires_at: t(90) },
         "bob",
         NOW,
-    );
-    review(&mut rules[4], &ReviewAction::Retire, "bob", NOW);
+    )
+    .unwrap();
+    review(&mut rules[4], &ReviewAction::Retire, "bob", NOW).unwrap();
     assert_eq!(rules[0].metadata.review_by, Some(t(365).date()));
     assert_eq!(rules[0].metadata.last_reviewed_by.as_deref(), Some("bob"));
     assert_eq!(rules[1].expires_at, Some(t(90)));
@@ -824,4 +823,144 @@ fn an_expired_rule_with_an_audit_twin_counts_as_the_same_rule() {
     );
     counters.record(&d, b"x", t(1));
     assert_eq!(counters.report(t(2)).rules[0].hits_total, 1);
+}
+
+// ------------------------------------------------- review regressions
+
+#[test]
+fn undated_rules_are_due_without_a_sentinel_date() {
+    let d = doc_with(
+        serde_json::json!({}),
+        vec![rule(1, "allow", serde_json::json!({}))],
+    );
+    let due = review_due(&d, NOW.date());
+    assert_eq!(due[0].review_by, None);
+    let summary = review_summary(&d, NOW.date());
+    assert_eq!((summary.undated, summary.earliest_due), (1, None));
+    let json = serde_json::to_value(&due).unwrap();
+    assert!(json[0]["review_by"].is_null());
+    // Extreme dates neither panic nor wrap.
+    let _ = review_summary(&d, Date(i64::MIN));
+    let _ = review_summary(&d, Date(i64::MAX));
+}
+
+#[test]
+fn renewing_or_extending_a_governed_exception_keeps_it_valid() {
+    let g = serde_json::json!({"governance": {"require_justification": true}});
+    let exception = rule(
+        1,
+        "allow",
+        serde_json::json!({
+            "expires_at": ts(t(300)),
+            "metadata": {"exception": true, "justification": "vendor tool", "approved_by": "ciso",
+                         "approved_at": ts(NOW), "created_at": ts(NOW), "risk_rating": "medium"},
+        }),
+    );
+    let mut d = doc_with(g, vec![exception]);
+    d.clone().validate().unwrap();
+    // A year later, the reviewer renews it for another 300 days.
+    let later = t(360);
+    review(
+        &mut d.rule_sets[0].rules[0],
+        &ReviewAction::Renew { expires_at: t(660) },
+        "auditor",
+        later,
+    )
+    .unwrap();
+    assert_eq!(
+        d.rule_sets[0].rules[0].metadata.approved_by.as_deref(),
+        Some("auditor")
+    );
+    d.clone().validate().unwrap();
+    // Bulk extension past the year is refused, within it allowed.
+    let set: RuleSetId = SET.parse().unwrap();
+    let loc = RuleLocation {
+        rule_set_id: set,
+        rule_id: d.rule_sets[0].rules[0].id,
+    };
+    assert_eq!(
+        bulk(&mut d, &[loc], &BulkOp::Extend(t(800)), "bob", "x", later),
+        Err(BulkError::ExceptionTooLong(loc))
+    );
+    bulk(&mut d, &[loc], &BulkOp::Extend(t(700)), "bob", "x", later).unwrap();
+    d.clone().validate().unwrap();
+}
+
+#[test]
+fn reviews_and_bulk_changes_refuse_invalid_input() {
+    let mut r: Rule = serde_json::from_value(rule(1, "allow", serde_json::json!({}))).unwrap();
+    let before = r.clone();
+    assert_eq!(
+        review(&mut r, &ReviewAction::Attest, " ", NOW),
+        Err(ChangeError::InvalidActor)
+    );
+    assert_eq!(
+        review(
+            &mut r,
+            &ReviewAction::Renew { expires_at: t(-1) },
+            "bob",
+            NOW
+        ),
+        Err(ChangeError::InvalidExpiry)
+    );
+    assert_eq!(r, before);
+    let mut d = doc_with(
+        serde_json::json!({}),
+        vec![rule(
+            1,
+            "allow",
+            serde_json::json!({"metadata": {"comment": "keep me"}}),
+        )],
+    );
+    let loc = RuleLocation {
+        rule_set_id: SET.parse().unwrap(),
+        rule_id: d.rule_sets[0].rules[0].id,
+    };
+    assert_eq!(
+        bulk(&mut d, &[loc], &BulkOp::Disable, "", "x", NOW),
+        Err(BulkError::Invalid(ChangeError::InvalidActor))
+    );
+    let cs = bulk(&mut d, &[loc], &BulkOp::Retire, "bob", "app removed", NOW).unwrap();
+    assert_eq!(cs.changes[0].comment.0.as_deref(), Some("keep me"));
+    assert_eq!(
+        d.rule_sets[0].rules[0].metadata.comment.as_deref(),
+        Some("keep me\nretired: app removed")
+    );
+    d.validate().unwrap();
+}
+
+#[test]
+fn inactive_matches_apply_unknown_handling_and_skip_defer() {
+    let unknown_deny = serde_json::json!({"id": rule_id(1), "name": "U", "enabled": false,
+        "match": {"criterion": {"field": "meta.product_name", "operator": "equals", "values": ["X"]}},
+        "action": {"type": "deny", "unknown_as": "match"}});
+    let defer = rule(2, "defer", serde_json::json!({"enabled": false}));
+    let v = valid(doc_with(serde_json::json!({}), vec![unknown_deny, defer]));
+    let facts = ObjectFacts::new().with(Field::HashSha256, sha('a'));
+    let variables = PathVariables::new();
+    let context = EvaluationContext::new();
+    let subject = Subject {
+        object_type: ObjectType::Executable,
+        facts: &facts,
+        variables: &variables,
+        context: &context,
+    };
+    let got: Vec<String> = inactive_matches(&v, &subject, &RuleClock::at(NOW))
+        .iter()
+        .map(|(r, _)| r.rule_id.to_string())
+        .collect();
+    assert_eq!(got, vec![rule_id(1)]);
+}
+
+#[test]
+fn counters_record_by_index_for_large_policies() {
+    let rules: Vec<serde_json::Value> = (0..2000u32)
+        .map(|n| serde_json::json!({"id": format!("01936b2e-{:04x}-7{:03x}-9f21-0a1b2c3d4e61", n >> 12, n & 0xfff), "name": "R",
+            "match": {"criterion": {"field": "hash.sha256", "operator": "equals", "values": [format!("{n:064x}")]}}, "action": {"type": "allow"}}))
+        .collect();
+    let v = valid(doc_with(serde_json::json!({}), rules));
+    let e = Evaluator::new(&v).unwrap();
+    let c = e.counters();
+    let last = v.document().rule_sets[0].rules[1999].id;
+    assert_eq!(c.ordinal(last), Some(1999));
 }

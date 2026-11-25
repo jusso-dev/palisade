@@ -9,4 +9,3 @@ weak_identity Error 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e62
 # staged-rollout.yaml
 # unknown-applications.yaml
 # workstation-baseline.yaml
-broad_wildcard Warning 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e72

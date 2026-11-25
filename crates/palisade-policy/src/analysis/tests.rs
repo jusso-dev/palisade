@@ -981,3 +981,342 @@ fn lint_snapshot_of_the_example_policies() {
         .replace("\r\n", "\n");
     assert!(committed == text, "{} differs:\n{text}", snap.display());
 }
+
+// ------------------------------------------------- review regressions
+
+#[test]
+fn negated_tests_never_count_as_trusted_or_broad() {
+    let facts = Facts {
+        certificates: BTreeMap::from([("Gone Ltd".into(), CertificateState::Revoked)]),
+        restricted_publishers: vec!["OS Publisher".into()],
+        ..Facts::default()
+    };
+    let excludes_revoked = serde_json::json!({"all": [hash('a'), {"not": crit("signer.publisher", "equals", &["Gone Ltd"])}]});
+    let excludes_wildcard = serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]),
+        {"not": crit("path.directory", "wildcard", &["C:\\*"])}]});
+    // Excluding one file still trusts everything else the OS signs.
+    let not_narrowed = serde_json::json!({"all": [crit("signer.publisher", "equals", &["OS Publisher"]),
+        {"not": crit("path.file_name", "equals", &["cmd.exe"])}]});
+    // One branch is narrowed, the other is not.
+    let any_branch = serde_json::json!({"any": [
+        {"all": [crit("signer.publisher", "equals", &["OS Publisher"]), crit("meta.product_name", "equals", &["Calc"])]},
+        crit("signer.publisher", "equals", &["OS Publisher"]),
+    ]});
+    let trusts_revoked =
+        serde_json::json!({"all": [hash('b'), crit("signer.publisher", "equals", &["Gone Ltd"])]});
+    let found = lint(
+        &mixed(vec![
+            rule(1, excludes_revoked, "allow"),
+            rule(2, excludes_wildcard, "allow"),
+            rule(3, not_narrowed, "allow"),
+            rule(4, any_branch, "allow"),
+            rule(5, trusts_revoked, "allow"),
+        ]),
+        &facts,
+    );
+    assert!(
+        !has(&found, FindingCode::RevokedOrExpiredSigner, 1),
+        "{found:?}"
+    );
+    assert!(!has(&found, FindingCode::BroadWildcard, 2));
+    assert!(has(&found, FindingCode::RestrictedPublisherBroad, 3));
+    assert!(has(&found, FindingCode::RestrictedPublisherBroad, 4));
+    // Requiring the revoked signer is reported.
+    assert!(has(&found, FindingCode::RevokedOrExpiredSigner, 5));
+}
+
+#[test]
+fn broad_wildcards_are_read_as_matching_reads_them() {
+    for (v, broad) in [
+        ("C:\\.\\*", true),
+        ("C:\\a\\..\\*", true),
+        ("C:\\Windows\\**.exe", true),
+        ("%WINDIR%\\**", true),
+        ("\\\\server\\share\\**", true),
+        ("%TEMP%\\**", false),
+        ("%PROGRAMFILES%\\Example\\**", false),
+        ("C:\\Program Files\\Example\\*.exe", false),
+    ] {
+        assert_eq!(is_broad_path_wildcard(v), broad, "{v}");
+    }
+}
+
+#[test]
+fn writable_directories_are_found_through_roots_patterns_and_branches() {
+    let facts = Facts {
+        writable_dirs: vec!["C:\\Tools\\Drop".into()],
+        ..Facts::default()
+    };
+    let found = lint(
+        &mixed(vec![
+            rule(1, crit("path.directory", "starts_with", &["C:\\"]), "allow"),
+            rule(
+                2,
+                crit("path.full", "wildcard", &["C:\\Tools\\**\\*.exe"]),
+                "allow",
+            ),
+            rule(
+                3,
+                serde_json::json!({"any": [crit("path.directory", "starts_with", &["C:\\Safe"]), crit("path.directory", "starts_with", &["C:\\Tools\\Drop"])]}),
+                "allow",
+            ),
+            rule(
+                4,
+                crit("path.directory", "starts_with", &["C:\\Safe"]),
+                "allow",
+            ),
+        ]),
+        &facts,
+    );
+    for n in [1, 2, 3] {
+        assert!(
+            has(&found, FindingCode::UserWritablePathAllow, n),
+            "{n}: {found:?}"
+        );
+    }
+    assert!(!has(&found, FindingCode::UserWritablePathAllow, 4));
+}
+
+#[test]
+fn principals_track_negation_and_repeats_across_criteria() {
+    let g = |op: &str, v: &str| serde_json::json!({"criterion": {"field": "user.groups", "operator": op, "values": [v]}});
+    let found = lint(
+        &mixed(vec![
+            rule(
+                1,
+                serde_json::json!({"all": [hash('a'), g("member_of", "S-1-5-32-544"), {"not": g("member_of", "S-1-5-32-544")}]}),
+                "deny",
+            ),
+            rule(
+                2,
+                serde_json::json!({"all": [hash('b'), g("member_of", "S-1-5-32-545"), g("member_of", "S-1-5-32-545")]}),
+                "deny",
+            ),
+        ]),
+        &Facts::default(),
+    );
+    assert!(has(&found, FindingCode::DuplicatePrincipal, 1));
+    assert!(has(&found, FindingCode::DuplicatePrincipal, 2));
+}
+
+#[test]
+fn managed_read_only_sets_are_not_governed_or_reviewed() {
+    let d = doc(
+        serde_json::json!({"unknown": {"preset": "e8_ml2"}}),
+        vec![(
+            CURATED,
+            "baseline",
+            false,
+            true,
+            vec![rule(
+                1,
+                crit("signer.publisher", "equals", &["OS Publisher"]),
+                "allow",
+            )],
+        )],
+    );
+    let findings = analyse(&d, &Facts::default(), NOW);
+    assert!(
+        !findings.iter().any(|f| matches!(
+            f.code,
+            FindingCode::MissingJustification
+                | FindingCode::ExceptionWithoutExpiry
+                | FindingCode::ReviewOverdue
+        )),
+        "{findings:?}"
+    );
+    assert_eq!(publish_gate(&findings, None), Gate::Pass);
+    assert!(crate::lifecycle::review_due(&d, NOW.date()).is_empty());
+}
+
+#[test]
+fn duplicates_respect_patterns_scope_and_timing_and_keep_the_winner() {
+    let re =
+        |p: &str| serde_json::json!({"all": [hash('a'), crit("meta.product_name", "regex", &[p])]});
+    let found = lint(
+        &mixed(vec![
+            rule(1, re("\\w+"), "deny"),
+            rule(2, re("\\W+"), "deny"),
+        ]),
+        &Facts::default(),
+    );
+    assert!(none_of(&found, FindingCode::DuplicateRule));
+    let timed = with(
+        rule(4, hash('c'), "allow"),
+        serde_json::json!({"expires_at": t(30).to_string()}),
+    );
+    let found = lint(
+        &mixed(vec![rule(3, hash('c'), "allow"), timed]),
+        &Facts::default(),
+    );
+    assert!(none_of(&found, FindingCode::DuplicateRule));
+    // Three copies: both later ones are reported against the lowest ID,
+    // whatever the order.
+    let copies = vec![
+        rule(7, hash('d'), "allow"),
+        rule(5, hash('d'), "allow"),
+        rule(6, hash('d'), "allow"),
+    ];
+    let found = lint(&mixed(copies), &Facts::default());
+    let dups: Vec<&Vec<String>> = found
+        .iter()
+        .filter(|(c, _)| *c == FindingCode::DuplicateRule)
+        .map(|(_, r)| r)
+        .collect();
+    assert_eq!(
+        dups,
+        vec![&vec![rule_id(6), rule_id(5)], &vec![rule_id(7), rule_id(5)]]
+    );
+    // Under first_match, rules at different positions are not duplicates.
+    let d = doc(
+        serde_json::json!({"precedence_model": "first_match"}),
+        vec![(
+            SET,
+            "mixed",
+            false,
+            false,
+            vec![
+                with(
+                    rule(1, hash('e'), "allow"),
+                    serde_json::json!({"order": 100_100}),
+                ),
+                with(
+                    rule(2, hash('e'), "allow"),
+                    serde_json::json!({"order": 100_200}),
+                ),
+            ],
+        )],
+    );
+    assert!(none_of(
+        &lint(&d, &Facts::default()),
+        FindingCode::DuplicateRule
+    ));
+}
+
+#[test]
+fn vulnerable_versions_intersect_bounds_and_respect_identity() {
+    let ver = |op: &str, v: &[&str]| serde_json::json!({"criterion": {"field": "meta.file_version", "operator": op, "values": v}});
+    let vuln = rule(
+        1,
+        serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]), crit("meta.product_name", "equals", &["Tool"]),
+        ver("version_ge", &["1.2"]), ver("version_lt", &["2.0"])]}),
+        "deny",
+    );
+    let tool = |n: u32, extra: Vec<serde_json::Value>| {
+        let mut all = vec![
+            crit("signer.publisher", "equals", &["Example Ltd"]),
+            crit("meta.product_name", "equals", &["Tool"]),
+        ];
+        all.extend(extra);
+        rule(n, serde_json::json!({"all": all}), "allow")
+    };
+    let d = doc(
+        serde_json::json!({}),
+        vec![
+            (CURATED, "blocklist", false, true, vec![vuln]),
+            (
+                SET,
+                "mixed",
+                false,
+                false,
+                vec![
+                    tool(2, vec![ver("version_ge", &["2.0"])]),
+                    tool(
+                        3,
+                        vec![ver("version_le", &["3.0"]), ver("version_ge", &["2.0"])],
+                    ),
+                    tool(4, vec![ver("version_eq", &["2.0", "2.1"])]),
+                    tool(5, vec![ver("version_ge", &["1.0"])]),
+                    tool(6, vec![ver("version_eq", &["1.0", "1.5"])]),
+                    rule(
+                        7,
+                        serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]), crit("meta.product_name", "equals", &["Other"])]}),
+                        "allow",
+                    ),
+                    with(
+                        tool(8, vec![ver("version_ge", &["1.0"])]),
+                        serde_json::json!({"expires_at": t(-1).to_string()}),
+                    ),
+                ],
+            ),
+        ],
+    );
+    let found = lint(&d, &Facts::default());
+    for n in [2, 3, 4, 7, 8] {
+        assert!(
+            !has(&found, FindingCode::VulnerableVersionAllowed, n),
+            "{n}: {found:?}"
+        );
+    }
+    assert!(has(&found, FindingCode::VulnerableVersionAllowed, 5));
+    assert!(has(&found, FindingCode::VulnerableVersionAllowed, 6));
+}
+
+#[test]
+fn exception_rules_without_a_start_are_reported_as_validation_does() {
+    let mut d = mixed(vec![with(
+        rule(1, hash('a'), "allow"),
+        serde_json::json!({
+            "expires_at": t(30).to_string(),
+            "metadata": {"exception": true, "justification": "x", "approved_by": "ciso", "risk_rating": "low", "review_by": "2027-01-01"},
+        }),
+    )]);
+    d.policy.governance.require_justification = Some(true);
+    assert!(has(
+        &lint(&d, &Facts::default()),
+        FindingCode::ExceptionWithoutExpiry,
+        1
+    ));
+    assert!(
+        d.validate()
+            .unwrap_err()
+            .iter()
+            .any(|e| e.code == crate::validate::ErrorCode::ExceptionIncomplete)
+    );
+}
+
+#[test]
+fn trust_sources_are_never_stale() {
+    let trust = serde_json::json!({"id": rule_id(1), "name": "T", "object_types": ["installer"],
+        "match": hash('a'), "action": {"type": "trust_source", "mode": "direct", "scope_paths": ["C:\\Apps"]},
+        "metadata": {"created_at": t(-365).to_string()}});
+    let d = mixed(vec![trust]);
+    let facts = Facts {
+        usage: BTreeMap::from([(
+            rule_id(1).parse().unwrap(),
+            Usage {
+                last_matched_at: None,
+                devices_online: true,
+            },
+        )]),
+        ..Facts::default()
+    };
+    assert!(none_of(&lint(&d, &facts), FindingCode::StaleRule));
+}
+
+#[test]
+fn rules_sharing_a_common_scope_do_not_explode_the_conflict_pass() {
+    // 5,000 rules that all require the same context criterion first.
+    let rules: Vec<serde_json::Value> = (0..5_000u32)
+        .map(|n| serde_json::json!({"id": format!("01936b2e-{:04x}-7{:03x}-9f21-0a1b2c3d4e61", n >> 12, n & 0xfff), "name": "R",
+            "match": {"all": [{"criterion": {"field": "user.is_admin", "operator": "is_false"}}, crit("hash.sha256", "equals", &[&format!("{n:064x}")])]},
+            "action": {"type": "deny"}}))
+        .collect();
+    let json = serde_json::json!({"schema_version": "1.0.0",
+        "policy": {"id": POLICY, "name": "Scoped", "revision": 1, "mode": "enforce", "rule_sets": [SET]},
+        "rule_sets": [{"id": SET, "name": "S", "kind": "blocklist", "rules": rules}]});
+    let d = PolicyDocument::from_json(&json.to_string()).unwrap();
+    let start = std::time::Instant::now();
+    let _ = analyse(&d, &Facts::default(), NOW);
+    assert!(start.elapsed() < std::time::Duration::from_secs(30));
+    // A tiny budget still finishes and finds nothing false.
+    let opts = Options {
+        max_pair_checks: 10,
+        ..Options::default()
+    };
+    assert!(
+        analyse_with(&d, &Facts::default(), NOW, &opts)
+            .iter()
+            .all(|f| f.code != FindingCode::Shadowed)
+    );
+}

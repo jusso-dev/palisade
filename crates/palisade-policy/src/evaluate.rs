@@ -558,18 +558,34 @@ impl<'p> Evaluator<'p> {
         self.clock = Some(clock);
     }
 
+    /// Whether `rule` takes part at this evaluator's clock, and why not:
+    /// [`crate::lifecycle::activity`] at the clock. With no clock, a
+    /// time-bounded rule that lets an object run, trusts it or excludes it
+    /// is `not_yet_active`, and any other is active (the closed direction).
+    /// The decision trace (#41) reports inactive rules with this.
+    #[must_use]
+    pub fn activity_of(&self, rule: &Rule) -> crate::lifecycle::Activity {
+        use crate::lifecycle::Activity;
+        if !rule.enabled {
+            return Activity::Disabled;
+        }
+        if rule.activates_at.is_none() && rule.expires_at.is_none() {
+            return Activity::Active;
+        }
+        match &self.clock {
+            Some(clock) => crate::lifecycle::activity(rule, clock),
+            None if rule.action.kind().needs_identity() => Activity::NotYetActive,
+            None => Activity::Active,
+        }
+    }
+
     /// Whether a compiled rule takes part at the evaluator's clock.
     fn live(&self, r: &Compiled<'_>) -> bool {
         use crate::lifecycle::Activity;
         if !r.timed {
             return true;
         }
-        let activity = match &self.clock {
-            Some(clock) => crate::lifecycle::activity(r.rule, clock),
-            // No clock: the closed direction.
-            None if r.rule.action.kind().needs_identity() => Activity::NotYetActive,
-            None => Activity::Active,
-        };
+        let activity = self.activity_of(r.rule);
         if r.twin {
             activity == Activity::Expired
         } else {

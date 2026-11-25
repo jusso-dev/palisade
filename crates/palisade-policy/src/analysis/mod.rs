@@ -273,6 +273,10 @@ pub struct Options {
     pub broad_corpus_percent: u8,
     /// More inline hash values than this in one rule set is reported.
     pub max_inline_hashes: usize,
+    /// The most rule pairs the conflict checks compare, so a hostile
+    /// policy cannot make an interactive save slow. Pairs past the limit
+    /// are not checked, which can only miss findings.
+    pub max_pair_checks: usize,
 }
 
 impl Default for Options {
@@ -280,6 +284,7 @@ impl Default for Options {
         Self {
             broad_corpus_percent: 20,
             max_inline_hashes: 50_000,
+            max_pair_checks: 2_000_000,
         }
     }
 }
@@ -451,7 +456,7 @@ impl Analyser<'_> {
             }
             Activity::Disabled | Activity::NotYetActive => {}
         }
-        if rule.enabled {
+        if rule.enabled && !e.set.read_only {
             if let Some(due) = review_by(&rule.metadata, Some(kind)) {
                 if due < self.now.date() {
                     self.push(
@@ -462,7 +467,14 @@ impl Analyser<'_> {
                     );
                 }
             }
-            if let Some(u) = self.facts.usage.get(&rule.id) {
+            // A trust source grants rather than decides, so its use is not
+            // counted as a hit (#9 reports grants).
+            let usage = self
+                .facts
+                .usage
+                .get(&rule.id)
+                .filter(|_| kind != ActionKind::TrustSource);
+            if let Some(u) = usage {
                 let window = self.now.plus_days(-i64::from(g.stale_after_days));
                 let old = window.is_some_and(|w| {
                     u.last_matched_at.is_none_or(|t| t < w)
@@ -526,8 +538,9 @@ impl Analyser<'_> {
         self.patterns(e);
         self.principals(e);
 
-        // Governance.
-        if self.governance() && rule.enabled {
+        // Governance, as validation applies it: not to managed read-only
+        // rule sets, which carry their own provenance.
+        if self.governance() && rule.enabled && !e.set.read_only {
             let exception = is_exception(rule);
             let needs_justification = kind.permits()
                 || matches!(kind, ActionKind::TrustSource | ActionKind::Ignore)
@@ -550,18 +563,15 @@ impl Analyser<'_> {
             }
             if exception {
                 let mut missing = Vec::new();
-                let start = rule
-                    .metadata
-                    .approved_at
-                    .or(rule.metadata.created_at)
-                    .unwrap_or(self.now);
-                let limit = start.plus_days(MAX_EXCEPTION_DAYS);
-                match rule.expires_at {
-                    None => missing.push("expires_at"),
-                    Some(t) if limit.is_some_and(|l| t > l) => {
-                        missing.push("expires_at (at most 365 days)")
+                let start = crate::lifecycle::exception_start(&rule.metadata);
+                match (rule.expires_at, start) {
+                    (None, _) => missing.push("expires_at"),
+                    (Some(_), None) => missing.push("approved_at or created_at"),
+                    (Some(t), Some(start)) => {
+                        if start.plus_days(MAX_EXCEPTION_DAYS).is_none_or(|l| t > l) {
+                            missing.push("expires_at (at most 365 days)");
+                        }
                     }
-                    Some(_) => {}
                 }
                 if rule.metadata.approved_by.is_none() {
                     missing.push("approved_by");
@@ -595,25 +605,34 @@ impl Analyser<'_> {
         }
     }
 
-    /// The first scanner-flagged directory that a required path criterion
-    /// of `tree` falls under.
+    /// A scanner-flagged directory that some way the tree can match trusts:
+    /// a branch whose path criterion can match a file in that directory.
+    /// A pattern is checked against a file under the directory; a literal
+    /// by prefix in either direction (a path above the directory covers
+    /// it). A tree too wide to expand is checked as if every path test
+    /// were required.
     fn flagged_path(&self, tree: &Match) -> Option<String> {
+        if self.facts.writable_dirs.is_empty() {
+            return None;
+        }
         let flagged: Vec<String> = self
             .facts
             .writable_dirs
             .iter()
-            .map(|d| crate::ops::fold(palisade_core::path::normalize(d).as_str(), false))
+            .map(|d| palisade_core::path::normalize(d).as_str().to_owned())
             .collect();
-        for c in identity::required_paths(tree) {
-            for v in &c.values {
-                let value = crate::ops::fold(palisade_core::path::normalize(v).as_str(), false);
-                if let Some(d) = flagged.iter().find(|d| {
-                    value
-                        .strip_prefix(d.as_str())
-                        .is_some_and(|r| r.is_empty() || r.starts_with('\\'))
-                        || d.strip_prefix(value.as_str())
-                            .is_some_and(|r| r.starts_with('\\'))
-                }) {
+        let paths: Vec<&Criterion> = identity::literals(tree)
+            .into_iter()
+            .filter(|(c, positive)| {
+                *positive
+                    && c.operator.is_positive()
+                    && matches!(c.field, Field::PathFull | Field::PathDirectory)
+            })
+            .map(|(c, _)| c)
+            .collect();
+        for c in paths {
+            for d in &flagged {
+                if path_test_reaches(c, d) {
                     return Some(d.clone());
                 }
             }
@@ -621,44 +640,60 @@ impl Analyser<'_> {
         None
     }
 
-    /// The restricted publisher a publisher-only tree names, if it does:
-    /// the tree's strongest required identity is that publisher, with no
-    /// product, file name or hash narrowing it.
+    /// The restricted publisher that some way the tree can match trusts
+    /// with nothing else narrowing it: a branch whose positive criteria
+    /// name a restricted publisher and test no product, file name, full
+    /// path or hash. A test under `not` excludes files and narrows nothing.
+    /// A tree too wide to expand is reported if it names a restricted
+    /// publisher at all.
     fn restricted_publisher_only(&self, tree: &Match) -> Option<String> {
         if self.facts.restricted_publishers.is_empty() {
             return None;
         }
-        let narrows = identity::criteria(tree).iter().any(|c| {
-            c.operator.is_positive()
-                && matches!(
-                    c.field,
-                    Field::MetaProductName
-                        | Field::MetaOriginalFilename
-                        | Field::MetaInternalName
-                        | Field::PathFileName
-                        | Field::PathFull
-                )
-                || matches!(c.field.class(), FieldClass::Hash { .. }) && c.operator.is_positive()
-        });
-        if narrows {
-            return None;
-        }
-        let mut pubs = Vec::new();
-        identity::required(tree, Field::SignerPublisher, &mut pubs);
         let restricted: Vec<String> = self
             .facts
             .restricted_publishers
             .iter()
             .map(|p| crate::ops::fold(p, false))
             .collect();
-        pubs.iter()
-            .flat_map(|c| &c.values)
-            .find(|v| restricted.contains(&crate::ops::fold(v, false)))
-            .cloned()
+        let named = |c: &Criterion| {
+            (c.field == Field::SignerPublisher && c.operator.is_positive())
+                .then(|| {
+                    c.values
+                        .iter()
+                        .find(|v| restricted.contains(&crate::ops::fold(v, false)))
+                        .cloned()
+                })
+                .flatten()
+        };
+        let narrows = |c: &Criterion| {
+            matches!(
+                c.field,
+                Field::MetaProductName
+                    | Field::MetaOriginalFilename
+                    | Field::MetaInternalName
+                    | Field::PathFileName
+                    | Field::PathFull
+            ) || matches!(c.field.class(), FieldClass::Hash { .. })
+                || c.field == Field::SignerLeafThumbprint
+        };
+        match identity::branches(tree) {
+            Some(branches) => branches.iter().find_map(|b| {
+                if b.iter().any(|c| narrows(c)) {
+                    None
+                } else {
+                    b.iter().find_map(|c| named(c))
+                }
+            }),
+            None => identity::literals(tree)
+                .into_iter()
+                .filter(|(_, positive)| *positive)
+                .find_map(|(c, _)| named(c)),
+        }
     }
 
     fn signers(&mut self, e: &Entry<'_>) {
-        if self.facts.certificates.is_empty() {
+        if self.facts.certificates.is_empty() || !e.rule.action.kind().needs_identity() {
             return;
         }
         let certs: BTreeMap<String, CertificateState> = self
@@ -674,8 +709,9 @@ impl Analyser<'_> {
                 )
             })
             .collect();
-        for c in identity::criteria(&e.rule.match_) {
-            if !c.operator.is_positive() {
+        // Only a signer the rule trusts: a positive test outside `not`.
+        for (c, positive) in identity::literals(&e.rule.match_) {
+            if !positive || !c.operator.is_positive() {
                 continue;
             }
             for v in &c.values {
@@ -689,61 +725,66 @@ impl Analyser<'_> {
                         CertificateState::Revoked => "revoked",
                         CertificateState::Expired => "expired",
                     };
-                    if e.rule.action.kind().needs_identity() {
-                        self.push(
-                            FindingCode::RevokedOrExpiredSigner,
-                            vec![e.r()],
-                            format!("this rule trusts `{v}`, whose certificate is {what}; files it signs no longer match a trusted signature"),
-                            Some(Fix::Narrow { hint: "replace the signer with hashes of the files still needed" }),
-                        );
-                        return;
-                    }
+                    self.push(
+                        FindingCode::RevokedOrExpiredSigner,
+                        vec![e.r()],
+                        format!("this rule trusts `{v}`, whose certificate is {what}; files it signs no longer match a trusted signature"),
+                        Some(Fix::Narrow { hint: "replace the signer with hashes of the files still needed" }),
+                    );
+                    return;
                 }
             }
         }
     }
 
-    /// `broad_wildcard` and `regex_cost`.
+    /// `broad_wildcard` and `regex_cost`. Each is reported at most once
+    /// per rule, independently.
     fn patterns(&mut self, e: &Entry<'_>) {
-        for c in identity::criteria(&e.rule.match_) {
-            if matches!(c.operator, Operator::Regex | Operator::NotRegex)
+        let literals = identity::literals(&e.rule.match_);
+        if let Some((c, _)) = literals.iter().find(|(c, _)| {
+            matches!(c.operator, Operator::Regex | Operator::NotRegex)
                 && c.values
                     .iter()
                     .any(|v| regex_near_limit(v, c.case_sensitive.unwrap_or(false)))
+        }) {
+            let _ = c;
+            self.push(
+                FindingCode::RegexCost,
+                vec![e.r()],
+                format!("a regular expression compiles to more than half the engine's limit of {REGEX_SIZE_LIMIT} bytes; matching it is slow and a small edit can push it over"),
+                Some(Fix::Narrow { hint: "simplify the expression or use several values" }),
+            );
+        }
+        if !e.rule.action.kind().needs_identity() {
+            return;
+        }
+        // Only a pattern that lets objects in: a positive test outside
+        // `not`. An excluded pattern makes the rule narrower.
+        for (c, positive) in literals {
+            if !positive
+                || !c.operator.is_positive()
+                || !matches!(c.field.class(), FieldClass::Path)
             {
-                self.push(
-                    FindingCode::RegexCost,
-                    vec![e.r()],
-                    format!("a regular expression compiles to more than half the engine's limit of {REGEX_SIZE_LIMIT} bytes; matching it is slow and a small edit can push it over"),
-                    Some(Fix::Narrow { hint: "simplify the expression or use several values" }),
-                );
-                return;
-            }
-            if !c.operator.is_positive() {
                 continue;
             }
-            if matches!(c.field.class(), FieldClass::Path) && c.operator == Operator::Wildcard {
+            if c.operator == Operator::Wildcard {
                 if let Some(v) = c.values.iter().find(|v| is_broad_path_wildcard(v)) {
-                    if e.rule.action.kind().needs_identity() {
-                        self.push(
-                            FindingCode::BroadWildcard,
-                            vec![e.r()],
-                            format!("`{v}` matches almost every file"),
-                            Some(Fix::Narrow {
-                                hint: "name a specific directory",
-                            }),
-                        );
-                        return;
-                    }
+                    self.push(
+                        FindingCode::BroadWildcard,
+                        vec![e.r()],
+                        format!("`{v}` matches almost every file"),
+                        Some(Fix::Narrow {
+                            hint: "name a specific directory",
+                        }),
+                    );
+                    return;
                 }
             }
             if matches!(c.operator, Operator::Wildcard | Operator::Regex)
-                && matches!(c.field.class(), FieldClass::Path)
                 && !self.facts.path_corpus.is_empty()
-                && e.rule.action.kind().needs_identity()
             {
                 if let Some(share) = corpus_share(c, &self.facts.path_corpus) {
-                    if share >= u32::from(self.options.broad_corpus_percent) {
+                    if share >= u64::from(self.options.broad_corpus_percent) {
                         self.push(
                             FindingCode::BroadWildcard,
                             vec![e.r()],
@@ -759,36 +800,31 @@ impl Analyser<'_> {
         }
     }
 
-    /// `duplicate_principal`: a principal in both `member_of` and
-    /// `not_member_of` of one rule, or repeated in one criterion.
+    /// `duplicate_principal`: a principal that a rule both requires and
+    /// excludes, or lists twice on the same field. Polarity is the
+    /// operator's, flipped under each `not`.
     fn principals(&mut self, e: &Entry<'_>) {
         let mut include: BTreeMap<Field, BTreeSet<String>> = BTreeMap::new();
         let mut exclude: BTreeMap<Field, BTreeSet<String>> = BTreeMap::new();
-        for c in identity::criteria(&e.rule.match_) {
+        for (c, positive) in identity::literals(&e.rule.match_) {
             if !matches!(
                 c.field.class(),
                 FieldClass::PrincipalSet | FieldClass::Sid | FieldClass::PrincipalName
             ) {
                 continue;
             }
-            let mut seen = BTreeSet::new();
+            let side = if positive { &mut include } else { &mut exclude };
+            let set = side.entry(c.field).or_default();
             for v in &c.values {
-                let key = principal_key(v);
-                if !seen.insert(key.clone()) {
+                if !set.insert(principal_key(v)) {
                     self.push(
                         FindingCode::DuplicatePrincipal,
                         vec![e.r()],
-                        format!("`{v}` is listed more than once in one criterion"),
+                        format!("`{v}` is listed more than once"),
                         None,
                     );
                     return;
                 }
-                let side = if c.operator.is_positive() {
-                    &mut include
-                } else {
-                    &mut exclude
-                };
-                side.entry(c.field).or_default().insert(key);
             }
         }
         for (field, inc) in &include {
@@ -806,10 +842,16 @@ impl Analyser<'_> {
         }
     }
 
-    /// `duplicate_rule`: identical normalised match, action, object types
-    /// and enforcement, so the rules mean the same.
+    /// `duplicate_rule`: rules with the same normalised match, action,
+    /// object types, enforcement, mode, activity window and expiry
+    /// behaviour, so they mean the same. Each group is reported once, on
+    /// every rule but the one that keeps deciding: the first under
+    /// `first_match` and `priority` (by the model's own order), otherwise
+    /// the lowest rule ID. So the result does not depend on rule order, and
+    /// removing the reported rules changes no decision.
     fn duplicates(&mut self, entries: &[Entry<'_>]) {
-        let mut seen: BTreeMap<String, RuleRef> = BTreeMap::new();
+        let model = self.doc.policy.precedence_model;
+        let mut groups: BTreeMap<String, Vec<&Entry<'_>>> = BTreeMap::new();
         for e in entries {
             let Ok(key) = serde_json::to_string(&(
                 normalized(&e.rule.match_),
@@ -817,26 +859,36 @@ impl Analyser<'_> {
                 sorted_types(e.rule),
                 e.rule.enforcement_override,
                 e.set.mandatory,
+                e.set.mode_override,
+                (e.rule.activates_at, e.rule.expires_at, e.rule.on_expire),
+                // Under the ordered models, position matters too.
+                match model {
+                    PrecedenceModel::FirstMatch => (e.rule.order.map(i64::from), e.set.read_only),
+                    PrecedenceModel::Priority => (e.rule.priority.map(i64::from), false),
+                    _ => (None, false),
+                },
                 e.scopes(self.doc),
             )) else {
                 continue;
             };
-            if let Some(first) = seen.get(&key) {
+            groups.entry(key).or_default().push(e);
+        }
+        for group in groups.values_mut().filter(|g| g.len() > 1) {
+            group.sort_by_key(|e| e.r());
+            let keep = group[0].r();
+            for e in &group[1..] {
                 self.push(
                     FindingCode::DuplicateRule,
-                    vec![e.r(), *first],
-                    "this rule has the same match, action and scope as another".to_owned(),
+                    vec![e.r(), keep],
+                    "this rule has the same match, action, scope and timing as another".to_owned(),
                     Some(Fix::RemoveRule),
                 );
-            } else {
-                seen.insert(key, e.r());
             }
         }
     }
 
     /// `shadowed`, `contradiction` and `ineffective_vs_mandatory`.
     fn conflicts(&mut self, entries: &[Entry<'_>]) {
-        let model = self.doc.policy.precedence_model;
         // Only pairs that can be proven are compared. If `cover` covers
         // `victim`, then every criterion `cover` requires (one that every
         // match of `cover` must satisfy) is implied by a criterion of
@@ -848,7 +900,7 @@ impl Analyser<'_> {
         let mut covers_by_key: BTreeMap<String, Vec<usize>> = BTreeMap::new();
         let mut broad: Vec<usize> = Vec::new();
         for (j, e) in entries.iter().enumerate() {
-            match identity::first_required(&e.rule.match_) {
+            match identity::best_required(&e.rule.match_) {
                 Some(c) => {
                     for k in cover_keys(c) {
                         covers_by_key.entry(k).or_default().push(j);
@@ -857,34 +909,64 @@ impl Analyser<'_> {
                 None => broad.push(j),
             }
         }
-        let mut pairs: Vec<(usize, usize)> = Vec::new();
+        // Pairs are checked as they are found, never collected, and each
+        // victim is compared with at most `MAX_CANDIDATES` covers, most
+        // selective keys first: a check that gives up only misses findings,
+        // which the conservative design allows.
+        let mut reported: BTreeSet<(FindingCode, usize)> = BTreeSet::new();
+        let mut budget = self.options.max_pair_checks;
         for (i, e) in entries.iter().enumerate() {
-            let mut others: Vec<usize> = broad.clone();
+            let mut others: Vec<usize> = Vec::new();
             for k in victim_keys(&e.rule.match_) {
                 others.extend(covers_by_key.get(&k).into_iter().flatten());
+                if others.len() > MAX_CANDIDATES {
+                    break;
+                }
             }
+            others.extend(broad.iter().take(MAX_CANDIDATES));
             others.sort_unstable();
             others.dedup();
-            pairs.extend(others.into_iter().filter(|j| *j != i).map(|j| (i, j)));
+            others.truncate(MAX_CANDIDATES);
+            for j in others {
+                if j == i {
+                    continue;
+                }
+                if budget == 0 {
+                    return;
+                }
+                budget -= 1;
+                self.conflict(entries, &mut reported, i, j);
+            }
         }
-        let mut reported: BTreeSet<(FindingCode, usize)> = BTreeSet::new();
-        for (i, j) in pairs {
+    }
+
+    /// Checks whether `entries[j]` makes `entries[i]` shadowed,
+    /// ineffective or contradicted.
+    fn conflict(
+        &mut self,
+        entries: &[Entry<'_>],
+        reported: &mut BTreeSet<(FindingCode, usize)>,
+        i: usize,
+        j: usize,
+    ) {
+        let model = self.doc.policy.precedence_model;
+        {
             // Does `cover` (j) always match when `victim` (i) does?
             let (victim, cover) = (&entries[i], &entries[j]);
             // A scoped rule applies only inside its scope (#38). Scopes are
             // not compared, so a pair is only proven when both rules are in
             // exactly the same scopes.
             if cover.scopes(self.doc) != victim.scopes(self.doc) {
-                continue;
+                return;
             }
             if !always_matches(cover, victim) {
-                continue;
+                return;
             }
             // A deny that matches on unknown facts is not a plain match.
             let cover_mandatory =
                 cover.set.mandatory && matches!(cover.rule.action, Action::Deny(_));
             let Some(v) = victim.verdict().filter(|_| !victim.set.mandatory) else {
-                continue;
+                return;
             };
             if cover_mandatory && v.allows() {
                 if reported.insert((FindingCode::IneffectiveVsMandatory, i)) {
@@ -895,18 +977,18 @@ impl Analyser<'_> {
                         Some(Fix::RemoveRule),
                     );
                 }
-                continue;
+                return;
             }
             if cover.set.mandatory
                 || cover.rule.enforcement_override != victim.rule.enforcement_override
             {
-                continue;
+                return;
             }
             // Different modes can make the outranked rule decide (#36).
             if cover.set.mode_override != victim.set.mode_override {
-                continue;
+                return;
             }
-            let Some(cv) = cover.verdict() else { continue };
+            let Some(cv) = cover.verdict() else { return };
             let shadowed = match model {
                 // Any deny beats every allow, and among denies the most
                 // specific, then the lowest rule ID, decides.
@@ -936,7 +1018,7 @@ impl Analyser<'_> {
                         Some(Fix::RemoveRule),
                     );
                 }
-                continue;
+                return;
             }
             if v.allows() != cv.allows() {
                 let (a, b) = if victim.r() < cover.r() {
@@ -981,6 +1063,7 @@ impl Analyser<'_> {
                 }
             }
         }
+        let clock = self.clock;
         // Vulnerable versions: a deny in a mandatory or curated blocklist
         // with a version test, and an allow whose versions overlap it for
         // the same signer or product.
@@ -990,7 +1073,7 @@ impl Analyser<'_> {
                 s.kind == crate::model::RuleSetKind::Blocklist && (s.mandatory || s.read_only)
             })
             .flat_map(|s| s.rules.iter().map(move |r| (*s, r)))
-            .filter(|(_, r)| r.enabled && matches!(r.action, Action::Deny(_)))
+            .filter(|(_, r)| activity(r, &clock).is_active() && matches!(r.action, Action::Deny(_)))
             .collect();
         if vulnerable.is_empty() {
             return;
@@ -999,9 +1082,18 @@ impl Analyser<'_> {
             for rule in set
                 .rules
                 .iter()
-                .filter(|r| r.enabled && r.action.kind().permits())
+                .filter(|r| activity(r, &clock).is_active() && r.action.kind().permits())
             {
                 for (vset, vrule) in &vulnerable {
+                    let types_meet = rule.object_types.is_empty()
+                        || vrule.object_types.is_empty()
+                        || rule
+                            .object_types
+                            .iter()
+                            .any(|t| vrule.object_types.contains(t));
+                    if !types_meet {
+                        continue;
+                    }
                     if let Some(range) = overlap(&rule.match_, &vrule.match_) {
                         self.push(
                             FindingCode::VulnerableVersionAllowed,
@@ -1016,6 +1108,9 @@ impl Analyser<'_> {
         }
     }
 }
+
+/// The most covers one rule is compared with.
+const MAX_CANDIDATES: usize = 512;
 
 /// The model's `snake_case` name.
 fn model_name(model: PrecedenceModel) -> &'static str {
@@ -1156,7 +1251,7 @@ fn normalized(tree: &Match) -> Match {
             Match::Any(c)
         }
         Match::Not(c) => Match::Not(Box::new(normalized(c))),
-        Match::Ref(r) => Match::Ref(r.clone()),
+        Match::Ref(r) => Match::Ref(*r),
         Match::Criterion(c) => {
             let mut c: Criterion = c.clone();
             let sensitive = c.case_sensitive.unwrap_or(false);
@@ -1167,6 +1262,8 @@ fn normalized(tree: &Match) -> Match {
                     FieldClass::Hash { .. } => {
                         crate::ops::normalize_hex(v).unwrap_or_else(|| v.clone())
                     }
+                    // A pattern's text is its meaning (`\w` is not `\W`).
+                    _ if matches!(c.operator, Operator::Regex | Operator::NotRegex) => v.clone(),
                     class if class.has_case() && !sensitive => crate::ops::fold(v, false),
                     _ => v.clone(),
                 })
@@ -1191,33 +1288,19 @@ fn principal_key(v: &str) -> String {
     crate::context::normalize_sid(v).unwrap_or_else(|| v.to_ascii_lowercase())
 }
 
-/// Whether a path wildcard matches almost everything: a pattern whose
-/// first fixed component is at most one level deep, such as `C:\*`,
-/// `*\*.exe`, `**` or `C:\**\*.exe`.
+/// Whether a path wildcard matches almost everything: it fixes no
+/// directory below its root (`C:\*`, `*\*.exe`, `**`, `\\server\share\**`),
+/// or it fixes at most one and has a `**` anywhere (`C:\**\*.exe`,
+/// `%WINDIR%\**`, `C:\Windows\**.exe`). The value is read as matching
+/// reads it: normalised, with a path variable counted at its default
+/// depth ([`crate::precedence`]).
 fn is_broad_path_wildcard(v: &str) -> bool {
-    let v = v.replace('/', "\\");
-    let comps: Vec<&str> = v.split('\\').filter(|c| !c.is_empty()).collect();
-    let wild = |c: &str| c.contains(['*', '?', '[']);
-    let Some(first) = comps.first() else {
-        return false;
-    };
-    let rooted = first.len() == 2 && first.ends_with(':') && !wild(first);
-    let fixed = comps
-        .iter()
-        .skip(usize::from(rooted))
-        .take_while(|c| !wild(c))
-        .count();
-    // `**` anywhere in the first two levels, or nothing fixed below the root.
-    fixed == 0
-        || (fixed <= 1
-            && comps
-                .iter()
-                .skip(usize::from(rooted) + fixed)
-                .any(|c| *c == "**"))
+    let depth = crate::precedence::path_depth(v, Operator::Wildcard);
+    depth == 0 || (depth <= 1 && v.contains("**"))
 }
 
 /// The share of `corpus`, in percent, that a path criterion matches.
-fn corpus_share(c: &Criterion, corpus: &[String]) -> Option<u32> {
+fn corpus_share(c: &Criterion, corpus: &[String]) -> Option<u64> {
     let compiled = crate::ops::CompiledCriterion::compile(c).ok()?;
     let variables = crate::facts::PathVariables::new();
     let context = crate::context::EvaluationContext::new();
@@ -1235,8 +1318,60 @@ fn corpus_share(c: &Criterion, corpus: &[String]) -> Option<u32> {
             compiled.eval(&facts, &ctx).result == crate::ops::Tri::Match
         })
         .count();
-    let n = u32::try_from(corpus.len()).ok().filter(|n| *n > 0)?;
-    u32::try_from(hits).ok().map(|h| h * 100 / n)
+    let n = u64::try_from(corpus.len()).ok().filter(|n| *n > 0)?;
+    u64::try_from(hits).ok().map(|h| h.saturating_mul(100) / n)
+}
+
+/// Whether a positive path criterion can match a file in the directory
+/// `dir` (normalised): a literal by prefix in either direction, or a
+/// pattern that matches a file in `dir` or whose fixed part lies under it.
+fn path_test_reaches(c: &Criterion, dir: &str) -> bool {
+    let fold = |v: &str| crate::ops::fold(v, false);
+    let d = fold(dir.trim_end_matches('\\'));
+    let under = |a: &str, b: &str| {
+        a.strip_prefix(b)
+            .is_some_and(|r| r.is_empty() || r.starts_with('\\'))
+    };
+    match c.operator {
+        Operator::Equals | Operator::StartsWith => c.values.iter().any(|v| {
+            let v = fold(
+                palisade_core::path::normalize(v)
+                    .as_str()
+                    .trim_end_matches('\\'),
+            );
+            under(&v, &d) || (c.operator == Operator::StartsWith && under(&d, &v))
+        }),
+        Operator::Wildcard | Operator::Regex => {
+            let Ok(compiled) = crate::ops::CompiledCriterion::compile(c) else {
+                return false;
+            };
+            let variables = crate::facts::PathVariables::new();
+            let context = crate::context::EvaluationContext::new();
+            let ctx = crate::ops::EvalContext {
+                action: ActionKind::Deny,
+                variables: &variables,
+                context: &context,
+            };
+            let probe = format!("{}\\probe.exe", dir.trim_end_matches('\\'));
+            let facts = crate::facts::ObjectFacts::new().with_path(
+                crate::facts::PathFact::new(&probe, &palisade_core::path::VolumeMap::new())
+                    .with_user_writable(false),
+            );
+            if compiled.eval(&facts, &ctx).result == crate::ops::Tri::Match {
+                return true;
+            }
+            // The fixed part of a wildcard below the directory.
+            c.operator == Operator::Wildcard
+                && c.values.iter().any(|v| {
+                    let n = palisade_core::path::normalize(v);
+                    let text = n.as_str();
+                    let cut = text.find(['*', '?', '[']).unwrap_or(text.len());
+                    let fixed = fold(text[..cut].trim_end_matches('\\'));
+                    !fixed.is_empty() && under(&fixed, &d)
+                })
+        }
+        _ => false,
+    }
 }
 
 /// Whether a regular expression compiles within the engine's size limit
@@ -1260,53 +1395,92 @@ fn regex_near_limit(pattern: &str, case_sensitive: bool) -> bool {
     builds(REGEX_SIZE_LIMIT / 2) == Some(false) && builds(REGEX_SIZE_LIMIT) == Some(true)
 }
 
-/// The version range an allow covers that a vulnerable deny also covers,
-/// for the same signer or product: both trees require the same publisher
-/// or product name, and their version ranges on one field overlap.
+/// The versions an allow covers that a vulnerable deny also covers. Both
+/// trees must require the same publisher or product, and must not
+/// require disjoint values of any other identity field (product name,
+/// file names, hashes). On each version field, a tree's versions are the
+/// intersection of every version criterion it requires (a union over the
+/// values of one criterion). Conservative: an `any` or a criterion it
+/// cannot read leaves a tree's versions unbounded, but only when the
+/// trees share an identity, which keeps the finding to the same product.
 fn overlap(allow: &Match, deny: &Match) -> Option<String> {
-    let same = |field: Field| {
-        let (mut a, mut d) = (Vec::new(), Vec::new());
-        identity::required(allow, field, &mut a);
-        identity::required(deny, field, &mut d);
-        a.iter().any(|ca| {
-            d.iter().any(|cd| {
-                ca.operator == Operator::Equals
-                    && cd.operator == Operator::Equals
-                    && ca.values.iter().any(|v| {
-                        cd.values
-                            .iter()
-                            .any(|w| crate::ops::fold(v, false) == crate::ops::fold(w, false))
-                    })
-            })
-        })
+    let ra = identity::required_all(allow);
+    let rd = identity::required_all(deny);
+    let values = |cs: &[&Criterion], field: Field| -> Option<BTreeSet<String>> {
+        let sets: Vec<BTreeSet<String>> = cs
+            .iter()
+            .filter(|c| c.field == field && c.operator == Operator::Equals)
+            .map(|c| c.values.iter().map(|v| key(field, v)).collect())
+            .collect();
+        sets.into_iter()
+            .reduce(|a, b| a.intersection(&b).cloned().collect())
     };
-    if !same(Field::SignerPublisher) && !same(Field::MetaProductName) {
+    let shared = |field: Field| match (values(&ra, field), values(&rd, field)) {
+        (Some(a), Some(d)) => Some(!a.is_disjoint(&d)),
+        _ => None,
+    };
+    if shared(Field::SignerPublisher) != Some(true) && shared(Field::MetaProductName) != Some(true)
+    {
         return None;
     }
+    for field in [
+        Field::MetaProductName,
+        Field::MetaOriginalFilename,
+        Field::MetaInternalName,
+        Field::PathFileName,
+        Field::HashSha256,
+        Field::SignerLeafThumbprint,
+    ] {
+        if shared(field) == Some(false) {
+            return None;
+        }
+    }
     for field in [Field::MetaFileVersion, Field::MetaProductVersion] {
-        let (mut a, mut d) = (Vec::new(), Vec::new());
-        identity::required(allow, field, &mut a);
-        identity::required(deny, field, &mut d);
-        let ra = a
-            .iter()
-            .find_map(|c| version_range(c))
-            .unwrap_or((Version0::MIN, Version0::MAX));
-        for rd in d.iter().filter_map(|c| version_range(c)) {
-            let lo = ra.0.max(rd.0);
-            let hi = ra.1.min(rd.1);
-            if lo <= hi {
-                return Some(format!("{} to {}", show(lo), show(hi)));
+        let a = versions(&ra, field);
+        let d = versions(&rd, field);
+        if a.is_none() && d.is_none() {
+            continue;
+        }
+        let full = vec![(0u64, u64::MAX)];
+        let a = a.unwrap_or_else(|| full.clone());
+        let d = d.unwrap_or(full);
+        for (alo, ahi) in &a {
+            for (dlo, dhi) in &d {
+                let lo = (*alo).max(*dlo);
+                let hi = (*ahi).min(*dhi);
+                if lo <= hi {
+                    return Some(format!("{} to {}", show(lo), show(hi)));
+                }
             }
         }
+        return None;
     }
     None
 }
 
-/// Version bounds as 64-bit numbers, so strict bounds are exact.
-struct Version0;
-impl Version0 {
-    const MIN: u64 = 0;
-    const MAX: u64 = u64::MAX;
+/// The versions on `field` that every match of the criteria allows, as
+/// closed intervals; `None` if no criterion constrains the field.
+fn versions(cs: &[&Criterion], field: Field) -> Option<Vec<(u64, u64)>> {
+    let mut out: Option<Vec<(u64, u64)>> = None;
+    for c in cs.iter().filter(|c| c.field == field) {
+        let Some(these) = version_ranges(c) else {
+            continue;
+        };
+        out = Some(match out {
+            None => these,
+            Some(prev) => prev
+                .iter()
+                .flat_map(|(a, b)| {
+                    these.iter().filter_map(move |(c, d)| {
+                        let lo = (*a).max(*c);
+                        let hi = (*b).min(*d);
+                        (lo <= hi).then_some((lo, hi))
+                    })
+                })
+                .collect(),
+        });
+    }
+    out
 }
 
 fn as_u64(v: crate::ops::Version) -> u64 {
@@ -1318,20 +1492,22 @@ fn show(n: u64) -> String {
     format!("{}.{}.{}.{}", p(48), p(32), p(16), p(0))
 }
 
-fn version_range(c: &Criterion) -> Option<(u64, u64)> {
-    let v = |i: usize| {
-        c.values
-            .get(i)
-            .and_then(|s| crate::ops::Version::parse_strict(s))
-            .map(as_u64)
-    };
+/// The versions one criterion allows, as closed intervals: a union over
+/// its values. `None` if it is not a version test this reads.
+fn version_ranges(c: &Criterion) -> Option<Vec<(u64, u64)>> {
+    let v = |s: &String| crate::ops::Version::parse_strict(s).map(as_u64);
+    let one = |i: usize| c.values.get(i).and_then(v);
     Some(match c.operator {
-        Operator::VersionEq | Operator::Equals if c.values.len() == 1 => (v(0)?, v(0)?),
-        Operator::VersionGe => (v(0)?, u64::MAX),
-        Operator::VersionGt => (v(0)?.checked_add(1)?, u64::MAX),
-        Operator::VersionLe => (0, v(0)?),
-        Operator::VersionLt => (0, v(0)?.checked_sub(1)?),
-        Operator::VersionBetween => (v(0)?, v(1)?),
+        Operator::VersionEq | Operator::Equals => c
+            .values
+            .iter()
+            .map(|s| v(s).map(|x| (x, x)))
+            .collect::<Option<Vec<_>>>()?,
+        Operator::VersionGe => vec![(one(0)?, u64::MAX)],
+        Operator::VersionGt => vec![(one(0)?.checked_add(1)?, u64::MAX)],
+        Operator::VersionLe => vec![(0, one(0)?)],
+        Operator::VersionLt => vec![(0, one(0)?.checked_sub(1)?)],
+        Operator::VersionBetween => vec![(one(0)?, one(1)?)],
         _ => return None,
     })
 }

@@ -67,6 +67,7 @@ impl Validator {
         let governance = g
             .require_justification
             .unwrap_or(doc.policy.unknown.preset.is_some());
+        let referenced: BTreeSet<_> = doc.policy.rule_sets.iter().collect();
         for (i, set) in doc.rule_sets.iter().enumerate() {
             for (j, rule) in set.rules.iter().enumerate() {
                 let path = format!("/rule_sets/{i}/rules/{j}");
@@ -104,7 +105,7 @@ impl Validator {
                 // Governance mode applies to the rules a policy uses, and
                 // never to managed read-only sets, which carry their own
                 // provenance.
-                if !governance || !rule.enabled || set.read_only {
+                if !governance || !rule.enabled || set.read_only || !referenced.contains(&set.id) {
                     continue;
                 }
                 let kind = rule.action.kind();
@@ -133,14 +134,16 @@ impl Validator {
                 }
                 if exception {
                     let mut missing = Vec::new();
-                    match (rule.expires_at, m.approved_at.or(m.created_at)) {
+                    match (rule.expires_at, crate::lifecycle::exception_start(m)) {
                         (None, _) => missing.push("`expires_at`"),
-                        (Some(_), None) => {
-                            missing.push("`approved_at` or `created_at`, to bound the expiry")
-                        }
+                        (Some(_), None) => missing.push(
+                            "`approved_at`, `created_at` or `last_reviewed_at`, to bound the expiry",
+                        ),
                         (Some(e), Some(start)) => {
                             if start.plus_days(MAX_EXCEPTION_DAYS).is_none_or(|l| e > l) {
-                                missing.push("`expires_at` at most 365 days after approval");
+                                missing.push(
+                                    "`expires_at` at most 365 days after approval or the last review",
+                                );
                             }
                         }
                     }

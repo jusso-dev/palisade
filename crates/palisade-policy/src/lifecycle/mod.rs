@@ -186,6 +186,17 @@ pub fn review_by(metadata: &Metadata, kind: Option<ActionKind>) -> Option<Date> 
     })
 }
 
+/// When an exception's year starts: its last review, approval or
+/// creation, whichever is latest. A review that renews an exception
+/// re-approves it for another year.
+#[must_use]
+pub fn exception_start(m: &Metadata) -> Option<Timestamp> {
+    [m.last_reviewed_at, m.approved_at, m.created_at]
+        .into_iter()
+        .flatten()
+        .max()
+}
+
 /// A reference to one rule in a document, for review queues and reports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct RuleLocation {
@@ -200,27 +211,35 @@ pub struct RuleLocation {
 pub struct ReviewItem {
     /// The rule.
     pub rule: RuleLocation,
-    /// When it is due.
-    pub review_by: Date,
+    /// When it is due, or `null` when no date can be determined (no
+    /// `review_by` and no `created_at`): such a rule is due at once.
+    pub review_by: Option<Date>,
     /// Its owner, if set.
     pub owner: Option<String>,
     /// Whether it is an exception.
     pub exception: bool,
 }
 
-/// The rules of the policy's referenced rule sets that are due for review
-/// on or before `as_of`: their [`review_by`] date is at or before it. A
-/// rule whose `review_by` cannot be determined is due at once. Sorted by
-/// date, then rule set and rule ID, so the result is deterministic
-/// evidence (ISM-1582).
-#[must_use]
-pub fn review_due(doc: &PolicyDocument, as_of: Date) -> Vec<ReviewItem> {
-    let mut out: Vec<ReviewItem> = referenced(doc)
+/// The rules a review campaign covers: enabled allow and trust rules of
+/// the policy's referenced rule sets, other than managed read-only ones,
+/// which their curator reviews.
+fn reviewable(doc: &PolicyDocument) -> impl Iterator<Item = (&RuleSet, &Rule)> {
+    referenced(doc)
+        .filter(|set| !set.read_only)
         .flat_map(|set| set.rules.iter().map(move |r| (set, r)))
         .filter(|(_, r)| r.enabled && needs_review(r.action.kind()))
+}
+
+/// The rules due for review on or before `as_of`: their [`review_by`] date
+/// is at or before it, or cannot be determined. Sorted, undated first, then
+/// by date, rule set and rule ID, so the result is deterministic evidence
+/// (ISM-1582).
+#[must_use]
+pub fn review_due(doc: &PolicyDocument, as_of: Date) -> Vec<ReviewItem> {
+    let mut out: Vec<ReviewItem> = reviewable(doc)
         .filter_map(|(set, r)| {
-            let due = review_by(&r.metadata, Some(r.action.kind())).unwrap_or(Date(i64::MIN));
-            (due <= as_of).then(|| ReviewItem {
+            let due = review_by(&r.metadata, Some(r.action.kind()));
+            due.is_none_or(|d| d <= as_of).then(|| ReviewItem {
                 rule: RuleLocation {
                     rule_set_id: set.id,
                     rule_id: r.id,
@@ -246,7 +265,9 @@ pub struct ReviewSummary {
     pub exceptions_due: usize,
     /// Rules reviewed in the last 365 days.
     pub reviewed_last_year: usize,
-    /// The earliest due date, if any.
+    /// Of those, with no date that can be determined.
+    pub undated: usize,
+    /// The earliest due date among the dated ones, if any.
     pub earliest_due: Option<Date>,
 }
 
@@ -254,20 +275,22 @@ pub struct ReviewSummary {
 #[must_use]
 pub fn review_summary(doc: &PolicyDocument, as_of: Date) -> ReviewSummary {
     let due = review_due(doc, as_of);
-    let since = Date(as_of.0 - REVIEW_PERIOD_DAYS).start();
-    let reviewable: Vec<&Rule> = referenced(doc)
-        .flat_map(|s| &s.rules)
-        .filter(|r| r.enabled && needs_review(r.action.kind()))
-        .collect();
+    let since = as_of.start().plus_days(-REVIEW_PERIOD_DAYS);
+    let rules: Vec<&Rule> = reviewable(doc).map(|(_, r)| r).collect();
     ReviewSummary {
-        reviewable: reviewable.len(),
+        reviewable: rules.len(),
         due: due.len(),
         exceptions_due: due.iter().filter(|d| d.exception).count(),
-        reviewed_last_year: reviewable
+        reviewed_last_year: rules
             .iter()
-            .filter(|r| r.metadata.last_reviewed_at.is_some_and(|t| t >= since))
+            .filter(|r| {
+                r.metadata
+                    .last_reviewed_at
+                    .is_some_and(|t| since.is_none_or(|s| t >= s))
+            })
             .count(),
-        earliest_due: due.first().map(|d| d.review_by),
+        undated: due.iter().filter(|d| d.review_by.is_none()).count(),
+        earliest_due: due.iter().find_map(|d| d.review_by),
     }
 }
 
@@ -277,28 +300,92 @@ pub enum ReviewAction {
     /// The rule is still needed as it is: the next review is a year on.
     Attest,
     /// The rule is renewed: as attest, and its expiry moves to
-    /// `expires_at`.
+    /// `expires_at`. An exception is re-approved by the reviewer for
+    /// another year from the review ([`exception_start`]).
     Renew {
         /// The new expiry.
-        expires_at: Option<Timestamp>,
+        expires_at: Timestamp,
     },
     /// The rule is no longer needed: it is disabled.
     Retire,
 }
 
+/// Why a review or bulk change was refused.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ChangeError {
+    /// The actor or reviewer is empty, untrimmed or too long.
+    InvalidActor,
+    /// The new expiry is not after `now`, or not after `activates_at`.
+    InvalidExpiry,
+    /// The time is past the representable range.
+    TimeOverflow,
+}
+
+impl core::fmt::Display for ChangeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::InvalidActor => "the actor must be 1 to 128 trimmed characters",
+            Self::InvalidExpiry => "the new expiry must be in the future and after `activates_at`",
+            Self::TimeOverflow => "the time is out of range",
+        })
+    }
+}
+
+impl std::error::Error for ChangeError {}
+
+/// Whether `actor` is a valid metadata name: 1 to 128 trimmed characters
+/// with no control characters.
+fn valid_actor(actor: &str) -> bool {
+    !actor.is_empty()
+        && actor.trim() == actor
+        && actor.chars().count() <= crate::model::limits::MAX_NAME_CHARS
+        && !actor.chars().any(char::is_control)
+}
+
 /// Applies a review action to `rule`, by `reviewer` at `now`: sets
 /// `last_reviewed_at` and `last_reviewed_by`, and `review_by` a year on.
-pub fn review(rule: &mut Rule, action: &ReviewAction, reviewer: &str, now: Timestamp) {
+/// The rule stays valid: renewing an exception re-approves it, so its
+/// expiry is checked from the review.
+///
+/// # Errors
+///
+/// Returns [`ChangeError`] for an invalid reviewer or expiry; the rule is
+/// then unchanged.
+pub fn review(
+    rule: &mut Rule,
+    action: &ReviewAction,
+    reviewer: &str,
+    now: Timestamp,
+) -> Result<(), ChangeError> {
+    if !valid_actor(reviewer) {
+        return Err(ChangeError::InvalidActor);
+    }
+    let next = now
+        .plus_days(REVIEW_PERIOD_DAYS)
+        .map(Timestamp::date)
+        .ok_or(ChangeError::TimeOverflow)?;
+    if let ReviewAction::Renew { expires_at } = action {
+        if *expires_at <= now || rule.activates_at.is_some_and(|a| *expires_at <= a) {
+            return Err(ChangeError::InvalidExpiry);
+        }
+    }
     rule.metadata.last_reviewed_at = Some(now);
     rule.metadata.last_reviewed_by = Some(reviewer.to_owned());
     rule.metadata.updated_at = Some(now);
     rule.metadata.updated_by = Some(reviewer.to_owned());
     match action {
         ReviewAction::Attest => {}
-        ReviewAction::Renew { expires_at } => rule.expires_at = *expires_at,
+        ReviewAction::Renew { expires_at } => {
+            rule.expires_at = Some(*expires_at);
+            if is_exception(rule) {
+                rule.metadata.approved_by = Some(reviewer.to_owned());
+                rule.metadata.approved_at = Some(now);
+            }
+        }
         ReviewAction::Retire => rule.enabled = false,
     }
-    rule.metadata.review_by = now.plus_days(REVIEW_PERIOD_DAYS).map(Timestamp::date);
+    rule.metadata.review_by = Some(next);
+    Ok(())
 }
 
 /// One expiry notice the server sends to a rule's owner (#16):
@@ -405,6 +492,8 @@ pub struct RuleChange {
     pub enabled: (bool, bool),
     /// `expires_at` before and after.
     pub expires_at: (Option<Timestamp>, Option<Timestamp>),
+    /// `metadata.comment` before and after.
+    pub comment: (Option<String>, Option<String>),
 }
 
 /// A bulk operation recorded as one change, with its reason, for the
@@ -430,6 +519,12 @@ pub enum BulkError {
     UnknownRule(RuleLocation),
     /// A read-only rule set cannot be edited.
     ReadOnly(RuleLocation),
+    /// The actor is not a valid name, or an expiry is not after the time
+    /// of the change.
+    Invalid(ChangeError),
+    /// Extending would put an exception's expiry more than 365 days after
+    /// its approval: renew it in a review instead, which re-approves it.
+    ExceptionTooLong(RuleLocation),
 }
 
 impl core::fmt::Display for BulkError {
@@ -440,6 +535,12 @@ impl core::fmt::Display for BulkError {
                 write!(f, "rule {} is not in rule set {}", r.rule_id, r.rule_set_id)
             }
             Self::ReadOnly(r) => write!(f, "rule set {} is read-only", r.rule_set_id),
+            Self::Invalid(e) => e.fmt(f),
+            Self::ExceptionTooLong(r) => write!(
+                f,
+                "rule {} is an exception, and the new expiry is more than 365 days after its approval; renew it in a review",
+                r.rule_id
+            ),
         }
     }
 }
@@ -464,15 +565,34 @@ pub fn bulk(
     if reason.trim().is_empty() {
         return Err(BulkError::ReasonRequired);
     }
+    if !valid_actor(actor) {
+        return Err(BulkError::Invalid(ChangeError::InvalidActor));
+    }
     for loc in rules {
         let set = doc
             .rule_sets
             .iter()
             .find(|s| s.id == loc.rule_set_id)
-            .filter(|s| s.rules.iter().any(|r| r.id == loc.rule_id))
+            .ok_or(BulkError::UnknownRule(*loc))?;
+        let rule = set
+            .rules
+            .iter()
+            .find(|r| r.id == loc.rule_id)
             .ok_or(BulkError::UnknownRule(*loc))?;
         if set.read_only {
             return Err(BulkError::ReadOnly(*loc));
+        }
+        if let BulkOp::Extend(t) = op {
+            if *t <= at || rule.activates_at.is_some_and(|a| *t <= a) {
+                return Err(BulkError::Invalid(ChangeError::InvalidExpiry));
+            }
+            if is_exception(rule) {
+                let limit = exception_start(&rule.metadata)
+                    .and_then(|s| s.plus_days(crate::model::lifecycle::limits::MAX_EXCEPTION_DAYS));
+                if limit.is_none_or(|l| *t > l) {
+                    return Err(BulkError::ExceptionTooLong(*loc));
+                }
+            }
         }
     }
     let mut changes = Vec::new();
@@ -489,14 +609,25 @@ pub fn bulk(
         else {
             continue;
         };
-        let before = (rule.enabled, rule.expires_at);
+        let before = (rule.enabled, rule.expires_at, rule.metadata.comment.clone());
         match op {
             BulkOp::Enable => rule.enabled = true,
             BulkOp::Disable => rule.enabled = false,
             BulkOp::Extend(t) => rule.expires_at = Some(*t),
             BulkOp::Retire => {
                 rule.enabled = false;
-                rule.metadata.comment = Some(format!("retired: {}", reason.trim()));
+                // Kept within the text limit; the full reason is in the
+                // change set.
+                let note = format!("retired: {}", reason.trim());
+                let text = match &rule.metadata.comment {
+                    Some(c) => format!("{c}\n{note}"),
+                    None => note,
+                };
+                rule.metadata.comment = Some(
+                    text.chars()
+                        .take(crate::model::limits::MAX_TEXT_CHARS)
+                        .collect(),
+                );
             }
         }
         rule.metadata.updated_by = Some(actor.to_owned());
@@ -505,6 +636,7 @@ pub fn bulk(
             rule: loc,
             enabled: (before.0, rule.enabled),
             expires_at: (before.1, rule.expires_at),
+            comment: (before.2, rule.metadata.comment.clone()),
         });
     }
     Ok(ChangeSet {
@@ -533,7 +665,11 @@ pub fn inactive_matches(
             if why.is_active() {
                 return None;
             }
-            if !rule.object_types.is_empty() && !rule.object_types.contains(&subject.object_type) {
+            // `defer` is never evaluated, active or not.
+            if matches!(rule.action, Action::Defer {})
+                || (!rule.object_types.is_empty()
+                    && !rule.object_types.contains(&subject.object_type))
+            {
                 return None;
             }
             let tree = crate::condition::CompiledMatch::compile(&rule.match_).ok()?;
@@ -542,9 +678,28 @@ pub fn inactive_matches(
                 variables: subject.variables,
                 context: subject.context,
             };
-            tree.eval(subject.facts, &ctx)
-                .matches()
-                .then(|| (RuleRef::new(&doc.policy, set, rule), why))
+            // As the evaluator applies it: a deny's unknown handling counts.
+            let (unknown_as, unparseable) = match &rule.action {
+                Action::Deny(o) => (
+                    o.unknown_as,
+                    match o.on_unparseable {
+                        crate::model::UnknownAs::Match => {
+                            crate::condition::Unparseable::FavourMatch
+                        }
+                        crate::model::UnknownAs::NoMatch => crate::condition::Unparseable::Unknown,
+                    },
+                ),
+                _ => (
+                    crate::model::UnknownAs::NoMatch,
+                    crate::condition::Unparseable::Unknown,
+                ),
+            };
+            let matched = match tree.eval_with(subject.facts, &ctx, unparseable).result {
+                crate::ops::Tri::Match => true,
+                crate::ops::Tri::Unknown => unknown_as == crate::model::UnknownAs::Match,
+                crate::ops::Tri::NoMatch => false,
+            };
+            matched.then(|| (RuleRef::new(&doc.policy, set, rule), why))
         })
         .collect();
     out.sort_by_key(|(r, _)| r.rule_id);

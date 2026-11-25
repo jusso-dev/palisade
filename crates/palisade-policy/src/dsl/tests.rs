@@ -839,7 +839,7 @@ proptest! {
     #![proptest_config(cases(10_000))]
 
     #[test]
-    fn yaml_round_trip_is_lossless(doc in arbitrary::scoped_document()) {
+    fn yaml_round_trip_is_lossless(doc in arbitrary::document_with_lifecycle()) {
         let yaml = to_string(&doc).unwrap();
         let back = PolicyDocument::from_yaml(&yaml);
         prop_assert!(back.is_ok(), "{}\n{}", back.unwrap_err(), yaml);
@@ -861,7 +861,7 @@ proptest! {
     #![proptest_config(cases(512))]
 
     #[test]
-    fn json_text_reads_the_same_as_yaml(doc in arbitrary::scoped_document()) {
+    fn json_text_reads_the_same_as_yaml(doc in arbitrary::document_with_lifecycle()) {
         let json = doc.to_json_pretty().unwrap();
         prop_assert_eq!(PolicyDocument::from_yaml(&json).unwrap(), doc.clone());
         let compact = serde_json::to_string(&doc).unwrap();

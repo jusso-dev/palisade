@@ -1038,6 +1038,8 @@ fn explain_messages_all_have_english_templates() {
         "overridden",
         "inactive",
         "scope-rejected",
+        "inactive-not-yet",
+        "inactive-expired",
         "tray-with-reason",
     ];
     let mut checked = 0;
@@ -1371,9 +1373,27 @@ proptest! {
         state in any_state(),
         t in proptest::sample::select(ObjectType::ALL.to_vec()),
         early in any::<bool>(),
+        clock in proptest::option::of((-20i64..20, -20i64..20)),
+        windows in proptest::collection::vec(proptest::option::of((-10i64..10, 1i64..10, any::<bool>())), 1..6),
     ) {
         let mut doc = doc;
         retree(&mut doc, &picks);
+        // Give rules activity windows (#40), judged at `clock` below: each
+        // rule takes the next window, and `None` leaves it untimed.
+        for (r, w) in doc
+            .rule_sets
+            .iter_mut()
+            .flat_map(|s| s.rules.iter_mut())
+            .zip(windows.iter().cycle())
+        {
+            // Windows of a few days around 2026-11-25, and a clock (now,
+            // floor) a few days either side, so activity really varies.
+            if let Some((start, len, open_start)) = w {
+                let day = |d: i64| crate::model::Timestamp(1_795_564_800 + d * 86_400);
+                r.activates_at = (!open_start).then_some(day(*start));
+                r.expires_at = Some(day(start + len));
+            }
+        }
         let policy = doc.validate();
         prop_assume!(policy.is_ok());
         let policy = policy.unwrap();
@@ -1385,9 +1405,24 @@ proptest! {
             ctx.device.boot_phase = Some(crate::context::BootPhase::Early);
         }
         let subject = Subject { object_type: t, facts: &facts, variables: &vars, context: &ctx };
-        let tracer = Tracer::new(&policy).unwrap();
+        // Activity windows, judged at a random clock (or none) in both.
+        let rule_clock = clock.map(|(now, floor)| crate::lifecycle::RuleClock {
+            now: crate::model::Timestamp(1_795_564_800 + now * 86_400),
+            floor: crate::model::Timestamp(1_795_564_800 + floor * 86_400),
+        });
+        let mut tracer = Tracer::new(&policy).unwrap();
+        let mut evaluator = Evaluator::new(&policy).unwrap();
+        if let Some(c) = rule_clock {
+            tracer.set_clock(c);
+            evaluator.set_clock(c);
+        }
         let tr = tracer.trace(&subject, &ObjectExtras::default(), &state, TRACE, &TraceOptions::at(TraceLevel::Full));
-        let direct = Evaluator::new(&policy).unwrap().evaluate_in(&subject, &state, TRACE);
+        let direct = evaluator.evaluate_in(&subject, &state, TRACE);
+        // Every inactive rule listed is one the evaluator left out.
+        for i in &tr.inactive_matches {
+            let r = policy.document().rule_sets.iter().flat_map(|s| &s.rules).find(|r| r.id == i.rule.rule_id).unwrap();
+            prop_assert!(!evaluator.activity_of(r).is_active());
+        }
         prop_assert_eq!(&tr.decision, &direct);
         let ids: Vec<RuleId> = tr.matched.iter().map(|m| m.rule.rule_id).collect();
         // A disabled device consults no rule, so nothing is listed.
@@ -2976,4 +3011,150 @@ fn an_out_of_scope_unknown_decision_explains_the_policy_scope() {
         "{:?}",
         doc.paragraphs
     );
+}
+
+#[test]
+fn expired_and_future_rules_are_listed_as_inactive_with_their_reason() {
+    use crate::lifecycle::RuleClock;
+    use crate::model::Timestamp;
+    let now = Timestamp(1_795_564_800);
+    let hash = |c: char| serde_json::json!({"criterion": {"field": "hash.sha256", "operator": "equals", "values": [std::iter::repeat_n(c, 64).collect::<String>()]}});
+    let rule = |n: u32, extra: serde_json::Value| {
+        let mut r = serde_json::json!({"id": format!("01936b2e-{n:04x}-7b3d-9f21-0a1b2c3d4e61"), "name": format!("R{n}"),
+            "match": hash('a'), "action": {"type": "allow"}});
+        for (k, v) in extra.as_object().unwrap() {
+            r[k] = v.clone();
+        }
+        r
+    };
+    let doc = crate::model::PolicyDocument::from_json(&serde_json::json!({
+        "schema_version": "1.0.0",
+        "policy": {"id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f", "name": "P", "revision": 1, "mode": "enforce",
+                   "rule_sets": ["01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001"]},
+        "rule_sets": [{"id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001", "name": "S", "kind": "allowlist", "rules": [
+            rule(1, serde_json::json!({"expires_at": "2026-01-01T00:00:00Z"})),
+            rule(2, serde_json::json!({"activates_at": "2027-01-01T00:00:00Z"})),
+            rule(3, serde_json::json!({"enabled": false})),
+        ]}],
+    }).to_string()).unwrap();
+    let policy = doc.validate().unwrap();
+    let facts = ObjectFacts::new().with(
+        Field::HashSha256,
+        std::iter::repeat_n('a', 64).collect::<String>(),
+    );
+    let vars = PathVariables::new();
+    let ctx = EvaluationContext::new();
+    let subject = Subject {
+        object_type: ObjectType::Executable,
+        facts: &facts,
+        variables: &vars,
+        context: &ctx,
+    };
+    let state = DeviceState::of(&policy.document().policy);
+    let tracer = Tracer::new(&policy).unwrap().at(RuleClock::at(now));
+    let tr = tracer.trace(
+        &subject,
+        &ObjectExtras::default(),
+        &state,
+        TRACE,
+        &TraceOptions::at(TraceLevel::Standard),
+    );
+    assert_eq!(tr.decision.as_ref().unwrap().outcome(), Outcome::Blocked);
+    let reasons: Vec<InactiveReason> = tr.inactive_matches.iter().map(|i| i.reason).collect();
+    assert_eq!(
+        reasons,
+        vec![
+            InactiveReason::Expired,
+            InactiveReason::NotYetActive,
+            InactiveReason::Disabled
+        ]
+    );
+    let c = Catalog::english();
+    let text = render_text(&explain(&tr, Verbosity::Detailed), &c);
+    assert!(text.contains("but it has expired"), "{text}");
+    assert!(text.contains("but it is not active yet"), "{text}");
+}
+
+/// The trace and the evaluator judge activity at the same clock: with the
+/// clock before, inside and after each rule's window, the traced decision
+/// is the evaluator's, and a rule listed as inactive is one the evaluator
+/// left out. A tracer without the clock would disagree on several of
+/// these cases.
+#[test]
+fn the_trace_judges_activity_at_the_evaluators_clock() {
+    use crate::lifecycle::RuleClock;
+    use crate::model::Timestamp;
+    let day = |d: i64| Timestamp(1_795_564_800 + d * 86_400);
+    let hash = serde_json::json!({"criterion": {"field": "hash.sha256", "operator": "equals", "values": [sha('a')]}});
+    let rule = |n: u32, action: &str, from: i64, to: i64| {
+        serde_json::json!({
+            "id": format!("01936b2e-{n:04x}-7b3d-9f21-0a1b2c3d4e61"), "name": format!("R{n}"),
+            "match": hash, "action": {"type": action},
+            "activates_at": day(from).to_string(), "expires_at": day(to).to_string(),
+        })
+    };
+    let doc = crate::model::PolicyDocument::from_json(&serde_json::json!({
+        "schema_version": "1.0.0",
+        "policy": {"id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f", "name": "P", "revision": 1, "mode": "enforce",
+                   "rule_sets": ["01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001"]},
+        "rule_sets": [{"id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001", "name": "S", "kind": "mixed", "rules": [
+            rule(1, "allow", 0, 10),
+            rule(2, "deny", 5, 15),
+        ]}],
+    }).to_string()).unwrap();
+    let policy = doc.validate().unwrap();
+    let facts = ObjectFacts::new().with(Field::HashSha256, sha('a'));
+    let vars = PathVariables::new();
+    let ctx = EvaluationContext::new();
+    let subject = Subject {
+        object_type: ObjectType::Executable,
+        facts: &facts,
+        variables: &vars,
+        context: &ctx,
+    };
+    let state = DeviceState::of(&policy.document().policy);
+    let mut seen = std::collections::BTreeSet::new();
+    for (now, floor) in [
+        (-1, -1),
+        (2, 2),
+        (7, 7),
+        (12, 12),
+        (20, 20),
+        (7, 12),
+        (2, 7),
+    ] {
+        let clock = RuleClock {
+            now: day(now),
+            floor: day(floor),
+        };
+        let mut tracer = Tracer::new(&policy).unwrap();
+        tracer.set_clock(clock);
+        let mut evaluator = Evaluator::new(&policy).unwrap();
+        evaluator.set_clock(clock);
+        let tr = tracer.trace(
+            &subject,
+            &ObjectExtras::default(),
+            &state,
+            TRACE,
+            &TraceOptions::at(TraceLevel::Standard),
+        );
+        let direct = evaluator.evaluate_in(&subject, &state, TRACE);
+        assert_eq!(tr.decision, direct, "at {now}/{floor}");
+        for i in &tr.inactive_matches {
+            let r = policy.document().rule_sets[0]
+                .rules
+                .iter()
+                .find(|r| r.id == i.rule.rule_id)
+                .unwrap();
+            assert!(!evaluator.activity_of(r).is_active(), "at {now}/{floor}");
+        }
+        let d = direct.unwrap();
+        seen.insert((
+            d.outcome() == Outcome::Allowed,
+            d.reason_code() == crate::decision::ReasonCode::ExplicitDeny,
+        ));
+    }
+    // The clock really changes the decision across these cases: allowed,
+    // explicitly denied, and the implicit deny all occur.
+    assert_eq!(seen.len(), 3, "{seen:?}");
 }

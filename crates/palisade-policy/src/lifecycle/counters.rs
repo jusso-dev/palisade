@@ -9,11 +9,19 @@
 //! takes a [`HitReport`] every `counter_report_hours` and on a policy
 //! change ([`Counters::report`]).
 //!
+//! The per-decision cost is [`Counters::hit_key`] with the rule's ordinal,
+//! which the agent looks up once per compiled rule ([`Counters::ordinal`],
+//! [`Counters::ordinal_of`]) and keeps with it; [`Counters::record`] is the
+//! convenient form, with an `O(log n)` lookup per rule of the decision.
+//!
 //! Counters belong to one bundle revision. A report carries the policy ID
 //! and revision, and the server adds reports up across revisions by rule
-//! ID. To survive an agent restart, the agent stores the last report it
-//! took and [`Counters::restore`]s it into the new counters of the same
-//! revision. The totals then carry on, and nothing is reported twice.
+//! ID. Reports serialise with the sketch registers (as hex), so the server
+//! can merge them and the agent can store them. To survive an agent
+//! restart, the agent stores a snapshot ([`Counters::snapshot`]) at
+//! shutdown and [`Counters::restore`]s it into the new counters of the same
+//! revision: the totals carry on, and hits that were not yet reported are
+//! reported next time, never twice.
 //!
 //! `distinct_objects` is a HyperLogLog sketch with 1024 one-byte registers
 //! (1 KiB, a standard error of about 3%), updated with atomic maximums.
@@ -24,7 +32,9 @@
 
 use std::sync::atomic::{AtomicI64, AtomicU8, AtomicU64, Ordering};
 
-use serde::Serialize;
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
 
 use crate::decision::{Decision, RuleRef};
 use crate::model::{PolicyId, RuleId, Timestamp};
@@ -32,6 +42,9 @@ use crate::model::{PolicyId, RuleId, Timestamp};
 /// HyperLogLog registers per rule: 2^10.
 const HLL_BITS: u32 = 10;
 const HLL_REGISTERS: usize = 1 << HLL_BITS;
+/// The largest rank a register can hold: the bits left after the index,
+/// plus one.
+const MAX_RANK: u32 = 64 - HLL_BITS + 1;
 
 /// A HyperLogLog sketch of distinct objects, updated without a lock.
 #[derive(Debug)]
@@ -71,6 +84,12 @@ impl Sketch {
         }
     }
 
+    /// Whether `registers` could be this sketch's: the right length, and no
+    /// rank above what a 64-bit hash can give.
+    fn valid(registers: &[u8]) -> bool {
+        registers.len() == HLL_REGISTERS && registers.iter().all(|r| u32::from(*r) <= MAX_RANK)
+    }
+
     fn clear(&self) {
         for r in &*self.registers {
             r.store(0, Ordering::Relaxed);
@@ -78,14 +97,14 @@ impl Sketch {
     }
 }
 
-/// The HyperLogLog estimate of a set of registers, with the small-range
-/// correction.
+/// The HyperLogLog estimate of a sketch's registers, with the small-range
+/// correction. `None` unless there are 1024 registers, each at most 55.
 #[must_use]
-pub fn estimate(registers: &[u8]) -> u64 {
-    let m = f64::from(u32::try_from(registers.len()).unwrap_or(u32::MAX));
-    if registers.is_empty() {
-        return 0;
+pub fn estimate(registers: &[u8]) -> Option<u64> {
+    if !Sketch::valid(registers) {
+        return None;
     }
+    let m = f64::from(u32::try_from(registers.len()).ok()?);
     let alpha = 0.7213 / (1.0 + 1.079 / m);
     let sum: f64 = registers.iter().map(|r| 2f64.powi(-i32::from(*r))).sum();
     let raw = alpha * m * m / sum;
@@ -98,7 +117,55 @@ pub fn estimate(registers: &[u8]) -> u64 {
     // The estimate is non-negative and far below 2^53.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let n = value.round() as u64;
-    n
+    Some(n)
+}
+
+/// Merges sketches, as the server does across devices for
+/// `distinct_devices` and across revisions: the register-wise maximum.
+/// `None` if any sketch is malformed.
+#[must_use]
+pub fn merge<'a>(sketches: impl IntoIterator<Item = &'a [u8]>) -> Option<Vec<u8>> {
+    let mut out = vec![0u8; HLL_REGISTERS];
+    for s in sketches {
+        if !Sketch::valid(s) {
+            return None;
+        }
+        for (o, v) in out.iter_mut().zip(s) {
+            *o = (*o).max(*v);
+        }
+    }
+    Some(out)
+}
+
+/// Sketch registers as lowercase hex.
+mod hex_bytes {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(bytes: &[u8], s: S) -> Result<S::Ok, S::Error> {
+        let mut text = String::with_capacity(bytes.len() * 2);
+        for b in bytes {
+            text.push(char::from(b"0123456789abcdef"[usize::from(b >> 4)]));
+            text.push(char::from(b"0123456789abcdef"[usize::from(b & 0xf)]));
+        }
+        s.serialize_str(&text)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        let text = String::deserialize(d)?;
+        let digit = |c: u8| match c {
+            b'0'..=b'9' => Some(c - b'0'),
+            b'a'..=b'f' => Some(c - b'a' + 10),
+            _ => None,
+        };
+        let b = text.as_bytes();
+        if b.len() % 2 != 0 {
+            return Err(serde::de::Error::custom("odd number of hex digits"));
+        }
+        b.chunks(2)
+            .map(|p| Some(digit(p[0])? << 4 | digit(p[1])?))
+            .collect::<Option<Vec<u8>>>()
+            .ok_or_else(|| serde::de::Error::custom("expected lowercase hex"))
+    }
 }
 
 /// The key [`Counters::hit_key`] takes for an object: a 64-bit hash of its
@@ -137,10 +204,13 @@ pub struct Counters {
     policy_id: PolicyId,
     revision: u64,
     slots: Vec<Slot>,
+    /// Ordinal by rule ID.
+    index: BTreeMap<RuleId, usize>,
 }
 
 /// One rule's counters in a report.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RuleHits {
     /// The rule.
     pub rule_id: RuleId,
@@ -152,13 +222,15 @@ pub struct RuleHits {
     pub last_matched_at: Option<Timestamp>,
     /// The estimated number of distinct objects matched.
     pub distinct_objects: u64,
-    /// The sketch's registers, for the server to merge across devices.
-    #[serde(skip)]
+    /// The sketch's 1024 registers, as hex, for the server to merge
+    /// across devices ([`merge`]).
+    #[serde(with = "hex_bytes")]
     pub sketch: Vec<u8>,
 }
 
-/// A report of every rule's counters.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+/// A report of every rule's counters, or a snapshot for a restart.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HitReport {
     /// The policy.
     pub policy_id: PolicyId,
@@ -173,9 +245,16 @@ pub struct HitReport {
 impl Counters {
     /// Counters for `rules`, in the evaluator's ordinal order.
     pub(crate) fn new(policy_id: PolicyId, revision: u64, rules: Vec<RuleRef>) -> Self {
+        let index = rules
+            .iter()
+            .enumerate()
+            .rev()
+            .map(|(i, r)| (r.rule_id, i))
+            .collect();
         Self {
             policy_id,
             revision,
+            index,
             slots: rules
                 .into_iter()
                 .map(|rule| Slot {
@@ -204,7 +283,16 @@ impl Counters {
     /// The ordinal of a rule, if it is counted.
     #[must_use]
     pub fn ordinal(&self, rule_id: RuleId) -> Option<usize> {
-        self.slots.iter().position(|s| s.rule.rule_id == rule_id)
+        self.index.get(&rule_id).copied()
+    }
+
+    /// The ordinal of a rule a decision names, if it is of this policy
+    /// revision and counted.
+    #[must_use]
+    pub fn ordinal_of(&self, r: &RuleRef) -> Option<usize> {
+        (r.policy_id == self.policy_id && r.policy_revision == self.revision)
+            .then(|| self.ordinal(r.rule_id))
+            .flatten()
     }
 
     /// Records one hit of the rule at `ordinal`, on the object identified
@@ -235,24 +323,31 @@ impl Counters {
             .matched_rule()
             .into_iter()
             .chain(decision.annotations());
+        let key = object_key(object);
         for r in refs {
-            if r.policy_id != self.policy_id || r.policy_revision != self.revision {
-                continue;
-            }
-            if let Some(i) = self.slots.iter().position(|s| s.rule == *r) {
-                self.hit(i, object, at);
+            if let Some(i) = self.ordinal_of(r) {
+                self.hit_key(i, key, at);
             }
         }
     }
 
     /// Takes a report at `at`, and starts a new `hits_since_report` period.
     pub fn report(&self, at: Timestamp) -> HitReport {
+        self.report_inner(at, true)
+    }
+
+    fn report_inner(&self, at: Timestamp, advance: bool) -> HitReport {
         let mut rules: Vec<RuleHits> = self
             .slots
             .iter()
             .filter_map(|s| {
                 let total = s.total.load(Ordering::Relaxed);
-                let since = total.saturating_sub(s.reported.swap(total, Ordering::Relaxed));
+                let before = if advance {
+                    s.reported.swap(total, Ordering::Relaxed)
+                } else {
+                    s.reported.load(Ordering::Relaxed)
+                };
+                let since = total.saturating_sub(before);
                 (total > 0).then(|| {
                     let sketch = s.objects.snapshot();
                     let last = s.last_matched.load(Ordering::Relaxed);
@@ -261,7 +356,7 @@ impl Counters {
                         hits_total: total,
                         hits_since_report: since,
                         last_matched_at: (last != i64::MIN).then_some(Timestamp(last)),
-                        distinct_objects: estimate(&sketch),
+                        distinct_objects: estimate(&sketch).unwrap_or(0),
                         sketch,
                     }
                 })
@@ -276,19 +371,36 @@ impl Counters {
         }
     }
 
-    /// Restores the totals, last match times and sketches of `report`, the
-    /// last report taken before a restart, if it is of the same policy and
-    /// revision. `hits_since_report` starts at zero, because those hits
-    /// were reported. Returns whether it was restored.
+    /// A snapshot for a restart, taken without starting a new report
+    /// period: `hits_since_report` counts the hits not yet reported.
+    #[must_use]
+    pub fn snapshot(&self, at: Timestamp) -> HitReport {
+        let mut report = self.report_inner(at, false);
+        report.at = at;
+        report
+    }
+
+    /// Restores a snapshot (or the last report) taken before a restart, if
+    /// it is of the same policy and revision and well formed: totals, last
+    /// matches and sketches carry on, and its `hits_since_report` are
+    /// reported in the next report. Returns whether it was restored;
+    /// nothing changes otherwise.
     pub fn restore(&self, report: &HitReport) -> bool {
-        if report.policy_id != self.policy_id || report.revision != self.revision {
+        if report.policy_id != self.policy_id
+            || report.revision != self.revision
+            || report
+                .rules
+                .iter()
+                .any(|r| !Sketch::valid(&r.sketch) || r.hits_since_report > r.hits_total)
+        {
             return false;
         }
         for r in &report.rules {
-            if let Some(slot) = self.slots.iter().find(|s| s.rule.rule_id == r.rule_id) {
-                // Those hits were reported already.
+            if let Some(slot) = self.ordinal(r.rule_id).and_then(|i| self.slots.get(i)) {
                 slot.total.fetch_add(r.hits_total, Ordering::Relaxed);
-                slot.reported.fetch_add(r.hits_total, Ordering::Relaxed);
+                // Only what was reported counts as reported.
+                slot.reported
+                    .fetch_add(r.hits_total - r.hits_since_report, Ordering::Relaxed);
                 if let Some(t) = r.last_matched_at {
                     slot.last_matched.fetch_max(t.0, Ordering::Relaxed);
                 }
@@ -360,16 +472,38 @@ mod tests {
         for i in 0..50u32 {
             c.hit(0, &i.to_le_bytes(), Timestamp(i64::from(i)));
         }
-        let saved = c.report(Timestamp(100));
+        let _ = c.report(Timestamp(90));
+        for i in 50..55u32 {
+            c.hit(0, &i.to_le_bytes(), Timestamp(i64::from(i)));
+        }
+        // Shutdown: a snapshot with 5 hits not yet reported.
+        let saved = c.snapshot(Timestamp(100));
+        assert_eq!(saved.rules[0].hits_since_report, 5);
+        // It survives storage.
+        let saved: HitReport =
+            serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
         // A restart: new counters of the same revision.
         let after = counters(2);
         assert!(after.restore(&saved));
         after.hit(0, b"new", Timestamp(200));
         let r = after.report(Timestamp(300));
-        assert_eq!(r.rules[0].hits_total, 51);
-        assert_eq!(r.rules[0].hits_since_report, 1);
+        assert_eq!(r.rules[0].hits_total, 56);
+        assert_eq!(r.rules[0].hits_since_report, 6);
         assert_eq!(r.rules[0].last_matched_at, Some(Timestamp(200)));
-        assert!(r.rules[0].distinct_objects >= 49);
+        assert!(r.rules[0].distinct_objects >= 53);
+        // Malformed sketches are refused, and change nothing.
+        let mut bad = saved.clone();
+        bad.rules[0].sketch.truncate(10);
+        let fresh = counters(2);
+        assert!(!fresh.restore(&bad));
+        assert!(fresh.report(Timestamp(0)).rules.is_empty());
+        bad.rules[0].sketch = vec![200; 1024];
+        assert!(!fresh.restore(&bad));
+        assert_eq!(estimate(&[200; 1024]), None);
+        // Merging sketches never undercounts either.
+        let a = r.rules[0].sketch.clone();
+        let m = merge([a.as_slice(), a.as_slice()]).unwrap();
+        assert_eq!(estimate(&m), estimate(&a));
         // Another revision does not restore.
         let other = Counters::new(refs(1)[0].policy_id, 5, refs(1));
         assert!(!other.restore(&saved));

@@ -75,18 +75,35 @@ fn parse_date(s: &[u8]) -> Option<i64> {
     Some(days_from_civil(y, m, d))
 }
 
-/// An instant: whole seconds since 1970-01-01T00:00:00Z.
+/// The first representable instant, 0001-01-01T00:00:00Z.
+const MIN_SECS: i64 = -62_135_596_800;
+/// The last representable instant, 9999-12-31T23:59:59Z.
+const MAX_SECS: i64 = 253_402_300_799;
+
+/// An instant: whole seconds since 1970-01-01T00:00:00Z. Only instants in
+/// years 0001 to 9999 (UTC) are read and produced, so every instant has an
+/// RFC 3339 form that reads back.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Timestamp(pub i64);
 
 impl Timestamp {
+    /// The instant, if it is in years 0001 to 9999 UTC.
+    #[must_use]
+    pub const fn checked(secs: i64) -> Option<Self> {
+        if secs >= MIN_SECS && secs <= MAX_SECS {
+            Some(Self(secs))
+        } else {
+            None
+        }
+    }
+
     /// The instant `days` days later, or `None` past the representable
     /// range.
     #[must_use]
     pub const fn plus_days(self, days: i64) -> Option<Self> {
         match days.checked_mul(DAY_SECS) {
             Some(secs) => match self.0.checked_add(secs) {
-                Some(t) => Some(Self(t)),
+                Some(t) => Self::checked(t),
                 None => None,
             },
             None => None,
@@ -138,7 +155,8 @@ impl Timestamp {
             }
             _ => return None,
         };
-        Some(Self(day * DAY_SECS + h * 3600 + mi * 60 + sec - offset))
+        // An offset can move the instant out of years 0001 to 9999.
+        Self::checked(day * DAY_SECS + h * 3600 + mi * 60 + sec - offset)
     }
 }
 
@@ -194,10 +212,16 @@ impl JsonSchema for Timestamp {
 pub struct Date(pub i64);
 
 impl Date {
-    /// The instant the day starts.
+    /// The instant the day starts, clamped to the representable range.
     #[must_use]
     pub const fn start(self) -> Timestamp {
-        Timestamp(self.0 * DAY_SECS)
+        match self.0.checked_mul(DAY_SECS) {
+            Some(t) if t < MIN_SECS => Timestamp(MIN_SECS),
+            Some(t) if t > MAX_SECS => Timestamp(MAX_SECS),
+            Some(t) => Timestamp(t),
+            None if self.0 < 0 => Timestamp(MIN_SECS),
+            None => Timestamp(MAX_SECS),
+        }
     }
 
     /// Reads an RFC 3339 full date, `YYYY-MM-DD`.
@@ -388,6 +412,45 @@ impl GovernanceSettings {
     pub fn is_default(&self) -> bool {
         self == &Self::default()
     }
+
+    /// The stricter combination of `self`, the nearer layer, and `other`,
+    /// for building an effective policy (#37): governance mode is on if
+    /// either side turns it on explicitly; rules go stale and expiry
+    /// warnings start at the earlier point; counters report at the shorter
+    /// interval; every expiry notice of either side is sent; and each
+    /// finding's severity is the more serious one. A nearer layer can
+    /// therefore not relax governance that an outer layer requires.
+    #[must_use]
+    pub fn stricter(&self, other: &Self) -> Self {
+        let require_justification = match (self.require_justification, other.require_justification)
+        {
+            (Some(true), _) | (_, Some(true)) => Some(true),
+            (Some(false), _) | (_, Some(false)) => Some(false),
+            (None, None) => None,
+        };
+        let mut notices: Vec<u16> = self
+            .expiry_notice_days
+            .iter()
+            .chain(&other.expiry_notice_days)
+            .copied()
+            .collect();
+        notices.sort_unstable_by(|a, b| b.cmp(a));
+        notices.dedup();
+        notices.truncate(limits::MAX_EXPIRY_NOTICES);
+        let mut severity = other.severity.clone();
+        for (code, s) in &self.severity {
+            let e = severity.entry(code.clone()).or_insert(*s);
+            *e = (*e).max(*s);
+        }
+        Self {
+            require_justification,
+            stale_after_days: self.stale_after_days.min(other.stale_after_days),
+            expiring_soon_days: self.expiring_soon_days.max(other.expiring_soon_days),
+            expiry_notice_days: notices,
+            counter_report_hours: self.counter_report_hours.min(other.counter_report_hours),
+            severity,
+        }
+    }
 }
 
 /// The schema of `severity` keys: the finding codes.
@@ -433,6 +496,8 @@ mod tests {
             "2026-11-25 09:30:00Z",
             "0000-01-01T00:00:00Z",
             "2026-11-25T09:30:00Z ",
+            "0001-01-01T00:00:00+01:00",
+            "9999-12-31T23:30:00-01:00",
         ] {
             assert_eq!(Timestamp::parse(bad), None, "{bad}");
         }
@@ -458,6 +523,9 @@ mod tests {
             Date::parse("2026-11-25").unwrap()
         );
         assert_eq!(Date::parse("2025-02-29"), None);
+        assert_eq!(Date(i64::MIN).start(), Timestamp(MIN_SECS));
+        assert_eq!(Date(i64::MAX).start(), Timestamp(MAX_SECS));
+        assert_eq!(Timestamp(MAX_SECS).plus_days(1), None);
         assert_eq!(Date::parse("2026-1-01"), None);
     }
 

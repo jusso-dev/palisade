@@ -312,7 +312,7 @@ fn criterion_spec(c: &crate::model::Criterion) -> Option<Spec> {
 ///   `equals` and `starts_with` every character is literal.
 /// - A regular expression fixes nothing.
 /// - A stream name is not a directory component.
-fn path_depth(value: &str, operator: Operator) -> u16 {
+pub(crate) fn path_depth(value: &str, operator: Operator) -> u16 {
     let wildcard = match operator {
         Operator::Regex => return 0,
         Operator::Wildcard => true,
