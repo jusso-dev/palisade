@@ -123,6 +123,7 @@ fn leaving_enforce_needs_a_reason_a_ticket_and_an_expiry() {
     let strict = Governance {
         require_ticket: true,
         may_weaken_permanently: false,
+        readiness_ack_required: false,
     };
     for to in [Mode::Audit, Mode::Learning, Mode::Monitor, Mode::Disabled] {
         let ok = full(to, now, DAY);
@@ -231,6 +232,7 @@ fn only_enforce_to_audit_can_be_permanent_and_only_with_the_permission() {
     let elevated = Governance {
         require_ticket: false,
         may_weaken_permanently: true,
+        readiness_ack_required: false,
     };
     let permanent = |to| Request {
         reason: Some("steady state".to_owned()),
@@ -495,6 +497,56 @@ fn leaving_learning_is_flagged_for_the_summary() {
     assert!(!changes[0].learning_ended);
 }
 
+#[test]
+fn a_gated_move_to_enforce_needs_a_readiness_ack() {
+    let mut clock = SimClock::start();
+    let gated = Governance {
+        readiness_ack_required: true,
+        ..Governance::default()
+    };
+    let to_enforce = Request::new(Mode::Enforce, "admin");
+    let acked = Request {
+        readiness_ack: true,
+        ..to_enforce.clone()
+    };
+    for from in [Mode::Disabled, Mode::Monitor, Mode::Audit, Mode::Learning] {
+        let mut m = ModeMachine::new(from);
+        assert_eq!(
+            m.transition(&to_enforce, &gated, clock.now()),
+            Err(TransitionError::ReadinessAckRequired),
+            "{from:?}"
+        );
+        assert_eq!(m, ModeMachine::new(from));
+        let changes = m.transition(&acked, &gated, clock.now()).unwrap();
+        assert!(changes[0].readiness_acked);
+        assert_eq!(m.stored(), Mode::Enforce);
+        // Without the gate, no ack is needed and none is recorded.
+        let mut m = ModeMachine::new(from);
+        let changes = m
+            .transition(&acked, &Governance::default(), clock.now())
+            .unwrap();
+        assert!(!changes[0].readiness_acked);
+    }
+    // The gate is only about entering enforce.
+    let mut m = ModeMachine::new(Mode::Monitor);
+    m.transition(&Request::new(Mode::Audit, "admin"), &gated, clock.now())
+        .unwrap();
+    // Returning to enforce from a time box that left it restores
+    // enforcement early, and is never held back.
+    let mut m = ModeMachine::new(Mode::Enforce);
+    m.transition(&full(Mode::Audit, clock.now(), DAY), &gated, clock.now())
+        .unwrap();
+    let changes = m.transition(&to_enforce, &gated, clock.now()).unwrap();
+    assert!(!changes[0].readiness_acked);
+    assert_eq!(m.time_box(), None);
+    // Nor is the revert when the box ends.
+    let mut m = ModeMachine::new(Mode::Enforce);
+    m.transition(&full(Mode::Audit, clock.now(), 60), &gated, clock.now())
+        .unwrap();
+    clock.advance(60);
+    assert_eq!(m.current(clock.now()).0, Mode::Enforce);
+}
+
 /// One step of a random history.
 #[derive(Clone, Debug)]
 enum Step {
@@ -511,6 +563,7 @@ enum Step {
         ticket: bool,
         expires_in: Option<i64>,
         permanent: bool,
+        ack: bool,
     },
     /// The agent checks for expiry.
     Tick,
@@ -528,14 +581,16 @@ fn step() -> impl Strategy<Value = Step> {
             any::<bool>(),
             proptest::option::of(-DAY..40 * DAY),
             proptest::bool::weighted(0.1),
+            any::<bool>(),
         )
             .prop_map(
-                |(to, reason, ticket, expires_in, permanent)| Step::Request {
+                |(to, reason, ticket, expires_in, permanent, ack)| Step::Request {
                     to,
                     reason,
                     ticket,
                     expires_in,
-                    permanent
+                    permanent,
+                    ack,
                 }
             ),
         Just(Step::Tick),
@@ -554,9 +609,10 @@ proptest! {
     fn no_history_reaches_an_illegal_state(
         start in proptest::sample::select(ALL.to_vec()),
         steps in proptest::collection::vec(step(), 1..40),
-        governance in (any::<bool>(), any::<bool>()).prop_map(|(t, p)| Governance {
+        governance in (any::<bool>(), any::<bool>(), any::<bool>()).prop_map(|(t, p, a)| Governance {
             require_ticket: t,
             may_weaken_permanently: p,
+            readiness_ack_required: a,
         }),
     ) {
         let mut clock = SimClock::start();
@@ -568,7 +624,8 @@ proptest! {
                 Step::SetWall(d) => { clock.wall += d; Vec::new() }
                 Step::Restart(at) => { clock.monotonic = at; Vec::new() }
                 Step::Tick => m.tick(clock.now()).into_iter().collect(),
-                Step::Request { to, reason, ticket, expires_in, permanent } => {
+                Step::Request { to, reason, ticket, expires_in, permanent, ack } => {
+                    let restores = m.time_box().is_some_and(|b| b.prior == Mode::Enforce);
                     let request = Request {
                         to,
                         actor: "admin".to_owned(),
@@ -576,6 +633,7 @@ proptest! {
                         ticket: ticket.then(|| "CHG-9".to_owned()),
                         expires_at: expires_in.map(|s| clock.wall + s),
                         permanent,
+                        readiness_ack: ack,
                     };
                     match m.transition(&request, &governance, clock.now()) {
                         Ok(changes) => {
@@ -586,6 +644,13 @@ proptest! {
                                 prop_assert!(reason);
                                 prop_assert!(!governance.require_ticket || ticket);
                             }
+                            // A gated move to enforce was acknowledged,
+                            // unless it restored enforcement.
+                            let gated = to == Mode::Enforce
+                                && governance.readiness_ack_required
+                                && !restores;
+                            prop_assert!(!gated || ack);
+                            prop_assert_eq!(last.readiness_acked, gated);
                             changes
                         }
                         Err(_) => {

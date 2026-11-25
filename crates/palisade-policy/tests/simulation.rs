@@ -7,6 +7,7 @@
 use std::path::Path;
 
 use palisade_policy::dsl;
+use palisade_policy::mode::machine::{Governance, ModeMachine, Now, Request, TransitionError};
 use palisade_policy::model::Mode;
 use palisade_policy::trace::readiness::{ReadinessOptions, readiness};
 use palisade_policy::trace::simulate::{Candidate, Simulator, read_snapshots};
@@ -93,6 +94,28 @@ fn moving_the_example_to_enforce_is_simulated_and_gated() {
         "3 would-block events across 2 devices in the last 7 days"
     );
     assert!(r.gate.ack_required);
+    // The gate holds the move to enforce until it is acknowledged (#36).
+    let governance = Governance {
+        readiness_ack_required: r.gate.ack_required,
+        ..Governance::default()
+    };
+    let now = Now {
+        wall_secs: 1_700_604_800,
+        monotonic_secs: 0,
+    };
+    let mut machine = ModeMachine::new(p.document().policy.mode);
+    let request = Request::new(Mode::Enforce, "admin");
+    assert_eq!(
+        machine.transition(&request, &governance, now),
+        Err(TransitionError::ReadinessAckRequired)
+    );
+    let acked = Request {
+        readiness_ack: true,
+        ..request
+    };
+    let changes = machine.transition(&acked, &governance, now).unwrap();
+    assert!(changes[0].readiness_acked);
+    assert_eq!(machine.stored(), Mode::Enforce);
     assert_eq!(r.events_outside_window, 1);
     assert_eq!(r.top_objects[0].would_block, 2);
     assert!(r.top_objects[0].object.starts_with("sha256:cccc"));

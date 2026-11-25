@@ -736,3 +736,79 @@ proptest! {
         prop_assert_eq!(d, Some(enforce));
     }
 }
+
+/// The `log` flag of rules that log every decision.
+fn always() -> serde_json::Value {
+    serde_json::json!({"log": "always"})
+}
+
+#[test]
+fn each_mode_reports_the_decisions_the_issue_lists() {
+    use crate::mode::events::{EventFidelity, Report, fidelity};
+    let report = |d: &Decision| fidelity(Some(d)).report;
+    // A disabled device reports nothing.
+    assert_eq!(
+        fidelity(None),
+        EventFidelity {
+            report: Report::None,
+            learning_candidate: false
+        }
+    );
+    // A would-block is an event in every non-enforcing mode, and a block
+    // keeps its rule's `log` (always, for a deny by default).
+    let blocklist = blocklists(vec![rule(1, hash_a(), deny())], vec![]);
+    assert_eq!(report(&in_mode(&blocklist, Mode::Enforce)), Report::Event);
+    for mode in RELAXED {
+        assert_eq!(
+            report(&in_mode(&blocklist, mode)),
+            Report::Event,
+            "{mode:?}"
+        );
+    }
+    // An allow logs `summary` by default: kept in enforce and monitor,
+    // raised to a full event in audit and learning.
+    let allowlist = |r: serde_json::Value| {
+        validated(document(
+            "deny_wins",
+            serde_json::json!({}),
+            vec![(1, "allowlist", false, false, vec![r])],
+        ))
+    };
+    let summary = allowlist(rule(1, hash_a(), allow()));
+    let expect = [
+        (Mode::Enforce, Report::Summary),
+        (Mode::Monitor, Report::Summary),
+        (Mode::Audit, Report::Event),
+        (Mode::Learning, Report::Event),
+    ];
+    for (mode, r) in expect {
+        assert_eq!(report(&in_mode(&summary, mode)), r, "{mode:?}");
+    }
+    // An allow with `log: always` is still only summarised in monitor;
+    // `log: never` stays silent there, but not in audit.
+    let loud = allowlist(with(rule(1, hash_a(), allow()), "effects", always()));
+    assert_eq!(report(&in_mode(&loud, Mode::Enforce)), Report::Event);
+    assert_eq!(report(&in_mode(&loud, Mode::Monitor)), Report::Summary);
+    let quiet = allowlist(with(
+        rule(1, hash_a(), allow()),
+        "effects",
+        serde_json::json!({"log": "never"}),
+    ));
+    assert_eq!(report(&in_mode(&quiet, Mode::Enforce)), Report::None);
+    assert_eq!(report(&in_mode(&quiet, Mode::Monitor)), Report::None);
+    assert_eq!(report(&in_mode(&quiet, Mode::Audit)), Report::Event);
+    // A learning candidate is an event with the object's full facts.
+    let unknown = blocklists(vec![rule(1, hash_b(), deny())], vec![]);
+    for mode in [Mode::Enforce, Mode::Monitor, Mode::Audit, Mode::Learning] {
+        let f = fidelity(Some(&in_mode(&unknown, mode)));
+        assert_eq!(f.learning_candidate, mode == Mode::Learning, "{mode:?}");
+    }
+    // The use of an override session is always an event.
+    let state = DeviceState {
+        session: Some(SessionKind::Audit),
+        ..DeviceState::of(&blocklist.document().policy)
+    };
+    let d = decide_in(&blocklist, &state, ObjectType::Executable).unwrap();
+    assert_eq!(d.outcome(), Outcome::AllowedOverride);
+    assert_eq!(report(&d), Report::Event);
+}
