@@ -124,7 +124,7 @@ impl Element {
 
 /// Namespace URIs seen so far, shared.
 #[derive(Default)]
-struct Namespaces(Vec<Arc<str>>);
+struct Namespaces(std::collections::BTreeSet<Arc<str>>);
 
 impl Namespaces {
     fn get(&mut self, r: &ResolveResult<'_>) -> Result<Arc<str>, XmlError> {
@@ -137,11 +137,11 @@ impl Namespaces {
                 return err(format!("undeclared prefix {}", String::from_utf8_lossy(p)));
             }
         };
-        if let Some(found) = self.0.iter().find(|n| &***n == text) {
+        if let Some(found) = self.0.get(text) {
             return Ok(Arc::clone(found));
         }
         let new: Arc<str> = Arc::from(text);
-        self.0.push(Arc::clone(&new));
+        self.0.insert(Arc::clone(&new));
         Ok(new)
     }
 }

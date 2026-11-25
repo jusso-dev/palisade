@@ -7,7 +7,7 @@
 use libfuzzer_sys::fuzz_target;
 use palisade_fileid::authenticode::SignatureKind;
 use palisade_fileid::package::manifest::{parse_bundle_manifest, parse_package_manifest};
-use palisade_fileid::package::{blockmap, parse_package, publisher_id};
+use palisade_fileid::package::{blockmap, parse_package, publisher_id, zip};
 
 fuzz_target!(|data: &[u8]| {
     // The XML formats on their own.
@@ -16,6 +16,18 @@ fuzz_target!(|data: &[u8]| {
     }
     let _ = parse_bundle_manifest(data);
     let _ = blockmap::parse(data);
+
+    // The block map against the archive directly, since through
+    // `parse_package` it runs only after a signature verifies.
+    if let Ok(archive) = zip::Archive::parse(data) {
+        if let Some(m) = archive.member("AppxBlockMap.xml") {
+            if m.size <= 1 << 20 {
+                if let Ok(map) = archive.read(m).map_err(drop).and_then(|b| blockmap::parse(&b).map_err(drop)) {
+                    let _ = blockmap::verify(&map, &archive);
+                }
+            }
+        }
+    }
 
     let Ok(id) = parse_package(data) else {
         return;

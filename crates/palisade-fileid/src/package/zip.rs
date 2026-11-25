@@ -28,8 +28,10 @@
 //!   empty, without `\`, a leading `/`, empty, `.` or `..` segments, or
 //!   NUL; and part names are unique compared ASCII-case-insensitively, as
 //!   OPC compares them, so two spellings of one part are a duplicate;
-//! - local headers have no extra data except a ZIP64 field, and a data
-//!   descriptor uses 8-byte sizes exactly when its entry has a ZIP64 field;
+//! - extra data, in a local header or a central entry, is either empty or
+//!   exactly one ZIP64 block with exactly the fields its `0xffffffff`
+//!   markers call for (none with a data descriptor); and a data descriptor
+//!   uses 8-byte sizes exactly when its central entry has a ZIP64 block;
 //! - method 0 (stored, sizes equal) or 8 (deflate); no encryption, no
 //!   patch data, no strong encryption flags;
 //! - every member's data inflates to exactly its declared size and CRC.
@@ -185,24 +187,20 @@ fn to_usize(v: u64) -> Option<usize> {
 /// The ZIP64 extended information extra field (ID 1): the 64-bit values
 /// for each 32-bit field that is `0xffffffff`, in order.
 fn zip64_extra(extra: &[u8], want: [bool; 3]) -> Option<[Option<u64>; 3]> {
-    let mut at = 0;
-    let mut found = None;
-    while at < extra.len() {
-        let id = u16_at(extra, at)?;
-        let len = usize::from(u16_at(extra, at + 2)?);
-        let body = extra.get(at + 4..at + 4 + len)?;
-        if id == 1 {
-            if found.is_some() {
-                return None;
-            }
-            found = Some(body);
-        }
-        at += 4 + len;
-    }
+    // Empty, or exactly one ZIP64 block (ID 1) and nothing else, and only
+    // when a field calls for it.
     let mut out = [None; 3];
-    let Some(body) = found else {
+    if extra.is_empty() {
         return want.iter().all(|w| !w).then_some(out);
-    };
+    }
+    if !want.iter().any(|&w| w) || u16_at(extra, 0)? != 1 {
+        return None;
+    }
+    let len = usize::from(u16_at(extra, 2)?);
+    if extra.len() != 4 + len {
+        return None;
+    }
+    let body = extra.get(4..)?;
     let mut pos = 0;
     for (slot, &w) in out.iter_mut().zip(&want) {
         if w {
@@ -224,8 +222,16 @@ pub fn decode_part_name(name: &str) -> Option<String> {
     while let Some(&c) = b.get(i) {
         if c == b'%' {
             let hex = b.get(i + 1..i + 3)?;
+            if !hex.iter().all(u8::is_ascii_hexdigit) {
+                return None;
+            }
             let s = std::str::from_utf8(hex).ok()?;
-            out.push(u8::from_str_radix(s, 16).ok()?);
+            let v = u8::from_str_radix(s, 16).ok()?;
+            // OPC forbids an escaped `/` or `\` in a segment.
+            if v == b'/' || v == b'\\' {
+                return None;
+            }
+            out.push(v);
             i += 3;
         } else {
             out.push(c);
@@ -489,7 +495,9 @@ impl<'a> Archive<'a> {
         // Local extra data is not used, and would make the local header size
         // the block map records ambiguous: none is allowed beyond a ZIP64
         // field when the local sizes need one.
-        if !extra.is_empty() && (u16_at(extra, 0) != Some(1) || flags & FLAG_DESCRIPTOR != 0) {
+        // With a data descriptor, the local sizes are zero and no ZIP64
+        // field is needed; otherwise only the one `zip64_extra` accepts.
+        if !extra.is_empty() && flags & FLAG_DESCRIPTOR != 0 {
             return Err(bad());
         }
         // Flags must agree except for bits that only describe the central

@@ -871,3 +871,102 @@ fn unmapped_parts_are_bounded() {
     assert!(!id.signature_valid());
     assert!(start.elapsed() < std::time::Duration::from_secs(20));
 }
+
+#[test]
+fn round_two_review_cases() {
+    // Escaped `/` or `\` inside a segment, and `%+` escapes, are refused.
+    for name in [
+        "a%2fb.exe",
+        "AppxMetadata%2FCodeIntegrity.cat",
+        "a%5Cb.exe",
+        "app/%+9tool.exe",
+    ] {
+        let mut b = AppxBuilder::package();
+        b.files[1].name = name.into();
+        assert!(
+            matches!(
+                Archive::parse(&b.build()).unwrap_err(),
+                ZipError::BadName(_)
+            ),
+            "{name}"
+        );
+    }
+
+    // Block sizes that overflow when summed are a mismatch, not a panic.
+    let mut b = AppxBuilder::package();
+    b.blockmap_extra = String::new();
+    let data = b.build();
+    let archive = Archive::parse(&data).unwrap();
+    let map_xml = String::from_utf8(
+        archive
+            .read(archive.member("AppxBlockMap.xml").unwrap())
+            .unwrap(),
+    )
+    .unwrap();
+    // big.bin has three blocks; give them sizes that wrap.
+    let mut n = 0;
+    let patched: String = map_xml
+        .split("<Block ")
+        .enumerate()
+        .map(|(i, part)| {
+            if i == 0 {
+                return part.to_owned();
+            }
+            let inside_big = map_xml
+                .split("<Block ")
+                .take(i)
+                .collect::<String>()
+                .rsplit("<File ")
+                .next()
+                .unwrap()
+                .contains("assets\\big.bin");
+            if inside_big {
+                n += 1;
+                let size = if n == 1 { u64::MAX } else { 1 };
+                format!("<Block Size=\"{size}\" {part}")
+            } else {
+                format!("<Block {part}")
+            }
+        })
+        .collect();
+    assert_eq!(n, 3);
+    let map = palisade_fileid::package::blockmap::parse(patched.as_bytes()).unwrap();
+    assert!(palisade_fileid::package::blockmap::verify(&map, &archive).is_err());
+
+    // Extra data after a ZIP64 block, or a ZIP64 block nothing calls for,
+    // is refused.
+    let zip64 = AppxBuilder::package().build_with(ZIP64);
+    let a = Archive::parse(&zip64).unwrap();
+    let first = &a.members[0];
+    let (at, len) = first.central_raw;
+    let name_len = u16::from_le_bytes([zip64[at + 28], zip64[at + 29]]) as usize;
+    let extra_len = u16::from_le_bytes([zip64[at + 30], zip64[at + 31]]) as usize;
+    assert_eq!(extra_len, 28);
+    let extra_end = at + 46 + name_len + extra_len;
+    let mut trailing = zip64[..extra_end].to_vec();
+    trailing.extend_from_slice(&[0xfe, 0xca, 0, 0]);
+    trailing.extend_from_slice(&zip64[extra_end..]);
+    // Fix the extra length, the central directory size and offsets.
+    trailing[at + 30] = 32;
+    let _ = len;
+    assert!(Archive::parse(&trailing).is_err());
+    let plain = AppxBuilder::package().build();
+    let a = Archive::parse(&plain).unwrap();
+    let (at, _) = a.members[0].central_raw;
+    assert_eq!(plain[at + 30], 0);
+}
+
+#[test]
+fn many_namespaces_parse_quickly() {
+    let mut doc = String::from("<r xmlns=\"urn:root\">");
+    for i in 0..5000 {
+        doc.push_str(&format!(
+            "<p{i}:a xmlns:p{i}=\"urn:{}{i}\"/>",
+            "x".repeat(900)
+        ));
+    }
+    doc.push_str("</r>");
+    let start = std::time::Instant::now();
+    palisade_fileid::package::xml::parse(doc.as_bytes()).unwrap();
+    assert!(start.elapsed() < std::time::Duration::from_secs(10));
+}

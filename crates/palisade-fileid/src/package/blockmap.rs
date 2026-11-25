@@ -263,7 +263,7 @@ pub fn verify(map: &BlockMap, archive: &Archive<'_>) -> Result<(), BlockMapError
         if m.method == 8 {
             if given.len() == f.block_sizes.len()
                 && !f.blocks.is_empty()
-                && given.iter().sum::<u64>() != m.compressed_size
+                && given.iter().try_fold(0_u64, |a, &x| a.checked_add(x)) != Some(m.compressed_size)
             {
                 return Err(BlockMapError::Size(f.name.clone()));
             }
@@ -277,7 +277,16 @@ pub fn verify(map: &BlockMap, archive: &Archive<'_>) -> Result<(), BlockMapError
             .map_or_else(String::new, |f| f.name.clone());
         return Err(BlockMapError::Unlisted(name));
     }
-    // Only then the content, one member at a time.
+    // Only then the content, one member at a time, within a budget: the
+    // whole uncompressed size the block map lists may not exceed what a
+    // package may be at all, whatever sizes the archive claims.
+    let total = listed
+        .values()
+        .try_fold(0_u64, |a, f| a.checked_add(f.size))
+        .filter(|&t| t <= super::MAX_PACKAGE_SIZE);
+    if total.is_none() {
+        return Err(BlockMapError::Size("(total)".into()));
+    }
     for m in &archive.members {
         if let Some(f) = listed.get(&fold(&m.part)) {
             if !UNMAPPED.iter().any(|u| fold(u) == fold(&m.part)) {
