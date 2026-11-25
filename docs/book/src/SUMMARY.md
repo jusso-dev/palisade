@@ -13,6 +13,7 @@
     - [Unknown applications](concepts/unknown-applications.md)
     - [Exceptions and offline overrides](concepts/exceptions-and-overrides.md)
     - [Decision trace](concepts/decision-trace.md)
+        - [Simulation examples](../../examples/simulation/README.md)
 - [Getting started](getting-started/README.md)
     - [Lab install](getting-started/lab-install.md)
     - [Your first policy](getting-started/first-policy.md)
