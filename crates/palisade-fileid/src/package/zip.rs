@@ -18,7 +18,12 @@
 //!   descriptor end where the next local header starts;
 //! - each local header agrees with its central entry (name, method,
 //!   flags, CRC and sizes, or zero for those three when a data descriptor
-//!   follows, whose values must then agree);
+//!   follows, which must carry its signature and whose values must then
+//!   agree);
+//! - a central entry's extra data, if any, is exactly one ZIP64 block with
+//!   exactly the fields its `0xffffffff` markers call for (the package
+//!   digest writes entries that way, so anything else would be read
+//!   differently from how it is signed);
 //! - names are unique (compared ASCII-case-insensitively, as OPC part
 //!   names are), valid UTF-8 or CP437 ASCII, not empty, without `\`, a
 //!   leading `/`, empty, `.` or `..` segments, or NUL;
@@ -390,6 +395,14 @@ impl<'a> Archive<'a> {
             return Err(ZipError::Unsupported(name));
         }
         let want = [usize32 == u32::MAX, csize32 == u32::MAX, off32 == u32::MAX];
+        // The package digest rewrites each central entry with only its
+        // ZIP64 block as extra data, so any other extra field would make
+        // the bytes read here differ from the bytes signed: refused.
+        if !extra.is_empty() && (u16_at(extra, 0) != Some(1) || want.iter().all(|w| !w)) {
+            return Err(ZipError::Unsupported(
+                String::from_utf8_lossy(name_bytes).into_owned(),
+            ));
+        }
         let [u64v, c64v, o64v] = zip64_extra(extra, want).ok_or(ZipError::Zip64)?;
         let size = u64v.unwrap_or(u64::from(usize32));
         let compressed_size = c64v.unwrap_or(u64::from(csize32));
@@ -447,11 +460,13 @@ impl<'a> Archive<'a> {
             if crc != 0 || csize32 != 0 || usize32 != 0 {
                 return Err(bad());
             }
+            // The descriptor must carry its signature: the package digest
+            // writes one, so one without would hash differently.
             let d = to_usize(data_end).ok_or_else(bad)?;
-            let mut p = d;
-            if u32_at(data, p) == Some(DESCRIPTOR_SIG) {
-                p += 4;
+            if u32_at(data, d) != Some(DESCRIPTOR_SIG) {
+                return Err(bad());
             }
+            let p = d + 4;
             let d_crc = u32_at(data, p).ok_or_else(bad)?;
             let (dc, du, n) = if zip64 {
                 (

@@ -468,6 +468,51 @@ fn manifests_are_strict() {
     assert_eq!(parse_package(&b.build()).unwrap().name, "Palisade.TestApp");
 }
 
+const DESCRIPTORS: ZipStyle = ZipStyle {
+    descriptors: true,
+    zip64: false,
+};
+const ZIP64: ZipStyle = ZipStyle {
+    descriptors: true,
+    zip64: true,
+};
+
+#[test]
+fn descriptor_and_zip64_layouts_verify() {
+    for (name, style) in [("app-desc.msix", DESCRIPTORS), ("app-zip64.msix", ZIP64)] {
+        let unsigned = AppxBuilder::package().build_with(style);
+        let a = Archive::parse(&unsigned).unwrap();
+        assert_eq!(a.zip64, style.zip64, "{name}");
+        assert_eq!(parse_package(&unsigned).unwrap().name, "Palisade.TestApp");
+        let id = parse_package(&fixture(name)).unwrap();
+        assert!(
+            id.signature_valid(),
+            "{name}: {:?}",
+            id.signature
+                .as_ref()
+                .map(|s| (&s.issue, &s.report.signatures[0].status))
+        );
+        assert_eq!(
+            fixture(&name.replace(".msix", "-unsigned.msix")),
+            unsigned,
+            "{name}"
+        );
+    }
+    // A data descriptor without its signature is refused.
+    let mut bad = AppxBuilder::package().build_with(DESCRIPTORS);
+    let sig = 0x0807_4b50_u32.to_le_bytes();
+    let at = bad.windows(4).position(|w| w == sig).unwrap();
+    bad[at] = 0;
+    assert!(Archive::parse(&bad).is_err());
+    // An extra field other than one ZIP64 block in a central entry is
+    // refused.
+    let mut extra = AppxBuilder::package().build();
+    let a = Archive::parse(&extra).unwrap();
+    let first = a.members[0].central_raw.0;
+    extra[first + 30] = 4;
+    assert!(Archive::parse(&extra).is_err());
+}
+
 #[test]
 #[ignore = "writes files; run by tests/fixtures/package/generate.sh"]
 fn write_unsigned_packages() {
@@ -475,6 +520,16 @@ fn write_unsigned_packages() {
     let dir = std::path::Path::new(&dir);
     std::fs::write(dir.join("app.msix"), AppxBuilder::package().build()).unwrap();
     std::fs::write(dir.join("bundle.msixbundle"), AppxBuilder::bundle().build()).unwrap();
+    std::fs::write(
+        dir.join("app-desc-unsigned.msix"),
+        AppxBuilder::package().build_with(DESCRIPTORS),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("app-zip64-unsigned.msix"),
+        AppxBuilder::package().build_with(ZIP64),
+    )
+    .unwrap();
 }
 
 #[test]

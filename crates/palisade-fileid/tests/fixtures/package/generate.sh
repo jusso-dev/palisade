@@ -18,6 +18,10 @@
 #   bundle.msixbundle       the unsigned bundle.
 #   bundle-signed.msixbundle  signed.
 #   other-publisher.msix    the package signed by another publisher.
+#   app-desc(-unsigned).msix   the package with data descriptors, as
+#                           packaging tools write it, and signed.
+#   app-zip64(-unsigned).msix  the package with data descriptors and ZIP64
+#                           records and extra fields, and signed.
 #   ca.der                  the test root.
 #
 # Needs: openssl (3.x or later), osslsigncode (2.x), cargo. Run from
@@ -39,7 +43,7 @@ PALISADE_PACKAGE_OUT="$work" \
   cargo test --manifest-path "$crate/Cargo.toml" --test package -- \
   --ignored --exact write_unsigned_packages --quiet
 test -s app.msix && test -s bundle.msixbundle
-cp app.msix bundle.msixbundle "$out/"
+cp app.msix bundle.msixbundle app-desc-unsigned.msix app-zip64-unsigned.msix "$out/"
 
 cat > ca.cnf <<'CNF'
 basicConstraints=critical,CA:TRUE
@@ -81,5 +85,7 @@ sign() {
 sign signer app.msix app-signed.msix
 sign signer bundle.msixbundle bundle-signed.msixbundle
 sign other app.msix other-publisher.msix
+sign signer app-desc-unsigned.msix app-desc.msix
+sign signer app-zip64-unsigned.msix app-zip64.msix
 
 echo "package fixtures written to $out"
