@@ -564,23 +564,16 @@ fn check_threat_coverage(root: &Path) -> Result<Vec<String>, String> {
     for (_, name) in &crates {
         facts.tests.entry(name.clone()).or_default();
     }
-    let mut ids = std::collections::BTreeSet::new();
-    let mut components = std::collections::BTreeSet::new();
-    for line in doc.lines() {
-        if let Some(id) = line
-            .strip_prefix("| T-")
-            .and_then(|rest| rest.split_once(' '))
-            .map(|(id, _)| format!("T-{id}"))
-        {
-            if let Some((component, _)) = id[2..].rsplit_once('-') {
-                components.insert(component.to_owned());
-            }
-            ids.insert(id);
-        }
-    }
+    let (ids, components) = threat_coverage::defined_ids(&doc);
+    // Fuzz projects are separate workspaces, not part of the crate's tests.
+    let fuzz_dirs: Vec<String> = fuzz::PROJECTS
+        .iter()
+        .map(|p| format!("{}/", p.dir))
+        .collect();
     for path in &paths {
         let is_rust = unsafe_code::is_rust_path(path);
-        if !(is_rust || path.ends_with(".md")) || path == threat_coverage::DOCUMENT {
+        let is_markdown = path.to_ascii_lowercase().ends_with(".md");
+        if !(is_rust || is_markdown) || path == threat_coverage::DOCUMENT {
             continue;
         }
         let text = read(&root.join(path))?;
@@ -590,16 +583,15 @@ fn check_threat_coverage(root: &Path) -> Result<Vec<String>, String> {
             &ids,
             &components,
         ));
-        if is_rust {
+        let in_fuzz = fuzz_dirs.iter().any(|d| path.starts_with(d.as_str()));
+        if is_rust && !in_fuzz {
             if let Some((_, name)) = crates
                 .iter()
                 .find(|(prefix, _)| path.starts_with(prefix.as_str()))
             {
-                facts
-                    .tests
-                    .entry(name.clone())
-                    .or_default()
-                    .extend(threat_coverage::test_functions(&text));
+                let tests = threat_coverage::test_functions(&text)
+                    .ok_or_else(|| format!("{path}: cannot tokenise"))?;
+                facts.tests.entry(name.clone()).or_default().extend(tests);
             }
         }
     }

@@ -24,8 +24,8 @@
 //!   tables;
 //! - the document, or any tracked `.rs` or `.md` file, mentions a threat ID
 //!   of a known component that the STRIDE tables do not define (for
-//!   example a `// threat: T-agent-NN` comment that names a number the
-//!   tables do not have).
+//!   example a threat annotation comment whose number the tables do not
+//!   have).
 //!
 //! The format of the verification column is described in the threat model
 //! itself, under "Bypass attack trees". A test is any function preceded by a
@@ -103,6 +103,11 @@ fn cells(line: &str) -> Option<Vec<&str>> {
     Some(inner.split('|').map(str::trim).collect())
 }
 
+/// `true` for a Markdown table separator cell such as `---` or `:-:`.
+fn is_separator(cell: &str) -> bool {
+    !cell.is_empty() && cell.bytes().all(|b| b == b'-' || b == b':')
+}
+
 /// `(component, number)` of a threat ID `T-<component>-<nn>`, where the
 /// component is lowercase ASCII letters and the number is two digits.
 fn split_id(id: &str) -> Option<(&str, &str)> {
@@ -136,12 +141,11 @@ fn parse(doc: &str, v: &mut Vec<String>) -> Parsed {
         }
         let Some(row) = cells(line) else { continue };
         let first = row.first().copied().unwrap_or("");
+        // Header and separator rows; every other row is data.
+        if matches!(first, "ID" | "Threat" | "Component") || row.iter().all(|c| is_separator(c)) {
+            continue;
+        }
         match section {
-            "STRIDE per component" if first.starts_with("T-") => {
-                if let Some(t) = parse_threat(&row, n, v) {
-                    threats.push(t);
-                }
-            }
             "STRIDE per component" if first.starts_with('`') || first == "**Total**" => {
                 let name = first.trim_matches(|c| c == '`' || c == '*').to_owned();
                 let counts = row[1..]
@@ -150,19 +154,33 @@ fn parse(doc: &str, v: &mut Vec<String>) -> Parsed {
                     .collect();
                 summary.push((name, counts, n));
             }
-            "Mitigation mapping" if first.starts_with("T-") => {
-                if row.len() == 4 {
+            "STRIDE per component" => {
+                if let Some(t) = parse_threat(&row, n, v) {
+                    threats.push(t);
+                }
+            }
+            "Mitigation mapping" => {
+                if row.len() != 4 {
+                    v.push(format!(
+                        "{DOCUMENT}:{n}: a mitigation row needs 4 cells (threat, mitigation, issue, verification), found {}",
+                        row.len()
+                    ));
+                } else if split_id(first).is_none() {
+                    v.push(format!(
+                        "{DOCUMENT}:{n}: `{first}` is not a threat ID of the form T-<component>-<nn>"
+                    ));
+                } else {
+                    for (name, cell) in [("mitigation", row[1]), ("verification", row[3])] {
+                        if cell.is_empty() {
+                            v.push(format!("{DOCUMENT}:{n}: {first}: the {name} cell is empty"));
+                        }
+                    }
                     mitigations.push(Mitigation {
                         id: row[0].to_owned(),
                         issues: row[2].to_owned(),
                         verification: row[3].to_owned(),
                         line: n,
                     });
-                } else {
-                    v.push(format!(
-                        "{DOCUMENT}:{n}: a mitigation row needs 4 cells (threat, mitigation, issue, verification), found {}",
-                        row.len()
-                    ));
                 }
             }
             _ => {}
@@ -212,6 +230,7 @@ fn parse_threat(row: &[&str], n: usize, v: &mut Vec<String>) -> Option<Threat> {
         }
         for (name, cell) in [
             ("description", row[2]),
+            ("preconditions", row[3]),
             ("impact", row[4]),
             ("likelihood", row[5]),
             ("issue", row[6]),
@@ -331,14 +350,47 @@ fn backticked(s: &str) -> Vec<&str> {
     s.split('`').skip(1).step_by(2).collect()
 }
 
+/// The items of an untagged verification entry: split on commas outside
+/// parentheses, so `TEST-x (#1, #2)` stays one item.
+fn items(entry: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0;
+    for (i, c) in entry.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                out.push(entry[start..i].trim());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(entry[start..].trim());
+    out
+}
+
+/// `true` if `item` starts with a proposed verification ID: one of the
+/// prefixes, then lowercase letters, digits and `-`, not empty.
+fn proposed_id<'a>(item: &'a str, prefixes: &[&str]) -> Option<&'a str> {
+    let id = item.split_whitespace().next().unwrap_or("");
+    let (prefix, rest) = prefixes
+        .iter()
+        .find_map(|p| id.strip_prefix(p).map(|r| (*p, r)))?;
+    let valid = !rest.is_empty()
+        && !rest.starts_with('-')
+        && rest
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+    valid.then(|| &id[..prefix.len() + rest.len()])
+}
+
 fn check_verification(m: &Mitigation, status: &str, facts: &Facts, v: &mut Vec<String>) {
     let at = format!("{DOCUMENT}:{}: {}", m.line, m.id);
     let mut on_main = false;
     let mut scenario = false;
     for entry in m.verification.split(';').map(str::trim) {
-        if entry.starts_with("BYP-") || entry.starts_with("RT-") {
-            scenario = true;
-        }
         if let Some(rest) = entry.strip_prefix("TEST:") {
             on_main = true;
             check_tests(&at, rest, facts, v);
@@ -366,6 +418,20 @@ fn check_verification(m: &Mitigation, status: &str, facts: &Facts, v: &mut Vec<S
                 }
                 None => v.push(format!("{at}: `CI:` names no command in backticks")),
             }
+        } else if entry.starts_with("None yet") {
+            // An honest gap, allowed only on planned rows (checked below).
+        } else {
+            // Proposed IDs for #230 and other issues: every item must be
+            // one, so a citation with a mistyped or missing tag fails.
+            for item in items(entry) {
+                if proposed_id(item, &["BYP-", "RT-"]).is_some() {
+                    scenario = true;
+                } else if proposed_id(item, &["FUZZ-", "TEST-"]).is_none() {
+                    v.push(format!(
+                        "{at}: verification entry `{item}` is not `TEST:`, `fuzz:` or `CI:` followed by backticked names, or a `BYP-`, `RT-`, `FUZZ-` or `TEST-` ID; separate entries with `;`"
+                    ));
+                }
+            }
         }
     }
     if matches!(status, "implemented" | "verified") && !on_main {
@@ -385,9 +451,18 @@ fn check_verification(m: &Mitigation, status: &str, facts: &Facts, v: &mut Vec<S
 fn check_tests(at: &str, rest: &str, facts: &Facts, v: &mut Vec<String>) {
     let mut crate_name: Option<&str> = None;
     let mut tests = 0;
+    // Whether the current crate has had a test named after it.
+    let mut named = true;
     for token in backticked(rest) {
         if facts.tests.contains_key(token) {
+            if !named {
+                v.push(format!(
+                    "{at}: `TEST:` names crate `{}` with no test after it",
+                    crate_name.unwrap_or(token)
+                ));
+            }
             crate_name = Some(token);
+            named = false;
             continue;
         }
         let Some(name) = crate_name else {
@@ -397,6 +472,7 @@ fn check_tests(at: &str, rest: &str, facts: &Facts, v: &mut Vec<String>) {
             return;
         };
         tests += 1;
+        named = true;
         let function = token.rsplit("::").next().unwrap_or(token);
         if !facts.tests[name].contains(function) {
             v.push(format!("{at}: crate `{name}` has no test `{function}`"));
@@ -404,6 +480,11 @@ fn check_tests(at: &str, rest: &str, facts: &Facts, v: &mut Vec<String>) {
     }
     if tests == 0 {
         v.push(format!("{at}: `TEST:` names no test in backticks"));
+    } else if !named {
+        v.push(format!(
+            "{at}: `TEST:` names crate `{}` with no test after it",
+            crate_name.unwrap_or("")
+        ));
     }
 }
 
@@ -462,7 +543,9 @@ fn check_summary(
 }
 
 /// Every mention in `text` of a threat ID whose component is in
-/// `components` but which is not in `ids`.
+/// `components` but which is not in `ids`. On a line with a `threat:` or
+/// `threats:` annotation, any `T-...` token that is not a defined ID fails,
+/// whatever its component or number of digits.
 pub fn check_references(
     path: &str,
     text: &str,
@@ -471,6 +554,7 @@ pub fn check_references(
 ) -> Vec<String> {
     let mut v = Vec::new();
     for (index, line) in text.lines().enumerate() {
+        let annotated = line.contains("threat:") || line.contains("threats:");
         let bytes = line.as_bytes();
         let mut start = 0;
         while let Some(offset) = line[start..].find("T-") {
@@ -483,11 +567,12 @@ pub fn check_references(
             let end = line[at + 2..]
                 .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
                 .map_or(line.len(), |e| at + 2 + e);
-            let candidate = &line[at..end];
-            let Some((component, _)) = split_id(candidate) else {
-                continue;
-            };
-            if components.contains(component) && !ids.contains(candidate) {
+            let candidate = line[at..end].trim_end_matches('-');
+            let known_component = split_id(candidate).is_some_and(|(c, _)| components.contains(c));
+            let looks_like_id = candidate.len() > 2
+                && candidate[2..].contains('-')
+                && candidate.as_bytes()[2].is_ascii_lowercase();
+            if (known_component || (annotated && looks_like_id)) && !ids.contains(candidate) {
                 v.push(format!(
                     "{path}:{}: {candidate} is not a threat in {DOCUMENT}",
                     index + 1
@@ -498,44 +583,89 @@ pub fn check_references(
     v
 }
 
-/// Names of the test functions in Rust `source`: each `fn` that follows a
-/// `#[test]` or `#[tokio::test]` attribute, past any other attributes,
-/// comments and doc comments in between.
-pub fn test_functions(source: &str) -> Vec<String> {
+/// Names of the test functions in Rust `source`: each `fn` item preceded by
+/// a `#[test]` or `#[tokio::test(...)]` attribute, at any nesting depth
+/// (including inside `proptest!` and other macro bodies). Tests that are
+/// also `#[ignore]`d do not run by default, so they are left out. The source
+/// is tokenised, so text in comments and string literals never counts.
+/// `None` if `source` does not tokenise.
+pub fn test_functions(source: &str) -> Option<Vec<String>> {
+    use proc_macro2::{Delimiter, TokenStream, TokenTree};
+    use std::str::FromStr as _;
+
     let mut found = Vec::new();
-    let mut pending = false;
-    for line in source.lines() {
-        let line = line.trim();
-        if line.starts_with("#[test]") || line.starts_with("#[tokio::test") {
-            pending = true;
-            continue;
-        }
-        if !pending {
-            continue;
-        }
-        if line.starts_with("#[") || line.starts_with("//") || line.is_empty() {
-            continue;
-        }
-        pending = false;
-        let after_fn = line
-            .split_once("fn ")
-            .filter(|(before, _)| {
-                before
-                    .split_whitespace()
-                    .all(|w| matches!(w, "pub" | "async" | "const" | "unsafe"))
-            })
-            .map(|(_, after)| after);
-        if let Some(after) = after_fn {
-            let name: String = after
-                .chars()
-                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-                .collect();
-            if !name.is_empty() {
-                found.push(name);
+    let mut stack = vec![TokenStream::from_str(source).ok()?];
+    while let Some(stream) = stack.pop() {
+        let tokens: Vec<TokenTree> = stream.into_iter().collect();
+        let mut is_test = false;
+        let mut ignored = false;
+        let mut i = 0;
+        while i < tokens.len() {
+            match &tokens[i] {
+                TokenTree::Punct(p) if p.as_char() == '#' => {
+                    if let Some(TokenTree::Group(g)) = tokens.get(i + 1) {
+                        if g.delimiter() == Delimiter::Bracket {
+                            // The attribute's path: idents and `::`, up to
+                            // its arguments (`(...)` or `= ...`).
+                            let path: Vec<String> = g
+                                .stream()
+                                .into_iter()
+                                .take_while(|t| match t {
+                                    TokenTree::Ident(_) => true,
+                                    TokenTree::Punct(p) => p.as_char() == ':',
+                                    _ => false,
+                                })
+                                .map(|t| t.to_string())
+                                .collect();
+                            match path.concat().as_str() {
+                                "test" | "tokio::test" => is_test = true,
+                                "ignore" => ignored = true,
+                                _ => {}
+                            }
+                            stack.push(g.stream());
+                            i += 2;
+                            continue;
+                        }
+                    }
+                }
+                TokenTree::Ident(ident) if ident == "fn" => {
+                    if let Some(TokenTree::Ident(name)) = tokens.get(i + 1) {
+                        if is_test && !ignored {
+                            found.push(name.to_string());
+                        }
+                    }
+                    is_test = false;
+                    ignored = false;
+                }
+                TokenTree::Group(g) => {
+                    stack.push(g.stream());
+                    // A body ends the item the attributes belonged to.
+                    if g.delimiter() == Delimiter::Brace {
+                        is_test = false;
+                        ignored = false;
+                    }
+                }
+                TokenTree::Punct(p) if p.as_char() == ';' => {
+                    is_test = false;
+                    ignored = false;
+                }
+                _ => {}
             }
+            i += 1;
         }
     }
-    found
+    found.sort();
+    Some(found)
+}
+
+/// The threat IDs and component names the STRIDE tables of `doc` define,
+/// read with the same parser as [`check`].
+pub fn defined_ids(doc: &str) -> (BTreeSet<String>, BTreeSet<String>) {
+    let (threats, _, _) = parse(doc, &mut Vec::new());
+    (
+        threats.iter().map(|t| t.id.clone()).collect(),
+        threats.iter().map(|t| t.component.clone()).collect(),
+    )
 }
 
 #[cfg(test)]
@@ -770,13 +900,19 @@ mod tests {
     fn unknown_threat_ids_are_found_in_any_text() {
         let ids: BTreeSet<String> = ["T-agent-01".to_owned()].into();
         let components: BTreeSet<String> = ["agent".to_owned()].into();
-        let text = "// threat: T-agent-01\n// threat: T-agent-02, see T-agent-1 and XT-agent-03\n\
-                    ATT&CK T-1218, T-other-01, (T-agent-04).";
-        let v = check_references("src/a.rs", text, &ids, &components);
+        let text = [
+            "// threat",
+            ": T-agent-01\n// threat",
+            ": T-agent-02, see T-agent-1 and XT-agent-03\nATT&CK T-1218, T-other-01, (T-agent-04).",
+        ]
+        .concat();
+        let v = check_references("src/a.rs", &text, &ids, &components);
         assert_eq!(
             v,
             [
                 "src/a.rs:2: T-agent-02 is not a threat in docs/security/threat-model.md",
+                // On a `threat:` line even a malformed ID is reported.
+                "src/a.rs:2: T-agent-1 is not a threat in docs/security/threat-model.md",
                 "src/a.rs:3: T-agent-04 is not a threat in docs/security/threat-model.md",
             ]
         );
@@ -790,33 +926,137 @@ mod tests {
     }
 
     #[test]
+    fn untagged_or_mistyped_verification_entries_fail() {
+        let v = run(
+            "| T-x-07 | E | More. | Any | H | L | #5 | implemented | None. |\n",
+            "| T-x-07 | Check. | #5 | TEST: `palisade-policy` `a_real_test`; `palisade-policy` `gone`; Test: `x`; BYP-; TEST-ok (#5, #6) |\n",
+            "6/4/2/0",
+        );
+        assert_eq!(v.len(), 3, "{v:?}");
+        assert!(v[0].contains("entry ``palisade-policy` `gone``"), "{v:?}");
+        assert!(v[1].contains("entry `Test: `x``"), "{v:?}");
+        assert!(v[2].contains("entry `BYP-`"), "{v:?}");
+    }
+
+    #[test]
+    fn comma_separated_scenarios_count_for_verified() {
+        let v = run(
+            "| T-x-07 | E | More. | Any | H | L | #5 | verified | None. |\n",
+            "| T-x-07 | Check. | #5 | TEST: `palisade-policy` `a_real_test`; FUZZ-x, TEST-y (#5), RT-x-01 |\n",
+            "6/4/1/1",
+        );
+        assert_eq!(v, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_crate_named_without_a_test_fails() {
+        let v = run(
+            "| T-x-07 | E | More. | Any | H | L | #5 | implemented | None. |\n",
+            "| T-x-07 | Check. | #5 | TEST: `palisade-policy` `a_real_test`, `xtask` |\n",
+            "6/4/2/0",
+        );
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert!(
+            v[0].contains("names crate `xtask` with no test after it"),
+            "{v:?}"
+        );
+    }
+
+    #[test]
+    fn every_data_row_is_checked_and_no_cell_is_blank() {
+        let v = run(
+            "| t-x-07 | E | Lowercase ID. | Any | H | L | #5 | planned | None. |\n\
+             | T-x-08 | E | No preconditions. | | H | L | #5 | planned | None. |\n",
+            "| X-09 | Check. | #5 | BYP-x |\n| T-x-08 | | #5 | BYP-x |\n",
+            "6/5/1/0",
+        );
+        let joined = v.join("\n");
+        for want in [
+            "`t-x-07` is not a threat ID",
+            "T-x-08: the preconditions cell is empty",
+            "`X-09` is not a threat ID",
+            "T-x-08: the mitigation cell is empty",
+        ] {
+            assert!(joined.contains(want), "missing {want:?} in:\n{joined}");
+        }
+    }
+
+    #[test]
+    fn threat_annotations_must_name_defined_threats() {
+        let ids: BTreeSet<String> = ["T-agent-01".to_owned()].into();
+        let components: BTreeSet<String> = ["agent".to_owned()].into();
+        let text = [
+            "// threat",
+            ": T-policy-05\n// threats",
+            ": T-agent-01, T-agent-3\nprose about T-1218 and T-cell-x\n",
+        ]
+        .concat();
+        let v = check_references("a.rs", &text, &ids, &components);
+        assert_eq!(
+            v,
+            [
+                "a.rs:1: T-policy-05 is not a threat in docs/security/threat-model.md",
+                "a.rs:2: T-agent-3 is not a threat in docs/security/threat-model.md",
+            ]
+        );
+    }
+
+    #[test]
+    fn defined_ids_come_from_the_stride_tables_only() {
+        let text = doc("", "", "5/4/1/0") + "\n## Other\n\n| T-y-01 | not a threat row |\n";
+        let (ids, components) = defined_ids(&text);
+        assert_eq!(ids.len(), 6);
+        assert!(ids.contains("T-x-03"));
+        assert_eq!(components, ["x".to_owned()].into());
+    }
+
+    #[test]
     fn test_functions_follow_test_attributes() {
-        let source = "\
+        let source = r##"
 #[test]
 fn plain() {}
 
-#[tokio::test(flavor = \"multi_thread\")]
+#[tokio::test(flavor = "multi_thread")]
 async fn on_tokio() {}
 
 #[test]
 #[cfg(windows)]
+#[should_panic(
+    expected = "multi-line attribute"
+)]
 /// Documented.
 // Commented.
 pub fn with_attributes() {}
+
+#[test]
+#[ignore = "writes fuzz seeds"]
+fn ignored_seed_writer() {}
 
 proptest! {
     #[test]
     fn inside_proptest(x in 0..1u8) {}
 }
 
+mod nested {
+    #[test]
+    fn in_a_module() {}
+}
+
 fn not_a_test() {}
 
-#[test]
-let fn_like = 1;
-";
+const TEXT: &str = "#[test] fn in_a_string() {}";
+// #[test] fn in_a_comment() {}
+"##;
         assert_eq!(
-            test_functions(source),
-            ["plain", "on_tokio", "with_attributes", "inside_proptest"]
+            test_functions(source).unwrap(),
+            [
+                "in_a_module",
+                "inside_proptest",
+                "on_tokio",
+                "plain",
+                "with_attributes"
+            ]
         );
+        assert_eq!(test_functions("fn (("), None);
     }
 }

@@ -362,19 +362,29 @@ fn check_action(at: &str, uses: &str, step: &Yaml, v: &mut Vec<String>) {
         }
     }
     if repo.eq_ignore_ascii_case("Swatinem/rust-cache") {
-        let save_if = step
+        // Action inputs are matched case-insensitively by the runner, so
+        // every spelling of the key is checked, and there must be one.
+        let with = step
             .as_hash()
             .and_then(|s| get(s, "with"))
-            .and_then(|w| w.as_hash())
-            .and_then(|w| get(w, "save-if"));
-        let main_only = match save_if {
-            Some(Yaml::Boolean(false)) => true,
-            Some(Yaml::String(s)) => s.trim() == CACHE_SAVE_IF,
+            .and_then(|w| w.as_hash());
+        let values: Vec<&Yaml> = with
+            .into_iter()
+            .flat_map(|w| w.iter())
+            .filter(|(k, _)| {
+                k.as_str()
+                    .is_some_and(|k| k.eq_ignore_ascii_case("save-if"))
+            })
+            .map(|(_, value)| value)
+            .collect();
+        let main_only = |value: &Yaml| match value {
+            Yaml::Boolean(false) => true,
+            Yaml::String(s) => s.trim() == CACHE_SAVE_IF,
             _ => false,
         };
-        if !main_only {
+        if values.len() != 1 || !values.iter().all(|v| main_only(v)) {
             v.push(format!(
-                "{at}: Swatinem/rust-cache must set `save-if: false` or `save-if: {CACHE_SAVE_IF}`, so only main writes the cache"
+                "{at}: Swatinem/rust-cache must set `save-if` once, to `false` or `{CACHE_SAVE_IF}`, so only main writes the cache"
             ));
         }
     }
@@ -677,6 +687,8 @@ mod tests {
             "        with:\n          save-if: true\n",
             "        with:\n          save-if: ${{ github.event_name == 'push' }}\n",
             "        with:\n          save-if: ${{ github.ref == 'refs/heads/main' || true }}\n",
+            "        with:\n          save-if: false\n          SAVE-IF: true\n",
+            "        with:\n          Save-If: true\n",
         ] {
             let v = check(&workflow(&step(bad)));
             assert_eq!(v.len(), 1, "{bad}: {v:?}");
