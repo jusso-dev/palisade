@@ -17,9 +17,11 @@
 //!   (its signature verifies with the issuer's key), whose extended key
 //!   usage lists OCSP Signing, whose key usage, if restricted, allows
 //!   digital signatures, that was valid when the response was produced,
-//!   and that no offline revocation entry names. The responder ID (by name
-//!   or by key hash) must name the key that signed. A delegated `good`
-//!   answer stops counting once the responder has expired.
+//!   and that no revocation data in the set revokes (offline entries, the
+//!   issuer's verified CRLs, the issuer's own OCSP answers). The responder
+//!   ID (by name or by key hash) must name the key that signed. A delegated
+//!   responder's `good` answers, and its answers as coverage, count only
+//!   inside its validity period; its `revoked` answers always count.
 //!
 //! What it shows:
 //!
@@ -259,8 +261,11 @@ fn subject_public_key(cert: &CertSummary) -> Option<&[u8]> {
 pub(crate) enum Signer {
     /// The issuer itself.
     Issuer,
-    /// A responder the issuer delegated to, valid until this time.
+    /// A responder the issuer delegated to, valid from `valid_from` to
+    /// `valid_until`.
     Delegated {
+        /// The responder certificate's `notBefore`.
+        valid_from: i64,
         /// The responder certificate's `notAfter`.
         valid_until: i64,
     },
@@ -271,14 +276,28 @@ pub(crate) enum Signer {
 }
 
 impl Signer {
-    /// Whether an answer by this signer counts at `now`. A `revoked` or
-    /// `unknown` answer counts whenever the response was authorised; a
-    /// `good` one only while a delegated responder is still valid.
+    /// Whether this signer can vouch at `now`: the issuer always, a
+    /// delegated responder only inside its validity period.
+    pub(crate) fn valid_at(self, now: i64) -> bool {
+        match self {
+            Self::Issuer => true,
+            Self::Delegated {
+                valid_from,
+                valid_until,
+            } => valid_from <= now && now <= valid_until,
+            Self::None | Self::NotChecked => false,
+        }
+    }
+
+    /// Whether an answer by this signer counts at `now`. A `revoked` answer
+    /// counts whenever the response was authorised (it can only make a
+    /// certificate fail); a `good` or `unknown` one only while the signer
+    /// can vouch ([`Self::valid_at`]).
     pub(crate) fn vouches(self, answer: &SingleResponse, now: i64) -> bool {
         match self {
             Self::Issuer => true,
-            Self::Delegated { valid_until } => {
-                answer.status != OcspCertStatus::Good || now <= valid_until
+            Self::Delegated { .. } => {
+                matches!(answer.status, OcspCertStatus::Revoked { .. }) || self.valid_at(now)
             }
             Self::None | Self::NotChecked => false,
         }
@@ -349,12 +368,13 @@ impl OcspResponse {
     /// - list the OCSP Signing EKU, allow `digitalSignature` if its key usage
     ///   is restricted, and carry no unprocessed critical extension;
     /// - have been valid when the response was produced (`producedAt`);
-    /// - not be named by `revoked`, which [`super::RevocationSet`] fills with
-    ///   its offline entries: a revoked responder vouches for nothing.
+    /// - not be named by `revoked`, which [`super::RevocationSet`] answers
+    ///   from its offline entries, the issuer's verified CRLs and the
+    ///   issuer's own OCSP answers: a revoked responder vouches for nothing.
     ///
-    /// Whether the responder is still valid now is
-    /// [`Signer::Delegated::valid_until`]'s business: a `good` answer is
-    /// used only while it is.
+    /// Whether the responder is valid now is [`Signer::valid_at`]'s
+    /// business: only then do its `good` answers count, or any answer as
+    /// coverage.
     pub(crate) fn signer_for(
         &self,
         issuer: &CertSummary,
@@ -410,6 +430,7 @@ impl OcspResponse {
             }
             if self.signature_valid(r) {
                 return Signer::Delegated {
+                    valid_from: r.not_before,
                     valid_until: r.not_after,
                 };
             }
@@ -482,8 +503,10 @@ impl OcspResponse {
     /// restricted, and carry no unprocessed critical extension; and have
     /// been valid when the response was produced. A `good` answer from a
     /// delegated responder that has expired by `now` is left out: it can no
-    /// longer vouch. Empty otherwise. ([`super::RevocationSet`] also rejects
-    /// a responder its offline entries revoke.)
+    /// longer vouch, and so is one before the responder became valid.
+    /// Empty otherwise. ([`super::RevocationSet`] also rejects a responder
+    /// that its offline entries, the issuer's CRLs or the issuer's own OCSP
+    /// answers revoke.)
     #[must_use]
     pub fn answers_for<'a>(
         &'a self,

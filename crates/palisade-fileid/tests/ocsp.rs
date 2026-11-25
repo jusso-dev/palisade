@@ -154,8 +154,8 @@ fn a_revoked_answer_revokes_with_its_date_and_reason() {
             assert_eq!(entries[0].revoked_at, Some(1_622_505_600));
             assert_eq!(entries[0].reason, RevocationReason::KeyCompromise);
             assert_eq!(entries[0].source, RevocationSource::Ocsp(0));
-            // The answer was not `good`, so nothing vouches for coverage;
-            // with mode Off nothing more is needed either.
+            // A current `revoked` answer from an authorised responder is
+            // itself coverage.
             assert_eq!(coverage, Coverage::Good);
         }
         other => panic!("{other:?}"),
@@ -790,4 +790,91 @@ fn ocsp_checks_share_the_crl_budget_and_fail_closed() {
         set.add_ocsp(r.clone());
     }
     assert_eq!(set.state_of(&[&leaf, &root], 0, now), CertRevocation::Good);
+}
+
+#[test]
+fn a_responder_revoked_by_its_issuer_vouches_for_nothing() {
+    use palisade_fileid::authenticode::Crl;
+    let (leaf, root) = (cert("leaf"), cert("root"));
+    let good = response("good-delegated");
+    let now = now_of(&good);
+    let crl = Crl::from_der(&bytes("crl-responder-revoked.der")).unwrap();
+    // The CRL runs 2024 to 2034. At a time it is stale it covers nothing,
+    // but it still revokes the responder: then nothing covers the leaf.
+    let stale = crl.next_update.unwrap() + 1;
+    assert!(stale > now && stale < cert("responder").not_after);
+    let mut current = good.clone();
+    current.responses[0].next_update = Some(stale + 1);
+    let state = |crl: Option<Crl>, extra: Option<OcspResponse>, at: i64| {
+        let mut set = RevocationSet::new();
+        set.mode = RevocationMode::OnlineRequired;
+        set.add_ocsp(current.clone());
+        if let Some(c) = crl {
+            set.add_crl(c);
+        }
+        if let Some(r) = extra {
+            set.add_ocsp(r);
+        }
+        set.state_of(&[&leaf, &root], 0, at)
+    };
+    // Without the CRL, the responder's answer covers the leaf.
+    assert_eq!(state(None, None, stale), CertRevocation::Good);
+    // With it, the revoked responder vouches for nothing.
+    assert_eq!(
+        state(Some(crl.clone()), None, stale),
+        CertRevocation::Unknown
+    );
+    // Another CA's CRL (it lists serial 1001 under another root) revokes
+    // nothing here: a CRL counts only from the responder's issuer.
+    let forged = Crl::from_der(
+        &std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/timestamp/crl-forged.der"
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(state(Some(forged), None, stale), CertRevocation::Good);
+    // By the issuer's own OCSP answer about the responder.
+    assert_eq!(
+        state(None, Some(response("revoked-responder-by-root")), now),
+        CertRevocation::Unknown
+    );
+}
+
+#[test]
+fn a_responder_vouches_only_inside_its_validity() {
+    let (leaf, root) = (cert("leaf"), cert("root"));
+    let responder = cert("responder");
+    let mut good = response("good-delegated");
+    // Make the answer current across the responder's whole life and
+    // beyond, so only the responder's validity decides.
+    good.responses[0].this_update = responder.not_before - 1_000_000;
+    good.responses[0].next_update = Some(responder.not_after + 1_000_000);
+    let run = |r: &OcspResponse, now: i64| {
+        let mut set = RevocationSet::new();
+        set.mode = RevocationMode::OnlineRequired;
+        set.add_ocsp(r.clone());
+        set.state_of(&[&leaf, &root], 0, now)
+    };
+    let inside = now_of(&response("good-delegated"));
+    assert_eq!(run(&good, inside), CertRevocation::Good);
+    // Before the responder is valid, and after it expires: no coverage.
+    assert_eq!(
+        run(&good, responder.not_before - 1),
+        CertRevocation::Unknown
+    );
+    assert_eq!(run(&good, responder.not_after + 1), CertRevocation::Unknown);
+    // A delegated `revoked` answer still revokes after the responder
+    // expires, but is not coverage then.
+    let mut revoked = response("revoked-delegated");
+    revoked.responses[0].next_update = Some(responder.not_after + 1_000_000);
+    let other = cert("other");
+    let mut set = RevocationSet::new();
+    set.mode = RevocationMode::OnlineRequired;
+    set.add_ocsp(revoked);
+    match set.state_of(&[&other, &root], 0, responder.not_after + 1) {
+        CertRevocation::Revoked { coverage, .. } => assert_eq!(coverage, Coverage::Unknown),
+        s => panic!("{s:?}"),
+    }
 }

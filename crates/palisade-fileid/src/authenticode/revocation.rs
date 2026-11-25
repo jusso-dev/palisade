@@ -328,7 +328,8 @@ pub struct RevocationSet {
 #[serde(rename_all = "snake_case")]
 pub enum Coverage {
     /// Nothing more was needed, or a current CRL from its issuer, or a
-    /// current `good` OCSP response its issuer authorised, covers it.
+    /// current `good` or `revoked` answer from an OCSP signer its issuer
+    /// authorised (and that can vouch now), covers it.
     Good,
     /// An answer was looked for and is missing.
     Unknown,
@@ -518,9 +519,9 @@ impl RevocationSet {
                 if singles.peek().is_none() {
                     continue;
                 }
-                // A responder that offline entries revoke vouches for
+                // A delegated responder that the set revokes vouches for
                 // nothing.
-                let revoked = |r: &CertSummary| self.certificates.iter().any(|e| e.cert.matches(r));
+                let revoked = |r: &CertSummary| responder_revoked(self, r, issuer);
                 let signer = match crl_cache.ocsp_by(index, response, issuer, &revoked) {
                     Signer::None => continue,
                     Signer::NotChecked => {
@@ -530,10 +531,12 @@ impl RevocationSet {
                     signer => signer,
                 };
                 for single in singles.filter(|a| signer.vouches(a, now)) {
-                    // A current answer, `good` or `revoked`, is an answer:
-                    // coverage, like a current CRL. Only a stale one, or
-                    // `unknown`, leaves the question open.
-                    if single.status != OcspCertStatus::Unknown {
+                    // A current answer, `good` or `revoked`, from a signer
+                    // that can vouch now is an answer: coverage, like a
+                    // current CRL. A stale one, `unknown`, or one from a
+                    // responder outside its validity leaves the question
+                    // open.
+                    if single.status != OcspCertStatus::Unknown && signer.valid_at(now) {
                         covered |= single.is_current(now);
                     }
                     match single.status {
@@ -576,6 +579,35 @@ impl RevocationSet {
             (true, Coverage::NotChecked) => CertRevocation::NotChecked,
         }
     }
+}
+
+/// Whether `responder`, a delegated OCSP responder that `issuer` issued,
+/// is revoked by anything in `set`: an offline entry; an entry in a CRL
+/// that `issuer` signed; or a `revoked` answer in an OCSP response that
+/// `issuer` itself signed. Signatures are checked here without the
+/// file's budget: at most one per CRL and response in the set, which
+/// [`MAX_CRLS`] and [`MAX_OCSP_RESPONSES`] bound, and only for a
+/// responder that is otherwise acceptable.
+fn responder_revoked(set: &RevocationSet, responder: &CertSummary, issuer: &CertSummary) -> bool {
+    if set.certificates.iter().any(|e| e.cert.matches(responder)) {
+        return true;
+    }
+    let by_crl = set.crls.iter().any(|crl| {
+        crl.issuer.der == issuer.subject.der
+            && crl.entries_for(&responder.serial).next().is_some()
+            && crl.verify_with(issuer) == Verified::Valid
+    });
+    if by_crl {
+        return true;
+    }
+    set.ocsp.iter().any(|r| {
+        r.responses_for(responder, issuer)
+            .any(|a| matches!(a.status, OcspCertStatus::Revoked { .. }))
+            && {
+                let mut one = 1;
+                r.signer_for(issuer, &|_| false, &mut one) == Signer::Issuer
+            }
+    })
 }
 
 /// Whether a CRL was issued by a certificate.

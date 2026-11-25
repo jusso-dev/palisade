@@ -22,6 +22,10 @@
 #   good-rogue.der          leaf good, signed by rogue (no OCSP Signing EKU)
 #   good-old-responder.der  leaf good, signed by old-responder, produced
 #                           long after it expired
+#   crl-responder-revoked.der  root's CRL (2024 to 2034) revoking responder
+#                           (serial 2001, keyCompromise)
+#   revoked-responder-by-root.der  root's own OCSP answer: responder
+#                           revoked (keyCompromise)
 #   revoked-delegated.der   other revoked (keyCompromise), signed by responder
 #   unknown-by-root.der     a serial the index does not know, signed by root
 #   good-expired.der        leaf good, nextUpdate in the past (-ndays 0 is
@@ -115,6 +119,29 @@ respond revoked-delegated.der other.req responder
 respond unknown-by-root.der unknown.req root
 openssl ocsp -index index.txt -CA root.pem -rsigner root.pem -rkey root.key \
   -reqin leaf.req -respout "$out/good-expired.der" -nmin 1 >/dev/null
+
+# root's CRL revoking the delegated responder.
+cat > crl.cnf <<'CNF'
+[ca]
+default_ca = d
+[d]
+database = crl.idx
+crlnumber = crl.num
+default_md = sha256
+crl_extensions = ext
+[ext]
+authorityKeyIdentifier = keyid
+CNF
+printf 'R\t400101000000Z\t210601000000Z,keyCompromise\t2001\tunknown\t/O=Palisade Tests/CN=Palisade OCSP Responder\n' > crl.idx
+echo 01 > crl.num
+openssl ca -config crl.cnf -gencrl -cert root.pem -keyfile root.key \
+  -crl_lastupdate 20240101000000Z -crl_nextupdate 20340101000000Z -out crl.pem 2>/dev/null
+openssl crl -in crl.pem -outform DER -out "$out/crl-responder-revoked.der"
+# root's own OCSP answer about the responder.
+printf 'R\t400101000000Z\t210601000000Z,keyCompromise\t2001\tunknown\t/O=Palisade Tests/CN=Palisade OCSP Responder\n' > rindex.txt
+req -cert responder.pem -reqout responder.req
+openssl ocsp -index rindex.txt -CA root.pem -rsigner root.pem -rkey root.key \
+  -reqin responder.req -respout "$out/revoked-responder-by-root.der" -ndays 3650 >/dev/null
 
 cat leaf.pem root.pem > leaf.chain
 osslsigncode sign -certs leaf.chain -key leaf.key -h sha256 -time 1609459200 \
