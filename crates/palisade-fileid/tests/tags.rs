@@ -844,7 +844,10 @@ mod scanning {
                 (GIB / 2, cab()),
             ],
         );
-        let r = tags::scan(&mut file, &builtin(), &ScanLimits::default());
+        // The default budgets, without the wall clock: on a slow runner
+        // (coverage builds) the clock could stop the scan first, which is
+        // `wall_clock_gives_a_timeout_tag`'s job, not this test's.
+        let r = tags::scan(&mut file, &builtin(), &limits());
         assert_eq!(r.status, ScanStatus::Partial);
         assert_eq!(r.file_size, GIB);
         // Found at the start and in the tail; the middle is not scanned.
@@ -869,7 +872,7 @@ mod scanning {
         let mut file = Sparse::new(GIB, vec![(100, seven_zip())]);
         let no_size_limit = ScanLimits {
             max_file_size: u64::MAX,
-            ..ScanLimits::default()
+            ..limits()
         };
         let r = tags::scan(&mut file, &builtin(), &no_size_limit);
         assert_eq!(r.status, ScanStatus::Timeout);
