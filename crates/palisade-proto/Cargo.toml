@@ -23,6 +23,7 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 boon = { workspace = true }
+insta = { workspace = true }
 proptest = { workspace = true }
 
 [lints]

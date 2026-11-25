@@ -15,6 +15,8 @@ pub mod ops;
 pub mod precedence;
 pub mod schema;
 pub mod scope;
+#[cfg(any(test, feature = "test-util"))]
+pub mod test_util;
 pub mod trace;
 pub mod validate;
 

@@ -1,0 +1,4 @@
+---
+source: crates/palisade-proto/tests/event_snapshots.rs
+---
+{"schema_version":"1.1.0","event_id":"01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f","event_type":"exec.decision","category":"execution","action":"execute","outcome":"blocked","severity":6,"mode":"enforce","description":"An executable was blocked.","ts":"2026-11-24T03:15:22.123456Z","clock_synced":true,"tenant_id":"01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f","host":{"id":"01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f","name":"WS-0001"},"user":{"sid":"S-1-5-21-1111111111-2222222222-3333333333-1001","name":"alice"},"seq":0,"process":{"pid":4412,"image_path":"C:\\Windows\\explorer.exe"},"file":{"path":"C:\\Users\\alice\\Downloads\\tool.exe","size":102400,"hashes":{"sha256":"abababababababababababababababababababababababababababababababab"},"signers":[{"publisher":"Example Software Ltd"}],"version_info":{"original_filename":"tool.exe","file_version":"1.2.3.4"}}}

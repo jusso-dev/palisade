@@ -1,0 +1,40 @@
+---
+source: crates/palisade-policy/tests/decision_snapshots.rs
+---
+{
+  "outcome": "allowed",
+  "would_have_been": "allowed",
+  "action": "allow",
+  "matched_rule": {
+    "rule_id": "01936b2e-8c4a-7003-9f21-000000000001",
+    "display_id": null,
+    "rule_set_id": "01936b2e-8c4a-7002-9f21-000000000001",
+    "policy_id": "01936b2e-8c4a-7001-9f21-000000000001",
+    "policy_revision": 1
+  },
+  "overridden": [],
+  "annotations": [],
+  "mode": "enforce",
+  "learning_candidate": false,
+  "directives": {
+    "containment": null,
+    "elevation": null,
+    "trust_sources": [],
+    "kill_running": false,
+    "request": null,
+    "window_close": null
+  },
+  "effects": {
+    "log": "summary",
+    "upload": "batched",
+    "notify": "none",
+    "notification_text": null,
+    "help_url": null,
+    "severity": "info",
+    "tags": [],
+    "suppress_duplicates_secs": 86400
+  },
+  "reason_code": "explicit_allow",
+  "scope_notes": [],
+  "trace_id": "07070707070707070707070707070707"
+}

@@ -48,6 +48,9 @@ criterion = { version = "0.7.0", default-features = false, features = ["cargo_be
 hmac = { version = "0.13.0", default-features = false }
 hyper-util = { version = "0.1.21", default-features = false, features = ["http1", "http2", "server-auto", "service", "tokio"] }
 if-addrs = { version = "0.15.0", default-features = false }
+# Snapshot tests (dev-dependency only). Without default features, so no
+# terminal-colour crates; `json` gives `assert_json_snapshot!`.
+insta = { version = "1.49.0", default-features = false, features = ["json"] }
 # Schedules (#38): civil time, IANA time zones from the bundled database
 # only, so evaluation never reads the system.
 jiff = { version = "1.0.3", default-features = false, features = ["std", "tzdb-bundle-always"] }

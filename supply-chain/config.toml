@@ -314,6 +314,11 @@ version = "5.4.2"
 criteria = "safe-to-deploy"
 notes = "Added by #127 (palisade-server Postgres layer: sqlx with the Postgres driver, migrations and rustls). Audit, or import an audit, before bumping."
 
+[[exemptions.fastrand]]
+version = "2.5.0"
+criteria = "safe-to-run"
+notes = "Added by #25 (insta snapshot tests, a dev-dependency of palisade-policy and palisade-proto only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
 [[exemptions.find-msvc-tools]]
 version = "0.1.15"
 criteria = "safe-to-deploy"
@@ -549,6 +554,11 @@ version = "2.14.2"
 criteria = "safe-to-deploy"
 notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
 
+[[exemptions.insta]]
+version = "1.49.0"
+criteria = "safe-to-run"
+notes = "Added by #25 (insta snapshot tests, a dev-dependency of palisade-policy and palisade-proto only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
 [[exemptions.itertools]]
 version = "0.13.0"
 criteria = "safe-to-run"
@@ -603,6 +613,11 @@ notes = "Added by #127 (palisade-server Postgres layer: sqlx with the Postgres d
 version = "0.40.0"
 criteria = "safe-to-deploy"
 notes = "Added by #127 (palisade-server Postgres layer: sqlx with the Postgres driver, migrations and rustls). Audit, or import an audit, before bumping."
+
+[[exemptions.linux-raw-sys]]
+version = "0.12.1"
+criteria = "safe-to-run"
+notes = "Added by #25 (insta snapshot tests, a dev-dependency of palisade-policy and palisade-proto only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
 
 [[exemptions.litemap]]
 version = "0.8.3"
@@ -809,6 +824,11 @@ version = "0.17.14"
 criteria = "safe-to-deploy"
 notes = "Added by #247 (palisade-fileid Authenticode verification: ring and its build and platform dependencies) before cargo-vet landed. Audit, or import an audit, before bumping."
 
+[[exemptions.rustix]]
+version = "1.1.6"
+criteria = "safe-to-run"
+notes = "Added by #25 (insta snapshot tests, a dev-dependency of palisade-policy and palisade-proto only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
 [[exemptions.rustls]]
 version = "0.23.46"
 criteria = "safe-to-deploy"
@@ -929,6 +949,11 @@ version = "1.4.8"
 criteria = "safe-to-deploy"
 notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
 
+[[exemptions.similar]]
+version = "2.7.0"
+criteria = "safe-to-run"
+notes = "Added by #25 (insta snapshot tests, a dev-dependency of palisade-policy and palisade-proto only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
 [[exemptions.slab]]
 version = "0.4.12"
 criteria = "safe-to-deploy"
@@ -1018,6 +1043,11 @@ notes = "Added by #126 (palisade-server process skeleton: HTTP stack, TLS, comma
 version = "0.14.0"
 criteria = "safe-to-deploy"
 notes = "Baseline when cargo-vet was adopted (#23) at safe-to-run; raised to safe-to-deploy because #127 (palisade-server Postgres layer) made it a normal or build dependency of a shipped crate. Audit, or import an audit, before bumping."
+
+[[exemptions.tempfile]]
+version = "3.27.0"
+criteria = "safe-to-run"
+notes = "Added by #25 (insta snapshot tests, a dev-dependency of palisade-policy and palisade-proto only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
 
 [[exemptions.thiserror]]
 version = "2.0.21"

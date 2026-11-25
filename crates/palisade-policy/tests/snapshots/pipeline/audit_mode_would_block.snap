@@ -1,0 +1,34 @@
+---
+source: crates/palisade-policy/tests/decision_snapshots.rs
+---
+{
+  "outcome": "allowed_audit",
+  "would_have_been": "blocked",
+  "action": "deny",
+  "matched_rule": null,
+  "overridden": [],
+  "annotations": [],
+  "mode": "audit",
+  "learning_candidate": false,
+  "directives": {
+    "containment": null,
+    "elevation": null,
+    "trust_sources": [],
+    "kill_running": false,
+    "request": null,
+    "window_close": null
+  },
+  "effects": {
+    "log": "always",
+    "upload": "immediate",
+    "notify": "none",
+    "notification_text": null,
+    "help_url": null,
+    "severity": "medium",
+    "tags": [],
+    "suppress_duplicates_secs": 600
+  },
+  "reason_code": "audit_mode_would_block",
+  "scope_notes": [],
+  "trace_id": "07070707070707070707070707070707"
+}

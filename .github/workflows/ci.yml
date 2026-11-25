@@ -160,6 +160,32 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo xtask check-fuzz-locks
 
+  # Snapshot tests (insta, #25): every snapshot matches, and none is left
+  # unreferenced. Snapshots are reviewed in the PR like code.
+  snapshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: cargo-insta@1.49.0
+      # cargo-insta has no --locked. Fetch exactly Cargo.lock first (fails if
+      # it is out of date), then run offline, so the run can neither
+      # re-resolve the lockfile nor download anything.
+      - run: cargo fetch --locked
+      - env:
+          CARGO_NET_OFFLINE: "true"
+        run: >-
+          cargo insta test --check --unreferenced reject --all-features
+          -p palisade-policy -p palisade-proto
+
   # Every cargo-fuzz target, seeded from the synthetic test fixtures, for 60 s
   # each. A finding fails the job and is written to the job summary with a
   # reproducer. fuzz.yml runs the same targets for longer every week.
@@ -502,7 +528,7 @@ jobs:
   # The single required check from this workflow for branch protection.
   ci-ok:
     if: always()
-    needs: [fmt, clippy, test, postgres, coverage, coverage-gate, fuzz-locks, fuzz, bench, msrv, docs, deps, supply-chain, feature-powerset, runner-guard, doc-checks, workflow-lint, package, sign-test, server-image]
+    needs: [fmt, clippy, test, postgres, coverage, coverage-gate, snapshots, fuzz-locks, fuzz, bench, msrv, docs, deps, supply-chain, feature-powerset, runner-guard, doc-checks, workflow-lint, package, sign-test, server-image]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
