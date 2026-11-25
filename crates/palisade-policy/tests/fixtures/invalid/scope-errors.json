@@ -1,0 +1,56 @@
+{
+  "schema_version": "1.0.0",
+  "policy": {
+    "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+    "name": "Scope errors",
+    "revision": 1,
+    "mode": "enforce",
+    "rule_sets": ["01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60"],
+    "rule_set_scopes": [
+      {
+        "rule_set": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e6f",
+        "scopes": [{ "devices": { "include": [{ "tag": "site=sydney" }] } }]
+      }
+    ],
+    "location_profiles": [
+      { "name": "corporate", "all": [{ "dns_suffix": "corp.example.org" }, { "server_reachable": true }] }
+    ]
+  },
+  "rule_sets": [
+    {
+      "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60",
+      "name": "Set",
+      "kind": "mixed",
+      "rules": [
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e61",
+          "name": "Service accounts by name",
+          "match": { "criterion": { "field": "hash.sha256", "operator": "equals", "values": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"] } },
+          "action": { "type": "allow" },
+          "scope": {
+            "principals": { "include": [{ "user_pattern": "*\\svc_*" }] },
+            "network": { "include": [{ "cidr": "10.0.0.1/8" }, { "location_profile": "branch" }] }
+          }
+        },
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e62",
+          "name": "Night shift deny",
+          "match": { "criterion": { "field": "hash.sha256", "operator": "equals", "values": ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"] } },
+          "action": { "type": "deny" },
+          "scope": {
+            "principals": { "exclude": [{ "user_pattern": "*\\admin" }] },
+            "max_instances_per_session": 2,
+            "schedule": {
+              "windows": [
+                { "days": ["mon", "mon"], "start": "22:00", "end": "06:00" },
+                { "days": ["tue"], "start": "22:00", "end": "06:00", "duration_mins": 480 }
+              ],
+              "except_dates": [{ "from": "2026-12-26", "to": "2026-12-25" }],
+              "on_window_close": "warn"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

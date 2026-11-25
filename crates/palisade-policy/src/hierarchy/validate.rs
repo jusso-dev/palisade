@@ -927,6 +927,20 @@ fn check_policies(
                 }
             }
         }
+        // The library sets the policy's scopes use (#38): each must exist,
+        // be visible and be of the right kind, and is pinned to the version
+        // used, so the effective policy and its hash follow it.
+        if !scope_refs(
+            &mut document,
+            &format!("{base}/document"),
+            catalogue,
+            from,
+            &mut used,
+            &mut refs,
+            errors,
+        ) {
+            continue;
+        }
         if !ok {
             continue;
         }
@@ -995,6 +1009,33 @@ fn check_rule_set_libraries(
         if !ok {
             continue;
         }
+        let mut wrapped = wrap(set);
+        let mut refs = BTreeSet::new();
+        if !scope_refs(
+            &mut wrapped,
+            "",
+            catalogue,
+            from,
+            &mut used,
+            &mut refs,
+            &mut Vec::new(),
+        ) {
+            for (path, problem) in scope_ref_problems(&wrapped, catalogue, from) {
+                let rest = path
+                    .strip_prefix("/rule_sets/0")
+                    .unwrap_or(&path)
+                    .to_owned();
+                errors.push(herr(
+                    HierarchyCode::Library(problem.code),
+                    format!("{base}{rest}"),
+                    problem.message,
+                ));
+            }
+            continue;
+        }
+        let Some(mut set) = wrapped.rule_sets.pop() else {
+            continue;
+        };
         set.band = 0;
         match wrap(set).validate() {
             Ok(v) => {
@@ -1033,6 +1074,86 @@ fn check_rule_set_libraries(
     out
 }
 
+/// The library set references of every scope in `doc`, resolved from
+/// `from`: each must name a library of the kind its position needs. A
+/// `latest` reference is pinned to the version it resolves to. Every
+/// version used goes into `used` and every library into `refs`. Returns
+/// whether all resolved; problems go to `errors` under `base`.
+fn scope_refs(
+    doc: &mut PolicyDocument,
+    base: &str,
+    catalogue: &Catalogue,
+    from: Visibility,
+    used: &mut BTreeSet<Version>,
+    refs: &mut BTreeSet<LibraryId>,
+    errors: &mut Vec<HierarchyError>,
+) -> bool {
+    let problems = scope_ref_problems(doc, catalogue, from);
+    let ok = problems.is_empty();
+    for (path, e) in problems {
+        errors.push(HierarchyError {
+            code: HierarchyCode::Library(e.code),
+            path: format!("{base}{path}"),
+            message: e.message,
+        });
+    }
+    if !ok {
+        return false;
+    }
+    let pin = |r: &mut LibraryRef, used: &mut BTreeSet<Version>, refs: &mut BTreeSet<LibraryId>| {
+        if let Ok(lib) = catalogue.resolve(r, from) {
+            used.insert((lib.id, lib.version));
+            refs.insert(lib.id);
+            r.pin = crate::library::Pin::Version(lib.version);
+        }
+    };
+    let mut scopes: Vec<&mut crate::scope::Scope> = Vec::new();
+    scopes.extend(doc.policy.scope.as_mut());
+    for a in &mut doc.policy.rule_set_scopes {
+        scopes.extend(a.scopes.iter_mut());
+    }
+    for set in &mut doc.rule_sets {
+        scopes.extend(set.rules.iter_mut().filter_map(|r| r.scope.as_mut()));
+    }
+    for scope in scopes {
+        crate::scope::for_each_set_ref(scope, |r| pin(r, used, refs));
+    }
+    true
+}
+
+/// The scope set references of `doc` that do not resolve to a library of
+/// the right kind, with their JSON Pointers.
+fn scope_ref_problems(
+    doc: &PolicyDocument,
+    catalogue: &Catalogue,
+    from: Visibility,
+) -> Vec<(String, LibraryError)> {
+    let mut out = Vec::new();
+    for (at, scope) in crate::scope::document_scopes(doc) {
+        for (path, r, kind) in crate::scope::set_refs(scope) {
+            let path = format!("{at}{path}");
+            match catalogue.resolve(&r, from) {
+                Err(e) => out.push((path, e)),
+                Ok(lib) if lib.content.kind() != kind => out.push((
+                    path,
+                    LibraryError {
+                        code: LibraryCode::RefKindNotAllowed,
+                        path: String::new(),
+                        message: format!(
+                            "library `{}` is a `{}`; this position needs a `{}`",
+                            lib.name,
+                            lib.content.kind(),
+                            kind.as_str()
+                        ),
+                    },
+                )),
+                Ok(_) => {}
+            }
+        }
+    }
+    out
+}
+
 /// A policy holding only `set`, to validate the set on its own.
 fn wrap(set: RuleSet) -> PolicyDocument {
     PolicyDocument {
@@ -1048,6 +1169,9 @@ fn wrap(set: RuleSet) -> PolicyDocument {
             mode_options: crate::model::ModeOptions::default(),
             settings: PolicySettings::default(),
             rule_sets: vec![set.id],
+            scope: None,
+            rule_set_scopes: Vec::new(),
+            location_profiles: Vec::new(),
             metadata: crate::model::Metadata::default(),
         },
         rule_sets: vec![set],
@@ -1143,11 +1267,18 @@ impl ValidatedHierarchy {
             if lib_id == id {
                 continue;
             }
-            if lib
-                .content
-                .trees()
-                .iter()
-                .any(|(_, t)| refs_in(t).iter().any(|(_, r)| r.id == id))
+            let in_scope = match &lib.content {
+                LibraryContent::RuleSet { rule_set } => crate::scope::rule_set_scopes(rule_set)
+                    .iter()
+                    .any(|(_, s)| crate::scope::set_refs(s).iter().any(|(_, r, _)| r.id == id)),
+                _ => false,
+            };
+            if in_scope
+                || lib
+                    .content
+                    .trees()
+                    .iter()
+                    .any(|(_, t)| refs_in(t).iter().any(|(_, r)| r.id == id))
             {
                 let at = self
                     .library_index

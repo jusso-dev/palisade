@@ -731,13 +731,13 @@ proptest! {
     #![proptest_config(cases(512))]
 
     #[test]
-    fn generated_documents_are_valid(doc in arbitrary::document()) {
+    fn generated_documents_are_valid(doc in arbitrary::scoped_document()) {
         let result = doc.validate();
         prop_assert!(result.is_ok(), "{:?}", result.err());
     }
 
     #[test]
-    fn generated_documents_match_the_json_schema(doc in arbitrary::document()) {
+    fn generated_documents_match_the_json_schema(doc in arbitrary::scoped_document()) {
         let value = serde_json::to_value(&doc).unwrap();
         let result = SCHEMA.with(|s| s.schemas.validate(&value, s.index).map_err(|e| format!("{e:#}")));
         prop_assert!(result.is_ok(), "{}", result.err().unwrap_or_default());
@@ -754,7 +754,7 @@ proptest! {
     #![proptest_config(cases(10_000))]
 
     #[test]
-    fn json_round_trip_is_lossless(doc in arbitrary::document()) {
+    fn json_round_trip_is_lossless(doc in arbitrary::scoped_document()) {
         let text = doc.to_json_pretty().unwrap();
         let back = PolicyDocument::from_json(&text).unwrap();
         prop_assert_eq!(&back, &doc);

@@ -48,6 +48,9 @@ criterion = { version = "0.7.0", default-features = false, features = ["cargo_be
 hmac = { version = "0.13.0", default-features = false }
 hyper-util = { version = "0.1.21", default-features = false, features = ["http1", "http2", "server-auto", "service", "tokio"] }
 if-addrs = { version = "0.15.0", default-features = false }
+# Schedules (#38): civil time, IANA time zones from the bundled database
+# only, so evaluation never reads the system.
+jiff = { version = "1.0.3", default-features = false, features = ["std", "tzdb-bundle-always"] }
 libc = { version = "0.2.191", default-features = false }
 md-5 = { version = "0.11.0", default-features = false }
 proc-macro2 = { version = "1.0.107", default-features = false }

@@ -8,10 +8,17 @@
 //!
 //! Every fact here is plain data, already known when a decision starts.
 //! Facts that cost a lookup at decision time (registry, files, environment
-//! blocks), their cost classes and caching, and network, time and
-//! scope facts are later parts of #33 and #38.
+//! blocks), their cost classes and caching, and the time facts that
+//! criteria test are later parts of #33. The network facts and the facts
+//! only scopes read ([`ScopeFacts`]) are part of rule scoping (#38).
+
+use std::net::IpAddr;
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use crate::model::Field;
+use crate::scope::ScopeFacts;
 
 /// Everything context criteria can test, for one evaluation.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -22,6 +29,12 @@ pub struct EvaluationContext {
     pub device: DeviceContext,
     /// The session the process runs in.
     pub session: SessionContext,
+    /// The device's network location (#38).
+    pub network: NetworkContext,
+    /// The facts only scopes read (#38): the subjects' tokens and cached
+    /// groups, trusted time, time zones, set memberships and instance
+    /// counts.
+    pub scope: ScopeFacts,
 }
 
 /// The user the process runs as, from its token and the directory.
@@ -83,6 +96,9 @@ pub struct DeviceContext {
     pub is_vdi: Option<bool>,
     /// The device is a multi-session terminal server.
     pub is_terminal_server: Option<bool>,
+    /// The distinguished name of the device's computer object in the
+    /// directory, such as `CN=WS-0042,OU=Finance,DC=corp,DC=example,DC=org`.
+    pub dn: Option<String>,
 }
 
 /// The session the process runs in.
@@ -94,10 +110,35 @@ pub struct SessionContext {
     pub client_hostname: Option<String>,
     /// The session is remote.
     pub is_remote: Option<bool>,
+    /// The address of the connected client, on a multi-session host.
+    pub client_ip: Option<IpAddr>,
+}
+
+/// The device's network location, as the agent last observed it (#38).
+///
+/// The agent evaluates the location on network change events and on every
+/// heartbeat, and keeps the previous location until a new one is stable
+/// ([`LocationTracker`](crate::scope::LocationTracker)).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NetworkContext {
+    /// The addresses of the local interfaces.
+    pub addresses: Option<Vec<IpAddr>>,
+    /// The hardware addresses of the local interfaces.
+    pub macs: Option<Vec<[u8; 6]>>,
+    /// The connection-specific DNS suffixes.
+    pub dns_suffixes: Option<Vec<String>>,
+    /// The hardware addresses of the default gateways.
+    pub gateway_macs: Option<Vec<[u8; 6]>>,
+    /// Whether the management server answered the last check.
+    pub server_reachable: Option<bool>,
+    /// The names of the location profiles that are active, after the
+    /// debounce.
+    pub locations: Option<Vec<String>>,
 }
 
 /// How a session was started.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum SessionType {
     /// The physical console.
     Console,

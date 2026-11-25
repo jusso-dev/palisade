@@ -25,6 +25,7 @@ use crate::model::{
     ResolvedEffects, Rule, RuleId, RuleSet, RuleSetId, TokenProfileRef, TrustMode,
     TrustSourceDirective,
 };
+use crate::scope::{OnWindowClose, ScopeNote, ScopeNotes};
 
 /// What happened to the object.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
@@ -61,6 +62,9 @@ pub enum ReasonCode {
     OverrideSession,
     /// An `ignore` rule excluded the object.
     Exclusion,
+    /// The deciding allow's per-session instance limit was reached, or
+    /// the instance count was unknown (#38).
+    InstanceLimit,
 }
 
 /// A rule's human short ID, `R-` and 6 to 12 digits, kept as a number and
@@ -246,6 +250,23 @@ pub struct Directives {
     pub kill_running: bool,
     /// The user may ask for approval.
     pub request: Option<RequestDirective>,
+    /// What to do with the running process when the deciding allow's
+    /// schedule closes (#38). Only an allowed object gets one.
+    pub window_close: Option<WindowClose>,
+}
+
+/// What the agent and the tray do when the schedule of the allow that let
+/// a process run closes (#38, #4, #11), as a decision carries it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+pub struct WindowClose {
+    /// Warn, or warn and then terminate.
+    pub action: OnWindowClose,
+    /// Seconds between the warning and termination.
+    pub grace_secs: u32,
+    /// When the schedule closes, in seconds since 1970-01-01T00:00:00Z, or
+    /// `null` if it is not known yet. The agent re-evaluates on every
+    /// heartbeat.
+    pub closes_at: Option<i64>,
 }
 
 impl Directives {
@@ -290,7 +311,13 @@ pub struct Decision {
     directives: Directives,
     effects: ResolvedEffects,
     reason_code: ReasonCode,
+    scope_notes: Vec<ScopeNote>,
     trace_id: TraceId,
+    /// The directives of an allow that its instance limit blocked (#38),
+    /// for a mode that relaxes the block: the object then runs with them.
+    /// Not part of the JSON form.
+    #[serde(skip)]
+    withheld: Option<Box<Directives>>,
 }
 
 impl Decision {
@@ -333,7 +360,9 @@ impl Decision {
             directives: Directives::of(&rule.action),
             effects: rule.effects.resolve(kind),
             reason_code,
+            scope_notes: Vec::new(),
             trace_id,
+            withheld: None,
         })
     }
 
@@ -354,7 +383,9 @@ impl Decision {
             directives: Directives::default(),
             effects: crate::model::Effects::default().resolve(ActionKind::Deny),
             reason_code: ReasonCode::ImplicitDenyUnknown,
+            scope_notes: Vec::new(),
             trace_id,
+            withheld: None,
         }
     }
 
@@ -423,6 +454,62 @@ impl Decision {
         self
     }
 
+    /// Adds scope notes (#38), keeping the list sorted and unique.
+    pub(crate) fn with_scope_notes(mut self, notes: ScopeNotes) -> Self {
+        let mut all = ScopeNotes::default();
+        for n in &self.scope_notes {
+            all.insert(*n);
+        }
+        all.extend(notes);
+        self.scope_notes = all.iter().collect();
+        self
+    }
+
+    /// The window-close directive of an allowed object (#38).
+    pub(crate) fn with_window_close(mut self, close: WindowClose) -> Self {
+        self.directives.window_close = Some(close);
+        self
+    }
+
+    /// An allow's decision turned into a block by its per-session instance
+    /// limit (#38): blocked, naming the allow. The block takes a deny's
+    /// default effects, so it is logged and sent at once and the user is
+    /// told, and keeps the allow's tags. Nothing runs, so it carries no
+    /// directives, and the trust sources are listed as overridden. If a
+    /// mode relaxes the block, the object runs with the allow's directives
+    /// ([`relaxed`](Self::relaxed)).
+    pub(crate) fn instance_limit(mut self) -> Self {
+        self.outcome = Outcome::Blocked;
+        self.would_have_been = Outcome::Blocked;
+        self.reason_code = ReasonCode::InstanceLimit;
+        let tags = core::mem::take(&mut self.effects.tags);
+        self.effects = crate::model::Effects::default().resolve(ActionKind::Deny);
+        self.effects.tags = tags;
+        if let Some(rule) = self.matched_rule {
+            self.overridden.extend(
+                self.directives
+                    .trust_sources
+                    .iter()
+                    .map(|g| g.rule)
+                    .filter(|r| *r != rule),
+            );
+            self.overridden.sort_by_key(|r| r.rule_id);
+        }
+        self.withheld = Some(Box::new(core::mem::take(&mut self.directives)));
+        self
+    }
+
+    /// The directives an object gets if a mode lets it run: those of the
+    /// allow that decided, if it did, including one its instance limit
+    /// blocked; otherwise none.
+    pub(crate) fn runnable_directives(&self) -> Directives {
+        match (&self.withheld, self.outcome) {
+            (Some(d), _) => (**d).clone(),
+            (None, Outcome::Allowed) => self.directives.clone(),
+            (None, _) => Directives::default(),
+        }
+    }
+
     /// The same decision, made in `mode`, with its outcome unchanged.
     pub(crate) fn in_mode(mut self, mode: Mode) -> Self {
         self.mode = mode;
@@ -454,6 +541,7 @@ impl Decision {
         self.overridden
             .retain(|r| !directives.trust_sources.iter().any(|g| g.rule == *r));
         self.directives = directives;
+        self.withheld = None;
         self.effects.notify = crate::model::Notify::None;
         self.effects.notification_text = None;
         self.effects.help_url = None;
@@ -490,6 +578,14 @@ impl Decision {
     #[must_use]
     pub const fn reason_code(&self) -> ReasonCode {
         self.reason_code
+    }
+
+    /// What the scope evaluations noticed (#38), such as `scope_stale` or
+    /// `clock_untrusted`: the notes of every rule whose tree was not
+    /// `NoMatch`, including one its scopes took out, sorted.
+    #[must_use]
+    pub fn scope_notes(&self) -> &[ScopeNote] {
+        &self.scope_notes
     }
 
     /// The trace ID of the evaluation.

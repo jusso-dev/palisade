@@ -182,6 +182,15 @@ pub fn explain(trace: &Trace, verbosity: Verbosity) -> ExplainDoc {
                 .push(Message::new("warning-detail").arg("detail", d.clone()));
         }
     }
+    for s in &trace.scope_rejections {
+        let m = Message::new("scope-rejected")
+            .arg("rule", named(&s.name, &s.rule))
+            .arg("level", s.level.replace('_', " "));
+        doc.paragraphs.push(match s.dimension {
+            Some(d) => m.arg("dimension", d),
+            None => m.arg("dimension", "scope"),
+        });
+    }
     for i in &trace.inactive_matches {
         doc.paragraphs.push(
             Message::new("inactive")
@@ -269,6 +278,7 @@ fn summary(trace: &Trace) -> Message {
         ReasonCode::MandatoryDeny => Message::new("summary-mandatory").arg("rule", rule),
         ReasonCode::ImplicitDenyUnknown => Message::new("summary-implicit").arg("object", object),
         ReasonCode::Exclusion => Message::new("summary-excluded").arg("rule", rule),
+        ReasonCode::InstanceLimit => Message::new("summary-instance-limit").arg("rule", rule),
         ReasonCode::AuditModeWouldBlock | ReasonCode::OverrideSession => {
             let id = if d.outcome() == Outcome::AllowedOverride {
                 "summary-override"
@@ -514,6 +524,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("summary-allowed", "Allowed by rule { $rule }."),
     ("summary-blocked", "Blocked by rule { $rule }."),
     (
+        "summary-instance-limit",
+        "Blocked: rule { $rule } allows only a limited number of copies per session, and that many are already running.",
+    ),
+    (
         "summary-mandatory",
         "Blocked by mandatory rule { $rule }. Nothing can override it.",
     ),
@@ -613,6 +627,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     (
         "inactive",
         "Rule { $rule } would have matched ({ $action }), but it is disabled.",
+    ),
+    (
+        "scope-rejected",
+        "Rule { $rule } matched this file, but its { $level } scope does not cover this case ({ $dimension }), so it did not apply.",
     ),
     (
         "why-not-mismatch",

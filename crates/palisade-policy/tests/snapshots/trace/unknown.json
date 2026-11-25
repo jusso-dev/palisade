@@ -310,7 +310,8 @@
   "omitted": {
     "matched": 0,
     "near_misses": 0,
-    "inactive_matches": 0
+    "inactive_matches": 0,
+    "scope_rejections": 0
   },
   "decision": {
     "outcome": "blocked",
@@ -326,7 +327,8 @@
       "elevation": null,
       "trust_sources": [],
       "kill_running": false,
-      "request": null
+      "request": null,
+      "window_close": null
     },
     "effects": {
       "log": "always",
@@ -339,6 +341,7 @@
       "suppress_duplicates_secs": 600
     },
     "reason_code": "implicit_deny_unknown",
+    "scope_notes": [],
     "trace_id": "41414141414141414141414141414141",
     "overridden_omitted": 0,
     "annotations_omitted": 0,

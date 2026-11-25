@@ -1,0 +1,133 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/jusso-dev/palisade/main/schemas/policy/v1.json
+#
+# Rule scoping: who, where and when a rule applies. Scopes narrow a rule;
+# they never identify the object, which is the match tree's job, and they
+# never widen a rule. A rule applies only when the policy's scope, its rule
+# set's assignment scopes and its own scope all match.
+#
+# - The policy applies to the corporate network only, a location profile
+#   the agent evaluates on network changes and heartbeats.
+# - The scripting set is assigned to every user but service accounts named
+#   `svc_*`. A name pattern may only exclude principals from rules that
+#   let an object run, because account names can be spoofed.
+# - The script engine is allowed for administrators only, so it stays
+#   blocked for unprivileged users (ISM-1491). A filtered (non-elevated)
+#   administrator token does not count.
+# - The trading tool runs only during market hours in Sydney, with a
+#   warning and termination five minutes after close. It is closed on
+#   public holidays, and one instance per session is allowed.
+# - Remote desktop sessions are denied a file transfer tool, except on
+#   jump hosts, and its use from the thin-client range is audited.
+schema_version: "1.0.0"
+policy:
+  id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5f00
+  name: Scoped rules
+  revision: 1
+  mode: enforce
+  settings:
+    time_zone_basis: device_local
+    group_cache_max_age_secs: 43200
+  scope:
+    network:
+      include:
+        - location_profile: corporate
+  location_profiles:
+    - name: corporate
+      all:
+        - dns_suffix: corp.example.org
+        - server_reachable: true
+  rule_sets:
+    - 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5f10
+    - 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5f20
+  rule_set_scopes:
+    - rule_set: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5f10
+      scopes:
+        - principals:
+            exclude:
+              - user_pattern: '*\svc_*'
+
+rule_sets:
+  - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5f10
+    name: Scripting and trading
+    kind: allowlist
+    rules:
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5f11
+        name: Script engine for administrators
+        object_types: [executable]
+        match:
+          criterion:
+            field: hash.sha256
+            operator: equals
+            values: ["9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"]
+        action: {type: allow}
+        scope:
+          principals:
+            include:
+              - well_known: administrators
+          sessions:
+            types: [console, rdp]
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5f12
+        name: Trading tool during market hours
+        object_types: [executable]
+        match:
+          criterion:
+            field: signer.publisher
+            operator: equals
+            values: [Example Markets Pty Ltd]
+        action: {type: allow}
+        scope:
+          principals:
+            include:
+              - directory_group:
+                  sid: S-1-5-21-1004336348-1177238915-682003330-1105
+                  name: Traders
+          max_instances_per_session: 1
+          schedule:
+            timezone_basis: device_local
+            windows:
+              - days: [mon, tue, wed, thu, fri]
+                start: "10:00"
+                end: "16:00"
+            except_dates:
+              - from: 2026-12-25
+                to: 2026-12-26
+              - from: 2027-01-01
+            on_window_close: warn_then_terminate
+            grace_secs: 300
+
+  - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5f20
+    name: Remote session controls
+    kind: blocklist
+    rules:
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5f21
+        name: No file transfer in remote sessions
+        object_types: [executable]
+        match:
+          criterion:
+            field: hash.sha256
+            operator: equals
+            values: ["60303ae22b998861bce3b28f33eec1be758a213c86c93c076dbe9f558c11c752"]
+        action: {type: deny}
+        scope:
+          sessions:
+            types: [rdp]
+          devices:
+            exclude:
+              - tag: role=jump-host
+        metadata:
+          justification: Remote sessions may not copy files off the network.
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d5f22
+        name: Audit file transfer from thin clients
+        object_types: [executable]
+        match:
+          criterion:
+            field: hash.sha256
+            operator: equals
+            values: ["60303ae22b998861bce3b28f33eec1be758a213c86c93c076dbe9f558c11c752"]
+        action: {type: audit}
+        scope:
+          sessions:
+            types: [rdp]
+            client:
+              ip: [10.50.0.0/16]
+              hostname: ["THIN-*"]

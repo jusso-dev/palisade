@@ -18,7 +18,8 @@
     "elevation": null,
     "trust_sources": [],
     "kill_running": false,
-    "request": null
+    "request": null,
+    "window_close": null
   },
   "effects": {
     "log": "always",
@@ -31,5 +32,6 @@
     "suppress_duplicates_secs": 600
   },
   "reason_code": "mandatory_deny",
+  "scope_notes": [],
   "trace_id": "0f1e2d3c4b5a69788796a5b4c3d2e1f0"
 }

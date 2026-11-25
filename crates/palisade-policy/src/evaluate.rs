@@ -22,6 +22,29 @@
 //! 6. **Unknown.** If nothing decided, the implicit deny
 //!    (`implicit_deny_unknown`, #39).
 //!
+//! # Scopes
+//!
+//! A rule is a candidate only if it is in scope (#38, [`crate::scope`]):
+//! its own `scope`, the scopes of its rule set's assignment and the
+//! policy's `scope` are evaluated first, and a rule applies when the `AND`
+//! of those scopes and its match tree is `Match` (or `Unknown`, for a deny
+//! with `unknown_as: match`). A rule that is out of scope behaves as if it
+//! were absent in every stage: it never decides and is not listed as
+//! overridden. The scope notes of every rule whose tree was not `NoMatch`
+//! (in scope or not) are in [`Decision::scope_notes`].
+//!
+//! Two scope settings act on the deciding rule:
+//!
+//! - **Instance limit.** If an allow that decides has a scope with
+//!   `max_instances_per_session` and the session already runs that many
+//!   instances (or the count is unknown), the object is blocked with
+//!   `instance_limit`, naming the allow. A mode that relaxes the block
+//!   runs the object with the allow's directives.
+//! - **Window close.** If the object is allowed and a scope on the way to
+//!   the deciding rule has a schedule with `on_window_close`, the decision
+//!   carries a [`WindowClose`] directive with the instant the schedule
+//!   closes.
+//!
 //! Two kinds of rule never decide:
 //!
 //! - `audit` rules that match are listed in [`Decision::annotations`],
@@ -87,15 +110,21 @@
 //! `first_match` and `priority` depend on rules' `order` and `priority`.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use crate::condition::{CompiledMatch, TreeError, Unparseable};
 use crate::context::EvaluationContext;
-use crate::decision::{Decision, Directives, Outcome, RuleRef, TraceId, TrustGrant};
+use crate::decision::{Decision, Directives, Outcome, RuleRef, TraceId, TrustGrant, WindowClose};
 use crate::facts::{ObjectFacts, PathVariables};
 use crate::mode::{self, DeviceState};
 use crate::model::{Action, Mode, ObjectType, Policy, Rule, RuleId, RuleSet, RuleSetId, UnknownAs};
 use crate::ops::{EvalContext, Tri};
 use crate::precedence::{Candidate, MatchSet, Precedence, Resolver, Spec, Verdict, most_specific};
+use crate::scope::compile::Env;
+use crate::scope::{
+    Bias, CompiledScope, NoLibrary, OnWindowClose, ScopeEvaluation, ScopeLevel, ScopeLibrary,
+    ScopeNote, ScopeNotes, eval_chain,
+};
 use crate::validate::ValidatedPolicy;
 
 /// The object being decided, and what is known about it.
@@ -156,6 +185,10 @@ struct Compiled<'p> {
     unknown_as: UnknownAs,
     unparseable: Unparseable,
     reference: RuleRef,
+    /// The scopes on the way to the rule: the policy's, the rule set
+    /// assignment's, then its own.
+    scopes: Vec<(ScopeLevel, Arc<CompiledScope>)>,
+    bias: Bias,
 }
 
 impl Compiled<'_> {
@@ -171,11 +204,28 @@ impl Compiled<'_> {
         }
     }
 
-    /// Whether the rule applies to the subject.
-    fn applies(&self, subject: &Subject<'_>) -> bool {
+    /// The scopes on the way to the rule, evaluated for the subject.
+    pub(crate) fn scope_eval(&self, subject: &Subject<'_>) -> ScopeEvaluation {
+        if self.scopes.is_empty() {
+            return ScopeEvaluation::MATCH;
+        }
+        eval_chain(&self.scopes, subject.context, self.bias)
+    }
+
+    /// Whether the rule applies to the subject. The scopes are evaluated
+    /// before the tree; when they are `NoMatch` and noticed nothing, the
+    /// tree is not evaluated. `notes` gathers the scope notes of a rule
+    /// whose tree is not `NoMatch`, including one its scopes took out:
+    /// a stale group or an untrusted clock is worth reporting exactly when
+    /// it kept a matching rule from applying.
+    fn applies(&self, subject: &Subject<'_>, notes: &mut ScopeNotes) -> bool {
         if !self.rule.object_types.is_empty()
             && !self.rule.object_types.contains(&subject.object_type)
         {
+            return false;
+        }
+        let scope = self.scope_eval(subject);
+        if scope.result == Tri::NoMatch && scope.notes.is_empty() {
             return false;
         }
         let ctx = EvalContext {
@@ -183,15 +233,78 @@ impl Compiled<'_> {
             variables: subject.variables,
             context: subject.context,
         };
-        match self
+        let tree = self
             .tree
             .eval_with(subject.facts, &ctx, self.unparseable)
-            .result
-        {
+            .result;
+        if tree == Tri::NoMatch {
+            return false;
+        }
+        notes.extend(scope.notes);
+        match scope.result.and(tree) {
             Tri::Match => true,
             Tri::Unknown => self.unknown_as == UnknownAs::Match,
             Tri::NoMatch => false,
         }
+    }
+
+    /// The per-session instance limit of the rule's scopes, the smallest
+    /// that is set, or `None`.
+    fn instance_limit(&self) -> Option<u32> {
+        self.scopes
+            .iter()
+            .map(|(_, s)| s.max_instances_per_session())
+            .filter(|n| *n > 0)
+            .min()
+    }
+
+    /// What to do when a schedule on the way to the rule closes: the
+    /// strictest action, the earliest close, and the shortest grace period
+    /// of the schedules that terminate.
+    ///
+    /// Only a schedule whose closing ends the rule's match counts: one in
+    /// a scope with `combine: all` and no `negate`. Validation rejects
+    /// `on_window_close` anywhere else, so this only matters for library
+    /// schedules.
+    fn window_close(&self, subject: &Subject<'_>) -> Option<WindowClose> {
+        let facts = &subject.context.scope;
+        let mut out: Option<WindowClose> = None;
+        for (_, scope) in &self.scopes {
+            let Some(schedule) = scope.closing_schedule() else {
+                continue;
+            };
+            if schedule.on_window_close() == OnWindowClose::None {
+                continue;
+            }
+            let closes_at = facts.time.filter(|t| t.trusted).and_then(|t| {
+                let (tz, _) = schedule.zone(facts).ok()?;
+                schedule.closes_at(t.unix_secs, &tz)
+            });
+            let this = WindowClose {
+                action: schedule.on_window_close(),
+                grace_secs: schedule.grace_secs(),
+                closes_at,
+            };
+            out = Some(match out {
+                None => this,
+                Some(o) => WindowClose {
+                    action: o.action.max(this.action),
+                    grace_secs: match (o.action, this.action) {
+                        (OnWindowClose::WarnThenTerminate, OnWindowClose::WarnThenTerminate) => {
+                            o.grace_secs.min(this.grace_secs)
+                        }
+                        (OnWindowClose::WarnThenTerminate, _) => o.grace_secs,
+                        (_, OnWindowClose::WarnThenTerminate) => this.grace_secs,
+                        _ => o.grace_secs.min(this.grace_secs),
+                    },
+                    closes_at: match (o.closes_at, this.closes_at) {
+                        (Some(a), Some(b)) => Some(a.min(b)),
+                        (a, b) => a.or(b),
+                    },
+                },
+            });
+        }
+        out
     }
 }
 
@@ -211,13 +324,9 @@ struct Layer<'a, 'p> {
 
 impl Layer<'_, '_> {
     /// The directives an object that runs gets: an allow's, if one
-    /// decided, otherwise none.
+    /// decided (also one its instance limit blocked), otherwise none.
     fn directives(&self) -> Directives {
-        if self.decision.outcome() == Outcome::Allowed {
-            self.decision.directives().clone()
-        } else {
-            Directives::default()
-        }
+        self.decision.runnable_directives()
     }
 }
 
@@ -230,21 +339,52 @@ pub struct Evaluator<'p> {
 }
 
 impl<'p> Evaluator<'p> {
-    /// Compiles every enabled rule of the rule sets the policy references.
+    /// Compiles every enabled rule of the rule sets the policy references,
+    /// with no library: every library set a scope references is unknown.
     ///
     /// # Errors
     ///
     /// Returns [`BuildError`] if a tree does not compile, which validation
     /// rules out.
     pub fn new(validated: &'p ValidatedPolicy) -> Result<Self, BuildError> {
+        Self::with_library(validated, &NoLibrary)
+    }
+
+    /// Compiles every enabled rule of the rule sets the policy references,
+    /// resolving the library sets scopes reference through `library` (#37).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BuildError`] if a tree does not compile, which validation
+    /// rules out.
+    pub fn with_library(
+        validated: &'p ValidatedPolicy,
+        library: &dyn ScopeLibrary,
+    ) -> Result<Self, BuildError> {
         let doc = validated.document();
         let policy = &doc.policy;
         let sets: BTreeMap<RuleSetId, &RuleSet> = doc.rule_sets.iter().map(|s| (s.id, s)).collect();
+        let env = Env {
+            library,
+            basis: policy.settings.time_zone_basis,
+        };
+        let max_age = policy.settings.group_cache_max_age_secs;
+        let compile = |s| Arc::new(CompiledScope::compile(s, env, max_age));
+        let policy_scope = policy.scope.as_ref().map(compile);
         let mut rules = Vec::new();
         for id in &policy.rule_sets {
             let Some(set) = sets.get(id).copied() else {
                 continue;
             };
+            let mut chain: Vec<(ScopeLevel, Arc<CompiledScope>)> = Vec::new();
+            if let Some(s) = &policy_scope {
+                chain.push((ScopeLevel::Policy, Arc::clone(s)));
+            }
+            for assignment in policy.rule_set_scopes.iter().filter(|a| a.rule_set == *id) {
+                for s in &assignment.scopes {
+                    chain.push((ScopeLevel::RuleSet, compile(s)));
+                }
+            }
             for rule in set.rules.iter().filter(|r| r.enabled) {
                 let role = match &rule.action {
                     _ if set.mandatory => Role::Mandatory,
@@ -271,6 +411,10 @@ impl<'p> Evaluator<'p> {
                     ),
                     _ => (UnknownAs::NoMatch, Unparseable::Unknown),
                 };
+                let mut scopes = chain.clone();
+                if let Some(s) = &rule.scope {
+                    scopes.push((ScopeLevel::Rule, compile(s)));
+                }
                 rules.push(Compiled {
                     set,
                     rule,
@@ -280,6 +424,8 @@ impl<'p> Evaluator<'p> {
                     unknown_as,
                     unparseable,
                     reference: RuleRef::new(policy, set, rule),
+                    scopes,
+                    bias: Bias::of(rule.action.kind()),
                 });
             }
         }
@@ -302,8 +448,10 @@ impl<'p> Evaluator<'p> {
     /// applies the modes.
     #[must_use]
     pub fn evaluate(&self, subject: &Subject<'_>, trace_id: TraceId) -> Decision {
-        let matched = self.matching(subject);
-        self.run(&matched, trace_id).0
+        let (matched, notes) = self.matching_with_notes(subject);
+        self.run(&matched, subject, trace_id)
+            .0
+            .with_scope_notes(notes)
     }
 
     /// Decides one object on a device in `state`, applying the effective
@@ -350,9 +498,21 @@ impl<'p> Evaluator<'p> {
         if mode::device_mode(self.policy, state) == Mode::Disabled {
             return None;
         }
+        let (matched, notes) = self.matching_with_notes(subject);
+        self.decide_in(subject, &matched, state, trace_id)
+            .map(|d| d.with_scope_notes(notes))
+    }
+
+    /// [`evaluate_in`](Self::evaluate_in) over the rules that apply.
+    fn decide_in(
+        &self,
+        subject: &Subject<'_>,
+        matched: &[&Compiled<'p>],
+        state: &DeviceState,
+        trace_id: TraceId,
+    ) -> Option<Decision> {
         let t = subject.object_type;
-        let matched = self.matching(subject);
-        let (full, winner) = self.run(&matched, trace_id);
+        let (full, winner) = self.run(matched, subject, trace_id);
         if full.outcome() != Outcome::Blocked {
             let mode = self.mode_of(t, winner, state).mode;
             return Some(full.in_mode(mode));
@@ -362,7 +522,7 @@ impl<'p> Evaluator<'p> {
             session: None,
             ..*state
         };
-        let one = self.enforcing(t, &matched, (full.clone(), winner), &base, trace_id);
+        let one = self.enforcing(subject, matched, (full.clone(), winner), &base, trace_id);
         if !one.blocks {
             let effective = self.mode_of(t, winner, &base);
             let learning = effective.mode == Mode::Learning && winner.is_none();
@@ -378,7 +538,7 @@ impl<'p> Evaluator<'p> {
         };
         // Layer 2: what the session relaxes of what layer 1 enforced.
         let two = self.enforcing(
-            t,
+            subject,
             &one.kept,
             (one.decision.clone(), one.winner),
             state,
@@ -415,12 +575,13 @@ impl<'p> Evaluator<'p> {
     /// rest are decided again.
     fn enforcing<'a>(
         &self,
-        t: ObjectType,
+        subject: &Subject<'_>,
         rules: &[&'a Compiled<'p>],
         first: (Decision, Option<&'a Compiled<'p>>),
         state: &DeviceState,
         trace_id: TraceId,
     ) -> Layer<'a, 'p> {
+        let t = subject.object_type;
         let enforces = |r: Option<&Compiled<'_>>| self.mode_of(t, r, state).mode == Mode::Enforce;
         let (decision, winner) = first;
         if decision.outcome() == Outcome::Blocked && enforces(winner) {
@@ -435,7 +596,7 @@ impl<'p> Evaluator<'p> {
         let (dropped, kept): (Vec<&Compiled<'p>>, Vec<&Compiled<'p>>) = rules
             .iter()
             .partition(|r| matches!(r.role, Role::Policy(Verdict::Deny)) && !enforces(Some(r)));
-        let (decision, winner) = self.run(&kept, trace_id);
+        let (decision, winner) = self.run(&kept, subject, trace_id);
         let blocks = decision.outcome() == Outcome::Blocked && enforces(winner);
         Layer {
             decision,
@@ -448,7 +609,19 @@ impl<'p> Evaluator<'p> {
 
     /// The enabled rules that apply to the subject.
     fn matching(&self, subject: &Subject<'_>) -> Vec<&Compiled<'p>> {
-        self.rules.iter().filter(|r| r.applies(subject)).collect()
+        self.matching_with_notes(subject).0
+    }
+
+    /// The enabled rules that apply to the subject, and the scope notes of
+    /// every rule whose tree was not `NoMatch`.
+    fn matching_with_notes(&self, subject: &Subject<'_>) -> (Vec<&Compiled<'p>>, ScopeNotes) {
+        let mut notes = ScopeNotes::default();
+        let matched = self
+            .rules
+            .iter()
+            .filter(|r| r.applies(subject, &mut notes))
+            .collect();
+        (matched, notes)
     }
 
     /// Runs the stages over the rules that apply, and returns the decision
@@ -456,6 +629,7 @@ impl<'p> Evaluator<'p> {
     fn run<'a>(
         &self,
         matched: &[&'a Compiled<'p>],
+        subject: &Subject<'_>,
         trace_id: TraceId,
     ) -> (Decision, Option<&'a Compiled<'p>>) {
         let mut mandatory = Vec::new();
@@ -526,9 +700,25 @@ impl<'p> Evaluator<'p> {
             overridden.extend(trust.iter().map(|r| r.reference));
             Vec::new()
         };
-        let d = self
+        let mut d = self
             .decide(winner, trace_id)
             .with_context(overridden, annotations, grants);
+        if verdict.allows() {
+            if let Some(close) = winner.window_close(subject) {
+                d = d.with_window_close(close);
+            }
+            if let Some(limit) = winner.instance_limit() {
+                // The count is a fact like any other: unknown never allows.
+                let running = subject.context.scope.instances_in_session;
+                if running.is_none_or(|n| n >= limit) {
+                    return (
+                        d.instance_limit()
+                            .with_scope_notes(note(ScopeNote::InstanceLimit)),
+                        Some(winner),
+                    );
+                }
+            }
+        }
         (d, Some(winner))
     }
 
@@ -548,6 +738,22 @@ impl Evaluator<'_> {
     pub(crate) fn matching_ids(&self, subject: &Subject<'_>) -> Vec<RuleId> {
         self.matching(subject).iter().map(|r| r.rule.id).collect()
     }
+
+    /// The scopes of an enabled rule, evaluated for the subject (#38), as
+    /// the evaluator reads them; `None` for a rule it does not hold.
+    pub(crate) fn scope_of(&self, rule: RuleId, subject: &Subject<'_>) -> Option<ScopeEvaluation> {
+        self.rules
+            .iter()
+            .find(|r| r.rule.id == rule)
+            .map(|r| r.scope_eval(subject))
+    }
+}
+
+/// A set of one note.
+fn note(n: ScopeNote) -> ScopeNotes {
+    let mut notes = ScopeNotes::default();
+    notes.insert(n);
+    notes
 }
 
 #[cfg(test)]

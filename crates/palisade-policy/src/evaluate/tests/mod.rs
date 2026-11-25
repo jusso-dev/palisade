@@ -916,3 +916,4 @@ proptest! {
 }
 
 mod modes;
+mod scopes;

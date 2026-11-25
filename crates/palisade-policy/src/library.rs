@@ -348,14 +348,17 @@ pub enum LibraryContent {
         /// Up to 100,000 device identifiers.
         devices: Vec<String>,
     },
-    /// Networks: CIDRs, ranges and domains, for scopes (#38).
+    /// Networks, for scopes (#38): address blocks (`10.0.0.0/8`), ranges
+    /// (`10.0.0.1-10.0.0.9`) and DNS suffixes (`corp.example.org`).
     NetworkSet {
         /// Up to 100,000 entries.
         entries: Vec<String>,
     },
-    /// Schedules, for scopes (#38).
+    /// A schedule, for scopes (#38): exactly one entry, the schedule
+    /// written as JSON, the same object as a scope's inline `schedule`
+    /// (whitespace and line breaks allowed), at most 1 MiB.
     ScheduleSet {
-        /// Up to 100,000 entries, whose syntax #38 defines.
+        /// One entry.
         entries: Vec<String>,
     },
     /// A notification or block message (#147).
@@ -1503,10 +1506,21 @@ fn check_library(base: &str, lib: &Library, errors: &mut Vec<LibraryError>) {
             check_entries(&c, "devices", v, MAX_SET_ENTRIES, errors, plain_problem);
         }
         LibraryContent::NetworkSet { entries: v } => {
-            check_entries(&c, "entries", v, MAX_SET_ENTRIES, errors, plain_problem);
+            check_entries(&c, "entries", v, MAX_SET_ENTRIES, errors, |e| {
+                plain_problem(e).or_else(|| crate::scope::network_entry_problem(e))
+            });
         }
         LibraryContent::ScheduleSet { entries: v } => {
-            check_entries(&c, "entries", v, MAX_SET_ENTRIES, errors, plain_problem);
+            // One schedule per set. It is JSON, so it may hold line breaks,
+            // and it is measured on its own limit, not a set entry's.
+            check_entries(
+                &c,
+                "entries",
+                v,
+                1,
+                errors,
+                crate::scope::schedule_entry_problem,
+            );
         }
         LibraryContent::MessageTemplate { text } => {
             let problem = if text.trim().is_empty() {

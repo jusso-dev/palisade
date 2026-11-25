@@ -2037,3 +2037,291 @@ fn a_rule_set_id_maps_to_its_contributions() {
     let set_id = RuleSetId(id(60).parse().unwrap());
     assert_eq!(e.rule_set(set_id).unwrap().len(), 1);
 }
+
+// --- Scopes (#38) ------------------------------------------------------------
+
+#[test]
+fn policy_and_assignment_scopes_move_onto_the_rule_sets() {
+    let admins = json!({"principals": {"include": [{"well_known": "administrators"}]}});
+    let console = json!({"sessions": {"types": ["console"]}});
+    let mut nodes = base_nodes();
+    set_node(&mut nodes, 11, json!({"assignments": assign(&[(50, 0)])}));
+    let h = validated(&snapshot(
+        nodes,
+        vec![policy_with(
+            50,
+            "enforce",
+            vec![set(60, "allowlist", false, vec![rule(70, "allow", 'b')])],
+            json!({
+                "scope": admins,
+                "rule_set_scopes": [{"rule_set": id(60), "scopes": [console]}],
+                "location_profiles": [{"name": "corporate", "all": [{"server_reachable": true}]}]
+            }),
+        )],
+        vec![],
+    ));
+    let e = effective(&h, 20);
+    let p = &e.policy().unwrap().document().policy;
+    assert!(p.scope.is_none());
+    assert_eq!(p.rule_set_scopes.len(), 1);
+    assert_eq!(p.rule_set_scopes[0].rule_set.0.to_string(), id(60));
+    assert_eq!(p.rule_set_scopes[0].scopes.len(), 2);
+    assert!(p.rule_set_scopes[0].scopes[0].principals.is_some());
+    assert!(p.rule_set_scopes[0].scopes[1].sessions.is_some());
+    assert_eq!(p.location_profiles.len(), 1);
+}
+
+#[test]
+fn one_rule_set_with_two_scopes_is_a_conflicting_scope() {
+    let shared = set(60, "allowlist", false, vec![rule(70, "allow", 'b')]);
+    let mut nodes = base_nodes();
+    set_node(&mut nodes, 1, json!({"assignments": assign(&[(50, 0)])}));
+    set_node(&mut nodes, 11, json!({"assignments": assign(&[(51, 0)])}));
+    let found = errors(&snapshot(
+        nodes,
+        vec![
+            policy_with(
+                50,
+                "enforce",
+                vec![shared.clone()],
+                json!({"scope": {"sessions": {"types": ["console"]}}}),
+            ),
+            policy(51, "enforce", vec![shared]),
+        ],
+        vec![],
+    ));
+    assert!(
+        found.iter().any(|(c, _)| c == "conflicting_scope"),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn location_profiles_with_one_name_must_agree() {
+    let mut nodes = base_nodes();
+    set_node(&mut nodes, 1, json!({"assignments": assign(&[(50, 0)])}));
+    set_node(&mut nodes, 11, json!({"assignments": assign(&[(51, 0)])}));
+    let profile = |reachable: bool| json!({"location_profiles": [{"name": "corporate", "all": [{"server_reachable": reachable}]}]});
+    let found = errors(&snapshot(
+        nodes,
+        vec![
+            policy_with(
+                50,
+                "enforce",
+                vec![set(60, "allowlist", false, vec![rule(70, "allow", 'b')])],
+                profile(true),
+            ),
+            policy_with(
+                51,
+                "enforce",
+                vec![set(61, "allowlist", false, vec![rule(71, "allow", 'c')])],
+                profile(false),
+            ),
+        ],
+        vec![],
+    ));
+    assert!(
+        found
+            .iter()
+            .any(|(c, p)| c == "conflicting_scope" && p.contains("location_profiles")),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn scopes_resolve_library_sets_through_the_catalogue() {
+    use crate::library::Visibility;
+    use crate::scope::{CatalogueLibrary, ScopeLibrary, SetRef};
+    let schedule =
+        json!({"windows": [{"days": ["mon"], "start": "09:00", "end": "17:00"}]}).to_string();
+    let lib = |n: u32, content: Value| json!({"id": id(n), "version": 1, "name": format!("Set {n}"), "realm": "global", "content": content});
+    let h = validated(&snapshot(
+        base_nodes(),
+        vec![],
+        vec![
+            lib(
+                100,
+                json!({"kind": "principal_set", "principals": ["S-1-5-32-544"]}),
+            ),
+            lib(
+                101,
+                json!({"kind": "network_set", "entries": ["10.0.0.0/8", "corp.example.org"]}),
+            ),
+            lib(102, json!({"kind": "schedule_set", "entries": [schedule]})),
+        ],
+    ));
+    let library = CatalogueLibrary {
+        catalogue: &h.catalogue,
+        from: Visibility::Global,
+    };
+    let r = |n: u32| SetRef {
+        id: LibraryId(id(n).parse().unwrap()),
+        pin: crate::library::Pin::Latest,
+    };
+    assert_eq!(
+        library.principal_set(&r(100)),
+        Some(vec!["S-1-5-32-544".to_owned()])
+    );
+    assert_eq!(library.network_set(&r(101)).map(|v| v.len()), Some(2));
+    assert_eq!(
+        library.schedule_set(&r(102)).map(|s| s.windows.len()),
+        Some(1)
+    );
+    // The wrong kind, or a set that does not exist, is unresolved.
+    assert_eq!(library.network_set(&r(100)), None);
+    assert_eq!(library.principal_set(&r(103)), None);
+}
+
+#[test]
+fn set_libraries_check_their_entries() {
+    let lib = |content: Value| json!({"id": id(100), "version": 1, "name": "Set", "realm": "global", "content": content});
+    for content in [
+        json!({"kind": "network_set", "entries": ["10.0.0.1/8"]}),
+        json!({"kind": "network_set", "entries": ["not a network"]}),
+        json!({"kind": "schedule_set", "entries": ["{}x"]}),
+        json!({"kind": "schedule_set", "entries": [json!({"windows": [{"days": [], "start": "09:00", "end": "17:00"}]}).to_string()]}),
+        json!({"kind": "schedule_set", "entries": [json!({"on_window_close": "warn"}).to_string()]}),
+        json!({"kind": "schedule_set", "entries": ["{}", "{}"]}),
+    ] {
+        let found = errors(&snapshot(base_nodes(), vec![], vec![lib(content.clone())]));
+        assert!(
+            found.iter().any(|(c, _)| c == "invalid_entry"),
+            "{content}: {found:?}"
+        );
+    }
+}
+
+/// A policy (50) whose allow (70) is scoped to principal set 100, at
+/// `pin`, assigned at group 11.
+fn scoped_by_set(pin: Value) -> (Vec<Value>, Value) {
+    let scoped = {
+        let mut r = rule(70, "allow", 'b');
+        r["scope"] =
+            json!({"principals": {"include": [{"principal_set": {"id": id(100), "pin": pin}}]}});
+        r
+    };
+    let mut nodes = base_nodes();
+    set_node(&mut nodes, 11, json!({"assignments": assign(&[(50, 0)])}));
+    (
+        nodes,
+        policy(
+            50,
+            "enforce",
+            vec![set(60, "allowlist", false, vec![scoped])],
+        ),
+    )
+}
+
+fn principal_set_library(version: u32, sid: &str) -> Value {
+    json!({"id": id(100), "version": version, "name": "Admins", "realm": "global",
+           "content": {"kind": "principal_set", "principals": [sid]}})
+}
+
+#[test]
+fn scope_sets_must_exist_and_be_the_right_kind() {
+    let (nodes, p) = scoped_by_set(json!("latest"));
+    let found = errors(&snapshot(nodes.clone(), vec![p.clone()], vec![]));
+    assert!(
+        found.iter().any(|(c, path)| c == "unknown_library"
+            && path.ends_with("/scope/principals/include/0/principal_set")),
+        "{found:?}"
+    );
+    let wrong = json!({"id": id(100), "version": 1, "name": "Nets", "realm": "global",
+                       "content": {"kind": "network_set", "entries": ["10.0.0.0/8"]}});
+    let found = errors(&snapshot(nodes, vec![p], vec![wrong]));
+    assert!(
+        found.iter().any(|(c, _)| c == "ref_kind_not_allowed"),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn scope_sets_are_pinned_counted_and_in_use() {
+    let (nodes, p) = scoped_by_set(json!("latest"));
+    let h = validated(&snapshot(
+        nodes.clone(),
+        vec![p.clone()],
+        vec![principal_set_library(1, "S-1-5-32-544")],
+    ));
+    let e = effective(&h, 20);
+    // Pinned to the version used, and listed with it.
+    let doc = e.policy().unwrap().document();
+    let r = &doc.rule_sets[0].rules[0];
+    let scope = serde_json::to_value(r.scope.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        scope["principals"]["include"][0]["principal_set"]["pin"],
+        json!(1)
+    );
+    assert!(
+        e.libraries()
+            .contains(&(LibraryId(id(100).parse().unwrap()), 1))
+    );
+    // A new version changes the content hash.
+    let h2 = validated(&snapshot(
+        nodes,
+        vec![p],
+        vec![
+            principal_set_library(1, "S-1-5-32-544"),
+            principal_set_library(2, "S-1-5-32-545"),
+        ],
+    ));
+    assert_ne!(effective(&h2, 20).content_hash(), e.content_hash());
+    // And the set cannot be deleted while the policy uses it.
+    let err = h
+        .check_delete(LibraryId(id(100).parse().unwrap()))
+        .unwrap_err();
+    assert_eq!(err.code.as_str(), "in_use");
+}
+
+#[test]
+fn two_pins_of_one_scope_set_conflict() {
+    let shared = |n: u32, rid: u32, pin: u32| {
+        let mut r = rule(rid, "allow", 'b');
+        r["scope"] =
+            json!({"principals": {"include": [{"principal_set": {"id": id(100), "pin": pin}}]}});
+        set(n, "allowlist", false, vec![r])
+    };
+    let mut nodes = base_nodes();
+    set_node(&mut nodes, 1, json!({"assignments": assign(&[(50, 0)])}));
+    set_node(&mut nodes, 11, json!({"assignments": assign(&[(51, 0)])}));
+    let found = errors(&snapshot(
+        nodes,
+        vec![
+            policy(50, "enforce", vec![shared(60, 70, 1)]),
+            policy(51, "enforce", vec![shared(61, 71, 2)]),
+        ],
+        vec![
+            principal_set_library(1, "S-1-5-32-544"),
+            principal_set_library(2, "S-1-5-32-545"),
+        ],
+    ));
+    assert!(
+        found.iter().any(|(c, _)| c == "library_version_conflict"),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn an_effective_assignment_holds_the_policy_scope_too() {
+    let console = json!({"sessions": {"types": ["console"]}});
+    let scopes: Vec<Value> = (0..8).map(|_| console.clone()).collect();
+    let mut nodes = base_nodes();
+    set_node(&mut nodes, 11, json!({"assignments": assign(&[(50, 0)])}));
+    let h = validated(&snapshot(
+        nodes,
+        vec![policy_with(
+            50,
+            "enforce",
+            vec![set(60, "allowlist", false, vec![rule(70, "allow", 'b')])],
+            json!({"scope": console, "rule_set_scopes": [{"rule_set": id(60), "scopes": scopes}]}),
+        )],
+        vec![],
+    ));
+    let e = effective(&h, 20);
+    assert_eq!(
+        e.policy().unwrap().document().policy.rule_set_scopes[0]
+            .scopes
+            .len(),
+        9
+    );
+}

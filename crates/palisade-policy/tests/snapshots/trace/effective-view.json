@@ -119,6 +119,11 @@
       "source": "default"
     },
     {
+      "key": "group_cache_max_age_secs",
+      "value": 86400,
+      "source": "default"
+    },
+    {
       "key": "max_ancestor_depth",
       "value": 8,
       "source": "default"

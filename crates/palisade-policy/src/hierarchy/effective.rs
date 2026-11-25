@@ -588,6 +588,10 @@ impl ValidatedHierarchy {
 /// A rule set in the making.
 struct SetEntry {
     set: RuleSet,
+    /// The scopes it is assigned with (#38): the contributing policy's
+    /// `scope`, then that policy's `rule_set_scopes` for the set. Empty for
+    /// a rule set library a node assigns.
+    scopes: Vec<crate::scope::Scope>,
     /// `(layer position, contribution)`, in layer order.
     contributions: Vec<(usize, Contribution)>,
     band: u8,
@@ -644,6 +648,8 @@ impl<'a, 'h> Builder<'a, 'h> {
         let (mut settings, mut settings_prov) = self.settings();
         let (mut mode_options, mode_prov) = self.mode_options();
         let mut mode = self.mode();
+        let location_profiles = self.location_profiles();
+        self.scope_set_versions();
         if !self.errors.is_empty() {
             return Err(self.errors);
         }
@@ -714,6 +720,19 @@ impl<'a, 'h> Builder<'a, 'h> {
 
         let target = self.h.nodes.get(&node);
         let name = target.map_or_else(|| node.to_string(), |t| t.node.name.clone());
+        // Each contributing policy's scopes now sit on its rule sets, so the
+        // effective policy has no scope of its own (#38). Location profiles
+        // are the union of the contributing policies'; two with one name
+        // and different tests cannot both hold.
+        let rule_set_scopes = self
+            .sets
+            .iter()
+            .filter(|(_, e)| !e.scopes.is_empty())
+            .map(|(id, e)| crate::scope::RuleSetScope {
+                rule_set: *id,
+                scopes: e.scopes.clone(),
+            })
+            .collect();
         let doc = PolicyDocument {
             schema_version: schema::CURRENT,
             policy: Policy {
@@ -727,6 +746,9 @@ impl<'a, 'h> Builder<'a, 'h> {
                 mode_options,
                 settings,
                 rule_sets: sets.keys().copied().collect(),
+                scope: None,
+                rule_set_scopes,
+                location_profiles,
                 metadata: Metadata::default(),
             },
             rule_sets: sets.into_values().collect(),
@@ -777,12 +799,87 @@ impl<'a, 'h> Builder<'a, 'h> {
         })
     }
 
+    /// One version of each library set the scopes use (#38), as of each
+    /// rule set library and policy: two pins of one set would leave a
+    /// device-set membership fact, which names the set only, ambiguous.
+    fn scope_set_versions(&mut self) {
+        let mut seen: BTreeMap<LibraryId, (crate::library::Pin, String)> = BTreeMap::new();
+        let mut found = Vec::new();
+        for (id, e) in &self.sets {
+            let scopes = e
+                .scopes
+                .iter()
+                .chain(e.set.rules.iter().filter_map(|r| r.scope.as_ref()));
+            for scope in scopes {
+                for (_, r, _) in crate::scope::set_refs(scope) {
+                    found.push((r, format!("/effective/rule_sets/{id}")));
+                }
+            }
+        }
+        for (r, at) in found {
+            match seen.get(&r.id) {
+                Some((pin, first)) if *pin != r.pin => self.errors.push(herr(
+                    HierarchyCode::LibraryVersionConflict,
+                    at,
+                    format!(
+                        "library set {} is used at version {} and at version {pin} ({first}); one device uses one version of each set",
+                        r.id, r.pin
+                    ),
+                )),
+                Some(_) => {}
+                None => {
+                    seen.insert(r.id, (r.pin, at));
+                }
+            }
+        }
+    }
+
+    /// The location profiles of every contributing policy (#38), by name.
+    /// Two with one name and different tests are a `conflicting_scope`.
+    fn location_profiles(&mut self) -> Vec<crate::scope::LocationProfile> {
+        let mut out: BTreeMap<String, (crate::scope::LocationProfile, String)> = BTreeMap::new();
+        let layers = self.layers;
+        for layer in layers {
+            let base = layer.info.path();
+            for (_, doc) in self.policies(layer) {
+                for (i, p) in doc.policy.location_profiles.iter().enumerate() {
+                    let key = crate::scope::text::group_name(&p.name);
+                    let at = self.h.policies.get(&doc.policy.id).map_or_else(
+                        || base.clone(),
+                        |info| {
+                            format!(
+                                "/policies/{}/document/policy/location_profiles/{i}",
+                                info.index
+                            )
+                        },
+                    );
+                    match out.get(&key) {
+                        Some((q, first)) if q.all != p.all => {
+                            let message = format!(
+                                "location profile `{}` is defined differently by two policies ({first}); give one of them another name",
+                                p.name
+                            );
+                            self.errors
+                                .push(herr(HierarchyCode::ConflictingScope, at, message));
+                        }
+                        Some(_) => {}
+                        None => {
+                            out.insert(key, (p.clone(), at));
+                        }
+                    }
+                }
+            }
+        }
+        out.into_values().map(|(p, _)| p).collect()
+    }
+
     /// Adds one rule set from layer `pos`.
     fn add_set(
         &mut self,
         pos: usize,
         set: &RuleSet,
         library: Option<Version>,
+        scopes: Vec<crate::scope::Scope>,
         contribution: Contribution,
         at: &str,
     ) {
@@ -810,6 +907,17 @@ impl<'a, 'h> Builder<'a, 'h> {
                 let mut b = set.clone();
                 a.band = 0;
                 b.band = 0;
+                if a == b && entry.scopes != scopes {
+                    self.errors.push(herr(
+                        HierarchyCode::ConflictingScope,
+                        at,
+                        format!(
+                            "rule set {} (`{}`) is also contributed with a different scope; give it one scope, or contribute it once",
+                            set.id, set.name
+                        ),
+                    ));
+                    return;
+                }
                 if a != b {
                     self.errors.push(herr(
                         HierarchyCode::RuleSetConflict,
@@ -829,6 +937,7 @@ impl<'a, 'h> Builder<'a, 'h> {
                     set.id,
                     SetEntry {
                         set: set.clone(),
+                        scopes,
                         contributions: vec![(pos, contribution)],
                         band,
                     },
@@ -854,10 +963,26 @@ impl<'a, 'h> Builder<'a, 'h> {
                             policy: doc.policy.id,
                             slot_order: slot,
                         };
+                        // The policy's scope covers its rule sets, so it
+                        // moves onto each of them (#38).
+                        let scopes: Vec<crate::scope::Scope> = doc
+                            .policy
+                            .scope
+                            .iter()
+                            .cloned()
+                            .chain(
+                                doc.policy
+                                    .rule_set_scopes
+                                    .iter()
+                                    .filter(|a| a.rule_set == *id)
+                                    .flat_map(|a| a.scopes.iter().cloned()),
+                            )
+                            .collect();
                         self.add_set(
                             pos,
                             set,
                             None,
+                            scopes,
                             layer.contribution(via),
                             &format!("{base}/assignments"),
                         );
@@ -883,6 +1008,7 @@ impl<'a, 'h> Builder<'a, 'h> {
                     pos,
                     &set,
                     Some(version),
+                    Vec::new(),
                     layer.contribution(via),
                     &format!("{base}/rule_sets/{i}"),
                 );
@@ -908,6 +1034,7 @@ impl<'a, 'h> Builder<'a, 'h> {
                         pos,
                         &set,
                         Some(version),
+                        Vec::new(),
                         layer.contribution(via),
                         &format!("{base}/categories/{i}"),
                     );

@@ -14,6 +14,7 @@ pub mod model;
 pub mod ops;
 pub mod precedence;
 pub mod schema;
+pub mod scope;
 pub mod trace;
 pub mod validate;
 

@@ -559,6 +559,26 @@ version = "1.0.19"
 criteria = "safe-to-deploy"
 notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
 
+[[exemptions.jiff]]
+version = "1.0.3"
+criteria = "safe-to-deploy"
+notes = "Added by #38 (palisade-policy rule scoping: civil time and the bundled time zone database for schedules) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
+[[exemptions.jiff-core]]
+version = "1.0.2"
+criteria = "safe-to-deploy"
+notes = "Added by #38 (palisade-policy rule scoping: civil time and the bundled time zone database for schedules) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
+[[exemptions.jiff-static]]
+version = "1.0.3"
+criteria = "safe-to-deploy"
+notes = "Added by #38 (palisade-policy rule scoping: civil time and the bundled time zone database for schedules) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
+[[exemptions.jiff-tzdb]]
+version = "1.0.0"
+criteria = "safe-to-deploy"
+notes = "Added by #38 (palisade-policy rule scoping: civil time and the bundled time zone database for schedules) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
 [[exemptions.js-sys]]
 version = "0.3.107"
 criteria = "safe-to-deploy"
@@ -678,6 +698,16 @@ notes = "Added by #252 (palisade-agent service host: async runtime, logging and 
 version = "0.3.34"
 criteria = "safe-to-deploy"
 notes = "Added by #127 (palisade-server Postgres layer: sqlx with the Postgres driver, migrations and rustls). Audit, or import an audit, before bumping."
+
+[[exemptions.portable-atomic]]
+version = "1.15.0"
+criteria = "safe-to-deploy"
+notes = "Added by #38 (palisade-policy rule scoping: civil time and the bundled time zone database for schedules) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
+[[exemptions.portable-atomic-util]]
+version = "0.2.8"
+criteria = "safe-to-deploy"
+notes = "Added by #38 (palisade-policy rule scoping: civil time and the bundled time zone database for schedules) when cargo-vet was already in place. Audit, or import an audit, before bumping."
 
 [[exemptions.potential_utf]]
 version = "0.1.6"

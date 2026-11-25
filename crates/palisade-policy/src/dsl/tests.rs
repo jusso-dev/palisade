@@ -839,7 +839,7 @@ proptest! {
     #![proptest_config(cases(10_000))]
 
     #[test]
-    fn yaml_round_trip_is_lossless(doc in arbitrary::document()) {
+    fn yaml_round_trip_is_lossless(doc in arbitrary::scoped_document()) {
         let yaml = to_string(&doc).unwrap();
         let back = PolicyDocument::from_yaml(&yaml);
         prop_assert!(back.is_ok(), "{}\n{}", back.unwrap_err(), yaml);
@@ -861,7 +861,7 @@ proptest! {
     #![proptest_config(cases(512))]
 
     #[test]
-    fn json_text_reads_the_same_as_yaml(doc in arbitrary::document()) {
+    fn json_text_reads_the_same_as_yaml(doc in arbitrary::scoped_document()) {
         let json = doc.to_json_pretty().unwrap();
         prop_assert_eq!(PolicyDocument::from_yaml(&json).unwrap(), doc.clone());
         let compact = serde_json::to_string(&doc).unwrap();
@@ -1251,7 +1251,7 @@ proptest! {
     // The JSON reader is an optimisation: on JSON the YAML parser can read,
     // both build the same tree, with the same locations.
     #[test]
-    fn json_reader_and_yaml_parser_agree(doc in arbitrary::document()) {
+    fn json_reader_and_yaml_parser_agree(doc in arbitrary::scoped_document()) {
         for text in [doc.to_json_pretty().unwrap(), serde_json::to_string(&doc).unwrap()] {
             prop_assert!(parse::is_json(&text, Limits::DEFAULT.max_depth));
             prop_assert_eq!(tree(&text, true).unwrap(), tree(&text, false).unwrap());

@@ -35,6 +35,8 @@ pub use precedence::{AllowTiebreak, PrecedenceOptions, PriorityDirection, TierTi
 pub use settings::{AdvancedValue, ControlLevel, PolicySettings, TimeZoneBasis};
 pub use tree::{Criterion, Field, FieldClass, Match, Operator, Strength};
 
+use crate::scope::{LocationProfile, RuleSetScope, Scope};
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -112,6 +114,20 @@ pub struct Policy {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(length(max = 1000))]
     pub rule_sets: Vec<RuleSetId>,
+    /// Who, where and when the whole policy applies (#38). Every rule must
+    /// also be in this scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<Scope>,
+    /// The scopes of rule set assignments (#38): each rule of the set must
+    /// also be in every one of them. At most one entry per rule set.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = 1000))]
+    pub rule_set_scopes: Vec<RuleSetScope>,
+    /// Named network locations that scopes test with `location_profile`
+    /// (#38).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = 64))]
+    pub location_profiles: Vec<LocationProfile>,
     /// Governance metadata (#40).
     #[serde(default, skip_serializing_if = "Metadata::is_empty")]
     pub metadata: Metadata,
@@ -278,6 +294,10 @@ pub struct Rule {
     /// Per-rule enforcement override (#36). Only for `deny` rules.
     #[serde(default)]
     pub enforcement_override: EnforcementOverride,
+    /// Who, where and when the rule applies (#38). Unset means everyone,
+    /// everywhere, always, within the policy's and the rule set's scopes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<Scope>,
     /// Governance metadata (#40).
     #[serde(default, skip_serializing_if = "Metadata::is_empty")]
     pub metadata: Metadata,
