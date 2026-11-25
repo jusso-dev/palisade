@@ -2,8 +2,8 @@
 //! and the Linux server binary, exactly as CI builds them (#22).
 //!
 //! ```text
-//! cargo xtask dist [--target <triple>] [--msi] [--sign none] [--out <dir>]
-//!                  [--bump-patch] [--compare-sizes <sizes.json>]
+//! cargo xtask dist [--target <triple>] [--msi] [--sign <signer>] [--out <dir>]
+//!                  [--bump-patch] [--compare-sizes <sizes.json>] [--from <dir>]
 //! cargo xtask dist driver
 //! ```
 //!
@@ -20,9 +20,12 @@
 //!    resources identical to what step 1 wrote;
 //! 4. writes the PDBs to `palisade-<version>-<arch>-symbols.zip` in the
 //!    symbol-server layout, and `sizes-<arch>.json`;
-//! 5. with `--msi`, generates the property fragment ([`msi`]), builds
+//! 5. with `--sign`, signs every executable before it is packaged;
+//! 6. with `--msi`, builds
 //!    `Palisade-<version>-<arch>.msi` with the pinned WiX version and
-//!    validates it (ICE). PDBs are never packaged.
+//!    validates it (ICE), then signs it with the same signer. PDBs are never
+//!    packaged. `--from <dir>` packages executables built (and signed)
+//!    elsewhere instead, after checking they match this version.
 //!
 //! For `x86_64-unknown-linux-gnu` it builds `palisade-server`, checks it is
 //! an x86-64 ELF executable and writes it with `sizes-linux-x64.json`.
@@ -147,29 +150,27 @@ pub const SERVER: Binary = Binary {
 const CRT_DLLS: &[&str] = &["vcruntime", "msvcp", "ucrtbase", "concrt", "vccorlib"];
 const CRT_API_SET_PREFIX: &str = "api-ms-win-crt-";
 
-/// The signer `--sign` selects. Only the dry run exists until the release
-/// pipeline adds real signers (#24).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Signer {
-    /// Log every file that would be signed, and sign nothing.
-    None,
-}
+/// The signer `--sign` selects: any kind `cargo xtask sign` has
+/// (`crate::release::sign`).
+pub use crate::release::sign::Kind as Signer;
 
-impl Signer {
-    pub fn parse(name: &str) -> Result<Self, String> {
-        match name {
-            "none" => Ok(Self::None),
-            other => Err(format!(
-                "signer `{other}` is not available; only `none` (a dry run) exists until the release pipeline adds real signers (#24)"
-            )),
-        }
+/// Signs `files` in place with `kind`, reading its secrets from the
+/// environment. Verification is a separate step (`cargo xtask release
+/// verify`), because a test CA must be trusted first.
+fn sign_files(
+    root: &Path,
+    kind: Signer,
+    no_timestamp: bool,
+    files: &[PathBuf],
+) -> Result<(), String> {
+    use crate::release::sign;
+    let mut config = sign::Config::from_process(kind, root);
+    if no_timestamp {
+        config.timestamp = sign::Timestamp::Skip;
     }
-
-    fn sign(self, path: &Path) {
-        match self {
-            Self::None => println!("dist: sign(none): would sign {}", path.display()),
-        }
-    }
+    let mut runner = sign::ProcessRunner::new(&config);
+    let mut signer = sign::signer(&config, &mut runner)?;
+    sign::sign_all(signer.as_mut(), files, false).map(|_| ())
 }
 
 /// Parsed `cargo xtask dist` arguments.
@@ -181,6 +182,13 @@ pub struct Args {
     pub out: Option<PathBuf>,
     pub bump_patch: bool,
     pub compare_sizes: Option<PathBuf>,
+    /// `--from <dir>`: package these already-built (and signed)
+    /// executables instead of building them. The release pipeline builds
+    /// and signs in separate jobs, then packages.
+    pub from: Option<PathBuf>,
+    /// `--no-timestamp`: sign without a timestamp server. For the CI test
+    /// of the signing path only; `release.yml` never passes it.
+    pub no_timestamp: bool,
 }
 
 /// What the command line asks for.
@@ -202,6 +210,8 @@ pub fn parse_args(args: &[String]) -> Result<Request, String> {
     let mut out = None;
     let mut bump_patch = false;
     let mut compare_sizes = None;
+    let mut from = None;
+    let mut no_timestamp = false;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         let mut value = |name: &str| {
@@ -216,6 +226,8 @@ pub fn parse_args(args: &[String]) -> Result<Request, String> {
             "--out" => out = Some(PathBuf::from(value("--out")?)),
             "--bump-patch" => bump_patch = true,
             "--compare-sizes" => compare_sizes = Some(PathBuf::from(value("--compare-sizes")?)),
+            "--from" => from = Some(PathBuf::from(value("--from")?)),
+            "--no-timestamp" => no_timestamp = true,
             other => return Err(format!("unexpected argument `{other}`")),
         }
     }
@@ -231,6 +243,14 @@ pub fn parse_args(args: &[String]) -> Result<Request, String> {
     if sign.is_some() && !target.is_windows() {
         return Err("--sign needs a Windows target (Authenticode)".to_owned());
     }
+    if from.is_some() && !msi {
+        return Err("--from packages prebuilt executables; it needs --msi".to_owned());
+    }
+    if from.is_some() && bump_patch {
+        return Err(
+            "--from packages the executables as built; --bump-patch cannot change them".to_owned(),
+        );
+    }
     Ok(Request::Build(Args {
         target,
         msi,
@@ -238,6 +258,8 @@ pub fn parse_args(args: &[String]) -> Result<Request, String> {
         out,
         bump_patch,
         compare_sizes,
+        from,
+        no_timestamp,
     }))
 }
 
@@ -294,7 +316,9 @@ pub fn target_dir(root: &Path) -> Result<PathBuf, String> {
 
 /// Runs `cargo xtask dist`. Returns the files written.
 pub fn run(root: &Path, args: &Args) -> Result<Vec<PathBuf>, String> {
-    if !can_link(args.target) {
+    // Packaging prebuilt executables links nothing, so any Windows
+    // machine can package for either architecture.
+    if !(can_link(args.target) || (args.from.is_some() && cfg!(windows))) {
         return Err(format!(
             "{} builds only on {}: it links with the platform's own linker",
             args.target.triple(),
@@ -379,6 +403,9 @@ fn windows(build: &Build<'_>, args: &Args) -> Result<Vec<PathBuf>, String> {
     std::fs::create_dir_all(&bin_dir)
         .map_err(|e| format!("cannot create {}: {e}", bin_dir.display()))?;
 
+    if let Some(from) = &args.from {
+        return package_prebuilt(build, args, from, &bin_dir);
+    }
     let mut exes = Vec::new();
     let mut symbols = Vec::new();
     for binary in WINDOWS_BINARIES {
@@ -435,10 +462,10 @@ fn windows(build: &Build<'_>, args: &Args) -> Result<Vec<PathBuf>, String> {
         write(&shipped, &data)?;
         exes.push(shipped);
     }
+    // Every executable is signed before it is packaged, so the package
+    // never holds an unsigned payload.
     if let Some(signer) = args.sign {
-        for exe in &exes {
-            signer.sign(exe);
-        }
+        sign_files(build.root, signer, args.no_timestamp, &exes)?;
     }
 
     let symbols_path = build.out.join(format!(
@@ -454,29 +481,71 @@ fn windows(build: &Build<'_>, args: &Args) -> Result<Vec<PathBuf>, String> {
     let mut written = exes;
     written.push(symbols_path);
     if args.msi {
-        let msi_path = msi::build(
-            build.root,
-            &msi::Inputs {
-                target: build.target,
-                version: &build.version,
-                bin_dir: &bin_dir,
-                out_dir: &build.out,
-                target_dir: &build.target_dir,
-            },
-        )?;
-        if let Some(signer) = args.sign {
-            signer.sign(&msi_path);
-        }
-        let digest =
-            hex(&Sha256::digest(std::fs::read(&msi_path).map_err(|e| {
-                format!("cannot read {}: {e}", msi_path.display())
-            })?));
-        let name = file_name(&msi_path);
-        let sum_path = msi_path.with_file_name(format!("{name}.sha256"));
-        write(&sum_path, format!("{digest}  {name}\n").as_bytes())?;
-        written.push(msi_path);
-        written.push(sum_path);
+        written.extend(package(build, args, &bin_dir)?);
     }
+    Ok(written)
+}
+
+/// Builds the package from the executables in `bin_dir`, signs it with
+/// the selected signer, and writes its checksum file.
+fn package(build: &Build<'_>, args: &Args, bin_dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let msi_path = msi::build(
+        build.root,
+        &msi::Inputs {
+            target: build.target,
+            version: &build.version,
+            bin_dir,
+            out_dir: &build.out,
+            target_dir: &build.target_dir,
+        },
+    )?;
+    if let Some(signer) = args.sign {
+        sign_files(
+            build.root,
+            signer,
+            args.no_timestamp,
+            std::slice::from_ref(&msi_path),
+        )?;
+    }
+    let digest =
+        hex(&Sha256::digest(std::fs::read(&msi_path).map_err(|e| {
+            format!("cannot read {}: {e}", msi_path.display())
+        })?));
+    let name = file_name(&msi_path);
+    let sum_path = msi_path.with_file_name(format!("{name}.sha256"));
+    write(&sum_path, format!("{digest}  {name}\n").as_bytes())?;
+    Ok(vec![msi_path, sum_path])
+}
+
+/// `--from <dir>`: checks the executables in `from` are the ones this
+/// version and target produce (machine type, version resource and
+/// manifest), copies them, and packages them. The release pipeline uses it
+/// to package executables another job built and signed. A signature only
+/// changes the certificate table, which the checks do not read.
+fn package_prebuilt(
+    build: &Build<'_>,
+    args: &Args,
+    from: &Path,
+    bin_dir: &Path,
+) -> Result<Vec<PathBuf>, String> {
+    let mut written = Vec::new();
+    for binary in WINDOWS_BINARIES {
+        let file_name = format!("{}.exe", binary.bin);
+        let source = from.join(&file_name);
+        let data =
+            std::fs::read(&source).map_err(|e| format!("cannot read {}: {e}", source.display()))?;
+        let stamp = res::Stamp {
+            file_name: &file_name,
+            description: binary.description,
+            version: &build.version,
+            product_version: &build.product_version,
+        };
+        verify_windows(&file_name, &data, build.target, &stamp)?;
+        let shipped = bin_dir.join(&file_name);
+        write(&shipped, &data)?;
+        written.push(shipped);
+    }
+    written.extend(package(build, args, bin_dir)?);
     Ok(written)
 }
 
@@ -838,7 +907,24 @@ mod tests {
                 out: Some(PathBuf::from("o")),
                 bump_patch: false,
                 compare_sizes: None,
+                from: None,
+                no_timestamp: false,
             }))
+        );
+        let Ok(Request::Build(a)) = args(&[
+            "--target",
+            "aarch64-pc-windows-msvc",
+            "--msi",
+            "--from",
+            "signed",
+            "--sign",
+            "pfx",
+        ]) else {
+            panic!()
+        };
+        assert_eq!(
+            (a.from, a.sign),
+            (Some(PathBuf::from("signed")), Some(Signer::Pfx))
         );
         let Ok(Request::Build(a)) = args(&[
             "--target",
@@ -864,7 +950,16 @@ mod tests {
             &["--target"][..],
             &["--target", "i686-pc-windows-msvc"],
             &["--target", "x86_64-unknown-linux-gnu", "--msi"],
-            &["--target", "x86_64-pc-windows-msvc", "--sign", "pfx"],
+            &["--target", "x86_64-pc-windows-msvc", "--sign", "hsm"],
+            &["--target", "x86_64-pc-windows-msvc", "--from", "x"],
+            &[
+                "--target",
+                "x86_64-pc-windows-msvc",
+                "--msi",
+                "--from",
+                "x",
+                "--bump-patch",
+            ],
             &["--target", "x86_64-pc-windows-msvc", "--bogus"],
             &["driver", "--msi"],
             &["--target", "x86_64-unknown-linux-gnu", "--msi"],
@@ -872,8 +967,8 @@ mod tests {
         ] {
             assert!(args(bad).is_err(), "{bad:?}");
         }
-        let error = args(&["--target", "x86_64-pc-windows-msvc", "--sign", "test-ca"]).unwrap_err();
-        assert!(error.contains("#24"), "{error}");
+        let error = args(&["--target", "x86_64-pc-windows-msvc", "--sign", "x"]).unwrap_err();
+        assert!(error.contains("test-ca"), "{error}");
     }
 
     #[test]
@@ -1033,11 +1128,5 @@ mod tests {
         assert!(compare_sizes(Path::new("/nonexistent/sizes.json"), new).is_ok());
         assert!(compare_sizes(Path::new(env!("CARGO_MANIFEST_DIR")), new).is_err());
         assert!(size_warnings("nope", new).is_err());
-    }
-
-    #[test]
-    fn only_none_signs_for_now() {
-        assert_eq!(Signer::parse("none"), Ok(Signer::None));
-        assert!(Signer::parse("").is_err());
     }
 }

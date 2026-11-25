@@ -33,6 +33,7 @@ type.
 | `doc-checks` | ubuntu-latest | `cargo xtask threat-coverage`: the threat model's tables are complete and consistent, and every test, fuzz target and CI check it cites exists ([threat model](security/threat-model.md#keeping-it-current)) |
 | `workflow-lint` | ubuntu-latest | `actionlint` (checksum-verified release) and `zizmor --offline` |
 | `package` | windows-latest (x64), windows-11-arm (ARM64, native) | `cargo xtask dist --msi --sign none`, then the same with `--bump-patch`, then `packaging/wix/smoke-test.ps1`: install, upgrade, downgrade, repair and removal of the package on the runner ([packaging.md](packaging.md#tests-in-ci)) |
+| `sign-test` | windows-latest | Code signing end to end with throwaway certificates made on the runner and deleted: `cargo xtask dist --msi --sign test-ca`, `cargo xtask release verify` of every signature including inside the packages, then `packaging/sign/ci-test.ps1` (the `pfx` signer with a canary password that must not appear in the output, and a signed package of unsigned executables that verification must reject). No secrets ([releasing.md](releasing.md#dry-run-on-pull-requests)) |
 | `server-image` | ubuntu-latest | `cargo xtask dist` (the Linux server binary), `podman build` of `packaging/server/Containerfile`, and `palisade-server version` in the image |
 | `ci-ok` | ubuntu-latest | Passes only if every job above succeeded |
 | `snapshot-prepare`, `snapshot`, `snapshot-finish` | ubuntu-latest; windows-latest and windows-11-arm | Pushes to `main` only, after `ci-ok`: the [`main-snapshot`](#main-snapshot) pre-release |
@@ -105,18 +106,23 @@ Details and local commands are in [testing.md](testing.md).
 #### `main-snapshot`
 
 Every push to `main` whose CI passed replaces the files of one rolling pre-release, tagged
-`main-snapshot`, with that commit's unsigned packages (`Palisade-<version>-x64.msi` and
-`-arm64.msi`) and their `.msi.sha256` checksums (#22). The release is marked as a pre-release,
-never as the latest release, and its notes say the builds are unsigned, untested snapshots and
-not for production use, and name the commit and the run. Files of an older version are removed,
-so there is only ever one set.
+`main-snapshot`, with that commit's unsigned packages (`<commit>.Palisade-<version>-x64.msi` and
+`-arm64.msi`, where `<commit>` is the first 12 characters of the commit) and their `.msi.sha256`
+checksums (#22). The release is marked as a pre-release, never as the latest release, and its
+notes say the builds are unsigned, untested snapshots and not for production use, and name the
+commit and the run. Every file name starts with its commit, so an upload never replaces another
+commit's file: the previous set stays published until the new one is complete, and is then
+removed, so there is only ever one set.
 
 Only the three snapshot jobs have a write scope (`contents: write`, to edit the release and
 move the tag), and they run only on `push` to `main`, never on pull requests, so fork code
 never runs with it. `snapshot-prepare` creates the release on first use and marks it as being
 updated, `snapshot` builds and uploads each architecture's package on its own runner, and
-`snapshot-finish` points the tag at the commit, removes older files, checks all four files are
-there and writes the notes. The commands are in `.github/scripts/main-snapshot.sh`, which uses
+`snapshot-finish` checks that `main` still points at the commit (a re-run of an older run's
+job keeps that run's commit, and must not publish over a newer snapshot) and that all four
+files are there, then points the tag at the commit, removes older files and writes the notes.
+`snapshot-prepare` stops on any release lookup failure other than "not found", so an API error
+never creates a release or moves the tag. The commands are in `.github/scripts/main-snapshot.sh`, which uses
 the preinstalled `gh` CLI; its tests (`main-snapshot.test.sh`, a fake `gh`) run in
 `runner-guard`. Pushes to `main` queue rather than cancel each other (`concurrency`), so two
 snapshots never interleave.
@@ -125,6 +131,16 @@ The `snapshot` job builds the packages again instead of reusing the `package` jo
 files between jobs needs an artefact action, and only three actions are allowed (see below).
 The packages are built from the same commit with the same command. Pull requests build and test
 the packages in `package` and publish nothing.
+
+### `release.yml` (pushed `v*` tags; pull requests that change release tooling)
+
+The release pipeline: `check-tag`, `build` (x64 and ARM64, natively), `server`, `sign` (the
+approval-gated `release-signing` environment), `verify`, `provenance` and `publish`. Files move
+between jobs through a draft release, using the preinstalled `gh`, because no artefact action is
+allowed; the draft is published only after `verify` passes. Pull requests that change
+`release.yml`, `xtask/src/dist/`, `xtask/src/release/` or `packaging/` run only `dry-run`: the
+same build, signing with a throwaway test CA, packaging and verification, with no secrets, no
+write access and no upload. Details: [releasing.md](releasing.md).
 
 ### `fuzz.yml` (weekly on Sunday at 04:41 UTC, and on demand)
 
@@ -285,7 +301,7 @@ command lines:
 
 ```sh
 cargo xtask ci          # everything, including coverage, fuzz, docs, feature-powerset and msrv
-cargo xtask ci --fast   # skips those slow steps, and the package and server-image builds
+cargo xtask ci --fast   # skips those slow steps, and the package, signing and server-image builds
 ```
 
 It runs every step even after one fails, and lists the failed ones at the

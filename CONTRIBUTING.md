@@ -182,7 +182,7 @@ Commit messages and PR titles follow [Conventional Commits](https://www.conventi
   `docs: explain rule precedence`.
 
 Pull requests are squash-merged, and the **PR title becomes the commit message on `main`**, which
-the release changelog ([#24](https://github.com/jusso-dev/palisade/issues/24)) is generated from. The `PR title` check
+the release changelog is generated from (`cargo xtask release prepare`, [docs/releasing.md](docs/releasing.md)). The `PR title` check
 (`.github/workflows/pr-title.yml`) fails a pull request whose title does not follow this format.
 Edit the title to fix it; the check reruns.
 

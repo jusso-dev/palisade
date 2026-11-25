@@ -33,9 +33,10 @@ podman build -f packaging/server/Containerfile -t palisade-server:dev target/dis
 `--target <triple>` picks the target explicitly (`x86_64-pc-windows-msvc`,
 `aarch64-pc-windows-msvc` or `x86_64-unknown-linux-gnu`). Windows targets build on Windows and
 the server on Linux, each with the platform's own linker. Output goes to
-`target/dist/<arch>-<version>/`, or to `--out <dir>`. `--sign none` logs each file that would be
-signed; real signers are added by the release pipeline (#24), and any other value fails until
-then. `--bump-patch` builds as the next patch version, which CI uses to test upgrades.
+`target/dist/<arch>-<version>/`, or to `--out <dir>`. `--sign <signer>` signs every executable
+before it is packaged, then the package, with any `cargo xtask sign` signer (`none` only logs);
+see [releasing.md](releasing.md#code-signing). `--from <dir>` packages executables built and
+signed elsewhere, after checking they are this version's; the release pipeline uses it. `--bump-patch` builds as the next patch version, which CI uses to test upgrades.
 `--compare-sizes <sizes.json>` warns about every binary that grew by more than 10% against an
 earlier build's size report. Everything `dist` builds and downloads goes under Cargo's target
 directory, wherever `CARGO_TARGET_DIR` or `build.target-dir` puts it.
@@ -153,7 +154,10 @@ is installed.
   again. The earlier values are read in the elevated part of the install only: the user-interface
   part of an interactive install runs unelevated and cannot read the key.
 - **Notifier.** `palisade-tray.exe` is started in every user's session at sign-in, from the
-  per-machine Run key, unless `NO_TRAY=1`.
+  per-machine Run key, unless `NO_TRAY=1`. The conditional parts (this entry, `ADD_TO_PATH` and
+  each stored setting) are re-evaluated on a repair or reinstall, so
+  `msiexec /i <package> REINSTALL=ALL REINSTALLMODE=amus NO_TRAY=1` removes the entry, and
+  `NO_TRAY=0` puts it back.
 - **CLI.** `pal.exe` is installed next to the agent. `ADD_TO_PATH=1` adds the folder to the
   system `PATH`.
 - **Logging.** Windows Installer records every install, upgrade and removal in the Windows
@@ -166,7 +170,8 @@ is installed.
 ### Properties
 
 All are optional. `SERVER_URL` must start with `https://`, and `MODE` must be one of the values
-below; otherwise the install is refused before anything changes.
+below; otherwise the install, or a repair or reinstall that passes them, is refused before
+anything changes. Removal never checks them, so a damaged stored value cannot block it.
 
 | Property | Meaning |
 |---|---|
@@ -277,7 +282,7 @@ hosted image and installing it exceeds job limits, and no other runner type is e
 
 ## Not covered here
 
-- Signing binaries and packages, and publishing releases: the release pipeline (#24).
+- Signing binaries and packages, and publishing releases: [releasing.md](releasing.md).
 - Testing on clean x64 and ARM64 virtual machines, including the notifier in a real user
   session: the VM harness (#26).
 - Image signing, uninstall protection and further ACL hardening: #18.

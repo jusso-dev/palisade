@@ -1,0 +1,432 @@
+# The release pipeline (#24), on GitHub-hosted runners only. See
+# docs/releasing.md.
+#
+# A pushed `v*` tag runs every job. Files move between jobs through a
+# DRAFT GitHub Release (only three actions are allowed, so there is no
+# artefact action); the draft is published only after `verify` passes.
+#
+#   check-tag  the tag is vX.Y.Z[-alpha.N|-beta.N|-rc.N], annotated and
+#              signed, matches Cargo.toml and has a CHANGELOG.md section;
+#              signing is configured; creates the draft
+#   build      unsigned executables, symbols and size reports per
+#              architecture, natively; no secrets
+#   server     the Linux server binary; no secrets
+#   sign       environment `release-signing` (required reviewers, `v*` tags
+#              only): signs every executable, packages each architecture's
+#              MSI from the signed executables, signs the MSIs, writes and
+#              signs SHA256SUMS
+#   verify     per architecture, on its own runner: the MSI and every
+#              executable inside it has a valid timestamped signature;
+#              SHA256SUMS matches
+#   provenance SBOM and provenance hook (#18, #226): a no-op until enabled
+#   publish    release notes from CHANGELOG.md, the pre-release flag, and
+#              publishes the draft
+#
+# A pull request that changes release tooling runs `dry-run` instead: the
+# same build, signing with a throwaway test CA, packaging and verification
+# on one runner, with no secrets, no environment and no upload.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - xtask/src/dist/**
+      - xtask/src/release/**
+      - xtask/src/main.rs
+      - packaging/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  # Pull requests: the whole pipeline without secrets or publishing.
+  dry-run:
+    if: github.event_name == 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      # No cache in this workflow: release builds start from scratch.
+      - name: Build, sign with a throwaway test CA, package and sign
+        run: cargo xtask dist --msi --sign test-ca --out target/release-dry-run
+      - name: Trust the throwaway root on this runner only
+        shell: pwsh
+        run: ./packaging/sign/sign.ps1 -Action trust
+      - name: Verify every signature, including inside the package
+        run: cargo xtask release verify target/release-dry-run --allow-untimestamped
+      - run: cargo xtask release checksums target/release-dry-run
+      - run: cargo xtask release verify-checksums target/release-dry-run
+      - name: Remove the test certificates
+        if: always()
+        shell: pwsh
+        run: ./packaging/sign/sign.ps1 -Action cleanup
+
+  check-tag:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - run: rustup toolchain install
+      # Checkout fetches the tag as a lightweight ref; fetch the tag object.
+      - name: Fetch the tag object
+        env:
+          TAG: ${{ github.ref_name }}
+        run: git fetch --force --no-tags origin "refs/tags/$TAG:refs/tags/$TAG"
+      # A tag moved after the push, or a re-run of an older run, must not
+      # release a commit the tag no longer names.
+      - name: The tag still names this run's commit
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          [ "$(git rev-parse "refs/tags/$TAG^{commit}")" = "$GITHUB_SHA" ] || {
+            echo "::error::$TAG no longer points at $GITHUB_SHA; push a new tag instead of moving one"; exit 1; }
+      # The signature itself, against the maintainer keys committed in the
+      # repository (docs/releasing.md#what-the-maintainer-sets-up).
+      - name: Verify the tag signature
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          ssh_keys=packaging/sign/allowed_tag_signers
+          gpg_keys=packaging/sign/tag-signers.asc
+          if [ -s "$ssh_keys" ]; then
+            git -c gpg.ssh.allowedSignersFile="$ssh_keys" tag -v "$TAG"
+          elif [ -s "$gpg_keys" ]; then
+            export GNUPGHOME="$RUNNER_TEMP/gnupg"
+            mkdir -m 700 "$GNUPGHOME"
+            gpg --batch --quiet --import "$gpg_keys"
+            git tag -v "$TAG"
+          else
+            echo "::error title=Signing not configured::Commit the keys that may sign release tags as $ssh_keys or $gpg_keys (docs/releasing.md#what-the-maintainer-sets-up)."; exit 1
+          fi
+      - name: Check the tag
+        id: tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          cargo xtask release check-tag "$TAG"
+          version="${TAG#v}"
+          cargo xtask release notes "$version" > /dev/null
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          case "$version" in *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;; *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;; esac
+      # A release tag must never produce unsigned packages. The signing
+      # secrets live only in the `release-signing` environment, which this
+      # job cannot read, so the maintainer records that signing is set up
+      # in the repository variable RELEASE_SIGNER (docs/releasing.md).
+      - name: Require code signing to be configured
+        env:
+          SIGNER: ${{ vars.RELEASE_SIGNER }}
+          TSA: ${{ vars.RELEASE_TSA_URLS }}
+        run: |
+          case "$SIGNER" in
+            pfx|cloud-hsm) ;;
+            *) echo "::error title=Signing not configured::Set the RELEASE_SIGNER variable to pfx or cloud-hsm and add the signing secrets to the release-signing environment (docs/releasing.md#code-signing). Release tags never produce unsigned builds."; exit 1 ;;
+          esac
+          [ -n "$TSA" ] || { echo "::error title=Signing not configured::Set the RELEASE_TSA_URLS variable (docs/releasing.md#code-signing)."; exit 1; }
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ steps.tag.outputs.prerelease }}
+        run: |
+          # One lookup: a draft goes on, a published release stops, "not
+          # found" creates the draft, and any other failure stops.
+          if state=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>"$RUNNER_TEMP/view.err"); then
+            [ "$state" = true ] || { echo "::error::$TAG is already published; releases are never replaced (docs/releasing.md#yanking)"; exit 1; }
+          elif grep -qi "release not found" "$RUNNER_TEMP/view.err"; then
+            flags=(--draft --verify-tag --title "Palisade $TAG")
+            [ "$PRERELEASE" = true ] && flags+=(--prerelease)
+            gh release create "$TAG" "${flags[@]}" --notes "Being built by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID."
+          else
+            echo "::error::cannot look up the $TAG release: $(cat "$RUNNER_TEMP/view.err")"; exit 1
+          fi
+
+  build:
+    needs: [check-tag]
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+          - os: windows-11-arm
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      # The previous release's size report, to warn on >10% growth. None
+      # for the first release.
+      - name: Fetch the previous size report
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCH: ${{ matrix.arch }}
+        run: gh release download --repo "$GITHUB_REPOSITORY" --pattern "sizes-$ARCH.json" --dir target/previous || echo "No previous release to compare with."
+      # No cache: a release builds from scratch, with --locked.
+      - shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: cargo xtask dist --out target/release --compare-sizes "target/previous/sizes-$ARCH.json"
+      - name: Upload the unsigned executables, symbols and size report to the draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          ARCH: ${{ matrix.arch }}
+          VERSION: ${{ needs.check-tag.outputs.version }}
+        run: |
+          cd "target/release/palisade-$VERSION-$ARCH"
+          tar -a -c -f "../unsigned-$ARCH.zip" palisade-agent.exe palisade-tray.exe pal.exe
+          cd ..
+          gh release upload "$TAG" --clobber "unsigned-$ARCH.zip" "palisade-$VERSION-$ARCH-symbols.zip" "sizes-$ARCH.json"
+
+  server:
+    needs: [check-tag]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - name: Fetch the previous size report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download --repo "$GITHUB_REPOSITORY" --pattern sizes-linux-x64.json --dir target/previous || echo "No previous release to compare with."
+      - run: cargo xtask dist --out target/release --compare-sizes target/previous/sizes-linux-x64.json
+      - name: Upload the server binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.check-tag.outputs.version }}
+        run: |
+          cp target/release/palisade-server "target/release/palisade-server-$VERSION-linux-x64"
+          gh release upload "$TAG" --clobber "target/release/palisade-server-$VERSION-linux-x64" target/release/sizes-linux-x64.json
+
+  # The only job with signing secrets. It runs after a reviewer approves the
+  # `release-signing` environment, and does all signing in one go: every
+  # executable, then the packages built from the signed executables, then
+  # the packages, then SHA256SUMS over the final set.
+  sign:
+    needs: [check-tag, build, server]
+    runs-on: windows-latest
+    timeout-minutes: 60
+    environment: release-signing
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - name: Download the unsigned executables
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p target/unsigned
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'unsigned-*.zip' --dir target/unsigned
+          for arch in x64 arm64; do
+            mkdir -p "target/unsigned/$arch"
+            tar -x -f "target/unsigned/unsigned-$arch.zip" -C "target/unsigned/$arch"
+          done
+      # Executables first; `dist --from` checks they are this version's
+      # before packaging them, and signs each package.
+      - name: Sign, package and sign
+        shell: bash
+        env:
+          SIGNER: ${{ vars.RELEASE_SIGNER }}
+          PALISADE_TSA_URLS: ${{ vars.RELEASE_TSA_URLS }}
+          PALISADE_SIGN_PFX_BASE64: ${{ secrets.PALISADE_SIGN_PFX_BASE64 }}
+          PALISADE_SIGN_PFX_PASSWORD: ${{ secrets.PALISADE_SIGN_PFX_PASSWORD }}
+          PALISADE_SIGN_COMMAND: ${{ secrets.PALISADE_SIGN_COMMAND }}
+        run: |
+          for arch in x64 arm64; do
+            cargo xtask sign --signer "$SIGNER" "target/unsigned/$arch/palisade-agent.exe" "target/unsigned/$arch/palisade-tray.exe" "target/unsigned/$arch/pal.exe"
+          done
+          cargo xtask dist --target x86_64-pc-windows-msvc --msi --from target/unsigned/x64 --sign "$SIGNER" --out target/signed
+          cargo xtask dist --target aarch64-pc-windows-msvc --msi --from target/unsigned/arm64 --sign "$SIGNER" --out target/signed
+      - name: Collect the release files
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p target/final
+          cp target/signed/Palisade-*.msi target/final/
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'palisade-*-symbols.zip' --pattern 'palisade-server-*' --pattern 'sizes-*.json' --dir target/final
+          cargo xtask release checksums target/final
+      # An Ed25519 SSH key held in the environment signs the checksum file
+      # (docs/releasing.md#checksum-signing-key). The key is written to a
+      # file only this job can read and removed at the end.
+      - name: Sign SHA256SUMS
+        shell: bash
+        env:
+          RELEASE_CHECKSUM_KEY: ${{ secrets.RELEASE_CHECKSUM_KEY }}
+        run: |
+          [ -n "$RELEASE_CHECKSUM_KEY" ] || { echo "::error title=Signing not configured::Add the RELEASE_CHECKSUM_KEY secret to the release-signing environment (docs/releasing.md#checksum-signing-key)."; exit 1; }
+          umask 077
+          key="$RUNNER_TEMP/checksum-key"
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$RELEASE_CHECKSUM_KEY" > "$key"
+          ssh-keygen -Y sign -q -f "$key" -n palisade-release target/final/SHA256SUMS
+      - name: Upload the signed files
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber target/final/Palisade-*.msi target/final/SHA256SUMS target/final/SHA256SUMS.sig
+      - name: Remove the signing material
+        if: always()
+        shell: pwsh
+        run: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue target/unsigned, target/signed
+
+  # Fails if any package, or any executable inside a package, is unsigned,
+  # invalid or not timestamped, or if SHA256SUMS does not match.
+  # Each architecture's package is unpacked and checked on its own
+  # architecture's runner, so the installer's platform check never applies.
+  verify:
+    needs: [check-tag, sign]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+          - os: windows-11-arm
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - name: Download the release files
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir target/verify
+          rm -f target/verify/unsigned-*.zip
+      # SHA256SUMS is trusted only once its signature checks out against
+      # the public key published in the repository.
+      - name: Check the checksum signature
+        shell: bash
+        run: |
+          key=packaging/sign/release-checksum.pub
+          [ -s "$key" ] || { echo "::error title=Signing not configured::Commit the checksum signing public key as $key (docs/releasing.md#checksum-signing-key)."; exit 1; }
+          echo "palisade-release $(cat "$key")" > "$RUNNER_TEMP/allowed_signers"
+          ssh-keygen -Y verify -f "$RUNNER_TEMP/allowed_signers" -I palisade-release -n palisade-release \
+            -s target/verify/SHA256SUMS.sig < target/verify/SHA256SUMS
+      - run: cargo xtask release verify-checksums target/verify
+      - name: Keep only this architecture's package
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p target/verify-arch
+          mv target/verify/Palisade-*-"$ARCH".msi target/verify-arch/
+          [ "$(find target/verify-arch -name '*.msi' | wc -l)" -eq 1 ] || { echo "::error::expected one $ARCH package"; exit 1; }
+      - run: cargo xtask release verify target/verify-arch
+
+  # The unsigned executables leave the draft once the signed files are
+  # verified. A separate job, so a failed deletion is retried without
+  # signing again; an archive already gone counts as deleted.
+  remove-unsigned:
+    needs: [check-tag, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          names=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          for arch in x64 arm64; do
+            if printf '%s\n' "$names" | grep -Fqx "unsigned-$arch.zip"; then
+              gh release delete-asset "$TAG" "unsigned-$arch.zip" --repo "$GITHUB_REPOSITORY" --yes
+            fi
+          done
+
+  provenance:
+    needs: [check-tag, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      # A no-op until the RELEASE_PROVENANCE variable is `on`; then it runs
+      # `cargo xtask sbom` and fails if that is missing or fails (#18, #226).
+      - env:
+          RELEASE_PROVENANCE: ${{ vars.RELEASE_PROVENANCE }}
+        run: cargo xtask release provenance
+
+  publish:
+    needs: [check-tag, verify, provenance, remove-unsigned]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - run: rustup toolchain install
+      - name: The tag still names this run's commit
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          git fetch --force --no-tags origin "refs/tags/$TAG:refs/tags/$TAG"
+          [ "$(git rev-parse "refs/tags/$TAG^{commit}")" = "$GITHUB_SHA" ] || {
+            echo "::error::$TAG no longer points at $GITHUB_SHA; not publishing"; exit 1; }
+      - name: Publish the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.check-tag.outputs.version }}
+          PRERELEASE: ${{ needs.check-tag.outputs.prerelease }}
+        run: |
+          cargo xtask release notes "$VERSION" > "$RUNNER_TEMP/notes.md"
+          latest=true
+          [ "$PRERELEASE" = true ] && latest=false
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --notes-file "$RUNNER_TEMP/notes.md" --prerelease="$PRERELEASE" --latest="$latest"

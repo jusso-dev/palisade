@@ -98,7 +98,12 @@
          a value the launch condition did not see is checked again. Never
          on removal, so a damaged stored value cannot block uninstalling. -->
     <CustomAction Id="CheckMode" Error="MODE must be one of: audit, monitor, learning, enforce, disabled." />
+    <CustomAction Id="CheckServerUrl" Error="SERVER_URL must be an https:// URL." />
     <InstallExecuteSequence>
+      <!-- The launch condition skips installed products; a repair or
+           reinstall that passes SERVER_URL is checked here. Never on
+           removal. -->
+      <Custom Action="CheckServerUrl" After="CheckMode" Condition="NOT (REMOVE ~= &quot;ALL&quot;) AND SERVER_URL AND NOT (SERVER_URL &lt;&lt; &quot;https://&quot;)" />
       <Custom Action="CheckMode" After="DefaultMode" Condition="NOT (REMOVE ~= &quot;ALL&quot;) AND NOT (MODE = &quot;audit&quot; OR MODE = &quot;monitor&quot; OR MODE = &quot;learning&quot; OR MODE = &quot;enforce&quot; OR MODE = &quot;disabled&quot;)" />
     </InstallExecuteSequence>
 
@@ -164,8 +169,11 @@
       <File Id="TrayExe" Source="$(var.BinDir)\palisade-tray.exe" KeyPath="yes" />
     </Component>
 
-    <!-- Every user's session starts the notifier at sign-in, unless NO_TRAY=1. -->
-    <Component Id="TrayAutostart" Directory="INSTALLFOLDER" Condition="NOT (NO_TRAY = &quot;1&quot;)">
+    <!-- Every user's session starts the notifier at sign-in, unless NO_TRAY=1.
+         This and the other conditional components are transitive, so a
+         repair or reinstall with a new value (NO_TRAY=1 REINSTALL=ALL)
+         adds or removes them to match. -->
+    <Component Id="TrayAutostart" Directory="INSTALLFOLDER" Transitive="yes" Condition="NOT (NO_TRAY = &quot;1&quot;)">
       <RegistryValue Root="HKLM" Key="$(var.RunKey)" Name="Palisade" Type="string" Value="&quot;[INSTALLFOLDER]palisade-tray.exe&quot;" KeyPath="yes" />
     </Component>
 
@@ -173,7 +181,7 @@
       <File Id="CliExe" Source="$(var.BinDir)\pal.exe" KeyPath="yes" />
     </Component>
 
-    <Component Id="CliPath" Directory="INSTALLFOLDER" Condition="ADD_TO_PATH = &quot;1&quot;">
+    <Component Id="CliPath" Directory="INSTALLFOLDER" Transitive="yes" Condition="ADD_TO_PATH = &quot;1&quot;">
       <RegistryValue Root="HKLM" Key="SOFTWARE\Palisade\Agent" Name="PathEntry" Type="integer" Value="1" KeyPath="yes" />
       <Environment Id="PathEntry" Name="PATH" Value="[INSTALLFOLDER]" Part="last" Action="set" System="yes" Permanent="no" />
     </Component>
@@ -218,25 +226,25 @@
         </RegistryValue>
       </RegistryKey>
     </Component>
-    <Component Id="SettingServerUrl" Directory="INSTALLFOLDER" Condition="SERVER_URL">
+    <Component Id="SettingServerUrl" Directory="INSTALLFOLDER" Transitive="yes" Condition="SERVER_URL">
       <RegistryValue Root="HKLM" Key="SOFTWARE\Palisade\Agent" Name="ServerUrl" Type="string" Value="[SERVER_URL]" KeyPath="yes" />
     </Component>
-    <Component Id="SettingGroupKey" Directory="INSTALLFOLDER" Condition="GROUP_KEY">
+    <Component Id="SettingGroupKey" Directory="INSTALLFOLDER" Transitive="yes" Condition="GROUP_KEY">
       <RegistryValue Root="HKLM" Key="SOFTWARE\Palisade\Agent" Name="GroupKey" Type="string" Value="[GROUP_KEY]" KeyPath="yes" />
     </Component>
-    <Component Id="SettingProxy" Directory="INSTALLFOLDER" Condition="PROXY">
+    <Component Id="SettingProxy" Directory="INSTALLFOLDER" Transitive="yes" Condition="PROXY">
       <RegistryValue Root="HKLM" Key="SOFTWARE\Palisade\Agent" Name="Proxy" Type="string" Value="[PROXY]" KeyPath="yes" />
     </Component>
     <Component Id="SettingMode" Directory="INSTALLFOLDER">
       <RegistryValue Root="HKLM" Key="SOFTWARE\Palisade\Agent" Name="Mode" Type="string" Value="[MODE]" KeyPath="yes" />
     </Component>
-    <Component Id="SettingSkipEnroll" Directory="INSTALLFOLDER" Condition="SKIP_ENROLL = &quot;1&quot;">
+    <Component Id="SettingSkipEnroll" Directory="INSTALLFOLDER" Transitive="yes" Condition="SKIP_ENROLL = &quot;1&quot;">
       <RegistryValue Root="HKLM" Key="SOFTWARE\Palisade\Agent" Name="SkipEnroll" Type="string" Value="1" KeyPath="yes" />
     </Component>
-    <Component Id="SettingNoTray" Directory="INSTALLFOLDER" Condition="NO_TRAY = &quot;1&quot;">
+    <Component Id="SettingNoTray" Directory="INSTALLFOLDER" Transitive="yes" Condition="NO_TRAY = &quot;1&quot;">
       <RegistryValue Root="HKLM" Key="SOFTWARE\Palisade\Agent" Name="NoTray" Type="string" Value="1" KeyPath="yes" />
     </Component>
-    <Component Id="SettingAddToPath" Directory="INSTALLFOLDER" Condition="ADD_TO_PATH = &quot;1&quot;">
+    <Component Id="SettingAddToPath" Directory="INSTALLFOLDER" Transitive="yes" Condition="ADD_TO_PATH = &quot;1&quot;">
       <RegistryValue Root="HKLM" Key="SOFTWARE\Palisade\Agent" Name="AddToPath" Type="string" Value="1" KeyPath="yes" />
     </Component>
 

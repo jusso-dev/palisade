@@ -450,6 +450,37 @@ jobs:
           ARCH: ${{ matrix.arch }}
         run: ./packaging/wix/smoke-test.ps1 -Current target/dist/current -Next target/dist/next -Arch $env:ARCH
 
+  # Code signing, end to end, with throwaway certificates made on the runner
+  # and deleted afterwards (#24): the packages built with every executable
+  # and the package signed by a throwaway test CA, every signature verified
+  # (including inside the packages); then the `pfx` path with a throwaway
+  # PFX whose password is a canary, checked absent from the output; and a
+  # signed package of unsigned executables, which verification must reject.
+  # No secret of any kind is used.
+  sign-test:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo xtask dist --msi --sign test-ca --out target/dist/signed
+      - name: Trust the throwaway test root on this runner
+        shell: pwsh
+        run: ./packaging/sign/sign.ps1 -Action trust
+      - run: cargo xtask release verify target/dist/signed --allow-untimestamped
+      - name: The pfx path, and rejecting unsigned executables
+        shell: pwsh
+        run: ./packaging/sign/ci-test.ps1 -UnsignedDir target/x86_64-pc-windows-msvc/release
+      - name: Remove the test certificates
+        if: always()
+        shell: pwsh
+        run: ./packaging/sign/sign.ps1 -Action cleanup
+
   # The Linux server binary, and its OCI image built with the runner's
   # preinstalled podman. The image is only built, not pushed; signing and
   # publishing it is #18.
@@ -471,7 +502,7 @@ jobs:
   # The single required check from this workflow for branch protection.
   ci-ok:
     if: always()
-    needs: [fmt, clippy, test, postgres, coverage, coverage-gate, fuzz-locks, fuzz, bench, msrv, docs, deps, supply-chain, feature-powerset, runner-guard, doc-checks, workflow-lint, package, server-image]
+    needs: [fmt, clippy, test, postgres, coverage, coverage-gate, fuzz-locks, fuzz, bench, msrv, docs, deps, supply-chain, feature-powerset, runner-guard, doc-checks, workflow-lint, package, sign-test, server-image]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
