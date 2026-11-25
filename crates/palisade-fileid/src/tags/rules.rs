@@ -30,8 +30,9 @@ pub struct RuleSetSource {
 #[serde(deny_unknown_fields)]
 pub struct RuleSource {
     /// The tag: two to four segments of lowercase ASCII letters, digits and
-    /// `-`, joined by `:` (`installer:in-house`), at most [`MAX_TAG_LEN`]
-    /// bytes. It must not be a built-in tag.
+    /// `-`, joined by `:` (`installer:in-house`). Each segment is 1 to 32
+    /// bytes, and the whole tag at most [`MAX_TAG_LEN`] bytes. It must not
+    /// be a built-in tag.
     pub tag: String,
     /// The rule applies only to a PE image (one that
     /// [`filetype::classify`](crate::filetype::classify) would call
@@ -153,8 +154,8 @@ pub enum RuleErrorKind {
     NoStrings,
     /// A rule has more than [`MAX_STRINGS_PER_RULE`] strings.
     TooManyStrings,
-    /// The tag is not two to four `[a-z0-9-]` segments joined by `:`, or
-    /// is longer than [`MAX_TAG_LEN`].
+    /// The tag is not two to four `[a-z0-9-]` segments of 1 to 32 bytes
+    /// joined by `:`, or is longer than [`MAX_TAG_LEN`].
     BadTag,
     /// The tag is a built-in tag; the built-in set is read-only.
     ReservedTag,

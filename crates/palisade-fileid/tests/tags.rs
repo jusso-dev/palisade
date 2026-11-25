@@ -973,6 +973,207 @@ mod scanning {
         assert_eq!(r.tags, [CONTENT_SCAN_ERROR]);
     }
 
+    /// Returns `data` in reads of at most `step` bytes, then fails with
+    /// `PermissionDenied` once `fail_at` bytes have been returned. Reports
+    /// `len` as its length.
+    struct Flaky {
+        data: Vec<u8>,
+        pos: usize,
+        len: u64,
+        step: usize,
+        fail_at: usize,
+        interrupt_forever: bool,
+    }
+
+    impl Read for Flaky {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if self.pos >= self.fail_at {
+                if self.interrupt_forever {
+                    return Err(io::ErrorKind::Interrupted.into());
+                }
+                return Err(io::ErrorKind::PermissionDenied.into());
+            }
+            let n = buf
+                .len()
+                .min(self.step)
+                .min(self.fail_at - self.pos)
+                .min(self.data.len().saturating_sub(self.pos));
+            buf[..n].copy_from_slice(&self.data[self.pos..self.pos + n]);
+            self.pos += n;
+            Ok(n)
+        }
+    }
+
+    impl Seek for Flaky {
+        fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+            match pos {
+                SeekFrom::End(_) => Ok(self.len),
+                SeekFrom::Start(p) => {
+                    self.pos = p as usize;
+                    Ok(p)
+                }
+                SeekFrom::Current(_) => Ok(self.pos as u64),
+            }
+        }
+    }
+
+    fn flaky(data: Vec<u8>, fail_at: usize) -> Flaky {
+        let len = data.len() as u64;
+        Flaky {
+            data,
+            pos: 0,
+            len,
+            step: 16,
+            fail_at,
+            interrupt_forever: false,
+        }
+    }
+
+    #[test]
+    fn bytes_before_a_read_error_are_counted_and_scanned() {
+        // A 7z signature in the first bytes of a chunk whose read then
+        // fails: the bytes that arrived are scanned and counted, and the
+        // error is still reported.
+        let data = [vec![0x20; 40], seven_zip(), vec![0x20; 4000]].concat();
+        let mut r = flaky(data, 100);
+        let report = tags::scan(&mut r, &builtin(), &limits());
+        assert_eq!(
+            report.status,
+            ScanStatus::ReadError(io::ErrorKind::PermissionDenied)
+        );
+        assert_eq!(report.tags, [ARCHIVE_EMBEDDED_ARCHIVE, CONTENT_SCAN_ERROR]);
+        // The 4-byte start-of-file filter, the 64-byte DOS header probe,
+        // and the 100 bytes that arrived before the error.
+        assert_eq!(report.bytes_scanned, 4 + 64 + 100);
+    }
+
+    #[test]
+    fn a_short_read_then_a_spent_budget_is_an_error() {
+        // The reader ends early, then the step budget runs out on the bytes
+        // it gave: the reader is the reason, so the status is an error,
+        // not a timeout.
+        let rules = org(vec![RuleSource {
+            unless_start: Some(PatternSource::Hex("FF FE".into())),
+            ..org_rule(
+                "a:b",
+                vec![s(PatternSource::Hex("41 42 43".into()), Location::At(4))],
+                Condition::Any,
+            )
+        }]);
+        // Enough steps for the two start-of-file filters (the built-in
+        // 4-byte ZIP header and this rule's 2 bytes), not for the 3-byte
+        // check. A reported length under 64 skips the PE probe, so the
+        // short read happens in the chunk scan.
+        let tight = ScanLimits {
+            max_match_steps: 6,
+            ..limits()
+        };
+        let mut r = Liar(Cursor::new(b"0123ABC456".to_vec()), 50);
+        let report = tags::scan(&mut r, &rules, &tight);
+        assert_eq!(
+            report.status,
+            ScanStatus::ReadError(io::ErrorKind::UnexpectedEof),
+            "{report:?}"
+        );
+        assert_eq!(report.tags, [CONTENT_SCAN_ERROR]);
+    }
+
+    #[test]
+    fn an_oversized_file_stays_partial_when_it_stops_early() {
+        // Over the size limit, then out of byte budget: both are reported.
+        let mut file = Sparse::new(64 << 20, vec![(10, seven_zip())]);
+        let tight = ScanLimits {
+            max_scan_bytes: 4 << 20,
+            ..limits()
+        };
+        let r = tags::scan(&mut file, &builtin(), &tight);
+        assert_eq!(r.status, ScanStatus::Timeout);
+        assert_eq!(
+            r.tags,
+            [
+                ARCHIVE_EMBEDDED_ARCHIVE,
+                CONTENT_SCAN_PARTIAL,
+                CONTENT_SCAN_TIMEOUT
+            ]
+        );
+        // Over the size limit, then a read error.
+        let mut file = Sparse::new(64 << 20, vec![]);
+        file.fail_after = Some(1 << 20);
+        let r = tags::scan(&mut file, &builtin(), &limits());
+        assert_eq!(
+            r.status,
+            ScanStatus::ReadError(io::ErrorKind::PermissionDenied)
+        );
+        assert_eq!(r.tags, [CONTENT_SCAN_PARTIAL, CONTENT_SCAN_ERROR]);
+    }
+
+    #[test]
+    fn interrupted_reads_stop_at_the_deadline() {
+        // A reader that only ever says "interrupted" cannot keep the scan
+        // past its time limit.
+        let mut r = flaky(vec![0; 4096], 0);
+        r.interrupt_forever = true;
+        let short = ScanLimits {
+            timeout: Some(Duration::from_millis(50)),
+            ..ScanLimits::default()
+        };
+        let started = std::time::Instant::now();
+        let report = tags::scan(&mut r, &builtin(), &short);
+        assert_eq!(report.status, ScanStatus::Timeout);
+        assert_eq!(report.tags, [CONTENT_SCAN_TIMEOUT]);
+        assert!(started.elapsed() < Duration::from_secs(30));
+    }
+
+    #[test]
+    fn a_slow_first_seek_and_a_late_last_read_count_against_the_clock() {
+        /// Sleeps in its end seek, or in its last read.
+        struct Slow {
+            inner: Cursor<Vec<u8>>,
+            in_seek: bool,
+            delay: Duration,
+        }
+        impl Read for Slow {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                let n = self.inner.read(buf)?;
+                if !self.in_seek && self.inner.position() == self.inner.get_ref().len() as u64 {
+                    std::thread::sleep(self.delay);
+                }
+                Ok(n)
+            }
+        }
+        impl Seek for Slow {
+            fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+                if self.in_seek && matches!(pos, SeekFrom::End(_)) {
+                    std::thread::sleep(self.delay);
+                }
+                self.inner.seek(pos)
+            }
+        }
+        let limit = ScanLimits {
+            timeout: Some(Duration::from_millis(50)),
+            ..ScanLimits::default()
+        };
+        for in_seek in [true, false] {
+            let mut r = Slow {
+                inner: Cursor::new(vec![0x20; 1000]),
+                in_seek,
+                delay: Duration::from_millis(120),
+            };
+            let report = tags::scan(&mut r, &builtin(), &limit);
+            assert_eq!(report.status, ScanStatus::Timeout, "in_seek {in_seek}");
+            assert_eq!(report.tags, [CONTENT_SCAN_TIMEOUT]);
+        }
+    }
+
+    #[test]
+    fn a_pk_prefix_alone_does_not_hide_embedded_archives() {
+        // Only a full ZIP local header at the start excludes the file.
+        let data = [b"PKXY".to_vec(), vec![0x20; 50], cab()].concat();
+        assert_tags(&data, &[ARCHIVE_EMBEDDED_ARCHIVE]);
+        let zip_start = [b"PK\x03\x04".to_vec(), vec![0x20; 50], cab()].concat();
+        assert_tags(&zip_start, &[]);
+    }
+
     /// Reports `len` from the end seek, but holds only `data`.
     struct Liar(Cursor<Vec<u8>>, u64);
     impl Read for Liar {
@@ -1094,6 +1295,7 @@ mod scanning {
             prop_assert!(r.match_steps <= limits.max_match_steps);
             prop_assert_eq!(r.file_size, data.len() as u64);
             let status_tags = r.tags.iter().filter(|t| t.starts_with("content_scan_")).count();
+            // Files here are under the size limit, so at most one.
             prop_assert_eq!(status_tags, usize::from(r.status != ScanStatus::Complete));
             if r.status == ScanStatus::Complete {
                 // A full scan agrees with the classifier about PE images...

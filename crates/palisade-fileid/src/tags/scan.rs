@@ -13,7 +13,7 @@ use std::io::{self, Read, Seek, SeekFrom};
 use std::time::Instant;
 
 use super::rules::{Compiled, Location};
-use super::{ContentRules, ScanLimits, ScanStatus, TAIL_SCAN_LEN, TagReport};
+use super::{CONTENT_SCAN_PARTIAL, ContentRules, ScanLimits, ScanStatus, TAIL_SCAN_LEN, TagReport};
 use crate::pe;
 use crate::pe::read::u16_at;
 
@@ -53,8 +53,10 @@ struct Scan<'a, R: ?Sized> {
     /// For each `unless_start` pattern: whether the file starts with it,
     /// or `None` if that could not be checked.
     prefix_hits: Vec<Option<bool>>,
-    /// A read returned fewer bytes than the file length promised.
-    short_read: bool,
+    /// The reader stopped early: a read failed (its error), or returned
+    /// fewer bytes than the file length promised (`UnexpectedEof`). The
+    /// bytes it did return are scanned, then the scan stops with this.
+    ended: Option<io::ErrorKind>,
 }
 
 pub(super) fn run<R: Read + Seek + ?Sized>(
@@ -74,6 +76,9 @@ pub(super) fn run<R: Read + Seek + ?Sized>(
         bytes_scanned: 0,
         match_steps: 0,
     };
+    // The clock starts before the first seek, so a slow seek counts
+    // against the time limit too.
+    let started = Instant::now();
     let len = match reader.seek(SeekFrom::End(0)) {
         Ok(len) => len,
         Err(e) => {
@@ -87,7 +92,7 @@ pub(super) fn run<R: Read + Seek + ?Sized>(
         reader,
         compiled,
         limits,
-        started: Instant::now(),
+        started,
         len,
         overlay: None,
         found: vec![false; compiled.strings.len()],
@@ -96,11 +101,12 @@ pub(super) fn run<R: Read + Seek + ?Sized>(
         since_clock: 0,
         next_anchored: 0,
         prefix_hits: vec![None; compiled.prefixes.len()],
-        short_read: false,
+        ended: None,
     };
     let partial = len > limits.max_file_size;
     let result = scan
-        .prefixes()
+        .check_clock()
+        .and_then(|()| scan.prefixes())
         .and_then(|()| scan.probe_pe())
         .and_then(|()| {
             let tail = len.saturating_sub(TAIL_SCAN_LEN);
@@ -117,7 +123,11 @@ pub(super) fn run<R: Read + Seek + ?Sized>(
         });
     report.status = match result {
         Err(Stop::Io(kind)) => ScanStatus::ReadError(kind),
-        Err(Stop::Budget) => ScanStatus::Timeout,
+        // A reader that already stopped early is the reason the scan is
+        // incomplete, even if a budget then ran out on the bytes it gave.
+        Err(Stop::Budget) => scan
+            .ended
+            .map_or(ScanStatus::Timeout, ScanStatus::ReadError),
         Ok(()) if partial => ScanStatus::Partial,
         Ok(()) => ScanStatus::Complete,
     };
@@ -147,6 +157,11 @@ pub(super) fn run<R: Read + Seek + ?Sized>(
             report.tags.push(rule.tag.clone());
         }
     }
+    // A file over the size limit is reported as such however the scan
+    // ended, then the reason it ended early, if it did.
+    if partial && report.status != ScanStatus::Partial {
+        report.tags.push(CONTENT_SCAN_PARTIAL.to_owned());
+    }
     report.tags.extend(report.status.tag().map(str::to_owned));
     report
 }
@@ -154,10 +169,10 @@ pub(super) fn run<R: Read + Seek + ?Sized>(
 impl<R: Read + Seek + ?Sized> Scan<'_, R> {
     /// Reads `len` bytes at `offset`, or up to the file length the reader
     /// reported, charged to the byte budget. A read the budget cannot cover
-    /// is not made. If the reader ends before that, the bytes it gave are
-    /// returned and [`Self::short_read`] is set; the caller scans them and
-    /// then stops with [`Self::eof`], so a truncated file is never reported
-    /// as scanned in full.
+    /// is not made. If the reader fails or ends before that, the bytes it
+    /// gave are counted and returned, and [`Self::ended`] is set; the caller
+    /// scans them and then stops with [`Self::eof`], so a truncated or
+    /// failing file is never reported as scanned in full.
     fn read_at(&mut self, offset: u64, len: usize) -> Result<Vec<u8>, Stop> {
         let len = usize::try_from(self.len.saturating_sub(offset)).map_or(len, |a| a.min(len));
         // Nothing to read: no seek, so an offset taken from the file (such
@@ -174,24 +189,31 @@ impl<R: Read + Seek + ?Sized> Scan<'_, R> {
         }
         self.reader.seek(SeekFrom::Start(offset))?;
         let mut buf = vec![0_u8; len];
-        let got = read_full(self.reader, &mut buf)?;
+        let deadline = self
+            .limits
+            .timeout
+            .and_then(|t| self.started.checked_add(t));
+        let (got, outcome) = read_full(self.reader, &mut buf, deadline);
         buf.truncate(got);
         self.bytes = self
             .bytes
             .saturating_add(u64::try_from(got).unwrap_or(u64::MAX));
-        if got < len {
-            self.short_read = true;
+        match outcome {
+            Filled::Done if got < len => {
+                self.ended.get_or_insert(io::ErrorKind::UnexpectedEof);
+            }
+            Filled::Done => {}
+            Filled::Failed(kind) => {
+                self.ended.get_or_insert(kind);
+            }
+            Filled::TimedOut => return Err(Stop::Budget),
         }
         Ok(buf)
     }
 
-    /// Stops the scan if a read came up short.
+    /// Stops the scan if the reader stopped early.
     fn eof(&self) -> Result<(), Stop> {
-        if self.short_read {
-            Err(Stop::Io(io::ErrorKind::UnexpectedEof))
-        } else {
-            Ok(())
-        }
+        self.ended.map_or(Ok(()), |kind| Err(Stop::Io(kind)))
     }
 
     /// Checks every `unless_start` pattern against the start of the file,
@@ -294,9 +316,9 @@ impl<R: Read + Seek + ?Sized> Scan<'_, R> {
             next = next.saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
             buf.extend_from_slice(&chunk);
             let buf_end = base.saturating_add(u64::try_from(buf.len()).unwrap_or(u64::MAX));
-            // After a short read, the bytes that did arrive are still
-            // scanned, as the last chunk, before the scan stops.
-            let last = next >= end || self.short_read;
+            // After a short or failed read, the bytes that did arrive are
+            // still scanned, as the last chunk, before the scan stops.
+            let last = next >= end || self.ended.is_some();
             let owned_to = if last {
                 buf_end
             } else {
@@ -306,7 +328,10 @@ impl<R: Read + Seek + ?Sized> Scan<'_, R> {
             };
             self.chunk(&buf, base, owned_from, owned_to)?;
             if last {
-                return self.eof();
+                // A read that returned after the deadline does not make
+                // the scan complete.
+                self.eof()?;
+                return self.check_clock();
             }
             let drop = usize::try_from(owned_to - base).unwrap_or(buf.len());
             buf.drain(..drop.min(buf.len()));
@@ -416,8 +441,24 @@ impl<R: Read + Seek + ?Sized> Scan<'_, R> {
     }
 }
 
-/// Fills `buf` from `reader`, stopping early only at end of input.
-fn read_full<R: Read + ?Sized>(reader: &mut R, buf: &mut [u8]) -> io::Result<usize> {
+/// How [`read_full`] ended.
+enum Filled {
+    /// The buffer is full, or the reader reached its end.
+    Done,
+    /// The reader failed.
+    Failed(io::ErrorKind),
+    /// The deadline passed while retrying interrupted reads.
+    TimedOut,
+}
+
+/// Fills `buf` from `reader`, stopping early at end of input or on an
+/// error. Returns how many bytes were read either way, so none that arrived
+/// are lost. Interrupted reads are retried until `deadline`.
+fn read_full<R: Read + ?Sized>(
+    reader: &mut R,
+    buf: &mut [u8],
+    deadline: Option<Instant>,
+) -> (usize, Filled) {
     let mut filled = 0;
     while let Some(rest) = buf.get_mut(filled..) {
         if rest.is_empty() {
@@ -426,9 +467,13 @@ fn read_full<R: Read + ?Sized>(reader: &mut R, buf: &mut [u8]) -> io::Result<usi
         match reader.read(rest) {
             Ok(0) => break,
             Ok(n) => filled = filled.saturating_add(n),
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-            Err(e) => return Err(e),
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+                if deadline.is_some_and(|d| Instant::now() >= d) {
+                    return (filled, Filled::TimedOut);
+                }
+            }
+            Err(e) => return (filled, Filled::Failed(e.kind())),
         }
     }
-    Ok(filled)
+    (filled, Filled::Done)
 }

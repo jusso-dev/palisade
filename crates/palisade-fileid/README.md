@@ -624,7 +624,9 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   scan is linear. `ScanLimits` (32 MiB scanned in full, 40 MiB read, 64 Mi
   steps, 2 s) bound every scan; a file over the size limit gets
   `content_scan_partial` (its start and last 1 MiB are scanned), a spent
-  budget `content_scan_timeout`, and a read error or early end of file `content_scan_error`,
+  budget `content_scan_timeout`, and a read error or early end of file
+  `content_scan_error` (a file over the size limit keeps
+  `content_scan_partial` either way),
   never an error. Tags found before a stop are kept. YARA syntax (through
   `yara-x`) is not supported: it needs a newer Rust than the workspace
   minimum and would exceed the duplicate-crate budget; see the module
@@ -821,8 +823,10 @@ comment, and each wrapper is tested on the Windows runners.
 ## Feature flags
 
 - `content-rules` (off by default): builds `palisade_fileid::tags`, the
-  content tagger, and adds the `aho-corasick` dependency. The agent runs
-  it in a worker off the identity hot path (#4, #59, #60).
+  content tagger, and adds the `aho-corasick` dependency. The scan runs in
+  the calling thread with a cooperative time limit that cannot interrupt a
+  blocking read; running it in a worker off the identity hot path is the
+  caller's job, and the agent's worker is still to come (#4, #59, #60).
 - `os-trust` (off by default): builds `palisade_fileid::win` on Windows. It
   adds OS-backed reads and never changes what the portable code reports. It
   has no effect on other targets. The agent, and the CLI for local

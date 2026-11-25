@@ -63,17 +63,32 @@
 //! fully inspected and fail conservative: a rule that requires a tag
 //! should not be satisfied by its absence.
 //!
-//! The scan runs in the calling thread. The agent runs it off the identity
-//! hot path, in a separate worker, after a file's identity is established
-//! (#4, #59, #60). The budget bounds each call; the worker's own
-//! scheduling, queueing and cancellation are the agent's.
+//! The scan runs in the calling thread and is cooperative: the time limit
+//! is checked before every read, between chunks, every few thousand
+//! candidate checks, on each retry of an interrupted read and after the
+//! last chunk, but it cannot interrupt a `read` or `seek` that blocks. A
+//! scan of a reader that blocks can therefore outlast `timeout`. Running
+//! it off the identity hot path, in a separate worker that can be
+//! abandoned, is the caller's job. That worker is not part of this crate
+//! and is not built yet: the agent's file pipeline (#4, #59, #60) will
+//! provide it, with its scheduling, queueing and cancellation.
+//!
+//! The file is read more than once: the start-of-file filters and the PE
+//! headers are read first, then the file is read again in chunks. A file
+//! rewritten at the same length between those reads can be judged on a mix
+//! of its two versions (a filter decided on the first, strings on the
+//! second), and the scan still reports [`ScanStatus::Complete`]. Callers
+//! that need one consistent view should scan a snapshot, or a file they
+//! hold open with writes denied, as the agent does for hashing.
 //!
 //! # Rule sets in policy
 //!
 //! A [`RuleSetSource`] is plain data (`serde`). It has a version, and
 //! [`ContentRules::rules_digest`] is a SHA-256 over a canonical encoding of
 //! it, so the policy bundle (#43) can record exactly which rules were in
-//! force. The rule set has no signature of its own: it is part of the
+//! force. The encoding covers the version and every rule as written, with
+//! only the pattern bytes normalised (hex case and spacing); see
+//! [`ContentRules::rules_digest`] for what equal digests mean. The rule set has no signature of its own: it is part of the
 //! policy bundle, whose signature (#225) covers it.
 
 #![forbid(unsafe_code)]
@@ -137,9 +152,13 @@ pub struct ScanLimits {
     /// The most candidate checks and pattern byte comparisons. Default
     /// 64 Mi.
     pub max_match_steps: u64,
-    /// The most wall-clock time, checked between chunks and every few
-    /// thousand candidate checks. Default 2 s. `None` turns it off, so a
-    /// scan's result depends only on its input (for tests and fuzzing).
+    /// The most wall-clock time, measured from before the first seek and
+    /// checked before every read, between chunks, every few thousand
+    /// candidate checks, on interrupted-read retries and after the last
+    /// chunk. It is cooperative: a `read` or `seek` that blocks is not
+    /// interrupted, so a scan can outlast it (see the module docs). Default
+    /// 2 s. `None` turns it off, so a scan's result depends only on its
+    /// input (for tests and fuzzing).
     pub timeout: Option<Duration>,
 }
 
@@ -187,8 +206,15 @@ impl ContentRules {
     }
 
     /// SHA-256 over a canonical encoding of the organisation rule set, if
-    /// one was given. Rule sets that match the same bytes in the same
-    /// places have the same digest, however their hex is written.
+    /// one was given. It covers the set's version and each rule's tag,
+    /// filters, condition, and each string's pattern and location as
+    /// written. Patterns are encoded by the bytes and masks they match, so
+    /// hex case and spacing do not change the digest. Nothing else is
+    /// normalised: two sets that behave the same but are written
+    /// differently, such as `Location::Anywhere` and `Location::From(0)`,
+    /// or the same rules under another version number, have different
+    /// digests. Equal digests mean the same rule set, not just the same
+    /// behaviour.
     #[must_use]
     pub const fn rules_digest(&self) -> Option<[u8; 32]> {
         self.rules_digest

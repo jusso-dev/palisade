@@ -35,9 +35,13 @@ pub const BUILTIN_TAGS: &[&str] = &[
     TEST_MALWARE_TEST_FILE,
 ];
 
-/// A PE image that carries a Windows Installer database: a compound file
-/// header and the installer database root CLSID after it. Installer
-/// wrappers and bootstrappers that unpack and run an MSI look like this.
+/// A PE image that may carry a Windows Installer database: a compound file
+/// header after the start of the file, and the installer database root
+/// CLSID anywhere in it. The two are found independently: the rule does
+/// not check that the CLSID is the root entry of that compound file, so a
+/// PE that holds some other compound file and the same 16 bytes elsewhere
+/// is tagged too. Installer wrappers and bootstrappers that unpack and run
+/// an MSI look like this.
 pub const INSTALLER_MSI_WRAPPER: &str = "installer:msi-wrapper";
 /// A PE image whose appended data holds the first header of a widely used
 /// script-driven installer system: a flags word, the signature
@@ -49,8 +53,11 @@ pub const INSTALLER_SCRIPTED_SETUP: &str = "installer:scripted-setup";
 /// find its compressed setup program and data.
 pub const INSTALLER_SETUP_LOADER: &str = "installer:setup-loader";
 /// A bundle bootstrapper that chains installer packages: a PE image with
-/// the bootstrapper's 8-byte section name in its section table, and that
-/// section's header (magic `0x00F14300`, version 2).
+/// the bootstrapper's 8-byte section name anywhere a section table can be,
+/// and the bootstrapper's section header (magic `0x00F14300`, version 2)
+/// anywhere in the file. The two are found independently: the rule does
+/// not resolve the named section or check that the header is at its raw
+/// data, so it is a two-marker heuristic.
 pub const INSTALLER_BUNDLE_BOOTSTRAPPER: &str = "installer:bundle-bootstrapper";
 /// A commercial setup-authoring engine's setup stream: its plain or
 /// stream-format signature (each a 13-byte name and a NUL) in a PE
@@ -69,8 +76,9 @@ pub const ARCHIVE_SELF_EXTRACTING_7Z: &str = "archive:self-extracting-7z";
 /// archives stored without compression and some documents carry one.
 pub const ARCHIVE_EMBEDDED_PE: &str = "archive:embedded-pe";
 /// A cabinet, 7z, RAR (4 or 5) or ZIP local header signature after the
-/// start of a file that does not itself start with a ZIP signature (a ZIP
-/// archive has a local header for every entry).
+/// start of a file that does not itself start with a ZIP local file header
+/// (`PK\x03\x04`; a ZIP archive has a local header for every entry). A
+/// file that merely starts with `PK` is not excluded.
 pub const ARCHIVE_EMBEDDED_ARCHIVE: &str = "archive:embedded-archive";
 /// A script compiled into an executable by a desktop automation
 /// language's script-to-executable compiler: its 16-byte script marker,
@@ -176,7 +184,7 @@ pub(super) fn rules() -> Vec<RuleSource> {
             condition: Condition::Any,
         },
         RuleSource {
-            unless_start: Some(PatternSource::Hex("50 4B".to_owned())),
+            unless_start: Some(PatternSource::Hex(ZIP_LOCAL.to_owned())),
             ..rule(
                 ARCHIVE_EMBEDDED_ARCHIVE,
                 false,

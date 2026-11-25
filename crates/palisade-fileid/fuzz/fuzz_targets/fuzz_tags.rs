@@ -74,15 +74,23 @@ fuzz_target!(|data: &[u8]| {
         assert!(r.bytes_scanned <= limits.max_scan_bytes);
         assert!(r.match_steps <= limits.max_match_steps);
         assert_eq!(r.file_size, data.len() as u64);
-        // The status tag, if any, is last, and appears nowhere else.
-        let status_tags = r.tags.iter().filter(|t| t.starts_with("content_scan_")).count();
-        match r.status.tag() {
-            Some(tag) => {
-                assert_eq!(r.tags.last().map(String::as_str), Some(tag));
-                assert_eq!(status_tags, 1);
-            }
-            None => assert_eq!(status_tags, 0),
+        // The status tags are last: `content_scan_partial` for a file over
+        // the size limit, then the status's own tag if it is different.
+        let mut want: Vec<&str> = Vec::new();
+        if r.file_size > limits.max_file_size {
+            want.push(tags::CONTENT_SCAN_PARTIAL);
         }
+        if let Some(tag) = r.status.tag().filter(|t| !want.contains(t)) {
+            want.push(tag);
+        }
+        let status_tags: Vec<&str> = r
+            .tags
+            .iter()
+            .map(String::as_str)
+            .filter(|t| t.starts_with("content_scan_"))
+            .collect();
+        assert_eq!(status_tags, want);
+        assert!(r.tags.ends_with(&want.iter().map(|t| t.to_string()).collect::<Vec<_>>()));
         if r.status == ScanStatus::Complete {
             let c = filetype::classify_bytes(data, None);
             assert_eq!(r.is_pe, c.content_kind == FileKind::Pe);
