@@ -1,15 +1,16 @@
 //! Fuzzes catalog files (#51): CTL decoding, the catalog signature check,
-//! loading into a store and member lookup. No input may panic, and every
-//! result must respect the documented limits.
+//! loading into a store, member lookup, and the persistent index (built
+//! from the store, round-tripped, and fed the raw input as an index). No
+//! input may panic, and every result must respect the documented limits.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
 use palisade_fileid::authenticode::DigestAlgorithm;
 use palisade_fileid::catalog::{
-    CatalogSource, CatalogStoreBuilder, FileDigests, MAX_CTL_WARNINGS, MAX_MATCHES, MAX_MEMBERS,
-    MAX_NAME_VALUES, StoreLimits, parse_catalog, parse_ctl,
+    CatalogIndex, CatalogSource, CatalogStoreBuilder, FileDigests, MAX_CTL_WARNINGS, MAX_MATCHES,
+    MAX_MEMBERS, MAX_NAME_VALUES, StoreLimits, parse_catalog, parse_ctl,
 };
-use palisade_fileid::hash::Digest;
+use palisade_fileid::hash::{Digest, MacKey};
 
 fuzz_target!(|data: &[u8]| {
     for ctl in [parse_ctl(data).ok(), parse_catalog(data).ok().map(|c| c.ctl)]
@@ -46,6 +47,16 @@ fuzz_target!(|data: &[u8]| {
     }
     let result = store.lookup(&digests);
     assert!(result.matches.len() <= MAX_MATCHES);
+    // The persistent index answers as the store does, survives a round
+    // trip, and decodes nothing but what it encoded.
+    let index = CatalogIndex::from_store(&store);
+    let key = MacKey::new(&[0x5a; 32]).unwrap();
+    let bytes = index.encode(&key);
+    assert_eq!(CatalogIndex::decode(&bytes, &key).as_ref(), Ok(&index));
+    let as_index: Vec<usize> = index.lookup(&digests).iter().map(|m| m.catalog).collect();
+    let as_store: Vec<usize> = result.matches.iter().map(|m| m.catalog).collect();
+    assert_eq!(as_index, as_store);
+    let _ = CatalogIndex::decode(data, &key);
     digests.authenticode_sha256 = digests.flat_sha256.clone();
     digests.authenticode_sha1 = digests.flat_sha1.clone();
     let _ = store.lookup(&digests);

@@ -446,46 +446,39 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     or the catalog's signature is SHA-1, because no allow decision may
     rest on SHA-1 alone (ADR 0008).
 
-  Still to come in #51: the persistent on-disk index and incremental
-  updates, the lookup settings, the authoring helper and the OS catalog
-  database cross-check (`CryptCATAdmin*`, behind `os-trust`). Folding a
-  catalog match into the file's signing state (`CatalogValid`) is #55;
-  catalog timestamps and expiry are #50.
-- `filetype`: content-based file type detection
-  ([#44](https://github.com/jusso-dev/palisade/issues/44)).
-  `filetype::classify(&mut reader, name_hint)` decides what a file is from
-  its magic numbers and structure, never from its name alone, and returns
-  a `Classification`: the content `FileKind`, what the extension claims
-  (`ExtensionKind`), `mismatch` and `mismatch_severity` (`None`, `Benign`,
-  `Suspicious` for a PE named `.pdf`, `Critical` for a bidirectional
-  override character or a disguising double extension), a `Confidence`,
-  `heuristic` and `extension_assisted` flags, informational
-  `ContentFlags`, the text encoding, a `parse_error` reason and
-  `classifier_version`. It recognises PE (with `PeDetails`: `Exe`, `Dll`,
-  `Driver`, `Efi`, `Cpl`, `Scr`, `Ocx` and `ResourceOnly`, the CLR header
-  as IL-only or mixed, and ARM64X, ARM64EC and CHPE layouts), NE, LE, LX
-  and DOS `MZ` programs, DOS `.com` programs (by name and size, flagged
-  `heuristic`), compound files by root CLSID (installer database, patch,
-  transform and merge module, and macro-capable office suite documents as
-  a flag), ZIP containers by entry name (app packages and bundles, Java
-  archives, Python zip applications), cabinet, compiled help, shell links,
-  ISO 9660 and UDF images, 7z, RAR, gzip, ELF, Mach-O (thin and fat),
-  Python bytecode, HTML applications, registry files, and scripts
-  (`ScriptKind`) from shebang lines, defining markers, signature block
-  markers and keyword scores. A keyword guess never overrides the script
-  language the extension claims. `is_executable_content()` is true for
-  every kind that can run code, natively or through a host, and for a ZIP
-  archive whose structure could not be read in one consistent way.
+  - Catalog signatures under the #50 checks: given `ValidityOptions`
+    (validity policy, revocation data, TSA anchors, now and clock floor),
+    `CatalogStoreBuilder::validity` judges each catalog's signature as of
+    when it was made: its own RFC 3161 or legacy timestamps, expiry
+    (`ValidTimestamped` after the signer expires), Lifetime Signing,
+    revocation of its chain, and revocation of the catalog file by its
+    SHA-256 (code 19). The verdict is `CatalogRecord::validity`, and
+    `CatalogMatch::usable` is true only for a trusted catalog that passed
+    it; lookups rank usable catalogs first. Without validity options no
+    catalog is usable, so an unchecked catalog never vouches for a file.
+  - `CatalogSettings`: `catalog_lookup_enabled` (default on),
+    `catalog_scope` (`System`, `SystemAndDriverStore`, `All`, the default)
+    and `skip_catalog_for_paths` (normalised paths; a skipped lookup says
+    which entry, for the log). `CatalogStore::lookup_with` and
+    `CatalogIndex::lookup_with` apply them.
+  - `CatalogIndex` is the persistent index: per catalog its ID, path,
+    source, status, trust, usability, publisher, signer thumbprint, member
+    count, OS attribute and effective date, plus the sorted member tables.
+    `encode` writes it with an HMAC-SHA-256 tag under an agent-held key;
+    `decode` checks the tag first, and asks for a full rebuild for another
+    index format or library version. `remove_path` and `merge` apply the
+    change feed's added, changed and removed catalogs (#60). Until
+    `finish_build`, a miss is `CatalogLookup::Indeterminate`, never "not
+    catalog-signed".
+  - `build_catalog(entries, name, os_attr, this_update)` writes an unsigned
+    v2 catalog definition (DER, SHA-256 members, sorted and deduplicated,
+    file names and `OSAttr` as name-value pairs) from a recorded set of
+    files, for organisation catalogs; signing it is #13/#18.
 
-  The PE sub-kind reuses `pe::parse_prefix` on the header bytes only, then
-  maps RVAs with the parser's loader layout and makes small reads of the
-  import, export, resource root, CLR and load configuration directories.
-  Its `Driver` rule includes every `pe` kernel driver signal (`INIT`,
-  `IMAGE_FILE_SYSTEM`, kernel module imports), so an image for which
-  `PeInfo::is_kernel_driver` is true is a `Driver` here too. (#44's rule
-  also makes a native image that does not import `ntdll.dll` a `Driver`.)
-  The import table ends where the loader ends it: at the first descriptor
-  with no name or no import address table.
+  Watching catalog directories (#60) and scheduling the first build at low
+  priority (#65) are the agent's; the OS catalog database cross-check
+  (`CryptCATAdmin*`) is the Windows backend's (#48). Folding a catalog
+  match into the file's signing state (`CatalogValid`) is #55.
 
 - `installer`: Windows Installer packages
   ([#53](https://github.com/jusso-dev/palisade/issues/53)): `.msi`, `.msp`,
