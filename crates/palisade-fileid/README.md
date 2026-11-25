@@ -699,6 +699,33 @@ The parser has no `unsafe` code, and its modules say `#![forbid(unsafe_code)]`.
 
 ## Testing and fuzzing
 
+**Fixture corpus (#25).** `tests/corpus/` builds a whole test corpus from Rust
+at test time, on any OS:
+
+- PE32 and PE32+ executables and DLLs for x64, ARM64 and x86, each with a
+  version resource (original file name, product, company, file version).
+- A throwaway test PKI: a root CA, an intermediate, RSA-3072 leaves, an ECDSA
+  P-256 leaf, and expired, revoked-in-CRL, wrong-EKU and self-signed leaves,
+  plus a CRL.
+- Signed PEs, signed in pure Rust (`tests/corpus/sign.rs`): embedded
+  Authenticode, dual signed, tampered after signing, a truncated certificate
+  table, and a page-hash-bearing signature; and a signed catalog (`.cat`) with
+  the unsigned PE it lists.
+- A malformed corpus: zero length, truncated headers, overlapping sections,
+  an absurd section count, a recursive resource directory and a huge
+  `SizeOfImage`.
+- Benign `.ps1`, `.bat`, `.cmd`, `.vbs`, `.js`, `.wsf` and `.hta` scripts that
+  only print a marker.
+
+`tests/fixture_corpus.rs` parses every fixture with this crate and checks
+what it was built to be: machine, format and version info; signatures that
+verify and chain to the test root; the tampered one a digest mismatch; the
+wrong-EKU and self-signed leaves refused for that reason; the CRL listing the
+revoked leaf. `cargo xtask fixtures` writes the corpus to `target/fixtures/`,
+`cargo xtask golden` checks its hashes against `testdata/golden/fixtures.txt`,
+and `write_corpus_fuzz_seeds` feeds it to the PE, PKCS#7 and X.509 fuzz
+targets.
+
 Fixtures are synthetic PE images built byte by byte at test time
 (`tests/common`); no PE binaries are checked in. The signature tests use
 small PKCS#7 signatures in `tests/fixtures/authenticode`, made over that
@@ -805,8 +832,10 @@ for the tagger's multi-pattern search. It is already a dependency of
 `palisade-policy` through `regex-automata`, so it adds no crate to the
 workspace.
 
-Dev-dependencies: `proptest` for the property tests, and `criterion` for the
-benchmarks.
+Dev-dependencies: `proptest` for the property tests, `criterion` for the
+benchmarks, and `rsa` with `rand_core` for the fixture generator
+(`tests/corpus/`): throwaway RSA test-CA keys from a seeded RNG, and their
+signatures. They are never in a shipped build.
 
 ## Platform support
 

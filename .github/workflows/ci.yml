@@ -144,6 +144,25 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: cargo xtask coverage-gate --base "$BASE_SHA"
 
+  # The generated fixture corpus (#25): built from Rust on Linux, its hashes
+  # match testdata/golden/fixtures.txt, and the repository holds no
+  # executable file that testdata/manifest.txt does not allow. The corpus's
+  # own properties are checked by palisade-fileid's fixture_corpus tests in
+  # the `test` job, on every OS.
+  fixtures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo xtask check-testdata
+      - run: cargo xtask golden
+
   # Every committed fuzz-workspace lockfile is current. A dependency change
   # in a crate a fuzz workspace builds leaves its lockfile stale; this finds
   # that in seconds, instead of after the fuzz job's setup.
@@ -528,7 +547,7 @@ jobs:
   # The single required check from this workflow for branch protection.
   ci-ok:
     if: always()
-    needs: [fmt, clippy, test, postgres, coverage, coverage-gate, snapshots, fuzz-locks, fuzz, bench, msrv, docs, deps, supply-chain, feature-powerset, runner-guard, doc-checks, workflow-lint, package, sign-test, server-image]
+    needs: [fmt, clippy, test, postgres, coverage, coverage-gate, snapshots, fixtures, fuzz-locks, fuzz, bench, msrv, docs, deps, supply-chain, feature-powerset, runner-guard, doc-checks, workflow-lint, package, sign-test, server-image]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
