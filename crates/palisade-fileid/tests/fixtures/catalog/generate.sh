@@ -29,6 +29,9 @@
 # The tests check that each catalog signs exactly the trust list the
 # builder makes (`fixture_ctls_are_the_builder_output`).
 #
+# generate-validity.sh makes the timestamped and expired catalogs and their
+# roots (validity-*.der, v2-expired*.cat), with fixed dates.
+#
 # Needs: openssl (3.x or later), osslsigncode (2.x), cargo. Run from
 # anywhere:
 #   sh crates/palisade-fileid/tests/fixtures/catalog/generate.sh

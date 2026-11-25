@@ -61,18 +61,40 @@
 //! trusted is [`CatalogMatch::trusted`], decided by the [`TrustConfig`]
 //! given when the catalog was loaded. Catalogs whose signature is not valid
 //! (tampered, unsupported, malformed) are recorded with their status but
-//! never indexed, so they match nothing. Validity periods, timestamps and
-//! revocation are #50, as for embedded signatures.
+//! never indexed, so they match nothing.
 //!
-//! # Not done here yet
+//! Given [`ValidityOptions`], the builder also judges each catalog's
+//! signature as of when it was made, with the same machinery as embedded
+//! signatures (#50): the catalog's own timestamps, expiry, revocation of
+//! its chain, and revocation of the catalog file by hash.
+//! [`CatalogMatch::usable`] is true only for a trusted catalog whose
+//! signature passed all of it; without validity options no match is
+//! usable.
 //!
-//! - The persistent on-disk index, incremental updates from the change
-//!   feed (#60), low-priority builds (#65), the `catalog_lookup_enabled`,
-//!   `catalog_scope` and `skip_catalog_for_paths` settings and the
-//!   authoring helper remain part of #51.
+//! # Settings, the persistent index and authoring
+//!
+//! - [`CatalogSettings`]: `catalog_lookup_enabled`, `catalog_scope` and
+//!   `skip_catalog_for_paths`, applied by [`CatalogStore::lookup_with`] and
+//!   [`CatalogIndex::lookup_with`]. A skipped lookup says why, for the log.
+//! - [`CatalogIndex`]: the persistent index. It is built from a store,
+//!   written with an HMAC-SHA-256 tag ([`CatalogIndex::encode`]) and read
+//!   back only when the tag verifies and it was written by this library
+//!   version and index format ([`CatalogIndex::decode`]; anything else asks
+//!   for a full rebuild). It is updated in place as catalogs are added,
+//!   changed or removed ([`CatalogIndex::remove_path`],
+//!   [`CatalogIndex::merge`]), and reports [`IndexState::Building`] until
+//!   its first build is complete, during which a miss is
+//!   [`CatalogLookup::Indeterminate`], never a "not catalog-signed".
+//! - [`build_catalog`]: an unsigned catalog definition from a recorded set
+//!   of files, for organisation catalogs.
+//!
+//! # Not done here
+//!
+//! - Watching the catalog directories for changes is the change feed
+//!   (#60), and scheduling the first build at low priority is #65: both are
+//!   the agent's. This module takes their results.
 //! - The OS catalog database cross-check (`CryptCATAdmin*`, Windows,
-//!   behind `os-trust`) remains part of #51; it needs the Windows API
-//!   dependency and unsafe-code allowlist entry that ADR 0011 requires.
+//!   `os-trust`) belongs to the Windows backend (#48).
 //! - Folding catalog matches into a file's signing state (`CatalogValid`)
 //!   is the unified file identity record (#55).
 //!
@@ -90,20 +112,32 @@
 
 #![forbid(unsafe_code)]
 
+mod author;
 mod ctl;
+mod index;
+mod settings;
 mod store;
 
 use std::fmt;
 
+pub use author::{
+    AuthorError, CatalogEntry, EntryKind, MAX_AUTHORED_MEMBERS, MAX_AUTHORED_TEXT, UnsignedCtl,
+    build_catalog,
+};
 pub use ctl::{
     CatalogMember, CertificateTrustList, CtlError, CtlWarning, MAX_ATTRIBUTES, MAX_CTL_WARNINGS,
     MAX_DECODED_BYTES, MAX_MEMBERS, MAX_NAME_VALUES, MAX_VALUE_BYTES, MemberDigest, MemberTag,
     NameValue, NameValueData, SubjectAlgorithm, parse_ctl,
 };
+pub use index::{
+    CatalogIndex, INDEX_FORMAT, IndexError, IndexMatch, IndexState, IndexedCatalog, IndexedStatus,
+    MAX_INDEX_SIZE,
+};
+pub use settings::{CatalogLookup, CatalogScope, CatalogSettings, LookupSkipped};
 pub use store::{
     CatalogMatch, CatalogRecord, CatalogSigner, CatalogSource, CatalogStatus, CatalogStore,
-    CatalogStoreBuilder, DigestKind, FileDigests, LoadError, LoadReport, LookupResult,
-    MAX_LOAD_ERRORS, MAX_MATCHES, StoreLimits,
+    CatalogStoreBuilder, CatalogValidity, DigestKind, FileDigests, LoadError, LoadReport,
+    LookupResult, MAX_LOAD_ERRORS, MAX_MATCHES, StoreLimits, ValidityOptions,
 };
 
 use crate::authenticode::asn1;

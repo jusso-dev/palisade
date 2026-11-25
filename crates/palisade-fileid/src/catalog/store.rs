@@ -8,11 +8,15 @@ use std::fmt;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
+use super::settings::{CatalogLookup, CatalogSettings};
 use super::{Catalog, CatalogError, CatalogWarning, MAX_CATALOG_SIZE, SubjectAlgorithm};
 use crate::authenticode::{
-    AuthenticodeHashes, BadSignature, DigestAlgorithm, SignatureStatus, SignerIdentity,
-    SignerTrust, TrustConfig, hash_pe,
+    AuthenticodeHashes, BadSignature, DigestAlgorithm, RelaxedCheck, RevocationSet,
+    SignatureStatus, SignerIdentity, SignerTrust, TimeValidity, TrustConfig, TrustReport,
+    ValidityContext, ValidityPolicy, ValidityWarning, VerificationError, evaluate_validity,
+    hash_pe,
 };
+use crate::fsctx::NormalizedPath;
 use crate::hash::{AlgorithmSet, Digest, FlatHashes, HashAlgorithm, hash_bytes};
 
 /// The most matches [`CatalogStore::lookup`] returns. A digest listed in
@@ -138,10 +142,65 @@ pub struct CatalogRecord {
     /// `ctlThisUpdate`, in seconds since the Unix epoch (UTC).
     pub this_update: Option<i64>,
     /// The signer's `signingTime` claim, in seconds since the Unix epoch
-    /// (UTC). Not a trusted time; timestamps are #50.
+    /// (UTC). Not a trusted time: see [`CatalogValidity::signing_time`].
     pub signing_time: Option<i64>,
+    /// The catalog signature's validity (timestamps, expiry, revocation),
+    /// when the builder was given [`ValidityOptions`]. `None` when it was
+    /// not, or the signature is not valid.
+    pub validity: Option<CatalogValidity>,
     /// Anything unusual about the file.
     pub warnings: Vec<CatalogWarning>,
+}
+
+impl CatalogRecord {
+    /// Whether a match in this catalog may stand for a signature: the
+    /// signer is trusted and, when validity was judged, the signature
+    /// passed every check. Without [`ValidityOptions`] only trust is known,
+    /// and this is `false`: a catalog whose expiry and revocation were never
+    /// checked does not vouch for a file.
+    #[must_use]
+    pub fn usable(&self) -> bool {
+        self.trusted && self.validity.as_ref().is_some_and(|v| v.error.is_ok())
+    }
+}
+
+/// What [`crate::authenticode::evaluate_validity`] (#50) said about a
+/// catalog's signature, as kept in its record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogValidity {
+    /// The verdict: [`VerificationError::Ok`], or the first failure.
+    pub error: VerificationError,
+    /// Every failure, in check order.
+    pub failures: Vec<VerificationError>,
+    /// The trusted signing time, from the catalog's own timestamps.
+    pub signing_time: Option<i64>,
+    /// The chain's time validity.
+    pub time_validity: Option<TimeValidity>,
+    /// Relaxations used, for the decision trace (#41).
+    pub relaxed: Vec<RelaxedCheck>,
+    /// Anything that did not fail the signature.
+    pub warnings: Vec<ValidityWarning>,
+    /// The time judged against.
+    pub effective_now: i64,
+    /// The clock was before its floor.
+    pub clock_suspect: bool,
+}
+
+/// What catalog signatures are judged against (#50), owned by the builder.
+/// The catalog file's own SHA-256 is checked against the revoked file
+/// hashes, so a catalog can be revoked by hash (code 19).
+#[derive(Debug, Clone)]
+pub struct ValidityOptions {
+    /// The validity settings.
+    pub policy: ValidityPolicy,
+    /// Revocation data.
+    pub revocation: RevocationSet,
+    /// Anchors for the timestamping authorities that timestamp catalogs.
+    pub tsa_trust: TrustConfig,
+    /// The current time, in seconds since the Unix epoch.
+    pub now: i64,
+    /// The clock floor ([`ValidityContext::clock_floor`]).
+    pub clock_floor: Option<i64>,
 }
 
 /// A catalog signer, shared by every catalog in one namespace with the same
@@ -392,6 +451,13 @@ impl CatalogMatch<'_> {
         self.record.trusted
     }
 
+    /// Whether the match may stand for a signature
+    /// ([`CatalogRecord::usable`]): trusted, and valid when judged.
+    #[must_use]
+    pub fn usable(&self) -> bool {
+        self.record.usable()
+    }
+
     /// Whether the match rests on SHA-1 anywhere: the member digest that
     /// matched, or the catalog's own signature. **Not collision
     /// resistant**: no allow decision may rest on such a match alone (ADR
@@ -412,8 +478,9 @@ impl CatalogMatch<'_> {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LookupResult<'a> {
     /// Each catalog that lists the file, once, by its best matching
-    /// digest: trusted catalogs first, then by [`DigestKind`] order, then
-    /// SHA-2-signed catalogs before SHA-1-signed ones, then in load order.
+    /// digest: usable catalogs first ([`CatalogRecord::usable`]), then
+    /// trusted ones, then by [`DigestKind`] order, then SHA-2-signed
+    /// catalogs before SHA-1-signed ones, then in load order.
     /// At most [`MAX_MATCHES`].
     pub matches: Vec<CatalogMatch<'a>>,
     /// Whether more catalogs matched than [`MAX_MATCHES`].
@@ -467,6 +534,7 @@ pub struct CatalogStoreBuilder {
     sha1: Index<20>,
     members: usize,
     bytes: u64,
+    validity: Option<Box<ValidityOptions>>,
 }
 
 impl CatalogStoreBuilder {
@@ -488,6 +556,16 @@ impl CatalogStoreBuilder {
             *slot = config;
         }
         self.generation = self.generation.saturating_add(1);
+        self
+    }
+
+    /// Judges the signature of every catalog loaded after this call (#50):
+    /// its timestamps, expiry and revocation, under `options`. Without it,
+    /// records carry no [`CatalogRecord::validity`] and none is
+    /// [`CatalogRecord::usable`].
+    #[must_use]
+    pub fn validity(mut self, options: ValidityOptions) -> Self {
+        self.validity = Some(Box::new(options));
         self
     }
 
@@ -574,8 +652,9 @@ impl CatalogStoreBuilder {
     /// [`StoreLimits::max_depth`] levels. Symbolic links (and other reparse
     /// points the OS reports as links) are not followed. Entries are read
     /// in name order, so the result does not depend on the directory's
-    /// order. The walk stops, before listing another directory, once
-    /// [`StoreLimits::max_catalogs`] or [`StoreLimits::max_total_bytes`] is
+    /// order. The walk stops, before listing another directory or reading
+    /// another catalog, once [`StoreLimits::max_catalogs`],
+    /// [`StoreLimits::max_total_bytes`] or [`StoreLimits::max_members`] is
     /// spent.
     ///
     /// For the OS layout, load `catroot` (its `{GUID}` folders) as
@@ -676,12 +755,15 @@ impl CatalogStoreBuilder {
     }
 
     /// The limit that stops [`Self::add_dir`], if one is spent: no catalog
-    /// can be recorded, or no byte can be read.
+    /// can be recorded, no byte can be read, or no member can be indexed
+    /// (reading more catalogs would then only spend time).
     fn spent(&self) -> Option<LoadError> {
         if self.full() {
             Some(LoadError::CatalogLimit)
         } else if self.remaining_bytes() == 0 {
             Some(LoadError::ByteLimit)
+        } else if self.members >= self.limits.max_members {
+            Some(LoadError::MemberLimit)
         } else {
             None
         }
@@ -769,6 +851,7 @@ impl CatalogStoreBuilder {
                     os_attr: None,
                     this_update: None,
                     signing_time: None,
+                    validity: None,
                     warnings: Vec::new(),
                 });
                 report.recorded = report.recorded.saturating_add(1);
@@ -835,6 +918,7 @@ impl CatalogStoreBuilder {
                 }
             }
         }
+        let validity = signer.and_then(|i| self.judge(&catalog, i));
         let signature = catalog.signature();
         let status = match signature.map(|s| &s.status) {
             Some(SignatureStatus::Valid) => CatalogStatus::Valid,
@@ -862,6 +946,7 @@ impl CatalogStoreBuilder {
             signing_time: signature
                 .and_then(|s| s.signer.as_ref())
                 .and_then(|a| a.signing_time),
+            validity,
             warnings: catalog.warnings,
         });
         report.recorded = report.recorded.saturating_add(1);
@@ -872,6 +957,40 @@ impl CatalogStoreBuilder {
 }
 
 impl CatalogStoreBuilder {
+    /// The catalog signature's validity, when options were given.
+    fn judge(&self, catalog: &Catalog, signer: usize) -> Option<CatalogValidity> {
+        let options = self.validity.as_deref()?;
+        let signer = self.signers.get(signer)?;
+        let trust = TrustReport {
+            signers: vec![signer.trust.clone()],
+            primary: signer.trust.trusted.then_some(0),
+            identity: signer.identity.clone(),
+            vendor_hint: None,
+        };
+        let digests = [catalog.id.clone()];
+        let ctx = ValidityContext {
+            now: options.now,
+            clock_floor: options.clock_floor,
+            policy: &options.policy,
+            revocation: &options.revocation,
+            tsa_trust: &options.tsa_trust,
+            file_digests: &digests,
+            version: None,
+        };
+        let report = evaluate_validity(&catalog.signatures, &trust, &ctx);
+        let sig = report.signatures.into_iter().next()?;
+        Some(CatalogValidity {
+            error: sig.error,
+            failures: sig.failures,
+            signing_time: sig.signing_time,
+            time_validity: sig.validity,
+            relaxed: sig.relaxed,
+            warnings: sig.warnings,
+            effective_now: report.effective_now,
+            clock_suspect: report.clock_suspect,
+        })
+    }
+
     /// The signer of a catalog with a valid signature, shared with earlier
     /// catalogs whose chain is built from the same input.
     fn signer_of(&mut self, source: CatalogSource, catalog: &Catalog) -> Option<usize> {
@@ -987,6 +1106,22 @@ impl CatalogStore {
         self.sha256.0.len().saturating_add(self.sha1.0.len())
     }
 
+    /// The SHA-256 index entries: `(catalog, member, digest, pe_image)`.
+    pub(crate) fn entries_sha256(&self) -> impl Iterator<Item = (u32, u32, [u8; 32], bool)> + '_ {
+        self.sha256
+            .0
+            .iter()
+            .map(|e| (e.catalog, e.member, e.digest, e.pe_image))
+    }
+
+    /// The SHA-1 index entries: `(catalog, member, digest, pe_image)`.
+    pub(crate) fn entries_sha1(&self) -> impl Iterator<Item = (u32, u32, [u8; 20], bool)> + '_ {
+        self.sha1
+            .0
+            .iter()
+            .map(|e| (e.catalog, e.member, e.digest, e.pe_image))
+    }
+
     /// The catalogs, from any source, that list a file with `digests`.
     #[must_use]
     pub fn lookup(&self, digests: &FileDigests) -> LookupResult<'_> {
@@ -998,6 +1133,23 @@ impl CatalogStore {
                 CatalogSource::Policy,
             ],
         )
+    }
+
+    /// The catalogs that list a file with `digests` under `settings`: none
+    /// when lookups are disabled or `path` (the file's normalised path) is
+    /// under a [`CatalogSettings::skip_catalog_for_paths`] entry (with the
+    /// reason, for the log), else those from the sources
+    /// [`CatalogSettings::catalog_scope`] covers.
+    #[must_use]
+    pub fn lookup_with(
+        &self,
+        digests: &FileDigests,
+        settings: &CatalogSettings,
+        path: Option<&NormalizedPath>,
+    ) -> CatalogLookup<LookupResult<'_>> {
+        settings.gate(path, || {
+            self.lookup_in(digests, settings.catalog_scope.sources())
+        })
     }
 
     /// The catalogs from `sources` that list a file with `digests`. The
@@ -1060,10 +1212,11 @@ impl CatalogStore {
                 })
             })
             .collect();
-        // Trusted first, then by member digest, then SHA-2-signed catalogs
-        // before SHA-1-signed ones, then load order.
+        // Usable first, then trusted, then by member digest, then
+        // SHA-2-signed catalogs before SHA-1-signed ones, then load order.
         matches.sort_by_key(|m| {
             (
+                !m.usable(),
                 !m.trusted(),
                 m.matched_by,
                 !m.signature_is_sha2(),
