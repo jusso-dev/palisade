@@ -27,7 +27,7 @@ type.
 | `deps` | ubuntu-latest | `cargo xtask check-deps`, `cargo xtask check-manifests`, `cargo xtask check-unsafe`, `cargo deny --locked check` for the root workspace and for each fuzz workspace (with the root `deny.toml`), `cargo xtask audit` (cargo-audit over the root and every fuzz lockfile, with the ignores from `deny.toml`) |
 | `supply-chain` | ubuntu-latest | `cargo vet --locked`, `cargo xtask check-supply-chain`, and on PRs `cargo xtask deps-report --base <base>` to the job summary ([dependencies.md](dependencies.md)) |
 | `feature-powerset` | ubuntu-latest | `cargo hack check --each-feature --all-targets --locked` on the portable crates (`core`, `fileid`, `policy`, `proto`, `server`, `cli`, `console`) |
-| `runner-guard` | ubuntu-latest | `cargo xtask check-workflows` ([Runner and action policy](#runner-and-action-policy)) |
+| `runner-guard` | ubuntu-latest | `cargo xtask check-workflows` ([Runner and action policy](#runner-and-action-policy)), and `cargo xtask adr lint` (ADR format and index, [docs/adr/PROCESS.md](adr/PROCESS.md#index-and-tooling)) |
 | `doc-checks` | ubuntu-latest | `cargo xtask threat-coverage`: the threat model's tables are complete and consistent, and every test, fuzz target and CI check it cites exists ([threat model](security/threat-model.md#keeping-it-current)) |
 | `workflow-lint` | ubuntu-latest | `actionlint` (checksum-verified release) and `zizmor --offline` |
 | `ci-ok` | ubuntu-latest | Passes only if every job above succeeded |
@@ -254,6 +254,7 @@ cargo xtask check-deps
 cargo xtask check-manifests
 cargo xtask check-unsafe
 cargo xtask check-workflows
+cargo xtask adr lint
 cargo xtask threat-coverage
 cargo deny --locked check          # needs cargo-deny 0.22
 cargo deny --locked --manifest-path crates/palisade-fileid/fuzz/Cargo.toml --config deny.toml check

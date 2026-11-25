@@ -666,7 +666,7 @@ fn is_advisory_id(id: &str) -> bool {
 }
 
 /// A `YYYY-MM-DD` date with a plausible month and day.
-fn is_date(s: &str) -> bool {
+pub fn is_date(s: &str) -> bool {
     let parts: Vec<&str> = s.split('-').collect();
     let [y, m, d] = parts.as_slice() else {
         return false;

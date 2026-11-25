@@ -99,17 +99,34 @@ removed, with nothing to replace them.
 
 ## Index and tooling
 
-[`README.md`](README.md) holds the index of all ADRs. The index is maintained by hand for now.
-Planned tooling (tracked in #29, with CI wiring in #21) will replace the manual steps:
+[`README.md`](README.md) holds the index of all ADRs. Three commands do the mechanical work:
 
-- `cargo xtask adr new "<title>"` copies the template with the next number;
-- `cargo xtask adr index` regenerates the table between the `adr-index` markers in `README.md`,
-  and CI fails if it is stale;
-- `cargo xtask adr lint` rejects an ADR with a bad file name or number, a missing or invalid
-  Status line, or a missing or empty Security impact section.
+- `cargo xtask adr new "<title>"` copies the template to the next number, with the title, today's
+  date and status `proposed`. It never overwrites a file.
+- `cargo xtask adr index` regenerates the table between the `adr-index` markers in `README.md`
+  from the ADR files.
+- `cargo xtask adr lint` runs in CI (the `runner-guard` job, behind the required `ci-ok` check). It
+  fails on:
+  - a file name that is not `NNNN-kebab-title.md`, a reused number, a gap in the numbering, or
+    `0000` used for anything but the template;
+  - a first line that is not `# NNNN. Title` with the file's number;
+  - a missing or invalid Status, Date or Deciders line;
+  - a template section that is missing, repeated, out of order or empty (Security impact
+    included), judged as the Markdown renders: a heading or text inside an HTML comment does
+    not count, and neither does a `##` line inside a fenced code block. A `##` section's `###`
+    subsections are part of its content;
+  - in the template, a title other than `# NNNN. ...`, a status other than `proposed`, or a date
+    other than `YYYY-MM-DD`, because `adr new` relies on all three;
+  - a date that is not a real calendar date;
+  - `superseded by NNNN` naming an ADR that does not exist, is not later, or is not `accepted` or
+    `proposed`, or whose Links section has no visible `- Supersedes: NNNN` bullet for it (the
+    number may be a Markdown link);
+  - a symbolic link, subdirectory or file other than an ADR, README.md or PROCESS.md in
+    `docs/adr/` (dotfiles such as `.gitattributes` are allowed);
+  - an index in `README.md` that differs from what `adr index` would write.
 
-Until that tooling lands, the PR author updates the index by hand and reviewers check the format
-against this document.
+The lint cannot see history, so it cannot tell whether an accepted ADR's text was changed.
+Reviewers check that, and the rest of the checklist below, by hand.
 
 ## Review checklist for ADR PRs
 

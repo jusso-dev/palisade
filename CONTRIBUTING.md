@@ -159,8 +159,8 @@ Significant decisions are recorded as Architecture Decision Records (ADRs) in
 ADR, and how to write, number, accept and supersede one, starting from the
 [template](docs/adr/0000-template.md). If you are not sure whether your change needs one, ask in
 the issue. If a PR contradicts an accepted ADR, it must link a new ADR that supersedes it.
-Tooling to scaffold, index and lint ADRs is planned in
-[#29](https://github.com/jusso-dev/palisade/issues/29).
+`cargo xtask adr new "<title>"` starts one from the template, `cargo xtask adr index` updates the
+index, and `cargo xtask adr lint` checks the format, as CI does.
 
 ## Commits and pull requests
 

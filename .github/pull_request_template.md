@@ -25,7 +25,7 @@ Closes #<!-- issue number, or use "Part of #N" and say what is left below -->
 
 - [ ] Tests added or updated, and the checks in [CONTRIBUTING.md](https://github.com/jusso-dev/palisade/blob/main/CONTRIBUTING.md#before-you-push) pass locally.
 - [ ] Docs updated, or no docs change is needed.
-- [ ] ADR linked, if this is an architectural change, or not applicable.
+- [ ] ADR linked, if this is an architectural change, or not applicable. For a PR that adds or changes an ADR: the [ADR review checklist](https://github.com/jusso-dev/palisade/blob/main/docs/adr/PROCESS.md#review-checklist-for-adr-prs) is done, the PR is labelled `area:infra`, and it stays open at least 3 days unless the maintainer marks it urgent.
 - [ ] Does this change a trust boundary or add a parser of untrusted input? If yes, the [threat model](https://github.com/jusso-dev/palisade/blob/main/docs/security/threat-model.md) is updated in this pull request (see its [Process](https://github.com/jusso-dev/palisade/blob/main/docs/security/threat-model.md#keeping-it-current) section).
 - [ ] No new `unsafe` code, or the unsafe allowlist is updated and every block has a `// SAFETY:` comment.
 - [ ] New dependencies, if any, are justified in the summary above.
