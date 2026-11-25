@@ -6,7 +6,7 @@ the pinned toolchain and needs no other tools.
 
 | Command | What it does |
 |---|---|
-| `ci [--fast]` | Runs every check in `.github/workflows/ci.yml` locally, with the same commands. `--fast` skips coverage, fuzz, docs, feature-powerset, msrv and the package and server-image builds. A unit test keeps its step list identical to `ci.yml`. Steps: `src/ci.rs`. |
+| `ci [--fast]` | Runs every check in `.github/workflows/ci.yml` locally, with the same commands. `--fast` skips coverage, fuzz, docs, feature-powerset, msrv and the package, signing and server-image builds. A unit test keeps its step list identical to `ci.yml`. Steps: `src/ci.rs`. |
 | `check-deps` | The allowed dependency directions between workspace crates, and crates banned from the `palisade-policy` and `palisade-agent` dependency trees. Rules: `src/deps.rs`. |
 | `check-manifests` | Every member crate inherits version, edition, MSRV, licence, repository, authors, `publish` and lints from the workspace, and takes every dependency from `[workspace.dependencies]`. `test-util` is never on by default and only dev-dependencies may enable it (an explicit `--features test-util` on the command line still can). Every crate README has no HTML comments, opens with a purpose paragraph, has the required sections and documents every feature. Rules: `src/manifests.rs`. |
 | `adr new "<title>"`, `adr index`, `adr lint` | The ADR tooling from `docs/adr/PROCESS.md`: scaffold the next ADR from the template, regenerate the index in `docs/adr/README.md`, and check every ADR's file name, number, title, Status, Date and Deciders lines, sections (present, in order, not empty), supersession links and the index. Rules: `src/adr.rs`. |
@@ -15,7 +15,9 @@ the pinned toolchain and needs no other tools.
 | `check-unsafe` | Only files listed in `unsafe-allowlist.txt`, in the locations ADR 0011 allows, may relax the `unsafe_code` lint. Crates without an allowlisted module keep `#![forbid(unsafe_code)]` at their roots. Rules: `src/unsafe_code.rs`. |
 | `check-workflows` | GitHub-hosted runners only, allowlisted and SHA-pinned actions, least-privilege permissions, and no cloud-managed build service named anywhere under `.github/`. Rules: `src/workflows.rs`; see `docs/ci.md`. |
 | `threat-coverage` | The threat model (`docs/security/threat-model.md`): STRIDE rows well formed, every component considers all six categories, one mitigation row per threat in order with the same issues, every `implemented` or `verified` threat cites a check on `main`, every cited test function, fuzz target and workflow command exists, the status summary matches, and no file names an undefined threat ID. Rules: `src/threat_coverage.rs`. |
-| `dist [--target <triple>] [--msi] [--sign none] [--out <dir>] [--bump-patch] [--compare-sizes <file>]` | Release-builds the Windows executables (static CRT, version resource, manifest, `/Brepro`), checks them, writes the symbols archive and size report, and with `--msi` builds and validates the installer package with the pinned WiX; on Linux, the server binary. `dist driver` explains the local-only driver package (#8). Code: `src/dist/`; see `docs/packaging.md`. |
+| `dist [--target <triple>] [--msi] [--sign <signer>] [--out <dir>] [--bump-patch] [--compare-sizes <file>] [--from <dir>] [--no-timestamp]` | Release-builds the Windows executables (static CRT, version resource, manifest, `/Brepro`), checks them, writes the symbols archive and size report, and with `--msi` builds and validates the installer package with the pinned WiX; on Linux, the server binary. `dist driver` explains the local-only driver package (#8). Code: `src/dist/`; see `docs/packaging.md`. |
+| `sign --signer <none\|test-ca\|pfx\|cloud-hsm> [--verify] [--no-timestamp] <file>...` | Authenticode-signs PE files and packages with a SHA-256 digest and an RFC 3161 timestamp, then verifies them; secrets come from the environment and are scrubbed from output. Code: `src/release/sign.rs`; see `docs/releasing.md#code-signing`. |
+| `release <prepare\|check-tag\|notes\|checksums\|verify-checksums\|verify\|provenance> ...` | The release pipeline's steps: version bump and changelog, tag checks, release notes, `SHA256SUMS`, signature verification inside packages, and the provenance hook. Code: `src/release/`; see `docs/releasing.md`. |
 | `deps-report [--base <commit>]` | The dependency report on the CI job summary: duplicates, `cargo tree -d`, third-party crates per crate, third-party `unsafe` counts and their change, build scripts and proc-macros. Code: `src/report.rs`. |
 | `sbom` | Reserved for #226; prints where the CycloneDX files will go (`target/dist/sbom/`) and fails. |
 | `test-summary <label> <junit.xml>` | Turns a nextest JUnit report into the CI job summary and one annotation per failed test. Code: `src/junit.rs`. |
@@ -30,7 +32,7 @@ any. Each rule set has unit tests with passing and failing fixtures:
 `cargo test -p xtask`. The workspace rules themselves are described in
 [`docs/workspace.md`](../docs/workspace.md).
 
-More commands (`fixtures` and others) are planned in #29; `sign` comes with the release pipeline (#24), and `sbom` is filled in by #226.
+More commands (`fixtures` and others) are planned in #29; `sbom` is filled in by #226.
 
 ## Allowed dependencies
 

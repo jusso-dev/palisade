@@ -233,6 +233,17 @@ pub const STEPS: &[Step] = &[
             "cargo xtask dist --msi --bump-patch --out target/dist/next",
         )
     },
+    // `sign-test` trusts a throwaway root machine-wide, so locally only the
+    // test-CA build runs; verification and the pfx test stay on the runner.
+    Step {
+        tool: Some(DOTNET),
+        slow: true,
+        only_on: Some("windows"),
+        ..step(
+            "sign-test",
+            "cargo xtask dist --msi --sign test-ca --out target/dist/signed",
+        )
+    },
     Step {
         slow: true,
         only_on: Some("linux"),
@@ -445,6 +456,9 @@ mod tests {
             // The main-only snapshot publishing jobs.
             || command.starts_with(".github/scripts/main-snapshot.sh ")
             || command == "cargo xtask dist --msi --sign none --out target/dist/snapshot"
+            // Trusts a throwaway root machine-wide: CI runners only.
+            || command.starts_with("./packaging/sign/")
+            || command == "cargo xtask release verify target/dist/signed --allow-untimestamped"
     }
 
     #[test]
@@ -547,6 +561,7 @@ mod tests {
                 "feature-powerset",
                 "package",
                 "package",
+                "sign-test",
                 "server-image",
                 "server-image",
                 "server-image"

@@ -33,9 +33,10 @@ podman build -f packaging/server/Containerfile -t palisade-server:dev target/dis
 `--target <triple>` picks the target explicitly (`x86_64-pc-windows-msvc`,
 `aarch64-pc-windows-msvc` or `x86_64-unknown-linux-gnu`). Windows targets build on Windows and
 the server on Linux, each with the platform's own linker. Output goes to
-`target/dist/<arch>-<version>/`, or to `--out <dir>`. `--sign none` logs each file that would be
-signed; real signers are added by the release pipeline (#24), and any other value fails until
-then. `--bump-patch` builds as the next patch version, which CI uses to test upgrades.
+`target/dist/<arch>-<version>/`, or to `--out <dir>`. `--sign <signer>` signs every executable
+before it is packaged, then the package, with any `cargo xtask sign` signer (`none` only logs);
+see [releasing.md](releasing.md#code-signing). `--from <dir>` packages executables built and
+signed elsewhere, after checking they are this version's; the release pipeline uses it. `--bump-patch` builds as the next patch version, which CI uses to test upgrades.
 `--compare-sizes <sizes.json>` warns about every binary that grew by more than 10% against an
 earlier build's size report. Everything `dist` builds and downloads goes under Cargo's target
 directory, wherever `CARGO_TARGET_DIR` or `build.target-dir` puts it.
@@ -277,7 +278,7 @@ hosted image and installing it exceeds job limits, and no other runner type is e
 
 ## Not covered here
 
-- Signing binaries and packages, and publishing releases: the release pipeline (#24).
+- Signing binaries and packages, and publishing releases: [releasing.md](releasing.md).
 - Testing on clean x64 and ARM64 virtual machines, including the notifier in a real user
   session: the VM harness (#26).
 - Image signing, uninstall protection and further ACL hardening: #18.

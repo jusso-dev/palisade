@@ -17,6 +17,7 @@ mod fuzz;
 mod fuzz_locks;
 mod junit;
 mod manifests;
+mod release;
 mod report;
 mod supply_chain;
 mod threat_coverage;
@@ -40,7 +41,7 @@ Commands:
   audit            Run cargo-audit over the root and fuzz lockfiles, ignoring exactly the
                    advisories deny.toml ignores
   ci [--fast]      Run the checks from .github/workflows/ci.yml locally (--fast skips coverage,
-                   fuzz, docs, feature-powerset, msrv, package and server-image)
+                   fuzz, docs, feature-powerset, msrv, package, sign-test and server-image)
   bench-compare --base <commit>
                    Run every criterion bench at <commit> and at the working tree, and fail if a
                    median is more than 10% slower outside the noise (bench.yml)
@@ -52,11 +53,15 @@ Commands:
                    Enforce the duplicate-version budget, deny.toml ignore expiry and reasons,
                    the cargo-vet criteria and exemption notes, and no audit.toml
   check-unsafe     Enforce the unsafe-code allowlist (unsafe-allowlist.txt, ADR 0011)
-  dist [--target <triple>] [--msi] [--sign none] [--out <dir>] [--bump-patch]
-       [--compare-sizes <sizes.json>]
+  dist [--target <triple>] [--msi] [--sign <signer>] [--out <dir>] [--bump-patch]
+       [--compare-sizes <sizes.json>] [--from <dir>] [--no-timestamp]
                    Release-build the Windows binaries (with --msi, the installer package) or the
                    Linux server, with symbols and size reports, as CI does (docs/packaging.md)
   dist driver      Explain how the optional kernel driver is packaged (local-only, #8)
+  sign --signer <none|test-ca|pfx|cloud-hsm> [--verify] [--no-timestamp] <file>...
+                   Authenticode-sign and verify files (docs/releasing.md#code-signing)
+  release <prepare|check-tag|notes|checksums|verify-checksums|provenance|verify> ...
+                   The release pipeline's steps (docs/releasing.md)
   deps-report [--base <commit>]
                    Print the dependency report: duplicates, third-party crates per crate,
                    third-party unsafe counts and code that runs at build time; with --base,
@@ -99,6 +104,12 @@ fn main() -> ExitCode {
         if command == "dist" {
             return run_dist(rest);
         }
+        if command == "sign" {
+            return run_sign(rest);
+        }
+        if command == "release" {
+            return run_release(rest);
+        }
     }
     match args.as_slice() {
         [command, flag, base] if command == "deps-report" && flag == "--base" => {
@@ -129,7 +140,7 @@ fn main() -> ExitCode {
         "sbom" => {
             eprintln!(
                 "sbom: not implemented yet. CycloneDX output is reserved at {SBOM_DIR}/<crate>.cdx.json; \
-                 generating and attesting it is #226 (release provenance), wired into the release pipeline (#24)."
+                 generating and attesting it is #226; the release pipeline's provenance job runs it once RELEASE_PROVENANCE is on (docs/releasing.md#provenance)."
             );
             return ExitCode::FAILURE;
         }
@@ -358,6 +369,115 @@ fn run_fuzz(args: &[String]) -> ExitCode {
     } else {
         eprintln!("fuzz: {failed} of {} targets failed", outcomes.len());
         ExitCode::FAILURE
+    }
+}
+
+/// `cargo xtask sign`: see `src/release/sign.rs`.
+fn run_sign(args: &[String]) -> ExitCode {
+    use release::sign;
+    let result = (|| -> Result<usize, String> {
+        let args = sign::parse_args(args)?;
+        let root = workspace_root();
+        let mut config = sign::Config::from_process(args.kind, &root);
+        if args.no_timestamp {
+            config.timestamp = sign::Timestamp::Skip;
+        }
+        let mut runner = sign::ProcessRunner::new(&config);
+        if args.verify_only {
+            for file in &args.files {
+                sign::verify_file(&root, config.timestamp, &mut runner, file)?;
+            }
+            return Ok(args.files.len());
+        }
+        let mut signer = sign::signer(&config, &mut runner)?;
+        sign::sign_all(signer.as_mut(), &args.files, true)
+    })();
+    match result {
+        Ok(count) => {
+            println!("sign: {count} file(s) done");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            println!("::error title=sign::{}", fuzz::escape_data(&error));
+            eprintln!("sign: error: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `cargo xtask release`: see `src/release/mod.rs`.
+fn run_release(args: &[String]) -> ExitCode {
+    let root = workspace_root();
+    let result: Result<(), String> = match args {
+        [cmd, version] if cmd == "prepare" => {
+            let date = std::env::var("RELEASE_DATE").unwrap_or_default();
+            if date.len() != 10 {
+                Err("set RELEASE_DATE=YYYY-MM-DD (the date the release is cut)".to_owned())
+            } else {
+                release::prepare(&root, version, &date).map(|section| print!("{section}"))
+            }
+        }
+        [cmd, tag] if cmd == "check-tag" => release::check_tag(&root, tag).map(|v| {
+            println!("check-tag: {tag} is version {v}{}", if release::is_prerelease(&v) { " (pre-release)" } else { "" });
+        }),
+        [cmd, version] if cmd == "notes" => read(&root.join("CHANGELOG.md"))
+            .and_then(|c| release::changelog::excerpt(&c, version))
+            .map(|notes| print!("{notes}")),
+        [cmd, dir] if cmd == "checksums" => {
+            let dir = Path::new(dir);
+            release::checksums::for_dir(dir).and_then(|sums| {
+                std::fs::write(dir.join("SHA256SUMS"), &sums).map_err(|e| format!("cannot write SHA256SUMS: {e}"))?;
+                print!("{sums}");
+                Ok(())
+            })
+        }
+        [cmd, dir] if cmd == "verify-checksums" => {
+            let dir = Path::new(dir);
+            (|| {
+                let sums = read(&dir.join("SHA256SUMS"))?;
+                let mut files = Vec::new();
+                for line in sums.lines() {
+                    if let Some((_, name)) = line.split_once("  ") {
+                        if let Ok(data) = std::fs::read(dir.join(name)) {
+                            files.push((name.to_owned(), data));
+                        }
+                    }
+                }
+                for entry in std::fs::read_dir(dir).map_err(|e| format!("cannot read {}: {e}", dir.display()))? {
+                    let entry = entry.map_err(|e| e.to_string())?;
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    if entry.path().is_file() && name != "SHA256SUMS" && name != "SHA256SUMS.sig" && !files.iter().any(|(n, _)| *n == name) {
+                        files.push((name, Vec::new()));
+                    }
+                }
+                let problems = release::checksums::verify(&sums, &files);
+                if problems.is_empty() { Ok(()) } else { Err(problems.join("\n")) }
+            })()
+        }
+        [cmd] if cmd == "provenance" => {
+            let enabled = std::env::var("RELEASE_PROVENANCE").is_ok_and(|v| v == "on");
+            release::provenance(&root, enabled)
+        }
+        [cmd, dir, rest @ ..] if cmd == "verify" && rest.len() <= 1 => {
+            let timestamp = match rest.first() {
+                None => Ok(release::sign::Timestamp::Required),
+                Some(flag) if flag == "--allow-untimestamped" => Ok(release::sign::Timestamp::IfConfigured),
+                Some(other) => Err(format!("unexpected argument `{other}`")),
+            };
+            timestamp.and_then(|t| {
+                let work = dist::target_dir(&root)?.join("release-verify");
+                release::verify_dir(&root, Path::new(dir), &work, t).map(|n| println!("verify: {n} file(s) signed and valid"))
+            })
+        }
+        _ => Err("usage: cargo xtask release prepare <version> | check-tag <tag> | notes <version> | checksums <dir> | verify-checksums <dir> | provenance | verify <dir> [--allow-untimestamped]".to_owned()),
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            println!("::error title=release::{}", fuzz::escape_data(&error));
+            eprintln!("release: error: {error}");
+            ExitCode::FAILURE
+        }
     }
 }
 
