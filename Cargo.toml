@@ -38,6 +38,7 @@ palisade-fileid = { path = "crates/palisade-fileid" }
 palisade-policy = { path = "crates/palisade-policy" }
 #
 # Third-party crates. Justify every new entry in the PR description.
+aho-corasick = { version = "1.1.5", default-features = false, features = ["std", "perf-literal"] }
 axum = { version = "0.8.9", default-features = false }
 boon = { version = "0.6.1" }
 clap = { version = "4.6.9", default-features = false, features = ["std", "derive", "env", "error-context", "help", "usage"] }

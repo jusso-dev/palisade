@@ -1199,6 +1199,7 @@ version = "0.1.0"
 name = "palisade-fileid"
 version = "0.1.0"
 dependencies = [
+ "aho-corasick",
  "criterion",
  "libc",
  "md-5",

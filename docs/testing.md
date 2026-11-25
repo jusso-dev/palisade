@@ -85,7 +85,11 @@ Do not prefix names with `test_`.
 - Small committed fixtures (policy documents, PKCS#7 signatures) live in the crate's
   `tests/fixtures/`, each set with a note, or a script, that says how it was made.
 - Never commit malware, antivirus test strings or third-party signed binaries
-  ([responsible-use.md](responsible-use.md)). A generator for the full fixture corpus, and a
+  ([responsible-use.md](responsible-use.md)). The one exception is the content tagger's
+  built-in rule for the standard anti-malware test file (#44): its rule and test fixture
+  hold the string as hex only, assembled in memory at test time and never written to disk,
+  and `source_files_do_not_carry_the_test_string` (`crates/palisade-fileid/tests/tags.rs`)
+  fails if the string appears verbatim in the crate's sources. A generator for the full fixture corpus, and a
   check that `testdata/` holds only generated files, are planned in #25.
 
 ### Unwrap in tests
@@ -126,9 +130,10 @@ Every parser of untrusted input has a coverage-guided fuzz target. The targets l
 separate cargo-fuzz workspace per crate (`crates/<crate>/fuzz/`), so normal builds never compile
 them, and only they need a nightly toolchain. There are two projects:
 
-- `crates/palisade-fileid/fuzz`, with eleven targets: `pe_parse`, `version_info_parse`,
+- `crates/palisade-fileid/fuzz`, with twelve targets: `pe_parse`, `version_info_parse`,
   `authenticode_ranges`, `authenticode_pkcs7`, `fsctx_parse`, `x509_chain`, `timestamp_crl`,
-  `fuzz_ctl`, `fuzz_classify`, `fuzz_msi_tables` and `legacy_parse`.
+  `fuzz_ctl`, `fuzz_classify`, `fuzz_msi_tables`, `legacy_parse` and `fuzz_tags`. The project
+  builds `palisade-fileid` with its `content-rules` feature, for `fuzz_tags`.
 - `crates/palisade-proto/fuzz`, with one target: `trust_set_decode`.
 
 Target names are unique across projects, so `--target` names one without its project. Each fuzz

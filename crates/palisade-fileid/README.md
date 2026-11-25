@@ -573,6 +573,63 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   checks the product fields, the PackageCode and the signature verdict
   against the OS installer API and the OS signature check.
 
+- `filetype`: content-based file type detection
+  ([#44](https://github.com/jusso-dev/palisade/issues/44)).
+  `filetype::classify(&mut reader, name_hint)` decides what a file is from
+  its magic numbers and structure, never from its name alone, and returns
+  a `Classification`: the content `FileKind`, what the extension claims
+  (`ExtensionKind`), `mismatch` and `mismatch_severity` (`None`, `Benign`,
+  `Suspicious` for a PE named `.pdf`, `Critical` for a bidirectional
+  override character or a disguising double extension), a `Confidence`,
+  `heuristic` and `extension_assisted` flags, informational
+  `ContentFlags`, the text encoding, a `parse_error` reason and
+  `classifier_version`. It recognises PE (with `PeDetails`: `Exe`, `Dll`,
+  `Driver`, `Efi`, `Cpl`, `Scr`, `Ocx` and `ResourceOnly`, the CLR header
+  as IL-only or mixed, and ARM64X, ARM64EC and CHPE layouts), NE, LE, LX
+  and DOS `MZ` programs, DOS `.com` programs (by name and size, flagged
+  `heuristic`), compound files by root CLSID (installer database, patch,
+  transform and merge module, and macro-capable office suite documents as
+  a flag), ZIP containers by entry name (app packages and bundles, Java
+  archives, Python zip applications), cabinet, compiled help, shell links,
+  ISO 9660 and UDF images, 7z, RAR, gzip, ELF, Mach-O (thin and fat),
+  Python bytecode, HTML applications, registry files, and scripts
+  (`ScriptKind`) from shebang lines, defining markers, signature block
+  markers and keyword scores. A keyword guess never overrides the script
+  language the extension claims. `is_executable_content()` is true for
+  every kind that can run code, natively or through a host, and for a ZIP
+  archive whose structure could not be read in one consistent way.
+
+  The PE sub-kind reuses `pe::parse_prefix` on the header bytes only, then
+  maps RVAs with the parser's loader layout and makes small reads of the
+  import, export, resource root, CLR and load configuration directories.
+  Its `Driver` rule includes every `pe` kernel driver signal (`INIT`,
+  `IMAGE_FILE_SYSTEM`, kernel module imports), so an image for which
+  `PeInfo::is_kernel_driver` is true is a `Driver` here too. (#44's rule
+  also makes a native image that does not import `ntdll.dll` a `Driver`.)
+  The import table ends where the loader ends it: at the first descriptor
+  with no name or no import address table.
+- `tags` (feature `content-rules`): content tagging
+  ([#44](https://github.com/jusso-dev/palisade/issues/44)).
+  `tags::scan(&mut reader, &rules, &limits)` looks for masked byte
+  patterns and returns a `TagReport` of string tags. `ContentRules` holds
+  the read-only built-in set (`BUILTIN_TAGS`: installer engines, including
+  an installer database wrapper, a scripted setup system, a setup loader,
+  a bundle bootstrapper and a setup stream; self-extracting cabinet, ZIP
+  and 7z archives; embedded executables and archives; compiled automation
+  scripts and frozen Python applications; and the standard anti-malware
+  test file), plus an optional organisation `RuleSetSource` from policy,
+  which is plain `serde` data with a version and a canonical SHA-256
+  digest. Patterns have a fixed length (at most 256 bytes) and are found
+  through their longest exact run with one `aho-corasick` automaton, so a
+  scan is linear. `ScanLimits` (32 MiB scanned in full, 40 MiB read, 64 Mi
+  steps, 2 s) bound every scan; a file over the size limit gets
+  `content_scan_partial` (its start and last 1 MiB are scanned), a spent
+  budget `content_scan_timeout` and a read error `content_scan_error`,
+  never an error. Tags found before a stop are kept. YARA syntax (through
+  `yara-x`) is not supported: it needs a newer Rust than the workspace
+  minimum and would exceed the duplicate-crate budget; see the module
+  docs.
+
 ## Handling untrusted input
 
 Every file this crate reads may be hostile, so the parser:
@@ -694,6 +751,8 @@ PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/fuzz_ctl" \
   cargo test -p palisade-fileid --test catalog -- --ignored write_ctl_fuzz_seeds
 PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/fuzz_classify" \
   cargo test -p palisade-fileid --test filetype -- --ignored write_fuzz_seeds
+PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/fuzz_tags" \
+  cargo test -p palisade-fileid --test tags -- --ignored write_tag_fuzz_seeds
 cargo +nightly fuzz run pe_parse -- -dict=fuzz/pe.dict -max_total_time=60
 cargo +nightly fuzz run version_info_parse -- -dict=fuzz/pe.dict -max_total_time=60
 cargo +nightly fuzz run authenticode_ranges -- -dict=fuzz/pe.dict -max_total_time=60
@@ -708,6 +767,7 @@ cargo +nightly fuzz run fuzz_classify -- -timeout=1 -max_total_time=60
 PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/fuzz_msi_tables" \
   cargo test -p palisade-fileid --test installer -- --ignored write_installer_fuzz_seeds
 cargo +nightly fuzz run fuzz_msi_tables -- -max_total_time=60
+cargo +nightly fuzz run fuzz_tags -- -timeout=1 -max_total_time=60
 ```
 
 `benches/hash_and_parse.rs` (criterion) measures flat hashing, streamed
@@ -738,6 +798,11 @@ With the `os-trust` feature, on Windows only, `windows-sys` (the Windows API
 bindings, with only the API families `win` calls) is a direct dependency.
 `palisade-policy` never enables the feature, so its graph is unchanged.
 
+With `content-rules`, `aho-corasick` (std and its `memchr` fast path only)
+for the tagger's multi-pattern search. It is already a dependency of
+`palisade-policy` through `regex-automata`, so it adds no crate to the
+workspace.
+
 Dev-dependencies: `proptest` for the property tests, and `criterion` for the
 benchmarks.
 
@@ -755,6 +820,9 @@ comment, and each wrapper is tested on the Windows runners.
 
 ## Feature flags
 
+- `content-rules` (off by default): builds `palisade_fileid::tags`, the
+  content tagger, and adds the `aho-corasick` dependency. The agent runs
+  it in a worker off the identity hot path (#4, #59, #60).
 - `os-trust` (off by default): builds `palisade_fileid::win` on Windows. It
   adds OS-backed reads and never changes what the portable code reports. It
   has no effect on other targets. The agent, and the CLI for local

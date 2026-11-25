@@ -13,6 +13,7 @@
 #   cargo +nightly fuzz run fuzz_classify
 #   cargo +nightly fuzz run legacy_parse
 #   cargo +nightly fuzz run fuzz_msi_tables
+#   cargo +nightly fuzz run fuzz_tags
 [package]
 name = "palisade-fileid-fuzz"
 version = "0.0.0"
@@ -27,7 +28,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4.13"
-palisade-fileid = { path = ".." }
+palisade-fileid = { path = "..", features = ["content-rules"] }
 
 [[bin]]
 name = "pe_parse"
@@ -102,6 +103,13 @@ bench = false
 [[bin]]
 name = "legacy_parse"
 path = "fuzz_targets/legacy_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_tags"
+path = "fuzz_targets/fuzz_tags.rs"
 test = false
 doc = false
 bench = false
