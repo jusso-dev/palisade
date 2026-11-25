@@ -51,6 +51,13 @@ const FILE_NAMED_STREAMS: u32 = 0x0004_0000;
 /// `VOLUME_NAME_DOS` and `VOLUME_NAME_GUID` for `GetFinalPathNameByHandleW`.
 const VOLUME_NAME_DOS: u32 = 0;
 const VOLUME_NAME_GUID: u32 = 1;
+/// `VOLUME_NAME_NONE | FILE_NAME_OPENED`: the path as opened, without the
+/// volume. No volume-manager lookup and no walk of parent folders to expand
+/// short names, so it works on network shares and below folders the caller
+/// cannot list.
+const OPENED_NAME_NO_VOLUME: u32 = 0x4 | 0x8;
+/// `VOLUME_NAME_GUID | FILE_NAME_OPENED`.
+const OPENED_NAME_GUID: u32 = 0x1 | 0x8;
 
 /// Files at least this large on a local fixed volume are hashed through a
 /// memory mapping: 16 MiB, as #46 asks.
@@ -170,8 +177,8 @@ impl FileFacts {
                 .is_some_and(|v| v.flags & FILE_SUPPORTS_USN_JOURNAL != 0);
         // The final path of a named-stream handle ends in `:name`. If it
         // cannot be read, assume a named stream: that only weakens the key.
-        let named_stream =
-            sys::final_path_by_handle(file, VOLUME_NAME_GUID).map_or(true, |p| is_stream_path(&p));
+        let named_stream = sys::final_path_by_handle(file, OPENED_NAME_NO_VOLUME)
+            .map_or(true, |p| is_stream_path(&p));
         let usn = if journal && !named_stream {
             read_usn(file)
         } else {
@@ -205,13 +212,17 @@ impl FileFacts {
     }
 }
 
-/// Whether a final path (`\\?\Volume{…}\dir\file.txt:name`) names a
-/// named stream: a `:` in its last component.
-fn is_stream_path(final_path: &str) -> bool {
-    final_path
-        .rsplit('\\')
-        .next()
-        .is_some_and(|last| last.contains(':'))
+/// Whether a path (`\dir\file.txt:name`) names a named stream: a `:` in
+/// its last component, other than an explicit default stream
+/// (`file.txt::$DATA`, in any case).
+fn is_stream_path(path: &str) -> bool {
+    let Some(last) = path.rsplit('\\').next() else {
+        return false;
+    };
+    match last.split_once(':') {
+        None => false,
+        Some((name, rest)) => !(rest.eq_ignore_ascii_case(":$DATA") && !name.is_empty()),
+    }
 }
 
 const fn is_placeholder(attributes: u32) -> bool {
@@ -225,7 +236,7 @@ const fn is_placeholder(attributes: u32) -> bool {
 /// The volume root of the opened `file`, as a volume GUID path, from its
 /// final path.
 fn volume_root(file: &File) -> io::Result<String> {
-    let guid_path = sys::final_path_by_handle(file, VOLUME_NAME_GUID)?;
+    let guid_path = sys::final_path_by_handle(file, OPENED_NAME_GUID)?;
     // `\\?\Volume{GUID}\rest`: the volume device is everything before the
     // fourth backslash, without it.
     let end = guid_path
@@ -614,7 +625,14 @@ pub fn hash_streams(path: &Path, options: &HashOptions) -> Result<StreamHashes, 
             // path may instead have been moved or swapped for another file.
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 let still = list_streams(&file)?;
-                if still.alternate().any(|s| s.name == stream.name) {
+                let folded = crate::fsctx::fold_case(&stream.name);
+                // If the list was cut, the stream may be past the cut, so
+                // its absence cannot be shown.
+                if still.truncated
+                    || still
+                        .alternate()
+                        .any(|s| crate::fsctx::fold_case(&s.name) == folded)
+                {
                     return Err(io::Error::other(
                         "the file moved or changed while its streams were hashed",
                     )
@@ -654,4 +672,24 @@ pub fn hash_streams(path: &Path, options: &HashOptions) -> Result<StreamHashes, 
 /// that hashing a large file keeps memory bounded.
 pub fn peak_working_set_bytes() -> io::Result<u64> {
     sys::peak_working_set()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stream_paths() {
+        assert!(is_stream_path(r"\dir\file.txt:payload"));
+        assert!(is_stream_path(r"\dir\file.txt:payload:$DATA"));
+        assert!(!is_stream_path(r"\dir\file.txt"));
+        assert!(!is_stream_path(r"\dir\file.txt::$DATA"));
+        assert!(!is_stream_path(r"\dir\file.txt::$data"));
+        assert!(is_stream_path(r"\dir\file.txt::$INDEX_ALLOCATION"));
+        assert!(
+            !is_stream_path(r"\dir:x\file.txt"),
+            "only the last component counts"
+        );
+        assert!(!is_stream_path(""));
+    }
 }
