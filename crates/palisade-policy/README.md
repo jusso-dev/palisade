@@ -2,7 +2,7 @@
 
 The policy model, conditions, precedence and evaluation, with a decision trace. Evaluation is pure and deterministic: no network or filesystem access.
 
-**Status:** the policy object model, its JSON Schema and validation are in place (#30), with a YAML front end (#190). Single criteria can be matched against an object's facts (#31, #32), and whole match trees can be evaluated, with context criteria for the user, device, session, network and time (#33). Rule actions, effect flags and the typed `Decision` are defined (#34). The evaluation pipeline and the five precedence models turn the matching rules into one decision (#35). Enforcement modes, their resolution per decision and the mode state machine are in place (#36). The group hierarchy, inheritance, reusable libraries and the effective policy of a device are in place (#37). Rules, rule-set assignments and policies can be scoped by user, group, device, network location, session and time (#38). Every decision can be traced, explained and simulated (#41). Indexing is still to come (#42). Work is tracked in [#2](https://github.com/jusso-dev/palisade/issues/2).
+**Status:** the policy object model, its JSON Schema and validation are in place (#30), with a YAML front end (#190). Single criteria can be matched against an object's facts (#31, #32), and whole match trees can be evaluated, with context criteria for the user, device, session, network and time (#33). Rule actions, effect flags and the typed `Decision` are defined (#34). The evaluation pipeline and the five precedence models turn the matching rules into one decision (#35). Enforcement modes, their resolution per decision and the mode state machine are in place (#36). The group hierarchy, inheritance, reusable libraries and the effective policy of a device are in place (#37). Rules, rule-set assignments and policies can be scoped by user, group, device, network location, session and time (#38). Every decision can be traced, explained and simulated (#41). Indexing is still to come (#42). The unknown-application policy decides what happens when no rule does, with the built-in `system_baseline`, Palisade's self-allow and the Essential Eight presets (#39). Work is tracked in [#2](https://github.com/jusso-dev/palisade/issues/2).
 
 ## Modules
 
@@ -12,6 +12,7 @@ The policy model, conditions, precedence and evaluation, with a decision trace. 
 - `validate`: `PolicyDocument::validate` reports every finding in one pass. Each finding has a stable code, a severity and the JSON Pointer of the field. It normalises hash values to lowercase hex, compiles every criterion, checks each rule's `order` and `priority` against the precedence model, and flags rules that can match without a positive identity criterion (naming the criteria on one such path through the tree), rules that match on negations or context alone, allow rules whose only identity is weak, and unsupported regular expressions. A document that passes becomes a `ValidatedPolicy`.
 - `decision`: the typed `Decision` every consumer gets: outcome, the enforce-mode outcome (`would_have_been`), the deciding action and rule (`RuleRef`), `audit` annotations, the mode, directives, effects with defaults applied, a reason code and a trace ID. Its JSON form is stable and snapshot-tested. `Decision::from_rule` builds the enforce-mode decision of one deciding rule, and `Decision::implicit_deny` the decision when none decides. The pipeline adds the rules the deciding rule overrode, the `audit` annotations and the trust-source grants (#35), then applies the effective mode (#36): `would_have_been` keeps the enforce-mode outcome, and `learning_candidate` marks an object to learn.
 - `evaluate`: the evaluation pipeline (#35). An `Evaluator` compiles a validated policy once, and `Evaluator::evaluate` decides one object in fixed stages: the mandatory deny tier, exclusions (`ignore`), the policy's precedence model, then the implicit deny. See [Precedence](#precedence). `Evaluator::evaluate_in` then applies the device's modes; see [Modes](#modes).
+- `unknown`: stage 6, the unknown-application policy (#39). See [Unknown applications](#unknown-applications).
 - `mode`: enforcement modes (#36). `mode::resolve` gives the effective mode of one decision from the policy, the object type, the deciding rule and the device state (`DeviceState`: base mode, connectivity, override session, lockdown); `ProtectionStatus` reports a device's protection; `mode::machine` is the state machine of legal mode changes, with time boxes that revert on a monotonic and a wall clock.
 - `library`: reusable libraries (#37): rule sets, application definitions, match fragments, and hash, publisher, path, principal, device, network and schedule sets, and message templates. A `ref` node in a match tree names one by ID and pin (`latest` or a version). `Catalogue` checks every library version, resolves references and rejects reference cycles, naming the path. `Catalogue::expand` replaces each reference with its tree. Libraries are global (read-only to tenants) or one tenant's, have an owner, and can be duplicated into an editable copy that records `derived_from`.
 - `hierarchy`: the scope hierarchy (#37): global, tenant, nested groups (at most 8 deep), devices, dynamic groups and templates, with the built-in `unassigned`, `unmanaged` and `staging` groups. `HierarchyDocument::validate` checks a snapshot, and `ValidatedHierarchy::effective_policy` computes one device's effective policy: a pure function of the snapshot, the libraries at their resolved versions and the device's dynamic groups, with per-rule and per-setting provenance and a content hash. `place` runs the automatic placement rules. See [Hierarchy](#hierarchy).
@@ -61,7 +62,9 @@ A file often matches several rules. `Evaluator::evaluate` decides it in fixed st
 1. **Mandatory deny.** A matching rule of a `mandatory` blocklist blocks (`mandatory_deny`). No allow, elevation, trust source or exclusion changes that, under any model.
 2. **Exclusion.** A matching `ignore` rule makes the object `ignored`.
 3. **Policy.** The policy's `precedence_model` chooses among the matching `allow`, `allow_contained`, `allow_elevated` and `deny` rules.
-4. **Unknown.** If nothing decided, the implicit deny (`implicit_deny_unknown`, #39).
+4. **Unknown.** If nothing decided, the policy's `unknown` policy decides; its default is the implicit deny (`implicit_deny_unknown`, #39). See [Unknown applications](#unknown-applications).
+
+Between stages 1 and 2, one of Palisade's own pinned images (`Evaluator::with_self_images`) is allowed (`self_allow`).
 
 An override session (#9) lowers the mode of stages 3 and 4 (see [Modes](#modes)); post-allow attribute rules (#33) are the stage still to come between them. The result is the enforce-mode decision; `Evaluator::evaluate_in` applies the modes on top of it. `audit` rules never decide: every one that matches is an annotation. `trust_source` rules never let an object run: their grants are attached only to an allowed object. `defer` rules have no opinion. When several mandatory denies or exclusions match, the most specific decides.
 
@@ -107,7 +110,7 @@ Mandatory denies use the same options and defaults. Making the shipped blocklist
 | `disabled` | Only a device can be disabled (see the state machine below). The engine is not consulted: `evaluate_in` returns `None`, and not even a mandatory deny applies. |
 | `monitor` | Evaluated fully. A would-block runs as `allowed_audit`, with `would_have_been: blocked`. |
 | `audit` | As `monitor`; the agent sends a full event for every decision rather than would-blocks and summaries (#16). |
-| `learning` | As `audit`. An object that only the implicit deny would block is a `learning_candidate` (#5). An object a deny rule would block is never one. |
+| `learning` | As `audit`. An object that no rule decided, so that stage 6 handled it, is a `learning_candidate` (#5). An object a deny rule would block is never one. |
 | `enforce` | Blocked means blocked. |
 
 A relaxed block keeps the deciding rule and its effects, so the would-block event is still logged, but notifies nobody and carries no `kill_running` or `request`. **A mandatory deny blocks in every mode and every override session** (#125: the blocklist always wins); only a disabled device skips it. A relaxed deny never lets through what an enforcing rule blocks: the matching rules are decided again without the denies that do not enforce, and if an enforcing deny or the implicit deny then blocks, the object is blocked. If an allow decides instead, the object runs with that allow's containment, elevation and grants. An override session is applied as a second layer, after the modes: only what the modes still block can become `allowed_override`, and the decision names the enforcing rule the session bypassed.
@@ -213,6 +216,47 @@ Membership in token groups changes only when a new token is created, at the next
 **Network location.** `policy.location_profiles` names locations such as `corporate` (`dns_suffix: corp.example.org` and `server_reachable: true`). The agent evaluates them with `scope::CompiledProfiles` on every network change and heartbeat (60 seconds by default). `scope::LocationTracker` keeps the previous location until a new one has been stable for 5 seconds, and scopes test the result with `location_profile`.
 
 **Library sets.** `principal_set`, `device_set`, `network_set`, `schedule_set` and client `device_sets` refer to library sets by `{id, pin}`, where `pin` is `latest` (the default) or a version number. Hierarchy validation checks each one like a tree reference, pins it to the version it resolves to, and counts it for in-use checks, so a new version of a set changes an effective policy's content hash. A schedule set holds one schedule, written as JSON. `Evaluator::with_library`, `trace::Tracer::with_library` and `Simulator::with_library` resolve principal, network and schedule sets through a `scope::ScopeLibrary` (#37 provides one: `ResolvedLibraries`). A set it cannot resolve is unknown (`set_unresolved`). Device-set membership is worked out by the server and arrives as a fact.
+
+## Unknown applications
+
+`policy.unknown` decides an object no rule decides (stage 6, #39). Stage 6 never overrides an explicit allow or deny. Every field is optional, and the default blocks every unknown object.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `default` | `block` | The level when no entry below applies. |
+| `by_location` | none | Level per location class: `user_profile`, `temp`, `user_writable_other`, `program_files`, `windows`, `other_fixed`, `removable`, `network`, `optical`, `ads`. |
+| `by_origin` | none | Level per origin: `internet`, `email_attachment`, `removable_copy`, `network_share`, `trusted_source`, `preexisting`, `unknown`. |
+| `by_type` | none | Level per object type. |
+| `restrict_profile` | none | The containment profile of `restrict` (#14). Required when any level is `restrict`. |
+| `prompt` | see below | How `prompt` asks. |
+| `effects` | a deny's | Effect flags of stage-6 decisions. `log` must be `always` or `sampled`. |
+| `allow_request` | `false` | A blocked user may ask for approval (#11). |
+| `preexisting_policy` | `baseline_only` | Files present at install: `treat_as_unknown`, `local_approve` (#69), or `baseline_only` (blocked at stage 6, so only the approved baseline allows them). |
+| `driver_boot_policy` | `audit` | Drivers loaded in early boot (`boot_phase: early`): `audit` reports only, `enforce` applies the level. |
+| `preset` | none | The compliance preset the policy started from. |
+
+**Levels**, ordered `block > restrict > prompt > detect > allow`. The level applied is the **most restrictive** of every entry that matches: the object type, each of its location classes (a path can be in several, such as `user_profile` and `temp`) and each origin. `default` applies only when none matches.
+
+| Level | Outcome | Reason |
+|---|---|---|
+| `block` | `blocked` | `implicit_deny_unknown` |
+| `restrict` | `allowed`, with `directives.containment` | `unknown_restricted`; `restrict_unavailable` (blocked) without the containment component (`device.containment_available`) or for a type other than executable, script or installer |
+| `prompt` | `pending_user`, with `directives.prompt` | `unknown_prompt` |
+| `detect` | `allowed`, logged with severity medium | `unknown_detected` |
+| `allow` | `allowed`, silently (validation warns) | `unknown_allowed` |
+
+Every stage-6 decision is `unhandled` and carries `unknown`: the resolved and applied levels, the entries that applied, any fallback reason, and the object's locations and origins. Location classes come from the agent (`ObjectFacts::location_class`); without them the engine classifies the path (`unknown::classify`), and an object with no usable path, or unknown ACL facts, is `user_writable_other`. The protected classes `program_files` and `windows` are never given to a removable, optical or network volume or path, and come from `%PROGRAMFILES%` and `%WINDIR%` when those are set. Both spellings of a path with an alias are classified. An object with no origin facts has origin `unknown`.
+
+**Prompts.** `prompt.options` is a subset of `allow_once`, `allow_always_local`, `request_approval` and `block` (default: all but `allow_always_local`), with `require_justification`, `reauth` (`none`, `password`, `mfa`), `timeout_secs` (10 to 600, default 60) and `fallback` (default `block`). A prompt is never shown for an object a blocklist rule matched (even one set aside by a non-enforcing mode), for a library or driver, or without an interactive session (a console or remote-desktop session of a user who is not the system account): those get the fallback. `unknown::answer` turns the user's answer into the final outcome; a timeout or a prompt that could not be shown applies the fallback. `allow_always_local` creates a `LocalApproval` for the exact SHA-256, scoped to the user or device (`local_approval_scope`) and uploaded for review. For objects from the internet, email, removable media, a network share, or of unknown origin, or on removable, optical or network volumes, it expires after `temp_approval_days` (default 14).
+
+**Modes.** A `blocked` or `pending_user` stage-6 result is relaxed to `allowed_audit` in a mode that does not enforce, so no prompt is shown in `audit`, `monitor` or `learning`.
+
+**Built-in safe defaults.**
+
+- `system_baseline` (`unknown::system_baseline`, `PolicyDocument::with_system_baseline`): a managed, read-only `baseline` rule set with one allow for binaries with a trusted signature from the OS publishers the agent reports, under `%WINDIR%` or `%PROGRAMFILES%`, where no non-administrator can write. The known user-writable folders inside the Windows directory are excluded (`unknown::baseline::MANDATORY_EXCEPTIONS`: `System32\spool\drivers\color`, `System32\Tasks`, `Windows\Tasks`, `Windows\Temp`, the RSA `MachineKeys` store, `System32\Com\dmp`, `System32\FxsTmp`, `System32\spool\PRINTERS` and `SERVERS`, `Registration\CRMLog`, `Windows\tracing`), along with every directory the writable-path scanner flagged and any alternate data stream. It is a **floor** at stage 4: it is decided over only when no tenant allow or deny matched, so under every model (including `first_match` with `curated_first`) a tenant's rule wins over it. A mandatory deny still blocks what it covers. Its inputs are checked: publishers are trimmed text, and flagged directories are drive or UNC paths with no stream or wildcard.
+- **Self-allow.** `Evaluator::with_self_images` pins the agent's images (`SelfImage::new`: the facts the agent's parser computed, the context the image runs in, and its publisher) by SHA-256 and trusted signer; a pinned image is allowed right after the mandatory tier. `PolicyDocument::validate_with_self_images` rejects every deny, mandatory or not, whose tree is not `NoMatch` on an image's facts and context with the devices' path variables (`deny_matches_self`): a deny that matches, or could match depending on facts it does not settle, could block the agent.
+
+**Compliance presets** (`UnknownPolicy::preset`): `e8_ml1` blocks in `user_profile`, `temp` and `user_writable_other` and detects elsewhere (ISM-1870); `e8_ml2` blocks everywhere (ISM-1871); `e8_ml3` also blocks drivers and requires a mandatory blocklist (`mandatory_blocklist_required`, ISM-1658). A preset-tagged policy that is weaker than its preset for any type, set of one or two location classes and origin (with a prompt counted at its fallback) warns (`compliance_weakened`), and a silent `allow` in a user profile or temporary folder is an error (`unknown_allow_not_permitted`). Other checks: `unknown_level_not_valid_for_type`, `restrict_profile_required`, `invalid_prompt_settings` and `unknown_allow` (a warning).
 
 ## Schema versioning
 

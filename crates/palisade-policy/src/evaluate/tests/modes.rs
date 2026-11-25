@@ -653,13 +653,13 @@ proptest! {
         }
         let d = d.unwrap();
         prop_assert_eq!(d.would_have_been(), enforce.outcome());
-        if enforce.outcome() != Outcome::Blocked {
-            prop_assert_eq!(&d, &enforce.clone().in_mode(d.mode()));
+        if !enforce.outcome().stops() {
+            prop_assert_eq!(&d, &enforce.clone().in_mode(d.mode()).with_learning(d.learning_candidate()));
         }
         match d.outcome() {
-            Outcome::Blocked => prop_assert_eq!(d.mode(), Mode::Enforce),
+            Outcome::Blocked | Outcome::PendingUser => prop_assert_eq!(d.mode(), Mode::Enforce),
             Outcome::AllowedAudit | Outcome::AllowedOverride => {
-                prop_assert_eq!(d.would_have_been(), Outcome::Blocked);
+                prop_assert!(d.would_have_been().stops());
                 prop_assert_ne!(d.mode(), Mode::Enforce);
                 // A mode names the rule enforce mode decided by; a session
                 // names the enforcing rule it bypassed.
@@ -670,7 +670,7 @@ proptest! {
                 if d.outcome() == Outcome::AllowedOverride {
                     let base = DeviceState { session: None, ..state };
                     let without = decide_in(&policy, &base, t).unwrap();
-                    prop_assert_eq!(without.outcome(), Outcome::Blocked);
+                    prop_assert!(without.outcome().stops());
                     prop_assert_eq!(d.matched_rule(), without.matched_rule());
                 }
                 // Granted trust sources are never also overridden.
@@ -688,7 +688,7 @@ proptest! {
         if state.session.is_some() {
             let base = DeviceState { session: None, ..state };
             let without = decide_in(&policy, &base, t).unwrap();
-            if without.outcome() != Outcome::Blocked {
+            if !without.outcome().stops() {
                 prop_assert_eq!(&without.clone().in_mode(d.mode()), &d.clone().in_mode(d.mode()));
             }
         }
@@ -802,6 +802,40 @@ fn each_mode_reports_the_decisions_the_issue_lists() {
     for mode in [Mode::Enforce, Mode::Monitor, Mode::Audit, Mode::Learning] {
         let f = fidelity(Some(&in_mode(&unknown, mode)));
         assert_eq!(f.learning_candidate, mode == Mode::Learning, "{mode:?}");
+    }
+    // A pending prompt (#39) keeps the unknown policy's `log`, as a block
+    // does; a relaxed one is a would-block event.
+    let mut doc = document("deny_wins", serde_json::json!({}), vec![]);
+    doc.policy.unknown = serde_json::from_value(
+        serde_json::json!({"default": "prompt", "effects": {"log": "sampled"}}),
+    )
+    .unwrap();
+    let prompt = validated(doc);
+    // A prompt needs a user at a console or remote desktop.
+    let mut context = EvaluationContext::new();
+    context.session.session_type = Some(crate::context::SessionType::Console);
+    let (variables, facts) = (PathVariables::new(), facts());
+    let prompted = |mode: Mode| {
+        let state = DeviceState {
+            mode,
+            ..DeviceState::of(&prompt.document().policy)
+        };
+        let subject = Subject {
+            object_type: ObjectType::Executable,
+            facts: &facts,
+            variables: &variables,
+            context: &context,
+        };
+        Evaluator::new(&prompt)
+            .unwrap()
+            .evaluate_in(&subject, &state, TRACE)
+            .unwrap()
+    };
+    let pending = prompted(Mode::Enforce);
+    assert_eq!(pending.outcome(), Outcome::PendingUser);
+    assert_eq!(report(&pending), Report::Sampled);
+    for mode in RELAXED {
+        assert_eq!(report(&prompted(mode)), Report::Event, "{mode:?}");
     }
     // The use of an override session is always an event.
     let state = DeviceState {

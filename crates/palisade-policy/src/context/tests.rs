@@ -86,6 +86,8 @@ fn full() -> EvaluationContext {
             is_terminal_server: Some(false),
             os_build: Some(22631),
             dn: Some("CN=WS-0042,OU=Workstations,DC=corp,DC=example,DC=org".to_owned()),
+            boot_phase: None,
+            containment_available: None,
         },
         session: SessionContext {
             session_type: Some(SessionType::Rdp),

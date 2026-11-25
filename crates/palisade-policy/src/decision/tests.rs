@@ -320,6 +320,7 @@ fn every_field_is_always_present() {
         "effects",
         "reason_code",
         "scope_notes",
+        "unknown",
         "trace_id",
     ];
     let mut sorted = keys.clone();
@@ -327,6 +328,7 @@ fn every_field_is_always_present() {
     expected.sort_unstable();
     assert_eq!(sorted, expected);
     assert!(value["matched_rule"].is_null());
+    assert!(value["unknown"].is_null());
     assert_eq!(value["trace_id"], "0f1e2d3c4b5a69788796a5b4c3d2e1f0");
     for key in [
         "containment",
@@ -334,6 +336,7 @@ fn every_field_is_always_present() {
         "trust_sources",
         "kill_running",
         "request",
+        "prompt",
     ] {
         assert!(value["directives"].get(key).is_some(), "{key}");
     }
@@ -353,6 +356,7 @@ fn enum_names_are_stable() {
         Outcome::AllowedAudit,
         Outcome::AllowedOverride,
         Outcome::Ignored,
+        Outcome::PendingUser,
     ]
     .iter()
     .map(|o| serde_json::to_value(o).unwrap())
@@ -364,7 +368,8 @@ fn enum_names_are_stable() {
             "blocked",
             "allowed_audit",
             "allowed_override",
-            "ignored"
+            "ignored",
+            "pending_user"
         ]
     );
     let reasons: Vec<_> = [
@@ -375,6 +380,12 @@ fn enum_names_are_stable() {
         ReasonCode::AuditModeWouldBlock,
         ReasonCode::OverrideSession,
         ReasonCode::Exclusion,
+        ReasonCode::UnknownRestricted,
+        ReasonCode::UnknownPrompt,
+        ReasonCode::UnknownDetected,
+        ReasonCode::UnknownAllowed,
+        ReasonCode::RestrictUnavailable,
+        ReasonCode::SelfAllow,
     ]
     .iter()
     .map(|r| serde_json::to_value(r).unwrap())
@@ -388,7 +399,13 @@ fn enum_names_are_stable() {
             "implicit_deny_unknown",
             "audit_mode_would_block",
             "override_session",
-            "exclusion"
+            "exclusion",
+            "unknown_restricted",
+            "unknown_prompt",
+            "unknown_detected",
+            "unknown_allowed",
+            "restrict_unavailable",
+            "self_allow"
         ]
     );
 }

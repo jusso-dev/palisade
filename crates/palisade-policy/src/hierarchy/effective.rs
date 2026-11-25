@@ -745,6 +745,7 @@ impl<'a, 'h> Builder<'a, 'h> {
                 mode: mode.mode,
                 mode_options,
                 settings,
+                unknown: self.unknown(),
                 rule_sets: sets.keys().copied().collect(),
                 scope: None,
                 rule_set_scopes,
@@ -1191,6 +1192,24 @@ impl<'a, 'h> Builder<'a, 'h> {
             }
         }
         ok.then_some((model, options, source))
+    }
+
+    /// The unknown-application policy (#39): the strictest combination of
+    /// every assigned policy's, from the outermost layer in, so no layer
+    /// can make unknown objects run more freely than another layer allows.
+    /// Prompt settings, containment profile and effects come from the
+    /// nearest policy that sets them. With no policy, the default (block).
+    fn unknown(&self) -> crate::model::UnknownPolicy {
+        let mut acc: Option<crate::model::UnknownPolicy> = None;
+        for layer in self.layers {
+            for (_, d) in self.policies(layer) {
+                acc = Some(match acc {
+                    None => d.policy.unknown.clone(),
+                    Some(outer) => d.policy.unknown.stricter(&outer),
+                });
+            }
+        }
+        acc.unwrap_or_default()
     }
 
     /// The merged settings and their provenance.

@@ -288,6 +288,9 @@ pub enum SimOutcome {
     AllowedOverride,
     /// An `ignore` rule excluded it.
     Ignored,
+    /// It waits for the user to answer a prompt (#39). It does not run
+    /// until then, so it counts as blocked for changes.
+    PendingUser,
     /// The device is disabled: nothing was decided.
     NotEvaluated,
 }
@@ -303,14 +306,15 @@ impl SimOutcome {
             Some(Outcome::AllowedAudit) => Self::AllowedAudit,
             Some(Outcome::AllowedOverride) => Self::AllowedOverride,
             Some(Outcome::Ignored) => Self::Ignored,
+            Some(Outcome::PendingUser) => Self::PendingUser,
         }
     }
 
     /// Whether the object runs (or is not stopped): everything but
-    /// `blocked`.
+    /// `blocked` and `pending_user`.
     #[must_use]
     pub const fn runs(self) -> bool {
-        !matches!(self, Self::Blocked)
+        !matches!(self, Self::Blocked | Self::PendingUser)
     }
 }
 
@@ -545,6 +549,9 @@ impl FactsSnapshot {
                 is_terminal_server: c.device_is_terminal_server,
                 os_build: None,
                 dn: None,
+                // Not recorded in events yet (#4).
+                boot_phase: None,
+                containment_available: None,
             },
             session: SessionContext {
                 session_type,
@@ -773,6 +780,7 @@ impl SimOutcome {
             Outcome::AllowedAudit => Self::AllowedAudit,
             Outcome::AllowedOverride => Self::AllowedOverride,
             Outcome::Ignored => Self::Ignored,
+            Outcome::PendingUser => Self::PendingUser,
         }
     }
 }

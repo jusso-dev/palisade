@@ -13,6 +13,7 @@ mod actions;
 mod mode;
 mod precedence;
 mod scope;
+mod unknown;
 
 pub use precedence::order_ranges;
 
@@ -196,6 +197,29 @@ pub enum ErrorCode {
     /// `anchored` on an operator that takes no regular expression (#32), or
     /// `safety_critical` outside a mandatory blocklist (#32, #87).
     OptionNotApplicable,
+    /// An unknown-handling level that cannot apply to the object type it is
+    /// set for: `restrict` other than for executables, scripts and
+    /// installers, or `prompt` for libraries and drivers (#39).
+    UnknownLevelNotValidForType,
+    /// A `restrict` level with no `restrict_profile` (#39).
+    RestrictProfileRequired,
+    /// The prompt settings are inconsistent: no options, a repeated option,
+    /// or a `prompt` fallback (#39).
+    InvalidPromptSettings,
+    /// An unknown-handling level is `allow`: unknown objects run silently
+    /// (#39).
+    UnknownAllow,
+    /// A policy tagged with an Essential Eight preset lets unknown objects
+    /// in user profiles or temporary folders run silently (#39, ISM-1870).
+    UnknownAllowNotPermitted,
+    /// A policy tagged with a compliance preset is weaker than the preset
+    /// for some object, or lacks what the preset requires (#39, #17).
+    ComplianceWeakened,
+    /// A deny would match one of Palisade's own pinned images (#39).
+    DenyMatchesSelf,
+    /// The `e8_ml3` preset needs a mandatory blocklist, and the policy
+    /// references none (#39).
+    MandatoryBlocklistRequired,
 }
 
 impl ErrorCode {
@@ -261,6 +285,14 @@ impl ErrorCode {
             Self::InvalidSchedule => "invalid_schedule",
             Self::UserPatternNotAllowed => "user_pattern_not_allowed",
             Self::OptionNotApplicable => "option_not_applicable",
+            Self::UnknownLevelNotValidForType => "unknown_level_not_valid_for_type",
+            Self::RestrictProfileRequired => "restrict_profile_required",
+            Self::InvalidPromptSettings => "invalid_prompt_settings",
+            Self::UnknownAllow => "unknown_allow",
+            Self::UnknownAllowNotPermitted => "unknown_allow_not_permitted",
+            Self::ComplianceWeakened => "compliance_weakened",
+            Self::DenyMatchesSelf => "deny_matches_self",
+            Self::MandatoryBlocklistRequired => "mandatory_blocklist_required",
         }
     }
 
@@ -272,7 +304,9 @@ impl ErrorCode {
             | Self::WeakIdentity
             | Self::ExclusionNeedsPermission
             | Self::DuplicatePriority
-            | Self::PrecedenceOptionUnused => Severity::Warning,
+            | Self::PrecedenceOptionUnused
+            | Self::UnknownAllow
+            | Self::ComplianceWeakened => Severity::Warning,
             _ => Severity::Error,
         }
     }
@@ -467,6 +501,7 @@ impl Validator {
         self.metadata("/policy/metadata", &policy.metadata);
         self.settings(doc);
         self.modes(doc);
+        self.unknown(doc);
         if policy.precedence_model == PrecedenceModel::AllowWins {
             self.push(
                 ErrorCode::AllowWinsNotRecommended,

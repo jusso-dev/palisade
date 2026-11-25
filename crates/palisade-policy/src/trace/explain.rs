@@ -277,6 +277,22 @@ fn summary(trace: &Trace) -> Message {
         ReasonCode::ExplicitDeny => Message::new("summary-blocked").arg("rule", rule),
         ReasonCode::MandatoryDeny => Message::new("summary-mandatory").arg("rule", rule),
         ReasonCode::ImplicitDenyUnknown => Message::new("summary-implicit").arg("object", object),
+        // The unknown-application policy (#39).
+        ReasonCode::UnknownRestricted => {
+            Message::new("summary-unknown-restricted").arg("object", object)
+        }
+        ReasonCode::UnknownPrompt if d.outcome() == Outcome::PendingUser => {
+            Message::new("summary-unknown-prompt").arg("object", object)
+        }
+        ReasonCode::UnknownPrompt => Message::new("summary-unknown-answered").arg("object", object),
+        ReasonCode::UnknownDetected => {
+            Message::new("summary-unknown-detected").arg("object", object)
+        }
+        ReasonCode::UnknownAllowed => Message::new("summary-unknown-allowed").arg("object", object),
+        ReasonCode::RestrictUnavailable => {
+            Message::new("summary-restrict-unavailable").arg("object", object)
+        }
+        ReasonCode::SelfAllow => Message::new("summary-self-allow"),
         ReasonCode::Exclusion => Message::new("summary-excluded").arg("rule", rule),
         ReasonCode::InstanceLimit => Message::new("summary-instance-limit").arg("rule", rule),
         ReasonCode::AuditModeWouldBlock | ReasonCode::OverrideSession => {
@@ -534,6 +550,34 @@ pub const ENGLISH: &[(&str, &str)] = &[
     (
         "summary-implicit",
         "Blocked: no rule allows this { $object }.",
+    ),
+    (
+        "summary-unknown-restricted",
+        "Allowed in containment: no rule decides this { $object }, and unknown objects here are restricted.",
+    ),
+    (
+        "summary-unknown-prompt",
+        "Waiting for you: no rule decides this { $object }, so you are asked whether it may run.",
+    ),
+    (
+        "summary-unknown-answered",
+        "Decided by the answer to a prompt: no rule decides this { $object }.",
+    ),
+    (
+        "summary-unknown-detected",
+        "Allowed and reported: no rule decides this { $object }, and unknown objects here are detected.",
+    ),
+    (
+        "summary-unknown-allowed",
+        "Allowed: no rule decides this { $object }, and unknown objects here are allowed.",
+    ),
+    (
+        "summary-restrict-unavailable",
+        "Blocked: no rule decides this { $object }, and it could not be contained on this device.",
+    ),
+    (
+        "summary-self-allow",
+        "Allowed: this is one of Palisade's own files.",
     ),
     (
         "summary-excluded",

@@ -1168,6 +1168,7 @@ fn wrap(set: RuleSet) -> PolicyDocument {
             mode: crate::model::Mode::Enforce,
             mode_options: crate::model::ModeOptions::default(),
             settings: PolicySettings::default(),
+            unknown: crate::model::UnknownPolicy::default(),
             rule_sets: vec![set.id],
             scope: None,
             rule_set_scopes: Vec::new(),

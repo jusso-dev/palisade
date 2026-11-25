@@ -6,11 +6,11 @@
 //! and every criterion on an absent fact evaluates to
 //! [`Tri::Unknown`](crate::ops::Tri::Unknown), never to a match.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use palisade_core::path::{NormalizedPath, VolumeMap, normalize_with};
 
-use crate::model::{Field, FieldClass};
+use crate::model::{Field, FieldClass, LocationClass, OriginClass};
 
 /// Every fact about one object that the criteria of this version can test.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -24,6 +24,14 @@ pub struct ObjectFacts {
     /// signatures were examined. `Some(vec![])` means the object is known
     /// to be unsigned; `None` means nobody looked.
     pub signers: Option<Vec<SignerFact>>,
+    /// The location classes the agent computed from the path, the volume
+    /// and the writable-path scanner (#4, #39). `None` (or empty) means the
+    /// engine classifies the path itself
+    /// ([`crate::unknown::location::classify`]).
+    pub location_class: Option<BTreeSet<LocationClass>>,
+    /// Where the object came from (#4, #39). `None` (or empty) means its
+    /// origin is `unknown`.
+    pub origin: Option<BTreeSet<OriginClass>>,
 }
 
 impl ObjectFacts {
@@ -69,6 +77,20 @@ impl ObjectFacts {
     #[must_use]
     pub fn with_signers(mut self, signers: Vec<SignerFact>) -> Self {
         self.signers = Some(signers);
+        self
+    }
+
+    /// The same facts, with the location classes set.
+    #[must_use]
+    pub fn with_location_class(mut self, classes: impl IntoIterator<Item = LocationClass>) -> Self {
+        self.location_class = Some(classes.into_iter().collect());
+        self
+    }
+
+    /// The same facts, with the origins set.
+    #[must_use]
+    pub fn with_origin(mut self, origins: impl IntoIterator<Item = OriginClass>) -> Self {
+        self.origin = Some(origins.into_iter().collect());
         self
     }
 

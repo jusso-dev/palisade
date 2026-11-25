@@ -117,6 +117,24 @@ pub struct DeviceContext {
     /// directory, such as `CN=WS-0042,OU=Finance,DC=corp,DC=example,DC=org`.
     /// `device.ou` tests the unit it is in.
     pub dn: Option<String>,
+    /// How far the device has booted (#39). Drivers loaded in
+    /// [`BootPhase::Early`] follow the unknown policy's
+    /// `driver_boot_policy`.
+    pub boot_phase: Option<BootPhase>,
+    /// Whether the application containment component (#14) is installed
+    /// and running. The unknown policy's `restrict` level blocks instead
+    /// unless this is `Some(true)` (#39).
+    pub containment_available: Option<bool>,
+}
+
+/// How far the device has booted, as the agent reports it (#39).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BootPhase {
+    /// Before the agent had fully started: boot-start drivers, which #6
+    /// and #8 handle, not the unknown-application policy.
+    Early,
+    /// The agent is running.
+    Running,
 }
 
 /// The session the process runs in.
@@ -457,6 +475,8 @@ impl EvaluationContext {
             is_terminal_server: None,
             os_build: None,
             dn: None,
+            boot_phase: None,
+            containment_available: None,
         },
         session: SessionContext {
             session_type: None,

@@ -2325,3 +2325,53 @@ fn an_effective_assignment_holds_the_policy_scope_too() {
         9
     );
 }
+
+#[test]
+fn the_effective_unknown_policy_is_the_strictest_of_the_layers() {
+    let mut nodes = base_nodes();
+    set_node(&mut nodes, 1, json!({"assignments": assign(&[(50, 0)])}));
+    set_node(&mut nodes, 20, json!({"assignments": assign(&[(52, 0)])}));
+    // The global policy blocks unknown objects in temporary folders and
+    // detects elsewhere; the device's policy tries to allow them in
+    // temporary folders and to detect drivers.
+    let h = validated(&snapshot(
+        nodes,
+        vec![
+            policy_with(
+                50,
+                "enforce",
+                vec![],
+                json!({"unknown": {"default": "detect", "by_location": {"temp": "block"}}}),
+            ),
+            policy_with(
+                52,
+                "enforce",
+                vec![],
+                json!({"unknown": {"default": "detect", "by_location": {"temp": "allow", "network": "block"}}}),
+            ),
+        ],
+        vec![],
+    ));
+    let e = effective(&h, 20);
+    let u = &e.policy().unwrap().document().policy.unknown;
+    assert_eq!(u.default, crate::model::Level::Detect);
+    assert_eq!(
+        u.by_location.get(&crate::model::LocationClass::Temp),
+        Some(&crate::model::Level::Block)
+    );
+    assert_eq!(
+        u.by_location.get(&crate::model::LocationClass::Network),
+        Some(&crate::model::Level::Block)
+    );
+    // A node with no policy gets the default, which blocks.
+    let none = validated(&snapshot(base_nodes(), vec![], vec![]));
+    assert!(
+        effective(&none, 20)
+            .policy()
+            .unwrap()
+            .document()
+            .policy
+            .unknown
+            .is_default()
+    );
+}

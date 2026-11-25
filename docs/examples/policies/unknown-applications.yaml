@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/jusso-dev/palisade/main/schemas/policy/v1.json
+#
+# Unknown-application handling (#39), starting from the Essential Eight
+# maturity level 1 preset: unknown objects in user profiles, temporary
+# folders and other user-writable locations are blocked, and elsewhere they
+# are detected. Downloads are contained rather than detected, and unknown
+# scripts in program folders ask the user, falling back to block.
+schema_version: "1.0.0"
+policy:
+  id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f
+  name: Unknown application handling
+  revision: 1
+  mode: enforce
+  unknown:
+    preset: e8_ml1
+    default: detect
+    by_location:
+      user_profile: block
+      temp: block
+      user_writable_other: block
+    by_origin:
+      internet: restrict
+    by_type:
+      script.powershell: prompt
+    restrict_profile: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d0c01
+    prompt:
+      options:
+        - allow_once
+        - allow_always_local
+        - request_approval
+        - block
+      require_justification: true
+      timeout_secs: 60
+      fallback: block
+    effects:
+      severity: high
+      tags:
+        - unhandled

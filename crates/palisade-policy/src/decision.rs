@@ -42,6 +42,20 @@ pub enum Outcome {
     AllowedOverride,
     /// It was excluded by an `ignore` rule: no decision is logged.
     Ignored,
+    /// It waits for the user to answer a prompt (#39, #11). The agent shows
+    /// [`Directives::prompt`] and applies its fallback when the prompt times
+    /// out or cannot be shown. It does not run until then.
+    PendingUser,
+}
+
+impl Outcome {
+    /// Whether the object does not run, at least for now: `blocked` or
+    /// `pending_user`. Only these are relaxed by a mode that does not
+    /// enforce.
+    #[must_use]
+    pub const fn stops(self) -> bool {
+        matches!(self, Self::Blocked | Self::PendingUser)
+    }
 }
 
 /// Why the decision was made. The `snake_case` name is part of the API.
@@ -65,6 +79,25 @@ pub enum ReasonCode {
     /// The deciding allow's per-session instance limit was reached, or
     /// the instance count was unknown (#38).
     InstanceLimit,
+    /// No rule decided, and the unknown-application policy runs the object
+    /// inside its containment profile (`restrict`, #39).
+    UnknownRestricted,
+    /// No rule decided, and the unknown-application policy asks the user
+    /// (`prompt`, #39).
+    UnknownPrompt,
+    /// No rule decided, and the unknown-application policy lets the object
+    /// run, reported as unhandled (`detect`, #39).
+    UnknownDetected,
+    /// No rule decided, and the unknown-application policy lets the object
+    /// run (`allow`, #39).
+    UnknownAllowed,
+    /// No rule decided, the unknown-application policy says `restrict`, and
+    /// the containment component is not installed, so the object is blocked
+    /// (#39).
+    RestrictUnavailable,
+    /// The object is one of Palisade's own pinned images, which tenant rules
+    /// cannot block (#39).
+    SelfAllow,
 }
 
 /// A rule's human short ID, `R-` and 6 to 12 digits, kept as a number and
@@ -253,6 +286,8 @@ pub struct Directives {
     /// What to do with the running process when the deciding allow's
     /// schedule closes (#38). Only an allowed object gets one.
     pub window_close: Option<WindowClose>,
+    /// The prompt to show, for a `pending_user` decision (#39).
+    pub prompt: Option<crate::unknown::PromptDirective>,
 }
 
 /// What the agent and the tray do when the schedule of the allow that let
@@ -312,6 +347,7 @@ pub struct Decision {
     effects: ResolvedEffects,
     reason_code: ReasonCode,
     scope_notes: Vec<ScopeNote>,
+    unknown: Option<crate::unknown::UnknownHandling>,
     trace_id: TraceId,
     /// The directives of an allow that its instance limit blocked (#38),
     /// for a mode that relaxes the block: the object then runs with them.
@@ -361,6 +397,7 @@ impl Decision {
             effects: rule.effects.resolve(kind),
             reason_code,
             scope_notes: Vec::new(),
+            unknown: None,
             trace_id,
             withheld: None,
         })
@@ -384,6 +421,59 @@ impl Decision {
             effects: crate::model::Effects::default().resolve(ActionKind::Deny),
             reason_code: ReasonCode::ImplicitDenyUnknown,
             scope_notes: Vec::new(),
+            unknown: None,
+            trace_id,
+            withheld: None,
+        }
+    }
+
+    /// A decision of stage 6, the unknown-application policy (#39), as
+    /// enforce mode sees it. [`crate::unknown`] chooses every part.
+    pub(crate) fn unknown_handling(
+        outcome: Outcome,
+        action: ActionKind,
+        directives: Directives,
+        effects: ResolvedEffects,
+        reason_code: ReasonCode,
+        handling: crate::unknown::UnknownHandling,
+        trace_id: TraceId,
+    ) -> Self {
+        Self {
+            outcome,
+            would_have_been: outcome,
+            action,
+            matched_rule: None,
+            overridden: Vec::new(),
+            annotations: Vec::new(),
+            mode: Mode::Enforce,
+            learning_candidate: false,
+            directives,
+            effects,
+            reason_code,
+            scope_notes: Vec::new(),
+            unknown: Some(handling),
+            trace_id,
+            withheld: None,
+        }
+    }
+
+    /// The decision for one of Palisade's own pinned images (#39): allowed,
+    /// whatever the ordinary rules say.
+    pub(crate) fn self_allow(trace_id: TraceId) -> Self {
+        Self {
+            outcome: Outcome::Allowed,
+            would_have_been: Outcome::Allowed,
+            action: ActionKind::Allow,
+            matched_rule: None,
+            overridden: Vec::new(),
+            annotations: Vec::new(),
+            mode: Mode::Enforce,
+            learning_candidate: false,
+            directives: Directives::default(),
+            effects: crate::model::Effects::default().resolve(ActionKind::Allow),
+            reason_code: ReasonCode::SelfAllow,
+            scope_notes: Vec::new(),
+            unknown: None,
             trace_id,
             withheld: None,
         }
@@ -409,7 +499,8 @@ impl Decision {
         self.action
     }
 
-    /// The rule that decided, or `None` for the implicit deny.
+    /// The rule that decided, or `None` when no rule did: stage 6 (the
+    /// unknown-application policy) or a pinned Palisade image.
     #[must_use]
     pub const fn matched_rule(&self) -> Option<&RuleRef> {
         self.matched_rule.as_ref()
@@ -516,10 +607,17 @@ impl Decision {
         self
     }
 
+    /// The same decision, marked as a learning candidate or not.
+    pub(crate) const fn with_learning(mut self, learning: bool) -> Self {
+        self.learning_candidate = learning;
+        self
+    }
+
     /// A block that the effective mode does not enforce (#36): the object
     /// runs, as `allowed_audit`, or `allowed_override` if an override
     /// session relaxed an enforcing mode, with `directives`.
-    /// `would_have_been` stays `blocked`, and the deciding rule and effects
+    /// `would_have_been` keeps the enforce outcome (`blocked`, or
+    /// `pending_user` for a prompt), and the deciding rule and effects
     /// stay, so the would-block event is still logged and sent, but
     /// nothing was blocked, so the user is not notified.
     pub(crate) fn relaxed(
@@ -555,8 +653,9 @@ impl Decision {
     }
 
     /// Whether the object is a learning candidate (#36, #5): the effective
-    /// mode is `learning`, and only the implicit deny would have blocked
-    /// it. An object that a deny rule would block is never learned (#69).
+    /// mode is `learning`, and no rule decided it, so the unknown-application
+    /// policy did (stage 6, #39), whatever its level. An object that a deny
+    /// rule would block is never learned (#69).
     #[must_use]
     pub const fn learning_candidate(&self) -> bool {
         self.learning_candidate
@@ -586,6 +685,20 @@ impl Decision {
     #[must_use]
     pub fn scope_notes(&self) -> &[ScopeNote] {
         &self.scope_notes
+    }
+
+    /// How the unknown-application policy handled the object, when no rule
+    /// decided it (stage 6, #39). `None` when a rule decided.
+    #[must_use]
+    pub const fn unknown(&self) -> Option<&crate::unknown::UnknownHandling> {
+        self.unknown.as_ref()
+    }
+
+    /// Whether no rule decided the object, so it is unhandled: the
+    /// unknown-application policy decided it (#39).
+    #[must_use]
+    pub const fn unhandled(&self) -> bool {
+        self.unknown.is_some()
     }
 
     /// The trace ID of the evaluation.

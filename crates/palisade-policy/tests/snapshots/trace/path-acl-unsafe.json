@@ -323,7 +323,8 @@
       "trust_sources": [],
       "kill_running": false,
       "request": null,
-      "window_close": null
+      "window_close": null,
+      "prompt": null
     },
     "effects": {
       "log": "always",
@@ -337,6 +338,25 @@
     },
     "reason_code": "implicit_deny_unknown",
     "scope_notes": [],
+    "unknown": {
+      "resolved": "block",
+      "applied": "block",
+      "fallback": null,
+      "entries": [
+        {
+          "kind": "default",
+          "key": "default",
+          "level": "block"
+        }
+      ],
+      "locations": [
+        "user_writable_other",
+        "other_fixed"
+      ],
+      "origins": [
+        "unknown"
+      ]
+    },
     "trace_id": "41414141414141414141414141414141",
     "overridden_omitted": 0,
     "annotations_omitted": 0,

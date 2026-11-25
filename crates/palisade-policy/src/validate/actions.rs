@@ -12,7 +12,7 @@ use crate::model::effects::limits::{
     MAX_HELP_URL_BYTES, MAX_NOTIFICATION_TEXT_CHARS, MAX_SUPPRESS_DUPLICATES_SECS,
     NOTIFICATION_PLACEHOLDERS,
 };
-use crate::model::{Action, ActionKind, Notify, ObjectType, Rule, RuleSet};
+use crate::model::{Action, ActionKind, Effects, Notify, ObjectType, Rule, RuleSet};
 
 impl Validator {
     /// Checks a rule's action against the validity matrix, its options, and
@@ -182,8 +182,11 @@ impl Validator {
     }
 
     fn effects(&mut self, base: &str, rule: &Rule) {
-        let kind = rule.action.kind();
-        let e = &rule.effects;
+        self.effect_flags(base, rule.action.kind(), &rule.effects);
+    }
+
+    /// Checks effect flags as those of an action of `kind`.
+    pub(super) fn effect_flags(&mut self, base: &str, kind: ActionKind, e: &Effects) {
         if matches!(kind, ActionKind::Ignore | ActionKind::Defer) {
             if !e.is_empty() {
                 self.push(
