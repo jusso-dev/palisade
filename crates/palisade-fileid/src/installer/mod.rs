@@ -655,8 +655,15 @@ pub fn parse_installer(data: &[u8]) -> Result<InstallerIdentity, InstallerError>
     // patch carries only its own metadata table, so their table catalog is
     // not reported on.
     let is_database = base_kind == InstallerKind::Msi;
+    // A patch or transform with no table streams at all has no string pool,
+    // which is normal. Once it has any (a patch's MsiPatchMetadata, a
+    // transform's deltas), an unreadable string pool is reported.
+    let has_tables = root
+        .children
+        .iter()
+        .any(|c| !c.is_storage && c.name.first() == Some(&0x4840));
     if let Err(e) = &db.strings {
-        if is_database {
+        if is_database || has_tables {
             warnings.push(InstallerWarning::Table(e.clone()));
         }
     } else if db.strings.as_ref().is_ok_and(|p| p.lossy) {

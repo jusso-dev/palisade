@@ -1362,3 +1362,38 @@ fn nest_signature(outer: &[u8], inner: &[u8]) -> Vec<u8> {
         der_tlv(si[0], &body)
     })
 }
+
+#[test]
+fn a_patch_with_a_broken_string_pool_is_reported() {
+    // MsiPatchMetadata present, but _StringData one byte too long: the
+    // metadata cannot be read, and that is said, not silently dropped.
+    let p = patch_metadata(vec![vec![Cell::Null, s("DisplayName"), s("x")]]);
+    let mut cfb = p.cfb();
+    let data_name = encode_name("_StringData", true);
+    for n in &mut cfb.children {
+        if let Node::Stream { name, data, .. } = n {
+            if *name == data_name {
+                data.push(b'!');
+            }
+        }
+    }
+    let id = parse_installer(&cfb.build()).unwrap();
+    assert!(id.patch.as_ref().unwrap().display_name.is_none());
+    assert!(
+        id.warnings
+            .iter()
+            .any(|w| matches!(w, InstallerWarning::Table(_))),
+        "{:?}",
+        id.warnings
+    );
+    // The same patch with _StringPool missing altogether.
+    let mut cfb = p.cfb();
+    let pool_name = encode_name("_StringPool", true);
+    cfb.children.retain(|n| n.name() != pool_name.as_slice());
+    let id = parse_installer(&cfb.build()).unwrap();
+    assert!(
+        id.warnings
+            .iter()
+            .any(|w| matches!(w, InstallerWarning::Table(_)))
+    );
+}
