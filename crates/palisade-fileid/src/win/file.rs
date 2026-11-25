@@ -267,10 +267,12 @@ fn read_usn(file: &File) -> Option<(u64, i64)> {
 
 /// Ways to get the journal ID of the volume `file` is on, tried in order
 /// until one works: `FSCTL_QUERY_USN_JOURNAL` on the file's own handle,
-/// then on the volume device (by volume GUID, then by drive letter),
-/// opened with no access rights and then with read access (which needs
-/// administrator rights). Each attempt is labelled, so a test can report
-/// which one the system accepts. Stops at the first success.
+/// then on the file's own volume device (by its volume GUID, never a drive
+/// letter, which could name another volume), opened with no access rights
+/// and then with read access (which needs administrator rights). Each
+/// attempt is labelled, so a test can report which one the system accepts.
+/// Stops at the first success, or when the volume says it has no active
+/// journal.
 pub(crate) fn journal_id_attempts(file: &File) -> Vec<(&'static str, io::Result<u64>)> {
     let mut out: Vec<(&'static str, io::Result<u64>)> = Vec::new();
     let r = sys::usn_journal_id(file);
@@ -286,44 +288,29 @@ pub(crate) fn journal_id_attempts(file: &File) -> Vec<(&'static str, io::Result<
             return out;
         }
     };
-    // The same volume by drive letter (`\\.\C:`), when it has one.
-    let drive = sys::final_path_by_handle(file, VOLUME_NAME_DOS)
-        .ok()
-        .and_then(|p| {
-            let p = p.strip_prefix(r"\\?\").unwrap_or(&p).to_owned();
-            let mut chars = p.chars();
-            match (chars.next(), chars.next()) {
-                (Some(letter), Some(':')) if letter.is_ascii_alphabetic() => {
-                    Some(format!(r"\\.\{letter}:"))
-                }
-                _ => None,
-            }
-        });
-    let mut devices = vec![("volume GUID", root)];
-    if let Some(d) = drive {
-        devices.push(("drive letter", d));
-    }
+    // Only the file's own volume, by its GUID: a drive letter could name
+    // another volume (a volume mounted in a folder has its host's letter).
     // No access rights first (enough for this control code); then
-    // `GENERIC_READ`, which needs administrator rights on a volume.
-    for (device_label, device) in &devices {
-        for (access_label, access) in [("no access", 0_u32), ("read", 0x8000_0000)] {
-            let r = OpenOptions::new()
-                .access_mode(access)
-                .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
-                .open(device)
-                .and_then(|v| sys::usn_journal_id(&v));
-            let ok = r.is_ok();
-            out.push((
-                if access == 0 {
-                    device_label
-                } else {
-                    access_label
-                },
-                r,
-            ));
-            if ok {
-                return out;
-            }
+    // `GENERIC_READ`, which needs administrator rights on a volume. A
+    // volume that says its journal is not active has none to report, so
+    // nothing more is tried.
+    for (label, access) in [
+        ("volume GUID, no access", 0_u32),
+        ("volume GUID, read", 0x8000_0000),
+    ] {
+        let r = OpenOptions::new()
+            .access_mode(access)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .open(&root)
+            .and_then(|v| sys::usn_journal_id(&v));
+        let stop = match &r {
+            Ok(_) => true,
+            // ERROR_JOURNAL_DELETE_IN_PROGRESS, ERROR_JOURNAL_NOT_ACTIVE.
+            Err(e) => matches!(e.raw_os_error(), Some(1178 | 1179)),
+        };
+        out.push((label, r));
+        if stop {
+            break;
         }
     }
     out
