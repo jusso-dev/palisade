@@ -21,6 +21,8 @@
 
 #![forbid(unsafe_code)]
 
+use std::fmt;
+
 use serde::Serialize;
 
 use super::chain::{ChainReport, MAX_FILE_SIGNATURE_CHECKS, TrustConfig, build_chain_within};
@@ -216,6 +218,72 @@ pub struct SignerIdentity {
     pub file_publisher_os_rule: Option<FilePublisherOsRule>,
     /// What limits the rules above.
     pub issues: Vec<IdentityIssue>,
+    /// The packaged app's publisher display name (`PublisherDisplayName`
+    /// in its manifest, #53), once [`Self::attach_package_publisher`] has
+    /// checked that the manifest's publisher is this signer. For display
+    /// and grouping only: rules match on [`Self::publisher_dn`] and
+    /// [`Self::publisher_name`], never on it.
+    pub package_display_name: Option<String>,
+}
+
+/// Why [`SignerIdentity::attach_package_publisher`] refused a package's
+/// publisher.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum PackagePublisherError {
+    /// The signer has no usable DN ([`IdentityIssue::UnusableDn`]), so
+    /// nothing can be compared.
+    NoSignerDn,
+    /// The manifest's `Identity@Publisher` is not the signer's subject DN.
+    /// A package whose manifest names another publisher than its signer is
+    /// not that publisher's package.
+    PublisherMismatch,
+    /// The display name is empty, only whitespace, or holds a control
+    /// character.
+    UnusableDisplayName,
+}
+
+impl fmt::Display for PackagePublisherError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::NoSignerDn => "the signer has no usable DN to compare",
+            Self::PublisherMismatch => "the manifest's publisher is not the signer",
+            Self::UnusableDisplayName => "the display name is empty or holds control characters",
+        })
+    }
+}
+
+impl std::error::Error for PackagePublisherError {}
+
+impl SignerIdentity {
+    /// Carries a packaged app's publisher display name (#53) onto this
+    /// identity. `manifest_publisher` is the manifest's `Identity@Publisher`
+    /// DN string and `display_name` its `Properties/PublisherDisplayName`.
+    ///
+    /// The OS installs a package only when `Identity@Publisher` equals its
+    /// signer's subject, so the name is attached only when
+    /// `manifest_publisher` equals [`Self::publisher_dn`] (both in the
+    /// canonical `CN=…, O=…` form; surrounding whitespace is ignored).
+    /// Otherwise nothing changes and the reason is returned.
+    pub fn attach_package_publisher(
+        &mut self,
+        manifest_publisher: &str,
+        display_name: &str,
+    ) -> Result<(), PackagePublisherError> {
+        let Some(dn) = self.publisher_dn.as_deref() else {
+            return Err(PackagePublisherError::NoSignerDn);
+        };
+        if manifest_publisher.trim() != dn {
+            return Err(PackagePublisherError::PublisherMismatch);
+        }
+        let name = display_name.trim();
+        if name.is_empty() || name.chars().any(char::is_control) {
+            return Err(PackagePublisherError::UnusableDisplayName);
+        }
+        self.package_display_name = Some(name.to_owned());
+        Ok(())
+    }
 }
 
 /// The vendor a file claims, unverified: the version resource's
@@ -460,6 +528,7 @@ pub(crate) fn identity(
         publisher_os_rule,
         file_publisher_os_rule,
         issues,
+        package_display_name: None,
     }
 }
 

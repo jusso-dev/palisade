@@ -64,8 +64,19 @@
 //! whose self-signature was not checked is not self-signed. Neither ever
 //! affects trust.
 //!
-//! Not checked here: validity periods, timestamps and revocation (#50), and
-//! the OS trust store (the `os-trust` cross-check in #48).
+//! Policy can relax one certificate's basic constraints
+//! ([`TrustConfig::ignore_basic_constraints`]): it may then issue although it
+//! is not a CA or its path length is exceeded, with every other check kept,
+//! and the links that needed it are reported. Certificates the Windows
+//! backend reads from the OS stores are added with
+//! [`TrustConfig::add_os_store_anchor`] and
+//! [`TrustConfig::add_os_store_intermediate`] and reported as
+//! [`AnchorSource::OsStore`].
+//!
+//! Not checked here: validity periods (whose nesting is only reported, in
+//! [`ChainReport::time_nesting_violations`]), timestamps and revocation
+//! (#50). Reading the OS stores and the OS trust-verification cross-check
+//! are the Windows backend's (`os-trust`, #48).
 
 #![forbid(unsafe_code)]
 
@@ -126,6 +137,33 @@ pub struct TrustAnchor {
     pub label: String,
     /// The anchor certificate.
     pub cert: CertSummary,
+    /// Where it came from: [`AnchorSource::Policy`] or
+    /// [`AnchorSource::OsStore`].
+    pub source: AnchorSource,
+}
+
+/// How a [`TrustConfig`] names one certificate: only by forms that bind its
+/// key. Issuer and serial do not (anyone can issue a certificate with any
+/// issuer name and serial), so they cannot pin.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CertificatePin {
+    /// The SHA-256 thumbprint, hex (either case).
+    Sha256Thumbprint(String),
+    /// A TBS hash, hex (either case), under the certificate's own digest or
+    /// SHA-256.
+    TbsHash(String),
+}
+
+impl CertificatePin {
+    /// Whether this pins `cert`. Hex is compared ignoring case.
+    #[must_use]
+    pub fn matches(&self, cert: &CertSummary) -> bool {
+        match self {
+            Self::Sha256Thumbprint(t) => cert.sha256_thumbprint.eq_ignore_ascii_case(t),
+            Self::TbsHash(h) => super::revocation::tbs_matches(cert, h),
+        }
+    }
 }
 
 /// An OS-vendor root's well-known ID, keyed by its TBS hash. OS code
@@ -153,7 +191,12 @@ pub enum WellKnownRootError {
 pub struct TrustConfig {
     anchors: Vec<TrustAnchor>,
     intermediates: Vec<CertSummary>,
+    /// The source of each intermediate, in [`Self::intermediates`] order.
+    intermediate_sources: Vec<AnchorSource>,
     well_known_roots: Vec<WellKnownRoot>,
+    /// Certificates whose basic constraints are not enforced when they
+    /// issue ([`Self::ignore_basic_constraints`]).
+    basic_constraints_exempt: Vec<CertificatePin>,
 }
 
 impl TrustConfig {
@@ -163,25 +206,93 @@ impl TrustConfig {
         Self::default()
     }
 
-    /// Adds a trust anchor certificate. Returns its index.
+    /// Adds a trust anchor certificate from the policy bundle. Returns its
+    /// index.
     pub fn add_anchor(
         &mut self,
         label: impl Into<String>,
         der: &[u8],
     ) -> Result<usize, CertificateError> {
+        self.push_anchor(label.into(), der, AnchorSource::Policy)
+    }
+
+    /// Adds a trust anchor read from the OS machine root store. The Windows
+    /// backend reads the store (the `os-trust` feature, #48); this crate
+    /// only records where the anchor came from, so a chain that reaches it
+    /// reports [`AnchorSource::OsStore`] and policy can tell the two apart.
+    /// Returns its index in [`Self::anchors`].
+    pub fn add_os_store_anchor(
+        &mut self,
+        label: impl Into<String>,
+        der: &[u8],
+    ) -> Result<usize, CertificateError> {
+        self.push_anchor(label.into(), der, AnchorSource::OsStore)
+    }
+
+    fn push_anchor(
+        &mut self,
+        label: String,
+        der: &[u8],
+        source: AnchorSource,
+    ) -> Result<usize, CertificateError> {
         let cert = CertSummary::from_der(der)?;
         self.anchors.push(TrustAnchor {
-            label: label.into(),
+            label,
             cert,
+            source,
         });
         Ok(self.anchors.len() - 1)
     }
 
-    /// Adds an intermediate certificate that chains may use but that is not
-    /// trusted by itself. Returns its index.
+    /// Adds an intermediate certificate from policy that chains may use but
+    /// that is not trusted by itself. Returns its index.
     pub fn add_intermediate(&mut self, der: &[u8]) -> Result<usize, CertificateError> {
+        self.push_intermediate(der, AnchorSource::Policy)
+    }
+
+    /// Adds an intermediate read from the OS machine intermediate store
+    /// (see [`Self::add_os_store_anchor`]). It is not trusted by itself.
+    /// Returns its index in [`Self::intermediates`].
+    pub fn add_os_store_intermediate(&mut self, der: &[u8]) -> Result<usize, CertificateError> {
+        self.push_intermediate(der, AnchorSource::OsStore)
+    }
+
+    fn push_intermediate(
+        &mut self,
+        der: &[u8],
+        source: AnchorSource,
+    ) -> Result<usize, CertificateError> {
         self.intermediates.push(CertSummary::from_der(der)?);
+        self.intermediate_sources.push(source);
         Ok(self.intermediates.len() - 1)
+    }
+
+    /// Where the intermediate at `index` came from.
+    #[must_use]
+    pub fn intermediate_source(&self, index: usize) -> Option<AnchorSource> {
+        self.intermediate_sources.get(index).copied()
+    }
+
+    /// Lets the certificate `pin` names issue certificates even though its
+    /// basic constraints forbid it: it is not a CA (`cA` absent or FALSE),
+    /// or its `pathLenConstraint` is exceeded. This is the "ignore basic
+    /// constraints" relaxation of a trusted-publisher rule (#50).
+    ///
+    /// Only those two checks are relaxed, and only for that certificate as
+    /// an issuer. Its key usage must still allow `keyCertSign`, the child's
+    /// signature must still verify with its key, and trust is still decided
+    /// downwards from the anchors. Every link that used the relaxation is
+    /// listed in [`ChainReport::basic_constraints_ignored`].
+    pub fn ignore_basic_constraints(&mut self, pin: CertificatePin) {
+        if !self.basic_constraints_exempt.contains(&pin) {
+            self.basic_constraints_exempt.push(pin);
+        }
+    }
+
+    /// The certificates [`Self::ignore_basic_constraints`] names.
+    #[must_use]
+    pub fn basic_constraints_exempt(&self) -> &[CertificatePin] {
+        &self.basic_constraints_exempt
     }
 
     /// Adds a well-known root. The hash may be upper- or lowercase.
@@ -233,9 +344,12 @@ pub enum CertOrigin {
     /// Embedded in the signature: an index into
     /// [`super::SignatureInfo::certs_in_blob`].
     Embedded(usize),
-    /// A [`TrustConfig`] intermediate, by index.
+    /// A [`TrustConfig`] intermediate, by index. It came from policy or,
+    /// for one added with [`TrustConfig::add_os_store_intermediate`], from
+    /// the OS store ([`TrustConfig::intermediate_source`]).
     PolicyIntermediate(usize),
-    /// A [`TrustConfig`] anchor, by index.
+    /// A [`TrustConfig`] anchor, by index; its
+    /// [`TrustAnchor::source`] says whether from policy or the OS store.
     PolicyAnchor(usize),
 }
 
@@ -246,6 +360,9 @@ pub enum CertOrigin {
 pub enum AnchorSource {
     /// A [`TrustConfig`] anchor from policy.
     Policy,
+    /// A [`TrustConfig`] anchor read from the OS machine root store
+    /// ([`TrustConfig::add_os_store_anchor`]).
+    OsStore,
     /// The chain reaches no anchor.
     None,
 }
@@ -411,6 +528,18 @@ pub struct ChainReport {
     /// The well-known ID of the full chain's root (its self-signed top or
     /// anchor), from [`TrustConfig`]'s table.
     pub well_known_root_id: Option<u8>,
+    /// The issuers on the full chain that issued their child only because
+    /// [`TrustConfig::ignore_basic_constraints`] relaxed their basic
+    /// constraints: indices into [`Self::certificates`], lowest first.
+    /// Empty when no relaxation was needed.
+    pub basic_constraints_ignored: Vec<usize>,
+    /// The certificates on the full chain whose validity period is not
+    /// inside their issuer's ("not time nested"): indices into
+    /// [`Self::certificates`], lowest first. This is reported, not judged:
+    /// whether it fails a signature is policy's call (#50,
+    /// `ValidityPolicy::require_time_nesting`), as the OS ignores it for
+    /// code signing by default.
+    pub time_nesting_violations: Vec<usize>,
     /// What was found along the way.
     pub issues: Vec<ChainIssue>,
 }
@@ -505,6 +634,8 @@ struct Node<'a> {
     /// The certificate is a policy intermediate or anchor, even if the
     /// file also embeds a copy (which keeps the embedded origin).
     from_policy: bool,
+    /// [`TrustConfig::ignore_basic_constraints`] names it.
+    bc_exempt: bool,
 }
 
 /// Builds the chains of the signer certificate `certs[signer]`, where
@@ -593,6 +724,12 @@ pub(crate) fn build_chain_within(
         .chain(config.anchors.iter().map(|a| &a.cert))
         .map(|c| c.sha256_thumbprint.as_str())
         .collect();
+    let exempt = |cert: &CertSummary| {
+        config
+            .basic_constraints_exempt
+            .iter()
+            .any(|pin| pin.matches(cert))
+    };
     let mut pool: Vec<Node<'_>> = Vec::new();
     let mut seen: HashSet<&str> = HashSet::new();
     for (i, cert) in &embedded {
@@ -602,6 +739,7 @@ pub(crate) fn build_chain_within(
                 origin: CertOrigin::Embedded(*i),
                 anchor: anchor_of(cert),
                 from_policy: policy_thumbprints.contains(cert.sha256_thumbprint.as_str()),
+                bc_exempt: exempt(cert),
             });
         }
     }
@@ -613,6 +751,7 @@ pub(crate) fn build_chain_within(
                 origin: CertOrigin::PolicyIntermediate(i),
                 anchor: anchor_of(cert),
                 from_policy: true,
+                bc_exempt: exempt(cert),
             });
         }
     }
@@ -623,6 +762,7 @@ pub(crate) fn build_chain_within(
                 origin: CertOrigin::PolicyAnchor(i),
                 anchor: Some(i),
                 from_policy: true,
+                bc_exempt: exempt(&anchor.cert),
             });
         }
     }
@@ -645,7 +785,9 @@ pub(crate) fn build_chain_within(
             .left()
             .min(MAX_SIGNATURE_CHECKS.saturating_sub(parse_budget.used())),
     );
+    search.relax = false;
     let provided_paths = search.run(leaf, embedded_count, Mode::Untrusted, &mut budget);
+    search.relax = true;
     let full_anchored = !anchored_paths.is_empty();
     let full_paths = if full_anchored {
         anchored_paths
@@ -762,6 +904,21 @@ pub(crate) fn build_chain_within(
     let well_known_root_id = top
         .filter(|c| full_chain.complete && (is_root(c, anchored) || c.anchor.is_some()))
         .and_then(|c| config.well_known_root_id(&c.cert));
+    // The issuers on the chosen full chain that issued only because policy
+    // relaxed their basic constraints: worked out from that chain alone,
+    // with the same rules the search applied to it.
+    let basic_constraints_ignored = relaxed_issuers(&full_chain, &out, anchored, config);
+    let time_nesting_violations: Vec<usize> = full_chain
+        .certs
+        .windows(2)
+        .filter_map(|pair| match pair {
+            [child, issuer] => {
+                let (c, i) = (&out.get(*child)?.cert, &out.get(*issuer)?.cert);
+                (c.not_before < i.not_before || c.not_after > i.not_after).then_some(*child)
+            }
+            _ => None,
+        })
+        .collect();
 
     Ok(ChainReport {
         leaf,
@@ -769,13 +926,14 @@ pub(crate) fn build_chain_within(
         root_as_provided,
         intermediates,
         chain_complete: full_chain.complete,
-        anchor_source: if anchored_to.is_some() {
-            AnchorSource::Policy
-        } else {
-            AnchorSource::None
-        },
+        anchor_source: anchored_to
+            .as_ref()
+            .and_then(|a| config.anchors.get(a.index))
+            .map_or(AnchorSource::None, |a| a.source),
         anchored_to,
         well_known_root_id,
+        basic_constraints_ignored,
+        time_nesting_violations,
         as_provided,
         as_provided_alternatives,
         full_chain,
@@ -783,6 +941,52 @@ pub(crate) fn build_chain_within(
         issues: issue_list,
         certificates: out,
     })
+}
+
+/// The issuers on `chain` that are not CAs, or whose path length is
+/// exceeded on it, and that a [`TrustConfig::ignore_basic_constraints`] pin
+/// names: the links the chain could make only through that relaxation.
+/// A v1 or v2 anchor counts as a CA in an anchored chain, as the trusted
+/// search treats it.
+fn relaxed_issuers(
+    chain: &ChainPath,
+    certs: &[ChainCert],
+    anchored: bool,
+    config: &TrustConfig,
+) -> Vec<usize> {
+    let mut out = Vec::new();
+    for (pos, &issuer) in chain.certs.iter().enumerate().skip(1) {
+        let Some(node) = certs.get(issuer) else {
+            continue;
+        };
+        let cert = &node.cert;
+        if !config
+            .basic_constraints_exempt
+            .iter()
+            .any(|pin| pin.matches(cert))
+        {
+            continue;
+        }
+        let legacy_anchor = anchored && node.anchor.is_some() && cert.version < 3;
+        let is_ca = cert.basic_constraints.map_or(legacy_anchor, |bc| bc.ca);
+        // Non-self-issued intermediates below this issuer (not the leaf).
+        let below = chain
+            .certs
+            .iter()
+            .take(pos)
+            .skip(1)
+            .filter_map(|i| certs.get(*i))
+            .filter(|c| c.cert.subject.der != c.cert.issuer.der)
+            .count();
+        let path_exceeded = cert
+            .basic_constraints
+            .and_then(|bc| bc.path_len)
+            .is_some_and(|max| u32::try_from(below).unwrap_or(u32::MAX) > max);
+        if !is_ca || path_exceeded {
+            out.push(issuer);
+        }
+    }
+    out
 }
 
 /// Whether `c`, the top of a full chain, is a root: self-signed, or (in an
@@ -892,6 +1096,16 @@ impl Issues {
 /// few comparisons at most; signature checks are bounded by budgets.
 const MAX_SEARCH_STEPS: usize = 4096;
 
+/// Whether a certificate may issue others.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MayIssue {
+    No,
+    Yes,
+    /// Only because [`TrustConfig::ignore_basic_constraints`] relaxes its
+    /// basic constraints.
+    Relaxed,
+}
+
 /// Which links a search may make.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -918,6 +1132,11 @@ struct Search<'p, 'i> {
     trusted: Vec<bool>,
     steps: usize,
     issues: &'i mut Issues,
+    /// Whether [`TrustConfig::ignore_basic_constraints`] applies in this
+    /// search. It does in the trusted search and the unanchored full-chain
+    /// search, never in the as-provided one, which shows the file's own
+    /// chain without policy.
+    relax: bool,
     paths: Vec<Vec<usize>>,
     /// Only pool indices below this are used.
     limit: usize,
@@ -950,6 +1169,7 @@ impl<'p, 'i> Search<'p, 'i> {
             trusted: vec![false; pool.len()],
             steps: 0,
             issues,
+            relax: true,
             paths: Vec::new(),
             limit: pool.len(),
             mode: Mode::Untrusted,
@@ -981,12 +1201,15 @@ impl<'p, 'i> Search<'p, 'i> {
     /// `keyCertSign` by its key usage. A v1 or v2 certificate has no
     /// extensions to say it is a CA; it is taken as one only when it is a
     /// configured anchor in a trusted search.
-    fn may_issue(&mut self, issuer: usize) -> bool {
+    ///
+    /// A certificate [`TrustConfig::ignore_basic_constraints`] names may
+    /// issue without being a CA; the answer is then [`MayIssue::Relaxed`].
+    fn may_issue(&mut self, issuer: usize) -> MayIssue {
         if !self.usable(issuer) {
-            return false;
+            return MayIssue::No;
         }
         let Some(node) = self.pool.get(issuer) else {
-            return false;
+            return MayIssue::No;
         };
         let i = node.cert;
         let legacy_anchor = self.mode == Mode::Trusted && node.anchor.is_some() && i.version < 3;
@@ -994,17 +1217,21 @@ impl<'p, 'i> Search<'p, 'i> {
             Some(bc) => bc.ca,
             None => legacy_anchor,
         };
-        if !is_ca {
-            self.issues.push(ChainIssue::IssuerNotCa { issuer });
-            return false;
-        }
+        let answer = match (is_ca, node.bc_exempt && self.relax) {
+            (true, _) => MayIssue::Yes,
+            (false, true) => MayIssue::Relaxed,
+            (false, false) => {
+                self.issues.push(ChainIssue::IssuerNotCa { issuer });
+                return MayIssue::No;
+            }
+        };
         if i.key_usage
             .is_some_and(|ku| !ku.contains(KeyUsage::KEY_CERT_SIGN))
         {
             self.issues.push(ChainIssue::IssuerKeyUsage { issuer });
-            return false;
+            return MayIssue::No;
         }
-        true
+        answer
     }
 
     /// Whether the key identifiers of `child` and `issuer` agree (or one is
@@ -1152,7 +1379,10 @@ impl<'p, 'i> Search<'p, 'i> {
                 })
                 .unwrap_or_default();
             children.sort_by_key(|c| (!self.privileged(*c, leaf), *c));
-            if children.is_empty() || !self.may_issue(t) {
+            if children.is_empty() {
+                continue;
+            }
+            if self.may_issue(t) == MayIssue::No {
                 continue;
             }
             for c in children {
@@ -1314,7 +1544,10 @@ impl<'p, 'i> Search<'p, 'i> {
         let Some(&child) = path.last() else {
             return false;
         };
-        if !self.key_ids_agree(child, issuer) || !self.may_issue(issuer) {
+        if !self.key_ids_agree(child, issuer) {
+            return false;
+        }
+        if self.may_issue(issuer) == MayIssue::No {
             return false;
         }
         if let Some(max) = self
@@ -1331,7 +1564,8 @@ impl<'p, 'i> Search<'p, 'i> {
                 .filter_map(|p| self.pool.get(*p))
                 .filter(|n| n.cert.subject.der != n.cert.issuer.der)
                 .count();
-            if u32::try_from(below).unwrap_or(u32::MAX) > max {
+            let exempt = self.relax && self.pool.get(issuer).is_some_and(|n| n.bc_exempt);
+            if u32::try_from(below).unwrap_or(u32::MAX) > max && !exempt {
                 self.issues.push(ChainIssue::PathLengthExceeded { issuer });
                 return false;
             }

@@ -272,12 +272,41 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     `permits_code_signing`, `meets_min_key_bits`, `cert_sig_algs_allowed`
     and `os_ci_compatible` (RSA keys of at most 4096 bits in the whole
     chain).
+  - OS store certificates: `TrustConfig::add_os_store_anchor` and
+    `add_os_store_intermediate` take certificates the Windows backend reads
+    from the machine root and intermediate stores (`os-trust`, #48). A chain
+    that reaches such an anchor reports `anchor_source = OsStore`, so policy
+    can tell OS-store trust from policy-shipped trust.
+  - Relaxations for one trusted certificate:
+    `TrustConfig::ignore_basic_constraints(pin)` lets a certificate pinned by
+    SHA-256 thumbprint or TBS hash issue although it is not a CA or its path
+    length is exceeded. Its key usage must still allow `keyCertSign`, the
+    child's signature must still verify, and trust is still decided from the
+    anchors down. Every link that used it is listed in
+    `ChainReport::basic_constraints_ignored`. `ChainReport::time_nesting_violations`
+    lists certificates whose validity is not inside their issuer's; the OS
+    ignores this for code signing, so it is reported, and #50's
+    `require_time_nesting` decides whether it fails.
+  - `SignerIdentity::attach_package_publisher` carries a packaged app's
+    `PublisherDisplayName` (#53) onto the signer's identity, only when the
+    manifest's `Identity@Publisher` is the signer's own DN. It is for
+    display: rules never match on it.
+  - Certificate extraction: `extract_certificates(bytes, selection)` lists
+    the certificates a signed PE image (every certificate table entry and
+    nested signature), signed cabinet or bare PKCS#7 (detached signature,
+    catalog, package signature) carries: all of them, each signer (leaf), or
+    the self-signed roots. `CertificateBundle` collects them from many files,
+    once each, and writes a PEM bundle or one DER file per certificate (named
+    by thumbprint), for building trust bundles offline. The `pal fileid
+    certs` command (#55) wraps it.
 
   `SignatureReport::primary` is still #48's choice by cryptographic
   validity alone, and `TrustReport::primary` ignores time and revocation.
   Anything that decides whether to allow a file must use
-  `ValidityReport::primary` (below). The OS trust store is not consulted;
-  that is the `os-trust` cross-check in #48. Catalog signing is `catalog` below.
+  `ValidityReport::primary` (below). The OS trust store is consulted only
+  through certificates the caller adds from it; reading the stores and the
+  OS trust-verification cross-check are the Windows backend's (`os-trust`,
+  #48). Catalog signing is `catalog` below.
 - `authenticode` timestamps, expiry, revocation and the error taxonomy
   ([#50](https://github.com/jusso-dev/palisade/issues/50)):
   - `verify_timestamps` parses and verifies every timestamp on a
