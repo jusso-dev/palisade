@@ -50,6 +50,7 @@ fn metadata() -> impl Strategy<Value = Metadata> {
             ticket_ref,
             tags: tags.into_iter().collect(),
             comment,
+            ..Metadata::default()
         })
 }
 
@@ -307,6 +308,9 @@ fn rule(kind: RuleSetKind, mandatory: bool) -> impl Strategy<Value = Rule> {
                 name,
                 description,
                 enabled,
+                activates_at: None,
+                expires_at: None,
+                on_expire: super::OnExpire::Deactivate,
                 object_types: types.into_iter().collect(),
                 match_,
                 effects,
@@ -821,6 +825,7 @@ pub fn document() -> impl Strategy<Value = PolicyDocument> {
                         mode_options,
                         settings,
                         unknown,
+                        governance: super::GovernanceSettings::default(),
                         rule_sets,
                         scope: None,
                         rule_set_scopes: Vec::new(),

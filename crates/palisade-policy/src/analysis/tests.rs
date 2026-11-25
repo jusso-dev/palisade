@@ -1,0 +1,983 @@
+//! Tests of the policy assistant (#40): a positive and a negative fixture
+//! per check, the publish gate, and property tests that conflict findings
+//! are true.
+
+use proptest::prelude::*;
+
+use super::*;
+use crate::context::EvaluationContext;
+use crate::decision::TraceId;
+use crate::evaluate::{Evaluator, Subject};
+use crate::facts::{
+    ObjectFacts, PathFact, PathVariables, SignatureSource, SignerFact, SignerStatus,
+};
+use crate::model::ObjectType;
+
+const POLICY: &str = "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f";
+const SET: &str = "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001";
+const MANDATORY: &str = "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0002";
+const CURATED: &str = "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0003";
+/// 2026-11-25T00:00:00Z.
+const NOW: Timestamp = Timestamp(1_795_564_800);
+
+fn t(days: i64) -> Timestamp {
+    Timestamp(NOW.0 + days * 86_400)
+}
+
+fn sha(c: char) -> String {
+    std::iter::repeat_n(c, 64).collect()
+}
+
+fn rule_id(n: u32) -> String {
+    format!("01936b2e-{n:04x}-7b3d-9f21-0a1b2c3d4e61")
+}
+
+fn crit(field: &str, op: &str, values: &[&str]) -> serde_json::Value {
+    serde_json::json!({"criterion": {"field": field, "operator": op, "values": values}})
+}
+
+fn hash(c: char) -> serde_json::Value {
+    crit("hash.sha256", "equals", &[&sha(c)])
+}
+
+fn rule(n: u32, tree: serde_json::Value, action: &str) -> serde_json::Value {
+    serde_json::json!({"id": rule_id(n), "name": format!("R{n}"), "match": tree, "action": {"type": action}})
+}
+
+fn with(mut r: serde_json::Value, extra: serde_json::Value) -> serde_json::Value {
+    for (k, v) in extra.as_object().unwrap() {
+        r.as_object_mut().unwrap().insert(k.clone(), v.clone());
+    }
+    r
+}
+
+/// `(id, kind, mandatory, read_only, rules)`.
+type Set = (
+    &'static str,
+    &'static str,
+    bool,
+    bool,
+    Vec<serde_json::Value>,
+);
+
+fn doc(policy: serde_json::Value, sets: Vec<Set>) -> PolicyDocument {
+    let mut p = serde_json::json!({
+        "id": POLICY, "name": "Lint", "revision": 1, "mode": "enforce",
+        "rule_sets": sets.iter().map(|s| s.0).collect::<Vec<_>>(),
+    });
+    for (k, v) in policy.as_object().unwrap() {
+        p.as_object_mut().unwrap().insert(k.clone(), v.clone());
+    }
+    let rule_sets: Vec<serde_json::Value> = sets
+        .iter()
+        .map(|(id, kind, m, ro, rules)| serde_json::json!({"id": id, "name": "S", "kind": kind, "mandatory": m, "read_only": ro, "rules": rules}))
+        .collect();
+    let json = serde_json::json!({"schema_version": "1.0.0", "policy": p, "rule_sets": rule_sets});
+    let d = PolicyDocument::from_json(&json.to_string()).unwrap();
+    // Every fixture is a policy that validation accepts.
+    d.clone().validate().unwrap_or_else(|e| panic!("{e:#?}"));
+    d
+}
+
+fn mixed(rules: Vec<serde_json::Value>) -> PolicyDocument {
+    doc(
+        serde_json::json!({}),
+        vec![(SET, "mixed", false, false, rules)],
+    )
+}
+
+fn lint(d: &PolicyDocument, facts: &Facts) -> Vec<(FindingCode, Vec<String>)> {
+    analyse(d, facts, NOW)
+        .into_iter()
+        .map(|f| {
+            (
+                f.code,
+                f.rule_refs.iter().map(|r| r.rule_id.to_string()).collect(),
+            )
+        })
+        .collect()
+}
+
+fn has(found: &[(FindingCode, Vec<String>)], code: FindingCode, first: u32) -> bool {
+    found
+        .iter()
+        .any(|(c, r)| *c == code && r.first() == Some(&rule_id(first)))
+}
+
+fn none_of(found: &[(FindingCode, Vec<String>)], code: FindingCode) -> bool {
+    !found.iter().any(|(c, _)| *c == code)
+}
+
+// ----------------------------------------------------------- identity
+
+#[test]
+fn weak_identity() {
+    let name = serde_json::json!({"all": [crit("path.file_name", "equals", &["a.exe"]), crit("meta.product_name", "equals", &["A"])]});
+    let path = crit("path.directory", "starts_with", &["C:\\Tools"]);
+    let found = lint(
+        &mixed(vec![
+            rule(1, name, "allow"),
+            rule(2, path, "allow"),
+            rule(3, hash('a'), "allow"),
+        ]),
+        &Facts::default(),
+    );
+    assert!(has(&found, FindingCode::WeakIdentity, 1));
+    assert!(has(&found, FindingCode::WeakIdentity, 2));
+    assert!(!has(&found, FindingCode::WeakIdentity, 3));
+}
+
+#[test]
+fn user_writable_path_allow() {
+    let facts = Facts {
+        writable_dirs: vec!["C:\\Tools\\Drop".into()],
+        ..Facts::default()
+    };
+    let found = lint(
+        &mixed(vec![
+            rule(
+                1,
+                crit("path.directory", "starts_with", &["C:\\Tools"]),
+                "allow",
+            ),
+            rule(
+                2,
+                crit("path.directory", "starts_with", &["C:\\Other"]),
+                "allow",
+            ),
+            rule(
+                3,
+                crit("path.directory", "starts_with", &["c:\\tools\\drop\\x"]),
+                "allow",
+            ),
+        ]),
+        &facts,
+    );
+    assert!(has(&found, FindingCode::UserWritablePathAllow, 1));
+    assert!(has(&found, FindingCode::UserWritablePathAllow, 3));
+    assert!(!has(&found, FindingCode::UserWritablePathAllow, 2));
+    assert!(has(&found, FindingCode::WeakIdentity, 2));
+}
+
+#[test]
+fn restricted_publisher_broad() {
+    let facts = Facts {
+        restricted_publishers: vec!["OS Publisher".into()],
+        ..Facts::default()
+    };
+    let broad = crit("signer.publisher", "equals", &["os publisher"]);
+    let narrow = serde_json::json!({"all": [crit("signer.publisher", "equals", &["OS Publisher"]), crit("meta.product_name", "equals", &["Calculator"])]});
+    let other = crit("signer.publisher", "equals", &["Example Ltd"]);
+    let found = lint(
+        &mixed(vec![
+            rule(1, broad.clone(), "allow"),
+            rule(2, narrow, "allow"),
+            rule(3, other, "allow"),
+            rule(4, broad, "deny"),
+        ]),
+        &facts,
+    );
+    assert!(has(&found, FindingCode::RestrictedPublisherBroad, 1));
+    assert!(!has(&found, FindingCode::RestrictedPublisherBroad, 2));
+    assert!(!has(&found, FindingCode::RestrictedPublisherBroad, 3));
+    assert!(!has(&found, FindingCode::RestrictedPublisherBroad, 4));
+}
+
+#[test]
+fn broad_wildcard() {
+    let with_pub = |w: &str| serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]), crit("path.full", "wildcard", &[w])]});
+    let found = lint(
+        &mixed(vec![
+            rule(1, with_pub("C:\\*"), "allow"),
+            rule(2, with_pub("*\\*.exe"), "allow"),
+            rule(3, with_pub("**"), "allow"),
+            rule(4, with_pub("C:\\Program Files\\Example\\**"), "allow"),
+            rule(5, with_pub("C:\\**\\*.exe"), "allow"),
+        ]),
+        &Facts::default(),
+    );
+    for n in [1, 2, 3, 5] {
+        assert!(has(&found, FindingCode::BroadWildcard, n), "{n}: {found:?}");
+    }
+    assert!(!has(&found, FindingCode::BroadWildcard, 4));
+    // A regular expression that matches much of a sample corpus.
+    let corpus: Vec<String> = (0..10).map(|i| format!("C:\\App{i}\\a.exe")).collect();
+    let re = serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]), crit("path.full", "regex", &["C:\\\\App[0-4]\\\\.*"])]});
+    let narrow = serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]), crit("path.full", "regex", &["C:\\\\App1\\\\.*"])]});
+    let found = lint(
+        &mixed(vec![rule(1, re, "allow"), rule(2, narrow, "allow")]),
+        &Facts {
+            path_corpus: corpus,
+            ..Facts::default()
+        },
+    );
+    assert!(has(&found, FindingCode::BroadWildcard, 1));
+    assert!(!has(&found, FindingCode::BroadWildcard, 2));
+}
+
+#[test]
+fn regex_cost() {
+    let big = serde_json::json!({"all": [hash('a'), crit("meta.product_name", "regex", &["(\\w{20}){1}"])]});
+    let small =
+        serde_json::json!({"all": [hash('b'), crit("meta.product_name", "regex", &["ab+c"])]});
+    let found = lint(
+        &mixed(vec![rule(1, big, "deny"), rule(2, small, "deny")]),
+        &Facts::default(),
+    );
+    assert!(has(&found, FindingCode::RegexCost, 1), "{found:?}");
+    assert!(!has(&found, FindingCode::RegexCost, 2));
+    assert!(regex_near_limit("(\\w{20}){1}", false));
+    assert!(!regex_near_limit("ab+c", false));
+    // Over the limit is validation's error, not this warning.
+    assert!(!regex_near_limit("(\\w{20}){10}", false));
+}
+
+#[test]
+fn revoked_or_expired_signer() {
+    let facts = Facts {
+        certificates: BTreeMap::from([
+            ("Gone Ltd".into(), CertificateState::Revoked),
+            (sha('C'), CertificateState::Expired),
+        ]),
+        ..Facts::default()
+    };
+    let found = lint(
+        &mixed(vec![
+            rule(
+                1,
+                crit("signer.publisher", "equals", &["gone ltd"]),
+                "allow",
+            ),
+            rule(
+                2,
+                crit("signer.leaf_thumbprint", "equals", &[&sha('c')]),
+                "allow",
+            ),
+            rule(
+                3,
+                crit("signer.publisher", "equals", &["Example Ltd"]),
+                "allow",
+            ),
+            rule(4, crit("signer.publisher", "equals", &["Gone Ltd"]), "deny"),
+        ]),
+        &facts,
+    );
+    assert!(has(&found, FindingCode::RevokedOrExpiredSigner, 1));
+    assert!(has(&found, FindingCode::RevokedOrExpiredSigner, 2));
+    assert!(!has(&found, FindingCode::RevokedOrExpiredSigner, 3));
+    assert!(!has(&found, FindingCode::RevokedOrExpiredSigner, 4));
+}
+
+// ---------------------------------------------------------- duplicates
+
+#[test]
+fn duplicate_rule() {
+    let a =
+        serde_json::json!({"all": [hash('A'), crit("signer.publisher", "equals", &["X", "y"])]});
+    let b =
+        serde_json::json!({"all": [crit("signer.publisher", "equals", &["Y", "x"]), hash('a')]});
+    let found = lint(
+        &mixed(vec![
+            rule(1, a, "allow"),
+            rule(2, b.clone(), "allow"),
+            rule(3, b.clone(), "deny"),
+            with(
+                rule(4, b, "allow"),
+                serde_json::json!({"object_types": ["installer"]}),
+            ),
+        ]),
+        &Facts::default(),
+    );
+    assert!(
+        found
+            .iter()
+            .any(|(c, r)| *c == FindingCode::DuplicateRule && r == &vec![rule_id(2), rule_id(1)]),
+        "{found:?}"
+    );
+    assert!(!has(&found, FindingCode::DuplicateRule, 3));
+    assert!(!has(&found, FindingCode::DuplicateRule, 4));
+}
+
+#[test]
+fn duplicate_principal() {
+    let both = serde_json::json!({"all": [hash('a'),
+        {"criterion": {"field": "user.groups", "operator": "member_of", "values": ["S-1-5-32-544"]}},
+        {"criterion": {"field": "user.groups", "operator": "not_member_of", "values": ["s-1-5-32-0544"]}}]});
+    let repeated = serde_json::json!({"all": [hash('b'),
+        {"criterion": {"field": "user.groups", "operator": "member_of", "values": ["S-1-5-32-545", "S-1-5-32-545"]}}]});
+    let fine = serde_json::json!({"all": [hash('c'),
+        {"criterion": {"field": "user.groups", "operator": "member_of", "values": ["S-1-5-32-545"]}},
+        {"criterion": {"field": "user.groups", "operator": "not_member_of", "values": ["S-1-5-32-544"]}}]});
+    let found = lint(
+        &mixed(vec![
+            rule(1, both, "deny"),
+            rule(2, repeated, "deny"),
+            rule(3, fine, "deny"),
+        ]),
+        &Facts::default(),
+    );
+    assert!(has(&found, FindingCode::DuplicatePrincipal, 1));
+    assert!(has(&found, FindingCode::DuplicatePrincipal, 2));
+    assert!(!has(&found, FindingCode::DuplicatePrincipal, 3));
+}
+
+// ----------------------------------------------------------- conflicts
+
+#[test]
+fn ineffective_vs_mandatory() {
+    let d = doc(
+        serde_json::json!({}),
+        vec![
+            (
+                MANDATORY,
+                "blocklist",
+                true,
+                false,
+                vec![rule(
+                    1,
+                    crit("signer.publisher", "equals", &["Bad Ltd"]),
+                    "deny",
+                )],
+            ),
+            (
+                SET,
+                "mixed",
+                false,
+                false,
+                vec![
+                    rule(
+                        2,
+                        serde_json::json!({"all": [crit("signer.publisher", "equals", &["Bad Ltd"]), hash('a')]}),
+                        "allow",
+                    ),
+                    rule(
+                        3,
+                        crit("signer.publisher", "equals", &["Good Ltd"]),
+                        "allow",
+                    ),
+                ],
+            ),
+        ],
+    );
+    let found = lint(&d, &Facts::default());
+    assert!(
+        has(&found, FindingCode::IneffectiveVsMandatory, 2),
+        "{found:?}"
+    );
+    assert!(!has(&found, FindingCode::IneffectiveVsMandatory, 3));
+}
+
+#[test]
+fn a_scoped_rule_is_not_called_shadowed_or_a_duplicate_of_an_unscoped_one() {
+    let admins = serde_json::json!({"scope": {"principals": {"include": [{"well_known": "administrators"}]}}});
+    let found = lint(
+        &mixed(vec![
+            // A deny scoped to administrators never shadows the allow
+            // outside that scope.
+            with(rule(1, hash('a'), "deny"), admins.clone()),
+            rule(2, hash('a'), "allow"),
+            // The same match, action and type, in different scopes.
+            with(rule(3, hash('b'), "allow"), admins.clone()),
+            rule(4, hash('b'), "allow"),
+            // The same scope: still a duplicate.
+            with(rule(5, hash('c'), "allow"), admins.clone()),
+            with(rule(6, hash('c'), "allow"), admins),
+        ]),
+        &Facts::default(),
+    );
+    assert!(!has(&found, FindingCode::Shadowed, 2), "{found:?}");
+    assert!(!has(&found, FindingCode::DuplicateRule, 4), "{found:?}");
+    assert!(has(&found, FindingCode::DuplicateRule, 6), "{found:?}");
+}
+
+#[test]
+fn shadowed_under_deny_wins() {
+    let found = lint(
+        &mixed(vec![
+            rule(
+                1,
+                crit("signer.publisher", "equals", &["Example Ltd", "Other Ltd"]),
+                "deny",
+            ),
+            rule(
+                2,
+                serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]), hash('a')]}),
+                "allow",
+            ),
+            rule(
+                3,
+                crit("signer.publisher", "equals", &["Third Ltd"]),
+                "allow",
+            ),
+            // A deny that a more specific deny beats is not shadowed: the
+            // other way round, the less specific one is.
+            rule(
+                4,
+                serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]), hash('b')]}),
+                "deny",
+            ),
+        ]),
+        &Facts::default(),
+    );
+    assert!(has(&found, FindingCode::Shadowed, 2), "{found:?}");
+    assert!(!has(&found, FindingCode::Shadowed, 3));
+    // Rule 4 is more specific than rule 1, so it wins and is not shadowed.
+    assert!(!has(&found, FindingCode::Shadowed, 4));
+    // Under deny_wins, the covered allow is reported as shadowed, not as a
+    // contradiction.
+    assert!(
+        !found
+            .iter()
+            .any(|(c, r)| *c == FindingCode::Contradiction && r.contains(&rule_id(2)))
+    );
+}
+
+#[test]
+fn shadowed_under_first_match_and_contradiction() {
+    let d = doc(
+        serde_json::json!({"precedence_model": "first_match"}),
+        vec![(
+            SET,
+            "mixed",
+            false,
+            false,
+            vec![
+                with(
+                    rule(
+                        1,
+                        crit("signer.publisher", "equals", &["Example Ltd"]),
+                        "allow",
+                    ),
+                    serde_json::json!({"order": 100_100}),
+                ),
+                with(
+                    rule(
+                        2,
+                        serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]), hash('a')]}),
+                        "deny",
+                    ),
+                    serde_json::json!({"order": 100_200}),
+                ),
+                with(
+                    rule(
+                        3,
+                        serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]), hash('b')]}),
+                        "deny",
+                    ),
+                    serde_json::json!({"order": 100_050}),
+                ),
+            ],
+        )],
+    );
+    let found = lint(&d, &Facts::default());
+    assert!(has(&found, FindingCode::Shadowed, 2), "{found:?}");
+    assert!(!has(&found, FindingCode::Shadowed, 3));
+    // Rule 3 comes first and is covered by rule 1: they contradict.
+    assert!(found.iter().any(|(c, r)| *c == FindingCode::Contradiction
+        && r.contains(&rule_id(1))
+        && r.contains(&rule_id(3))));
+}
+
+#[test]
+fn rules_that_differ_in_time_types_or_unknown_handling_are_not_shadowed() {
+    let deny = |extra: serde_json::Value| {
+        with(
+            rule(
+                1,
+                crit("signer.publisher", "equals", &["Example Ltd"]),
+                "deny",
+            ),
+            extra,
+        )
+    };
+    let allow = || {
+        rule(
+            2,
+            serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]), hash('a')]}),
+            "allow",
+        )
+    };
+    for d in [
+        deny(serde_json::json!({"expires_at": t(10).to_string()})),
+        deny(serde_json::json!({"object_types": ["installer"]})),
+    ] {
+        let found = lint(&mixed(vec![d, allow()]), &Facts::default());
+        assert!(none_of(&found, FindingCode::Shadowed), "{found:?}");
+    }
+    // A covered deny with `unknown_as: match` also applies where the cover
+    // does not.
+    let cover = rule(
+        1,
+        crit("signer.publisher", "equals", &["Example Ltd"]),
+        "deny",
+    );
+    let victim = serde_json::json!({"id": rule_id(2), "name": "V",
+        "match": {"all": [crit("signer.publisher", "equals", &["Example Ltd"]), hash('a')]},
+        "action": {"type": "deny", "unknown_as": "match"}});
+    let found = lint(&mixed(vec![cover, victim]), &Facts::default());
+    assert!(none_of(&found, FindingCode::Shadowed), "{found:?}");
+}
+
+// ------------------------------------------------------- lifecycle checks
+
+#[test]
+fn expiry_and_review_findings() {
+    let found = lint(
+        &mixed(vec![
+            with(
+                rule(1, hash('a'), "allow"),
+                serde_json::json!({"expires_at": t(-1).to_string()}),
+            ),
+            with(
+                rule(2, hash('b'), "allow"),
+                serde_json::json!({"expires_at": t(5).to_string()}),
+            ),
+            with(
+                rule(3, hash('c'), "allow"),
+                serde_json::json!({"expires_at": t(60).to_string()}),
+            ),
+            with(
+                rule(4, hash('d'), "allow"),
+                serde_json::json!({"metadata": {"review_by": "2026-01-01"}}),
+            ),
+            with(
+                rule(5, hash('e'), "allow"),
+                serde_json::json!({"metadata": {"review_by": "2027-01-01"}}),
+            ),
+        ]),
+        &Facts::default(),
+    );
+    assert!(has(&found, FindingCode::ExpiredRulePresent, 1));
+    assert!(has(&found, FindingCode::ExpiringSoon, 2));
+    assert!(!has(&found, FindingCode::ExpiringSoon, 3));
+    assert!(has(&found, FindingCode::ReviewOverdue, 4));
+    assert!(!has(&found, FindingCode::ReviewOverdue, 5));
+}
+
+#[test]
+fn stale_rule() {
+    let created = serde_json::json!({"metadata": {"created_at": t(-365).to_string()}});
+    let d = mixed(vec![
+        with(rule(1, hash('a'), "allow"), created.clone()),
+        with(rule(2, hash('b'), "allow"), created.clone()),
+        with(rule(3, hash('c'), "allow"), created.clone()),
+        with(
+            rule(4, hash('d'), "allow"),
+            serde_json::json!({"metadata": {"created_at": t(-10).to_string()}}),
+        ),
+    ]);
+    let id = |n| rule_id(n).parse().unwrap();
+    let facts = Facts {
+        usage: BTreeMap::from([
+            (
+                id(1),
+                Usage {
+                    last_matched_at: Some(t(-200)),
+                    devices_online: true,
+                },
+            ),
+            (
+                id(2),
+                Usage {
+                    last_matched_at: Some(t(-5)),
+                    devices_online: true,
+                },
+            ),
+            (
+                id(3),
+                Usage {
+                    last_matched_at: None,
+                    devices_online: false,
+                },
+            ),
+            (
+                id(4),
+                Usage {
+                    last_matched_at: None,
+                    devices_online: true,
+                },
+            ),
+        ]),
+        ..Facts::default()
+    };
+    let found = lint(&d, &facts);
+    assert!(has(&found, FindingCode::StaleRule, 1));
+    assert!(!has(&found, FindingCode::StaleRule, 2));
+    assert!(!has(&found, FindingCode::StaleRule, 3));
+    assert!(!has(&found, FindingCode::StaleRule, 4));
+    let f = analyse(&d, &facts, NOW)
+        .into_iter()
+        .find(|f| f.code == FindingCode::StaleRule)
+        .unwrap();
+    assert_eq!(f.fix, Some(Fix::ConvertToAudit));
+}
+
+#[test]
+fn governance_findings() {
+    // The validator rejects these in governance mode; the assistant also
+    // reports them, so a lint run before saving shows them.
+    let mut d = mixed(vec![
+        rule(1, hash('a'), "allow"),
+        with(
+            rule(2, hash('b'), "allow"),
+            serde_json::json!({"metadata": {"justification": "needed", "created_at": NOW.to_string()}}),
+        ),
+        with(
+            rule(3, hash('c'), "allow"),
+            serde_json::json!({"metadata": {"exception": true, "justification": "x", "created_at": NOW.to_string()}}),
+        ),
+    ]);
+    d.policy.governance.require_justification = Some(true);
+    let found = lint(&d, &Facts::default());
+    assert!(has(&found, FindingCode::MissingJustification, 1));
+    assert!(!has(&found, FindingCode::MissingJustification, 2));
+    assert!(has(&found, FindingCode::ExceptionWithoutExpiry, 3));
+    assert!(!has(&found, FindingCode::ExceptionWithoutExpiry, 2));
+}
+
+#[test]
+fn vulnerable_version_allowed() {
+    let vuln = rule(
+        1,
+        serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]),
+        {"criterion": {"field": "meta.file_version", "operator": "version_lt", "values": ["2.0"]}}]}),
+        "deny",
+    );
+    let wide = rule(
+        2,
+        serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]), crit("meta.product_name", "equals", &["Tool"]),
+        {"criterion": {"field": "meta.file_version", "operator": "version_ge", "values": ["1.0"]}}]}),
+        "allow",
+    );
+    let safe = rule(
+        3,
+        serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]), crit("meta.product_name", "equals", &["Tool"]),
+        {"criterion": {"field": "meta.file_version", "operator": "version_ge", "values": ["2.0"]}}]}),
+        "allow",
+    );
+    let d = doc(
+        serde_json::json!({}),
+        vec![
+            (CURATED, "blocklist", false, true, vec![vuln]),
+            (SET, "mixed", false, false, vec![wide, safe]),
+        ],
+    );
+    let found = lint(&d, &Facts::default());
+    assert!(
+        has(&found, FindingCode::VulnerableVersionAllowed, 2),
+        "{found:?}"
+    );
+    assert!(!has(&found, FindingCode::VulnerableVersionAllowed, 3));
+}
+
+#[test]
+fn too_many_hash_rules() {
+    let rules: Vec<serde_json::Value> = (0..12u32)
+        .map(|n| {
+            rule(
+                n + 1,
+                crit("hash.sha256", "equals", &[&format!("{:064x}", n)]),
+                "allow",
+            )
+        })
+        .collect();
+    let d = mixed(rules);
+    let opts = Options {
+        max_inline_hashes: 10,
+        ..Options::default()
+    };
+    let found = analyse_with(&d, &Facts::default(), NOW, &opts);
+    assert!(
+        found
+            .iter()
+            .any(|f| f.code == FindingCode::TooManyHashRules)
+    );
+    assert!(
+        !analyse(&d, &Facts::default(), NOW)
+            .iter()
+            .any(|f| f.code == FindingCode::TooManyHashRules)
+    );
+}
+
+// ------------------------------------------------------ severity and gate
+
+#[test]
+fn severities_are_configurable_and_errors_block_publishing() {
+    let mut d = mixed(vec![rule(
+        1,
+        crit("path.file_name", "equals", &["a.exe"]),
+        "allow",
+    )]);
+    let f = analyse(&d, &Facts::default(), NOW);
+    assert_eq!(f[0].severity, FindingSeverity::Warning);
+    assert_eq!(publish_gate(&f, None), Gate::Pass);
+    d.policy
+        .governance
+        .severity
+        .insert("weak_identity".into(), FindingSeverity::Error);
+    let f = analyse(&d, &Facts::default(), NOW);
+    assert_eq!(f[0].severity, FindingSeverity::Error);
+    assert!(matches!(publish_gate(&f, None), Gate::Blocked(ref e) if e.len() == 1));
+    let blank = Override {
+        actor: "admin".into(),
+        reason: " ".into(),
+    };
+    assert!(matches!(publish_gate(&f, Some(&blank)), Gate::Blocked(_)));
+    let ok = Override {
+        actor: "admin".into(),
+        reason: "accepted risk, ticket CHG-1".into(),
+    };
+    assert!(
+        matches!(publish_gate(&f, Some(&ok)), Gate::Overridden { ref reason, .. } if reason == "accepted risk, ticket CHG-1")
+    );
+}
+
+#[test]
+fn every_code_has_a_unique_stable_name() {
+    let names: BTreeSet<&str> = FindingCode::ALL.iter().map(|c| c.as_str()).collect();
+    assert_eq!(names.len(), FindingCode::ALL.len());
+    for c in FindingCode::ALL {
+        assert_eq!(FindingCode::from_name(c.as_str()), Some(c));
+        assert_eq!(serde_json::to_value(c).unwrap(), c.as_str());
+    }
+}
+
+#[test]
+fn findings_do_not_depend_on_rule_order() {
+    let rules = vec![
+        rule(
+            1,
+            crit("signer.publisher", "equals", &["Example Ltd"]),
+            "deny",
+        ),
+        rule(
+            2,
+            serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]), hash('a')]}),
+            "allow",
+        ),
+        rule(3, crit("path.file_name", "equals", &["a.exe"]), "allow"),
+        rule(4, crit("path.file_name", "equals", &["a.exe"]), "allow"),
+    ];
+    let mut reversed = rules.clone();
+    reversed.reverse();
+    let a = analyse(&mixed(rules), &Facts::default(), NOW);
+    let b = analyse(&mixed(reversed), &Facts::default(), NOW);
+    let key = |f: &[Finding]| -> Vec<(FindingCode, Vec<RuleRef>)> {
+        let mut v: Vec<_> = f
+            .iter()
+            .map(|f| {
+                let mut r = f.rule_refs.clone();
+                if f.code == FindingCode::DuplicateRule || f.code == FindingCode::Contradiction {
+                    r.sort();
+                }
+                (f.code, r)
+            })
+            .collect();
+        v.sort();
+        v
+    };
+    assert_eq!(key(&a), key(&b));
+}
+
+// ------------------------------------------- shadowed rules never decide
+
+/// The objects the property tests decide: every combination of three
+/// hashes, three publishers and two product names.
+fn objects() -> Vec<ObjectFacts> {
+    let mut out = Vec::new();
+    for h in ['a', 'b', 'c'] {
+        for p in ["P1", "P2", "P3"] {
+            for prod in ["X", "Y"] {
+                out.push(
+                    ObjectFacts::new()
+                        .with(crate::model::Field::HashSha256, sha(h))
+                        .with(crate::model::Field::MetaProductName, prod)
+                        .with_path(
+                            PathFact::new(
+                                "C:\\Tools\\a.exe",
+                                &palisade_core::path::VolumeMap::new(),
+                            )
+                            .with_user_writable(false),
+                        )
+                        .with_signers(vec![SignerFact {
+                            status: SignerStatus::Valid,
+                            source: SignatureSource::Embedded,
+                            publisher: Some(p.into()),
+                            issuer: None,
+                            leaf_thumbprint_sha256: None,
+                        }]),
+                );
+            }
+        }
+    }
+    out
+}
+
+fn arb_leaf() -> impl Strategy<Value = serde_json::Value> {
+    prop_oneof![
+        prop::sample::subsequence(vec!['a', 'b', 'c'], 1..=3).prop_map(|v| {
+            let v: Vec<String> = v.into_iter().map(sha).collect();
+            serde_json::json!({"criterion": {"field": "hash.sha256", "operator": "equals", "values": v}})
+        }),
+        prop::sample::subsequence(vec!["P1", "P2", "P3"], 1..=3).prop_map(|v| crit("signer.publisher", "equals", &v)),
+    ]
+}
+
+fn arb_tree() -> impl Strategy<Value = serde_json::Value> {
+    let extra = prop::sample::subsequence(vec!["X", "Y"], 1..=2)
+        .prop_map(|v| crit("meta.product_name", "equals", &v));
+    prop_oneof![
+        arb_leaf(),
+        (arb_leaf(), arb_leaf()).prop_map(|(a, b)| serde_json::json!({"all": [a, b]})),
+        (arb_leaf(), arb_leaf()).prop_map(|(a, b)| serde_json::json!({"any": [a, b]})),
+        (arb_leaf(), extra).prop_map(|(a, b)| serde_json::json!({"all": [a, b]})),
+    ]
+}
+
+fn arb_rules() -> impl Strategy<Value = Vec<(serde_json::Value, bool, bool, u32)>> {
+    prop::collection::vec(
+        (
+            arb_tree(),
+            any::<bool>(),
+            any::<bool>(),
+            100_001u32..100_100,
+        ),
+        2..7,
+    )
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    /// A rule reported as `shadowed` or `ineffective_vs_mandatory` never
+    /// decides any object, under `deny_wins` and `first_match`.
+    #[test]
+    fn shadowed_and_ineffective_rules_never_decide(
+        rules in arb_rules(),
+        first_match in any::<bool>(),
+    ) {
+        let model = if first_match { "first_match" } else { "deny_wins" };
+        let mut mandatory = Vec::new();
+        let mut ordinary = Vec::new();
+        for (i, (tree, deny, mand, order)) in rules.iter().enumerate() {
+            let n = u32::try_from(i).unwrap() + 1;
+            let action = if *deny || *mand { "deny" } else { "allow" };
+            let r = with(rule(n, tree.clone(), action), serde_json::json!({"order": order}));
+            if *mand { mandatory.push(r) } else { ordinary.push(r) }
+        }
+        let mut sets: Vec<Set> = vec![(SET, "mixed", false, false, ordinary)];
+        if !mandatory.is_empty() {
+            sets.push((MANDATORY, "blocklist", true, false, mandatory));
+        }
+        let d = doc(serde_json::json!({"precedence_model": model}), sets);
+        let never: BTreeSet<RuleId> = analyse(&d, &Facts::default(), NOW)
+            .iter()
+            .filter(|f| matches!(f.code, FindingCode::Shadowed | FindingCode::IneffectiveVsMandatory))
+            .map(|f| f.rule_refs[0].rule_id)
+            .collect();
+        let v = d.validate().unwrap();
+        let e = Evaluator::new(&v).unwrap();
+        let variables = PathVariables::new();
+        let context = EvaluationContext::new();
+        for facts in objects() {
+            let decision = e.evaluate(
+                &Subject { object_type: ObjectType::Executable, facts: &facts, variables: &variables, context: &context },
+                TraceId([0; 16]),
+            );
+            if let Some(r) = decision.matched_rule() {
+                prop_assert!(!never.contains(&r.rule_id), "rule {} decided but was reported as never deciding", r.rule_id);
+            }
+        }
+    }
+
+    /// `covers(a, b)` is sound: whenever it holds, every object `b`
+    /// matches also matches `a`.
+    #[test]
+    fn covers_is_sound(a in arb_tree(), b in arb_tree()) {
+        let a: Match = serde_json::from_value(a).unwrap();
+        let b: Match = serde_json::from_value(b).unwrap();
+        if covers(&a, &b) {
+            let ca = crate::condition::CompiledMatch::compile(&a).unwrap();
+            let cb = crate::condition::CompiledMatch::compile(&b).unwrap();
+            let variables = PathVariables::new();
+            let context = EvaluationContext::new();
+            let ctx = crate::ops::EvalContext { action: ActionKind::Deny, variables: &variables, context: &context };
+            for facts in objects() {
+                if cb.eval(&facts, &ctx).matches() {
+                    prop_assert!(ca.eval(&facts, &ctx).matches());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn analyse_scales_to_a_large_policy() {
+    // 20k hash rules and 2k publisher rules: the index keeps the conflict
+    // pass from comparing every pair. The 50k benchmark is in benches/.
+    let mut rules = Vec::new();
+    for n in 0..20_000u32 {
+        rules.push(serde_json::json!({"id": format!("01936b2e-{:04x}-7{:03x}-9f21-0a1b2c3d4e61", n >> 12, n & 0xfff), "name": "H",
+            "match": crit("hash.sha256", "equals", &[&format!("{n:064x}")]), "action": {"type": "allow"}}));
+    }
+    for n in 0..2_000u32 {
+        rules.push(serde_json::json!({"id": format!("01936b2e-ffff-7{:03x}-9f21-0a1b2c3d{:04x}", n & 0xfff, n), "name": "P",
+            "match": crit("signer.publisher", "equals", &[&format!("Publisher {n}")]), "action": {"type": "allow"}}));
+    }
+    let json = serde_json::json!({"schema_version": "1.0.0",
+        "policy": {"id": POLICY, "name": "Big", "revision": 1, "mode": "enforce", "rule_sets": [SET]},
+        "rule_sets": [{"id": SET, "name": "S", "kind": "allowlist", "rules": rules}]});
+    let d = PolicyDocument::from_json(&json.to_string()).unwrap();
+    let start = std::time::Instant::now();
+    let f = analyse(&d, &Facts::default(), NOW);
+    let took = start.elapsed();
+    assert!(f.iter().all(|f| f.code != FindingCode::Shadowed));
+    // Generous for debug builds on shared runners; the release benchmark
+    // is the real budget.
+    assert!(took < std::time::Duration::from_secs(30), "{took:?}");
+}
+
+/// The lint output of the example policies is a committed snapshot, so a
+/// change to any check shows up in review. Regenerate with
+/// `PALISADE_BLESS=1 cargo test -p palisade-policy analysis::`.
+#[test]
+fn lint_snapshot_of_the_example_policies() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let dir = root.join("../../docs/examples/policies");
+    let mut names: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "yaml"))
+        .collect();
+    names.sort();
+    let mut text = String::new();
+    for path in names {
+        let yaml = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace("\r\n", "\n");
+        let d = PolicyDocument::from_yaml(&yaml).unwrap();
+        text.push_str(&format!(
+            "# {}\n",
+            path.file_name().unwrap().to_string_lossy()
+        ));
+        for f in analyse(&d, &Facts::default(), NOW) {
+            let rules: Vec<String> = f.rule_refs.iter().map(|r| r.rule_id.to_string()).collect();
+            text.push_str(&format!(
+                "{} {:?} {}\n",
+                f.code,
+                f.severity,
+                rules.join(" ")
+            ));
+        }
+    }
+    let snap = root.join("tests/snapshots/lint/examples.txt");
+    if std::env::var_os("PALISADE_BLESS").is_some() {
+        std::fs::create_dir_all(snap.parent().unwrap()).unwrap();
+        std::fs::write(&snap, &text).unwrap();
+        return;
+    }
+    let committed = std::fs::read_to_string(&snap)
+        .unwrap_or_default()
+        .replace("\r\n", "\n");
+    assert!(committed == text, "{} differs:\n{text}", snap.display());
+}

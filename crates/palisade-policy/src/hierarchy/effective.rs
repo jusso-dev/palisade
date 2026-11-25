@@ -746,6 +746,7 @@ impl<'a, 'h> Builder<'a, 'h> {
                 mode_options,
                 settings,
                 unknown: self.unknown(),
+                governance: crate::model::GovernanceSettings::default(),
                 rule_sets: sets.keys().copied().collect(),
                 scope: None,
                 rule_set_scopes,

@@ -1186,6 +1186,110 @@
         }
       ]
     },
+    "FindingSeverity": {
+      "description": "How serious a policy-assistant finding is (#40).",
+      "oneOf": [
+        {
+          "const": "info",
+          "description": "Informational.",
+          "type": "string"
+        },
+        {
+          "const": "warning",
+          "description": "Probably a mistake or a risk.",
+          "type": "string"
+        },
+        {
+          "const": "error",
+          "description": "Blocks publishing unless a tenant administrator overrides it.",
+          "type": "string"
+        }
+      ]
+    },
+    "GovernanceSettings": {
+      "additionalProperties": false,
+      "description": "The tenant's governance settings (#40). Every field is optional.",
+      "properties": {
+        "counter_report_hours": {
+          "default": 24,
+          "description": "How often the agent reports hit counters, in hours: 1 to 168,\ndefault 24.",
+          "format": "uint16",
+          "maximum": 168,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "expiring_soon_days": {
+          "default": 14,
+          "description": "A rule that expires within this many days is expiring soon: 1 to\n365, default 14.",
+          "format": "uint16",
+          "maximum": 365,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "expiry_notice_days": {
+          "default": [
+            14,
+            3,
+            0
+          ],
+          "description": "When the server tells a rule's owner that it expires, in days\nbefore the expiry: at most 8 values, each at most 365, default\n`[14, 3, 0]`.",
+          "items": {
+            "format": "uint16",
+            "maximum": 365,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 8,
+          "type": "array"
+        },
+        "require_justification": {
+          "description": "Governance mode: allow, trust, exclusion and exception rules need a\njustification, allow and trust rules a review date, and exception\nrules an expiry, an approver and a risk rating. Unset means on for\na policy with a compliance preset (`unknown.preset`) and off\notherwise.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "severity": {
+          "additionalProperties": {
+            "$ref": "#/$defs/FindingSeverity"
+          },
+          "description": "The severity of policy-assistant findings, per finding code,\nreplacing the default.",
+          "propertyNames": {
+            "enum": [
+              "weak_identity",
+              "user_writable_path_allow",
+              "restricted_publisher_broad",
+              "broad_wildcard",
+              "shadowed",
+              "contradiction",
+              "ineffective_vs_mandatory",
+              "duplicate_rule",
+              "duplicate_principal",
+              "expired_rule_present",
+              "expiring_soon",
+              "review_overdue",
+              "stale_rule",
+              "revoked_or_expired_signer",
+              "vulnerable_version_allowed",
+              "missing_justification",
+              "exception_without_expiry",
+              "too_many_hash_rules",
+              "regex_cost"
+            ]
+          },
+          "type": "object"
+        },
+        "stale_after_days": {
+          "default": 90,
+          "description": "A rule with no hits for this many days, while usage was observed,\nis stale: 1 to 3650, default 90.",
+          "format": "uint16",
+          "maximum": 3650,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "Level": {
       "description": "How an unknown object is handled. The variants are declared from least\nto most restrictive, so `Ord` is the restrictiveness order.",
       "oneOf": [
@@ -1370,8 +1474,28 @@
     },
     "Metadata": {
       "additionalProperties": false,
-      "description": "Governance metadata (#40). More fields arrive with #40.",
+      "description": "Governance metadata (#40), on a policy, a rule set or a rule. Every\nfield is optional. Metadata is not decision-relevant: it never changes\nwhat a rule decides ([`PolicyDocument::decision_relevant`]).",
       "properties": {
+        "approved_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When it was approved."
+        },
+        "approved_by": {
+          "description": "Who approved it. Required for exception rules in governance mode.",
+          "maxLength": 128,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "comment": {
           "description": "A free-text comment.",
           "maxLength": 4096,
@@ -1380,13 +1504,116 @@
             "null"
           ]
         },
-        "justification": {
-          "description": "Why the object exists.",
+        "compensating_controls": {
+          "description": "The controls that make up for the risk.",
           "maxLength": 4096,
           "type": [
             "string",
             "null"
           ]
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When it was created."
+        },
+        "created_by": {
+          "description": "Who created it.",
+          "maxLength": 128,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exception": {
+          "description": "Mark the rule as an exception, in addition to the rules that are\nexceptions by their nature ([`crate::lifecycle::is_exception`]).",
+          "type": "boolean"
+        },
+        "justification": {
+          "description": "Why the object exists. Required in governance mode for allow, trust,\nexclusion and exception rules.",
+          "maxLength": 4096,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last_reviewed_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When it was last reviewed."
+        },
+        "last_reviewed_by": {
+          "description": "Who reviewed it last.",
+          "maxLength": 128,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "owner": {
+          "description": "The principal who owns the object, such as a user or group ID. The\nowner or a tenant administrator may edit it, and is notified before\nit expires (#16).",
+          "maxLength": 128,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requested_by": {
+          "description": "Who asked for it.",
+          "maxLength": 128,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "review_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcDate"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When it is due for review. Unset on an allow or trust rule means a\nyear after `created_at` ([`crate::lifecycle::review_by`])."
+        },
+        "risk_rating": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RiskRating"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The risk it carries. Required for exception rules in governance mode."
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuleSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where it came from."
         },
         "tags": {
           "description": "Free-form labels, each 1 to 128 characters, at most 64.",
@@ -1400,6 +1627,26 @@
         },
         "ticket_ref": {
           "description": "A change or ticket reference.",
+          "maxLength": 128,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When it was changed last."
+        },
+        "updated_by": {
+          "description": "Who changed it last.",
           "maxLength": 128,
           "minLength": 1,
           "type": [
@@ -1706,6 +1953,37 @@
       ],
       "type": "string"
     },
+    "OnExpire": {
+      "description": "What happens when a rule expires.",
+      "oneOf": [
+        {
+          "const": "deactivate",
+          "description": "The rule behaves as absent. The default.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The rule is deleted this many days after it expires (1 to 3650):\nit behaves as absent at once, and [`crate::lifecycle::retire_due`]\nlists it for deletion once the days have passed.",
+          "properties": {
+            "delete_after_days": {
+              "format": "uint16",
+              "maximum": 3650,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "delete_after_days"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "convert_to_audit",
+          "description": "The rule becomes an `audit` rule: it still records matches, but no\nlonger decides.",
+          "type": "string"
+        }
+      ]
+    },
     "OnWindowClose": {
       "description": "What happens to processes a scheduled allow let run, when its schedule\ncloses. The engine sends a directive; the agent and the tray act on it\n(#4, #11).",
       "oneOf": [
@@ -1958,6 +2236,10 @@
             "string",
             "null"
           ]
+        },
+        "governance": {
+          "$ref": "#/$defs/GovernanceSettings",
+          "description": "Governance settings: justification, review and expiry rules, the\npolicy assistant's severities and counter reporting (#40)."
         },
         "id": {
           "$ref": "#/$defs/PolicyId",
@@ -2540,6 +2822,26 @@
       "$ref": "#/$defs/Uuid7",
       "description": "The ID of an approval request template (#11)."
     },
+    "RiskRating": {
+      "description": "The risk an exception carries.",
+      "oneOf": [
+        {
+          "const": "low",
+          "description": "Low.",
+          "type": "string"
+        },
+        {
+          "const": "medium",
+          "description": "Medium.",
+          "type": "string"
+        },
+        {
+          "const": "high",
+          "description": "High.",
+          "type": "string"
+        }
+      ]
+    },
     "Rule": {
       "additionalProperties": false,
       "description": "One rule: a match tree and the action taken when it matches.",
@@ -2547,6 +2849,17 @@
         "action": {
           "$ref": "#/$defs/Action",
           "description": "What happens when it matches (#34)."
+        },
+        "activates_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The rule is absent before this instant (#40)."
         },
         "description": {
           "description": "Free-text description, at most 4096 characters.",
@@ -2578,6 +2891,17 @@
           "default": "inherit",
           "description": "Per-rule enforcement override (#36). Only for `deny` rules."
         },
+        "expires_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The rule is absent from this instant on (#40). An expired allow\nnever revives, even if the clock is set back\n([`crate::lifecycle`])."
+        },
         "id": {
           "$ref": "#/$defs/RuleId",
           "description": "Stable ID, never reused."
@@ -2602,6 +2926,10 @@
             "$ref": "#/$defs/ObjectType"
           },
           "type": "array"
+        },
+        "on_expire": {
+          "$ref": "#/$defs/OnExpire",
+          "description": "What happens when the rule expires (#40)."
         },
         "order": {
           "description": "Position for the `first_match` model (#35): 0 to 1000000, lowest\nfirst. Rules of custom (not read-only) rule sets use 100001 to\n999989; the other ranges are reserved for system, curated and\ncatch-all rules.",
@@ -2819,6 +3147,46 @@
         "scopes"
       ],
       "type": "object"
+    },
+    "RuleSource": {
+      "description": "Where a rule came from.",
+      "oneOf": [
+        {
+          "const": "manual",
+          "description": "Written by an administrator.",
+          "type": "string"
+        },
+        {
+          "const": "learned",
+          "description": "From learning mode (#5).",
+          "type": "string"
+        },
+        {
+          "const": "recommendation",
+          "description": "Accepted from a recommendation (#5).",
+          "type": "string"
+        },
+        {
+          "const": "catalogue",
+          "description": "From the curated catalogue.",
+          "type": "string"
+        },
+        {
+          "const": "import",
+          "description": "Imported from another format.",
+          "type": "string"
+        },
+        {
+          "const": "api",
+          "description": "Created through the API (#15).",
+          "type": "string"
+        },
+        {
+          "const": "approval_request",
+          "description": "From an approved user request (#11).",
+          "type": "string"
+        }
+      ]
     },
     "Schedule": {
       "additionalProperties": false,
@@ -3315,6 +3683,11 @@
         }
       ]
     },
+    "Timestamp": {
+      "description": "An RFC 3339 date-time, such as `2026-11-25T09:30:00Z`. Read as UTC; fractions of a second are dropped.",
+      "format": "date-time",
+      "type": "string"
+    },
     "TokenProfileRef": {
       "$ref": "#/$defs/Uuid7",
       "description": "The ID of an access token profile for elevation (#12, #150)."
@@ -3573,6 +3946,11 @@
           "type": "string"
         }
       ]
+    },
+    "UtcDate": {
+      "description": "An RFC 3339 full date, such as `2026-11-25`, in UTC.",
+      "format": "date",
+      "type": "string"
     },
     "Uuid7": {
       "description": "A UUID version 7 in canonical lowercase form.",

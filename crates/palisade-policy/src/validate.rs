@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 mod actions;
+mod lifecycle;
 mod mode;
 mod precedence;
 mod scope;
@@ -225,6 +226,23 @@ pub enum ErrorCode {
     /// default in a rule that lets an object run, trusts it or excludes it
     /// (#31).
     SignatureStatusRelaxed,
+    /// `expires_at` is not after `activates_at` (#40).
+    InvalidActivityWindow,
+    /// A governance setting is out of range or repeated (#40).
+    InvalidGovernance,
+    /// In governance mode, a rule that needs a justification has none
+    /// (#40).
+    JustificationRequired,
+    /// In governance mode, an allow or trust rule has no review date and
+    /// no creation time to derive one from (#40).
+    ReviewDateRequired,
+    /// In governance mode, an exception rule has no expiry, an expiry more
+    /// than 365 days after it was approved or created, no approver, or no
+    /// risk rating (#40).
+    ExceptionIncomplete,
+    /// `on_expire` on a rule without `expires_at`, or `convert_to_audit` on
+    /// a rule of a mandatory rule set (#40).
+    OnExpireNotApplicable,
 }
 
 impl ErrorCode {
@@ -299,6 +317,12 @@ impl ErrorCode {
             Self::DenyMatchesSelf => "deny_matches_self",
             Self::MandatoryBlocklistRequired => "mandatory_blocklist_required",
             Self::SignatureStatusRelaxed => "signature_status_relaxed",
+            Self::InvalidActivityWindow => "invalid_activity_window",
+            Self::InvalidGovernance => "invalid_governance",
+            Self::JustificationRequired => "justification_required",
+            Self::ReviewDateRequired => "review_date_required",
+            Self::ExceptionIncomplete => "exception_incomplete",
+            Self::OnExpireNotApplicable => "on_expire_not_applicable",
         }
     }
 
@@ -509,6 +533,7 @@ impl Validator {
         self.settings(doc);
         self.modes(doc);
         self.unknown(doc);
+        self.lifecycle(doc);
         if policy.precedence_model == PrecedenceModel::AllowWins {
             self.push(
                 ErrorCode::AllowWinsNotRecommended,
@@ -1112,8 +1137,22 @@ impl Validator {
     fn metadata(&mut self, base: &str, m: &Metadata) {
         self.text(&format!("{base}/justification"), m.justification.as_deref());
         self.text(&format!("{base}/comment"), m.comment.as_deref());
-        if let Some(ticket) = &m.ticket_ref {
-            self.name(&format!("{base}/ticket_ref"), ticket);
+        self.text(
+            &format!("{base}/compensating_controls"),
+            m.compensating_controls.as_deref(),
+        );
+        for (key, value) in [
+            ("ticket_ref", &m.ticket_ref),
+            ("owner", &m.owner),
+            ("requested_by", &m.requested_by),
+            ("approved_by", &m.approved_by),
+            ("created_by", &m.created_by),
+            ("updated_by", &m.updated_by),
+            ("last_reviewed_by", &m.last_reviewed_by),
+        ] {
+            if let Some(v) = value {
+                self.name(&format!("{base}/{key}"), v);
+            }
         }
         self.tags(&format!("{base}/tags"), &m.tags);
     }

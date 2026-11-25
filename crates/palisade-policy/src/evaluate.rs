@@ -59,6 +59,16 @@
 //!   object run by itself (#114). When the object is blocked or ignored,
 //!   they are listed as overridden instead.
 //!
+//! # Rule lifecycle
+//!
+//! A rule outside its activity window (`activates_at`, `expires_at`, #40)
+//! behaves as absent, exactly like a disabled rule
+//! ([`crate::lifecycle::activity`]). [`Evaluator::at`] sets the clock.
+//! Without one, a time-bounded rule is judged as if the time were unknown,
+//! in the closed direction: one that lets an object run, trusts it or
+//! excludes it is inactive, and any other is active. An expired rule with
+//! `on_expire: convert_to_audit` only annotates.
+//!
 //! `defer` rules have no opinion. They are never evaluated, so a `defer`
 //! that matches makes `first_match` continue with the next rule.
 //!
@@ -199,6 +209,12 @@ struct Compiled<'p> {
     /// A rule of the managed `system_baseline` (#39): a floor that only
     /// decides when no other stage-4 rule matched.
     floor: bool,
+    /// The rule has an activity window, so its activity depends on the
+    /// clock (#40).
+    timed: bool,
+    /// The `audit` stand-in of an expired rule with `on_expire:
+    /// convert_to_audit`: live only once the rule has expired.
+    twin: bool,
 }
 
 impl Compiled<'_> {
@@ -352,6 +368,7 @@ pub struct Evaluator<'p> {
     self_images: Vec<SelfImage>,
     /// Where the policy's unknown settings apply (#38, #39).
     unknown_scope: UnknownScope,
+    clock: Option<crate::lifecycle::RuleClock>,
 }
 
 /// What one evaluation knows besides the matching rules.
@@ -394,6 +411,7 @@ impl<'p> Evaluator<'p> {
         let compile = |s| Arc::new(CompiledScope::compile(s, env, max_age));
         let policy_scope = policy.scope.as_ref().map(compile);
         let mut rules = Vec::new();
+        let mut twins = Vec::new();
         for id in &policy.rule_sets {
             let Some(set) = sets.get(id).copied() else {
                 continue;
@@ -433,11 +451,16 @@ impl<'p> Evaluator<'p> {
                     ),
                     _ => (UnknownAs::NoMatch, Unparseable::Unknown),
                 };
+                let timed = rule.activates_at.is_some() || rule.expires_at.is_some();
+                let converts = rule.expires_at.is_some()
+                    && rule.on_expire == crate::model::OnExpire::ConvertToAudit
+                    && !set.mandatory
+                    && role != Role::Annotation;
                 let mut scopes = chain.clone();
                 if let Some(s) = &rule.scope {
                     scopes.push((ScopeLevel::Rule, compile(s)));
                 }
-                rules.push(Compiled {
+                let compiled = Compiled {
                     set,
                     rule,
                     tree,
@@ -449,7 +472,34 @@ impl<'p> Evaluator<'p> {
                     scopes,
                     bias: Bias::of(rule.action.kind()),
                     floor: crate::unknown::baseline::is_system_baseline(set),
-                });
+                    timed,
+                    twin: false,
+                };
+                if converts {
+                    twins.push(Compiled {
+                        set,
+                        rule,
+                        tree: CompiledMatch::compile(&rule.match_).map_err(|errors| {
+                            BuildError {
+                                rule_id: rule.id,
+                                errors,
+                            }
+                        })?,
+                        role: Role::Annotation,
+                        spec: compiled.spec,
+                        unknown_as: UnknownAs::NoMatch,
+                        unparseable: Unparseable::Unknown,
+                        reference: compiled.reference,
+                        // The same scopes as the rule: an audit twin
+                        // annotates only where the rule would have applied.
+                        scopes: compiled.scopes.clone(),
+                        bias: Bias::of(crate::model::ActionKind::Audit),
+                        floor: false,
+                        timed: true,
+                        twin: true,
+                    });
+                }
+                rules.push(compiled);
             }
         }
         let unknown_scope = UnknownScope::new(
@@ -467,13 +517,64 @@ impl<'p> Evaluator<'p> {
                 })
                 .collect(),
         );
+        // Twins come last, so the ordinals of real rules (for counters) are
+        // positions in the policy.
+        rules.extend(twins);
         Ok(Self {
             policy,
             rules,
             resolver: Resolver::new(policy.precedence_model, &policy.precedence_options),
             self_images: Vec::new(),
             unknown_scope,
+            clock: None,
         })
+    }
+
+    /// The same evaluator, deciding at `clock`: rules outside their
+    /// activity window behave as absent ([`crate::lifecycle`], #40).
+    #[must_use]
+    pub const fn at(mut self, clock: crate::lifecycle::RuleClock) -> Self {
+        self.clock = Some(clock);
+        self
+    }
+
+    /// Hit counters for this evaluator's rules, by ordinal (#40).
+    #[must_use]
+    pub fn counters(&self) -> crate::lifecycle::Counters {
+        crate::lifecycle::Counters::new(
+            self.policy.id,
+            self.policy.revision,
+            self.rules
+                .iter()
+                .filter(|r| !r.twin)
+                .map(|r| r.reference)
+                .collect(),
+        )
+    }
+
+    /// Sets the clock rules are judged at (#40). The agent sets it before
+    /// each decision, or whenever its trusted time or floor moves.
+    pub const fn set_clock(&mut self, clock: crate::lifecycle::RuleClock) {
+        self.clock = Some(clock);
+    }
+
+    /// Whether a compiled rule takes part at the evaluator's clock.
+    fn live(&self, r: &Compiled<'_>) -> bool {
+        use crate::lifecycle::Activity;
+        if !r.timed {
+            return true;
+        }
+        let activity = match &self.clock {
+            Some(clock) => crate::lifecycle::activity(r.rule, clock),
+            // No clock: the closed direction.
+            None if r.rule.action.kind().needs_identity() => Activity::NotYetActive,
+            None => Activity::Active,
+        };
+        if r.twin {
+            activity == Activity::Expired
+        } else {
+            activity == Activity::Active
+        }
     }
 
     /// The same evaluator, with Palisade's own images pinned (#39): an
@@ -717,7 +818,7 @@ impl<'p> Evaluator<'p> {
         let matched = self
             .rules
             .iter()
-            .filter(|r| r.applies(subject, &mut notes))
+            .filter(|r| self.live(r) && r.applies(subject, &mut notes))
             .collect();
         (matched, notes)
     }

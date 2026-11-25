@@ -1,0 +1,6 @@
+invalid_governance /policy/governance/expiry_notice_days/1
+invalid_activity_window /rule_sets/0/rules/0/expires_at
+on_expire_not_applicable /rule_sets/0/rules/1/on_expire
+justification_required /rule_sets/0/rules/2/metadata/justification
+review_date_required /rule_sets/0/rules/2/metadata/review_by
+exception_incomplete /rule_sets/0/rules/3
