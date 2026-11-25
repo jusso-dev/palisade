@@ -1,0 +1,39 @@
+# Editor settings, read by most editors natively or through a plug-in.
+# https://editorconfig.org
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{yml,yaml,json}]
+indent_size = 2
+
+# rustfmt owns Rust formatting; this only sets the defaults it agrees with.
+[*.rs]
+indent_size = 4
+max_line_length = 100
+
+[*.md]
+# A trailing double space is a Markdown line break.
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab
+
+# Windows scripts keep CRLF line endings.
+[*.{ps1,bat,cmd}]
+end_of_line = crlf
+
+# Binary and byte-exact fixtures: never touch them.
+[{**/tests/fixtures/**,**/testdata/**,*.der,*.p7,*.cat,*.lock}]
+charset = unset
+end_of_line = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+indent_style = unset
+indent_size = unset

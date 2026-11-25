@@ -36,6 +36,7 @@ publish = false
 palisade-core = { path = "crates/palisade-core", default-features = false }
 palisade-fileid = { path = "crates/palisade-fileid" }
 palisade-policy = { path = "crates/palisade-policy" }
+palisade-proto = { path = "crates/palisade-proto" }
 #
 # Third-party crates. Justify every new entry in the PR description.
 aho-corasick = { version = "1.1.5", default-features = false, features = ["std", "perf-literal"] }
@@ -85,10 +86,12 @@ tower-http = { version = "0.6.11", default-features = false }
 tracing = { version = "0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "std"] }
 unicode-normalization = { version = "0.1.26", default-features = false, features = ["std"] }
+windows-registry = { version = "0.6.1", default-features = false, features = ["std"] }
 windows-service = { version = "0.8.1" }
 # Windows API bindings for `palisade_fileid::win` (ADR 0003, ADR 0011). Each
 # user enables only the API families it calls.
 windows-sys = { version = "0.61.2", default-features = false }
+windows-version = { version = "0.1.7", default-features = false }
 yaml-rust2 = { version = "0.13.2", default-features = false }
 zeroize = { version = "1.9.2", default-features = false, features = ["alloc"] }
 

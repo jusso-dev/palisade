@@ -56,7 +56,22 @@ rustup target add x86_64-pc-windows-gnu
 cargo check --workspace --all-targets --target x86_64-pc-windows-gnu
 ```
 
-A fuller setup guide, a dev container and opt-in Git hooks are planned in [#29](https://github.com/jusso-dev/palisade/issues/29).
+Fuller guides: [docs/dev/windows.md](docs/dev/windows.md) (build tools, running the agent in
+the foreground, tracing, test signing in a VM, and what to do if a policy locks you out) and
+[docs/dev/unix.md](docs/dev/unix.md) (what builds where, the [dev container](.devcontainer),
+running the server, and the fake agent for server and console work without Windows).
+
+### Git hooks (opt-in)
+
+`.githooks/` has a `pre-commit` hook (formatting, spelling and banned terms) and a `commit-msg`
+hook (the Conventional Commit format below). They are off until you turn them on for your clone:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+Nothing in the repository turns them on for you. `git commit --no-verify` skips them once; CI
+runs the same checks either way. See [.githooks/README.md](.githooks/README.md).
 
 ## Before you push
 
@@ -81,6 +96,19 @@ warning fails CI**, including the lints set to `warn`.
 - Return errors with enough context to act on. Do not panic on bad input: Palisade parses untrusted
   files, policy and network messages.
 - `todo!()`, `unimplemented!()` and `dbg!()` are denied.
+
+### Time, processes and the platform
+
+- Read the OS only through the `palisade_core::platform` traits (#29), so the logic can be tested
+  on any OS with the mocks in `palisade_core::test_util`.
+- `clippy.toml` bans `std::time::SystemTime::now` everywhere: take time from a
+  `palisade_core::platform::Clock`. The one implementation that reads the wall clock, and
+  repository tooling, say so with `#[expect(clippy::disallowed_methods, reason = "...")]`.
+- `palisade-policy` also bans `std::process::Command::new`, in its tests too
+  (`crates/palisade-policy/clippy.toml`). Clippy reads the nearest `clippy.toml`, so a setting
+  added to the root file must be added to that one as well.
+- Formatting is `cargo fmt` with the stable options in `rustfmt.toml`. `.editorconfig` sets the
+  editor defaults that match it.
 - Silent numeric truncation is flagged (`cast_possible_truncation` and related lints). Use checked
   conversions.
 - Public items need doc comments (`missing_docs`).

@@ -7,7 +7,10 @@ pub mod cli;
 pub mod config;
 pub mod host;
 pub mod lifecycle;
+pub mod platform;
 #[cfg(windows)]
 pub mod service;
+#[cfg(feature = "test-util")]
+pub mod simulate;
 pub mod subsystem;
 pub mod supervisor;

@@ -1,0 +1,13 @@
+# rustfmt configuration. Stable options only, so `cargo fmt` works on the
+# pinned stable toolchain (rust-toolchain.toml) without nightly.
+#
+# #29 also asks for `imports_granularity = "Crate"` and
+# `group_imports = "StdExternalCrate"`. Both are still unstable rustfmt
+# options: stable rustfmt ignores them with a warning on every run, and
+# applying them needs nightly. They are left out until they stabilise.
+# To preview them on a nightly toolchain (do not commit the result):
+#
+#   cargo +nightly fmt --all -- --config imports_granularity=Crate,group_imports=StdExternalCrate
+
+edition = "2024"
+style_edition = "2024"

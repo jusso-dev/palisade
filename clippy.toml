@@ -1,4 +1,21 @@
+# Clippy configuration for the whole workspace. `palisade-policy` has its own
+# copy, `crates/palisade-policy/clippy.toml`, with stricter bans; Clippy reads
+# the file nearest the crate, so keep the shared settings in both.
+
+# The MSRV, so Clippy does not suggest APIs newer than the declared
+# `rust-version` (root Cargo.toml). Keep the two in step.
+msrv = "1.94"
+
 # `unwrap_used` is denied and `expect_used` warns in production code (see the
 # root Cargo.toml). Tests may use both.
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
+
+# The wall clock is read only through `palisade_core::platform::Clock`
+# (#29), so rule expiry, schedules, time boxes and OTP windows can be tested
+# with a mock clock. The one implementation that reads it, and repository
+# tooling that stamps dates, say so with
+# `#[expect(clippy::disallowed_methods, reason = "...")]`.
+disallowed-methods = [
+    { path = "std::time::SystemTime::now", reason = "read time through palisade_core::platform::Clock (#29)" },
+]

@@ -1,0 +1,17 @@
+# Clippy configuration for `palisade-policy`. Clippy uses the nearest
+# `clippy.toml`, so this file replaces the root one for this crate: the
+# shared settings are repeated, and the policy-only ban is added.
+#
+# Policy evaluation is pure (ADR 0003): it receives facts and a clock from
+# the caller, and never reads the system itself. `cargo xtask check-deps`
+# keeps I/O crates out of its dependency tree; these bans cover the
+# standard library's clock and process APIs, in tests too.
+
+msrv = "1.94"
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+
+disallowed-methods = [
+    { path = "std::time::SystemTime::now", reason = "take time from palisade_core::platform::Clock (#29)" },
+    { path = "std::process::Command::new", reason = "policy evaluation must not run processes (ADR 0003)" },
+]

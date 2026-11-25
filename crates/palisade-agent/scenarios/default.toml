@@ -1,0 +1,96 @@
+# The built-in scenario for `palisade-agent --simulate` (#29).
+#
+# A workstation where a user opens a shell, runs two tools, and a third
+# program starts from the Downloads folder. Every value is invented; the
+# format is documented in crates/palisade-agent/README.md.
+
+start = "2026-01-05T09:00:00.000000Z"
+mode = "audit"
+
+[device]
+hostname = "SIM-0001"
+domain = "example.test"
+os_version = "10.0.26100.2314"
+architecture = "x64"
+tenant_id = "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e61"
+host_id = "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60"
+
+[[user]]
+sid = "S-1-5-18"
+name = "SYSTEM"
+domain = "NT AUTHORITY"
+session = "services"
+elevated = true
+
+[[user]]
+sid = "S-1-5-21-1111111111-2222222222-3333333333-1001"
+name = "alice"
+domain = "EXAMPLE"
+session = "console"
+
+# Processes already running when the agent starts.
+[[running]]
+pid = 4
+image = "System"
+user = "S-1-5-18"
+
+[[running]]
+pid = 744
+parent = 4
+image = 'C:\Windows\System32\services.exe'
+user = "S-1-5-18"
+
+[[running]]
+pid = 5120
+parent = 744
+image = 'C:\Windows\explorer.exe'
+user = "S-1-5-21-1111111111-2222222222-3333333333-1001"
+
+# Each step starts one process, `after_ms` after the previous step.
+[[step]]
+after_ms = 1500
+pid = 6200
+parent = 5120
+image = 'C:\Windows\System32\cmd.exe'
+user = "S-1-5-21-1111111111-2222222222-3333333333-1001"
+outcome = "allowed"
+signer = "Example OS Publisher"
+
+[[step]]
+after_ms = 800
+pid = 6344
+parent = 6200
+image = 'C:\Program Files\Example\tool.exe'
+command_line = '"C:\Program Files\Example\tool.exe" --version'
+user = "S-1-5-21-1111111111-2222222222-3333333333-1001"
+outcome = "allowed"
+signer = "Example Software Ltd"
+
+[[step]]
+after_ms = 2000
+pid = 7020
+parent = 5120
+image = 'C:\Users\alice\Downloads\setup.exe'
+user = "S-1-5-21-1111111111-2222222222-3333333333-1001"
+outcome = "audited"
+
+# cmd.exe exits, and a service host reuses its process ID. The next step's
+# parent is the service host, so its ancestry is the service host, the
+# service control manager and System, never the old shell.
+[[step]]
+after_ms = 500
+exited = [6200]
+pid = 6200
+parent = 744
+image = 'C:\Windows\System32\svchost.exe'
+user = "S-1-5-18"
+outcome = "allowed"
+signer = "Example OS Publisher"
+
+[[step]]
+after_ms = 250
+pid = 8100
+parent = 6200
+image = 'C:\Windows\System32\wbem\WmiPrvSE.exe'
+user = "S-1-5-18"
+outcome = "allowed"

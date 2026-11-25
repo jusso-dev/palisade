@@ -17,6 +17,9 @@ std = []
 serde = ["dep:serde"]
 # JSON Schema descriptions of the shared types, for `palisade-policy`'s schema.
 schema = ["serde", "dep:schemars"]
+# In-memory mocks of the platform traits, and their contract checks. For
+# tests and the agent's simulator only; never in a release build.
+test-util = []
 
 [dependencies]
 schemars = { workspace = true, optional = true }

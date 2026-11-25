@@ -1359,10 +1359,25 @@ version = "0.2.1"
 criteria = "safe-to-deploy"
 notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
 
+[[exemptions.windows-registry]]
+version = "0.6.1"
+criteria = "safe-to-deploy"
+notes = "Added by #29 (palisade-agent platform backends: safe Windows registry and OS version reads) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
+[[exemptions.windows-result]]
+version = "0.4.1"
+criteria = "safe-to-deploy"
+notes = "Added by #29 (palisade-agent platform backends: safe Windows registry and OS version reads) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
 [[exemptions.windows-service]]
 version = "0.8.1"
 criteria = "safe-to-deploy"
 notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.windows-strings]]
+version = "0.5.1"
+criteria = "safe-to-deploy"
+notes = "Added by #29 (palisade-agent platform backends: safe Windows registry and OS version reads) when cargo-vet was already in place. Audit, or import an audit, before bumping."
 
 [[exemptions.windows-sys]]
 version = "0.52.0"
@@ -1378,6 +1393,11 @@ notes = "Added by #252 (palisade-agent service host: async runtime, logging and 
 version = "0.52.6"
 criteria = "safe-to-deploy"
 notes = "Added by #247 (palisade-fileid Authenticode verification: ring and its build and platform dependencies) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.windows-version]]
+version = "0.1.7"
+criteria = "safe-to-deploy"
+notes = "Added by #29 (palisade-agent platform backends: safe Windows registry and OS version reads) when cargo-vet was already in place. Audit, or import an audit, before bumping."
 
 [[exemptions.windows_aarch64_gnullvm]]
 version = "0.52.6"

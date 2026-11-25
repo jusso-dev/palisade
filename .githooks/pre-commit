@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Opt-in pre-commit hook (#29). Enable once per clone with
+#   git config core.hooksPath .githooks
+# and disable with `git config --unset core.hooksPath`. Nothing enables it
+# for you. Skip it for one commit with `git commit --no-verify`; CI runs the
+# same checks regardless.
+#
+# Runs, from the repository root:
+#   1. cargo fmt --all --check
+#   2. typos, the spell checker, if it is installed (#27 pins the version)
+#   3. cargo xtask check-banned-terms, once that command exists (#27)
+# Each check that cannot run says why. A failing check blocks the commit.
+set -uo pipefail
+
+root=$(git rev-parse --show-toplevel) || exit 1
+cd "$root" || exit 1
+
+failed=0
+note() { printf 'pre-commit: %s\n' "$*" >&2; }
+
+note "cargo fmt --all --check"
+if ! cargo fmt --all --check; then
+  note "formatting differs; run \`cargo fmt --all\` and stage the result"
+  failed=1
+fi
+
+if command -v typos >/dev/null 2>&1; then
+  note "typos"
+  if ! typos; then
+    note "spelling problems; fix them, or add a word to _typos.toml"
+    failed=1
+  fi
+else
+  note "skipped typos: not installed (cargo install --locked typos-cli@1.52.2)"
+fi
+
+# The banned-terms check lands with the documentation site (#27). Until it
+# does, `cargo xtask help` does not list it, and this step is skipped.
+if cargo xtask help 2>/dev/null | grep -q 'check-banned-terms'; then
+  note "cargo xtask check-banned-terms"
+  if ! cargo xtask check-banned-terms; then
+    note "a banned term was found; see docs/NAMING.md"
+    failed=1
+  fi
+else
+  note "skipped check-banned-terms: this checkout has no such xtask command yet (#27)"
+fi
+
+exit "$failed"
