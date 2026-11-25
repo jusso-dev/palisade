@@ -356,23 +356,42 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     ignoring case. With no trusted time, any entry revokes. `RevocationMode` and
     `RevocationFailure` record how the caller fetched and whether a missing
     answer fails open (default) or closed (code 1006).
+  - OCSP responses are revocation data too. `OcspResponse::from_der` parses
+    an `OCSPResponse` (RFC 6960, basic type) strictly: at most 1 MiB, 256
+    `SingleResponse`s and 8 responder certificates; SHA-1 or SHA-256
+    `CertID`s; unprocessed critical extensions (a critical nonce included)
+    rejected. `RevocationSet::add_ocsp` adds one. A response answers for a
+    certificate only when its `CertID` names it under its issuer on the
+    chain, and the issuer signed it or delegated to a responder (a
+    certificate it issued, with the OCSP Signing EKU) that did; the
+    responder ID must name the signing key. A `revoked` answer revokes
+    like a CRL entry, with its date and reason, however old; a `good`
+    answer covers the certificate only while current; `unknown` says
+    nothing. OCSP signature checks share the 32-per-file budget with CRLs.
   - `CertificateOptions` pin one certificate (by thumbprint or TBS hash)
-    with an `ErrorIgnoreFlags` mask (ignore expiry, ignore revocation
-    unknown, ignore invalid usage, allow untrusted root). Allow untrusted
-    root relaxes only a complete chain: an incomplete one (issuers stripped
-    from the unsigned certificate set) always fails. Every relaxation used
-    is recorded in `SignatureValidity::relaxed` for the decision trace.
+    with an `ErrorIgnoreFlags` mask: ignore expiry, ignore revocation
+    unknown, ignore invalid usage, allow untrusted root, ignore time
+    nesting and ignore basic constraints. Allow untrusted root relaxes only
+    a complete chain: an incomplete one (issuers stripped from the unsigned
+    certificate set) always fails. Ignore basic constraints pins the issuer
+    itself: `ValidityPolicy::relax_trust` passes those options to the
+    `TrustConfig` chains are built with (#49), and a chain that used a
+    relaxation for an issuer no option allows fails with code 1008. When
+    `ValidityPolicy::require_time_nesting` is set (default off, as the OS
+    ignores it for code signing), a chain that is not time nested fails
+    with code 1007 unless an option on the chain ignores it. Every
+    relaxation used is recorded in `SignatureValidity::relaxed` for the
+    decision trace.
   - Every outcome is one `VerificationError` from `palisade-core`: codes 0
     to 28 are the OS code integrity `VerificationError` values with the
-    same meaning, and 1000 to 1006 are Palisade's own. `status_error` maps a
+    same meaning, and 1000 to 1008 are Palisade's own. `status_error` maps a
     #48 `SignatureStatus` into it. `ValidityReport::primary` is the first
     signature that passes everything, ranked by digest as in #48 and #49,
     with its `SignerIdentity`.
 
-  Fetching CRLs and OCSP responses (and the response cache) belongs to the
-  agent and server; OCSP response parsing comes with them. Basic-constraint
-  and time-nesting relaxations would need chain building to change, so they
-  are not offered.
+  Fetching CRLs and OCSP responses (proxy settings, the 5 s timeout and the
+  24 h response cache) belongs to the agent and server; this crate takes
+  what they fetched as data.
 - `catalog`: catalog-signed files
   ([#51](https://github.com/jusso-dev/palisade/issues/51)). A catalog
   (`.cat`) is a PKCS#7 SignedData over a certificate trust list (CTL,

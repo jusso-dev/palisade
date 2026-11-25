@@ -107,11 +107,18 @@ pub enum VerificationError {
     CountersignatureRequired,
     /// 1006: a required revocation check could not be completed.
     RevocationUnavailable,
+    /// 1007: a certificate's validity period is not inside its issuer's
+    /// ("time nesting"), and policy requires it to be.
+    TimeNotNested,
+    /// 1008: the chain uses an issuer that is not a CA, or whose path
+    /// length constraint is exceeded, without a per-certificate relaxation
+    /// that allows it.
+    BasicConstraintsViolated,
 }
 
 impl VerificationError {
     /// Every code, in numeric order.
-    pub const ALL: [Self; 36] = [
+    pub const ALL: [Self; 38] = [
         Self::Ok,
         Self::InvalidHash,
         Self::SharedWritableSections,
@@ -148,6 +155,8 @@ impl VerificationError {
         Self::KeyTooSmall,
         Self::CountersignatureRequired,
         Self::RevocationUnavailable,
+        Self::TimeNotNested,
+        Self::BasicConstraintsViolated,
     ];
 
     /// The first Palisade-specific code. Codes below it are OS codes.
@@ -193,6 +202,8 @@ impl VerificationError {
             Self::KeyTooSmall => 1004,
             Self::CountersignatureRequired => 1005,
             Self::RevocationUnavailable => 1006,
+            Self::TimeNotNested => 1007,
+            Self::BasicConstraintsViolated => 1008,
         }
     }
 
@@ -257,6 +268,8 @@ impl VerificationError {
             Self::KeyTooSmall => "key_too_small",
             Self::CountersignatureRequired => "countersignature_required",
             Self::RevocationUnavailable => "revocation_unavailable",
+            Self::TimeNotNested => "time_not_nested",
+            Self::BasicConstraintsViolated => "basic_constraints_violated",
         }
     }
 }

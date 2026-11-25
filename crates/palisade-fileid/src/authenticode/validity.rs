@@ -63,6 +63,15 @@
 //! certificate is on a signature's full chain, the flags relax the matching
 //! checks for that signature, and every relaxation actually used is
 //! recorded in [`SignatureValidity::relaxed`] for the decision trace (#41).
+//!
+//! Two flags reach into chain building (#49).
+//! [`ErrorIgnoreFlags::IGNORE_BASIC_CONSTRAINTS`] lets a pinned certificate
+//! issue although it is not a CA or its path length is exceeded
+//! ([`ValidityPolicy::relax_trust`] passes it to the [`TrustConfig`]); any
+//! chain that used such a relaxation for an issuer no option allows fails
+//! with code 1008. [`ErrorIgnoreFlags::IGNORE_TIME_NESTING`] excuses a
+//! chain that is not time nested when
+//! [`ValidityPolicy::require_time_nesting`] asks for it (code 1007).
 
 #![forbid(unsafe_code)]
 
@@ -103,10 +112,6 @@ pub enum ExpiryPolicy {
 }
 
 /// A per-certificate relaxation mask, carried on trusted-publisher rules.
-///
-/// Only flags this module can honour exist. Relaxing basic constraints and
-/// time nesting needs chain building to change (#49), so those are not
-/// offered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize)]
 pub struct ErrorIgnoreFlags(pub u8);
 
@@ -127,8 +132,20 @@ impl ErrorIgnoreFlags {
     /// are unsigned, so anyone could strip the issuers above the pin to
     /// escape their revocation, usage, expiry and key-size checks.
     pub const ALLOW_UNTRUSTED_ROOT: u8 = 0x08;
+    /// A chain whose certificates are not time nested (a certificate valid
+    /// outside its issuer's period) does not fail the signature when
+    /// [`ValidityPolicy::require_time_nesting`] is set.
+    pub const IGNORE_TIME_NESTING: u8 = 0x10;
+    /// The pinned certificate may issue although it is not a CA or its
+    /// path length is exceeded. Unlike the other flags, it pins the
+    /// **issuer** itself: it relaxes only links that this certificate
+    /// issued. [`ValidityPolicy::relax_trust`] passes it to chain building
+    /// ([`TrustConfig::ignore_basic_constraints`]), which keeps every other
+    /// link check; [`evaluate_validity`] then fails, with code 1008, any
+    /// chain that used the relaxation for an issuer no option allows.
+    pub const IGNORE_BASIC_CONSTRAINTS: u8 = 0x20;
     /// Every flag.
-    pub const ALL: u8 = 0x0f;
+    pub const ALL: u8 = 0x3f;
 
     /// Whether every bit of `flag` is set.
     #[must_use]
@@ -149,6 +166,10 @@ pub enum IgnoreFlag {
     IgnoreInvalidUsage,
     /// [`ErrorIgnoreFlags::ALLOW_UNTRUSTED_ROOT`].
     AllowUntrustedRoot,
+    /// [`ErrorIgnoreFlags::IGNORE_TIME_NESTING`].
+    IgnoreTimeNesting,
+    /// [`ErrorIgnoreFlags::IGNORE_BASIC_CONSTRAINTS`].
+    IgnoreBasicConstraints,
 }
 
 impl IgnoreFlag {
@@ -158,6 +179,8 @@ impl IgnoreFlag {
             Self::IgnoreRevocationUnknown => ErrorIgnoreFlags::IGNORE_REVOCATION_UNKNOWN,
             Self::IgnoreInvalidUsage => ErrorIgnoreFlags::IGNORE_INVALID_USAGE,
             Self::AllowUntrustedRoot => ErrorIgnoreFlags::ALLOW_UNTRUSTED_ROOT,
+            Self::IgnoreTimeNesting => ErrorIgnoreFlags::IGNORE_TIME_NESTING,
+            Self::IgnoreBasicConstraints => ErrorIgnoreFlags::IGNORE_BASIC_CONSTRAINTS,
         }
     }
 }
@@ -199,8 +222,29 @@ pub struct ValidityPolicy {
     pub min_rsa_bits: Option<u32>,
     /// The smallest elliptic-curve key allowed, in bits. Default `None`.
     pub min_ec_bits: Option<u32>,
+    /// Every certificate on the full chain must be time nested: valid only
+    /// within its issuer's period (code 1007 otherwise). Default `false`,
+    /// as the OS ignores time nesting for code signing.
+    pub require_time_nesting: bool,
     /// Per-certificate relaxations.
     pub certificate_options: Vec<CertificateOptions>,
+}
+
+impl ValidityPolicy {
+    /// Passes every [`ErrorIgnoreFlags::IGNORE_BASIC_CONSTRAINTS`] option
+    /// to chain building, so `config` lets those certificates issue. Call it
+    /// on the [`TrustConfig`] given to [`super::evaluate_trust`]; without
+    /// it, chains are built with basic constraints in force everywhere.
+    pub fn relax_trust(&self, config: &mut TrustConfig) {
+        for option in &self.certificate_options {
+            if option
+                .flags
+                .contains(ErrorIgnoreFlags::IGNORE_BASIC_CONSTRAINTS)
+            {
+                config.ignore_basic_constraints(option.pin.clone());
+            }
+        }
+    }
 }
 
 impl Default for ValidityPolicy {
@@ -214,6 +258,7 @@ impl Default for ValidityPolicy {
             strict_key_compromise: true,
             min_rsa_bits: None,
             min_ec_bits: None,
+            require_time_nesting: false,
             certificate_options: Vec::new(),
         }
     }
@@ -500,17 +545,18 @@ impl Verdict<'_> {
                 .is_some_and(|o| o.flags.contains(flag.bit()))
         });
         match option {
-            Some(option) => {
-                let relaxed = RelaxedCheck {
-                    flag,
-                    option,
-                    suppressed: error,
-                };
-                if !self.relaxed.contains(&relaxed) {
-                    self.relaxed.push(relaxed);
-                }
-            }
+            Some(option) => self.relax(RelaxedCheck {
+                flag,
+                option,
+                suppressed: error,
+            }),
             None => self.fail(error),
+        }
+    }
+
+    fn relax(&mut self, relaxed: RelaxedCheck) {
+        if !self.relaxed.contains(&relaxed) {
+            self.relaxed.push(relaxed);
         }
     }
 
@@ -562,6 +608,9 @@ impl Judge<'_, '_> {
             // No trust verdict for this signature: `trust` is not this
             // file's. Never valid.
             None => v.fail(VerificationError::Generic),
+        }
+        if let Some(chain) = chain {
+            self.chain_constraints(chain, &mut v);
         }
         if sig.status.is_valid() && chain.is_none() && v.failures.is_empty() {
             // A valid signature with no chain must have a reason on record;
@@ -695,6 +744,37 @@ impl Judge<'_, '_> {
                     );
                 }
             }
+        }
+    }
+
+    /// The chain-building relaxations (#49) the chain used, against the
+    /// options that allow them, and time nesting.
+    fn chain_constraints(&self, chain: &ChainReport, v: &mut Verdict<'_>) {
+        let options = &self.ctx.policy.certificate_options;
+        // Each relaxed issuer must be pinned, as itself, by an option that
+        // allows it.
+        for issuer in &chain.basic_constraints_ignored {
+            let Some(cert) = chain.cert(*issuer) else {
+                v.fail(VerificationError::BasicConstraintsViolated);
+                continue;
+            };
+            let allowed = options.iter().position(|o| {
+                o.pin.matches(cert) && o.flags.contains(ErrorIgnoreFlags::IGNORE_BASIC_CONSTRAINTS)
+            });
+            match allowed {
+                Some(option) => v.relax(RelaxedCheck {
+                    flag: IgnoreFlag::IgnoreBasicConstraints,
+                    option,
+                    suppressed: VerificationError::BasicConstraintsViolated,
+                }),
+                None => v.fail(VerificationError::BasicConstraintsViolated),
+            }
+        }
+        if self.ctx.policy.require_time_nesting && !chain.time_nesting_violations.is_empty() {
+            v.fail_unless(
+                VerificationError::TimeNotNested,
+                IgnoreFlag::IgnoreTimeNesting,
+            );
         }
     }
 

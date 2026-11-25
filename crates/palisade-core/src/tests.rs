@@ -551,13 +551,15 @@ mod verification {
             (1004, VerificationError::KeyTooSmall),
             (1005, VerificationError::CountersignatureRequired),
             (1006, VerificationError::RevocationUnavailable),
+            (1007, VerificationError::TimeNotNested),
+            (1008, VerificationError::BasicConstraintsViolated),
         ];
         for (code, e) in own {
             assert_eq!(e.code(), code);
             assert!(!e.is_os_code());
             assert_eq!(VerificationError::from_code(code), Some(e));
         }
-        assert_eq!(VerificationError::from_code(1007), None);
+        assert_eq!(VerificationError::from_code(1009), None);
     }
 
     #[test]

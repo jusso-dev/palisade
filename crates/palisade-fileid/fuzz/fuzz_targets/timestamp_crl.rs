@@ -5,18 +5,22 @@
 //!   fixture signature in place of its own token, and verified against the
 //!   fixture TSA anchor;
 //! - 1: the same for a legacy countersignature, on `leaf-legacy`;
-//! - 2: the rest is a CRL, parsed, then judged against the fixture chain.
+//! - 2: the rest is a CRL, parsed, then judged against the fixture chain;
+//! - 3: the rest is an OCSP response, parsed, then judged against the OCSP
+//!   fixture chain.
 //!
 //! No input may panic, a valid timestamp must keep every invariant the
-//! module documents, and a CRL must respect its limits.
+//! module documents, a CRL must respect its limits, and an OCSP response
+//! may only give answers for a certificate its signer is authorised for.
 #![no_main]
 
 use std::sync::OnceLock;
 
 use libfuzzer_sys::fuzz_target;
 use palisade_fileid::authenticode::{
-    CertSummary, Crl, MAX_CRL_ENTRIES, MAX_TIMESTAMP_WARNINGS, RevocationSet, SignatureInfo,
-    TimestampStatus, TrustConfig, VerifyOptions, verify_pe, verify_timestamps,
+    CertSummary, Crl, MAX_CRL_ENTRIES, MAX_OCSP_RESPONSES_PER_RESPONSE, MAX_TIMESTAMP_WARNINGS,
+    OcspResponse, RevocationSet, SignatureInfo, TimestampStatus, TrustConfig, VerifyOptions,
+    verify_pe, verify_timestamps,
 };
 
 #[path = "../../tests/common/mod.rs"]
@@ -54,6 +58,7 @@ struct Fixtures {
     legacy: SignatureInfo,
     tsa: TrustConfig,
     chain: Vec<CertSummary>,
+    ocsp_chain: Vec<CertSummary>,
 }
 
 fn fixtures() -> &'static Fixtures {
@@ -68,6 +73,10 @@ fn fixtures() -> &'static Fixtures {
             chain: vec![
                 CertSummary::from_der(&read("leaf.der")).unwrap(),
                 CertSummary::from_der(&read("root.der")).unwrap(),
+            ],
+            ocsp_chain: vec![
+                CertSummary::from_der(&read("../ocsp/leaf.der")).unwrap(),
+                CertSummary::from_der(&read("../ocsp/root.der")).unwrap(),
             ],
         }
     })
@@ -97,9 +106,28 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
     let f = fixtures();
-    match selector % 3 {
+    match selector % 4 {
         0 => timestamp(&f.rfc3161, rest, &f.tsa),
         1 => timestamp(&f.legacy, rest, &f.tsa),
+        3 => {
+            let Ok(response) = OcspResponse::from_der(rest) else {
+                return;
+            };
+            assert!(response.responses.len() <= MAX_OCSP_RESPONSES_PER_RESPONSE);
+            let (leaf, root) = (&f.ocsp_chain[0], &f.ocsp_chain[1]);
+            let answers = response.answers_for(leaf, root);
+            if !answers.is_empty() {
+                assert!(response.verified_by(root));
+                assert!(answers.iter().all(|a| a.names(leaf, root)));
+            }
+            let mut set = RevocationSet::new();
+            set.add_ocsp(response);
+            let chain: Vec<&CertSummary> = f.ocsp_chain.iter().collect();
+            for now in [0, 1_700_000_000, i64::MAX] {
+                let _ = set.state_of(&chain, 0, now);
+                let _ = set.state_of(&chain, 1, now);
+            }
+        }
         _ => {
             let Ok(crl) = Crl::from_der(rest) else {
                 return;

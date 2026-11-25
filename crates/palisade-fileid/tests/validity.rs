@@ -16,11 +16,11 @@ mod common;
 use common::*;
 use palisade_fileid::authenticode::{
     CertRevocation, CertificateMatch, CertificateOptions, CertificatePin, Coverage, Crl, CrlError,
-    ErrorIgnoreFlags, ExpiryPolicy, IgnoreFlag, RevocationFailure, RevocationMode,
+    ErrorIgnoreFlags, ExpiryPolicy, IgnoreFlag, RelaxedCheck, RevocationFailure, RevocationMode,
     RevocationReason, RevocationSet, RevocationSource, RevokedCertificate, SignatureReport,
-    TimeValidity, TimestampKind, TimestampStatus, TrustConfig, ValidityContext, ValidityPolicy,
-    ValidityReport, ValidityWarning, VerificationError, VerifyOptions, evaluate_trust,
-    evaluate_validity, parse_timestamp_time, verify_pe, verify_timestamps,
+    TimeValidity, TimestampKind, TimestampStatus, TrustConfig, UntrustedReason, ValidityContext,
+    ValidityPolicy, ValidityReport, ValidityWarning, VerificationError, VerifyOptions,
+    evaluate_trust, evaluate_validity, parse_timestamp_time, verify_pe, verify_timestamps,
 };
 use palisade_fileid::hash::{Digest, HashAlgorithm};
 use proptest::prelude::*;
@@ -1568,4 +1568,196 @@ fn constraints_are_not_reported_on_signatures_that_already_failed() {
         v.signatures[0].failures,
         vec![VerificationError::InvalidHash]
     );
+}
+
+// --- Chain-building relaxations (#49) ------------------------------------
+
+const CHAIN_FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/chain");
+
+fn chain_der(name: &str) -> Vec<u8> {
+    std::fs::read(format!("{CHAIN_FIXTURES}/{name}.der")).unwrap()
+}
+
+/// A full verdict for a synthetic signature whose embedded chain is
+/// `names` (leaf first), anchored at the chain fixtures' root under
+/// `trust`. The trust entry is built from the chain, so these tests judge
+/// chain shape alone.
+fn judge_chain(
+    names: &[&str],
+    trust: &TrustConfig,
+    policy: &ValidityPolicy,
+    now: i64,
+) -> palisade_fileid::authenticode::SignatureValidity {
+    let certs: Vec<Vec<u8>> = names.iter().map(|n| chain_der(n)).collect();
+    let chain = palisade_fileid::authenticode::build_chain(&certs, 0, trust).unwrap();
+    // Any valid signature carries the verdict; its own chain is replaced.
+    let report = report_of(&bytes("leaf-untimestamped.p7"));
+    let mut t = evaluate_trust(&report, &code_trust(), None);
+    // The verdict as `evaluate_trust` would give it for this chain.
+    let signer = &mut t.signers[0];
+    signer.untrusted.clear();
+    if !chain.full_chain.anchored {
+        signer.untrusted.push(UntrustedReason::NoTrustAnchor);
+    }
+    if !chain.permits_code_signing() {
+        signer
+            .untrusted
+            .push(UntrustedReason::CodeSigningNotPermitted);
+    }
+    signer.trusted = signer.untrusted.is_empty();
+    signer.chain = Some(chain);
+    let revocation = RevocationSet::new();
+    let tsa = tsa_trust();
+    let ctx = ValidityContext {
+        now,
+        clock_floor: None,
+        policy,
+        revocation: &revocation,
+        tsa_trust: &tsa,
+        file_digests: &[],
+        version: None,
+    };
+    evaluate_validity(&report, &t, &ctx).signatures[0].clone()
+}
+
+fn chain_root_trust() -> TrustConfig {
+    let mut t = TrustConfig::new();
+    t.add_anchor("chain root", &chain_der("root")).unwrap();
+    t
+}
+
+/// 2030, inside every chain fixture's validity except `inter-expired`.
+const Y2030: i64 = 1_893_456_000;
+
+#[test]
+fn ignore_basic_constraints_needs_an_option_naming_the_issuer() {
+    let names = ["leaf-under-not-ca", "inter-not-ca", "root"];
+    let inter =
+        palisade_fileid::authenticode::CertSummary::from_der(&chain_der("inter-not-ca")).unwrap();
+    let option = CertificateOptions {
+        label: "legacy CA".into(),
+        pin: CertificatePin::Sha256Thumbprint(inter.sha256_thumbprint.clone()),
+        flags: ErrorIgnoreFlags(ErrorIgnoreFlags::IGNORE_BASIC_CONSTRAINTS),
+    };
+    // Without the option, chain building refuses the non-CA: untrusted.
+    let strict = judge_chain(
+        &names,
+        &chain_root_trust(),
+        &ValidityPolicy::default(),
+        Y2030,
+    );
+    assert_eq!(strict.error, VerificationError::ChainIncomplete);
+    // With it, `relax_trust` passes it to chain building, the chain
+    // anchors, and the relaxation is recorded.
+    let mut policy = ValidityPolicy::default();
+    policy.certificate_options.push(option.clone());
+    let mut trust = chain_root_trust();
+    policy.relax_trust(&mut trust);
+    let v = judge_chain(&names, &trust, &policy, Y2030);
+    assert!(v.is_ok(), "{v:#?}");
+    assert_eq!(
+        v.relaxed,
+        [RelaxedCheck {
+            flag: IgnoreFlag::IgnoreBasicConstraints,
+            option: 0,
+            suppressed: VerificationError::BasicConstraintsViolated,
+        }]
+    );
+    // A trust configuration relaxed by someone else, with no option that
+    // allows it, fails with code 1008.
+    let v = judge_chain(&names, &trust, &ValidityPolicy::default(), Y2030);
+    assert_eq!(v.error, VerificationError::BasicConstraintsViolated);
+    assert_eq!(VerificationError::BasicConstraintsViolated.code(), 1008);
+    // An option naming another certificate does not allow it either.
+    let mut other = ValidityPolicy::default();
+    other.certificate_options.push(CertificateOptions {
+        pin: CertificatePin::Sha256Thumbprint(
+            palisade_fileid::authenticode::CertSummary::from_der(&chain_der("root"))
+                .unwrap()
+                .sha256_thumbprint,
+        ),
+        ..option
+    });
+    let v = judge_chain(&names, &trust, &other, Y2030);
+    assert_eq!(v.error, VerificationError::BasicConstraintsViolated);
+}
+
+#[test]
+fn time_nesting_is_required_only_when_policy_says() {
+    // `inter-expired` was valid in 2001 only, so the leaf it issued is not
+    // time nested. Expiry is ignored here to isolate nesting.
+    let names = ["leaf-expired-ca", "inter-expired", "root"];
+    let mut policy = ValidityPolicy {
+        expiry_policy: ExpiryPolicy::Ignore,
+        ..ValidityPolicy::default()
+    };
+    let v = judge_chain(&names, &chain_root_trust(), &policy, Y2030);
+    assert!(v.is_ok(), "{v:#?}");
+    policy.require_time_nesting = true;
+    let v = judge_chain(&names, &chain_root_trust(), &policy, Y2030);
+    assert_eq!(v.error, VerificationError::TimeNotNested);
+    assert_eq!(VerificationError::TimeNotNested.code(), 1007);
+    // A nested chain passes.
+    let v = judge_chain(
+        &["leaf", "inter", "root"],
+        &chain_root_trust(),
+        &policy,
+        Y2030,
+    );
+    assert!(v.is_ok(), "{v:#?}");
+    // The flag on a certificate of the chain excuses it, and is recorded.
+    let inter =
+        palisade_fileid::authenticode::CertSummary::from_der(&chain_der("inter-expired")).unwrap();
+    policy.certificate_options.push(CertificateOptions {
+        label: "old CA".into(),
+        pin: CertificatePin::TbsHash(inter.tbs_hash_sha256),
+        flags: ErrorIgnoreFlags(ErrorIgnoreFlags::IGNORE_TIME_NESTING),
+    });
+    let v = judge_chain(&names, &chain_root_trust(), &policy, Y2030);
+    assert!(v.is_ok(), "{v:#?}");
+    assert_eq!(v.relaxed[0].flag, IgnoreFlag::IgnoreTimeNesting);
+    assert_eq!(v.relaxed[0].suppressed, VerificationError::TimeNotNested);
+}
+
+#[test]
+fn every_flag_has_a_bit() {
+    let flags = [
+        (IgnoreFlag::IgnoreExpiry, ErrorIgnoreFlags::IGNORE_EXPIRY),
+        (
+            IgnoreFlag::IgnoreRevocationUnknown,
+            ErrorIgnoreFlags::IGNORE_REVOCATION_UNKNOWN,
+        ),
+        (
+            IgnoreFlag::IgnoreInvalidUsage,
+            ErrorIgnoreFlags::IGNORE_INVALID_USAGE,
+        ),
+        (
+            IgnoreFlag::AllowUntrustedRoot,
+            ErrorIgnoreFlags::ALLOW_UNTRUSTED_ROOT,
+        ),
+        (
+            IgnoreFlag::IgnoreTimeNesting,
+            ErrorIgnoreFlags::IGNORE_TIME_NESTING,
+        ),
+        (
+            IgnoreFlag::IgnoreBasicConstraints,
+            ErrorIgnoreFlags::IGNORE_BASIC_CONSTRAINTS,
+        ),
+    ];
+    let mut all = 0_u8;
+    for (flag, bit) in flags {
+        assert_eq!(bit.count_ones(), 1, "{flag:?}");
+        assert_eq!(all & bit, 0, "{flag:?} shares a bit");
+        all |= bit;
+        assert!(ErrorIgnoreFlags(ErrorIgnoreFlags::ALL).contains(bit));
+        // The trace names each flag in snake_case.
+        assert!(
+            serde_json::to_value(flag)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .contains('_')
+        );
+    }
+    assert_eq!(all, ErrorIgnoreFlags::ALL);
 }
