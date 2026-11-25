@@ -26,6 +26,7 @@ Closes #<!-- issue number, or use "Part of #N" and say what is left below -->
 - [ ] Tests added or updated, and the checks in [CONTRIBUTING.md](https://github.com/jusso-dev/palisade/blob/main/CONTRIBUTING.md#before-you-push) pass locally.
 - [ ] Docs updated, or no docs change is needed.
 - [ ] ADR linked, if this is an architectural change, or not applicable.
+- [ ] Does this change a trust boundary or add a parser of untrusted input? If yes, the [threat model](https://github.com/jusso-dev/palisade/blob/main/docs/security/threat-model.md) is updated in this pull request (see its [Process](https://github.com/jusso-dev/palisade/blob/main/docs/security/threat-model.md#keeping-it-current) section).
 - [ ] No new `unsafe` code, or the unsafe allowlist is updated and every block has a `// SAFETY:` comment.
 - [ ] New dependencies, if any, are justified in the summary above.
 - [ ] No secrets, tokens, keys or real malware samples.

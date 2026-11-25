@@ -21,6 +21,8 @@
 //!   ask for it themselves.
 //! - `pull_request_target` is never used.
 //! - `actions/checkout` sets `persist-credentials: false`.
+//! - `Swatinem/rust-cache` sets `save-if` to `false` or to the main-branch
+//!   expression, so only `main` writes the cache.
 //!
 //! [`check_terms`] also scans every file under `.github/` for the names of
 //! cloud-managed build and pipeline services, case-insensitively, anywhere in
@@ -359,7 +361,39 @@ fn check_action(at: &str, uses: &str, step: &Yaml, v: &mut Vec<String>) {
             ));
         }
     }
+    if repo.eq_ignore_ascii_case("Swatinem/rust-cache") {
+        // Action inputs are matched case-insensitively by the runner, so
+        // every spelling of the key is checked, and there must be one.
+        let with = step
+            .as_hash()
+            .and_then(|s| get(s, "with"))
+            .and_then(|w| w.as_hash());
+        let values: Vec<&Yaml> = with
+            .into_iter()
+            .flat_map(|w| w.iter())
+            .filter(|(k, _)| {
+                k.as_str()
+                    .is_some_and(|k| k.eq_ignore_ascii_case("save-if"))
+            })
+            .map(|(_, value)| value)
+            .collect();
+        let main_only = |value: &Yaml| match value {
+            Yaml::Boolean(false) => true,
+            Yaml::String(s) => s.trim() == CACHE_SAVE_IF,
+            _ => false,
+        };
+        if values.len() != 1 || !values.iter().all(|v| main_only(v)) {
+            v.push(format!(
+                "{at}: Swatinem/rust-cache must set `save-if` once, to `false` or `{CACHE_SAVE_IF}`, so only main writes the cache"
+            ));
+        }
+    }
 }
+
+/// The only `save-if` expression, apart from `false`, that a rust-cache
+/// step may use: the cache is written from `main` only, so a pull request
+/// cannot poison what later `main` builds restore (threat model T-ci-06).
+const CACHE_SAVE_IF: &str = "${{ github.ref == 'refs/heads/main' }}";
 
 /// `true` for top-level permissions that grant no write scope.
 fn is_read_only(permissions: &Yaml) -> bool {
@@ -380,6 +414,36 @@ fn uses_pull_request_target(on: Option<&Yaml>) -> bool {
         Some(Yaml::Hash(map)) => map.contains_key(&key_of(TRIGGER)),
         _ => false,
     }
+}
+
+/// Every `run:` command of every job in the workflow `source`, with runs of
+/// whitespace (including folded line breaks) collapsed to one space. An
+/// unreadable workflow gives no commands; `check_workflow` reports it.
+pub fn run_commands(source: &str) -> Vec<String> {
+    let Ok(docs) = YamlLoader::load_from_str(source) else {
+        return Vec::new();
+    };
+    let mut commands = Vec::new();
+    for doc in &docs {
+        let Some(Yaml::Hash(jobs)) = doc.as_hash().and_then(|w| get(w, "jobs")) else {
+            continue;
+        };
+        for job in jobs.values() {
+            let Some(Yaml::Array(steps)) = job.as_hash().and_then(|j| get(j, "steps")) else {
+                continue;
+            };
+            for step in steps {
+                if let Some(run) = step
+                    .as_hash()
+                    .and_then(|s| get(s, "run"))
+                    .and_then(Yaml::as_str)
+                {
+                    commands.push(run.split_whitespace().collect::<Vec<_>>().join(" "));
+                }
+            }
+        }
+    }
+    commands
 }
 
 fn key_of(key: &str) -> Yaml {
@@ -426,6 +490,8 @@ mod tests {
         with:
           persist-credentials: false
       - uses: Swatinem/rust-cache@{SHA}
+        with:
+          save-if: false
       - run: cargo test
 "
         );
@@ -569,9 +635,9 @@ mod tests {
                 "  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: {uses}\n"
             ))
         };
-        assert_eq!(check(&steps("Swatinem/rust-cache@v2")).len(), 1);
+        assert_eq!(check(&steps("taiki-e/install-action@v2")).len(), 1);
         assert_eq!(
-            check(&steps(&format!("Swatinem/rust-cache@{}", &SHA[..12]))).len(),
+            check(&steps(&format!("taiki-e/install-action@{}", &SHA[..12]))).len(),
             1
         );
         assert_eq!(
@@ -600,6 +666,34 @@ mod tests {
         let v = check(&workflow(&jobs));
         assert_eq!(v.len(), 1);
         assert!(v[0].contains("persist-credentials"), "{v:?}");
+    }
+
+    #[test]
+    fn rust_cache_must_only_save_on_main() {
+        let step = |with: &str| {
+            format!(
+                "  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: Swatinem/rust-cache@{SHA}\n{with}"
+            )
+        };
+        for ok in [
+            "        with:\n          save-if: false\n",
+            "        with:\n          save-if: ${{ github.ref == 'refs/heads/main' }}\n",
+        ] {
+            assert_eq!(check(&workflow(&step(ok))), Vec::<String>::new(), "{ok}");
+        }
+        for bad in [
+            "",
+            "        with:\n          shared-key: x\n",
+            "        with:\n          save-if: true\n",
+            "        with:\n          save-if: ${{ github.event_name == 'push' }}\n",
+            "        with:\n          save-if: ${{ github.ref == 'refs/heads/main' || true }}\n",
+            "        with:\n          save-if: false\n          SAVE-IF: true\n",
+            "        with:\n          Save-If: true\n",
+        ] {
+            let v = check(&workflow(&step(bad)));
+            assert_eq!(v.len(), 1, "{bad}: {v:?}");
+            assert!(v[0].contains("save-if"), "{v:?}");
+        }
     }
 
     #[test]
@@ -683,6 +777,16 @@ mod tests {
         ] {
             assert!(!super::contains_forbidden_term(text.as_bytes()), "{text}");
         }
+    }
+
+    #[test]
+    fn run_commands_lists_every_step_command_with_whitespace_collapsed() {
+        let source = "jobs:\n  a:\n    steps:\n      - uses: x\n      - run: cargo  xtask   one\n  b:\n    steps:\n      - run: >-\n          cargo deny\n          check\n";
+        assert_eq!(
+            super::run_commands(source),
+            ["cargo xtask one", "cargo deny check"]
+        );
+        assert!(super::run_commands("[not: yaml").is_empty());
     }
 
     #[test]

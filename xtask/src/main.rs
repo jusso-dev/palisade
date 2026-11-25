@@ -14,6 +14,7 @@ mod junit;
 mod manifests;
 mod report;
 mod supply_chain;
+mod threat_coverage;
 mod unsafe_code;
 mod workflows;
 
@@ -44,6 +45,8 @@ Commands:
   sbom             Reserved for the SBOM (#226); prints where it will be written and fails
   check-workflows  Enforce the CI runner and action policy for .github/workflows,
                    and that nothing under .github names a cloud-managed build service
+  threat-coverage  Check the threat model's tables, and that every test, fuzz target and CI
+                   check it cites exists (docs/security/threat-model.md)
   test-summary <label> <junit.xml>
                    Summarise a nextest JUnit report for the GitHub job page
   coverage-summary <label> <coverage.json>
@@ -96,6 +99,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
         "check-workflows" => run_check("check-workflows", check_workflows),
+        "threat-coverage" => run_check("threat-coverage", check_threat_coverage),
         "help" | "--help" | "-h" => {
             print!("{HELP}");
             return ExitCode::SUCCESS;
@@ -523,6 +527,88 @@ fn check_workflows(root: &Path) -> Result<Vec<String>, String> {
     let github = root.join(".github");
     let mut violations = workflows::check_dir(&github.join("workflows"))?;
     violations.extend(workflows::check_terms(&github)?);
+    Ok(violations)
+}
+
+/// `cargo xtask threat-coverage`: see [`threat_coverage`].
+fn check_threat_coverage(root: &Path) -> Result<Vec<String>, String> {
+    let doc = read(&root.join(threat_coverage::DOCUMENT))?;
+    let (paths, mut violations) = unsafe_code::repository_files(root)?;
+
+    // Test function names per crate. A file belongs to the member whose
+    // directory is the longest prefix of its path.
+    let metadata = cargo_metadata(root, &["--no-deps"])?;
+    let mut crates: Vec<(String, String)> = Vec::new();
+    for manifest in deps::member_manifest_paths(&metadata)? {
+        let dir = Path::new(&manifest)
+            .parent()
+            .and_then(|d| d.strip_prefix(root).ok())
+            .ok_or_else(|| format!("{manifest}: not under the repository root"))?;
+        let source = read(Path::new(&manifest))?;
+        let name = source
+            .parse::<toml::Table>()
+            .map_err(|e| format!("{manifest}: invalid TOML: {e}"))?
+            .get("package")
+            .and_then(|p| p.get("name"))
+            .and_then(toml::Value::as_str)
+            .ok_or_else(|| format!("{manifest}: no package name"))?
+            .to_owned();
+        let mut prefix = dir.to_string_lossy().replace('\\', "/");
+        if !prefix.is_empty() {
+            prefix.push('/');
+        }
+        crates.push((prefix, name));
+    }
+    crates.sort_by_key(|(prefix, _)| std::cmp::Reverse(prefix.len()));
+    let mut facts = threat_coverage::Facts::default();
+    for (_, name) in &crates {
+        facts.tests.entry(name.clone()).or_default();
+    }
+    let (ids, components) = threat_coverage::defined_ids(&doc);
+    // Fuzz projects are separate workspaces, not part of the crate's tests.
+    let fuzz_dirs: Vec<String> = fuzz::PROJECTS
+        .iter()
+        .map(|p| format!("{}/", p.dir))
+        .collect();
+    for path in &paths {
+        let is_rust = unsafe_code::is_rust_path(path);
+        let is_markdown = path.to_ascii_lowercase().ends_with(".md");
+        if !(is_rust || is_markdown) || path == threat_coverage::DOCUMENT {
+            continue;
+        }
+        let text = read(&root.join(path))?;
+        violations.extend(threat_coverage::check_references(
+            path,
+            &text,
+            &ids,
+            &components,
+        ));
+        let in_fuzz = fuzz_dirs.iter().any(|d| path.starts_with(d.as_str()));
+        if is_rust && !in_fuzz {
+            if let Some((_, name)) = crates
+                .iter()
+                .find(|(prefix, _)| path.starts_with(prefix.as_str()))
+            {
+                let tests = threat_coverage::test_functions(&text)
+                    .ok_or_else(|| format!("{path}: cannot tokenise"))?;
+                facts.tests.entry(name.clone()).or_default().extend(tests);
+            }
+        }
+    }
+    facts.fuzz_targets = fuzz::PROJECTS
+        .iter()
+        .flat_map(|p| p.targets.iter().map(|t| t.name.to_owned()))
+        .collect();
+    for path in &paths {
+        if path.starts_with(".github/workflows/")
+            && (path.ends_with(".yml") || path.ends_with(".yaml"))
+        {
+            facts
+                .ci_commands
+                .extend(workflows::run_commands(&read(&root.join(path))?));
+        }
+    }
+    violations.extend(threat_coverage::check(&doc, &facts));
     Ok(violations)
 }
 

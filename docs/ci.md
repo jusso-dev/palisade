@@ -28,6 +28,7 @@ type.
 | `supply-chain` | ubuntu-latest | `cargo vet --locked`, `cargo xtask check-supply-chain`, and on PRs `cargo xtask deps-report --base <base>` to the job summary ([dependencies.md](dependencies.md)) |
 | `feature-powerset` | ubuntu-latest | `cargo hack check --each-feature --all-targets --locked` on the portable crates (`core`, `fileid`, `policy`, `proto`, `server`, `cli`, `console`) |
 | `runner-guard` | ubuntu-latest | `cargo xtask check-workflows` ([Runner and action policy](#runner-and-action-policy)) |
+| `doc-checks` | ubuntu-latest | `cargo xtask threat-coverage`: the threat model's tables are complete and consistent, and every test, fuzz target and CI check it cites exists ([threat model](security/threat-model.md#keeping-it-current)) |
 | `workflow-lint` | ubuntu-latest | `actionlint` (checksum-verified release) and `zizmor --offline` |
 | `ci-ok` | ubuntu-latest | Passes only if every job above succeeded |
 
@@ -190,6 +191,9 @@ file against allowlists in `xtask/src/workflows.rs`:
 - `pull_request_target` is never used, so fork PRs never run with secrets or
   a write token.
 - `actions/checkout` sets `persist-credentials: false`.
+- `Swatinem/rust-cache` sets `save-if` exactly once (in any letter case, as
+  the runner matches input names), to `false` or to the main-branch
+  expression, so only `main` writes the cache (threat model T-ci-06).
 - No file under `.github/` (workflows, scripts, issue templates, anything)
   names a cloud-managed build or pipeline service, in any letter case,
   anywhere in its text or its file name. The names are kept out of this
@@ -202,8 +206,8 @@ or an action is a reviewed change to `xtask/src/workflows.rs`.
 
 Other hardening:
 
-- Rust caches are written only from `main` (`save-if`), so PR builds,
-  including forks, cannot poison them.
+- Rust caches are written only from `main` (`save-if`, checked above), so PR
+  builds, including forks, cannot poison them.
 - Superseded PR runs are cancelled; pushes to `main` always finish.
 - Every job has a `timeout-minutes` (30, or 60 for the test and coverage
   matrices and the weekly fuzz jobs).
@@ -250,6 +254,7 @@ cargo xtask check-deps
 cargo xtask check-manifests
 cargo xtask check-unsafe
 cargo xtask check-workflows
+cargo xtask threat-coverage
 cargo deny --locked check          # needs cargo-deny 0.22
 cargo deny --locked --manifest-path crates/palisade-fileid/fuzz/Cargo.toml --config deny.toml check
 cargo deny --locked --manifest-path crates/palisade-proto/fuzz/Cargo.toml --config deny.toml check
