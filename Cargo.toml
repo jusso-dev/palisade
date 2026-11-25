@@ -67,6 +67,9 @@ insta = { version = "1.49.0", default-features = false, features = ["json"] }
 jiff = { version = "1.0.3", default-features = false, features = ["std", "tzdb-bundle-always"] }
 libc = { version = "0.2.191", default-features = false }
 md-5 = { version = "0.11.0", default-features = false }
+# Raw DEFLATE for app package members (#53). `forbid(unsafe_code)`, no
+# default features but `with-alloc` (a heap-allocated inflate state).
+miniz_oxide = { version = "0.8.9", default-features = false, features = ["with-alloc"] }
 proc-macro2 = { version = "1.0.107", default-features = false }
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 quick-xml = { version = "0.41.0", default-features = false }

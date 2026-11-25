@@ -268,6 +268,11 @@ pub enum SignatureKind {
     /// SignedData whose indirect data is `SPC_SIPINFO`, signing the digest
     /// a script subject interface package computes over the text.
     Script,
+    /// The signature of an app package or bundle (#53,
+    /// [`crate::package`]): `AppxSignature.p7x`, an Authenticode SignedData
+    /// whose indirect data is `SPC_SIPINFO` for the package or bundle
+    /// subject type, over the package's tagged digest list.
+    Package,
 }
 
 /// The `SpcStatementType` authenticated attribute.

@@ -116,8 +116,13 @@ pub(crate) enum Subject {
     /// `SPC_PE_IMAGE_DATA`: a PE image.
     PeImage,
     /// `SPC_SIPINFO` naming this subject interface package GUID (16 bytes,
-    /// as encoded): an installer package, an app package (#53).
+    /// as encoded), over a digest of the algorithm's length: an installer
+    /// package (#53).
     Sip([u8; 16]),
+    /// `SPC_SIPINFO` naming this GUID, over a structured digest of any
+    /// length: an app package or bundle, whose signed digest is a tagged
+    /// list of digests (#53).
+    SipBlob([u8; 16]),
 }
 
 /// Decodes a `ContentInfo` holding an Authenticode SignedData whose
@@ -366,13 +371,14 @@ fn parse_indirect_data<'a>(
     let data = r.read(tag::SEQUENCE)?;
     let mut d = data.reader();
     let data_type = read_oid(&mut d)?;
-    if let Subject::Sip(guid) = subject {
+    if let Subject::Sip(guid) | Subject::SipBlob(guid) = subject {
         if data_type != oid::SPC_SIPINFO {
             return Err(SignatureError::NotSipInfo(ObjectId::from_der(data_type)));
         }
         parse_sip_info(&d.read(tag::SEQUENCE)?, &guid)?;
         d.finish()?;
-        return finish_indirect_data(seq, &mut r, None, None);
+        let fixed = matches!(subject, Subject::Sip(_));
+        return finish_indirect_data(seq, &mut r, None, None, fixed);
     }
     if data_type != oid::SPC_PE_IMAGE_DATA {
         return Err(SignatureError::NotPeImageData(ObjectId::from_der(
@@ -398,7 +404,7 @@ fn parse_indirect_data<'a>(
         v.finish()?;
     }
     d.finish()?;
-    finish_indirect_data(seq, &mut r, pe_image_flags, page_hashes)
+    finish_indirect_data(seq, &mut r, pe_image_flags, page_hashes, true)
 }
 
 /// `SpcSipInfo ::= SEQUENCE { version INTEGER, guid OCTET STRING (16),
@@ -418,14 +424,16 @@ fn parse_sip_info(info: &Tlv<'_>, guid: &[u8; 16]) -> Result<()> {
     Ok(())
 }
 
-/// The `DigestInfo` that ends an `SpcIndirectDataContent`.
+/// The `DigestInfo` that ends an `SpcIndirectDataContent`. With
+/// `fixed_len`, the digest must be as long as its algorithm's output.
 fn finish_indirect_data<'a>(
     seq: &Tlv<'a>,
     r: &mut Reader<'a>,
     pe_image_flags: Option<u8>,
     page_hashes: Option<PageHashes>,
+    fixed_len: bool,
 ) -> Result<IndirectData<'a>> {
-    let (digest_alg, digest) = parse_digest_info(r)?;
+    let (digest_alg, digest) = parse_digest_info(r, fixed_len)?;
     Ok(IndirectData {
         content: seq.content,
         digest_alg,
@@ -436,8 +444,9 @@ fn finish_indirect_data<'a>(
 }
 
 /// The `DigestInfo` that ends an `SpcIndirectDataContent`, and nothing
-/// after it. A digest of a known algorithm must be its length.
-fn parse_digest_info<'a>(r: &mut Reader<'a>) -> Result<(DigestId, &'a [u8])> {
+/// after it. With `fixed_len`, a digest of a known algorithm must be its
+/// length.
+fn parse_digest_info<'a>(r: &mut Reader<'a>, fixed_len: bool) -> Result<(DigestId, &'a [u8])> {
     let digest_info = r.read(tag::SEQUENCE)?;
     let mut di = digest_info.reader();
     let digest_alg = parse_digest_alg(&di.read(tag::SEQUENCE)?)?;
@@ -445,7 +454,7 @@ fn parse_digest_info<'a>(r: &mut Reader<'a>) -> Result<(DigestId, &'a [u8])> {
     di.finish()?;
     r.finish()?;
     if let Ok(alg) = digest_alg {
-        if digest.len() != alg.digest_len() {
+        if fixed_len && digest.len() != alg.digest_len() {
             return Err(SignatureError::DigestLength);
         }
     }
@@ -475,7 +484,8 @@ fn parse_sip_indirect_data<'a>(seq: &Tlv<'a>) -> Result<(IndirectData<'a>, SipIn
     }
     v.finish()?;
 
-    let indirect = finish_indirect_data(seq, &mut r, None, None)?;
+    // A script's package signs one digest of its algorithm's length.
+    let indirect = finish_indirect_data(seq, &mut r, None, None, true)?;
     Ok((indirect, SipInfo { version, guid }))
 }
 

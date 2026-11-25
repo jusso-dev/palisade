@@ -10,6 +10,7 @@ pub mod filetype;
 pub mod fsctx;
 pub mod hash;
 pub mod installer;
+pub mod package;
 pub mod pe;
 pub mod script;
 #[cfg(feature = "content-rules")]

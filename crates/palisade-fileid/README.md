@@ -1,8 +1,8 @@
 # palisade-fileid
 
-File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes), signature and certificate chain extraction, version-info metadata, and Windows Installer package identity.
+File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes), signature and certificate chain extraction, version-info metadata, and Windows Installer and app package identity.
 
-**Status:** early. PE header and version-resource parsing, flat hashing, the Authenticode image hash, page hashes, Authenticode signature verification, certificate chains, signer trust and signer identity, timestamps, expiry and revocation, catalog parsing, catalog signatures and the catalog member index, content-based file type detection, Windows Installer package identity and signatures, and script signature blocks and signed metadata work; the rest of [#3](https://github.com/jusso-dev/palisade/issues/3) is still to come.
+**Status:** early. PE header and version-resource parsing, flat hashing, the Authenticode image hash, page hashes, Authenticode signature verification, certificate chains, signer trust and signer identity, timestamps, expiry and revocation, catalog parsing, catalog signatures and the catalog member index, content-based file type detection, Windows Installer package identity and signatures, script signature blocks and signed metadata, and app package (MSIX/AppX and bundle) identity and signatures work; the rest of [#3](https://github.com/jusso-dev/palisade/issues/3) is still to come.
 
 ## What is here
 
@@ -712,6 +712,40 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   record (#55), other package identity (#53) and interpreter enforcement
   (#92 to #95).
 
+- `package`: app packages and bundles
+  ([#53](https://github.com/jusso-dev/palisade/issues/53)): `.msix`, `.appx`,
+  `.msixbundle` and `.appxbundle`. `package::parse_package(&bytes)` reads the
+  archive with a strict ZIP reader (`package::zip`), which accepts only the
+  shape packaging tools write and refuses everything ZIP readers disagree
+  about: archive comments, data before or between records, central entries
+  that disagree with local headers, duplicate names (case-insensitively),
+  traversal names, encryption, ZIP64 records that do not match, members that
+  do not inflate to their CRC. It reads `AppxManifest.xml` or
+  `AppxMetadata/AppxBundleManifest.xml` with a bounded, namespace-aware XML
+  reader that refuses DTDs (so no entity is ever expanded). The result is a
+  `PackageIdentity`: name, publisher DN, publisher ID, package family name
+  and full name, version, architecture, resource ID, display names,
+  framework and resource flags, applications, capabilities (restricted
+  `rescap:` ones flagged; `runs_full_trust()`), extensions (full-trust
+  processes, app execution aliases, services, COM servers and others, with
+  their namespace), dependencies (target device families with min and max
+  versions, package dependencies), and for a bundle its member packages with
+  type, architecture, version, resource ID, offset and size.
+
+  The publisher ID is the OS algorithm (SHA-256 of the UTF-16LE publisher,
+  first 8 bytes, 13 characters of Crockford base32), pinned against
+  publisher IDs the OS reports and 58 vectors from an independent Python
+  script (`tests/fixtures/package/publisher_ids.py`). `AppxSignature.p7x`
+  (`PKCX` and an Authenticode SignedData, `SignatureKind::Package`) is
+  verified by the shared Authenticode code against the package digest (the
+  `AXPC`, `AXCD`, `AXCT`, `AXBM` and optional `AXCI` hashes), the block map
+  is checked against every file and block, and the signer's subject must
+  equal `Identity@Publisher` (`PublisherMismatch` otherwise). Anything wrong
+  with any of those leaves no signature valid. On Windows,
+  `tests/package_os.rs` checks the family names against the OS package
+  identity API and the signature verdicts against the OS trust-verification
+  API.
+
 ## Handling untrusted input
 
 Every file this crate reads may be hostile, so the parser:
@@ -773,7 +807,10 @@ and the `Zone.Identifier` parser, which are also fuzzed (`fsctx_parse`), and
 to catalog files, which are capped at 64 MiB and fuzzed with lookups
 (`fuzz_ctl`), and to installer packages, which are capped at 1 GiB, 65,536
 directory entries, 16 storage levels, 4,194,304 strings and 4,096 tables,
-and fuzzed end to end (`fuzz_msi_tables`).
+and fuzzed end to end (`fuzz_msi_tables`), and to app packages, which are
+capped at 4 GiB, 65,535 members, 64 MiB per member read into memory, 16 MiB
+of manifest, block map or signature, and 64 levels and 200,000 elements of
+XML, and fuzzed end to end (`fuzz_appx_manifest`).
 
 The parser has no `unsafe` code, and its modules say `#![forbid(unsafe_code)]`.
 
@@ -831,7 +868,11 @@ committed. The installer tests build every package at test time
 and summary information); `tests/fixtures/installer` holds that test product
 signed by osslsigncode with SHA-256, SHA-1 and SHA-256 plus
 `MsiDigitalSignatureEx`, under a throwaway test root, and its normalised
-hash computed by an independent Python script. No vendor package is
+hash computed by an independent Python script. The package tests build
+every package with `tests/common/appx.rs` (a ZIP writer, real block hashes,
+literal-only DEFLATE); `tests/fixtures/package` holds the test package and
+bundle, unsigned and signed by osslsigncode under a throwaway root, and a
+copy signed by another publisher. No vendor package is
 committed. The script tests use scripts in `tests/fixtures/script`, written
 by its `generate.sh` and signed by jsign with a throwaway test CA, in every
 format, encoding (UTF-8, UTF-8 with BOM, UTF-16LE, UTF-16BE where the
@@ -884,6 +925,9 @@ PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/fuzz_msi_tables" \
   cargo test -p palisade-fileid --test installer -- --ignored write_installer_fuzz_seeds
 cargo +nightly fuzz run fuzz_msi_tables -- -max_total_time=60
 cargo +nightly fuzz run fuzz_tags -- -timeout=1 -max_total_time=60
+PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/fuzz_appx_manifest" \
+  cargo test -p palisade-fileid --test package -- --ignored write_package_fuzz_seeds
+cargo +nightly fuzz run fuzz_appx_manifest -- -max_total_time=60
 ```
 
 `benches/hash_and_parse.rs` (criterion) measures flat hashing, streamed
@@ -895,6 +939,8 @@ hashing, PE parsing and the Authenticode hash over the same synthetic inputs:
 `palisade-core` (for the shared `VerificationError` table, with its `serde`
 feature), plus the RustCrypto `sha2`, `sha1` and `md-5` crates,
 `ring` for signature verification and the hash cache record MAC (ADR 0008),
+`miniz_oxide` (raw DEFLATE for app package members; `forbid(unsafe_code)`,
+only `with-alloc`),
 used only inside `authenticode/crypto.rs` and `hash/mac.rs`, `serde`
 (derive only, no format crate) so certificate and chain reports serialise
 with stable field names, `quick-xml` for the application manifest (no
