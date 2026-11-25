@@ -112,20 +112,16 @@ fn fixture(root: &Path) -> (PathBuf, PathBuf, PathBuf, PathBuf, PathBuf) {
         &format!("O:BAD:P{ADMIN_ONLY}{USERS_MODIFY}"),
     )
     .unwrap();
-    // A deny for Everyone before an allow of Users modify: not writable.
-    set_security_sddl(
-        &open_for_dacl(&denied),
-        &format!("O:BAD:P(D;OICI;0x000D0156;;;WD){ADMIN_ONLY}{USERS_MODIFY}"),
-    )
-    .unwrap();
     // Users may change the file's permissions, and nothing else.
     set_security_sddl(
         &open_for_dacl(&dac_file),
         &format!("O:BAD:P{ADMIN_ONLY}(A;;0x1200A9;;;BU)(A;;WD;;;BU)"),
     )
     .unwrap();
-    // A child created inside `denied` inherits its ACEs, so NTFS gives it a
-    // DACL with an *inherited* deny (#54: "an inherited deny").
+    // A child of `denied`, made (and given its owner) before the deny goes
+    // on, since the deny stops anyone adding to `denied`. Setting the
+    // parent's DACL then propagates the deny to it as an *inherited* ACE
+    // (#54: "an inherited deny").
     let child = denied.join("child");
     std::fs::create_dir(&child).unwrap();
     // Owned by Administrators like the rest, without touching its
@@ -138,6 +134,12 @@ fn fixture(root: &Path) -> (PathBuf, PathBuf, PathBuf, PathBuf, PathBuf) {
             .unwrap()
             .success()
     );
+    // A deny for Everyone before an allow of Users modify: not writable.
+    set_security_sddl(
+        &open_for_dacl(&denied),
+        &format!("O:BAD:P(D;OICI;0x000D0156;;;WD){ADMIN_ONLY}{USERS_MODIFY}"),
+    )
+    .unwrap();
     (pf, app, logs, denied, dac_file)
 }
 

@@ -519,8 +519,9 @@ mod tests {
         let locked = sddl_to_bytes("O:BAD:(A;;FA;;;BA)(A;;0x1200A9;;;BU)").unwrap();
         let g = access_check(&locked, &token).unwrap();
         assert_eq!(g & FILE_WRITE_DATA, 0, "{g:#x}");
-        // A deny before an allow wins.
-        let denied = sddl_to_bytes("O:BAD:(D;;WD;;;WD)(A;;0x1301BF;;;BU)").unwrap();
+        // A deny before an allow wins. (In SDDL, `WD` as a right is
+        // WRITE_DAC; write data is 0x2.)
+        let denied = sddl_to_bytes("O:BAD:(D;;0x6;;;WD)(A;;0x1301BF;;;BU)").unwrap();
         let g = access_check(&denied, &token).unwrap();
         assert_eq!(g & FILE_WRITE_DATA, 0, "{g:#x}");
         // The owner gets WRITE_DAC implicitly.
@@ -561,11 +562,14 @@ mod tests {
         std::fs::create_dir(&dir).unwrap();
         let path = dir.join("f.txt");
         std::fs::write(&path, b"x").unwrap();
-        let file = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&path)
-            .unwrap();
+        // READ_CONTROL | WRITE_DAC, to read and set the DACL.
+        let file = {
+            use std::os::windows::fs::OpenOptionsExt as _;
+            std::fs::OpenOptions::new()
+                .access_mode(0x0002_0000 | 0x0004_0000)
+                .open(&path)
+                .unwrap()
+        };
         set_security_sddl(
             &file,
             "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)(A;;0x1301BF;;;BU)",
