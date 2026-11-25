@@ -2,7 +2,7 @@
 
 File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes), signature and certificate chain extraction, and version-info metadata.
 
-**Status:** early. PE header and version-resource parsing, flat hashing, the Authenticode image hash, page hashes, Authenticode signature verification, certificate chains, signer trust and signer identity, timestamps, expiry and revocation, and catalog parsing, catalog signatures and the catalog member index work; the rest of [#3](https://github.com/jusso-dev/palisade/issues/3) is still to come.
+**Status:** early. PE header and version-resource parsing, flat hashing, the Authenticode image hash, page hashes, Authenticode signature verification, certificate chains, signer trust and signer identity, timestamps, expiry and revocation, catalog parsing, catalog signatures and the catalog member index, and content-based file type detection work; the rest of [#3](https://github.com/jusso-dev/palisade/issues/3) is still to come.
 
 ## What is here
 
@@ -403,6 +403,41 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   database cross-check (`CryptCATAdmin*`, behind `os-trust`). Folding a
   catalog match into the file's signing state (`CatalogValid`) is #55;
   catalog timestamps and expiry are #50.
+- `filetype`: content-based file type detection
+  ([#44](https://github.com/jusso-dev/palisade/issues/44)).
+  `filetype::classify(&mut reader, name_hint)` decides what a file is from
+  its magic numbers and structure, never from its name alone, and returns
+  a `Classification`: the content `FileKind`, what the extension claims
+  (`ExtensionKind`), `mismatch` and `mismatch_severity` (`None`, `Benign`,
+  `Suspicious` for a PE named `.pdf`, `Critical` for a bidirectional
+  override character or a disguising double extension), a `Confidence`,
+  `heuristic` and `extension_assisted` flags, informational
+  `ContentFlags`, the text encoding, a `parse_error` reason and
+  `classifier_version`. It recognises PE (with `PeDetails`: `Exe`, `Dll`,
+  `Driver`, `Efi`, `Cpl`, `Scr`, `Ocx` and `ResourceOnly`, the CLR header
+  as IL-only or mixed, and ARM64X, ARM64EC and CHPE layouts), NE, LE, LX
+  and DOS `MZ` programs, DOS `.com` programs (by name and size, flagged
+  `heuristic`), compound files by root CLSID (installer database, patch,
+  transform and merge module, and macro-capable office suite documents as
+  a flag), ZIP containers by entry name (app packages and bundles, Java
+  archives, Python zip applications), cabinet, compiled help, shell links,
+  ISO 9660 and UDF images, 7z, RAR, gzip, ELF, Mach-O (thin and fat),
+  Python bytecode, HTML applications, registry files, and scripts
+  (`ScriptKind`) from shebang lines, defining markers, signature block
+  markers and keyword scores. A keyword guess never overrides the script
+  language the extension claims. `is_executable_content()` is true for
+  every kind that can run code, natively or through a host, and for a ZIP
+  archive whose structure could not be read in one consistent way.
+
+  The PE sub-kind reuses `pe::parse_prefix` on the header bytes only, then
+  maps RVAs with the parser's loader layout and makes small reads of the
+  import, export, resource root, CLR and load configuration directories.
+  Its `Driver` rule includes every `pe` kernel driver signal (`INIT`,
+  `IMAGE_FILE_SYSTEM`, kernel module imports), so an image for which
+  `PeInfo::is_kernel_driver` is true is a `Driver` here too. (#44's rule
+  also makes a native image that does not import `ntdll.dll` a `Driver`.)
+  The import table ends where the loader ends it: at the first descriptor
+  with no name or no import address table.
 
 ## Handling untrusted input
 
@@ -424,6 +459,30 @@ Every file this crate reads may be hostile, so the parser:
   `ParseWarning`s, each with an offset;
 - records the file offset of every structure, so later stages such as the
   Authenticode hash work on exactly the bytes that were parsed.
+
+The file type classifier reads the first 64 KiB, then makes targeted reads
+(PE headers past the head, ZIP end records and central directory, the
+compound file root entry, PE directories, the last 64 KiB of long text for
+a signature block marker) whose total is capped at 4.25 MiB, so it never
+loads a whole file. A ZIP central directory is read once, up to 4 MiB and
+65,536 entries, and only when the end records and directory are consistent
+with the APPNOTE layout. Any structure on which ZIP readers could disagree
+(a second end record, trailing data, ZIP64 and 32-bit fields that differ, a
+shifted or understated directory, a wrong entry count, another record
+inside the directory) is reported as `ZipDirectoryAmbiguous`, and a broken
+or cut-off one as `ZipDirectoryMalformed` or `ZipDirectoryTruncated`.
+`is_executable_content()` is true for a ZIP with any of these, so a misread
+fails closed. PE imports are read up to 256 descriptors and exports up to
+4,096 names.
+It never fails: a file it cannot make sense of is `Unknown`, and a broken
+structure behind a recognised magic keeps the outer kind, with the reason
+in `parse_error`. A PE whose headers do not parse, or that ends inside its
+optional header or section table, stays executable (`Mz16`). A read that
+fails or comes up short is reported in `parse_error` (a compound file root
+entry cut short, a ZIP extra subfield cut short, an unreadable text tail, a
+failed PE directory or zip application probe), never taken as a clean
+negative. A reader that ends before the length it reported (a file
+truncated while it is read) is `Io(UnexpectedEof)`, not a shorter file.
 
 Signature data gets the same treatment. Its ASN.1 is read by one small
 DER-only module (`authenticode/asn1.rs`), which rejects BER indefinite
@@ -491,6 +550,8 @@ PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/authenticode_pkcs7" \
   cargo test -p palisade-fileid --test signature -- --ignored write_pkcs7_fuzz_seeds
 PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/fuzz_ctl" \
   cargo test -p palisade-fileid --test catalog -- --ignored write_ctl_fuzz_seeds
+PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/fuzz_classify" \
+  cargo test -p palisade-fileid --test filetype -- --ignored write_fuzz_seeds
 cargo +nightly fuzz run pe_parse -- -dict=fuzz/pe.dict -max_total_time=60
 cargo +nightly fuzz run version_info_parse -- -dict=fuzz/pe.dict -max_total_time=60
 cargo +nightly fuzz run authenticode_ranges -- -dict=fuzz/pe.dict -max_total_time=60
@@ -501,6 +562,7 @@ PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/timestamp_crl" \
   cargo test -p palisade-fileid --test validity -- --ignored write_timestamp_fuzz_seeds
 cargo +nightly fuzz run timestamp_crl -- -dict=fuzz/pkcs7.dict -max_total_time=60
 cargo +nightly fuzz run fuzz_ctl -- -max_total_time=60
+cargo +nightly fuzz run fuzz_classify -- -timeout=1 -max_total_time=60
 ```
 
 `benches/hash_and_parse.rs` (criterion) measures flat hashing, streamed

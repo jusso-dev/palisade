@@ -6,6 +6,7 @@
 
 pub mod authenticode;
 pub mod catalog;
+pub mod filetype;
 pub mod fsctx;
 pub mod hash;
 pub mod pe;
