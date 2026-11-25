@@ -106,8 +106,13 @@ case ${1:-} in
     trap 'rm -rf "$dir"' EXIT
     staged=()
     for file in "$@"; do
-      cp "$file" "$dir/$stage${file##*/}"
-      staged+=("$dir/$stage${file##*/}")
+      name=${file##*/}
+      case $name in
+        # The checksum line names the file; it must name the prefixed one.
+        *.sha256) sed "s|  ${name%.sha256}\$|  $stage${name%.sha256}|" "$file" >"$dir/$stage$name" ;;
+        *) cp "$file" "$dir/$stage$name" ;;
+      esac
+      staged+=("$dir/$stage$name")
     done
     gh release upload "$tag" --repo "$repo" --clobber -- "${staged[@]}"
     echo "main-snapshot: uploaded $# file(s) for $arch"

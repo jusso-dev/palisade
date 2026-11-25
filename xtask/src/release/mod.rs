@@ -226,8 +226,18 @@ pub fn prepare(root: &Path, version: &str, date: &str) -> Result<String, String>
         .collect();
     let section = changelog::render_release(version, date, &subjects);
     let changelog_path = root.join("CHANGELOG.md");
-    let existing = std::fs::read_to_string(&changelog_path).unwrap_or_default();
-    let updated = changelog::insert(&existing, &section, version)?;
+    let existing = match std::fs::read_to_string(&changelog_path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("cannot read CHANGELOG.md: {e}")),
+    };
+    // A rerun after a failed lock refresh finds its own section and keeps
+    // it, then finishes the remaining steps.
+    let updated = if parsed == current && changelog::excerpt(&existing, version).is_ok() {
+        existing
+    } else {
+        changelog::insert(&existing, &section, version)?
+    };
     write(&changelog_path, &updated)?;
     write(&manifest_path, &set_workspace_version(&manifest, version)?)?;
     // The release builds with --locked, so the lock file must record the
@@ -321,7 +331,14 @@ pub fn verify_dir(
         .filter(|f| f.extension().is_some_and(|e| e.eq_ignore_ascii_case("msi")))
         .cloned()
         .collect();
+    // A directory of this run's own, so two runs cannot swap packages.
+    let work = work.join(format!("run-{}", std::process::id()));
+    let _cleanup = RemoveOnDrop(work.clone());
     for (index, package) in packages.iter().enumerate() {
+        // The package's own signature first: an administrative install runs
+        // the package's actions, so only a validly signed one is opened.
+        sign::verify_file(root, timestamp, &mut runner, package)
+            .map_err(|e| format!("{}: {e}; not unpacking it", package.display()))?;
         // Windows Installer needs absolute paths with backslashes.
         let package =
             std::path::absolute(package).map_err(|e| format!("{}: {e}", package.display()))?;
@@ -377,6 +394,40 @@ pub fn verify_dir(
             failures.join(", ")
         ))
     }
+}
+
+/// Removes a directory when dropped, whatever happened.
+struct RemoveOnDrop(std::path::PathBuf);
+
+impl Drop for RemoveOnDrop {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// `true` for a real calendar date written `YYYY-MM-DD`.
+pub fn is_calendar_date(text: &str) -> bool {
+    let b = text.as_bytes();
+    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
+        return false;
+    }
+    let num = |r: std::ops::Range<usize>| {
+        text.get(r)
+            .filter(|s| s.bytes().all(|c| c.is_ascii_digit()))
+            .and_then(|s| s.parse::<u32>().ok())
+    };
+    let (Some(y), Some(m), Some(d)) = (num(0..4), num(5..7), num(8..10)) else {
+        return false;
+    };
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let days = match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return false,
+    };
+    y >= 2000 && (1..=days).contains(&d)
 }
 
 fn list_signable(dir: &Path) -> Result<Vec<std::path::PathBuf>, String> {
@@ -514,6 +565,27 @@ mod tests {
     }
 
     #[test]
+    fn calendar_dates() {
+        for ok in ["2026-12-01", "2028-02-29", "2000-02-29", "2026-12-31"] {
+            assert!(is_calendar_date(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "2026-02-30",
+            "2027-02-29",
+            "1900-02-29",
+            "2026-13-01",
+            "2026-00-10",
+            "2026-1-01",
+            "2026/12/01",
+            "20261201xx",
+            "+026-12-01",
+        ] {
+            assert!(!is_calendar_date(bad), "{bad}");
+        }
+    }
+
+    #[test]
     fn provenance_is_a_no_op_until_enabled() {
         assert!(provenance(Path::new("/nonexistent"), false).is_ok());
     }
@@ -627,10 +699,15 @@ mod workflow_tests {
         assert!(text(&w["jobs"]["check-tag"]).contains("--draft"));
     }
 
-    /// The tag check refuses to go on without signing configured.
+    /// The tag check refuses to go on without signing configured, and
+    /// verifies the tag signature against committed keys.
     #[test]
     fn a_tag_without_signing_configured_fails() {
         let check = text(&workflow()["jobs"]["check-tag"]);
+        assert!(check.contains("tag -v") && check.contains("allowed_tag_signers"));
+        assert!(check.contains("^{commit}") && check.contains("GITHUB_SHA"));
+        let verify = text(&workflow()["jobs"]["verify"]);
+        assert!(verify.contains("ssh-keygen -Y verify") && verify.contains("release-checksum.pub"));
         assert!(check.contains("vars.RELEASE_SIGNER") && check.contains("pfx|cloud-hsm)"));
         assert!(check.contains("Signing not configured"));
     }

@@ -35,6 +35,7 @@ case "$1 $2" in
     for a in "$@"; do
       case $a in --) continue ;; *.msi|*.msi.sha256|*.txt) n=${a##*/}
         [ -f "$FAKE/upload-fails" ] && { echo "upload failed" >&2; exit 1; }
+        mkdir -p "$FAKE/staged"; cp "$a" "$FAKE/staged/$n"
         grep -Fqx "$n" "$FAKE/assets" 2>/dev/null || echo "$n" >>"$FAKE/assets" ;;
       esac
     done ;;
@@ -60,7 +61,10 @@ sha2=2222222222222222222222222222222222222222
 mkdir -p "$FAKE" "$work/out"
 for f in Palisade-0.1.0-x64.msi Palisade-0.1.0-x64.msi.sha256 Palisade-0.1.0-arm64.msi Palisade-0.1.0-arm64.msi.sha256 \
          Palisade-0.2.0-x64.msi Palisade-0.2.0-x64.msi.sha256 Palisade-0.2.0-arm64.msi Palisade-0.2.0-arm64.msi.sha256 other.txt; do
-  echo "$f" >"$work/out/$f"
+  case $f in
+    *.sha256) echo "abc  ${f%.sha256}" >"$work/out/$f" ;;
+    *) echo "$f" >"$work/out/$f" ;;
+  esac
 done
 printf '[workspace]\nmembers = []\n\n[workspace.package]\nversion = "0.1.0"\nedition = "2024"\n\n[profile.x]\nversion = "9.9.9"\n' >"$work/Cargo.toml"
 export SNAPSHOT_MANIFEST="$work/Cargo.toml"
@@ -89,6 +93,8 @@ grep -q "Being updated to $sha1" "$FAKE/notes" || fail "prepare notes name the c
 grep -q "not for production" "$FAKE/notes" || fail "notes warn the builds are not for production"
 up "$sha1" 0.1.0
 grep -qx "${p1}Palisade-0.1.0-x64.msi" "$FAKE/assets" || fail "uploads carry the commit prefix"
+grep -qx "abc  ${p1}Palisade-0.1.0-x64.msi" "$FAKE/staged/${p1}Palisade-0.1.0-x64.msi.sha256" \
+  || fail "the checksum file names the prefixed package: $(cat "$FAKE/staged/${p1}Palisade-0.1.0-x64.msi.sha256" 2>&1)"
 GITHUB_SHA=$sha1 run finish || fail "finish: $(cat "$work/stderr")"
 [ "$(cat "$FAKE/tag")" = "$sha1" ] || fail "finish points the tag at the commit"
 grep -q "Commit: $sha1" "$FAKE/notes" || fail "finish notes name the commit"

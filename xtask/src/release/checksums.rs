@@ -77,7 +77,7 @@ pub fn verify(sums: &str, files: &[(String, Vec<u8>)]) -> Vec<String> {
 
 /// Release file names are plain: no directories, spaces or control
 /// characters, so every line parses one way.
-fn check_name(name: &str) -> Result<(), String> {
+pub fn check_name(name: &str) -> Result<(), String> {
     let ok = !name.is_empty()
         && !name.starts_with('.')
         && name

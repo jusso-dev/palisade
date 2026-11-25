@@ -35,6 +35,7 @@ on:
       - .github/workflows/release.yml
       - xtask/src/dist/**
       - xtask/src/release/**
+      - xtask/src/main.rs
       - packaging/**
 
 permissions:
@@ -95,6 +96,32 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: git fetch --force --no-tags origin "refs/tags/$TAG:refs/tags/$TAG"
+      # A tag moved after the push, or a re-run of an older run, must not
+      # release a commit the tag no longer names.
+      - name: The tag still names this run's commit
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          [ "$(git rev-parse "refs/tags/$TAG^{commit}")" = "$GITHUB_SHA" ] || {
+            echo "::error::$TAG no longer points at $GITHUB_SHA; push a new tag instead of moving one"; exit 1; }
+      # The signature itself, against the maintainer keys committed in the
+      # repository (docs/releasing.md#what-the-maintainer-sets-up).
+      - name: Verify the tag signature
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          ssh_keys=packaging/sign/allowed_tag_signers
+          gpg_keys=packaging/sign/tag-signers.asc
+          if [ -s "$ssh_keys" ]; then
+            git -c gpg.ssh.allowedSignersFile="$ssh_keys" tag -v "$TAG"
+          elif [ -s "$gpg_keys" ]; then
+            export GNUPGHOME="$RUNNER_TEMP/gnupg"
+            mkdir -m 700 "$GNUPGHOME"
+            gpg --batch --quiet --import "$gpg_keys"
+            git tag -v "$TAG"
+          else
+            echo "::error title=Signing not configured::Commit the keys that may sign release tags as $ssh_keys or $gpg_keys (docs/releasing.md#what-the-maintainer-sets-up)."; exit 1
+          fi
       - name: Check the tag
         id: tag
         env:
@@ -125,13 +152,16 @@ jobs:
           TAG: ${{ github.ref_name }}
           PRERELEASE: ${{ steps.tag.outputs.prerelease }}
         run: |
-          if gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null | grep -qx false; then
-            echo "::error::$TAG is already published; releases are never replaced (docs/releasing.md#yanking)"; exit 1
-          fi
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
+          # One lookup: a draft goes on, a published release stops, "not
+          # found" creates the draft, and any other failure stops.
+          if state=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>"$RUNNER_TEMP/view.err"); then
+            [ "$state" = true ] || { echo "::error::$TAG is already published; releases are never replaced (docs/releasing.md#yanking)"; exit 1; }
+          elif grep -qi "release not found" "$RUNNER_TEMP/view.err"; then
             flags=(--draft --verify-tag --title "Palisade $TAG")
             [ "$PRERELEASE" = true ] && flags+=(--prerelease)
             gh release create "$TAG" "${flags[@]}" --notes "Being built by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID."
+          else
+            echo "::error::cannot look up the $TAG release: $(cat "$RUNNER_TEMP/view.err")"; exit 1
           fi
 
   build:
@@ -279,9 +309,6 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber target/final/Palisade-*.msi target/final/SHA256SUMS target/final/SHA256SUMS.sig
-          for arch in x64 arm64; do
-            gh release delete-asset "$TAG" "unsigned-$arch.zip" --repo "$GITHUB_REPOSITORY" --yes
-          done
       - name: Remove the signing material
         if: always()
         shell: pwsh
@@ -313,7 +340,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir target/verify
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir target/verify
+          rm -f target/verify/unsigned-*.zip
+      # SHA256SUMS is trusted only once its signature checks out against
+      # the public key published in the repository.
+      - name: Check the checksum signature
+        shell: bash
+        run: |
+          key=packaging/sign/release-checksum.pub
+          [ -s "$key" ] || { echo "::error title=Signing not configured::Commit the checksum signing public key as $key (docs/releasing.md#checksum-signing-key)."; exit 1; }
+          echo "palisade-release $(cat "$key")" > "$RUNNER_TEMP/allowed_signers"
+          ssh-keygen -Y verify -f "$RUNNER_TEMP/allowed_signers" -I palisade-release -n palisade-release \
+            -s target/verify/SHA256SUMS.sig < target/verify/SHA256SUMS
       - run: cargo xtask release verify-checksums target/verify
       - name: Keep only this architecture's package
         shell: bash
@@ -324,6 +363,27 @@ jobs:
           mv target/verify/Palisade-*-"$ARCH".msi target/verify-arch/
           [ "$(find target/verify-arch -name '*.msi' | wc -l)" -eq 1 ] || { echo "::error::expected one $ARCH package"; exit 1; }
       - run: cargo xtask release verify target/verify-arch
+
+  # The unsigned executables leave the draft once the signed files are
+  # verified. A separate job, so a failed deletion is retried without
+  # signing again; an archive already gone counts as deleted.
+  remove-unsigned:
+    needs: [check-tag, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          names=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          for arch in x64 arm64; do
+            if printf '%s\n' "$names" | grep -Fqx "unsigned-$arch.zip"; then
+              gh release delete-asset "$TAG" "unsigned-$arch.zip" --repo "$GITHUB_REPOSITORY" --yes
+            fi
+          done
 
   provenance:
     needs: [check-tag, verify]
@@ -341,7 +401,7 @@ jobs:
         run: cargo xtask release provenance
 
   publish:
-    needs: [check-tag, verify, provenance]
+    needs: [check-tag, verify, provenance, remove-unsigned]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -350,7 +410,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - run: rustup toolchain install
+      - name: The tag still names this run's commit
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          git fetch --force --no-tags origin "refs/tags/$TAG:refs/tags/$TAG"
+          [ "$(git rev-parse "refs/tags/$TAG^{commit}")" = "$GITHUB_SHA" ] || {
+            echo "::error::$TAG no longer points at $GITHUB_SHA; not publishing"; exit 1; }
       - name: Publish the draft
         env:
           GH_TOKEN: ${{ github.token }}

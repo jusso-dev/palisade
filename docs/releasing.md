@@ -17,9 +17,11 @@ the [`main-snapshot`](ci.md#main-snapshot) pre-release.
 - Pre-releases are `-alpha.N`, `-beta.N` and `-rc.N`, and are published as GitHub pre-releases.
 - Tags are `vX.Y.Z` or `vX.Y.Z-rc.N` (and so on), **annotated and signed** with SSH or GPG
   (`git tag -s`). `cargo xtask release check-tag` refuses a lightweight or unsigned tag, a name
-  that is not a release version, and a tag whose commit's `Cargo.toml` has another version. It
-  checks that a signature is there; whose key made it is enforced by protecting `v*` tags
-  (below), because a runner has no trusted keyring to check it against.
+  that is not a release version, and a tag whose commit's `Cargo.toml` has another version. In
+  the release workflow it then verifies the signature cryptographically with `git tag -v`
+  against the maintainer keys committed in `packaging/sign/allowed_tag_signers` (SSH, in
+  `allowed_signers` format) and `packaging/sign/tag-signers.asc` (GPG), and fails if neither
+  file is there.
 
 ## The pipeline
 
@@ -153,8 +155,17 @@ maintainer can do; everything else is in place.
    EOF
    ```
 
-   `required_signatures` makes GitHub refuse tags whose signature it cannot verify against the
-   tagger's registered keys.
+   This stops anyone but the maintainer creating, moving or deleting a `v*` tag. It does not
+   check tag signatures (the signatures rule covers commits, and the maintainer bypasses
+   creation); the release workflow does that against the committed keys (below).
+
+6. **Commit the keys that may sign release tags and checksums**, in a pull request:
+   - `packaging/sign/allowed_tag_signers`: one line per SSH key that may sign tags,
+     `<email> namespaces="git" <public key>` (`git config gpg.ssh.allowedSignersFile` format); or
+     `packaging/sign/tag-signers.asc`: the armoured public GPG keys that may sign tags.
+   - `packaging/sign/release-checksum.pub`: the public half of `RELEASE_CHECKSUM_KEY`
+     ([below](#checksum-signing-key)). `verify` checks `SHA256SUMS.sig` against it and fails if
+     it is missing.
 
 ### How secrets are handled
 
@@ -190,19 +201,24 @@ with an Ed25519 key held as `RELEASE_CHECKSUM_KEY`. Create it once:
 
 ```sh
 ssh-keygen -t ed25519 -N '' -C 'palisade-release' -f palisade-release
-# Secret: the contents of palisade-release. Public key: palisade-release.pub, published here.
+# Secret: the contents of palisade-release.
+# Public key: commit palisade-release.pub as packaging/sign/release-checksum.pub.
 ```
 
-To check a download:
+To check a download, here `Palisade-0.2.0-x64.msi`: the signature first, and only then that
+exact file's line in the checksums.
 
 ```sh
-echo "palisade-release $(cat palisade-release.pub)" > allowed_signers
+file=Palisade-0.2.0-x64.msi
+echo "palisade-release $(cat release-checksum.pub)" > allowed_signers
 ssh-keygen -Y verify -f allowed_signers -I palisade-release -n palisade-release \
-  -s SHA256SUMS.sig < SHA256SUMS
-sha256sum --check --ignore-missing SHA256SUMS
+  -s SHA256SUMS.sig < SHA256SUMS \
+  && grep -E "^[0-9a-f]{64}  ${file}\$" SHA256SUMS | sha256sum --check --strict - \
+  && echo "$file is verified"
 ```
 
-The public key is published here once the maintainer has created it.
+Install it only if the last line prints. `release-checksum.pub` is
+`packaging/sign/release-checksum.pub` in the repository, once the maintainer has committed it.
 
 ## Release checklist
 
@@ -218,10 +234,10 @@ The public key is published here once the maintainer has created it.
    RELEASE_DATE=2026-12-01 cargo xtask release prepare 0.2.0
    ```
 
-   This sets `workspace.package.version`, updates `Cargo.lock` to match (the release builds
-   with `--locked`), and adds a `CHANGELOG.md` section generated from the
+   This sets `workspace.package.version`, updates `Cargo.lock` and each fuzz workspace's lock
+   file to match (the release builds with `--locked`), and adds a `CHANGELOG.md` section generated from the
    Conventional Commit titles merged since the last release tag, under Breaking, Security,
-   Features, Fixes, Docs and Internal. Edit the wording if needed, commit all three files, then
+   Features, Fixes, Docs and Internal. Edit the wording if needed, commit every changed file, then
    open a pull request
    titled `chore(release): 0.2.0` and merge it once CI passes.
 4. Tag the merge commit and push the tag:
@@ -267,8 +283,10 @@ release cannot be audited. To withdraw one:
    Until that exists, the release notes are the notice.
 
 The tag stays. A tag that was pushed but whose release failed before publishing leaves only a
-draft. Delete the draft, fix the problem, and tag a new patch version rather than moving the
-tag.
+draft. Delete the draft, fix the problem, then release a new patch version rather than moving
+the tag: run `cargo xtask release prepare <next version>`, merge that pull request, and tag its
+merge commit as in the [checklist](#release-checklist). `check-tag` refuses a tag whose
+`Cargo.toml` still has the old version.
 
 ## Provenance
 

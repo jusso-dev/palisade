@@ -120,7 +120,7 @@ impl ProcessRunner {
 pub fn scrub(text: &str, secrets: &[String]) -> String {
     let mut out = text.to_owned();
     // Longest first, so a secret that contains another is replaced whole.
-    let mut sorted: Vec<&String> = secrets.iter().filter(|s| s.len() >= 4).collect();
+    let mut sorted: Vec<&String> = secrets.iter().filter(|s| !s.is_empty()).collect();
     sorted.sort_by_key(|s| std::cmp::Reverse(s.len()));
     for secret in sorted {
         out = out.replace(secret.as_str(), "***");
@@ -600,8 +600,9 @@ mod tests {
         ];
         assert_eq!(
             scrub(&format!("x {CANARY}-long y {CANARY} abc"), &secrets),
-            "x *** y *** abc"
+            "x *** y *** ***"
         );
+        assert_eq!(scrub("keep", &[String::new()]), "keep");
         let cfg = config(
             Kind::Pfx,
             &[

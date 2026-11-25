@@ -411,10 +411,10 @@ fn run_release(args: &[String]) -> ExitCode {
     let result: Result<(), String> = match args {
         [cmd, version] if cmd == "prepare" => {
             let date = std::env::var("RELEASE_DATE").unwrap_or_default();
-            if date.len() != 10 {
-                Err("set RELEASE_DATE=YYYY-MM-DD (the date the release is cut)".to_owned())
-            } else {
+            if release::is_calendar_date(&date) {
                 release::prepare(&root, version, &date).map(|section| print!("{section}"))
+            } else {
+                Err("set RELEASE_DATE to a real date, YYYY-MM-DD (the date the release is cut)".to_owned())
             }
         }
         [cmd, tag] if cmd == "check-tag" => release::check_tag(&root, tag).map(|v| {
@@ -435,19 +435,37 @@ fn run_release(args: &[String]) -> ExitCode {
             let dir = Path::new(dir);
             (|| {
                 let sums = read(&dir.join("SHA256SUMS"))?;
-                let mut files = Vec::new();
+                // Every listed name and every file present are read; a name
+                // that is not a plain file name in `dir`, or a file that
+                // cannot be read, is an error rather than skipped.
+                let mut names: Vec<String> = Vec::new();
                 for line in sums.lines() {
                     if let Some((_, name)) = line.split_once("  ") {
-                        if let Ok(data) = std::fs::read(dir.join(name)) {
-                            files.push((name.to_owned(), data));
-                        }
+                        release::checksums::check_name(name)?;
+                        names.push(name.to_owned());
                     }
                 }
                 for entry in std::fs::read_dir(dir).map_err(|e| format!("cannot read {}: {e}", dir.display()))? {
                     let entry = entry.map_err(|e| e.to_string())?;
                     let name = entry.file_name().to_string_lossy().into_owned();
-                    if entry.path().is_file() && name != "SHA256SUMS" && name != "SHA256SUMS.sig" && !files.iter().any(|(n, _)| *n == name) {
-                        files.push((name, Vec::new()));
+                    let kind = entry.file_type().map_err(|e| format!("{name}: {e}"))?;
+                    if kind.is_file() && name != "SHA256SUMS" && name != "SHA256SUMS.sig" && !names.contains(&name) {
+                        names.push(name);
+                    }
+                }
+                let mut files = Vec::new();
+                for name in names {
+                    let path = dir.join(&name);
+                    let meta = std::fs::symlink_metadata(&path);
+                    match meta {
+                        Ok(m) if m.file_type().is_symlink() => return Err(format!("{name}: is a link")),
+                        Ok(_) => {
+                            let data = std::fs::read(&path).map_err(|e| format!("cannot read {name}: {e}"))?;
+                            files.push((name, data));
+                        }
+                        // Missing: checksums::verify reports it as listed but missing.
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(e) => return Err(format!("cannot read {name}: {e}")),
                     }
                 }
                 let problems = release::checksums::verify(&sums, &files);
