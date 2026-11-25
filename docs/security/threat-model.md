@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Document version | 0.2.0 |
+| Document version | 0.2.1 |
 | Last reviewed | 2026-11-25 |
 | Next review due | 2027-05-25 at the latest (see [Review cadence](#review-cadence)) |
 | Status | Draft. The residual-risk register is awaiting review by someone other than the author. |
@@ -485,8 +485,8 @@ Summary by status:
 | `integ` | 10 | 10 | 0 | 0 |
 | `script` | 8 | 8 | 0 | 0 |
 | `ci` | 11 | 6 | 5 | 0 |
-| `engine` | 15 | 8 | 7 | 0 |
-| **Total** | **176** | **157** | **19** | **0** |
+| `engine` | 16 | 8 | 8 | 0 |
+| **Total** | **177** | **157** | **20** | **0** |
 
 ### Kernel driver (`palisade-driver`, optional minifilter)
 
@@ -800,6 +800,7 @@ Pure, deterministic decision code and file parsers used by the agent, server and
 | T-engine-13 | E | A parent-process trust rule is abused: a trusted parent spawns a shell or interpreter, or the attacker spoofs the reported parent process ID. | Standard user | H | M | #118, #175, #111 | planned | Until the driver ships, parent conditions can only be audited (ADR 0002, R-07). |
 | T-engine-14 | S | A file whose signature does not hold (digest mismatch, tampered signer data, weak digest, a chain to an untrusted root, a signer not allowed to sign code, revoked before the signing time, or expired without a trusted timestamp) is treated as signed by a trusted publisher. | Crafted or altered signed file | H | M | #48, #49, #50, #32 | implemented | The OS trust store cross-check (#48) and fetching revocation data online (#4) are still to be built; until then revocation is only what policy ships or the caller supplies. Parser differentials remain (R-16). |
 | T-engine-15 | S | A file is accepted as catalog-signed through a tampered or untrusted catalog, a digest looked up in the wrong slot, or a member entry for a different file. | Ability to place a catalog file or alter a file | H | L | #51 | implemented | The OS catalog database cross-check (#51) and folding catalog matches into the file identity record (#55) are still to be built. |
+| T-engine-16 | E | An administrator of a tenant, a group or a device layer weakens a control it inherits: suppresses an inherited mandatory deny or blocklist rule, lowers a locked mode or a locked setting, pins an older version of an inherited blocklist library, moves its rules ahead of global ones under `first_match`, or references another tenant's library. | Rights over a node below the one that sets the control | H | M | #37, #125 | implemented | Whoever can edit the ancestor node can still change the control there; who may edit which node is enforced by the server (#131, #10), and one administrator without dual control can widen policy for the nodes they manage (R-08). |
 
 ## Bypass attack trees
 
@@ -1294,6 +1295,7 @@ One row per threat, in the same order as the STRIDE tables. `N/A` rows are omitt
 | T-engine-13 | Created-by rules exclude shells and interpreters by default, child-process control, and the real creator is taken from process-creation callbacks, not the reported parent. | #118, #175, #111 | BYP-trust-03, BYP-trust-04 |
 | T-engine-14 | Signer criteria match only signatures whose status is valid (or valid, expired and timestamped, or catalog-signed); every other status is a non-match with a `signer_not_trusted` note. Signature, chain, timestamp and revocation checks fail closed and are judged as of the trusted signing time. | #48, #49, #50, #32 | TEST: `palisade-policy` `ops::tests::signer_criteria_only_trust_good_signatures`, `palisade-fileid` `signature::tampered_signature_is_invalid`, `signature::md5_is_weak_and_never_trusted`, `chain::invalid_signatures_are_never_trusted`, `chain::signers_restricted_from_code_signing_are_untrusted`, `validity::revocation_before_the_signing_time_always_revokes`, `validity::a_timestamp_needs_a_trusted_tsa`, `validity::a_forged_crl_cannot_revoke_and_cannot_vouch`; fuzz: `authenticode_pkcs7`, `x509_chain`, `timestamp_crl` |
 | T-engine-15 | A catalog counts only when its own signature verifies under the trust configuration in force; each digest is used only in its own slot; a changed file does not match its old member entry. | #51 | TEST: `palisade-fileid` `catalog::tampered_ctl_fails_the_message_digest`, `catalog::signers_follow_the_trust_configuration_in_force`, `catalog::digests_are_used_only_in_their_own_slot`, `catalog::changed_file_does_not_match`, `catalog::mutated_catalogs_never_panic_and_never_verify`; fuzz: `fuzz_ctl` |
+| T-engine-16 | Rules are additive and cannot be deleted below; a mandatory rule set can never be suppressed, and other blocklists only when they opt in (`allow_child_suppress`). `lock_mode` sets a floor that raises every weaker mode, type mode, rule set override and control level in the effective policy; `locked_settings` keeps a setting or mode option fixed below the node. One version of each rule set library applies per device, the hierarchy assigns every `first_match` band itself, and a library is visible only to its own tenant (or to every tenant if global). | #37, #125 | TEST: `palisade-policy` `hierarchy::tests::a_child_can_never_remove_an_inherited_mandatory_deny`, `hierarchy::tests::a_child_can_never_lower_a_locked_mode`, `hierarchy::tests::a_blocklist_cannot_be_suppressed_by_default_and_a_mandatory_one_never`, `hierarchy::tests::settings_are_override_by_nearest_and_locks_hold`, `hierarchy::tests::mode_options_can_be_locked`, `hierarchy::tests::rule_set_libraries_version_pins_and_categories`, `hierarchy::tests::a_band_written_in_a_policy_is_replaced`, `hierarchy::tests::tenant_libraries_are_invisible_to_other_tenants`, `hierarchy::tests::no_node_can_be_disabled`, `library::tests::references_must_be_visible_and_of_a_tree_kind` |
 
 ## Residual-risk register
 
@@ -1399,3 +1401,4 @@ needs an actor this model says Palisade does not resist.
 |---|---|---|---|
 | 0.1.0 | 2026-11-24 | First version: scope, assets, actors, trust boundaries, four data-flow diagrams, STRIDE tables for 19 components, 19 attack trees, privacy threats, mitigation mapping, residual-risk register, assumptions and process. | Author only; independent review pending |
 | 0.2.0 | 2026-11-25 | Status review after the policy engine, file identity, PKI and server foundations merged. Now `implemented`, each citing tests on `main`: T-engine-05 (deny-wins default and the mandatory-deny tier), T-engine-10 (path trust needs a non-writable path), T-cache-06 (MAC-protected hash cache records), T-signer-02 (domain separation), T-signer-06 and T-ca-08 (trust sets), T-ca-05 (TLS 1.3 preferred, 1.3-only option), T-db-06 and T-db-08 (forced row-level security, runtime role checks), T-ci-06 (`save-if` rule in `check-workflows`). New threats T-engine-14 (signature, chain, timestamp and revocation verdicts) and T-engine-15 (catalog signatures), both `implemented`. Existing tests are now also cited on 13 `planned` rows (one, T-api-09, already cited one), which stay planned until the component that calls the code exists. The pull request template asks the trust-boundary question, and `cargo xtask threat-coverage` checks the tables in CI. The residual-risk register is unchanged. | Author only; independent review pending |
+| 0.2.1 | 2026-11-25 | New threat T-engine-16, `implemented` (#37): an administrator of a lower hierarchy node weakening an inherited control (suppressing a mandatory deny or blocklist, lowering a locked mode or setting, pinning an older blocklist, reordering `first_match` levels, or using another tenant's library). Hierarchy snapshots are read by the strict `dsl` reader with bounded work, under T-engine-08. | Author only; independent review pending |
