@@ -9,7 +9,9 @@
 //! ProductName, ProductVersion, Manufacturer, ProductLanguage, the
 //! PackageCode and the template with [`parse_installer`], and whether the
 //! OS finds each signature's content hash intact with
-//! [`InstallerIdentity::signature_valid`]. CI runs it on its Windows
+//! [`InstallerIdentity::signature_valid`]. A second test signs the product
+//! with the OS signing cmdlet and checks that this crate verifies that
+//! signature and that the normalised hash is unchanged by signing. CI runs it on its Windows
 //! runners, where the API is always present: under CI a missing API fails
 //! the test. On a developer machine without it it says so and passes.
 
@@ -183,9 +185,13 @@ fn verifies_a_signature_the_os_made() {
         "{sig:?}"
     );
     assert!(id.signature_valid());
+    // The OS signer may also rewrite timestamp metadata (the summary
+    // information's times) as it signs, which changes the content hash but
+    // must not change the normalised hash: that is what it is for.
     let before = parse_installer(&unsigned_product()).unwrap();
     assert_eq!(id.normalised_sha256, before.normalised_sha256);
-    assert_eq!(id.content_sha256, before.content_sha256);
+    assert_eq!(id.properties, before.properties);
+    assert_eq!(id.package_code, before.package_code);
 
     // One byte changed after the OS signed it.
     let needle = b"synthetic cabinet";
