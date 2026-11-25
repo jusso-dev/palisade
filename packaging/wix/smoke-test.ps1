@@ -277,6 +277,17 @@ Check ((Setting 'GroupKey') -eq 'smoke' -and (Setting 'Proxy') -eq 'system' -and
 Check ((Get-Service $Service).Status -eq 'Running') 'the service runs after the upgrade'
 Check ((Get-Item (Join-Path $InstallDir 'pal.exe')).VersionInfo.FileVersion -eq "$NewVersion.0") 'the upgraded binaries are in place'
 
+# --- Settings changed by a maintenance reinstall ---------------------------
+$r = Msiexec 'reinstall-bad-url' @('/i', "`"$NextMsi`"", 'REINSTALL=ALL', 'REINSTALLMODE=amus', 'SERVER_URL=http://palisade.invalid')
+Check ($r.Code -eq 1603) "a reinstall with a plain-HTTP SERVER_URL is refused ($($r.Code))"
+Check ((Setting 'ServerUrl') -eq 'https://palisade.invalid/') 'the refused reinstall keeps SERVER_URL'
+$r = Msiexec 'reinstall-no-tray' @('/i', "`"$NextMsi`"", 'REINSTALL=ALL', 'REINSTALLMODE=amus', 'NO_TRAY=1')
+Require ($r.Code -eq 0) 'a reinstall with NO_TRAY=1 succeeds' $r
+Check ($null -eq (RunValue)) 'a reinstall with NO_TRAY=1 removes the sign-in entry'
+$r = Msiexec 'reinstall-tray' @('/i', "`"$NextMsi`"", 'REINSTALL=ALL', 'REINSTALLMODE=amus', 'NO_TRAY=0')
+Require ($r.Code -eq 0) 'a reinstall with NO_TRAY=0 succeeds' $r
+Check ($null -ne (RunValue)) 'a reinstall with NO_TRAY=0 restores the sign-in entry'
+
 # --- Downgrade is refused -------------------------------------------------
 $r = Msiexec 'downgrade' @('/i', "`"$CurrentMsi`"")
 Check ($r.Code -eq 1603) "a downgrade is refused ($($r.Code))"

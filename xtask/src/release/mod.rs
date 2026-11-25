@@ -122,9 +122,26 @@ pub fn parse_tag_object(kind: &str, body: &str) -> Result<TagObject, String> {
         .find_map(|l| l.strip_prefix("object "))
         .ok_or("the tag object has no `object` line")?
         .to_owned();
-    let signed = body.contains("-----BEGIN PGP SIGNATURE-----")
-        || body.contains("-----BEGIN SSH SIGNATURE-----");
-    Ok(TagObject { object, signed })
+    Ok(TagObject {
+        object,
+        signed: ends_with_signature(body),
+    })
+}
+
+/// Git appends a tag's signature after its message, so a signed tag object
+/// ends with one complete armoured block. A marker anywhere else, such as
+/// inside the message, does not count.
+fn ends_with_signature(body: &str) -> bool {
+    let lines: Vec<&str> = body.trim_end().lines().map(str::trim_end).collect();
+    ["PGP", "SSH"].iter().any(|kind| {
+        let begin = format!("-----BEGIN {kind} SIGNATURE-----");
+        let end = format!("-----END {kind} SIGNATURE-----");
+        lines.last() == Some(&end.as_str())
+            && lines
+                .iter()
+                .rposition(|l| *l == begin)
+                .is_some_and(|at| at + 1 < lines.len() - 1)
+    })
 }
 
 /// `release check-tag <tag>`: the tag's name, that it is annotated and
@@ -166,8 +183,8 @@ pub fn check_tag(root: &Path, tag: &str) -> Result<Version, String> {
     Ok(version)
 }
 
-/// `release prepare <version>`: the new version in `Cargo.toml` and a new
-/// `CHANGELOG.md` section from the commit subjects since the last release
+/// `release prepare <version>`: the new version in `Cargo.toml` and
+/// `Cargo.lock`, and a new `CHANGELOG.md` section from the commit subjects since the last release
 /// tag. Returns the changelog section.
 pub fn prepare(root: &Path, version: &str, date: &str) -> Result<String, String> {
     let parsed = parse_tag(&format!("v{version}"))?;
@@ -213,6 +230,19 @@ pub fn prepare(root: &Path, version: &str, date: &str) -> Result<String, String>
     let updated = changelog::insert(&existing, &section, version)?;
     write(&changelog_path, &updated)?;
     write(&manifest_path, &set_workspace_version(&manifest, version)?)?;
+    // The release builds with --locked, so the lock file must record the
+    // new version of every workspace crate. `--workspace` touches only them.
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let status = Command::new(cargo)
+        .args(["update", "--workspace", "--offline"])
+        .current_dir(root)
+        .status()
+        .map_err(|e| format!("cannot run cargo update: {e}"))?;
+    if !status.success() {
+        return Err(
+            "cargo update --workspace failed; Cargo.lock still has the old version".to_owned(),
+        );
+    }
     Ok(section)
 }
 
@@ -461,15 +491,19 @@ mod tests {
         let unsigned = parse_tag_object("tag\n", body).unwrap();
         assert_eq!(unsigned.object, "1111111111111111111111111111111111111111");
         assert!(!unsigned.signed);
-        for sig in [
-            "-----BEGIN SSH SIGNATURE-----",
-            "-----BEGIN PGP SIGNATURE-----",
-        ] {
-            assert!(
-                parse_tag_object("tag", &format!("{body}{sig}\nabc\n"))
-                    .unwrap()
-                    .signed
+        // A marker in the message is not a signature.
+        let forged = format!("{body}-----BEGIN SSH SIGNATURE-----\nquoted\n");
+        assert!(!parse_tag_object("tag", &forged).unwrap().signed);
+        let quoted = body.replace(
+            "Release 0.1.0",
+            "-----BEGIN PGP SIGNATURE-----\nx\n-----END PGP SIGNATURE-----\nmore text",
+        );
+        assert!(!parse_tag_object("tag", &quoted).unwrap().signed);
+        for kind in ["SSH", "PGP"] {
+            let signed = format!(
+                "{body}-----BEGIN {kind} SIGNATURE-----\nabc\n-----END {kind} SIGNATURE-----\n"
             );
+            assert!(parse_tag_object("tag", &signed).unwrap().signed, "{kind}");
         }
         assert!(
             parse_tag_object("commit", body)
@@ -568,9 +602,17 @@ mod workflow_tests {
         let all = text(&w);
         assert!(!all.contains("--no-timestamp"));
         let verify = text(&w["jobs"]["verify"]);
-        assert!(
-            verify.contains("cargo xtask release verify target/verify\n")
-                || verify.ends_with("cargo xtask release verify target/verify")
+        assert!(verify.contains("cargo xtask release verify target/verify-arch"));
+        let runners: Vec<&str> = w["jobs"]["verify"]["strategy"]["matrix"]["include"]
+            .as_vec()
+            .unwrap()
+            .iter()
+            .map(|e| e["os"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            runners,
+            ["windows-latest", "windows-11-arm"],
+            "each package is verified on its own architecture"
         );
         assert!(!verify.contains("--allow-untimestamped"));
         let needs: Vec<&str> = w["jobs"]["publish"]["needs"]

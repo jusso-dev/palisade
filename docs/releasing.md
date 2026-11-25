@@ -34,7 +34,7 @@ published only after `verify` passes.
 | `build` | windows-latest (x64), windows-11-arm (ARM64) | none | `cargo xtask dist --locked` release builds, natively; uploads the unsigned executables, the symbols archive and the size report, warning about binaries more than 10% larger than in the previous release |
 | `server` | ubuntu-latest | none | The Linux server binary |
 | `sign` | windows-latest | `release-signing` environment | After a reviewer approves: signs every executable, builds each architecture's package from the **signed** executables (`dist --from`, which first checks they are this version's), signs each package, writes `SHA256SUMS` over the final files and signs it; replaces the unsigned files in the draft |
-| `verify` | windows-latest | none | Checks `SHA256SUMS`, then every package and every executable **inside** each package (unpacked with an administrative install) with the OS signing tool's default policy, every signature, SHA-256, and an RFC 3161 timestamp. Any unsigned, invalid or untimestamped file fails the release |
+| `verify` | windows-latest (x64), windows-11-arm (ARM64) | none | Checks `SHA256SUMS`, then each architecture's package, on its own architecture's runner, and every executable **inside** it (unpacked with an administrative install) with the OS signing tool's default policy, every signature, SHA-256, and an RFC 3161 timestamp. Any unsigned, invalid or untimestamped file fails the release |
 | `provenance` | ubuntu-latest | none | The hook for the SBOM, build provenance and signed update manifest (#18, #226); see [Provenance](#provenance) |
 | `publish` | ubuntu-latest | none | The `CHANGELOG.md` section as release notes, the pre-release flag for `-alpha`, `-beta` and `-rc`, and publishes the draft |
 
@@ -218,9 +218,11 @@ The public key is published here once the maintainer has created it.
    RELEASE_DATE=2026-12-01 cargo xtask release prepare 0.2.0
    ```
 
-   This sets `workspace.package.version` and adds a `CHANGELOG.md` section generated from the
+   This sets `workspace.package.version`, updates `Cargo.lock` to match (the release builds
+   with `--locked`), and adds a `CHANGELOG.md` section generated from the
    Conventional Commit titles merged since the last release tag, under Breaking, Security,
-   Features, Fixes, Docs and Internal. Edit the wording if needed, then open a pull request
+   Features, Fixes, Docs and Internal. Edit the wording if needed, commit all three files, then
+   open a pull request
    titled `chore(release): 0.2.0` and merge it once CI passes.
 4. Tag the merge commit and push the tag:
 

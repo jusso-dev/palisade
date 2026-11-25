@@ -15,8 +15,9 @@
 #              only): signs every executable, packages each architecture's
 #              MSI from the signed executables, signs the MSIs, writes and
 #              signs SHA256SUMS
-#   verify     every MSI, and every executable inside each MSI, has a
-#              valid timestamped signature; SHA256SUMS matches
+#   verify     per architecture, on its own runner: the MSI and every
+#              executable inside it has a valid timestamped signature;
+#              SHA256SUMS matches
 #   provenance SBOM and provenance hook (#18, #226): a no-op until enabled
 #   publish    release notes from CHANGELOG.md, the pre-release flag, and
 #              publishes the draft
@@ -288,9 +289,19 @@ jobs:
 
   # Fails if any package, or any executable inside a package, is unsigned,
   # invalid or not timestamped, or if SHA256SUMS does not match.
+  # Each architecture's package is unpacked and checked on its own
+  # architecture's runner, so the installer's platform check never applies.
   verify:
     needs: [check-tag, sign]
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+          - os: windows-11-arm
+            arch: arm64
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -304,7 +315,15 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir target/verify
       - run: cargo xtask release verify-checksums target/verify
-      - run: cargo xtask release verify target/verify
+      - name: Keep only this architecture's package
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p target/verify-arch
+          mv target/verify/Palisade-*-"$ARCH".msi target/verify-arch/
+          [ "$(find target/verify-arch -name '*.msi' | wc -l)" -eq 1 ] || { echo "::error::expected one $ARCH package"; exit 1; }
+      - run: cargo xtask release verify target/verify-arch
 
   provenance:
     needs: [check-tag, verify]

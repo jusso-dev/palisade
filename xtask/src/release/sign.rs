@@ -157,6 +157,11 @@ pub trait Signer {
     fn sign(&mut self, path: &Path) -> Result<(), String>;
     /// Checks `path` has a valid, timestamped signature.
     fn verify(&mut self, path: &Path) -> Result<(), String>;
+    /// Whether this signer only logs (`none`), so having nothing to sign is
+    /// not an error.
+    fn is_dry_run(&self) -> bool {
+        false
+    }
 }
 
 /// Whether signatures get an RFC 3161 timestamp.
@@ -274,6 +279,9 @@ pub fn signer<'a>(
 struct DryRun;
 
 impl Signer for DryRun {
+    fn is_dry_run(&self) -> bool {
+        true
+    }
     fn sign(&mut self, path: &Path) -> Result<(), String> {
         println!("sign(none): would sign {}", path.display());
         Ok(())
@@ -374,12 +382,15 @@ impl Signer for CloudHsm<'_> {
         let invocation = hsm_invocation(template, path)?;
         self.runner.run(&invocation)
     }
+    /// The script only knows the local signers, so verification goes
+    /// through [`verify_file`], which does not name one.
     fn verify(&mut self, path: &Path) -> Result<(), String> {
-        let mut script = Script {
-            config: self.config,
-            runner: &mut *self.runner,
-        };
-        script.verify(path)
+        verify_file(
+            &self.config.root,
+            self.config.timestamp,
+            &mut *self.runner,
+            path,
+        )
     }
 }
 
@@ -421,6 +432,12 @@ pub fn is_signable(path: &Path) -> bool {
 /// file.
 pub fn sign_all(signer: &mut dyn Signer, files: &[PathBuf], verify: bool) -> Result<usize, String> {
     let targets: Vec<&PathBuf> = files.iter().filter(|f| is_signable(f)).collect();
+    if targets.is_empty() && !signer.is_dry_run() {
+        return Err(format!(
+            "nothing to sign: none of the {} file(s) given is an .exe, .dll, .sys or .msi",
+            files.len()
+        ));
+    }
     for file in &targets {
         signer.sign(file)?;
     }
@@ -644,6 +661,26 @@ mod tests {
     }
 
     #[test]
+    fn a_real_signer_with_nothing_to_sign_fails() {
+        let cfg = config(Kind::TestCa, &[]);
+        let mut rec = Recorder::default();
+        {
+            let mut s = signer(&cfg, &mut rec).unwrap();
+            let error = sign_all(s.as_mut(), &[PathBuf::from("notes.txt")], true).unwrap_err();
+            assert!(error.contains("nothing to sign"), "{error}");
+            assert!(sign_all(s.as_mut(), &[], true).is_err());
+        }
+        assert!(rec.calls.is_empty());
+        let none = config(Kind::None, &[]);
+        let mut rec = Recorder::default();
+        let mut s = signer(&none, &mut rec).unwrap();
+        assert_eq!(
+            sign_all(s.as_mut(), &[PathBuf::from("notes.txt")], true),
+            Ok(0)
+        );
+    }
+
+    #[test]
     fn the_dry_run_runs_nothing() {
         let cfg = config(Kind::None, &[]);
         let mut rec = Recorder::default();
@@ -706,6 +743,13 @@ mod tests {
         assert_eq!(rec.calls[0].program, "remote-sign");
         assert_eq!(rec.calls[1].program, "pwsh");
         assert_eq!(rec.calls[1].args[5], "verify");
+        assert!(
+            !rec.calls[1]
+                .args
+                .iter()
+                .any(|a| a == "-Signer" || a == "cloud-hsm")
+        );
+        assert_eq!(rec.calls[1].args.last().unwrap(), "-RequireTimestamp");
     }
 
     #[test]

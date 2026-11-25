@@ -154,7 +154,10 @@ is installed.
   again. The earlier values are read in the elevated part of the install only: the user-interface
   part of an interactive install runs unelevated and cannot read the key.
 - **Notifier.** `palisade-tray.exe` is started in every user's session at sign-in, from the
-  per-machine Run key, unless `NO_TRAY=1`.
+  per-machine Run key, unless `NO_TRAY=1`. The conditional parts (this entry, `ADD_TO_PATH` and
+  each stored setting) are re-evaluated on a repair or reinstall, so
+  `msiexec /i <package> REINSTALL=ALL REINSTALLMODE=amus NO_TRAY=1` removes the entry, and
+  `NO_TRAY=0` puts it back.
 - **CLI.** `pal.exe` is installed next to the agent. `ADD_TO_PATH=1` adds the folder to the
   system `PATH`.
 - **Logging.** Windows Installer records every install, upgrade and removal in the Windows
@@ -167,7 +170,8 @@ is installed.
 ### Properties
 
 All are optional. `SERVER_URL` must start with `https://`, and `MODE` must be one of the values
-below; otherwise the install is refused before anything changes.
+below; otherwise the install, or a repair or reinstall that passes them, is refused before
+anything changes. Removal never checks them, so a damaged stored value cannot block it.
 
 | Property | Meaning |
 |---|---|
