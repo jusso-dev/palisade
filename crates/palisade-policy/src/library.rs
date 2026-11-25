@@ -782,6 +782,25 @@ pub type Version = (LibraryId, u32);
 #[derive(Clone, Debug, Default)]
 pub struct Catalogue {
     by_id: BTreeMap<LibraryId, BTreeMap<u32, Library>>,
+    /// For each hash, publisher and path set version: its canonical entries
+    /// if they fit inline in one rule, or their count if not. Computed once
+    /// here, so expanding a reference costs O(min(entries, 800)) however
+    /// often a set is referenced.
+    sets: BTreeMap<Version, Inline>,
+}
+
+/// A set as a tree uses it.
+#[derive(Clone, Debug)]
+enum Inline {
+    /// The canonical entries, at most [`inline_limit`].
+    Entries(Vec<String>),
+    /// More distinct entries than fit inline: how many.
+    TooLarge(usize),
+}
+
+/// Most entries a set may have to be inlined: 32 criteria of 25 values.
+const fn inline_limit() -> usize {
+    MAX_VALUES_PER_CRITERION * crate::model::limits::MAX_CRITERIA_PER_RULE
 }
 
 impl Catalogue {
@@ -845,7 +864,28 @@ impl Catalogue {
             paths.insert((lib.id, lib.version), base);
             versions.insert(lib.version, lib);
         }
-        let catalogue = Self { by_id };
+        let sets = by_id
+            .iter()
+            .flat_map(|(id, vs)| vs.iter().map(move |(v, lib)| ((*id, *v), lib)))
+            .filter(|(_, lib)| {
+                matches!(
+                    lib.content,
+                    LibraryContent::HashSet { .. }
+                        | LibraryContent::PublisherSet { .. }
+                        | LibraryContent::PathSet { .. }
+                )
+            })
+            .map(|(version, lib)| {
+                let entries = lib.content.canonical_entries();
+                let inline = if entries.len() > inline_limit() {
+                    Inline::TooLarge(entries.len())
+                } else {
+                    Inline::Entries(entries)
+                };
+                (version, inline)
+            })
+            .collect();
+        let catalogue = Self { by_id, sets };
         // References: each must resolve, be visible and be of a kind a tree
         // may use. Only then is the graph checked for cycles.
         let mut edges: BTreeMap<Version, Vec<Version>> = BTreeMap::new();
@@ -1106,14 +1146,14 @@ impl Catalogue {
                 })
             }
             LibraryContent::HashSet { field, .. } => {
-                set_tree(lib, *field, Operator::Equals, at, budget)
+                self.set_tree(lib, *field, Operator::Equals, at, budget)
             }
             LibraryContent::PublisherSet { .. } => {
-                set_tree(lib, Field::SignerPublisher, Operator::Equals, at, budget)
+                self.set_tree(lib, Field::SignerPublisher, Operator::Equals, at, budget)
             }
             LibraryContent::PathSet {
                 field, operator, ..
-            } => set_tree(lib, *field, *operator, at, budget),
+            } => self.set_tree(lib, *field, *operator, at, budget),
             _ => Err(err(
                 LibraryCode::RefKindNotAllowed,
                 at,
@@ -1123,54 +1163,67 @@ impl Catalogue {
     }
 }
 
-/// A set as criteria of at most 25 values each, under `any` if there are
-/// several. A rule tests at most 32 criteria, so at most 800 entries fit;
-/// a larger set is matched through the compiled index (#42).
-fn set_tree(
-    lib: &Library,
-    field: Field,
-    operator: Operator,
-    at: &str,
-    budget: &mut usize,
-) -> Result<Match, LibraryError> {
-    let entries = lib.content.canonical_entries();
-    let inline = MAX_VALUES_PER_CRITERION * crate::model::limits::MAX_CRITERIA_PER_RULE;
-    if entries.len() > inline {
-        return Err(err(
-            LibraryCode::SetTooLarge,
-            at,
-            format!(
-                "set {} has {} entries; a rule tests at most {inline} values inline (32 criteria of 25 values), and larger sets are matched through the compiled index (#42)",
-                lib.label(),
-                entries.len()
-            ),
-        ));
-    }
-    let mut criteria: Vec<Match> = entries
-        .chunks(MAX_VALUES_PER_CRITERION)
-        .map(|chunk| {
-            Match::Criterion(Criterion {
-                field,
-                operator,
-                values: chunk.to_vec(),
-                case_sensitive: None,
+impl Catalogue {
+    /// A set as criteria of at most 25 values each, under `any` if there
+    /// are several. A rule tests at most 32 criteria, so at most 800
+    /// entries fit; a larger set is matched through the compiled index
+    /// (#42). The entries were made canonical once, in [`Catalogue::new`].
+    fn set_tree(
+        &self,
+        lib: &Library,
+        field: Field,
+        operator: Operator,
+        at: &str,
+        budget: &mut usize,
+    ) -> Result<Match, LibraryError> {
+        let entries = match self.sets.get(&(lib.id, lib.version)) {
+            Some(Inline::Entries(entries)) => entries,
+            Some(Inline::TooLarge(count)) => {
+                return Err(err(
+                    LibraryCode::SetTooLarge,
+                    at,
+                    format!(
+                        "set {} has {count} entries; a rule tests at most {} values inline (32 criteria of 25 values), and larger sets are matched through the compiled index (#42)",
+                        lib.label(),
+                        inline_limit()
+                    ),
+                ));
+            }
+            None => {
+                return Err(err(
+                    LibraryCode::RefKindNotAllowed,
+                    at,
+                    format!("library {} is not a set", lib.label()),
+                ));
+            }
+        };
+        let chunks = entries.len().div_ceil(MAX_VALUES_PER_CRITERION).max(1);
+        *budget = budget.checked_sub(chunks).ok_or_else(|| {
+            err(
+                LibraryCode::RefTooDeep,
+                at,
+                format!(
+                    "the tree has more than {MAX_EXPANDED_NODES} nodes once its references are replaced"
+                ),
+            )
+        })?;
+        let mut criteria: Vec<Match> = entries
+            .chunks(MAX_VALUES_PER_CRITERION)
+            .map(|chunk| {
+                Match::Criterion(Criterion {
+                    field,
+                    operator,
+                    values: chunk.to_vec(),
+                    case_sensitive: None,
+                })
             })
+            .collect();
+        Ok(if criteria.len() == 1 {
+            criteria.remove(0)
+        } else {
+            Match::Any(criteria)
         })
-        .collect();
-    *budget = budget.checked_sub(criteria.len()).ok_or_else(|| {
-        err(
-            LibraryCode::RefTooDeep,
-            at,
-            format!(
-                "the tree has more than {MAX_EXPANDED_NODES} nodes once its references are replaced"
-            ),
-        )
-    })?;
-    Ok(if criteria.len() == 1 {
-        criteria.remove(0)
-    } else {
-        Match::Any(criteria)
-    })
+    }
 }
 
 /// Every `ref` node in a tree, with its pointer relative to the tree (the

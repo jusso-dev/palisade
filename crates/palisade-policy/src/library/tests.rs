@@ -188,6 +188,39 @@ fn a_set_too_large_for_one_rule_is_rejected_when_inlined() {
 }
 
 #[test]
+fn many_references_to_a_large_set_cost_little() {
+    // A 100,000-entry publisher set (mostly duplicates, 900 distinct),
+    // reached through a doubling chain of fragments from many rules: each
+    // reference costs O(1) after the catalogue makes the entries canonical
+    // once, whatever the size of the set.
+    let publishers: Vec<String> = (0..100_000)
+        .map(|i| format!("Publisher {}", i % 900))
+        .collect();
+    let mut libs = vec![library(
+        1,
+        1,
+        json!("global"),
+        json!({"kind": "publisher_set", "publishers": publishers}),
+    )];
+    for n in 2..=8 {
+        libs.push(fragment(n, 1, json!({"any": [r(n - 1), r(n - 1)]})));
+    }
+    let start = std::time::Instant::now();
+    let c = Catalogue::new(libs).unwrap();
+    for _ in 0..1_000 {
+        let e = c
+            .expand(&tree(r(8)), Visibility::Global, &mut BTreeSet::new())
+            .unwrap_err();
+        assert_eq!(e.code, LibraryCode::SetTooLarge);
+    }
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(30),
+        "{:?}",
+        start.elapsed()
+    );
+}
+
+#[test]
 fn cycles_are_rejected_with_the_cycle_path_once() {
     let libs = vec![
         fragment(1, 1, json!({"all": [r(2), hash('a')]})),

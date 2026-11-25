@@ -226,16 +226,19 @@ pub(super) fn check(
                 );
             }
             for (j, v) in values.iter().enumerate() {
-                let problem =
-                    if v.trim().is_empty() || v.chars().any(char::is_control) || v.len() > 2048 {
-                        Some("values are 1 to 2048 bytes with no control characters".to_owned())
-                    } else if key == "directory_groups" && normalize_principal(v).is_none() {
-                        Some("not a SID or an object ID".to_owned())
-                    } else if key == "networks" && parse_cidr(v).is_none() {
-                        Some("not a CIDR such as `10.0.0.0/8` or `2001:db8::/32`".to_owned())
-                    } else {
-                        None
-                    };
+                let problem = if v.trim().is_empty()
+                    || v.chars()
+                        .any(|c| c.is_control() || crate::validate::is_bidi_control(c))
+                    || v.len() > 2048
+                {
+                    Some("values are 1 to 2048 bytes with no control or bidirectional formatting characters".to_owned())
+                } else if key == "directory_groups" && normalize_principal(v).is_none() {
+                    Some("not a SID or an object ID".to_owned())
+                } else if key == "networks" && parse_cidr(v).is_none() {
+                    Some("not a CIDR such as `10.0.0.0/8` or `2001:db8::/32`".to_owned())
+                } else {
+                    None
+                };
                 if let Some(problem) = problem {
                     bad(&format!("/conditions/{key}/{j}"), problem);
                 }
