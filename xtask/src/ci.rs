@@ -186,6 +186,7 @@ pub const STEPS: &[Step] = &[
         )
     },
     step("runner-guard", "cargo xtask check-workflows"),
+    step("runner-guard", "cargo xtask adr lint"),
     step("doc-checks", "cargo xtask threat-coverage"),
     Step {
         tool: Some(ACTIONLINT),

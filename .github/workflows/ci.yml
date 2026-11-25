@@ -328,6 +328,8 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo xtask check-workflows
+      # ADR format, numbering, supersession links and index (docs/adr/PROCESS.md).
+      - run: cargo xtask adr lint
 
   # The documentation checks that read the repository: the threat model's
   # tables and the tests, fuzz targets and CI checks it cites (#219).

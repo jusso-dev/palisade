@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 
+mod adr;
 mod ci;
 mod coverage;
 mod deps;
@@ -27,6 +28,11 @@ const HELP: &str = "\
 Usage: cargo xtask <command>
 
 Commands:
+  adr new \"<title>\"
+                   Copy docs/adr/0000-template.md to the next ADR number, as `proposed`
+  adr index        Regenerate the ADR index table in docs/adr/README.md
+  adr lint         Check every ADR's file name, number, status, date and sections (Security
+                   impact included), supersession links, and that the index is current
   audit            Run cargo-audit over the root and fuzz lockfiles, ignoring exactly the
                    advisories deny.toml ignores
   ci [--fast]      Run the checks from .github/workflows/ci.yml locally (--fast skips coverage,
@@ -70,6 +76,9 @@ fn main() -> ExitCode {
     if let [command, rest @ ..] = args.as_slice() {
         if command == "fuzz" {
             return run_fuzz(rest);
+        }
+        if command == "adr" {
+            return run_adr(rest);
         }
     }
     match args.as_slice() {
@@ -610,6 +619,94 @@ fn check_threat_coverage(root: &Path) -> Result<Vec<String>, String> {
     }
     violations.extend(threat_coverage::check(&doc, &facts));
     Ok(violations)
+}
+
+/// `cargo xtask adr new|index|lint`.
+fn run_adr(args: &[String]) -> ExitCode {
+    let root = workspace_root();
+    let readme_path = root.join(adr::DIR).join("README.md");
+    match args {
+        [lint] if lint == "lint" => {
+            let result = adr::read_dir(&root.join(adr::DIR))
+                .and_then(|files| Ok(adr::lint(&files, &read(&readme_path)?)));
+            match result {
+                Ok(v) if v.is_empty() => {
+                    println!("adr lint: ok");
+                    ExitCode::SUCCESS
+                }
+                Ok(v) => {
+                    for violation in &v {
+                        eprintln!("adr lint: {violation}");
+                    }
+                    eprintln!("adr lint: {} violation(s)", v.len());
+                    ExitCode::FAILURE
+                }
+                Err(e) => {
+                    eprintln!("adr lint: error: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        [index] if index == "index" => {
+            let result = adr::read_dir(&root.join(adr::DIR)).and_then(|files| {
+                let adrs = adr::index_entries(&files)?;
+                let readme = read(&readme_path)?;
+                let updated = adr::replace_index(&readme, &adrs)?;
+                if updated != readme {
+                    std::fs::write(&readme_path, updated)
+                        .map_err(|e| format!("cannot write {}: {e}", readme_path.display()))?;
+                    println!("adr index: updated {}/README.md", adr::DIR);
+                } else {
+                    println!("adr index: {}/README.md is current", adr::DIR);
+                }
+                Ok(())
+            });
+            match result {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("adr index: error: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        [new, title] if new == "new" => {
+            let result = adr::read_dir(&root.join(adr::DIR)).and_then(|files| {
+                let template = files
+                    .iter()
+                    .find(|(n, _)| n == adr::TEMPLATE)
+                    .map(|(_, t)| t.clone())
+                    .ok_or_else(|| format!("{}/{} is missing", adr::DIR, adr::TEMPLATE))?;
+                let names: Vec<String> = files.into_iter().map(|(n, _)| n).collect();
+                let (name, text) =
+                    adr::new_adr(&names, &template, title, &supply_chain::today_utc()?)?;
+                let path = root.join(adr::DIR).join(&name);
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&path)
+                    .and_then(|mut f| std::io::Write::write_all(&mut f, text.as_bytes()))
+                    .map_err(|e| format!("cannot create {}: {e}", path.display()))?;
+                Ok(name)
+            });
+            match result {
+                Ok(name) => {
+                    println!(
+                        "adr new: created {}/{name}; fill it in, then run `cargo xtask adr index`",
+                        adr::DIR
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("adr new: error: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        _ => {
+            eprintln!("usage: cargo xtask adr new \"<title>\" | adr index | adr lint");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// The repository root: this crate lives in `<root>/xtask`.

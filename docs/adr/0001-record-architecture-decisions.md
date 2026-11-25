@@ -80,3 +80,5 @@ architectural change can merge without its security effect being stated.
 - Issue #20 (this process), epic #1.
 - Tooling: `cargo xtask adr new|index|lint` in #29, CI enforcement in #21, ADR table in the
   docs site in #27, PR template checklist in #28.
+- The tooling was delivered under #20 (`xtask/src/adr.rs`); `cargo xtask adr lint` runs in the
+  `runner-guard` CI job ([PROCESS.md](PROCESS.md#index-and-tooling)).
