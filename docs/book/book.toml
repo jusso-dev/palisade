@@ -20,7 +20,10 @@ security-level = "strict"
 
 [output.html]
 git-repository-url = "https://github.com/jusso-dev/palisade"
-edit-url-template = "https://github.com/jusso-dev/palisade/edit/main/{path}"
+# No `edit-url-template`: chapters are staged under different paths than
+# they have in git (xtask/src/docs/stage.rs), so mdBook's `{path}` would
+# point at files that do not exist. Each page's source is linked from the
+# repository instead.
 additional-css = ["theme/palisade.css"]
 additional-js = ["theme/palisade.js"]
 # Off: it would also curl the quotes inside the pre-rendered Mermaid SVGs'

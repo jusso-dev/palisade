@@ -6,7 +6,7 @@ A script.
 
 A script is either a file (`path`) or inline text (`inline: true`):
 exactly one of the two.
-A file-backed script's digests and signatures are in [`Event::file`].
+A file-backed script's digests and signatures are in `Event::file`.
 
 Appears at: `/script`.
 

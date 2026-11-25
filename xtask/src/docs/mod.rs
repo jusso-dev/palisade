@@ -24,12 +24,12 @@
 //!   checks every internal link and anchor with `lychee --offline`. The
 //!   site is written to `target/book`. With `--site-url <path>`, links are
 //!   built for that base path (`/palisade/latest/`).
-//! - `publish <dir> --version <name>` assembles the GitHub Pages tree: the
+//! - `assemble <dir> --version <name>` assembles the GitHub Pages tree: the
 //!   book under `<dir>/<name>/`, the Rust API docs under
 //!   `<dir>/<name>/api/rust/`, the version list, and a root redirect.
 
+pub mod assemble;
 pub mod markdown;
-pub mod publish;
 pub mod schema_ref;
 pub mod stage;
 
@@ -43,10 +43,15 @@ use serde_json::Value;
 pub const BOOK: &str = "docs/book";
 /// Generated pages, relative to the repository root.
 pub const GENERATED: &str = "docs/book/src/reference/generated";
-/// Where `build` stages the sources.
-pub const STAGE: &str = "target/book-src";
-/// Where `build` writes the site.
-pub const OUT: &str = "target/book";
+/// Where `build` stages the sources, under the target directory.
+pub const STAGE: &str = "book-src";
+/// Where `build` writes the site, under the target directory.
+pub const OUT: &str = "book";
+
+/// Cargo's target directory: `CARGO_TARGET_DIR`, or `<root>/target`.
+pub fn target_dir(root: &Path) -> PathBuf {
+    std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| root.join("target"), PathBuf::from)
+}
 
 /// A tool `docs build` runs: its name (also the command), the version CI
 /// installs, and how to install it. The Mermaid preprocessor also needs
@@ -439,9 +444,7 @@ pub fn cli_help(root: &Path) -> Result<Vec<(String, String)>, String> {
     if !status.success() {
         return Err("cargo build of the CLI binaries failed".to_owned());
     }
-    let target = std::env::var_os("CARGO_TARGET_DIR")
-        .map_or_else(|| root.join("target"), PathBuf::from)
-        .join("debug");
+    let target = target_dir(root).join("debug");
     let mut out = Vec::new();
     for (_, bin, commands) in CLIS {
         let exe = target.join(format!("{bin}{}", std::env::consts::EXE_SUFFIX));
@@ -457,12 +460,14 @@ pub fn cli_help(root: &Path) -> Result<Vec<(String, String)>, String> {
                 .env("NO_COLOR", "1")
                 .output()
                 .map_err(|e| format!("cannot run {}: {e}", exe.display()))?;
-            let text = String::from_utf8_lossy(if output.stdout.is_empty() {
-                &output.stderr
-            } else {
-                &output.stdout
-            })
-            .replace("\r\n", "\n");
+            let text = normalise_help(
+                bin,
+                &String::from_utf8_lossy(if output.stdout.is_empty() {
+                    &output.stderr
+                } else {
+                    &output.stdout
+                }),
+            );
             let title = std::iter::once(*bin)
                 .chain(command.iter().copied())
                 .collect::<Vec<_>>()
@@ -471,6 +476,14 @@ pub fn cli_help(root: &Path) -> Result<Vec<(String, String)>, String> {
         }
     }
     Ok(out)
+}
+
+/// Help text as every platform prints it: LF line endings, and the binary
+/// named without `.exe`. clap takes the name in `Usage:` lines from how the
+/// program was started, so on Windows it says `palisade-server.exe`.
+fn normalise_help(bin: &str, text: &str) -> String {
+    text.replace("\r\n", "\n")
+        .replace(&format!("{bin}.exe"), bin)
 }
 
 /// Writes the generated pages and the SUMMARY block. Removes generated
@@ -690,8 +703,8 @@ pub fn require_tools() -> Result<(), String> {
 /// mdBook warning or error line fails the build.
 pub fn build(root: &Path, files: &[String], site_url: Option<&str>) -> Result<Vec<String>, String> {
     require_tools()?;
-    let stage_dir = root.join(STAGE);
-    let out_dir = root.join(OUT);
+    let stage_dir = target_dir(root).join(STAGE);
+    let out_dir = target_dir(root).join(OUT);
     for dir in [&stage_dir, &out_dir] {
         if dir.exists() {
             std::fs::remove_dir_all(dir)
@@ -881,6 +894,15 @@ mod tests {
     }
 
     #[test]
+    fn help_is_the_same_on_every_platform() {
+        assert_eq!(
+            normalise_help("pal", "Usage: pal.exe [OPTIONS]\r\n  pal.exe help\r\n"),
+            "Usage: pal [OPTIONS]\n  pal help\n"
+        );
+        assert_eq!(normalise_help("pal", "Usage: pal x"), "Usage: pal x");
+    }
+
+    #[test]
     fn cli_page_has_one_section_per_command() {
         let page = cli_page(&[
             ("a".to_owned(), "Usage: a\n".to_owned()),
@@ -889,5 +911,197 @@ mod tests {
         assert!(page.contains("## `a`\n\n```text\nUsage: a\n```"));
         assert!(page.contains("## `a b`\n\n```text\nUsage: a b\n```"));
         assert!(page.ends_with("```\n"));
+    }
+
+    /// A scratch repository with a minimal book, for the failure paths.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let dir =
+                std::env::temp_dir().join(format!("palisade-docs-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let s = Self(dir);
+            s.write("README.md", &format!("# Project\n\n**{DISCLAIMER}**\n"));
+            s.write(
+                "docs/book/theme/header.hbs",
+                &format!("<div>{DISCLAIMER}</div>"),
+            );
+            s.write("docs/book/book.toml", "[book]\ntitle = \"t\"\n");
+            s.write(
+                "docs/book/src/SUMMARY.md",
+                "# Summary\n\n[Intro](intro.md)\n- [CI](../../ci.md)\n- [Readme](../../../README.md)\n- [Crate](../../../crates/c/README.md)\n- [Example](example.md)\n<!-- generated:start -->\n<!-- generated:end -->\n<!-- adr:start -->\n    - [0001. First](../../adr/0001-first.md)\n<!-- adr:end -->\n",
+            );
+            s.write("docs/book/src/intro.md", "# Intro\n");
+            s.write(
+                "docs/book/src/example.md",
+                "# Example\n\n{{#include ../../examples/policies/a.yaml}}\n",
+            );
+            s.write("docs/examples/policies/a.yaml", "x: 1\n");
+            s.write("docs/ci.md", "# CI\n\n[intro](book/src/intro.md)\n");
+            s.write("crates/c/README.md", "# c\n\n```rust\nlet x = 1;\n```\n");
+            s.write(
+                "crates/c/src/lib.rs",
+                "#![doc = include_str!(\"../README.md\")]\n",
+            );
+            s.write("docs/adr/0001-first.md", "# 0001. First\n");
+            s
+        }
+
+        fn write(&self, path: &str, text: &str) {
+            let path = self.0.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        }
+
+        fn files(&self) -> Vec<String> {
+            walk_files(&self.0)
+                .unwrap()
+                .iter()
+                .map(|p| relative(&self.0, p))
+                .collect()
+        }
+
+        fn check(&self) -> Vec<String> {
+            check_sources(&self.0, &self.files()).unwrap()
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn check_sources_passes_a_good_book() {
+        let s = Scratch::new("good");
+        assert_eq!(s.check(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn check_sources_reports_each_rule() {
+        let s = Scratch::new("bad");
+        s.write("docs/orphan.md", "# Orphan\n");
+        s.write("docs/examples/policies/unshown.yaml", "x: 2\n");
+        s.write("docs/ci.md", "## CI\n\n![](x.png)\n\n```rust\nfn f() {}\n```\n\n```yaml\nschema_version: \"1.0.0\"\n```\n");
+        s.write("docs/book/theme/header.hbs", "no banner");
+        s.write("README.md", "# Project\n");
+        let v = s.check();
+        let expect = [
+            "docs/orphan.md: not in docs/book/src/SUMMARY.md",
+            "docs/ci.md:1: the first heading must be level 1",
+            "docs/ci.md:3: an image without alt text",
+            "docs/ci.md:5: this `rust` block is not tested",
+            "docs/ci.md:9: an inline policy example",
+            "docs/examples/policies/unshown.yaml: not shown in the book",
+            "README.md: must contain the disclaimer",
+            "docs/book/theme/header.hbs: must contain the disclaimer",
+        ];
+        for e in expect {
+            assert!(
+                v.iter().any(|m| m.starts_with(e)),
+                "missing `{e}` in {v:#?}"
+            );
+        }
+        assert_eq!(v.len(), expect.len(), "{v:#?}");
+        // A doctested crate README may have plain `rust` blocks; marked
+        // blocks are fine anywhere.
+        assert!(!v.iter().any(|m| m.starts_with("crates/c/README.md")));
+    }
+
+    #[test]
+    fn stale_reports_changed_missing_and_orphaned_pages() {
+        let s = Scratch::new("stale");
+        let pages = vec![
+            Generated {
+                path: format!("{GENERATED}/a.md"),
+                content: "# A\n".to_owned(),
+            },
+            Generated {
+                path: format!("{GENERATED}/b.md"),
+                content: "# B\n".to_owned(),
+            },
+        ];
+        write(&s.0, &pages).unwrap();
+        assert_eq!(stale(&s.0, &pages).unwrap(), Vec::<String>::new());
+        // write() fills both SUMMARY blocks and drops pages no longer made.
+        let summary = std::fs::read_to_string(s.0.join("docs/book/src/SUMMARY.md")).unwrap();
+        assert!(summary.contains("    - [0001. First](../../adr/0001-first.md)\n"));
+        s.write(&format!("{GENERATED}/a.md"), "# A edited\n");
+        std::fs::remove_file(s.0.join(format!("{GENERATED}/b.md"))).unwrap();
+        s.write(&format!("{GENERATED}/old.md"), "# Old\n");
+        s.write("docs/adr/0002-second.md", "# 0002. Second\n");
+        let v = stale(&s.0, &pages).unwrap();
+        assert_eq!(v.len(), 4, "{v:#?}");
+        assert!(v[0].starts_with(&format!("{GENERATED}/a.md: out of date")));
+        assert!(v[1].starts_with(&format!("{GENERATED}/b.md: missing")));
+        assert!(v[2].starts_with(&format!("{GENERATED}/old.md: no longer generated")));
+        assert!(v[3].contains("ADR list is out of date"));
+        write(&s.0, &pages).unwrap();
+        assert!(!s.0.join(format!("{GENERATED}/old.md")).exists());
+        assert_eq!(stale(&s.0, &pages).unwrap(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn stage_writes_chapters_includes_and_summary() {
+        let s = Scratch::new("stage");
+        let out = s.0.join("stage");
+        assert_eq!(
+            stage::stage(&s.0, &s.files(), &out).unwrap(),
+            Vec::<String>::new()
+        );
+        let read_out = |p: &str| std::fs::read_to_string(out.join("src").join(p)).unwrap();
+        let summary = read_out("SUMMARY.md");
+        assert!(summary.contains("[Intro](intro.md)"), "{summary}");
+        assert!(summary.contains(&format!("[Readme]({})", stage::ROOT_README)));
+        assert!(summary.contains("[Crate](crates/c/README.md)"));
+        assert!(!summary.contains("<!--"));
+        // The first chapter is at the root, and links to it are rewritten.
+        assert!(read_out("docs/ci.md").contains("[intro](../intro.md)"));
+        assert!(read_out("docs/ci.md").contains(&format!(
+            "Source: [`docs/ci.md`]({}docs/ci.md)",
+            stage::BLOB
+        )));
+        assert_eq!(read_out("docs/examples/policies/a.yaml"), "x: 1\n");
+        assert!(
+            read_out("docs/book/src/example.md")
+                .contains("{{#include ../../examples/policies/a.yaml}}")
+        );
+        assert!(out.join("theme/header.hbs").is_file() && out.join("book.toml").is_file());
+        // The first chapter cannot use includes (mdBook copies it to the
+        // root `index.html`); a broken link or include fails.
+        s.write(
+            "docs/book/src/SUMMARY.md",
+            "# Summary\n\n[CI](../../ci.md)\n- [Intro](intro.md)\n- [Example](example.md)\n",
+        );
+        s.write("docs/ci.md", "# CI\n\n[gone](gone.md)\n\n{{#include nope.yaml}}\n\n{{#include examples/policies/a.yaml}}\n");
+        let v = stage::stage(&s.0, &s.files(), &out).unwrap();
+        assert_eq!(v.len(), 3, "{v:#?}");
+        assert!(v[0].starts_with("docs/ci.md:3: broken link `gone.md`"));
+        assert!(v[1].contains("`{{#include nope.yaml}}`: no such file"));
+        assert!(
+            v[2].contains("the first chapter and the root README cannot use"),
+            "{v:#?}"
+        );
+    }
+
+    #[test]
+    fn every_built_page_needs_the_banner() {
+        let s = Scratch::new("banner");
+        s.write("out/a.html", DISCLAIMER);
+        s.write("out/toc.html", "frame");
+        assert_eq!(
+            pages_without_disclaimer(&s.0.join("out")).unwrap(),
+            Vec::<String>::new()
+        );
+        s.write("out/sub/b.html", "no banner");
+        let v = pages_without_disclaimer(&s.0.join("out")).unwrap();
+        assert_eq!(v.len(), 1);
+        assert!(v[0].ends_with("b.html: no disclaimer banner"));
+        assert_eq!(
+            pages_without_disclaimer(&s.0.join("empty")).unwrap().len(),
+            1
+        );
     }
 }

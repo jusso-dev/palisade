@@ -84,7 +84,7 @@ Commands:
   docs build [--site-url <path>]
                    Build the book into target/book (warnings are errors), then check every
                    internal link; needs mdbook, mdbook-mermaid-ssr, a headless browser and lychee
-  docs publish <dir> --version <latest|vX.Y>
+  docs assemble <dir> --version <latest|vX.Y>
                    Assemble the GitHub Pages tree: the book and the Rust API docs under
                    <dir>/<version>/, the version list and the root redirect
   docs version-for-ref <git ref>
@@ -1018,7 +1018,7 @@ fn check_banned_terms(root: &Path) -> Result<Vec<String>, String> {
     Ok(violations)
 }
 
-/// `cargo xtask docs <generate|check|build|publish|version-for-ref>`.
+/// `cargo xtask docs <generate|check|build|assemble|version-for-ref>`.
 fn run_docs(args: &[String]) -> ExitCode {
     let root = workspace_root();
     let target =
@@ -1045,24 +1045,25 @@ fn run_docs(args: &[String]) -> ExitCode {
                 [flag, url] if flag == "--site-url" => Some(url.as_str()),
                 _ => return Err("usage: cargo xtask docs build [--site-url <path>]".to_owned()),
             };
-            let (files, _) = unsafe_code::repository_files(&root)?;
-            docs::build(&root, &files, site_url).map(Some)
+            let (files, mut v) = unsafe_code::repository_files(&root)?;
+            v.extend(docs::build(&root, &files, site_url)?);
+            Ok(Some(v))
         }
-        [c, dir, flag, version] if c == "publish" && flag == "--version" => {
-            let versions = docs::publish::publish(
+        [c, dir, flag, version] if c == "assemble" && flag == "--version" => {
+            let versions = docs::assemble::assemble(
                 Path::new(dir),
                 version,
-                &root.join(docs::OUT),
+                &target.join(docs::OUT),
                 &target.join("doc"),
             )?;
             println!(
-                "docs: published {version}; versions: {}",
+                "docs: assembled {version}; versions: {}",
                 versions.join(", ")
             );
             Ok(None)
         }
         [c, git_ref] if c == "version-for-ref" => {
-            println!("{}", docs::publish::version_for_ref(git_ref)?);
+            println!("{}", docs::assemble::version_for_ref(git_ref)?);
             Ok(None)
         }
         _ => Err(format!("unknown docs command\n\n{HELP}")),

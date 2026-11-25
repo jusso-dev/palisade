@@ -41,7 +41,6 @@
     - [Approval](reference/generated/events/approval.md)
     - [AuditPolicy](reference/generated/events/audit-policy.md)
     - [CacheStats](reference/generated/events/cache-stats.md)
-    - [ChangeRule](reference/generated/events/change-rule.md)
     - [Change](reference/generated/events/change.md)
     - [Device](reference/generated/events/device.md)
     - [Elevation](reference/generated/events/elevation.md)

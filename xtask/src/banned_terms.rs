@@ -36,7 +36,7 @@ pub const LIST_PATH: &str = "docs/banned-terms.txt";
 /// The parsed [`LIST_PATH`].
 #[derive(Debug, Default)]
 pub struct List {
-    /// `(number of words, lowercase hex SHA-256)` of each term.
+    /// `(length in bytes, lowercase hex SHA-256)` of each term.
     pub terms: Vec<(usize, String)>,
     /// Paths that are not scanned, with the line they were allowed on.
     pub allowed: Vec<(String, usize)>,
@@ -201,7 +201,7 @@ pub fn check(root: &Path, files: &[String], list: &List) -> Result<Vec<String>, 
                 "{path}: the path contains a banned term (docs/NAMING.md)"
             ));
         }
-        if allowed.contains(path.as_str()) || path == LIST_PATH {
+        if allowed.contains(path.as_str()) {
             continue;
         }
         let bytes =
@@ -351,6 +351,11 @@ mod tests {
                 list.terms.iter().any(|(l, d)| l == len && d == digest),
                 "{LIST_PATH} must include every FORBIDDEN_TERM_DIGESTS entry"
             );
+        }
+        // A source archive without git metadata cannot list tracked files;
+        // `cargo xtask check-banned-terms` still fails closed there.
+        if !root.join(".git").exists() {
+            return;
         }
         let (files, _) = crate::unsafe_code::repository_files(&root).unwrap();
         let violations = check(&root, &files, &list).unwrap();

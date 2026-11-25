@@ -228,7 +228,7 @@ checkout). Details:
 
 | Job | Runners | What it runs |
 |---|---|---|
-| `publish` | ubuntu-latest | `cargo xtask docs check` and `docs build`, `cargo doc`, then `cargo xtask docs publish` into a clone of `gh-pages`, and a push. The only job with `contents: write`; see [Publishing](#publishing) |
+| `publish` | ubuntu-latest | `cargo xtask docs check` and `docs build`, `cargo doc`, then `cargo xtask docs assemble` into a clone of `gh-pages`, and a push. The only job with `contents: write`; see [Publishing](#publishing) |
 
 ### `links.yml` (weekly on Monday at 05:29 UTC, and on demand)
 
@@ -243,8 +243,8 @@ Runs `cargo deny check advisories` and `cargo xtask audit` (cargo-audit with the
 also run on every PR (the `deps` job). A new advisory can affect `main`
 without any change here, which is why this is also scheduled. On failure, a second job opens an issue titled "Scheduled advisory
 audit is failing" with the `area:security` label, or comments on the open
-one. That job, the `report` job in `fuzz.yml` and the `sync` job in `labels.yml`
-are the only places with `issues: write`.
+one. That job, the `report` jobs in `fuzz.yml` and `links.yml`, and the `sync` job in
+`labels.yml` are the only places with `issues: write`.
 
 ### Dependabot (`.github/dependabot.yml`)
 
@@ -272,7 +272,7 @@ only the book's configuration, theme, the pages that are new, and the generated 
 | `cargo xtask docs generate` | Regenerates `docs/book/src/reference/generated/`: the policy and event reference from `schemas/*/v1.json`, the CLI reference from each binary's `--help`, the crate map from the crate READMEs and `xtask/src/deps.rs`, and the reference and ADR lists in `SUMMARY.md`. Commit the result |
 | `cargo xtask docs check` | Fails if a generated page or list is stale; if a `docs/**/*.md`, crate README or root Markdown file is not in the book; if a page has no single title, skips a heading level or has an image without alt text; if a policy example is inline instead of included from `docs/examples/policies/` (where `palisade-policy`'s `tests/yaml.rs` validates it), or an example there is not shown; if a `rust` block is untested and not marked `ignore`; or if the disclaimer is missing from the README or the theme |
 | `cargo xtask docs build` | Stages the sources into `target/book-src` (repository links that are not chapters become links to GitHub; a broken one fails), runs `mdbook build` with every warning an error, renders every Mermaid diagram (a diagram that does not parse fails), checks every internal link and anchor with `lychee --offline`, and checks every page has the disclaimer banner. The site is in `target/book` |
-| `cargo xtask docs publish <dir> --version <name>` | Assembles the GitHub Pages tree: the book and the `cargo doc` API docs under `<dir>/<name>/` and `<dir>/<name>/api/rust/`, `versions.json` for the version switcher, and a root redirect to `latest/` |
+| `cargo xtask docs assemble <dir> --version <name>` | Assembles the GitHub Pages tree: the book and the `cargo doc` API docs under `<dir>/<name>/` and `<dir>/<name>/api/rust/`, `versions.json` for the version switcher, and a root redirect to `latest/` |
 
 `docs build` needs [mdBook](https://github.com/rust-lang/mdBook) 0.5.2,
 [mdbook-mermaid-ssr](https://github.com/CommanderStorm/mdbook-mermaid-ssr) 0.3.0 with the

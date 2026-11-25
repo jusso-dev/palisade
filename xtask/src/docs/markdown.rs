@@ -127,7 +127,9 @@ pub fn rewrite_links(
                 .split(char::is_whitespace)
                 .next()
                 .unwrap_or("");
-            if !dest.is_empty() && !rest[1..=close].contains(']') {
+            // `close` indexes the text after `[`, so the label is
+            // `rest[1..1 + close]`; an empty label is not a definition.
+            if close > 0 && !dest.is_empty() && !rest[1..1 + close].contains(']') {
                 if let Some(new) = f(dest)? {
                     return Ok(format!(
                         "{}{new}{}",
@@ -383,6 +385,8 @@ mod tests {
         assert_eq!(rewrite_all("    [label]: t.md"), "    [label]: t.md");
         assert_eq!(rewrite_all("no links ] ( here"), "no links ] ( here");
         assert_eq!(rewrite_all("[empty]()"), "[empty]()");
+        assert_eq!(rewrite_all("[]: foo.md"), "[]: foo.md");
+        assert_eq!(rewrite_all("[a]: x.md"), "[a]: <x.md>");
         let mut seen = Vec::new();
         rewrite_links("[a](one) [b](two)", &mut |d| {
             seen.push(d.to_owned());

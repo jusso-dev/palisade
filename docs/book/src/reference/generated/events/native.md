@@ -6,7 +6,7 @@ Details from OS-native enforcement: the OS code integrity and legacy
 rule-collection engines.
 
 These are the OS's own identifiers. Linking them to the Palisade policy
-and rule that produced the native policy fills [`Event::policy`] (#90).
+and rule that produced the native policy fills `Event::policy` (#90).
 
 Appears at: `/native`.
 
@@ -29,7 +29,7 @@ Appears at: `/native`.
 | `policy_options` | integer | no |  | at least 0; format `uint32` | 1.0.0 | The native policy's option bits, as the OS reports them on activation. |
 | `requested_signing_level` | integer | no |  | 0 to 255; format `uint8` | 1.0.0 | The signing level the caller requested (code 0 to 14). |
 | `rule_guid` | [`Guid`](types.md#guid) | no |  |  | 1.0.0 | The native rule's GUID. |
-| `rule_hash` | string | no |  | matches `^([0-9a-f]{2}){1,64}$` | 1.0.0 | The hash the rule-collection engine computed for hash rules. Its algorithm depends on the file type, so it is not one of [`Hashes`]. |
+| `rule_hash` | string | no |  | matches `^([0-9a-f]{2}){1,64}$` | 1.0.0 | The hash the rule-collection engine computed for hash rules. Its algorithm depends on the file type, so it is not one of `Hashes`. |
 | `rule_name` | string | no |  | 1 to 256 characters | 1.0.0 | The native rule's name. |
 | `rule_sddl` | string | no |  | 1 to 32767 characters | 1.0.0 | The native rule's security descriptor (SDDL). |
 | `signing_scenario` | integer | no |  | at least 0; format `uint32` | 1.0.0 | The signing scenario: 0 for kernel mode, 1 for user mode. |

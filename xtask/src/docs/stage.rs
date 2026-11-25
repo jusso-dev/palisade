@@ -26,6 +26,9 @@
 //! as seen from the root, and that chapter is staged at the root
 //! (`docs/book/src/introduction.md` becomes `introduction.md`).
 //!
+//! Each staged chapter ends with a link to its source file on GitHub, which
+//! replaces mdBook's edit link: that one is built from the staged path.
+//!
 //! The `SUMMARY.md` itself is rewritten to the staged paths. `book.toml`
 //! and `theme/` are copied as they are.
 
@@ -407,6 +410,11 @@ pub fn stage(root: &Path, files: &[String], stage_dir: &Path) -> Result<Vec<Stri
                 )),
             }
         }
+        let text = format!(
+            "{}\n\n---\n\n<small>Source: [`{src}`]({BLOB}{src}) on GitHub.</small>\n",
+            text.trim_end(),
+            src = c.source
+        );
         staged.insert(c.source.clone(), text);
     }
     if !problems.is_empty() {

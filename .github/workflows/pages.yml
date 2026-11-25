@@ -28,8 +28,9 @@ env:
 
 jobs:
   publish:
-    # Only from main or a release tag: a manual run on a branch fails here.
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    # Only from main or a release tag. Pre-release tags (vX.Y.Z-rc.1) are
+    # skipped; `version-for-ref` below rejects anything else.
+    if: github.ref == 'refs/heads/main' || (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -59,8 +60,12 @@ jobs:
           echo "$LYCHEE_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict
           tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" --strip-components=1 lychee-x86_64-unknown-linux-gnu/lychee
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      # Fails on anything but main or a release tag vX.Y.Z, so a stray tag
+      # never replaces a release's vX.Y/.
       - name: Choose the version directory
-        run: echo "DOCS_VERSION=$(cargo xtask docs version-for-ref "$GIT_REF")" >> "$GITHUB_ENV"
+        run: |
+          version=$(cargo xtask docs version-for-ref "$GIT_REF")
+          echo "DOCS_VERSION=$version" >> "$GITHUB_ENV"
       - run: cargo xtask docs check
       - run: cargo xtask docs build --site-url "/palisade/$DOCS_VERSION/"
       - run: cargo doc --workspace --no-deps --all-features --locked --lib
@@ -72,7 +77,16 @@ jobs:
           else
             git init --quiet --initial-branch gh-pages "$site"
           fi
-          cargo xtask docs publish "$site" --version "$DOCS_VERSION"
+          cargo xtask docs assemble "$site" --version "$DOCS_VERSION"
+      # The assembled tree adds the API docs and root files to the checked
+      # book; check its own links before anything is pushed. rustdoc's
+      # pages are its own and are not checked.
+      - name: Check the assembled site's links
+        run: >-
+          lychee --offline --include-fragments --no-progress
+          --exclude-path '404\.html$'
+          --exclude-path 'api/rust/(src|static\.files|trait\.impl|type\.impl|palisade_)'
+          "$RUNNER_TEMP/site/$DOCS_VERSION" "$RUNNER_TEMP/site/index.html"
       - name: Push to gh-pages
         env:
           GH_TOKEN: ${{ github.token }}
@@ -86,6 +100,13 @@ jobs:
             exit 0
           fi
           git commit --quiet -m "docs: publish $DOCS_VERSION from $SHA"
-          # The token is passed for this one command, not stored in the clone.
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
-            push "https://github.com/$REPOSITORY.git" HEAD:gh-pages
+          # The token goes to this one push through git's environment
+          # configuration, not the command line or the clone's config, and
+          # its encoded form is masked in the log too.
+          encoded=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          echo "::add-mask::$encoded"
+          header="AUTHORIZATION: basic $encoded"
+          GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" \
+            GIT_CONFIG_VALUE_0="$header" \
+            git push "https://github.com/$REPOSITORY.git" HEAD:gh-pages

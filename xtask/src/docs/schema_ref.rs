@@ -86,6 +86,11 @@ fn type_of(node: &Value, defs: &Map<String, Value>) -> String {
     }
     for key in ["anyOf", "oneOf"] {
         if let Some(options) = node.get(key).and_then(Value::as_array) {
+            // Options that only add constraints (`{"format": "ipv4"}`) say
+            // nothing about the type: the node's own `type` does.
+            if options.iter().all(|o| !says_type(o)) {
+                continue;
+            }
             // `T or null` reads as an optional `T`.
             let parts: Vec<String> = options
                 .iter()
@@ -139,6 +144,26 @@ fn type_of(node: &Value, defs: &Map<String, Value>) -> String {
     } else {
         named.join(" or ")
     }
+}
+
+/// `true` if a subschema names a type: `type`, `$ref`, `const`, `enum`,
+/// or a union of those.
+fn says_type(node: &Value) -> bool {
+    ["type", "$ref", "const", "enum"]
+        .iter()
+        .any(|k| node.get(k).is_some())
+        || ["anyOf", "oneOf"].iter().any(|k| {
+            node.get(k)
+                .and_then(Value::as_array)
+                .is_some_and(|o| o.iter().any(says_type))
+        })
+}
+
+/// A definition that is only a cross-field rule (`ChangeRule`: which keys
+/// each `op` requires), not a type of its own. The schema applies it with
+/// `allOf` on the object it constrains.
+fn is_rule_def(def: &Value) -> bool {
+    !says_type(def) && def.get("properties").is_none()
 }
 
 fn link_to(name: &str, defs: &Map<String, Value>) -> String {
@@ -195,6 +220,20 @@ fn constraints(node: &Value) -> String {
     if let Some(Value::String(format)) = node.get("format") {
         out.push(format!("format `{format}`"));
     }
+    for key in ["anyOf", "oneOf"] {
+        let Some(options) = node.get(key).and_then(Value::as_array) else {
+            continue;
+        };
+        let formats: Vec<String> = options
+            .iter()
+            .filter(|o| !says_type(o))
+            .filter_map(|o| o.get("format").and_then(Value::as_str))
+            .map(|f| format!("`{f}`"))
+            .collect();
+        if !formats.is_empty() && formats.len() == options.len() {
+            out.push(format!("format {}", formats.join(" or ")));
+        }
+    }
     if let Some(Value::String(pattern)) = node.get("pattern") {
         out.push(format!("matches {}", code(pattern)));
     }
@@ -215,11 +254,35 @@ fn unquote(v: &Value) -> String {
 }
 
 fn description(node: &Value) -> String {
-    prose(
+    prose(&strip_intra_doc_links(
         node.get("description")
             .and_then(Value::as_str)
             .unwrap_or(""),
-    )
+    ))
+}
+
+/// Schema descriptions come from Rust doc comments, where ``[`Name`]`` is a
+/// rustdoc link. Outside rustdoc it would show its brackets, so keep only
+/// the code span. A bracket followed by `(` is a real Markdown link.
+fn strip_intra_doc_links(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find("[`") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        match after.find("`]") {
+            Some(end) if !after[1..end].contains('`') && !after[end + 2..].starts_with('(') => {
+                out.push_str(&after[..=end]);
+                rest = &after[end + 2..];
+            }
+            _ => {
+                out.push('[');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Every pointer at which each object definition appears, from the root:
@@ -509,7 +572,7 @@ pub fn pages(schema: &Value, spec: &Spec<'_>) -> Result<Vec<Page>, String> {
         root_title
     );
     for (name, def) in defs {
-        if is_object_def(def) || has_object_variants(def) {
+        if is_object_def(def) || has_object_variants(def) || is_rule_def(def) {
             continue;
         }
         types.push_str(&format!("## {name}\n\n"));
@@ -536,6 +599,23 @@ pub fn pages(schema: &Value, spec: &Spec<'_>) -> Result<Vec<Page>, String> {
         }
         types.push('\n');
     }
+    let rules: Vec<(&String, &Value)> = defs.iter().filter(|(_, d)| is_rule_def(d)).collect();
+    if !rules.is_empty() {
+        types.push_str(
+            "## Cross-field rules\n\nConstraints the schema applies to the objects that use them, beyond their field tables.\n\n| Rule | Applies to | Rule |\n|---|---|---|\n",
+        );
+        for (name, def) in rules {
+            let at: Vec<String> = pointers
+                .get(name.as_str())
+                .map(|ps| ps.iter().map(|p| format!("`{p}`")).collect())
+                .unwrap_or_default();
+            types.push_str(&format!(
+                "| `{name}` | {} | {} |\n",
+                cell(&at.join(", ")),
+                cell(&description(def))
+            ));
+        }
+    }
     pages.push(Page {
         file: "types.md".to_owned(),
         title: "Value types".to_owned(),
@@ -550,9 +630,11 @@ fn link_to_page(name: &str) -> String {
 
 /// A `oneOf` whose options are objects with properties (a tagged union).
 fn has_object_variants(def: &Value) -> bool {
-    def.get("oneOf")
-        .and_then(Value::as_array)
-        .is_some_and(|o| o.iter().any(|v| v.get("properties").is_some()))
+    def.get("oneOf").and_then(Value::as_array).is_some_and(|o| {
+        o.iter().any(|v| {
+            v.get("properties").is_some() && v.get("type").and_then(Value::as_str) == Some("object")
+        })
+    })
 }
 
 fn first_sentence(def: &Value) -> String {
@@ -597,7 +679,8 @@ mod tests {
                         "kind": { "$ref": "#/$defs/Kind" },
                         "tags": { "type": "array", "items": { "type": "string", "maxLength": 8 }, "maxItems": 4 },
                         "new_field": { "type": "string", "pattern": "^a`b$" },
-                        "act": { "$ref": "#/$defs/Action" }
+                        "act": { "$ref": "#/$defs/Action" },
+                        "rule": { "type": "object", "allOf": [{ "$ref": "#/$defs/OpRule" }] }
                     }
                 },
                 "Kind": { "oneOf": [
@@ -607,7 +690,12 @@ mod tests {
                 "Action": { "oneOf": [
                     { "type": "object", "properties": { "type": { "const": "go" }, "fast": { "type": "boolean" } }, "required": ["type"] }
                 ]},
-                "Id": { "type": "string", "pattern": "^[0-9]+$" }
+                "Id": { "type": "string", "pattern": "^[0-9]+$" },
+                "Ip": { "type": "string", "anyOf": [{ "format": "ipv4" }, { "format": "ipv6" }] },
+                "OpRule": {
+                    "description": "`add` has `new` only.",
+                    "oneOf": [{ "properties": { "op": { "const": "add" } }, "required": ["new"] }]
+                }
             }
         })
     }
@@ -641,6 +729,16 @@ mod tests {
         assert!(types.contains("## Kind\n\n| Value | Meaning |"));
         assert!(types.contains("| `b` | Second &lt;kind&gt;. |"));
         assert!(types.contains("## Id\n\nType: string; matches `^[0-9]+$`."));
+        assert!(
+            types.contains("## Ip\n\nType: string; format `ipv4` or `ipv6`."),
+            "{types}"
+        );
+        // A cross-field rule is not a type and has no page of its own.
+        assert!(!types.contains("## OpRule"));
+        assert!(
+            types.contains("| `OpRule` | `/thing/rule` | `add` has `new` only. |"),
+            "{types}"
+        );
     }
 
     #[test]
@@ -655,6 +753,18 @@ mod tests {
         assert!(pages(&first, &spec(None)).is_err());
         first["x-schema-version"] = json!("2.0.0");
         assert!(pages(&first, &spec(None)).is_ok());
+    }
+
+    #[test]
+    fn rustdoc_links_lose_their_brackets() {
+        assert_eq!(
+            strip_intra_doc_links(
+                "See [`Event::file`] and [`a`](x.md) or [b]. is [`super::Event::user`]."
+            ),
+            "See `Event::file` and [`a`](x.md) or [b]. is `super::Event::user`."
+        );
+        assert_eq!(strip_intra_doc_links("[`x` and `y`]"), "[`x` and `y`]");
+        assert_eq!(strip_intra_doc_links("[`unclosed"), "[`unclosed");
     }
 
     #[test]

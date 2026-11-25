@@ -4,7 +4,7 @@
 
 One canonical event.
 
-Field order here is the serialisation order, so [`Event::to_canonical_json`]
+Field order here is the serialisation order, so `Event::to_canonical_json`
 is deterministic.
 
 Schema: [`schemas/events/v1.json`](https://github.com/jusso-dev/palisade/blob/main/schemas/events/v1.json) (`$id` `https://github.com/jusso-dev/palisade/schemas/events/v1.json`), version 1.1.0. Regenerate the schema with `PALISADE_BLESS=1 cargo test -p palisade-proto --test events_schema`, then these pages with `cargo xtask docs generate`.
@@ -44,7 +44,7 @@ Schema: [`schemas/events/v1.json`](https://github.com/jusso-dev/palisade/blob/ma
 | `schema_version` | [`SchemaVersion`](types.md#schemaversion) | yes |  | matches `^1\.(0\|1)\.(0\|[1-9][0-9]*)$` | 1.0.0 | The schema version of this event. |
 | `script` | [`Script`](script.md) | no |  |  | 1.0.0 | The script, for script events. |
 | `seq` | integer | yes |  | at least 0; format `uint64` | 1.0.0 | The producer's sequence number, starting at 0. |
-| `severity` | [`Severity`](types.md#severity) | yes |  |  | 1.0.0 | 0 to 10. See [`Severity::syslog`] for the syslog mapping. |
+| `severity` | [`Severity`](types.md#severity) | yes |  |  | 1.0.0 | 0 to 10. See `Severity::syslog` for the syslog mapping. |
 | `source` | [`Source`](source.md) | no |  |  | 1.0.0 | Where the event came from, for events translated from another log. |
 | `tenant_id` | [`TenantId`](types.md#tenantid) | yes |  |  | 1.0.0 | The tenant. |
 | `ts` | [`Timestamp`](types.md#timestamp) | yes |  |  | 1.0.0 | When the event happened, in UTC. |
@@ -62,14 +62,13 @@ The schema also has 69 cross-field rules (`allOf`), for example which field sets
 - [`AuditPolicy`](audit-policy.md): A change to the OS audit policy.
 - [`CacheStats`](cache-stats.md): Cache counters.
 - [`Change`](change.md): One change to an object.
-- [`ChangeRule`](change-rule.md): `add` has `new` only, `remove` `old` only, `replace` both.
 - [`Device`](device.md): A peripheral device.
 - [`Elevation`](elevation.md): A privilege elevation.
 - [`File`](file.md): The file an event is about: the target of a decision.
-- [`Fim`](fim.md): A change to a monitored file (#183). The file as it is now is [`super::Event::file`]; this records what it was before.
+- [`Fim`](fim.md): A change to a monitored file (#183). The file as it is now is `super::Event::file`; this records what it was before.
 - [`Hashes`](hashes.md): The digests of a file.
 - [`Host`](host.md): The device an event is about.
-- [`Identity`](identity.md): Identity details: logons and group membership changes. The account that logged on, or that made a change, is [`super::Event::user`].
+- [`Identity`](identity.md): Identity details: logons and group membership changes. The account that logged on, or that made a change, is `super::Event::user`.
 - [`Native`](native.md): Details from OS-native enforcement: the OS code integrity and legacy rule-collection engines.
 - [`Network`](network.md): A network connection or request.
 - [`Origin`](origin.md): Where a file came from.

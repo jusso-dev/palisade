@@ -225,8 +225,8 @@ Whether a storage device's contents are encrypted.
 
 The enforcement mode in effect when the event happened.
 
-This is the policy [`Mode`] as seen by an event, plus two states the
-agent can be in. [`EventMode::from_policy_mode`] converts.
+This is the policy `Mode` as seen by an event, plus two states the
+agent can be in. `EventMode::from_policy_mode` converts.
 
 | Value | Meaning |
 |---|---|
@@ -306,7 +306,7 @@ A process integrity level.
 
 An IPv4 or IPv6 address in canonical form.
 
-Type: any.
+Type: string; format `ipv4` or `ipv6`.
 
 ## JsonPointer
 
@@ -407,12 +407,6 @@ The result of a compliance probe.
 | `error` | The probe could not run. |
 | `not_applicable` | The requirement does not apply to this device. |
 
-## RegistryDataRule
-
-`truncated` data has a `preview`.
-
-Type: any.
-
 ## RegistryKey
 
 A registry key path: the full root key name, then components of 1 to 255 characters separated by `\`.
@@ -480,7 +474,7 @@ Type: string; matches `^(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)$`.
 
 ## ScriptKind
 
-The kind of script, for [`ObjectType::Script`].
+The kind of script, for `ObjectType::Script`.
 
 | Value | Meaning |
 |---|---|
@@ -566,3 +560,11 @@ The security zone a file was downloaded from (its mark of the web).
 | `internet` | Zone 3: the internet. |
 | `restricted` | Zone 4: restricted sites. |
 
+## Cross-field rules
+
+Constraints the schema applies to the objects that use them, beyond their field tables.
+
+| Rule | Applies to | Rule |
+|---|---|---|
+| `ChangeRule` | `/admin/changes` | `add` has `new` only, `remove` `old` only, `replace` both. |
+| `RegistryDataRule` | `/registry/new`, `/registry/old` | `truncated` data has a `preview`. |

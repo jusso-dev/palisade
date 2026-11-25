@@ -1,6 +1,6 @@
 // The version switcher in theme/header.hbs. The published site has one
 // directory per version (`latest/`, `v0.1/`, ...) and `versions.json` at
-// its root, written by `cargo xtask docs publish`. A local build has
+// its root, written by `cargo xtask docs assemble`. A local build has
 // neither, and the switcher stays hidden.
 (function () {
     "use strict";
@@ -8,8 +8,10 @@
     if (!select || typeof path_to_root === "undefined") {
         return;
     }
-    // This page's URL below the version directory, and the site root.
-    const book = new URL(path_to_root, window.location.href);
+    // This page's URL below the version directory, and the site root. At
+    // the book's root `path_to_root` is "", and `new URL("", page)` is the
+    // page itself, so resolve "./" instead.
+    const book = new URL(path_to_root || "./", window.location.href);
     const site = new URL("../", book);
     const current = book.pathname.replace(/\/$/, "").split("/").pop();
     const page = window.location.href.slice(book.href.length);

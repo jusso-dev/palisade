@@ -245,7 +245,7 @@ How the matching rules of the ordinary rule sets are combined (#35).
 
 The mandatory-deny tier and the implicit deny for unmatched files apply
 under every model (ADR 0004). The semantics of each model are in
-[`crate::precedence`].
+`crate::precedence`.
 
 | Value | Meaning |
 |---|---|
