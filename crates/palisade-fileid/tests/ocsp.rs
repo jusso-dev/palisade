@@ -878,3 +878,93 @@ fn a_responder_vouches_only_inside_its_validity() {
         s => panic!("{s:?}"),
     }
 }
+
+#[test]
+fn responder_revocation_checks_are_budgeted_and_fail_closed() {
+    use palisade_fileid::authenticode::{Crl, MAX_CRL_CHECKS};
+    let (leaf, root) = (cert("leaf"), cert("root"));
+    let good = response("good-delegated");
+    let now = now_of(&good);
+    let revoking = Crl::from_der(&bytes("crl-responder-revoked.der")).unwrap();
+    // A CRL that names the responder's serial but that the root did not
+    // sign: the root's name, another key (the timestamp fixtures' forged CRL
+    // is for another serial, so make one by flipping the signature).
+    let mut der = bytes("crl-responder-revoked.der");
+    let last = der.len() - 1;
+    der[last] ^= 1;
+    let forged = Crl::from_der(&der).unwrap();
+    // Many forged copies, then the real one: checking each costs one CRL
+    // check. Past the budget the responder's state is unknown, so its
+    // answer is not used and the leaf is NotChecked: fail closed.
+    let mut set = RevocationSet::new();
+    set.mode = RevocationMode::OnlineRequired;
+    set.add_ocsp(good.clone());
+    for _ in 0..MAX_CRL_CHECKS {
+        set.add_crl(forged.clone());
+    }
+    set.add_crl(revoking.clone());
+    assert_eq!(
+        set.state_of(&[&leaf, &root], 0, now),
+        CertRevocation::NotChecked
+    );
+    // Within the budget, the real CRL is reached and revokes the responder.
+    // (CRL checks are cached per issuer key, so the responder's check of
+    // the root's CRLs reuses those made for the leaf itself.)
+    let stale = revoking.next_update.unwrap() + 1;
+    let mut current = good.clone();
+    current.responses[0].next_update = Some(stale + 1);
+    let mut set2 = RevocationSet::new();
+    set2.mode = RevocationMode::OnlineRequired;
+    set2.add_ocsp(current);
+    for _ in 0..4 {
+        set2.add_crl(forged.clone());
+    }
+    set2.add_crl(revoking);
+    assert_eq!(
+        set2.state_of(&[&leaf, &root], 0, stale),
+        CertRevocation::Unknown
+    );
+    // Forged CRLs alone revoke nothing: the responder's answer still counts.
+    let mut set = RevocationSet::new();
+    set.mode = RevocationMode::OnlineRequired;
+    set.add_ocsp(good.clone());
+    for _ in 0..4 {
+        set.add_crl(forged.clone());
+    }
+    assert_eq!(set.state_of(&[&leaf, &root], 0, now), CertRevocation::Good);
+}
+
+#[test]
+fn an_issuer_ocsp_answer_about_the_responder_is_budgeted() {
+    use palisade_fileid::authenticode::MAX_CRL_CHECKS;
+    let (leaf, root) = (cert("leaf"), cert("root"));
+    let good = response("good-delegated");
+    let now = now_of(&good);
+    // The root's own answer revoking the responder, but with its signature
+    // broken: checking it costs one check and revokes nothing.
+    let mut broken = bytes("revoked-responder-by-root.der");
+    // The signature's last byte sits just before the `[0]` certificates.
+    let root_der = bytes("root.der");
+    let certs_at = broken
+        .windows(root_der.len())
+        .position(|w| w == root_der.as_slice())
+        .unwrap()
+        - 8;
+    broken[certs_at - 1] ^= 1;
+    let broken = OcspResponse::from_der(&broken).unwrap();
+    assert!(!broken.verified_by(&root));
+    let run = |copies: usize| {
+        let mut set = RevocationSet::new();
+        set.mode = RevocationMode::OnlineRequired;
+        set.add_ocsp(good.clone());
+        for _ in 0..copies {
+            set.add_ocsp(broken.clone());
+        }
+        set.state_of(&[&leaf, &root], 0, now)
+    };
+    // A few broken answers: checked, rejected, the responder still counts.
+    assert_eq!(run(4), CertRevocation::Good);
+    // More than the budget leaves: the responder's revocation state is not
+    // known, so its answer is not used, and the leaf fails closed.
+    assert_eq!(run(MAX_CRL_CHECKS), CertRevocation::NotChecked);
+}

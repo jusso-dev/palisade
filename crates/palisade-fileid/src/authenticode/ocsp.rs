@@ -262,8 +262,12 @@ pub(crate) enum Signer {
     /// The issuer itself.
     Issuer,
     /// A responder the issuer delegated to, valid from `valid_from` to
-    /// `valid_until`.
+    /// `valid_until`. Whether revocation data revokes it is decided by
+    /// [`super::RevocationSet`], which has the data.
     Delegated {
+        /// The responder certificate: an index into
+        /// [`OcspResponse::certificates`].
+        responder: usize,
         /// The responder certificate's `notBefore`.
         valid_from: i64,
         /// The responder certificate's `notAfter`.
@@ -284,6 +288,7 @@ impl Signer {
             Self::Delegated {
                 valid_from,
                 valid_until,
+                ..
             } => valid_from <= now && now <= valid_until,
             Self::None | Self::NotChecked => false,
         }
@@ -367,20 +372,15 @@ impl OcspResponse {
     ///   carry a signature that verifies with `issuer`'s key;
     /// - list the OCSP Signing EKU, allow `digitalSignature` if its key usage
     ///   is restricted, and carry no unprocessed critical extension;
-    /// - have been valid when the response was produced (`producedAt`);
-    /// - not be named by `revoked`, which [`super::RevocationSet`] answers
-    ///   from its offline entries, the issuer's verified CRLs and the
-    ///   issuer's own OCSP answers: a revoked responder vouches for nothing.
+    /// - have been valid when the response was produced (`producedAt`).
     ///
-    /// Whether the responder is valid now is [`Signer::valid_at`]'s
-    /// business: only then do its `good` answers count, or any answer as
-    /// coverage.
-    pub(crate) fn signer_for(
-        &self,
-        issuer: &CertSummary,
-        revoked: &dyn Fn(&CertSummary) -> bool,
-        budget: &mut usize,
-    ) -> Signer {
+    /// Only the cheap checks above run before a signature is checked, and
+    /// each signature check spends `budget`. Whether revocation data
+    /// revokes the responder is checked afterwards, by
+    /// [`super::RevocationSet`], only for a responder that passed all of
+    /// this. Whether it is valid now is [`Signer::valid_at`]'s business:
+    /// only then do its `good` answers count, or any answer as coverage.
+    pub(crate) fn signer_for(&self, issuer: &CertSummary, budget: &mut usize) -> Signer {
         let mut spend = || {
             if *budget == 0 {
                 false
@@ -400,7 +400,7 @@ impl OcspResponse {
             }
         }
         // A delegated responder, issued by the issuer.
-        for r in &self.certificates {
+        for (index, r) in self.certificates.iter().enumerate() {
             let eligible = self.names_responder(r)
                 && r.issuer.der == issuer.subject.der
                 && match (&r.authority_key_id, &issuer.subject_key_id) {
@@ -412,8 +412,7 @@ impl OcspResponse {
                     .is_none_or(|ku| ku.contains(KeyUsage::DIGITAL_SIGNATURE))
                 && r.unhandled_critical_extensions.is_empty()
                 && r.not_before <= self.produced_at
-                && self.produced_at <= r.not_after
-                && !revoked(r);
+                && self.produced_at <= r.not_after;
             if !eligible {
                 continue;
             }
@@ -430,6 +429,7 @@ impl OcspResponse {
             }
             if self.signature_valid(r) {
                 return Signer::Delegated {
+                    responder: index,
                     valid_from: r.not_before,
                     valid_until: r.not_after,
                 };
@@ -451,7 +451,7 @@ impl OcspResponse {
     pub fn verified_by(&self, issuer: &CertSummary) -> bool {
         let mut budget = self.max_checks();
         !matches!(
-            self.signer_for(issuer, &|_| false, &mut budget),
+            self.signer_for(issuer, &mut budget),
             Signer::None | Signer::NotChecked
         )
     }
@@ -462,6 +462,12 @@ impl OcspResponse {
     #[must_use]
     pub fn max_checks(&self) -> usize {
         1 + 2 * self.certificates.len()
+    }
+
+    /// Whether `issuer` itself signed the response: the responder ID names
+    /// it and the signature verifies with its key. One signature check.
+    pub(crate) fn signed_by(&self, issuer: &CertSummary) -> bool {
+        self.names_responder(issuer) && self.signature_valid(issuer)
     }
 
     fn names_responder(&self, cert: &CertSummary) -> bool {
@@ -504,9 +510,9 @@ impl OcspResponse {
     /// been valid when the response was produced. A `good` answer from a
     /// delegated responder that has expired by `now` is left out: it can no
     /// longer vouch, and so is one before the responder became valid.
-    /// Empty otherwise. ([`super::RevocationSet`] also rejects a responder
-    /// that its offline entries, the issuer's CRLs or the issuer's own OCSP
-    /// answers revoke.)
+    /// Empty otherwise. This checks no revocation data:
+    /// [`super::RevocationSet`] also rejects a responder that its offline
+    /// entries, the issuer's CRLs or the issuer's own OCSP answers revoke.
     #[must_use]
     pub fn answers_for<'a>(
         &'a self,
@@ -519,7 +525,7 @@ impl OcspResponse {
             return Vec::new();
         }
         let mut budget = self.max_checks();
-        let signer = self.signer_for(issuer, &|_| false, &mut budget);
+        let signer = self.signer_for(issuer, &mut budget);
         answers
             .into_iter()
             .filter(|a| signer.vouches(a, now))

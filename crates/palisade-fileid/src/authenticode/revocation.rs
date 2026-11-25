@@ -458,8 +458,10 @@ impl RevocationSet {
     /// `chain[index + 1]`, then OCSP responses that name the certificate
     /// under that issuer and that it, or a responder it delegated to,
     /// signed. A delegated responder must have been valid at `producedAt`
-    /// and must not be named by an offline entry; its `good` answers count
-    /// only while it is still valid. An entry in any such CRL, or a
+    /// and must not be revoked by this set (an offline entry, the issuer's
+    /// verified CRL, or the issuer's own OCSP answer); its `good` answers,
+    /// and any of its answers as coverage, count only inside its own
+    /// `notBefore` to `notAfter`. An entry in any such CRL, or a
     /// `revoked` OCSP answer, counts, however old; but only a CRL or an
     /// OCSP answer (`good` or `revoked`) current at `now` (`thisUpdate <=
     /// now <= nextUpdate`, with `nextUpdate` present) is an answer that
@@ -468,6 +470,55 @@ impl RevocationSet {
     #[must_use]
     pub fn state_of(&self, chain: &[&CertSummary], index: usize, now: i64) -> CertRevocation {
         self.check(chain, index, now, &mut CrlCache::new())
+    }
+
+    /// Whether `responder`, a delegated OCSP responder `issuer` issued and
+    /// that signed a response, is revoked by this set: an offline entry; an
+    /// entry in a CRL `issuer` issued (by the same rules, cache and budget
+    /// as every CRL: [`CrlCache::issued_by`]); or a `revoked` answer about
+    /// it in an OCSP response `issuer` itself signed (cached and budgeted
+    /// too). Any such entry revokes it, whatever its date. Only CRLs and
+    /// responses that name the responder cost a check. When the budget runs
+    /// out before every one is checked, the answer is
+    /// [`Issued::NotChecked`], which fails closed.
+    fn responder_revoked(
+        &self,
+        responder: &CertSummary,
+        issuer: &CertSummary,
+        crl_cache: &mut CrlCache,
+    ) -> Issued {
+        if self.certificates.iter().any(|e| e.cert.matches(responder)) {
+            return Issued::Yes;
+        }
+        let mut not_checked = false;
+        for (index, crl) in self.crls.iter().enumerate() {
+            if crl.entries_for(&responder.serial).next().is_none() {
+                continue;
+            }
+            match crl_cache.issued_by(index, crl, issuer) {
+                Issued::Yes => return Issued::Yes,
+                Issued::NotChecked => not_checked = true,
+                Issued::No => {}
+            }
+        }
+        for (index, response) in self.ocsp.iter().enumerate() {
+            let revokes = response
+                .responses_for(responder, issuer)
+                .any(|a| matches!(a.status, OcspCertStatus::Revoked { .. }));
+            if !revokes {
+                continue;
+            }
+            match crl_cache.ocsp_signed_by_issuer(index, response, issuer) {
+                Issued::Yes => return Issued::Yes,
+                Issued::NotChecked => not_checked = true,
+                Issued::No => {}
+            }
+        }
+        if not_checked {
+            Issued::NotChecked
+        } else {
+            Issued::No
+        }
     }
 
     /// [`Self::state_of`], sharing CRL signature checks across calls.
@@ -519,10 +570,7 @@ impl RevocationSet {
                 if singles.peek().is_none() {
                     continue;
                 }
-                // A delegated responder that the set revokes vouches for
-                // nothing.
-                let revoked = |r: &CertSummary| responder_revoked(self, r, issuer);
-                let signer = match crl_cache.ocsp_by(index, response, issuer, &revoked) {
+                let signer = match crl_cache.ocsp_by(index, response, issuer) {
                     Signer::None => continue,
                     Signer::NotChecked => {
                         not_checked = true;
@@ -530,6 +578,21 @@ impl RevocationSet {
                     }
                     signer => signer,
                 };
+                // A delegated responder, already verified, that the set
+                // revokes vouches for nothing.
+                if let Signer::Delegated { responder, .. } = signer {
+                    let Some(r) = response.certificates.get(responder) else {
+                        continue;
+                    };
+                    match self.responder_revoked(r, issuer, crl_cache) {
+                        Issued::Yes => continue,
+                        Issued::NotChecked => {
+                            not_checked = true;
+                            continue;
+                        }
+                        Issued::No => {}
+                    }
+                }
                 for single in singles.filter(|a| signer.vouches(a, now)) {
                     // A current answer, `good` or `revoked`, from a signer
                     // that can vouch now is an answer: coverage, like a
@@ -581,35 +644,6 @@ impl RevocationSet {
     }
 }
 
-/// Whether `responder`, a delegated OCSP responder that `issuer` issued,
-/// is revoked by anything in `set`: an offline entry; an entry in a CRL
-/// that `issuer` signed; or a `revoked` answer in an OCSP response that
-/// `issuer` itself signed. Signatures are checked here without the
-/// file's budget: at most one per CRL and response in the set, which
-/// [`MAX_CRLS`] and [`MAX_OCSP_RESPONSES`] bound, and only for a
-/// responder that is otherwise acceptable.
-fn responder_revoked(set: &RevocationSet, responder: &CertSummary, issuer: &CertSummary) -> bool {
-    if set.certificates.iter().any(|e| e.cert.matches(responder)) {
-        return true;
-    }
-    let by_crl = set.crls.iter().any(|crl| {
-        crl.issuer.der == issuer.subject.der
-            && crl.entries_for(&responder.serial).next().is_some()
-            && crl.verify_with(issuer) == Verified::Valid
-    });
-    if by_crl {
-        return true;
-    }
-    set.ocsp.iter().any(|r| {
-        r.responses_for(responder, issuer)
-            .any(|a| matches!(a.status, OcspCertStatus::Revoked { .. }))
-            && {
-                let mut one = 1;
-                r.signer_for(issuer, &|_| false, &mut one) == Signer::Issuer
-            }
-    })
-}
-
 /// Whether a CRL was issued by a certificate.
 enum Issued {
     Yes,
@@ -625,6 +659,7 @@ enum Issued {
 pub(crate) struct CrlCache {
     verified: HashMap<(usize, String), bool>,
     ocsp_verified: HashMap<(usize, String), Signer>,
+    ocsp_issuer_signed: HashMap<(usize, String), bool>,
     checks_left: usize,
 }
 
@@ -634,6 +669,7 @@ impl CrlCache {
         Self {
             verified: HashMap::new(),
             ocsp_verified: HashMap::new(),
+            ocsp_issuer_signed: HashMap::new(),
             checks_left: MAX_CRL_CHECKS,
         }
     }
@@ -676,22 +712,38 @@ impl CrlCache {
     /// depends on its name as well as its key), and charged the signature
     /// checks actually made from the same budget as CRLs. A check cut short
     /// by the budget is not cached.
-    fn ocsp_by(
-        &mut self,
-        index: usize,
-        response: &OcspResponse,
-        issuer: &CertSummary,
-        revoked: &dyn Fn(&CertSummary) -> bool,
-    ) -> Signer {
+    fn ocsp_by(&mut self, index: usize, response: &OcspResponse, issuer: &CertSummary) -> Signer {
         let key = (index, issuer.sha256_thumbprint.clone());
         if let Some(signer) = self.ocsp_verified.get(&key) {
             return *signer;
         }
-        let signer = response.signer_for(issuer, revoked, &mut self.checks_left);
+        let signer = response.signer_for(issuer, &mut self.checks_left);
         if signer != Signer::NotChecked {
             self.ocsp_verified.insert(key, signer);
         }
         signer
+    }
+
+    /// Whether `issuer` itself signed `response` ([`OcspResponse::signed_by`]),
+    /// cached per issuer certificate and charged one check.
+    fn ocsp_signed_by_issuer(
+        &mut self,
+        index: usize,
+        response: &OcspResponse,
+        issuer: &CertSummary,
+    ) -> Issued {
+        let key = (index, issuer.sha256_thumbprint.clone());
+        let signed = match self.ocsp_issuer_signed.get(&key) {
+            Some(v) => *v,
+            None if self.checks_left == 0 => return Issued::NotChecked,
+            None => {
+                self.checks_left -= 1;
+                let v = response.signed_by(issuer);
+                self.ocsp_issuer_signed.insert(key, v);
+                v
+            }
+        };
+        if signed { Issued::Yes } else { Issued::No }
     }
 }
 
