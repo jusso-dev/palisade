@@ -64,7 +64,11 @@ fn identity_and_signatures_match_the_os() {
     }
 
     let out = dir.join("os.txt");
+    // A parent PowerShell 7 (as on CI runners) leaves its module path in
+    // the environment, which stops Windows PowerShell loading its own
+    // modules; let it use its default.
     let status = Command::new("powershell.exe")
+        .env_remove("PSModulePath")
         .args([
             "-NoProfile",
             "-NonInteractive",
