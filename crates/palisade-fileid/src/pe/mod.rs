@@ -23,6 +23,7 @@ mod analysis;
 mod debug;
 mod driver;
 mod imports;
+pub mod legacy;
 pub mod manifest;
 mod name;
 pub(crate) mod read;
