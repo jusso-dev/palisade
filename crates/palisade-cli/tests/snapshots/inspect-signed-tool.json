@@ -1,0 +1,432 @@
+{
+  "catalog_matches": {
+    "status": "not_requested"
+  },
+  "computed_tiers": [
+    "stat",
+    "classify",
+    "hash",
+    "trust"
+  ],
+  "derived": {
+    "effective_file_name": {
+      "source": "original_file_name",
+      "value": "extool.exe"
+    },
+    "is_dotnet": false,
+    "is_kernel_driver": false,
+    "publisher_name": "Palisade Corpus Vendor",
+    "publisher_product": {
+      "product": "Example Suite",
+      "publisher": "Palisade Corpus Vendor"
+    },
+    "requires_elevation": false
+  },
+  "errors": [],
+  "fs": {
+    "file_id": {
+      "status": "not_requested"
+    },
+    "motw": {
+      "status": "not_requested"
+    },
+    "owner": {
+      "status": "not_requested"
+    },
+    "path": "<scrubbed>",
+    "path_variables": {
+      "status": "not_requested"
+    },
+    "provenance": {
+      "status": "not_requested"
+    },
+    "reparse": {
+      "status": "not_requested"
+    },
+    "streams": {
+      "status": "not_requested"
+    },
+    "user_writable": {
+      "status": "not_requested"
+    },
+    "volume": {
+      "status": "not_requested"
+    }
+  },
+  "hashes": {
+    "status": "computed",
+    "value": {
+      "authenticode": {
+        "status": "computed",
+        "value": {
+          "conformant": true,
+          "non_conformance": [],
+          "page_hashes_error": null,
+          "page_sha1": "d6335346738a9c6414e4f5ce93cf3bba6ae0a590",
+          "page_sha256": "a9706e1e408f4e6419c7a0aa5c6d7325cabefbfdef5dde84ac0bf02bc58d198d",
+          "sha1": "bac3c9463eb6ed9b4476ddd767c4f562088c0405",
+          "sha256": "bb315a34a23b4cc8f185907f6954fc105c431ec15bf655180d25348cf58def5b"
+        }
+      },
+      "authoritative": "authenticode_sha256",
+      "empty": false,
+      "md5": "4b2da4a6ef9ba12f864dfadbe9e294a9",
+      "msi_normalised_sha256": {
+        "status": "not_yet_supported",
+        "value": {
+          "issues": [
+            53
+          ]
+        }
+      },
+      "script_normalised_sha256": {
+        "status": "not_yet_supported",
+        "value": {
+          "issues": [
+            52
+          ]
+        }
+      },
+      "sha1": "6cf259f0248cb94adf0c831a78bd0ce54751ed85",
+      "sha256": "adf84c7e7bb63026cfacb5447b8b09fdd0a422d31a9c630905e8b52ce3980017",
+      "sha384": "7ec102c47d190ae513a9237f449923437cbaad711e4eec332bba0a2adedea76042db326ed6e33f035e47ac641ba9ab36",
+      "sha512": "cc7b791494eaf1a46decfec5d0aacd5da06ec6e5f3de06cd04aec8eb1a1312438ed54c10de70d0dcbae2a814d3e3ee6d1f664214c26c05868cd043b1ba3dcb56",
+      "size": 5016
+    }
+  },
+  "installer": {
+    "status": "not_requested"
+  },
+  "kind": {
+    "status": "computed",
+    "value": {
+      "classifier_version": 1,
+      "confidence": "high",
+      "content_kind": "pe",
+      "executable_content": true,
+      "extension_assisted": false,
+      "extension_kind": "pe",
+      "flags": [],
+      "heuristic": false,
+      "mismatch": false,
+      "mismatch_severity": "none",
+      "parse_error": null,
+      "pe_sub_kind": "exe",
+      "script_kind": null
+    }
+  },
+  "library_version": "<scrubbed>",
+  "masquerade": {
+    "reasons": [],
+    "score": 0,
+    "unassessed": []
+  },
+  "name": {
+    "extension": "exe",
+    "file_name": "extool.exe",
+    "stream": null
+  },
+  "name_hint": null,
+  "package": {
+    "status": "not_requested"
+  },
+  "path": "<scrubbed>",
+  "pe": {
+    "status": "computed",
+    "value": {
+      "characteristics": [
+        "EXECUTABLE_IMAGE",
+        "LARGE_ADDRESS_AWARE"
+      ],
+      "checksum_stored": 16847,
+      "checksum_valid": true,
+      "coff_timestamp": 1610612736,
+      "dll_characteristics": [
+        "HIGH_ENTROPY_VA",
+        "DYNAMIC_BASE",
+        "NX_COMPAT",
+        "TERMINAL_SERVER_AWARE"
+      ],
+      "driver_signals": [],
+      "entry_point": 4096,
+      "exports": null,
+      "format": "pe32_plus",
+      "has_certificate_table": true,
+      "image_base": 5368709120,
+      "imports": null,
+      "imports_truncated": false,
+      "is_dll": false,
+      "is_dotnet": false,
+      "is_kernel_driver": false,
+      "machine": 34404,
+      "machine_name": "Amd64",
+      "manifest": null,
+      "overlay_size": null,
+      "pdb": null,
+      "requires_elevation": {
+        "reason": "None",
+        "value": false
+      },
+      "sections": [
+        {
+          "entropy": 4.996,
+          "name": ".text",
+          "raw_size": 512,
+          "virtual_size": 257,
+          "writable_and_executable": false
+        },
+        {
+          "entropy": 2.363,
+          "name": ".rsrc",
+          "raw_size": 1024,
+          "virtual_size": 704,
+          "writable_and_executable": false
+        }
+      ],
+      "size_of_image": 12288,
+      "subsystem": 2,
+      "subsystem_name": "WindowsGui",
+      "timestamp_is_reproducible": false,
+      "version": {
+        "company_name": "Example Org",
+        "file_description": "Example tool",
+        "file_version": "1.2.3.4",
+        "file_version_quad": "1.2.3.4",
+        "internal_name": "extool",
+        "language": "040904B0",
+        "original_file_name": "extool.exe",
+        "product_name": "Example Suite",
+        "product_version": "1.2.0.0",
+        "product_version_quad": "1.2.3.4"
+      },
+      "warnings": 0,
+      "warnings_truncated": false
+    }
+  },
+  "requested_tiers": [
+    "stat",
+    "classify",
+    "hash",
+    "trust"
+  ],
+  "schema": "fileid.v1",
+  "script": {
+    "status": "not_requested"
+  },
+  "signatures": {
+    "status": "computed",
+    "value": [
+      {
+        "chain": {
+          "anchored": true,
+          "anchored_to": "ca.der",
+          "issues": 0,
+          "leaf": {
+            "issuer": "O=Palisade Tests, CN=Palisade Corpus Root",
+            "not_after": 2524608000,
+            "not_before": 1577836800,
+            "serial": "62d0a8c850ac79c20178ff094ce3a091d6abc866",
+            "sha1_thumbprint": "8c67a28662534589e56293f6e43e0e713f271c4c",
+            "sha256_thumbprint": "a09b1dc691a741fc78a01779f1d853ac614ffc63e3bb89cabe1d655a399edded",
+            "subject": "O=Palisade Tests, CN=Palisade Corpus Vendor",
+            "tbs_hash": "abd20a80caeb576109efce4b5c06272241946b1fb7e6365443fb13ade86f68e6",
+            "tbs_hash_alg": "sha256",
+            "tbs_hash_sha256": "abd20a80caeb576109efce4b5c06272241946b1fb7e6365443fb13ade86f68e6"
+          },
+          "length": 2,
+          "pca": null,
+          "root": {
+            "issuer": "O=Palisade Tests, CN=Palisade Corpus Root",
+            "not_after": 2524608000,
+            "not_before": 1577836800,
+            "serial": "5d92e85a1c32dc1cb57815c13fa42fabab989f39",
+            "sha1_thumbprint": "3e3bfb445486104cd7c43af34821bb67ede8ca96",
+            "sha256_thumbprint": "1ec693c334bfecca92b173e6ec00b773d48cb471ba27b006f3b282886d6a97ab",
+            "subject": "O=Palisade Tests, CN=Palisade Corpus Root",
+            "tbs_hash": "f9dc0e33a0ddaa59f07693027bb1bd55f5f1e9c706f1d0f7d45145c9c10ef42c",
+            "tbs_hash_alg": "sha256",
+            "tbs_hash_sha256": "f9dc0e33a0ddaa59f07693027bb1bd55f5f1e9c706f1d0f7d45145c9c10ef42c"
+          },
+          "well_known_root_id": null
+        },
+        "claimed_signing_time": 1700000000,
+        "depth": 0,
+        "digest_alg": "sha256",
+        "digest_match": true,
+        "has_page_hashes": false,
+        "index": 0,
+        "key_alg": "rsa",
+        "key_bits": 2048,
+        "kind": "embedded",
+        "more_info_url": null,
+        "os_ci_compatible": true,
+        "parent": null,
+        "program_name": "Palisade corpus",
+        "sig_alg": {
+          "rsa_pkcs1": "sha256"
+        },
+        "signer_digest_alg": "sha256",
+        "status": "valid",
+        "status_detail": "Valid",
+        "timestamps": "<scrubbed>",
+        "trusted": true,
+        "trusted_signing_time": null,
+        "untrusted": [],
+        "validity_error": "ok"
+      }
+    ]
+  },
+  "signing_state": {
+    "status": "computed",
+    "value": {
+      "catalog": "not_checked",
+      "clock_suspect": false,
+      "embedded": "valid",
+      "embedded_invalid_reason": null,
+      "signer": {
+        "anchored_to": "ca.der",
+        "catalog_match": null,
+        "leaf": {
+          "issuer": "O=Palisade Tests, CN=Palisade Corpus Root",
+          "not_after": 2524608000,
+          "not_before": 1577836800,
+          "serial": "62d0a8c850ac79c20178ff094ce3a091d6abc866",
+          "sha1_thumbprint": "8c67a28662534589e56293f6e43e0e713f271c4c",
+          "sha256_thumbprint": "a09b1dc691a741fc78a01779f1d853ac614ffc63e3bb89cabe1d655a399edded",
+          "subject": "O=Palisade Tests, CN=Palisade Corpus Vendor",
+          "tbs_hash": "abd20a80caeb576109efce4b5c06272241946b1fb7e6365443fb13ade86f68e6",
+          "tbs_hash_alg": "sha256",
+          "tbs_hash_sha256": "abd20a80caeb576109efce4b5c06272241946b1fb7e6365443fb13ade86f68e6"
+        },
+        "pca": null,
+        "product_name": "Example Suite",
+        "publisher_dn": "O=Palisade Tests, CN=Palisade Corpus Vendor",
+        "publisher_name": "Palisade Corpus Vendor",
+        "root": {
+          "issuer": "O=Palisade Tests, CN=Palisade Corpus Root",
+          "not_after": 2524608000,
+          "not_before": 1577836800,
+          "serial": "5d92e85a1c32dc1cb57815c13fa42fabab989f39",
+          "sha1_thumbprint": "3e3bfb445486104cd7c43af34821bb67ede8ca96",
+          "sha256_thumbprint": "1ec693c334bfecca92b173e6ec00b773d48cb471ba27b006f3b282886d6a97ab",
+          "subject": "O=Palisade Tests, CN=Palisade Corpus Root",
+          "tbs_hash": "f9dc0e33a0ddaa59f07693027bb1bd55f5f1e9c706f1d0f7d45145c9c10ef42c",
+          "tbs_hash_alg": "sha256",
+          "tbs_hash_sha256": "f9dc0e33a0ddaa59f07693027bb1bd55f5f1e9c706f1d0f7d45145c9c10ef42c"
+        },
+        "signature": 0,
+        "source": "embedded",
+        "well_known_root_id": null
+      },
+      "state": "trusted",
+      "verification_error": "ok"
+    }
+  },
+  "size": {
+    "status": "computed",
+    "value": 5016
+  },
+  "strengths": [
+    {
+      "attribute": "sha256",
+      "reason": "identifies the file's exact content",
+      "strength": "strong"
+    },
+    {
+      "attribute": "sha384",
+      "reason": "identifies the file's exact content",
+      "strength": "strong"
+    },
+    {
+      "attribute": "sha512",
+      "reason": "identifies the file's exact content",
+      "strength": "strong"
+    },
+    {
+      "attribute": "sha1",
+      "reason": "not collision resistant (ADR 0008)",
+      "strength": "insecure"
+    },
+    {
+      "attribute": "md5",
+      "reason": "not collision resistant (ADR 0008)",
+      "strength": "insecure"
+    },
+    {
+      "attribute": "authenticode_sha256",
+      "reason": "identifies the image independently of its signature",
+      "strength": "strong"
+    },
+    {
+      "attribute": "authenticode_sha1",
+      "reason": "not collision resistant (ADR 0008)",
+      "strength": "insecure"
+    },
+    {
+      "attribute": "page_sha256",
+      "reason": "covers only the header page; pair it with authenticode_sha256",
+      "strength": "medium"
+    },
+    {
+      "attribute": "page_sha1",
+      "reason": "not collision resistant (ADR 0008)",
+      "strength": "insecure"
+    },
+    {
+      "attribute": "signer_chain",
+      "reason": "the certificates of a trusted signer, by thumbprint and TBS hash",
+      "strength": "strong"
+    },
+    {
+      "attribute": "publisher",
+      "reason": "a trusted signer's name: every file it signs matches",
+      "strength": "medium"
+    },
+    {
+      "attribute": "publisher_product",
+      "reason": "a trusted signer and the product its signature covers",
+      "strength": "medium"
+    },
+    {
+      "attribute": "publisher_product_file_name_version",
+      "reason": "the narrowest signer rule: publisher, product, file name and minimum version",
+      "strength": "medium"
+    },
+    {
+      "attribute": "original_file_name",
+      "reason": "covered by a trusted signature; survives renaming",
+      "strength": "medium"
+    },
+    {
+      "attribute": "internal_name",
+      "reason": "free text that the file's author chooses; use a publisher rule instead",
+      "strength": "weak"
+    },
+    {
+      "attribute": "company_name",
+      "reason": "free text that the file's author chooses; use a publisher rule instead",
+      "strength": "weak"
+    },
+    {
+      "attribute": "product_name",
+      "reason": "free text that the file's author chooses; use a publisher rule instead",
+      "strength": "weak"
+    },
+    {
+      "attribute": "file_description",
+      "reason": "free text that the file's author chooses; use a publisher rule instead",
+      "strength": "weak"
+    },
+    {
+      "attribute": "file_name",
+      "reason": "anyone who can copy the file can rename it",
+      "strength": "weak"
+    },
+    {
+      "attribute": "path",
+      "reason": "its writability by non-administrators is not known, so it is treated as user-writable",
+      "strength": "weak"
+    }
+  ],
+  "timestamps": "<scrubbed>"
+}

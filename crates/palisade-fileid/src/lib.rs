@@ -9,6 +9,7 @@ pub mod catalog;
 pub mod filetype;
 pub mod fsctx;
 pub mod hash;
+pub mod identity;
 pub mod installer;
 pub mod package;
 pub mod pe;

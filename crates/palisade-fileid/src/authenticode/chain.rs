@@ -324,6 +324,12 @@ impl TrustConfig {
         &self.intermediates
     }
 
+    /// The well-known root table.
+    #[must_use]
+    pub fn well_known_roots(&self) -> &[WellKnownRoot] {
+        &self.well_known_roots
+    }
+
     /// The well-known ID of `cert`, if its TBS hash is in the table.
     #[must_use]
     pub fn well_known_root_id(&self, cert: &CertSummary) -> Option<u8> {

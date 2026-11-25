@@ -166,8 +166,9 @@ pub use palisade_core::VerificationError;
 pub use pkcs7::{MAX_CERTIFICATES, MAX_TIMESTAMPS, MAX_WARNINGS};
 pub use revocation::{
     CertRevocation, CertificateMatch, Coverage, Crl, CrlEntry, CrlError, MAX_CRL_CHECKS,
-    MAX_CRL_ENTRIES, MAX_CRL_SIZE, MAX_CRLS, MAX_OCSP_RESPONSES, RevocationFailure, RevocationMode,
-    RevocationReason, RevocationSet, RevocationSource, RevokedCertificate,
+    MAX_CRL_ENTRIES, MAX_CRL_SIZE, MAX_CRLS, MAX_OCSP_RESPONSES, RevocationChecker,
+    RevocationFailure, RevocationMode, RevocationReason, RevocationSet, RevocationSource,
+    RevokedCertificate,
 };
 pub use signature::{
     BadSignature, CertificateEntry, CertificateTableError, Curve, DigestAlgorithm, InvalidReason,

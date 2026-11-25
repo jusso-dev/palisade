@@ -121,6 +121,10 @@ const PACKAGE_SEEDS: Seed = Seed {
     test: "package",
     name: "write_package_fuzz_seeds",
 };
+const IDENTITY_SEEDS: Seed = Seed {
+    test: "identity_corpus",
+    name: "write_identity_fuzz_seeds",
+};
 const TRUST_SET_SEEDS: Seed = Seed {
     test: "trust_set",
     name: "write_trust_set_fuzz_seeds",
@@ -224,6 +228,11 @@ pub const PROJECTS: &[Project] = &[
                 name: "fuzz_appx_manifest",
                 dict: None,
                 seeds: &[PACKAGE_SEEDS],
+            },
+            Target {
+                name: "identity_bytes",
+                dict: Some("pe.dict"),
+                seeds: &[PE_SEEDS, IDENTITY_SEEDS],
             },
         ],
     },

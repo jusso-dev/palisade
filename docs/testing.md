@@ -81,7 +81,9 @@ Do not prefix names with `test_`.
 ### Fixtures
 
 - Fixtures are synthetic and built at test time where possible. `palisade-fileid` builds its PE
-  images byte by byte (`crates/palisade-fileid/tests/common`), so no binaries are committed.
+  images byte by byte (`crates/palisade-fileid/tests/common`). The only committed binaries are
+  a few of those images signed with throwaway test keys for the identity corpus
+  (`crates/palisade-fileid/tests/corpus`), each listed in its manifest with its generator.
 - Small committed fixtures (policy documents, PKCS#7 signatures) live in the crate's
   `tests/fixtures/`, each set with a note, or a script, that says how it was made.
 - Never commit malware, antivirus test strings or third-party signed binaries
@@ -225,11 +227,11 @@ Every parser of untrusted input has a coverage-guided fuzz target. The targets l
 separate cargo-fuzz workspace per crate (`crates/<crate>/fuzz/`), so normal builds never compile
 them, and only they need a nightly toolchain. There are three projects:
 
-- `crates/palisade-fileid/fuzz`, with fourteen targets: `pe_parse`, `version_info_parse`,
+- `crates/palisade-fileid/fuzz`, with fifteen targets: `pe_parse`, `version_info_parse`,
   `authenticode_ranges`, `authenticode_pkcs7`, `fsctx_parse`, `x509_chain`, `timestamp_crl`,
-  `fuzz_ctl`, `fuzz_classify`, `fuzz_msi_tables`, `legacy_parse`, `fuzz_tags`, `script_sig` and
-  `fuzz_appx_manifest`. The project builds `palisade-fileid` with its `content-rules` feature,
-  for `fuzz_tags`.
+  `fuzz_ctl`, `fuzz_classify`, `fuzz_msi_tables`, `legacy_parse`, `fuzz_tags`, `script_sig`,
+  `fuzz_appx_manifest` and `identity_bytes`. The project builds `palisade-fileid` with its
+  `content-rules` feature, for `fuzz_tags`.
 - `crates/palisade-proto/fuzz`, with one target: `trust_set_decode`.
 - `crates/palisade-policy/fuzz`, with four targets: `fuzz_policy_json` (the strict JSON reader,
   validation and the evaluator build), `fuzz_policy_yaml` (the YAML reader),
@@ -342,7 +344,7 @@ Benchmarks use [criterion](https://docs.rs/criterion), in `crates/<crate>/benche
 |---|---|---|
 | `palisade-policy` | `criterion_eval` | One compiled criterion against an object's facts: hash, 25-value text, path wildcard, regex and version range |
 | `palisade-policy` | `policy_eval` | Whole-policy evaluation on the #42 reference policy (10k rules, a 100k hash set), under `deny_wins`, `first_match` and `specificity`; a decision-cache hit; loading the reference and 1M-hash policies |
-| `palisade-fileid` | `hash_and_parse` | Flat hashing of 1 MiB with each algorithm set, streamed hashing, PE parsing (full and metadata-only) and the Authenticode hash |
+| `palisade-fileid` | `hash_and_parse` | Flat hashing of 1 MiB with each algorithm set, streamed hashing, PE parsing (full and metadata-only), the Authenticode hash, and each file identity tier on a small and a 1 MiB image |
 
 Run them locally, on a quiet machine:
 

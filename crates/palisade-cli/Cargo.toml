@@ -13,5 +13,23 @@ publish.workspace = true
 name = "pal"
 path = "src/main.rs"
 
+[dependencies]
+clap = { workspace = true }
+palisade-fileid = { workspace = true }
+serde_json = { workspace = true }
+
+# `O_NONBLOCK`, so `pal fileid certs` cannot block on a FIFO.
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+# On Windows, the OS-backed reads: the final path and the mark-of-the-web.
+[target.'cfg(windows)'.dependencies]
+palisade-fileid = { workspace = true, features = ["os-trust"] }
+
+[dev-dependencies]
+sha2 = { workspace = true }
+# Parses `--yaml` output back in the tests.
+yaml-rust2 = { workspace = true }
+
 [lints]
 workspace = true

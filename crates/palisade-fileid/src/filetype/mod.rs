@@ -583,6 +583,15 @@ pub fn classify<R: Read + Seek + ?Sized>(
     out
 }
 
+/// Whether `name` has a disguising double extension (`invoice.pdf.exe`):
+/// an inert extension, or one of a kind that cannot run code, before one
+/// that claims executable content. The same rule as
+/// [`ContentFlags::name_double_extension`], for a name alone.
+#[must_use]
+pub fn is_double_extension(name: &OsStr) -> bool {
+    NameInfo::parse(name).double_extension()
+}
+
 /// [`classify`] over bytes held in memory.
 #[must_use]
 pub fn classify_bytes(data: &[u8], name_hint: Option<&OsStr>) -> Classification {

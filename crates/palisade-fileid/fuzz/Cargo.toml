@@ -16,6 +16,7 @@
 #   cargo +nightly fuzz run fuzz_tags
 #   cargo +nightly fuzz run script_sig
 #   cargo +nightly fuzz run fuzz_appx_manifest
+#   cargo +nightly fuzz run identity_bytes
 [package]
 name = "palisade-fileid-fuzz"
 version = "0.0.0"
@@ -126,6 +127,13 @@ bench = false
 [[bin]]
 name = "fuzz_appx_manifest"
 path = "fuzz_targets/fuzz_appx_manifest.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "identity_bytes"
+path = "fuzz_targets/identity_bytes.rs"
 test = false
 doc = false
 bench = false
