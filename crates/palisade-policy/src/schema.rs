@@ -41,7 +41,7 @@ pub fn generate() -> serde_json::Value {
 /// Rebuilds every object with its keys in sorted order, so the committed
 /// text does not depend on whether `serde_json`'s `preserve_order` feature
 /// happens to be enabled elsewhere in the build.
-fn sort_keys(value: serde_json::Value) -> serde_json::Value {
+pub(crate) fn sort_keys(value: serde_json::Value) -> serde_json::Value {
     match value {
         serde_json::Value::Object(map) => {
             let mut entries: Vec<_> = map.into_iter().collect();

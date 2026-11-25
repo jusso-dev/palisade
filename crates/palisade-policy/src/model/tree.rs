@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 
 /// A condition tree (#33).
 ///
-/// Each node is an object with exactly one key: `all`, `any`, `not` or
-/// `criterion`.
+/// Each node is an object with exactly one key: `all`, `any`, `not`,
+/// `criterion` or `ref`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Match {
@@ -25,6 +25,12 @@ pub enum Match {
     Not(Box<Match>),
     /// One test of one fact.
     Criterion(Criterion),
+    /// A reference to a reusable match fragment or application definition
+    /// in a library (#37), by ID and an optional version pin. A policy
+    /// document that is evaluated never holds one: the hierarchy replaces
+    /// every reference with the tree it names when it builds the effective
+    /// policy, and validation rejects one that is left (`unresolved_ref`).
+    Ref(crate::library::LibraryRef),
 }
 
 impl Match {
@@ -50,7 +56,7 @@ impl Match {
         match self {
             Self::All(children) | Self::Any(children) => children,
             Self::Not(child) => core::slice::from_ref(child),
-            Self::Criterion(_) => &[],
+            Self::Criterion(_) | Self::Ref(_) => &[],
         }
     }
 }
@@ -73,7 +79,7 @@ fn take_children(node: &mut Match, stack: &mut Vec<Match>) {
     match node {
         Match::All(children) | Match::Any(children) => stack.append(children),
         Match::Not(child) => stack.push(core::mem::replace(child.as_mut(), Match::All(Vec::new()))),
-        Match::Criterion(_) => {}
+        Match::Criterion(_) | Match::Ref(_) => {}
     }
 }
 

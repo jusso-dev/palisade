@@ -303,6 +303,9 @@ fn rule_set() -> impl Strategy<Value = RuleSet> {
                         read_only,
                         hidden,
                         mode_override,
+                        allow_child_suppress: None,
+                        category_path: None,
+                        band: 0,
                         rules,
                         metadata,
                     }

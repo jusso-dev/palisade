@@ -34,6 +34,7 @@ fn candidate(n: u64, set: u64, verdict: Verdict, tier: Tier) -> Candidate {
         order: None,
         priority: None,
         curated: false,
+        band: 0,
     }
 }
 

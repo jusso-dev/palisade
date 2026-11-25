@@ -100,7 +100,7 @@ pub fn is_valid_advanced_key(key: &str) -> bool {
 
 /// Reads a map and rejects repeated keys. serde's own map reader keeps the
 /// last value, which would let two tools disagree about one document.
-pub(super) fn unique_keys<'de, D, K, V>(deserializer: D) -> Result<BTreeMap<K, V>, D::Error>
+pub(crate) fn unique_keys<'de, D, K, V>(deserializer: D) -> Result<BTreeMap<K, V>, D::Error>
 where
     D: serde::Deserializer<'de>,
     K: Deserialize<'de> + Ord + core::fmt::Debug,

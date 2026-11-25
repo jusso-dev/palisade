@@ -33,7 +33,10 @@
 //!   UUIDv7, whose leading bits are the creation time; IDs created in the
 //!   same millisecond fall back to the rest of the ID. With `curated_first`
 //!   (the default), rules of read-only (curated) rule sets come before
-//!   every custom rule. `defer`, `audit` and `trust_source` rules are never
+//!   every custom rule. In an effective policy built from a hierarchy
+//!   (#37), each rule set carries the band of the level that assigned it,
+//!   and a lower band comes before everything else, so the levels are
+//!   evaluated in their configured order. `defer`, `audit` and `trust_source` rules are never
 //!   candidates, so a matching `defer` falls through to the next rule.
 //! - **`priority`**: the lowest `priority` number decides
 //!   (`priority_direction: higher_wins` reverses this). Between equal
@@ -204,7 +207,9 @@ impl Features {
 fn spec_of(node: &Match) -> Option<Spec> {
     match node {
         Match::Criterion(c) => criterion_spec(c),
-        Match::Not(_) => None,
+        // A reference is resolved before evaluation; one left over
+        // identifies nothing.
+        Match::Not(_) | Match::Ref(_) => None,
         Match::Any(children) => {
             // The least specific child; `None` if any child identifies
             // nothing.
@@ -246,7 +251,7 @@ fn features(node: &Match) -> Features {
             .iter()
             .map(features)
             .fold(Features::default(), Features::union),
-        Match::Criterion(_) | Match::Any(_) | Match::Not(_) => Features::default(),
+        Match::Criterion(_) | Match::Any(_) | Match::Not(_) | Match::Ref(_) => Features::default(),
     }
 }
 
@@ -450,6 +455,9 @@ pub struct Candidate {
     pub priority: Option<i32>,
     /// Whether its rule set is curated (read-only), for `curated_first`.
     pub curated: bool,
+    /// The hierarchy band of its rule set, for `first_match` (#37): a
+    /// lower band comes first. 0 outside a hierarchy.
+    pub band: u8,
 }
 
 impl Candidate {
@@ -618,6 +626,7 @@ impl Precedence for FirstMatch {
             |_| true,
             |c| {
                 (
+                    c.band,
                     self.curated_first && !c.curated,
                     c.order.is_none(),
                     c.order,

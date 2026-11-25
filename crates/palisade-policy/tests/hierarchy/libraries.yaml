@@ -1,0 +1,134 @@
+description: >-
+  A tenant rule set library pinned to version 1 while version 2 exists, a
+  category that pulls in a curated rule set at its latest version, and a
+  policy whose rule refers to a match fragment that refers to a hash set.
+  Under first_match the global band comes before the device band.
+device: 01936b2e-0014-7b3d-9f21-0a1b2c3d4e5f
+membership: []
+snapshot:
+  schema_version: 1.0.0
+  revision: 4
+  nodes:
+    - id: 01936b2e-0001-7b3d-9f21-0a1b2c3d4e5f
+      name: Installation
+      kind: global
+      precedence: {model: first_match}
+      categories: [Hardening]
+    - id: 01936b2e-0002-7b3d-9f21-0a1b2c3d4e5f
+      name: Example tenant
+      kind: tenant
+      parent: 01936b2e-0001-7b3d-9f21-0a1b2c3d4e5f
+      rule_sets: [{id: 01936b2e-0064-7b3d-9f21-0a1b2c3d4e5f, pin: 1}]
+    - id: 01936b2e-0003-7b3d-9f21-0a1b2c3d4e5f
+      name: Unassigned
+      kind: group
+      parent: 01936b2e-0002-7b3d-9f21-0a1b2c3d4e5f
+      builtin: unassigned
+    - id: 01936b2e-000a-7b3d-9f21-0a1b2c3d4e5f
+      name: Build agents
+      kind: group
+      parent: 01936b2e-0002-7b3d-9f21-0a1b2c3d4e5f
+      mode: enforce
+    - id: 01936b2e-0014-7b3d-9f21-0a1b2c3d4e5f
+      name: BUILD-07
+      kind: device
+      parent: 01936b2e-000a-7b3d-9f21-0a1b2c3d4e5f
+      assignments: [{policy: 01936b2e-0032-7b3d-9f21-0a1b2c3d4e5f, slot_order: 0}]
+  policies:
+    - realm: {tenant: 01936b2e-0002-7b3d-9f21-0a1b2c3d4e5f}
+      document:
+        schema_version: 1.0.0
+        policy:
+          id: 01936b2e-0032-7b3d-9f21-0a1b2c3d4e5f
+          name: Build tools
+          revision: 2
+          mode: enforce
+          precedence_model: first_match
+          rule_sets: [01936b2e-003c-7b3d-9f21-0a1b2c3d4e5f]
+        rule_sets:
+          - id: 01936b2e-003c-7b3d-9f21-0a1b2c3d4e5f
+            name: Build tools
+            kind: allowlist
+            rules:
+              - id: 01936b2e-0046-7b3d-9f21-0a1b2c3d4e5f
+                name: compilers
+                order: 100001
+                match:
+                  all:
+                    - ref: {id: 01936b2e-00c8-7b3d-9f21-0a1b2c3d4e5f}
+                    - criterion: {field: path.directory, operator: starts_with, values: ['C:\Tools']}
+                action: {type: allow}
+  libraries:
+    - id: 01936b2e-0064-7b3d-9f21-0a1b2c3d4e5f
+      version: 1
+      name: Tenant denies
+      realm: {tenant: 01936b2e-0002-7b3d-9f21-0a1b2c3d4e5f}
+      content:
+        kind: rule_set
+        rule_set:
+          id: 01936b2e-0064-7b3d-9f21-0a1b2c3d4e5f
+          name: Tenant denies
+          kind: blocklist
+          rules:
+            - id: 01936b2e-0065-7b3d-9f21-0a1b2c3d4e5f
+              name: old installer
+              order: 500000
+              match: {criterion: {field: hash.sha256, operator: equals, values: [dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd]}}
+              action: {type: deny}
+    - id: 01936b2e-0064-7b3d-9f21-0a1b2c3d4e5f
+      version: 2
+      name: Tenant denies
+      realm: {tenant: 01936b2e-0002-7b3d-9f21-0a1b2c3d4e5f}
+      content:
+        kind: rule_set
+        rule_set:
+          id: 01936b2e-0064-7b3d-9f21-0a1b2c3d4e5f
+          name: Tenant denies
+          kind: blocklist
+          rules:
+            - id: 01936b2e-0066-7b3d-9f21-0a1b2c3d4e5f
+              name: new installer
+              order: 500000
+              match: {criterion: {field: hash.sha256, operator: equals, values: [eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee]}}
+              action: {type: deny}
+    - id: 01936b2e-006e-7b3d-9f21-0a1b2c3d4e5f
+      version: 3
+      name: Curated hardening
+      realm: global
+      read_only: true
+      content:
+        kind: rule_set
+        rule_set:
+          id: 01936b2e-006e-7b3d-9f21-0a1b2c3d4e5f
+          name: Curated hardening
+          kind: blocklist
+          read_only: true
+          category_path: Hardening/Interpreters
+          rules:
+            - id: 01936b2e-006f-7b3d-9f21-0a1b2c3d4e5f
+              name: script host
+              order: 100100
+              match: {criterion: {field: hash.sha256, operator: equals, values: [bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb]}}
+              action: {type: deny}
+    - id: 01936b2e-00c8-7b3d-9f21-0a1b2c3d4e5f
+      version: 1
+      name: Compilers
+      realm: global
+      content:
+        kind: match_fragment
+        tree: {ref: {id: 01936b2e-00c9-7b3d-9f21-0a1b2c3d4e5f}}
+    - id: 01936b2e-00c9-7b3d-9f21-0a1b2c3d4e5f
+      version: 1
+      name: Compiler hashes
+      realm: global
+      content:
+        kind: hash_set
+        field: hash.sha256
+        hashes:
+          - BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+          - cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+decisions:
+  bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb: blocked
+  cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc: allowed
+  dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd: blocked
+  eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee: blocked
