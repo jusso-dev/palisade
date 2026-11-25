@@ -62,6 +62,8 @@ pub enum ManifestError {
     Attribute(&'static str),
     /// More than [`MAX_ITEMS`] of something.
     TooMany(&'static str),
+    /// A section that may appear once appears more than once.
+    Duplicate(&'static str),
 }
 
 impl fmt::Display for ManifestError {
@@ -72,6 +74,7 @@ impl fmt::Display for ManifestError {
             Self::Identity => f.write_str("the manifest must have exactly one Identity"),
             Self::Attribute(a) => write!(f, "Identity@{a} is missing or invalid"),
             Self::TooMany(what) => write!(f, "more than {MAX_ITEMS} {what}"),
+            Self::Duplicate(what) => write!(f, "{what} appears more than once"),
         }
     }
 }
@@ -89,7 +92,8 @@ pub struct Identity {
     pub version: PackageVersion,
     /// `ProcessorArchitecture`, lowercased; empty when absent (neutral).
     pub arch: String,
-    /// `ResourceId`; empty when absent.
+    /// `ResourceId`; empty when absent, and `~` for a bundle (its full name
+    /// always uses `~`).
     pub resource_id: String,
 }
 
@@ -259,15 +263,17 @@ fn identity(e: &Element, bundle: bool) -> Result<Identity, ManifestError> {
             lower
         }
     };
+    // A bundle's resource ID is always `~` in its full name.
     let resource_id = if bundle {
-        String::new()
+        "~".to_owned()
     } else {
         value(e, "ResourceId")?.unwrap_or_default()
     };
-    if resource_id.len() > 30
-        || !resource_id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+    if !bundle
+        && (resource_id.len() > 30
+            || !resource_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-'))
     {
         return Err(ManifestError::Attribute("ResourceId"));
     }
@@ -289,6 +295,24 @@ fn the_identity(root: &Element, nss: &[&str], bundle: bool) -> Result<Identity, 
     identity(first, bundle)
 }
 
+/// The child section `name`, which must appear at most once: a second one
+/// would be read by one reader and ignored by another.
+fn section<'a>(
+    parent: &'a Element,
+    nss: &[&str],
+    name: &'static str,
+) -> Result<Option<&'a Element>, ManifestError> {
+    let mut it = parent
+        .children
+        .iter()
+        .filter(|c| c.name == name && nss.contains(&&*c.ns));
+    let first = it.next();
+    if it.next().is_some() {
+        return Err(ManifestError::Duplicate(name));
+    }
+    Ok(first)
+}
+
 fn push<T>(list: &mut Vec<T>, item: T, what: &'static str) -> Result<(), ManifestError> {
     if list.len() >= MAX_ITEMS {
         return Err(ManifestError::TooMany(what));
@@ -300,31 +324,33 @@ fn push<T>(list: &mut Vec<T>, item: T, what: &'static str) -> Result<(), Manifes
 /// Parses `AppxManifest.xml`.
 pub fn parse_package_manifest(data: &[u8]) -> Result<PackageManifest, ManifestError> {
     let root = xml::parse(data).map_err(ManifestError::Xml)?;
-    if root.name != "Package" || !ns::PACKAGE.contains(&root.ns.as_str()) {
+    if root.name != "Package" || !ns::PACKAGE.contains(&&*root.ns) {
         return Err(ManifestError::NotManifest);
     }
-    let fnd = [root.ns.as_str()];
+    let fnd = [&*root.ns];
     let identity = the_identity(&root, &fnd, false)?;
-    let props = root.child(&fnd, "Properties");
-    let text = |name: &str| {
-        props
-            .and_then(|p| p.child(&fnd, name))
+    let props = section(&root, &fnd, "Properties")?;
+    let text = |name: &'static str| -> Result<Option<String>, ManifestError> {
+        let Some(p) = props else { return Ok(None) };
+        Ok(section(p, &fnd, name)?
             .map(|e| e.text.trim().to_owned())
-            .filter(|t| !t.is_empty() && t.len() <= MAX_VALUE)
+            .filter(|t| !t.is_empty() && t.len() <= MAX_VALUE))
     };
-    let flag = |name: &str| text(name).is_some_and(|t| t.eq_ignore_ascii_case("true"));
+    let flag = |name: &'static str| -> Result<bool, ManifestError> {
+        Ok(text(name)?.is_some_and(|t| t.eq_ignore_ascii_case("true")))
+    };
     let mut out = PackageManifest {
         identity,
-        display_name: text("DisplayName"),
-        publisher_display_name: text("PublisherDisplayName"),
-        is_framework: flag("Framework"),
-        is_resource_package: flag("ResourcePackage"),
+        display_name: text("DisplayName")?,
+        publisher_display_name: text("PublisherDisplayName")?,
+        is_framework: flag("Framework")?,
+        is_resource_package: flag("ResourcePackage")?,
         applications: Vec::new(),
         capabilities: Vec::new(),
         extensions: Vec::new(),
         dependencies: Vec::new(),
     };
-    if let Some(apps) = root.child(&fnd, "Applications") {
+    if let Some(apps) = section(&root, &fnd, "Applications")? {
         for app in apps.children_named(&fnd, "Application") {
             let a = Application {
                 id: value(app, "Id")?,
@@ -337,11 +363,11 @@ pub fn parse_package_manifest(data: &[u8]) -> Result<PackageManifest, ManifestEr
         }
     }
     collect_extensions(&root, None, &mut out.extensions)?;
-    if let Some(caps) = root.child(&fnd, "Capabilities") {
+    if let Some(caps) = section(&root, &fnd, "Capabilities")? {
         for c in &caps.children {
             if let Some(name) = value(c, "Name")? {
                 let cap = Capability {
-                    ns: c.ns.clone(),
+                    ns: c.ns.to_string(),
                     element: c.name.clone(),
                     name,
                 };
@@ -349,7 +375,7 @@ pub fn parse_package_manifest(data: &[u8]) -> Result<PackageManifest, ManifestEr
             }
         }
     }
-    if let Some(deps) = root.child(&fnd, "Dependencies") {
+    if let Some(deps) = section(&root, &fnd, "Dependencies")? {
         for d in &deps.children {
             let Some(name) = value(d, "Name")? else {
                 continue;
@@ -387,7 +413,7 @@ fn collect_extensions(
                 }
             }
             let ext = Extension {
-                ns: e.ns.clone(),
+                ns: e.ns.to_string(),
                 category,
                 executable: value(e, "Executable")?,
                 aliases,
@@ -402,12 +428,12 @@ fn collect_extensions(
 /// Parses `AppxMetadata/AppxBundleManifest.xml`.
 pub fn parse_bundle_manifest(data: &[u8]) -> Result<BundleManifest, ManifestError> {
     let root = xml::parse(data).map_err(ManifestError::Xml)?;
-    if root.name != "Bundle" || !ns::BUNDLE.contains(&root.ns.as_str()) {
+    if root.name != "Bundle" || !ns::BUNDLE.contains(&&*root.ns) {
         return Err(ManifestError::NotManifest);
     }
     let identity = the_identity(&root, &ns::BUNDLE_ANY, true)?;
     let mut members = Vec::new();
-    if let Some(packages) = root.child(&ns::BUNDLE_ANY, "Packages") {
+    if let Some(packages) = section(&root, &ns::BUNDLE_ANY, "Packages")? {
         for p in packages.children_named(&ns::BUNDLE_ANY, "Package") {
             let Some(file_name) = value(p, "FileName")? else {
                 continue;

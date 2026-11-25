@@ -176,6 +176,201 @@ fn publisher_mismatch_is_invalid() {
     assert!(sig.report.primary.is_none());
 }
 
+// DER, to nest one package signature inside another.
+
+fn der_header(der: &[u8], at: usize) -> (usize, usize) {
+    let first = der[at + 1];
+    if first < 0x80 {
+        (2, usize::from(first))
+    } else {
+        let n = usize::from(first & 0x7f);
+        let len = der[at + 2..at + 2 + n]
+            .iter()
+            .fold(0, |acc, b| (acc << 8) | usize::from(*b));
+        (2 + n, len)
+    }
+}
+
+fn der_tlv(tag: u8, content: &[u8]) -> Vec<u8> {
+    let mut out = vec![tag];
+    let len = content.len();
+    if len < 0x80 {
+        out.push(len as u8);
+    } else {
+        let bytes = len.to_be_bytes();
+        let skip = bytes.iter().take_while(|b| **b == 0).count();
+        out.push(0x80 | (bytes.len() - skip) as u8);
+        out.extend_from_slice(&bytes[skip..]);
+    }
+    out.extend_from_slice(content);
+    out
+}
+
+/// `der` with the element at `path` (child indexes, level by level)
+/// replaced by `f` of it.
+fn der_edit(der: &[u8], path: &[usize], f: &dyn Fn(&[u8]) -> Vec<u8>) -> Vec<u8> {
+    let Some((&first, rest)) = path.split_first() else {
+        return f(der);
+    };
+    let (h, l) = der_header(der, 0);
+    let body = &der[h..h + l];
+    let mut out = Vec::new();
+    let (mut pos, mut index) = (0, 0);
+    while pos < body.len() {
+        let (ch, cl) = der_header(body, pos);
+        let child = &body[pos..pos + ch + cl];
+        if index == first {
+            out.extend(der_edit(child, rest, f));
+        } else {
+            out.extend_from_slice(child);
+        }
+        pos += ch + cl;
+        index += 1;
+    }
+    der_tlv(der[0], &out)
+}
+
+/// The signature `PKCX` + ContentInfo of a package.
+fn p7x(data: &[u8]) -> Vec<u8> {
+    let a = Archive::parse(data).unwrap();
+    a.read(a.member("AppxSignature.p7x").unwrap()).unwrap()
+}
+
+/// `outer` (a signed package) with `inner`'s signature nested in its
+/// SignerInfo as an `szOID_NESTED_SIGNATURE` unauthenticated attribute,
+/// which the outer signature does not cover.
+fn nest(outer: &[u8], inner: &[u8]) -> Vec<u8> {
+    let outer_sig = p7x(outer);
+    let inner_ci = p7x(inner)[4..].to_vec();
+    // 1.3.6.1.4.1.311.2.4.1
+    let oid = der_tlv(
+        0x06,
+        &[0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x04, 0x01],
+    );
+    let attr = der_tlv(0x30, &[oid, der_tlv(0x31, &inner_ci)].concat());
+    let unsigned = der_tlv(0xa1, &attr);
+    // ContentInfo -> [0] (child 1) -> SignedData (its only child) ->
+    // signerInfos (the last child) -> the only SignerInfo.
+    let ci = &outer_sig[4..];
+    let children = |der: &[u8]| -> Vec<(usize, usize)> {
+        let (h, l) = der_header(der, 0);
+        let mut out = Vec::new();
+        let mut pos = h;
+        while pos < h + l {
+            let (ch, cl) = der_header(der, pos);
+            out.push((pos, ch + cl));
+            pos += ch + cl;
+        }
+        out
+    };
+    let (explicit_at, explicit_len) = children(ci)[1];
+    let explicit = &ci[explicit_at..explicit_at + explicit_len];
+    let (sd_at, sd_len) = children(explicit)[0];
+    let sd = &explicit[sd_at..sd_at + sd_len];
+    let signer_infos = children(sd).len() - 1;
+    let new_ci = der_edit(ci, &[1, 0, signer_infos, 0], &|si| {
+        let (h, l) = der_header(si, 0);
+        let mut body = si[h..h + l].to_vec();
+        body.extend_from_slice(&unsigned);
+        der_tlv(si[0], &body)
+    });
+    let mut new_sig = b"PKCX".to_vec();
+    new_sig.extend(new_ci);
+    let mut files = members(outer);
+    files.last_mut().unwrap().data = new_sig;
+    // Rewriting the archive re-deflates every member, which changes the
+    // records the signature covers; so keep the outer bytes and swap only
+    // the signature member, stored, at the end.
+    replace_signature(outer, &files.last().unwrap().data)
+}
+
+/// `signed` with its last member (the signature) replaced by `sig`, stored;
+/// every other record is kept byte for byte.
+fn replace_signature(signed: &[u8], sig: &[u8]) -> Vec<u8> {
+    let a = Archive::parse(signed).unwrap();
+    let last = a.members.last().unwrap();
+    let mut out = signed[..last.local_offset as usize].to_vec();
+    let mut central = Vec::new();
+    for m in &a.members[..a.members.len() - 1] {
+        central.extend_from_slice(a.central_bytes(m));
+    }
+    let offset = out.len() as u32;
+    let name = last.name.as_bytes();
+    let crc = crc32(sig);
+    out.extend_from_slice(&0x0403_4b50_u32.to_le_bytes());
+    out.extend_from_slice(&20_u16.to_le_bytes());
+    out.extend_from_slice(&[0, 0, 0, 0]);
+    out.extend_from_slice(&[0, 0, 0x21, 0x58]);
+    out.extend_from_slice(&crc.to_le_bytes());
+    out.extend_from_slice(&(sig.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(sig.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+    out.extend_from_slice(&0_u16.to_le_bytes());
+    out.extend_from_slice(name);
+    out.extend_from_slice(sig);
+    central.extend_from_slice(&0x0201_4b50_u32.to_le_bytes());
+    central.extend_from_slice(&45_u16.to_le_bytes());
+    central.extend_from_slice(&20_u16.to_le_bytes());
+    central.extend_from_slice(&[0, 0, 0, 0]);
+    central.extend_from_slice(&[0, 0, 0x21, 0x58]);
+    central.extend_from_slice(&crc.to_le_bytes());
+    central.extend_from_slice(&(sig.len() as u32).to_le_bytes());
+    central.extend_from_slice(&(sig.len() as u32).to_le_bytes());
+    central.extend_from_slice(&(name.len() as u16).to_le_bytes());
+    central.extend_from_slice(&[0; 12]);
+    central.extend_from_slice(&offset.to_le_bytes());
+    central.extend_from_slice(name);
+    let cd = out.len() as u32;
+    out.extend_from_slice(&central);
+    out.extend_from_slice(&0x0605_4b50_u32.to_le_bytes());
+    out.extend_from_slice(&[0; 4]);
+    let n = a.members.len() as u16;
+    out.extend_from_slice(&n.to_le_bytes());
+    out.extend_from_slice(&n.to_le_bytes());
+    out.extend_from_slice(&(central.len() as u32).to_le_bytes());
+    out.extend_from_slice(&cd.to_le_bytes());
+    out.extend_from_slice(&0_u16.to_le_bytes());
+    out
+}
+
+#[test]
+fn every_valid_signer_must_be_the_publisher() {
+    let outer = fixture("app-signed.msix");
+    // The signature swapped in unchanged still verifies (the helper keeps
+    // every covered byte).
+    let same = replace_signature(&outer, &p7x(&outer));
+    assert!(parse_package(&same).unwrap().signature_valid());
+
+    // A nested signature by another publisher: whichever signature trust
+    // evaluation picks, the identity must not be vouched for by it.
+    let id = parse_package(&nest(&outer, &fixture("other-publisher.msix"))).unwrap();
+    let sig = id.signature.as_ref().unwrap();
+    assert_eq!(sig.report.signatures.len(), 2);
+    assert!(
+        matches!(
+            &sig.issue,
+            Some(PackageSignatureIssue::PublisherMismatch { signer, .. })
+                if signer.starts_with("CN=Someone Else")
+        ),
+        "{:?}",
+        sig.issue
+    );
+    assert!(!id.signature_valid());
+    assert!(sig.report.signatures.iter().all(|s| !s.status.is_valid()));
+    let mut config = TrustConfig::new();
+    config
+        .add_anchor("package test root", &fixture("ca.der"))
+        .unwrap();
+    assert!(evaluate_trust(&sig.report, &config, None).primary.is_none());
+
+    // Nested by the same publisher: both valid, and the identity holds.
+    let id = parse_package(&nest(&outer, &fixture("app-sha384.msix"))).unwrap();
+    let sig = id.signature.as_ref().unwrap();
+    assert_eq!(sig.report.signatures.len(), 2);
+    assert!(id.signature_valid(), "{:?}", sig.issue);
+    assert!(sig.report.signatures.iter().all(|s| s.status.is_valid()));
+}
+
 #[test]
 fn bundles() {
     let id = parse_package(&fixture("bundle-signed.msixbundle")).unwrap();
@@ -219,12 +414,13 @@ fn tamper(data: &[u8], needle: &[u8]) -> Vec<u8> {
 #[test]
 fn tampering_is_never_valid() {
     let data = fixture("app-signed.msix");
-    // Any byte of a stored file: the block map no longer matches.
+    // Any byte of a stored file: the records the signature covers change,
+    // so the digest no longer matches (the block map would not either).
     let id = parse_package(&tamper(&data, b"synthetic tool")).unwrap();
-    assert!(matches!(
-        id.signature.as_ref().unwrap().issue,
-        Some(PackageSignatureIssue::BlockMap(_))
-    ));
+    assert_eq!(
+        id.signature.as_ref().unwrap().report.signatures[0].status,
+        SignatureStatus::DigestMismatch
+    );
     assert!(!id.signature_valid());
     // A deflated file whose compressed bytes change no longer inflates
     // to its CRC, so the block map check fails too.
@@ -375,6 +571,112 @@ fn block_map_must_cover_every_file() {
     files[map_at].data = skip.block_map().into_bytes();
     let id = parse_package(&write_zip(&files)).unwrap();
     assert!(!id.signature_valid());
+}
+
+#[test]
+fn part_names_compare_as_opc_compares_them() {
+    // Special parts are found whatever their case or percent-encoding.
+    let mut both = AppxBuilder::package();
+    both.files.push(File {
+        name: "AppxMetadata/appxbundlemanifest.xml".into(),
+        data: AppxBuilder::bundle().files[0].data.clone(),
+        deflate: false,
+    });
+    assert_eq!(
+        parse_package(&both.build()).unwrap_err(),
+        PackageError::NotPackage
+    );
+    let mut escaped = AppxBuilder::package();
+    escaped.files.push(File {
+        name: "AppxMetadata/%41ppxBundleManifest.xml".into(),
+        data: AppxBuilder::bundle().files[0].data.clone(),
+        deflate: false,
+    });
+    assert_eq!(
+        parse_package(&escaped.build()).unwrap_err(),
+        PackageError::NotPackage
+    );
+    // A lower-case signature part is still the signature.
+    let mut files = members(&fixture("app-signed.msix"));
+    files.last_mut().unwrap().name = "appxsignature.p7x".into();
+    let id = parse_package(&write_zip(&files)).unwrap();
+    assert!(id.signature.is_some());
+    // Escaped traversal, separators and NUL are refused like plain ones.
+    for name in [
+        "a/%2e%2e/b.exe",
+        "%2ftool.exe",
+        "a%5cb.exe",
+        "a%00b.exe",
+        "bad%2",
+    ] {
+        let mut b = AppxBuilder::package();
+        b.files[1].name = name.into();
+        assert!(
+            matches!(
+                Archive::parse(&b.build()).unwrap_err(),
+                ZipError::BadName(_)
+            ),
+            "{name}"
+        );
+    }
+    // Two spellings of one part are a duplicate.
+    let mut dup = AppxBuilder::package();
+    dup.files.push(File {
+        name: "app/tool%2Eexe".into(),
+        data: vec![1],
+        deflate: false,
+    });
+    assert!(matches!(
+        Archive::parse(&dup.build()).unwrap_err(),
+        ZipError::DuplicateName(_)
+    ));
+}
+
+#[test]
+fn empty_deflated_files_verify_in_the_block_map() {
+    let mut b = AppxBuilder::package();
+    b.files.push(File {
+        name: "empty.txt".into(),
+        data: Vec::new(),
+        deflate: true,
+    });
+    let data = b.build();
+    let archive = Archive::parse(&data).unwrap();
+    let map = palisade_fileid::package::blockmap::parse(
+        &archive
+            .read(archive.member("AppxBlockMap.xml").unwrap())
+            .unwrap(),
+    )
+    .unwrap();
+    palisade_fileid::package::blockmap::verify(&map, &archive).unwrap();
+}
+
+#[test]
+fn manifest_sections_appear_once() {
+    let twice = manifest("Palisade.TestApp", PUBLISHER, "1.2.3.4", "x64").replace(
+        "<Capabilities>",
+        "<Capabilities></Capabilities><Capabilities>",
+    );
+    let mut b = AppxBuilder::package();
+    b.files[0].data = twice.into_bytes();
+    assert!(matches!(
+        parse_package(&b.build()).unwrap_err(),
+        PackageError::Manifest(palisade_fileid::package::ManifestError::Duplicate(
+            "Capabilities"
+        ))
+    ));
+    // A namespace declaration with a reference is refused rather than
+    // bound differently from a normalising reader.
+    let escaped = manifest("Palisade.TestApp", PUBLISHER, "1.2.3.4", "x64").replace(
+        "windows10/restrictedcapabilities",
+        "windows10/&#x72;estrictedcapabilities",
+    );
+    let mut b = AppxBuilder::package();
+    b.files[0].data = escaped.into_bytes();
+    assert!(matches!(
+        parse_package(&b.build()).unwrap_err(),
+        PackageError::Manifest(_)
+    ));
 }
 
 #[test]
@@ -551,4 +853,21 @@ fn write_package_fuzz_seeds() {
         manifest("Palisade.TestApp", PUBLISHER, "1.2.3.4", "x64"),
     )
     .unwrap();
+}
+
+#[test]
+fn unmapped_parts_are_bounded() {
+    // `[Content_Types].xml` is not in the block map; one that inflates past
+    // the metadata limit is not hashed, so the signature cannot verify,
+    // and parsing stays fast.
+    let mut files = members(&fixture("app-signed.msix"));
+    let ct = files
+        .iter_mut()
+        .find(|f| f.name == "[Content_Types].xml")
+        .unwrap();
+    ct.data = vec![b' '; palisade_fileid::package::MAX_METADATA_SIZE as usize + 1];
+    let start = std::time::Instant::now();
+    let id = parse_package(&write_zip(&files)).unwrap();
+    assert!(!id.signature_valid());
+    assert!(start.elapsed() < std::time::Duration::from_secs(20));
 }

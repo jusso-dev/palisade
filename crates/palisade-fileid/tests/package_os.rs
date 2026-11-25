@@ -15,7 +15,9 @@
 use std::collections::BTreeMap;
 use std::process::Command;
 
-use palisade_fileid::package::{PackageIdentity, parse_package, publisher_id};
+use palisade_fileid::package::{
+    PackageIdentity, PackageVersion, full_name, parse_package, publisher_id,
+};
 
 const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/package");
 const SCRIPT: &str = concat!(
@@ -94,6 +96,7 @@ fn identity_and_signatures_match_the_os() {
     let text = text.trim_start_matches('\u{feff}');
 
     let mut pfns = 0;
+    let mut fulls = 0;
     let mut sigs: BTreeMap<String, String> = BTreeMap::new();
     for line in text.lines().filter(|l| !l.trim().is_empty()) {
         let mut parts = line.splitn(3, '\t');
@@ -111,6 +114,18 @@ fn identity_and_signatures_match_the_os() {
                 );
                 pfns += 1;
             }
+            "FULL" => {
+                let pid = publisher_id(publishers[0]);
+                let v = PackageVersion(1, 2, 3, 4);
+                let want = match key {
+                    "x64" => full_name("Palisade.Probe", v, "x64", "", &pid),
+                    // A bundle: neutral, resource ID `~`, as parse_package
+                    // reports for bundles.
+                    _ => full_name("Palisade.Probe", v, "", "~", &pid),
+                };
+                assert_eq!(value, want, "{key}");
+                fulls += 1;
+            }
             "SIG" => {
                 sigs.insert(key.into(), value.into());
             }
@@ -118,6 +133,7 @@ fn identity_and_signatures_match_the_os() {
         }
     }
     assert_eq!(pfns, publishers.len(), "{text}");
+    assert_eq!(fulls, 2, "{text}");
     // The test root is not trusted here, so a signature the OS finds intact
     // reports success or a chain error (an untrusted root, a chain it
     // cannot build); any other code is a broken or unverifiable package.

@@ -16,11 +16,11 @@
 
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use super::xml::{self, Element};
-use super::zip::{Archive, MAX_ENTRIES, Member};
+use super::zip::{Archive, MAX_ENTRIES, Member, fold};
 use crate::authenticode::DigestAlgorithm;
 use crate::hash::{AlgorithmSet, MultiHasher};
 
@@ -163,7 +163,7 @@ fn number(e: &Element, name: &str) -> Result<Option<u64>, BlockMapError> {
 /// Parses `AppxBlockMap.xml`.
 pub fn parse(data: &[u8]) -> Result<BlockMap, BlockMapError> {
     let root = xml::parse(data).map_err(|e| BlockMapError::Malformed(e.0))?;
-    if root.ns != NS || root.name != "BlockMap" {
+    if &*root.ns != NS || root.name != "BlockMap" {
         return Err(bad("not a block map"));
     }
     let hash = root
@@ -180,6 +180,14 @@ pub fn parse(data: &[u8]) -> Result<BlockMap, BlockMapError> {
             .filter(|n| !n.is_empty())
             .ok_or_else(|| bad("a file has no name"))?
             .replace('\\', "/");
+        if name.starts_with('/')
+            || name.contains('\0')
+            || name
+                .split('/')
+                .any(|seg| seg.is_empty() || seg == "." || seg == "..")
+        {
+            return Err(bad("a file name is not a valid part name"));
+        }
         let size = number(f, "Size")?.ok_or_else(|| bad("a file has no size"))?;
         let lfh_size = number(f, "LfhSize")?.ok_or_else(|| bad("a file has no LfhSize"))?;
         let mut blocks = Vec::new();
@@ -191,9 +199,18 @@ pub fn parse(data: &[u8]) -> Result<BlockMap, BlockMapError> {
                 .filter(|h| h.len() == hash.digest_len())
                 .ok_or_else(|| bad("a block hash is not valid base64 of the right length"))?;
             blocks.push(h);
-            block_sizes.push(number(b, "Size")?);
+            let size = number(b, "Size")?;
+            if size == Some(0) {
+                return Err(bad("a block size is zero"));
+            }
+            block_sizes.push(size);
         }
         if u64::try_from(blocks.len()).ok() != Some(size.div_ceil(BLOCK)) {
+            return Err(BlockMapError::Size(name));
+        }
+        // Either every block gives its compressed size or none does.
+        let with = block_sizes.iter().filter(|s| s.is_some()).count();
+        if with != 0 && with != block_sizes.len() {
             return Err(BlockMapError::Size(name));
         }
         files.push(MappedFile {
@@ -207,25 +224,6 @@ pub fn parse(data: &[u8]) -> Result<BlockMap, BlockMapError> {
     Ok(BlockMap { hash, files })
 }
 
-/// Percent-decodes an OPC part name as stored in the archive.
-pub(crate) fn decode_part_name(name: &str) -> Option<String> {
-    let b = name.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while let Some(&c) = b.get(i) {
-        if c == b'%' {
-            let hex = b.get(i + 1..i + 3)?;
-            let s = std::str::from_utf8(hex).ok()?;
-            out.push(u8::from_str_radix(s, 16).ok()?);
-            i += 3;
-        } else {
-            out.push(c);
-            i += 1;
-        }
-    }
-    String::from_utf8(out).ok()
-}
-
 /// The size of a member's local file header (signature to data).
 fn local_header_len(m: &Member) -> u64 {
     m.data_offset.saturating_sub(m.local_offset)
@@ -233,50 +231,59 @@ fn local_header_len(m: &Member) -> u64 {
 
 /// Checks `map` against `archive`.
 pub fn verify(map: &BlockMap, archive: &Archive<'_>) -> Result<(), BlockMapError> {
-    let mut listed = BTreeSet::new();
+    // Listed files by folded name; each name once.
+    let mut listed: BTreeMap<String, &MappedFile> = BTreeMap::new();
     for f in &map.files {
-        if !listed.insert(f.name.to_ascii_lowercase()) {
+        if listed.insert(fold(&f.name), f).is_some() {
             return Err(BlockMapError::Duplicate(f.name.clone()));
         }
     }
-    // Every member is listed (by its decoded part name), or is one of the
-    // four that are not; and every listed file is a member.
+    // Every member is listed (by its part name), or is one of the four
+    // that are not; and every listed file is exactly one member (part
+    // names are unique in the archive).
     let mut seen = BTreeSet::new();
     for m in &archive.members {
-        if UNMAPPED.iter().any(|u| m.name.eq_ignore_ascii_case(u)) {
+        let key = fold(&m.part);
+        if UNMAPPED.iter().any(|u| fold(u) == key) {
             continue;
         }
-        let decoded =
-            decode_part_name(&m.name).ok_or_else(|| BlockMapError::Unlisted(m.name.clone()))?;
-        let key = decoded.to_ascii_lowercase();
-        let Some(f) = map
-            .files
-            .iter()
-            .find(|f| f.name.to_ascii_lowercase() == key)
-        else {
+        let Some(f) = listed.get(&key) else {
             return Err(BlockMapError::Unlisted(m.name.clone()));
         };
-        seen.insert(key);
+        if !seen.insert(key) {
+            return Err(BlockMapError::Duplicate(f.name.clone()));
+        }
         if f.size != m.size || f.lfh_size != local_header_len(m) {
             return Err(BlockMapError::Size(f.name.clone()));
         }
+        // Block sizes, when given, are the compressed size of each block
+        // of a deflated file (an empty file has no blocks and no sizes);
+        // a stored file's blocks carry none.
+        let given: Vec<u64> = f.block_sizes.iter().flatten().copied().collect();
         if m.method == 8 {
-            let sum = f
-                .block_sizes
-                .iter()
-                .try_fold(0_u64, |acc, s| s.map(|s| acc.saturating_add(s)));
-            if sum.is_some_and(|s| s != m.compressed_size) {
+            if given.len() == f.block_sizes.len()
+                && !f.blocks.is_empty()
+                && given.iter().sum::<u64>() != m.compressed_size
+            {
                 return Err(BlockMapError::Size(f.name.clone()));
             }
+        } else if !given.is_empty() {
+            return Err(BlockMapError::Size(f.name.clone()));
         }
-        check_blocks(map.hash, f, archive, m)?;
     }
-    if let Some(missing) = map
-        .files
-        .iter()
-        .find(|f| !seen.contains(&f.name.to_ascii_lowercase()))
-    {
-        return Err(BlockMapError::Unlisted(missing.name.clone()));
+    if let Some(missing) = listed.keys().find(|k| !seen.contains(*k)) {
+        let name = listed
+            .get(missing)
+            .map_or_else(String::new, |f| f.name.clone());
+        return Err(BlockMapError::Unlisted(name));
+    }
+    // Only then the content, one member at a time.
+    for m in &archive.members {
+        if let Some(f) = listed.get(&fold(&m.part)) {
+            if !UNMAPPED.iter().any(|u| fold(u) == fold(&m.part)) {
+                check_blocks(map.hash, f, archive, m)?;
+            }
+        }
     }
     Ok(())
 }
@@ -348,13 +355,5 @@ mod tests {
         ] {
             assert_eq!(base64(bad), None, "{bad:?}");
         }
-    }
-
-    #[test]
-    fn part_names_decode() {
-        assert_eq!(decode_part_name("a%20b.txt").as_deref(), Some("a b.txt"));
-        assert_eq!(decode_part_name("%C3%A9").as_deref(), Some("\u{e9}"));
-        assert_eq!(decode_part_name("bad%2"), None);
-        assert_eq!(decode_part_name("%FF"), None);
     }
 }

@@ -16,7 +16,8 @@
 //! The package family name is `{Name}_{PublisherId}` and the package full
 //! name `{Name}_{Version}_{Architecture}_{ResourceId}_{PublisherId}`, with
 //! the architecture in lowercase (`neutral` when none is given) and an empty
-//! resource ID for none, so `Name_1.0.0.0_x64__8wekyb3d8bbwe`.
+//! resource ID for none, so `Name_1.0.0.0_x64__8wekyb3d8bbwe`. A bundle's
+//! resource ID is `~`: `Bundle_1.0.0.0_neutral_~_8wekyb3d8bbwe`.
 
 #![forbid(unsafe_code)]
 

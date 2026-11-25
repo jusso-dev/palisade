@@ -41,9 +41,12 @@
 //! decoder, signer certificate lookup, `messageDigest` and signature checks
 //! as PE signatures, nested signatures included. A signature is valid only
 //! when, in addition, the block map verifies against every file
-//! ([`blockmap::verify`]) and the signer's subject DN, rendered as the OS
-//! renders it, equals `Identity@Publisher` exactly; a different publisher
-//! is [`PackageSignatureIssue::PublisherMismatch`]. The report then feeds
+//! ([`blockmap::verify`]) and the subject DN of the signer of **every**
+//! valid signature, nested ones included, rendered as the OS renders it,
+//! equals `Identity@Publisher` exactly; a different publisher is
+//! [`PackageSignatureIssue::PublisherMismatch`]. Special parts
+//! (`AppxSignature.p7x`, the manifests, the block map) are found by part
+//! name: percent-decoded and ASCII case-insensitive, as OPC compares them. The report then feeds
 //! [`crate::authenticode::evaluate_trust`] and
 //! [`crate::authenticode::evaluate_validity`] unchanged.
 //!
@@ -82,7 +85,8 @@ use zip::{Archive, Member, ZipError};
 
 /// The largest package read: 4 GiB.
 pub const MAX_PACKAGE_SIZE: u64 = 4 * 1024 * 1024 * 1024;
-/// The largest manifest, block map or content types file read: 16 MiB.
+/// The largest manifest, block map, content types file or code integrity
+/// catalog read or hashed: 16 MiB.
 pub const MAX_METADATA_SIZE: u64 = 16 * 1024 * 1024;
 /// The largest signature file read: 16 MiB.
 pub const MAX_SIGNATURE_SIZE: u64 = 16 * 1024 * 1024;
@@ -246,6 +250,12 @@ fn read_metadata(archive: &Archive<'_>, m: &Member) -> Result<Vec<u8>, PackageEr
         .map_err(|_| PackageError::Member(m.name.clone()))
 }
 
+/// Whether `m` is the signature part (part names compare
+/// case-insensitively, percent-decoded).
+fn is_signature(m: &Member) -> bool {
+    zip::fold(&m.part) == zip::fold(SIGNATURE)
+}
+
 /// Parses a package or bundle.
 pub fn parse_package(data: &[u8]) -> Result<PackageIdentity, PackageError> {
     let size = u64::try_from(data.len()).unwrap_or(u64::MAX);
@@ -328,6 +338,11 @@ pub fn signed_digest(archive: &Archive<'_>, alg: DigestAlgorithm) -> Option<Vec<
     };
     let member_hash = |name: &str| -> Option<Vec<u8>> {
         let m = archive.member(name)?;
+        // These members are not in the block map, so nothing else bounds
+        // how much they inflate to.
+        if m.size > MAX_METADATA_SIZE {
+            return None;
+        }
         let mut hasher = MultiHasher::new(AlgorithmSet::from(h));
         archive.stream(m, |c| hasher.update(c)).ok()?;
         hasher.finalize().get(h).map(|d| d.as_bytes().to_vec())
@@ -335,7 +350,7 @@ pub fn signed_digest(archive: &Archive<'_>, alg: DigestAlgorithm) -> Option<Vec<
     let signed: Vec<&Member> = archive
         .members
         .iter()
-        .filter(|m| m.name != SIGNATURE)
+        .filter(|m| !is_signature(m))
         .collect();
     // AXPC: the local records, in archive order.
     let axpc = one(&mut |hasher| {
@@ -462,7 +477,7 @@ fn verify_signature(archive: &Archive<'_>, id: &PackageIdentity) -> Option<Packa
         return fail(empty(), PackageSignatureIssue::BadContainer);
     };
     // The signature is the last record and the last directory entry.
-    if archive.members.last().map(|m| m.name.as_str()) != Some(SIGNATURE) {
+    if !archive.members.last().is_some_and(is_signature) {
         return fail(empty(), PackageSignatureIssue::NotLast);
     }
     let blockmap = archive
@@ -478,13 +493,17 @@ fn verify_signature(archive: &Archive<'_>, id: &PackageIdentity) -> Option<Packa
         })
         .and_then(|b| blockmap::parse(&b));
     // The package digest uses the block map's hash method; a signature
-    // under another digest does not match.
-    let map_alg = blockmap.as_ref().ok().map(|m| m.hash);
-    let expected = move |alg: DigestAlgorithm| -> Option<Vec<u8>> {
-        if Some(alg) != map_alg {
-            return None;
-        }
-        signed_digest(archive, alg)
+    // under another digest does not match. It is computed once, however
+    // many signatures the file carries.
+    let digest = blockmap
+        .as_ref()
+        .ok()
+        .and_then(|m| signed_digest(archive, m.hash).map(|d| (m.hash, d)));
+    let expected = |alg: DigestAlgorithm| -> Option<Vec<u8>> {
+        digest
+            .as_ref()
+            .filter(|(a, _)| *a == alg)
+            .map(|(_, d)| d.clone())
     };
     let report = verify_detached(
         der,
@@ -499,15 +518,14 @@ fn verify_signature(archive: &Archive<'_>, id: &PackageIdentity) -> Option<Packa
         Ok(m) => m,
         Err(e) => return fail(report, PackageSignatureIssue::BlockMap(e)),
     };
-    if let Err(e) = blockmap::verify(&map, archive) {
-        return fail(report, PackageSignatureIssue::BlockMap(e));
-    }
-    // The signer is the publisher.
-    if let Some(primary) = report.primary_signature() {
-        let cert = primary
+    // The signer of every valid signature, nested ones included, is the
+    // publisher: trust and validity evaluation may pick any of them, so
+    // one from another publisher would let it vouch for this identity.
+    for sig in report.signatures.iter().filter(|s| s.status.is_valid()) {
+        let cert = sig
             .signer
             .as_ref()
-            .and_then(|s| primary.certs_in_blob.get(s.signer_cert))
+            .and_then(|s| sig.certs_in_blob.get(s.signer_cert))
             .and_then(|der| CertSummary::from_der(der).ok());
         let Some(cert) = cert else {
             return fail(report, PackageSignatureIssue::SignerUnreadable);
@@ -521,6 +539,13 @@ fn verify_signature(archive: &Archive<'_>, id: &PackageIdentity) -> Option<Packa
                     publisher: id.publisher_dn.clone(),
                 },
             );
+        }
+    }
+    // The block map, last: it inflates every file, so it runs only for a
+    // signature that is otherwise sound.
+    if report.primary.is_some() {
+        if let Err(e) = blockmap::verify(&map, archive) {
+            return fail(report, PackageSignatureIssue::BlockMap(e));
         }
     }
     Some(PackageSignature {

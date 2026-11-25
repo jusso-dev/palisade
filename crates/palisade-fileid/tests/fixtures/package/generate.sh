@@ -18,6 +18,8 @@
 #   bundle.msixbundle       the unsigned bundle.
 #   bundle-signed.msixbundle  signed.
 #   other-publisher.msix    the package signed by another publisher.
+#   app-sha384.msix         the package signed with a SHA-384 signer
+#                           digest (for nesting, in the tests).
 #   app-desc(-unsigned).msix   the package with data descriptors, as
 #                           packaging tools write it, and signed.
 #   app-zip64(-unsigned).msix  the package with data descriptors and ZIP64
@@ -85,6 +87,13 @@ sign() {
 sign signer app.msix app-signed.msix
 sign signer bundle.msixbundle bundle-signed.msixbundle
 sign other app.msix other-publisher.msix
+# The same package signed again, with a SHA-384 signer digest. The tests
+# nest each signature inside app-signed.msix's (osslsigncode does not nest
+# on packages): other-publisher.msix gives a nested signer from another
+# publisher, app-sha384.msix one from the same publisher.
+rm -f "$out/app-sha384.msix"
+osslsigncode sign -h sha384 -certs signer.chain -key signer.key -time 1700000000 \
+  -in app.msix -out "$out/app-sha384.msix" >/dev/null
 sign signer app-desc-unsigned.msix app-desc.msix
 sign signer app-zip64-unsigned.msix app-zip64.msix
 

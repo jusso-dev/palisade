@@ -8,6 +8,7 @@
 # verify action, no revocation check, no UI) reports its result code.
 # Output, tab-separated:
 #   PFN <tab> publisher <tab> family name
+#   FULL <tab> x64|bundle <tab> full name (of the first publisher)
 #   SIG <tab> file name <tab> result code (hex)
 #
 # Exit codes: 0 done, 3 a needed OS component is not available.
@@ -34,6 +35,19 @@ public static class PalisadePackageId {
     }
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     public static extern int PackageFamilyNameFromId(ref PACKAGE_ID id, ref uint len, StringBuilder name);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    public static extern int PackageFullNameFromId(ref PACKAGE_ID id, ref uint len, StringBuilder name);
+    // Full name of a package: version 1.2.3.4, the given architecture
+    // (PROCESSOR_ARCHITECTURE_*, 11 = neutral) and resource ID.
+    public static string Full(string name, string publisher, uint arch, string resourceId) {
+        var id = new PACKAGE_ID { name = name, publisher = publisher, processorArchitecture = arch,
+            resourceId = resourceId, version = (1UL << 48) | (2UL << 32) | (3UL << 16) | 4UL };
+        uint len = 256;
+        var sb = new StringBuilder((int)len);
+        int rc = PackageFullNameFromId(ref id, ref len, sb);
+        if (rc != 0) { throw new Exception("PackageFullNameFromId failed: " + rc); }
+        return sb.ToString();
+    }
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     public struct WINTRUST_FILE_INFO {
         public uint cbStruct;
@@ -104,6 +118,10 @@ foreach ($p in Get-Content -LiteralPath $Publishers -Encoding UTF8) {
     if ($p.Length -eq 0) { continue }
     $lines.Add("PFN`t{0}`t{1}" -f $p, [PalisadePackageId]::Family('Palisade.Probe', $p))
 }
+# Full names: x64 (9) with no resource ID, and neutral with the bundle's `~`.
+$first = (Get-Content -LiteralPath $Publishers -Encoding UTF8 | Where-Object { $_ })[0]
+$lines.Add("FULL`tx64`t{0}" -f [PalisadePackageId]::Full('Palisade.Probe', $first, 9, $null))
+$lines.Add("FULL`tbundle`t{0}" -f [PalisadePackageId]::Full('Palisade.Probe', $first, 11, '~'))
 foreach ($file in Get-ChildItem -LiteralPath $Dir -File) {
     if ($file.Extension -notin '.msix', '.msixbundle') { continue }
     $rc = [PalisadePackageId]::Verify($file.FullName)

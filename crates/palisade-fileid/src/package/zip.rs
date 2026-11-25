@@ -24,9 +24,12 @@
 //!   exactly the fields its `0xffffffff` markers call for (the package
 //!   digest writes entries that way, so anything else would be read
 //!   differently from how it is signed);
-//! - names are unique (compared ASCII-case-insensitively, as OPC part
-//!   names are), valid UTF-8 or CP437 ASCII, not empty, without `\`, a
-//!   leading `/`, empty, `.` or `..` segments, or NUL;
+//! - names, and their percent-decoded OPC part names, are valid UTF-8, not
+//!   empty, without `\`, a leading `/`, empty, `.` or `..` segments, or
+//!   NUL; and part names are unique compared ASCII-case-insensitively, as
+//!   OPC compares them, so two spellings of one part are a duplicate;
+//! - local headers have no extra data except a ZIP64 field, and a data
+//!   descriptor uses 8-byte sizes exactly when its entry has a ZIP64 field;
 //! - method 0 (stored, sizes equal) or 8 (deflate); no encryption, no
 //!   patch data, no strong encryption flags;
 //! - every member's data inflates to exactly its declared size and CRC.
@@ -116,6 +119,13 @@ type Result<T> = std::result::Result<T, ZipError>;
 pub struct Member {
     /// The name, as stored.
     pub name: String,
+    /// The OPC part name: [`Self::name`] percent-decoded. Names are checked
+    /// and compared in this form, so two spellings of one part are one
+    /// name.
+    pub part: String,
+    /// Whether the central entry carries a ZIP64 extra field, which makes
+    /// its data descriptor use 8-byte sizes.
+    pub has_zip64_extra: bool,
     /// 0 stored, 8 deflate.
     pub method: u16,
     /// The CRC-32.
@@ -203,6 +213,33 @@ fn zip64_extra(extra: &[u8], want: [bool; 3]) -> Option<[Option<u64>; 3]> {
     // Nothing after the values we need (a disk number would be at the
     // end, and is not allowed here).
     (pos == body.len()).then_some(out)
+}
+
+/// Percent-decodes an OPC part name. `None` for a bad escape or a result
+/// that is not UTF-8.
+pub fn decode_part_name(name: &str) -> Option<String> {
+    let b = name.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while let Some(&c) = b.get(i) {
+        if c == b'%' {
+            let hex = b.get(i + 1..i + 3)?;
+            let s = std::str::from_utf8(hex).ok()?;
+            out.push(u8::from_str_radix(s, 16).ok()?);
+            i += 3;
+        } else {
+            out.push(c);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+/// The folded form names are compared in: ASCII case-insensitive, as OPC
+/// part names are.
+#[must_use]
+pub fn fold(name: &str) -> String {
+    name.to_ascii_lowercase()
 }
 
 fn check_name(name: &str) -> Result<()> {
@@ -317,7 +354,7 @@ impl<'a> Archive<'a> {
         for _ in 0..count {
             let m = Self::central_entry(data, at)?;
             at = m.central_raw.0 + m.central_raw.1;
-            folded.push(m.name.to_ascii_lowercase());
+            folded.push(fold(&m.part));
             members.push(m);
         }
         if at as u64 != cd_end {
@@ -336,7 +373,7 @@ impl<'a> Archive<'a> {
             if m.local_offset != next {
                 return Err(ZipError::LocalHeader(m.name.clone()));
             }
-            Self::local_entry(data, m, zip64)?;
+            Self::local_entry(data, m)?;
             next = m.end_offset;
         }
         if next != cd_off {
@@ -385,7 +422,11 @@ impl<'a> Archive<'a> {
                 String::from_utf8_lossy(name_bytes).into_owned(),
             ));
         };
+        // The raw name and its decoded part name must both be clean, so an
+        // escaped `/`, `\`, `..` or NUL cannot hide.
         check_name(&name)?;
+        let part = decode_part_name(&name).ok_or_else(|| ZipError::BadName(name.clone()))?;
+        check_name(&part)?;
         if disk != 0 {
             return Err(ZipError::MultiDisk);
         }
@@ -412,6 +453,8 @@ impl<'a> Archive<'a> {
         }
         Ok(Member {
             name,
+            part,
+            has_zip64_extra: !extra.is_empty(),
             method,
             crc32: crc,
             compressed_size,
@@ -423,7 +466,7 @@ impl<'a> Archive<'a> {
         })
     }
 
-    fn local_entry(data: &[u8], m: &mut Member, zip64: bool) -> Result<()> {
+    fn local_entry(data: &[u8], m: &mut Member) -> Result<()> {
         let bad = || ZipError::LocalHeader(m.name.clone());
         let at = to_usize(m.local_offset).ok_or_else(bad)?;
         if u32_at(data, at) != Some(LOCAL_SIG) {
@@ -441,6 +484,12 @@ impl<'a> Archive<'a> {
             .get(at + 30 + name_len..at + 30 + name_len + extra_len)
             .ok_or_else(bad)?;
         if name != m.name.as_bytes() || method != m.method {
+            return Err(bad());
+        }
+        // Local extra data is not used, and would make the local header size
+        // the block map records ambiguous: none is allowed beyond a ZIP64
+        // field when the local sizes need one.
+        if !extra.is_empty() && (u16_at(extra, 0) != Some(1) || flags & FLAG_DESCRIPTOR != 0) {
             return Err(bad());
         }
         // Flags must agree except for bits that only describe the central
@@ -468,7 +517,8 @@ impl<'a> Archive<'a> {
             }
             let p = d + 4;
             let d_crc = u32_at(data, p).ok_or_else(bad)?;
-            let (dc, du, n) = if zip64 {
+            // 8-byte sizes when the entry has a ZIP64 extra field.
+            let (dc, du, n) = if m.has_zip64_extra {
                 (
                     u64_at(data, p + 4).ok_or_else(bad)?,
                     u64_at(data, p + 12).ok_or_else(bad)?,
@@ -500,10 +550,13 @@ impl<'a> Archive<'a> {
         Ok(())
     }
 
-    /// The member called `name` (exact match).
+    /// The member whose part name is `name`, compared as part names are
+    /// (percent-decoded, ASCII case-insensitive). Part names are unique
+    /// under that comparison, so there is at most one.
     #[must_use]
     pub fn member(&self, name: &str) -> Option<&Member> {
-        self.members.iter().find(|m| m.name == name)
+        let want = fold(name);
+        self.members.iter().find(|m| fold(&m.part) == want)
     }
 
     /// The raw bytes of `[from, to)` in the file.
