@@ -206,14 +206,16 @@ ssh-keygen -t ed25519 -N '' -C 'palisade-release' -f palisade-release
 ```
 
 To check a download, here `Palisade-0.2.0-x64.msi`: the signature first, and only then that
-exact file's line in the checksums.
+exact file's line in the checksums, compared as a literal name (`grep .` fails if the file is
+not listed).
 
 ```sh
 file=Palisade-0.2.0-x64.msi
 echo "palisade-release $(cat release-checksum.pub)" > allowed_signers
 ssh-keygen -Y verify -f allowed_signers -I palisade-release -n palisade-release \
   -s SHA256SUMS.sig < SHA256SUMS \
-  && grep -E "^[0-9a-f]{64}  ${file}\$" SHA256SUMS | sha256sum --check --strict - \
+  && FILE="$file" awk 'substr($0, 65, 2) == "  " && substr($0, 67) == ENVIRON["FILE"]' SHA256SUMS \
+     | grep . | sha256sum --check --strict - \
   && echo "$file is verified"
 ```
 

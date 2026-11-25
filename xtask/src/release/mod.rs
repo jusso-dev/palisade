@@ -250,8 +250,33 @@ pub fn prepare(root: &Path, version: &str, date: &str) -> Result<String, String>
         .map_err(|e| format!("cannot run cargo update: {e}"))?;
     if !status.success() {
         return Err(
-            "cargo update --workspace failed; Cargo.lock still has the old version".to_owned(),
+            "cargo update --workspace failed; Cargo.lock still has the old version (rerun after fixing it)".to_owned(),
         );
+    }
+    // Each fuzz workspace has its own lock file, which records the
+    // workspace crates' version too; re-lock it as check-fuzz-locks asks.
+    for project in crate::fuzz::PROJECTS {
+        let manifest = root.join(project.dir).join("Cargo.toml");
+        let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+        let status = Command::new(cargo)
+            .args([
+                "metadata",
+                "--format-version",
+                "1",
+                "--offline",
+                "--manifest-path",
+            ])
+            .arg(&manifest)
+            .stdout(std::process::Stdio::null())
+            .current_dir(root)
+            .status()
+            .map_err(|e| format!("cannot run cargo metadata: {e}"))?;
+        if !status.success() {
+            return Err(format!(
+                "cannot re-lock {} (rerun after fixing it)",
+                manifest.display()
+            ));
+        }
     }
     Ok(section)
 }
