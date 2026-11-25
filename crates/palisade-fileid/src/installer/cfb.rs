@@ -20,8 +20,8 @@
 //!   and no data is read twice;
 //! - a directory entry reached twice, a child of the wrong type, two
 //!   siblings with the same name (names compare case-insensitively, as the
-//!   format requires), or a name with a character the format forbids
-//!   (`/`, `\`, `:`, `!`);
+//!   format requires), or a name that is empty or has a character the
+//!   format forbids (`/`, `\`, `:`, `!`);
 //! - a header that is not version 3 with 512-byte sectors or version 4 with
 //!   4096-byte sectors, a mini sector size other than 64, or a mini stream
 //!   cutoff other than 4096.
@@ -538,7 +538,8 @@ impl<'a> Parser<'a> {
             return Ok(RawEntry::unused());
         }
         if !matches!(kind, TYPE_STORAGE | TYPE_STREAM | TYPE_ROOT)
-            || !(2..=64).contains(&name_len)
+            // At least one character: MS-CFB does not allow an empty name.
+            || !(4..=64).contains(&name_len)
             || name_len % 2 != 0
         {
             return Err(CfbError::BadDirectoryEntry(id));

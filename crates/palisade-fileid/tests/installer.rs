@@ -1019,3 +1019,122 @@ fn version_4_files_and_extended_difat() {
     set_u32(&mut bad, 512 * (difat + 1) + 508, difat as u32);
     assert!(parse_installer(&bad).is_err());
 }
+
+// ---------------------------------------------------------------------------
+// Round 2 review.
+
+#[test]
+fn empty_names_are_refused() {
+    let mut b = product();
+    b.extra.push(Node::Storage {
+        name: Vec::new(),
+        clsid: [1; 16],
+        times: [0; 16],
+        children: vec![Node::stream("x", vec![1])],
+    });
+    assert!(matches!(
+        parse_installer(&b.build()).unwrap_err(),
+        InstallerError::Container(CfbError::BadDirectoryEntry(_))
+    ));
+}
+
+#[test]
+fn storages_with_special_names_are_hashed() {
+    // Content under a storage named like a skipped stream changes both the
+    // normalised hash and the content hash (what a signature covers).
+    let storage = |data: u8| Node::Storage {
+        name: "\u{5}DocumentSummaryInformation".encode_utf16().collect(),
+        clsid: [0; 16],
+        times: [0; 16],
+        children: vec![Node::stream("hidden", vec![data; 10])],
+    };
+    for name in [
+        "\u{5}DocumentSummaryInformation",
+        "\u{5}SummaryInformation",
+        "\u{5}DigitalSignature",
+        "\u{5}MsiDigitalSignatureEx",
+    ] {
+        let with = |data: u8| {
+            let mut b = product();
+            if name == "\u{5}SummaryInformation" {
+                b.summary = None;
+            }
+            let Node::Storage {
+                clsid,
+                times,
+                children,
+                ..
+            } = storage(data)
+            else {
+                unreachable!()
+            };
+            b.extra.push(Node::Storage {
+                name: name.encode_utf16().collect(),
+                clsid,
+                times,
+                children,
+            });
+            parse_installer(&b.build()).unwrap()
+        };
+        let (a, b) = (with(1), with(2));
+        assert_ne!(a.normalised_sha256, b.normalised_sha256, "{name:?}");
+        assert_ne!(a.content_sha256, b.content_sha256, "{name:?}");
+    }
+}
+
+#[test]
+fn oversized_signature_streams_are_never_valid() {
+    let data = fixture("product-dse.msi");
+    let cf = palisade_fileid::installer::cfb::CompoundFile::parse(&data).unwrap();
+    let get = |n: &str| cf.stream(cf.root.children.iter().find(|c| c.is_named(n)).unwrap());
+    let sig = get("\u{5}DigitalSignature");
+    let ex = get("\u{5}MsiDigitalSignatureEx");
+    assert_eq!(ex.len(), 32);
+    // An Ex stream longer than any digest.
+    let mut b = product();
+    b.extra
+        .push(Node::stream("\u{5}DigitalSignature", sig.clone()));
+    let mut long_ex = ex.clone();
+    long_ex.extend_from_slice(&[0; 40]);
+    b.extra
+        .push(Node::stream("\u{5}MsiDigitalSignatureEx", long_ex));
+    let id = parse_installer(&b.build()).unwrap();
+    assert!(id.warnings.contains(&InstallerWarning::SignatureTooLarge));
+    assert!(!id.signature_valid());
+    assert!(id.signature.is_some());
+
+    // A signature stream over the limit.
+    let mut big = product();
+    let mut huge = sig;
+    huge.resize(
+        palisade_fileid::installer::MAX_SIGNATURE_SIZE as usize + 1,
+        0,
+    );
+    big.extra.push(Node::stream("\u{5}DigitalSignature", huge));
+    let id = parse_installer(&big.build()).unwrap();
+    assert!(id.warnings.contains(&InstallerWarning::SignatureTooLarge));
+    assert!(!id.signature_valid());
+
+    // An oversized summary is hashed (streamed) rather than parsed.
+    let mut s1 = product();
+    s1.summary = None;
+    s1.extra.push(Node::stream(
+        "\u{5}SummaryInformation",
+        vec![1; palisade_fileid::installer::MAX_SUMMARY_SIZE as usize + 1],
+    ));
+    let mut s2 = s1.clone();
+    s2.extra = vec![Node::stream(
+        "\u{5}SummaryInformation",
+        vec![2; palisade_fileid::installer::MAX_SUMMARY_SIZE as usize + 1],
+    )];
+    let (a, b) = (
+        parse_installer(&s1.build()).unwrap(),
+        parse_installer(&s2.build()).unwrap(),
+    );
+    assert!(
+        a.warnings
+            .iter()
+            .any(|w| matches!(w, InstallerWarning::Summary(_)))
+    );
+    assert_ne!(a.normalised_sha256, b.normalised_sha256);
+}

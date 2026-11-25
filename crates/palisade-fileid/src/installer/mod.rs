@@ -38,10 +38,11 @@
 //! 2. Sort the storage's children by name: compare the UTF-16LE bytes of
 //!    the names up to the shorter length; when one is a prefix of the
 //!    other, the longer name sorts first.
-//! 3. For each child in that order: in the root, skip
-//!    `\u{5}DigitalSignature`, and hash the content of
-//!    `\u{5}MsiDigitalSignatureEx` only through step 5; hash a stream's
-//!    bytes; recurse into a storage.
+//! 3. For each child in that order: in the root, skip the
+//!    `\u{5}DigitalSignature` stream, and hash the content of the
+//!    `\u{5}MsiDigitalSignatureEx` stream only through step 5; hash a
+//!    stream's bytes; recurse into a storage (a storage with one of those
+//!    names included).
 //! 4. After the children, hash the storage's 16-byte CLSID.
 //! 5. When the package has `\u{5}MsiDigitalSignatureEx`, the hash includes
 //!    that stream's bytes at its sorted place, and the stream must equal
@@ -87,8 +88,10 @@
 //!    the package has none.
 //!
 //! Names compare case-insensitively when deciding what to leave out, as
-//! the format compares them; path components cannot contain `/`, which
-//! the compound file reader rejects in names.
+//! the format compares them, and only **streams** with those names are
+//! left out: a storage with one of them is hashed like any other. Path
+//! components are never empty and cannot contain `/`, which the compound
+//! file reader rejects in names, so a path has one reading.
 //!
 //! Directory-entry times, the signature streams and sector layout never
 //! enter it, so two copies of a package that differ only in when they
@@ -671,24 +674,26 @@ pub fn parse_installer(data: &[u8]) -> Result<InstallerIdentity, InstallerError>
     }
     // The summary as the normalised hash sees it: parsed, present but
     // unreadable (its raw bytes, so its content still counts), or absent.
-    let mut summary_raw: Option<Vec<u8>> = None;
-    let summary_info = match root.child(&utf16(SUMMARY_INFORMATION)) {
-        Some(e) if !e.is_storage && e.size <= MAX_SUMMARY_SIZE => {
-            let bytes = db.cf.stream(e);
-            match summary::parse(&bytes, database_decode) {
+    let mut summary_raw: Option<&Entry> = None;
+    let summary_stream = root
+        .children
+        .iter()
+        .find(|c| is_special_stream(c, SUMMARY_INFORMATION));
+    let summary_info = match summary_stream {
+        Some(e) if e.size <= MAX_SUMMARY_SIZE => {
+            match summary::parse(&db.cf.stream(e), database_decode) {
                 Ok(info) => Some(info),
                 Err(err) => {
                     warnings.push(InstallerWarning::Summary(err));
-                    summary_raw = Some(bytes);
+                    summary_raw = Some(e);
                     None
                 }
             }
         }
         Some(e) => {
-            warnings.push(InstallerWarning::Summary(SummaryError::Header(
-                "not a stream, or too large",
-            )));
-            summary_raw = Some(db.cf.stream(e));
+            // Not read into memory: hashed raw, streamed.
+            warnings.push(InstallerWarning::Summary(SummaryError::Header("too large")));
+            summary_raw = Some(e);
             None
         }
         None => {
@@ -719,7 +724,7 @@ pub fn parse_installer(data: &[u8]) -> Result<InstallerIdentity, InstallerError>
         .get(HashAlgorithm::Sha256)
         .cloned()
         .unwrap_or_else(|| content_sha256(&db.cf, &root));
-    let summary_for_hash = match (&summary_info, &summary_raw) {
+    let summary_for_hash = match (&summary_info, summary_raw) {
         (Some(info), _) => NormalisedSummary::Parsed(info),
         (None, Some(raw)) => NormalisedSummary::Raw(raw),
         (None, None) => NormalisedSummary::Absent,
@@ -747,10 +752,6 @@ pub fn parse_installer(data: &[u8]) -> Result<InstallerIdentity, InstallerError>
 
 fn sha256(data: &[u8]) -> Digest {
     crate::hash::sha256_of(data)
-}
-
-fn utf16(s: &str) -> Vec<u16> {
-    s.encode_utf16().collect()
 }
 
 /// Summary strings use the same codepage rules as the string pool.
@@ -1100,13 +1101,21 @@ fn is_named(entry: &Entry, name: &str) -> bool {
     entry.is_named(name)
 }
 
+/// Whether `entry` is the root *stream* called `name`. The signature,
+/// metadata-hash and summary names are special only for streams: a storage
+/// with one of those names is ordinary content and is hashed like any
+/// other, so nothing can hide under it.
+fn is_special_stream(entry: &Entry, name: &str) -> bool {
+    !entry.is_storage && entry.is_named(name)
+}
+
 /// The SHA-256 content hash alone.
 fn content_sha256(cf: &CompoundFile<'_>, root: &Entry) -> Digest {
     let mut h = Sha256Stream::default();
     let include_ex = root
         .children
         .iter()
-        .any(|c| !c.is_storage && is_named(c, DIGITAL_SIGNATURE_EX));
+        .any(|c| is_special_stream(c, DIGITAL_SIGNATURE_EX));
     hash_storage(cf, root, true, include_ex, &mut |c| h.update(c));
     h.finish()
 }
@@ -1119,7 +1128,7 @@ pub fn content_digests(cf: &CompoundFile<'_>, root: &Entry) -> AuthenticodeHashe
     let ex = root
         .children
         .iter()
-        .find(|c| !c.is_storage && is_named(c, DIGITAL_SIGNATURE_EX));
+        .find(|c| is_special_stream(c, DIGITAL_SIGNATURE_EX));
     hash_storage(cf, root, true, ex.is_some(), &mut |c| hasher.update(c));
     let hashed_bytes = hasher.bytes_hashed();
     let flat = hasher.finalize();
@@ -1144,11 +1153,11 @@ fn hash_storage(
     let mut children: Vec<&Entry> = storage.children.iter().collect();
     children.sort_by(|a, b| hash_order(a, b));
     for child in children {
-        if is_root && is_named(child, DIGITAL_SIGNATURE) {
+        if is_root && is_special_stream(child, DIGITAL_SIGNATURE) {
             continue;
         }
-        if is_root && is_named(child, DIGITAL_SIGNATURE_EX) {
-            if include_ex && !child.is_storage {
+        if is_root && is_special_stream(child, DIGITAL_SIGNATURE_EX) {
+            if include_ex {
                 cf.for_each_chunk(child, &mut *sink);
             }
             continue;
@@ -1195,7 +1204,9 @@ fn prehash_storage(storage: &Entry, is_root: bool, hasher: &mut MultiHasher) {
     let mut children: Vec<&Entry> = storage.children.iter().collect();
     children.sort_by(|a, b| hash_order(a, b));
     for child in children {
-        if is_root && (is_named(child, DIGITAL_SIGNATURE) || is_named(child, DIGITAL_SIGNATURE_EX))
+        if is_root
+            && (is_special_stream(child, DIGITAL_SIGNATURE)
+                || is_special_stream(child, DIGITAL_SIGNATURE_EX))
         {
             continue;
         }
@@ -1220,7 +1231,7 @@ fn read_signature(
     let ex = root
         .children
         .iter()
-        .find(|c| is_named(c, DIGITAL_SIGNATURE_EX));
+        .find(|c| is_special_stream(c, DIGITAL_SIGNATURE_EX));
     let sig = match sig {
         Some(s) if s.is_storage => {
             warnings.push(InstallerWarning::SignatureNotStream);
@@ -1263,11 +1274,7 @@ fn read_signature(
             .filter(|a| !a.is_broken())
             .and_then(|a| a.hash_algorithm())
             .and_then(|a| metadata_digest(root, a));
-        let stored = if ex.is_storage {
-            None
-        } else {
-            Some(cf.stream(ex))
-        };
+        let stored = Some(cf.stream(ex));
         let ok = matches!((&expected, &stored), (Some(e), Some(s)) if e.as_bytes() == s.as_slice());
         if !ok {
             demote(&mut report, SignatureStatus::DigestMismatch);
@@ -1297,8 +1304,8 @@ fn demote(report: &mut SignatureReport, status: SignatureStatus) {
 enum NormalisedSummary<'a> {
     /// Parsed: its canonical form without the timestamps.
     Parsed(&'a SummaryInfo),
-    /// Present but unreadable: its raw bytes.
-    Raw(&'a [u8]),
+    /// Present but unreadable or too large: its raw bytes, streamed.
+    Raw(&'a Entry),
     /// Absent.
     Absent,
 }
@@ -1317,10 +1324,10 @@ fn normalised_hash(cf: &CompoundFile<'_>, root: &Entry, summary: NormalisedSumma
             h.update(&u64::try_from(canon.len()).unwrap_or(u64::MAX).to_le_bytes());
             h.update(&canon);
         }
-        NormalisedSummary::Raw(raw) => {
+        NormalisedSummary::Raw(entry) => {
             h.update(b"R");
-            h.update(&u64::try_from(raw.len()).unwrap_or(u64::MAX).to_le_bytes());
-            h.update(raw);
+            h.update(&entry.size.to_le_bytes());
+            cf.for_each_chunk(entry, |c| h.update(c));
         }
         NormalisedSummary::Absent => h.update(b"N"),
     }
@@ -1345,7 +1352,7 @@ fn normalised_storage(
                 DOC_SUMMARY_INFORMATION,
             ]
             .iter()
-            .any(|n| is_named(child, n))
+            .any(|n| is_special_stream(child, n))
         {
             continue;
         }

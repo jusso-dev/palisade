@@ -125,7 +125,8 @@ def main(path):
 
     def walk(storage, is_root, path):
         for c in sorted(children(storage), key=lambda c: units(c["raw"])):
-            if is_root and fold(c["name"]) in {fold(n) for n in SKIP}:
+            # Only streams with these names are left out.
+            if is_root and c["kind"] == 2 and fold(c["name"]) in {fold(n) for n in SKIP}:
                 continue
             p = path + ("/".encode("utf-16-le") if path else b"") + c["raw"]
             if c["kind"] == 1:
@@ -136,7 +137,8 @@ def main(path):
                 h.update(content(c))
 
     walk(root, True, b"")
-    summary = [c for c in children(root) if fold(c["name"]) == fold("\x05SummaryInformation")]
+    summary = [c for c in children(root)
+               if c["kind"] == 2 and fold(c["name"]) == fold("\x05SummaryInformation")]
     if summary:
         # Fixtures always have a well-formed summary; a malformed one is
         # hashed raw under the tag "R" (not needed here).
