@@ -15,9 +15,11 @@
 //! - the response is signed by the issuer itself, or by a **delegated
 //!   responder**: a certificate in the response that the issuer issued
 //!   (its signature verifies with the issuer's key), whose extended key
-//!   usage lists OCSP Signing and whose key usage, if restricted, allows
-//!   digital signatures. The responder ID (by name or by key hash) must
-//!   name the key that signed.
+//!   usage lists OCSP Signing, whose key usage, if restricted, allows
+//!   digital signatures, that was valid when the response was produced,
+//!   and that no offline revocation entry names. The responder ID (by name
+//!   or by key hash) must name the key that signed. A delegated `good`
+//!   answer stops counting once the responder has expired.
 //!
 //! What it shows:
 //!
@@ -187,9 +189,20 @@ pub struct SingleResponse {
 }
 
 impl SingleResponse {
-    /// Whether this names `cert`, issued by `issuer`.
+    /// Whether this names `cert`, issued by `issuer`: `cert` names
+    /// `issuer` as its issuer (by DER name, and by key identifier when both
+    /// carry one), and the `CertID` hashes `issuer`'s name and key and
+    /// carries `cert`'s serial.
     #[must_use]
     pub fn names(&self, cert: &CertSummary, issuer: &CertSummary) -> bool {
+        if cert.issuer.der != issuer.subject.der {
+            return false;
+        }
+        if let (Some(aki), Some(ski)) = (&cert.authority_key_id, &issuer.subject_key_id) {
+            if aki != ski {
+                return false;
+            }
+        }
         if !self.serial.eq_ignore_ascii_case(&cert.serial) {
             return false;
         }
@@ -241,6 +254,37 @@ fn subject_public_key(cert: &CertSummary) -> Option<&[u8]> {
     asn1::bit_string_octets(&s.read(tag::BIT_STRING).ok()?).ok()
 }
 
+/// Who signed an OCSP response, for one issuer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Signer {
+    /// The issuer itself.
+    Issuer,
+    /// A responder the issuer delegated to, valid until this time.
+    Delegated {
+        /// The responder certificate's `notAfter`.
+        valid_until: i64,
+    },
+    /// Nobody the issuer vouches for.
+    None,
+    /// The check budget ran out first.
+    NotChecked,
+}
+
+impl Signer {
+    /// Whether an answer by this signer counts at `now`. A `revoked` or
+    /// `unknown` answer counts whenever the response was authorised; a
+    /// `good` one only while a delegated responder is still valid.
+    pub(crate) fn vouches(self, answer: &SingleResponse, now: i64) -> bool {
+        match self {
+            Self::Issuer => true,
+            Self::Delegated { valid_until } => {
+                answer.status != OcspCertStatus::Good || now <= valid_until
+            }
+            Self::None | Self::NotChecked => false,
+        }
+    }
+}
+
 /// A parsed OCSP response. Its signature is checked only when it is used
 /// against an issuer ([`Self::verified_by`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -274,9 +318,7 @@ impl OcspResponse {
         if status != 0 {
             return Err(OcspError::Unsuccessful(status));
         }
-        let explicit = o
-            .read(tag::context_cons(0))
-            .map_err(|_| OcspError::Unsuccessful(status))?;
+        let explicit = o.read(tag::context_cons(0))?;
         o.finish()?;
         let bytes = asn1::single(explicit.content, explicit.content_offset, tag::SEQUENCE)?;
         let mut b = bytes.reader();
@@ -294,31 +336,106 @@ impl OcspResponse {
         parse_basic(&basic)
     }
 
-    /// Whether `issuer`, or a responder `issuer` delegated to, signed the
-    /// response. This alone does not say the response is about a
-    /// certificate `issuer` issued: [`Self::answers_for`] checks both, and
-    /// is what revocation uses. Costs at most [`Self::max_checks`]
-    /// signature verifications.
-    #[must_use]
-    pub fn verified_by(&self, issuer: &CertSummary) -> bool {
+    /// Who signed the response, as far as `issuer` is concerned: `issuer`
+    /// itself, or a delegated responder `issuer` authorised, or nobody it
+    /// vouches for. See [`Signer`]. `budget` bounds the signature
+    /// verifications made (at most [`Self::max_checks`]); when it runs out
+    /// the answer is [`Signer::NotChecked`].
+    ///
+    /// A delegated responder must:
+    /// - be named by the responder ID;
+    /// - name `issuer` as its issuer (by DER name and key identifier) and
+    ///   carry a signature that verifies with `issuer`'s key;
+    /// - list the OCSP Signing EKU, allow `digitalSignature` if its key usage
+    ///   is restricted, and carry no unprocessed critical extension;
+    /// - have been valid when the response was produced (`producedAt`);
+    /// - not be named by `revoked`, which [`super::RevocationSet`] fills with
+    ///   its offline entries: a revoked responder vouches for nothing.
+    ///
+    /// Whether the responder is still valid now is
+    /// [`Signer::Delegated::valid_until`]'s business: a `good` answer is
+    /// used only while it is.
+    pub(crate) fn signer_for(
+        &self,
+        issuer: &CertSummary,
+        revoked: &dyn Fn(&CertSummary) -> bool,
+        budget: &mut usize,
+    ) -> Signer {
+        let mut spend = || {
+            if *budget == 0 {
+                false
+            } else {
+                *budget -= 1;
+                true
+            }
+        };
+        let mut ran_out = false;
         // The issuer signed it.
-        if self.names_responder(issuer) && self.signature_valid(issuer) {
-            return true;
+        if self.names_responder(issuer) {
+            if !spend() {
+                return Signer::NotChecked;
+            }
+            if self.signature_valid(issuer) {
+                return Signer::Issuer;
+            }
         }
         // A delegated responder, issued by the issuer.
-        self.certificates.iter().any(|r| {
-            self.names_responder(r)
+        for r in &self.certificates {
+            let eligible = self.names_responder(r)
                 && r.issuer.der == issuer.subject.der
+                && match (&r.authority_key_id, &issuer.subject_key_id) {
+                    (Some(aki), Some(ski)) => aki == ski,
+                    _ => true,
+                }
                 && r.has_eku(&eku::OCSP_SIGNING.id())
                 && r.key_usage
                     .is_none_or(|ku| ku.contains(KeyUsage::DIGITAL_SIGNATURE))
                 && r.unhandled_critical_extensions.is_empty()
-                && issued_by(r, issuer)
-                && self.signature_valid(r)
-        })
+                && r.not_before <= self.produced_at
+                && self.produced_at <= r.not_after
+                && !revoked(r);
+            if !eligible {
+                continue;
+            }
+            if !spend() {
+                ran_out = true;
+                break;
+            }
+            if !issued_by(r, issuer) {
+                continue;
+            }
+            if !spend() {
+                ran_out = true;
+                break;
+            }
+            if self.signature_valid(r) {
+                return Signer::Delegated {
+                    valid_until: r.not_after,
+                };
+            }
+        }
+        if ran_out {
+            Signer::NotChecked
+        } else {
+            Signer::None
+        }
     }
 
-    /// The most signature verifications [`Self::verified_by`] makes: one
+    /// Whether `issuer`, or a responder `issuer` delegated to, signed the
+    /// response (see [`Self::answers_for`] for the rules). This alone does
+    /// not say the response is about a certificate `issuer` issued, and it
+    /// checks no revocation of the responder; [`Self::answers_for`] and
+    /// revocation do both.
+    #[must_use]
+    pub fn verified_by(&self, issuer: &CertSummary) -> bool {
+        let mut budget = self.max_checks();
+        !matches!(
+            self.signer_for(issuer, &|_| false, &mut budget),
+            Signer::None | Signer::NotChecked
+        )
+    }
+
+    /// The most signature verifications checking a response can make: one
     /// for the issuer, and two (the responder's certificate, then the
     /// response) for each certificate the response carries.
     #[must_use]
@@ -355,21 +472,35 @@ impl OcspResponse {
             == Verified::Valid
     }
 
-    /// The answers this response gives about `cert`, issued by `issuer`:
-    /// the `SingleResponse`s whose `CertID` names `cert` under `issuer`,
-    /// and only if `issuer` (or a responder it delegated to) signed the
-    /// response. Empty otherwise.
+    /// The answers this response gives about `cert`, issued by `issuer`,
+    /// at time `now`: the `SingleResponse`s whose `CertID` names `cert`
+    /// under `issuer`, and only if `issuer` signed the response, or a
+    /// delegated responder did. Such a responder must be named by the
+    /// responder ID; name `issuer` as its issuer (by DER name and key
+    /// identifier) with a signature that verifies with `issuer`'s key; list
+    /// the OCSP Signing EKU, allow `digitalSignature` if its key usage is
+    /// restricted, and carry no unprocessed critical extension; and have
+    /// been valid when the response was produced. A `good` answer from a
+    /// delegated responder that has expired by `now` is left out: it can no
+    /// longer vouch. Empty otherwise. ([`super::RevocationSet`] also rejects
+    /// a responder its offline entries revoke.)
     #[must_use]
     pub fn answers_for<'a>(
         &'a self,
         cert: &'a CertSummary,
         issuer: &'a CertSummary,
+        now: i64,
     ) -> Vec<&'a SingleResponse> {
         let answers: Vec<&SingleResponse> = self.responses_for(cert, issuer).collect();
-        if answers.is_empty() || !self.verified_by(issuer) {
+        if answers.is_empty() {
             return Vec::new();
         }
+        let mut budget = self.max_checks();
+        let signer = self.signer_for(issuer, &|_| false, &mut budget);
         answers
+            .into_iter()
+            .filter(|a| signer.vouches(a, now))
+            .collect()
     }
 
     /// The `SingleResponse`s for `cert`, issued by `issuer`, in order,

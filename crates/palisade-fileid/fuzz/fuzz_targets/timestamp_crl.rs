@@ -115,10 +115,12 @@ fuzz_target!(|data: &[u8]| {
             };
             assert!(response.responses.len() <= MAX_OCSP_RESPONSES_PER_RESPONSE);
             let (leaf, root) = (&f.ocsp_chain[0], &f.ocsp_chain[1]);
-            let answers = response.answers_for(leaf, root);
-            if !answers.is_empty() {
-                assert!(response.verified_by(root));
-                assert!(answers.iter().all(|a| a.names(leaf, root)));
+            for now in [0, 1_700_000_000, i64::MAX] {
+                let answers = response.answers_for(leaf, root, now);
+                if !answers.is_empty() {
+                    assert!(response.verified_by(root));
+                    assert!(answers.iter().all(|a| a.names(leaf, root)));
+                }
             }
             let mut set = RevocationSet::new();
             set.add_ocsp(response);

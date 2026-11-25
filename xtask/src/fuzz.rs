@@ -88,6 +88,10 @@ const TIMESTAMP_SEEDS: Seed = Seed {
     test: "validity",
     name: "write_timestamp_fuzz_seeds",
 };
+const OCSP_SEEDS: Seed = Seed {
+    test: "ocsp",
+    name: "write_ocsp_fuzz_seeds",
+};
 const CTL_SEEDS: Seed = Seed {
     test: "catalog",
     name: "write_ctl_fuzz_seeds",
@@ -140,7 +144,7 @@ pub const PROJECTS: &[Project] = &[
             Target {
                 name: "timestamp_crl",
                 dict: Some("pkcs7.dict"),
-                seeds: &[TIMESTAMP_SEEDS],
+                seeds: &[TIMESTAMP_SEEDS, OCSP_SEEDS],
             },
             Target {
                 name: "fuzz_ctl",

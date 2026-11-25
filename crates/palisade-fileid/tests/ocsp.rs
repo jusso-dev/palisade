@@ -116,13 +116,22 @@ fn only_an_authorised_responder_counts() {
     // The root's own and its delegate's answers are about the leaf.
     let delegated = response("good-delegated");
     assert!(delegated.verified_by(&root));
-    assert_eq!(delegated.answers_for(&leaf, &root).len(), 1);
-    assert!(rogue.answers_for(&leaf, &root).is_empty());
+    assert_eq!(
+        delegated
+            .answers_for(&leaf, &root, now_of(&delegated))
+            .len(),
+        1
+    );
+    assert!(rogue.answers_for(&leaf, &root, now_of(&rogue)).is_empty());
     // The responder signed its own response, but it issued nothing the
     // response is about, so it answers nothing as an issuer.
     let responder = cert("responder");
     assert!(delegated.verified_by(&responder));
-    assert!(delegated.answers_for(&leaf, &responder).is_empty());
+    assert!(
+        delegated
+            .answers_for(&leaf, &responder, now_of(&delegated))
+            .is_empty()
+    );
     // Another root's key verifies nothing.
     let tsa_root = CertSummary::from_der(
         &std::fs::read(concat!(
@@ -281,8 +290,11 @@ fn malformed_responses_are_rejected() {
         OcspResponse::from_der(&[0x30, 0x03, 0x0a, 0x01, 0x01]).unwrap_err(),
         OcspError::Unsuccessful(1)
     );
-    // Successful but with no response bytes.
-    assert!(OcspResponse::from_der(&[0x30, 0x03, 0x0a, 0x01, 0x00]).is_err());
+    // Successful but with no response bytes: a DER error, not "unsuccessful".
+    assert!(matches!(
+        OcspResponse::from_der(&[0x30, 0x03, 0x0a, 0x01, 0x00]).unwrap_err(),
+        OcspError::Asn1(_)
+    ));
     // A tampered signature never verifies.
     let mut tampered = good.clone();
     let last = tampered.len() - 300;
@@ -391,4 +403,391 @@ fn an_unreachable_responder_fails_open_or_closed_as_policy_says() {
         set.add_ocsp(response("good-delegated"));
         assert!(run(&set).is_ok());
     }
+}
+
+#[test]
+fn an_expired_or_revoked_responder_vouches_for_nothing() {
+    let (leaf, root) = (cert("leaf"), cert("root"));
+    // Valid only in 2021, but the response was produced in this run's time.
+    let old = response("good-old-responder");
+    assert!(old.produced_at > cert("old-responder").not_after);
+    assert!(!old.verified_by(&root));
+    assert!(old.answers_for(&leaf, &root, now_of(&old)).is_empty());
+    let mut set = RevocationSet::new();
+    set.mode = RevocationMode::OnlineRequired;
+    set.add_ocsp(old.clone());
+    assert_eq!(
+        set.state_of(&[&leaf, &root], 0, now_of(&old)),
+        CertRevocation::Unknown
+    );
+    // A responder an offline entry revokes vouches for nothing either.
+    let good = response("good-delegated");
+    let responder = cert("responder");
+    let mut set = RevocationSet::new();
+    set.mode = RevocationMode::OnlineRequired;
+    set.add_ocsp(good.clone());
+    assert_eq!(
+        set.state_of(&[&leaf, &root], 0, now_of(&good)),
+        CertRevocation::Good
+    );
+    set.add_certificate(palisade_fileid::authenticode::RevokedCertificate {
+        cert: palisade_fileid::authenticode::CertificateMatch::Sha256Thumbprint(
+            responder.sha256_thumbprint.to_ascii_uppercase(),
+        ),
+        revoked_at: None,
+        reason: RevocationReason::KeyCompromise,
+        source: RevocationSource::Policy,
+    });
+    assert_eq!(
+        set.state_of(&[&leaf, &root], 0, now_of(&good)),
+        CertRevocation::Unknown
+    );
+    // A delegated `good` answer stops vouching once the responder expires.
+    let after = responder.not_after + 1;
+    assert!(good.answers_for(&leaf, &root, after).is_empty());
+    assert_eq!(good.answers_for(&leaf, &root, now_of(&good)).len(), 1);
+    // The root's own answers have no such limit.
+    let by_root = response("good-by-root");
+    assert_eq!(by_root.answers_for(&leaf, &root, after).len(), 1);
+}
+
+#[test]
+fn a_response_never_names_another_issuers_certificate() {
+    // A certificate with the leaf's serial under another issuer: the
+    // response's CertID hashes the OCSP root, not that issuer.
+    let leaf = cert("leaf");
+    let root = cert("root");
+    let foreign_issuer = CertSummary::from_der(
+        &std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/timestamp/root.der"
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let r = response("good-by-root");
+    assert!(r.responses[0].names(&leaf, &root));
+    // The right issuer certificate, but the checked certificate names
+    // another issuer.
+    let mut stranger = leaf.clone();
+    stranger.issuer = foreign_issuer.subject.clone();
+    assert!(!r.responses[0].names(&stranger, &root));
+    assert!(r.answers_for(&stranger, &root, now_of(&r)).is_empty());
+    // A key identifier that disagrees.
+    let mut rekeyed = leaf.clone();
+    rekeyed.authority_key_id = Some("00".repeat(20));
+    assert!(!r.responses[0].names(&rekeyed, &root));
+    // And the foreign issuer itself is not the response's.
+    assert!(!r.responses[0].names(&leaf, &foreign_issuer));
+}
+
+#[test]
+fn a_current_revoked_answer_is_coverage() {
+    // Under OnlineRequired, a current `revoked` answer is an answer: the
+    // certificate is covered even when policy excuses the entry (revoked
+    // after a trusted signing time, for a reason that is not a compromise).
+    let r = response("revoked-delegated");
+    let now = now_of(&r);
+    let mut set = RevocationSet::new();
+    set.mode = RevocationMode::OnlineRequired;
+    set.add_ocsp(r);
+    let (other, root) = (cert("other"), cert("root"));
+    match set.state_of(&[&other, &root], 0, now) {
+        CertRevocation::Revoked { coverage, .. } => assert_eq!(coverage, Coverage::Good),
+        s => panic!("{s:?}"),
+    }
+}
+
+// --- Synthetic responses, for each parser rule. ----------------------------
+
+fn tlv(tag: u8, content: &[u8]) -> Vec<u8> {
+    let mut out = vec![tag];
+    let len = content.len();
+    if len < 0x80 {
+        out.push(u8::try_from(len).unwrap());
+    } else {
+        let bytes: Vec<u8> = len
+            .to_be_bytes()
+            .into_iter()
+            .skip_while(|b| *b == 0)
+            .collect();
+        out.push(0x80 | u8::try_from(bytes.len()).unwrap());
+        out.extend(bytes);
+    }
+    out.extend_from_slice(content);
+    out
+}
+
+const SHA1_OID: &[u8] = &[0x2b, 0x0e, 0x03, 0x02, 0x1a];
+const SHA256_RSA: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b];
+const NONCE: &[u8] = &[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x01, 0x02];
+
+fn gtime() -> Vec<u8> {
+    tlv(0x18, b"20240101000000Z")
+}
+
+fn ext(id: &[u8], critical: bool) -> Vec<u8> {
+    let mut body = tlv(0x06, id);
+    if critical {
+        body.extend(tlv(0x01, &[0xff]));
+    }
+    body.extend(tlv(0x04, &tlv(0x04, &[1, 2, 3])));
+    tlv(0x30, &body)
+}
+
+/// A SingleResponse with these parts.
+struct Single {
+    hash_oid: Vec<u8>,
+    hash_len: usize,
+    status: Vec<u8>,
+    extensions: Option<Vec<Vec<u8>>>,
+}
+
+impl Default for Single {
+    fn default() -> Self {
+        Self {
+            hash_oid: SHA1_OID.to_vec(),
+            hash_len: 20,
+            status: tlv(0x80, &[]),
+            extensions: None,
+        }
+    }
+}
+
+impl Single {
+    fn der(&self) -> Vec<u8> {
+        let alg = tlv(
+            0x30,
+            &[tlv(0x06, &self.hash_oid), vec![0x05, 0x00]].concat(),
+        );
+        let cert_id = tlv(
+            0x30,
+            &[
+                alg,
+                tlv(0x04, &vec![0xaa; self.hash_len]),
+                tlv(0x04, &vec![0xbb; self.hash_len]),
+                tlv(0x02, &[0x10, 0x01]),
+            ]
+            .concat(),
+        );
+        let mut body = [cert_id, self.status.clone(), gtime()].concat();
+        body.extend(tlv(0xa0, &gtime()));
+        if let Some(exts) = &self.extensions {
+            body.extend(tlv(0xa1, &tlv(0x30, &exts.concat())));
+        }
+        tlv(0x30, &body)
+    }
+}
+
+/// A whole OCSPResponse (never validly signed) with these parts.
+fn synthetic(
+    version: Option<u8>,
+    singles: &[Vec<u8>],
+    exts: Option<&[Vec<u8>]>,
+    certs: usize,
+) -> Vec<u8> {
+    let name = tlv(
+        0x30,
+        &tlv(
+            0x31,
+            &tlv(
+                0x30,
+                &[tlv(0x06, &[0x55, 0x04, 0x03]), tlv(0x0c, b"x")].concat(),
+            ),
+        ),
+    );
+    let mut tbs = Vec::new();
+    if let Some(v) = version {
+        tbs.extend(tlv(0xa0, &tlv(0x02, &[v])));
+    }
+    tbs.extend(tlv(0xa1, &name));
+    tbs.extend(gtime());
+    tbs.extend(tlv(0x30, &singles.concat()));
+    if let Some(exts) = exts {
+        tbs.extend(tlv(0xa1, &tlv(0x30, &exts.concat())));
+    }
+    let alg = tlv(0x30, &[tlv(0x06, SHA256_RSA), vec![0x05, 0x00]].concat());
+    let mut basic = [tlv(0x30, &tbs), alg, tlv(0x03, &[0x00, 0x01])].concat();
+    if certs > 0 {
+        let c = bytes("root.der");
+        let all: Vec<u8> = std::iter::repeat_n(c, certs).flatten().collect();
+        basic.extend(tlv(0xa0, &tlv(0x30, &all)));
+    }
+    let basic = tlv(0x30, &basic);
+    let response_bytes = tlv(
+        0x30,
+        &[
+            tlv(
+                0x06,
+                &[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x01, 0x01],
+            ),
+            tlv(0x04, &basic),
+        ]
+        .concat(),
+    );
+    tlv(
+        0x30,
+        &[tlv(0x0a, &[0x00]), tlv(0xa0, &response_bytes)].concat(),
+    )
+}
+
+fn parse(der: &[u8]) -> Result<OcspResponse, OcspError> {
+    OcspResponse::from_der(der)
+}
+
+#[test]
+fn every_parser_rule_has_a_test() {
+    let one = [Single::default().der()];
+    // The baseline parses.
+    let r = parse(&synthetic(None, &one, None, 0)).unwrap();
+    assert_eq!(r.responses.len(), 1);
+    assert_eq!(r.responses[0].serial, "1001");
+    // A non-critical nonce is ignored...
+    assert!(parse(&synthetic(None, &one, Some(&[ext(NONCE, false)]), 0)).is_ok());
+    // ...a critical one is rejected, as is any other critical extension.
+    assert!(matches!(
+        parse(&synthetic(None, &one, Some(&[ext(NONCE, true)]), 0)).unwrap_err(),
+        OcspError::UnhandledCriticalExtension(_)
+    ));
+    assert!(matches!(
+        parse(&synthetic(None, &one, Some(&[ext(&[0x2a, 0x03], true)]), 0)).unwrap_err(),
+        OcspError::UnhandledCriticalExtension(_)
+    ));
+    // Duplicate and empty extension lists.
+    assert!(matches!(
+        parse(&synthetic(
+            None,
+            &one,
+            Some(&[ext(NONCE, false), ext(NONCE, false)]),
+            0
+        ))
+        .unwrap_err(),
+        OcspError::DuplicateExtension(_)
+    ));
+    assert!(matches!(
+        parse(&synthetic(None, &one, Some(&[]), 0)).unwrap_err(),
+        OcspError::Asn1(_)
+    ));
+    // Single-response extensions follow the same rules.
+    let critical_single = Single {
+        extensions: Some(vec![ext(&[0x2a, 0x03], true)]),
+        ..Single::default()
+    };
+    assert!(matches!(
+        parse(&synthetic(None, &[critical_single.der()], None, 0)).unwrap_err(),
+        OcspError::UnhandledCriticalExtension(_)
+    ));
+    // An encoded v1 is not DER; any other version is unknown.
+    assert!(matches!(
+        parse(&synthetic(Some(0), &one, None, 0)).unwrap_err(),
+        OcspError::Asn1(_)
+    ));
+    assert_eq!(
+        parse(&synthetic(Some(1), &one, None, 0)).unwrap_err(),
+        OcspError::UnsupportedVersion(2)
+    );
+    // An undefined revocation reason.
+    let reason = |r: u8| Single {
+        status: tlv(0xa1, &[gtime(), tlv(0xa0, &tlv(0x0a, &[r]))].concat()),
+        ..Single::default()
+    };
+    let r = parse(&synthetic(None, &[reason(1).der()], None, 0)).unwrap();
+    assert_eq!(
+        r.responses[0].status,
+        OcspCertStatus::Revoked {
+            at: 1_704_067_200,
+            reason: RevocationReason::KeyCompromise
+        }
+    );
+    assert_eq!(
+        parse(&synthetic(None, &[reason(7).der()], None, 0)).unwrap_err(),
+        OcspError::BadReason(7)
+    );
+    // CertID hash algorithm and length.
+    let md5 = Single {
+        hash_oid: vec![0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x02, 0x05],
+        hash_len: 16,
+        ..Single::default()
+    };
+    assert!(matches!(
+        parse(&synthetic(None, &[md5.der()], None, 0)).unwrap_err(),
+        OcspError::UnsupportedCertIdHash(_)
+    ));
+    let short = Single {
+        hash_len: 19,
+        ..Single::default()
+    };
+    assert_eq!(
+        parse(&synthetic(None, &[short.der()], None, 0)).unwrap_err(),
+        OcspError::CertIdHashLength
+    );
+    // A status that is not one of the three choices.
+    let bad_status = Single {
+        status: tlv(0x83, &[]),
+        ..Single::default()
+    };
+    assert!(parse(&synthetic(None, &[bad_status.der()], None, 0)).is_err());
+    // The response and certificate caps.
+    use palisade_fileid::authenticode::{MAX_OCSP_CERTIFICATES, MAX_OCSP_RESPONSES_PER_RESPONSE};
+    let many: Vec<Vec<u8>> = (0..=MAX_OCSP_RESPONSES_PER_RESPONSE)
+        .map(|_| Single::default().der())
+        .collect();
+    assert_eq!(
+        parse(&synthetic(None, &many, None, 0)).unwrap_err(),
+        OcspError::TooMany
+    );
+    assert!(parse(&synthetic(None, &many[1..], None, 0)).is_ok());
+    assert_eq!(
+        parse(&synthetic(None, &one, None, MAX_OCSP_CERTIFICATES + 1)).unwrap_err(),
+        OcspError::TooMany
+    );
+    assert!(parse(&synthetic(None, &one, None, MAX_OCSP_CERTIFICATES)).is_ok());
+    // Every error has a message.
+    assert!(!OcspError::TooMany.to_string().is_empty());
+}
+
+#[test]
+fn the_set_holds_a_bounded_number_of_responses() {
+    use palisade_fileid::authenticode::MAX_OCSP_RESPONSES;
+    let r = response("good-by-root");
+    let mut set = RevocationSet::new();
+    for i in 0..MAX_OCSP_RESPONSES {
+        assert_eq!(set.add_ocsp(r.clone()), Some(i));
+    }
+    assert_eq!(set.add_ocsp(r), None);
+    assert_eq!(set.ocsp_responses().len(), MAX_OCSP_RESPONSES);
+}
+
+#[test]
+fn a_response_without_next_update_never_vouches() {
+    let r = response("good-by-root");
+    let mut single = r.responses[0].clone();
+    assert!(single.is_current(single.this_update));
+    single.next_update = None;
+    assert!(!single.is_current(single.this_update));
+}
+
+#[test]
+fn ocsp_checks_share_the_crl_budget_and_fail_closed() {
+    use palisade_fileid::authenticode::MAX_CRL_CHECKS;
+    // More signer-relevant responses than the budget can check: each one
+    // names the leaf and is signed by a delegate (two checks), so past the
+    // budget the leaf's state is NotChecked, which fails closed.
+    let r = response("good-delegated");
+    let now = now_of(&r);
+    let mut set = RevocationSet::new();
+    for _ in 0..=MAX_CRL_CHECKS {
+        set.add_ocsp(r.clone());
+    }
+    let (leaf, root) = (cert("leaf"), cert("root"));
+    assert_eq!(
+        set.state_of(&[&leaf, &root], 0, now),
+        CertRevocation::NotChecked
+    );
+    // Within the budget the same answers cover it.
+    let mut set = RevocationSet::new();
+    for _ in 0..MAX_CRL_CHECKS / 2 {
+        set.add_ocsp(r.clone());
+    }
+    assert_eq!(set.state_of(&[&leaf, &root], 0, now), CertRevocation::Good);
 }

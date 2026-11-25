@@ -11,6 +11,7 @@
 #   other.der        code signing, serial 1002 (revoked in the index)
 #   responder.der    a delegated responder: OCSP Signing EKU, issued by root
 #   rogue.der        a would-be responder without the OCSP Signing EKU
+#   old-responder.der a delegated responder valid only during 2021
 #   leaf.p7          a SHA-256 Authenticode signature by leaf (with root)
 #                    over the synthetic image `PeBuilder::default()`
 #
@@ -19,6 +20,8 @@
 #   good-by-key.der         leaf good, signed by root, responder ID by key
 #   good-delegated.der      leaf good, signed by responder
 #   good-rogue.der          leaf good, signed by rogue (no OCSP Signing EKU)
+#   good-old-responder.der  leaf good, signed by old-responder, produced
+#                           long after it expired
 #   revoked-delegated.der   other revoked (keyCompromise), signed by responder
 #   unknown-by-root.der     a serial the index does not know, signed by root
 #   good-expired.der        leaf good, nextUpdate in the past (-ndays 0 is
@@ -68,19 +71,21 @@ openssl req -x509 -new -key root.key -subj "/O=Palisade Tests/CN=Palisade OCSP T
   -not_before 20180101000000Z -not_after 20450101000000Z \
   -addext basicConstraints=critical,CA:TRUE -addext keyUsage=critical,keyCertSign,cRLSign \
   -addext subjectKeyIdentifier=hash -out root.pem 2>/dev/null
-# issue NAME SUBJECT EXTFILE SERIAL
+# issue NAME SUBJECT EXTFILE SERIAL [FROM TO]
 issue() {
   rsa "$1"
   openssl req -new -key "$1.key" -subj "$2" -out "$1.csr" 2>/dev/null
   openssl x509 -req -in "$1.csr" -CA root.pem -CAkey root.key -set_serial "0x$4" \
-    -not_before 20200101000000Z -not_after 20400101000000Z -sha256 -extfile "$3" \
-    -out "$1.pem" 2>/dev/null
+    -not_before "${5:-20200101000000Z}" -not_after "${6:-20400101000000Z}" -sha256 \
+    -extfile "$3" -out "$1.pem" 2>/dev/null
 }
 issue leaf "/O=Palisade Tests/CN=Palisade OCSP Leaf" leaf.cnf 1001
 issue other "/O=Palisade Tests/CN=Palisade OCSP Revoked Leaf" leaf.cnf 1002
 issue responder "/O=Palisade Tests/CN=Palisade OCSP Responder" responder.cnf 2001
 issue rogue "/O=Palisade Tests/CN=Palisade Rogue Responder" rogue.cnf 2002
-for c in root leaf other responder rogue; do openssl x509 -in "$c.pem" -outform DER -out "$out/$c.der"; done
+issue old-responder "/O=Palisade Tests/CN=Palisade Old Responder" responder.cnf 2003 \
+  20210101000000Z 20220101000000Z
+for c in root leaf other responder rogue old-responder; do openssl x509 -in "$c.pem" -outform DER -out "$out/$c.der"; done
 
 # The CA database: 1001 valid, 1002 revoked for keyCompromise.
 {
@@ -105,6 +110,7 @@ respond good-by-root-sha256.der leaf256.req root
 respond good-by-key.der leaf.req root -resp_key_id
 respond good-delegated.der leaf.req responder
 respond good-rogue.der leaf.req rogue
+respond good-old-responder.der leaf.req old-responder
 respond revoked-delegated.der other.req responder
 respond unknown-by-root.der unknown.req root
 openssl ocsp -index index.txt -CA root.pem -rsigner root.pem -rkey root.key \
@@ -113,5 +119,6 @@ openssl ocsp -index index.txt -CA root.pem -rsigner root.pem -rkey root.key \
 cat leaf.pem root.pem > leaf.chain
 osslsigncode sign -certs leaf.chain -key leaf.key -h sha256 -time 1609459200 \
   -in base.exe -out leaf.exe >/dev/null
+rm -f "$out/leaf.p7"
 osslsigncode extract-signature -in leaf.exe -out "$out/leaf.p7" >/dev/null
 echo "OCSP fixtures written to $out"
