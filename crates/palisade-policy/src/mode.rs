@@ -7,7 +7,7 @@
 //! applies it. Everything here is a pure function of the policy and a
 //! [`DeviceState`] that the agent supplies; nothing reads a clock. The
 //! state machine that changes a device's mode over time is in
-//! [`machine`].
+//! [`machine`], and which decisions each mode reports is in [`events`].
 //!
 //! # The modes
 //!
@@ -15,7 +15,7 @@
 //! |---|---|
 //! | `disabled` | The engine is not consulted: there is no decision ([`Evaluator::evaluate_in`](crate::evaluate::Evaluator::evaluate_in) returns `None`). Mandatory denies do not apply, and the device is reported `disabled`. Only a whole device can be disabled. |
 //! | `monitor` | Evaluated fully. What enforce mode would block runs (`allowed_audit`), and `would_have_been` is `blocked`. |
-//! | `audit` | As `monitor`. The two differ only in which events the agent sends (#16). |
+//! | `audit` | As `monitor`. The two differ only in which decisions are reported ([`events`]). |
 //! | `learning` | As `audit`. An object that only the implicit deny would block is also a learning candidate ([`Decision::learning_candidate`](crate::decision::Decision::learning_candidate)). |
 //! | `enforce` | Decisions take effect. |
 //!
@@ -66,6 +66,7 @@
 //! Lockdown never changes [`DeviceState::mode`], so clearing it restores
 //! every prior mode.
 
+pub mod events;
 pub mod machine;
 
 use crate::model::{

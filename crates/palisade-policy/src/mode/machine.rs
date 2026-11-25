@@ -52,6 +52,19 @@
 //! budget across a restart in protected storage, as ADR 0012 does for
 //! override sessions, is the agent's part (#69, #220).
 //!
+//! # Readiness gate
+//!
+//! A requested move to `enforce` can be gated on readiness (#41): the
+//! caller runs [`readiness`](crate::trace::readiness::readiness) over the
+//! recent events, and when its gate says a `readiness_ack` is required
+//! ([`ReadinessGate::ack_required`](crate::trace::readiness::ReadinessGate::ack_required)),
+//! sets [`Governance::readiness_ack_required`].
+//! The request must then carry [`Request::readiness_ack`], or it is rejected
+//! ([`TransitionError::ReadinessAckRequired`]). The gate never applies to a
+//! change that only returns a device to `enforce` from a time box that left
+//! it, nor to the revert when a box ends: restoring enforcement is never
+//! held back.
+//!
 //! Every change, requested or by expiry, gives a [`ModeChanged`] record
 //! for the `mode_changed` event (#16).
 
@@ -110,6 +123,10 @@ pub struct Governance {
     /// The actor holds the elevated permission that allows a permanent
     /// move from `enforce` to `audit` (#131).
     pub may_weaken_permanently: bool,
+    /// A requested move to `enforce` needs [`Request::readiness_ack`]: the
+    /// readiness check found more would-block events than the tenant's
+    /// threshold (#41). See the module documentation.
+    pub readiness_ack_required: bool,
 }
 
 /// A requested mode change.
@@ -127,6 +144,9 @@ pub struct Request {
     pub expires_at: Option<i64>,
     /// The new mode does not end.
     pub permanent: bool,
+    /// The actor has seen the readiness check and accepts its would-block
+    /// events (`readiness_ack`).
+    pub readiness_ack: bool,
 }
 
 impl Request {
@@ -141,6 +161,7 @@ impl Request {
             ticket: None,
             expires_at: None,
             permanent: false,
+            readiness_ack: false,
         }
     }
 }
@@ -176,6 +197,9 @@ pub enum TransitionError {
     /// time box: one that does not need one, or one made while a time box
     /// is already running. Time boxes on other changes are #69.
     TimeBoxNotAllowed,
+    /// The move to `enforce` needs a `readiness_ack`: the readiness check
+    /// found more would-block events than the threshold.
+    ReadinessAckRequired,
 }
 
 impl core::fmt::Display for TransitionError {
@@ -191,6 +215,9 @@ impl core::fmt::Display for TransitionError {
             Self::ExpiryTooFar => f.write_str("the expiry is more than 30 days ahead"),
             Self::PermanentNotAllowed => f.write_str("this change cannot be permanent"),
             Self::TimeBoxNotAllowed => f.write_str("this change cannot set an expiry"),
+            Self::ReadinessAckRequired => {
+                f.write_str("the move to enforce needs a readiness acknowledgement")
+            }
         }
     }
 }
@@ -252,6 +279,9 @@ pub struct ModeChanged {
     /// The device left `learning`, so the learning-ended summary is due
     /// (#5, #69).
     pub learning_ended: bool,
+    /// The change was a gated move to `enforce`, acknowledged with
+    /// `readiness_ack`.
+    pub readiness_acked: bool,
 }
 
 /// A device's base mode and its time box.
@@ -317,6 +347,7 @@ impl ModeMachine {
             ticket: None,
             expires_at: None,
             learning_ended: old == Mode::Learning && b.prior != Mode::Learning,
+            readiness_acked: false,
         })
     }
 
@@ -359,6 +390,13 @@ impl ModeMachine {
         }
         if !is_legal(from, r.to) {
             return Err(TransitionError::Illegal { from, to: r.to });
+        }
+        // Returning to `enforce` from a box that left it restores
+        // enforcement, and is never held back by the gate.
+        let restores = self.time_box.is_some_and(|b| b.prior == Mode::Enforce);
+        let gated = r.to == Mode::Enforce && governance.readiness_ack_required && !restores;
+        if gated && !r.readiness_ack {
+            return Err(TransitionError::ReadinessAckRequired);
         }
         // A change that needs a time box starts one, unless one is already
         // running: then the device keeps its rollback target and end.
@@ -428,6 +466,7 @@ impl ModeMachine {
             ticket: r.ticket.clone(),
             expires_at: self.time_box.map(|b| b.expires_at),
             learning_ended: from == Mode::Learning,
+            readiness_acked: gated,
         })
     }
 }
