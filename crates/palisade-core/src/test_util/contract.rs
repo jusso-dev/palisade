@@ -48,7 +48,8 @@ pub fn clock<C: Clock + ?Sized>(clock: &C) -> Outcome {
 /// - reading in small chunks returns `contents`, then 0 at the end;
 /// - a read at an offset past the end returns 0;
 /// - the alternate data streams, if listed, have non-empty names without a
-///   `:`.
+///   `:`. An implementation that cannot list them yet may answer
+///   [`ErrorKind::Unsupported`].
 ///
 /// # Errors
 ///
@@ -93,13 +94,38 @@ pub fn file_system<F: FileSystem + ?Sized>(
         .read_at(len.saturating_add(100), &mut buf)
         .map_err(|e| format!("read past the end: {e}"))?;
     ensure(past == 0, || format!("read past the end returned {past}"))?;
-    let streams = fs.streams(path).map_err(|e| format!("streams: {e}"))?;
+    let streams = match fs.streams(path) {
+        Ok(streams) => streams,
+        Err(e) if e.kind() == ErrorKind::Unsupported => Vec::new(),
+        Err(e) => return Err(format!("streams: {e}")),
+    };
     for s in &streams {
         ensure(!s.name.is_empty() && !s.name.contains(':'), || {
             format!("bad stream name {:?}", s.name)
         })?;
     }
     Ok(())
+}
+
+/// A directory, for a file system where `path` is one: it opens, its
+/// metadata says it is a directory with size 0, and reading it fails with
+/// [`ErrorKind::InvalidInput`].
+///
+/// # Errors
+///
+/// The first rule `fs` breaks.
+pub fn directory<F: FileSystem + ?Sized>(fs: &F, path: &str) -> Outcome {
+    let mut dir = fs.open(path).map_err(|e| format!("open {path}: {e}"))?;
+    let metadata = dir.metadata().map_err(|e| format!("metadata: {e}"))?;
+    ensure(metadata.is_dir && metadata.size == 0, || {
+        format!("{path}: metadata {metadata:?} does not describe a directory")
+    })?;
+    match dir.read_at(0, &mut [0u8; 8]) {
+        Err(e) => ensure(e.kind() == ErrorKind::InvalidInput, || {
+            format!("reading a directory gave {e}, not InvalidInput")
+        }),
+        Ok(n) => Err(format!("reading a directory returned {n} bytes")),
+    }
 }
 
 /// Environment queries, for an environment where `var` is set to `value`
@@ -192,7 +218,10 @@ pub fn processes<P: ProcessInfo + ?Sized>(processes: &P, process: ProcessKey) ->
 /// - a value and a key that do not exist read as `None` and `false`, not
 ///   as errors;
 /// - the subkeys are listed, and listing a missing key fails with
-///   [`ErrorKind::NotFound`].
+///   [`ErrorKind::NotFound`];
+/// - a key path or value name with a NUL character fails with
+///   [`ErrorKind::InvalidInput`], so it can never be read as a shorter,
+///   different name.
 ///
 /// # Errors
 ///
@@ -250,7 +279,45 @@ pub fn registry<R: Registry + ?Sized>(
     match registry.subkeys(hive, &missing) {
         Err(e) => ensure(e.kind() == ErrorKind::NotFound, || {
             format!("listing {missing} gave {e}, not NotFound")
-        }),
-        Ok(_) => Err(format!("listing {missing} succeeded")),
+        })?,
+        Ok(_) => return Err(format!("listing {missing} succeeded")),
     }
+    let nul_key = format!("{key}\0suffix");
+    let nul_name = format!("{name}\0suffix");
+    let checks: [(&str, Result<(), ErrorKind>); 4] = [
+        (
+            "key_exists with a NUL",
+            registry
+                .key_exists(hive, &nul_key)
+                .map(drop)
+                .map_err(|e| e.kind()),
+        ),
+        (
+            "value with a NUL in the key",
+            registry
+                .value(hive, &nul_key, name)
+                .map(drop)
+                .map_err(|e| e.kind()),
+        ),
+        (
+            "value with a NUL in the name",
+            registry
+                .value(hive, key, &nul_name)
+                .map(drop)
+                .map_err(|e| e.kind()),
+        ),
+        (
+            "subkeys with a NUL",
+            registry
+                .subkeys(hive, &nul_key)
+                .map(drop)
+                .map_err(|e| e.kind()),
+        ),
+    ];
+    for (what, result) in checks {
+        ensure(result == Err(ErrorKind::InvalidInput), || {
+            format!("{what} gave {result:?}, not InvalidInput")
+        })?;
+    }
+    Ok(())
 }

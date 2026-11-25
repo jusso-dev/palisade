@@ -74,6 +74,13 @@ impl Clock for SystemClock {
 /// `owner_sid` and `security_descriptor` return [`ErrorKind::Unsupported`],
 /// `streams` does too on Windows, and the metadata leaves those fields
 /// `None`.
+///
+/// This is not yet the hardened reader the privileged agent needs: like
+/// any `std::fs` open, it follows reparse points (symbolic links and
+/// junctions) and accepts UNC and device paths (threat T-agent-13). The
+/// file inventory replaces it with handle-based reads through
+/// `palisade_fileid::win` (#54, #60). Until then it serves development,
+/// tests and the simulator only.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct StdFileSystem;
 
@@ -148,10 +155,16 @@ fn open_shared(path: &Path) -> std::io::Result<File> {
     // Lets a directory be opened, so `metadata` works on directories as it
     // does on other OSes.
     const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    // If the path names a named pipe (`\\.\pipe\...`, or a link to one),
+    // the pipe's server must not be able to impersonate the agent, which
+    // runs as LocalSystem: connect at the anonymous impersonation level.
+    const SECURITY_SQOS_PRESENT: u32 = 0x0010_0000;
+    const SECURITY_ANONYMOUS: u32 = 0;
     fs::OpenOptions::new()
         .read(true)
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS)
         .open(path)
 }
 

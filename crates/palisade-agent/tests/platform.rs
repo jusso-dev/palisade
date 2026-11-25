@@ -73,6 +73,7 @@ fn std_file_system_reports_times_and_rejects_relative_paths_and_directories() {
         ErrorKind::InvalidInput
     );
 
+    contract::directory(&StdFileSystem, dir.0.to_str().unwrap()).unwrap();
     let mut d = StdFileSystem.open(dir.0.to_str().unwrap()).unwrap();
     assert!(d.metadata().unwrap().is_dir);
     assert_eq!(

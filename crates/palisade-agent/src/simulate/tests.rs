@@ -238,3 +238,42 @@ fn oversized_and_missing_scenario_files_are_rejected() {
     assert!(Scenario::load(&ok).is_ok());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn reusing_an_id_with_no_delay_still_gives_a_new_process() {
+    let source = format!(
+        "{DEFAULT}\n[[step]]\nafter_ms = 0\nexited = [8100]\npid = 8100\nparent = 744\n\
+         image = 'C:\\\\other.exe'\nuser = 'S-1-5-18'\noutcome = 'allowed'\n"
+    );
+    let scenario = Scenario::from_toml(&source).unwrap();
+    let mut sink = RecordingSink::new();
+    run(&scenario, &mut sink).unwrap();
+    let keys: Vec<_> = sink
+        .events()
+        .iter()
+        .filter_map(|e| e.process.as_ref())
+        .filter(|p| p.pid == Some(8100))
+        .map(|p| p.process_key.clone().unwrap())
+        .collect();
+    assert_eq!(keys.len(), 2);
+    assert_ne!(keys[0], keys[1]);
+}
+
+#[test]
+fn an_unsigned_step_does_not_inherit_an_earlier_signature() {
+    let source = format!(
+        "{DEFAULT}\n[[step]]\nexited = [6344]\npid = 6345\nparent = 744\n\
+         image = 'C:\\\\Program Files\\\\Example\\\\tool.exe'\nuser = 'S-1-5-18'\noutcome = 'allowed'\n"
+    );
+    let scenario = Scenario::from_toml(&source).unwrap();
+    let mut sink = RecordingSink::new();
+    run(&scenario, &mut sink).unwrap();
+    let last = sink
+        .events()
+        .iter()
+        .rev()
+        .find_map(|e| e.process.as_ref())
+        .unwrap();
+    assert_eq!(last.pid, Some(6345));
+    assert!(last.signers.is_empty());
+}

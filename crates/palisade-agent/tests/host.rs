@@ -184,3 +184,36 @@ fn console_mode_stops_on(signal: &str) {
     assert!(log.contains("to=running"), "{log}");
     assert!(log.contains("to=stopped"), "{log}");
 }
+
+#[cfg(not(feature = "test-util"))]
+#[test]
+fn simulate_needs_the_test_util_feature() {
+    let out = agent().arg("--simulate").output().unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(out.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--features test-util"));
+}
+
+#[cfg(feature = "test-util")]
+#[test]
+fn simulate_prints_one_event_per_line() {
+    let out = agent().arg("--simulate").output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8(out.stdout).unwrap();
+    let events: Vec<palisade_proto::events::Event> = text
+        .lines()
+        .map(|l| palisade_proto::events::Event::from_json(l).unwrap())
+        .collect();
+    assert_eq!(events.len(), 7);
+    assert!(events.iter().all(|e| e.validate().is_ok()));
+
+    let bad = agent()
+        .args(["--simulate", "--scenario", "does-not-exist.toml"])
+        .output()
+        .unwrap();
+    assert_eq!(bad.status.code(), Some(2));
+}

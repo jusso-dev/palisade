@@ -86,8 +86,8 @@ applies to all of these. Every `unsafe` block also needs a `// SAFETY:` comment
 - **Documented.** Every feature, including optional dependencies that act as features, is listed in
   the `## Feature flags` section of the crate README. Enforced by `cargo xtask check-manifests`.
 - **Each feature builds on its own.** CI runs `cargo hack check --each-feature --all-targets` on the
-  portable crates, `core`, `fileid`, `policy`, `proto`, `server`, `cli` and `console` (the
-  `feature-powerset` job).
+  portable crates, `core`, `fileid`, `policy`, `proto`, `server`, `cli` and `console`, and on
+  `agent`, which builds on every OS (the `feature-powerset` job).
 - **No ordinary build turns `test-util` on.** It may hold fixtures and mocks. It is never in
   `default`, no other feature of the crate turns it on (so `default` cannot reach it indirectly),
   and only `[dev-dependencies]` may enable it on another crate. No `[workspace.dependencies]`

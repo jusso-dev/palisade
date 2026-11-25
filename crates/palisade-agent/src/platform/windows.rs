@@ -40,8 +40,22 @@ fn root(hive: Hive) -> &'static Key {
     }
 }
 
+/// Rejects a name with a NUL character: the OS would read it only up to
+/// the NUL, so it would name a different, shorter key or value.
+fn no_nul(text: &str) -> Result<()> {
+    if text.contains('\0') {
+        Err(PlatformError::new(
+            ErrorKind::InvalidInput,
+            "a registry name contains a NUL character",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 /// Opens `path` for reading. `Ok(None)` if it does not exist.
 fn open(hive: Hive, path: &str) -> Result<Option<Key>> {
+    no_nul(path)?;
     match root(hive).open(path) {
         Ok(key) => Ok(Some(key)),
         Err(e) if kind(e.code().0) == ErrorKind::NotFound => Ok(None),
@@ -50,6 +64,11 @@ fn open(hive: Hive, path: &str) -> Result<Option<Key>> {
 }
 
 /// Registry reads through the OS.
+///
+/// A value is read in full, whatever its size: the safe wrapper has no
+/// size-capped read, and capping one needs FFI. Registry conditions (#33,
+/// #59), which read user-writable hives, add the cap when they wire this
+/// in.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WindowsRegistry;
 
@@ -59,6 +78,7 @@ impl Registry for WindowsRegistry {
     }
 
     fn value(&self, hive: Hive, path: &str, name: &str) -> Result<Option<RegistryValue>> {
+        no_nul(name)?;
         let Some(key) = open(hive, path)? else {
             return Ok(None);
         };

@@ -30,7 +30,7 @@ type.
 | `docs` | ubuntu-latest | `cargo doc --workspace --no-deps --all-features --locked` with `RUSTDOCFLAGS=-D warnings` |
 | `deps` | ubuntu-latest | `cargo xtask check-deps`, `cargo xtask check-manifests`, `cargo xtask check-unsafe`, `cargo deny --locked check` for the root workspace and for each fuzz workspace (with the root `deny.toml`), `cargo xtask audit` (cargo-audit over the root and every fuzz lockfile, with the ignores from `deny.toml`) |
 | `supply-chain` | ubuntu-latest | `cargo vet --locked`, `cargo xtask check-supply-chain`, and on PRs `cargo xtask deps-report --base <base>` to the job summary ([dependencies.md](dependencies.md)) |
-| `feature-powerset` | ubuntu-latest | `cargo hack check --each-feature --all-targets --locked` on the portable crates (`core`, `fileid`, `policy`, `proto`, `server`, `cli`, `console`) |
+| `feature-powerset` | ubuntu-latest | `cargo hack check --each-feature --all-targets --locked` on the portable crates (`core`, `fileid`, `policy`, `proto`, `server`, `cli`, `console`) and `agent`, so the agent is also built without `test-util`, as a release build is |
 | `runner-guard` | ubuntu-latest | `cargo xtask check-workflows` ([Runner and action policy](#runner-and-action-policy)), `cargo xtask adr lint` (ADR format and index, [docs/adr/PROCESS.md](adr/PROCESS.md#index-and-tooling)), and the tests of the snapshot script (`bash .github/scripts/main-snapshot.test.sh`) |
 | `doc-checks` | ubuntu-latest | `cargo xtask threat-coverage`: the threat model's tables are complete and consistent, and every test, fuzz target and CI check it cites exists ([threat model](security/threat-model.md#keeping-it-current)) |
 | `workflow-lint` | ubuntu-latest | `actionlint` (checksum-verified release) and `zizmor --offline` |
@@ -362,7 +362,7 @@ cargo test --workspace --all-features --locked --bench criterion_eval --bench ha
 cargo hack check --each-feature --all-targets --locked \
   -p palisade-core -p palisade-fileid -p palisade-policy \
   -p palisade-proto -p palisade-server -p palisade-cli \
-  -p palisade-console                                    # needs cargo-hack 0.6
+  -p palisade-console -p palisade-agent                   # needs cargo-hack 0.6
 actionlint -color && zizmor --offline .github/workflows
 cargo +1.94.0 check --workspace --all-targets --all-features --locked
 bash .github/scripts/check-pr-title.test.sh

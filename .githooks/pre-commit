@@ -36,7 +36,10 @@ fi
 
 # The banned-terms check lands with the documentation site (#27). Until it
 # does, `cargo xtask help` does not list it, and this step is skipped.
-if cargo xtask help 2>/dev/null | grep -q 'check-banned-terms'; then
+# The help text is captured first: `grep -q` in a pipeline could stop
+# reading early and make `cargo` fail with SIGPIPE under pipefail.
+help=$(cargo xtask help 2>/dev/null || true)
+if [[ "$help" == *check-banned-terms* ]]; then
   note "cargo xtask check-banned-terms"
   if ! cargo xtask check-banned-terms; then
     note "a banned term was found; see docs/NAMING.md"

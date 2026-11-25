@@ -199,10 +199,17 @@ fn split_stream(path: &str) -> (&str, Option<&str>) {
         Some(i) if !(name_start == 0 && i == 1) => {
             let at = name_start + i;
             let stream = path.get(at + 1..).unwrap_or_default();
-            let stream = stream
-                .strip_suffix(":$DATA")
-                .or_else(|| stream.strip_suffix(":$data"))
-                .unwrap_or(stream);
+            // The stream type is matched case-insensitively, as Windows does.
+            let stream = match stream.len().checked_sub(6) {
+                Some(cut)
+                    if stream
+                        .get(cut..)
+                        .is_some_and(|t| t.eq_ignore_ascii_case(":$DATA")) =>
+                {
+                    stream.get(..cut).unwrap_or_default()
+                }
+                _ => stream,
+            };
             (path.get(..at).unwrap_or_default(), Some(stream))
         }
         _ => (path, None),
@@ -216,15 +223,8 @@ impl FileSystem for MockFileSystem {
         let (base, stream) = split_stream(path);
         let file = self.file(base)?;
         let data = match stream {
-            None | Some("") => {
-                if file.metadata.is_dir {
-                    return Err(PlatformError::new(
-                        ErrorKind::InvalidInput,
-                        "cannot read a directory",
-                    ));
-                }
-                file.data.clone()
-            }
+            // A directory opens, for its metadata; reading it fails.
+            None | Some("") => file.data.clone(),
             Some(name) => file
                 .streams
                 .iter()
@@ -232,8 +232,13 @@ impl FileSystem for MockFileSystem {
                 .map(|(_, d)| d.clone())
                 .ok_or_else(|| PlatformError::not_found(path))?,
         };
+        let size = if file.metadata.is_dir {
+            0
+        } else {
+            u64::try_from(data.len()).unwrap_or(u64::MAX)
+        };
         let metadata = FileMetadata {
-            size: u64::try_from(data.len()).unwrap_or(u64::MAX),
+            size,
             ..file.metadata.clone()
         };
         Ok(MockOpenFile { data, metadata })
@@ -266,6 +271,12 @@ impl OpenFile for MockOpenFile {
     }
 
     fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> Result<usize> {
+        if self.metadata.is_dir {
+            return Err(PlatformError::new(
+                ErrorKind::InvalidInput,
+                "cannot read a directory",
+            ));
+        }
         let start = usize::try_from(offset).unwrap_or(usize::MAX);
         let rest = self.data.get(start..).unwrap_or_default();
         let n = rest.len().min(buf.len());
@@ -621,12 +632,27 @@ impl MockRegistry {
     }
 }
 
+/// Registry names cannot contain NUL; the OS would cut the name short.
+fn no_nul(text: &str) -> Result<()> {
+    if text.contains('\0') {
+        Err(PlatformError::new(
+            ErrorKind::InvalidInput,
+            "a registry name contains a NUL character",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 impl Registry for MockRegistry {
     fn key_exists(&self, hive: Hive, path: &str) -> Result<bool> {
+        no_nul(path)?;
         Ok(self.find(hive, path).is_some())
     }
 
     fn value(&self, hive: Hive, path: &str, name: &str) -> Result<Option<RegistryValue>> {
+        no_nul(path)?;
+        no_nul(name)?;
         Ok(self.find(hive, path).flatten().and_then(|values| {
             values
                 .iter()
@@ -636,6 +662,7 @@ impl Registry for MockRegistry {
     }
 
     fn subkeys(&self, hive: Hive, path: &str) -> Result<Vec<String>> {
+        no_nul(path)?;
         if self.find(hive, path).is_none() {
             return Err(PlatformError::not_found(path));
         }

@@ -105,6 +105,8 @@ fn mock_file_system_meets_the_contract() {
         r"C:\nope",
     )
     .unwrap();
+    contract::directory(&fs, r"C:\Tools").unwrap();
+    assert!(contract::directory(&fs, r"C:\Tools\tool.exe").is_err());
 }
 
 #[test]
@@ -185,13 +187,18 @@ fn drive_letters_are_not_streams() {
         split_stream(r"\\srv\share\f:s"),
         (r"\\srv\share\f", Some("s"))
     );
+    assert_eq!(split_stream(r"C:\a\b:s:$Data"), (r"C:\a\b", Some("s")));
+    assert_eq!(split_stream(r"C:\a\b::$data"), (r"C:\a\b", Some("")));
 }
 
 #[test]
-fn directories_cannot_be_read_and_removed_files_are_gone() {
+fn directories_open_but_cannot_be_read_and_removed_files_are_gone() {
     let mut fs = sample_fs();
+    let mut dir = fs.open(r"C:\Tools").unwrap();
+    assert!(dir.metadata().unwrap().is_dir);
+    assert_eq!(dir.metadata().unwrap().size, 0);
     assert_eq!(
-        fs.open(r"C:\Tools").unwrap_err().kind(),
+        dir.read_at(0, &mut [0u8; 4]).unwrap_err().kind(),
         ErrorKind::InvalidInput
     );
     assert!(fs.remove(r"c:\tools\tool.exe").is_some());

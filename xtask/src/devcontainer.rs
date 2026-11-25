@@ -85,6 +85,46 @@ mod tests {
         assert_eq!(image(&compose), image(&ci));
     }
 
+    /// compose.yaml mounts a named volume over the build directory; the
+    /// image must create it owned by the non-root user, or a fresh volume
+    /// is owned by root and every build fails.
+    #[test]
+    fn volume_mount_points_belong_to_the_container_user() {
+        let dockerfile = read(".devcontainer/Dockerfile");
+        let compose = read(".devcontainer/compose.yaml");
+        let user = dockerfile
+            .lines()
+            .find_map(|l| l.strip_prefix("USER "))
+            .unwrap()
+            .trim();
+        for line in compose.lines() {
+            let Some(mount) = line.trim().strip_prefix("- ") else {
+                continue;
+            };
+            let Some((source, target)) = mount.split_once(':') else {
+                continue;
+            };
+            // Named volumes only; bind mounts start with `.` or `/`.
+            if source.starts_with(['.', '/']) {
+                continue;
+            }
+            let target = target.split(':').next().unwrap();
+            assert!(
+                dockerfile.contains(&format!("mkdir -p {target}")),
+                "the Dockerfile does not create {target}"
+            );
+            let workspace = target.rsplit_once('/').unwrap().0;
+            let chown = dockerfile
+                .lines()
+                .find(|l| l.contains(&format!("chown -R {user}")))
+                .unwrap();
+            assert!(
+                chown.contains(target) || chown.contains(workspace),
+                "{target} is not chowned to {user}"
+            );
+        }
+    }
+
     #[test]
     fn the_container_does_not_enable_the_git_hooks() {
         // The hooks are opt-in (#29): nothing may set core.hooksPath for the

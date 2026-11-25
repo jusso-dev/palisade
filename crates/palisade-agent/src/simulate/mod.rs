@@ -263,7 +263,12 @@ fn user(token: &TokenInfo, account: Option<&AccountName>) -> Result<User, Simula
             SessionKind::Services => events::LogonType::Service,
             SessionKind::Console | SessionKind::Unknown => events::LogonType::Interactive,
         }),
-        is_admin: Some(token.groups.iter().any(|g| g.sid == ADMINISTRATORS)),
+        is_admin: Some(
+            token
+                .groups
+                .iter()
+                .any(|g| g.sid.eq_ignore_ascii_case(ADMINISTRATORS)),
+        ),
         elevated: Some(token.elevated),
     })
 }
@@ -571,7 +576,11 @@ pub fn run(scenario: &Scenario, sink: &mut dyn EventSink<Event>) -> Result<u64, 
     )?;
     producer.emit(started, sink)?;
     for step in &scenario.steps {
-        platform.clock.advance(step.after_ms.saturating_mul(1000));
+        // At least one microsecond passes, so no two processes share a
+        // creation time, and a reused process ID always gets a new key.
+        platform
+            .clock
+            .advance(step.after_ms.saturating_mul(1000).max(1));
         for pid in &step.exited {
             platform.processes.exit(*pid);
         }
@@ -589,6 +598,9 @@ pub fn run(scenario: &Scenario, sink: &mut dyn EventSink<Event>) -> Result<u64, 
         platform
             .identity
             .set_token(key, token_for(scenario, &step.user)?);
+        // Each step states the image's signature, so a later unsigned step
+        // with the same image path does not inherit an earlier signature.
+        platform.signatures.set_embedded(&step.image, Vec::new());
         if let Some(publisher) = &step.signer {
             platform.signatures.set_embedded(
                 &step.image,

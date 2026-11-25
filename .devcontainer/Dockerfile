@@ -58,7 +58,11 @@ RUN if [ "$WITH_XWIN" = "1" ]; then \
         && rm -rf "$CARGO_HOME/registry" "$CARGO_HOME/git"; \
     fi
 
-# A non-root user, matching the host user's UID in most setups.
+# A non-root user, matching the host user's UID in most setups. The build
+# output directory is created here, owned by that user, because compose.yaml
+# mounts a named volume over it, and a new named volume copies the owner of
+# the directory it is mounted on (root, if the directory did not exist).
 RUN useradd --create-home --uid 1000 --shell /bin/bash dev \
-    && chown -R dev "$CARGO_HOME" "$RUSTUP_HOME"
+    && mkdir -p /workspaces/palisade/target \
+    && chown -R dev "$CARGO_HOME" "$RUSTUP_HOME" /workspaces/palisade
 USER dev
