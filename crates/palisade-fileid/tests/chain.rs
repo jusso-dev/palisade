@@ -2231,7 +2231,10 @@ fn ignoring_basic_constraints_lets_a_pinned_non_ca_issue() {
     assert!(r.full_chain.anchored, "{:?}", r.issues);
     assert_eq!(r.full_chain.certs, [0, 1, 2]);
     assert_eq!(r.basic_constraints_ignored, [1]);
-    assert!(!r.issues.contains(&ChainIssue::IssuerNotCa { issuer: 1 }));
+    // The as-provided chain shows the file's own chain, without policy: the
+    // non-CA does not issue there.
+    assert_eq!(r.as_provided.certs, [0]);
+    assert!(r.issues.contains(&ChainIssue::IssuerNotCa { issuer: 1 }));
     // By TBS hash, the same.
     let mut cfg = config(&["root"]);
     cfg.ignore_basic_constraints(CertificatePin::TbsHash(
@@ -2289,8 +2292,8 @@ fn ignoring_basic_constraints_keeps_every_other_check() {
     let r = build_chain(&[forged, der("inter-not-ca"), der("root")], 0, &cfg).unwrap();
     assert!(!r.full_chain.anchored);
     assert!(r.basic_constraints_ignored.is_empty());
-    // Untrusted searches record a relaxed link only when the chain takes
-    // it, and the relaxation never anchors a chain on its own.
+    // With no anchor the relaxation still shapes the full chain (which
+    // reports it), but never anchors it.
     let mut cfg = TrustConfig::new();
     cfg.ignore_basic_constraints(CertificatePin::Sha256Thumbprint(
         cert("inter-not-ca").sha256_thumbprint,
@@ -2360,4 +2363,35 @@ fn chains_report_time_nesting_violations() {
     // nested.
     let r = build_chain(&chain_of(&["leaf", "inter", "root"]), 0, &config(&["root"])).unwrap();
     assert!(r.time_nesting_violations.is_empty());
+}
+
+#[test]
+fn relaxations_are_reported_only_where_the_chosen_chain_needs_them() {
+    // A v1 anchor is a CA in a trusted search without any relaxation, so
+    // pinning it reports nothing, even though the file embeds it and the
+    // as-provided search (which does not treat it as a CA) sees it too.
+    let mut cfg = config(&["root-v1"]);
+    cfg.ignore_basic_constraints(CertificatePin::Sha256Thumbprint(
+        cert("root-v1").sha256_thumbprint,
+    ));
+    let r = build_chain(&chain_of(&["leaf-v1", "root-v1"]), 0, &cfg).unwrap();
+    assert!(r.full_chain.anchored);
+    assert!(r.basic_constraints_ignored.is_empty(), "{r:#?}");
+    // A pathlen-0 CA pinned for relaxation issues the leaf directly: no
+    // intermediate sits below it, so nothing was relaxed on that chain.
+    let mut cfg = config(&["root"]);
+    cfg.ignore_basic_constraints(CertificatePin::Sha256Thumbprint(
+        cert("inter").sha256_thumbprint,
+    ));
+    let r = build_chain(&chain_of(&["leaf", "inter", "root"]), 0, &cfg).unwrap();
+    assert!(r.full_chain.anchored);
+    assert!(r.basic_constraints_ignored.is_empty());
+    // With the sub-CA below it, it is.
+    let r = build_chain(
+        &chain_of(&["leaf-too-deep", "inter-sub", "inter", "root"]),
+        0,
+        &cfg,
+    )
+    .unwrap();
+    assert_eq!(r.basic_constraints_ignored, [2]);
 }

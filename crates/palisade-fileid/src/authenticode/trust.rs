@@ -21,6 +21,8 @@
 
 #![forbid(unsafe_code)]
 
+use std::fmt;
+
 use serde::Serialize;
 
 use super::chain::{ChainReport, MAX_FILE_SIGNATURE_CHECKS, TrustConfig, build_chain_within};
@@ -241,6 +243,18 @@ pub enum PackagePublisherError {
     /// character.
     UnusableDisplayName,
 }
+
+impl fmt::Display for PackagePublisherError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::NoSignerDn => "the signer has no usable DN to compare",
+            Self::PublisherMismatch => "the manifest's publisher is not the signer",
+            Self::UnusableDisplayName => "the display name is empty or holds control characters",
+        })
+    }
+}
+
+impl std::error::Error for PackagePublisherError {}
 
 impl SignerIdentity {
     /// Carries a packaged app's publisher display name (#53) onto this

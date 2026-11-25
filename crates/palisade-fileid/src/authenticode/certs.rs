@@ -36,11 +36,11 @@ use std::fmt;
 use serde::Serialize;
 
 use super::asn1::{self, Asn1Error, Reader, Tlv, oid, read_oid, tag};
-use super::chain::{TrustConfig, build_chain};
+use super::chain::{MAX_FILE_SIGNATURE_CHECKS, TrustConfig, build_chain_within};
 use super::pkcs7;
 use super::signature::SignerIdentifier;
-use super::x509::CertSummary;
-use crate::pe::{self, ParseOptions};
+use super::x509::{self, Budget, CertSummary};
+use crate::pe::{self, DataDirectoryKind, ParseOptions};
 
 /// The most signatures (outer and nested) read from one file.
 pub const MAX_EXTRACTED_SIGNATURES: usize = super::MAX_SIGNATURES;
@@ -135,6 +135,10 @@ pub enum CabinetError {
         /// Its length.
         size: u32,
     },
+    /// `cbCabinet` is smaller than the fixed header.
+    TooShort(u32),
+    /// The reserved area names a signature of zero bytes.
+    EmptySignature,
 }
 
 impl fmt::Display for CabinetError {
@@ -150,15 +154,17 @@ impl fmt::Display for CabinetError {
             Self::ReserveTooShort(n) => {
                 write!(f, "reserved header area of {n} bytes holds no signature")
             }
-            Self::SignatureOutOfRange { offset, size } => {
-                write!(
-                    f,
-                    "signature at {offset} ({size} bytes) is outside the file"
-                )
-            }
+            Self::SignatureOutOfRange { offset, size } => write!(
+                f,
+                "signature at {offset} ({size} bytes) is outside the file or inside the cabinet"
+            ),
+            Self::TooShort(n) => write!(f, "header says the cabinet is only {n} bytes"),
+            Self::EmptySignature => f.write_str("the signature location is empty"),
         }
     }
 }
+
+impl std::error::Error for CabinetError {}
 
 /// One certificate found in a file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -198,8 +204,14 @@ pub enum ExtractWarning {
         /// The signature.
         signature: usize,
     },
-    /// More than [`MAX_EXTRACTED_SIGNATURES`] signatures, or nesting deeper
-    /// than [`MAX_EXTRACT_NESTING`]; the rest were not read.
+    /// More than [`MAX_EXTRACTED_SIGNATURES`] signatures (counting those
+    /// that could not be read), more than [`MAX_EXTRACTED_SIGNATURES`]
+    /// nested signature values on one signer, nesting deeper than
+    /// [`MAX_EXTRACT_NESTING`], more than [`super::MAX_CERTIFICATE_ENTRIES`]
+    /// certificate table entries, or more than
+    /// [`MAX_FILE_SIGNATURE_CHECKS`] certificate signature checks; the rest
+    /// were not read (or not checked, so a certificate may not be marked
+    /// as a root).
     LimitReached,
 }
 
@@ -210,8 +222,9 @@ pub struct Extraction {
     pub kind: SignedFileKind,
     /// How many signatures were read.
     pub signatures: usize,
-    /// The certificates [`CertSelection`] kept, each once per signature, in
-    /// the order the file carries them.
+    /// The certificates [`CertSelection`] kept, each once per signature (a
+    /// copy the signature carries twice is kept once, by SHA-256
+    /// thumbprint), in the order the file carries them.
     pub certificates: Vec<ExtractedCert>,
     /// Anything unusual.
     pub warnings: Vec<ExtractWarning>,
@@ -225,8 +238,12 @@ pub fn extract_certificates(
     if data.len() > MAX_EXTRACT_INPUT {
         return Err(ExtractError::TooLarge(data.len()));
     }
+    let mut table_warnings = Vec::new();
     let (kind, blobs) = if data.starts_with(b"MZ") {
-        (SignedFileKind::PeImage, pe_blobs(data)?)
+        (
+            SignedFileKind::PeImage,
+            pe_blobs(data, &mut table_warnings)?,
+        )
     } else if data.starts_with(b"MSCF") {
         let blob = cabinet_signature(data).map_err(ExtractError::Cabinet)?;
         let blobs = if blob.is_empty() {
@@ -245,6 +262,9 @@ pub fn extract_certificates(
     }
 
     let mut walker = Walker::default();
+    for w in table_warnings {
+        walker.warn(w);
+    }
     for (i, blob) in blobs.iter().enumerate() {
         if let Err(e) = walker.signature(blob, 0) {
             // The first signature must read; a later one is a warning.
@@ -257,12 +277,18 @@ pub fn extract_certificates(
         }
     }
 
+    // Certificate self-signature checks and chain links share one budget
+    // for the file, as `evaluate_trust` does.
+    let mut budget = Budget::new(MAX_FILE_SIGNATURE_CHECKS);
     let mut certificates = Vec::new();
     let mut cert_warnings = Vec::new();
     for (index, sig) in walker.signatures.iter().enumerate() {
         let mut parsed: Vec<Option<CertSummary>> = Vec::with_capacity(sig.certs.len());
         for (position, der) in sig.certs.iter().enumerate() {
-            match CertSummary::from_der(der) {
+            let mut one = Budget::new(budget.left().min(1));
+            let result = x509::parse_within(der, &mut one);
+            budget.absorb(&one);
+            match result {
                 Ok(c) => parsed.push(Some(c)),
                 Err(_) => {
                     cert_warnings.push(ExtractWarning::UnparseableCertificate {
@@ -273,23 +299,33 @@ pub fn extract_certificates(
                 }
             }
         }
+        // The signer: the first certificate that parsed in full and that
+        // the SignerInfo's identifier names.
         let signer = sig.sid.as_ref().and_then(|sid| {
-            sig.certs.iter().position(|der| {
-                pkcs7::parse_certificate(der).is_ok_and(|c| pkcs7::matches(&c, sid))
+            sig.certs.iter().enumerate().position(|(i, der)| {
+                parsed.get(i).is_some_and(Option::is_some)
+                    && pkcs7::parse_certificate(der).is_ok_and(|c| pkcs7::matches(&c, sid))
             })
         });
         if signer.is_none() {
             cert_warnings.push(ExtractWarning::SignerNotFound { signature: index });
         }
+        let signer_thumbprint = signer
+            .and_then(|s| parsed.get(s))
+            .and_then(Option::as_ref)
+            .map(|c| c.sha256_thumbprint.clone());
         // The root: the self-signed top of the signer's as-provided chain,
         // built with no trust configuration (nothing is trusted here).
         let owned: Vec<Vec<u8>> = sig.certs.iter().map(|c| c.to_vec()).collect();
         let root_thumbprint = signer
-            .and_then(|s| build_chain(&owned, s, &TrustConfig::new()).ok())
+            .and_then(|s| build_chain_within(&owned, s, &TrustConfig::new(), &mut budget).ok())
             .and_then(|chain| chain.root_cert().map(|r| r.sha256_thumbprint.clone()));
-        for (position, cert) in parsed.into_iter().enumerate() {
-            let Some(cert) = cert else { continue };
-            let is_signer = signer == Some(position);
+        let mut seen: HashSet<String> = HashSet::new();
+        for cert in parsed.into_iter().flatten() {
+            if !seen.insert(cert.sha256_thumbprint.clone()) {
+                continue;
+            }
+            let is_signer = signer_thumbprint.as_deref() == Some(cert.sha256_thumbprint.as_str());
             let is_root = root_thumbprint.as_deref() == Some(cert.sha256_thumbprint.as_str());
             let keep = match selection {
                 CertSelection::All => true,
@@ -306,6 +342,9 @@ pub fn extract_certificates(
             }
         }
     }
+    if budget.exhausted {
+        walker.warn(ExtractWarning::LimitReached);
+    }
     let mut warnings = walker.warnings;
     warnings.extend(cert_warnings);
     Ok(Extraction {
@@ -316,13 +355,35 @@ pub fn extract_certificates(
     })
 }
 
-/// The PKCS#7 entries of a PE image's certificate table.
-fn pe_blobs(data: &[u8]) -> Result<Vec<&[u8]>, ExtractError> {
+/// The PKCS#7 entries of a PE image's certificate table, at most
+/// [`super::MAX_CERTIFICATE_ENTRIES`] entries of any type, as the verifier
+/// reads it (#48). A table that is declared but rejected, too large, or
+/// whose first entry is malformed is an error, never "unsigned".
+fn pe_blobs<'a>(
+    data: &'a [u8],
+    warnings: &mut Vec<ExtractWarning>,
+) -> Result<Vec<&'a [u8]>, ExtractError> {
     let info = pe::parse_with(data, &ParseOptions::metadata_only())
         .map_err(|e| ExtractError::Pe(e.to_string()))?;
     let Some(table) = info.certificate_table else {
-        return Ok(Vec::new());
+        let declared = info
+            .data_directories
+            .get(DataDirectoryKind::Security.index())
+            .is_some_and(|entry| entry.size != 0);
+        return if declared {
+            Err(ExtractError::Pe(
+                "the certificate table is declared but invalid".to_owned(),
+            ))
+        } else {
+            Ok(Vec::new())
+        };
     };
+    if table.size > super::MAX_CERTIFICATE_TABLE_SIZE {
+        return Err(ExtractError::Pe(format!(
+            "certificate table of {} bytes is too large",
+            table.size
+        )));
+    }
     let table = usize::try_from(table.offset)
         .ok()
         .zip(usize::try_from(table.size).ok())
@@ -330,25 +391,34 @@ fn pe_blobs(data: &[u8]) -> Result<Vec<&[u8]>, ExtractError> {
         .ok_or_else(|| ExtractError::Pe("certificate table outside the file".to_owned()))?;
     let mut blobs = Vec::new();
     let mut pos = 0_usize;
-    while blobs.len() < super::MAX_CERTIFICATE_ENTRIES {
-        let Some(header) = table.get(pos..pos.saturating_add(8)) else {
+    let mut entries = 0_usize;
+    while pos < table.len() {
+        if entries >= super::MAX_CERTIFICATE_ENTRIES {
+            warnings.push(ExtractWarning::LimitReached);
             break;
-        };
+        }
+        entries += 1;
+        let header = table.get(pos..pos.saturating_add(8));
         let length = header
-            .get(0..4)
+            .and_then(|h| h.get(0..4))
             .and_then(|b| b.try_into().ok())
             .map(u32::from_le_bytes)
-            .and_then(|l| usize::try_from(l).ok());
+            .and_then(|l| usize::try_from(l).ok())
+            .filter(|l| *l >= 8);
+        let body = length.and_then(|l| table.get(pos.saturating_add(8)..pos.checked_add(l)?));
+        let (Some(header), Some(length), Some(body)) = (header, length, body) else {
+            if pos == 0 {
+                return Err(ExtractError::Pe(
+                    "the first certificate table entry is malformed".to_owned(),
+                ));
+            }
+            // Padding or a damaged later entry: the walk stops here.
+            break;
+        };
         let kind = header
             .get(6..8)
             .and_then(|b| b.try_into().ok())
             .map(u16::from_le_bytes);
-        let Some(length) = length.filter(|l| *l >= 8) else {
-            break;
-        };
-        let Some(body) = table.get(pos.saturating_add(8)..pos.saturating_add(length)) else {
-            break;
-        };
         // WIN_CERT_TYPE_PKCS_SIGNED_DATA.
         if kind == Some(2) {
             // The SignedData element only, without the entry's padding.
@@ -391,6 +461,9 @@ fn cabinet_signature(data: &[u8]) -> Result<&[u8], CabinetError> {
     if data.len() < FIXED {
         return Err(CabinetError::Truncated);
     }
+    if usize::try_from(declared).is_ok_and(|d| d < FIXED) {
+        return Err(CabinetError::TooShort(declared));
+    }
     let Some(cabinet_end) = usize::try_from(declared).ok().filter(|d| *d <= data.len()) else {
         return Err(CabinetError::LengthMismatch {
             declared,
@@ -416,6 +489,9 @@ fn cabinet_signature(data: &[u8]) -> Result<&[u8], CabinetError> {
         .zip(usize::try_from(size).ok())
         .filter(|(o, _)| *o >= cabinet_end.max(area + usize::from(reserve)))
         .and_then(|(o, s)| data.get(o..o.checked_add(s)?));
+    if size == 0 {
+        return Err(CabinetError::EmptySignature);
+    }
     let blob = range.ok_or(CabinetError::SignatureOutOfRange { offset, size })?;
     // The signer pads the blob; keep the SignedData element only.
     let mut r = Reader::new(blob, 0);
@@ -431,6 +507,10 @@ struct Found<'a> {
 #[derive(Default)]
 struct Walker<'a> {
     signatures: Vec<Found<'a>>,
+    /// Signatures tried, read or not: bounded by
+    /// [`MAX_EXTRACTED_SIGNATURES`], so unreadable nested values cannot make
+    /// the walk try without end.
+    attempts: usize,
     warnings: Vec<ExtractWarning>,
 }
 
@@ -444,10 +524,11 @@ impl<'a> Walker<'a> {
     /// Reads one `ContentInfo` holding a SignedData, whatever its content
     /// type, then its nested signatures.
     fn signature(&mut self, der: &'a [u8], depth: usize) -> Result<(), Asn1Error> {
-        if self.signatures.len() >= MAX_EXTRACTED_SIGNATURES || depth > MAX_EXTRACT_NESTING {
+        if self.attempts >= MAX_EXTRACTED_SIGNATURES || depth > MAX_EXTRACT_NESTING {
             self.warn(ExtractWarning::LimitReached);
             return Ok(());
         }
+        self.attempts += 1;
         let mut outer = Reader::new(der, 0);
         // Read with the strict DER reader. Each certificate is validated
         // whole; nested signatures are read (and so checked) one level at a
@@ -492,7 +573,11 @@ impl<'a> Walker<'a> {
         while !i.is_empty() {
             let info = i.read(tag::SEQUENCE)?;
             if first {
-                (sid, nested) = signer_info(&info)?;
+                let truncated;
+                (sid, nested, truncated) = signer_info(&info)?;
+                if truncated {
+                    self.warn(ExtractWarning::LimitReached);
+                }
                 first = false;
             } else {
                 asn1::validate(&info)?;
@@ -509,10 +594,17 @@ impl<'a> Walker<'a> {
     }
 }
 
+/// A SignerInfo's identifier, its nested signatures, and whether nested
+/// values past the limit were dropped.
+type SignerParts<'a> = (Option<SignerIdentifier>, Vec<&'a [u8]>, bool);
+
 /// A SignerInfo's identifier and its nested signatures. Every part but the
 /// nested signatures (which the walker reads itself, one level at a time)
 /// is checked as DER.
-fn signer_info<'a>(info: &Tlv<'a>) -> Result<(Option<SignerIdentifier>, Vec<&'a [u8]>), Asn1Error> {
+///
+/// At most [`MAX_EXTRACTED_SIGNATURES`] nested values are kept; the rest
+/// are still checked as DER, and the third value says some were dropped.
+fn signer_info<'a>(info: &Tlv<'a>) -> Result<SignerParts<'a>, Asn1Error> {
     let mut r = info.reader();
     r.read(tag::INTEGER)?;
     let sid_start = r.clone();
@@ -523,6 +615,7 @@ fn signer_info<'a>(info: &Tlv<'a>) -> Result<(Option<SignerIdentifier>, Vec<&'a 
         asn1::validate(&r.read_any()?)?;
     }
     let mut nested = Vec::new();
+    let mut truncated = false;
     while !r.is_empty() {
         let field = r.read_any()?;
         if field.tag != tag::context_cons(1) {
@@ -539,14 +632,19 @@ fn signer_info<'a>(info: &Tlv<'a>) -> Result<(Option<SignerIdentifier>, Vec<&'a 
             if id == oid::NESTED_SIGNATURE {
                 let mut v = values.reader();
                 while !v.is_empty() {
-                    nested.push(v.read_any()?.raw);
+                    let value = v.read_any()?;
+                    if nested.len() < MAX_EXTRACTED_SIGNATURES {
+                        nested.push(value.raw);
+                    } else {
+                        truncated = true;
+                    }
                 }
             } else {
                 asn1::validate(&values)?;
             }
         }
     }
-    Ok((sid, nested))
+    Ok((sid, nested, truncated))
 }
 
 /// Certificates from many files, each kept once (by SHA-256 thumbprint), in

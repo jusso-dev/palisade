@@ -84,4 +84,14 @@ fn check(report: &palisade_fileid::authenticode::ChainReport) {
     {
         assert!(report.full_chain.certs.contains(i));
     }
+    // A relaxed issuer really needed it: not a CA (a v1/v2 anchor is one in
+    // an anchored chain), or a path length constraint.
+    for i in &report.basic_constraints_ignored {
+        let c = &report.certificates[*i];
+        let legacy = report.full_chain.anchored && c.anchor.is_some() && c.cert.version < 3;
+        let ca = c.cert.basic_constraints.map_or(legacy, |b| b.ca);
+        let has_pathlen = c.cert.basic_constraints.is_some_and(|b| b.path_len.is_some());
+        assert!(!ca || has_pathlen);
+        assert!(*i != report.leaf);
+    }
 }

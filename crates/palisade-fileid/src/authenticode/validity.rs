@@ -435,12 +435,18 @@ pub fn evaluate_validity(
     let primary = best.map(|(i, _)| i);
     let identity = primary.and_then(|p| {
         let signer = trust.signers.iter().find(|s| s.signature == p)?;
-        Some(identity(
+        let mut id = identity(
             p,
             signer.chain.as_ref()?,
             signer.os_ci_compatible,
             ctx.version,
-        ))
+        );
+        // A package publisher name already checked against this signer
+        // (#53) carries over.
+        if let Some(t) = trust.identity.as_ref().filter(|t| t.signature == p) {
+            id.package_display_name.clone_from(&t.package_display_name);
+        }
+        Some(id)
     });
     let error = match (primary, signatures.first(), &report.signing_state) {
         (Some(_), _, _) => VerificationError::Ok,

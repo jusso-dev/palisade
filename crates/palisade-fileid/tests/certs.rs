@@ -347,6 +347,249 @@ fn nesting_is_bounded() {
     assert!(!out.warnings.contains(&ExtractWarning::LimitReached));
 }
 
+fn der_header(d: &[u8], at: usize) -> (usize, usize) {
+    let first = d[at + 1];
+    if first < 0x80 {
+        (2, first as usize)
+    } else {
+        let n = (first & 0x7f) as usize;
+        let len = d[at + 2..at + 2 + n]
+            .iter()
+            .fold(0_usize, |a, b| (a << 8) | *b as usize);
+        (2 + n, len)
+    }
+}
+
+fn children(d: &[u8]) -> Vec<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at < d.len() {
+        let (h, l) = der_header(d, at);
+        out.push(d[at..at + h + l].to_vec());
+        at += h + l;
+    }
+    out
+}
+
+fn content(el: &[u8]) -> &[u8] {
+    let (h, l) = der_header(el, 0);
+    &el[h..h + l]
+}
+
+/// The PKCS#7 `blob` with its certificate set replaced by `certs`, every
+/// enclosing length re-encoded. The signature is untouched, so it still
+/// verifies when the signer certificate is among `certs`.
+fn replace_certificates(blob: &[u8], certs: &[Vec<u8>]) -> Vec<u8> {
+    // ContentInfo { oid, [0] { SignedData { version, digests, content,
+    // [0] certificates, ..., signerInfos } } }
+    let ci = children(content(blob));
+    let mut items = children(content(content(&ci[1])));
+    assert_eq!(items[3][0], 0xa0);
+    items[3] = tlv(0xa0, &certs.concat());
+    let sd = tlv(0x30, &items.concat());
+    tlv(0x30, &[ci[0].clone(), tlv(0xa0, &sd)].concat())
+}
+
+fn chain_certs() -> Vec<Vec<u8>> {
+    ["leaf", "inter", "root"]
+        .iter()
+        .map(|n| read(&format!("chain/{n}.der")))
+        .collect()
+}
+
+/// The chain leaf with its first UTCTime retagged as an OCTET STRING: the
+/// same issuer and serial (so the SignerInfo names it) and valid DER, but
+/// no longer an X.509 certificate.
+fn leaf_broken() -> Vec<u8> {
+    let mut leaf = read("chain/leaf.der");
+    let at = leaf.windows(2).position(|w| w == [0x17, 0x0d]).unwrap();
+    leaf[at] = 0x04;
+    assert!(CertSummary::from_der(&leaf).is_err());
+    leaf
+}
+
+#[test]
+fn duplicate_certificates_are_listed_once_per_signature() {
+    let p7 = read("chain/leaf-inter-root.p7");
+    let mut certs = chain_certs();
+    certs.extend(chain_certs());
+    let dup = replace_certificates(&p7, &certs);
+    let all = extract_certificates(&dup, CertSelection::All).unwrap();
+    assert_eq!(all.certificates.len(), 3, "{:?}", all.certificates);
+    let roots = extract_certificates(&dup, CertSelection::Root).unwrap();
+    assert_eq!(roots.certificates.len(), 1);
+    let leaves = extract_certificates(&dup, CertSelection::Leaf).unwrap();
+    assert_eq!(leaves.certificates.len(), 1);
+    assert!(leaves.certificates[0].is_signer);
+}
+
+#[test]
+fn an_unparseable_signer_copy_does_not_hide_the_real_one() {
+    let p7 = read("chain/leaf-inter-root.p7");
+    // The broken copy first, then the real chain.
+    let mut certs = vec![leaf_broken()];
+    certs.extend(chain_certs());
+    let blob = replace_certificates(&p7, &certs);
+    let leaves = extract_certificates(&blob, CertSelection::Leaf).unwrap();
+    assert_eq!(leaves.certificates.len(), 1, "{leaves:?}");
+    assert_eq!(leaves.certificates[0].cert.der, read("chain/leaf.der"));
+    assert!(
+        !leaves
+            .warnings
+            .contains(&ExtractWarning::SignerNotFound { signature: 0 })
+    );
+    assert!(
+        leaves
+            .warnings
+            .contains(&ExtractWarning::UnparseableCertificate {
+                signature: 0,
+                position: 0
+            })
+    );
+    // With only the broken copy, no signer is found, and the report says so.
+    let blob = replace_certificates(&p7, &[leaf_broken()]);
+    let out = extract_certificates(&blob, CertSelection::Leaf).unwrap();
+    assert!(out.certificates.is_empty());
+    assert!(
+        out.warnings
+            .contains(&ExtractWarning::SignerNotFound { signature: 0 })
+    );
+}
+
+#[test]
+fn nested_signature_values_are_capped() {
+    // One signer with a million unreadable nested values: the walk stops at
+    // the cap, says so, and the outer signature is still read.
+    let junk: Vec<u8> = std::iter::repeat_n([0x05_u8, 0x00], 1_000_000)
+        .flatten()
+        .collect();
+    let blob = signed_data_with_values(&junk);
+    let start = std::time::Instant::now();
+    let out = extract_certificates(&blob, CertSelection::All).unwrap();
+    assert!(start.elapsed() < std::time::Duration::from_secs(10));
+    assert_eq!(out.signatures, 1);
+    assert!(out.warnings.contains(&ExtractWarning::LimitReached));
+}
+
+/// A minimal SignedData whose signer's nested-signature attribute holds the
+/// raw values `values`.
+fn signed_data_with_values(values: &[u8]) -> Vec<u8> {
+    let oid = |b: &[u8]| tlv(0x06, b);
+    let sha256 = tlv(
+        0x30,
+        &[
+            oid(&[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01]),
+            vec![0x05, 0x00],
+        ]
+        .concat(),
+    );
+    let sid = tlv(0x30, &[tlv(0x30, &[]), tlv(0x02, &[0x01])].concat());
+    let nested_oid = oid(&[0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x04, 0x01]);
+    let attr = tlv(0x30, &[nested_oid, tlv(0x31, values)].concat());
+    let info = [
+        tlv(0x02, &[0x01]),
+        sid,
+        sha256.clone(),
+        tlv(0xa0, &[]),
+        sha256.clone(),
+        tlv(0x04, &[0x00]),
+        tlv(0xa1, &attr),
+    ]
+    .concat();
+    let sd = tlv(
+        0x30,
+        &[
+            tlv(0x02, &[0x01]),
+            tlv(0x31, &sha256),
+            tlv(
+                0x30,
+                &oid(&[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x01]),
+            ),
+            tlv(0x31, &tlv(0x30, &info)),
+        ]
+        .concat(),
+    );
+    tlv(
+        0x30,
+        &[
+            oid(&[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02]),
+            tlv(0xa0, &sd),
+        ]
+        .concat(),
+    )
+}
+
+#[test]
+fn malformed_pe_certificate_tables_are_errors_not_unsigned() {
+    // A Security directory that points outside the file.
+    let mut image = PeBuilder::default().build();
+    let dir = PeBuilder::default().data_directory_offset(4);
+    image[dir..dir + 4].copy_from_slice(&0x7fff_0000_u32.to_le_bytes());
+    image[dir + 4..dir + 8].copy_from_slice(&64_u32.to_le_bytes());
+    assert!(matches!(
+        extract_certificates(&image, CertSelection::All).unwrap_err(),
+        ExtractError::Pe(_)
+    ));
+    // A table whose first entry claims more bytes than it has.
+    let mut bad = entry(&read("chain/leaf-inter-root.p7"));
+    bad[0..4].copy_from_slice(&u32::MAX.to_le_bytes());
+    let image = PeBuilder {
+        certificate: Some(bad),
+        ..PeBuilder::default()
+    }
+    .build();
+    assert!(matches!(
+        extract_certificates(&image, CertSelection::All).unwrap_err(),
+        ExtractError::Pe(_)
+    ));
+    // Many non-PKCS#7 entries: only the entry limit is walked.
+    let mut table = Vec::new();
+    for _ in 0..10_000 {
+        table.extend_from_slice(&8_u32.to_le_bytes());
+        table.extend_from_slice(&0x0200_u16.to_le_bytes());
+        table.extend_from_slice(&1_u16.to_le_bytes());
+    }
+    table.extend(entry(&read("chain/leaf-inter-root.p7")));
+    let image = PeBuilder {
+        certificate: Some(table),
+        ..PeBuilder::default()
+    }
+    .build();
+    // The PKCS#7 entry is past the limit, so, as for the verifier, the
+    // file carries no signature this reads.
+    assert_eq!(
+        extract_certificates(&image, CertSelection::All).unwrap_err(),
+        ExtractError::Unsigned
+    );
+}
+
+#[test]
+fn degenerate_cabinet_headers_are_errors() {
+    let cab = read("certs/signed.cab");
+    let mut bad = cab.clone();
+    bad[8..12].copy_from_slice(&10_u32.to_le_bytes());
+    assert_eq!(
+        extract_certificates(&bad, CertSelection::All).unwrap_err(),
+        ExtractError::Cabinet(CabinetError::TooShort(10))
+    );
+    let mut bad = cab.clone();
+    bad[48..52].copy_from_slice(&0_u32.to_le_bytes());
+    assert_eq!(
+        extract_certificates(&bad, CertSelection::All).unwrap_err(),
+        ExtractError::Cabinet(CabinetError::EmptySignature)
+    );
+    // Every error has a message.
+    for e in [
+        CabinetError::Truncated,
+        CabinetError::TooShort(1),
+        CabinetError::EmptySignature,
+        CabinetError::ReserveTooShort(1),
+    ] {
+        assert!(!e.to_string().is_empty());
+        let _: &dyn std::error::Error = &e;
+    }
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
 

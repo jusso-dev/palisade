@@ -42,9 +42,18 @@ fuzz_target!(|table: &[u8]| {
                         .iter()
                         .all(|c| c.signature < out.signatures)
                 );
-                if selection == CertSelection::Leaf {
-                    assert!(out.certificates.iter().all(|c| c.is_signer));
+                match selection {
+                    CertSelection::Leaf => assert!(out.certificates.iter().all(|c| c.is_signer)),
+                    CertSelection::Root => assert!(out.certificates.iter().all(|c| c.is_root)),
+                    _ => {}
                 }
+                // Each certificate once per signature.
+                let mut seen = std::collections::HashSet::new();
+                assert!(
+                    out.certificates
+                        .iter()
+                        .all(|c| seen.insert((c.signature, c.cert.sha256_thumbprint.clone())))
+                );
             }
         }
     }

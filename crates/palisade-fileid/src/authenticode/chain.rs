@@ -785,14 +785,15 @@ pub(crate) fn build_chain_within(
             .left()
             .min(MAX_SIGNATURE_CHECKS.saturating_sub(parse_budget.used())),
     );
+    search.relax = false;
     let provided_paths = search.run(leaf, embedded_count, Mode::Untrusted, &mut budget);
+    search.relax = true;
     let full_anchored = !anchored_paths.is_empty();
     let full_paths = if full_anchored {
         anchored_paths
     } else {
         search.run(leaf, pool.len(), Mode::Untrusted, &mut budget)
     };
-    let relaxed_links = std::mem::take(&mut search.relaxed);
     drop(search);
     file_budget.absorb(&budget);
     if budget.exhausted
@@ -903,17 +904,10 @@ pub(crate) fn build_chain_within(
     let well_known_root_id = top
         .filter(|c| full_chain.complete && (is_root(c, anchored) || c.anchor.is_some()))
         .and_then(|c| config.well_known_root_id(&c.cert));
-    // The relaxed links the chosen full chain actually takes.
-    let to_report = |p: usize| map.get(&p).copied();
-    let mut basic_constraints_ignored: Vec<usize> = Vec::new();
-    for (child, issuer) in &relaxed_links {
-        if let (Some(c), Some(i)) = (to_report(*child), to_report(*issuer)) {
-            let on_chain = full_chain.certs.windows(2).any(|pair| pair == [c, i]);
-            if on_chain && !basic_constraints_ignored.contains(&i) {
-                basic_constraints_ignored.push(i);
-            }
-        }
-    }
+    // The issuers on the chosen full chain that issued only because policy
+    // relaxed their basic constraints: worked out from that chain alone,
+    // with the same rules the search applied to it.
+    let basic_constraints_ignored = relaxed_issuers(&full_chain, &out, anchored, config);
     let time_nesting_violations: Vec<usize> = full_chain
         .certs
         .windows(2)
@@ -925,13 +919,6 @@ pub(crate) fn build_chain_within(
             _ => None,
         })
         .collect();
-    basic_constraints_ignored.sort_by_key(|i| {
-        full_chain
-            .certs
-            .iter()
-            .position(|c| c == i)
-            .unwrap_or(usize::MAX)
-    });
 
     Ok(ChainReport {
         leaf,
@@ -954,6 +941,52 @@ pub(crate) fn build_chain_within(
         issues: issue_list,
         certificates: out,
     })
+}
+
+/// The issuers on `chain` that are not CAs, or whose path length is
+/// exceeded on it, and that a [`TrustConfig::ignore_basic_constraints`] pin
+/// names: the links the chain could make only through that relaxation.
+/// A v1 or v2 anchor counts as a CA in an anchored chain, as the trusted
+/// search treats it.
+fn relaxed_issuers(
+    chain: &ChainPath,
+    certs: &[ChainCert],
+    anchored: bool,
+    config: &TrustConfig,
+) -> Vec<usize> {
+    let mut out = Vec::new();
+    for (pos, &issuer) in chain.certs.iter().enumerate().skip(1) {
+        let Some(node) = certs.get(issuer) else {
+            continue;
+        };
+        let cert = &node.cert;
+        if !config
+            .basic_constraints_exempt
+            .iter()
+            .any(|pin| pin.matches(cert))
+        {
+            continue;
+        }
+        let legacy_anchor = anchored && node.anchor.is_some() && cert.version < 3;
+        let is_ca = cert.basic_constraints.map_or(legacy_anchor, |bc| bc.ca);
+        // Non-self-issued intermediates below this issuer (not the leaf).
+        let below = chain
+            .certs
+            .iter()
+            .take(pos)
+            .skip(1)
+            .filter_map(|i| certs.get(*i))
+            .filter(|c| c.cert.subject.der != c.cert.issuer.der)
+            .count();
+        let path_exceeded = cert
+            .basic_constraints
+            .and_then(|bc| bc.path_len)
+            .is_some_and(|max| u32::try_from(below).unwrap_or(u32::MAX) > max);
+        if !is_ca || path_exceeded {
+            out.push(issuer);
+        }
+    }
+    out
 }
 
 /// Whether `c`, the top of a full chain, is a root: self-signed, or (in an
@@ -1099,9 +1132,11 @@ struct Search<'p, 'i> {
     trusted: Vec<bool>,
     steps: usize,
     issues: &'i mut Issues,
-    /// Links `(child, issuer)` made only because the issuer's basic
-    /// constraints are relaxed by [`TrustConfig::ignore_basic_constraints`].
-    relaxed: Vec<(usize, usize)>,
+    /// Whether [`TrustConfig::ignore_basic_constraints`] applies in this
+    /// search. It does in the trusted search and the unanchored full-chain
+    /// search, never in the as-provided one, which shows the file's own
+    /// chain without policy.
+    relax: bool,
     paths: Vec<Vec<usize>>,
     /// Only pool indices below this are used.
     limit: usize,
@@ -1134,7 +1169,7 @@ impl<'p, 'i> Search<'p, 'i> {
             trusted: vec![false; pool.len()],
             steps: 0,
             issues,
-            relaxed: Vec::new(),
+            relax: true,
             paths: Vec::new(),
             limit: pool.len(),
             mode: Mode::Untrusted,
@@ -1182,7 +1217,7 @@ impl<'p, 'i> Search<'p, 'i> {
             Some(bc) => bc.ca,
             None => legacy_anchor,
         };
-        let answer = match (is_ca, node.bc_exempt) {
+        let answer = match (is_ca, node.bc_exempt && self.relax) {
             (true, _) => MayIssue::Yes,
             (false, true) => MayIssue::Relaxed,
             (false, false) => {
@@ -1197,13 +1232,6 @@ impl<'p, 'i> Search<'p, 'i> {
             return MayIssue::No;
         }
         answer
-    }
-
-    /// Records that `child` was linked to `issuer` only by a relaxation.
-    fn record_relaxed(&mut self, child: usize, issuer: usize) {
-        if !self.relaxed.contains(&(child, issuer)) {
-            self.relaxed.push((child, issuer));
-        }
     }
 
     /// Whether the key identifiers of `child` and `issuer` agree (or one is
@@ -1354,7 +1382,6 @@ impl<'p, 'i> Search<'p, 'i> {
             if children.is_empty() {
                 continue;
             }
-            // A relaxed issuer's links are recorded when a path takes them.
             if self.may_issue(t) == MayIssue::No {
                 continue;
             }
@@ -1520,11 +1547,9 @@ impl<'p, 'i> Search<'p, 'i> {
         if !self.key_ids_agree(child, issuer) {
             return false;
         }
-        let mut relaxed = match self.may_issue(issuer) {
-            MayIssue::No => return false,
-            MayIssue::Yes => false,
-            MayIssue::Relaxed => true,
-        };
+        if self.may_issue(issuer) == MayIssue::No {
+            return false;
+        }
         if let Some(max) = self
             .pool
             .get(issuer)
@@ -1539,16 +1564,13 @@ impl<'p, 'i> Search<'p, 'i> {
                 .filter_map(|p| self.pool.get(*p))
                 .filter(|n| n.cert.subject.der != n.cert.issuer.der)
                 .count();
-            if u32::try_from(below).unwrap_or(u32::MAX) > max {
-                if self.pool.get(issuer).is_some_and(|n| n.bc_exempt) {
-                    relaxed = true;
-                } else {
-                    self.issues.push(ChainIssue::PathLengthExceeded { issuer });
-                    return false;
-                }
+            let exempt = self.relax && self.pool.get(issuer).is_some_and(|n| n.bc_exempt);
+            if u32::try_from(below).unwrap_or(u32::MAX) > max && !exempt {
+                self.issues.push(ChainIssue::PathLengthExceeded { issuer });
+                return false;
             }
         }
-        let ok = match self.mode {
+        match self.mode {
             Mode::Trusted => {
                 let Some(i) = self.pool.get(issuer) else {
                     return false;
@@ -1559,11 +1581,7 @@ impl<'p, 'i> Search<'p, 'i> {
                     .unwrap_or(false)
             }
             Mode::Untrusted => self.check(child, issuer, budget),
-        };
-        if ok && relaxed {
-            self.record_relaxed(child, issuer);
         }
-        ok
     }
 }
 
