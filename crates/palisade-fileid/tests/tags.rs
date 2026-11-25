@@ -906,26 +906,102 @@ mod scanning {
         assert_eq!(r.tags, [CONTENT_SCAN_ERROR]);
     }
 
+    /// Reports `len` from the end seek, but holds only `data`.
+    struct Liar(Cursor<Vec<u8>>, u64);
+    impl Read for Liar {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            self.0.read(buf)
+        }
+    }
+    impl Seek for Liar {
+        fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+            match pos {
+                SeekFrom::End(_) => Ok(self.1),
+                other => self.0.seek(other),
+            }
+        }
+    }
+
     #[test]
-    fn a_file_shorter_than_reported_ends_cleanly() {
-        struct Liar(Cursor<Vec<u8>>);
-        impl Read for Liar {
-            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-                self.0.read(buf)
-            }
-        }
-        impl Seek for Liar {
-            fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
-                match pos {
-                    SeekFrom::End(_) => Ok(10 << 20),
-                    other => self.0.seek(other),
-                }
-            }
-        }
-        let mut r = Liar(Cursor::new([vec![1; 50], seven_zip()].concat()));
+    fn a_file_shorter_than_reported_fails_conservative() {
+        // The bytes that did arrive are scanned, and their tags kept, but
+        // the scan is not called complete: the rest was never seen.
+        let data = [vec![1; 50], seven_zip()].concat();
+        let mut r = Liar(Cursor::new(data.clone()), 10 << 20);
         let report = tags::scan(&mut r, &builtin(), &limits());
-        assert_eq!(report.status, ScanStatus::Complete);
-        assert_eq!(report.tags, [ARCHIVE_EMBEDDED_ARCHIVE]);
+        assert_eq!(
+            report.status,
+            ScanStatus::ReadError(io::ErrorKind::UnexpectedEof)
+        );
+        assert_eq!(report.tags, [ARCHIVE_EMBEDDED_ARCHIVE, CONTENT_SCAN_ERROR]);
+        // Only the bytes actually read are counted.
+        assert!(
+            report.bytes_scanned <= 2 * data.len() as u64,
+            "{}",
+            report.bytes_scanned
+        );
+        // A file that ends inside its PE headers, or inside a chunk.
+        for len in [10, 0x41, 0x100, 0x500] {
+            let mut r = Liar(
+                Cursor::new(PeBuilder::default().build()[..len].to_vec()),
+                1 << 20,
+            );
+            let report = tags::scan(&mut r, &builtin(), &limits());
+            assert_eq!(
+                report.status,
+                ScanStatus::ReadError(io::ErrorKind::UnexpectedEof),
+                "{len}"
+            );
+            assert_eq!(
+                report.tags.last().map(String::as_str),
+                Some(CONTENT_SCAN_ERROR)
+            );
+        }
+    }
+
+    #[test]
+    fn an_unchecked_start_filter_never_lets_a_rule_through() {
+        // The embedded archive rule must not fire on a plain ZIP, whose
+        // later entries carry local headers, even when the first bytes of
+        // the file are outside the scanned range or the budget runs out.
+        let mut archive = zip();
+        archive.extend_from_slice(&vec![0; 3 << 20]);
+        archive.extend_from_slice(&zip());
+        // 1. A size limit smaller than the filter: only the tail is
+        //    scanned past it, but the filter is still checked first.
+        let tiny = ScanLimits {
+            max_file_size: 1,
+            ..limits()
+        };
+        let r = tags::scan_bytes(&archive, &builtin(), &tiny);
+        assert_eq!(r.status, ScanStatus::Partial);
+        assert_eq!(r.tags, [CONTENT_SCAN_PARTIAL]);
+        // 2. A step budget that runs out right after a rule's own string:
+        //    the filter was checked before any rule string.
+        let rules = org(vec![RuleSource {
+            unless_start: Some(PatternSource::Hex("AA BB".into())),
+            ..org_rule(
+                "a:filtered",
+                vec![s(PatternSource::Hex("AA".into()), Location::At(0))],
+                Condition::Any,
+            )
+        }]);
+        let data = [vec![0xaa, 0xbb], vec![0; 100]].concat();
+        for steps in 0..200 {
+            let tight = ScanLimits {
+                max_match_steps: steps,
+                ..limits()
+            };
+            let r = tags::scan_bytes(&data, &rules, &tight);
+            assert!(!r.has("a:filtered"), "{steps}: {r:?}");
+        }
+        // Without the filter's bytes, the rule fires.
+        let r = tags::scan_bytes(&[0xaa, 0xcc], &rules, &limits());
+        assert!(r.has("a:filtered"));
+        // A file that ended before the filter could be read decides
+        // nothing.
+        let mut short = Liar(Cursor::new(vec![0xaa]), 100);
+        assert!(!tags::scan(&mut short, &rules, &limits()).has("a:filtered"));
     }
 
     proptest! {

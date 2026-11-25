@@ -47,7 +47,12 @@
 //!   read, [`ScanLimits::max_match_steps`] pattern comparisons have been
 //!   made, or [`ScanLimits::timeout`] (2 s by default) has passed. The
 //!   report then has [`CONTENT_SCAN_TIMEOUT`].
-//! - A read error ends the scan with [`CONTENT_SCAN_ERROR`].
+//! - A read error, or a file that ends before the length its reader
+//!   reported (truncated while being scanned), ends the scan with
+//!   [`CONTENT_SCAN_ERROR`], after the bytes that did arrive are scanned.
+//! - A rule's `unless_start` filter is checked before anything else, and a
+//!   filter that could not be checked counts as matched, so a budget or a
+//!   size limit can never let a filtered rule through.
 //!
 //! None of these is an error: [`scan`] always returns a [`TagReport`].
 //! Tags found before the scan stopped are kept, because each is positive
@@ -113,7 +118,7 @@ pub const CONTENT_SCAN_TIMEOUT: &str = "content_scan_timeout";
 /// The file is over [`ScanLimits::max_file_size`], so only its start and
 /// its tail were scanned.
 pub const CONTENT_SCAN_PARTIAL: &str = "content_scan_partial";
-/// The reader failed.
+/// The reader failed, or the file ended early.
 pub const CONTENT_SCAN_ERROR: &str = "content_scan_error";
 
 /// The per-file budget of a scan.
@@ -203,7 +208,8 @@ pub enum ScanStatus {
     Partial,
     /// A budget of [`ScanLimits`] ran out.
     Timeout,
-    /// The reader failed.
+    /// The reader failed, or the file ended before the length the reader
+    /// reported (`UnexpectedEof`).
     ReadError(io::ErrorKind),
 }
 

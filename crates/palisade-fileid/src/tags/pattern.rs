@@ -68,6 +68,15 @@ impl Pattern {
         if text.is_empty() {
             return Err(RuleErrorKind::EmptyPattern);
         }
+        // Checked before anything is allocated.
+        let len = if wide {
+            text.len().saturating_mul(2)
+        } else {
+            text.len()
+        };
+        if len > MAX_PATTERN_LEN {
+            return Err(RuleErrorKind::PatternTooLong);
+        }
         let value: Vec<u8> = if wide {
             if !text.is_ascii() {
                 return Err(RuleErrorKind::WideNotAscii);
@@ -76,9 +85,6 @@ impl Pattern {
         } else {
             text.as_bytes().to_vec()
         };
-        if value.len() > MAX_PATTERN_LEN {
-            return Err(RuleErrorKind::PatternTooLong);
-        }
         let mask = vec![0xff; value.len()];
         Ok(Self { value, mask })
     }

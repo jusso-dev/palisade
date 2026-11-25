@@ -42,6 +42,9 @@ pub struct RuleSource {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_file_size: Option<u64>,
     /// The rule does not apply to a file that starts with this pattern.
+    /// It is checked before anything else is scanned. If it cannot be
+    /// checked (the file ended early, or the budget ran out first), the
+    /// rule is not reported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unless_start: Option<PatternSource>,
     /// The strings, 1 to [`MAX_STRINGS_PER_RULE`].
@@ -103,7 +106,10 @@ pub enum Location {
     },
     /// In a PE image's appended data: at or after the end of the headers
     /// and of every section's raw data. A certificate table, if any, is
-    /// not excluded. Never matches in a file that is not a PE image.
+    /// not excluded. Never matches in a file that is not a PE image. A
+    /// crafted image can declare section data or headers that cover its
+    /// appended bytes, so that such a rule does not match them: a missing
+    /// tag is never proof of absence.
     Overlay,
     /// In the last this many bytes of the file (1 to [`TAIL_SCAN_LEN`]).
     Tail(u64),
@@ -264,7 +270,7 @@ pub(super) struct CompiledRule {
     pub(super) tag: String,
     pub(super) require_pe: bool,
     pub(super) max_file_size: Option<u64>,
-    /// The index of the `unless_start` string, which is at offset 0.
+    /// The index of the `unless_start` pattern in [`Compiled::prefixes`].
     pub(super) unless: Option<usize>,
     pub(super) strings: std::ops::Range<usize>,
     /// How many of `strings` must be found.
@@ -292,6 +298,12 @@ pub(super) struct Compiled {
     pub(super) anchored: Vec<Anchored>,
     /// The longest span of any string (at least 1).
     pub(super) window: usize,
+    /// The `unless_start` patterns. They are checked against the start of
+    /// the file before anything else is scanned, so a rule is never
+    /// reported with its filter unchecked.
+    pub(super) prefixes: Vec<Matcher>,
+    /// The longest span of any prefix pattern.
+    pub(super) prefix_len: usize,
 }
 
 /// Compiles the built-in rules followed by the organisation's, checking
@@ -316,6 +328,8 @@ pub(super) fn compile(
         atom_users: Vec::new(),
         anchored: Vec::new(),
         window: 1,
+        prefixes: Vec::new(),
+        prefix_len: 0,
     };
     let mut atoms: Vec<Vec<u8>> = Vec::new();
     let mut org_strings = 0_usize;
@@ -375,10 +389,9 @@ pub(super) fn compile(
         let unless = match &rule.unless_start {
             Some(p) => {
                 let matcher = compile_pattern(p).map_err(|kind| err(None, kind))?;
-                let at = out.strings.len();
-                add_string(&mut out, &mut atoms, matcher, Location::At(0))
-                    .map_err(|kind| err(None, kind))?;
-                Some(at)
+                out.prefix_len = out.prefix_len.max(matcher.span());
+                out.prefixes.push(matcher);
+                Some(out.prefixes.len() - 1)
             }
             None => None,
         };

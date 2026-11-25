@@ -50,6 +50,11 @@ struct Scan<'a, R: ?Sized> {
     since_clock: u32,
     /// The next entry of `compiled.anchored` to check.
     next_anchored: usize,
+    /// For each `unless_start` pattern: whether the file starts with it,
+    /// or `None` if that could not be checked.
+    prefix_hits: Vec<Option<bool>>,
+    /// A read returned fewer bytes than the file length promised.
+    short_read: bool,
 }
 
 pub(super) fn run<R: Read + Seek + ?Sized>(
@@ -90,17 +95,22 @@ pub(super) fn run<R: Read + Seek + ?Sized>(
         steps: 0,
         since_clock: 0,
         next_anchored: 0,
+        prefix_hits: vec![None; compiled.prefixes.len()],
+        short_read: false,
     };
     let partial = len > limits.max_file_size;
-    let result = scan.probe_pe().and_then(|()| {
-        if partial {
-            let tail = len.saturating_sub(TAIL_SCAN_LEN).max(limits.max_file_size);
-            scan.region(0, limits.max_file_size)?;
-            scan.region(tail, len)
-        } else {
-            scan.region(0, len)
-        }
-    });
+    let result = scan
+        .prefixes()
+        .and_then(|()| scan.probe_pe())
+        .and_then(|()| {
+            if partial {
+                let tail = len.saturating_sub(TAIL_SCAN_LEN).max(limits.max_file_size);
+                scan.region(0, limits.max_file_size)?;
+                scan.region(tail, len)
+            } else {
+                scan.region(0, len)
+            }
+        });
     report.status = match result {
         Err(Stop::Io(kind)) => ScanStatus::ReadError(kind),
         Err(Stop::Budget) => ScanStatus::Timeout,
@@ -117,9 +127,11 @@ pub(super) fn run<R: Read + Seek + ?Sized>(
         if rule.max_file_size.is_some_and(|max| len > max) {
             continue;
         }
+        // A filter that was not checked is treated as a hit: the rule is
+        // not reported on evidence its own filter might rule out.
         if rule
             .unless
-            .is_some_and(|i| scan.found.get(i).copied().unwrap_or(false))
+            .is_some_and(|i| scan.prefix_hits.get(i).copied().flatten() != Some(false))
         {
             continue;
         }
@@ -136,8 +148,12 @@ pub(super) fn run<R: Read + Seek + ?Sized>(
 }
 
 impl<R: Read + Seek + ?Sized> Scan<'_, R> {
-    /// Reads `len` bytes at `offset` (fewer at end of file), charged to the
-    /// byte budget. A read the budget cannot cover is not made.
+    /// Reads `len` bytes at `offset`, or up to the file length the reader
+    /// reported, charged to the byte budget. A read the budget cannot cover
+    /// is not made. If the reader ends before that, the bytes it gave are
+    /// returned and [`Self::short_read`] is set; the caller scans them and
+    /// then stops with [`Self::eof`], so a truncated file is never reported
+    /// as scanned in full.
     fn read_at(&mut self, offset: u64, len: usize) -> Result<Vec<u8>, Stop> {
         let len = usize::try_from(self.len.saturating_sub(offset)).map_or(len, |a| a.min(len));
         let cost = u64::try_from(len).unwrap_or(u64::MAX);
@@ -145,12 +161,47 @@ impl<R: Read + Seek + ?Sized> Scan<'_, R> {
         if total > self.limits.max_scan_bytes {
             return Err(Stop::Budget);
         }
-        self.bytes = total;
         self.reader.seek(SeekFrom::Start(offset))?;
         let mut buf = vec![0_u8; len];
         let got = read_full(self.reader, &mut buf)?;
         buf.truncate(got);
+        self.bytes = self
+            .bytes
+            .saturating_add(u64::try_from(got).unwrap_or(u64::MAX));
+        if got < len {
+            self.short_read = true;
+        }
         Ok(buf)
+    }
+
+    /// Stops the scan if a read came up short.
+    fn eof(&self) -> Result<(), Stop> {
+        if self.short_read {
+            Err(Stop::Io(io::ErrorKind::UnexpectedEof))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Checks every `unless_start` pattern against the start of the file,
+    /// before anything else is scanned, so no budget can run out between a
+    /// rule's strings and its filter.
+    fn prefixes(&mut self) -> Result<(), Stop> {
+        let compiled = self.compiled;
+        if compiled.prefixes.is_empty() {
+            return Ok(());
+        }
+        let head = self.read_at(0, compiled.prefix_len)?;
+        // A file shorter than a pattern does not start with it; a file
+        // that ended early might, so nothing is decided.
+        self.eof()?;
+        for (i, matcher) in compiled.prefixes.iter().enumerate() {
+            self.step(matcher.cost())?;
+            if let Some(hit) = self.prefix_hits.get_mut(i) {
+                *hit = Some(matcher.matches_at(&head, 0));
+            }
+        }
+        Ok(())
     }
 
     /// Parses the PE headers, as [`crate::filetype::classify`] does: only
@@ -165,6 +216,7 @@ impl<R: Read + Seek + ?Sized> Scan<'_, R> {
             return Ok(());
         }
         let dos = self.read_at(0, DOS_LEN)?;
+        self.eof()?;
         let e_lfanew = match (dos.get(..2), dos.get(0x3c..0x40)) {
             (Some(b"MZ"), Some(&[a, b, c, d])) => u32::from_le_bytes([a, b, c, d]),
             _ => return Ok(()),
@@ -174,6 +226,7 @@ impl<R: Read + Seek + ?Sized> Scan<'_, R> {
         }
         let coff_at = u64::from(e_lfanew) + 4;
         let nt = self.read_at(u64::from(e_lfanew), 24)?;
+        self.eof()?;
         if nt.get(..4) != Some(&b"PE\0\0"[..]) {
             return Ok(());
         }
@@ -183,6 +236,7 @@ impl<R: Read + Seek + ?Sized> Scan<'_, R> {
         let end = coff_at + COFF_LEN + optional_len + sections * SECTION_HEADER_LEN;
         let want = usize::try_from(end).map_err(|_| Stop::Budget)?;
         let headers = self.read_at(0, want)?;
+        self.eof()?;
         // A file that ends inside its headers is not mapped by the loader,
         // and the classifier does not call it a PE image either.
         if headers.len() < want {
@@ -226,14 +280,12 @@ impl<R: Read + Seek + ?Sized> Scan<'_, R> {
             self.check_clock()?;
             let want = usize::try_from(end - next).map_or(CHUNK_LEN, |n| n.min(CHUNK_LEN));
             let chunk = self.read_at(next, want)?;
-            if chunk.is_empty() {
-                // The file is shorter than the reader said.
-                break;
-            }
             next = next.saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
             buf.extend_from_slice(&chunk);
             let buf_end = base.saturating_add(u64::try_from(buf.len()).unwrap_or(u64::MAX));
-            let last = next >= end || chunk.len() < want;
+            // After a short read, the bytes that did arrive are still
+            // scanned, as the last chunk, before the scan stops.
+            let last = next >= end || self.short_read;
             let owned_to = if last {
                 buf_end
             } else {
@@ -243,7 +295,7 @@ impl<R: Read + Seek + ?Sized> Scan<'_, R> {
             };
             self.chunk(&buf, base, owned_from, owned_to)?;
             if last {
-                break;
+                return self.eof();
             }
             let drop = usize::try_from(owned_to - base).unwrap_or(buf.len());
             buf.drain(..drop.min(buf.len()));

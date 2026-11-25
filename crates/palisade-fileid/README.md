@@ -624,7 +624,7 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   scan is linear. `ScanLimits` (32 MiB scanned in full, 40 MiB read, 64 Mi
   steps, 2 s) bound every scan; a file over the size limit gets
   `content_scan_partial` (its start and last 1 MiB are scanned), a spent
-  budget `content_scan_timeout` and a read error `content_scan_error`,
+  budget `content_scan_timeout`, and a read error or early end of file `content_scan_error`,
   never an error. Tags found before a stop are kept. YARA syntax (through
   `yara-x`) is not supported: it needs a newer Rust than the workspace
   minimum and would exceed the duplicate-crate budget; see the module

@@ -86,9 +86,15 @@ pub const SCRIPT_FROZEN_PYTHON: &str = "script:frozen-python";
 pub const TEST_MALWARE_TEST_FILE: &str = "test:malware-test-file";
 
 /// The compound file header: signature, a zero CLSID, then a minor
-/// version, major version 3 or 4, and the little-endian byte order mark.
+/// version, a major version below 16 (the format defines 3 and 4), and the
+/// little-endian byte order mark.
 const CFB_HEADER: &str =
     "D0 CF 11 E0 A1 B1 1A E1 00000000 00000000 00000000 00000000 ?? 00 0? 00 FE FF";
+/// One past the last offset a section header can start at: the largest
+/// `e_lfanew` the parser accepts, the signature and COFF header, the
+/// largest optional header, and the largest section table.
+const BUNDLE_NAME_SEARCH_END: u64 = 0x10_0000 + 4 + 20 + 0xffff + 1024 * 40;
+
 /// The installer database root CLSID `{000C1084-0000-0000-C000-000000000046}`.
 const MSI_CLSID: &str = "84 10 0C 00 00 00 00 00 C0 00 00 00 00 00 00 46";
 const CAB: &str = "4D 53 43 46 00 00 00 00";
@@ -124,7 +130,9 @@ pub(super) fn rules() -> Vec<RuleSource> {
             INSTALLER_BUNDLE_BOOTSTRAPPER,
             true,
             vec![
-                range("2E 77 69 78 62 75 72 6E", 0, 0x10_0000 + 0x1_0000),
+                // Anywhere a section header can be: past the largest
+                // `e_lfanew`, optional header and section table.
+                range("2E 77 69 78 62 75 72 6E", 0, BUNDLE_NAME_SEARCH_END),
                 anywhere("00 43 F1 00 02 00 00 00"),
             ],
             Condition::All,
