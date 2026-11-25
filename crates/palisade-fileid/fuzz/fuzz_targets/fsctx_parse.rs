@@ -1,12 +1,14 @@
 //! Fuzzes the file-system context parsers: path normalisation (Win32 and
 //! NT forms), self-relative security descriptors with the writability
-//! evaluation, and `Zone.Identifier` streams. No input may panic, and a
+//! evaluation, `Zone.Identifier` streams, and the stream-list and
+//! change-journal records the OS returns. No input may panic, and a
 //! normalised path, and each ancestor that is not too long, must normalise
 //! to itself again.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
 use palisade_fileid::fsctx::acl::{EvaluationOptions, ObjectKind, SecurityDescriptor, evaluate};
+use palisade_fileid::fsctx::ntfs::{MAX_STREAMS, parse_stream_info, parse_usn_record};
 use palisade_fileid::fsctx::{normalize_nt, normalize_win32, parse_zone_identifier};
 
 fuzz_target!(|data: &[u8]| {
@@ -29,6 +31,12 @@ fuzz_target!(|data: &[u8]| {
             let w = evaluate(&sd, kind, &EvaluationOptions::default());
             assert!(w.uncertain.difference(w.rights).is_empty());
         }
+    }
+    if let Ok(list) = parse_stream_info(data) {
+        assert!(list.streams.len() <= MAX_STREAMS);
+    }
+    if let Ok(usn) = parse_usn_record(data) {
+        assert!(matches!(usn.major_version, 2 | 3));
     }
     let m = parse_zone_identifier(data);
     if let (Some(z), Some(s)) = (m.zone, m.strictest_zone) {

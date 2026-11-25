@@ -12,5 +12,7 @@
 # Changing this file needs code owner review (.github/CODEOWNERS).
 # The workspace sets `unsafe_code = "deny"`; the files below relax it.
 
+# File and volume calls for the Windows backend (#46, #54).
+crates/palisade-fileid/src/win/sys.rs
 # The OS trust-verification cross-check (#48).
 crates/palisade-fileid/src/win/trust.rs
