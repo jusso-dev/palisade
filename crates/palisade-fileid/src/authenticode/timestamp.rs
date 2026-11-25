@@ -192,6 +192,12 @@ pub enum TimestampStatus {
     /// The TSA certificate chains to no anchor of the TSA trust
     /// configuration.
     UntrustedTsa,
+    /// The TSA chain could be built only by relaxing an issuer's basic
+    /// constraints ([`super::TrustConfig::ignore_basic_constraints`]). Those
+    /// relaxations are for code signers' chains; a TSA chain that needs one
+    /// is never trusted, even when the TSA trust configuration is shared
+    /// with code signing.
+    TsaBasicConstraintsRelaxed,
     /// The TSA chain is not in force for the Time Stamping EKU.
     MissingTimeStampingEku,
     /// The TSA certificate's key usage does not include
@@ -702,8 +708,9 @@ fn verify_signer_and_tsa(
     status
 }
 
-/// The TSA chain checks: anchored, Time Stamping EKU, key usage, and the
-/// time inside every certificate's validity.
+/// The TSA chain checks: anchored with no basic-constraint relaxation, Time
+/// Stamping EKU, key usage, and the time inside every certificate's
+/// validity.
 fn judge_tsa(
     info: &TimestampInfo,
     chain: &ChainReport,
@@ -711,6 +718,9 @@ fn judge_tsa(
 ) -> TimestampStatus {
     if !chain.full_chain.anchored {
         return TimestampStatus::UntrustedTsa;
+    }
+    if !chain.basic_constraints_ignored.is_empty() {
+        return TimestampStatus::TsaBasicConstraintsRelaxed;
     }
     let time_stamping = eku::TIME_STAMPING.id();
     if !chain.chain_has_eku(&time_stamping) {
@@ -1272,6 +1282,38 @@ mod tests {
             TimestampError::DuplicateAttribute(ObjectId::from_der(oid::SIGNING_CERTIFICATE))
         );
         assert!(signer(&[v2.clone(), v2]).is_err());
+    }
+
+    #[test]
+    fn a_tsa_chain_that_needs_a_relaxed_issuer_is_never_trusted() {
+        use super::super::chain::{CertificatePin, TrustConfig, build_chain};
+        let fixture = |n: &str| {
+            std::fs::read(format!(
+                "{}/tests/fixtures/chain/{n}.der",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .unwrap()
+        };
+        let certs = vec![
+            fixture("leaf-under-not-ca"),
+            fixture("inter-not-ca"),
+            fixture("root"),
+        ];
+        let mut config = TrustConfig::new();
+        config.add_anchor("root", &fixture("root")).unwrap();
+        // A configuration relaxed for code signing, shared with TSAs.
+        let inter = super::super::x509::CertSummary::from_der(&certs[1]).unwrap();
+        config.ignore_basic_constraints(CertificatePin::Sha256Thumbprint(inter.sha256_thumbprint));
+        let chain = build_chain(&certs, 0, &config).unwrap();
+        assert!(chain.full_chain.anchored);
+        assert_eq!(chain.basic_constraints_ignored, [1]);
+        let mut info = blank(0, TimestampKind::Rfc3161);
+        info.time = Some(1_900_000_000);
+        let mut warnings = Warnings::default();
+        assert_eq!(
+            judge_tsa(&info, &chain, &mut warnings),
+            TimestampStatus::TsaBasicConstraintsRelaxed
+        );
     }
 
     #[test]

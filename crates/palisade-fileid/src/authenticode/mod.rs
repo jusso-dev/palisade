@@ -67,8 +67,8 @@
 //!   countersignature timestamps against a TSA [`TrustConfig`].
 //! - [`evaluate_validity`] judges every signature as of when it was made:
 //!   the trusted signing time, expiry ([`ExpiryPolicy`], Lifetime Signing),
-//!   revocation data the caller supplies ([`RevocationSet`], [`Crl`]), and
-//!   per-certificate relaxations. Every outcome is one
+//!   revocation data the caller supplies ([`RevocationSet`], [`Crl`],
+//!   [`OcspResponse`]), and per-certificate relaxations. Every outcome is one
 //!   [`VerificationError`] code, shared with the OS event decoder (#58).
 //!   Allow decisions must use [`ValidityReport::primary`].
 //!
@@ -111,6 +111,7 @@ mod crypto;
 pub mod eku;
 pub mod hash;
 mod image;
+mod ocsp;
 pub mod page;
 pub(crate) mod pkcs7;
 mod revocation;
@@ -142,6 +143,10 @@ pub use image::{
     HEADER_PREFIX_LEN, ImageHashOptions, ImageHashStatus, ImageHashes, hash_image_file,
     hash_image_reader,
 };
+pub use ocsp::{
+    MAX_OCSP_CERTIFICATES, MAX_OCSP_RESPONSES_PER_RESPONSE, MAX_OCSP_SIZE, OcspCertStatus,
+    OcspError, OcspResponse, ResponderId, SingleResponse,
+};
 pub use page::{
     PAGE_SIZE, PageHashCheck, PageHashError, PageHashMismatch, PageHashTables, PageHasher,
     PageLayout, PageMismatchKind, page_hash_table, page_hash_tables, verify_page_hashes,
@@ -151,8 +156,8 @@ pub use palisade_core::VerificationError;
 pub use pkcs7::{MAX_CERTIFICATES, MAX_TIMESTAMPS, MAX_WARNINGS};
 pub use revocation::{
     CertRevocation, CertificateMatch, Coverage, Crl, CrlEntry, CrlError, MAX_CRL_CHECKS,
-    MAX_CRL_ENTRIES, MAX_CRL_SIZE, MAX_CRLS, RevocationFailure, RevocationMode, RevocationReason,
-    RevocationSet, RevocationSource, RevokedCertificate,
+    MAX_CRL_ENTRIES, MAX_CRL_SIZE, MAX_CRLS, MAX_OCSP_RESPONSES, RevocationFailure, RevocationMode,
+    RevocationReason, RevocationSet, RevocationSource, RevokedCertificate,
 };
 pub use signature::{
     BadSignature, CertificateEntry, CertificateTableError, Curve, DigestAlgorithm, InvalidReason,
