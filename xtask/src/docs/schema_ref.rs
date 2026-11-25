@@ -263,26 +263,31 @@ fn description(node: &Value) -> String {
 
 /// Schema descriptions come from Rust doc comments, where ``[`Name`]`` is a
 /// rustdoc link. Outside rustdoc it would show its brackets, so keep only
-/// the code span. A bracket followed by `(` is a real Markdown link.
+/// the code span. Only a whole code span directly inside `[` and `]` is
+/// such a link, and not when a `(` or `[` follows (a real Markdown link).
+/// Code spans are found per line, as Markdown finds them.
 fn strip_intra_doc_links(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(start) = rest.find("[`") {
-        out.push_str(&rest[..start]);
-        let after = &rest[start + 1..];
-        match after.find("`]") {
-            Some(end) if !after[1..end].contains('`') && !after[end + 2..].starts_with('(') => {
-                out.push_str(&after[..=end]);
-                rest = &after[end + 2..];
+    let lines: Vec<String> = text
+        .split('\n')
+        .map(|line| {
+            let bytes = line.as_bytes();
+            let mut drop = Vec::new();
+            for (start, end) in super::markdown::code_spans(line) {
+                let opened = start > 0 && bytes[start - 1] == b'[';
+                let closed = bytes.get(end) == Some(&b']');
+                let followed = matches!(bytes.get(end + 1), Some(b'(' | b'['));
+                if opened && closed && !followed {
+                    drop.push(start - 1);
+                    drop.push(end);
+                }
             }
-            _ => {
-                out.push('[');
-                rest = after;
-            }
-        }
-    }
-    out.push_str(rest);
-    out
+            line.char_indices()
+                .filter(|(i, _)| !drop.contains(i))
+                .map(|(_, c)| c)
+                .collect()
+        })
+        .collect();
+    lines.join("\n")
 }
 
 /// Every pointer at which each object definition appears, from the root:
@@ -335,7 +340,7 @@ fn walk(
     }
 }
 
-/// The version that added a field: the newest version over every pointer
+/// The version that added a field: the oldest version over every pointer
 /// it appears at, so a field shared by an old and a new parent shows when it
 /// first appeared anywhere (the oldest).
 fn field_since(pointers: &[String], field: &str, spec: &Spec<'_>, first: &str) -> String {
@@ -765,6 +770,19 @@ mod tests {
         );
         assert_eq!(strip_intra_doc_links("[`x` and `y`]"), "[`x` and `y`]");
         assert_eq!(strip_intra_doc_links("[`unclosed"), "[`unclosed");
+        // Brackets inside separate code spans are not a link.
+        assert_eq!(
+            strip_intra_doc_links("Use `[` and `]`."),
+            "Use `[` and `]`."
+        );
+        assert_eq!(strip_intra_doc_links("[`]"), "[`]");
+        // A bracketed code span that holds a bracket is still one link.
+        assert_eq!(strip_intra_doc_links("[``]``]"), "``]``");
+        assert_eq!(strip_intra_doc_links("`[` x `]`"), "`[` x `]`");
+        // A reference-style link keeps its brackets.
+        assert_eq!(strip_intra_doc_links("[`Name`][ref]"), "[`Name`][ref]");
+        assert_eq!(strip_intra_doc_links("[``a`b``]"), "``a`b``");
+        assert_eq!(strip_intra_doc_links("[`a`]\n[`b`] é"), "`a`\n`b` é");
     }
 
     #[test]

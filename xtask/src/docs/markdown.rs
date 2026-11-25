@@ -72,7 +72,7 @@ pub fn join(lines: &[String]) -> String {
 
 /// The byte ranges of code spans in one line of prose: a run of `n`
 /// backticks up to the next run of exactly `n`. An unmatched run is text.
-fn code_spans(line: &str) -> Vec<(usize, usize)> {
+pub fn code_spans(line: &str) -> Vec<(usize, usize)> {
     let bytes = line.as_bytes();
     let mut spans = Vec::new();
     let mut i = 0;

@@ -7,7 +7,8 @@
 //! - `<site>/versions.json` lists every version directory, `latest`
 //!   first and then releases newest first. The theme's version switcher
 //!   reads it.
-//! - `<site>/index.html` redirects to `latest/`, and `<site>/.nojekyll`
+//! - `<site>/index.html` redirects to `latest/` (or, until `main` is first
+//!   published, the newest release), and `<site>/.nojekyll`
 //!   makes Pages serve the files as they are.
 //!
 //! Only `<name>` and the three root files are written, so publishing
@@ -79,8 +80,13 @@ pub fn sorted_versions(names: impl IntoIterator<Item = String>) -> Vec<String> {
     out
 }
 
-/// The root redirect page.
-pub const INDEX_HTML: &str = "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Palisade documentation</title>\n<meta http-equiv=\"refresh\" content=\"0; url=latest/\">\n<link rel=\"canonical\" href=\"latest/\">\n</head>\n<body>\n<p><a href=\"latest/\">Palisade documentation</a></p>\n</body>\n</html>\n";
+/// The root redirect page, to `version` (`latest`, or the newest release
+/// before `main` was first published).
+pub fn index_html(version: &str) -> String {
+    format!(
+        "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Palisade documentation</title>\n<meta http-equiv=\"refresh\" content=\"0; url={version}/\">\n<link rel=\"canonical\" href=\"{version}/\">\n</head>\n<body>\n<p><a href=\"{version}/\">Palisade documentation</a></p>\n</body>\n</html>\n"
+    )
+}
 
 /// Assembles `site`. `book` and `api` are the built book and `target/doc`.
 pub fn assemble(
@@ -132,7 +138,9 @@ pub fn assemble(
     let json = Value::from(versions.clone());
     std::fs::write(site.join("versions.json"), format!("{json}\n"))
         .map_err(|e| format!("cannot write versions.json: {e}"))?;
-    std::fs::write(site.join("index.html"), INDEX_HTML)
+    // `versions` holds at least the version just written.
+    let first = versions.first().map_or(version, String::as_str);
+    std::fs::write(site.join("index.html"), index_html(first))
         .map_err(|e| format!("cannot write index.html: {e}"))?;
     std::fs::write(site.join(".nojekyll"), "")
         .map_err(|e| format!("cannot write .nojekyll: {e}"))?;
@@ -267,6 +275,13 @@ mod tests {
             "[\"latest\",\"v0.1\"]\n"
         );
         assert!(site.join(".nojekyll").is_file());
+        let root = std::fs::read_to_string(site.join("index.html")).unwrap();
+        assert!(root.contains("url=latest/"));
+        // A release assembled into a site with no `latest` yet redirects to it.
+        let fresh = base.join("fresh");
+        assemble(&fresh, "v0.2", &book, &api).unwrap();
+        let root = std::fs::read_to_string(fresh.join("index.html")).unwrap();
+        assert!(root.contains("url=v0.2/"), "{root}");
         assert!(assemble(&site, "../x", &book, &api).is_err());
         assert!(assemble(&site, "latest", &base.join("none"), &api).is_err());
         let _ = std::fs::remove_dir_all(&base);

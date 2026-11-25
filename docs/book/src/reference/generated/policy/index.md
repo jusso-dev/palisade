@@ -35,9 +35,9 @@ Enumerations and string formats: [Value types](types.md).
 
 Each example passes this schema and full validation (`cargo test -p palisade-policy --test yaml`, in CI).
 
-- [`actions-and-effects.yaml`](../../../../../examples/policies/actions-and-effects.yaml): Rule actions and effect flags (#34). Each rule set kind holds the actions
-- [`finance-workstations.yaml`](../../../../../examples/policies/finance-workstations.yaml): Finance workstations: allow one line-of-business suite by publisher,
-- [`first-match.yaml`](../../../../../examples/policies/first-match.yaml): A firewall-style policy: rules are ordered, and the first rule that
-- [`minimal.yaml`](../../../../../examples/policies/minimal.yaml): The smallest valid policy: no rule sets, so nothing is allowed and every
-- [`staged-rollout.yaml`](../../../../../examples/policies/staged-rollout.yaml): A staged rollout (#36): the policy is in audit, so what it would block is
-- [`workstation-baseline.yaml`](../../../../../examples/policies/workstation-baseline.yaml): A workstation baseline with hash, publisher and path rules (ISM-0955).
+- [`actions-and-effects.yaml`](../../../../../examples/policies/actions-and-effects.yaml): Rule actions and effect flags (#34). Each rule set kind holds the actions it is for; a `mixed` set holds any. Effect flags are optional: an unset flag takes the action's default (see the palisade-policy README).
+- [`finance-workstations.yaml`](../../../../../examples/policies/finance-workstations.yaml): Finance workstations: allow one line-of-business suite by publisher, product and minimum version, and keep PowerShell in audit while scripts are reviewed. `signer.publisher` is the signer's common name (the `CN` of the leaf certificate's subject), not the whole distinguished name.
+- [`first-match.yaml`](../../../../../examples/policies/first-match.yaml): A firewall-style policy: rules are ordered, and the first rule that matches and does not defer decides (#35). Curated rule sets come first (curated_first, the default). The mandatory blocklist is checked before every ordered rule, whatever its order.
+- [`minimal.yaml`](../../../../../examples/policies/minimal.yaml): The smallest valid policy: no rule sets, so nothing is allowed and every file is reported (audit mode) by the implicit deny.
+- [`staged-rollout.yaml`](../../../../../examples/policies/staged-rollout.yaml): A staged rollout (#36): the policy is in audit, so what it would block is reported but runs. Executables are already enforced, a disconnected device enforces everything, and a new blocklist is tried in monitor mode. The mandatory blocklist blocks in every mode, and one deny rule is enforced in audit too (`always_enforce`).
+- [`workstation-baseline.yaml`](../../../../../examples/policies/workstation-baseline.yaml): A workstation baseline with hash, publisher and path rules (ISM-0955). The same document as tests/fixtures/valid/workstation-baseline.json.

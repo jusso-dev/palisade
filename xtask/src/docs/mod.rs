@@ -340,15 +340,20 @@ fn examples_section(root: &Path) -> Result<String, String> {
     );
     for name in names {
         let text = read(&dir.join(&name))?;
+        // The first paragraph of the header comment, after the editor
+        // schema line: the consecutive non-empty `#` lines.
         let summary = text
             .lines()
             .skip_while(|l| l.starts_with("# yaml-language-server:"))
-            .map(|l| l.trim_start_matches('#').trim())
-            .find(|l| !l.is_empty())
-            .unwrap_or("");
+            .map(|l| l.strip_prefix('#').map(str::trim))
+            .skip_while(|l| l.is_some_and(str::is_empty))
+            .take_while(|l| l.is_some_and(|t| !t.is_empty()))
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" ");
         out.push_str(&format!(
             "- [`{name}`](../../../../../examples/policies/{name}): {}\n",
-            markdown::cell(summary)
+            markdown::cell(&summary)
         ));
     }
     Ok(out)
