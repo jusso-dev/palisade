@@ -6,4 +6,4 @@ Decided at stage unknown, under the deny_wins precedence model.
 Rule 'Retired allow' (R-000005) would have matched (allow), but it is disabled.
 
 What would allow this?
-A rule allowing this exact file by its hash would allow it.
+Draft: a rule allowing this exact file by its hash. Added to the policy, it would allow this file.

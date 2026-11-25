@@ -152,16 +152,7 @@ pub fn read_tests(input: &str) -> Result<TestFile, TestFileError> {
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| TestFileError::Parse("missing policy_tests_version".to_owned()))?
         .to_owned();
-    let readable = version
-        .parse::<palisade_core::SchemaVersion>()
-        .ok()
-        .zip(
-            POLICY_TESTS_VERSION
-                .parse::<palisade_core::SchemaVersion>()
-                .ok(),
-        )
-        .is_some_and(|(v, r)| super::simulate::readable(v, r));
-    if !readable {
+    if !readable(&version) {
         return Err(TestFileError::UnsupportedVersion(version));
     }
     if let Some(n) = value
@@ -177,34 +168,67 @@ pub fn read_tests(input: &str) -> Result<TestFile, TestFileError> {
     }
     let file: TestFile =
         serde_json::from_value(value).map_err(|e| TestFileError::Parse(e.to_string()))?;
-    if file.tests.len() > MAX_TESTS {
-        return Err(TestFileError::Invalid(format!(
-            "{} tests; at most {MAX_TESTS}",
-            file.tests.len()
-        )));
-    }
-    let mut names = BTreeSet::new();
-    for t in &file.tests {
-        if !names.insert(t.name.as_str()) {
-            return Err(TestFileError::Invalid(format!(
-                "test {:?} appears more than once",
-                t.name
-            )));
-        }
-        if t.expect == Expect::default() {
-            return Err(TestFileError::Invalid(format!(
-                "test {:?} expects nothing",
-                t.name
-            )));
-        }
-        if t.expect.no_rule && t.expect.rule.is_some() {
-            return Err(TestFileError::Invalid(format!(
-                "test {:?} sets both rule and no_rule",
-                t.name
-            )));
-        }
-    }
+    file.validate()?;
     Ok(file)
+}
+
+/// Whether this reader can read test files of `version`.
+fn readable(version: &str) -> bool {
+    version
+        .parse::<palisade_core::SchemaVersion>()
+        .ok()
+        .zip(
+            POLICY_TESTS_VERSION
+                .parse::<palisade_core::SchemaVersion>()
+                .ok(),
+        )
+        .is_some_and(|(v, r)| super::simulate::readable(v, r))
+}
+
+impl TestFile {
+    /// Checks what [`read_tests`] checks after parsing: the version, the
+    /// number of tests, unique names, and that each test expects something
+    /// and does not set both `rule` and `no_rule`. [`run`] checks it too,
+    /// so a file built in code is held to the same rules as one read.
+    ///
+    /// # Errors
+    ///
+    /// [`TestFileError::UnsupportedVersion`] or [`TestFileError::Invalid`].
+    pub fn validate(&self) -> Result<(), TestFileError> {
+        if !readable(&self.policy_tests_version) {
+            return Err(TestFileError::UnsupportedVersion(
+                self.policy_tests_version.clone(),
+            ));
+        }
+        if self.tests.len() > MAX_TESTS {
+            return Err(TestFileError::Invalid(format!(
+                "{} tests; at most {MAX_TESTS}",
+                self.tests.len()
+            )));
+        }
+        let mut names = BTreeSet::new();
+        for t in &self.tests {
+            if !names.insert(t.name.as_str()) {
+                return Err(TestFileError::Invalid(format!(
+                    "test {:?} appears more than once",
+                    t.name
+                )));
+            }
+            if t.expect == Expect::default() {
+                return Err(TestFileError::Invalid(format!(
+                    "test {:?} expects nothing",
+                    t.name
+                )));
+            }
+            if t.expect.no_rule && t.expect.rule.is_some() {
+                return Err(TestFileError::Invalid(format!(
+                    "test {:?} sets both rule and no_rule",
+                    t.name
+                )));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// The result of one test.
@@ -281,9 +305,11 @@ impl TestReport {
 ///
 /// # Errors
 ///
-/// [`SimError`] if a test's inputs cannot be used or the policy cannot be
-/// compiled.
+/// [`SimError::Tests`] if the file breaks the rules [`read_tests`] checks
+/// (for example, a test expects nothing), or another [`SimError`] if a
+/// test's inputs cannot be used or the policy cannot be compiled.
 pub fn run(policy: &ValidatedPolicy, suite: &str, file: &TestFile) -> Result<TestReport, SimError> {
+    file.validate().map_err(SimError::Tests)?;
     let sim = Simulator::new(policy)
         .map_err(|e| SimError::Candidate(super::simulate::CandidateError::Build(e)))?;
     let snapshots: Vec<FactsSnapshot> = file

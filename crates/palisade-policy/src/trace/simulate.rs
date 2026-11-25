@@ -1020,6 +1020,8 @@ pub enum SimError {
     Snapshot(SnapshotError),
     /// The candidate is unusable.
     Candidate(CandidateError),
+    /// A policy test file is unusable ([`super::policy_test::run`]).
+    Tests(super::policy_test::TestFileError),
 }
 
 impl core::fmt::Display for SimError {
@@ -1027,6 +1029,7 @@ impl core::fmt::Display for SimError {
         match self {
             Self::Snapshot(e) => e.fmt(f),
             Self::Candidate(e) => e.fmt(f),
+            Self::Tests(e) => e.fmt(f),
         }
     }
 }
@@ -1102,8 +1105,9 @@ fn classify(a: &SimDecision, b: &SimDecision) -> Change {
 ///
 /// 1. its SHA-256, if the fact is one the matcher accepts (64 hex digits),
 ///    in lowercase;
-/// 2. otherwise its path, if it is a drive or UNC path, normalised and
-///    folded as path criteria compare it;
+/// 2. otherwise its path, if it is a drive or UNC path whose 8.3 short
+///    names were all expanded, normalised and folded as path criteria
+///    compare it (the matcher treats an unexpanded path as unknown);
 /// 3. otherwise the publisher of its first trusted signature, if not
 ///    empty, folded the same way;
 /// 4. otherwise none.
@@ -1120,6 +1124,7 @@ pub(crate) fn object_key(s: &FactsSnapshot) -> Option<String> {
         .facts
         .path
         .as_ref()
+        .filter(|p| !p.short_name_unresolved)
         .map(|p| palisade_core::path::normalize(&p.path))
         .filter(palisade_core::path::NormalizedPath::is_resolved);
     if let Some(n) = path {

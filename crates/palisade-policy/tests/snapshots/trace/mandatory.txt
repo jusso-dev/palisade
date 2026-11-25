@@ -10,7 +10,7 @@ Why not allowed?
 - Rule 'Tools folder' (R-000003) would allow this file, but the path.directory on this file is `C:\Apps` (expected starts_with `C:\Tools`).
 
 What would allow this?
-A rule allowing this exact file by its hash would allow it. A mandatory rule blocks it, so no allow rule can change that.
+Draft: a rule allowing this exact file by its hash. A mandatory rule blocks this file, so no allow rule can change that.
 
 Matching rules
 Rule      Name                  Action  Stage           Role

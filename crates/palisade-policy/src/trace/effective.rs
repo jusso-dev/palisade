@@ -4,9 +4,10 @@
 //! every rule with where it comes from and whether it takes part, the
 //! settings with their sources, the effective mode per object type, the
 //! active override session and lockdown, and the protection status (#36).
-//! Group inheritance (#37) adds more provenance steps; until it lands, a
-//! device's policy is one document, and every rule's provenance is that
-//! document's rule set.
+//! The view reads one policy document, so every rule's provenance is that
+//! document's rule set. A device's effective policy from the group
+//! hierarchy (#37, `hierarchy::EffectivePolicy`) records group provenance
+//! too; showing it here is a follow-up under #41.
 
 use std::collections::BTreeMap;
 
@@ -30,9 +31,13 @@ pub struct EffectiveRule {
     pub action: ActionKind,
     /// Its stage, or `null` for `defer`.
     pub stage: Option<RuleStage>,
-    /// Whether it takes part in evaluation.
+    /// Whether it takes part in evaluation: it is enabled and the device
+    /// is not disabled, as [`Evaluator::evaluate_in`] decides.
+    ///
+    /// [`Evaluator::evaluate_in`]: crate::evaluate::Evaluator::evaluate_in
     pub active: bool,
-    /// Why not, if it does not: `disabled`.
+    /// Why not, if it does not: `disabled` (the rule is disabled) or
+    /// `device_disabled` (the device mode is `disabled`, so no rule runs).
     pub inactive_reason: Option<&'static str>,
     /// Its rule set's `mode_override`.
     pub rule_set_mode: Option<Mode>,
@@ -92,6 +97,10 @@ pub fn effective_view(policy: &ValidatedPolicy, state: &DeviceState) -> Effectiv
     let doc = policy.document();
     let p = &doc.policy;
     let sets: BTreeMap<_, _> = doc.rule_sets.iter().map(|s| (s.id, s)).collect();
+    // The evaluator runs no rule on a disabled device. The resolved mode is
+    // used, because lockdown overrides a disabled device mode.
+    let device_mode = mode::device_mode(p, state);
+    let device_disabled = device_mode == Mode::Disabled;
     let mut rules = Vec::new();
     for id in &p.rule_sets {
         let Some(set) = sets.get(id).copied() else {
@@ -103,8 +112,14 @@ pub fn effective_view(policy: &ValidatedPolicy, state: &DeviceState) -> Effectiv
                 name: rule.name.clone(),
                 action: rule.action.kind(),
                 stage: RuleStage::of(set, rule),
-                active: rule.enabled,
-                inactive_reason: (!rule.enabled).then_some("disabled"),
+                active: rule.enabled && !device_disabled,
+                inactive_reason: if !rule.enabled {
+                    Some("disabled")
+                } else if device_disabled {
+                    Some("device_disabled")
+                } else {
+                    None
+                },
                 rule_set_mode: set.mode_override,
                 provenance: vec![
                     InheritanceStep {
@@ -131,7 +146,7 @@ pub fn effective_view(policy: &ValidatedPolicy, state: &DeviceState) -> Effectiv
     EffectiveView {
         policy_id: p.id,
         policy_revision: p.revision,
-        device_mode: mode::device_mode(p, state),
+        device_mode,
         protection: ProtectionStatus::of(p, state),
         lockdown: state.lockdown,
         override_session: state.session.map(|s| match s {

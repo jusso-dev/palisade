@@ -19,7 +19,7 @@ Warning: a path rule did not count, because users may be able to write the path:
 
 ### What would allow this?
 
-A rule allowing this exact file by its hash would allow it.
+Draft: a rule allowing this exact file by its hash. Added to the policy, it would allow this file.
 
 ### Matching rules
 

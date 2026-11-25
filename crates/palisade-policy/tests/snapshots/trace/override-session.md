@@ -14,7 +14,7 @@ Decided at stage policy, under the deny\_wins precedence model.
 
 ### What would allow this?
 
-A rule allowing this exact file by its hash would allow it. A deny rule also matches, so the precedence model may still block it.
+Draft: a rule allowing this exact file by its hash. A deny rule also matches, and under deny_wins a deny beats every allow, so no allow rule can stop it blocking this file in enforce mode.
 
 ### Matching rules
 

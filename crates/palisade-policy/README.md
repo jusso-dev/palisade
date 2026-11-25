@@ -158,7 +158,7 @@ A device's effective policy is built from layers, outermost first: the global no
 | `scope_rejections[]` | rules excluded by their scope; empty until scopes exist (#38) | standard |
 | `unknown_facts[]` | each missing or untrusted fact, why, and its effect on the rules it left unknown (an allow did not apply, a deny did not apply, a deny failed closed) | standard |
 | `warnings[]` | `path_acl_unsafe`, `short_name_unresolved`, `signature_relaxed` (#256), and `scope_stale`, `condition_timeout`, `user_controlled_context`, `clock_untrusted` once their sources exist (#38, #33) | standard |
-| `inheritance[]` | the deciding rule's provenance: policy, rule set, rule (#37 adds group nodes) | standard |
+| `inheritance[]` | the deciding rule's provenance: policy, rule set, rule. The group steps that `hierarchy::EffectivePolicy` records (#37) are a follow-up under #41 | standard |
 | `allow_suggestion` | for a block or a would-block, a draft allow rule from the strongest identity available (hash, then publisher with product and version, then publisher, then a path users cannot write), with caveats if a mandatory or ordinary deny also matched. The engine never applies it: it is handed to approvals and recommendations (#5, #11) | standard |
 | `near_misses[]` | rules whose identity anchor matched but which did not apply, ranked by matched criteria (at most 10), each with its failing criteria: pointer, field, operator, expected and observed values | full |
 | `facts_used[]` | every fact the evaluated criteria read | full |
@@ -177,7 +177,7 @@ A device's effective policy is built from layers, outermost first: the global no
 
 **Policy-as-code tests.** `trace::policy_test` reads a `tests:` file (`given` facts, `expect` an outcome, enforce-mode outcome, reason code, mode or deciding rule) and runs it through the simulator. The report has `exit_code` (non-zero on failure) and `junit()`. The examples in [`docs/examples/simulation/`](../../docs/examples/simulation/) run in CI (`tests/simulation.rs`). The `pal policy test` command is #15.
 
-**Effective view.** `trace::effective::effective_view(policy, state)` lists what a device enforces: every rule with its provenance and whether it is active, the settings with their source, the mode of every object type, the session, lockdown and the protection status.
+**Effective view.** `trace::effective::effective_view(policy, state)` lists what a device enforces: every rule with its provenance and whether it is active (a disabled rule, or every rule on a disabled device, is not), the settings with their source, the mode of every object type, the session, lockdown and the protection status.
 
 ## Schema versioning
 

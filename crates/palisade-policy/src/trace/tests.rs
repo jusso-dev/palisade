@@ -2086,3 +2086,342 @@ fn object_keys_identify_one_object_across_spellings() {
     );
     assert_eq!(key(signed(SnapshotSignerStatus::Valid, "")), None);
 }
+
+// Review follow-ups (#41): each test below fails without its fix.
+
+#[test]
+fn the_effective_view_marks_every_rule_inactive_on_a_disabled_device() {
+    // The evaluator runs no rule on a disabled device, so the view must not
+    // report any as active; lockdown overrides a disabled device mode.
+    let p = fixture();
+    let disabled = DeviceState {
+        mode: Mode::Disabled,
+        ..enforce(&p)
+    };
+    let v = effective::effective_view(&p, &disabled);
+    assert_eq!(v.device_mode, Mode::Disabled);
+    assert!(v.rules.iter().all(|r| !r.active), "{:#?}", v.rules);
+    let retired = v.rules.iter().find(|r| r.name == "Retired allow").unwrap();
+    assert_eq!(retired.inactive_reason, Some("disabled"));
+    assert!(
+        v.rules
+            .iter()
+            .filter(|r| r.name != "Retired allow")
+            .all(|r| r.inactive_reason == Some("device_disabled"))
+    );
+    // The view agrees with the evaluator: nothing is decided.
+    let o = object(
+        'b',
+        "Example Ltd",
+        "Example Tools",
+        "C:\\Apps\\tool.exe",
+        Some(false),
+    );
+    assert!(
+        trace_of(&p, &o, &disabled, TraceLevel::Standard)
+            .decision
+            .is_none()
+    );
+
+    let locked = DeviceState {
+        lockdown: true,
+        ..disabled
+    };
+    let v = effective::effective_view(&p, &locked);
+    assert_eq!(v.device_mode, Mode::Enforce);
+    assert!(
+        v.rules
+            .iter()
+            .all(|r| r.active == (r.name != "Retired allow"))
+    );
+    assert!(
+        trace_of(&p, &o, &locked, TraceLevel::Standard)
+            .decision
+            .is_some()
+    );
+}
+
+#[test]
+fn why_not_counts_the_failing_criteria_the_trace_left_out() {
+    // One allow on hash `a` with MAX_FAILING + 2 product criteria that all
+    // fail: `failing` keeps MAX_FAILING, and two more are omitted.
+    let extra = limits::MAX_FAILING + 2;
+    let mut all = vec![crit("hash.sha256", "equals", &[&sha('a')])];
+    for j in 0..extra {
+        all.push(crit("meta.product_name", "equals", &[&format!("P{j}")]));
+    }
+    let p = validated(policy_doc(
+        "enforce",
+        vec![(
+            1,
+            "allowlist",
+            false,
+            vec![rule(
+                1,
+                "Wide",
+                serde_json::json!({"all": all}),
+                serde_json::json!({"type": "allow"}),
+            )],
+        )],
+    ));
+    let o = object('a', "X", "Q", "C:\\a.exe", Some(false));
+    let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Full);
+    let n = &t.near_misses[0];
+    assert_eq!(n.failing.len(), limits::MAX_FAILING);
+    assert_eq!(n.failing_omitted, 2);
+    let doc = explain(&t, Verbosity::Normal);
+    assert_eq!(doc.why_not[0].args["more"], (extra - 1).to_string());
+    let text = render_text(&doc, &Catalog::english());
+    assert!(
+        text.contains(&format!(
+            "{} more criteria of that rule also failed.",
+            extra - 1
+        )),
+        "{text}"
+    );
+
+    // Only omitted failures beyond the first: one kept, more omitted is
+    // still counted. A single failure gives no extra sentence.
+    let mut one = n.clone();
+    one.failing.truncate(1);
+    one.failing_omitted = 2;
+    let mut t2 = t.clone();
+    t2.near_misses = vec![one.clone()];
+    assert_eq!(explain(&t2, Verbosity::Normal).why_not[0].args["more"], "2");
+    one.failing_omitted = 0;
+    t2.near_misses = vec![one];
+    let text = render_text(&explain(&t2, Verbosity::Normal), &Catalog::english());
+    assert!(!text.contains("more criteria"), "{text}");
+}
+
+#[test]
+fn run_rejects_a_test_file_built_in_code_that_expects_nothing() {
+    let given = policy_test::Given {
+        object_type: ObjectType::Executable,
+        facts: SnapshotFacts::default(),
+        variables: Default::default(),
+        context: Default::default(),
+        device_state: SnapshotState::default(),
+    };
+    let case = |name: &str, expect: policy_test::Expect| policy_test::TestCase {
+        name: name.to_owned(),
+        given: given.clone(),
+        expect,
+    };
+    let file = |tests| policy_test::TestFile {
+        policy_tests_version: policy_test::POLICY_TESTS_VERSION.to_owned(),
+        tests,
+    };
+    let empty = file(vec![case("nothing", policy_test::Expect::default())]);
+    assert!(matches!(
+        policy_test::run(&fixture(), "s", &empty),
+        Err(simulate::SimError::Tests(
+            policy_test::TestFileError::Invalid(_)
+        ))
+    ));
+    let both = file(vec![case(
+        "both",
+        policy_test::Expect {
+            rule: Some("R-000001".to_owned()),
+            no_rule: true,
+            ..Default::default()
+        },
+    )]);
+    assert!(policy_test::run(&fixture(), "s", &both).is_err());
+    let twice = file(vec![
+        case(
+            "a",
+            policy_test::Expect {
+                no_rule: true,
+                ..Default::default()
+            },
+        ),
+        case(
+            "a",
+            policy_test::Expect {
+                no_rule: true,
+                ..Default::default()
+            },
+        ),
+    ]);
+    assert!(policy_test::run(&fixture(), "s", &twice).is_err());
+    let newer = policy_test::TestFile {
+        policy_tests_version: "2.0.0".to_owned(),
+        ..file(vec![])
+    };
+    assert!(matches!(
+        policy_test::run(&fixture(), "s", &newer),
+        Err(simulate::SimError::Tests(
+            policy_test::TestFileError::UnsupportedVersion(_)
+        ))
+    ));
+    // A test with a supported expectation still runs.
+    let ok = file(vec![case(
+        "implicit deny",
+        policy_test::Expect {
+            outcome: Some(SimOutcome::Blocked),
+            no_rule: true,
+            ..Default::default()
+        },
+    )]);
+    let r = policy_test::run(&fixture(), "s", &ok).unwrap();
+    assert_eq!(r.exit_code(), 0, "{r:#?}");
+}
+
+#[test]
+fn an_unexpanded_short_name_is_not_an_object_identity() {
+    let snap = |facts: SnapshotFacts| FactsSnapshot {
+        event_id: "e".to_owned(),
+        device_id: None,
+        timestamp: None,
+        object_type: ObjectType::Executable,
+        facts,
+        variables: Default::default(),
+        context: Default::default(),
+        device_state: SnapshotState::default(),
+        recorded: None,
+    };
+    let signer = SnapshotSigner {
+        status: SnapshotSignerStatus::Valid,
+        catalog: false,
+        publisher: Some("Example Ltd".to_owned()),
+        issuer: None,
+        leaf_thumbprint_sha256: None,
+    };
+    let short = SnapshotFacts {
+        path: Some(SnapshotPath {
+            path: "C:\\PROGRA~1\\Tools\\x.exe".to_owned(),
+            alias: None,
+            short_name_unresolved: true,
+            user_writable: None,
+        }),
+        signers: Some(vec![signer.clone()]),
+        ..SnapshotFacts::default()
+    };
+    // The matcher reads the path as unknown, so the key falls through to
+    // the publisher, as for the same object recorded without a path.
+    let only_signer = SnapshotFacts {
+        signers: Some(vec![signer]),
+        ..SnapshotFacts::default()
+    };
+    assert_eq!(
+        simulate::object_key(&snap(short.clone())),
+        simulate::object_key(&snap(only_signer))
+    );
+    assert_eq!(
+        simulate::object_key(&snap(short.clone())).as_deref(),
+        Some("publisher:EXAMPLE LTD")
+    );
+    // With no other identity, there is none.
+    let bare = SnapshotFacts {
+        signers: None,
+        ..short
+    };
+    assert_eq!(simulate::object_key(&snap(bare)), None);
+}
+
+/// The suggestion never claims an allow that precedence would override.
+#[test]
+fn the_suggestion_follows_the_precedence_model() {
+    let deny = |model: &str| {
+        let mut doc = policy_doc(
+            "enforce",
+            vec![(
+                1,
+                "mixed",
+                false,
+                vec![rule(
+                    1,
+                    "Block tool",
+                    crit("path.file_name", "equals", &["tool.exe"]),
+                    serde_json::json!({"type": "deny"}),
+                )],
+            )],
+        );
+        doc.policy.precedence_model = serde_json::from_value(model.into()).unwrap();
+        validated(doc)
+    };
+    let o = object(
+        'b',
+        "Example Ltd",
+        "Example Tools",
+        "C:\\Apps\\tool.exe",
+        Some(false),
+    );
+    let suggestion = |p: &ValidatedPolicy| {
+        let t = trace_of(p, &o, &enforce(p), TraceLevel::Standard);
+        assert_eq!(
+            t.allow_suggestion.as_ref().unwrap().caveats,
+            ["deny_rule_matched"]
+        );
+        let doc = explain(&t, Verbosity::Normal);
+        let c = Catalog::english();
+        let s = doc.suggestion.clone().unwrap();
+        // The suggestion line of the rendered text, after its heading.
+        let text = render_text(&doc, &c);
+        let heading = c.format(&explain::Message {
+            id: "heading-suggestion",
+            args: Default::default(),
+        });
+        let line = text
+            .lines()
+            .skip_while(|l| *l != heading)
+            .nth(1)
+            .unwrap()
+            .to_owned();
+        (s.args["effect"].clone(), line)
+    };
+
+    // deny_wins: the deny always blocks, so no allow is claimed.
+    let p = deny("deny_wins");
+    let (effect, text) = suggestion(&p);
+    assert_eq!(effect, "deny_wins");
+    assert!(!text.contains("would allow"), "{text}");
+    assert!(text.contains("no allow rule can stop it"), "{text}");
+    // And that is what the evaluator decides with the draft added.
+    let draft = trace_of(&p, &o, &enforce(&p), TraceLevel::Standard)
+        .allow_suggestion
+        .unwrap();
+    let with_draft = |p: ValidatedPolicy| {
+        let mut doc = p.into_document();
+        doc.rule_sets[0].rules.push(
+            serde_json::from_value(serde_json::json!({
+                "id": rule_id(99), "name": "Draft", "object_types": draft.object_types,
+                "match": draft.r#match, "action": {"type": "allow"},
+            }))
+            .unwrap(),
+        );
+        validated(doc)
+    };
+    let p2 = with_draft(p);
+    assert_eq!(
+        trace_of(&p2, &o, &enforce(&p2), TraceLevel::Minimal)
+            .decision
+            .unwrap()
+            .outcome(),
+        Outcome::Blocked
+    );
+
+    // allow_wins: the draft does win, and the text only says it may.
+    let p = deny("allow_wins");
+    let (effect, text) = suggestion(&p);
+    assert_eq!(effect, "deny");
+    assert!(text.contains("may allow"), "{text}");
+    let p2 = with_draft(p);
+    assert_eq!(
+        trace_of(&p2, &o, &enforce(&p2), TraceLevel::Minimal)
+            .decision
+            .unwrap()
+            .outcome(),
+        Outcome::Allowed
+    );
+
+    // No deny matched: the draft allows under every model.
+    let p = fixture();
+    let o = object('b', "Other Ltd", "Other", "C:\\Apps\\x.exe", Some(false));
+    let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Standard);
+    assert!(t.allow_suggestion.as_ref().unwrap().caveats.is_empty());
+    let doc = explain(&t, Verbosity::Normal);
+    assert_eq!(doc.suggestion.as_ref().unwrap().args["effect"], "allow");
+    assert!(render_text(&doc, &Catalog::english()).contains("it would allow this file"));
+}

@@ -24,7 +24,7 @@ use super::{
     StageOutcome, Trace, TriState, UnknownEffect, WarningCode,
 };
 use crate::decision::{Outcome, ReasonCode, RuleRef};
-use crate::model::{ActionKind, Field, FieldClass, Mode, Operator};
+use crate::model::{ActionKind, Field, FieldClass, Mode, Operator, PrecedenceModel};
 
 /// How much an explanation says.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -215,11 +215,23 @@ pub fn explain(trace: &Trace, verbosity: Verbosity) -> ExplainDoc {
             DraftIdentity::Publisher => "suggest-publisher",
             DraftIdentity::Path => "suggest-path",
         });
-        if s.caveats.contains(&"mandatory_deny_matched") {
-            m = m.arg("caveat", "mandatory");
+        // What adding the draft would do, claiming no more than the
+        // evaluator would decide: a mandatory deny always blocks, and under
+        // `deny_wins` so does any matching deny. Under the other models the
+        // deny may still win. With no deny matched, the draft is the only
+        // policy candidate, so it allows the object under every model.
+        let effect = if s.caveats.contains(&"mandatory_deny_matched") {
+            "mandatory"
         } else if s.caveats.contains(&"deny_rule_matched") {
-            m = m.arg("caveat", "deny");
-        }
+            if trace.precedence_model == PrecedenceModel::DenyWins {
+                "deny_wins"
+            } else {
+                "deny"
+            }
+        } else {
+            "allow"
+        };
+        m = m.arg("effect", effect);
         doc.suggestion = Some(m);
     }
     doc.table = trace
@@ -319,7 +331,14 @@ fn why_not(n: &NearMiss) -> Option<Message> {
             .arg("rule", rule.clone())
             .arg("verb", verb)
             .arg("field", field_name(c.field))
-            .arg("more", n.failing.len().saturating_sub(1).to_string())
+            // Every other failing criterion, including those the trace
+            // left out of `failing`.
+            .arg(
+                "more",
+                (n.failing.len() + n.failing_omitted as usize)
+                    .saturating_sub(1)
+                    .to_string(),
+            )
     };
     let expected = c.expected.join(", ");
     if c.notes.contains(&"path_acl_unsafe") {
@@ -625,31 +644,39 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ),
     (
         "suggest-hash",
-        "A rule allowing this exact file by its hash would allow it.",
+        "Draft: a rule allowing this exact file by its hash.",
     ),
     (
         "suggest-publisher-product-version",
-        "A rule allowing this publisher, product and version or later would allow it.",
+        "Draft: a rule allowing this publisher, product and version or later.",
     ),
     (
         "suggest-publisher-product",
-        "A rule allowing this publisher and product would allow it.",
+        "Draft: a rule allowing this publisher and product.",
     ),
     (
         "suggest-publisher",
-        "A rule allowing this publisher would allow it.",
+        "Draft: a rule allowing this publisher.",
     ),
     (
         "suggest-path",
-        "A rule allowing this path, which users cannot write, would allow it.",
+        "Draft: a rule allowing this path, which users cannot write.",
     ),
     (
-        "suggest-caveat-mandatory",
-        "A mandatory rule blocks it, so no allow rule can change that.",
+        "suggest-effect-allow",
+        "Added to the policy, it would allow this file.",
     ),
     (
-        "suggest-caveat-deny",
-        "A deny rule also matches, so the precedence model may still block it.",
+        "suggest-effect-mandatory",
+        "A mandatory rule blocks this file, so no allow rule can change that.",
+    ),
+    (
+        "suggest-effect-deny-wins",
+        "A deny rule also matches, and under deny_wins a deny beats every allow, so no allow rule can stop it blocking this file in enforce mode.",
+    ),
+    (
+        "suggest-effect-deny",
+        "Added to the policy, it may allow this file, but a deny rule also matches and the precedence model may still block it.",
     ),
     ("heading-why-not", "Why not allowed?"),
     ("heading-suggestion", "What would allow this?"),
@@ -1023,12 +1050,14 @@ fn why_not_text(m: &Message, catalog: &Catalog, style: Style) -> String {
 
 fn suggestion_text(m: &Message, catalog: &Catalog, style: Style) -> String {
     let mut s = catalog.styled(m, style);
-    let caveat = match m.args.get("caveat").map(String::as_str) {
-        Some("mandatory") => Some("suggest-caveat-mandatory"),
-        Some("deny") => Some("suggest-caveat-deny"),
+    let effect = match m.args.get("effect").map(String::as_str) {
+        Some("allow") => Some("suggest-effect-allow"),
+        Some("mandatory") => Some("suggest-effect-mandatory"),
+        Some("deny_wins") => Some("suggest-effect-deny-wins"),
+        Some("deny") => Some("suggest-effect-deny"),
         _ => None,
     };
-    if let Some(id) = caveat {
+    if let Some(id) = effect {
         s.push(' ');
         s.push_str(&catalog.styled(&Message::new(id), style));
     }

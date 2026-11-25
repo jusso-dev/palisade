@@ -10,4 +10,4 @@ Decided at stage unknown, under the deny\_wins precedence model.
 
 ### What would allow this?
 
-A rule allowing this exact file by its hash would allow it.
+Draft: a rule allowing this exact file by its hash. Added to the policy, it would allow this file.

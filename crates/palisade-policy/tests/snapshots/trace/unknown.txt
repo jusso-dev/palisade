@@ -13,4 +13,4 @@ Why not allowed?
 - Rule 'Tools folder' (R-000003) would allow this file, but the signer.publisher is unknown.
 
 What would allow this?
-A rule allowing this exact file by its hash would allow it.
+Draft: a rule allowing this exact file by its hash. Added to the policy, it would allow this file.

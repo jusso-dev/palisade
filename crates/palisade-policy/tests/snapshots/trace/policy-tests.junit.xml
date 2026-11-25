@@ -18,7 +18,7 @@ The meta.product_name fact was unknown, so a rule that would let this run did no
 The user.groups fact was unknown, so a deny rule did not apply.
 
 What would allow this?
-A rule allowing this exact file by its hash would allow it.
+Draft: a rule allowing this exact file by its hash. Added to the policy, it would allow this file.
 </failure>
     </testcase>
   </testsuite>

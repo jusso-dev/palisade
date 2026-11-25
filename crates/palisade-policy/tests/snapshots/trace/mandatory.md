@@ -18,7 +18,7 @@ Other matching rules overridden by the deciding rule: 1.
 
 ### What would allow this?
 
-A rule allowing this exact file by its hash would allow it. A mandatory rule blocks it, so no allow rule can change that.
+Draft: a rule allowing this exact file by its hash. A mandatory rule blocks this file, so no allow rule can change that.
 
 ### Matching rules
 

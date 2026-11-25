@@ -24,4 +24,4 @@ Rule 'Block script hosts for standard users' \(R\-000004\) would block this file
 
 ### What would allow this?
 
-A rule allowing this exact file by its hash would allow it.
+Draft: a rule allowing this exact file by its hash. Added to the policy, it would allow this file.

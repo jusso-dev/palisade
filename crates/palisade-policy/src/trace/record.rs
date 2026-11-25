@@ -215,6 +215,13 @@ impl<'p> TracedRule<'p> {
                 }
             }
             Match::Not(child) => Node::Not(self.add(child, format!("{pointer}/not"), !negated)?),
+            // As the evaluator: the hierarchy resolves every reference
+            // before evaluation (#37), and validation rejects one left over.
+            Match::Ref(_) => {
+                return Err(vec![crate::condition::TreeError::UnresolvedRef {
+                    pointer: format!("{pointer}/ref"),
+                }]);
+            }
             Match::Criterion(c) => {
                 let compiled = CompiledCriterion::compile(c).map_err(|errors| {
                     vec![crate::condition::TreeError::Criterion {

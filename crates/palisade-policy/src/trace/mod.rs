@@ -447,7 +447,7 @@ pub struct CriterionTrace {
     /// What the evaluation noticed (`fact_missing`, `path_acl_unsafe` and
     /// so on).
     pub notes: Vec<&'static str>,
-    /// The rule's values, cut to the limits.
+    /// The rule's values, redacted and cut like observed values.
     pub expected: Vec<String>,
     /// Some expected values were cut or left out.
     pub expected_truncated: bool,
@@ -622,8 +622,8 @@ pub struct RuleDraft {
     /// The match tree, as a policy document writes it.
     pub r#match: crate::model::Match,
     /// Why the draft may not be enough: `mandatory_deny_matched` (nothing
-    /// overrides it) and `deny_rule_matched` (the precedence model may
-    /// prefer the deny).
+    /// overrides it) and `deny_rule_matched` (under `deny_wins` the deny
+    /// always wins; under the other models it may).
     pub caveats: Vec<&'static str>,
 }
 
@@ -975,7 +975,8 @@ impl<'p> Tracer<'p> {
             trace.mode_resolution = modes::disabled_steps(state);
         }
 
-        // Provenance of the deciding rule (#37 adds group inheritance).
+        // Provenance of the deciding rule within the policy document. The
+        // group steps of #37's effective policy are a follow-up under #41.
         if let Some(r) = decider {
             trace.inheritance = vec![
                 InheritanceStep {
@@ -1091,7 +1092,9 @@ fn criteria(
                 .iter()
                 .take(privacy::MAX_VALUES)
                 .map(|v| {
-                    let (t, cut) = clip(v);
+                    // The policy's values pass the same redactor as the
+                    // facts: a path criterion can name a user as well.
+                    let (t, cut) = privacy.text(v);
                     expected_truncated |= cut;
                     t
                 })
