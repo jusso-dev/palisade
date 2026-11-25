@@ -338,9 +338,25 @@ impl PolicyDocument {
     /// # Errors
     ///
     /// Returns every finding if any has `error` severity.
-    pub fn validate(mut self) -> Result<ValidatedPolicy, Vec<ValidationError>> {
+    pub fn validate(self) -> Result<ValidatedPolicy, Vec<ValidationError>> {
+        self.validate_with(Validator::default())
+    }
+
+    /// Validates a document assembled from documents that each passed
+    /// [`validate`](Self::validate): the effective policy of a hierarchy
+    /// (#37). Every rule is a copy of a validated rule, so its criterion
+    /// values were already compiled and are not compiled again; everything
+    /// else, including every check across rules and rule sets, the
+    /// settings, modes and precedence, is checked as usual.
+    pub(crate) fn validate_assembled(self) -> Result<ValidatedPolicy, Vec<ValidationError>> {
+        self.validate_with(Validator {
+            compile_values: false,
+            ..Validator::default()
+        })
+    }
+
+    fn validate_with(mut self, mut v: Validator) -> Result<ValidatedPolicy, Vec<ValidationError>> {
         normalize_hashes(&mut self);
-        let mut v = Validator::default();
         v.document(&self);
         if v.findings.iter().any(|f| f.severity == Severity::Error) {
             Err(v.findings)
@@ -363,6 +379,10 @@ struct Validator {
     /// Whether regular expressions are compiled. Off once the document
     /// holds more than the per-policy cap.
     compile_regexes: bool,
+    /// Whether criterion values are compiled at all. Off only for a
+    /// document whose every criterion comes from documents that already
+    /// passed validation ([`PolicyDocument::validate_assembled`]).
+    compile_values: bool,
 }
 
 impl Default for Validator {
@@ -370,6 +390,7 @@ impl Default for Validator {
         Self {
             findings: Vec::new(),
             compile_regexes: true,
+            compile_values: true,
         }
     }
 }
@@ -754,6 +775,8 @@ impl Validator {
                 all_ok = false;
             } else if c.operator.is_regex() && !self.compile_regexes {
                 all_ok = false;
+            } else if !self.compile_values {
+                // Compiled when the document it came from was validated.
             } else if let Err(kind) = CompiledCriterion::check_value(c, value) {
                 self.compile_error(&path, &kind);
                 all_ok = false;
@@ -768,7 +791,7 @@ impl Validator {
             && case_ok
             && c.operator.applies_to(class)
             && (min..=max).contains(&c.values.len());
-        if well_formed && c.operator.is_version() {
+        if well_formed && self.compile_values && c.operator.is_version() {
             if let Err(errors) = CompiledCriterion::compile(c) {
                 for e in errors {
                     let path = match e.value {

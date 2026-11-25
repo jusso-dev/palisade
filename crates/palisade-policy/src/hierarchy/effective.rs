@@ -461,7 +461,22 @@ impl ValidatedHierarchy {
         }
         let (level_order, merge) = self.options(target.tenant);
         let layers = self.layers(target, &dynamic, level_order);
-        Builder::new(self, &layers, merge).build(node)
+        Builder::new(self, &layers, merge).build(node, true)
+    }
+
+    /// Checks the effective policy a device would have at `node`, as
+    /// [`effective_policy_as`](Self::effective_policy_as) does, without
+    /// hashing it. Validation runs this for every configured structural
+    /// node.
+    pub(crate) fn check_effective_at(&self, node: NodeId) -> Result<(), Vec<HierarchyError>> {
+        let Some(target) = self.nodes.get(&node) else {
+            return Ok(());
+        };
+        let (level_order, merge) = self.options(target.tenant);
+        let layers = self.layers(target, &[], level_order);
+        Builder::new(self, &layers, merge)
+            .build(node, false)
+            .map(|_| ())
     }
 
     /// The dynamic groups of a device at `target`, checked, sorted from the
@@ -620,7 +635,9 @@ impl<'a, 'h> Builder<'a, 'h> {
         out
     }
 
-    fn build(mut self, node: NodeId) -> Result<EffectivePolicy, Vec<HierarchyError>> {
+    /// Builds the effective policy. With `hash` false (a validation check)
+    /// the content hash is left empty.
+    fn build(mut self, node: NodeId, hash: bool) -> Result<EffectivePolicy, Vec<HierarchyError>> {
         self.collect_rule_sets();
         let rules = self.suppressions();
         let precedence = self.precedence();
@@ -714,7 +731,9 @@ impl<'a, 'h> Builder<'a, 'h> {
             },
             rule_sets: sets.into_values().collect(),
         };
-        let validated = doc.validate().map_err(|findings| {
+        // Every rule is a copy of one in a validated policy or rule set
+        // library, so its criteria are not compiled again.
+        let validated = doc.validate_assembled().map_err(|findings| {
             findings
                 .into_iter()
                 .filter(|f| f.severity == Severity::Error)
@@ -725,11 +744,15 @@ impl<'a, 'h> Builder<'a, 'h> {
                 })
                 .collect::<Vec<_>>()
         })?;
-        let text = canonical(
-            Management::Managed,
-            Some(validated.document()),
-            &self.libraries,
-        );
+        let content_hash = if hash {
+            sha256_hex(&canonical(
+                Management::Managed,
+                Some(validated.document()),
+                &self.libraries,
+            ))
+        } else {
+            String::new()
+        };
         let rule_sets = self
             .sets
             .iter()
@@ -750,7 +773,7 @@ impl<'a, 'h> Builder<'a, 'h> {
             mode: Some(mode),
             precedence: Some(source),
             libraries: self.libraries,
-            content_hash: sha256_hex(&text),
+            content_hash,
         })
     }
 
@@ -1100,10 +1123,12 @@ impl<'a, 'h> Builder<'a, 'h> {
                 }
                 let Some(p) = prov.get_mut(key) else { continue };
                 for (i, (from, value)) in offers.into_iter().enumerate() {
-                    let outcome = if i > 0 {
-                        StepOutcome::Overridden
-                    } else if let Some(&locked_at) = locks.get(key) {
+                    // A lock above blocks every offer of the layer; without
+                    // one, the first offer applies and the rest lose to it.
+                    let outcome = if let Some(&locked_at) = locks.get(key) {
                         StepOutcome::BlockedByLock { locked_at }
+                    } else if i > 0 {
+                        StepOutcome::Overridden
                     } else {
                         current.insert(key.clone(), Some(value.clone()));
                         StepOutcome::Applied
@@ -1233,10 +1258,26 @@ impl<'a, 'h> Builder<'a, 'h> {
                 }
             }
         }
+        // A locked key is reported even if no layer offered it (it is then
+        // locked at unset); a lock on `mode_by_type` covers every type
+        // offered anywhere.
+        for key in locks.keys() {
+            if key != "mode_options.mode_by_type" {
+                prov.entry(key.clone())
+                    .or_insert_with(|| SettingProvenance {
+                        value: serde_json::Value::Null,
+                        source: None,
+                        locked_at: None,
+                        raised_by_floor: false,
+                        steps: Vec::new(),
+                    });
+            }
+        }
         // Within a layer the lowest slot wins, across layers the nearest:
         // the winner is the first offer of the last layer that offered and
         // was not blocked by a lock.
         for (key, p) in &mut prov {
+            p.locked_at = lock_of(&locks, key);
             let open = |s: &SettingStep| !matches!(s.outcome, StepOutcome::BlockedByLock { .. });
             let Some(last_node) = p
                 .steps

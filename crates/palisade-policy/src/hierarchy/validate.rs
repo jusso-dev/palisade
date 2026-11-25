@@ -9,15 +9,16 @@ use super::limits::{
 };
 use super::placement::{self, PlacementRule};
 use super::{
-    Builtin, HierarchyCode, HierarchyDocument, HierarchyError, LevelOrder, Membership, ModeMerge,
-    Node, NodeId, NodeKind, herr,
+    Builtin, HierarchyCode, HierarchyDocument, HierarchyError, LevelOrder, ModeMerge, Node, NodeId,
+    NodeKind, herr,
 };
 use crate::library::{
     Catalogue, Library, LibraryCode, LibraryContent, LibraryError, LibraryId, LibraryRef, Realm,
     Version, Visibility, name_problem, refs_in,
 };
-use crate::model::{PolicyDocument, PolicyId, PolicySettings, RuleSet};
+use crate::model::{Mode, PolicyDocument, PolicyId, PolicySettings, RuleSet};
 use crate::schema;
+use crate::validate::ErrorCode;
 
 /// A node, with what validation worked out about it.
 #[derive(Clone, Debug)]
@@ -68,6 +69,10 @@ pub(crate) struct RuleSetInfo {
 pub struct ValidatedHierarchy {
     pub(crate) revision: u64,
     pub(crate) nodes: BTreeMap<NodeId, NodeInfo>,
+    /// The global node.
+    pub(crate) global: Option<NodeId>,
+    /// Each tenant's `unassigned` group.
+    pub(crate) unassigned: BTreeMap<NodeId, NodeId>,
     pub(crate) policies: BTreeMap<PolicyId, PolicyInfo>,
     pub(crate) catalogue: Catalogue,
     pub(crate) rule_sets: BTreeMap<Version, RuleSetInfo>,
@@ -234,8 +239,19 @@ impl HierarchyDocument {
         if !errors.is_empty() {
             return Err(errors);
         }
+        let global = nodes
+            .values()
+            .find(|n| n.node.kind == NodeKind::Global)
+            .map(|n| n.node.id);
+        let unassigned = nodes
+            .values()
+            .filter(|n| n.node.builtin == Some(Builtin::Unassigned))
+            .filter_map(|n| n.tenant.map(|t| (t, n.node.id)))
+            .collect();
         let validated = ValidatedHierarchy {
             revision: self.revision,
+            global,
+            unassigned,
             nodes,
             policies,
             catalogue: catalogue.unwrap_or_default(),
@@ -243,21 +259,24 @@ impl HierarchyDocument {
             library_index,
             placement,
         };
-        // The effective policy of every structural node: catches
+        // The effective policy of every configured structural node: catches
         // suppressions of rules that are not inherited, precedence
         // conflicts and effective documents that do not validate before any
-        // device is computed.
+        // device is computed. A group that configures nothing has the
+        // findings of its parent, so it is skipped. Each check costs what
+        // computing one device's policy costs, with no regular expression
+        // compiled again and no hash, so validation is bounded by the work
+        // the server does anyway to compute its devices' policies (#10).
         let mut seen = BTreeSet::new();
         for info in validated.nodes.values() {
             let structural = matches!(
                 info.node.kind,
                 NodeKind::Global | NodeKind::Tenant | NodeKind::Group
             ) && info.node.builtin != Some(Builtin::Unmanaged);
-            if !structural {
+            if !structural || !configures(info) {
                 continue;
             }
-            if let Err(found) = validated.effective_policy_as(info.node.id, &Membership::default())
-            {
+            if let Err(found) = validated.check_effective_at(info.node.id) {
                 for mut e in found {
                     if e.path.starts_with("/effective") {
                         e.message = format!(
@@ -278,6 +297,25 @@ impl HierarchyDocument {
             Err(errors)
         }
     }
+}
+
+/// Whether a structural node changes anything for the devices below it
+/// beyond what its parent gives them. The global node, tenants and built-in
+/// groups always count.
+fn configures(info: &NodeInfo) -> bool {
+    let n = &info.node;
+    n.kind != NodeKind::Group
+        || n.builtin.is_some()
+        || n.template.is_some()
+        || !n.assignments.is_empty()
+        || !n.rule_sets.is_empty()
+        || !n.categories.is_empty()
+        || !n.suppress_inherited.is_empty()
+        || !n.settings.is_empty()
+        || !n.locked_settings.is_empty()
+        || n.mode.is_some()
+        || n.lock_mode
+        || n.precedence.is_some()
 }
 
 fn library_positions(libraries: &[Library]) -> BTreeMap<Version, usize> {
@@ -608,6 +646,13 @@ fn place_of<'n>(
 
 /// Fields that only some kinds of node may have, and per-node limits.
 fn check_fields(base: &str, n: &Node, errors: &mut Vec<HierarchyError>) {
+    if n.mode == Some(Mode::Disabled) {
+        errors.push(herr(
+            HierarchyCode::Policy(ErrorCode::ModeNotAllowed),
+            format!("{base}/mode"),
+            "a node cannot be `disabled`: a device is disabled only through the mode state machine, with a reason and an expiry (#36), and a device removed from management belongs in the `unmanaged` group",
+        ));
+    }
     let mut not_allowed = |field: &str, why: &str| {
         errors.push(herr(
             HierarchyCode::FieldNotAllowed,
@@ -1032,9 +1077,8 @@ impl ValidatedHierarchy {
     /// tenant's own, then the global node's, then the defaults.
     pub(crate) fn options(&self, tenant: Option<NodeId>) -> (LevelOrder, ModeMerge) {
         let global = self
-            .nodes
-            .values()
-            .find(|n| n.node.kind == NodeKind::Global)
+            .global
+            .and_then(|g| self.nodes.get(&g))
             .and_then(|n| n.node.tenant_options);
         let own = tenant
             .and_then(|t| self.nodes.get(&t))
@@ -1055,12 +1099,9 @@ impl ValidatedHierarchy {
                 .and_then(|n| n.node.tenant_options)
                 .and_then(|o| o.place_on_user_change)
         };
-        let global = self
-            .nodes
-            .values()
-            .find(|n| n.node.kind == NodeKind::Global)
-            .map(|n| n.node.id);
-        get(Some(tenant)).or_else(|| get(global)).unwrap_or(false)
+        get(Some(tenant))
+            .or_else(|| get(self.global))
+            .unwrap_or(false)
     }
 
     /// Checks that library `id` can be deleted: nothing references it.

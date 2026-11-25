@@ -303,18 +303,13 @@ impl super::ValidatedHierarchy {
                 });
             }
         }
-        let unassigned = self
-            .nodes
-            .values()
-            .find(|n| n.tenant == Some(t.node.id) && n.node.builtin == Some(Builtin::Unassigned))
-            .map(|n| n.node.id)
-            .ok_or_else(|| {
-                herr(
-                    HierarchyCode::InvalidBuiltin,
-                    t.path(),
-                    "the tenant has no `unassigned` group",
-                )
-            })?;
+        let unassigned = self.unassigned.get(&t.node.id).copied().ok_or_else(|| {
+            herr(
+                HierarchyCode::InvalidBuiltin,
+                t.path(),
+                "the tenant has no `unassigned` group",
+            )
+        })?;
         Ok(PlacementOutcome::Place {
             group: unassigned,
             rule: None,

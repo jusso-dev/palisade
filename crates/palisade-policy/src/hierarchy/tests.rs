@@ -1535,6 +1535,158 @@ fn a_long_parent_chain_validates_quickly() {
 }
 
 #[test]
+fn a_locked_mode_option_reports_its_lock_without_any_override() {
+    let mut nodes = base_nodes();
+    set_node(
+        &mut nodes,
+        2,
+        json!({
+            "assignments": assign(&[(50, 0)]),
+            "locked_settings": ["mode_options.mode_disconnected", "mode_options.disconnected_after_secs"],
+        }),
+    );
+    let h = validated(&snapshot(
+        nodes,
+        vec![policy_with(
+            50,
+            "audit",
+            vec![],
+            json!({"mode_options": {"mode_disconnected": "enforce"}}),
+        )],
+        vec![],
+    ));
+    let e = effective(&h, 10);
+    let p = e.setting("mode_options.mode_disconnected").unwrap();
+    assert_eq!(p.locked_at, Some(node_id(2)));
+    assert_eq!(p.value, json!("enforce"));
+    // Locked at unset: reported, with no value.
+    let p = e.setting("mode_options.disconnected_after_secs").unwrap();
+    assert_eq!(p.locked_at, Some(node_id(2)));
+    assert_eq!(p.value, Value::Null);
+}
+
+#[test]
+fn every_offer_below_a_lock_is_blocked() {
+    let mut nodes = base_nodes();
+    set_node(
+        &mut nodes,
+        1,
+        json!({
+            "settings": {"poll_interval_secs": 600},
+            "locked_settings": ["poll_interval_secs"],
+        }),
+    );
+    set_node(
+        &mut nodes,
+        10,
+        json!({
+            "settings": {"poll_interval_secs": 300},
+            "assignments": assign(&[(50, 0)]),
+        }),
+    );
+    let h = validated(&snapshot(
+        nodes,
+        vec![policy_with(
+            50,
+            "audit",
+            vec![],
+            json!({"settings": {"poll_interval_secs": 120}}),
+        )],
+        vec![],
+    ));
+    let p = effective(&h, 20)
+        .setting("poll_interval_secs")
+        .unwrap()
+        .clone();
+    let blocked = StepOutcome::BlockedByLock {
+        locked_at: node_id(1),
+    };
+    assert_eq!(
+        p.steps
+            .iter()
+            .map(|s| s.outcome.clone())
+            .collect::<Vec<_>>(),
+        [StepOutcome::Applied, blocked.clone(), blocked]
+    );
+}
+
+#[test]
+fn no_node_can_be_disabled() {
+    for n in [1, 2, 10, 20] {
+        let mut nodes = base_nodes();
+        set_node(&mut nodes, 1, json!({"mode": "enforce", "lock_mode": true}));
+        set_node(&mut nodes, n, json!({"mode": "disabled"}));
+        let found = errors(&snapshot(nodes, vec![], vec![]));
+        assert!(
+            found
+                .iter()
+                .any(|(c, p)| c == "mode_not_allowed" && p.ends_with("/mode")),
+            "{n}: {found:?}"
+        );
+    }
+    // Nor a template or dynamic group, which could otherwise reset a floor.
+    let mut nodes = base_nodes();
+    nodes.push(node(
+        30,
+        "dynamic_group",
+        Some(2),
+        json!({"mode": "disabled", "lock_mode": true}),
+    ));
+    nodes.push(node(40, "template", Some(2), json!({"mode": "disabled"})));
+    let found = errors(&snapshot(nodes, vec![], vec![]));
+    assert!(
+        found.contains(&("mode_not_allowed".to_owned(), "/nodes/6/mode".to_owned())),
+        "{found:?}"
+    );
+    assert!(
+        found.contains(&("mode_not_allowed".to_owned(), "/nodes/7/mode".to_owned())),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn a_flat_tenant_of_many_groups_validates_quickly() {
+    // 20,000 groups directly below the tenant, with the global node last
+    // in ID order: no lookup walks every node per group, and unconfigured
+    // groups are not computed.
+    let mut nodes = vec![
+        node(
+            0xfff0,
+            "global",
+            None,
+            json!({"assignments": assign(&[(50, 0)])}),
+        ),
+        node(2, "tenant", Some(0xfff0), json!({})),
+        node(3, "group", Some(2), json!({"builtin": "unassigned"})),
+    ];
+    for i in 0..20_000u32 {
+        let extra = if i % 1000 == 0 {
+            json!({"mode": "enforce"})
+        } else {
+            json!({})
+        };
+        nodes.push(node(10 + i, "group", Some(2), extra));
+    }
+    let snap = snapshot(
+        nodes,
+        vec![policy(
+            50,
+            "enforce",
+            vec![set(60, "blocklist", true, vec![rule(70, "deny", 'a')])],
+        )],
+        vec![],
+    );
+    let start = std::time::Instant::now();
+    let h = validated(&snap);
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+    assert_eq!(decide(&effective(&h, 12_000), 'a'), Outcome::Blocked);
+}
+
+#[test]
 fn snapshots_read_from_yaml() {
     let yaml = "schema_version: 1.0.0\nrevision: 1\nnodes:\n  - {id: 01936b2e-0001-7b3d-9f21-0a1b2c3d4e5f, name: Global, kind: global}\n";
     let doc = HierarchyDocument::from_yaml(yaml).unwrap();
