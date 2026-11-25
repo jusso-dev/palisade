@@ -96,6 +96,10 @@ const FILETYPE_SEEDS: Seed = Seed {
     test: "filetype",
     name: "write_fuzz_seeds",
 };
+const INSTALLER_SEEDS: Seed = Seed {
+    test: "installer",
+    name: "write_installer_fuzz_seeds",
+};
 const TRUST_SET_SEEDS: Seed = Seed {
     test: "trust_set",
     name: "write_trust_set_fuzz_seeds",
@@ -151,6 +155,11 @@ pub const PROJECTS: &[Project] = &[
                 name: "fuzz_classify",
                 dict: None,
                 seeds: &[FILETYPE_SEEDS],
+            },
+            Target {
+                name: "fuzz_msi_tables",
+                dict: None,
+                seeds: &[INSTALLER_SEEDS],
             },
         ],
     },

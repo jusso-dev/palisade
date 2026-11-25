@@ -883,6 +883,9 @@ pub(crate) mod oid {
     /// 1.3.6.1.4.1.311.2.1.15 `SPC_PE_IMAGE_DATA_OBJID`.
     pub const SPC_PE_IMAGE_DATA: &[u8] =
         &[0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x0f];
+    /// 1.3.6.1.4.1.311.2.1.30 `SPC_SIPINFO_OBJID`: the indirect data of a
+    /// signature over a non-PE subject (installer and app packages, #53).
+    pub const SPC_SIPINFO: &[u8] = &[0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x1e];
     /// 1.3.6.1.4.1.311.2.1.11 `SPC_STATEMENT_TYPE_OBJID`.
     pub const SPC_STATEMENT_TYPE: &[u8] =
         &[0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x0b];
