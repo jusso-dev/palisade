@@ -40,6 +40,12 @@ pub struct SelfImage {
 }
 
 impl SelfImage {
+    /// The object type of the image.
+    #[must_use]
+    pub const fn object_type(&self) -> ObjectType {
+        self.object_type
+    }
+
     /// An image of type `object_type`, pinned to the SHA-256 in `facts` and
     /// to `publisher`. `facts` should be everything the agent's parser
     /// computed for the file, including its path; `context` is the user,

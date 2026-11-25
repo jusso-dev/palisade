@@ -61,7 +61,6 @@
 //! overridden.
 
 use core::cmp::Reverse;
-use std::collections::BTreeMap;
 
 use crate::decision::RuleRef;
 use crate::facts::PathVariable;
@@ -511,19 +510,27 @@ pub struct Resolution {
 /// candidates, and its winner must not depend on their order.
 pub trait Precedence {
     /// Chooses the deciding candidate.
-    fn resolve(&self, matches: &MatchSet) -> Resolution;
+    fn resolve(&self, matches: &MatchSet) -> Resolution {
+        Resolution {
+            winner: self.pick(&matches.candidates),
+        }
+    }
+
+    /// The index of the deciding candidate in `candidates`, or `None` if
+    /// it is empty. The same choice as [`Self::resolve`], on a slice, so
+    /// the decision path need not build a [`MatchSet`] (#42).
+    fn pick(&self, candidates: &[Candidate]) -> Option<usize>;
 }
 
 /// The index of the candidate with the smallest key, among those `keep`
 /// accepts. Keys end with the unique rule ID, so the result does not depend
 /// on the order of the candidates.
 fn best<K: Ord>(
-    matches: &MatchSet,
+    matches: &[Candidate],
     keep: impl Fn(&Candidate) -> bool,
     key: impl Fn(&Candidate) -> K,
 ) -> Option<usize> {
     matches
-        .candidates
         .iter()
         .enumerate()
         .filter(|(_, c)| keep(c))
@@ -539,16 +546,15 @@ pub struct DenyWins {
 }
 
 impl Precedence for DenyWins {
-    fn resolve(&self, matches: &MatchSet) -> Resolution {
+    fn pick(&self, matches: &[Candidate]) -> Option<usize> {
         let tiebreak = self.allow_tiebreak;
-        let winner = best(matches, |c| !c.verdict.allows(), |c| (c.spec, c.id())).or_else(|| {
+        best(matches, |c| !c.verdict.allows(), |c| (c.spec, c.id())).or_else(|| {
             best(
                 matches,
                 |c| c.verdict.allows(),
                 |c| (c.verdict.allow_rank(tiebreak), c.spec, c.id()),
             )
-        });
-        Resolution { winner }
+        })
     }
 }
 
@@ -561,33 +567,19 @@ pub struct AllowWins {
     pub granularity_tiebreak: bool,
 }
 
-impl AllowWins {
-    /// The most specific candidate of each rule set, with
-    /// `granularity_tiebreak`. Candidates less specific than their set's
-    /// are left out.
-    fn most_specific_per_set(&self, matches: &MatchSet) -> Option<BTreeMap<RuleSetId, Spec>> {
-        if !self.granularity_tiebreak {
-            return None;
-        }
-        let mut most: BTreeMap<RuleSetId, Spec> = BTreeMap::new();
-        for c in &matches.candidates {
-            most.entry(c.set())
-                .and_modify(|s| *s = (*s).min(c.spec))
-                .or_insert(c.spec);
-        }
-        Some(most)
-    }
-}
-
 impl Precedence for AllowWins {
-    fn resolve(&self, matches: &MatchSet) -> Resolution {
+    fn pick(&self, matches: &[Candidate]) -> Option<usize> {
         let tiebreak = self.allow_tiebreak;
-        let most = self.most_specific_per_set(matches);
+        // With `granularity_tiebreak`, a candidate takes part only if no
+        // candidate of its rule set is more specific. The matching rules
+        // are few, so comparing pairs is cheaper than building a map.
         let survives = |c: &Candidate| {
-            most.as_ref()
-                .is_none_or(|m| m.get(&c.set()).is_none_or(|s| *s == c.spec))
+            !self.granularity_tiebreak
+                || !matches
+                    .iter()
+                    .any(|o| o.set() == c.set() && o.spec < c.spec)
         };
-        let winner = best(
+        best(
             matches,
             |c| c.verdict.allows() && survives(c),
             |c| (c.verdict.allow_rank(tiebreak), c.spec, c.id()),
@@ -598,8 +590,7 @@ impl Precedence for AllowWins {
                 |c| !c.verdict.allows() && survives(c),
                 |c| (c.spec, c.id()),
             )
-        });
-        Resolution { winner }
+        })
     }
 }
 
@@ -613,8 +604,8 @@ pub struct Specificity {
 }
 
 impl Precedence for Specificity {
-    fn resolve(&self, matches: &MatchSet) -> Resolution {
-        let winner = best(
+    fn pick(&self, matches: &[Candidate]) -> Option<usize> {
+        best(
             matches,
             |_| true,
             |c| {
@@ -629,8 +620,7 @@ impl Precedence for Specificity {
                     c.id(),
                 )
             },
-        );
-        Resolution { winner }
+        )
     }
 }
 
@@ -642,8 +632,8 @@ pub struct FirstMatch {
 }
 
 impl Precedence for FirstMatch {
-    fn resolve(&self, matches: &MatchSet) -> Resolution {
-        let winner = best(
+    fn pick(&self, matches: &[Candidate]) -> Option<usize> {
+        best(
             matches,
             |_| true,
             |c| {
@@ -656,8 +646,7 @@ impl Precedence for FirstMatch {
                     Reverse(c.id()),
                 )
             },
-        );
-        Resolution { winner }
+        )
     }
 }
 
@@ -669,8 +658,8 @@ pub struct Priority {
 }
 
 impl Precedence for Priority {
-    fn resolve(&self, matches: &MatchSet) -> Resolution {
-        let winner = best(
+    fn pick(&self, matches: &[Candidate]) -> Option<usize> {
+        best(
             matches,
             |_| true,
             |c| {
@@ -680,8 +669,7 @@ impl Precedence for Priority {
                 });
                 (key.is_none(), key, c.verdict.priority_rank(), c.id())
             },
-        );
-        Resolution { winner }
+        )
     }
 }
 
@@ -728,13 +716,13 @@ impl Resolver {
 }
 
 impl Precedence for Resolver {
-    fn resolve(&self, matches: &MatchSet) -> Resolution {
+    fn pick(&self, matches: &[Candidate]) -> Option<usize> {
         match self {
-            Self::DenyWins(m) => m.resolve(matches),
-            Self::AllowWins(m) => m.resolve(matches),
-            Self::Specificity(m) => m.resolve(matches),
-            Self::FirstMatch(m) => m.resolve(matches),
-            Self::Priority(m) => m.resolve(matches),
+            Self::DenyWins(m) => m.pick(matches),
+            Self::AllowWins(m) => m.pick(matches),
+            Self::Specificity(m) => m.pick(matches),
+            Self::FirstMatch(m) => m.pick(matches),
+            Self::Priority(m) => m.pick(matches),
         }
     }
 }
@@ -742,7 +730,7 @@ impl Precedence for Resolver {
 /// The candidate with the most specific identity, then the lowest rule ID:
 /// how the pipeline picks among several mandatory denies, or several
 /// exclusions, where every candidate has the same verdict.
-pub(crate) fn most_specific(matches: &MatchSet) -> Option<usize> {
+pub(crate) fn most_specific(matches: &[Candidate]) -> Option<usize> {
     best(matches, |_| true, |c| (c.spec, c.id()))
 }
 

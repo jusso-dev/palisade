@@ -434,7 +434,7 @@ cargo xtask fixtures               # the corpus, into target/fixtures/
 cargo xtask golden                 # --update to rewrite testdata/golden/fixtures.txt
 cargo xtask coverage-gate --base origin/main   # cargo-llvm-cov and cargo-nextest
 cargo xtask fuzz                   # needs nightly-2026-11-20 and cargo-fuzz 0.13
-cargo test --workspace --all-features --locked --bench criterion_eval --bench hash_and_parse
+cargo test --workspace --all-features --locked --bench criterion_eval --bench hash_and_parse --bench simulate --bench policy_eval
 cargo hack check --each-feature --all-targets --locked \
   -p palisade-core -p palisade-fileid -p palisade-policy \
   -p palisade-proto -p palisade-server -p palisade-cli \

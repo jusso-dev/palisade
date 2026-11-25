@@ -175,7 +175,7 @@ pub const STEPS: &[Step] = &[
     },
     step(
         "bench",
-        "cargo test --workspace --all-features --locked --bench criterion_eval --bench hash_and_parse --bench simulate",
+        "cargo test --workspace --all-features --locked --bench criterion_eval --bench hash_and_parse --bench simulate --bench policy_eval",
     ),
     Step {
         tool: Some(NEXTEST),

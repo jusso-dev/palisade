@@ -5,7 +5,9 @@ pub mod analysis;
 pub mod condition;
 pub mod context;
 pub mod decision;
+pub mod demand;
 pub mod dsl;
+pub mod engine;
 pub mod evaluate;
 pub mod facts;
 pub mod hierarchy;
@@ -15,6 +17,8 @@ pub mod mode;
 pub mod model;
 pub mod ops;
 pub mod precedence;
+#[doc(hidden)]
+pub mod reference;
 pub mod schema;
 pub mod scope;
 #[cfg(any(test, feature = "test-util"))]

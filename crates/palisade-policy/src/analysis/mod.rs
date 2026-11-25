@@ -322,7 +322,7 @@ impl Entry<'_> {
             .iter()
             .filter(|a| a.rule_set == self.set.id)
             .flat_map(|a| &a.scopes)
-            .chain(&self.rule.scope)
+            .chain(self.rule.scope.as_deref())
             .collect()
     }
 

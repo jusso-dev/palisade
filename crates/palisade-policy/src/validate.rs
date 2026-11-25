@@ -122,6 +122,10 @@ pub enum ErrorCode {
     PatternTooLarge,
     /// The policy holds more regular expressions than allowed (#32).
     TooManyRegexes,
+    /// More enabled rules than [`ALWAYS_EVAL_WARN`](crate::evaluate::ALWAYS_EVAL_WARN)
+    /// have no index anchor, so they are evaluated for every object of
+    /// their types (#42). A warning.
+    UnindexedRules,
     /// The strongest guaranteed identity of a rule that lets an object run,
     /// trusts it or excludes it is weak, such as a file name or
     /// version-resource string (#31, #34).
@@ -288,6 +292,7 @@ impl ErrorCode {
             Self::InvalidRegex => "invalid_regex",
             Self::PatternTooLarge => "pattern_too_large",
             Self::TooManyRegexes => "too_many_regexes",
+            Self::UnindexedRules => "unindexed_rules",
             Self::WeakIdentity => "weak_identity",
             Self::ActionNotValidInRuleSet => "action_not_valid_in_rule_set",
             Self::ActionNotValidForObjectType => "action_not_valid_for_object_type",
@@ -344,7 +349,8 @@ impl ErrorCode {
             | Self::PrecedenceOptionUnused
             | Self::UnknownAllow
             | Self::ComplianceWeakened
-            | Self::SignatureStatusRelaxed => Severity::Warning,
+            | Self::SignatureStatusRelaxed
+            | Self::UnindexedRules => Severity::Warning,
             _ => Severity::Error,
         }
     }
@@ -622,6 +628,30 @@ impl Validator {
                 ErrorCode::TooManyRules,
                 "/rule_sets",
                 format!("{total_rules} rules; at most {MAX_RULES_PER_POLICY} are allowed"),
+            );
+        }
+        // Rules the evaluator cannot index are evaluated for every object
+        // (#42). Only the rule sets the policy uses count.
+        let unindexed = doc
+            .rule_sets
+            .iter()
+            .filter(|s| policy.rule_sets.contains(&s.id))
+            .flat_map(|s| &s.rules)
+            // `defer` rules are never evaluated, so they cost nothing.
+            .filter(|r| {
+                r.enabled
+                    && !matches!(r.action, crate::model::Action::Defer {})
+                    && !crate::evaluate::index::is_indexed(r)
+            })
+            .count();
+        if unindexed > crate::evaluate::ALWAYS_EVAL_WARN {
+            self.push(
+                ErrorCode::UnindexedRules,
+                "/rule_sets",
+                format!(
+                    "{unindexed} enabled rules have no index anchor, so each is evaluated for every object; more than {} slows every decision. Give each rule a positive hash, signer, path, file-name, version-resource or principal criterion outside `not`, and avoid `unknown_as: match` on broad denies",
+                    crate::evaluate::ALWAYS_EVAL_WARN
+                ),
             );
         }
 

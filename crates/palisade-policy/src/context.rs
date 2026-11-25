@@ -588,6 +588,25 @@ impl EvaluationContext {
 /// gives the same text. `None` if `s` is not a SID.
 #[must_use]
 pub fn normalize_sid(s: &str) -> Option<String> {
+    let mut out = String::new();
+    normalize_sid_into(s, &mut out).then_some(out)
+}
+
+/// Writes the canonical form of the SID `s` to `out`, after clearing it,
+/// and returns whether `s` is a SID. Allocates only to grow `out`.
+pub(crate) fn normalize_sid_into(s: &str, out: &mut String) -> bool {
+    use core::fmt::Write as _;
+    out.clear();
+    parse_sid(s, out, &mut |out, v| {
+        let _ = write!(out, "{v}");
+    })
+    .is_some()
+}
+
+/// Parses a SID, writing its canonical form to `out` with `num` writing
+/// each decimal number.
+fn parse_sid(s: &str, out: &mut String, num: &mut dyn FnMut(&mut String, u64)) -> Option<()> {
+    use core::fmt::Write as _;
     let mut parts = s.split('-');
     if !parts.next()?.eq_ignore_ascii_case("s") || parts.next()? != "1" {
         return None;
@@ -608,11 +627,12 @@ pub fn normalize_sid(s: &str) -> Option<String> {
         }
         value
     };
-    let mut out = if authority < 1 << 32 {
-        format!("S-1-{authority}")
+    out.push_str("S-1-");
+    if authority < 1 << 32 {
+        num(out, authority);
     } else {
-        format!("S-1-0x{authority:012x}")
-    };
+        let _ = write!(out, "0x{authority:012x}");
+    }
     let mut count = 0usize;
     for part in parts {
         let value = u32::try_from(decimal(part)?).ok()?;
@@ -621,9 +641,9 @@ pub fn normalize_sid(s: &str) -> Option<String> {
             return None;
         }
         out.push('-');
-        out.push_str(&value.to_string());
+        num(out, u64::from(value));
     }
-    (count > 0).then_some(out)
+    (count > 0).then_some(())
 }
 
 /// A decimal number with no sign: one or more digits, of which at most 10
@@ -663,6 +683,35 @@ pub fn normalize_object_id(s: &str) -> Option<String> {
 #[must_use]
 pub fn normalize_principal(s: &str) -> Option<String> {
     normalize_sid(s).or_else(|| normalize_object_id(s))
+}
+
+/// Writes the canonical form of the principal `s` to `out`, after clearing
+/// it, and returns whether `s` is a SID or an object ID. Allocates only to
+/// grow `out`.
+pub(crate) fn normalize_principal_into(s: &str, out: &mut String) -> bool {
+    if normalize_sid_into(s, out) {
+        return true;
+    }
+    out.clear();
+    if is_object_id(s) {
+        out.extend(s.chars().map(|c| c.to_ascii_lowercase()));
+        true
+    } else {
+        false
+    }
+}
+
+/// Whether `s` is an object ID in the `8-4-4-4-12` hex form.
+fn is_object_id(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 36
+        && b.iter().enumerate().all(|(i, c)| {
+            if matches!(i, 8 | 13 | 18 | 23) {
+                *c == b'-'
+            } else {
+                c.is_ascii_hexdigit()
+            }
+        })
 }
 
 #[cfg(test)]

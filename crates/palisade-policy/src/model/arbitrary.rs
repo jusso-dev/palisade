@@ -387,7 +387,7 @@ fn rule(kind: RuleSetKind, mandatory: bool) -> impl Strategy<Value = Rule> {
                 },
                 scope: None,
                 action,
-                metadata,
+                metadata: metadata.into(),
             },
         )
 }
@@ -836,7 +836,7 @@ pub fn scoped_document() -> impl Strategy<Value = PolicyDocument> {
             }
             let rules = doc.rule_sets.iter_mut().flat_map(|s| s.rules.iter_mut());
             for (rule, scope) in rules.zip(rule_scopes) {
-                rule.scope = scope;
+                rule.scope = scope.map(Box::new);
             }
             doc
         })
@@ -847,9 +847,7 @@ pub fn scoped_document() -> impl Strategy<Value = PolicyDocument> {
 /// [`document`], whose rules are always active, so their oracles need no
 /// clock.
 pub fn document_with_lifecycle() -> impl Strategy<Value = PolicyDocument> {
-    // Boxed: the scoped document's strategy is deep enough that
-    // composing it unboxed overflows a test thread's stack in debug builds.
-    (scoped_document().boxed(), vec(window(), 0..16).boxed()).prop_map(|(mut doc, windows)| {
+    (scoped_document(), vec(window(), 0..16)).prop_map(|(mut doc, windows)| {
         let rules = doc.rule_sets.iter_mut().flat_map(|s| {
             let mandatory = s.mandatory;
             s.rules.iter_mut().map(move |r| (mandatory, r))
@@ -868,7 +866,11 @@ pub fn document_with_lifecycle() -> impl Strategy<Value = PolicyDocument> {
 }
 
 /// A document that passes [`PolicyDocument::validate`].
-pub fn document() -> impl Strategy<Value = PolicyDocument> {
+///
+/// Boxed: the document's strategy is deep, and tests compose it further;
+/// unboxed, the composed value overflows a test thread's stack in debug
+/// builds.
+pub fn document() -> BoxedStrategy<PolicyDocument> {
     let model = proptest::sample::select(vec![
         PrecedenceModel::DenyWins,
         PrecedenceModel::AllowWins,
@@ -941,6 +943,7 @@ pub fn document() -> impl Strategy<Value = PolicyDocument> {
                     .flat_map(|s| &s.rules)
                     .all(|r| ids.insert(r.id.0))
         })
+        .boxed()
 }
 
 /// Any precedence options. Options the model does not use only warn.

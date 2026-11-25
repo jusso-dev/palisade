@@ -64,6 +64,11 @@ version = "1.1.5"
 criteria = "safe-to-deploy"
 notes = "Baseline when cargo-vet was adopted (#23), raised from safe-to-run to safe-to-deploy because #251 (palisade-policy identity matching: regex operators) made it a normal dependency of a product crate before cargo-vet landed. Audit, or import an audit, before bumping."
 
+[[exemptions.allocation-counter]]
+version = "0.8.1"
+criteria = "safe-to-run"
+notes = "Added by #42 (dev-dependency of palisade-policy: counts heap allocations in the zero-allocation test binary only). Audit, or import an audit, before bumping."
+
 [[exemptions.allocator-api2]]
 version = "0.2.21"
 criteria = "safe-to-deploy"
@@ -83,6 +88,11 @@ notes = "Added by #126 (palisade-server process skeleton: HTTP stack, TLS, comma
 version = "1.4.0"
 criteria = "safe-to-run"
 notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.arc-swap]]
+version = "1.9.5"
+criteria = "safe-to-deploy"
+notes = "Added by #42 (palisade-policy: lock-free atomic swap of the policy snapshot on the decision path). Audit, or import an audit, before bumping."
 
 [[exemptions.arraydeque]]
 version = "0.5.1"
@@ -473,6 +483,11 @@ notes = "Added by #127 (palisade-server Postgres layer: sqlx with the Postgres d
 version = "0.12.2"
 criteria = "safe-to-deploy"
 notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.hdrhistogram]]
+version = "7.6.0"
+criteria = "safe-to-run"
+notes = "Added by #42 (dev-dependency of palisade-policy: the percentile harness of the performance budget test). Audit, or import an audit, before bumping."
 
 [[exemptions.heck]]
 version = "0.5.0"
@@ -943,6 +958,11 @@ notes = "Added by #127 (palisade-server Postgres layer: sqlx with the Postgres d
 version = "2.17.0"
 criteria = "safe-to-deploy"
 notes = "Added by #127 (palisade-server Postgres layer: sqlx with the Postgres driver, migrations and rustls). Audit, or import an audit, before bumping."
+
+[[exemptions.self_cell]]
+version = "1.3.0"
+criteria = "safe-to-deploy"
+notes = "Added by #42 (palisade-policy: owns a validated policy together with the evaluator that borrows it, for the shared snapshot). Audit, or import an audit, before bumping."
 
 [[exemptions.serde]]
 version = "1.0.229"

@@ -834,7 +834,7 @@ impl PolicyDocument {
         for set in &mut doc.rule_sets {
             set.metadata = Metadata::default();
             for rule in &mut set.rules {
-                rule.metadata = Metadata::default();
+                rule.metadata = crate::model::RuleMetadata::default();
             }
         }
         doc

@@ -327,6 +327,16 @@ fn summary(trace: &Trace) -> Message {
                 .arg("mode", mode_name(d.mode()))
                 .arg("object", object)
         }
+        // A decision the engine's watchdog stopped (#42): blocked, or let
+        // run in audit, before every rule was evaluated.
+        ReasonCode::EvalTimeout => {
+            let id = if d.outcome() == Outcome::Blocked {
+                "summary-timeout-blocked"
+            } else {
+                "summary-timeout-audit"
+            };
+            Message::new(id).arg("object", object)
+        }
         ReasonCode::AuditModeWouldBlock | ReasonCode::OverrideSession => {
             let id = if d.outcome() == Outcome::AllowedOverride {
                 "summary-override"
@@ -623,6 +633,14 @@ pub const ENGLISH: &[(&str, &str)] = &[
     (
         "summary-excluded",
         "Excluded by rule { $rule }: not evaluated further.",
+    ),
+    (
+        "summary-timeout-blocked",
+        "Blocked: deciding on this { $object } took longer than its time budget.",
+    ),
+    (
+        "summary-timeout-audit",
+        "Allowed in audit: deciding on this { $object } took longer than its time budget.",
     ),
     (
         "summary-would-block-rule",
