@@ -1,2 +1,23 @@
 [alias]
 xtask = "run --locked --package xtask --"
+
+# C runtime linking for release builds, per target (#22). This file may only
+# define aliases (`cargo xtask check-unsafe`, ADR 0011), so the flags are
+# applied by `cargo xtask dist`, which passes them with `--config` for the
+# one target it builds (`WINDOWS_RUSTFLAGS` in xtask/src/dist/mod.rs). A
+# test there checks that every target below is listed here.
+#
+# x86_64-pc-windows-msvc, aarch64-pc-windows-msvc:
+#   `-C target-feature=+crt-static`. The agent, tray and CLI link the C
+#   runtime statically, so installing them needs no VC++ redistributable,
+#   and the ARM64 package does not depend on a runtime that may be missing
+#   from a device. `dist` fails if a built executable imports a C runtime
+#   DLL.
+#
+# x86_64-unknown-linux-gnu:
+#   the default dynamic glibc. The server image's base provides glibc and
+#   the C++ runtime (packaging/server/Containerfile); a static musl build
+#   would change the TLS and allocator stack the server is tested with.
+#
+# Every target also remaps the workspace and Cargo home paths, so no local
+# path is recorded in the binaries or their symbols.

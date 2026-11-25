@@ -328,6 +328,7 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo xtask check-workflows
+      - run: bash .github/scripts/main-snapshot.test.sh
       # ADR format, numbering, supersession links and index (docs/adr/PROCESS.md).
       - run: cargo xtask adr lint
 
@@ -369,10 +370,63 @@ jobs:
           tool: zizmor@1.33.1
       - run: zizmor --offline .github/workflows
 
+  # Release builds and the Windows Installer package for each architecture,
+  # natively on its own runner (#22): the static-CRT binaries, their checks
+  # (machine type, symbols, reproducible-build marker, version and
+  # manifest), the symbols archive, the package with ICE validation, and an
+  # install / upgrade / downgrade / repair / removal run of the package on
+  # the runner. Nothing is uploaded here; on main, `snapshot` publishes.
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+          - os: windows-11-arm
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # `dist` builds for the runner's own architecture when no --target is given.
+      - run: cargo xtask dist --msi --sign none --out target/dist/current
+      # A second package, one patch version higher, to test upgrading.
+      - run: cargo xtask dist --msi --bump-patch --out target/dist/next
+      - name: Install, upgrade, downgrade, repair and remove
+        shell: pwsh
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: ./packaging/wix/smoke-test.ps1 -Current target/dist/current -Next target/dist/next -Arch $env:ARCH
+
+  # The Linux server binary, and its OCI image built with the runner's
+  # preinstalled podman. The image is only built, not pushed; signing and
+  # publishing it is #18.
+  server-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo xtask dist --out target/dist/server
+      - run: podman build --file packaging/server/Containerfile --tag palisade-server:ci target/dist/server
+      - run: podman run --rm palisade-server:ci version
+
   # The single required check from this workflow for branch protection.
   ci-ok:
     if: always()
-    needs: [fmt, clippy, test, postgres, coverage, fuzz, bench, msrv, docs, deps, supply-chain, feature-powerset, runner-guard, doc-checks, workflow-lint]
+    needs: [fmt, clippy, test, postgres, coverage, fuzz, bench, msrv, docs, deps, supply-chain, feature-powerset, runner-guard, doc-checks, workflow-lint, package, server-image]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -380,3 +434,70 @@ jobs:
         if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
         run: exit 1
       - run: echo "All CI jobs passed."
+
+  # The rolling `main-snapshot` pre-release (#22): after every push to main
+  # whose CI passed, the unsigned packages of that commit with their SHA-256
+  # checksums. Only these three jobs can write (releases and the tag), and
+  # they never run on pull requests. Each builds again instead of reusing
+  # the `package` job's output, because no artefact action is allowed
+  # (docs/ci.md#main-snapshot). CI runs on main are queued, never
+  # concurrent (`concurrency` above), so two snapshots cannot interleave.
+  snapshot-prepare:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [ci-ok]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/main-snapshot.sh prepare
+
+  snapshot:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [snapshot-prepare]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+          - os: windows-11-arm
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+      - run: cargo xtask dist --msi --sign none --out target/dist/snapshot
+      - shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCH: ${{ matrix.arch }}
+        run: .github/scripts/main-snapshot.sh upload "$ARCH" target/dist/snapshot/Palisade-*.msi target/dist/snapshot/Palisade-*.msi.sha256
+
+  snapshot-finish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [snapshot]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/main-snapshot.sh finish

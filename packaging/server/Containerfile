@@ -1,0 +1,20 @@
+# The palisade-server OCI image (#22). The binary is built first, on the
+# host, exactly as CI builds it:
+#
+#   cargo xtask dist --target x86_64-unknown-linux-gnu --out target/dist/linux-x64
+#   podman build -f packaging/server/Containerfile -t palisade-server:dev target/dist/linux-x64
+#
+# The build context is that output directory, so the image holds the one
+# binary and nothing from the source tree. The base is a minimal image with
+# glibc, the C++ runtime and CA certificates, and no shell or package
+# manager, pinned by digest (distroless cc, Debian 13, nonroot tag).
+# Signing the image is #18.
+FROM gcr.io/distroless/cc-debian13@sha256:532c7a94f9e96ba9db75eb9388f4227751131c7cb0a411d1a8521af4096135de
+
+COPY --chmod=0755 palisade-server /usr/local/bin/palisade-server
+
+# The `nonroot` user of the base image. The configuration, TLS files and
+# database password files are mounted in; see crates/palisade-server/README.md.
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/palisade-server"]
+CMD ["serve", "--config", "/etc/palisade/server.toml"]

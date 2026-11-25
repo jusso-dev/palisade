@@ -65,7 +65,7 @@ few extra tools.
 
 ```sh
 cargo xtask ci          # every check in ci.yml
-cargo xtask ci --fast   # skips coverage, fuzz, docs, feature-powerset and msrv
+cargo xtask ci --fast   # skips coverage, fuzz, docs, feature-powerset, msrv and the package builds
 ```
 
 ## Coding standards

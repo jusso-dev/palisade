@@ -1,0 +1,3 @@
+# Byte for byte on every OS: the licence text is compared in tests, and the
+# WiX sources are hashed into the package.
+* -text
