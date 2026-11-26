@@ -153,6 +153,20 @@ versions, each with its facts and matcher.
 | `session.type` | Context (#33): how the session was started: `console`, `rdp`, `remote_shell`, `service`, `batch` or `network`. |
 | `session.client_hostname` | Context (#33): the host name of the client connected to the session, on a multi-session host. |
 | `session.is_remote` | Context (#33): the session is remote. |
+| `user.integrity_level` | Context (#33): the integrity level of the process token: `untrusted`, `low`, `medium`, `medium_plus`, `high`, `system` or `protected`. Ordered, so `ge` and `le` compare levels. |
+| `user.ou` | Context (#33): the organisational unit of the user's directory object, as a distinguished name such as `OU=Finance,DC=corp,DC=example`. With `include_sub_ous`, units below it match too. |
+| `device.ou` | Context (#33): the organisational unit of the device's directory object, as for `user.ou`. |
+| `device.os_build` | Context (#33): the operating system build number, such as `22631`. |
+| `session.id` | Context (#33): the session ID. |
+| `session.client_ip` | Context (#33): the IP address of the client connected to the session, on a multi-session host. |
+| `net.ip` | Context (#33): every local interface address. A network test (`ip_in_cidr`, `ip_between`, `ip_wildcard`) matches if any address does; a set test holds the addresses as a set, so `all_of` needs every listed address to be present. |
+| `net.mac` | Context (#33): every local interface MAC address. |
+| `net.dns_suffix` | Context (#33): every connection-specific DNS suffix. |
+| `net.connected_to_server` | Context (#33): the device can reach its server now. |
+| `net.location` | Context (#33, #38): the names of the network locations the device is in, such as `corporate`, `remote` or `offline`. |
+| `time.weekday` | Context (#33): the day of the week of the evaluation, as `mon` to `sun`, in the clock the policy's `time_zone_basis` names. |
+| `time.local_time` | Context (#33): the time of day of the evaluation, as `HH:MM`, in the policy's clock. |
+| `time.date` | Context (#33): the date of the evaluation, as `YYYY-MM-DD`, in the policy's clock. |
 
 ## LibraryId
 
@@ -244,6 +258,21 @@ match if no value does, and never match a fact that is unknown.
 | `not_member_of` | The set holds none of the values (#33). |
 | `is_true` | The fact is true. Takes no values (#33). |
 | `is_false` | The fact is false. Takes no values (#33). On an unknown fact it is unknown, like every other test. |
+| `eq` | Number, level or date equal to any value (#32). |
+| `ne` | Number, level or date equal to none of the values (#32). |
+| `gt` | Greater than the value (#32). |
+| `ge` | Greater than or equal to the value (#32). |
+| `lt` | Less than the value (#32). |
+| `le` | Less than or equal to the value (#32). |
+| `between` | Within `[min, max]`, both inclusive. Takes exactly two values, the minimum first (#32). |
+| `ip_in_cidr` | The address is in any of the CIDR blocks, such as `10.0.0.0/8` or `2001:db8::/32` (#32). On a set of addresses, any address may be. |
+| `ip_between` | The address is in any of the ranges, written `first-last` or, for IPv4, `a.b.c.first-last` (#32). |
+| `ip_wildcard` | The IPv4 address matches any whole-octet pattern, such as `10.*.*.*` (#32). |
+| `any_of` | The set holds at least one of the values (#32). The same test as `member_of`. |
+| `all_of` | The set holds every one of the values (#32). |
+| `weekday_in` | The day of the week is any of the values, `mon` to `sun` (#32). |
+| `time_between` | The time of day is within `[start, end)`, both `HH:MM`. A window whose end is before its start wraps midnight: `22:00` to `06:00` (#32). |
+| `date_between` | The date is within `[from, to]`, both `YYYY-MM-DD` and inclusive (#32). |
 
 ## Os
 

@@ -123,6 +123,10 @@
     - [0012. Fail-open versus fail-closed defaults](../../adr/0012-fail-open-vs-fail-closed-defaults.md)
     - [0013. Protected process light feasibility](../../adr/0013-protected-process-light-feasibility.md)
     - [0014. Educational scope statement](../../adr/0014-educational-scope-statement.md)
+    - [0015. Agent-server protocol with protocol-failure fallback](../../adr/0015-agent-server-protocol-fallback-triggers.md)
+    - [0016. Server database, tenant isolation and tenant scope binding](../../adr/0016-server-database-and-tenant-scope.md)
+    - [0017. Cryptographic algorithms, libraries and AEAD nonces](../../adr/0017-cryptographic-algorithms-and-nonces.md)
+    - [0018. Fail-open versus fail-closed defaults, revised](../../adr/0018-fail-open-vs-fail-closed-defaults-revised.md)
 <!-- adr:end -->
 
 # Security

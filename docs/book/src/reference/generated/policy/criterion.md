@@ -14,9 +14,13 @@ Appears at: `/rule_sets/rules/match/all/all/all/criterion`, `/rule_sets/rules/ma
 
 | Field | Type | Required | Default | Constraints | Since | Description |
 |---|---|---|---|---|---|---|
+| `anchored` | boolean | no |  |  | 1.0.0 | Only for `regex` and `not_regex`: `false` lets the pattern match anywhere in the fact instead of the whole fact (#32). Unset means `true`. |
 | `case_sensitive` | boolean | no |  |  | 1.0.0 | Compare strings case-sensitively. Unset means the field's default (#32), which is case-insensitive for every field defined so far. Only text, paths, file names, account names and tags have a case; other fields (hashes, versions, SIDs, group sets, yes-or-no facts and session types) reject this option. |
 | `field` | [`Field`](types.md#field) | yes |  |  | 1.0.0 | The fact being tested. |
+| `include_sub_ous` | boolean | no |  |  | 1.0.0 | Only for `user.ou` and `device.ou`: `true` also matches objects in every organisational unit below the named one (#33). Unset means `false`: the object must be directly in it. |
+| `match_ads` | boolean | no |  |  | 1.0.0 | Only for positive tests of `path.full`: `true` lets a value that names no alternate data stream also match a stream of a file it matches, so `C:\\Tools\\*` matches `C:\\Tools\\a.exe:s` (#32). Unset means `false`: a stream is its own object. |
 | `operator` | [`Operator`](types.md#operator) | yes |  |  | 1.0.0 | How it is compared. |
+| `safety_critical` | boolean | no |  |  | 1.0.0 | Only in a mandatory blocklist: when the fact is unknown, this criterion counts towards the deny applying (`match`, or `no_match` under an odd number of `not` nodes), so the shipped blocklists fail closed (#32, #87). Unset means `false`. |
 | `values` | array of string | no |  | at most 25 items | 1.0.0 | 1 to 25 values. Each is at most 2048 bytes of UTF-8; the schema can only bound the length in characters, so validation checks the bytes. `is_true` and `is_false` take no values, and the key may be left out. |
 
 Unknown fields are rejected.

@@ -37,6 +37,16 @@ rule set's assignment scope and its own scope all match. An example, validated i
 {{#include ../../../examples/policies/scoped-rules.yaml}}
 ```
 
+**Context criteria** test who runs the object, where and when: the user's and device's
+organisational unit, the process's integrity level, the session, the network and the time of
+day. Specified in [#32](https://github.com/jusso-dev/palisade/issues/32) and
+[#33](https://github.com/jusso-dev/palisade/issues/33). Like a scope, they only narrow a rule:
+every rule still names the object by a hash, signer or path. An example, validated in CI:
+
+```yaml
+{{#include ../../../examples/policies/context-criteria.yaml}}
+```
+
 See also: [`Rule`](../reference/generated/policy/rule.md),
 [`Match`](../reference/generated/policy/match.md),
 [`Criterion`](../reference/generated/policy/criterion.md) and
