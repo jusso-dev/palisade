@@ -1,6 +1,6 @@
 # 0005. Agent-server protocol
 
-- Status: accepted
+- Status: superseded by 0015
 - Date: 2026-11-23
 - Deciders: Palisade maintainer
 
@@ -79,3 +79,4 @@ compromised or spoofed push channel can at worst cause extra check-ins. Message 
 
 - Issues #20, #62 (check-in and transport), #223 (enrolment and mTLS), #15 (REST API),
   #23 (supply chain), #230 (fuzzing). Epics #4, #10, #18.
+- Superseded by [ADR 0015](0015-agent-server-protocol-fallback-triggers.md).
