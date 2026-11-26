@@ -50,6 +50,11 @@
 //!   compliance, process-creation and script-logging types; `source.kind`
 //!   `third_party` with `source.format`. New fields come after every 1.0
 //!   field, so the canonical form of a 1.0 event is unchanged.
+//! - **1.2.0**: the policy integrity types of #225
+//!   (`policy.signature.invalid`, `policy.rollback_rejected`,
+//!   `policy.target_mismatch`, `policy.stale`, `policy.lkg_loaded`,
+//!   `policy.emergency_loaded`, `policy.schema_unsupported` and
+//!   `tamper.policy.rollback_suspected`). No fields change.
 //!
 //! Readers are strict. They reject unknown fields and unknown enum values,
 //! because events are hash-chained (`seq`, `prev_hash`) and a reader that
@@ -113,7 +118,7 @@ pub use value::{
 };
 
 /// The event schema version this crate writes, and the newest it reads.
-pub const CURRENT: SchemaVersion = SchemaVersion::new(1, 1, 0);
+pub const CURRENT: SchemaVersion = SchemaVersion::new(1, 2, 0);
 
 /// The first version of the current major: every part of the schema that
 /// has no later `since` version is in it.
@@ -123,6 +128,10 @@ pub const V1_0: SchemaVersion = SchemaVersion::new(1, 0, 0);
 /// registered with `since: 1.1.0`, `source.kind` `third_party` and
 /// `source.format`.
 pub const V1_1: SchemaVersion = SchemaVersion::new(1, 1, 0);
+
+/// Schema version 1.2: the policy integrity event types registered with
+/// `since: 1.2.0` (#225).
+pub const V1_2: SchemaVersion = SchemaVersion::new(1, 2, 0);
 
 /// Most signatures recorded for one file or process image.
 pub const MAX_SIGNERS: usize = 64;
