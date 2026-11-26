@@ -70,6 +70,10 @@ fn eval(operator: Operator, values: &[String], fact: Quad, action: ActionKind) -
         operator,
         values: values.to_vec(),
         case_sensitive: None,
+        anchored: None,
+        match_ads: None,
+        include_sub_ous: None,
+        safety_critical: false,
     };
     let compiled = CompiledCriterion::compile(&criterion).unwrap();
     let facts = ObjectFacts::new().with(Field::MetaFileVersion, text(fact));
