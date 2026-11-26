@@ -1,8 +1,8 @@
 //! Which bundle the agent runs, and whether a new bundle is accepted.
 //!
 //! [`startup`] picks what to load from the cache files and the record
-//! copies, following the failure table of ADR 0012 and the startup steps of
-//! ADR 0007 (as proposed in #234):
+//! copies, following the failure table of ADR 0018 (which supersedes ADR
+//! 0012) and the startup steps of ADR 0007 (still `proposed`):
 //!
 //! | State | [`Load`] | Events |
 //! |---|---|---|
@@ -20,7 +20,7 @@
 //! returns the record values to write before and after the rename (ADR 0007
 //! activation steps 1 to 5).
 //!
-//! "A policy was ever accepted" (ADR 0012) is: the floor is above zero, an
+//! "A policy was ever accepted" (ADR 0018) is: the floor is above zero, an
 //! `active` or `previous` file exists, or a record copy exists but does not
 //! unseal. The last is stricter than the ADR: a corrupt copy is evidence
 //! that a record was written, so it never opens the first-install path.
@@ -53,7 +53,7 @@ pub enum Load {
     },
     /// The `previous` bundle, under the one-step exception.
     Previous(BundleMeta),
-    /// The built-in emergency policy, in enforce mode (#225, ADR 0012).
+    /// The built-in emergency policy, in enforce mode (#225, ADR 0018).
     Emergency,
     /// No policy was ever accepted: the built-in first-install defaults
     /// (audit mode, mandatory blocklists enforced).
@@ -306,7 +306,7 @@ pub enum PendingOutcome {
 /// Decides whether a pending bundle is activated (#225 check order, ADR
 /// 0007 step 1). `record` is the record in force and `active` is
 /// [`Selection::loadable_active`], updated after each activation. On `Err`,
-/// keep what is loaded and report the rejection's event (ADR 0012, "new
+/// keep what is loaded and report the rejection's event (ADR 0018, "new
 /// bundle fails verification").
 ///
 /// # Errors

@@ -18,7 +18,8 @@
 //! - [`select`]: what to run at startup (`active`, then `previous` under the
 //!   one-step exception, then the emergency policy, then first-install
 //!   audit) and whether a new `pending` bundle is accepted, following the
-//!   failure table of ADR 0012 and the activation order of ADR 0007.
+//!   failure table of ADR 0018 (which supersedes ADR 0012) and the activation
+//!   order of ADR 0007.
 //! - [`stale`]: staleness, which is reported but never changes what runs.
 //!
 //! Every rejection maps to exactly one event type ([`Rejection::event_type`],

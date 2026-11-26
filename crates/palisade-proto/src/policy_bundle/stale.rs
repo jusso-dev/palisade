@@ -1,4 +1,4 @@
-//! Staleness (#225, ADR 0012 "Policy stale or past `expires_at`").
+//! Staleness (#225, ADR 0018 "Policy stale or past `expires_at`").
 //!
 //! A policy is stale when no new bundle was received within
 //! `policy.stale_after` (7 days by default), or when `now` is past the

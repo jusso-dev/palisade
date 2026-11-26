@@ -1,7 +1,7 @@
 //! The anti-rollback record and its copies.
 //!
-//! The record holds, for this device's target (ADR 0007, as proposed in
-//! #234):
+//! The record holds, for this device's target (ADR 0007, which is still
+//! `proposed`):
 //!
 //! - the **floor**: the highest `policy_version` the agent has made
 //!   `active`. It never exceeds the version of the bundle in `active`;

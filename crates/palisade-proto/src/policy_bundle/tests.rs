@@ -376,7 +376,7 @@ fn relaxed_signature_modes_need_a_dev_build_or_a_group_opt_in() {
 }
 
 // ---------------------------------------------------------------------------
-// ADR 0012's failure table, row by row
+// ADR 0018's failure table (ADR 0012's, revised), row by row
 // ---------------------------------------------------------------------------
 
 /// "New bundle (`pending`) fails verification or activation": keep
@@ -449,7 +449,7 @@ fn adr_0012_active_fails_loads_the_recorded_previous() {
 }
 
 /// The one-step exception never reaches further back than the recorded
-/// fallback (ADR 0007's fix, proposed in #234).
+/// fallback (ADR 0007's fix, from #234).
 #[test]
 fn adr_0012_previous_must_be_the_recorded_fallback() {
     for (record, previous) in [
