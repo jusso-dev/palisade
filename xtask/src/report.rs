@@ -141,7 +141,12 @@ pub fn base_metadata<T>(
     if commit.is_empty() || commit.starts_with('-') || commit.contains(':') {
         return Err(format!("not a commit: `{commit}`"));
     }
-    let nanos = std::time::SystemTime::now()
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "repository tooling: only makes a temporary directory name unique"
+    )]
+    let now = std::time::SystemTime::now();
+    let nanos = now
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.subsec_nanos());
     let parent = root

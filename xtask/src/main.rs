@@ -9,12 +9,16 @@
 mod adr;
 mod bench_compare;
 mod ci;
+mod clippy_config;
+mod commit_msg;
 mod coverage;
 mod coverage_gate;
 mod deps;
+mod devcontainer;
 mod dist;
 mod fuzz;
 mod fuzz_locks;
+mod hooks;
 mod junit;
 mod manifests;
 mod release;
@@ -46,6 +50,9 @@ Commands:
   bench-compare --base <commit>
                    Run every criterion bench at <commit> and at the working tree, and fail if a
                    median is more than 10% slower outside the noise (bench.yml)
+  check-commit-msg <file>
+                   Check a commit message file against Conventional Commits (the
+                   opt-in commit-msg hook in .githooks/ runs this)
   check-deps       Enforce the allowed dependency directions between crates
   check-fuzz-locks Check that every crates/*/fuzz/Cargo.lock is current (cargo metadata --locked)
   check-testdata   Fail if any file in the repository that starts like an executable (MZ) is not
@@ -116,6 +123,11 @@ fn main() -> ExitCode {
         if command == "release" {
             return run_release(rest);
         }
+    }
+    if let [command, path] = args.as_slice()
+        && command == "check-commit-msg"
+    {
+        return check_commit_msg(Path::new(path));
     }
     match args.as_slice() {
         [command, flag, base] if command == "deps-report" && flag == "--base" => {
@@ -196,6 +208,26 @@ fn run_ci(fast: bool) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `cargo xtask check-commit-msg <file>`: see `src/commit_msg.rs`.
+fn check_commit_msg(path: &Path) -> ExitCode {
+    let message = match read(path) {
+        Ok(message) => message,
+        Err(error) => {
+            eprintln!("check-commit-msg: error: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let problems = commit_msg::check(&message);
+    if problems.is_empty() {
+        return ExitCode::SUCCESS;
+    }
+    for problem in &problems {
+        eprintln!("check-commit-msg: {problem}");
+    }
+    eprintln!("check-commit-msg: see CONTRIBUTING.md; `git commit --no-verify` skips the hook");
+    ExitCode::FAILURE
 }
 
 /// Prints the Markdown summary of a nextest JUnit report to

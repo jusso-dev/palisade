@@ -13,17 +13,41 @@ publish.workspace = true
 name = "palisade-agent"
 path = "src/main.rs"
 
+[features]
+# `--simulate`: the fake agent, built on the platform mocks in
+# `palisade-core`'s `test-util`. For development builds only; never in a
+# release build (#29).
+test-util = [
+    "palisade-core/test-util",
+    "dep:palisade-proto",
+    "dep:sha2",
+]
+
 [dependencies]
+# The platform traits (#29).
+palisade-core = { workspace = true, features = ["std"] }
+# The event schema, for the simulator's events.
+palisade-proto = { workspace = true, optional = true }
+# Interface addresses for the environment backend, as in the server.
+if-addrs = { workspace = true }
 serde = { workspace = true }
+# The simulator's placeholder event chain.
+sha2 = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 toml = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
+# Safe registry reads, for the registry and environment backends (#29).
+windows-registry = { workspace = true }
 windows-service = { workspace = true }
+# The running OS version, without `unsafe` in this crate.
+windows-version = { workspace = true }
 
 [dev-dependencies]
+palisade-core = { workspace = true, features = ["std", "test-util"] }
+palisade-proto = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
 
 [lints]

@@ -1,0 +1,35 @@
+# The dev container and a disposable Postgres for the server tests (#29).
+# Started by .devcontainer/devcontainer.json; see docs/dev/unix.md.
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: sleep infinity
+    volumes:
+      - ..:/workspaces/palisade:cached
+      # Build output stays in a volume, off the (possibly slow) bind mount.
+      - target:/workspaces/palisade/target
+    environment:
+      # The server's Postgres tests run when this is set (docs/ci.md). The
+      # password is a throwaway that exists only in this container network.
+      PALISADE_TEST_DATABASE_ADMIN_URL: postgres://postgres:dev-only-throwaway@postgres:5432/postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    # postgres:17.12, the image and digest the CI `postgres` job uses.
+    image: postgres@sha256:156d40cfa063d6babb15d329a8e15b26a8d0690ebb6084c956084f3b025c3b30
+    environment:
+      POSTGRES_PASSWORD: dev-only-throwaway
+      POSTGRES_INITDB_ARGS: --auth=scram-sha-256
+    # Reachable from the dev container only; no port is published to the host.
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  target:

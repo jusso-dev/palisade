@@ -86,17 +86,18 @@ applies to all of these. Every `unsafe` block also needs a `// SAFETY:` comment
 - **Documented.** Every feature, including optional dependencies that act as features, is listed in
   the `## Feature flags` section of the crate README. Enforced by `cargo xtask check-manifests`.
 - **Each feature builds on its own.** CI runs `cargo hack check --each-feature --all-targets` on the
-  portable crates, `core`, `fileid`, `policy`, `proto`, `server`, `cli` and `console` (the
-  `feature-powerset` job).
+  portable crates, `core`, `fileid`, `policy`, `proto`, `server`, `cli` and `console`, and on
+  `agent`, which builds on every OS (the `feature-powerset` job).
 - **No ordinary build turns `test-util` on.** It may hold fixtures and mocks. It is never in
   `default`, no other feature of the crate turns it on (so `default` cannot reach it indirectly),
   and only `[dev-dependencies]` may enable it on another crate. No `[workspace.dependencies]`
   entry may enable it, because members inherit those features in every table. Enforced by
   `cargo xtask check-manifests`. The check reads manifests, not build commands, so
   `cargo build --release --features test-util` or `--all-features` would still turn it on.
-  `palisade-policy` has it (builders, #25); there is no release workflow yet; the release build in #22 must
-  name its features rather than pass `--all-features`. CI's `--all-features` jobs only check and
-  test.
+  `palisade-policy` (builders, #25), `palisade-core` (platform mocks) and `palisade-agent` (the
+  fake agent) have it. The release build (`cargo xtask dist`) builds named binaries with their
+  default features only, and must never pass `--all-features`. CI's `--all-features` jobs only
+  check and test.
 
 The planned flag names, each added with the code that needs it:
 
@@ -105,7 +106,7 @@ The planned flag names, each added with the code that needs it:
 | `std` | Standard library support. Off for `no_std` users such as the driver. | `palisade-core` (now) |
 | `serde` | `Serialize`/`Deserialize` for public types. | `palisade-core` (now) |
 | `schema` | JSON Schema descriptions (`schemars`). #19 calls this flag `schemars`; it landed in `palisade-core` as `schema` (#30), and `palisade-policy` depends on that name. | `palisade-core` (now) |
-| `test-util` | Fixtures and mocks for other crates' tests. | `palisade-policy` (now, #25); `palisade-core` platform mocks (#29) |
+| `test-util` | Fixtures and mocks for other crates' tests. | `palisade-policy` (#25), `palisade-core` and `palisade-agent` (#29) (now) |
 | `etw` | Event Tracing for Windows collection in the agent. | #59 |
 | `minifilter` | Agent support for the optional kernel driver. | #110 |
 | `os-native-compiler` | Compiling policies with the operating system's own tooling, on a Windows build host. | #84 |

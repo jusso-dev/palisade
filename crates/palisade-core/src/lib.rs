@@ -8,6 +8,9 @@ mod id;
 mod mode;
 mod object;
 pub mod path;
+pub mod platform;
+#[cfg(any(test, feature = "test-util"))]
+pub mod test_util;
 mod verification;
 mod version;
 

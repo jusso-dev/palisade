@@ -690,7 +690,12 @@ pub fn is_date(s: &str) -> bool {
 
 /// Today's UTC date as `YYYY-MM-DD`, from the system clock.
 pub fn today_utc() -> Result<String, String> {
-    let secs = std::time::SystemTime::now()
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "repository tooling: advisory expiry dates are checked against today's date"
+    )]
+    let now = std::time::SystemTime::now();
+    let secs = now
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| format!("system clock is before 1970: {e}"))?
         .as_secs();

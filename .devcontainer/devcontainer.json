@@ -1,0 +1,14 @@
+{
+  // Palisade dev container (#29): the pinned toolchain, the CI tools and a
+  // Postgres service for the server tests. Linux only; Windows-only code is
+  // checked with `cargo check --target x86_64-pc-windows-gnu`. See
+  // docs/dev/unix.md.
+  "name": "palisade",
+  "dockerComposeFile": "compose.yaml",
+  "service": "dev",
+  "workspaceFolder": "/workspaces/palisade",
+  "shutdownAction": "stopCompose",
+  "remoteUser": "dev",
+  // Git hooks stay opt-in: nothing here enables .githooks/.
+  "postCreateCommand": "cargo fetch --locked"
+}

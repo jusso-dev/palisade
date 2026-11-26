@@ -34,5 +34,45 @@ fn main() -> ExitCode {
             eprintln!("palisade-agent: --service is only available on Windows; use --console");
             ExitCode::FAILURE
         }
+        Mode::Simulate => simulate(&args),
     }
+}
+
+/// `--simulate`: replays a scenario and prints its events as JSON lines.
+#[cfg(feature = "test-util")]
+fn simulate(args: &cli::Args) -> ExitCode {
+    use palisade_agent::simulate::{self, JsonLines, Scenario};
+    let scenario = match &args.scenario {
+        Some(path) => Scenario::load(path),
+        None => Scenario::from_toml(simulate::scenario::DEFAULT),
+    };
+    let scenario = match scenario {
+        Ok(scenario) => scenario,
+        Err(e) => {
+            eprintln!("palisade-agent: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let stdout = std::io::stdout();
+    let mut sink = JsonLines(stdout.lock());
+    match simulate::run(&scenario, &mut sink) {
+        Ok(count) => {
+            eprintln!("palisade-agent: simulated {count} events");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("palisade-agent: simulation failed: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `--simulate` without the `test-util` feature.
+#[cfg(not(feature = "test-util"))]
+fn simulate(_: &cli::Args) -> ExitCode {
+    eprintln!(
+        "palisade-agent: --simulate is a development feature; build with \
+         `cargo run -p palisade-agent --features test-util -- --simulate`"
+    );
+    ExitCode::from(2)
 }

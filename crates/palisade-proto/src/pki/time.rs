@@ -26,7 +26,12 @@ pub struct SystemClock;
 
 impl Clock for SystemClock {
     fn now(&self) -> Timestamp {
-        let micros = match SystemTime::now().duration_since(UNIX_EPOCH) {
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "a Clock implementation is where the wall clock is read (#29)"
+        )]
+        let now = SystemTime::now();
+        let micros = match now.duration_since(UNIX_EPOCH) {
             Ok(after) => i64::try_from(after.as_micros()).unwrap_or(i64::MAX),
             Err(before) => i64::try_from(before.duration().as_micros())
                 .map_or(i64::MIN, |m| m.saturating_neg()),

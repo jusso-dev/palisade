@@ -268,8 +268,12 @@ fn cache_flow_on_ntfs() {
     // Touching only the write time changes the key too: a miss.
     let reads_before = reads.get();
     let f = OpenOptions::new().write(true).open(&path).unwrap();
-    f.set_modified(std::time::SystemTime::now() + Duration::from_secs(3600))
-        .unwrap();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "sets a real file's write time on NTFS; no Clock is involved"
+    )]
+    let now = std::time::SystemTime::now();
+    f.set_modified(now + Duration::from_secs(3600)).unwrap();
     drop(f);
     let Through::Done { source, .. } = run() else {
         panic!("unstable")

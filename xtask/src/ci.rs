@@ -217,7 +217,7 @@ pub const STEPS: &[Step] = &[
         slow: true,
         ..step(
             "feature-powerset",
-            "cargo hack check --each-feature --all-targets --locked -p palisade-core -p palisade-fileid -p palisade-policy -p palisade-proto -p palisade-server -p palisade-cli -p palisade-console",
+            "cargo hack check --each-feature --all-targets --locked -p palisade-core -p palisade-fileid -p palisade-policy -p palisade-proto -p palisade-server -p palisade-cli -p palisade-console -p palisade-agent",
         )
     },
     step("runner-guard", "cargo xtask check-workflows"),
