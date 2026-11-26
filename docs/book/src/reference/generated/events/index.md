@@ -7,7 +7,7 @@ One canonical event.
 Field order here is the serialisation order, so `Event::to_canonical_json`
 is deterministic.
 
-Schema: [`schemas/events/v1.json`](https://github.com/jusso-dev/palisade/blob/main/schemas/events/v1.json) (`$id` `https://github.com/jusso-dev/palisade/schemas/events/v1.json`), version 1.1.0. Regenerate the schema with `PALISADE_BLESS=1 cargo test -p palisade-proto --test events_schema`, then these pages with `cargo xtask docs generate`.
+Schema: [`schemas/events/v1.json`](https://github.com/jusso-dev/palisade/blob/main/schemas/events/v1.json) (`$id` `https://github.com/jusso-dev/palisade/schemas/events/v1.json`), version 1.2.0. Regenerate the schema with `PALISADE_BLESS=1 cargo test -p palisade-proto --test events_schema`, then these pages with `cargo xtask docs generate`.
 
 ## Fields
 
@@ -41,7 +41,7 @@ Schema: [`schemas/events/v1.json`](https://github.com/jusso-dev/palisade/blob/ma
 | `process` | [`Process`](process.md) | no |  |  | 1.0.0 | The process that acted. |
 | `registry` | [`Registry`](registry.md) | no |  |  | 1.1.0 | The registry key or value. Since 1.1. |
 | `restriction` | [`Restriction`](restriction.md) | no |  |  | 1.1.0 | The script language restriction. Since 1.1. |
-| `schema_version` | [`SchemaVersion`](types.md#schemaversion) | yes |  | matches `^1\.(0\|1)\.(0\|[1-9][0-9]*)$` | 1.0.0 | The schema version of this event. |
+| `schema_version` | [`SchemaVersion`](types.md#schemaversion) | yes |  | matches `^1\.(0\|1\|2)\.(0\|[1-9][0-9]*)$` | 1.0.0 | The schema version of this event. |
 | `script` | [`Script`](script.md) | no |  |  | 1.0.0 | The script, for script events. |
 | `seq` | integer | yes |  | at least 0; format `uint64` | 1.0.0 | The producer's sequence number, starting at 0. |
 | `severity` | [`Severity`](types.md#severity) | yes |  |  | 1.0.0 | 0 to 10. See `Severity::syslog` for the syslog mapping. |
@@ -51,7 +51,7 @@ Schema: [`schemas/events/v1.json`](https://github.com/jusso-dev/palisade/blob/ma
 | `ts_agent_monotonic` | integer | no |  | at least 0; format `uint64` | 1.0.0 | The producer's monotonic clock when the event was recorded, in microseconds since the agent started. It orders events even when the wall clock jumps. |
 | `user` | [`User`](user.md) | no |  |  | 1.0.0 | The user, if any. |
 
-The schema also has 69 cross-field rules (`allOf`), for example which field sets each event type requires and which fields an older `schema_version` may not use.
+The schema also has 78 cross-field rules (`allOf`), for example which field sets each event type requires and which fields an older `schema_version` may not use.
 
 ## Object types
 
