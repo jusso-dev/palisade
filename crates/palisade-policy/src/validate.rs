@@ -192,6 +192,10 @@ pub enum ErrorCode {
     /// make a rule that lets an object run apply, or keep a deny from
     /// applying (#38).
     UserPatternNotAllowed,
+    /// A criterion option is set where it does not apply, such as
+    /// `anchored` on an operator that takes no regular expression (#32), or
+    /// `safety_critical` outside a mandatory blocklist (#32, #87).
+    OptionNotApplicable,
 }
 
 impl ErrorCode {
@@ -256,6 +260,7 @@ impl ErrorCode {
             Self::InvalidScope => "invalid_scope",
             Self::InvalidSchedule => "invalid_schedule",
             Self::UserPatternNotAllowed => "user_pattern_not_allowed",
+            Self::OptionNotApplicable => "option_not_applicable",
         }
     }
 
@@ -598,7 +603,7 @@ impl Validator {
                         "rules in a mandatory rule set block under every mode (ADR 0004) and cannot be `never_enforce`",
                     );
                 }
-                self.rule(&path, rule);
+                self.rule(&path, rule, set.mandatory);
                 self.action(&path, set, rule);
                 if let Some(scope) = &rule.scope {
                     self.scope(
@@ -612,7 +617,9 @@ impl Validator {
         }
     }
 
-    fn rule(&mut self, base: &str, rule: &Rule) {
+    /// Checks one rule. `mandatory` is whether its rule set is a mandatory
+    /// blocklist, the only place `safety_critical` applies.
+    fn rule(&mut self, base: &str, rule: &Rule, mandatory: bool) {
         if let Some(display_id) = &rule.display_id {
             let digits = display_id.strip_prefix("R-").unwrap_or_default();
             if !(6..=12).contains(&digits.len()) || !digits.bytes().all(|b| b.is_ascii_digit()) {
@@ -693,7 +700,7 @@ impl Validator {
             );
         }
         for (c, path) in ordered {
-            self.criterion(&path, c);
+            self.criterion(&path, c, mandatory);
         }
 
         // The recursive analysis is bounded by the depth limit, so it only
@@ -747,9 +754,9 @@ impl Validator {
         }
     }
 
-    fn criterion(&mut self, base: &str, c: &Criterion) {
+    fn criterion(&mut self, base: &str, c: &Criterion, mandatory: bool) {
         let class = c.field.class();
-        if !c.operator.applies_to(class) {
+        if !c.operator.applies_to_field(c.field) {
             self.push(
                 ErrorCode::OperatorFieldMismatch,
                 &format!("{base}/operator"),
@@ -766,6 +773,24 @@ impl Validator {
                 ErrorCode::CaseSensitivityNotApplicable,
                 &format!("{base}/case_sensitive"),
                 format!("`{}` has no case to compare", serde_name(&c.field)),
+            );
+        }
+        let problems = ops::option_problems(c);
+        let options_ok = problems.is_empty();
+        for kind in &problems {
+            if let CompileErrorKind::OptionNotApplicable(option, _) = kind {
+                self.compile_error(&format!("{base}/{option}"), kind);
+            }
+        }
+        // `safety_critical` makes an unknown fact count towards a deny, which
+        // only fails closed in a mandatory blocklist (#32, #87). Anywhere
+        // else it would do nothing, or make a rule fail open. It does not
+        // change how the criterion compiles.
+        if c.safety_critical && !mandatory {
+            self.push(
+                ErrorCode::OptionNotApplicable,
+                &format!("{base}/safety_critical"),
+                "`safety_critical` only applies in a mandatory blocklist",
             );
         }
         let (min, max) = c.operator.value_count();
@@ -811,11 +836,27 @@ impl Validator {
         // compiles nothing a second time.
         // `case_sensitive` was reported above; compiling would report it
         // again.
+        // A misplaced option was reported above and does not change the
+        // values, so the bounds are still checked, without the options:
+        // the author sees both findings in one pass.
         let well_formed = all_ok
             && case_ok
-            && c.operator.applies_to(class)
+            && c.operator.applies_to_field(c.field)
             && (min..=max).contains(&c.values.len());
-        if well_formed && self.compile_values && c.operator.is_version() {
+        // Ranges and windows are checked across their two values.
+        if well_formed && self.compile_values && c.operator.value_count() == (2, 2) {
+            let without_options;
+            let c = if options_ok {
+                c
+            } else {
+                without_options = Criterion {
+                    anchored: None,
+                    match_ads: None,
+                    include_sub_ous: None,
+                    ..c.clone()
+                };
+                &without_options
+            };
             if let Err(errors) = CompiledCriterion::compile(c) {
                 for e in errors {
                     let path = match e.value {
@@ -841,6 +882,7 @@ impl Validator {
             CompileErrorKind::CaseSensitivityNotApplicable => {
                 ErrorCode::CaseSensitivityNotApplicable
             }
+            CompileErrorKind::OptionNotApplicable(..) => ErrorCode::OptionNotApplicable,
         };
         self.push(code, path, kind.to_string());
     }

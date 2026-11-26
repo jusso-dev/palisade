@@ -63,7 +63,13 @@
 //!   a stream only matches streams: `C:\x\*` does not match
 //!   `C:\x\a.txt:payload`, `C:\x\*:*` does, and `**:**` matches no plain
 //!   file. A value names a stream when its last component has a `:` that is
-//!   not a drive letter's. A regular expression never matches a stream. `path.directory`, `path.file_name` and
+//!   not a drive letter's. `match_ads: true`, on a positive test of
+//!   `path.full`, lets a value that names no stream also match the streams
+//!   of a file it matches; a negative test cannot take it, so a stream never
+//!   escapes a rule written for its file. A regular expression is never
+//!   tested against a stream's own name, so by default it never matches a
+//!   stream; with `match_ads: true` it is tested against the file that holds
+//!   the stream, and matches the stream if it matches that file. `path.directory`, `path.file_name` and
 //!   `path.extension` describe the file that holds the stream.
 //!
 //! On every other string field, `*` and `**` match any run of characters,
@@ -96,6 +102,10 @@
 //! - patterns whose compiled form exceeds [`REGEX_SIZE_LIMIT`].
 //!
 //! Path variables are not expanded inside regular expressions.
+//!
+//! `anchored: false` lets a pattern match anywhere in the fact instead of
+//! the whole fact (`Suite [0-9]+` then matches `Example Suite 12 (x64)`).
+//! Only `regex` and `not_regex` take it.
 //!
 //! # Versions
 //!
@@ -145,6 +155,74 @@
 //!   `console`, `rdp`, `remote_shell`, `service`, `batch` and `network`.
 //! - The other device and session facts are text or versions, compared as
 //!   above.
+//!
+//! ## Numbers, levels and dates
+//!
+//! `eq`, `ne`, `gt`, `ge`, `lt`, `le` and `between` compare whole numbers
+//! (`device.os_build`, `session.id`), integrity levels (`user.integrity_level`,
+//! ordered `untrusted` < `low` < `medium` < `medium_plus` < `high` <
+//! `system` < `protected`) and dates (`time.date`, `YYYY-MM-DD`, which also
+//! takes `date_between`). `between` and `date_between` take a minimum and a
+//! maximum and include both. Numbers are decimal with no sign, at most
+//! 2^64 - 1.
+//!
+//! ## Addresses
+//!
+//! `session.client_ip` is one address and `net.ip` the set of local
+//! addresses; a test of the set matches if any address matches.
+//! `ip_in_cidr` takes CIDR blocks (`10.0.0.0/8`, `2001:db8::/32`, whose
+//! address must be the first of the block), `ip_between` takes ranges
+//! (`192.168.1.10-192.168.1.20`, or `192.168.1.10-20`), and `ip_wildcard`
+//! takes IPv4 octet patterns (`10.*.*.*`). `equals` compares addresses, and
+//! the set operators test members of `net.ip`. An IPv4 address written in
+//! IPv6 form (`::ffff:10.0.0.1`) is the IPv4 address. [`net`] parses all of
+//! these, and scopes (#38) use it too. `net.mac` holds MAC addresses
+//! (`aa:bb:cc:01:02:03`, `AA-BB-CC-01-02-03` or `aabbcc010203`).
+//!
+//! ## Sets
+//!
+//! `member_of` and `any_of` match if the set holds any value, `all_of` if it
+//! holds every value, and `not_member_of` if it holds none. A member of a
+//! principal set that is neither a SID nor an object ID makes a value it
+//! might be unknown, so it never lets `not_member_of` match or `all_of` fail.
+//! `net.ip` is a set of addresses: a set test (`member_of`, `any_of`,
+//! `all_of`, `not_member_of`) compares the listed addresses with it, so
+//! `all_of` needs every one present, while a network test (`ip_in_cidr`,
+//! `ip_between`, `ip_wildcard`) matches if any local address does.
+//! `net.dns_suffix` and `net.location` are sets of names, compared like tags.
+//!
+//! ## Directory units
+//!
+//! `user.ou` and `device.ou` read the distinguished name of the user's or
+//! device's directory object and test the unit it is in: the name without
+//! its first component. Names are compared component by component, without
+//! case or spaces around `=` and `,`, after decoding the escapes of RFC 4514
+//! (`\,` and `\2C` are the same comma). A name with an escape RFC 4514
+//! does not define cannot be compared: as a rule value it is invalid, and as
+//! a fact it is unknown. `include_sub_ous: true` also matches units below
+//! the named one.
+//!
+//! ## Time
+//!
+//! The agent supplies the weekday, time of day and date in the clock the
+//! policy's `time_zone_basis` names, from its trusted clock, and leaves them
+//! out when the clock cannot be trusted, so every time test is then unknown
+//! and an allow that depends on the time fails closed (#18). `weekday_in`
+//! takes `mon` to `sun`. `time_between [start, end]` (`HH:MM`) includes the
+//! start and excludes the end, and wraps midnight when the end is before
+//! the start (`22:00`, `06:00`); an empty window is rejected.
+//!
+//! ## Failing closed in mandatory blocklists
+//!
+//! A criterion in a mandatory blocklist may be `safety_critical: true`. When
+//! it is unknown, it counts towards the deny applying, so a shipped
+//! blocklist blocks an object whose facts are missing instead of letting it
+//! through ([`crate::condition::CompiledMatch::eval_mandatory`], #87).
+//! Validation rejects the option anywhere else.
+
+pub mod net;
+
+use std::net::IpAddr;
 
 use regex_automata::meta::Regex;
 use unicode_normalization::UnicodeNormalization;
@@ -152,7 +230,8 @@ use unicode_normalization::UnicodeNormalization;
 use palisade_core::path::{NormalizedPath, normalize};
 
 use crate::context::{
-    ContextFact, EvaluationContext, SessionType, normalize_principal, normalize_sid,
+    ContextFact, Date, EvaluationContext, IntegrityLevel, SessionType, Weekday,
+    normalize_principal, normalize_sid, parse_time_of_day,
 };
 use crate::facts::{ObjectFacts, PathFact, PathVariable, PathVariables, SignerFact};
 use crate::model::limits::MAX_VALUE_BYTES;
@@ -421,6 +500,9 @@ pub enum CompileErrorKind {
     /// `case_sensitive` was set on a field that has no case, such as a
     /// hash, a version or a yes-or-no fact.
     CaseSensitivityNotApplicable,
+    /// An option was set on a criterion it does not apply to, with the
+    /// option's name and where it applies.
+    OptionNotApplicable(&'static str, &'static str),
 }
 
 impl core::fmt::Display for CompileErrorKind {
@@ -445,6 +527,9 @@ impl core::fmt::Display for CompileErrorKind {
             Self::CaseSensitivityNotApplicable => {
                 f.write_str("`case_sensitive` does not apply: the field has no case to compare")
             }
+            Self::OptionNotApplicable(option, applies) => {
+                write!(f, "`{option}` only applies to {applies}")
+            }
         }
     }
 }
@@ -458,6 +543,12 @@ pub struct CompiledCriterion {
     /// The positive form of the operator.
     operator: Operator,
     case_sensitive: bool,
+    /// `match_ads`, for `path.full`.
+    match_ads: bool,
+    /// `include_sub_ous`, for distinguished-name fields.
+    include_sub_ous: bool,
+    /// `safety_critical`: an unknown result counts towards a deny applying.
+    safety_critical: bool,
     values: Values,
 }
 
@@ -489,6 +580,36 @@ enum Values {
     Session(Vec<SessionType>),
     /// The value a yes-or-no fact must have.
     Bool(bool),
+    /// Ordered values (numbers, integrity levels, dates), with the
+    /// operator in [`CompiledCriterion::operator`].
+    Ordered(Vec<Ordinal>),
+    /// One inclusive range of ordered values.
+    OrderedRange(Ordinal, Ordinal),
+    /// Canonical IP addresses, for `equals`.
+    Ips(Vec<IpAddr>),
+    /// Address ranges, for `ip_in_cidr` and `ip_between`.
+    IpRanges(Vec<net::IpRange>),
+    /// Octet patterns, for `ip_wildcard`.
+    IpWildcards(Vec<net::IpWildcard>),
+    /// MAC addresses, for set operators on `net.mac`.
+    Macs(Vec<[u8; 6]>),
+    /// Distinguished names, each split into folded components, for
+    /// `user.ou` and `device.ou`.
+    Dns(Vec<Vec<String>>),
+    /// Days of the week.
+    Weekdays(Vec<Weekday>),
+    /// A time window, in minutes since midnight: `[start, end)`, wrapping
+    /// midnight when `end < start`.
+    TimeWindow(u16, u16),
+}
+
+/// A value that can be ordered: a whole number, an integrity level or a
+/// date. Values of different kinds never compare.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Ordinal {
+    Number(u64),
+    Level(IntegrityLevel),
+    Date(Date),
 }
 
 /// A value on `path.full` or `path.directory`.
@@ -519,7 +640,7 @@ impl CompiledCriterion {
     pub fn compile(c: &Criterion) -> Result<Self, Vec<CompileError>> {
         let whole = |kind| vec![CompileError { value: None, kind }];
         let class = c.field.class();
-        if !c.operator.applies_to(class) {
+        if !c.operator.applies_to_field(c.field) {
             return Err(whole(CompileErrorKind::OperatorFieldMismatch));
         }
         let (min, max) = c.operator.value_count();
@@ -530,6 +651,13 @@ impl CompiledCriterion {
         // rejected as well.
         if c.case_sensitive.is_some() && !class.has_case() {
             return Err(whole(CompileErrorKind::CaseSensitivityNotApplicable));
+        }
+        let options = option_problems(c);
+        if !options.is_empty() {
+            return Err(options
+                .into_iter()
+                .map(|kind| CompileError { value: None, kind })
+                .collect());
         }
         // Before any value is compiled, so an oversized pattern costs
         // nothing.
@@ -549,12 +677,16 @@ impl CompiledCriterion {
         }
         let operator = c.operator.positive();
         let case_sensitive = c.case_sensitive.unwrap_or(false);
-        let values = compile_values(c.field, operator, case_sensitive, &c.values)?;
+        let anchored = c.anchored.unwrap_or(true);
+        let values = compile_values(c.field, operator, case_sensitive, anchored, &c.values)?;
         Ok(Self {
             field: c.field,
             negated: !c.operator.is_positive(),
             operator,
             case_sensitive,
+            match_ads: c.match_ads.unwrap_or(false),
+            include_sub_ous: c.include_sub_ous.unwrap_or(false),
+            safety_critical: c.safety_critical,
             values,
         })
     }
@@ -575,6 +707,7 @@ impl CompiledCriterion {
             c.field,
             c.operator.positive(),
             case_sensitive,
+            c.anchored.unwrap_or(true),
             &[value.to_owned()],
         )
         .map(drop)
@@ -585,6 +718,13 @@ impl CompiledCriterion {
     #[must_use]
     pub const fn field(&self) -> Field {
         self.field
+    }
+
+    /// Whether the criterion is `safety_critical`: in a mandatory deny, an
+    /// unknown result counts towards the deny applying (#32, #87).
+    #[must_use]
+    pub const fn safety_critical(&self) -> bool {
+        self.safety_critical
     }
 
     /// Evaluates the criterion against one object's facts.
@@ -682,28 +822,85 @@ impl CompiledCriterion {
             }
             (ContextFact::Set(members), Values::Principals(want)) => {
                 // A member that is neither a SID nor an object ID could be
-                // any principal, so it is unknown rather than skipped: it
-                // must not let `not_member_of` match.
-                let mut result = Tri::NoMatch;
-                for member in members {
-                    if result == Tri::Match {
-                        break;
-                    }
-                    result = result.or(match normalize_principal(member) {
-                        Some(m) => Tri::from_bool(want.contains(&m)),
-                        None => {
-                            notes.insert(Note::FactMalformed);
-                            Tri::Unknown
-                        }
-                    });
-                }
-                result
-            }
-            (ContextFact::Set(members), Values::Tags(want)) => Tri::from_bool(
-                members
+                // any principal, so a value it might be is unknown rather
+                // than absent: it must not let `not_member_of` match, nor
+                // fail an `all_of` that the readable members satisfy.
+                let mut unreadable = false;
+                let have: Vec<String> = members
                     .iter()
-                    .any(|m| want.contains(&fold(m, self.case_sensitive))),
-            ),
+                    .filter_map(|m| {
+                        let n = normalize_principal(m);
+                        unreadable |= n.is_none();
+                        n
+                    })
+                    .collect();
+                if unreadable {
+                    notes.insert(Note::FactMalformed);
+                }
+                let held = |w: &String| {
+                    if have.contains(w) {
+                        Tri::Match
+                    } else if unreadable {
+                        Tri::Unknown
+                    } else {
+                        Tri::NoMatch
+                    }
+                };
+                if self.operator == Operator::AllOf {
+                    want.iter().map(held).fold(Tri::Match, Tri::and)
+                } else {
+                    want.iter().map(held).fold(Tri::NoMatch, Tri::or)
+                }
+            }
+            (ContextFact::Set(members), Values::Tags(want)) => {
+                let have: Vec<String> = members
+                    .iter()
+                    .map(|m| fold(m, self.case_sensitive))
+                    .collect();
+                self.set_test(want.iter().map(|w| have.contains(w)))
+            }
+            (ContextFact::Number(n), _) => self.ordered(Ordinal::Number(n)),
+            (ContextFact::Level(l), _) => self.ordered(Ordinal::Level(l)),
+            (ContextFact::Date(d), _) => self.ordered(Ordinal::Date(d)),
+            (ContextFact::Ip(ip), _) => Tri::from_bool(self.ip_matches(ip)),
+            (ContextFact::Ips(ips), Values::Ips(want)) if self.operator.is_set() => {
+                let have: Vec<IpAddr> = ips.iter().map(|ip| net::canonical(*ip)).collect();
+                self.set_test(want.iter().map(|w| have.contains(w)))
+            }
+            // A network test of a set of addresses: any address may match.
+            (ContextFact::Ips(ips), _) => Tri::from_bool(ips.iter().any(|ip| self.ip_matches(*ip))),
+            (ContextFact::Macs(macs), Values::Macs(want)) => {
+                self.set_test(want.iter().map(|w| macs.contains(w)))
+            }
+            (ContextFact::Weekday(day), Values::Weekdays(want)) => {
+                Tri::from_bool(want.contains(&day))
+            }
+            (ContextFact::Minute(m), Values::TimeWindow(start, end)) => {
+                Tri::from_bool(if start < end {
+                    *start <= m && m < *end
+                } else {
+                    // The window wraps midnight.
+                    m >= *start || m < *end
+                })
+            }
+            (ContextFact::Text(dn), Values::Dns(want)) => match dn_components(dn) {
+                // The object's own name is its first component; the unit it
+                // is in is the rest.
+                Some(have) if have.len() >= 2 => {
+                    let unit = &have[1..];
+                    Tri::from_bool(want.iter().any(|w| {
+                        if self.include_sub_ous {
+                            unit.len() >= w.len() && unit.ends_with(w)
+                        } else {
+                            unit == w.as_slice()
+                        }
+                    }))
+                }
+                _ => {
+                    notes.insert(Note::FactMalformed);
+                    Tri::Unknown
+                }
+            },
             (ContextFact::Text(fact), Values::Sid(want)) => match normalize_sid(fact) {
                 Some(have) => Tri::from_bool(want.contains(&have)),
                 None => {
@@ -784,10 +981,66 @@ impl CompiledCriterion {
             | Values::Principals(_)
             | Values::Tags(_)
             | Values::Session(_)
-            | Values::Bool(_) => {
+            | Values::Bool(_)
+            | Values::Ordered(_)
+            | Values::OrderedRange(..)
+            | Values::Ips(_)
+            | Values::IpRanges(_)
+            | Values::IpWildcards(_)
+            | Values::Macs(_)
+            | Values::Dns(_)
+            | Values::Weekdays(_)
+            | Values::TimeWindow(..) => {
                 notes.insert(Note::FactMalformed);
                 Tri::Unknown
             }
+        }
+    }
+
+    /// A set operator: `member_of` and `any_of` match if any value is in
+    /// the set, `all_of` if every value is.
+    fn set_test(&self, held: impl Iterator<Item = bool>) -> Tri {
+        let mut held = held;
+        Tri::from_bool(if self.operator == Operator::AllOf {
+            held.all(|h| h)
+        } else {
+            held.any(|h| h)
+        })
+    }
+
+    /// An ordered comparison of a number, an integrity level or a date.
+    fn ordered(&self, have: Ordinal) -> Tri {
+        let ok = match &self.values {
+            Values::Ordered(want) => want.iter().any(|w| {
+                // Values of another kind never compare; compilation only
+                // builds values of the field's kind.
+                core::mem::discriminant(w) == core::mem::discriminant(&have)
+                    && match self.operator {
+                        Operator::Gt => have > *w,
+                        Operator::Ge => have >= *w,
+                        Operator::Lt => have < *w,
+                        Operator::Le => have <= *w,
+                        _ => have == *w,
+                    }
+            }),
+            Values::OrderedRange(min, max) => {
+                core::mem::discriminant(min) == core::mem::discriminant(&have)
+                    && *min <= have
+                    && have <= *max
+            }
+            _ => return Tri::Unknown,
+        };
+        Tri::from_bool(ok)
+    }
+
+    /// Whether one address passes a network or equality test.
+    fn ip_matches(&self, ip: IpAddr) -> bool {
+        let ip = net::canonical(ip);
+        match &self.values {
+            Values::Ips(want) => want.contains(&ip),
+            Values::IpRanges(ranges) => ranges.iter().any(|r| r.contains(ip)),
+            Values::IpWildcards(patterns) => patterns.iter().any(|p| p.matches(ip)),
+            _ => false,
         }
     }
 
@@ -841,6 +1094,27 @@ impl CompiledCriterion {
         // Only `path.full` can name a stream; on `path.directory` no value
         // or fact names one.
         let fact_stream = self.field == Field::PathFull && path.stream().is_some();
+        // With `match_ads`, a value that names no stream also matches the
+        // streams of a file it matches: it is tested against the file.
+        if fact_stream && self.match_ads {
+            let mut result = self.eval_path_text(path.as_str(), true, ctx, notes);
+            if result != Tri::Match {
+                result = result.or(self.eval_path_text(path.without_stream(), false, ctx, notes));
+            }
+            return result;
+        }
+        self.eval_path_text(raw, fact_stream, ctx, notes)
+    }
+
+    /// A path test of `raw` (the whole path, or for `path.directory` the
+    /// directory), which is a stream if `fact_stream`.
+    fn eval_path_text(
+        &self,
+        raw: &str,
+        fact_stream: bool,
+        ctx: &EvalContext<'_>,
+        notes: &mut Notes,
+    ) -> Tri {
         match &self.values {
             Values::PathLiteral(values) => {
                 let fact = fold(raw, self.case_sensitive);
@@ -955,6 +1229,33 @@ fn join(base: &str, rest: &str) -> String {
     out
 }
 
+/// Every option of a criterion that does not apply to it, in field order:
+/// each option only applies to some fields and operators. `safety_critical`
+/// depends on the rule set, so validation checks it separately.
+/// Validation reports the same.
+pub(crate) fn option_problems(c: &Criterion) -> Vec<CompileErrorKind> {
+    let mut out = Vec::new();
+    if c.anchored.is_some() && !c.operator.is_regex() {
+        out.push(CompileErrorKind::OptionNotApplicable(
+            "anchored",
+            "`regex` and `not_regex`",
+        ));
+    }
+    if c.match_ads.is_some() && !(c.field == Field::PathFull && c.operator.is_positive()) {
+        out.push(CompileErrorKind::OptionNotApplicable(
+            "match_ads",
+            "positive tests of `path.full`",
+        ));
+    }
+    if c.include_sub_ous.is_some() && c.field.class() != FieldClass::DistinguishedName {
+        out.push(CompileErrorKind::OptionNotApplicable(
+            "include_sub_ous",
+            "`user.ou` and `device.ou`",
+        ));
+    }
+    out
+}
+
 /// Why a criterion value is too long, if it is: more than
 /// [`MAX_VALUE_BYTES`] bytes. Validation reports the same message.
 pub(crate) fn value_too_long(value: &str) -> Option<String> {
@@ -971,6 +1272,7 @@ fn compile_values(
     field: Field,
     operator: Operator,
     case_sensitive: bool,
+    anchored: bool,
     values: &[String],
 ) -> Result<Values, Vec<CompileError>> {
     fn each<T>(
@@ -1048,8 +1350,82 @@ fn compile_values(
         // The operator alone says what the fact must be; the number of
         // values (none) is checked with the operator.
         FieldClass::Bool => Values::Bool(operator == Operator::IsTrue),
+        FieldClass::Number | FieldClass::IntegrityLevel | FieldClass::Date => {
+            let parse = |v: &str| -> Result<Ordinal, CompileErrorKind> {
+                match field.class() {
+                    FieldClass::Number => number(v)
+                        .map(Ordinal::Number)
+                        .ok_or_else(|| invalid("expected a whole number from 0 to 18446744073709551615, in decimal")),
+                    FieldClass::IntegrityLevel => IntegrityLevel::from_name(v)
+                        .map(Ordinal::Level)
+                        .ok_or_else(|| invalid("expected one of `untrusted`, `low`, `medium`, `medium_plus`, `high`, `system`, `protected`")),
+                    _ => Date::parse(v)
+                        .map(Ordinal::Date)
+                        .ok_or_else(|| invalid("expected a date as `YYYY-MM-DD`")),
+                }
+            };
+            let parsed = each(values, parse)?;
+            match (operator, parsed.as_slice()) {
+                (Operator::Between | Operator::DateBetween, [min, max]) => {
+                    if min > max {
+                        return Err(vec![CompileError {
+                            value: Some(1),
+                            kind: invalid("the maximum is below the minimum"),
+                        }]);
+                    }
+                    Values::OrderedRange(*min, *max)
+                }
+                _ => Values::Ordered(parsed),
+            }
+        }
+        FieldClass::Ip | FieldClass::IpSet => match operator {
+            Operator::IpInCidr => Values::IpRanges(each(values, |v| {
+                net::IpRange::parse_cidr(v).map_err(CompileErrorKind::InvalidValue)
+            })?),
+            Operator::IpBetween => Values::IpRanges(each(values, |v| {
+                net::IpRange::parse_range(v).map_err(CompileErrorKind::InvalidValue)
+            })?),
+            Operator::IpWildcard => Values::IpWildcards(each(values, |v| {
+                net::IpWildcard::parse(v).map_err(CompileErrorKind::InvalidValue)
+            })?),
+            _ => Values::Ips(each(values, |v| {
+                net::parse_ip(v).ok_or_else(|| invalid("expected an IPv4 or IPv6 address"))
+            })?),
+        },
+        FieldClass::MacSet => Values::Macs(each(values, |v| {
+            net::parse_mac(v)
+                .ok_or_else(|| invalid("expected a MAC address, such as `aa:bb:cc:01:02:03`"))
+        })?),
+        FieldClass::NameSet => Values::Tags(each(values, |v| Ok(fold(v, case_sensitive)))?),
+        FieldClass::DistinguishedName => Values::Dns(each(values, |v| {
+            dn_components(v).ok_or_else(|| {
+                invalid("expected a distinguished name, such as `OU=Finance,DC=corp,DC=example`")
+            })
+        })?),
+        FieldClass::Weekday => Values::Weekdays(each(values, |v| {
+            Weekday::from_name(v).ok_or_else(|| invalid("expected one of `mon` to `sun`"))
+        })?),
+        FieldClass::TimeOfDay => {
+            let minutes = each(values, |v| {
+                parse_time_of_day(v).ok_or_else(|| {
+                    invalid("expected a time of day as `HH:MM`, from `00:00` to `23:59`")
+                })
+            })?;
+            match minutes.as_slice() {
+                [start, end] if start == end => {
+                    return Err(vec![CompileError {
+                        value: Some(1),
+                        kind: invalid("the window is empty: the end equals the start"),
+                    }]);
+                }
+                [start, end] => Values::TimeWindow(*start, *end),
+                // One value on its own, from `check_value`: the number of
+                // values is checked with the operator.
+                _ => Values::TimeWindow(0, 1),
+            }
+        }
         _ if operator == Operator::Regex => Values::Regex(each(values, |v| {
-            compile_regex(&v.nfc().collect::<String>(), case_sensitive)
+            compile_regex(&v.nfc().collect::<String>(), case_sensitive, anchored)
         })?),
         FieldClass::Path => match operator {
             Operator::Wildcard => Values::PathWildcard(each(values, |v| {
@@ -1233,6 +1609,105 @@ fn variable_syntax(value: &str) -> Option<(&str, &str)> {
     valid.then(|| (name, &body[end + 1..]))
 }
 
+/// A whole number in decimal, with no sign and at most 20 digits.
+fn number(s: &str) -> Option<u64> {
+    (!s.is_empty() && s.len() <= 20 && s.bytes().all(|b| b.is_ascii_digit()))
+        .then(|| s.parse().ok())
+        .flatten()
+}
+
+/// The components of a distinguished name, such as `OU=Finance,DC=corp`,
+/// from the leaf: each `TYPE=value` with the type upper-cased and the value
+/// decoded, trimmed and folded. The escapes of RFC 4514 are decoded, so
+/// `\,` and `\2C` are the same comma, kept inside its component. `None` if
+/// a component has no `=`, an empty type or value, or an escape that RFC
+/// 4514 does not define (`\q`, a lone `\` or hex digits that are not
+/// UTF-8): such a name cannot be compared, so a fact is unknown and a rule
+/// value is invalid.
+fn dn_components(s: &str) -> Option<Vec<String>> {
+    /// One component being read: its type once `=` was seen, and its
+    /// characters, each with whether it was escaped (escaped spaces are
+    /// not trimmed).
+    #[derive(Default)]
+    struct Part {
+        kind: Option<String>,
+        chars: Vec<(char, bool)>,
+        bytes: Vec<u8>,
+    }
+    impl Part {
+        /// Moves pending hex-escaped bytes into `chars`; `None` if they
+        /// are not UTF-8.
+        fn flush(&mut self) -> Option<()> {
+            if !self.bytes.is_empty() {
+                let text = String::from_utf8(core::mem::take(&mut self.bytes)).ok()?;
+                self.chars.extend(text.chars().map(|c| (c, true)));
+            }
+            Some(())
+        }
+        fn finish(mut self, out: &mut Vec<String>) -> Option<()> {
+            self.flush()?;
+            let kind = self.kind?;
+            let kind = kind.trim();
+            let start = self
+                .chars
+                .iter()
+                .position(|&(c, e)| e || !c.is_whitespace())?;
+            let end = self
+                .chars
+                .iter()
+                .rposition(|&(c, e)| e || !c.is_whitespace())?;
+            let value: String = self.chars[start..=end].iter().map(|&(c, _)| c).collect();
+            if kind.is_empty() || !kind.bytes().all(|b| b.is_ascii_alphanumeric()) {
+                return None;
+            }
+            out.push(format!(
+                "{}={}",
+                kind.to_ascii_uppercase(),
+                fold(&value, false)
+            ));
+            Some(())
+        }
+    }
+    let mut out = Vec::new();
+    let mut part = Part::default();
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => {
+                let next = chars.next()?;
+                if next.is_ascii_hexdigit() {
+                    let low = chars.next().filter(char::is_ascii_hexdigit)?;
+                    let hex = [next, low].iter().collect::<String>();
+                    part.bytes.push(u8::from_str_radix(&hex, 16).ok()?);
+                } else if matches!(
+                    next,
+                    ' ' | '"' | '#' | '+' | ',' | ';' | '<' | '=' | '>' | '\\'
+                ) {
+                    part.flush()?;
+                    part.chars.push((next, true));
+                } else {
+                    return None;
+                }
+                // An escape inside the type is not a valid type.
+                part.kind.as_ref()?;
+            }
+            ',' => {
+                core::mem::take(&mut part).finish(&mut out)?;
+            }
+            '=' if part.kind.is_none() => {
+                part.flush()?;
+                part.kind = Some(part.chars.drain(..).map(|(c, _)| c).collect());
+            }
+            _ => {
+                part.flush()?;
+                part.chars.push((c, false));
+            }
+        }
+    }
+    part.finish(&mut out)?;
+    Some(out)
+}
+
 /// The canonical form of a hash value: without a `0x` prefix, in lowercase.
 /// `None` if the rest is not hexadecimal.
 #[must_use]
@@ -1268,8 +1743,13 @@ fn build_error(e: &regex_automata::meta::BuildError) -> CompileErrorKind {
     }
 }
 
-/// Compiles a user's regular expression, anchored at both ends.
-fn compile_regex(pattern: &str, case_sensitive: bool) -> Result<Regex, CompileErrorKind> {
+/// Compiles a user's regular expression, anchored at both ends unless
+/// `anchored` is false.
+fn compile_regex(
+    pattern: &str,
+    case_sensitive: bool,
+    anchored: bool,
+) -> Result<Regex, CompileErrorKind> {
     use regex_syntax::ast::ErrorKind;
     use regex_syntax::hir::{Hir, Look};
 
@@ -1290,10 +1770,12 @@ fn compile_regex(pattern: &str, case_sensitive: bool) -> Result<Regex, CompileEr
             },
             _ => CompileErrorKind::RegexSyntax(e.to_string()),
         })?;
-    let anchored = Hir::concat(vec![Hir::look(Look::Start), hir, Hir::look(Look::End)]);
-    engine()
-        .build_from_hir(&anchored)
-        .map_err(|e| build_error(&e))
+    let tree = if anchored {
+        Hir::concat(vec![Hir::look(Look::Start), hir, Hir::look(Look::End)])
+    } else {
+        hir
+    };
+    engine().build_from_hir(&tree).map_err(|e| build_error(&e))
 }
 
 /// One piece of a wildcard pattern.

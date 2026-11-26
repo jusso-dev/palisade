@@ -446,7 +446,8 @@ pub struct CriterionTrace {
     /// `not`.
     pub needed: TriState,
     /// The criterion's own result, which differs from `result` only when
-    /// a deny reads an unparseable version as matching.
+    /// a deny reads an unparseable version as matching, or an unknown
+    /// `safety_critical` criterion of a mandatory deny fails closed.
     pub raw_result: TriState,
     /// What the evaluation noticed (`fact_missing`, `path_acl_unsafe` and
     /// so on).
@@ -1253,6 +1254,22 @@ fn observe(field: Field, subject: &Subject<'_>) -> Option<Vec<String>> {
             ContextFact::Set(s) => s.to_vec(),
             ContextFact::Bool(b) => vec![b.to_string()],
             ContextFact::Session(s) => vec![s.as_str().to_owned()],
+            ContextFact::Number(n) => vec![n.to_string()],
+            ContextFact::Level(l) => vec![l.as_str().to_owned()],
+            ContextFact::Ip(ip) => vec![ip.to_string()],
+            ContextFact::Ips(ips) => ips.iter().map(ToString::to_string).collect(),
+            ContextFact::Macs(macs) => macs
+                .iter()
+                .map(|m| {
+                    m.iter()
+                        .map(|b| format!("{b:02x}"))
+                        .collect::<Vec<_>>()
+                        .join(":")
+                })
+                .collect(),
+            ContextFact::Weekday(d) => vec![d.as_str().to_owned()],
+            ContextFact::Minute(m) => vec![format!("{:02}:{:02}", m / 60, m % 60)],
+            ContextFact::Date(d) => vec![d.to_string()],
         });
     }
     match field {
@@ -1437,12 +1454,7 @@ fn suggest(
             && v.len() <= crate::model::limits::MAX_VALUE_BYTES
     };
     let criterion = |field: Field, operator: Operator, v: &str| -> Option<Match> {
-        let c = Criterion {
-            field,
-            operator,
-            values: vec![v.to_owned()],
-            case_sensitive: None,
-        };
+        let c = Criterion::new(field, operator, [v]);
         (clean(field, v) && crate::ops::CompiledCriterion::compile(&c).is_ok())
             .then_some(Match::Criterion(c))
     };

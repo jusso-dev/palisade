@@ -18,62 +18,12 @@ use crate::model::{ActionKind, Criterion, Field, Operator, Strength};
 use Tri::{Match, NoMatch, Unknown};
 
 /// No context facts, for criteria on the object.
-static NO_CONTEXT: EvaluationContext = EvaluationContext {
-    user: crate::context::UserContext {
-        sid: None,
-        account_name: None,
-        upn: None,
-        groups: None,
-        primary_group: None,
-        is_admin: None,
-        is_elevated: None,
-        is_service_account: None,
-        is_system: None,
-    },
-    device: crate::context::DeviceContext {
-        hostname: None,
-        fqdn: None,
-        domain: None,
-        netbios: None,
-        ad_site: None,
-        groups: None,
-        tags: None,
-        os_version: None,
-        os_edition: None,
-        arch: None,
-        is_server: None,
-        is_domain_controller: None,
-        is_laptop: None,
-        is_vdi: None,
-        is_terminal_server: None,
-        dn: None,
-    },
-    session: crate::context::SessionContext {
-        session_type: None,
-        client_hostname: None,
-        is_remote: None,
-        client_ip: None,
-    },
-    network: crate::context::NetworkContext {
-        addresses: None,
-        macs: None,
-        dns_suffixes: None,
-        gateway_macs: None,
-        server_reachable: None,
-        locations: None,
-    },
-    scope: crate::scope::ScopeFacts::EMPTY,
-};
+static NO_CONTEXT: EvaluationContext = EvaluationContext::EMPTY;
 
 const SHA: &str = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
 
 fn crit(field: Field, operator: Operator, values: &[&str]) -> Criterion {
-    Criterion {
-        field,
-        operator,
-        values: values.iter().map(|v| (*v).to_owned()).collect(),
-        case_sensitive: None,
-    }
+    Criterion::new(field, operator, values.iter().copied())
 }
 
 fn compile(field: Field, operator: Operator, values: &[&str]) -> CompiledCriterion {
@@ -1448,4 +1398,87 @@ fn variables_are_only_expanded_at_the_start() {
     // A bare `?:` is drive-relative, like `C:`, and is not a drive root.
     let c = compile(Field::PathFull, Operator::Wildcard, &["?:"]);
     assert_eq!(eval(&c, &at_path("C:\\")), NoMatch);
+}
+
+#[test]
+fn unanchored_regex_matches_a_substring() {
+    let mut c = crit(Field::MetaProductName, Operator::Regex, &["Suite [0-9]+"]);
+    let anchored = CompiledCriterion::compile(&c).unwrap();
+    c.anchored = Some(false);
+    let substring = CompiledCriterion::compile(&c).unwrap();
+    let facts = text_facts(Field::MetaProductName, "Example Suite 12 (x64)");
+    assert_eq!(eval(&anchored, &facts), NoMatch);
+    assert_eq!(eval(&substring, &facts), Match);
+    // Explicitly anchored is the default.
+    c.anchored = Some(true);
+    assert_eq!(
+        eval(&CompiledCriterion::compile(&c).unwrap(), &facts),
+        NoMatch
+    );
+    // `not_regex` takes it too.
+    let mut n = crit(Field::MetaProductName, Operator::NotRegex, &["beta"]);
+    n.anchored = Some(false);
+    let n = CompiledCriterion::compile(&n).unwrap();
+    assert_eq!(
+        eval(&n, &text_facts(Field::MetaProductName, "App beta 2")),
+        NoMatch
+    );
+    assert_eq!(
+        eval(&n, &text_facts(Field::MetaProductName, "App 2")),
+        Match
+    );
+    // Only regular expressions take it.
+    let mut w = crit(Field::MetaProductName, Operator::Wildcard, &["x*"]);
+    w.anchored = Some(false);
+    assert!(matches!(
+        CompiledCriterion::compile(&w).unwrap_err()[0].kind,
+        CompileErrorKind::OptionNotApplicable("anchored", _)
+    ));
+}
+
+#[test]
+fn match_ads_lets_a_file_value_match_its_streams() {
+    let stream = at_path(r"C:\Tools\a.exe:payload");
+    let file = at_path(r"C:\Tools\a.exe");
+    for (operator, value) in [
+        (Operator::Wildcard, r"C:\Tools\*"),
+        (Operator::Equals, r"C:\Tools\a.exe"),
+        (Operator::StartsWith, r"C:\Tools"),
+        (Operator::Regex, r"C:\\Tools\\a\.exe"),
+        (Operator::EndsWith, "a.exe"),
+    ] {
+        let mut c = crit(Field::PathFull, operator, &[value]);
+        let plain = CompiledCriterion::compile(&c).unwrap();
+        c.match_ads = Some(true);
+        let with = CompiledCriterion::compile(&c).unwrap();
+        assert_eq!(eval(&plain, &stream), NoMatch, "{operator:?} {value}");
+        assert_eq!(eval(&with, &stream), Match, "{operator:?} {value}");
+        assert_eq!(eval(&with, &file), Match, "{operator:?} {value}");
+    }
+    // A value that names a stream still only matches that stream.
+    let mut c = crit(
+        Field::PathFull,
+        Operator::Equals,
+        &[r"C:\Tools\a.exe:other"],
+    );
+    c.match_ads = Some(true);
+    let named = CompiledCriterion::compile(&c).unwrap();
+    assert_eq!(eval(&named, &stream), NoMatch);
+    // Only positive tests of `path.full` take it: a negation would let a
+    // stream escape a rule written for its file.
+    for (field, operator) in [
+        (Field::PathFull, Operator::NotWildcard),
+        (Field::PathDirectory, Operator::Equals),
+        (Field::MetaProductName, Operator::Equals),
+    ] {
+        let mut c = crit(field, operator, &[r"C:\Tools"]);
+        c.match_ads = Some(true);
+        assert!(
+            matches!(
+                CompiledCriterion::compile(&c).unwrap_err()[0].kind,
+                CompileErrorKind::OptionNotApplicable("match_ads", _)
+            ),
+            "{field:?} {operator:?}"
+        );
+    }
 }

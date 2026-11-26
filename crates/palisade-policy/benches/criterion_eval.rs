@@ -26,12 +26,7 @@ use palisade_policy::ops::{CompiledCriterion, EvalContext, Tri};
 const SHA: &str = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
 
 fn compile(field: Field, operator: Operator, values: &[&str]) -> CompiledCriterion {
-    let criterion = Criterion {
-        field,
-        operator,
-        values: values.iter().map(|v| (*v).to_owned()).collect(),
-        case_sensitive: None,
-    };
+    let criterion = Criterion::new(field, operator, values.iter().copied());
     match CompiledCriterion::compile(&criterion) {
         Ok(compiled) => compiled,
         Err(errors) => panic!("{field:?} {operator:?} {values:?}: {errors:?}"),
@@ -40,7 +35,14 @@ fn compile(field: Field, operator: Operator, values: &[&str]) -> CompiledCriteri
 
 fn eval(c: &mut Bench) {
     let variables = PathVariables::new();
-    let context = EvaluationContext::default();
+    let mut context = EvaluationContext::default();
+    // 64 local addresses and 64 groups: a large host.
+    context.network.addresses = Some(
+        (0..64u8)
+            .map(|i| std::net::IpAddr::from([10, 1, 2, i]))
+            .collect(),
+    );
+    context.user.groups = Some((0..64).map(|i| format!("S-1-5-21-1-2-3-{i}")).collect());
     let ctx = EvalContext {
         action: ActionKind::Deny,
         variables: &variables,
@@ -56,6 +58,22 @@ fn eval(c: &mut Bench) {
         );
 
     let cases = [
+        (
+            "ip_in_cidr_any_of_64",
+            compile(
+                Field::NetIp,
+                Operator::IpInCidr,
+                &["10.1.2.63/32", "10.1.0.0/16"],
+            ),
+        ),
+        (
+            "groups_all_of",
+            compile(
+                Field::UserGroups,
+                Operator::AllOf,
+                &["S-1-5-21-1-2-3-7", "S-1-5-21-1-2-3-63"],
+            ),
+        ),
         (
             "hash_equals",
             compile(Field::HashSha256, Operator::Equals, &[SHA]),

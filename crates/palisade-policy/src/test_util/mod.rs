@@ -94,6 +94,10 @@ pub fn criterion(field: Field, operator: Operator, values: &[&str]) -> Match {
         operator,
         values: values.iter().map(|v| (*v).to_owned()).collect(),
         case_sensitive: None,
+        anchored: None,
+        match_ads: None,
+        include_sub_ous: None,
+        safety_critical: false,
     })
 }
 

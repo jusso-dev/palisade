@@ -1,0 +1,62 @@
+# Regular expressions: RE2 semantics, anchoring, and the guided errors (#32).
+
+[[case]]
+name = "anchored by default"
+criterion = { field = "meta.product_name", operator = "regex", values = ["Suite [0-9]+"] }
+fact = "Example Suite 12"
+expect = "no_match"
+
+[[case]]
+name = "unanchored matches a substring"
+criterion = { field = "meta.product_name", operator = "regex", values = ["Suite [0-9]+"], anchored = false }
+fact = "Example Suite 12"
+expect = "match"
+
+[[case]]
+name = "case-insensitive by default"
+criterion = { field = "meta.product_name", operator = "regex", values = ["ex[a-z]+"] }
+fact = "EXAMPLE"
+expect = "match"
+
+[[case]]
+name = "not_regex"
+criterion = { field = "meta.product_name", operator = "not_regex", values = ["beta.*"] }
+fact = "release"
+expect = "match"
+
+[[case]]
+name = "negative lookahead is rejected with guidance"
+criterion = { field = "meta.file_description", operator = "regex", values = ["chkdsk(?! /f)"] }
+error = "regex_look_around"
+
+[[case]]
+name = "lookahead on a text field is rejected"
+criterion = { field = "meta.product_name", operator = "regex", values = ["a(?!b)"] }
+error = "regex_look_around"
+
+[[case]]
+name = "backreference is rejected"
+criterion = { field = "meta.product_name", operator = "regex", values = ["(a)\\1"] }
+error = "regex_backreference"
+
+[[case]]
+name = "syntax error"
+criterion = { field = "meta.product_name", operator = "regex", values = ["(a"] }
+error = "regex_syntax"
+
+[[case]]
+name = "anchored only applies to regex"
+criterion = { field = "meta.product_name", operator = "equals", values = ["a"], anchored = true }
+error = "option_not_applicable"
+
+[[case]]
+name = "a regex on path.full never matches a stream"
+criterion = { field = "path.full", operator = "regex", values = ["C:\\\\x\\\\.*"] }
+path = "C:\\x\\a.txt:payload"
+user_writable = false
+expect = "no_match"
+
+[[case]]
+name = "a pattern above the compiled size limit is rejected"
+criterion = { field = "meta.product_name", operator = "regex", values = ["\\w{1000}\\w{1000}\\w{1000}"] }
+error = "pattern_too_large"

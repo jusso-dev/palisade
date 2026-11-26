@@ -109,6 +109,50 @@ pub struct Criterion {
     /// session types) reject this option.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub case_sensitive: Option<bool>,
+    /// Only for `regex` and `not_regex`: `false` lets the pattern match
+    /// anywhere in the fact instead of the whole fact (#32). Unset means
+    /// `true`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchored: Option<bool>,
+    /// Only for positive tests of `path.full`: `true` lets a value that
+    /// names no alternate data stream also match a stream of a file it
+    /// matches, so `C:\\Tools\\*` matches `C:\\Tools\\a.exe:s` (#32).
+    /// Unset means `false`: a stream is its own object.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_ads: Option<bool>,
+    /// Only for `user.ou` and `device.ou`: `true` also matches objects in
+    /// every organisational unit below the named one (#33). Unset means
+    /// `false`: the object must be directly in it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include_sub_ous: Option<bool>,
+    /// Only in a mandatory blocklist: when the fact is unknown, this
+    /// criterion counts towards the deny applying (`match`, or `no_match`
+    /// under an odd number of `not` nodes), so the shipped blocklists fail
+    /// closed (#32, #87). Unset means `false`.
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub safety_critical: bool,
+}
+
+impl Criterion {
+    /// A criterion with every option unset. Build criteria with this, so
+    /// that options added in later minor versions do not break the code.
+    #[must_use]
+    pub fn new<S: Into<String>>(
+        field: Field,
+        operator: Operator,
+        values: impl IntoIterator<Item = S>,
+    ) -> Self {
+        Self {
+            field,
+            operator,
+            values: values.into_iter().map(Into::into).collect(),
+            case_sensitive: None,
+            anchored: None,
+            match_ads: None,
+            include_sub_ous: None,
+            safety_critical: false,
+        }
+    }
 }
 
 /// The identity facts a criterion can test (#31).
@@ -284,6 +328,61 @@ pub enum Field {
     /// Context (#33): the session is remote.
     #[serde(rename = "session.is_remote")]
     SessionIsRemote,
+    /// Context (#33): the integrity level of the process token: `untrusted`,
+    /// `low`, `medium`, `medium_plus`, `high`, `system` or `protected`.
+    /// Ordered, so `ge` and `le` compare levels.
+    #[serde(rename = "user.integrity_level")]
+    UserIntegrityLevel,
+    /// Context (#33): the organisational unit of the user's directory
+    /// object, as a distinguished name such as `OU=Finance,DC=corp,DC=example`.
+    /// With `include_sub_ous`, units below it match too.
+    #[serde(rename = "user.ou")]
+    UserOu,
+    /// Context (#33): the organisational unit of the device's directory
+    /// object, as for `user.ou`.
+    #[serde(rename = "device.ou")]
+    DeviceOu,
+    /// Context (#33): the operating system build number, such as `22631`.
+    #[serde(rename = "device.os_build")]
+    DeviceOsBuild,
+    /// Context (#33): the session ID.
+    #[serde(rename = "session.id")]
+    SessionId,
+    /// Context (#33): the IP address of the client connected to the
+    /// session, on a multi-session host.
+    #[serde(rename = "session.client_ip")]
+    SessionClientIp,
+    /// Context (#33): every local interface address. A network test
+    /// (`ip_in_cidr`, `ip_between`, `ip_wildcard`) matches if any address
+    /// does; a set test holds the addresses as a set, so `all_of` needs
+    /// every listed address to be present.
+    #[serde(rename = "net.ip")]
+    NetIp,
+    /// Context (#33): every local interface MAC address.
+    #[serde(rename = "net.mac")]
+    NetMac,
+    /// Context (#33): every connection-specific DNS suffix.
+    #[serde(rename = "net.dns_suffix")]
+    NetDnsSuffix,
+    /// Context (#33): the device can reach its server now.
+    #[serde(rename = "net.connected_to_server")]
+    NetConnectedToServer,
+    /// Context (#33, #38): the names of the network locations the device is
+    /// in, such as `corporate`, `remote` or `offline`.
+    #[serde(rename = "net.location")]
+    NetLocation,
+    /// Context (#33): the day of the week of the evaluation, as `mon` to
+    /// `sun`, in the clock the policy's `time_zone_basis` names.
+    #[serde(rename = "time.weekday")]
+    TimeWeekday,
+    /// Context (#33): the time of day of the evaluation, as `HH:MM`, in the
+    /// policy's clock.
+    #[serde(rename = "time.local_time")]
+    TimeLocalTime,
+    /// Context (#33): the date of the evaluation, as `YYYY-MM-DD`, in the
+    /// policy's clock.
+    #[serde(rename = "time.date")]
+    TimeDate,
 }
 
 /// The type of a field's value, which decides the operators it accepts and
@@ -317,6 +416,26 @@ pub enum FieldClass {
     Bool,
     /// The type of a session (#33).
     SessionType,
+    /// A whole number, such as a build number or a session ID (#32).
+    Number,
+    /// A token integrity level, ordered from `untrusted` to `protected` (#33).
+    IntegrityLevel,
+    /// A directory distinguished name (#33): compared component by component.
+    DistinguishedName,
+    /// One IP address (#32).
+    Ip,
+    /// A set of IP addresses (#32).
+    IpSet,
+    /// A set of MAC addresses (#33).
+    MacSet,
+    /// A set of DNS suffixes or names (#33).
+    NameSet,
+    /// A day of the week (#32).
+    Weekday,
+    /// A time of day (#32).
+    TimeOfDay,
+    /// A calendar date (#32).
+    Date,
 }
 
 impl FieldClass {
@@ -325,7 +444,12 @@ impl FieldClass {
     pub const fn has_case(self) -> bool {
         matches!(
             self,
-            Self::Path | Self::FileName | Self::Text | Self::PrincipalName | Self::TagSet
+            Self::Path
+                | Self::FileName
+                | Self::Text
+                | Self::PrincipalName
+                | Self::TagSet
+                | Self::NameSet
         )
     }
 }
@@ -347,7 +471,7 @@ pub enum Strength {
 
 impl Field {
     /// Every field, in declaration order.
-    pub const ALL: [Self; 50] = [
+    pub const ALL: [Self; 64] = [
         Self::HashSha256,
         Self::HashSha384,
         Self::HashSha512,
@@ -398,6 +522,20 @@ impl Field {
         Self::SessionType,
         Self::SessionClientHostname,
         Self::SessionIsRemote,
+        Self::UserIntegrityLevel,
+        Self::UserOu,
+        Self::DeviceOu,
+        Self::DeviceOsBuild,
+        Self::SessionId,
+        Self::SessionClientIp,
+        Self::NetIp,
+        Self::NetMac,
+        Self::NetDnsSuffix,
+        Self::NetConnectedToServer,
+        Self::NetLocation,
+        Self::TimeWeekday,
+        Self::TimeLocalTime,
+        Self::TimeDate,
     ];
 
     /// Whether the field describes the context of an evaluation (the user,
@@ -456,8 +594,19 @@ impl Field {
             | Self::DeviceIsLaptop
             | Self::DeviceIsVdi
             | Self::DeviceIsTerminalServer
-            | Self::SessionIsRemote => FieldClass::Bool,
+            | Self::SessionIsRemote
+            | Self::NetConnectedToServer => FieldClass::Bool,
             Self::SessionType => FieldClass::SessionType,
+            Self::DeviceOsBuild | Self::SessionId => FieldClass::Number,
+            Self::UserIntegrityLevel => FieldClass::IntegrityLevel,
+            Self::UserOu | Self::DeviceOu => FieldClass::DistinguishedName,
+            Self::SessionClientIp => FieldClass::Ip,
+            Self::NetIp => FieldClass::IpSet,
+            Self::NetMac => FieldClass::MacSet,
+            Self::NetDnsSuffix | Self::NetLocation => FieldClass::NameSet,
+            Self::TimeWeekday => FieldClass::Weekday,
+            Self::TimeLocalTime => FieldClass::TimeOfDay,
+            Self::TimeDate => FieldClass::Date,
         }
     }
 
@@ -523,7 +672,21 @@ impl Field {
             | Self::DeviceIsTerminalServer
             | Self::SessionType
             | Self::SessionClientHostname
-            | Self::SessionIsRemote => return None,
+            | Self::SessionIsRemote
+            | Self::UserIntegrityLevel
+            | Self::UserOu
+            | Self::DeviceOu
+            | Self::DeviceOsBuild
+            | Self::SessionId
+            | Self::SessionClientIp
+            | Self::NetIp
+            | Self::NetMac
+            | Self::NetDnsSuffix
+            | Self::NetConnectedToServer
+            | Self::NetLocation
+            | Self::TimeWeekday
+            | Self::TimeLocalTime
+            | Self::TimeDate => return None,
         })
     }
 }
@@ -580,6 +743,44 @@ pub enum Operator {
     /// The fact is false. Takes no values (#33). On an unknown fact it is
     /// unknown, like every other test.
     IsFalse,
+    /// Number, level or date equal to any value (#32).
+    Eq,
+    /// Number, level or date equal to none of the values (#32).
+    Ne,
+    /// Greater than the value (#32).
+    Gt,
+    /// Greater than or equal to the value (#32).
+    Ge,
+    /// Less than the value (#32).
+    Lt,
+    /// Less than or equal to the value (#32).
+    Le,
+    /// Within `[min, max]`, both inclusive. Takes exactly two values, the
+    /// minimum first (#32).
+    Between,
+    /// The address is in any of the CIDR blocks, such as `10.0.0.0/8` or
+    /// `2001:db8::/32` (#32). On a set of addresses, any address may be.
+    IpInCidr,
+    /// The address is in any of the ranges, written `first-last` or, for
+    /// IPv4, `a.b.c.first-last` (#32).
+    IpBetween,
+    /// The IPv4 address matches any whole-octet pattern, such as `10.*.*.*`
+    /// (#32).
+    IpWildcard,
+    /// The set holds at least one of the values (#32). The same test as
+    /// `member_of`.
+    AnyOf,
+    /// The set holds every one of the values (#32).
+    AllOf,
+    /// The day of the week is any of the values, `mon` to `sun` (#32).
+    WeekdayIn,
+    /// The time of day is within `[start, end)`, both `HH:MM`. A window
+    /// whose end is before its start wraps midnight: `22:00` to `06:00`
+    /// (#32).
+    TimeBetween,
+    /// The date is within `[from, to]`, both `YYYY-MM-DD` and inclusive
+    /// (#32).
+    DateBetween,
 }
 
 impl Operator {
@@ -595,6 +796,7 @@ impl Operator {
                 | Self::NotWildcard
                 | Self::NotRegex
                 | Self::NotMemberOf
+                | Self::Ne
         )
     }
 
@@ -608,6 +810,7 @@ impl Operator {
             Self::NotWildcard => Self::Wildcard,
             Self::NotRegex => Self::Regex,
             Self::NotMemberOf => Self::MemberOf,
+            Self::Ne => Self::Eq,
             other => other,
         }
     }
@@ -645,6 +848,30 @@ impl Operator {
         )
     }
 
+    /// Whether the operator orders values: `eq` to `between`.
+    #[must_use]
+    pub const fn is_ordered(self) -> bool {
+        matches!(
+            self,
+            Self::Eq | Self::Ne | Self::Gt | Self::Ge | Self::Lt | Self::Le | Self::Between
+        )
+    }
+
+    /// Whether the operator tests IP addresses.
+    #[must_use]
+    pub const fn is_network(self) -> bool {
+        matches!(self, Self::IpInCidr | Self::IpBetween | Self::IpWildcard)
+    }
+
+    /// Whether the operator tests membership of a set.
+    #[must_use]
+    pub const fn is_set(self) -> bool {
+        matches!(
+            self,
+            Self::MemberOf | Self::NotMemberOf | Self::AnyOf | Self::AllOf
+        )
+    }
+
     /// Whether the operator takes regular expressions.
     #[must_use]
     pub const fn is_regex(self) -> bool {
@@ -655,8 +882,15 @@ impl Operator {
     #[must_use]
     pub const fn value_count(self) -> (usize, usize) {
         match self {
-            Self::VersionGt | Self::VersionGe | Self::VersionLt | Self::VersionLe => (1, 1),
-            Self::VersionBetween => (2, 2),
+            Self::VersionGt
+            | Self::VersionGe
+            | Self::VersionLt
+            | Self::VersionLe
+            | Self::Gt
+            | Self::Ge
+            | Self::Lt
+            | Self::Le => (1, 1),
+            Self::VersionBetween | Self::Between | Self::TimeBetween | Self::DateBetween => (2, 2),
             Self::IsTrue | Self::IsFalse => (0, 0),
             _ => (1, super::limits::MAX_VALUES_PER_CRITERION),
         }
@@ -675,15 +909,30 @@ impl Operator {
             FieldClass::Version => {
                 self.is_version() || matches!(self, Self::Equals | Self::NotEquals)
             }
-            FieldClass::PrincipalSet | FieldClass::TagSet => {
-                matches!(self, Self::MemberOf | Self::NotMemberOf)
-            }
+            FieldClass::PrincipalSet
+            | FieldClass::TagSet
+            | FieldClass::NameSet
+            | FieldClass::MacSet => self.is_set(),
             FieldClass::Bool => matches!(self, Self::IsTrue | Self::IsFalse),
+            FieldClass::Number | FieldClass::IntegrityLevel => self.is_ordered(),
+            FieldClass::Date => self.is_ordered() || matches!(self, Self::DateBetween),
+            FieldClass::DistinguishedName => matches!(self, Self::Equals | Self::NotEquals),
+            FieldClass::Ip => self.is_network() || matches!(self, Self::Equals | Self::NotEquals),
+            FieldClass::IpSet => self.is_network() || self.is_set(),
+            FieldClass::Weekday => matches!(self, Self::WeekdayIn),
+            FieldClass::TimeOfDay => matches!(self, Self::TimeBetween),
         }
     }
 
+    /// Whether the operator is valid on this field: the class table of
+    /// [`Self::applies_to`].
+    #[must_use]
+    pub const fn applies_to_field(self, field: Field) -> bool {
+        self.applies_to(field.class())
+    }
+
     /// Every operator, in declaration order.
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 35] = [
         Self::Equals,
         Self::NotEquals,
         Self::StartsWith,
@@ -704,6 +953,21 @@ impl Operator {
         Self::NotMemberOf,
         Self::IsTrue,
         Self::IsFalse,
+        Self::Eq,
+        Self::Ne,
+        Self::Gt,
+        Self::Ge,
+        Self::Lt,
+        Self::Le,
+        Self::Between,
+        Self::IpInCidr,
+        Self::IpBetween,
+        Self::IpWildcard,
+        Self::AnyOf,
+        Self::AllOf,
+        Self::WeekdayIn,
+        Self::TimeBetween,
+        Self::DateBetween,
     ];
 }
 

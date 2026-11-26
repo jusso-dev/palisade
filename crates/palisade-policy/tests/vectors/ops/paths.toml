@@ -1,0 +1,127 @@
+# Path normalisation and path matching (#32). Facts and values pass through
+# the same normalisation, so alternate spellings are one object. These
+# vectors are shared with the bypass regression suite (#18).
+
+[[case]]
+name = "extended-length prefix"
+criterion = { field = "path.full", operator = "equals", values = ["C:\\Tools\\a.exe"] }
+path = "\\\\?\\C:\\Tools\\a.exe"
+user_writable = false
+expect = "match"
+
+[[case]]
+name = "NT object prefix"
+criterion = { field = "path.full", operator = "equals", values = ["C:\\Tools\\a.exe"] }
+path = "\\??\\C:\\Tools\\a.exe"
+user_writable = false
+expect = "match"
+
+[[case]]
+name = "extended UNC is UNC"
+criterion = { field = "path.full", operator = "starts_with", values = ["\\\\srv\\share"] }
+path = "\\\\?\\UNC\\srv\\share\\a.exe"
+user_writable = false
+expect = "match"
+
+[[case]]
+name = "mixed separators, dot segments and repeated separators"
+criterion = { field = "path.full", operator = "equals", values = ["C:\\Tools\\a.exe"] }
+path = "C:/Tools//x/..\\.\\a.exe"
+user_writable = false
+expect = "match"
+
+[[case]]
+name = "case does not matter on paths"
+criterion = { field = "path.full", operator = "equals", values = ["c:\\tools\\A.EXE"] }
+path = "C:\\Tools\\a.exe"
+user_writable = false
+expect = "match"
+
+[[case]]
+name = "trailing dot is significant"
+criterion = { field = "path.full", operator = "equals", values = ["C:\\Tools\\a.exe"] }
+path = "C:\\Tools\\a.exe."
+user_writable = false
+expect = "no_match"
+
+[[case]]
+name = "trailing space is significant"
+criterion = { field = "path.full", operator = "equals", values = ["C:\\Tools\\a.exe"] }
+path = "C:\\Tools\\a.exe "
+user_writable = false
+expect = "no_match"
+
+[[case]]
+name = "starts_with ends at a component"
+criterion = { field = "path.full", operator = "starts_with", values = ["C:\\Tools"] }
+path = "C:\\ToolsX\\a.exe"
+user_writable = false
+expect = "no_match"
+
+[[case]]
+name = "a stream is its own object"
+criterion = { field = "path.full", operator = "wildcard", values = ["C:\\Tools\\*"] }
+path = "C:\\Tools\\a.exe:payload"
+user_writable = false
+expect = "no_match"
+
+[[case]]
+name = "match_ads lets the file's value match its streams"
+criterion = { field = "path.full", operator = "wildcard", values = ["C:\\Tools\\*"], match_ads = true }
+path = "C:\\Tools\\a.exe:payload"
+user_writable = false
+expect = "match"
+
+[[case]]
+name = "match_ads is not allowed on a negation"
+criterion = { field = "path.full", operator = "not_wildcard", values = ["C:\\Tools\\*"], match_ads = true }
+error = "option_not_applicable"
+
+[[case]]
+name = "double star crosses components"
+criterion = { field = "path.full", operator = "wildcard", values = ["C:\\Program Files\\**\\*.exe"] }
+path = "C:\\Program Files\\App\\bin\\x64\\app.exe"
+user_writable = false
+expect = "match"
+
+[[case]]
+name = "single star stays in one component"
+criterion = { field = "path.full", operator = "wildcard", values = ["C:\\Program Files\\*.exe"] }
+path = "C:\\Program Files\\App\\app.exe"
+user_writable = false
+expect = "no_match"
+
+[[case]]
+name = "allow does not trust a user-writable path"
+criterion = { field = "path.full", operator = "starts_with", values = ["C:\\Tools"] }
+path = "C:\\Tools\\a.exe"
+user_writable = true
+action = "allow"
+expect = "unknown"
+
+[[case]]
+name = "allow does not trust a path whose permissions are unknown"
+criterion = { field = "path.full", operator = "starts_with", values = ["C:\\Tools"] }
+path = "C:\\Tools\\a.exe"
+action = "allow"
+expect = "unknown"
+
+[[case]]
+name = "allow trusts an admin-only path"
+criterion = { field = "path.full", operator = "starts_with", values = ["C:\\Tools"] }
+path = "C:\\Tools\\a.exe"
+user_writable = false
+action = "allow"
+expect = "match"
+
+[[case]]
+name = "an unmapped device path is unknown"
+criterion = { field = "path.full", operator = "not_equals", values = ["C:\\Tools\\a.exe"] }
+path = "\\Device\\HarddiskVolume9\\Tools\\a.exe"
+user_writable = false
+expect = "unknown"
+
+[[case]]
+name = "a relative value is rejected"
+criterion = { field = "path.full", operator = "equals", values = ["Tools\\a.exe"] }
+error = "invalid_value"

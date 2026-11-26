@@ -2,7 +2,7 @@
 
 use proptest::prelude::*;
 
-use super::{CompiledMatch, TreeError};
+use super::{CompiledMatch, TreeError, Unparseable};
 use crate::context::EvaluationContext;
 use crate::facts::{ObjectFacts, PathVariables};
 use crate::model::limits::{MAX_CRITERIA_PER_RULE, MAX_TREE_DEPTH};
@@ -12,12 +12,7 @@ use crate::ops::{EvalContext, Note, Tri};
 use Tri::{Match as Yes, NoMatch as No, Unknown};
 
 fn crit(field: Field, operator: Operator, values: &[&str]) -> Match {
-    Match::Criterion(Criterion {
-        field,
-        operator,
-        values: values.iter().map(|v| (*v).to_owned()).collect(),
-        case_sensitive: None,
-    })
+    Match::Criterion(Criterion::new(field, operator, values.iter().copied()))
 }
 
 /// A criterion with a known result under [`context`]: `user.is_admin` is
@@ -340,10 +335,8 @@ fn compile_enforces_value_bytes_and_case_like_validation() {
         let tree = Match::All(vec![
             leaf(Yes),
             Match::Criterion(Criterion {
-                field: Field::UserIsAdmin,
-                operator: Operator::IsTrue,
-                values: Vec::new(),
                 case_sensitive: case,
+                ..Criterion::new(Field::UserIsAdmin, Operator::IsTrue, Vec::<String>::new())
             }),
         ]);
         assert_eq!(
@@ -361,10 +354,12 @@ fn compile_enforces_value_bytes_and_case_like_validation() {
     assert!(CompiledMatch::compile(&leaf(Yes)).is_ok());
     // A field with a case still takes the option.
     let tag = Match::Criterion(Criterion {
-        field: Field::DeviceTags,
-        operator: Operator::MemberOf,
-        values: vec!["Finance".to_owned()],
         case_sensitive: Some(true),
+        ..Criterion::new(
+            Field::DeviceTags,
+            Operator::MemberOf,
+            vec!["Finance".to_owned()],
+        )
     });
     assert!(CompiledMatch::compile(&tag).is_ok());
 }
@@ -395,7 +390,7 @@ fn compile_reports_every_bad_node_with_its_pointer() {
 
 /// Evaluates with facts whose file version is not a version, and whose
 /// SHA-256 is `a`×64.
-fn eval_unparseable(tree: &Match, unparseable: super::Unparseable) -> Tri {
+fn eval_unparseable(tree: &Match, unparseable: Unparseable) -> Tri {
     let compiled = CompiledMatch::compile(tree).unwrap();
     let variables = PathVariables::new();
     let context = context();
@@ -417,7 +412,7 @@ fn eval_unparseable(tree: &Match, unparseable: super::Unparseable) -> Tri {
 
 #[test]
 fn unparseable_versions_favour_the_match_only_when_asked() {
-    use super::Unparseable::{FavourMatch, Unknown as Keep};
+    use Unparseable::{FavourMatch, Unknown as Keep};
     let older = crit(Field::MetaFileVersion, Operator::VersionLt, &["2.0"]);
     let hash = crit(Field::HashSha256, Operator::Equals, &[&"a".repeat(64)]);
     let other_hash = crit(Field::HashSha256, Operator::Equals, &[&"b".repeat(64)]);
@@ -442,4 +437,48 @@ fn unparseable_versions_favour_the_match_only_when_asked() {
         assert_eq!(eval_unparseable(&tree, Keep), default, "{tree:?}");
         assert_eq!(eval_unparseable(&tree, FavourMatch), favoured, "{tree:?}");
     }
+}
+
+#[test]
+fn safety_critical_criteria_fail_closed_only_in_a_mandatory_deny() {
+    let mut c = Criterion::new(
+        Field::UserIsElevated,
+        Operator::IsTrue,
+        Vec::<String>::new(),
+    );
+    c.safety_critical = true;
+    let variables = PathVariables::new();
+    let context = context();
+    let ctx = EvalContext {
+        action: ActionKind::Deny,
+        variables: &variables,
+        context: &context,
+    };
+    let facts = ObjectFacts::new();
+    // `user.is_elevated` is not collected, so the criterion is unknown.
+    let single = CompiledMatch::compile(&Match::Criterion(c.clone())).unwrap();
+    assert_eq!(single.eval(&facts, &ctx).result, Unknown);
+    let p = Unparseable::Unknown;
+    assert_eq!(single.eval_mandatory(&facts, &ctx, p).result, Yes);
+    // Under `not`, failing closed means the negation does not rescue the
+    // object: the criterion counts as `NoMatch` there, so `not` gives `Match`.
+    let negated =
+        CompiledMatch::compile(&Match::Not(Box::new(Match::Criterion(c.clone())))).unwrap();
+    assert_eq!(negated.eval_mandatory(&facts, &ctx, p).result, Yes);
+    // The rest of the tree still decides.
+    let tree = Match::All(vec![Match::Criterion(c.clone()), leaf(No)]);
+    let tree = CompiledMatch::compile(&tree).unwrap();
+    assert_eq!(tree.eval_mandatory(&facts, &ctx, p).result, No);
+    // A known fact is used as it is.
+    let mut known = context.clone();
+    known.user.is_elevated = Some(false);
+    let ctx2 = EvalContext {
+        context: &known,
+        ..ctx
+    };
+    assert_eq!(single.eval_mandatory(&facts, &ctx2, p).result, No);
+    // Without the flag, an unknown stays unknown.
+    c.safety_critical = false;
+    let plain = CompiledMatch::compile(&Match::Criterion(c)).unwrap();
+    assert_eq!(plain.eval_mandatory(&facts, &ctx, p).result, Unknown);
 }

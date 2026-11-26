@@ -1,0 +1,58 @@
+description: >-
+  A mandatory blocklist entry for a vulnerable driver names its product and
+  marks the file version safety_critical. The driver's version resource was
+  not read, so the version is unknown. The entry fails closed and blocks,
+  and no allow can override it. The same entry in an ordinary blocklist
+  could not mark the criterion, and the unknown version would not block.
+object:
+  type: driver
+  sha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  publisher: Example Ltd
+  product_name: Example Driver
+rule_sets:
+  - name: Vulnerable drivers
+    kind: blocklist
+    mandatory: true
+    read_only: true
+    rules:
+      - name: vulnerable versions
+        match:
+          all:
+            - criterion: {field: signer.publisher, operator: equals, values: [Example Ltd]}
+            - criterion: {field: meta.product_name, operator: equals, values: [Example Driver]}
+            - criterion: {field: meta.file_version, operator: version_lt, values: ['3.2'], safety_critical: true}
+        action: {type: deny}
+  - name: Tenant rules
+    kind: mixed
+    rules:
+      - name: hash allow
+        match: {criterion: {field: hash.sha256, operator: equals, values: [bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb]}}
+        action: {type: allow}
+        order: 100100
+        priority: 1
+expect:
+  - model: deny_wins
+    outcome: blocked
+    reason: mandatory_deny
+    rule: vulnerable versions
+    overridden: [hash allow]
+  - model: allow_wins
+    outcome: blocked
+    reason: mandatory_deny
+    rule: vulnerable versions
+    overridden: [hash allow]
+  - model: specificity
+    outcome: blocked
+    reason: mandatory_deny
+    rule: vulnerable versions
+    overridden: [hash allow]
+  - model: first_match
+    outcome: blocked
+    reason: mandatory_deny
+    rule: vulnerable versions
+    overridden: [hash allow]
+  - model: priority
+    outcome: blocked
+    reason: mandatory_deny
+    rule: vulnerable versions
+    overridden: [hash allow]
