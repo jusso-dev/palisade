@@ -948,72 +948,91 @@ mod properties {
         })
     }
 
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(2048))]
-
-        /// Whatever the policy, a decision from the cache is the decision
-        /// a fresh evaluation gives. The second request is about the same
-        /// file (same identity, same content facts) with one change to
-        /// what is not content: the context, the path, the device state or
-        /// the path variables. The key must tell them apart whenever the
-        /// policy reads the change.
-        #[test]
-        fn a_hit_is_always_the_fresh_decision(
-            policy in pool_document(),
-            first in pool_facts(),
-            pick in any::<prop::sample::Index>(),
-            s1 in plain_state(),
-            change in change(),
-        ) {
-            let t = type_of(&policy, pick);
-            let engine = Engine::new(policy.clone(), EngineConfig::default()).unwrap();
-            let fresh = crate::evaluate::Evaluator::new(&policy).unwrap();
-            let v1 = variables();
-            let v2 = PathVariables::new()
-                .with(PathVariable::ProgramFiles, &[r"C:\Tools"]);
-            let mut first = first;
-            let mut second = first.clone();
-            let mut s2 = s1;
-            let mut v = &v1;
-            match &change {
-                Change::None => {}
-                Change::Context(c) => second.context = (**c).clone(),
-                Change::Path(p) => second.facts.path.clone_from(p),
-                Change::State(s) => s2 = *s,
-                Change::Variables => v = &v2,
-                Change::Content(kept) => first = restrict(&first, *kept),
-            }
-            let clock = TestClock::at(1);
-            let mut hits = 0;
-            for (pool, state, vars) in [(&first, &s1, &v1), (&second, &s2, v)] {
-                let request = Request {
-                    subject: subject(t, pool, vars),
-                    computed: FactSet::ALL,
-                    state,
-                    trace_id: TRACE,
-                    file: Some(FILE),
-                    session: None,
-                    expires_before: None,
-                };
-                let want = fresh.evaluate_in(&request.subject, state, TRACE);
-                let before = engine.cache_stats().hits;
-                match engine.evaluate(&request, &clock) {
-                    Outcome::Decided(got) => {
-                        prop_assert_eq!(got.as_deref(), want.as_ref(), "{:?}", change);
-                    }
-                    other => prop_assert!(false, "{:?}", other),
-                }
-                hits += engine.cache_stats().hits - before;
-            }
-            // A content change can only be served from the cache if the
-            // first decision did not rest on an unknown content fact; the
-            // assertion above already checked that whatever was served is
-            // the fresh decision. With no change and a cacheable first
-            // decision, the second is a hit.
-            if matches!(change, Change::None) && engine.cache_stats().inserts == 1 {
-                prop_assert_eq!(hits, 1);
-            }
-        }
+    /// Whatever the policy, a decision from the cache is the decision
+    /// a fresh evaluation gives. The second request is about the same
+    /// file (same identity, same content facts) with one change to
+    /// what is not content: the context, the path, the device state or
+    /// the path variables. The key must tell them apart whenever the
+    /// policy reads the change.
+    ///
+    /// Generating a random pool policy recurses deeply in debug builds:
+    /// with the scope, unknown-application and lifecycle model of #38, #39
+    /// and #40 it needs about 2 MiB, which is the size of a test thread on
+    /// some runners and more than others give. The test therefore runs its
+    /// cases on a thread with an 8 MiB stack. This is test data generation
+    /// only; the engine itself never recurses deeper than the validated
+    /// tree depth limit.
+    #[test]
+    fn a_hit_is_always_the_fresh_decision() {
+        std::thread::Builder::new()
+            .stack_size(8 * 1024 * 1024)
+            .spawn(|| {
+                let mut runner =
+                    proptest::test_runner::TestRunner::new(ProptestConfig::with_cases(2048));
+                let strategy = (
+                    pool_document(),
+                    pool_facts(),
+                    any::<prop::sample::Index>(),
+                    plain_state(),
+                    change(),
+                );
+                runner
+                    .run(&strategy, |(policy, first, pick, s1, change)| {
+                        let t = type_of(&policy, pick);
+                        let engine = Engine::new(policy.clone(), EngineConfig::default()).unwrap();
+                        let fresh = crate::evaluate::Evaluator::new(&policy).unwrap();
+                        let v1 = variables();
+                        let v2 =
+                            PathVariables::new().with(PathVariable::ProgramFiles, &[r"C:\Tools"]);
+                        let mut first = first;
+                        let mut second = first.clone();
+                        let mut s2 = s1;
+                        let mut v = &v1;
+                        match &change {
+                            Change::None => {}
+                            Change::Context(c) => second.context = (**c).clone(),
+                            Change::Path(p) => second.facts.path.clone_from(p),
+                            Change::State(s) => s2 = *s,
+                            Change::Variables => v = &v2,
+                            Change::Content(kept) => first = restrict(&first, *kept),
+                        }
+                        let clock = TestClock::at(1);
+                        let mut hits = 0;
+                        for (pool, state, vars) in [(&first, &s1, &v1), (&second, &s2, v)] {
+                            let request = Request {
+                                subject: subject(t, pool, vars),
+                                computed: FactSet::ALL,
+                                state,
+                                trace_id: TRACE,
+                                file: Some(FILE),
+                                session: None,
+                                expires_before: None,
+                            };
+                            let want = fresh.evaluate_in(&request.subject, state, TRACE);
+                            let before = engine.cache_stats().hits;
+                            match engine.evaluate(&request, &clock) {
+                                Outcome::Decided(got) => {
+                                    prop_assert_eq!(got.as_deref(), want.as_ref(), "{:?}", change);
+                                }
+                                other => prop_assert!(false, "{:?}", other),
+                            }
+                            hits += engine.cache_stats().hits - before;
+                        }
+                        // A content change can only be served from the cache if the
+                        // first decision did not rest on an unknown content fact; the
+                        // assertion above already checked that whatever was served is
+                        // the fresh decision. With no change and a cacheable first
+                        // decision, the second is a hit.
+                        if matches!(change, Change::None) && engine.cache_stats().inserts == 1 {
+                            prop_assert_eq!(hits, 1);
+                        }
+                        Ok(())
+                    })
+                    .unwrap();
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 }
 
