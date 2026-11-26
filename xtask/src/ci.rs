@@ -67,6 +67,10 @@ const LLVM_COV: Tool = Tool {
     check: &["cargo", "llvm-cov", "--version"],
     install: "cargo install --locked cargo-llvm-cov@0.9.2",
 };
+const INSTA: Tool = Tool {
+    check: &["cargo", "insta", "--version"],
+    install: "cargo install --locked cargo-insta@1.49.0",
+};
 const FUZZ: Tool = Tool {
     check: &["cargo", "+nightly-2026-11-20", "fuzz", "--version"],
     install: "rustup toolchain install nightly-2026-11-20 --profile minimal && cargo install --locked cargo-fuzz@0.13.2",
@@ -139,6 +143,15 @@ pub const STEPS: &[Step] = &[
         ..step(
             "coverage",
             "cargo llvm-cov nextest --workspace --all-features --locked --profile ci --json --summary-only --output-path target/llvm-cov-summary.json",
+        )
+    },
+    step("snapshots", "cargo fetch --locked"),
+    Step {
+        tool: Some(INSTA),
+        env: &[("CARGO_NET_OFFLINE", "true")],
+        ..step(
+            "snapshots",
+            "cargo insta test --check --unreferenced reject --all-features -p palisade-policy -p palisade-proto",
         )
     },
     step("fuzz-locks", "cargo xtask check-fuzz-locks"),
@@ -498,12 +511,47 @@ mod tests {
         assert_eq!(step.env, [("RUSTDOCFLAGS", docs_env.as_str().unwrap())]);
     }
 
+    /// cargo-insta has no `--locked`: the `snapshots` job fetches the
+    /// locked dependencies first and runs it offline, here and in CI.
+    #[test]
+    fn snapshot_step_runs_offline_after_a_locked_fetch() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows/ci.yml");
+        let docs = YamlLoader::load_from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let Yaml::Array(steps) = &docs[0]["jobs"]["snapshots"]["steps"] else {
+            panic!("no snapshots job");
+        };
+        let runs: Vec<&Yaml> = steps
+            .iter()
+            .filter(|s| s["run"].as_str().is_some())
+            .collect();
+        let insta = runs
+            .iter()
+            .position(|s| s["run"].as_str().unwrap().contains("cargo insta test"))
+            .unwrap();
+        let fetch = runs
+            .iter()
+            .position(|s| s["run"].as_str() == Some("cargo fetch --locked"))
+            .unwrap();
+        assert!(fetch < insta, "cargo fetch --locked must come first");
+        assert_eq!(
+            runs[insta]["env"]["CARGO_NET_OFFLINE"].as_str(),
+            Some("true")
+        );
+        let local: Vec<&Step> = STEPS.iter().filter(|s| s.job == "snapshots").collect();
+        assert_eq!(local[0].command, "cargo fetch --locked");
+        assert!(local[1].command.starts_with("cargo insta test "));
+        assert_eq!(local[1].env, [("CARGO_NET_OFFLINE", "true")]);
+    }
+
     #[test]
     fn install_hints_use_the_ci_tool_versions() {
         let path =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows/ci.yml");
         let source = std::fs::read_to_string(path).unwrap();
-        for tool in [NEXTEST, DENY, AUDIT, VET, HACK, LLVM_COV, FUZZ, ZIZMOR] {
+        for tool in [
+            NEXTEST, DENY, AUDIT, VET, HACK, LLVM_COV, INSTA, FUZZ, ZIZMOR,
+        ] {
             let pinned = tool.install.rsplit(' ').next().unwrap();
             assert!(source.contains(pinned), "ci.yml does not install {pinned}");
         }
@@ -635,7 +683,11 @@ mod tests {
         let mut others: Vec<&str> = jobs
             .keys()
             .map(|k| k.as_str().unwrap())
-            .filter(|k| *k != "ci-ok" && !k.starts_with("snapshot"))
+            // The post-merge release snapshot jobs run after `ci-ok`; the
+            // `snapshots` test job is an ordinary check, so match exactly.
+            .filter(|k| {
+                *k != "ci-ok" && !["snapshot-prepare", "snapshot", "snapshot-finish"].contains(k)
+            })
             .collect();
         others.sort_unstable();
         assert_eq!(needs, others);

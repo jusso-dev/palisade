@@ -1,0 +1,4 @@
+---
+source: crates/palisade-proto/tests/event_snapshots.rs
+---
+{"schema_version":"1.1.0","event_id":"01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f","event_type":"agent.started","category":"agent","action":"start","outcome":"info","severity":2,"description":"The agent started.","ts":"2026-11-24T03:15:22.123456Z","clock_synced":true,"tenant_id":"01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f","host":{"id":"01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f","name":"WS-0001"},"seq":0}

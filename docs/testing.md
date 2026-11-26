@@ -87,6 +87,20 @@ Do not prefix names with `test_`.
 - Never commit malware, antivirus test strings or third-party signed binaries
   ([responsible-use.md](responsible-use.md)). A generator for the full fixture corpus, and a
   check that `testdata/` holds only generated files, are planned in #25.
+- **Builders.** Policy tests in other crates build their inputs with `palisade-policy`'s
+  `test-util` feature (`palisade_policy::test_util`) rather than hand-written JSON:
+
+  ```toml
+  [dev-dependencies]
+  palisade-policy = { workspace = true, features = ["test-util"] }
+  ```
+
+  ```rust
+  let policy = PolicyBuilder::new()
+      .rule_set(RuleSetBuilder::allowlist(1).rule(RuleBuilder::allow(1, hash('a'))))
+      .validate();
+  let decision = subject(&facts().sha256('a')).decide(&policy);
+  ```
 
 ### Unwrap in tests
 
@@ -99,8 +113,12 @@ Property tests use [`proptest`](https://docs.rs/proptest). Use them for invarian
 for every input: parsers never panic and respect their limits, serialisation round-trips, and
 matching agrees with a simpler reference.
 
-- Failing cases are saved in `proptest-regressions/` next to the crate's sources. Commit those
-  files. proptest replays the saved cases first on every run, so a fixed bug stays fixed.
+- Failing cases are saved and replayed first on every run, so a fixed bug stays fixed: for unit
+  tests in `proptest-regressions/` next to the crate's sources, and for integration tests in
+  `tests/<name>.proptest-regressions`. Commit those files.
+- Check that a property can fail: plant a bug (an off-by-one at a bound, say), run it, and
+  revert. `tests/version_properties.rs` in `palisade-policy` says which bugs it was checked
+  against.
 - Prefer mutating valid inputs (flip, truncate, overwrite) over purely random bytes: they reach
   much deeper into a parser.
 - The default case count is 256. Expensive properties set a smaller count with
@@ -117,8 +135,43 @@ A golden-file test compares generated output with a committed file. The conventi
 - A change to a golden file is reviewed in the PR like code. The diff shows what changed in the
   output.
 
-A snapshot-testing library, and snapshots of decision traces, compiled policies, CLI output and
-events, arrive with the code that produces that output (#25).
+## Snapshot tests
+
+Structured output that people and other systems rely on is checked with
+[`insta`](https://insta.rs) snapshots: the test serialises the value, and `insta` compares it with
+a reviewed `.snap` file next to the test.
+
+| Crate | Test | What is snapshotted |
+|---|---|---|
+| `palisade-policy` | `tests/decision_snapshots.rs` | Whole-pipeline decisions (outcome, deciding rule, overridden rules, annotations, directives, effects, reason code), for policies built with `test_util` |
+| `palisade-proto` | `tests/event_snapshots.rs` | Event JSON: the canonical bytes, and a readable pretty-printed copy |
+
+Conventions:
+
+- **One directory per test file**, set with `Settings::set_snapshot_path` (for example
+  `tests/snapshots/pipeline/`), and **named snapshots** (`assert_json_snapshot!("name", value)`), so
+  file names say what they hold and do not depend on test function names.
+- **Deterministic input.** Fixed IDs (the `test_util` builders make them), fixed times, fixed trace
+  IDs. Never snapshot a random or time-dependent value; redact it or set it.
+- **`.gitattributes` with `* -text`** in each snapshot directory, so Windows checkouts keep LF and
+  the byte comparison holds on every runner.
+- **Review like code.** A snapshot diff in a PR is a change to output. After a deliberate change:
+
+  ```sh
+  cargo insta test -p palisade-policy --all-features   # writes .snap.new files for changes
+  cargo insta review                                   # accept or reject each one
+  ```
+
+  `INSTA_UPDATE=always cargo test ...` writes them directly; read the diff before committing.
+- **CI** (the `snapshots` job) runs `cargo insta test --check --unreferenced reject`, offline
+  after `cargo fetch --locked`: it fails if any snapshot differs, is missing, or is no longer
+  referenced by a test. The normal `test` job
+  also fails on a differing snapshot, because `insta` does not write files when `CI` is set.
+
+The older golden-file convention above (`PALISADE_BLESS=1`) stays for committed artefacts that are
+not snapshots of a test value: the JSON Schemas and the event registry. Snapshots of the compiled
+OS-native policy XML and of CLI output arrive with that code (#84, #15), using the same
+conventions.
 
 ## Fuzzing
 

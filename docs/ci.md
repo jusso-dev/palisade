@@ -20,6 +20,7 @@ type.
 | `test` | ubuntu-latest, macos-latest, windows-latest (x64), windows-11-arm (ARM64, native) | `cargo nextest run --workspace --all-features --locked --profile ci`, then the doctests with `cargo test --doc`, then `cargo xtask test-summary` (see [Test reports](#test-reports)) |
 | `coverage` | ubuntu-latest, windows-latest | `cargo llvm-cov nextest --workspace --all-features --locked --profile ci --json --summary-only`, then `cargo xtask coverage-summary` (see [Coverage, fuzzing and benchmarks](#coverage-fuzzing-and-benchmarks)) |
 | `coverage-gate` | ubuntu-latest | On PRs, `cargo xtask coverage-gate --base <base>`: `palisade-policy` line coverage at the PR's base commit and at the PR, measured in the same job; fails if it decreased (see [Coverage, fuzzing and benchmarks](#coverage-fuzzing-and-benchmarks)) |
+| `snapshots` | ubuntu-latest | `cargo fetch --locked`, then offline (`CARGO_NET_OFFLINE=true`) `cargo insta test --check --unreferenced reject --all-features -p palisade-policy -p palisade-proto`: every `insta` snapshot matches and none is unreferenced ([testing.md](testing.md#snapshot-tests)). cargo-insta has no `--locked`, so the locked fetch and the offline run stand in for it |
 | `fuzz-locks` | ubuntu-latest | `cargo xtask check-fuzz-locks`: `cargo metadata --locked` on every `crates/*/fuzz/Cargo.toml`, so a stale fuzz lockfile fails in seconds |
 | `fuzz` | ubuntu-latest | After `fuzz-locks`, `cargo xtask fuzz`: every cargo-fuzz target, seeded from the test fixtures, for 60 s each, on the pinned nightly |
 | `bench` | ubuntu-latest | `cargo test --bench <name>` for every criterion bench: builds them and runs each benchmark once, without timing |
@@ -289,6 +290,10 @@ Other hardening:
 - CI sets `CARGO_TERM_COLOR=always`, `CARGO_INCREMENTAL=0` and
   `RUST_BACKTRACE=1`.
 - Every Cargo command uses `--locked`, so CI builds exactly `Cargo.lock`.
+  Tools that run Cargo themselves and have no `--locked` (cargo-fuzz,
+  cargo-insta) run offline after a `cargo fetch --locked`, which has the
+  same effect: the lockfile cannot be re-resolved and nothing new is
+  downloaded.
 
 The workspace rules the `deps` and `feature-powerset` jobs enforce are described in
 [workspace.md](workspace.md).
@@ -344,6 +349,10 @@ cargo xtask check-supply-chain
 cargo xtask deps-report            # add --base origin/main to compare
 cargo llvm-cov nextest --workspace --all-features --locked --profile ci \
   --json --summary-only --output-path target/llvm-cov-summary.json   # needs cargo-llvm-cov 0.9
+cargo fetch --locked && CARGO_NET_OFFLINE=true \
+  cargo insta test --check --unreferenced reject --all-features -p palisade-policy -p palisade-proto  # cargo-insta 1.49
+cargo xtask check-fuzz-locks
+cargo xtask coverage-gate --base origin/main   # cargo-llvm-cov and cargo-nextest
 cargo xtask fuzz                   # needs nightly-2026-11-20 and cargo-fuzz 0.13
 cargo test --workspace --all-features --locked --bench criterion_eval --bench hash_and_parse
 cargo hack check --each-feature --all-targets --locked \
@@ -381,13 +390,13 @@ runners like everything else:
 
 - Uploading reports as artefacts (the JUnit XML, the lcov coverage report,
   fuzz crash inputs, the dependency report) and posting summaries as PR
-  comments. Artefacts need an action outside the allowlist, and comments need
-  a write token on pull requests, so both stay with #25. Every one of these
-  is in the job summary instead: test results, the coverage table, fuzz
-  findings as base64, and the dependency report.
+  comments. **These are not done, by policy, not by omission.** Artefacts
+  need an action outside the allowlist, and comments need a write token on
+  pull requests, which no workflow here is given. Every one of these is in
+  the job summary instead: test results, the coverage table and the
+  coverage gate, fuzz findings as base64 with a reproducer, the dependency
+  report, and the benchmark comparison.
 - The absolute performance budget of policy evaluation, with the benchmarks
   it is measured on (#42).
-- A Postgres service container for server tests, with the first server tests
-  (#126, #127).
 - The mdBook build and link check, with the documentation site (#27).
 - The `vm-smoke` subset of the Windows VM harness (#26).
