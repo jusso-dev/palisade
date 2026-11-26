@@ -66,7 +66,10 @@
 //!   not a drive letter's. `match_ads: true`, on a positive test of
 //!   `path.full`, lets a value that names no stream also match the streams
 //!   of a file it matches; a negative test cannot take it, so a stream never
-//!   escapes a rule written for its file. A regular expression never matches a stream. `path.directory`, `path.file_name` and
+//!   escapes a rule written for its file. A regular expression is never
+//!   tested against a stream's own name, so by default it never matches a
+//!   stream; with `match_ads: true` it is tested against the file that holds
+//!   the stream, and matches the stream if it matches that file. `path.directory`, `path.file_name` and
 //!   `path.extension` describe the file that holds the stream.
 //!
 //! On every other string field, `*` and `**` match any run of characters,
@@ -182,6 +185,10 @@
 //! holds every value, and `not_member_of` if it holds none. A member of a
 //! principal set that is neither a SID nor an object ID makes a value it
 //! might be unknown, so it never lets `not_member_of` match or `all_of` fail.
+//! `net.ip` is a set of addresses: a set test (`member_of`, `any_of`,
+//! `all_of`, `not_member_of`) compares the listed addresses with it, so
+//! `all_of` needs every one present, while a network test (`ip_in_cidr`,
+//! `ip_between`, `ip_wildcard`) matches if any local address does.
 //! `net.dns_suffix` and `net.location` are sets of names, compared like tags.
 //!
 //! ## Directory units
@@ -189,8 +196,11 @@
 //! `user.ou` and `device.ou` read the distinguished name of the user's or
 //! device's directory object and test the unit it is in: the name without
 //! its first component. Names are compared component by component, without
-//! case or spaces around `=` and `,`. `include_sub_ous: true` also matches
-//! units below the named one.
+//! case or spaces around `=` and `,`, after decoding the escapes of RFC 4514
+//! (`\,` and `\2C` are the same comma). A name with an escape RFC 4514
+//! does not define cannot be compared: as a rule value it is invalid, and as
+//! a fact it is unknown. `include_sub_ous: true` also matches units below
+//! the named one.
 //!
 //! ## Time
 //!
@@ -1607,40 +1617,94 @@ fn number(s: &str) -> Option<u64> {
 }
 
 /// The components of a distinguished name, such as `OU=Finance,DC=corp`,
-/// from the leaf: each `TYPE=value` with the type upper-cased, the value
-/// trimmed and folded, and escaped commas (`\,`) kept. `None` if a
-/// component has no `=` or an empty type or value.
+/// from the leaf: each `TYPE=value` with the type upper-cased and the value
+/// decoded, trimmed and folded. The escapes of RFC 4514 are decoded, so
+/// `\,` and `\2C` are the same comma, kept inside its component. `None` if
+/// a component has no `=`, an empty type or value, or an escape that RFC
+/// 4514 does not define (`\q`, a lone `\` or hex digits that are not
+/// UTF-8): such a name cannot be compared, so a fact is unknown and a rule
+/// value is invalid.
 fn dn_components(s: &str) -> Option<Vec<String>> {
-    let mut out = Vec::new();
-    let mut current = String::new();
-    let mut chars = s.chars();
-    let push = |part: &str, out: &mut Vec<String>| -> Option<()> {
-        let (kind, value) = part.split_once('=')?;
-        let (kind, value) = (kind.trim(), value.trim());
-        if kind.is_empty() || value.is_empty() || !kind.bytes().all(|b| b.is_ascii_alphanumeric()) {
-            return None;
+    /// One component being read: its type once `=` was seen, and its
+    /// characters, each with whether it was escaped (escaped spaces are
+    /// not trimmed).
+    #[derive(Default)]
+    struct Part {
+        kind: Option<String>,
+        chars: Vec<(char, bool)>,
+        bytes: Vec<u8>,
+    }
+    impl Part {
+        /// Moves pending hex-escaped bytes into `chars`; `None` if they
+        /// are not UTF-8.
+        fn flush(&mut self) -> Option<()> {
+            if !self.bytes.is_empty() {
+                let text = String::from_utf8(core::mem::take(&mut self.bytes)).ok()?;
+                self.chars.extend(text.chars().map(|c| (c, true)));
+            }
+            Some(())
         }
-        out.push(format!(
-            "{}={}",
-            kind.to_ascii_uppercase(),
-            fold(value, false)
-        ));
-        Some(())
-    };
+        fn finish(mut self, out: &mut Vec<String>) -> Option<()> {
+            self.flush()?;
+            let kind = self.kind?;
+            let kind = kind.trim();
+            let start = self
+                .chars
+                .iter()
+                .position(|&(c, e)| e || !c.is_whitespace())?;
+            let end = self
+                .chars
+                .iter()
+                .rposition(|&(c, e)| e || !c.is_whitespace())?;
+            let value: String = self.chars[start..=end].iter().map(|&(c, _)| c).collect();
+            if kind.is_empty() || !kind.bytes().all(|b| b.is_ascii_alphanumeric()) {
+                return None;
+            }
+            out.push(format!(
+                "{}={}",
+                kind.to_ascii_uppercase(),
+                fold(&value, false)
+            ));
+            Some(())
+        }
+    }
+    let mut out = Vec::new();
+    let mut part = Part::default();
+    let mut chars = s.chars().peekable();
     while let Some(c) = chars.next() {
         match c {
             '\\' => {
-                current.push(c);
-                current.push(chars.next()?);
+                let next = chars.next()?;
+                if next.is_ascii_hexdigit() {
+                    let low = chars.next().filter(char::is_ascii_hexdigit)?;
+                    let hex = [next, low].iter().collect::<String>();
+                    part.bytes.push(u8::from_str_radix(&hex, 16).ok()?);
+                } else if matches!(
+                    next,
+                    ' ' | '"' | '#' | '+' | ',' | ';' | '<' | '=' | '>' | '\\'
+                ) {
+                    part.flush()?;
+                    part.chars.push((next, true));
+                } else {
+                    return None;
+                }
+                // An escape inside the type is not a valid type.
+                part.kind.as_ref()?;
             }
             ',' => {
-                push(&current, &mut out)?;
-                current.clear();
+                core::mem::take(&mut part).finish(&mut out)?;
             }
-            _ => current.push(c),
+            '=' if part.kind.is_none() => {
+                part.flush()?;
+                part.kind = Some(part.chars.drain(..).map(|(c, _)| c).collect());
+            }
+            _ => {
+                part.flush()?;
+                part.chars.push((c, false));
+            }
         }
     }
-    push(&current, &mut out)?;
+    part.finish(&mut out)?;
     Some(out)
 }
 

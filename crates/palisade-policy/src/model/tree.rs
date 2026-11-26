@@ -352,8 +352,10 @@ pub enum Field {
     /// session, on a multi-session host.
     #[serde(rename = "session.client_ip")]
     SessionClientIp,
-    /// Context (#33): every local interface address. A positive test
-    /// matches if any address does.
+    /// Context (#33): every local interface address. A network test
+    /// (`ip_in_cidr`, `ip_between`, `ip_wildcard`) matches if any address
+    /// does; a set test holds the addresses as a set, so `all_of` needs
+    /// every listed address to be present.
     #[serde(rename = "net.ip")]
     NetIp,
     /// Context (#33): every local interface MAC address.

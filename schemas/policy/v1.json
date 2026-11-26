@@ -1020,7 +1020,7 @@
         },
         {
           "const": "net.ip",
-          "description": "Context (#33): every local interface address. A positive test\nmatches if any address does.",
+          "description": "Context (#33): every local interface address. A network test\n(`ip_in_cidr`, `ip_between`, `ip_wildcard`) matches if any address\ndoes; a set test holds the addresses as a set, so `all_of` needs\nevery listed address to be present.",
           "type": "string"
         },
         {

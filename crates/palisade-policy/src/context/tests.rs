@@ -1094,6 +1094,76 @@ fn organisational_units() {
 }
 
 #[test]
+fn distinguished_names_compare_after_decoding_their_escapes() {
+    let unit = |value: &str| {
+        CompiledCriterion::compile(&crit(Field::UserOu, Operator::Equals, &[value])).unwrap()
+    };
+    let in_dn = |dn: &str| {
+        let mut ctx = full();
+        ctx.user.dn = Some(dn.to_owned());
+        ctx
+    };
+    // `\,` and `\2C` are the same comma, kept inside the component.
+    let rule = unit(r"OU=Sales\, West,DC=corp");
+    assert_eq!(
+        eval(&rule, &in_dn(r"CN=Alice,OU=Sales\2C West,DC=corp")),
+        Match
+    );
+    assert_eq!(
+        eval(&rule, &in_dn(r"CN=Alice,OU=Sales\, West,DC=corp")),
+        Match
+    );
+    assert_eq!(
+        eval(
+            &unit(r"OU=Sales\2c West,DC=corp"),
+            &in_dn(r"CN=Alice,OU=Sales\, West,DC=corp")
+        ),
+        Match
+    );
+    // The escaped comma does not split the unit.
+    assert_eq!(
+        eval(&rule, &in_dn("CN=Alice,OU=Sales,OU= West,DC=corp")),
+        NoMatch
+    );
+    // Hex escapes decode as UTF-8, and other special characters escape too.
+    assert_eq!(
+        eval(
+            &unit("OU=Caf\\C3\\A9,DC=corp"),
+            &in_dn("CN=x,OU=café,DC=corp")
+        ),
+        Match
+    );
+    assert_eq!(
+        eval(
+            &unit(r"OU=a\+b\=c,DC=corp"),
+            &in_dn("CN=x,OU=a\\2Bb\\3Dc,DC=corp")
+        ),
+        Match
+    );
+    // An escape RFC 4514 does not define: an invalid rule value, and an
+    // unknown fact.
+    for bad in [
+        r"OU=Sa\qles,DC=corp",
+        r"OU=Sales\",
+        r"OU=Sales\2,DC=corp",
+        r"OU=\FF,DC=corp",
+    ] {
+        assert!(
+            matches!(
+                compile_err(Field::UserOu, Operator::Equals, &[bad]),
+                CompileErrorKind::InvalidValue(_)
+            ),
+            "{bad}"
+        );
+        let mut c = crit(Field::UserOu, Operator::Equals, &["OU=Sales,DC=corp"]);
+        c.safety_critical = true;
+        let c = CompiledCriterion::compile(&c).unwrap();
+        let (result, _) = eval_in(&c, &in_dn(&format!("CN=x,{bad}")), ActionKind::Deny);
+        assert_eq!(result, Unknown, "{bad}");
+    }
+}
+
+#[test]
 fn new_facts_are_read_from_their_place() {
     let ctx = full();
     assert_eq!(

@@ -180,6 +180,42 @@ fn validation_reports_every_error_in_one_pass() {
 }
 
 #[test]
+fn reversed_bounds_are_reported_with_a_misplaced_option() {
+    let mut c = Criterion::new(Field::DeviceOsBuild, Operator::Between, ["22631", "19045"]);
+    c.anchored = Some(false);
+    let doc = with_rule(
+        Match::All(vec![
+            leaf(Field::HashSha256, Operator::Equals, &[&sha256('a')]),
+            Match::Criterion(c),
+        ]),
+        Action::Deny(Default::default()),
+    );
+    let errors = doc.validate().unwrap_err();
+    let base = "/rule_sets/0/rules/0/match/all/1/criterion";
+    assert_eq!(
+        codes(&errors),
+        vec![
+            (ErrorCode::OptionNotApplicable, &*format!("{base}/anchored")),
+            (ErrorCode::InvalidValue, &*format!("{base}/values/1")),
+        ]
+    );
+    // Ordered bounds: only the option.
+    let mut c = Criterion::new(Field::DeviceOsBuild, Operator::Between, ["19045", "22631"]);
+    c.anchored = Some(false);
+    let doc = with_rule(
+        Match::All(vec![
+            leaf(Field::HashSha256, Operator::Equals, &[&sha256('a')]),
+            Match::Criterion(c),
+        ]),
+        Action::Deny(Default::default()),
+    );
+    assert_eq!(
+        codes(&doc.validate().unwrap_err()),
+        vec![(ErrorCode::OptionNotApplicable, &*format!("{base}/anchored"))]
+    );
+}
+
+#[test]
 fn references_must_resolve_and_ids_must_be_unique() {
     let mut doc = with_rule(
         leaf(Field::HashSha256, Operator::Equals, &[&sha256('a')]),

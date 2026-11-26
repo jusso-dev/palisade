@@ -9,8 +9,11 @@
 //! form matches a fact in the other. A CIDR block is checked in the form it
 //! is written in, so `::ffff:10.0.0.0/104` is `10.0.0.0/8` and
 //! `::ffff:10.0.0.0/8` is rejected for its host bits. An IPv6 block wider
-//! than `::ffff:0:0/96`, such as `::/0`, holds the IPv4 addresses it covers
-//! in mapped form. Otherwise IPv4 and IPv6 never match each other.
+//! than `::ffff:0:0/96`, such as `::/0`, or an explicit IPv6 range
+//! (`ip_between`) that spans part of `::ffff:0:0/96`, holds the IPv4
+//! addresses it covers in mapped form: every IPv6 range tests an IPv4
+//! address by its mapped form. Otherwise IPv4 and IPv6 never match each
+//! other.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -141,7 +144,8 @@ impl IpRange {
             .ok_or_else(|| "the end must be of the same family and not below the start".to_owned())
     }
 
-    /// Whether the range holds `ip`. An IPv4 address is in an IPv6 range
+    /// Whether the range holds `ip`. An IPv4 address is in an IPv6 range,
+    /// whether it came from a CIDR block or from two explicit endpoints,
     /// if its mapped form (`::ffff:a.b.c.d`) is.
     #[must_use]
     pub fn contains(&self, ip: IpAddr) -> bool {
@@ -355,6 +359,18 @@ mod tests {
         ] {
             assert!(IpRange::parse_range(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn explicit_ipv6_ranges_hold_the_ipv4_addresses_they_span_in_mapped_form() {
+        // A range spanning `::ffff:0:0/96` holds the IPv4 addresses inside
+        // it, as a wide CIDR block does; a disjoint IPv6 range holds none.
+        let spanning = IpRange::parse_range("::fffe:ffff:ffff-::1:0:0:0").unwrap();
+        assert!(spanning.contains(ip("255.255.0.0")));
+        assert!(spanning.contains(ip("::ffff:10.0.0.1")));
+        let disjoint = IpRange::parse_range("2001:db8::-2001:db8::ffff").unwrap();
+        assert!(!disjoint.contains(ip("255.255.0.0")));
+        assert!(!disjoint.contains(ip("10.0.0.1")));
     }
 
     #[test]

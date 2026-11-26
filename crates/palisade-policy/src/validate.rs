@@ -836,13 +836,27 @@ impl Validator {
         // compiles nothing a second time.
         // `case_sensitive` was reported above; compiling would report it
         // again.
+        // A misplaced option was reported above and does not change the
+        // values, so the bounds are still checked, without the options:
+        // the author sees both findings in one pass.
         let well_formed = all_ok
             && case_ok
-            && options_ok
             && c.operator.applies_to_field(c.field)
             && (min..=max).contains(&c.values.len());
         // Ranges and windows are checked across their two values.
         if well_formed && self.compile_values && c.operator.value_count() == (2, 2) {
+            let without_options;
+            let c = if options_ok {
+                c
+            } else {
+                without_options = Criterion {
+                    anchored: None,
+                    match_ads: None,
+                    include_sub_ous: None,
+                    ..c.clone()
+                };
+                &without_options
+            };
             if let Err(errors) = CompiledCriterion::compile(c) {
                 for e in errors {
                     let path = match e.value {

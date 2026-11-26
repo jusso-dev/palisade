@@ -6,11 +6,14 @@
 //! reads the system. A fact that was not collected is `None`, and every
 //! criterion on it evaluates to [`Tri::Unknown`](crate::ops::Tri::Unknown).
 //!
-//! Every fact here is plain data, already known when a decision starts.
-//! The agent collects the network facts on network changes and heartbeats,
-//! and the time facts from its trusted clock (#18), in the clock the
-//! policy's `time_zone_basis` names. When the clock cannot be trusted it
-//! leaves the time facts out, so every time criterion is unknown: an allow
+//! Every fact here is plain data, already known when a decision starts,
+//! and the caller supplies all of it: [`EvaluationContext::new`] knows
+//! nothing, so every context criterion is unknown until the caller fills
+//! the facts in. Collecting them on the endpoint is #4. The caller (the
+//! agent) collects the network facts on network changes and heartbeats,
+//! and converts the time facts from its trusted clock (#18) into the clock
+//! the policy's `time_zone_basis` names; nothing here reads the host clock.
+//! When the clock cannot be trusted it leaves the time facts out, so every time criterion is unknown: an allow
 //! that depends on the time fails closed. Facts that cost a lookup at
 //! decision time (registry, files, environment blocks), their cost classes
 //! and caching are later parts of #33. The facts only scopes read
