@@ -1093,7 +1093,15 @@
         "detection.log_cleared",
         "detection.audit_policy_changed",
         "integrity.fim.changed",
-        "compliance.probe.result"
+        "compliance.probe.result",
+        "policy.signature.invalid",
+        "policy.rollback_rejected",
+        "policy.target_mismatch",
+        "policy.stale",
+        "policy.lkg_loaded",
+        "policy.emergency_loaded",
+        "policy.schema_unsupported",
+        "tamper.policy.rollback_suspected"
       ],
       "type": "string"
     },
@@ -4057,6 +4065,178 @@
       }
     },
     {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "policy.signature.invalid"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "policy"
+          }
+        },
+        "required": [
+          "policy"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "policy.rollback_rejected"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "policy"
+          }
+        },
+        "required": [
+          "policy"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "policy.target_mismatch"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "policy"
+          }
+        },
+        "required": [
+          "policy"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "policy.stale"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "policy"
+          }
+        },
+        "required": [
+          "policy"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "policy.lkg_loaded"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "policy"
+          }
+        },
+        "required": [
+          "policy"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "policy.emergency_loaded"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "policy"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "policy.schema_unsupported"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "policy"
+          }
+        },
+        "required": [
+          "policy"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "tamper.policy.rollback_suspected"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "category": {
+            "const": "agent"
+          }
+        },
+        "required": []
+      }
+    },
+    {
       "else": {
         "required": [
           "prev_hash"
@@ -4449,6 +4629,36 @@
       "if": {
         "properties": {
           "schema_version": {
+            "pattern": "^1\\.(0|1)\\.(0|[1-9][0-9]*)$"
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "properties": {
+          "event_type": {
+            "not": {
+              "enum": [
+                "policy.signature.invalid",
+                "policy.rollback_rejected",
+                "policy.target_mismatch",
+                "policy.stale",
+                "policy.lkg_loaded",
+                "policy.emergency_loaded",
+                "policy.schema_unsupported",
+                "tamper.policy.rollback_suspected"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
             "pattern": "^1\\.(0)\\.(0|[1-9][0-9]*)$"
           }
         },
@@ -4659,7 +4869,7 @@
     "schema_version": {
       "$ref": "#/$defs/SchemaVersion",
       "description": "The schema version of this event.",
-      "pattern": "^1\\.(0|1)\\.(0|[1-9][0-9]*)$"
+      "pattern": "^1\\.(0|1|2)\\.(0|[1-9][0-9]*)$"
     },
     "script": {
       "$ref": "#/$defs/Script",
@@ -4715,5 +4925,5 @@
   ],
   "title": "Palisade canonical event",
   "type": "object",
-  "x-schema-version": "1.1.0"
+  "x-schema-version": "1.2.0"
 }

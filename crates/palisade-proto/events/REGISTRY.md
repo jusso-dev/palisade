@@ -2,7 +2,7 @@
 
 <!-- @generated from `registry.yaml`. Do not edit by hand. Regenerate with `PALISADE_BLESS=1 cargo test -p palisade-proto --lib registry`. -->
 
-Registry schema version 1.1.0.
+Registry schema version 1.2.0.
 
 | Type | Category | Default severity | Required field sets | Summarisable | Since | Description |
 |---|---|---|---|---|---|---|
@@ -56,3 +56,11 @@ Registry schema version 1.1.0.
 | `detection.audit_policy_changed` | `detection` | 7 | `audit_policy` | no | 1.1.0 | The OS audit policy was changed. |
 | `integrity.fim.changed` | `integrity` | 5 | `file`, `fim` | no | 1.1.0 | A monitored file was created, changed, renamed or deleted. |
 | `compliance.probe.result` | `compliance` | 3 | `probe` | no | 1.1.0 | A compliance probe reported its result. |
+| `policy.signature.invalid` | `policy` | 8 | `policy` | no | 1.2.0 | A policy bundle had no valid signature from a trusted policy-signing key. It was rejected, or loaded only because the signature mode is audit or warn. |
+| `policy.rollback_rejected` | `policy` | 8 | `policy` | no | 1.2.0 | A policy bundle was rejected because its version is below the highest version this device has accepted for its target. |
+| `policy.target_mismatch` | `policy` | 7 | `policy` | no | 1.2.0 | A policy bundle was rejected because its tenant or target does not match this device's enrolment. |
+| `policy.stale` | `policy` | 5 | `policy` | no | 1.2.0 | No newer policy arrived within the staleness window, or the policy is past its expiry. The device keeps enforcing it. |
+| `policy.lkg_loaded` | `policy` | 9 | `policy` | no | 1.2.0 | The active policy failed its integrity check at load, so the previous policy it directly replaced was loaded instead. |
+| `policy.emergency_loaded` | `policy` | 9 | none | no | 1.2.0 | No cached policy could be loaded after a policy had been accepted, so the built-in emergency policy was loaded. |
+| `policy.schema_unsupported` | `policy` | 6 | `policy` | no | 1.2.0 | A policy bundle uses a schema this agent does not support. It was rejected and the last known good policy stays in force. |
+| `tamper.policy.rollback_suspected` | `agent` | 9 | none | no | 1.2.0 | The copies of the policy anti-rollback record disagree, one is missing or corrupt, or no cached policy meets the recorded version. |

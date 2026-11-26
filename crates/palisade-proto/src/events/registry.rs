@@ -422,6 +422,15 @@ fn registry_has_the_issue_minimum() {
         "detection.audit_policy_changed",
         "integrity.fim.changed",
         "compliance.probe.result",
+        // The policy integrity types of #225, added in 1.2.
+        "policy.signature.invalid",
+        "policy.rollback_rejected",
+        "policy.target_mismatch",
+        "policy.stale",
+        "policy.lkg_loaded",
+        "policy.emergency_loaded",
+        "policy.schema_unsupported",
+        "tamper.policy.rollback_suspected",
     ] {
         assert!(
             name.parse::<super::EventType>().is_ok(),

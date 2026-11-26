@@ -358,10 +358,10 @@ fn versions_are_checked_before_fields() {
         Err(LoadError::UnsupportedSchemaVersion(_))
     ));
     assert!(matches!(
-        read("1.2.0"),
+        read("1.3.0"),
         Err(LoadError::NewerMinorVersion(_))
     ));
-    for older_or_same in ["1.0.0", "1.0.1", "1.1.0", "1.1.7"] {
+    for older_or_same in ["1.0.0", "1.0.1", "1.1.0", "1.1.7", "1.2.0"] {
         assert!(
             matches!(read(older_or_same), Err(LoadError::Json(_))),
             "{older_or_same}: read, and the extra field fails"
@@ -734,6 +734,45 @@ fn a_version_label_covers_everything_the_event_uses() {
         assert_eq!(event.validate(), Ok(()), "{patch}");
         event.schema_version = V1_0;
         assert_eq!(codes(&event), [EventErrorCode::NewerThanVersion], "{patch}");
+    }
+}
+
+#[test]
+fn the_1_2_policy_integrity_types_need_a_1_2_label() {
+    // #225's integrity types are the only 1.2 additions, and each needs a
+    // 1.2 label: an older reader would refuse the unknown type.
+    let v1_2: Vec<&str> = EventType::ALL
+        .iter()
+        .filter(|t| t.since() == V1_2)
+        .map(|t| t.as_str())
+        .collect();
+    assert_eq!(
+        v1_2,
+        [
+            "policy.signature.invalid",
+            "policy.rollback_rejected",
+            "policy.target_mismatch",
+            "policy.stale",
+            "policy.lkg_loaded",
+            "policy.emergency_loaded",
+            "policy.schema_unsupported",
+            "tamper.policy.rollback_suspected",
+        ]
+    );
+    for t in EventType::ALL.iter().filter(|t| t.since() == V1_2) {
+        let mut patch = serde_json::json!({
+            "event_type": t.as_str(),
+            "category": serde_json::to_value(t.category()).unwrap(),
+        });
+        if t.required().contains(&FieldSet::Policy) {
+            patch["policy"] = serde_json::json!({ "version": 7 });
+        }
+        patch["schema_version"] = "1.2.0".into();
+        let mut event = Event::from_json(&with(patch).to_string()).unwrap();
+        assert_eq!(event.min_version(), V1_2, "{t}");
+        assert_eq!(event.validate(), Ok(()), "{t}");
+        event.schema_version = V1_1;
+        assert_eq!(codes(&event), [EventErrorCode::NewerThanVersion], "{t}");
     }
 }
 

@@ -107,11 +107,27 @@ pub enum EventType {
     IntegrityFimChanged,
     /// `compliance.probe.result`: A compliance probe reported its result.
     ComplianceProbeResult,
+    /// `policy.signature.invalid`: A policy bundle had no valid signature from a trusted policy-signing key. It was rejected, or loaded only because the signature mode is audit or warn.
+    PolicySignatureInvalid,
+    /// `policy.rollback_rejected`: A policy bundle was rejected because its version is below the highest version this device has accepted for its target.
+    PolicyRollbackRejected,
+    /// `policy.target_mismatch`: A policy bundle was rejected because its tenant or target does not match this device's enrolment.
+    PolicyTargetMismatch,
+    /// `policy.stale`: No newer policy arrived within the staleness window, or the policy is past its expiry. The device keeps enforcing it.
+    PolicyStale,
+    /// `policy.lkg_loaded`: The active policy failed its integrity check at load, so the previous policy it directly replaced was loaded instead.
+    PolicyLkgLoaded,
+    /// `policy.emergency_loaded`: No cached policy could be loaded after a policy had been accepted, so the built-in emergency policy was loaded.
+    PolicyEmergencyLoaded,
+    /// `policy.schema_unsupported`: A policy bundle uses a schema this agent does not support. It was rejected and the last known good policy stays in force.
+    PolicySchemaUnsupported,
+    /// `tamper.policy.rollback_suspected`: The copies of the policy anti-rollback record disagree, one is missing or corrupt, or no cached policy meets the recorded version.
+    TamperPolicyRollbackSuspected,
 }
 
 impl EventType {
     /// Every registered type, in registry order.
-    pub const ALL: [Self; 50] = [
+    pub const ALL: [Self; 58] = [
         Self::ExecDecision,
         Self::LibraryDecision,
         Self::DriverDecision,
@@ -162,6 +178,14 @@ impl EventType {
         Self::DetectionAuditPolicyChanged,
         Self::IntegrityFimChanged,
         Self::ComplianceProbeResult,
+        Self::PolicySignatureInvalid,
+        Self::PolicyRollbackRejected,
+        Self::PolicyTargetMismatch,
+        Self::PolicyStale,
+        Self::PolicyLkgLoaded,
+        Self::PolicyEmergencyLoaded,
+        Self::PolicySchemaUnsupported,
+        Self::TamperPolicyRollbackSuspected,
     ];
 
     /// The dotted name.
@@ -218,6 +242,14 @@ impl EventType {
             Self::DetectionAuditPolicyChanged => "detection.audit_policy_changed",
             Self::IntegrityFimChanged => "integrity.fim.changed",
             Self::ComplianceProbeResult => "compliance.probe.result",
+            Self::PolicySignatureInvalid => "policy.signature.invalid",
+            Self::PolicyRollbackRejected => "policy.rollback_rejected",
+            Self::PolicyTargetMismatch => "policy.target_mismatch",
+            Self::PolicyStale => "policy.stale",
+            Self::PolicyLkgLoaded => "policy.lkg_loaded",
+            Self::PolicyEmergencyLoaded => "policy.emergency_loaded",
+            Self::PolicySchemaUnsupported => "policy.schema_unsupported",
+            Self::TamperPolicyRollbackSuspected => "tamper.policy.rollback_suspected",
         }
     }
 
@@ -275,6 +307,14 @@ impl EventType {
             Self::DetectionAuditPolicyChanged => Category::Detection,
             Self::IntegrityFimChanged => Category::Integrity,
             Self::ComplianceProbeResult => Category::Compliance,
+            Self::PolicySignatureInvalid => Category::Policy,
+            Self::PolicyRollbackRejected => Category::Policy,
+            Self::PolicyTargetMismatch => Category::Policy,
+            Self::PolicyStale => Category::Policy,
+            Self::PolicyLkgLoaded => Category::Policy,
+            Self::PolicyEmergencyLoaded => Category::Policy,
+            Self::PolicySchemaUnsupported => Category::Policy,
+            Self::TamperPolicyRollbackSuspected => Category::Agent,
         }
     }
 
@@ -332,6 +372,14 @@ impl EventType {
             Self::DetectionAuditPolicyChanged => Severity::clamped(7),
             Self::IntegrityFimChanged => Severity::clamped(5),
             Self::ComplianceProbeResult => Severity::clamped(3),
+            Self::PolicySignatureInvalid => Severity::clamped(8),
+            Self::PolicyRollbackRejected => Severity::clamped(8),
+            Self::PolicyTargetMismatch => Severity::clamped(7),
+            Self::PolicyStale => Severity::clamped(5),
+            Self::PolicyLkgLoaded => Severity::clamped(9),
+            Self::PolicyEmergencyLoaded => Severity::clamped(9),
+            Self::PolicySchemaUnsupported => Severity::clamped(6),
+            Self::TamperPolicyRollbackSuspected => Severity::clamped(9),
         }
     }
 
@@ -389,6 +437,14 @@ impl EventType {
             Self::DetectionAuditPolicyChanged => &[FieldSet::AuditPolicy],
             Self::IntegrityFimChanged => &[FieldSet::File, FieldSet::Fim],
             Self::ComplianceProbeResult => &[FieldSet::Probe],
+            Self::PolicySignatureInvalid => &[FieldSet::Policy],
+            Self::PolicyRollbackRejected => &[FieldSet::Policy],
+            Self::PolicyTargetMismatch => &[FieldSet::Policy],
+            Self::PolicyStale => &[FieldSet::Policy],
+            Self::PolicyLkgLoaded => &[FieldSet::Policy],
+            Self::PolicyEmergencyLoaded => &[],
+            Self::PolicySchemaUnsupported => &[FieldSet::Policy],
+            Self::TamperPolicyRollbackSuspected => &[],
         }
     }
 
@@ -446,6 +502,14 @@ impl EventType {
             Self::DetectionAuditPolicyChanged => false,
             Self::IntegrityFimChanged => false,
             Self::ComplianceProbeResult => false,
+            Self::PolicySignatureInvalid => false,
+            Self::PolicyRollbackRejected => false,
+            Self::PolicyTargetMismatch => false,
+            Self::PolicyStale => false,
+            Self::PolicyLkgLoaded => false,
+            Self::PolicyEmergencyLoaded => false,
+            Self::PolicySchemaUnsupported => false,
+            Self::TamperPolicyRollbackSuspected => false,
         }
     }
 
@@ -503,6 +567,14 @@ impl EventType {
             Self::DetectionAuditPolicyChanged => SchemaVersion::new(1, 1, 0),
             Self::IntegrityFimChanged => SchemaVersion::new(1, 1, 0),
             Self::ComplianceProbeResult => SchemaVersion::new(1, 1, 0),
+            Self::PolicySignatureInvalid => SchemaVersion::new(1, 2, 0),
+            Self::PolicyRollbackRejected => SchemaVersion::new(1, 2, 0),
+            Self::PolicyTargetMismatch => SchemaVersion::new(1, 2, 0),
+            Self::PolicyStale => SchemaVersion::new(1, 2, 0),
+            Self::PolicyLkgLoaded => SchemaVersion::new(1, 2, 0),
+            Self::PolicyEmergencyLoaded => SchemaVersion::new(1, 2, 0),
+            Self::PolicySchemaUnsupported => SchemaVersion::new(1, 2, 0),
+            Self::TamperPolicyRollbackSuspected => SchemaVersion::new(1, 2, 0),
         }
     }
 
@@ -560,6 +632,14 @@ impl EventType {
             Self::DetectionAuditPolicyChanged => "The OS audit policy was changed.",
             Self::IntegrityFimChanged => "A monitored file was created, changed, renamed or deleted.",
             Self::ComplianceProbeResult => "A compliance probe reported its result.",
+            Self::PolicySignatureInvalid => "A policy bundle had no valid signature from a trusted policy-signing key. It was rejected, or loaded only because the signature mode is audit or warn.",
+            Self::PolicyRollbackRejected => "A policy bundle was rejected because its version is below the highest version this device has accepted for its target.",
+            Self::PolicyTargetMismatch => "A policy bundle was rejected because its tenant or target does not match this device's enrolment.",
+            Self::PolicyStale => "No newer policy arrived within the staleness window, or the policy is past its expiry. The device keeps enforcing it.",
+            Self::PolicyLkgLoaded => "The active policy failed its integrity check at load, so the previous policy it directly replaced was loaded instead.",
+            Self::PolicyEmergencyLoaded => "No cached policy could be loaded after a policy had been accepted, so the built-in emergency policy was loaded.",
+            Self::PolicySchemaUnsupported => "A policy bundle uses a schema this agent does not support. It was rejected and the last known good policy stays in force.",
+            Self::TamperPolicyRollbackSuspected => "The copies of the policy anti-rollback record disagree, one is missing or corrupt, or no cached policy meets the recorded version.",
         }
     }
 }
