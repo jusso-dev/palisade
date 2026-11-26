@@ -83,7 +83,18 @@ mod tests {
         assert!(dockerfile.contains("sha256sum --check --strict"));
         for step in crate::ci::STEPS {
             let Some(tool) = step.tool else { continue };
+            // The image is Linux: Windows-only steps never run in it.
+            if step.only_on == Some("windows") {
+                continue;
+            }
             let program = tool.check[0];
+            // The server-image steps build and run an image, which needs a
+            // container runtime on the host, not one nested in the dev
+            // container (docs/dev/unix.md). `--fast` skips them.
+            if program == "podman" {
+                assert!(step.slow, "{}", step.command);
+                continue;
+            }
             let covered = match program {
                 "cargo" => {
                     let sub = tool

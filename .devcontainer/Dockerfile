@@ -63,6 +63,7 @@ RUN cargo install --locked \
         cargo-vet@0.10.3 \
         cargo-hack@0.6.46 \
         cargo-llvm-cov@0.9.2 \
+        cargo-insta@1.49.0 \
         zizmor@1.33.1 \
         typos-cli@1.52.2 \
         mdbook@0.5.2 \

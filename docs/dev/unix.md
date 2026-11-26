@@ -35,8 +35,8 @@ runners, so this is a quick local check, not a replacement.
 - the toolchain pinned in `rust-toolchain.toml`, its components and targets, plus the Windows GNU
   target, the MSRV toolchain and the pinned nightly for fuzzing;
 - the tools CI uses, at the versions CI installs: cargo-nextest, cargo-deny, cargo-audit,
-  cargo-vet, cargo-hack, cargo-llvm-cov, cargo-fuzz, zizmor and actionlint (the release
-  archive, checked against its SHA-256, as the CI job does);
+  cargo-vet, cargo-hack, cargo-llvm-cov, cargo-insta, cargo-fuzz, zizmor and actionlint (the
+  release archive, checked against its SHA-256, as the CI job does);
 - the documentation tools: mdBook, lychee and typos;
 - a Postgres 17 service (the image and digest the CI `postgres` job uses), with
   `PALISADE_TEST_DATABASE_ADMIN_URL` set, so the server's database tests run instead of skipping.
@@ -48,7 +48,9 @@ a while; actionlint is the one prebuilt binary, checked against its published SH
 
 `cargo xtask ci` runs every CI check inside the container, and `--fast` skips the slow ones. The
 image has every tool it checks for, and an xtask test fails if a CI step needs one the image
-lacks. The Postgres step runs because the container sets `PALISADE_TEST_DATABASE_ADMIN_URL`.
+lacks. Two exceptions: the Windows-only package and signing steps never run on Linux, and the
+`server-image` steps need podman, a container runtime the image does not nest; run those on the
+host, or use `--fast`, which skips them. The Postgres step runs because the container sets `PALISADE_TEST_DATABASE_ADMIN_URL`.
 
 Optional: building the image with `--build-arg WITH_XWIN=1` adds `cargo-xwin`, which can check the
 `x86_64-pc-windows-msvc` target from Linux (`cargo xwin check --target x86_64-pc-windows-msvc`).

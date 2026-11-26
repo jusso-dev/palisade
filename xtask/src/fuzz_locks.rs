@@ -175,7 +175,12 @@ mod tests {
     /// dependency, as happens when a PR adds one to a parser crate.
     #[test]
     fn cargo_metadata_locked_detects_a_stale_lockfile() {
-        let nanos = std::time::SystemTime::now()
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "repository tooling: only makes a temporary directory name unique"
+        )]
+        let now = std::time::SystemTime::now();
+        let nanos = now
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.subsec_nanos());
         let root = repo()
