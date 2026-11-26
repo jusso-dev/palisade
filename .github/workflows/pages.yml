@@ -112,13 +112,13 @@ jobs:
             GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" \
             GIT_CONFIG_VALUE_0="$header" \
             git push "https://github.com/$REPOSITORY.git" HEAD:gh-pages
-          echo "SITE_PUSHED=true" >> "$GITHUB_ENV"
       # A push made with the workflow's `GITHUB_TOKEN` does not start a Pages
       # build, so ask for one. This builds from the configured source,
-      # `gh-pages`, as a push by a person would. It runs only when the push
-      # step pushed something, and needs only `pages: write`.
+      # `gh-pages`, as a push by a person would, and needs only
+      # `pages: write`. It runs even when the site was unchanged, so a rerun
+      # after a failed request still publishes what an earlier run pushed;
+      # an extra build of an unchanged branch is harmless.
       - name: Request the Pages build
-        if: env.SITE_PUSHED == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh api -X POST "repos/$REPOSITORY/pages/builds" --jq .status

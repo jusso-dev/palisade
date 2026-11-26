@@ -140,7 +140,8 @@ first deployment needs this setting before Pages serves anything: after making i
 A push made with a workflow's `GITHUB_TOKEN` does not start a Pages build, so `pages.yml`'s push
 alone would update `gh-pages` but not the site. After each push it therefore requests the build
 itself (`POST repos/jusso-dev/palisade/pages/builds`), with the same token and only the job's
-`pages: write` permission. No personal token or deployment action is needed. A push to
+`pages: write` permission, even when the site is unchanged, so rerunning `pages.yml` also
+retries a build request that failed. No personal token or deployment action is needed. A push to
 `gh-pages` made by hand, by someone with admin rights, still starts a build as usual.
 
 Serving a branch still runs GitHub's own `pages-build-deployment` workflow. If the Actions
