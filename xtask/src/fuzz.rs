@@ -108,6 +108,10 @@ const LEGACY_SEEDS: Seed = Seed {
     test: "legacy",
     name: "write_legacy_fuzz_seeds",
 };
+const TAG_SEEDS: Seed = Seed {
+    test: "tags",
+    name: "write_tag_fuzz_seeds",
+};
 const TRUST_SET_SEEDS: Seed = Seed {
     test: "trust_set",
     name: "write_trust_set_fuzz_seeds",
@@ -173,6 +177,11 @@ pub const PROJECTS: &[Project] = &[
                 name: "fuzz_msi_tables",
                 dict: None,
                 seeds: &[INSTALLER_SEEDS],
+            },
+            Target {
+                name: "fuzz_tags",
+                dict: None,
+                seeds: &[TAG_SEEDS],
             },
         ],
     },

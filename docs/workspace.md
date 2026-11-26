@@ -110,6 +110,7 @@ The planned flag names, each added with the code that needs it:
 | `minifilter` | Agent support for the optional kernel driver. | #110 |
 | `os-native-compiler` | Compiling policies with the operating system's own tooling, on a Windows build host. | #84 |
 | `os-trust` | OS signature and catalog checks in `palisade-fileid` (ADR 0003). | #3 |
+| `content-rules` | Content tagging in `palisade-fileid`: the built-in tag set and organisation pattern rules. | `palisade-fileid` (now, #44) |
 
 ## Profiles
 

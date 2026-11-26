@@ -17,8 +17,15 @@ workspace = true
 # default. Intended for the agent, and the CLI for diagnostics; neither
 # depends on this crate yet.
 os-trust = ["dep:windows-sys"]
+# Content tagging (`palisade_fileid::tags`, #44): the built-in tag set and
+# organisation pattern rules. Off by default; the agent runs it off the
+# identity hot path.
+content-rules = ["dep:aho-corasick"]
 
 [dependencies]
+# The multi-pattern searcher for content tagging (#44), behind
+# `content-rules`.
+aho-corasick = { workspace = true, optional = true }
 md-5 = { workspace = true }
 # The shared verification-error table (#50, #58).
 palisade-core = { workspace = true, features = ["serde"] }
