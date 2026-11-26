@@ -21,6 +21,7 @@ type.
 | `coverage` | ubuntu-latest, windows-latest | `cargo llvm-cov nextest --workspace --all-features --locked --profile ci --json --summary-only`, then `cargo xtask coverage-summary` (see [Coverage, fuzzing and benchmarks](#coverage-fuzzing-and-benchmarks)) |
 | `coverage-gate` | ubuntu-latest | On PRs, `cargo xtask coverage-gate --base <base>`: `palisade-policy` line coverage at the PR's base commit and at the PR, measured in the same job; fails if it decreased (see [Coverage, fuzzing and benchmarks](#coverage-fuzzing-and-benchmarks)) |
 | `snapshots` | ubuntu-latest | `cargo fetch --locked`, then offline (`CARGO_NET_OFFLINE=true`) `cargo insta test --check --unreferenced reject --all-features -p palisade-policy -p palisade-proto`: every `insta` snapshot matches and none is unreferenced ([testing.md](testing.md#snapshot-tests)). cargo-insta has no `--locked`, so the locked fetch and the offline run stand in for it |
+| `fixtures` | ubuntu-latest | `cargo xtask check-testdata` (no executable file in the repository that `testdata/manifest.txt` does not allow), then `cargo xtask golden` (the generated fixture corpus matches `testdata/golden/fixtures.txt`) ([testing.md](testing.md#the-fixture-corpus)) |
 | `fuzz-locks` | ubuntu-latest | `cargo xtask check-fuzz-locks`: `cargo metadata --locked` on every `crates/*/fuzz/Cargo.toml`, so a stale fuzz lockfile fails in seconds |
 | `fuzz` | ubuntu-latest | After `fuzz-locks`, `cargo xtask fuzz`: every cargo-fuzz target, seeded from the test fixtures, for 60 s each, on the pinned nightly |
 | `bench` | ubuntu-latest | `cargo test --bench <name>` for every criterion bench: builds them and runs each benchmark once, without timing |
@@ -352,6 +353,9 @@ cargo llvm-cov nextest --workspace --all-features --locked --profile ci \
 cargo fetch --locked && CARGO_NET_OFFLINE=true \
   cargo insta test --check --unreferenced reject --all-features -p palisade-policy -p palisade-proto  # cargo-insta 1.49
 cargo xtask check-fuzz-locks
+cargo xtask check-testdata
+cargo xtask fixtures               # the corpus, into target/fixtures/
+cargo xtask golden                 # --update to rewrite testdata/golden/fixtures.txt
 cargo xtask coverage-gate --base origin/main   # cargo-llvm-cov and cargo-nextest
 cargo xtask fuzz                   # needs nightly-2026-11-20 and cargo-fuzz 0.13
 cargo test --workspace --all-features --locked --bench criterion_eval --bench hash_and_parse

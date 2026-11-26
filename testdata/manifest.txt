@@ -1,0 +1,7 @@
+# Executable files (anything starting with `MZ`) allowed in the repository,
+# by SHA-256, each with a reason. `cargo xtask check-testdata` fails on any
+# other (#25). Test fixtures are generated at test time and never committed
+# (`cargo xtask fixtures`), so this list is normally empty: real malware,
+# antivirus test strings and third-party signed binaries are never allowed
+# (docs/testing.md#fixtures). Add an entry only for a reviewed, generated,
+# benign file that cannot be built at test time.

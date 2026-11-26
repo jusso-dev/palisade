@@ -154,6 +154,8 @@ pub const STEPS: &[Step] = &[
             "cargo insta test --check --unreferenced reject --all-features -p palisade-policy -p palisade-proto",
         )
     },
+    step("fixtures", "cargo xtask check-testdata"),
+    step("fixtures", "cargo xtask golden"),
     step("fuzz-locks", "cargo xtask check-fuzz-locks"),
     Step {
         tool: Some(FUZZ),

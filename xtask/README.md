@@ -22,6 +22,9 @@ the pinned toolchain and needs no other tools.
 | `sbom` | Reserved for #226; prints where the CycloneDX files will go (`target/dist/sbom/`) and fails. |
 | `test-summary <label> <junit.xml>` | Turns a nextest JUnit report into the CI job summary and one annotation per failed test. Code: `src/junit.rs`. |
 | `coverage-summary <label> <coverage.json>` | Turns a `cargo llvm-cov --json --summary-only` report into a per-crate coverage table on the job summary, with a warning for each crate below its target. Code: `src/coverage.rs`. |
+| `fixtures` | Builds `palisade-fileid`'s generated fixture corpus into `target/fixtures/`, with a `MANIFEST` of hashes (release build: the RSA-3072 test keys are slow in debug). Code: `src/testdata.rs`, `crates/palisade-fileid/tests/corpus/`. |
+| `golden [--update]` | Rebuilds the corpus and compares every fixture's SHA-256 with `testdata/golden/fixtures.txt`, or rewrites it. Code: `src/testdata.rs`. |
+| `check-testdata` | Fails if any file in the repository starts like an executable (`MZ`) and is not allowlisted, by SHA-256 with a reason, in `testdata/manifest.txt`. Code: `src/testdata.rs`. |
 | `check-fuzz-locks` | Runs `cargo metadata --locked` on every `crates/*/fuzz/Cargo.toml` and fails, with the minimal re-lock command, if a fuzz workspace's committed lockfile is out of date. Code: `src/fuzz_locks.rs`. |
 | `coverage-gate --base <commit>` | Measures `palisade-policy` line coverage at `<commit>` (in a temporary worktree) and at the working tree, and fails if it decreased. Needs cargo-llvm-cov and cargo-nextest. Code: `src/coverage_gate.rs`. |
 | `bench-compare --base <commit>` | Runs every criterion bench at `<commit>` and at the working tree (twice each, alternating, keeping the faster), writes a comparison table to the job summary, and fails if a median is more than 10% slower with non-overlapping confidence intervals. Code: `src/bench_compare.rs`. |
@@ -32,7 +35,7 @@ any. Each rule set has unit tests with passing and failing fixtures:
 `cargo test -p xtask`. The workspace rules themselves are described in
 [`docs/workspace.md`](../docs/workspace.md).
 
-More commands (`fixtures` and others) are planned in #29; `sbom` is filled in by #226.
+More commands are planned in #29; `sbom` is filled in by #226.
 
 ## Allowed dependencies
 

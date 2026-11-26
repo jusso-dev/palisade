@@ -63,6 +63,9 @@ windows-sys = { workspace = true, optional = true, features = [
 [dev-dependencies]
 criterion = { workspace = true }
 proptest = { workspace = true }
+# The fixture generator (`tests/corpus`): test CA keys and signatures.
+rand_core = { workspace = true }
+rsa = { workspace = true }
 serde_json = { workspace = true }
 
 [[bench]]

@@ -20,6 +20,7 @@ mod manifests;
 mod release;
 mod report;
 mod supply_chain;
+mod testdata;
 mod threat_coverage;
 mod unsafe_code;
 mod workflows;
@@ -47,6 +48,8 @@ Commands:
                    median is more than 10% slower outside the noise (bench.yml)
   check-deps       Enforce the allowed dependency directions between crates
   check-fuzz-locks Check that every crates/*/fuzz/Cargo.lock is current (cargo metadata --locked)
+  check-testdata   Fail if any file in the repository that starts like an executable (MZ) is not
+                   allowlisted in testdata/manifest.txt
   check-manifests  Enforce workspace inheritance of package fields, lints and dependency versions,
                    and that every crate README documents its features
   check-supply-chain
@@ -78,6 +81,9 @@ Commands:
   coverage-gate --base <commit>
                    Fail if palisade-policy line coverage is lower than at <commit>; needs
                    cargo-llvm-cov and cargo-nextest
+  fixtures         Build the generated test fixture corpus into target/fixtures/
+  golden [--update]
+                   Check the corpus's hashes against testdata/golden/fixtures.txt, or rewrite it
   fuzz [--seconds N] [--target NAME]
                    Build every cargo-fuzz target, seed it from the test fixtures and run it for
                    N seconds (default 60), or only NAME; needs the pinned nightly and cargo-fuzz
@@ -121,6 +127,7 @@ fn main() -> ExitCode {
         [command, flag, base] if command == "bench-compare" && flag == "--base" => {
             return bench_compare(base);
         }
+        [command, flag] if command == "golden" && flag == "--update" => return golden(true),
         [command] if command == "ci" => return run_ci(false),
         [command, fast] if command == "ci" && fast == "--fast" => return run_ci(true),
         _ => {}
@@ -133,6 +140,9 @@ fn main() -> ExitCode {
         "check-deps" => run_check("check-deps", check_deps),
         "check-manifests" => run_check("check-manifests", check_manifests),
         "check-fuzz-locks" => run_check("check-fuzz-locks", check_fuzz_locks),
+        "check-testdata" => run_check("check-testdata", check_testdata),
+        "fixtures" => return fixtures().map_or_else(fail("fixtures"), |_| ExitCode::SUCCESS),
+        "golden" => return golden(false),
         "audit" => return run_audit(),
         "check-supply-chain" => run_check("check-supply-chain", check_supply_chain),
         "check-unsafe" => run_check("check-unsafe", check_unsafe),
@@ -602,6 +612,104 @@ fn check_fuzz_locks(root: &Path) -> Result<Vec<String>, String> {
         println!("check-fuzz-locks: {manifest}");
     }
     fuzz_locks::check(&manifests, |m| fuzz_locks::cargo_metadata_locked(root, m))
+}
+
+fn check_testdata(root: &Path) -> Result<Vec<String>, String> {
+    let (files, mut violations) = unsafe_code::repository_files(root)?;
+    let allowed = testdata::parse_manifest(&read(&root.join(testdata::MANIFEST))?)?;
+    violations.extend(testdata::check_files(root, &files, &allowed)?);
+    Ok(violations)
+}
+
+/// An `ExitCode::FAILURE` that prints `error` for `command`.
+fn fail(command: &'static str) -> impl FnOnce(String) -> ExitCode {
+    move |error| {
+        eprintln!("{command}: error: {error}");
+        ExitCode::FAILURE
+    }
+}
+
+/// `cargo xtask fixtures`: builds the corpus into `target/fixtures/` and
+/// returns its manifest.
+fn fixtures() -> Result<testdata::Hashes, String> {
+    let root = workspace_root();
+    let out = root.join(testdata::OUT_DIR);
+    if out.exists() {
+        std::fs::remove_dir_all(&out)
+            .map_err(|e| format!("cannot clear {}: {e}", out.display()))?;
+    }
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    // Release: the RSA-3072 test keys take seconds there and minutes in a
+    // debug build.
+    let status = Command::new(cargo)
+        .args([
+            "test",
+            "--release",
+            "--locked",
+            "-p",
+            "palisade-fileid",
+            "--test",
+            "fixture_corpus",
+            "--",
+            "--ignored",
+            "--exact",
+            "write_fixture_corpus",
+        ])
+        .env("PALISADE_FIXTURE_DIR", &out)
+        .current_dir(&root)
+        .status()
+        .map_err(|e| format!("cannot run cargo test: {e}"))?;
+    if !status.success() {
+        return Err("building the corpus failed".to_owned());
+    }
+    let manifest = out.join("MANIFEST");
+    let hashes = testdata::parse_hashes(&read(&manifest)?, &manifest.display().to_string())?;
+    if hashes.is_empty() {
+        return Err("the corpus is empty".to_owned());
+    }
+    println!("fixtures: {} fixtures in {}", hashes.len(), out.display());
+    Ok(hashes)
+}
+
+/// `cargo xtask golden [--update]`.
+fn golden(update: bool) -> ExitCode {
+    let root = workspace_root();
+    let built = match fixtures() {
+        Ok(h) => h,
+        Err(e) => return fail("golden")(e),
+    };
+    let path = root.join(testdata::GOLDEN);
+    if update {
+        return match std::fs::write(&path, testdata::render_golden(&built)) {
+            Ok(()) => {
+                println!("golden: wrote {}", testdata::GOLDEN);
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail("golden")(format!("cannot write {}: {e}", path.display())),
+        };
+    }
+    let golden = match read(&path).and_then(|t| testdata::parse_hashes(&t, testdata::GOLDEN)) {
+        Ok(g) => g,
+        Err(e) => return fail("golden")(e),
+    };
+    let diffs = testdata::compare(&golden, &built);
+    if diffs.is_empty() {
+        println!(
+            "golden: all {} fixtures match {}",
+            built.len(),
+            testdata::GOLDEN
+        );
+        ExitCode::SUCCESS
+    } else {
+        for d in &diffs {
+            eprintln!("golden: {d}");
+        }
+        eprintln!(
+            "golden: {} difference(s). If the change is intended, run `cargo xtask golden --update` and review the diff.",
+            diffs.len()
+        );
+        ExitCode::FAILURE
+    }
 }
 
 fn check_unsafe(root: &Path) -> Result<Vec<String>, String> {

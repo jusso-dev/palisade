@@ -89,8 +89,49 @@ Do not prefix names with `test_`.
   built-in rule for the standard anti-malware test file (#44): its rule and test fixture
   hold the string as hex only, assembled in memory at test time and never written to disk,
   and `source_files_do_not_carry_the_test_string` (`crates/palisade-fileid/tests/tags.rs`)
-  fails if the string appears verbatim in the crate's sources. A generator for the full fixture corpus, and a
-  check that `testdata/` holds only generated files, are planned in #25.
+  fails if the string appears verbatim in the crate's sources.
+  `cargo xtask check-testdata` (the `fixtures` CI job) fails if any file in the repository starts
+  like an executable (`MZ`) and its SHA-256 is not in `testdata/manifest.txt` with a reason.
+  Generated fixtures are never committed, so that list is normally empty, and a dropped-in PE,
+  anywhere, fails the check.
+
+### The fixture corpus
+
+`palisade-fileid` builds a whole corpus from Rust at test time, on any OS, in
+`crates/palisade-fileid/tests/corpus/`:
+
+| Kind | Fixtures |
+|---|---|
+| PE | PE32+ x64 and ARM64, PE32 x86, each as an `.exe` and a `.dll`, with a version resource (original file name, product, company, file version) |
+| Test PKI | A root CA, an intermediate and RSA-3072 leaves; an ECDSA P-256 leaf; expired, revoked-in-CRL, wrong-EKU (TLS server only) and self-signed leaves; a CRL |
+| Signed PE | Embedded Authenticode, dual signed (nested), tampered after signing, a truncated certificate table, a page-hash-bearing signature, and one per bad leaf above |
+| Catalog | A signed catalog (`.cat`) and the unsigned PE it lists by SHA-256 Authenticode digest (catalog-signed) |
+| Malformed | Zero length, `MZ` only, truncated headers, overlapping sections, `NumberOfSections` 0xffff, a recursive resource directory, `SizeOfImage` near 4 GiB |
+| Script | `.ps1`, `.bat`, `.cmd`, `.vbs`, `.js`, `.wsf`, `.hta`, each only printing `PALISADE-FIXTURE` |
+
+- **Signing is pure Rust** (`tests/corpus/sign.rs`): PKCS#7 SignedData over
+  `SpcIndirectDataContent` (or a catalog's trust list), as code signers write it, so no OS
+  signing tools are needed.
+- **Deterministic.** The RSA test keys come from an RNG seeded by the key's name, and the
+  signing time is fixed, so every run on every OS makes the same bytes. The one exception is the
+  ECDSA fixture, whose signature is random by nature.
+- **Checked by the crate itself.** `tests/fixture_corpus.rs` parses every fixture and asserts
+  the property it was built to have: machine, format and version info; signatures that verify
+  and chain to the test root (and the nested one); the tampered fixture a digest mismatch; the
+  wrong-EKU leaf refused because code signing is not permitted, the self-signed one because it
+  reaches no anchor; the CRL listing the revoked leaf; the page hash table matching; malformed
+  inputs never panicking. This runs in the `test` job on every OS.
+- **On disk:** `cargo xtask fixtures` writes the corpus and a `MANIFEST` to `target/fixtures/`.
+- **Golden hashes:** `cargo xtask golden` rebuilds the corpus and compares every fixture's
+  SHA-256 with `testdata/golden/fixtures.txt`; `cargo xtask golden --update` rewrites it. A
+  changed hash is a changed fixture, reviewed in the PR. Provenance:
+  `testdata/golden/README.md`.
+- **Fuzz seeds:** `write_corpus_fuzz_seeds` adds the corpus to the seed corpora of the PE,
+  PKCS#7 and X.509 fuzz targets.
+
+Not in the corpus: MSI/MSP/MST fixtures, which arrive with installer identity (#53; its
+compound-file builder is on `main` since #279), and CHM and CPL fixtures, which arrive with compiled HTML
+and control panel item enforcement (#98, M2).
 - **Builders.** Policy tests in other crates build their inputs with `palisade-policy`'s
   `test-util` feature (`palisade_policy::test_util`) rather than hand-written JSON:
 

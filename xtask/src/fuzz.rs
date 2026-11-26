@@ -117,6 +117,13 @@ const TRUST_SET_SEEDS: Seed = Seed {
     name: "write_trust_set_fuzz_seeds",
 };
 
+/// Seeds from the generated fixture corpus (#25): PEs, their signatures and
+/// the test PKI's certificates.
+const CORPUS_SEEDS: Seed = Seed {
+    test: "fixture_corpus",
+    name: "write_corpus_fuzz_seeds",
+};
+
 /// Every fuzz project in the repository.
 pub const PROJECTS: &[Project] = &[
     Project {
@@ -126,7 +133,7 @@ pub const PROJECTS: &[Project] = &[
             Target {
                 name: "pe_parse",
                 dict: Some("pe.dict"),
-                seeds: &[PE_SEEDS],
+                seeds: &[PE_SEEDS, CORPUS_SEEDS],
             },
             Target {
                 name: "version_info_parse",
@@ -136,12 +143,12 @@ pub const PROJECTS: &[Project] = &[
             Target {
                 name: "authenticode_ranges",
                 dict: Some("pe.dict"),
-                seeds: &[PE_SEEDS],
+                seeds: &[PE_SEEDS, CORPUS_SEEDS],
             },
             Target {
                 name: "authenticode_pkcs7",
                 dict: Some("pkcs7.dict"),
-                seeds: &[PKCS7_SEEDS],
+                seeds: &[PKCS7_SEEDS, CORPUS_SEEDS],
             },
             Target {
                 name: "fsctx_parse",
@@ -151,7 +158,7 @@ pub const PROJECTS: &[Project] = &[
             Target {
                 name: "x509_chain",
                 dict: Some("pkcs7.dict"),
-                seeds: &[X509_SEEDS],
+                seeds: &[X509_SEEDS, CORPUS_SEEDS],
             },
             Target {
                 name: "timestamp_crl",
