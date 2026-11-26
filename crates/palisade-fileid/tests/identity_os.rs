@@ -47,7 +47,11 @@ fn identity_matches_os_tooling() {
         .collect();
     assert!(paths.len() >= 4, "too few OS files found: {paths:?}");
     let out = std::env::temp_dir().join(format!("palisade-os-ref-{}.txt", std::process::id()));
+    // A parent PowerShell 7 (as on CI runners) leaves its module path in
+    // the environment, which stops Windows PowerShell loading its own
+    // built-in modules (`Get-FileHash`); let it use its default.
     let status = Command::new("powershell.exe")
+        .env_remove("PSModulePath")
         .args([
             "-NoProfile",
             "-NonInteractive",

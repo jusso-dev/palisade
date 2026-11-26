@@ -398,7 +398,13 @@ fn missing_files_fail() {
 #[test]
 fn crafted_names_never_reach_the_terminal_raw() {
     let dir = tempdir("crafted");
-    let name = "a\u{1b}[2J\u{9b}31m\u{202e}exe.txt";
+    // Windows refuses C0 control characters in file names, so there the
+    // escape is the C1 control sequence introducer alone.
+    let name = if cfg!(windows) {
+        "a\u{9b}2J\u{9b}31m\u{202e}exe.txt"
+    } else {
+        "a\u{1b}[2J\u{9b}31m\u{202e}exe.txt"
+    };
     let file = staged(&dir, "signed-tool.exe", name);
     let raw = |text: &str| {
         text.chars().any(|c| {
