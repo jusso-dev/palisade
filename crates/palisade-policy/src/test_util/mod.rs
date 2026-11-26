@@ -303,6 +303,7 @@ impl PolicyBuilder {
                 mode: Mode::Enforce,
                 mode_options: crate::model::ModeOptions::default(),
                 settings: crate::model::PolicySettings::default(),
+                unknown: crate::model::UnknownPolicy::default(),
                 rule_sets: Vec::new(),
                 scope: None,
                 rule_set_scopes: Vec::new(),

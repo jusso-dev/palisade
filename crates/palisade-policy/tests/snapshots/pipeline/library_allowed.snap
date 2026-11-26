@@ -22,7 +22,8 @@ source: crates/palisade-policy/tests/decision_snapshots.rs
     "trust_sources": [],
     "kill_running": false,
     "request": null,
-    "window_close": null
+    "window_close": null,
+    "prompt": null
   },
   "effects": {
     "log": "summary",
@@ -36,5 +37,6 @@ source: crates/palisade-policy/tests/decision_snapshots.rs
   },
   "reason_code": "explicit_allow",
   "scope_notes": [],
+  "unknown": null,
   "trace_id": "07070707070707070707070707070707"
 }
