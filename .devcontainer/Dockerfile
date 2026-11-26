@@ -67,6 +67,7 @@ RUN cargo install --locked \
         zizmor@1.33.1 \
         typos-cli@1.52.2 \
         mdbook@0.5.2 \
+        mdbook-mermaid-ssr@0.3.0 \
         lychee@0.24.2 \
     && cargo +"$FUZZ_TOOLCHAIN" install --locked cargo-fuzz@0.13.2 \
     && rm -rf "$CARGO_HOME/registry" "$CARGO_HOME/git"

@@ -118,17 +118,23 @@ Options:
 
 ```text
 Usage: palisade-agent (--console | --service) [--config <path>]
+       palisade-agent --simulate [--scenario <path>]
        palisade-agent --help | --version
 
 Modes:
   --console          Run in the foreground until Ctrl-C (any OS).
   --service          Run under the Windows service control manager.
                      The installer registers the service with this flag.
+  --simulate         Development only (built with the `test-util` feature):
+                     replay a scripted scenario on the mock platform and
+                     write its events to standard output as JSON lines.
 
 Options:
   --config <path>    Configuration file. Without it, the agent reads
                      %ProgramData%\Palisade\agent.toml on Windows if it
                      exists, and uses built-in defaults otherwise.
+  --scenario <path>  The scenario for --simulate. Without it, the built-in
+                     scenario runs.
   -h, --help         Print this help.
   -V, --version      Print the version.
 ```

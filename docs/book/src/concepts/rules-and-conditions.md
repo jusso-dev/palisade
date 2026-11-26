@@ -27,6 +27,16 @@ A complete example with every action, validated in CI:
 {{#include ../../../examples/policies/actions-and-effects.yaml}}
 ```
 
+A **scope** narrows who, where and when a rule applies: users and groups, devices, network
+location, session type and time windows. Specified in
+[#38](https://github.com/jusso-dev/palisade/issues/38). A scope never identifies the object, which
+is the match tree's job, and never widens a rule: a rule applies only when the policy's scope, its
+rule set's assignment scope and its own scope all match. An example, validated in CI:
+
+```yaml
+{{#include ../../../examples/policies/scoped-rules.yaml}}
+```
+
 See also: [`Rule`](../reference/generated/policy/rule.md),
 [`Match`](../reference/generated/policy/match.md),
 [`Criterion`](../reference/generated/policy/criterion.md) and

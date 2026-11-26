@@ -17,11 +17,12 @@ Appears at: `/policy/settings`.
 | `decision_cache_ttl_secs` | integer | no | `300` | 0 to 86400; format `uint32` | 1.0.0 | How long a decision may be cached, in seconds. `0` disables the cache. |
 | `dll_control` | [`ControlLevel`](types.md#controllevel) | no | `"enforce"` |  | 1.0.0 | Control level for libraries. |
 | `driver_control` | [`ControlLevel`](types.md#controllevel) | no | `"enforce"` |  | 1.0.0 | Control level for drivers. |
+| `group_cache_max_age_secs` | integer | no | `86400` | 3600 to 86400; format `uint32` | 1.0.0 | How old cached group memberships that are not in the token (cloud-directory groups) may be before scopes treat them as unknown, in seconds (#38). From 3600 to 86400. |
 | `max_ancestor_depth` | integer | no | `8` | 1 to 16; format `uint8` | 1.0.0 | How many ancestors process criteria may inspect (#31). |
 | `override_durations` | array of integer | no |  | at most 5 items | 1.0.0 | Durations, in minutes, offered for override sessions (#9). At most 5 slots, each at most 10080. `0` marks a disabled slot. |
 | `poll_interval_secs` | integer | no | `900` | 60 to 604800; format `uint32` | 1.0.0 | Agent check-in interval, in seconds. |
 | `script_control` | [`ControlLevel`](types.md#controllevel) | no | `"enforce"` |  | 1.0.0 | Control level for scripts of a kind not listed in `script_control_by_kind`. |
 | `script_control_by_kind` | map of [`ControlLevel`](types.md#controllevel) | no |  | keys: one of `powershell`, `batch`, `cmd`, `vbscript`, `jscript`, `wsf`, `wsc`, `python`, `java`, `reg`, `other` | 1.0.0 | Control level per script kind, overriding `script_control`. |
-| `time_zone_basis` | [`TimeZoneBasis`](types.md#timezonebasis) | no | `"device_local"` |  | 1.0.0 | Which clock schedules use. |
+| `time_zone_basis` | [`TimeZoneBasis`](types.md#timezonebasis) | no | `"device_local"` |  | 1.0.0 | Which clock schedules use, unless a schedule sets its own (#38). |
 
 Unknown fields are rejected.

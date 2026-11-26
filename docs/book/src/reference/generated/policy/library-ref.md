@@ -4,7 +4,7 @@
 
 A reference to a library from a match tree or a hierarchy assignment.
 
-Appears at: `/rule_sets/rules/match/all/all/all/ref`, `/rule_sets/rules/match/all/all/any/ref`, `/rule_sets/rules/match/all/all/not/ref`, `/rule_sets/rules/match/all/all/ref`, `/rule_sets/rules/match/all/any/all/ref`, `/rule_sets/rules/match/all/any/any/ref`, and more.
+Appears at: `/policy/location_profiles/all/network_set`, `/policy/rule_set_scopes/scopes/devices/exclude/device_set`, `/policy/rule_set_scopes/scopes/devices/include/device_set`, `/policy/rule_set_scopes/scopes/network/exclude/network_set`, `/policy/rule_set_scopes/scopes/network/include/network_set`, `/policy/rule_set_scopes/scopes/principals/exclude/principal_set`, and more.
 
 ## Fields
 

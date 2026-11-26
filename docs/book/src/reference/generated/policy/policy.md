@@ -12,6 +12,7 @@ Appears at: `/policy`.
 |---|---|---|---|---|---|---|
 | `description` | string | no |  | at most 4096 characters | 1.0.0 | Free-text description, at most 4096 characters. |
 | `id` | [`PolicyId`](types.md#policyid) | yes |  |  | 1.0.0 | Stable ID. Renaming the policy never changes it. |
+| `location_profiles` | array of [`LocationProfile`](location-profile.md) | no |  | at most 64 items | 1.0.0 | Named network locations that scopes test with `location_profile` (#38). |
 | `metadata` | [`Metadata`](metadata.md) | no |  |  | 1.0.0 | Governance metadata (#40). |
 | `mode` | [`Mode`](types.md#mode) | yes |  |  | 1.0.0 | The base enforcement mode (#36). `disabled` is not allowed: only a device can be disabled, with a reason and an expiry. |
 | `mode_options` | [`ModeOptions`](mode-options.md) | no |  |  | 1.0.0 | The modes per object type and while disconnected (#36). |
@@ -19,7 +20,9 @@ Appears at: `/policy`.
 | `precedence_model` | [`PrecedenceModel`](types.md#precedencemodel) | no | `"deny_wins"` |  | 1.0.0 | How matching rules are combined (#35, ADR 0004). |
 | `precedence_options` | [`PrecedenceOptions`](precedence-options.md) | no |  |  | 1.0.0 | Settings of the precedence models (#35). An option the selected model does not use is ignored, with a warning. |
 | `revision` | integer | yes |  | at least 0; format `uint64` | 1.0.0 | Monotonic revision, raised by the server on every change (#10). |
+| `rule_set_scopes` | array of [`RuleSetScope`](rule-set-scope.md) | no |  | at most 1000 items | 1.0.0 | The scopes of rule set assignments (#38): each rule of the set must also be in every one of them. At most one entry per rule set. |
 | `rule_sets` | array of [`RuleSetId`](types.md#rulesetid) | no |  | at most 1000 items | 1.0.0 | The rule sets that apply, in order, by ID. |
-| `settings` | [`PolicySettings`](policy-settings.md) | no | `{"allow_unknown_advanced":false,"capture_command_line":false,"decision_cache_ttl_secs":300,"dll_control":"enforce","driver_control":"enforce","max_ancestor_depth":8,"poll_interval_secs":900,"script_control":"enforce","time_zone_basis":"device_local"}` |  | 1.0.0 | Typed settings. Every field has a documented default. |
+| `scope` | [`Scope`](scope.md) | no |  |  | 1.0.0 | Who, where and when the whole policy applies (#38). Every rule must also be in this scope. |
+| `settings` | [`PolicySettings`](policy-settings.md) | no | `{"allow_unknown_advanced":false,"capture_command_line":false,"decision_cache_ttl_secs":300,"dll_control":"enforce","driver_control":"enforce","group_cache_max_age_secs":86400,"max_ancestor_depth":8,"poll_interval_secs":900,"script_control":"enforce","time_zone_basis":"device_local"}` |  | 1.0.0 | Typed settings. Every field has a documented default. |
 
 Unknown fields are rejected.

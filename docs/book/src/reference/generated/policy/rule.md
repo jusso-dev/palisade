@@ -23,5 +23,6 @@ Appears at: `/rule_sets/rules`.
 | `object_types` | array of [`ObjectType`](types.md#objecttype) | no |  |  | 1.0.0 | The object classes the rule applies to. Empty means every class. |
 | `order` | integer | no |  | 0 to 1000000; format `uint32` | 1.0.0 | Position for the `first_match` model (#35): 0 to 1000000, lowest first. Rules of custom (not read-only) rule sets use 100001 to 999989; the other ranges are reserved for system, curated and catch-all rules. |
 | `priority` | integer | no |  | format `int32` | 1.0.0 | Priority for the `priority` model (#35). |
+| `scope` | [`Scope`](scope.md) | no |  |  | 1.0.0 | Who, where and when the rule applies (#38). Unset means everyone, everywhere, always, within the policy's and the rule set's scopes. |
 
 Unknown fields are rejected.

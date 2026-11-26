@@ -121,8 +121,11 @@ mod tests {
             };
             for tool in tools.split(',') {
                 // cargo-fuzz is installed on the fuzz toolchain, checked above.
+                // The install action names typos by its binary; the crate is
+                // typos-cli.
+                let tool = tool.trim().replacen("typos@", "typos-cli@", 1);
                 assert!(
-                    dockerfile.contains(tool.trim()),
+                    dockerfile.contains(&tool),
                     "ci.yml installs {tool}, the Dockerfile does not"
                 );
                 checked += 1;

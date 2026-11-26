@@ -19,6 +19,15 @@ Which allow decides among allows of different kinds.
 | `most_restrictive` | `allow_contained`, then `allow`, then `allow_elevated` (with `condition: always` before `if_required`). The default. |
 | `most_permissive` | The reverse: `allow_elevated` (`if_required` before `always`), then `allow`, then `allow_contained`. |
 
+## Combine
+
+How a scope's dimensions combine.
+
+| Value | Meaning |
+|---|---|
+| `all` | Every dimension that is set must match. The default. |
+| `any` | At least one dimension that is set must match. |
+
 ## ContainmentProfileRef
 
 The ID of a containment profile (#14, #173).
@@ -34,6 +43,12 @@ Whether a class of object is controlled.
 | `off` | Not evaluated. |
 | `audit` | Evaluated, and would-block decisions are reported only. |
 | `enforce` | Evaluated and enforced. |
+
+## Date
+
+A calendar date, `YYYY-MM-DD`.
+
+Type: string; matches `^[0-9]{4}-[0-9]{2}-[0-9]{2}$`.
 
 ## ElevationAuth
 
@@ -189,6 +204,18 @@ The class of object being evaluated. Scripts are `script.<kind>`.
 
 Values: `executable`, `library`, `driver`, `script.powershell`, `script.batch`, `script.cmd`, `script.vbscript`, `script.jscript`, `script.wsf`, `script.wsc`, `script.python`, `script.java`, `script.reg`, `script.other`, `installer`, `compiled_html`, `html_application`, `control_panel_applet`, `packaged_app`, `command`, `com_object`.
 
+## OnWindowClose
+
+What happens to processes a scheduled allow let run, when its schedule
+closes. The engine sends a directive; the agent and the tray act on it
+(#4, #11).
+
+| Value | Meaning |
+|---|---|
+| `none` | Nothing: they keep running. The default. |
+| `warn` | Warn the user. |
+| `warn_then_terminate` | Warn the user, then terminate them after the grace period. |
+
 ## Operator
 
 How a criterion compares the fact with its values (#32). Positive
@@ -302,6 +329,29 @@ A semantic version MAJOR.MINOR.PATCH, without pre-release or build suffixes.
 
 Type: string; matches `^(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)$`.
 
+## ScopeSubject
+
+Whose token a scope's `principals` is tested against.
+
+| Value | Meaning |
+|---|---|
+| `process_user` | The user the process runs as. The default. |
+| `session_user` | The user logged on to the process's session, for example to scope a service running as SYSTEM on behalf of the interactive user. |
+| `parent_process_user` | The user the parent process runs as. |
+
+## SessionType
+
+How a session was started.
+
+| Value | Meaning |
+|---|---|
+| `console` | The physical console. |
+| `rdp` | A remote desktop session. |
+| `remote_shell` | A remote shell, such as a remote PowerShell session. |
+| `service` | A service. |
+| `batch` | A batch job, such as a scheduled task. |
+| `network` | A network logon. |
+
 ## TierTiebreak
 
 Which action wins between rules of the same specificity.
@@ -311,6 +361,12 @@ Which action wins between rules of the same specificity.
 | `deny` | A deny beats an allow. The default. |
 | `allow` | An allow beats a deny. |
 
+## TimeOfDay
+
+A wall-clock time, `HH:MM`, from 00:00 to 24:00.
+
+Type: string; matches `^(([01][0-9]\|2[0-3]):[0-5][0-9]\|24:00)$`.
+
 ## TimeZoneBasis
 
 The clock that schedules are interpreted in.
@@ -319,6 +375,7 @@ The clock that schedules are interpreted in.
 |---|---|
 | `device_local` | The device's local time zone. |
 | `utc` | Coordinated Universal Time. |
+| `user_local` | The time zone of the session's user, if the agent can read it, and otherwise the device's (#38). |
 
 ## TokenProfileRef
 
@@ -359,4 +416,35 @@ When an event is sent to the server.
 A UUID version 7 in canonical lowercase form.
 
 Type: string; matches `^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`.
+
+## Weekday
+
+A day of the week.
+
+| Value | Meaning |
+|---|---|
+| `mon` | Monday. |
+| `tue` | Tuesday. |
+| `wed` | Wednesday. |
+| `thu` | Thursday. |
+| `fri` | Friday. |
+| `sat` | Saturday. |
+| `sun` | Sunday. |
+
+## WellKnown
+
+A well-known account or group, with a fixed SID.
+
+| Value | Meaning |
+|---|---|
+| `everyone` | `S-1-1-0`. |
+| `authenticated_users` | `S-1-5-11`. |
+| `administrators` | The local Administrators group, `S-1-5-32-544`. |
+| `users` | The local Users group, `S-1-5-32-545`. |
+| `system` | The local system account, `S-1-5-18`. |
+| `local_service` | `S-1-5-19`. |
+| `network_service` | `S-1-5-20`. |
+| `interactive` | Interactive logons, `S-1-5-4`. |
+| `remote_desktop_users` | `S-1-5-32-555`. |
+| `domain_controllers` | Any domain's Domain Controllers group (relative ID 516), or the Enterprise Domain Controllers group, `S-1-5-9`. |
 
