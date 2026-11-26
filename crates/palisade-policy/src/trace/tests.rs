@@ -417,6 +417,62 @@ fn mandatory_deny_is_explained() {
 }
 
 #[test]
+fn a_safety_critical_unknown_fails_closed_in_the_trace_as_in_the_evaluator() {
+    let version = with(
+        crit("meta.file_version", "version_lt", &["3.2"]),
+        "criterion",
+        serde_json::json!({
+            "field": "meta.file_version",
+            "operator": "version_lt",
+            "values": ["3.2"],
+            "safety_critical": true,
+        }),
+    );
+    let p = validated(policy_doc(
+        "enforce",
+        vec![(
+            10,
+            "blocklist",
+            true,
+            vec![rule(
+                10,
+                "Vulnerable versions",
+                serde_json::json!({"all": [
+                    crit("signer.publisher", "equals", &["Example Ltd"]),
+                    version,
+                ]}),
+                serde_json::json!({"type": "deny"}),
+            )],
+        )],
+    ));
+    let mut o = object(
+        'b',
+        "Example Ltd",
+        "Example Driver",
+        "C:\\Drivers\\x.sys",
+        Some(false),
+    );
+    // The version resource was not read.
+    o.facts = ObjectFacts::new()
+        .with(Field::HashSha256, sha('b'))
+        .with_signers(vec![signer("Example Ltd", SignerStatus::Valid)]);
+    let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Full);
+    assert_eq!(
+        t.decision.as_ref().unwrap().reason_code(),
+        ReasonCode::MandatoryDeny
+    );
+    let decisive = t.decisive.as_ref().unwrap();
+    let leaf = decisive
+        .criteria
+        .iter()
+        .find(|c| c.field == Field::MetaFileVersion)
+        .unwrap();
+    assert_eq!(leaf.raw_result, TriState::Unknown);
+    assert_eq!(leaf.result, TriState::Match);
+    assert!(t.matched.iter().any(|m| m.rule == decisive.rule));
+}
+
+#[test]
 fn near_misses_name_the_failing_leaf_with_observed_and_expected() {
     let p = fixture();
     // Publisher off by one word: R-000001 and R-000003 both miss on it.

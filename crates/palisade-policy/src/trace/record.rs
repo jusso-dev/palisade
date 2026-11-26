@@ -117,7 +117,8 @@ pub(crate) struct LeafResult {
     /// The criterion's own result.
     pub raw: Tri,
     /// The result the tree used: `raw`, unless the rule reads unparseable
-    /// versions as matching (`on_unparseable: match`).
+    /// versions as matching (`on_unparseable: match`), or the criterion is
+    /// `safety_critical` in a mandatory deny.
     pub effective: Tri,
     pub notes: Notes,
 }
@@ -269,9 +270,16 @@ impl<'p> TracedRule<'p> {
         let mut leaves = Vec::with_capacity(self.leaves.len());
         for leaf in &self.leaves {
             let e = leaf.compiled.eval(subject.facts, &ctx);
-            let effective = if e.result == Tri::Unknown
-                && self.unparseable == Unparseable::FavourMatch
-                && e.notes.contains(Note::VersionUnparseable)
+            // As the evaluator (`CompiledMatch::eval_mandatory`): a
+            // safety-critical criterion of a mandatory deny that is unknown
+            // counts towards the deny applying (#32, #87).
+            let fail_closed = self.stage == RuleStage::MandatoryDeny
+                && e.result == Tri::Unknown
+                && leaf.compiled.safety_critical();
+            let effective = if fail_closed
+                || (e.result == Tri::Unknown
+                    && self.unparseable == Unparseable::FavourMatch
+                    && e.notes.contains(Note::VersionUnparseable))
             {
                 Tri::from_bool(!leaf.negated)
             } else {

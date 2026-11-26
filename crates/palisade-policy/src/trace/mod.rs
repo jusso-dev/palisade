@@ -446,7 +446,8 @@ pub struct CriterionTrace {
     /// `not`.
     pub needed: TriState,
     /// The criterion's own result, which differs from `result` only when
-    /// a deny reads an unparseable version as matching.
+    /// a deny reads an unparseable version as matching, or an unknown
+    /// `safety_critical` criterion of a mandatory deny fails closed.
     pub raw_result: TriState,
     /// What the evaluation noticed (`fact_missing`, `path_acl_unsafe` and
     /// so on).
