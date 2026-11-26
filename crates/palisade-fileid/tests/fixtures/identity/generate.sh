@@ -14,7 +14,7 @@
 #
 # Needs: openssl (3.x or later), osslsigncode (2.x), shasum, cargo. Run from
 # anywhere:
-#   sh crates/palisade-fileid/tests/corpus/generate.sh
+#   sh crates/palisade-fileid/tests/fixtures/identity/generate.sh
 #
 # Keys and serials are random, so a rerun changes every signed file and
 # its digests; copy the printed values into manifest.yaml. No private key

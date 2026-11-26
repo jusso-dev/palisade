@@ -16,7 +16,7 @@ use sha2::{Digest as _, Sha256};
 const BIN: &str = env!("CARGO_BIN_EXE_pal");
 const CORPUS: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../palisade-fileid/tests/corpus/files"
+    "/../palisade-fileid/tests/fixtures/identity/files"
 );
 
 fn corpus(name: &str) -> PathBuf {

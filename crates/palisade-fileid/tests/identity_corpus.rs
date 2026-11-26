@@ -1,9 +1,9 @@
-//! The file identity corpus (#55): every entry of `corpus/manifest.yaml`
+//! The file identity corpus (#55): every entry of `fixtures/identity/manifest.yaml`
 //! is identified and checked against its expected values.
 //!
-//! See `corpus/README.md` for the entry kinds and how the files and the
+//! See `fixtures/identity/README.md` for the entry kinds and how the files and the
 //! independent digests are made. Synthetic files are built here
-//! ([`corpus_files`]); generated files are committed under `corpus/files/`;
+//! ([`corpus_files`]); generated files are committed under `fixtures/identity/files/`;
 //! OS files are read by path on Windows CI only.
 
 // Test code: helpers may unwrap or index, since a failure should fail
@@ -30,7 +30,7 @@ use palisade_fileid::identity::{
 };
 use yaml_rust2::{Yaml, YamlLoader};
 
-const CORPUS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/corpus");
+const CORPUS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/identity");
 
 /// 2026-11-25T00:00:00Z: inside every corpus certificate's validity.
 const NOW: i64 = 1_795_564_800;
@@ -211,7 +211,7 @@ fn corpus_files() -> BTreeMap<&'static str, Vec<u8>> {
 ///     --test identity_corpus -- --ignored --exact write_corpus_unsigned
 /// ```
 #[test]
-#[ignore = "writes files; run by corpus/generate.sh"]
+#[ignore = "writes files; run by fixtures/identity/generate.sh"]
 fn write_corpus_unsigned() {
     let dir =
         PathBuf::from(std::env::var_os("PALISADE_CORPUS_OUT").expect("set PALISADE_CORPUS_OUT"));

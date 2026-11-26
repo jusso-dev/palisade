@@ -76,7 +76,7 @@ rsa = { workspace = true }
 ring = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
-# Reads the identity corpus manifest (`tests/corpus/manifest.yaml`, #55).
+# Reads the identity corpus manifest (`tests/fixtures/identity/manifest.yaml`, #55).
 yaml-rust2 = { workspace = true }
 
 [[bench]]

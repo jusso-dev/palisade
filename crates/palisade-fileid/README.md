@@ -896,7 +896,7 @@ targets.
 
 Fixtures are synthetic PE images built byte by byte at test time
 (`tests/common`). The only PE files checked in are five small images of the
-identity corpus (`tests/corpus/files`), built the same way and signed by its
+identity corpus (`tests/fixtures/identity/files`), built the same way and signed by its
 `generate.sh` with throwaway test keys; no third-party binary is. The signature tests use
 small PKCS#7 signatures in `tests/fixtures/authenticode`, made over that
 synthetic image by osslsigncode with throwaway keys from a test-only CA, plus
@@ -940,7 +940,7 @@ compares the verdicts with the OS's own. No private keys and no third-party bina
 committed; the `generate.sh` scripts document how every file was made and
 regenerate them.
 
-The identity corpus (`tests/corpus`, #55) is a manifest of files with their
+The identity corpus (`tests/fixtures/identity`, #55) is a manifest of files with their
 source, licence, generator and expected values: synthetic images built by
 `tests/identity_corpus.rs`, a few of them signed by a corpus test CA and
 committed with a test catalog, and OS binaries referenced by path and read
@@ -948,7 +948,7 @@ only on the Windows runners. Its digests come from tools independent of
 this crate (`shasum`, osslsigncode's `extract-data`, openssl). On Windows,
 `tests/identity_os.rs` also compares records of OS binaries with the OS's
 own tooling (file hash, signature status and signer, version resource).
-See [tests/corpus/README.md](tests/corpus/README.md).
+See [tests/fixtures/identity/README.md](tests/fixtures/identity/README.md).
 
 ```sh
 cargo test -p palisade-fileid

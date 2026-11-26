@@ -1,7 +1,7 @@
 //! Differential test of the file identity record against OS tooling (#55),
 //! over OS binaries read in place. Windows only.
 //!
-//! `corpus/os-reference.ps1` asks the OS for each file's SHA-256, its
+//! `fixtures/identity/os-reference.ps1` asks the OS for each file's SHA-256, its
 //! signature status, type and signer, and its version resource, and this
 //! test compares those with [`identify`]. Nothing is copied: the files are
 //! the runner's own. The OS trusts its own root store, while this test
@@ -24,7 +24,10 @@ use std::process::Command;
 
 use palisade_fileid::identity::{EmbeddedState, IdentityContext, Tiers, identify};
 
-const SCRIPT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/corpus/os-reference.ps1");
+const SCRIPT: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/identity/os-reference.ps1"
+);
 
 /// OS files present on every supported Windows version.
 const FILES: &[&str] = &[

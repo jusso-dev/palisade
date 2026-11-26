@@ -6,6 +6,13 @@ with its source, licence, the command that made it, and the values it must
 produce. `tests/identity_corpus.rs` runs the whole manifest and fails on any
 difference.
 
+It lives under `tests/fixtures/` with the crate's other committed fixture
+sets. It is not the generated fixture corpus of `cargo xtask fixtures`
+(`tests/corpus/`, Rust modules that build every fixture into
+`target/fixtures/` at run time): that one writes nothing to the
+repository, while this one commits its signed files and a manifest of
+values checked against independent tools.
+
 **No third-party binary is ever committed.** There are three kinds of entry:
 
 | `source` | What is committed | Where the bytes come from |
@@ -34,7 +41,7 @@ on) are the values a reviewer decided are right for the file. To regenerate
 the generated files and the independent digests:
 
 ```sh
-sh crates/palisade-fileid/tests/corpus/generate.sh
+sh crates/palisade-fileid/tests/fixtures/identity/generate.sh
 ```
 
 It needs openssl (3.x or later), osslsigncode (2.x) and cargo. Keys and
