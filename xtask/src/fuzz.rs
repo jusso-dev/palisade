@@ -120,6 +120,18 @@ const TRUST_SET_SEEDS: Seed = Seed {
     test: "trust_set",
     name: "write_trust_set_fuzz_seeds",
 };
+const POLICY_JSON_SEEDS: Seed = Seed {
+    test: "fuzz_seeds",
+    name: "write_policy_json_fuzz_seeds",
+};
+const POLICY_YAML_SEEDS: Seed = Seed {
+    test: "fuzz_seeds",
+    name: "write_policy_yaml_fuzz_seeds",
+};
+const PATTERN_SEEDS: Seed = Seed {
+    test: "fuzz_seeds",
+    name: "write_pattern_fuzz_seeds",
+};
 
 /// Seeds from the generated fixture corpus (#25): PEs, their signatures and
 /// the test PKI's certificates.
@@ -209,6 +221,27 @@ pub const PROJECTS: &[Project] = &[
             dict: None,
             seeds: &[TRUST_SET_SEEDS],
         }],
+    },
+    Project {
+        dir: "crates/palisade-policy/fuzz",
+        package: "palisade-policy",
+        targets: &[
+            Target {
+                name: "fuzz_policy_json",
+                dict: None,
+                seeds: &[POLICY_JSON_SEEDS],
+            },
+            Target {
+                name: "fuzz_policy_yaml",
+                dict: None,
+                seeds: &[POLICY_YAML_SEEDS],
+            },
+            Target {
+                name: "fuzz_wildcard_regex_compile",
+                dict: None,
+                seeds: &[PATTERN_SEEDS],
+            },
+        ],
     },
 ];
 

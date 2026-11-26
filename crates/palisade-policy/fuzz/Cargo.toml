@@ -1,0 +1,46 @@
+# Coverage-guided fuzz targets for the palisade-policy readers of untrusted
+# input and the pattern compiler (cargo-fuzz, libFuzzer). This is a separate
+# workspace, so the main build, tests and lint checks never compile it and
+# nightly is needed only here.
+#
+#   cargo +nightly fuzz run fuzz_policy_json            # from crates/palisade-policy
+#   cargo +nightly fuzz run fuzz_policy_yaml
+#   cargo +nightly fuzz run fuzz_wildcard_regex_compile
+[package]
+name = "palisade-policy-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0 OR MIT"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+palisade-core = { path = "../../palisade-core" }
+palisade-policy = { path = ".." }
+serde_json = "1.0.154"
+
+[[bin]]
+name = "fuzz_policy_json"
+path = "fuzz_targets/fuzz_policy_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_policy_yaml"
+path = "fuzz_targets/fuzz_policy_yaml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_wildcard_regex_compile"
+path = "fuzz_targets/fuzz_wildcard_regex_compile.rs"
+test = false
+doc = false
+bench = false

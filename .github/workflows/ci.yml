@@ -348,6 +348,9 @@ jobs:
       - run: >-
           cargo deny --locked --manifest-path crates/palisade-proto/fuzz/Cargo.toml
           --config deny.toml check
+      - run: >-
+          cargo deny --locked --manifest-path crates/palisade-policy/fuzz/Cargo.toml
+          --config deny.toml check
       # The same advisory database, read by a second tool on every PR, with
       # the same ignores as deny.toml; the daily audit.yml catches advisories
       # published after a merge.
