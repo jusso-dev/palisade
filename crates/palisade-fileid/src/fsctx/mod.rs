@@ -15,6 +15,7 @@
 //! - [`volume`]: file system, drive and bus types, and the location class;
 //! - [`motw`]: the `Zone.Identifier` mark-of-the-web;
 //! - [`ntfs`]: the stream list and change-journal records the OS returns;
+//! - [`dfs`]: DFS namespace resolution with a timeout and a cache;
 //! - [`writable`]: the per-descriptor writability cache, streaming
 //!   ancestor assessment and `enumerate_user_writable_dirs`.
 //!
@@ -29,6 +30,7 @@
 #![forbid(unsafe_code)]
 
 pub mod acl;
+pub mod dfs;
 pub mod motw;
 pub mod ntfs;
 pub mod path;
@@ -150,6 +152,19 @@ impl PathForms {
     #[must_use]
     pub fn lexical(&self) -> Option<&NormalizedPath> {
         self.long_path.as_ref()
+    }
+
+    /// The key of the file's network name: the DFS target when known,
+    /// otherwise the UNC form (for a UNC path, or a mapped drive the OS
+    /// resolved). A mapped drive, a DFS namespace path and a short-name
+    /// spelling of one file on a share all give the key of its long UNC
+    /// path. `None` for a local file, or while a short name is unexpanded.
+    #[must_use]
+    pub fn network_key(&self) -> Option<String> {
+        self.dfs_target
+            .as_ref()
+            .or(self.unc_path.as_ref())
+            .and_then(|p| p.match_key().ok())
     }
 
     /// [`NormalizedPath::match_key`] of [`Self::lexical`], for matching the

@@ -32,6 +32,15 @@ fuzz_target!(|data: &[u8]| {
                     let again = normalize_win32(&a.to_win32_string()).expect("ancestor");
                     assert_eq!(again.case_folded(), a.case_folded());
                 }
+                // Moving the path onto a share keeps its tail.
+                let onto = normalize_win32(r"\\srv\share").expect("share");
+                if let Some(Some(Ok(r))) = p.ancestors().last().map(|root| {
+                    root.ok().and_then(|root| p.rebase(&root, &onto))
+                }) {
+                    assert_eq!(r.components(), p.components());
+                    let again = normalize_win32(&r.to_win32_string()).expect("rebased");
+                    assert_eq!(again.case_folded(), r.case_folded());
+                }
             }
         }
     }

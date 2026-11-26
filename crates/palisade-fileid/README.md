@@ -221,6 +221,13 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     system and journal support), and `is_case_sensitive_dir` reads the
     per-directory case-sensitivity flag. Windows tests attach a VHD and
     share a local folder over SMB.
+  - `fsctx::dfs` and `win::paths` (Windows, `os-trust` feature): the OS
+    path forms of an opened file (NT, volume GUID, final, long with every
+    8.3 name expanded by `OsShortNames`, the UNC form of a mapped drive in
+    the caller's logon session) and DFS targets through `DfsCache`, which
+    bounds each lookup to 2 s and caches referrals and failures.
+    `PathForms::network_key` gives one key for a mapped drive, a DFS path
+    and a short-name spelling of one file on a share.
 - `authenticode` certificate chains, signer trust and identity
   ([#49](https://github.com/jusso-dev/palisade/issues/49)):
   - `CertSummary::from_der` parses an X.509 v1, v2 or v3 certificate. It
