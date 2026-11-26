@@ -49,7 +49,10 @@ pub use path::{
 };
 pub use sid::{Sid, SidError};
 pub use vars::{KnownFolders, PathVariable, path_variables_matched};
-pub use volume::{BusType, DriveType, FsType, LocationClass, VolumeInfo};
+pub use volume::{
+    BusType, DriveType, FsType, HotplugInfo, LocationClass, StorageDevice, VolumeInfo,
+    parse_hotplug_info, parse_storage_device_descriptor,
+};
 
 /// The forms of one file's path. Only `original` is always present; each
 /// other form needs an OS lookup and is `None` until one fills it.

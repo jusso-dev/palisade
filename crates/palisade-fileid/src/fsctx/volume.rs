@@ -4,8 +4,10 @@
 //! drive type (`GetDriveTypeW`) and the bus of the disk behind it
 //! (`IOCTL_STORAGE_QUERY_PROPERTY`, `STORAGE_BUS_TYPE`). The functions here
 //! turn those raw values into enums, and the enums into a
-//! [`LocationClass`] that rules and guardrails can condition on. Reading
-//! the values needs Windows FFI and is left to the OS backend (#54).
+//! [`LocationClass`] that rules and guardrails can condition on. The
+//! storage-query results are parsed here too
+//! ([`parse_storage_device_descriptor`], [`parse_hotplug_info`]); the
+//! Windows backend (`palisade_fileid::win::volume`) makes the calls.
 //!
 //! The classification is conservative: when the inputs disagree, the less
 //! trusted class wins. A fixed drive on a USB bus is [`LocationClass::Removable`],
@@ -342,9 +344,112 @@ impl VolumeInfo {
     }
 }
 
+/// What the disk behind a volume says about itself: the header of the
+/// `STORAGE_DEVICE_DESCRIPTOR` that `IOCTL_STORAGE_QUERY_PROPERTY` returns
+/// for `StorageDeviceProperty`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StorageDevice {
+    /// The bus.
+    pub bus_type: BusType,
+    /// The device reports removable media.
+    pub removable_media: bool,
+}
+
+/// The fixed part of `STORAGE_DEVICE_DESCRIPTOR`, up to and including
+/// `BusType`.
+const STORAGE_DEVICE_HEADER: usize = 32;
+
+fn u32_le(b: &[u8], at: usize) -> Option<u32> {
+    let bytes = b.get(at..at.checked_add(4)?)?;
+    Some(u32::from_le_bytes(bytes.try_into().ok()?))
+}
+
+/// Parses the `STORAGE_DEVICE_DESCRIPTOR` bytes the OS returned. `None` if
+/// they are shorter than the header, or the descriptor's own `Size` says
+/// it is.
+#[must_use]
+pub fn parse_storage_device_descriptor(bytes: &[u8]) -> Option<StorageDevice> {
+    let size = usize::try_from(u32_le(bytes, 4)?).ok()?;
+    if bytes.len() < STORAGE_DEVICE_HEADER || size < STORAGE_DEVICE_HEADER {
+        return None;
+    }
+    Some(StorageDevice {
+        bus_type: BusType::from_win32(u32_le(bytes, 28)?),
+        removable_media: *bytes.get(10)? != 0,
+    })
+}
+
+/// What `IOCTL_STORAGE_GET_HOTPLUG_INFO` reports (`STORAGE_HOTPLUG_INFO`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HotplugInfo {
+    /// The media can be removed from the device.
+    pub media_removable: bool,
+    /// The media can be removed while the system runs.
+    pub media_hotplug: bool,
+    /// The device itself can be removed while the system runs.
+    pub device_hotplug: bool,
+}
+
+impl HotplugInfo {
+    /// Whether the device or its media can be removed while the system
+    /// runs: the value of [`VolumeInfo::is_hotplug`].
+    #[must_use]
+    pub const fn is_hotplug(self) -> bool {
+        self.media_hotplug || self.device_hotplug
+    }
+}
+
+/// Parses the `STORAGE_HOTPLUG_INFO` bytes the OS returned: a `u32` size
+/// and four one-byte flags. `None` if shorter.
+#[must_use]
+pub fn parse_hotplug_info(bytes: &[u8]) -> Option<HotplugInfo> {
+    let size = usize::try_from(u32_le(bytes, 0)?).ok()?;
+    let flags = bytes.get(4..8)?;
+    if size < 8 {
+        return None;
+    }
+    Some(HotplugInfo {
+        media_removable: flags.first().is_some_and(|&b| b != 0),
+        media_hotplug: flags.get(1).is_some_and(|&b| b != 0),
+        device_hotplug: flags.get(2).is_some_and(|&b| b != 0),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn storage_descriptors_parse() {
+        let mut d = vec![0_u8; 40];
+        d[0..4].copy_from_slice(&1_u32.to_le_bytes());
+        d[4..8].copy_from_slice(&40_u32.to_le_bytes());
+        d[10] = 1;
+        d[28..32].copy_from_slice(&7_u32.to_le_bytes());
+        assert_eq!(
+            parse_storage_device_descriptor(&d),
+            Some(StorageDevice {
+                bus_type: BusType::Usb,
+                removable_media: true
+            })
+        );
+        // Too short, or a `Size` that does not cover the bus type.
+        assert_eq!(parse_storage_device_descriptor(&d[..31]), None);
+        d[4..8].copy_from_slice(&8_u32.to_le_bytes());
+        assert_eq!(parse_storage_device_descriptor(&d), None);
+        assert_eq!(parse_storage_device_descriptor(&[]), None);
+
+        let h = [8, 0, 0, 0, 0, 0, 1, 0];
+        let info = parse_hotplug_info(&h).unwrap();
+        assert!(info.device_hotplug && info.is_hotplug() && !info.media_removable);
+        assert!(
+            !parse_hotplug_info(&[8, 0, 0, 0, 1, 0, 0, 0])
+                .unwrap()
+                .is_hotplug()
+        );
+        assert_eq!(parse_hotplug_info(&[8, 0, 0, 0, 1]), None);
+        assert_eq!(parse_hotplug_info(&[4, 0, 0, 0, 1, 1, 1, 1]), None);
+    }
 
     fn fixed(bus: BusType, os: bool) -> VolumeInfo {
         VolumeInfo {

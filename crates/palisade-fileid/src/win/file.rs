@@ -235,7 +235,7 @@ const fn is_placeholder(attributes: u32) -> bool {
 
 /// The volume root of the opened `file`, as a volume GUID path, from its
 /// final path.
-fn volume_root(file: &File) -> io::Result<String> {
+pub(crate) fn volume_root(file: &File) -> io::Result<String> {
     let guid_path = sys::final_path_by_handle(file, OPENED_NAME_GUID)?;
     // `\\?\Volume{GUID}\rest`: the volume device is everything before the
     // fourth backslash, without it.

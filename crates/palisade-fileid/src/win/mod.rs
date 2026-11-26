@@ -13,6 +13,8 @@
 //! - [`security`]: security descriptors, account names and the OS access
 //!   check (#54).
 //! - [`trust`]: the OS trust-verification cross-check (#48).
+//! - [`volume`]: the volume a file is on (drive, bus, hot-plug, OS volume)
+//!   and the per-directory case-sensitivity flag (#54).
 //! - `sys` (private): the file and volume calls themselves, wrapped once.
 //!
 //! This is the only part of the crate that may contain `unsafe` code (ADR
@@ -28,3 +30,4 @@ pub mod fsctx;
 pub mod security;
 mod sys;
 pub mod trust;
+pub mod volume;

@@ -17,21 +17,26 @@ use std::os::windows::io::AsRawHandle as _;
 
 use windows_sys::Win32::Foundation::{CloseHandle, ERROR_IO_PENDING, HANDLE};
 use windows_sys::Win32::Storage::FileSystem::{
-    FILE_BASIC_INFO, FILE_ID_INFO, FILE_INFO_BY_HANDLE_CLASS, FILE_REMOTE_PROTOCOL_INFO,
-    FILE_STANDARD_INFO, FILE_TYPE_DISK, FileBasicInfo, FileIdInfo, FileRemoteProtocolInfo,
-    FileStandardInfo, FileStreamInfo, GetFileInformationByHandleEx, GetFileType,
-    GetFinalPathNameByHandleW, GetVolumeInformationByHandleW,
+    FILE_BASIC_INFO, FILE_CASE_SENSITIVE_INFO, FILE_ID_INFO, FILE_INFO_BY_HANDLE_CLASS,
+    FILE_REMOTE_PROTOCOL_INFO, FILE_STANDARD_INFO, FILE_TYPE_DISK, FileBasicInfo,
+    FileCaseSensitiveInfo, FileIdInfo, FileRemoteProtocolInfo, FileStandardInfo, FileStreamInfo,
+    GetDriveTypeW, GetFileInformationByHandleEx, GetFileType, GetFinalPathNameByHandleW,
+    GetVolumeInformationByHandleW,
 };
 use windows_sys::Win32::System::IO::{DeviceIoControl, GetOverlappedResult, OVERLAPPED};
 use windows_sys::Win32::System::Ioctl::{
-    FSCTL_QUERY_USN_JOURNAL, FSCTL_READ_FILE_USN_DATA, READ_FILE_USN_DATA, USN_JOURNAL_DATA_V0,
+    FSCTL_QUERY_USN_JOURNAL, FSCTL_READ_FILE_USN_DATA, IOCTL_STORAGE_GET_HOTPLUG_INFO,
+    IOCTL_STORAGE_QUERY_PROPERTY, PropertyStandardQuery, READ_FILE_USN_DATA,
+    STORAGE_PROPERTY_QUERY, StorageDeviceProperty, USN_JOURNAL_DATA_V0,
 };
 use windows_sys::Win32::System::Memory::{
     CreateFileMappingW, FILE_MAP_READ, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile, PAGE_READONLY,
     UnmapViewOfFile,
 };
 use windows_sys::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
-use windows_sys::Win32::System::SystemInformation::{GetSystemInfo, SYSTEM_INFO};
+use windows_sys::Win32::System::SystemInformation::{
+    GetSystemInfo, GetSystemWindowsDirectoryW, SYSTEM_INFO,
+};
 use windows_sys::Win32::System::Threading::{CreateEventW, GetCurrentProcess};
 
 /// The largest buffer any variable-length query here grows to: 1 MiB. A
@@ -397,6 +402,85 @@ pub(crate) fn usn_journal_id(volume: &File) -> io::Result<u64> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "short journal data"))?;
     const _: () = assert!(size_of::<USN_JOURNAL_DATA_V0>() <= 128);
     Ok(id)
+}
+
+/// The `STORAGE_DEVICE_DESCRIPTOR` of the disk behind `volume`
+/// (`IOCTL_STORAGE_QUERY_PROPERTY`, `StorageDeviceProperty`), for
+/// [`crate::fsctx::volume::parse_storage_device_descriptor`]. `volume` is a
+/// handle to the volume device itself, which may be opened with no access
+/// rights.
+pub(crate) fn storage_device_bytes(volume: &File) -> io::Result<Vec<u8>> {
+    let query = STORAGE_PROPERTY_QUERY {
+        PropertyId: StorageDeviceProperty,
+        QueryType: PropertyStandardQuery,
+        AdditionalParameters: [0],
+    };
+    // SAFETY: `IOCTL_STORAGE_QUERY_PROPERTY` (`METHOD_BUFFERED`) reads one
+    // `STORAGE_PROPERTY_QUERY` from the input buffer and writes at most the
+    // output length; a descriptor longer than that is truncated, with its
+    // full size in `Size`, which the parser handles.
+    unsafe { fsctl(volume, IOCTL_STORAGE_QUERY_PROPERTY, Some(&query), 1024) }
+}
+
+/// The `STORAGE_HOTPLUG_INFO` of the disk behind `volume`
+/// (`IOCTL_STORAGE_GET_HOTPLUG_INFO`), for
+/// [`crate::fsctx::volume::parse_hotplug_info`].
+pub(crate) fn hotplug_bytes(volume: &File) -> io::Result<Vec<u8>> {
+    // SAFETY: `IOCTL_STORAGE_GET_HOTPLUG_INFO` (`METHOD_BUFFERED`) takes no
+    // input and writes one 8-byte `STORAGE_HOTPLUG_INFO`, within the
+    // 16-byte output length.
+    unsafe { fsctl::<()>(volume, IOCTL_STORAGE_GET_HOTPLUG_INFO, None, 16) }
+}
+
+/// UTF-16 with a terminating NUL, for a path passed to the OS. Fails on
+/// an interior NUL, which would make the OS read a different, shorter path.
+pub(crate) fn wide(text: &str) -> io::Result<Vec<u16>> {
+    if text.contains('\0') {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "path contains NUL",
+        ));
+    }
+    Ok(text.encode_utf16().chain(std::iter::once(0)).collect())
+}
+
+/// `GetDriveTypeW` of `root`, a volume root with a trailing separator
+/// (`C:\`, `\\?\Volume{GUID}\`).
+pub(crate) fn drive_type(root: &str) -> io::Result<u32> {
+    let w = wide(root)?;
+    // SAFETY: `w` is a live, NUL-terminated UTF-16 string that the call
+    // only reads.
+    Ok(unsafe { GetDriveTypeW(w.as_ptr()) })
+}
+
+/// Whether the open directory `dir` is marked case-sensitive
+/// (`FileCaseSensitiveInfo`, `FILE_CS_FLAG_CASE_SENSITIVE_DIR`). Fails on
+/// a file system or OS that does not support the flag.
+pub(crate) fn case_sensitive_dir(dir: &File) -> io::Result<bool> {
+    // SAFETY: `FILE_CASE_SENSITIVE_INFO` is the structure for
+    // `FileCaseSensitiveInfo`: one `u32`, valid for every bit pattern.
+    let info: FILE_CASE_SENSITIVE_INFO = unsafe { info_by_handle(dir, FileCaseSensitiveInfo) }?;
+    Ok(info.Flags & 1 != 0)
+}
+
+/// The system Windows directory (`GetSystemWindowsDirectoryW`), which is
+/// on the OS volume.
+pub(crate) fn windows_directory() -> io::Result<String> {
+    let mut buf = [0_u16; 1024];
+    let cap = u32::try_from(buf.len()).unwrap_or(0);
+    // SAFETY: `buf` is a live, writable buffer of `cap` UTF-16 units, the
+    // size passed; the OS reports a larger required size instead of
+    // writing past it.
+    let n = unsafe { GetSystemWindowsDirectoryW(buf.as_mut_ptr(), cap) };
+    let n = usize::try_from(n).unwrap_or(usize::MAX);
+    if n == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let units = buf
+        .get(..n)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "path too long"))?;
+    String::from_utf16(units)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "not valid UTF-16"))
 }
 
 /// The system's allocation granularity, which every mapped view offset
