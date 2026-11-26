@@ -11,6 +11,7 @@ pub mod fsctx;
 pub mod hash;
 pub mod installer;
 pub mod pe;
+pub mod script;
 #[cfg(feature = "content-rules")]
 pub mod tags;
 #[cfg(all(windows, feature = "os-trust"))]

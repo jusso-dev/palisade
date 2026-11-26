@@ -14,6 +14,7 @@
 #   cargo +nightly fuzz run legacy_parse
 #   cargo +nightly fuzz run fuzz_msi_tables
 #   cargo +nightly fuzz run fuzz_tags
+#   cargo +nightly fuzz run script_sig
 [package]
 name = "palisade-fileid-fuzz"
 version = "0.0.0"
@@ -110,6 +111,13 @@ bench = false
 [[bin]]
 name = "fuzz_tags"
 path = "fuzz_targets/fuzz_tags.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "script_sig"
+path = "fuzz_targets/script_sig.rs"
 test = false
 doc = false
 bench = false

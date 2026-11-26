@@ -419,7 +419,7 @@ fn malformed(e: super::signature::SignatureError) -> SignatureInfo {
 }
 
 /// Runs every check on one parsed signature.
-fn check(
+pub(crate) fn check(
     sd: &SignedData<'_>,
     image: &AuthenticodeHashes,
     options: &VerifyOptions,
@@ -508,6 +508,7 @@ fn check(
         statement_type: signer.statement_type,
         signing_time: signer.signing_time,
         signer_cert,
+        signed_metadata: signer.signed_metadata.clone(),
     });
 
     SignatureInfo {

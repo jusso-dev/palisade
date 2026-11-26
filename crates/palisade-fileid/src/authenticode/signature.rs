@@ -264,6 +264,10 @@ pub enum SignatureKind {
     /// Authenticode SignedData whose indirect data is `SPC_SIPINFO` for the
     /// installer subject type, over the package's content hash.
     Msi,
+    /// A script's embedded signature block (#52, [`crate::script`]): a
+    /// SignedData whose indirect data is `SPC_SIPINFO`, signing the digest
+    /// a script subject interface package computes over the text.
+    Script,
 }
 
 /// The `SpcStatementType` authenticated attribute.
@@ -309,6 +313,70 @@ pub struct SignerAttributes {
     /// The signer certificate: an index into
     /// [`SignatureInfo::certs_in_blob`]. Chain building is #49.
     pub signer_cert: usize,
+    /// The signed metadata attributes (#52), on any signature: read only
+    /// and informational for PE files, and the version-like identity of
+    /// scripts and other files without a version resource.
+    pub signed_metadata: SignedMetadata,
+}
+
+/// The signed metadata authenticated attributes
+/// (`szOID_SIGNED_ATTRIBUTE_*`, 1.3.6.1.4.1.311.2.7.1 to .10), which give
+/// files without a version resource version-like identity. Signers encode
+/// each as a UTF8String. A field is `Some` only when its attribute is
+/// present and decodes exactly (see
+/// [`SignatureWarning::SignedMetadataUnreadable`]); an attribute that
+/// appears twice makes the signature [`SignatureStatus::Malformed`].
+///
+/// These are the signer's claims, covered by the signature: they can be
+/// trusted only as far as the signer is.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize)]
+pub struct SignedMetadata {
+    /// .1 `InternalName`.
+    pub internal_name: Option<String>,
+    /// .2 `FileVersion`.
+    pub file_version: Option<String>,
+    /// .3 `FileDescription`.
+    pub file_description: Option<String>,
+    /// .4 `Product`.
+    pub product: Option<String>,
+    /// .5 `ProductVersion`.
+    pub product_version: Option<String>,
+    /// .6 `OriginalFilename`.
+    pub original_filename: Option<String>,
+    /// .7 `Language`.
+    pub language: Option<String>,
+    /// .8 `Author`.
+    pub author: Option<String>,
+    /// .9 `PublishTime`, as the signer wrote it. Not parsed: it is the
+    /// signer's claim, and a trusted time comes from a timestamp (#50).
+    pub publish_time: Option<String>,
+    /// .10 `SourceURL`.
+    pub source_url: Option<String>,
+}
+
+impl SignedMetadata {
+    /// The field for the attribute whose final OID arc is `arc` (1 to 10).
+    pub(crate) fn field_mut(&mut self, arc: u8) -> Option<&mut Option<String>> {
+        Some(match arc {
+            1 => &mut self.internal_name,
+            2 => &mut self.file_version,
+            3 => &mut self.file_description,
+            4 => &mut self.product,
+            5 => &mut self.product_version,
+            6 => &mut self.original_filename,
+            7 => &mut self.language,
+            8 => &mut self.author,
+            9 => &mut self.publish_time,
+            10 => &mut self.source_url,
+            _ => return None,
+        })
+    }
+
+    /// Whether no field is set.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// A page hash table: the one an `SpcSerializedObject` moniker in a
@@ -440,6 +508,11 @@ pub enum SignatureWarning {
     LimitReached,
     /// More than [`super::MAX_WARNINGS`] warnings; the rest were dropped.
     WarningsTruncated,
+    /// A signed metadata attribute (1.3.6.1.4.1.311.2.7.1 to .10) whose
+    /// value is not a string, does not decode exactly, or is longer than
+    /// 4096 characters. It is left out of [`SignedMetadata`], so no rule can
+    /// match a partial or replaced value.
+    SignedMetadataUnreadable(ObjectId),
 }
 
 /// One Authenticode signature: an embedded SignedData, a nested one, or a
@@ -547,11 +620,17 @@ pub enum SignatureError {
     NotPeImageData(ObjectId),
     /// The indirect data is not `SPC_SIPINFO_OBJID`
     /// (1.3.6.1.4.1.311.2.1.30), so it does not sign a non-PE subject such
-    /// as an installer package.
+    /// as an installer package or a script (#52).
     NotSipInfo(ObjectId),
     /// The `SPC_SIPINFO` names a subject type other than the one the file
     /// is (for example a package signature on an installer).
     SubjectTypeMismatch,
+    /// The `SpcSipInfo` value is malformed: its GUID is not 16 bytes.
+    SipInfo,
+    /// The `SpcSipInfo` names a subject interface package other than the
+    /// one for the script's format (a VBScript signature in a JScript
+    /// file, say), so the signed digest is not of this kind of file.
+    SipMismatch,
     /// The SignedData has no signed content.
     MissingContent,
     /// Authenticode requires exactly one SignerInfo.
@@ -592,6 +671,10 @@ impl fmt::Display for SignatureError {
             Self::NotSipInfo(o) => write!(f, "indirect data type {o} is not SPC_SIPINFO"),
             Self::SubjectTypeMismatch => {
                 f.write_str("the SIP information names another subject type")
+            }
+            Self::SipInfo => f.write_str("the SpcSipInfo GUID is not 16 bytes"),
+            Self::SipMismatch => {
+                f.write_str("the SpcSipInfo names another format's subject interface package")
             }
             Self::MissingContent => f.write_str("the SignedData has no content"),
             Self::SignerCount(n) => write!(f, "{n} SignerInfos; Authenticode requires exactly one"),
@@ -647,6 +730,10 @@ pub enum InvalidReason {
     CertificateTable(CertificateTableError),
     /// No signature is valid. This is the status of the first one.
     Signature(SignatureStatus),
+    /// A script carries a signature block (#52) that could not be read:
+    /// the block is malformed, or the text cannot be decoded without
+    /// ambiguity. Why is [`crate::script::ScriptReport::signing_state`].
+    ScriptSignatureBlock,
 }
 
 /// The signing state of a file.
