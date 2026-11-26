@@ -116,7 +116,7 @@ try {
 $lines = New-Object System.Collections.Generic.List[string]
 foreach ($p in Get-Content -LiteralPath $Publishers -Encoding UTF8) {
     if ($p.Length -eq 0) { continue }
-    $lines.Add("PFN`t{0}`t{1}" -f $p, [PalisadePackageId]::Family('Palisade.Probe', $p))
+    $lines.Add(("PFN`t{0}`t{1}" -f $p, [PalisadePackageId]::Family('Palisade.Probe', $p)))
 }
 # Full names: x64 (9) with no resource ID, and neutral with the bundle's `~`.
 $first = (Get-Content -LiteralPath $Publishers -Encoding UTF8 | Where-Object { $_ })[0]
@@ -125,6 +125,6 @@ $lines.Add("FULL`tbundle`t{0}" -f [PalisadePackageId]::Full('Palisade.Probe', $f
 foreach ($file in Get-ChildItem -LiteralPath $Dir -File) {
     if ($file.Extension -notin '.msix', '.msixbundle') { continue }
     $rc = [PalisadePackageId]::Verify($file.FullName)
-    $lines.Add("SIG`t{0}`t{1:x8}" -f $file.Name, $rc)
+    $lines.Add(("SIG`t{0}`t{1:x8}" -f $file.Name, $rc))
 }
 Set-Content -LiteralPath $Out -Value $lines -Encoding UTF8
