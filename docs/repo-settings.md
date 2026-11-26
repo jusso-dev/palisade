@@ -135,8 +135,13 @@ gh api repos/jusso-dev/palisade/pages    # "build_type": "legacy", source gh-pag
 
 The site is then at <https://jusso-dev.github.io/palisade/>, which redirects to `latest/`. The
 first deployment needs this setting before Pages serves anything: after making it, rerun
-`pages.yml` once (**Actions → Pages → Run workflow** on `main`). Later pushes to `gh-pages` deploy
-by themselves.
+`pages.yml` once (**Actions → Pages → Run workflow** on `main`).
+
+A push made with a workflow's `GITHUB_TOKEN` does not start a Pages build, so `pages.yml`'s push
+alone would update `gh-pages` but not the site. After each push it therefore requests the build
+itself (`POST repos/jusso-dev/palisade/pages/builds`), with the same token and only the job's
+`pages: write` permission. No personal token or deployment action is needed. A push to
+`gh-pages` made by hand, by someone with admin rights, still starts a build as usual.
 
 Serving a branch still runs GitHub's own `pages-build-deployment` workflow. If the Actions
 allowlist above stops that workflow, its run shows a startup failure naming the blocked action,

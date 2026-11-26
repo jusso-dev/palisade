@@ -228,7 +228,7 @@ checkout). Details:
 
 | Job | Runners | What it runs |
 |---|---|---|
-| `publish` | ubuntu-latest | `cargo xtask docs check` and `docs build`, `cargo doc`, then `cargo xtask docs assemble` into a clone of `gh-pages`, and a push. The only job with `contents: write`; see [Publishing](#publishing) |
+| `publish` | ubuntu-latest | `cargo xtask docs check` and `docs build`, `cargo doc`, then `cargo xtask docs assemble` into a clone of `gh-pages`, a push, and a Pages build request. The only job with `contents: write` and `pages: write`; see [Publishing](#publishing) |
 
 ### `links.yml` (weekly on Monday at 05:29 UTC, and on demand)
 
@@ -288,10 +288,11 @@ in any file or path, matched as whole words in any letter case; the list is
 ### Publishing
 
 `pages.yml` builds the site on every push to `main` (as `latest`) and on every release tag
-`vX.Y.Z` (as `vX.Y`), and pushes it to the `gh-pages` branch. Its one write permission,
-`contents: write`, is on that job only. It does not use the Pages deployment actions, which are
-not on the [action allowlist](#runner-and-action-policy); GitHub Pages serves the branch
-instead. One-time setting for the maintainer, in [repo-settings.md](repo-settings.md#github-pages).
+`vX.Y.Z` (as `vX.Y`), and pushes it to the `gh-pages` branch. A push made with the
+workflow's token does not start a Pages build, so the job then requests one through the REST
+API. Its write permissions, `contents: write` for the push and `pages: write` for the build
+request, are on that job only. It does not use the Pages deployment actions, which are not on
+the [action allowlist](#runner-and-action-policy); GitHub Pages serves the branch instead. One-time setting for the maintainer, in [repo-settings.md](repo-settings.md#github-pages).
 
 `links.yml` checks every external link in the built book once a week, and opens or updates an
 issue when one is broken. Pull requests check internal links only (offline), so a third-party

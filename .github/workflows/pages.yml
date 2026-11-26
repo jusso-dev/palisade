@@ -35,6 +35,8 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: write
+      # Only for the build request after the push (see the last step).
+      pages: write
     env:
       LYCHEE_VERSION: "0.24.2"
       LYCHEE_SHA256: 1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a
@@ -110,3 +112,13 @@ jobs:
             GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" \
             GIT_CONFIG_VALUE_0="$header" \
             git push "https://github.com/$REPOSITORY.git" HEAD:gh-pages
+          echo "SITE_PUSHED=true" >> "$GITHUB_ENV"
+      # A push made with the workflow's `GITHUB_TOKEN` does not start a Pages
+      # build, so ask for one. This builds from the configured source,
+      # `gh-pages`, as a push by a person would. It runs only when the push
+      # step pushed something, and needs only `pages: write`.
+      - name: Request the Pages build
+        if: env.SITE_PUSHED == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/$REPOSITORY/pages/builds" --jq .status
