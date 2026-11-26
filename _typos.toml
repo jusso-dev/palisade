@@ -8,6 +8,9 @@ extend-exclude = [
     "*.pem.txt",
     # cargo-vet's imported audits are third-party text.
     "supply-chain/imports.lock",
+    # Signed script fixtures: their signature blocks are base64, and the
+    # files cannot be edited without breaking the signatures (#52).
+    "crates/palisade-fileid/tests/fixtures/script/",
 ]
 
 [default.extend-words]
