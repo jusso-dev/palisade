@@ -2,7 +2,7 @@
 //!
 //! ADR 0008 picks `ring` and requires call sites to go through a thin
 //! `crypto` module, so a later provider swap (for example a FIPS-validated
-//! one) is a one-module change. Nothing else in `pki` names `ring`.
+//! one) is a one-module change. Nothing else in the crate names `ring`.
 //!
 //! Algorithms, and nothing else:
 //!
@@ -15,6 +15,9 @@
 //! signature has exactly one length and the envelope can check it before
 //! verification. `ring` generates ECDSA nonces internally and hedges them
 //! with the message digest.
+//!
+//! MACs are HMAC-SHA-256 (ADR 0008), used for the policy anti-rollback
+//! record (`policy_bundle::record`). Tags are checked in constant time.
 
 #![forbid(unsafe_code)]
 
@@ -36,6 +39,36 @@ pub(crate) fn sha256(data: &[u8]) -> [u8; 32] {
         *o = *b;
     }
     out
+}
+
+/// An HMAC-SHA-256 key. `Debug` never prints it.
+pub(crate) struct MacKey(ring::hmac::Key);
+
+impl MacKey {
+    pub(crate) fn new(key: &[u8; 32]) -> Self {
+        Self(ring::hmac::Key::new(ring::hmac::HMAC_SHA256, key))
+    }
+
+    /// The 32-byte tag over `message`.
+    pub(crate) fn tag(&self, message: &[u8]) -> [u8; 32] {
+        let tag = ring::hmac::sign(&self.0, message);
+        let mut out = [0u8; 32];
+        for (o, b) in out.iter_mut().zip(tag.as_ref()) {
+            *o = *b;
+        }
+        out
+    }
+
+    /// Whether `tag` is the tag over `message`, compared in constant time.
+    pub(crate) fn verify(&self, message: &[u8], tag: &[u8]) -> bool {
+        ring::hmac::verify(&self.0, message, tag).is_ok()
+    }
+}
+
+impl fmt::Debug for MacKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("MacKey(..)")
+    }
 }
 
 /// Verifies `signature` over `message` with a raw public key (the uncompressed

@@ -16,12 +16,12 @@
 //!
 //! Every signature covers a [`Domain`] prefix followed by the payload, so a
 //! signature made for one purpose can never verify as another
-//! (threat: T-signer-02). The only module that calls `ring` is the private
-//! `crypto` module.
+//! (threat: T-signer-02). The only module that calls `ring` is the
+//! crate-private `crypto` module.
 
 #![forbid(unsafe_code)]
 
-mod crypto;
+pub(crate) mod crypto;
 pub mod key;
 pub mod signer;
 pub mod time;
