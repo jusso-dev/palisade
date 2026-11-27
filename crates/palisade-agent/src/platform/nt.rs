@@ -191,14 +191,6 @@ pub(crate) const fn integrity_from_rid(rid: u32) -> IntegrityLevel {
     }
 }
 
-/// A `DWORD` record (`TokenSessionId`, `TokenElevationType`,
-/// `TokenElevation`).
-pub(crate) fn dword(bytes: &[u8], what: &str) -> Result<u32> {
-    Record::new(bytes, 0)
-        .u32_at(0)
-        .ok_or_else(|| malformed(what, "truncated"))
-}
-
 /// The elevation type, from a `TOKEN_ELEVATION_TYPE` value.
 pub(crate) fn elevation_type(value: u32) -> Result<Elevation> {
     match value {
@@ -458,15 +450,13 @@ mod tests {
     }
 
     #[test]
-    fn elevation_and_dwords() {
+    fn elevation_types() {
         assert_eq!(elevation_type(1).unwrap(), Elevation::Default);
         assert_eq!(elevation_type(2).unwrap(), Elevation::Full);
         assert_eq!(elevation_type(3).unwrap(), Elevation::Limited);
         // An unknown value is never read as "not elevated".
         assert!(elevation_type(0).is_err());
         assert!(elevation_type(4).is_err());
-        assert_eq!(dword(&7_u32.to_le_bytes(), "x").unwrap(), 7);
-        assert!(dword(&[1, 2, 3], "x").is_err());
     }
 
     #[test]

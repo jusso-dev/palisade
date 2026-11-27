@@ -70,11 +70,11 @@ fn token_info(token: &Token) -> Result<TokenInfo> {
     let user = read(TokenUser, "token user")?;
     let groups = read(TokenGroups, "token groups")?;
     let integrity = read(TokenIntegrityLevel, "token integrity level")?;
-    let session = read(TokenSessionId, "token session")?;
-    let elevation_type = read(TokenElevationType, "token elevation type")?;
-    let elevation = read(TokenElevation, "token elevation")?;
+    let dword = |class, what: &str| token.dword(class).map_err(|e| os_error(&e, what));
+    let session_id = dword(TokenSessionId, "token session")?;
+    let elevation_type = dword(TokenElevationType, "token elevation type")?;
+    let elevated = dword(TokenElevation, "token elevation")?;
 
-    let session_id = nt::dword(&session.bytes, "TokenSessionId")?;
     Ok(TokenInfo {
         user_sid: nt::token_user(Record::new(&user.bytes, user.base))?,
         groups: nt::token_groups(Record::new(&groups.bytes, groups.base))?,
@@ -82,8 +82,8 @@ fn token_info(token: &Token) -> Result<TokenInfo> {
         // A failed protocol query is "unknown", never the console.
         session_kind: nt::session_kind(session_id, ffi::session_protocol(session_id).ok()),
         integrity: nt::token_integrity(Record::new(&integrity.bytes, integrity.base))?,
-        elevation: nt::elevation_type(nt::dword(&elevation_type.bytes, "TokenElevationType")?)?,
-        elevated: nt::dword(&elevation.bytes, "TokenElevation")? != 0,
+        elevation: nt::elevation_type(elevation_type)?,
+        elevated: elevated != 0,
     })
 }
 

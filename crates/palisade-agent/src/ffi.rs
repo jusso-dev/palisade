@@ -296,6 +296,37 @@ impl Drop for Process {
 pub(crate) struct Token(HANDLE);
 
 impl Token {
+    /// `GetTokenInformation` for a class whose record is one `DWORD`
+    /// (`TokenSessionId`, `TokenElevationType`, `TokenElevation`). Some
+    /// such classes accept only a buffer of exactly that size
+    /// (`ERROR_BAD_LENGTH` otherwise).
+    pub(crate) fn dword(&self, class: TOKEN_INFORMATION_CLASS) -> io::Result<u32> {
+        let mut value = 0_u32;
+        let mut needed = 0_u32;
+        // SAFETY: `self.0` is an open token handle with `TOKEN_QUERY`;
+        // `value` is a live, writable `u32` and its size is the length
+        // passed; `needed` is a live local.
+        let ok = unsafe {
+            GetTokenInformation(
+                self.0,
+                class,
+                (&raw mut value).cast(),
+                u32_len(size_of::<u32>()),
+                &raw mut needed,
+            )
+        };
+        if ok == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if usize::try_from(needed).ok() != Some(size_of::<u32>()) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "token record is not one DWORD",
+            ));
+        }
+        Ok(value)
+    }
+
     /// `GetTokenInformation` for `class`, as raw bytes.
     pub(crate) fn information(&self, class: TOKEN_INFORMATION_CLASS) -> io::Result<RawRecord> {
         let mut bytes = 256_usize;
@@ -424,7 +455,14 @@ pub(crate) fn lookup_account_name(name: &str) -> io::Result<(Vec<u8>, i32)> {
     if ok == 0 {
         return Err(io::Error::last_os_error());
     }
-    let len = usize::try_from(sid_len).unwrap_or(0).min(size_of_val(&sid));
+    // On success the OS leaves `sid_len` as the buffer size, so the SID's
+    // own length is read from it.
+    // SAFETY: the call succeeded, so `sid` holds a valid SID, alive and
+    // aligned for the call.
+    let len = usize::try_from(unsafe { GetLengthSid(sid.as_mut_ptr().cast()) }).unwrap_or(0);
+    if len == 0 || len > size_of_val(&sid) {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "bad SID length"));
+    }
     let bytes: Vec<u8> = sid.iter().flat_map(|w| w.to_ne_bytes()).take(len).collect();
     Ok((bytes, use_))
 }
