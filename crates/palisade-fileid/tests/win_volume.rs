@@ -14,7 +14,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use palisade_fileid::fsctx::{BusType, DriveType, FsType, LocationClass};
-use palisade_fileid::win::volume::{is_case_sensitive_dir, read_volume};
+use palisade_fileid::win::volume::{
+    is_case_sensitive_dir, network_evidence, read_volume, read_volume_opened_as,
+};
 
 /// A directory this test created, removed when dropped.
 struct Scratch(PathBuf);
@@ -206,11 +208,17 @@ fn a_file_on_a_local_smb_share_is_on_the_network() {
         plain(&dir.0)
     ));
     let unc = format!(r"\\localhost\{}\tool.exe", share.0);
-    let v = read_volume(&File::open(&unc).unwrap());
-    assert_eq!(v.fs_type, Some(FsType::Network), "{v:?}");
-    assert_eq!(v.drive_type, Some(DriveType::Network), "{v:?}");
-    assert_eq!(v.location_class(), LocationClass::Network);
-    assert!(!v.supports_owner());
+    let file = File::open(&unc).unwrap();
+    // The handle alone, and the handle with the name it was opened by.
+    for v in [read_volume(&file), read_volume_opened_as(&unc, &file)] {
+        let evidence = network_evidence(&file, None);
+        assert_eq!(v.fs_type, Some(FsType::Network), "{v:?} {evidence:?}");
+        assert_eq!(v.drive_type, Some(DriveType::Network), "{v:?} {evidence:?}");
+        assert_eq!(v.location_class(), LocationClass::Network);
+        assert!(!v.supports_owner());
+    }
+    // Whatever any one query says, a UNC name is never read as local.
+    assert!(network_evidence(&file, Some(&unc)).is_network());
 }
 
 #[test]

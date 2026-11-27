@@ -344,6 +344,143 @@ impl VolumeInfo {
     }
 }
 
+/// Independent signs that a file was reached through a network redirector.
+/// Each is `None` when it could not be read.
+///
+/// No single OS answer is relied on. `FileRemoteProtocolInfo` is the
+/// documented test, but it has been seen to fail on a real redirector
+/// handle (#54, the Windows 11 Arm64 runner), and a share's server reports
+/// its own file system (`NTFS`) and serial. Any one sign saying "network"
+/// makes the volume [`VolumeInfo::network`]; see [`VolumeInfo::settle`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct NetworkEvidence {
+    /// `FileRemoteProtocolInfo` answered for the handle, which only a
+    /// redirector does.
+    pub remote_protocol: Option<bool>,
+    /// The handle's NT path is under a network provider
+    /// (`\Device\Mup\…`), from [`nt_path_on_network`].
+    pub nt_path_on_network: Option<bool>,
+    /// The name the file was opened by is a UNC path, or a drive letter
+    /// the OS reports as remote.
+    pub opened_as_network: Option<bool>,
+}
+
+impl NetworkEvidence {
+    /// True if any sign says the file is on the network.
+    #[must_use]
+    pub const fn is_network(&self) -> bool {
+        matches!(self.remote_protocol, Some(true))
+            || matches!(self.nt_path_on_network, Some(true))
+            || matches!(self.opened_as_network, Some(true))
+    }
+}
+
+/// NT devices of network redirectors and providers: the multiple UNC
+/// provider, SMB, WebDAV, remote-desktop drive redirection and the
+/// Linux-subsystem file server.
+const REDIRECTOR_DEVICES: [&str; 5] = [
+    "Mup",
+    "LanmanRedirector",
+    "WebDavRedirector",
+    "RdpDr",
+    "P9Rdr",
+];
+
+/// What an NT device name (`Mup`, `HarddiskVolume3`) says: `Some(true)` for
+/// a redirector, `Some(false)` for a local disk volume or shadow copy,
+/// `None` for anything else.
+fn nt_device_on_network(device: &str) -> Option<bool> {
+    if REDIRECTOR_DEVICES
+        .iter()
+        .any(|r| device.eq_ignore_ascii_case(r))
+    {
+        return Some(true);
+    }
+    let local = device
+        .get(..14)
+        .is_some_and(|p| p.eq_ignore_ascii_case("HarddiskVolume"))
+        && device.len() > 14;
+    local.then_some(false)
+}
+
+/// Whether an NT path, as `GetFinalPathNameByHandleW` reports it with
+/// `VOLUME_NAME_NT`, is under a network provider. `Some(true)` for
+/// `\Device\Mup\…`, `\Device\LanmanRedirector\…` and the other redirector
+/// devices; `Some(false)` for a local disk volume
+/// (`\Device\HarddiskVolumeN\…`); `None` for any other device or a path
+/// that is not under `\Device\`, which never counts as either.
+///
+/// Only the device name is read, not the rest of the path, so a
+/// redirector path the path normaliser would reject (a provider prefix
+/// such as `;:1`) still counts as the network.
+#[must_use]
+pub fn nt_path_on_network(nt_path: &str) -> Option<bool> {
+    let mut parts = nt_path.split('\\');
+    let (Some(""), Some(dev), Some(device)) = (parts.next(), parts.next(), parts.next()) else {
+        return None;
+    };
+    if !dev.eq_ignore_ascii_case("Device") {
+        return None;
+    }
+    nt_device_on_network(device)
+}
+
+/// What the name a file was opened by says about the network, without the
+/// OS: `Some(true)` for a UNC path (also `\\?\UNC\…` and
+/// `\\?\GLOBALROOT\Device\Mup\…`), `Some(false)` for a volume GUID or local
+/// disk path, and `None` for a drive letter, which only the OS can map
+/// (it may be a mapped network drive), or anything else.
+#[must_use]
+pub fn opened_name_on_network(path: &super::path::NormalizedPath) -> Option<bool> {
+    match path.root() {
+        super::path::Root::Unc { .. } => Some(true),
+        super::path::Root::VolumeGuid(_) => Some(false),
+        super::path::Root::NtDevice(d) => nt_device_on_network(d),
+        _ => None,
+    }
+}
+
+impl VolumeInfo {
+    /// A volume reached through a network redirector: [`FsType::Network`],
+    /// [`DriveType::Network`] and no change journal, whatever the server
+    /// reports. The serial is kept as reported; it is the server's.
+    #[must_use]
+    pub fn network(serial: Option<u32>) -> Self {
+        Self {
+            serial,
+            fs_type: Some(FsType::Network),
+            drive_type: Some(DriveType::Network),
+            supports_usn: Some(false),
+            ..Self::default()
+        }
+    }
+
+    /// Settles what the OS `reported` for a handle into the value the
+    /// backend returns, so a missing or contradicted fact can never make
+    /// the volume look like a trusted local disk (ADR 0018):
+    ///
+    /// - any sign of the network in `evidence` gives [`VolumeInfo::network`],
+    ///   even if the redirector query said "local";
+    /// - otherwise, if the handle's local volume root could not be resolved
+    ///   (`root_resolved` is false), only the serial is kept. The file
+    ///   system, journal and drive facts may then be a server's, so they are
+    ///   dropped and the class is [`LocationClass::Unknown`];
+    /// - otherwise `reported` is returned unchanged.
+    #[must_use]
+    pub fn settle(reported: Self, evidence: NetworkEvidence, root_resolved: bool) -> Self {
+        if evidence.is_network() {
+            Self::network(reported.serial)
+        } else if root_resolved {
+            reported
+        } else {
+            Self {
+                serial: reported.serial,
+                ..Self::default()
+            }
+        }
+    }
+}
+
 /// What the disk behind a volume says about itself: the header of the
 /// `STORAGE_DEVICE_DESCRIPTOR` that `IOCTL_STORAGE_QUERY_PROPERTY` returns
 /// for `StorageDeviceProperty`.
@@ -615,5 +752,141 @@ mod tests {
         let mut os = fixed(BusType::Sata, true);
         os.is_hotplug = None;
         assert!(!os.supports_owner());
+    }
+
+    #[test]
+    fn nt_paths_of_redirectors_are_network() {
+        for p in [
+            r"\Device\Mup\localhost\share\tool.exe",
+            r"\Device\Mup\;LanmanRedirector\;Z:000000000001a2b3\srv\share\x.exe",
+            r"\Device\LanmanRedirector\srv\share\x.exe",
+            r"\Device\WebDavRedirector\srv\DavWWWRoot\x.exe",
+            r"\Device\RdpDr\;:1\tsclient\C\x.exe",
+            r"\Device\P9Rdr\wsl.localhost\distro\x.exe",
+        ] {
+            assert_eq!(nt_path_on_network(p), Some(true), "{p}");
+        }
+        assert_eq!(
+            nt_path_on_network(r"\Device\HarddiskVolume3\Windows\x.exe"),
+            Some(false)
+        );
+        assert_eq!(
+            nt_path_on_network(r"\Device\HarddiskVolumeShadowCopy2\x.exe"),
+            Some(false)
+        );
+        // Another device, or something that is not an NT path, is neither.
+        assert_eq!(nt_path_on_network(r"\Device\CdRom0\x.exe"), None);
+        assert_eq!(nt_path_on_network(r"\Device\HarddiskVolume"), None);
+        assert_eq!(nt_path_on_network(r"\??\C:\x.exe"), None);
+        assert_eq!(nt_path_on_network(r"C:\x.exe"), None);
+        assert_eq!(nt_path_on_network(""), None);
+    }
+
+    #[test]
+    fn opened_names_of_shares_are_network() {
+        let on = |p: &str| opened_name_on_network(&crate::fsctx::normalize_win32(p).unwrap());
+        assert_eq!(on(r"\\localhost\share\tool.exe"), Some(true));
+        assert_eq!(on(r"\\?\UNC\srv\share\tool.exe"), Some(true));
+        assert_eq!(
+            on(r"\\?\GLOBALROOT\Device\Mup\srv\share\tool.exe"),
+            Some(true)
+        );
+        assert_eq!(
+            on(r"\\?\Volume{12345678-1234-1234-1234-123456789abc}\x.exe"),
+            Some(false)
+        );
+        assert_eq!(
+            on(r"\\?\GLOBALROOT\Device\HarddiskVolume2\x.exe"),
+            Some(false)
+        );
+        // A drive letter may be a mapped network drive: only the OS knows.
+        assert_eq!(on(r"Z:\tool.exe"), None);
+        assert_eq!(on(r"\\.\pipe\x"), None);
+    }
+
+    /// What the Windows 11 Arm64 runner reported for a file opened as
+    /// `\\localhost\share\tool.exe` (#54): the server's NTFS and serial,
+    /// with the redirector query and the local volume root both failing.
+    fn arm64_share_report() -> VolumeInfo {
+        VolumeInfo {
+            serial: Some(2_222_135_570),
+            fs_type: Some(FsType::Ntfs),
+            supports_usn: Some(false),
+            ..VolumeInfo::default()
+        }
+    }
+
+    #[test]
+    fn a_share_whose_redirector_query_fails_is_still_network() {
+        // Any one sign of the network wins, even against the query.
+        for evidence in [
+            NetworkEvidence {
+                remote_protocol: Some(false),
+                nt_path_on_network: Some(true),
+                opened_as_network: None,
+            },
+            NetworkEvidence {
+                remote_protocol: Some(false),
+                nt_path_on_network: Some(false),
+                opened_as_network: Some(true),
+            },
+            NetworkEvidence {
+                remote_protocol: Some(true),
+                nt_path_on_network: Some(false),
+                opened_as_network: Some(false),
+            },
+        ] {
+            assert!(evidence.is_network());
+            for root in [false, true] {
+                let v = VolumeInfo::settle(arm64_share_report(), evidence, root);
+                assert_eq!(v, VolumeInfo::network(Some(2_222_135_570)));
+                assert_eq!(v.location_class(), LocationClass::Network);
+                assert!(!v.supports_owner());
+            }
+        }
+        // A fully local-looking report is also overridden.
+        let local = fixed(BusType::Nvme, true);
+        let evidence = NetworkEvidence {
+            opened_as_network: Some(true),
+            ..NetworkEvidence::default()
+        };
+        assert_eq!(
+            VolumeInfo::settle(local, evidence, true).location_class(),
+            LocationClass::Network
+        );
+    }
+
+    #[test]
+    fn an_unresolved_volume_root_never_reads_as_local_ntfs() {
+        // No sign of the network, but no local volume root either: the
+        // file system may be a server's, so nothing but the serial is kept.
+        for evidence in [
+            NetworkEvidence::default(),
+            NetworkEvidence {
+                remote_protocol: Some(false),
+                nt_path_on_network: None,
+                opened_as_network: None,
+            },
+            NetworkEvidence {
+                remote_protocol: None,
+                nt_path_on_network: Some(false),
+                opened_as_network: Some(false),
+            },
+        ] {
+            assert!(!evidence.is_network());
+            let v = VolumeInfo::settle(arm64_share_report(), evidence, false);
+            assert_eq!(v.fs_type, None, "{v:?}");
+            assert_eq!(v.supports_usn, None, "{v:?}");
+            assert_eq!(v.serial, Some(2_222_135_570));
+            assert_eq!(v.location_class(), LocationClass::Unknown);
+            assert!(!v.supports_owner());
+        }
+        // With a resolved local root and no sign of the network, the
+        // report stands.
+        let local = fixed(BusType::Nvme, true);
+        assert_eq!(
+            VolumeInfo::settle(local.clone(), NetworkEvidence::default(), true),
+            local
+        );
     }
 }

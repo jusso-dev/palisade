@@ -158,7 +158,9 @@ impl FileFacts {
         }
         let basic = sys::basic_info(file)?;
         let standard = sys::standard_info(file)?;
-        let remote = sys::is_remote(file);
+        // Any sign of a redirector, not only `FileRemoteProtocolInfo`,
+        // which has been seen to miss a share (#54).
+        let remote = super::volume::network_evidence(file, None).is_network();
         let file_id = sys::file_id_info(file)
             .ok()
             .map(|id| (id.VolumeSerialNumber, id.FileId.Identifier))

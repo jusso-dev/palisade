@@ -11,14 +11,19 @@ use libfuzzer_sys::fuzz_target;
 use palisade_fileid::fsctx::acl::{EvaluationOptions, ObjectKind, SecurityDescriptor, evaluate};
 use palisade_fileid::fsctx::ntfs::{MAX_STREAMS, parse_stream_info, parse_usn_record};
 use palisade_fileid::fsctx::{
-    normalize_nt, normalize_win32, parse_hotplug_info, parse_storage_device_descriptor,
-    parse_zone_identifier,
+    normalize_nt, normalize_win32, nt_path_on_network, opened_name_on_network, parse_hotplug_info,
+    parse_storage_device_descriptor, parse_zone_identifier,
 };
 
 fuzz_target!(|data: &[u8]| {
     if let Ok(text) = std::str::from_utf8(data) {
+        let _ = nt_path_on_network(text);
         for parsed in [normalize_win32(text), normalize_nt(text)] {
             if let Ok(p) = parsed {
+                // A path the normaliser calls UNC is always on the network.
+                if matches!(p.root(), palisade_fileid::fsctx::Root::Unc { .. }) {
+                    assert_eq!(opened_name_on_network(&p), Some(true));
+                }
                 let again = normalize_win32(&p.to_win32_string()).expect("re-parse");
                 assert_eq!(again.case_folded(), p.case_folded());
                 assert_eq!(again.components(), p.components());

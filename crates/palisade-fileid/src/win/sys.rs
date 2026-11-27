@@ -106,13 +106,16 @@ pub(crate) fn is_disk_file(file: &File) -> bool {
     unsafe { GetFileType(handle(file)) == FILE_TYPE_DISK }
 }
 
-/// Whether the file is on a remote file system: `FileRemoteProtocolInfo`
-/// succeeds only for files opened through a network redirector.
-pub(crate) fn is_remote(file: &File) -> bool {
+/// The `WNNC_NET_*` protocol `FileRemoteProtocolInfo` reports for the
+/// handle, or the error the call failed with. The call succeeds only for
+/// files opened through a network redirector, but a failure is not proof
+/// of a local file; see `win::volume::network_evidence`.
+pub(crate) fn remote_protocol(file: &File) -> io::Result<u32> {
     // SAFETY: `FILE_REMOTE_PROTOCOL_INFO` is the structure for
     // `FileRemoteProtocolInfo`: integers and unions of integer arrays only,
     // valid for every bit pattern.
-    unsafe { info_by_handle::<FILE_REMOTE_PROTOCOL_INFO>(file, FileRemoteProtocolInfo) }.is_ok()
+    unsafe { info_by_handle::<FILE_REMOTE_PROTOCOL_INFO>(file, FileRemoteProtocolInfo) }
+        .map(|info| info.Protocol)
 }
 
 /// The plain-data shape of `FILE_STANDARD_INFO`. The `windows-sys` type
@@ -666,7 +669,7 @@ mod tests {
         let guid = final_path_by_handle(&file, 1).unwrap();
         assert!(guid.starts_with(r"\\?\Volume{"), "{guid}");
         assert!(is_disk_file(&file));
-        assert!(!is_remote(&file));
+        assert!(remote_protocol(&file).is_err());
         drop(file);
         let _ = std::fs::remove_dir_all(dir);
     }
