@@ -238,7 +238,7 @@ fn features(node: &Match) -> Features {
         Match::Criterion(c) if c.operator.is_positive() => {
             let f = c.field;
             Features {
-                signer: matches!(f, Field::SignerPublisher | Field::SignerLeafThumbprint),
+                signer: is_signer_identity(f),
                 file: matches!(
                     f,
                     Field::PathFileName | Field::MetaOriginalFilename | Field::MetaInternalName
@@ -253,6 +253,21 @@ fn features(node: &Match) -> Features {
             .fold(Features::default(), Features::union),
         Match::Criterion(_) | Match::Any(_) | Match::Not(_) | Match::Ref(_) => Features::default(),
     }
+}
+
+/// The signer fields that name the signer itself (tier 4): the publisher,
+/// and the leaf thumbprints and TBS hashes, which name its certificate (a
+/// TBS hash at another position is ranked with them, so a block of a stolen
+/// CA certificate is as specific as the allows it overrides). The issuer,
+/// the PCA, the root and the EKUs name a certificate authority: tier 7.
+const fn is_signer_identity(f: Field) -> bool {
+    matches!(
+        f,
+        Field::SignerPublisher
+            | Field::SignerLeafThumbprint
+            | Field::SignerLeafThumbprintSha1
+            | Field::SignerTbsHash
+    )
 }
 
 fn criterion_spec(c: &crate::model::Criterion) -> Option<Spec> {
@@ -270,7 +285,7 @@ fn criterion_spec(c: &crate::model::Criterion) -> Option<Spec> {
         | Field::HashMsiFuzzySha256
         | Field::HashSha1
         | Field::HashMd5 => Tier::Hash,
-        Field::SignerPublisher | Field::SignerLeafThumbprint => Tier::Signer,
+        f if is_signer_identity(f) => Tier::Signer,
         Field::PathFull if c.operator == Operator::Equals => Tier::PathFile,
         Field::PathFull | Field::PathDirectory
             if matches!(

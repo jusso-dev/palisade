@@ -46,6 +46,10 @@ required-features = ["test-util"]
 name = "signer_criteria"
 required-features = ["test-util"]
 
+[[test]]
+name = "publisher_product"
+required-features = ["test-util"]
+
 [[bench]]
 name = "criterion_eval"
 harness = false

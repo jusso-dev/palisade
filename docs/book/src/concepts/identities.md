@@ -9,7 +9,7 @@ Specified in [#31](https://github.com/jusso-dev/palisade/issues/31) (identity cr
 | Hash | `hash.sha256`, `hash.sha384`, `hash.sha512`, `hash.authenticode_sha256` | strong: names exactly one file |
 | Hash (compatibility) | `hash.sha1`, `hash.md5`, `hash.authenticode_sha1`, page hashes | weak alone ([ADR 0008](../../../adr/0008-cryptographic-algorithms.md)) |
 | Publisher | `signer.publisher` (CN, O or full DN) | medium |
-| Certificate | `signer.leaf_thumbprint`, `signer.tbs_hash` | strong: names one certificate |
+| Certificate | `signer.leaf_thumbprint`, `signer.tbs_hash` | strong: names one certificate (a TBS hash above the leaf names a CA, so it is weak in an allow) |
 | Certificate authority | `signer.issuer`, `signer.pca`, `signer.root_thumbprint`, `signer.eku`, SHA-1 thumbprints | weak alone: a CA vouches for every file it signs |
 | Path | `path.full`, `path.directory`, `path.file_name`, `path.extension` | medium, and only where users cannot write |
 | Metadata | `meta.original_filename`, `meta.product_name`, `meta.file_version`, ... | weak: easy to copy into another file |
@@ -21,7 +21,8 @@ cannot write (ISM-1392); the engine checks the path's ACL safety at evaluation t
 
 **Hash rules** are the most precise and the most work: every update needs a new rule.
 **Publisher rules** trust what a signer signs, optionally narrowed by product name and minimum
-version (ISM-1471: use publisher *and* product names). By default a signer
+version (ISM-1471: use publisher *and* product names). The `publisher_product` preset
+(`palisade_policy::model::preset::PublisherProduct`) builds that form. By default a signer
 criterion only trusts signatures that are valid, valid with an expired but timestamped
 certificate, or catalog-signed; a criterion's `signer` options can accept other statuses, require
 a timestamp after a date or a minimum key size, reject algorithms, or pick the signature's source

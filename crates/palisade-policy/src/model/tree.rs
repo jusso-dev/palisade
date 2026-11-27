@@ -843,7 +843,9 @@ impl Field {
     ///
     /// A certificate authority vouches for every file it signs, so the
     /// issuer, the PCA, the root thumbprint and the EKUs are weak alone.
-    /// A TBS hash is strong, as #31 rates it.
+    /// A TBS hash is strong here, as #31 rates it; validation counts one
+    /// that may name a CA certificate (`position` other than `leaf`) as
+    /// weak in a rule that lets an object run.
     #[must_use]
     pub const fn strength(self) -> Option<Strength> {
         Some(match self {

@@ -17,6 +17,7 @@ pub mod action;
 pub mod effects;
 pub mod mode;
 pub mod precedence;
+pub mod preset;
 pub(crate) mod settings;
 mod tree;
 pub mod unknown;
