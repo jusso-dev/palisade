@@ -56,6 +56,9 @@ Commands:
   docs build [--site-url <path>]
                    Build the book into target/book (warnings are errors), then check every
                    internal link; needs mdbook, mdbook-mermaid-ssr, a headless browser and lychee
+  docs serve [--port <n>] [--open]
+                   Stage the book and serve it at http://127.0.0.1:3000/ with mdbook serve, until
+                   interrupted; run it again after editing a page (links are checked by docs build)
   docs assemble <dir> --version <latest|vX.Y>
                    Assemble the GitHub Pages tree: the book and the Rust API docs under
                    <dir>/<version>/, the version list and the root redirect
@@ -260,7 +263,7 @@ mod tests {
         assert_eq!(find("ci").description.len(), 3);
         assert!(find("dist").usage.contains("\n       [--compare-sizes"));
         assert_eq!(find("check-fuzz-locks").usage, "check-fuzz-locks");
-        assert_eq!(all.len(), 34);
+        assert_eq!(all.len(), 35);
     }
 
     /// Every command `main` dispatches on, as the string literal it
@@ -361,6 +364,7 @@ mod tests {
                 "docs generate",
                 "docs check",
                 "docs build",
+                "docs serve",
                 "docs assemble",
                 "docs version-for-ref"
             ]

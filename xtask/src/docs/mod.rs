@@ -47,6 +47,9 @@ pub const GENERATED: &str = "docs/book/src/reference/generated";
 pub const STAGE: &str = "book-src";
 /// Where `build` writes the site, under the target directory.
 pub const OUT: &str = "book";
+/// Where `docs serve` writes the book, apart from `docs build`'s output so
+/// serving never leaves a site that skipped the link check in `target/book`.
+pub const SERVE_OUT: &str = "book-serve";
 
 /// Cargo's target directory: `CARGO_TARGET_DIR`, or `<root>/target`.
 pub fn target_dir(root: &Path) -> PathBuf {
@@ -781,6 +784,95 @@ pub fn build(root: &Path, files: &[String], site_url: Option<&str>) -> Result<Ve
     Ok(v)
 }
 
+/// The address `docs serve` listens on by default: this machine only.
+pub const SERVE_HOST: &str = "127.0.0.1";
+/// The port `docs serve` listens on by default (mdBook's own default).
+pub const SERVE_PORT: u16 = 3000;
+
+/// `docs serve` options.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServeArgs {
+    pub port: u16,
+    pub open: bool,
+}
+
+/// Parses `docs serve [--port <n>] [--open]`.
+pub fn parse_serve_args(args: &[String]) -> Result<ServeArgs, String> {
+    const USAGE: &str = "usage: cargo xtask docs serve [--port <n>] [--open]";
+    let mut out = ServeArgs {
+        port: SERVE_PORT,
+        open: false,
+    };
+    let (mut port_seen, mut it) = (false, args.iter());
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--port" if !port_seen => {
+                port_seen = true;
+                let value = it.next().ok_or(USAGE)?;
+                out.port = match value.parse::<u16>() {
+                    Ok(p) if p >= 1024 => p,
+                    _ => return Err(format!("--port must be from 1024 to 65535, not `{value}`")),
+                };
+            }
+            "--open" if !out.open => out.open = true,
+            _ => return Err(USAGE.to_owned()),
+        }
+    }
+    Ok(out)
+}
+
+/// The `mdbook serve` arguments for the staged book in `stage_dir`,
+/// writing to `out_dir`. It listens on [`SERVE_HOST`] only.
+pub fn serve_command_args(stage_dir: &Path, out_dir: &Path, args: &ServeArgs) -> Vec<String> {
+    let mut out = vec![
+        "serve".to_owned(),
+        stage_dir.display().to_string(),
+        "--dest-dir".to_owned(),
+        out_dir.display().to_string(),
+        "--hostname".to_owned(),
+        SERVE_HOST.to_owned(),
+        "--port".to_owned(),
+        args.port.to_string(),
+    ];
+    if args.open {
+        out.push("--open".to_owned());
+    }
+    out
+}
+
+/// `docs serve`: stages the book as `docs build` does, then serves it with
+/// `mdbook serve` on this machine until interrupted. mdBook rebuilds when
+/// the staged copy changes, not the repository sources, so after editing a
+/// page run the command again. Links are not checked: run `docs build` for
+/// that, as CI does.
+pub fn serve(root: &Path, files: &[String], args: &ServeArgs) -> Result<Vec<String>, String> {
+    require_tools()?;
+    let stage_dir = target_dir(root).join(STAGE);
+    let out_dir = target_dir(root).join(SERVE_OUT);
+    if stage_dir.exists() {
+        std::fs::remove_dir_all(&stage_dir)
+            .map_err(|e| format!("cannot remove {}: {e}", stage_dir.display()))?;
+    }
+    let problems = stage::stage(root, files, &stage_dir)?;
+    if !problems.is_empty() {
+        return Ok(problems);
+    }
+    println!(
+        "docs: serving the book at http://{SERVE_HOST}:{}/ (Ctrl+C to stop; run again after editing a page)",
+        args.port
+    );
+    let status = Command::new("mdbook")
+        .args(serve_command_args(&stage_dir, &out_dir, args))
+        .env("RUST_LOG", "warn")
+        .status()
+        .map_err(|e| format!("cannot run mdbook: {e}"))?;
+    if status.success() {
+        Ok(Vec::new())
+    } else {
+        Err(format!("mdbook serve failed ({status})"))
+    }
+}
+
 /// Every rendered chapter carries the disclaimer banner from the theme.
 fn pages_without_disclaimer(out_dir: &Path) -> Result<Vec<String>, String> {
     let mut v = Vec::new();
@@ -830,6 +922,74 @@ fn read(path: &Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn serve_arguments_are_parsed_and_bounded() {
+        let a =
+            |l: &[&str]| parse_serve_args(&l.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>());
+        assert_eq!(
+            a(&[]),
+            Ok(ServeArgs {
+                port: 3000,
+                open: false
+            })
+        );
+        assert_eq!(
+            a(&["--port", "8080", "--open"]),
+            Ok(ServeArgs {
+                port: 8080,
+                open: true
+            })
+        );
+        assert_eq!(
+            a(&["--open", "--port", "65535"]),
+            Ok(ServeArgs {
+                port: 65535,
+                open: true
+            })
+        );
+        for bad in [
+            &["--port"][..],
+            &["--port", "80"],
+            &["--port", "0"],
+            &["--port", "70000"],
+            &["--port", "x"],
+            &["--port", "8080", "--port", "8081"],
+            &["--open", "--open"],
+            &["--hostname", "0.0.0.0"],
+            &["extra"],
+        ] {
+            assert!(a(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn serve_listens_on_this_machine_only() {
+        let args = serve_command_args(
+            Path::new("t/book-src"),
+            Path::new("t/book-serve"),
+            &ServeArgs {
+                port: 4000,
+                open: true,
+            },
+        );
+        assert_eq!(
+            args,
+            [
+                "serve",
+                "t/book-src",
+                "--dest-dir",
+                "t/book-serve",
+                "--hostname",
+                "127.0.0.1",
+                "--port",
+                "4000",
+                "--open"
+            ]
+        );
+        // Never the published site's output directory.
+        assert_ne!(SERVE_OUT, OUT);
+    }
 
     #[test]
     fn docs_tools_are_detected() {
