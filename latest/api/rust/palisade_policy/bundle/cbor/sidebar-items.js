@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_DEPTH"],"enum":["DecodeErrorKind","EncodeError","Value"],"fn":["decode","decode_prefix","decode_with_limits","encode"],"struct":["DecodeError","Limits","Map"]};
