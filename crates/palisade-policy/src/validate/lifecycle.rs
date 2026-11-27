@@ -79,14 +79,12 @@ impl Validator {
         }
 
         for (i, set) in doc.rule_sets.iter().enumerate() {
-            if set.id.to_string() == SYSTEM_BASELINE_ID
-                && !crate::unknown::baseline::is_generated_baseline(set, &doc.policy)
-            {
+            if set.id.to_string() == SYSTEM_BASELINE_ID {
                 self.push(
                     ErrorCode::ReservedRuleSetId,
                     &format!("/rule_sets/{i}/id"),
                     format!(
-                        "`{SYSTEM_BASELINE_ID}` is the managed `system_baseline`; only the engine adds it (`PolicyDocument::with_system_baseline`), so a policy cannot write a rule set with this ID"
+                        "`{SYSTEM_BASELINE_ID}` is the managed `system_baseline`; the engine adds it after validation (`ValidatedPolicy::with_system_baseline`), so a policy document cannot contain a rule set with this ID"
                     ),
                 );
             }
@@ -150,21 +148,17 @@ pub(crate) fn governance_mode(doc: &PolicyDocument) -> bool {
 /// What governance mode finds wrong with `rule` of `set` in `doc`: each
 /// problem's code, its path below the rule (empty for the rule itself)
 /// and a message. Empty when governance mode is off, the rule is disabled,
-/// the set is not referenced, or the set is the managed `system_baseline`
-/// the engine built ([`crate::unknown::baseline::is_generated_baseline`]). `read_only`
-/// alone exempts nothing: it is a curated set's precedence flag, and a
-/// policy author can set it.
+/// or the set is not referenced. No rule set is exempt: `read_only` is a
+/// curated set's precedence flag that an author can set, and the managed
+/// `system_baseline` never reaches validation (it is added afterwards,
+/// [`crate::validate::ValidatedPolicy::with_system_baseline`]).
 pub(crate) fn governance_problems(
     doc: &PolicyDocument,
     set: &RuleSet,
     rule: &Rule,
 ) -> Vec<(ErrorCode, &'static str, String)> {
     let mut out = Vec::new();
-    if !governance_mode(doc)
-        || !rule.enabled
-        || !doc.policy.rule_sets.contains(&set.id)
-        || crate::unknown::baseline::is_generated_baseline(set, &doc.policy)
-    {
+    if !governance_mode(doc) || !rule.enabled || !doc.policy.rule_sets.contains(&set.id) {
         return out;
     }
     let kind = rule.action.kind();

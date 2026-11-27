@@ -297,7 +297,7 @@ pub struct ReviewItem {
 
 /// The rules a review campaign covers: enabled allow and trust rules of
 /// the policy's referenced rule sets, other than the managed
-/// `system_baseline` the engine builds ([`managed_baseline`]). A
+/// `system_baseline` the engine adds after validation ([`managed_baseline`]). A
 /// read-only (curated) rule set is reviewed like any other.
 fn reviewable(doc: &PolicyDocument) -> impl Iterator<Item = (&RuleSet, &Rule)> {
     let exempt = managed_baseline(doc);
@@ -841,15 +841,17 @@ impl PolicyDocument {
     }
 }
 
-/// The managed `system_baseline` rule set, if the document holds the one
-/// the engine builds ([`crate::unknown::baseline::is_generated_baseline`]).
-/// It is the only rule set exempt from governance and review campaigns: a
-/// document that merely marks a rule set `read_only`, or gives it the
-/// baseline's ID, gets no exemption.
+/// The managed `system_baseline` rule set, if the document holds it. Only
+/// the engine adds it, after validation
+/// ([`crate::validate::ValidatedPolicy::with_system_baseline`]); an
+/// authored document that uses its ID is rejected, so this is never a set
+/// a policy author wrote. It is the only rule set exempt from review
+/// campaigns and the assistant's governance checks; `read_only` alone
+/// exempts nothing.
 pub(crate) fn managed_baseline(doc: &PolicyDocument) -> Option<RuleSetId> {
     doc.rule_sets
         .iter()
-        .find(|s| crate::unknown::baseline::is_generated_baseline(s, &doc.policy))
+        .find(|s| crate::unknown::baseline::is_system_baseline(s))
         .map(|s| s.id)
 }
 

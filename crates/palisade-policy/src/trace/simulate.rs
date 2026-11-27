@@ -761,7 +761,7 @@ impl Candidate {
     /// [`CandidateError`] if a change does not apply or the result is not
     /// valid.
     pub fn resolve(&self, current: &ValidatedPolicy) -> Result<ValidatedPolicy, CandidateError> {
-        let doc = match self {
+        let mut doc = match self {
             Self::Document(d) => (**d).clone(),
             Self::Change(c) => c.apply(current.document())?,
             Self::Mode(m) => ChangeSet {
@@ -770,7 +770,23 @@ impl Candidate {
             }
             .apply(current.document())?,
         };
-        doc.validate().map_err(CandidateError::Invalid)
+        // The managed baseline is added after validation and is never part
+        // of an authored document (#40): validate the candidate without
+        // it, then give the candidate the current policy's baseline, so
+        // both sides are compared with the same one. A draft's own
+        // baseline-shaped set is dropped, never trusted.
+        let baseline = current
+            .document()
+            .rule_sets
+            .iter()
+            .find(|s| crate::unknown::baseline::is_system_baseline(s))
+            .cloned();
+        crate::unknown::baseline::take_system_baseline(&mut doc);
+        let validated = doc.validate().map_err(CandidateError::Invalid)?;
+        Ok(match baseline {
+            Some(set) => validated.with_baseline_set(set),
+            None => validated,
+        })
     }
 }
 

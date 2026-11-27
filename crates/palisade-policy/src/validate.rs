@@ -245,8 +245,9 @@ pub enum ErrorCode {
     /// `on_expire` on a rule without `expires_at`, or `convert_to_audit` on
     /// a rule of a mandatory rule set (#40).
     OnExpireNotApplicable,
-    /// A rule set uses the managed `system_baseline`'s well-known ID but is
-    /// not the baseline the engine builds (#39, #40).
+    /// A policy document holds a rule set with the managed
+    /// `system_baseline`'s well-known ID, which only the engine adds, after
+    /// validation (#39, #40).
     ReservedRuleSetId,
 }
 
@@ -386,10 +387,13 @@ impl fmt::Display for ValidationError {
 impl std::error::Error for ValidationError {}
 
 /// A policy document that passed validation. It can only be built by
-/// [`PolicyDocument::validate`].
+/// [`PolicyDocument::validate`]; the engine may then add its managed
+/// `system_baseline` ([`ValidatedPolicy::with_system_baseline`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ValidatedPolicy {
-    document: PolicyDocument,
+    /// Crate-visible so the engine can add its managed `system_baseline`
+    /// after validation ([`ValidatedPolicy::with_system_baseline`]).
+    pub(crate) document: PolicyDocument,
     warnings: Vec<ValidationError>,
 }
 

@@ -1591,10 +1591,9 @@ fn baseline_doc(
         publishers: vec![OS_PUBLISHER.into()],
         writable_dirs: vec!["C:\\Windows\\ScannerFound".into()],
     };
-    let d = doc_with(unknown, extra)
+    valid(doc_with(unknown, extra))
         .with_system_baseline(&facts)
-        .unwrap();
-    valid(d)
+        .unwrap()
 }
 
 fn decide_os(v: &ValidatedPolicy, t: ObjectType, facts: &ObjectFacts) -> Decision {
@@ -1721,13 +1720,15 @@ fn the_baseline_validates_under_every_model() {
         let mut d = doc(serde_json::json!({}));
         d.policy.precedence_model = serde_json::from_value(model.into()).unwrap();
         d.policy.precedence_options = serde_json::from_value(options).unwrap();
-        let d = d
+        let v = d
+            .validate()
+            .unwrap_or_else(|e| panic!("{model}: {e:#?}"))
             .with_system_baseline(&SystemBaseline {
                 publishers: vec![OS_PUBLISHER.into()],
                 writable_dirs: vec![],
             })
             .unwrap();
-        let v = d.validate().unwrap_or_else(|e| panic!("{model}: {e:#?}"));
+        assert_baseline_valid(&v, model);
         let decision = decide_os(
             &v,
             ObjectType::Executable,
@@ -1743,11 +1744,12 @@ fn adding_the_baseline_twice_replaces_it() {
         publishers: vec![OS_PUBLISHER.into()],
         writable_dirs: vec![],
     };
-    let d = doc(serde_json::json!({}))
+    let v = valid(doc(serde_json::json!({})))
         .with_system_baseline(&facts)
         .unwrap()
         .with_system_baseline(&facts)
         .unwrap();
+    let d = v.document();
     assert_eq!(d.rule_sets.len(), 1);
     assert_eq!(d.policy.rule_sets.len(), 1);
     assert!(d.rule_sets[0].read_only);
@@ -1784,10 +1786,30 @@ fn baseline_inputs_are_bounded() {
             .map(|i| format!("C:\\Windows\\d{i}"))
             .collect(),
     };
-    let d = doc(serde_json::json!({}))
+    let v = valid(doc(serde_json::json!({})))
         .with_system_baseline(&most)
         .unwrap();
-    d.validate().unwrap();
+    assert_baseline_valid(&v, "deny_wins");
+}
+
+/// The baseline is added after validation and never validated with the
+/// policy, so check here that the set it adds is one validation would
+/// accept (under a fresh ID, which an authored document may use).
+fn assert_baseline_valid(v: &ValidatedPolicy, what: &str) {
+    let mut d = v.document().clone();
+    for set in &mut d.rule_sets {
+        if baseline::is_system_baseline(set) {
+            let fresh: crate::model::RuleSetId =
+                "01936b2e-8c4a-7b3d-9f21-0a1b2c3db001".parse().unwrap();
+            d.policy
+                .rule_sets
+                .iter_mut()
+                .filter(|r| **r == set.id)
+                .for_each(|r| *r = fresh);
+            set.id = fresh;
+        }
+    }
+    d.validate().unwrap_or_else(|e| panic!("{what}: {e:#?}"));
 }
 
 // ---------------------------------------------------------------- selfpin
@@ -2215,13 +2237,14 @@ fn the_baseline_never_overrides_a_tenant_rule_under_any_model() {
             let mut d = doc_with(serde_json::json!({}), &[(SET, "mixed", false, vec![rule])]);
             d.policy.precedence_model = serde_json::from_value(model.into()).unwrap();
             d.policy.precedence_options = serde_json::from_value(options.clone()).unwrap();
-            let d = d
+            let v = d
+                .validate()
+                .unwrap_or_else(|e| panic!("{model}: {e:#?}"))
                 .with_system_baseline(&SystemBaseline {
                     publishers: vec![OS_PUBLISHER.into()],
                     writable_dirs: vec![],
                 })
                 .unwrap();
-            let v = d.validate().unwrap_or_else(|e| panic!("{model}: {e:#?}"));
             let decision = decide_os(
                 &v,
                 ObjectType::Executable,
@@ -2276,11 +2299,10 @@ fn baseline_inputs_must_be_usable_values() {
         publishers: vec![OS_PUBLISHER.into()],
         writable_dirs: vec!["\\\\server\\share\\dir".into()],
     };
-    doc(serde_json::json!({}))
+    let v = valid(doc(serde_json::json!({})))
         .with_system_baseline(&facts)
-        .unwrap()
-        .validate()
         .unwrap();
+    assert_baseline_valid(&v, "unc");
 }
 
 #[test]
@@ -2456,44 +2478,42 @@ fn ml3_needs_a_mandatory_rule_in_force_at_every_time() {
     assert_eq!(codes(doc_with(ml3(), &[(id, kind, m, rules)])), vec![]);
 }
 
-/// F1: the baseline the engine builds validates under every precedence
-/// model even after its policy's model changes in a hierarchy merge, and
-/// is recognised as generated; editing any of its content is not.
+/// F1: a policy document can never contain the baseline's ID, however
+/// exactly it copies the generated set. A deliberate forgery (the exact
+/// generated shape with an arbitrary publisher) and a copy of the real
+/// baseline are both rejected; only the engine adds it, after validation.
 #[test]
-fn only_an_unedited_baseline_is_recognised_as_generated() {
-    let facts = SystemBaseline {
-        publishers: vec![OS_PUBLISHER.into()],
-        writable_dirs: vec!["C:\\Windows\\Flagged".into()],
-    };
-    let d = doc(serde_json::json!({}))
-        .with_system_baseline(&facts)
+fn an_authored_document_cannot_contain_the_baseline() {
+    let real = valid(doc(serde_json::json!({})))
+        .with_system_baseline(&SystemBaseline {
+            publishers: vec![OS_PUBLISHER.into()],
+            writable_dirs: vec!["C:\\Windows\\Flagged".into()],
+        })
         .unwrap();
-    assert!(baseline::is_generated_baseline(&d.rule_sets[0], &d.policy));
-    // Placement is not content.
-    let mut placed = d.clone();
-    placed.rule_sets[0].band = 3;
-    placed.rule_sets[0].rules[0].enabled = false;
-    placed.rule_sets[0].rules[0].order = Some(999_999);
-    assert!(baseline::is_generated_baseline(
-        &placed.rule_sets[0],
-        &placed.policy
-    ));
-    // Content is.
-    let edits: [fn(&mut crate::model::RuleSet); 4] = [
-        |s| {
-            s.rules[0].action =
-                serde_json::from_value(serde_json::json!({"type": "ignore"})).unwrap()
+    // A copy of what the engine added, submitted as an authored document.
+    let copied = real.document().clone();
+    assert_eq!(
+        codes(copied),
+        vec![(ErrorCode::ReservedRuleSetId, "/rule_sets/0/id".to_owned())]
+    );
+    // The reviewer's forgery: the generated shape, built for another
+    // publisher, so `facts_of`-style checks would accept it.
+    let forged = system_baseline(
+        &SystemBaseline {
+            publishers: vec!["Any Vendor Ltd".into()],
+            writable_dirs: vec![],
         },
-        |s| s.name = "renamed".into(),
-        |s| s.rules[0].metadata.exception = true,
-        |s| s.rules[0].expires_at = Some(crate::model::Timestamp(0)),
-    ];
-    for edit in edits {
-        let mut e = d.clone();
-        edit(&mut e.rule_sets[0]);
-        assert!(!baseline::is_generated_baseline(&e.rule_sets[0], &e.policy));
-        assert!(codes(e).contains(&(ErrorCode::ReservedRuleSetId, "/rule_sets/0/id".to_owned())));
-    }
+        crate::model::PrecedenceModel::DenyWins,
+        crate::model::PriorityDirection::LowerWins,
+    )
+    .unwrap();
+    let mut d = doc(serde_json::json!({}));
+    d.policy.rule_sets.push(forged.id);
+    d.rule_sets.push(forged);
+    assert_eq!(
+        codes(d),
+        vec![(ErrorCode::ReservedRuleSetId, "/rule_sets/0/id".to_owned())]
+    );
 }
 
 #[test]
@@ -4504,4 +4524,38 @@ proptest! {
                 "dropping {drop:?}: {:?} went from {f:?} to {p:?}", OriginClass::ALL[i]);
         }
     }
+}
+
+/// F1: the policy simulator re-validates candidate documents. A candidate
+/// built from a policy with the engine's baseline validates without it and
+/// gets the current policy's baseline back; a draft's own baseline-shaped
+/// set is dropped, never trusted.
+#[test]
+fn simulator_candidates_keep_the_engines_baseline() {
+    use crate::trace::simulate::Candidate;
+    let facts = SystemBaseline {
+        publishers: vec![OS_PUBLISHER.into()],
+        writable_dirs: vec![],
+    };
+    let current = valid(doc(serde_json::json!({})))
+        .with_system_baseline(&facts)
+        .unwrap();
+    let resolved = Candidate::Mode(Mode::Audit).resolve(&current).unwrap();
+    assert_eq!(resolved.document().policy.mode, Mode::Audit);
+    assert_eq!(resolved.document().rule_sets, current.document().rule_sets);
+    // A draft carrying a forged baseline.
+    let mut draft = current.document().clone();
+    draft.rule_sets[0] = system_baseline(
+        &SystemBaseline {
+            publishers: vec!["Any Vendor Ltd".into()],
+            writable_dirs: vec![],
+        },
+        draft.policy.precedence_model,
+        draft.policy.precedence_options.priority_direction,
+    )
+    .unwrap();
+    let resolved = Candidate::Document(Box::new(draft))
+        .resolve(&current)
+        .unwrap();
+    assert_eq!(resolved.document().rule_sets, current.document().rule_sets);
 }

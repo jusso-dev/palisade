@@ -16,7 +16,9 @@
 //!   any alternate data stream.
 //!
 //! The rule set is a `baseline`, `read_only` set with the well-known ID
-//! [`SYSTEM_BASELINE_ID`]. It is a **floor** at stage 4: the evaluator
+//! [`SYSTEM_BASELINE_ID`]. It is added to a policy only after validation
+//! ([`ValidatedPolicy::with_system_baseline`]), from facts the agent or
+//! server trusts; an authored document may not contain it. It is a **floor** at stage 4: the evaluator
 //! decides over its rule only when no other allow or deny matched, so
 //! under every precedence model (including `first_match` with
 //! `curated_first`) a tenant's rule wins over it. A mandatory deny, at
@@ -27,9 +29,8 @@
 //! trimmed text, and scanner-flagged directories are drive or UNC paths
 //! with no stream, so no value can be silently ignored at evaluation.
 
-use crate::model::{
-    PolicyDocument, PrecedenceModel, PriorityDirection, RuleSet, RuleSetId, limits,
-};
+use crate::model::{PrecedenceModel, PriorityDirection, RuleSet, RuleSetId, limits};
+use crate::validate::ValidatedPolicy;
 
 /// The well-known ID of the managed `system_baseline` rule set.
 pub const SYSTEM_BASELINE_ID: &str = "00000000-0000-7000-8000-00000000b001";
@@ -72,84 +73,16 @@ pub struct SystemBaseline {
     pub writable_dirs: Vec<String>,
 }
 
-/// Whether `set` claims to be the managed `system_baseline`: its
-/// well-known ID, as a read-only `baseline` rule set. In a validated
-/// document only the set the engine built can make that claim
-/// ([`is_generated_baseline`]).
+/// Whether `set` is the managed `system_baseline`: its well-known ID, as
+/// a read-only `baseline` rule set. Validation rejects
+/// [`SYSTEM_BASELINE_ID`] in every authored document
+/// (`reserved_rule_set_id`), so in a [`ValidatedPolicy`] only the set
+/// [`ValidatedPolicy::with_system_baseline`] added can be it.
 #[must_use]
 pub fn is_system_baseline(set: &RuleSet) -> bool {
     set.read_only
         && set.kind == crate::model::RuleSetKind::Baseline
         && set.id.to_string() == SYSTEM_BASELINE_ID
-}
-
-/// Whether `set` is exactly a `system_baseline` the engine builds
-/// ([`system_baseline`]) for `policy`'s precedence model, from the facts
-/// the set itself names. Only such a set is exempt from governance mode
-/// and review campaigns (#40), and validation rejects any other rule set
-/// that uses [`SYSTEM_BASELINE_ID`] (`reserved_rule_set_id`), so a policy
-/// author cannot write a rule set that claims to be the baseline. Its
-/// hierarchy `band`, its rule's `order` and `priority` (the evaluator
-/// decides over the baseline only as a floor, whatever they say), and
-/// whether a group suppressed its rule (which only makes it stricter) are
-/// placement, not content, and are not compared.
-#[must_use]
-pub fn is_generated_baseline(set: &RuleSet, policy: &crate::model::Policy) -> bool {
-    if !is_system_baseline(set) {
-        return false;
-    }
-    let Some(facts) = facts_of(set) else {
-        return false;
-    };
-    let Ok(mut built) = system_baseline(
-        &facts,
-        policy.precedence_model,
-        policy.precedence_options.priority_direction,
-    ) else {
-        return false;
-    };
-    built.band = set.band;
-    for (b, r) in built.rules.iter_mut().zip(&set.rules) {
-        b.enabled = r.enabled;
-        b.order = r.order;
-        b.priority = r.priority;
-    }
-    built == *set
-}
-
-/// The facts a baseline-shaped rule set was built from, read back from its
-/// one rule's tree, or `None` if it does not have that shape.
-fn facts_of(set: &RuleSet) -> Option<SystemBaseline> {
-    use crate::model::{Field, Match, Operator};
-    let [rule] = set.rules.as_slice() else {
-        return None;
-    };
-    let Match::All(parts) = &rule.match_ else {
-        return None;
-    };
-    let [Match::Criterion(publishers), _, Match::Not(excluded)] = parts.as_slice() else {
-        return None;
-    };
-    let Match::Any(excluded) = excluded.as_ref() else {
-        return None;
-    };
-    let writable_dirs = excluded
-        .iter()
-        .skip(2)
-        .map(|m| match m {
-            Match::Criterion(c)
-                if c.field == Field::PathDirectory && c.operator == Operator::StartsWith =>
-            {
-                Some(c.values.clone())
-            }
-            _ => None,
-        })
-        .collect::<Option<Vec<_>>>()?
-        .concat();
-    Some(SystemBaseline {
-        publishers: publishers.values.clone(),
-        writable_dirs,
-    })
 }
 
 /// Why a baseline cannot be built.
@@ -282,25 +215,64 @@ pub fn system_baseline(
     serde_json::from_value(set).map_err(|e| BaselineError::Model(e.to_string()))
 }
 
-impl PolicyDocument {
-    /// Adds the `system_baseline` rule set for `facts`, or replaces the one
-    /// already there, and references it from the policy.
+impl ValidatedPolicy {
+    /// Adds the `system_baseline` rule set for `facts` to a validated
+    /// policy, or replaces the one already there, and references it from
+    /// the policy. The agent (or the server at publishing) calls this
+    /// **after** validation with the OS facts it trusts: the baseline is
+    /// never part of an authored document, so validation, governance mode
+    /// and review campaigns never see it, and a document that writes a
+    /// rule set with [`SYSTEM_BASELINE_ID`] is rejected
+    /// (`reserved_rule_set_id`, #40). That is why the baseline is the only
+    /// rule set that needs no justification or review: where it came from
+    /// is the engine, not the document.
+    ///
+    /// The result is not validated again. The baseline is built to be
+    /// valid under the policy's precedence model (a test validates it
+    /// under every model), and the one rule it adds is counted against
+    /// no limit that matters: it is a floor that decides only when no
+    /// other rule did.
     ///
     /// # Errors
     ///
     /// Returns [`BaselineError`] if the facts do not fit in one rule.
     pub fn with_system_baseline(mut self, facts: &SystemBaseline) -> Result<Self, BaselineError> {
+        let doc = &mut self.document;
         let set = system_baseline(
             facts,
-            self.policy.precedence_model,
-            self.policy.precedence_options.priority_direction,
+            doc.policy.precedence_model,
+            doc.policy.precedence_options.priority_direction,
         )?;
         let id: RuleSetId = set.id;
-        self.rule_sets.retain(|s| s.id != id);
-        self.rule_sets.push(set);
-        if !self.policy.rule_sets.contains(&id) {
-            self.policy.rule_sets.push(id);
+        doc.rule_sets.retain(|s| s.id != id);
+        doc.rule_sets.push(set);
+        if !doc.policy.rule_sets.contains(&id) {
+            doc.policy.rule_sets.push(id);
         }
         Ok(self)
     }
+
+    /// The same policy with `set`, the `system_baseline` of another
+    /// validated policy, added after validation as
+    /// [`with_system_baseline`](Self::with_system_baseline) adds one.
+    #[must_use]
+    pub(crate) fn with_baseline_set(mut self, set: RuleSet) -> Self {
+        let doc = &mut self.document;
+        doc.rule_sets.retain(|s| s.id != set.id);
+        if !doc.policy.rule_sets.contains(&set.id) {
+            doc.policy.rule_sets.push(set.id);
+        }
+        doc.rule_sets.push(set);
+        self
+    }
+}
+
+/// Removes a managed `system_baseline` from `doc` and from the policy's
+/// references, and returns it, so the rest can be validated again (the
+/// policy simulator's candidates, #41).
+pub(crate) fn take_system_baseline(doc: &mut crate::model::PolicyDocument) -> Option<RuleSet> {
+    let i = doc.rule_sets.iter().position(is_system_baseline)?;
+    let set = doc.rule_sets.remove(i);
+    doc.policy.rule_sets.retain(|id| *id != set.id);
+    Some(set)
 }

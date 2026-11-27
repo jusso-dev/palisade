@@ -1142,25 +1142,29 @@ fn read_only_does_not_exempt_a_rule_set_from_governance() {
     assert_eq!(crate::lifecycle::review_due(&d, NOW.date()).len(), 1);
 }
 
-/// F1: the engine-built baseline stays exempt; a document that forges its
-/// ID gets nothing.
+/// F1: the baseline the engine adds after validation stays exempt; a
+/// document that writes a set with its ID, even the exact generated shape
+/// with an arbitrary publisher, is rejected, and if analysed anyway it is
+/// governed.
 #[test]
 fn only_the_engine_built_baseline_is_exempt() {
-    use crate::unknown::baseline::{SYSTEM_BASELINE_ID, SystemBaseline};
+    use crate::unknown::baseline::{SystemBaseline, system_baseline};
     let base = || {
         let json = serde_json::json!({"schema_version": "1.0.0",
             "policy": {"id": POLICY, "name": "Lint", "revision": 1, "mode": "enforce",
                        "unknown": {"preset": "e8_ml2"}, "rule_sets": []}});
         PolicyDocument::from_json(&json.to_string()).unwrap()
     };
+    // The way the engine adds it: after validation.
     let real = base()
+        .validate()
+        .unwrap()
         .with_system_baseline(&SystemBaseline {
             publishers: vec!["OS Publisher".into()],
             writable_dirs: vec!["C:\\Windows\\Flagged".into()],
         })
         .unwrap();
-    real.clone().validate().unwrap();
-    let findings = analyse(&real, &Facts::default(), NOW);
+    let findings = analyse(real.document(), &Facts::default(), NOW);
     assert!(
         !findings.iter().any(|f| matches!(
             f.code,
@@ -1170,11 +1174,21 @@ fn only_the_engine_built_baseline_is_exempt() {
         )),
         "{findings:?}"
     );
-    assert!(crate::lifecycle::review_due(&real, NOW.date()).is_empty());
-    // The same ID on a set the engine did not build: a wider tree.
-    let mut forged = real.clone();
-    forged.rule_sets[0].rules[0].match_ =
-        serde_json::from_value(crit("signer.publisher", "equals", &["OS Publisher"])).unwrap();
+    assert_eq!(publish_gate(&findings, None), Gate::Pass);
+    assert!(crate::lifecycle::review_due(real.document(), NOW.date()).is_empty());
+    // The forgery: the exact generated shape for any publisher.
+    let mut forged = base();
+    let set = system_baseline(
+        &SystemBaseline {
+            publishers: vec!["Any Vendor Ltd".into()],
+            writable_dirs: vec![],
+        },
+        forged.policy.precedence_model,
+        forged.policy.precedence_options.priority_direction,
+    )
+    .unwrap();
+    forged.policy.rule_sets.push(set.id);
+    forged.rule_sets.push(set);
     let errors = forged.clone().validate().unwrap_err();
     assert!(
         errors
@@ -1183,22 +1197,8 @@ fn only_the_engine_built_baseline_is_exempt() {
                 && e.path == "/rule_sets/0/id"),
         "{errors:#?}"
     );
-    let findings = analyse(&forged, &Facts::default(), NOW);
-    assert!(
-        findings
-            .iter()
-            .any(|f| f.code == FindingCode::MissingJustification),
-        "{findings:?}"
-    );
-    // A hand-written set with the ID, even read-only and of kind baseline.
-    let json = serde_json::json!({"schema_version": "1.0.0",
-        "policy": {"id": POLICY, "name": "Lint", "revision": 1, "mode": "enforce", "rule_sets": [SYSTEM_BASELINE_ID]},
-        "rule_sets": [{"id": SYSTEM_BASELINE_ID, "name": "system_baseline", "kind": "baseline", "read_only": true,
-                       "rules": [rule(1, hash('a'), "allow")]}]});
-    let errors = PolicyDocument::from_json(&json.to_string())
-        .unwrap()
-        .validate()
-        .unwrap_err();
+    // A copy of the real one, submitted as a document, is rejected too.
+    let errors = real.document().clone().validate().unwrap_err();
     assert!(
         errors
             .iter()
