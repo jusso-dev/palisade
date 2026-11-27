@@ -490,8 +490,12 @@ pub struct NearMiss {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InactiveReason {
-    /// The rule is disabled. Expiry and schedules arrive with #40.
+    /// The rule is disabled.
     Disabled,
+    /// `activates_at` has not been reached at the evaluator's clock (#40).
+    NotYetActive,
+    /// `expires_at` has passed at the evaluator's clock (#40).
+    Expired,
 }
 
 /// A rule that would have matched but is inactive.
@@ -699,6 +703,25 @@ impl<'p> Tracer<'p> {
         self
     }
 
+    /// The same tracer, deciding at `clock`: rules outside their activity
+    /// window are absent, and listed as inactive (#40,
+    /// [`Evaluator::at`]).
+    #[must_use]
+    pub fn at(mut self, clock: crate::lifecycle::RuleClock) -> Self {
+        self.evaluator.set_clock(clock);
+        self
+    }
+
+    /// Sets the clock rules are judged at ([`Evaluator::set_clock`]).
+    pub const fn set_clock(&mut self, clock: crate::lifecycle::RuleClock) {
+        self.evaluator.set_clock(clock);
+    }
+
+    /// Whether a rule takes part, as the evaluator judges it.
+    fn active(&self, rule: &crate::model::Rule) -> bool {
+        self.evaluator.activity_of(rule).is_active()
+    }
+
     /// The evaluator every decision comes from.
     #[must_use]
     pub const fn evaluator(&self) -> &Evaluator<'p> {
@@ -886,12 +909,15 @@ impl<'p> Tracer<'p> {
         // Stages.
         trace.stages = stages(decision_ref, decider, &matched, state, &durations);
 
-        // Inactive matches: disabled rules whose tree matches.
+        // Inactive matches: rules outside their activity window (disabled,
+        // not yet active or expired) whose tree matches.
         let mut inactive: Vec<&TracedRule<'p>> = self
             .rules
             .iter()
             .enumerate()
-            .filter(|(i, r)| !r.rule.enabled && result(*i).is_some_and(|x| x.tree == Tri::Match))
+            .filter(|(i, r)| {
+                !self.active(r.rule) && result(*i).is_some_and(|x| x.tree == Tri::Match)
+            })
             .map(|(_, r)| r)
             .collect();
         inactive.sort_by_key(|r| r.rule.id);
@@ -903,7 +929,13 @@ impl<'p> Tracer<'p> {
                 rule: r.reference,
                 name: clip(&r.rule.name).0,
                 action: r.action(),
-                reason: InactiveReason::Disabled,
+                reason: match self.evaluator.activity_of(r.rule) {
+                    crate::lifecycle::Activity::NotYetActive => InactiveReason::NotYetActive,
+                    crate::lifecycle::Activity::Expired => InactiveReason::Expired,
+                    crate::lifecycle::Activity::Disabled | crate::lifecycle::Activity::Active => {
+                        InactiveReason::Disabled
+                    }
+                },
             })
             .collect();
 
@@ -936,7 +968,7 @@ impl<'p> Tracer<'p> {
         let mut used: BTreeSet<(Field, Selector)> = BTreeSet::new();
         for (i, r) in self.rules.iter().enumerate() {
             let Some(res) = result(i) else { continue };
-            if !r.rule.enabled || !res.type_applies {
+            if !self.active(r.rule) || !res.type_applies {
                 continue;
             }
             // A scope note is worth a warning on a rule whose tree did not
@@ -1132,7 +1164,7 @@ impl<'p> Tracer<'p> {
             .zip(results)
             .filter_map(|(r, res)| Some((r, res.as_ref()?)))
             .filter(|(r, res)| {
-                r.rule.enabled
+                self.active(r.rule)
                     && res.type_applies
                     && !matched.contains(&r.rule.id)
                     && r.anchor_matched(res)

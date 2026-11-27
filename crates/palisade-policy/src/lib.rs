@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
 
+pub mod analysis;
 pub mod condition;
 pub mod context;
 pub mod decision;
@@ -9,6 +10,7 @@ pub mod evaluate;
 pub mod facts;
 pub mod hierarchy;
 pub mod library;
+pub mod lifecycle;
 pub mod mode;
 pub mod model;
 pub mod ops;

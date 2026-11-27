@@ -15,6 +15,7 @@
 
 pub mod action;
 pub mod effects;
+pub mod lifecycle;
 pub mod mode;
 pub mod precedence;
 pub mod preset;
@@ -31,6 +32,9 @@ pub use action::{
     TrustSourceDirective, UnknownAs,
 };
 pub use effects::{Effects, EventSeverity, LogLevel, Notify, ResolvedEffects, Upload};
+pub use lifecycle::{
+    Date, FindingSeverity, GovernanceSettings, OnExpire, RiskRating, RuleSource, Timestamp,
+};
 pub use mode::ModeOptions;
 pub use palisade_core::{Mode, ObjectType, PolicyId, RuleId, RuleSetId, SchemaVersion, ScriptKind};
 pub use precedence::{AllowTiebreak, PrecedenceOptions, PriorityDirection, TierTiebreak};
@@ -123,6 +127,10 @@ pub struct Policy {
     /// unknown object.
     #[serde(default, skip_serializing_if = "UnknownPolicy::is_default")]
     pub unknown: UnknownPolicy,
+    /// Governance settings: justification, review and expiry rules, the
+    /// policy assistant's severities and counter reporting (#40).
+    #[serde(default, skip_serializing_if = "GovernanceSettings::is_default")]
+    pub governance: GovernanceSettings,
     /// The rule sets that apply, in order, by ID.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(length(max = 1000))]
@@ -282,6 +290,17 @@ pub struct Rule {
     /// Disabled rules are kept, but never decide.
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// The rule is absent before this instant (#40).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activates_at: Option<Timestamp>,
+    /// The rule is absent from this instant on (#40). An expired allow
+    /// never revives, even if the clock is set back
+    /// ([`crate::lifecycle`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<Timestamp>,
+    /// What happens when the rule expires (#40).
+    #[serde(default, skip_serializing_if = "OnExpire::is_default")]
+    pub on_expire: OnExpire,
     /// The object classes the rule applies to. Empty means every class.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub object_types: Vec<ObjectType>,
@@ -338,11 +357,20 @@ pub enum EnforcementOverride {
     NeverEnforce,
 }
 
-/// Governance metadata (#40). More fields arrive with #40.
+/// Governance metadata (#40), on a policy, a rule set or a rule. Every
+/// field is optional. Metadata is not decision-relevant: it never changes
+/// what a rule decides ([`PolicyDocument::decision_relevant`]).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Metadata {
-    /// Why the object exists.
+    /// The principal who owns the object, such as a user or group ID. The
+    /// owner or a tenant administrator may edit it, and is notified before
+    /// it expires (#16).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(min = 1, max = 128))]
+    pub owner: Option<String>,
+    /// Why the object exists. Required in governance mode for allow, trust,
+    /// exclusion and exception rules.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(length(max = 4096))]
     pub justification: Option<String>,
@@ -350,6 +378,56 @@ pub struct Metadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(length(min = 1, max = 128))]
     pub ticket_ref: Option<String>,
+    /// Who asked for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(min = 1, max = 128))]
+    pub requested_by: Option<String>,
+    /// Who approved it. Required for exception rules in governance mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(min = 1, max = 128))]
+    pub approved_by: Option<String>,
+    /// When it was approved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approved_at: Option<Timestamp>,
+    /// Who created it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(min = 1, max = 128))]
+    pub created_by: Option<String>,
+    /// When it was created.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<Timestamp>,
+    /// Who changed it last.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(min = 1, max = 128))]
+    pub updated_by: Option<String>,
+    /// When it was changed last.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<Timestamp>,
+    /// Where it came from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<RuleSource>,
+    /// When it is due for review. Unset on an allow or trust rule means a
+    /// year after `created_at` ([`crate::lifecycle::review_by`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_by: Option<Date>,
+    /// When it was last reviewed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_reviewed_at: Option<Timestamp>,
+    /// Who reviewed it last.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(min = 1, max = 128))]
+    pub last_reviewed_by: Option<String>,
+    /// The risk it carries. Required for exception rules in governance mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk_rating: Option<RiskRating>,
+    /// The controls that make up for the risk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(max = 4096))]
+    pub compensating_controls: Option<String>,
+    /// Mark the rule as an exception, in addition to the rules that are
+    /// exceptions by their nature ([`crate::lifecycle::is_exception`]).
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub exception: bool,
     /// Free-form labels, each 1 to 128 characters, at most 64.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(length(max = 64), inner(length(min = 1, max = 128)))]

@@ -45,11 +45,75 @@ fn metadata() -> impl Strategy<Value = Metadata> {
         proptest::collection::btree_set("[a-z][a-z0-9:._-]{0,20}", 0..4),
         text(),
     )
-        .prop_map(|(justification, ticket_ref, tags, comment)| Metadata {
-            justification,
-            ticket_ref,
-            tags: tags.into_iter().collect(),
-            comment,
+        .prop_flat_map(|(justification, ticket_ref, tags, comment)| {
+            (
+                proptest::option::of("[a-z]{1,12}"),
+                proptest::option::of(timestamp()),
+                proptest::option::of(date()),
+                proptest::option::of(proptest::sample::select(vec![
+                    super::RiskRating::Low,
+                    super::RiskRating::Medium,
+                    super::RiskRating::High,
+                ])),
+                proptest::option::of(proptest::sample::select(vec![
+                    super::RuleSource::Manual,
+                    super::RuleSource::Learned,
+                    super::RuleSource::Api,
+                ])),
+            )
+                .prop_map(
+                    move |(owner, created_at, review_by, risk_rating, source)| Metadata {
+                        justification: justification.clone(),
+                        ticket_ref: ticket_ref.clone(),
+                        tags: tags.iter().cloned().collect(),
+                        comment: comment.clone(),
+                        owner,
+                        created_at,
+                        review_by,
+                        risk_rating,
+                        source,
+                        ..Metadata::default()
+                    },
+                )
+        })
+}
+
+/// An instant in years 1970 to 2100.
+fn timestamp() -> impl Strategy<Value = super::Timestamp> {
+    (0i64..4_102_444_800).prop_map(super::Timestamp)
+}
+
+/// A date in years 1970 to 2100.
+fn date() -> impl Strategy<Value = super::Date> {
+    (0i64..47_482).prop_map(super::Date)
+}
+
+/// An activity window and expiry behaviour that pass validation.
+fn window() -> impl Strategy<
+    Value = (
+        Option<super::Timestamp>,
+        Option<super::Timestamp>,
+        super::OnExpire,
+    ),
+> {
+    (
+        proptest::option::of(0i64..2_000_000_000),
+        proptest::option::of(1i64..1_000_000_000),
+        proptest::sample::select(vec![
+            super::OnExpire::Deactivate,
+            super::OnExpire::ConvertToAudit,
+            super::OnExpire::DeleteAfterDays(30),
+        ]),
+    )
+        .prop_map(|(start, len, on)| {
+            let activates = start.map(super::Timestamp);
+            let expires = len.map(|l| super::Timestamp(start.unwrap_or(0) + l));
+            let on = if expires.is_some() {
+                on
+            } else {
+                super::OnExpire::Deactivate
+            };
+            (activates, expires, on)
         })
 }
 
@@ -297,7 +361,7 @@ fn rule(kind: RuleSetKind, mandatory: bool) -> impl Strategy<Value = Rule> {
         ),
     )
         .prop_map(
-            |(
+            move |(
                 (id, display_id, name, description),
                 (enabled, match_, (action, types, effects)),
                 (order, priority, enforcement_override, metadata),
@@ -307,6 +371,9 @@ fn rule(kind: RuleSetKind, mandatory: bool) -> impl Strategy<Value = Rule> {
                 name,
                 description,
                 enabled,
+                activates_at: None,
+                expires_at: None,
+                on_expire: super::OnExpire::Deactivate,
                 object_types: types.into_iter().collect(),
                 match_,
                 effects,
@@ -775,6 +842,31 @@ pub fn scoped_document() -> impl Strategy<Value = PolicyDocument> {
         })
 }
 
+/// [`scoped_document`], with random activity windows, expiry behaviour and
+/// governance metadata on its rules (#40). The evaluation proptests use
+/// [`document`], whose rules are always active, so their oracles need no
+/// clock.
+pub fn document_with_lifecycle() -> impl Strategy<Value = PolicyDocument> {
+    // Boxed: the scoped document's strategy is deep enough that
+    // composing it unboxed overflows a test thread's stack in debug builds.
+    (scoped_document().boxed(), vec(window(), 0..16).boxed()).prop_map(|(mut doc, windows)| {
+        let rules = doc.rule_sets.iter_mut().flat_map(|s| {
+            let mandatory = s.mandatory;
+            s.rules.iter_mut().map(move |r| (mandatory, r))
+        });
+        for ((mandatory, rule), (activates_at, expires_at, on_expire)) in rules.zip(windows) {
+            rule.activates_at = activates_at;
+            rule.expires_at = expires_at;
+            rule.on_expire = if mandatory && on_expire == super::OnExpire::ConvertToAudit {
+                super::OnExpire::Deactivate
+            } else {
+                on_expire
+            };
+        }
+        doc
+    })
+}
+
 /// A document that passes [`PolicyDocument::validate`].
 pub fn document() -> impl Strategy<Value = PolicyDocument> {
     let model = proptest::sample::select(vec![
@@ -821,6 +913,13 @@ pub fn document() -> impl Strategy<Value = PolicyDocument> {
                         mode_options,
                         settings,
                         unknown,
+                        // Governance mode off, so random metadata need not
+                        // satisfy it; the settings themselves vary.
+                        governance: super::GovernanceSettings {
+                            require_justification: Some(false),
+                            stale_after_days: 30 + u16::try_from(revision % 300).unwrap_or(0),
+                            ..super::GovernanceSettings::default()
+                        },
                         rule_sets,
                         scope: None,
                         rule_set_scopes: Vec::new(),

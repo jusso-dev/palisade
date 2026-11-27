@@ -11,16 +11,19 @@ Appears at: `/rule_sets/rules`.
 | Field | Type | Required | Default | Constraints | Since | Description |
 |---|---|---|---|---|---|---|
 | `action` | [`Action`](action.md) | yes |  |  | 1.0.0 | What happens when it matches (#34). |
+| `activates_at` | [`Timestamp`](types.md#timestamp) | no |  |  | 1.0.0 | The rule is absent before this instant (#40). |
 | `description` | string | no |  | at most 4096 characters | 1.0.0 | Free-text description, at most 4096 characters. |
 | `display_id` | string | no |  | matches `^R-[0-9]{6,12}$` | 1.0.0 | Human short ID from the tenant's sequence, `R-` and 6 to 12 digits. |
 | `effects` | [`Effects`](effects.md) | no |  |  | 1.0.0 | Logging, upload, notification, severity and tags (#34). Unset fields take the action's defaults. |
 | `enabled` | boolean | no | `true` |  | 1.0.0 | Disabled rules are kept, but never decide. |
 | `enforcement_override` | [`EnforcementOverride`](types.md#enforcementoverride) | no | `"inherit"` |  | 1.0.0 | Per-rule enforcement override (#36). Only for `deny` rules. |
+| `expires_at` | [`Timestamp`](types.md#timestamp) | no |  |  | 1.0.0 | The rule is absent from this instant on (#40). An expired allow never revives, even if the clock is set back (`crate::lifecycle`). |
 | `id` | [`RuleId`](types.md#ruleid) | yes |  |  | 1.0.0 | Stable ID, never reused. |
 | `match` | [`Match`](match.md) | yes |  |  | 1.0.0 | When the rule matches (#33). |
 | `metadata` | [`Metadata`](metadata.md) | no |  |  | 1.0.0 | Governance metadata (#40). |
 | `name` | string | yes |  | 1 to 128 characters | 1.0.0 | Display name, with the same rules as a policy name. |
 | `object_types` | array of [`ObjectType`](types.md#objecttype) | no |  |  | 1.0.0 | The object classes the rule applies to. Empty means every class. |
+| `on_expire` | [`OnExpire`](on-expire.md) | no |  |  | 1.0.0 | What happens when the rule expires (#40). |
 | `order` | integer | no |  | 0 to 1000000; format `uint32` | 1.0.0 | Position for the `first_match` model (#35): 0 to 1000000, lowest first. Rules of custom (not read-only) rule sets use 100001 to 999989; the other ranges are reserved for system, curated and catch-all rules. |
 | `priority` | integer | no |  | format `int32` | 1.0.0 | Priority for the `priority` model (#35). |
 | `scope` | [`Scope`](scope.md) | no |  |  | 1.0.0 | Who, where and when the rule applies (#38). Unset means everyone, everywhere, always, within the policy's and the rule set's scopes. |

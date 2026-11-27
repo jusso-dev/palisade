@@ -211,9 +211,13 @@ pub fn explain(trace: &Trace, verbosity: Verbosity) -> ExplainDoc {
     }
     for i in &trace.inactive_matches {
         doc.paragraphs.push(
-            Message::new("inactive")
-                .arg("rule", named(&i.name, &i.rule))
-                .arg("action", i.action.as_str()),
+            Message::new(match i.reason {
+                super::InactiveReason::Disabled => "inactive",
+                super::InactiveReason::NotYetActive => "inactive-not-yet",
+                super::InactiveReason::Expired => "inactive-expired",
+            })
+            .arg("rule", named(&i.name, &i.rule))
+            .arg("action", i.action.as_str()),
         );
     }
     let blocked = trace
@@ -720,6 +724,14 @@ pub const ENGLISH: &[(&str, &str)] = &[
     (
         "scope-rejected",
         "Rule { $rule } matched this file, but its { $level } scope does not cover this case ({ $dimension }), so it did not apply.",
+    ),
+    (
+        "inactive-not-yet",
+        "Rule { $rule } would have matched ({ $action }), but it is not active yet.",
+    ),
+    (
+        "inactive-expired",
+        "Rule { $rule } would have matched ({ $action }), but it has expired.",
     ),
     (
         "why-not-mismatch",

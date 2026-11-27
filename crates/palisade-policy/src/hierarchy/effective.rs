@@ -746,6 +746,7 @@ impl<'a, 'h> Builder<'a, 'h> {
                 mode_options,
                 settings,
                 unknown: self.unknown(),
+                governance: self.governance(),
                 rule_sets: sets.keys().copied().collect(),
                 scope: None,
                 rule_set_scopes,
@@ -1270,6 +1271,29 @@ impl<'a, 'h> Builder<'a, 'h> {
         u.scopes = Vec::new();
         u.scope_limits = if everywhere { Vec::new() } else { limits };
         u
+    }
+
+    /// The governance settings (#40): the stricter combination of every
+    /// assigned policy's, each with its governance mode resolved against
+    /// its own preset, from the outermost layer in
+    /// ([`GovernanceSettings::stricter`](crate::model::GovernanceSettings::stricter)).
+    fn governance(&self) -> crate::model::GovernanceSettings {
+        let mut acc: Option<crate::model::GovernanceSettings> = None;
+        for layer in self.layers {
+            for (_, d) in self.policies(layer) {
+                // Each layer's mode as it gets it, so a preset's mode is
+                // not lost to a nearer layer's explicit `false`.
+                let own = d
+                    .policy
+                    .governance
+                    .resolved(d.policy.unknown.preset.is_some());
+                acc = Some(match acc {
+                    None => own,
+                    Some(outer) => own.stricter(&outer),
+                });
+            }
+        }
+        acc.unwrap_or_default()
     }
 
     /// The merged settings and their provenance.

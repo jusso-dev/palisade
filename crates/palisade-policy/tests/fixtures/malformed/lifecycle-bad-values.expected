@@ -1,0 +1,6 @@
+/policy/governance/stale_after_days
+propertyName:no_such_check
+/rule_sets/0/rules/0/expires_at
+/rule_sets/0/rules/0/on_expire
+/rule_sets/0/rules/0/metadata/risk_rating
+/rule_sets/0/rules/0/metadata/review_by

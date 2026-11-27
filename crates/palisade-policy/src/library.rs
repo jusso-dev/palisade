@@ -284,6 +284,10 @@ pub struct Library {
 }
 
 /// What a library holds. The `kind` key names the variant.
+// A rule set's governance metadata (#40) makes the `RuleSet` variant the
+// largest. Libraries are few and held in a catalogue, not copied on a hot
+// path, so boxing it would only complicate the API.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum LibraryContent {

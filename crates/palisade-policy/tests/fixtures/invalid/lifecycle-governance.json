@@ -1,0 +1,51 @@
+{
+  "schema_version": "1.0.0",
+  "policy": {
+    "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+    "name": "Lifecycle and governance",
+    "revision": 1,
+    "mode": "enforce",
+    "governance": {
+      "require_justification": true,
+      "expiry_notice_days": [14, 14]
+    },
+    "rule_sets": ["01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60"]
+  },
+  "rule_sets": [
+    {
+      "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60",
+      "name": "Rules",
+      "kind": "mixed",
+      "rules": [
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e61",
+          "name": "Window ends before it starts",
+          "activates_at": "2026-12-01T00:00:00Z",
+          "expires_at": "2026-11-01T00:00:00Z",
+          "match": {"criterion": {"field": "hash.sha256", "operator": "equals", "values": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]}},
+          "action": {"type": "deny"}
+        },
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e62",
+          "name": "On expire without expiry",
+          "on_expire": "convert_to_audit",
+          "match": {"criterion": {"field": "hash.sha256", "operator": "equals", "values": ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]}},
+          "action": {"type": "deny"}
+        },
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e63",
+          "name": "Allow with no justification or review date",
+          "match": {"criterion": {"field": "hash.sha256", "operator": "equals", "values": ["cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"]}},
+          "action": {"type": "allow"}
+        },
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e64",
+          "name": "Exception without expiry, approver or risk",
+          "match": {"criterion": {"field": "hash.sha256", "operator": "equals", "values": ["dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"]}},
+          "action": {"type": "allow"},
+          "metadata": {"exception": true, "justification": "Line-of-business tool", "created_at": "2026-11-25T00:00:00Z"}
+        }
+      ]
+    }
+  ]
+}

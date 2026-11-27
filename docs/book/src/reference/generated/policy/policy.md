@@ -11,6 +11,7 @@ Appears at: `/policy`.
 | Field | Type | Required | Default | Constraints | Since | Description |
 |---|---|---|---|---|---|---|
 | `description` | string | no |  | at most 4096 characters | 1.0.0 | Free-text description, at most 4096 characters. |
+| `governance` | [`GovernanceSettings`](governance-settings.md) | no |  |  | 1.0.0 | Governance settings: justification, review and expiry rules, the policy assistant's severities and counter reporting (#40). |
 | `id` | [`PolicyId`](types.md#policyid) | yes |  |  | 1.0.0 | Stable ID. Renaming the policy never changes it. |
 | `location_profiles` | array of [`LocationProfile`](location-profile.md) | no |  | at most 64 items | 1.0.0 | Named network locations that scopes test with `location_profile` (#38). |
 | `metadata` | [`Metadata`](metadata.md) | no |  |  | 1.0.0 | Governance metadata (#40). |
