@@ -62,8 +62,9 @@ Option 3. **Every commit in a pull request carries a DCO 1.1 sign-off. There is 
   one.
 - A `DCO` check, added in #244 as the workflow `.github/workflows/dco.yml` and the script
   `.github/scripts/check-dco.sh` with its tests, runs on every pull request. It fails if any
-  non-merge commit lacks a matching sign-off. The script lives in the repository and changes
-  only through review ([CODEOWNERS](../../.github/CODEOWNERS)).
+  non-merge commit lacks a matching sign-off, with the Dependabot rule and the owner exemption
+  below as the only exceptions. The script lives in the repository and changes only through
+  review ([CODEOWNERS](../../.github/CODEOWNERS)).
 - Merge commits are skipped. They are not free of content: a merge that resolves a conflict, or
   that is edited before it is committed, can add changes found in neither parent. They are
   skipped because the hosting platform's "update branch" button creates them, usually without
@@ -79,8 +80,17 @@ Option 3. **Every commit in a pull request carries a DCO 1.1 sign-off. There is 
 - Dependabot signs off its own commits, but with a different email from the one it authors them
   with. The check accepts that sign-off only when GitHub reports Dependabot as the pull request's
   author, and only for commits authored at the bot's address. The pull request author comes from
-  GitHub, not from the commit, so copying the bot's address into a commit gains nothing. No other
-  exemptions exist.
+  GitHub, not from the commit, so copying the bot's address into a commit gains nothing.
+- **Owner-opened pull requests are exempt** (#249). When GitHub reports the pull request's
+  `author_association` as `OWNER`, the check passes with a notice and does not inspect the
+  commits. The owner holds the copyright and the right to license their own changes, so a
+  sign-off adds nothing; this covers changes prepared for the owner by tools or AI agents, which
+  never sign off in the owner's name. The exemption is decided by GitHub's record of who opened
+  the pull request, not by anything in the commits, so it cannot be claimed by copying the
+  owner's name or email. It covers **every** commit in such a pull request, so when the owner
+  carries someone else's commit, the owner checks that commit's sign-off by hand.
+  [CONTRIBUTING.md](../../CONTRIBUTING.md#sign-off) states the same rule.
+- No other exemptions exist.
 - The licence terms do not change: contributions remain inbound = outbound under
   `Apache-2.0 OR MIT` ([ADR 0010](0010-licence.md)).
 
@@ -108,7 +118,9 @@ added, and the DCO check stays a script in the repository run with allowlisted a
   need every contributor's consent, or the removal of their code.
 - The record for squash-merged changes lives in the pull request, not in `main`'s history. If
   the hosting platform lost pull request history, the per-commit sign-offs would go with it.
-- The maintainer's own pull requests must be signed off too, which is one more habit to keep.
+- The owner exemption puts the owner-opened pull requests' record in GitHub's account history
+  rather than in a trailer, and it leaves a carried commit from someone else to the owner's
+  manual check.
 - The Dependabot rule depends on the bot's current author and sign-off addresses. If they change,
   its pull requests fail `DCO` until the script is updated.
 - Changes introduced inside a merge commit, by conflict resolution or by editing the merge, carry
@@ -126,9 +138,11 @@ does nothing about a compromised third-party crate, build tool or action (actor 
 the dependency policy covers. Review, CODEOWNERS and the required checks remain the controls
 against malicious changes.
 
-The check has two known gaps, both closed by review rather than by the check:
+The check has three known gaps, all closed by review rather than by the check:
 
 - Content added inside a merge commit is not checked (see Decision).
+- An owner-opened pull request is not checked at all, so a third party's commit carried in it
+  passes without a sign-off unless the owner checks it (see Decision).
 - The workflow runs the script from the pull request's own branch, so a pull request can edit
   `dco.yml` or `check-dco.sh` to make its own check pass. Every change under `.github/` needs the
   maintainer's review (CODEOWNERS), and the reviewer reads that diff before merging.
@@ -146,6 +160,7 @@ interpolation into the shell.
 - PR #244: adds the `DCO` workflow and script, and the sign-off section of
   [CONTRIBUTING.md](../../CONTRIBUTING.md), the `DCO` section of [docs/ci.md](../ci.md) and the
   steps in [docs/repo-settings.md](../repo-settings.md) for making the check required.
+- PR #249: the owner exemption in the `DCO` workflow.
 - Issue #21: required status checks on `main`, which `DCO` joins once this ADR is accepted.
 - [ADR 0010](0010-licence.md): the licence, which left this decision to #28.
 - Developer Certificate of Origin 1.1: <https://developercertificate.org>.
