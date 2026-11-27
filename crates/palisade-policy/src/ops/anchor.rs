@@ -47,6 +47,10 @@ pub(crate) enum LeafAnchor {
     Hash(Field, Vec<Vec<u8>>),
     /// Decoded SHA-256 leaf certificate thumbprints.
     Thumbprint(Vec<[u8; 32]>),
+    /// Lower-case hex TBS hashes of the leaf certificate
+    /// (`signer.tbs_hash` with `position: leaf`, #31): 40, 64, 96 or 128
+    /// digits.
+    LeafTbs(Vec<String>),
     /// Folded text of a text or file-name field, including the signer
     /// publisher and issuer.
     Text(Field, Vec<String>),
@@ -82,7 +86,7 @@ impl LeafAnchor {
     const fn selectivity(&self) -> u8 {
         match self {
             Self::Hash(..) => 0,
-            Self::Thumbprint(_) => 1,
+            Self::Thumbprint(_) | Self::LeafTbs(_) => 1,
             Self::Text(field, _) => match field {
                 Field::SignerPublisher => 2,
                 _ => 3,
@@ -100,6 +104,7 @@ impl LeafAnchor {
             | Self::Path { field, .. }
             | Self::Principal(field, _) => *field,
             Self::Thumbprint(_) => Field::SignerLeafThumbprint,
+            Self::LeafTbs(_) => Field::SignerTbsHash,
         }
     }
 }
@@ -111,7 +116,45 @@ pub(crate) fn leaf_anchor(c: &Criterion) -> Option<LeafAnchor> {
         return None;
     }
     let field = c.field;
+    // The signer probe reads only the SHA-256 leaf thumbprint and the
+    // publisher (common name) and issuer of signatures with a trusted
+    // status: every other `signer.*` field (#316, #317) is evaluated
+    // without an anchor, never filed as a hash of the file. Options that
+    // can make a criterion match a signature the probe does not read
+    // (`accept_status`, `allow_digest_mismatch`, a `component` other than
+    // the common name) leave it without an anchor too. The others only
+    // narrow which signatures match, so the anchor still holds.
+    if field.is_signer() {
+        // The leaf TBS hash only with `position: leaf`: a CA's TBS hash
+        // (`intermediate`, `root` or the default `any`) is shared by every
+        // file that CA signed, so it is evaluated for every object.
+        let leaf_tbs = field == Field::SignerTbsHash
+            && c.signer.as_deref().and_then(|o| o.position)
+                == Some(crate::model::TbsPosition::Leaf);
+        let probed = leaf_tbs
+            || matches!(
+                field,
+                Field::SignerLeafThumbprint | Field::SignerPublisher | Field::SignerIssuer
+            );
+        let widened = c.signer.as_deref().is_some_and(|o| {
+            o.accept_status.is_some()
+                || o.allow_digest_mismatch
+                || o.component
+                    .is_some_and(|k| k != crate::model::SubjectComponent::Cn)
+        });
+        if !probed || widened {
+            return None;
+        }
+    }
     match (field.class(), c.operator) {
+        // As the evaluator compares it: the fact must be a digest, equal
+        // to a value ignoring case.
+        (FieldClass::Digest, Operator::Equals) => Some(LeafAnchor::LeafTbs(
+            c.values
+                .iter()
+                .map(|v| normalize_hex(v).filter(|h| matches!(h.len(), 40 | 64 | 96 | 128)))
+                .collect::<Option<_>>()?,
+        )),
         (FieldClass::Hash { hex_len }, Operator::Equals) => {
             let digests = c
                 .values
@@ -282,6 +325,28 @@ mod tests {
             &[&format!("0x{}", "01".repeat(32))],
         ));
         assert_eq!(a, Some(LeafAnchor::Thumbprint(vec![[1; 32]])));
+        // The leaf TBS hash, only at `position: leaf`.
+        let mut tbs = crit(Field::SignerTbsHash, Operator::Equals, &[&"AB".repeat(32)]);
+        assert_eq!(leaf_anchor(&tbs), None);
+        tbs.signer = Some(Box::new(crate::model::SignerOptions {
+            position: Some(crate::model::TbsPosition::Leaf),
+            ..Default::default()
+        }));
+        assert_eq!(
+            leaf_anchor(&tbs),
+            Some(LeafAnchor::LeafTbs(vec!["ab".repeat(32)]))
+        );
+        for p in [
+            crate::model::TbsPosition::Root,
+            crate::model::TbsPosition::Intermediate,
+            crate::model::TbsPosition::Any,
+        ] {
+            tbs.signer = Some(Box::new(crate::model::SignerOptions {
+                position: Some(p),
+                ..Default::default()
+            }));
+            assert_eq!(leaf_anchor(&tbs), None, "{p:?}");
+        }
         assert_eq!(
             leaf_anchor(&crit(
                 Field::HashSha256,

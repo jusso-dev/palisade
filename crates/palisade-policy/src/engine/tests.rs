@@ -1116,6 +1116,7 @@ mod review {
             publisher: Some("Bad Ltd".to_owned()),
             issuer: None,
             leaf_thumbprint_sha256: None,
+            details: Default::default(),
         }];
         let partial: Vec<(&str, ObjectFacts)> = vec![
             // The hash was computed but could not be read.

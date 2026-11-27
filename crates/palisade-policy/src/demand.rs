@@ -105,22 +105,21 @@ impl FactSet {
             .map_or(Self::EMPTY, |i| Self(1 << (HASH_SHIFT as usize + i)))
     }
 
-    /// The class a criterion on `field` reads. The leaf thumbprint is a
-    /// signer fact, not a hash of the file.
+    /// The class a criterion on `field` reads. Every `signer.*` field,
+    /// thumbprints and the TBS hash included, is a signer fact, not a hash
+    /// of the file.
     #[must_use]
     pub fn of_field(field: Field) -> Self {
         if field.is_context() {
             return Self::CONTEXT;
         }
-        match field {
-            Field::SignerPublisher | Field::SignerIssuer | Field::SignerLeafThumbprint => {
-                Self::SIGNERS
-            }
-            _ => match field.class() {
-                FieldClass::Hash { .. } => Self::hash(field),
-                FieldClass::Path | FieldClass::FileName => Self::PATH,
-                _ => Self::METADATA,
-            },
+        if field.is_signer() {
+            return Self::SIGNERS;
+        }
+        match field.class() {
+            FieldClass::Hash { .. } => Self::hash(field),
+            FieldClass::Path | FieldClass::FileName => Self::PATH,
+            _ => Self::METADATA,
         }
     }
 
@@ -233,10 +232,11 @@ mod tests {
         assert_eq!(seen, FactSet::HASHES);
         assert_eq!(seen.hash_fields().collect::<Vec<_>>(), HASH_FIELDS);
         assert_eq!(FactSet::hash(Field::PathFull), FactSet::EMPTY);
-        assert_eq!(
-            FactSet::of_field(Field::SignerLeafThumbprint),
-            FactSet::SIGNERS
-        );
+        // Every signer field, including main's later ones (#316, #317), is
+        // read from the signatures.
+        for field in Field::ALL.into_iter().filter(|f| f.is_signer()) {
+            assert_eq!(FactSet::of_field(field), FactSet::SIGNERS, "{field:?}");
+        }
     }
 
     #[test]

@@ -244,10 +244,7 @@ impl Tree<'_> {
                         && v.bytes()
                             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
                 });
-                if c.field != crate::model::Field::SignerLeafThumbprint
-                    && canonical
-                    && !c.values.is_empty()
-                {
+                if !c.field.is_signer() && canonical && !c.values.is_empty() {
                     return Ok(Tree::Hash {
                         field: c.field,
                         hex_len,

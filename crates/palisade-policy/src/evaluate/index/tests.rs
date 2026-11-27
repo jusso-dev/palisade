@@ -86,6 +86,14 @@ fn pool_value(field: Field, k: usize) -> String {
         FieldClass::Weekday => ["mon", "wed", "sun"][k % 3].into(),
         FieldClass::TimeOfDay => ["08:00", "12:00", "18:00"][k % 3].into(),
         FieldClass::Date => ["2026-01-01", "2026-06-01", "2026-12-31"][k % 3].into(),
+        // Main's signer fields (#316): the TBS hash and the EKU set.
+        FieldClass::Digest => hex(HASH_CHARS[k % 3], 64),
+        FieldClass::OidSet => [
+            "1.3.6.1.5.5.7.3.3",
+            "1.3.6.1.4.1.311.10.3.6",
+            "1.3.6.1.5.5.7.3.1",
+        ][k % 3]
+            .into(),
     }
 }
 
@@ -103,6 +111,7 @@ fn pool_criterion() -> impl Strategy<Value = Criterion> {
         Field::PathExtension,
         Field::SignerPublisher,
         Field::SignerLeafThumbprint,
+        Field::SignerTbsHash,
         Field::MetaProductName,
         Field::MetaFileVersion,
         Field::UserSid,
@@ -111,41 +120,63 @@ fn pool_criterion() -> impl Strategy<Value = Criterion> {
         Field::UserIsAdmin,
     ]);
     let field = prop_oneof![4 => common, 1 => proptest::sample::select(Field::ALL.to_vec())];
-    (field, any::<prop::sample::Index>(), vec(0usize..6, 1..3)).prop_map(|(field, op, ks)| {
-        let ops: Vec<Operator> = Operator::ALL
-            .iter()
-            .copied()
-            .filter(|o| o.applies_to(field.class()))
-            .filter(|o| !o.is_regex())
-            .filter(|o| !o.is_version() || field.class() == FieldClass::Version)
-            .collect();
-        let operator = *op.get(&ops);
-        let (min, max) = operator.value_count();
-        let mut values: Vec<String> = ks.iter().map(|k| pool_value(field, *k)).collect();
-        values.truncate(max);
-        while values.len() < min {
-            values.push(pool_value(field, values.len()));
-        }
-        if operator == Operator::Wildcard && field.class() == FieldClass::Path {
-            for v in &mut values {
-                if let Some((dir, _)) = v.rsplit_once('\\') {
-                    *v = format!(r"{dir}\*.exe");
+    (
+        field,
+        any::<prop::sample::Index>(),
+        vec(0usize..6, 1..3),
+        0usize..5,
+    )
+        .prop_map(|(field, op, ks, position)| {
+            let ops: Vec<Operator> = Operator::ALL
+                .iter()
+                .copied()
+                .filter(|o| o.applies_to(field.class()))
+                .filter(|o| !o.is_regex())
+                .filter(|o| !o.is_version() || field.class() == FieldClass::Version)
+                .collect();
+            let operator = *op.get(&ops);
+            let (min, max) = operator.value_count();
+            let mut values: Vec<String> = ks.iter().map(|k| pool_value(field, *k)).collect();
+            values.truncate(max);
+            while values.len() < min {
+                values.push(pool_value(field, values.len()));
+            }
+            if operator == Operator::Wildcard && field.class() == FieldClass::Path {
+                for v in &mut values {
+                    if let Some((dir, _)) = v.rsplit_once('\\') {
+                        *v = format!(r"{dir}\*.exe");
+                    }
                 }
             }
-        }
-        if operator == Operator::VersionBetween {
-            values.sort_by_key(|v| crate::ops::Version::parse_strict(v));
-        }
-        if operator.value_count() == (2, 2) && operator != Operator::VersionBetween {
-            // Pool values are listed in ascending order.
-            values.sort_by_key(|v| (0..6).find(|k| pool_value(field, *k) == *v));
-            values.dedup();
-            while values.len() < 2 {
-                values.push(pool_value(field, 2));
+            if operator == Operator::VersionBetween {
+                values.sort_by_key(|v| crate::ops::Version::parse_strict(v));
             }
-        }
-        Criterion::new(field, operator, values)
-    })
+            if operator.value_count() == (2, 2) && operator != Operator::VersionBetween {
+                // Pool values are listed in ascending order.
+                values.sort_by_key(|v| (0..6).find(|k| pool_value(field, *k) == *v));
+                values.dedup();
+                while values.len() < 2 {
+                    values.push(pool_value(field, 2));
+                }
+            }
+            let mut c = Criterion::new(field, operator, values);
+            // A TBS-hash test at each position, or the default (`any`): only
+            // `leaf` is indexed (#42).
+            if field == Field::SignerTbsHash && position < 4 {
+                c.signer = Some(Box::new(crate::model::SignerOptions {
+                    position: Some(
+                        [
+                            crate::model::TbsPosition::Leaf,
+                            crate::model::TbsPosition::Leaf,
+                            crate::model::TbsPosition::Root,
+                            crate::model::TbsPosition::Any,
+                        ][position],
+                    ),
+                    ..Default::default()
+                }));
+            }
+            c
+        })
 }
 
 /// A tree over pool criteria. The root is `all` with an identity first, as
@@ -191,9 +222,20 @@ fn pool_tree() -> impl Strategy<Value = Match> {
             (Field::PathFull, Operator::Wildcard, pattern)
         }),
     ];
-    let identity = identity.prop_map(|(field, operator, value)| {
-        Match::Criterion(Criterion::new(field, operator, [value]))
-    });
+    let identity = prop_oneof![
+        5 => identity.prop_map(|(field, operator, value)| {
+            Match::Criterion(Criterion::new(field, operator, [value]))
+        }),
+        // A leaf TBS hash alone, so some rules rest only on that anchor.
+        1 => (0usize..3).prop_map(|k| {
+            let mut c = Criterion::new(Field::SignerTbsHash, Operator::Equals, [hex(HASH_CHARS[k], 64)]);
+            c.signer = Some(Box::new(crate::model::SignerOptions {
+                position: Some(crate::model::TbsPosition::Leaf),
+                ..Default::default()
+            }));
+            Match::Criterion(c)
+        }),
+    ];
     // The identity alone, or an `any` of two identities (so a rule's anchor
     // spans several classes, such as a path or a hash), in either order
     // with the other children.
@@ -277,6 +319,16 @@ pub(crate) fn pool_facts() -> impl Strategy<Value = PoolFacts> {
                                 publisher: Some(PUBLISHERS[p].to_owned()),
                                 issuer: None,
                                 leaf_thumbprint_sha256: Some(hex(HASH_CHARS[p], 64)),
+                                // The leaf's TBS hash, in either case, so
+                                // the index folds it as the evaluator does.
+                                details: crate::facts::SignerDetails {
+                                    leaf_tbs_hash: Some(if p == 1 {
+                                        hex(HASH_CHARS[p], 64).to_ascii_uppercase()
+                                    } else {
+                                        hex(HASH_CHARS[p], 64)
+                                    }),
+                                    ..Default::default()
+                                },
                             })
                             .collect(),
                     );
@@ -304,6 +356,12 @@ pub(crate) fn pool_facts() -> impl Strategy<Value = PoolFacts> {
 /// [`crate::model::arbitrary::document`]; each rule set is then filled
 /// with 4 to 16 copies of its generated rules, each with a fresh ID and a
 /// pool tree, so a policy has many overlapping rules.
+///
+/// The rule lifecycle (#40) is covered too: rules get activity windows a
+/// few days either side of [`POOL_NOW`], some with `on_expire:
+/// convert_to_audit` (whose audit stand-ins are indexed like any rule),
+/// and a quarter of the policies get the managed `system_baseline`, added
+/// after validation as the engine adds it.
 pub(crate) fn pool_document() -> impl Strategy<Value = ValidatedPolicy> {
     (
         crate::model::arbitrary::document(),
@@ -327,6 +385,21 @@ pub(crate) fn pool_document() -> impl Strategy<Value = ValidatedPolicy> {
                         rule.display_id = None;
                         rule.match_ = trees.next()?;
                         rule.enabled = k % 5 != 4;
+                        let day = |d: i64| crate::model::Timestamp(POOL_NOW.0 + d * 86_400);
+                        let converts = !set.mandatory;
+                        let (from, to, audit) = match n % 7 {
+                            1 => (None, Some(-3), false),
+                            2 => (Some(3), None, false),
+                            3 => (Some(-5), Some(5), false),
+                            4 => (None, Some(0), converts),
+                            5 => (Some(-2), Some(2), converts),
+                            _ => (None, None, false),
+                        };
+                        rule.activates_at = from.map(day);
+                        rule.expires_at = to.map(day);
+                        if audit {
+                            rule.on_expire = crate::model::OnExpire::ConvertToAudit;
+                        }
                         // Some denies fail closed, so the always-evaluated
                         // list is exercised.
                         if let crate::model::Action::Deny(o) = &mut rule.action {
@@ -338,8 +411,42 @@ pub(crate) fn pool_document() -> impl Strategy<Value = ValidatedPolicy> {
                     }
                 }
             }
-            doc.validate().ok()
+            let validated = doc.validate().ok()?;
+            Some(if salt % 4 == 0 {
+                validated
+                    .with_system_baseline(&crate::unknown::baseline::SystemBaseline {
+                        publishers: vec![PUBLISHERS[0].to_owned()],
+                        writable_dirs: Vec::new(),
+                    })
+                    .ok()?
+            } else {
+                validated
+            })
         })
+}
+
+/// The time the pool's activity windows are placed around:
+/// 2026-11-25T00:00:00Z.
+pub(crate) const POOL_NOW: crate::model::Timestamp = crate::model::Timestamp(1_795_564_800);
+
+/// No rule clock, an anchored one, or an offline-started one (ADR 0018),
+/// a few days either side of [`POOL_NOW`], with a floor that may lag.
+pub(crate) fn rule_clock() -> impl Strategy<Value = Option<crate::lifecycle::RuleClock>> {
+    proptest::option::weighted(0.8, (-8i64..8, 0i64..4, any::<bool>())).prop_map(|c| {
+        c.map(|(now, lag, anchored)| {
+            let now = crate::model::Timestamp(POOL_NOW.0 + now * 86_400);
+            let floor = crate::model::Timestamp(now.0 - lag * 86_400);
+            if anchored {
+                crate::lifecycle::RuleClock {
+                    now,
+                    floor,
+                    anchored: true,
+                }
+            } else {
+                crate::lifecycle::RuleClock::offline_started(now, floor)
+            }
+        })
+    })
 }
 
 pub(crate) fn state() -> impl Strategy<Value = DeviceState> {
@@ -415,16 +522,21 @@ proptest! {
 
     /// The indexed evaluator gives the decision of the linear scan, with
     /// the same deciding rule and every other field, for random policies,
-    /// facts, object types and device states.
+    /// facts, object types and device states, and rule clocks: none,
+    /// anchored, or offline-started (#40, ADR 0018).
     #[test]
     fn indexed_equals_linear(
         policy in pool_document(),
         pool in pool_facts(),
         pick in any::<prop::sample::Index>(),
         state in state(),
+        clock in rule_clock(),
     ) {
         let t = type_of(&policy, pick);
-        let e = Evaluator::new(&policy).unwrap();
+        let mut e = Evaluator::new(&policy).unwrap();
+        if let Some(c) = clock {
+            e.set_clock(c);
+        }
         let variables = variables();
         let s = subject(t, &pool, &variables);
         let linear = e.matching_linear(&s);
@@ -449,9 +561,13 @@ proptest! {
         pool in pool_facts(),
         pick in any::<prop::sample::Index>(),
         state in state(),
+        clock in rule_clock(),
     ) {
         let t = type_of(&policy, pick);
-        let e = Evaluator::new(&policy).unwrap();
+        let mut e = Evaluator::new(&policy).unwrap();
+        if let Some(c) = clock {
+            e.set_clock(c);
+        }
         let variables = variables();
         let full = subject(t, &pool, &variables);
         let want = e.evaluate_in(&full, &state, TRACE);
@@ -469,14 +585,25 @@ proptest! {
                 Ok(d) => {
                     // Stage 6 records the location classes it saw (#39).
                     // Unless a level depends on them, the path's ACL is not
-                    // asked for, and a file whose ACL is not known is
-                    // recorded as `user_writable_other`; nothing else may
-                    // differ.
+                    // asked for, so the record of what the ACL decides
+                    // differs: the location classes, `user_writable_other`
+                    // among the unknown ones, and `user_writable` among the
+                    // missing facts. With no level by location, none of
+                    // them changes the level or the fallback; nothing else
+                    // may differ.
                     let record = |d: &Option<crate::decision::Decision>| {
                         let mut v = serde_json::to_value(d).unwrap();
                         if policy.document().policy.unknown.by_location.is_empty() {
                             if let Some(u) = v.get_mut("unknown").and_then(|u| u.as_object_mut()) {
                                 u.remove("locations");
+                                for (key, acl) in [
+                                    ("unknown_locations", "user_writable_other"),
+                                    ("missing_facts", "user_writable"),
+                                ] {
+                                    if let Some(list) = u.get_mut(key).and_then(|l| l.as_array_mut()) {
+                                        list.retain(|x| x != acl);
+                                    }
+                                }
                             }
                         }
                         v
@@ -759,6 +886,7 @@ fn selection_applies_scopes_activity_and_safety_critical() {
             publisher: Some("Example Ltd".to_owned()),
             issuer: None,
             leaf_thumbprint_sha256: None,
+            details: Default::default(),
         }])
     };
     let a = signed(exe_facts(Some('a'), r"C:\Tools\a.exe", Some(false)));
@@ -1117,6 +1245,7 @@ fn every_policy_model_agrees_on_a_large_policy() {
                         publisher: Some("example ltd".into()),
                         issuer: None,
                         leaf_thumbprint_sha256: None,
+                        details: Default::default(),
                     }]);
                 let s = Subject {
                     object_type: ObjectType::Executable,
@@ -1139,4 +1268,69 @@ fn rule_kinds_reads() {
     rule.action = crate::model::Action::Deny(crate::model::DenyOptions::default());
     assert_eq!(reads(&rule), FactSet::PATH);
     let _ = RuleSetKind::Mixed;
+}
+
+/// The leaf TBS hash is an index anchor (#42, now that #316 has
+/// `signer.tbs_hash`); a CA-position TBS hash is evaluated always. Either
+/// way the decision is the linear scan's.
+#[test]
+fn a_leaf_tbs_hash_is_indexed_and_a_ca_one_is_not() {
+    let tbs = |n: u32, position: &str| {
+        serde_json::json!({"id": format!("01936b2e-{n:04x}-7b3d-9f21-0a1b2c3d4e61"), "name": "T",
+            "match": {"criterion": {"field": "signer.tbs_hash", "operator": "equals",
+                "values": ["AB".repeat(32)], "signer": {"position": position}}},
+            "action": {"type": "deny"}})
+    };
+    let leaf = doc(vec![tbs(1, "leaf")], vec![]);
+    let e = Evaluator::new(&leaf).unwrap();
+    assert_eq!(
+        (e.index_stats().indexed_rules, e.index_stats().always_eval),
+        (1, 0)
+    );
+    for position in ["root", "intermediate", "any"] {
+        let ca = doc(vec![tbs(1, position)], vec![]);
+        let e = Evaluator::new(&ca).unwrap();
+        assert_eq!(e.index_stats().always_eval, 1, "{position}");
+    }
+    let variables = variables();
+    let signer = |hash: Option<&str>| SignerFact {
+        status: SignerStatus::Valid,
+        source: SignatureSource::Embedded,
+        publisher: Some("Example Ltd".into()),
+        issuer: None,
+        leaf_thumbprint_sha256: None,
+        details: crate::facts::SignerDetails {
+            leaf_tbs_hash: hash.map(str::to_owned),
+            ..Default::default()
+        },
+    };
+    for (hash, matches) in [
+        (Some("ab".repeat(32)), true),
+        (Some("AB".repeat(32)), true),
+        (Some("cd".repeat(32)), false),
+        (Some("not a digest".to_owned()), false),
+        (None, false),
+    ] {
+        let pool = PoolFacts {
+            facts: ObjectFacts::new().with_signers(vec![signer(hash.as_deref())]),
+            context: EvaluationContext::new(),
+        };
+        let s = subject(ObjectType::Executable, &pool, &variables);
+        let indexed = e_matching_ids(&leaf, &s);
+        assert_eq!(indexed.len() == 1, matches, "{hash:?}");
+        let e = Evaluator::new(&leaf).unwrap();
+        assert_eq!(
+            e.evaluate(&s, TRACE),
+            e.evaluate_linear(&s, TRACE),
+            "{hash:?}"
+        );
+    }
+}
+
+fn e_matching_ids(p: &ValidatedPolicy, s: &Subject<'_>) -> Vec<crate::model::RuleId> {
+    let e = Evaluator::new(p).unwrap();
+    let linear: Vec<_> = e.matching_linear(s).iter().map(|r| r.rule.id).collect();
+    let indexed: Vec<_> = e.matching(s).iter().map(|r| r.rule.id).collect();
+    assert_eq!(indexed, linear);
+    indexed
 }

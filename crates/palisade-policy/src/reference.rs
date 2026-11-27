@@ -315,6 +315,7 @@ impl Case {
                     publisher: Some(publisher),
                     issuer: Some("Example CA".to_owned()),
                     leaf_thumbprint_sha256: Some("ab".repeat(32)),
+                    details: Default::default(),
                 }]
             }
             None => Vec::new(),

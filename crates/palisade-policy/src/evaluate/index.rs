@@ -20,7 +20,10 @@
 //! - **hash**: decoded digest to rules, per hash field. A rule whose
 //!   criterion lists 25 digests is filed 25 times, so one probe replaces
 //!   scanning every hash rule.
-//! - **signer**: leaf thumbprint, and the folded publisher and issuer.
+//! - **signer**: leaf thumbprint, the leaf certificate's TBS hash
+//!   (`signer.tbs_hash` at `position: leaf` only; a CA's TBS hash covers
+//!   every file it signed, so it is evaluated always), and the folded
+//!   publisher and issuer.
 //! - **meta**: folded version-resource strings, file name and extension.
 //! - **path**: folded literal path prefixes of `path.full` and
 //!   `path.directory`, cut at a separator, with values that start with a
@@ -277,6 +280,8 @@ impl DigestMap {
 struct IndexSet {
     hash: Vec<(Field, DigestMap)>,
     thumbprint: HashMap<[u8; 32], Posting>,
+    /// Leaf TBS hashes, as lower-case hex.
+    leaf_tbs: HashMap<String, Posting>,
     text: Vec<(Field, HashMap<String, Posting>)>,
     path: Vec<(Field, HashMap<String, Posting>)>,
     path_variable: Vec<(Field, PathVariable, Vec<u32>)>,
@@ -305,6 +310,11 @@ impl IndexSet {
             LeafAnchor::Thumbprint(prints) => {
                 for p in prints {
                     file(&mut self.thumbprint, *p, rule);
+                }
+            }
+            LeafAnchor::LeafTbs(hashes) => {
+                for h in hashes {
+                    file(&mut self.leaf_tbs, h.clone(), rule);
                 }
             }
             LeafAnchor::Text(field, values) => {
@@ -383,6 +393,7 @@ impl IndexSet {
     fn keys(&self) -> usize {
         self.hash.iter().map(|(_, m)| m.len()).sum::<usize>()
             + self.thumbprint.len()
+            + self.leaf_tbs.len()
             + self.text.iter().map(|(_, m)| m.len()).sum::<usize>()
             + self.path.iter().map(|(_, m)| m.len()).sum::<usize>()
             + self.path_variable.len()
@@ -412,6 +423,7 @@ impl IndexSet {
             }
         }
         let signer_fields = !self.thumbprint.is_empty()
+            || !self.leaf_tbs.is_empty()
             || find(&self.text, Field::SignerPublisher).is_some()
             || find(&self.text, Field::SignerIssuer).is_some();
         if signer_fields && available.contains(FactSet::SIGNERS) {
@@ -424,6 +436,28 @@ impl IndexSet {
                 .flatten()
                 .filter(|s| s.status.is_trusted())
             {
+                if !self.leaf_tbs.is_empty() {
+                    match signer.details.leaf_tbs_hash.as_deref() {
+                        // As the evaluator reads it: a digest, compared
+                        // ignoring case.
+                        Some(hex)
+                            if matches!(hex.len(), 40 | 64 | 96 | 128)
+                                && hex.bytes().all(|b| b.is_ascii_hexdigit()) =>
+                        {
+                            let mut key = [0u8; 128];
+                            let key = &mut key[..hex.len()];
+                            key.copy_from_slice(hex.as_bytes());
+                            key.make_ascii_lowercase();
+                            if let Some(p) = core::str::from_utf8(key)
+                                .ok()
+                                .and_then(|k| self.leaf_tbs.get(k))
+                            {
+                                out.extend_from_slice(p.rules());
+                            }
+                        }
+                        _ => unknown = true,
+                    }
+                }
                 if !self.thumbprint.is_empty() {
                     let mut key = [0u8; 32];
                     match signer.leaf_thumbprint_sha256.as_deref() {

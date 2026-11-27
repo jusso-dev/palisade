@@ -151,6 +151,7 @@ fn facts(sha: char) -> ObjectFacts {
             publisher: Some("Example Ltd".to_owned()),
             issuer: Some("Example CA".to_owned()),
             leaf_thumbprint_sha256: Some("b".repeat(64)),
+            details: Default::default(),
         }])
 }
 
