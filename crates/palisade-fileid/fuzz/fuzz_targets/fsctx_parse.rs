@@ -1,8 +1,8 @@
 //! Fuzzes the file-system context parsers: path normalisation (Win32 and
 //! NT forms), self-relative security descriptors with the writability
 //! evaluation, `Zone.Identifier` streams, and the stream-list and
-//! change-journal records the OS returns, and the storage descriptors the
-//! volume backend reads. No input may panic, and a
+//! change-journal records the OS returns, the storage descriptors the
+//! volume backend reads, and reparse data buffers. No input may panic, and a
 //! normalised path, and each ancestor that is not too long, must normalise
 //! to itself again.
 #![no_main]
@@ -10,6 +10,7 @@
 use libfuzzer_sys::fuzz_target;
 use palisade_fileid::fsctx::acl::{EvaluationOptions, ObjectKind, SecurityDescriptor, evaluate};
 use palisade_fileid::fsctx::ntfs::{MAX_STREAMS, parse_stream_info, parse_usn_record};
+use palisade_fileid::fsctx::reparse::{ReparseKind, parse_reparse_point};
 use palisade_fileid::fsctx::{
     normalize_nt, normalize_win32, nt_path_on_network, opened_name_on_network, parse_hotplug_info,
     parse_storage_device_descriptor, parse_zone_identifier,
@@ -57,6 +58,12 @@ fuzz_target!(|data: &[u8]| {
         assert!(matches!(usn.major_version, 2 | 3));
     }
     let _ = parse_storage_device_descriptor(data);
+    if let Ok(r) = parse_reparse_point(data) {
+        assert_eq!(r.kind == ReparseKind::from_tag(r.tag), r.kind != ReparseKind::MountPoint);
+        if let Some(a) = r.app_exec_link() {
+            assert!(!a.target_path.contains('\0'));
+        }
+    }
     if let Some(h) = parse_hotplug_info(data) {
         assert_eq!(h.is_hotplug(), h.media_hotplug || h.device_hotplug);
     }

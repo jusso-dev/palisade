@@ -7,6 +7,7 @@
 //!   flags, file IDs and USNs, timestamps and attributes, the
 //!   [`crate::hash::FileStamp`] implementation, memory-mapped and buffered
 //!   reads, and alternate data stream hashing.
+//! - [`links`]: reparse points and hard links of real files (#54).
 //! - [`paths`]: the OS path forms (NT, volume GUID, long, mapped-drive
 //!   UNC, DFS target) and an [`crate::fsctx::FsContext`] with its volume
 //!   (#54).
@@ -30,6 +31,7 @@
 pub mod access;
 pub mod file;
 pub mod fsctx;
+pub mod links;
 pub mod paths;
 pub mod security;
 mod sys;

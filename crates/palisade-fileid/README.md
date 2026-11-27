@@ -219,8 +219,12 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     `VolumeInfo` for the volume an open handle is on (drive type, bus and
     hot-plug state from the storage queries, OS volume by GUID, file
     system and journal support), and `is_case_sensitive_dir` reads the
-    per-directory case-sensitivity flag. Windows tests attach a VHD and
-    share a local folder over SMB.
+    per-directory case-sensitivity flag. A file is a network file if any
+    of three signs says so (the remote-protocol query, the handle's NT path
+    under a redirector device, the name it was opened by), and a handle with
+    no local volume root keeps only its serial, so a share never reads as
+    local NTFS. Windows tests attach a VHD and share a local folder over
+    SMB.
   - `fsctx::dfs` and `win::paths` (Windows, `os-trust` feature): the OS
     path forms of an opened file (NT, volume GUID, final, long with every
     8.3 name expanded by `OsShortNames`, the UNC form of a mapped drive in
@@ -228,6 +232,18 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     bounds each lookup to 2 s and caches referrals and failures.
     `PathForms::network_key` gives one key for a mapped drive, a DFS path
     and a short-name spelling of one file on a share.
+  - `fsctx::streams`, `fsctx::reparse`, `fsctx::meta` and `win::links`
+    (Windows, `os-trust` feature): alternate data streams with a tag for
+    well-known names and an executable-content sniff of each stream's first
+    64 KiB (a tag is not a pass: tagged streams are sniffed too, and an
+    unsniffed stream counts as possibly executable); reparse points
+    (symbolic links, junctions, volume mount points, app execution aliases
+    with their package family name, app ID and target, cloud placeholders,
+    deduplication), parsed by a bounded, fuzzed parser; hard links, counted
+    and listed up to 16; and the file ID, USN, timestamps and attributes.
+    `win::links::read_details` fills them into an `FsContext`. Windows tests
+    make a symbolic link, a relative link, a junction, a mount point and an
+    app execution alias, 21 hard links and tagged and executable streams.
 - `authenticode` certificate chains, signer trust and identity
   ([#49](https://github.com/jusso-dev/palisade/issues/49)):
   - `CertSummary::from_der` parses an X.509 v1, v2 or v3 certificate. It

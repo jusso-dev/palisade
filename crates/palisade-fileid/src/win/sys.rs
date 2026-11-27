@@ -25,15 +25,15 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_BASIC_INFO, FILE_CASE_SENSITIVE_INFO, FILE_ID_INFO, FILE_INFO_BY_HANDLE_CLASS,
     FILE_REMOTE_PROTOCOL_INFO, FILE_STANDARD_INFO, FILE_TYPE_DISK, FileBasicInfo,
     FileCaseSensitiveInfo, FileIdInfo, FileRemoteProtocolInfo, FileStandardInfo, FileStreamInfo,
-    FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, GetDriveTypeW,
-    GetFileInformationByHandleEx, GetFileType, GetFinalPathNameByHandleW,
-    GetVolumeInformationByHandleW, WIN32_FIND_DATAW,
+    FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, FindFirstFileNameW,
+    FindNextFileNameW, GetDriveTypeW, GetFileInformationByHandleEx, GetFileType,
+    GetFinalPathNameByHandleW, GetVolumeInformationByHandleW, WIN32_FIND_DATAW,
 };
 use windows_sys::Win32::System::IO::{DeviceIoControl, GetOverlappedResult, OVERLAPPED};
 use windows_sys::Win32::System::Ioctl::{
-    FSCTL_QUERY_USN_JOURNAL, FSCTL_READ_FILE_USN_DATA, IOCTL_STORAGE_GET_HOTPLUG_INFO,
-    IOCTL_STORAGE_QUERY_PROPERTY, PropertyStandardQuery, READ_FILE_USN_DATA,
-    STORAGE_PROPERTY_QUERY, StorageDeviceProperty, USN_JOURNAL_DATA_V0,
+    FSCTL_GET_REPARSE_POINT, FSCTL_QUERY_USN_JOURNAL, FSCTL_READ_FILE_USN_DATA,
+    IOCTL_STORAGE_GET_HOTPLUG_INFO, IOCTL_STORAGE_QUERY_PROPERTY, PropertyStandardQuery,
+    READ_FILE_USN_DATA, STORAGE_PROPERTY_QUERY, StorageDeviceProperty, USN_JOURNAL_DATA_V0,
 };
 use windows_sys::Win32::System::Memory::{
     CreateFileMappingW, FILE_MAP_READ, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile, PAGE_READONLY,
@@ -327,20 +327,41 @@ unsafe fn fsctl<I>(
     input: Option<&I>,
     out_bytes: usize,
 ) -> io::Result<Vec<u8>> {
-    let mut out = aligned_buffer(out_bytes);
-    let out_len = u32::try_from(out.len() * 8).unwrap_or(u32::MAX);
     let (in_ptr, in_len) = match input {
         Some(i) => (std::ptr::from_ref(i).cast(), size_u32::<I>()),
         None => (std::ptr::null(), 0),
     };
+    // SAFETY: `in_ptr` is null with length 0, or points to the live `I`
+    // borrowed for this call, of `in_len` bytes. The caller's guarantee
+    // about `code` carries over.
+    unsafe { fsctl_raw(file, code, in_ptr, in_len, out_bytes) }
+}
+
+/// As [`fsctl`], with an input of `in_len` bytes at `in_ptr`.
+///
+/// # Safety
+///
+/// `in_ptr` must be null with `in_len` 0, or point to `in_len` readable
+/// bytes that stay alive and unchanged for the call. `code` must read at
+/// most `in_len` bytes of input and write at most `out_bytes` bytes of
+/// output, whatever its transfer method.
+unsafe fn fsctl_raw(
+    file: &File,
+    code: u32,
+    in_ptr: *const std::ffi::c_void,
+    in_len: u32,
+    out_bytes: usize,
+) -> io::Result<Vec<u8>> {
+    let mut out = aligned_buffer(out_bytes);
+    let out_len = u32::try_from(out.len() * 8).unwrap_or(u32::MAX);
     let event = Event::new()?;
     let mut overlapped = OVERLAPPED {
         hEvent: event.0,
         ..OVERLAPPED::default()
     };
     let mut returned = 0_u32;
-    // SAFETY: the input, if any, is a live `I` of `in_len` bytes that the
-    // OS only reads; `out` is a live, writable buffer of `out_len` bytes,
+    // SAFETY: the input, if any, is `in_len` live bytes that the OS only
+    // reads (the caller's guarantee); `out` is a live, writable buffer of `out_len` bytes,
     // the size passed; `returned`, `overlapped` and its event are live
     // locals. If the request completes later (`ERROR_IO_PENDING`), the wait
     // below blocks until it has, so none of them is dropped or moved while
@@ -639,6 +660,115 @@ pub(crate) fn dfs_client_info(path: &str) -> io::Result<Option<(String, String)>
             _ => Ok(None),
         }
     }
+}
+
+/// The raw reparse data buffer of the open `file`
+/// (`FSCTL_GET_REPARSE_POINT`), for
+/// [`crate::fsctx::reparse::parse_reparse_point`]. `file` must have been
+/// opened with `FILE_FLAG_OPEN_REPARSE_POINT`.
+pub(crate) fn reparse_point_bytes(file: &File) -> io::Result<Vec<u8>> {
+    // SAFETY: `FSCTL_GET_REPARSE_POINT` (`METHOD_BUFFERED`) takes no input
+    // and writes at most the output length, 16 KiB, the largest reparse
+    // data buffer the OS allows.
+    unsafe {
+        fsctl::<()>(
+            file,
+            FSCTL_GET_REPARSE_POINT,
+            None,
+            crate::fsctx::reparse::MAX_REPARSE_BYTES,
+        )
+    }
+}
+
+/// Sets the reparse point of the open `file` to `data`, a whole reparse
+/// data buffer (`FSCTL_SET_REPARSE_POINT`). Only the tests use it, to make
+/// reparse fixtures (an app execution alias) that no tool on the runners
+/// creates.
+#[cfg(test)]
+pub(crate) fn set_reparse_point(file: &File, data: &[u8]) -> io::Result<()> {
+    if data.len() > crate::fsctx::reparse::MAX_REPARSE_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "reparse data is too long",
+        ));
+    }
+    let len = u32::try_from(data.len()).unwrap_or(u32::MAX);
+    // SAFETY: `data` is a live slice of `len` bytes borrowed for the call.
+    // `FSCTL_SET_REPARSE_POINT` (`METHOD_BUFFERED`) reads at most `len`
+    // input bytes and writes no output.
+    unsafe {
+        fsctl_raw(
+            file,
+            windows_sys::Win32::System::Ioctl::FSCTL_SET_REPARSE_POINT,
+            data.as_ptr().cast(),
+            len,
+            0,
+        )
+    }
+    .map(|_| ())
+}
+
+/// A `FindFirstFileNameW` search handle, closed on drop.
+struct FindNames(HANDLE);
+
+impl Drop for FindNames {
+    fn drop(&mut self) {
+        // SAFETY: `self.0` is the search handle `FindFirstFileNameW`
+        // returned, closed once, here.
+        let _ = unsafe { FindClose(self.0) };
+    }
+}
+
+/// Up to `max` of the hard-link names of the file at `path`
+/// (`FindFirstFileNameW`, `FindNextFileNameW`), each relative to the volume
+/// root. The flag says whether the list is complete.
+pub(crate) fn hard_link_names(path: &str, max: usize) -> io::Result<(Vec<String>, bool)> {
+    const UNITS: u32 = 32_768;
+    let w = wide(path)?;
+    let mut buf = vec![0_u16; UNITS as usize];
+    let mut len = UNITS;
+    // SAFETY: `w` is a live, NUL-terminated UTF-16 string the call only
+    // reads; `buf` is a live, writable buffer of `len` units and `len` a
+    // live local that says so. Flags must be 0.
+    let h = unsafe { FindFirstFileNameW(w.as_ptr(), 0, &raw mut len, buf.as_mut_ptr()) };
+    if h == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    let search = FindNames(h);
+    let take = |buf: &[u16], len: u32| -> Option<String> {
+        let n = usize::try_from(len).ok()?.min(buf.len());
+        let units = buf.get(..n)?;
+        let end = units.iter().position(|&u| u == 0).unwrap_or(units.len());
+        String::from_utf16(units.get(..end)?).ok()
+    };
+    let mut names = Vec::new();
+    let mut complete = true;
+    match take(&buf, len) {
+        Some(n) => names.push(n),
+        None => complete = false,
+    }
+    loop {
+        if names.len() >= max {
+            complete = false;
+            break;
+        }
+        len = UNITS;
+        // SAFETY: `search.0` is the live search handle; `buf` is a live,
+        // writable buffer of `len` units and `len` a live local.
+        let ok = unsafe { FindNextFileNameW(search.0, &raw mut len, buf.as_mut_ptr()) };
+        if ok == 0 {
+            // ERROR_HANDLE_EOF ends the list; anything else cuts it short.
+            if io::Error::last_os_error().raw_os_error() != Some(ERROR_HANDLE_EOF) {
+                complete = false;
+            }
+            break;
+        }
+        match take(&buf, len) {
+            Some(n) => names.push(n),
+            None => complete = false,
+        }
+    }
+    Ok((names, complete))
 }
 
 /// The system Windows directory (`GetSystemWindowsDirectoryW`), which is

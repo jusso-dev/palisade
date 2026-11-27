@@ -16,6 +16,10 @@
 //! - [`motw`]: the `Zone.Identifier` mark-of-the-web;
 //! - [`ntfs`]: the stream list and change-journal records the OS returns;
 //! - [`dfs`]: DFS namespace resolution with a timeout and a cache;
+//! - [`meta`]: file IDs, USNs, timestamps, attributes and hard links;
+//! - [`reparse`]: reparse data buffers (links, junctions, mount points,
+//!   app execution aliases, cloud placeholders, deduplication);
+//! - [`streams`]: alternate data streams, tagged and sniffed;
 //! - [`writable`]: the per-descriptor writability cache, streaming
 //!   ancestor assessment and `enumerate_user_writable_dirs`.
 //!
@@ -31,10 +35,13 @@
 
 pub mod acl;
 pub mod dfs;
+pub mod meta;
 pub mod motw;
 pub mod ntfs;
 pub mod path;
+pub mod reparse;
 pub mod sid;
+pub mod streams;
 pub mod vars;
 pub mod volume;
 pub mod writable;
@@ -198,9 +205,7 @@ impl PathForms {
 }
 
 /// Everything known about where a file is stored. See the module
-/// documentation. Fields this crate cannot fill yet (streams, reparse
-/// points, hard links, file ID, USN and Palisade provenance tags) come with
-/// the rest of #54.
+/// documentation. The Palisade provenance tag comes with the rest of #54.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FsContext {
     /// The path forms.
@@ -216,6 +221,15 @@ pub struct FsContext {
     pub motw: Option<Option<Motw>>,
     /// The Palisade path variables that cover the canonical path.
     pub path_variables_matched: Option<Vec<PathVariable>>,
+    /// The file ID, USN, timestamps and attributes.
+    pub meta: Option<meta::FileMeta>,
+    /// The hard links.
+    pub hard_links: Option<meta::HardLinks>,
+    /// The alternate data streams.
+    pub streams: Option<streams::FsStreams>,
+    /// The reparse point of the name itself. `None` means it was not read;
+    /// a read that found none is `Some(None)`.
+    pub reparse: Option<Option<reparse::ReparsePoint>>,
 }
 
 impl FsContext {
@@ -229,6 +243,10 @@ impl FsContext {
             writability: None,
             motw: None,
             path_variables_matched: None,
+            meta: None,
+            hard_links: None,
+            streams: None,
+            reparse: None,
         }
     }
 }
@@ -277,6 +295,8 @@ mod tests {
 
         let ctx = FsContext::from_path(r"C:\x.exe");
         assert!(ctx.motw.is_none());
+        assert!(ctx.meta.is_none() && ctx.hard_links.is_none());
+        assert!(ctx.streams.is_none() && ctx.reparse.is_none());
         assert!(ctx.path.lexical().is_some());
         assert!(ctx.path.canonical().is_none());
     }
