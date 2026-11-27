@@ -37,10 +37,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-3e2a1e09.js";
+            window.path_to_searchindex_js = "searchindex-d161a978.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-8cab92c4.js"></script>
+        <script src="toc-55ef34c3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -6893,6 +6893,7 @@ consequences, including its security impact.</p>
 <tr><td><a href="#0016-server-database-tenant-isolation-and-tenant-scope-binding">0016</a></td><td>Server database, tenant isolation and tenant scope binding</td><td>accepted</td></tr>
 <tr><td><a href="#0017-cryptographic-algorithms-libraries-and-aead-nonces">0017</a></td><td>Cryptographic algorithms, libraries and AEAD nonces</td><td>accepted</td></tr>
 <tr><td><a href="#0018-fail-open-versus-fail-closed-defaults-revised">0018</a></td><td>Fail-open versus fail-closed defaults, revised</td><td>accepted</td></tr>
+<tr><td><a href="#0019-contributor-sign-off-dco-no-cla">0019</a></td><td>Contributor sign-off: DCO, no CLA</td><td>accepted</td></tr>
 </tbody>
 </table>
 </div>
@@ -8130,6 +8131,8 @@ stops unreviewed code from entering the most privileged component.</p>
 <ul>
 <li>Issues #20, #19 (workspace metadata), #23 (cargo-deny licences), #28 (DCO, headers, notices).
 Epic #8 (driver).</li>
+<li><a href="#0019-contributor-sign-off-dco-no-cla">ADR 0019</a>: contributor sign-off (DCO, no CLA), the decision
+this ADR left to #28.</li>
 </ul>
 <hr>
 <p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/adr/0010-licence.md"><code>docs/adr/0010-licence.md</code></a> on GitHub.</small></p>
@@ -9452,6 +9455,169 @@ regression suite (#230).</p>
 </ul>
 <hr>
 <p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/adr/0018-fail-open-vs-fail-closed-defaults-revised.md"><code>docs/adr/0018-fail-open-vs-fail-closed-defaults-revised.md</code></a> on GitHub.</small></p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="0019-contributor-sign-off-dco-no-cla"><a class="header" href="#0019-contributor-sign-off-dco-no-cla">0019. Contributor sign-off: DCO, no CLA</a></h1>
+<ul>
+<li>Status: accepted</li>
+<li>Date: 2026-11-24</li>
+<li>Deciders: Palisade maintainer</li>
+</ul>
+<h2 id="context-18"><a class="header" href="#context-18">Context</a></h2>
+<p><a href="#0010-licence">ADR 0010</a> licenses Palisade as <code>Apache-2.0 OR MIT</code> and accepts contributions
+under the same terms (inbound = outbound). It leaves open whether contributors must also confirm,
+on each commit, that they have the right to submit their change, and points to #28 for that
+decision. This ADR makes it.</p>
+<p>Palisade is security software that runs as a privileged Windows service. Its history should
+show, for every change, who submitted it and on what terms, so that a disputed or tainted
+contribution can be traced and removed. It has one maintainer, no legal entity and no budget,
+so whatever is chosen must cost nothing to run and must not put off a first-time contributor.</p>
+<p>Two common mechanisms exist. A <strong>Contributor Licence Agreement</strong> (CLA) is a separate legal
+agreement, signed once per contributor, that grants the project rights to the contribution,
+sometimes including the right to relicense it. The <strong>Developer Certificate of Origin</strong> (DCO,
+version 1.1, <a href="https://developercertificate.org">https://developercertificate.org</a>) is a short statement that a contributor
+certifies per commit by adding a <code>Signed-off-by: Name &lt;email&gt;</code> trailer, usually with
+<code>git commit -s</code>.</p>
+<h2 id="decision-drivers-18"><a class="header" href="#decision-drivers-18">Decision drivers</a></h2>
+<ol>
+<li>A clear, per-change record of who submitted what, under the project licence.</li>
+<li>Nothing that stops a first-time contributor: no account on another service, no legal review.</li>
+<li>No infrastructure, secrets or services for one maintainer to run. CI may use only the
+allowlisted, SHA-pinned actions (<a href="#continuous-integration">docs/ci.md</a>).</li>
+<li>No extra rights for the maintainer beyond the project licence, so contributors give up nothing
+by contributing.</li>
+<li>Checkable by a machine on every pull request.</li>
+</ol>
+<h2 id="considered-options-18"><a class="header" href="#considered-options-18">Considered options</a></h2>
+<ol>
+<li><strong>Inbound = outbound only (the current state).</strong> The Apache-2.0 contribution clause already
+says contributions are licensed under the project licence. Costs nothing, but leaves no
+explicit, per-commit statement that the contributor had the right to submit the change, and
+nothing to check. Weak on driver 1 and 5.</li>
+<li><strong>A CLA.</strong> Gives the strongest legal record and can allow relicensing. But it needs a signing
+service, a stored record of signatures, a legal text the maintainer cannot have reviewed, and
+a hosted bot or third-party action that is not on the allowlist. Contributors must sign before
+their first pull request, and a relicensing right asks them to trust the maintainer with more
+than the licence grants. Fails drivers 2, 3 and 4.</li>
+<li><strong>DCO sign-off, checked by a script in the repository.</strong> Each non-merge commit in a pull request
+that is not exempt (see Decision) carries <code>Signed-off-by:</code>, and a short shell script
+(<code>.github/scripts/check-dco.sh</code>), run by a workflow that uses only <code>actions/checkout</code>, checks
+them. No service, no secret, no extra rights. The DCO certifies the contributor's right to
+submit, which is what driver 1 asks for; it does not allow relicensing, which driver 4 rules out
+anyway.</li>
+<li><strong>DCO sign-off, checked by a hosted app or a third-party action.</strong> Same record as option 3, but
+adds an external integration or an action outside the allowlist, and with it a supply-chain
+dependency with access to pull requests. Fails driver 3 for no gain over option 3.</li>
+</ol>
+<h2 id="decision-18"><a class="header" href="#decision-18">Decision</a></h2>
+<p>Option 3. <strong>Every non-merge commit in a pull request carries a DCO 1.1 sign-off, except in a
+pull request the repository owner opened. There is no CLA.</strong></p>
+<ul>
+<li>A sign-off is a <code>Signed-off-by: Name &lt;email&gt;</code> trailer in the commit message, with a non-empty
+name and an email that matches the commit's author email, ignoring case. <code>git commit -s</code> adds
+one.</li>
+<li>A <code>DCO</code> check, added in #244 as the workflow <code>.github/workflows/dco.yml</code> and the script
+<code>.github/scripts/check-dco.sh</code> with its tests, runs on every pull request. It fails if any
+non-merge commit lacks a matching sign-off, with the Dependabot rule and the owner exemption
+below as the only exceptions. The script lives in the repository and changes only through
+review (<a href="https://github.com/jusso-dev/palisade/blob/main/.github/CODEOWNERS">CODEOWNERS</a>).</li>
+<li>Merge commits are skipped. They are not free of content: a merge that resolves a conflict, or
+that is edited before it is committed, can add changes found in neither parent. They are
+skipped because the hosting platform's "update branch" button creates them, usually without
+a sign-off, and failing those would punish contributors for keeping a branch current. Changes
+made inside a merge commit are therefore not covered by the check (see Negative and Security
+impact). Contributors who must change code while resolving a conflict should rebase instead.</li>
+<li>Once this ADR is accepted, <code>DCO</code> becomes a required status check on <code>main</code>. Changing the
+ruleset is a repository setting, tracked with the other required checks in #21. The steps are
+in <a href="#repository-settings">docs/repo-settings.md</a> (from #244). Until then the check reports but
+does not block.</li>
+<li>Pull requests are squash-merged, and the squashed commit on <code>main</code> is not itself checked. The
+record is the pull request's own commits, which GitHub keeps with the closed pull request.</li>
+<li>Dependabot signs off its own commits, but with a different email from the one it authors them
+with. The check accepts that sign-off only when GitHub reports Dependabot as the pull request's
+author, and only for commits authored at the bot's address. The pull request author comes from
+GitHub, not from the commit, so copying the bot's address into a commit gains nothing.</li>
+<li><strong>Owner-opened pull requests are exempt</strong> (#249). When GitHub reports the pull request's
+<code>author_association</code> as <code>OWNER</code>, the check passes with a notice and does not inspect the
+commits. The owner holds the copyright and the right to license their own changes, so a
+sign-off adds nothing; this covers changes prepared for the owner by tools or AI agents, which
+never sign off in the owner's name. The exemption is decided by GitHub's record of who opened
+the pull request, not by anything in the commits, so it cannot be claimed by copying the
+owner's name or email. It covers <strong>every</strong> commit in such a pull request, so when the owner
+carries someone else's commit, the owner checks that commit's sign-off by hand.
+<a href="#sign-off">CONTRIBUTING.md</a> states the same rule.</li>
+<li>No other exemptions exist.</li>
+<li>The licence terms do not change: contributions remain inbound = outbound under
+<code>Apache-2.0 OR MIT</code> (<a href="#0010-licence">ADR 0010</a>).</li>
+</ul>
+<p>A later PR can be checked against this decision: no CLA text, signing service or CLA bot is
+added, and the DCO check stays a script in the repository run with allowlisted actions only.</p>
+<h2 id="consequences-18"><a class="header" href="#consequences-18">Consequences</a></h2>
+<h3 id="positive-18"><a class="header" href="#positive-18">Positive</a></h3>
+<ul>
+<li>Every non-merge commit in a pull request that someone other than the owner opened has a signed
+statement from its author that they may submit it. The owner's own pull requests are
+recorded by GitHub's account history instead (see Decision).</li>
+<li>Nothing to sign up for or sign in advance; <code>git commit -s</code> is enough.</li>
+<li>No service, secret or third-party action to run or trust. The checker is under 100 lines
+of shell, with tests.</li>
+<li>Contributors keep every right the project licence gives them; nobody can relicense their work.</li>
+</ul>
+<h3 id="negative-18"><a class="header" href="#negative-18">Negative</a></h3>
+<ul>
+<li>First-time contributors will forget to sign off and must amend or rebase their commits. The
+check prints the exact commands, and CONTRIBUTING.md explains them.</li>
+<li>A sign-off is a statement, not proof of identity. The check confirms that a trailer matches the
+author email; it cannot confirm the person is who they say they are.</li>
+<li>Without a CLA, the project cannot relicense contributions. Any future change of licence would
+need every contributor's consent, or the removal of their code.</li>
+<li>The record for squash-merged changes lives in the pull request, not in <code>main</code>'s history. If
+the hosting platform lost pull request history, the per-commit sign-offs would go with it.</li>
+<li>The owner exemption puts the owner-opened pull requests' record in GitHub's account history
+rather than in a trailer, and it leaves a carried commit from someone else to the owner's
+manual check.</li>
+<li>The Dependabot rule depends on the bot's current author and sign-off addresses. If they change,
+its pull requests fail <code>DCO</code> until the script is updated.</li>
+<li>Changes introduced inside a merge commit, by conflict resolution or by editing the merge, carry
+no sign-off and are not checked. Squash merging puts them on <code>main</code> like any other change. The
+pull request's diff, which reviewers read, still shows them.</li>
+</ul>
+<h2 id="security-impact-18"><a class="header" href="#security-impact-18">Security impact</a></h2>
+<p>The DCO is a provenance control for the source, not a runtime control. A sign-off ties each
+change to a named contributor who has certified their right to submit it, which helps trace and
+remove a tainted or disputed contribution that arrives through a pull request: the
+source-hosting boundary TB-12 in the <a href="#palisade-threat-model-and-security-architecture">threat model</a>. It does not
+stop malicious code: a hostile contributor can sign off just as easily as an honest one, and it
+does nothing about a compromised third-party crate, build tool or action (actor AC-09), which
+the dependency policy covers. Review, CODEOWNERS and the required checks remain the controls
+against malicious changes.</p>
+<p>The check has three known gaps, all closed by review rather than by the check:</p>
+<ul>
+<li>Content added inside a merge commit is not checked (see Decision).</li>
+<li>An owner-opened pull request is not checked at all, so a third party's commit carried in it
+passes without a sign-off unless the owner checks it (see Decision).</li>
+<li>The workflow runs the script from the pull request's own branch, so a pull request can edit
+<code>dco.yml</code> or <code>check-dco.sh</code> to make its own check pass. Every change under <code>.github/</code> needs the
+maintainer's review (CODEOWNERS), and the reviewer reads that diff before merging.</li>
+</ul>
+<p>Choosing a script in the repository over a hosted app or third-party action adds no new code
+with access to pull requests, and the workflow needs only <code>contents: read</code>. The workflow uses the
+<code>pull_request</code> trigger, not <code>pull_request_target</code>, so fork pull requests run it without secrets
+or a write token. Every value taken from the event (the commit SHAs and the pull request
+author's login) reaches the script through environment variables, never through expression
+interpolation into the shell.</p>
+<h2 id="links-18"><a class="header" href="#links-18">Links</a></h2>
+<ul>
+<li>Issue #28 (contributor docs, governance and licensing), which this ADR completes.</li>
+<li>PR #244: adds the <code>DCO</code> workflow and script, and the sign-off section of
+<a href="#contributing-to-palisade">CONTRIBUTING.md</a>, the <code>DCO</code> section of <a href="#continuous-integration">docs/ci.md</a> and the
+steps in <a href="#repository-settings">docs/repo-settings.md</a> for making the check required.</li>
+<li>PR #249: the owner exemption in the <code>DCO</code> workflow.</li>
+<li>Issue #21: required status checks on <code>main</code>, which <code>DCO</code> joins once this ADR is accepted.</li>
+<li><a href="#0010-licence">ADR 0010</a>: the licence, which left this decision to #28.</li>
+<li>Developer Certificate of Origin 1.1: <a href="https://developercertificate.org">https://developercertificate.org</a>.</li>
+</ul>
+<hr>
+<p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/adr/0019-contributor-sign-off-dco.md"><code>docs/adr/0019-contributor-sign-off-dco.md</code></a> on GitHub.</small></p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="security"><a class="header" href="#security">Security</a></h1>
 <ul>
