@@ -49,7 +49,7 @@ PALISADE_PACKAGE_OUT="$work" \
   cargo test --manifest-path "$crate/Cargo.toml" --test package -- \
   --ignored --exact write_unsigned_packages --quiet
 test -s app.msix && test -s bundle.msixbundle
-cp app.msix bundle.msixbundle app-desc-unsigned.msix app-zip64-unsigned.msix "$out/"
+cp app.msix bundle.msixbundle app-desc-unsigned.msix app-zip64-unsigned.msix app-classic-unsigned.msix "$out/"
 
 cat > ca.cnf <<'CNF'
 basicConstraints=critical,CA:TRUE
@@ -100,5 +100,6 @@ osslsigncode sign -h sha384 -certs signer.chain -key signer.key -time 1700000000
   -in app.msix -out "$out/app-sha384.msix" >/dev/null
 sign signer app-desc-unsigned.msix app-desc.msix
 sign signer app-zip64-unsigned.msix app-zip64.msix
+sign signer app-classic-unsigned.msix app-classic.msix
 
 echo "package fixtures written to $out"

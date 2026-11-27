@@ -33,7 +33,10 @@
 //! - `AXBM` and the hash of `AppxBlockMap.xml`, uncompressed;
 //! - `AXCI` and the hash of `AppxMetadata/CodeIntegrity.cat`, if present.
 //!
-//! All under the block map's hash method. The signature also must be the
+//! All under the block map's hash method. The archive must have ZIP64 end
+//! records: the OS signing tool always writes them, and the OS rejects a
+//! signature on a classic archive whatever its digest
+//! ([`PackageSignatureIssue::NotZip64`]). The signature also must be the
 //! last local record and the last central directory entry, so nothing
 //! unsigned can sit after it.
 //!
@@ -164,6 +167,12 @@ pub enum PackageSignatureIssue {
     },
     /// The signer certificate could not be read to compare its subject.
     SignerUnreadable,
+    /// The archive has no ZIP64 end records. The OS checks the package
+    /// digest of a signed package only as the ZIP64 archive its own signing
+    /// tool writes, so it rejects a signature on a classic archive
+    /// (`TRUST_E_BAD_DIGEST`), whatever the digest: such a signature is
+    /// never valid here either.
+    NotZip64,
 }
 
 /// The package signature: the Authenticode report and any package-level
@@ -482,6 +491,14 @@ fn verify_signature(archive: &Archive<'_>, id: &PackageIdentity) -> Option<Packa
     // The signature is the last record and the last directory entry.
     if !archive.members.last().is_some_and(is_signature) {
         return fail(empty(), PackageSignatureIssue::NotLast);
+    }
+    // The OS signing tool always writes ZIP64 end records, and the OS
+    // rejects a signed classic archive however its digest is computed
+    // (Windows CI: osslsigncode's signature on a classic archive is
+    // TRUST_E_BAD_DIGEST, the OS signing tool's on the same input,
+    // rewritten as ZIP64, verifies). Never valid, then.
+    if !archive.zip64 {
+        return fail(empty(), PackageSignatureIssue::NotZip64);
     }
     let blockmap = archive
         .member(BLOCK_MAP)

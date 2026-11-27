@@ -193,6 +193,8 @@ fn identity_and_signatures_match_the_os() {
     for name in [
         "app-signed.msix",
         "app-zip64.msix",
+        "app-desc.msix",
+        "app-classic.msix",
         "bundle-signed.msixbundle",
         "other-publisher.msix",
     ] {
@@ -432,6 +434,16 @@ fn the_os_signer_computes_our_digest() {
             "fixture-app.msix",
             std::fs::read(format!("{FIXTURES}/app.msix")).unwrap(),
         ),
+        // The committed ZIP64 fixture's layout (data descriptors, ZIP64
+        // extra fields), and the classic one, as the OS tool signs them.
+        (
+            "fixture-zip64.msix",
+            std::fs::read(format!("{FIXTURES}/app-zip64-unsigned.msix")).unwrap(),
+        ),
+        (
+            "fixture-classic.msix",
+            std::fs::read(format!("{FIXTURES}/app-classic-unsigned.msix")).unwrap(),
+        ),
         (
             "fixture-bundle.msixbundle",
             std::fs::read(format!("{FIXTURES}/bundle.msixbundle")).unwrap(),
@@ -454,6 +466,9 @@ fn the_os_signer_computes_our_digest() {
     // Every layout signed, the signer's digest beside ours, tag by tag.
     let mut report = String::new();
     let mut problems = 0;
+    // Every file the tool signed, whether this crate reads it or not: the
+    // OS is asked about each, so a refusal here is compared with its
+    // verdict too.
     let mut signed: Vec<(String, Vec<u8>)> = Vec::new();
     for (name, _) in &layouts {
         let line = log
@@ -466,6 +481,7 @@ fn the_os_signer_computes_our_digest() {
             continue;
         }
         let data = std::fs::read(dir.0.join(name)).unwrap();
+        signed.push(((*name).to_owned(), data.clone()));
         let archive = match Archive::parse(&data) {
             Ok(a) => a,
             Err(e) => {
@@ -475,7 +491,8 @@ fn the_os_signer_computes_our_digest() {
                 let before = &layouts.iter().find(|(n, _)| n == name).unwrap().1;
                 report.push_str(&format!("{name}: before signing:\n{}", zip_dump(before)));
                 report.push_str(&format!("{name}: after signing:\n{}", zip_dump(&data)));
-                problems += 1;
+                // A refusal is a problem only if the OS accepts the file;
+                // the verdicts are compared below.
                 continue;
             }
         };
@@ -516,7 +533,6 @@ fn the_os_signer_computes_our_digest() {
                 hex(o)
             ));
         }
-        signed.push(((*name).to_owned(), data));
     }
     // The OS's verdict on what its own signer made, beside ours.
     if let Some(os) = ask_os(&[], &signed) {
@@ -525,7 +541,8 @@ fn the_os_signer_computes_our_digest() {
         for (name, data) in &signed {
             let code = os.code(name);
             let ours = parse_package(data).map(|id| id.signature_valid());
-            let agree = ours.as_ref().is_ok_and(|v| *v == INTACT.contains(&code));
+            // Refused here or signature not valid: both are "not valid".
+            let agree = ours.as_ref().is_ok_and(|v| *v) == INTACT.contains(&code);
             if !agree {
                 problems += 1;
             }

@@ -322,7 +322,7 @@ impl AppxBuilder {
     /// identity) and a bundle manifest that lists them with the offset and
     /// size of their data, as the OS packaging tool lays a bundle out:
     /// payloads first and stored, then the manifest. The offsets are those
-    /// of [`Self::build`] (no data descriptors).
+    /// of [`Self::build`] (the packaging tool's layout).
     pub fn bundle() -> Self {
         let payloads = [
             File {
@@ -336,12 +336,14 @@ impl AppxBuilder {
                 deflate: false,
             },
         ];
+        // Each payload's data offset in the packaging tool's layout: a
+        // local header, the data, then a 24-byte data descriptor.
         let mut at = 0;
         let mut place = Vec::new();
         for p in &payloads {
             let data = at + Self::local_header_len(&p.name);
             place.push((data, p.data.len()));
-            at = data + p.data.len();
+            at = data + p.data.len() + 24;
         }
         let ((x64_at, x64_len), (en_at, en_len)) = (place[0], place[1]);
         let bundle_manifest = format!(
@@ -453,8 +455,16 @@ impl AppxBuilder {
         write_zip_with(&self.all_files(), style)
     }
 
-    /// The unsigned archive.
+    /// The unsigned archive, laid out as the OS packaging tool writes it
+    /// ([`ZipStyle::packaging_tool`]): the OS verifies a package signature
+    /// only on a ZIP64 archive.
     pub fn build(&self) -> Vec<u8> {
+        write_zip_with(&self.all_files(), &ZipStyle::packaging_tool())
+    }
+
+    /// The unsigned archive as a classic ZIP: no data descriptors, no ZIP64
+    /// records.
+    pub fn build_classic(&self) -> Vec<u8> {
         write_zip(&self.all_files())
     }
 
@@ -503,12 +513,14 @@ pub struct ZipStyle {
     /// Deflated members end on their last full flush, without the empty
     /// final block (for negative tests).
     pub no_final_block: bool,
-    /// Data descriptors with 4-byte sizes even in a ZIP64 archive (for
-    /// negative tests).
+    /// Data descriptors with 4-byte sizes even in a ZIP64 archive, as the
+    /// OS signing tool rewrites them (with ZIP version 2.0).
     pub narrow_descriptors: bool,
-    /// Data descriptors with 8-byte sizes even without ZIP64 (for negative
-    /// tests).
+    /// Data descriptors with 8-byte sizes even without ZIP64.
     pub wide_descriptors: bool,
+    /// The ZIP version that does not go with the descriptor width: 2.0
+    /// with 8-byte sizes, 4.5 with 4-byte sizes (for negative tests).
+    pub version_mismatch: bool,
 }
 
 impl ZipStyle {
@@ -552,8 +564,18 @@ pub fn write_zip_with(files: &[File], style: &ZipStyle) -> Vec<u8> {
         let offset = out.len() as u32;
         let name = f.name.as_bytes();
         let flags: u16 = if style.descriptors { 0x0008 } else { 0 };
+        // 8-byte descriptor sizes go with ZIP version 4.5, as the OS
+        // packaging tool writes them; `version_mismatch` writes the other
+        // version (for negative tests).
+        let wide = style.descriptors
+            && ((style.zip64 && !style.narrow_descriptors) || style.wide_descriptors);
+        let version: u16 = if wide != style.version_mismatch {
+            45
+        } else {
+            20
+        };
         out.extend_from_slice(&0x0403_4b50_u32.to_le_bytes());
-        out.extend_from_slice(&20_u16.to_le_bytes());
+        out.extend_from_slice(&version.to_le_bytes());
         out.extend_from_slice(&flags.to_le_bytes());
         out.extend_from_slice(&method.to_le_bytes());
         out.extend_from_slice(&0_u16.to_le_bytes());
@@ -573,7 +595,7 @@ pub fn write_zip_with(files: &[File], style: &ZipStyle) -> Vec<u8> {
         if style.descriptors {
             out.extend_from_slice(&0x0807_4b50_u32.to_le_bytes());
             out.extend_from_slice(&crc.to_le_bytes());
-            if (style.zip64 && !style.narrow_descriptors) || style.wide_descriptors {
+            if wide {
                 out.extend_from_slice(&(body.len() as u64).to_le_bytes());
                 out.extend_from_slice(&(f.data.len() as u64).to_le_bytes());
             } else {
@@ -584,7 +606,7 @@ pub fn write_zip_with(files: &[File], style: &ZipStyle) -> Vec<u8> {
 
         central.extend_from_slice(&0x0201_4b50_u32.to_le_bytes());
         central.extend_from_slice(&45_u16.to_le_bytes());
-        central.extend_from_slice(&20_u16.to_le_bytes());
+        central.extend_from_slice(&version.to_le_bytes());
         central.extend_from_slice(&flags.to_le_bytes());
         central.extend_from_slice(&method.to_le_bytes());
         central.extend_from_slice(&0_u16.to_le_bytes());

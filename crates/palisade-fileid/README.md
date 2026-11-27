@@ -741,7 +741,9 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   `AXPC`, `AXCD`, `AXCT`, `AXBM` and optional `AXCI` hashes), the block map
   is checked against every file and block, and the signer's subject must
   equal `Identity@Publisher` (`PublisherMismatch` otherwise). Anything wrong
-  with any of those leaves no signature valid. A bundle's block map lists
+  with any of those leaves no signature valid, and so does a signature on
+  an archive without ZIP64 end records, which the OS rejects whatever its
+  digest (Windows CI: the OS signing tool always writes them). A bundle's block map lists
   only its bundle manifest; each payload package must be a stored member at
   the offset and of the size the bundle manifest gives. On Windows,
   `tests/package_os.rs` checks the family names against the OS package

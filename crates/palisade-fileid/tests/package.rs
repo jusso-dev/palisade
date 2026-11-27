@@ -18,7 +18,7 @@ use palisade_fileid::package::blockmap::NS as BLOCK_MAP;
 use palisade_fileid::package::manifest::ns::FOUNDATION;
 use palisade_fileid::package::zip::{Archive, ZipError};
 use palisade_fileid::package::{
-    PackageError, PackageSignatureIssue, PackageVersion, parse_package, publisher_id,
+    PackageError, PackageSignatureIssue, PackageVersion, parse_package, publisher_id, signed_digest,
 };
 
 const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/package");
@@ -320,15 +320,27 @@ fn replace_signature(signed: &[u8], sig: &[u8]) -> Vec<u8> {
     central.extend_from_slice(&[0; 12]);
     central.extend_from_slice(&offset.to_le_bytes());
     central.extend_from_slice(name);
-    let cd = out.len() as u32;
+    // ZIP64 end records, as the OS signing tool writes them.
+    let cd = out.len() as u64;
     out.extend_from_slice(&central);
+    let rec = out.len() as u64;
+    let n = a.members.len() as u64;
+    out.extend_from_slice(&0x0606_4b50_u32.to_le_bytes());
+    out.extend_from_slice(&44_u64.to_le_bytes());
+    out.extend_from_slice(&45_u16.to_le_bytes());
+    out.extend_from_slice(&45_u16.to_le_bytes());
+    out.extend_from_slice(&[0; 8]);
+    out.extend_from_slice(&n.to_le_bytes());
+    out.extend_from_slice(&n.to_le_bytes());
+    out.extend_from_slice(&(central.len() as u64).to_le_bytes());
+    out.extend_from_slice(&cd.to_le_bytes());
+    out.extend_from_slice(&0x0706_4b50_u32.to_le_bytes());
+    out.extend_from_slice(&0_u32.to_le_bytes());
+    out.extend_from_slice(&rec.to_le_bytes());
+    out.extend_from_slice(&1_u32.to_le_bytes());
     out.extend_from_slice(&0x0605_4b50_u32.to_le_bytes());
     out.extend_from_slice(&[0; 4]);
-    let n = a.members.len() as u16;
-    out.extend_from_slice(&n.to_le_bytes());
-    out.extend_from_slice(&n.to_le_bytes());
-    out.extend_from_slice(&(central.len() as u32).to_le_bytes());
-    out.extend_from_slice(&cd.to_le_bytes());
+    out.extend_from_slice(&[0xff; 12]);
     out.extend_from_slice(&0_u16.to_le_bytes());
     out
 }
@@ -483,7 +495,7 @@ fn rebuild(files: &[File], fix_blockmap: bool) -> Vec<u8> {
             }
         }
     }
-    write_zip(&files)
+    write_zip_with(&files, &ZipStyle::packaging_tool())
 }
 
 #[test]
@@ -541,7 +553,7 @@ fn a_moved_signature_does_not_verify() {
     let mut files = members(&data);
     let sig = files.pop().unwrap();
     files.insert(0, sig);
-    let id = parse_package(&write_zip(&files)).unwrap();
+    let id = parse_package(&write_zip_with(&files, &ZipStyle::packaging_tool())).unwrap();
     assert_eq!(
         id.signature.as_ref().unwrap().issue,
         Some(PackageSignatureIssue::NotLast)
@@ -572,8 +584,12 @@ fn block_map_must_cover_every_file() {
         .position(|f| f.name == "AppxBlockMap.xml")
         .unwrap();
     files[map_at].data = skip.block_map().into_bytes();
-    let id = parse_package(&write_zip(&files)).unwrap();
+    let id = parse_package(&write_zip_with(&files, &ZipStyle::packaging_tool())).unwrap();
     assert!(!id.signature_valid());
+    assert_ne!(
+        id.signature.as_ref().unwrap().issue,
+        Some(PackageSignatureIssue::NotZip64)
+    );
 }
 
 #[test]
@@ -602,7 +618,7 @@ fn part_names_compare_as_opc_compares_them() {
     // A lower-case signature part is still the signature.
     let mut files = members(&fixture("app-signed.msix"));
     files.last_mut().unwrap().name = "appxsignature.p7x".into();
-    let id = parse_package(&write_zip(&files)).unwrap();
+    let id = parse_package(&write_zip_with(&files, &ZipStyle::packaging_tool())).unwrap();
     assert!(id.signature.is_some());
     // Escaped traversal, separators and NUL are refused like plain ones.
     for name in [
@@ -790,22 +806,31 @@ fn zip64() -> ZipStyle {
 
 #[test]
 fn descriptor_and_zip64_layouts_verify() {
-    for (name, style) in [
-        ("app-desc.msix", descriptors()),
-        ("app-zip64.msix", zip64()),
+    // Each layout reads; signed, a ZIP64 one verifies and a classic one is
+    // never valid (`NotZip64`: the OS rejects a signed classic archive,
+    // whatever its digest).
+    for (name, style, valid) in [
+        ("app-desc.msix", descriptors(), false),
+        ("app-classic.msix", ZipStyle::default(), false),
+        ("app-zip64.msix", zip64(), true),
     ] {
         let unsigned = AppxBuilder::package().build_with(&style);
         let a = Archive::parse(&unsigned).unwrap();
         assert_eq!(a.zip64, style.zip64, "{name}");
         assert_eq!(parse_package(&unsigned).unwrap().name, "Palisade.TestApp");
         let id = parse_package(&fixture(name)).unwrap();
-        assert!(
-            id.signature_valid(),
-            "{name}: {:?}",
-            id.signature
-                .as_ref()
-                .map(|s| (&s.issue, &s.report.signatures[0].status))
-        );
+        let why = id
+            .signature
+            .as_ref()
+            .map(|s| (s.issue.clone(), s.report.signatures[0].status.clone()));
+        assert_eq!(id.signature_valid(), valid, "{name}: {why:?}");
+        if !valid {
+            assert_eq!(
+                id.signature.as_ref().unwrap().issue,
+                Some(PackageSignatureIssue::NotZip64),
+                "{name}"
+            );
+        }
         assert_eq!(
             fixture(&name.replace(".msix", "-unsigned.msix")),
             unsigned,
@@ -833,6 +858,11 @@ fn write_unsigned_packages() {
     let dir = std::env::var_os("PALISADE_PACKAGE_OUT").expect("set PALISADE_PACKAGE_OUT");
     let dir = std::path::Path::new(&dir);
     std::fs::write(dir.join("app.msix"), AppxBuilder::package().build()).unwrap();
+    std::fs::write(
+        dir.join("app-classic-unsigned.msix"),
+        AppxBuilder::package().build_classic(),
+    )
+    .unwrap();
     std::fs::write(dir.join("bundle.msixbundle"), AppxBuilder::bundle().build()).unwrap();
     std::fs::write(
         dir.join("app-desc-unsigned.msix"),
@@ -879,7 +909,7 @@ fn unmapped_parts_are_bounded() {
         .unwrap();
     ct.data = vec![b' '; palisade_fileid::package::MAX_METADATA_SIZE as usize + 1];
     let start = std::time::Instant::now();
-    let id = parse_package(&write_zip(&files)).unwrap();
+    let id = parse_package(&write_zip_with(&files, &ZipStyle::packaging_tool())).unwrap();
     assert!(!id.signature_valid());
     assert!(start.elapsed() < std::time::Duration::from_secs(20));
 }
@@ -1123,31 +1153,79 @@ fn the_packaging_tool_zip64_layout_reads() {
     x[rec + 20] = 1;
     assert_eq!(Archive::parse(&x).unwrap_err(), ZipError::MultiDisk);
 
-    // Descriptor width: 8 bytes in a ZIP64 archive, 4 bytes otherwise.
-    // Written the other way, each is refused (the sizes read at the wrong
-    // width do not match, or the next header is not where it should be).
+    // Descriptor width follows the entry's ZIP version: 4.5, 8-byte sizes
+    // (the packaging tool); 2.0, 4-byte sizes, in a ZIP64 archive too (the
+    // OS signing tool rewrites archives so: ZIP64 end records, version 2.0,
+    // 16-byte descriptors). Both read.
     for (style, what) in [
         (
             ZipStyle {
                 narrow_descriptors: true,
                 ..ZipStyle::packaging_tool()
             },
-            "4-byte sizes in a ZIP64 archive",
+            "version 2.0, 4-byte sizes, ZIP64 archive (the signing tool)",
         ),
         (
             ZipStyle {
                 wide_descriptors: true,
                 ..descriptors()
             },
-            "8-byte sizes without ZIP64",
+            "version 4.5, 8-byte sizes, classic archive",
         ),
     ] {
         let x = AppxBuilder::package().build_with(&style);
+        let a = Archive::parse(&x).unwrap_or_else(|e| panic!("{what}: {e}"));
+        palisade_fileid::package::blockmap::verify(&block_map_of(&a), &a).unwrap();
+    }
+    // The width the version does not call for is refused, in every layout:
+    // the sizes read at the wrong width do not match, or the next record is
+    // not where it should be.
+    for (style, what) in [
+        (ZipStyle::packaging_tool(), "version 2.0 with 8-byte sizes"),
+        (
+            ZipStyle {
+                narrow_descriptors: true,
+                ..ZipStyle::packaging_tool()
+            },
+            "version 4.5 with 4-byte sizes, ZIP64",
+        ),
+        (descriptors(), "version 4.5 with 4-byte sizes"),
+        (
+            ZipStyle {
+                wide_descriptors: true,
+                ..descriptors()
+            },
+            "version 2.0 with 8-byte sizes, classic",
+        ),
+    ] {
+        let x = AppxBuilder::package().build_with(&ZipStyle {
+            version_mismatch: true,
+            ..style
+        });
         assert!(
             matches!(Archive::parse(&x), Err(ZipError::LocalHeader(_))),
             "{what}"
         );
     }
+    // A ZIP64 extra field with version 2.0 (and so 4-byte sizes) is
+    // refused: the extra field needs 4.5.
+    let x = AppxBuilder::package().build_with(&ZipStyle {
+        narrow_descriptors: true,
+        ..zip64()
+    });
+    assert!(matches!(Archive::parse(&x), Err(ZipError::LocalHeader(_))));
+    // The OS signing tool's rewrite of ZIP64 extras (seen on CI): 4-byte
+    // sizes with the uncompressed size 0. The values must match the central
+    // entry, so it is refused.
+    let mut x = AppxBuilder::package().build_with(&ZipStyle {
+        narrow_descriptors: true,
+        ..ZipStyle::packaging_tool()
+    });
+    let a = Archive::parse(&x).unwrap();
+    let m = a.member("AppxManifest.xml").unwrap();
+    let d = (m.data_offset + m.compressed_size) as usize;
+    x[d + 12..d + 16].copy_from_slice(&[0; 4]);
+    assert!(matches!(Archive::parse(&x), Err(ZipError::LocalHeader(_))));
     // A descriptor size changed by one is refused.
     let a = Archive::parse(&data).unwrap();
     let m = a.member("app/tool.exe").unwrap();
@@ -1345,4 +1423,53 @@ fn bundle_payloads_are_checked_against_the_bundle_manifest() {
     let mut flipped = signed.clone();
     flipped[(x64.data_offset + 40) as usize] ^= 1;
     assert!(!parse_package(&flipped).unwrap().signature_valid());
+}
+
+#[test]
+fn a_signed_classic_archive_is_never_valid() {
+    // osslsigncode signs a classic (non-ZIP64) archive with a digest of
+    // that archive, which this crate's digest reproduces; the OS rejects it
+    // (Windows CI: TRUST_E_BAD_DIGEST, HashMismatch), while the OS signing
+    // tool, given the same input, writes ZIP64 end records and signs that.
+    // So a signed classic archive is refused however its digest matches.
+    let classic = fixture("app-classic.msix");
+    let a = Archive::parse(&classic).unwrap();
+    assert!(!a.zip64);
+    let id = parse_package(&classic).unwrap();
+    let sig = id.signature.as_ref().unwrap();
+    assert_eq!(sig.issue, Some(PackageSignatureIssue::NotZip64));
+    assert!(!id.signature_valid());
+    assert!(sig.report.signatures.iter().all(|s| !s.status.is_valid()));
+    // The digest itself still matches what osslsigncode signed: the
+    // refusal is the container, not the hash.
+    let blob = p7x(&classic);
+    let ours = signed_digest(&a, palisade_fileid::authenticode::DigestAlgorithm::Sha256).unwrap();
+    assert!(blob.windows(ours.len()).any(|w| w == ours.as_slice()));
+    // The same package, signed by the same tool in ZIP64, verifies.
+    assert!(
+        parse_package(&fixture("app-signed.msix"))
+            .unwrap()
+            .signature_valid()
+    );
+    // The signed ZIP64 package with its ZIP64 end records removed (the
+    // central directory and classic end record kept, rewritten to plain
+    // values): never valid.
+    let z = fixture("app-signed.msix");
+    let za = Archive::parse(&z).unwrap();
+    let cd = za.central_offset as usize;
+    let cd_end = za.central_end as usize;
+    let n = za.members.len() as u16;
+    let mut stripped = z[..cd_end].to_vec();
+    stripped.extend_from_slice(&0x0605_4b50_u32.to_le_bytes());
+    stripped.extend_from_slice(&[0; 4]);
+    stripped.extend_from_slice(&n.to_le_bytes());
+    stripped.extend_from_slice(&n.to_le_bytes());
+    stripped.extend_from_slice(&((cd_end - cd) as u32).to_le_bytes());
+    stripped.extend_from_slice(&(cd as u32).to_le_bytes());
+    stripped.extend_from_slice(&0_u16.to_le_bytes());
+    let id = parse_package(&stripped).unwrap();
+    assert_eq!(
+        id.signature.as_ref().unwrap().issue,
+        Some(PackageSignatureIssue::NotZip64)
+    );
 }

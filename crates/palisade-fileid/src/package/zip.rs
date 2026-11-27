@@ -18,11 +18,11 @@
 //! - local entries tile the file from offset 0 to the central directory
 //!   in central-directory order: each local header, its data and its data
 //!   descriptor end where the next local header starts;
-//! - a data descriptor's sizes are 8 bytes when the archive has ZIP64 end
-//!   records or the entry a ZIP64 extra field, and 4 bytes otherwise (the
-//!   OS packaging tool writes ZIP64 archives with 8-byte descriptor sizes
-//!   for every entry, extra field or not, and signing tools read them that
-//!   way);
+//! - a data descriptor's sizes are 8 bytes when the entry's local header
+//!   gives ZIP version 4.5 or later, and 4 bytes otherwise (the OS
+//!   packaging tool writes 4.5 and 8-byte sizes; the OS signing tool,
+//!   rewriting an archive, writes 2.0 and 4-byte sizes, in ZIP64 archives
+//!   too); an entry with a ZIP64 extra field must give 4.5;
 //! - each local header agrees with its central entry (name, method,
 //!   flags, CRC and sizes, or zero for those three when a data descriptor
 //!   follows, which must carry its signature and whose values must then
@@ -131,8 +131,8 @@ pub struct Member {
     /// and compared in this form, so two spellings of one part are one
     /// name.
     pub part: String,
-    /// Whether the central entry carries a ZIP64 extra field, which makes
-    /// its data descriptor use 8-byte sizes.
+    /// Whether the central entry carries a ZIP64 extra field (which
+    /// needs ZIP version 4.5, and so 8-byte data descriptor sizes).
     pub has_zip64_extra: bool,
     /// 0 stored, 8 deflate.
     pub method: u16,
@@ -389,7 +389,7 @@ impl<'a> Archive<'a> {
             if m.local_offset != next {
                 return Err(ZipError::LocalHeader(m.name.clone()));
             }
-            Self::local_entry(data, m, zip64)?;
+            Self::local_entry(data, m)?;
             next = m.end_offset;
         }
         if next != cd_off {
@@ -482,12 +482,13 @@ impl<'a> Archive<'a> {
         })
     }
 
-    fn local_entry(data: &[u8], m: &mut Member, zip64: bool) -> Result<()> {
+    fn local_entry(data: &[u8], m: &mut Member) -> Result<()> {
         let bad = || ZipError::LocalHeader(m.name.clone());
         let at = to_usize(m.local_offset).ok_or_else(bad)?;
         if u32_at(data, at) != Some(LOCAL_SIG) {
             return Err(bad());
         }
+        let version = u16_at(data, at + 4).ok_or_else(bad)?;
         let flags = u16_at(data, at + 6).ok_or_else(bad)?;
         let method = u16_at(data, at + 8).ok_or_else(bad)?;
         let crc = u32_at(data, at + 14).ok_or_else(bad)?;
@@ -535,10 +536,19 @@ impl<'a> Archive<'a> {
             }
             let p = d + 4;
             let d_crc = u32_at(data, p).ok_or_else(bad)?;
-            // 8-byte sizes in a ZIP64 archive or with a ZIP64 extra field:
-            // the OS packaging tool writes them for every descriptor of the
-            // ZIP64 archives it makes, and osslsigncode reads them so.
-            let (dc, du, n) = if zip64 || m.has_zip64_extra {
+            // The size width follows the entry's ZIP version: 4.5 (ZIP64)
+            // or later, 8-byte sizes; earlier, 4-byte sizes. The OS
+            // packaging tool writes version 4.5 and 8-byte sizes; the OS
+            // signing tool, rewriting an archive, writes version 2.0 and
+            // 4-byte sizes, ZIP64 end records or not. Every descriptor in
+            // the open-source SDK's test corpus follows this. A ZIP64 extra
+            // field needs version 4.5; one with an earlier version is
+            // refused rather than read at either width.
+            let wide = version >= 45;
+            if m.has_zip64_extra && !wide {
+                return Err(bad());
+            }
+            let (dc, du, n) = if wide {
                 (
                     u64_at(data, p + 4).ok_or_else(bad)?,
                     u64_at(data, p + 12).ok_or_else(bad)?,
