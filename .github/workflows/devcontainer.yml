@@ -42,6 +42,11 @@ jobs:
         run: |
           $COMPOSE build dev
           $COMPOSE up --detach --wait
+      # Git refuses a repository owned by another user, and the checkout is
+      # owned by UID 1001 while the container runs as UID 1000. Trust only
+      # this workspace, for the container user (`check-unsafe` runs git).
+      - name: Trust the workspace for git inside the container
+        run: $COMPOSE exec -T dev git config --global --add safe.directory /workspaces/palisade
       - name: Fetch the locked dependencies
         run: $COMPOSE exec -T --workdir /workspaces/palisade dev cargo fetch --locked
       - name: cargo xtask ci --fast, inside the container
