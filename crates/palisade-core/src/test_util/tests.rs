@@ -65,13 +65,21 @@ fn utc_seconds_round_down() {
 
 // ---------------------------------------------------------------- files
 
+/// A self-relative descriptor header (revision 1,
+/// `SE_DACL_PRESENT | SE_SELF_RELATIVE`), with no owner, group or ACLs.
+fn sample_descriptor() -> Vec<u8> {
+    let mut sd = vec![1_u8, 0, 4, 0x80];
+    sd.extend([0_u8; 16]);
+    sd
+}
+
 fn sample_fs() -> MockFileSystem {
     let mut fs = MockFileSystem::new();
     fs.insert(
         r"C:\Tools\tool.exe",
         MockFile::new(b"MZ example contents".to_vec())
             .owner("S-1-5-32-544")
-            .descriptor(vec![1, 0, 4, 0x80])
+            .descriptor(sample_descriptor())
             .stream(
                 "Zone.Identifier",
                 b"[ZoneTransfer]\r\nZoneId=3\r\n".to_vec(),
@@ -140,7 +148,7 @@ fn mock_files_report_metadata_owner_descriptor_and_streams() {
     );
     assert_eq!(
         fs.security_descriptor(r"C:\Tools\tool.exe").unwrap(),
-        Some(vec![1, 0, 4, 0x80])
+        Some(sample_descriptor())
     );
     let streams = fs.streams(r"C:\Tools\tool.exe").unwrap();
     assert_eq!(streams.len(), 1);
@@ -310,6 +318,66 @@ fn mock_signatures_return_scripted_chains() {
     assert_eq!(sigs.catalog(r"C:\Tools\tool.exe").unwrap(), Some(catalog));
     assert!(sigs.embedded(r"C:\other.exe").unwrap().is_empty());
     assert_eq!(sigs.catalog(r"C:\other.exe").unwrap(), None);
+}
+
+#[test]
+fn mock_signatures_meet_the_contract() {
+    let leaf = crate::platform::CertificateSummary {
+        subject: "Example Signer".into(),
+        issuer: "Example Root".into(),
+        sha256: [1; 32],
+    };
+    let root = crate::platform::CertificateSummary {
+        subject: "Example Root".into(),
+        issuer: "Example Root".into(),
+        sha256: [2; 32],
+    };
+    let ok = SignatureResult {
+        source: crate::platform::SignatureSource::Embedded,
+        status: crate::VerificationError::Ok,
+        chain: vec![leaf.clone(), root.clone()],
+        signing_time: None,
+    };
+    let mut sigs = MockSignatures::new();
+    sigs.set_embedded(r"C:\signed.exe", vec![ok.clone()]);
+    sigs.set_missing(r"C:\missing.exe");
+    contract::signatures(&sigs, r"C:\signed.exe", r"C:\plain.exe", r"C:\missing.exe").unwrap();
+
+    // A missing file read as unsigned, a broken chain, or a status that
+    // is not Ok breaks the contract.
+    let mut lax = MockSignatures::new();
+    lax.set_embedded(r"C:\signed.exe", vec![ok.clone()]);
+    assert!(contract::signatures(&lax, r"C:\signed.exe", r"C:\plain.exe", r"C:\gone.exe").is_err());
+    let mut broken = MockSignatures::new();
+    broken.set_missing(r"C:\missing.exe");
+    broken.set_embedded(
+        r"C:\signed.exe",
+        vec![SignatureResult {
+            chain: vec![root, leaf],
+            ..ok.clone()
+        }],
+    );
+    assert!(
+        contract::signatures(
+            &broken,
+            r"C:\signed.exe",
+            r"C:\plain.exe",
+            r"C:\missing.exe"
+        )
+        .is_err()
+    );
+    let mut weak = MockSignatures::new();
+    weak.set_missing(r"C:\missing.exe");
+    weak.set_embedded(
+        r"C:\signed.exe",
+        vec![SignatureResult {
+            status: crate::VerificationError::WeakHashAlgorithm,
+            ..ok
+        }],
+    );
+    assert!(
+        contract::signatures(&weak, r"C:\signed.exe", r"C:\plain.exe", r"C:\missing.exe").is_err()
+    );
 }
 
 // ---------------------------------------------------------------- identity

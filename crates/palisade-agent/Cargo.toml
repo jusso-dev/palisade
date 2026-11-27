@@ -26,7 +26,8 @@ test-util = [
 [dependencies]
 # The platform traits (#29).
 palisade-core = { workspace = true, features = ["std"] }
-# SIDs in their binary and text forms, for the identity backend (#29).
+# SIDs for the identity backend, and signature verification and catalog
+# lookups for the signature backend (#29).
 palisade-fileid = { workspace = true }
 # The event schema, for the simulator's events.
 palisade-proto = { workspace = true, optional = true }
@@ -41,8 +42,8 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
-# Account lookups through `palisade_fileid::win` (ADR 0003: only the agent
-# enables `os-trust`).
+# Account names and the file-system context through `palisade_fileid::win`
+# (ADR 0003: only the agent enables `os-trust`).
 palisade-fileid = { workspace = true, features = ["os-trust"] }
 # Safe registry reads, for the registry and environment backends (#29).
 windows-registry = { workspace = true }

@@ -516,4 +516,117 @@ mod windows {
             .is_err()
         );
     }
+
+    // ------------------------------------------------------------------
+    // The file-system context, through `palisade_fileid::win`.
+    // ------------------------------------------------------------------
+
+    use palisade_agent::platform::windows::WindowsFileSystem;
+    use palisade_core::platform::{FileSystem, OpenFile};
+
+    #[test]
+    fn file_system_meets_the_contract() {
+        let dir = super::TempDir::new("winfs");
+        let contents: Vec<u8> = (0..=255u8).cycle().take(1000).collect();
+        let path = dir.path("sample.bin");
+        std::fs::write(&path, &contents).unwrap();
+        contract::file_system(&WindowsFileSystem, &path, &contents, &dir.path("missing")).unwrap();
+        contract::directory(&WindowsFileSystem, dir.0.to_str().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn file_ids_and_usns_come_from_the_handle() {
+        let dir = super::TempDir::new("winfs-ids");
+        let a = dir.path("a.bin");
+        let b = dir.path("b.bin");
+        std::fs::write(&a, b"a").unwrap();
+        std::fs::write(&b, b"b").unwrap();
+        let ma = WindowsFileSystem.open(&a).unwrap().metadata().unwrap();
+        let mb = WindowsFileSystem.open(&b).unwrap().metadata().unwrap();
+        // The temporary folder on the CI runners is on the NTFS system
+        // volume, which has file IDs and an active change journal.
+        assert!(ma.file_id.is_some() && ma.volume_serial.is_some(), "{ma:?}");
+        assert_ne!(ma.file_id, mb.file_id);
+        assert_eq!(ma.volume_serial, mb.volume_serial);
+        assert!(ma.usn.is_some_and(|u| u >= 0), "{ma:?}");
+        // A hard link is the same file: same ID.
+        let link = dir.path("link.bin");
+        std::fs::hard_link(&a, &link).unwrap();
+        let ml = WindowsFileSystem.open(&link).unwrap().metadata().unwrap();
+        assert_eq!(ml.file_id, ma.file_id);
+    }
+
+    #[test]
+    fn owners_and_descriptors() {
+        let dir = super::TempDir::new("winfs-owner");
+        let path = dir.path("mine.txt");
+        std::fs::write(&path, b"x").unwrap();
+        let sd = WindowsFileSystem
+            .security_descriptor(&path)
+            .unwrap()
+            .unwrap();
+        let parsed = palisade_fileid::fsctx::SecurityDescriptor::from_self_relative(&sd).unwrap();
+        let recorded = parsed.owner.map(|s| s.to_string()).unwrap();
+        let me = WindowsIdentity::new().current().unwrap();
+        // This process's user, or Administrators for an elevated one.
+        assert!(
+            recorded == me.user_sid || recorded == ADMINISTRATORS,
+            "{recorded} vs {}",
+            me.user_sid
+        );
+        // The owner is reported only where the volume says owners can be
+        // relied on (a physical local NTFS or ReFS disk); elsewhere, such
+        // as a runner whose disk reports a virtual bus, it is `None`,
+        // never a guess.
+        let file = std::fs::File::open(&path).unwrap();
+        let trusted_volume = palisade_fileid::win::volume::read_volume(&file).supports_owner();
+        let owner = WindowsFileSystem.owner_sid(&path).unwrap();
+        if trusted_volume {
+            assert_eq!(owner.as_deref(), Some(recorded.as_str()));
+        } else {
+            assert_eq!(owner, None);
+        }
+
+        let missing = dir.path("missing.txt");
+        assert_eq!(
+            WindowsFileSystem.owner_sid(&missing).unwrap_err().kind(),
+            ErrorKind::NotFound
+        );
+        assert_eq!(
+            WindowsFileSystem
+                .security_descriptor("relative.txt")
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidInput
+        );
+    }
+
+    #[test]
+    fn alternate_data_streams_are_listed() {
+        let dir = super::TempDir::new("winfs-ads");
+        let path = dir.path("download.exe");
+        std::fs::write(&path, b"MZ").unwrap();
+        assert!(WindowsFileSystem.streams(&path).unwrap().is_empty());
+        std::fs::write(
+            format!("{path}:Zone.Identifier"),
+            b"[ZoneTransfer]\r\nZoneId=3\r\n",
+        )
+        .unwrap();
+        std::fs::write(format!("{path}:extra"), b"12345").unwrap();
+        let mut streams = WindowsFileSystem.streams(&path).unwrap();
+        streams.sort_by(|a, b| a.name.cmp(&b.name));
+        let names: Vec<(&str, u64)> = streams.iter().map(|s| (s.name.as_str(), s.size)).collect();
+        assert_eq!(names, [("Zone.Identifier", 26), ("extra", 5)]);
+        // A stream is data, readable through `open`.
+        let mut f = WindowsFileSystem.open(&format!("{path}:extra")).unwrap();
+        let mut buf = [0_u8; 8];
+        assert_eq!(f.read_at(0, &mut buf).unwrap(), 5);
+        assert_eq!(
+            WindowsFileSystem
+                .streams(&dir.path("missing"))
+                .unwrap_err()
+                .kind(),
+            ErrorKind::NotFound
+        );
+    }
 }

@@ -69,11 +69,10 @@ impl Clock for SystemClock {
 ///
 /// `open`, `read_at` and `metadata` (size, directory flag and times) work on
 /// every OS. Owner SIDs, security descriptors, alternate data streams, file
-/// IDs, volume serials and USNs need Windows APIs. Until the agent reads
-/// them through `palisade_fileid::win` (#54), for the file inventory (#60),
-/// `owner_sid` and `security_descriptor` return [`ErrorKind::Unsupported`],
-/// `streams` does too on Windows, and the metadata leaves those fields
-/// `None`.
+/// IDs, volume serials and USNs need Windows APIs: here `owner_sid` and
+/// `security_descriptor` return [`ErrorKind::Unsupported`], `streams` does
+/// too on Windows, and the metadata leaves those fields `None`. On Windows,
+/// `windows::WindowsFileSystem` adds them through `palisade_fileid::win`.
 ///
 /// This is not yet the hardened reader the privileged agent needs: like
 /// any `std::fs` open, it follows reparse points (symbolic links and
@@ -102,7 +101,7 @@ fn unsupported(what: &str) -> PlatformError {
 /// `file:name:$DATA`, on Windows): those are data even on a directory.
 /// `file::$DATA` and other stream types, such as a directory's
 /// `::$INDEX_ALLOCATION`, do not count, nor does a drive letter's colon.
-fn names_a_stream(path: &str) -> bool {
+pub(crate) fn names_a_stream(path: &str) -> bool {
     if !cfg!(windows) {
         return false;
     }
@@ -120,7 +119,7 @@ fn names_a_stream(path: &str) -> bool {
 
 /// The path must be absolute, so a relative path cannot be resolved against
 /// the agent's working directory.
-fn absolute(path: &str) -> Result<&Path> {
+pub(crate) fn absolute(path: &str) -> Result<&Path> {
     let p = Path::new(path);
     if p.is_absolute() {
         Ok(p)
@@ -171,7 +170,7 @@ impl FileSystem for StdFileSystem {
 /// Opens for reading, letting other processes read, write and delete the
 /// file meanwhile, so the agent never blocks a program or an installer.
 #[cfg(windows)]
-fn open_shared(path: &Path) -> std::io::Result<File> {
+pub(crate) fn open_shared(path: &Path) -> std::io::Result<File> {
     use std::os::windows::fs::OpenOptionsExt;
     const FILE_SHARE_READ: u32 = 0x1;
     const FILE_SHARE_WRITE: u32 = 0x2;
@@ -195,8 +194,16 @@ fn open_shared(path: &Path) -> std::io::Result<File> {
 /// Opens for reading. The agent ships for Windows; on other OSes this
 /// backend serves development and tests.
 #[cfg(not(windows))]
-fn open_shared(path: &Path) -> std::io::Result<File> {
+pub(crate) fn open_shared(path: &Path) -> std::io::Result<File> {
     File::open(path)
+}
+
+impl StdFile {
+    /// The open file.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(crate) const fn file(&self) -> &File {
+        &self.file
+    }
 }
 
 impl OpenFile for StdFile {

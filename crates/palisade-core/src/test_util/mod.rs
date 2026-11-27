@@ -349,11 +349,13 @@ impl OpenFile for MockOpenFile {
 // Signatures
 // ---------------------------------------------------------------------------
 
-/// Scripted signature results, by path. Unknown paths are unsigned.
+/// Scripted signature results, by path. Unknown paths are unsigned, and
+/// paths marked missing ([`MockSignatures::set_missing`]) do not exist.
 #[derive(Debug, Default)]
 pub struct MockSignatures {
     embedded: BTreeMap<String, Vec<SignatureResult>>,
     catalog: BTreeMap<String, SignatureResult>,
+    missing: BTreeMap<String, ()>,
 }
 
 impl MockSignatures {
@@ -372,14 +374,30 @@ impl MockSignatures {
     pub fn set_catalog(&mut self, path: &str, result: SignatureResult) {
         self.catalog.insert(fold(path), result);
     }
+
+    /// Marks `path` as not existing: both queries fail with
+    /// [`ErrorKind::NotFound`].
+    pub fn set_missing(&mut self, path: &str) {
+        self.missing.insert(fold(path), ());
+    }
+
+    fn exists(&self, path: &str) -> Result<()> {
+        if self.missing.contains_key(&fold(path)) {
+            Err(PlatformError::not_found(path))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 impl SignatureVerifier for MockSignatures {
     fn embedded(&self, path: &str) -> Result<Vec<SignatureResult>> {
+        self.exists(path)?;
         Ok(self.embedded.get(&fold(path)).cloned().unwrap_or_default())
     }
 
     fn catalog(&self, path: &str) -> Result<Option<SignatureResult>> {
+        self.exists(path)?;
         Ok(self.catalog.get(&fold(path)).cloned())
     }
 }

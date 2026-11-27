@@ -51,12 +51,12 @@ the real implementations:
 | Trait | Implementation | Status |
 |---|---|---|
 | `Clock` | `SystemClock` | Done. The one place that reads the wall clock (`clippy.toml` bans `SystemTime::now` elsewhere) |
-| `FileSystem` | `StdFileSystem` | Reads, size and times on every OS, opened so other processes can keep writing and deleting. Owner SID, security descriptor, streams, file ID and USN report `Unsupported` until they are read through `palisade_fileid::win` (#54) for the file inventory (#60) |
+| `FileSystem` | `StdFileSystem`; `windows::WindowsFileSystem` | Reads, size and times on every OS, opened so other processes can keep writing and deleting. On Windows, `WindowsFileSystem` adds the file ID, volume serial and USN (from the open handle), the owner SID, the security descriptor and the alternate data streams, through `palisade_fileid::win`; `StdFileSystem` reports those `Unsupported` |
 | `Environment` | `StdEnvironment` | Variables, architecture and interface addresses everywhere; host name, domain and OS version from the OS on Windows. The connection type is `Unknown` until network location (#38) defines it |
 | `Registry` | `windows::WindowsRegistry` | Done, on Windows |
 | `IdentityProvider` | `windows::WindowsIdentity` | On Windows: a process's token (user, groups with deny-only flags, session ID and kind, integrity level, elevation type and state), account names, local group members by SID, and the directory group cache (filled by the directory sync, #38) |
 | `ProcessInfo` | `windows::WindowsProcesses` | On Windows: process records keyed by process ID and creation time, with parent ID, image path and command line, read through one handle |
-| `SignatureVerifier` | | Next, through `palisade_fileid` |
+| `SignatureVerifier` | `FileidSignatures` | Every OS: embedded Authenticode signatures, chains, timestamps, expiry and revocation, and catalog lookups, all judged by `palisade_fileid`, against the trust, validity and revocation settings and the catalog store policy supplies |
 
 The Windows identity and process backends fail closed
 ([ADR 0018](../../docs/adr/0018-fail-open-vs-fail-closed-defaults-revised.md)). A token is read
@@ -70,10 +70,30 @@ process now using its ID is `NotFound` too, so a reused process ID is never read
 it replaced. A local group's members are listed only if the SID names a local group whose name
 resolves back to the same SID: the bare name the OS enumerates by must itself be a local group with that SID, so a local group that only shares a domain group's name is never listed in its place. An account name lookup that fails for any reason other than "no such account" is an error, not `None`.
 
+The signature and file-system backends fail closed too. A file that cannot be read, or is larger
+than the size limit (256 MiB by default), is an error, never "unsigned"; so is a file that
+starts like a PE image but does not parse, or whose certificate table cannot be read
+(`MalformedSignature`). A file whose hash is revoked (its flat or Authenticode SHA-256 or SHA-1)
+is `RevokedByHash` on the embedded and the catalog path alike. A signature or catalog match that
+relies on SHA-1 is `WeakHashAlgorithm` (ADR 0008). With no catalog store, or an incomplete one (a
+load error or limit, an unreadable catalog, a truncated index), a catalog miss is an error, not
+"no catalog signature", and a catalog whose expiry and revocation were never judged is not `Ok`.
+Embedded signatures are judged on every call against the current settings and clock; a
+catalog's own signature is judged when the store is built, so the store is rebuilt to re-judge
+it, while the file's own revocation is checked on every call. The OS trust-verification API is
+never consulted: it is a diagnostic cross-check (`palisade_fileid::win::trust`) and must not
+decide. Owners and security descriptors are reported only on volumes where they can be relied on
+(a local NTFS or ReFS physical disk), and `None` elsewhere, which writability checks read as
+possibly writable; a descriptor is checked by `palisade_fileid`'s parser before it is returned; a
+named stream has no file ID, volume serial or USN of its own; and a stream list the OS cut short
+is `TooLarge`, never a complete list.
+
 Each implementation passes the same contract checks as the mocks
 (`palisade_core::test_util::contract`), in `tests/platform.rs`, on every CI runner. The Windows
-registry, environment, identity and process tests run on the Windows runners, against the
-test process itself and its token.
+registry, environment, identity, process and file-system tests run on the Windows runners,
+against the test process itself, its token and files it creates. `tests/signatures.rs` runs the
+signature backend on every OS against `palisade_fileid`'s fixtures, including the shared
+`contract::signatures` check that `MockSignatures` also passes.
 
 ## The fake agent
 
@@ -138,7 +158,7 @@ signer = "Example OS Publisher"         # optional: the image's signature publis
 
 `palisade-core`, `palisade-fileid`, `palisade-policy`, `palisade-proto`. Must never depend on `palisade-server` or any HTTP server or database stack. The rules are enforced by `cargo xtask check-deps`.
 
-Workspace: `palisade-fileid`, for SIDs, and on Windows with its `os-trust` feature, for account names (ADR 0003: the agent is the crate that enables it).
+Workspace: `palisade-fileid`, for SIDs, signature verification and catalog lookups, and on Windows with its `os-trust` feature, for account names and the file-system context (ADR 0003: the agent is the crate that enables it).
 
 Third-party: `tokio` (the only async runtime, ADR 0009), `tracing` and `tracing-subscriber` (logging), `serde` and `toml` (configuration), `if-addrs` (interface addresses, as in the server), and, on Windows only, `windows-service` (the safe service control manager API), `windows-registry` (safe registry reads), `windows-version` (the running OS version) and `windows-sys` (the process, token, session and local-group calls in `ffi`). With `test-util` only: `palisade-proto` (the event schema) and `sha2` (the simulator's placeholder chain).
 
@@ -150,7 +170,7 @@ The library root cannot say `#![forbid(unsafe_code)]`, because `forbid` cannot b
 
 ## Platform support
 
-The service host is platform-independent and builds and tests on Linux, other desktop OS and Windows. `--console` and `--simulate` work everywhere. `--service` and the registry, identity and process backends are Windows only; elsewhere `--service` exits with an error.
+The service host is platform-independent and builds and tests on Linux, other desktop OS and Windows. `--console` and `--simulate` work everywhere. `--service` and the registry, identity, process and file-system context backends are Windows only; elsewhere `--service` exits with an error.
 
 ## Feature flags
 
