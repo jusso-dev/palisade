@@ -52,6 +52,7 @@
     - [ScopeLimit](reference/generated/policy/scope-limit.md)
     - [Scope](reference/generated/policy/scope.md)
     - [SessionFilter](reference/generated/policy/session-filter.md)
+    - [SignerOptions](reference/generated/policy/signer-options.md)
     - [Value types](reference/generated/policy/types.md)
     - [UnknownPolicy](reference/generated/policy/unknown-policy.md)
     - [Window](reference/generated/policy/window.md)

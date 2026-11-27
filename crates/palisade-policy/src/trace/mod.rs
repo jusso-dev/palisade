@@ -1031,12 +1031,7 @@ impl<'p> Tracer<'p> {
                         .and_then(|&i| result(i))
                         .is_some_and(|res| {
                             r.leaves.iter().zip(&res.leaves).any(|(l, lr)| {
-                                matches!(
-                                    l.criterion.field,
-                                    Field::SignerPublisher
-                                        | Field::SignerIssuer
-                                        | Field::SignerLeafThumbprint
-                                ) && lr.effective == Tri::Match
+                                l.criterion.field.is_signer() && lr.effective == Tri::Match
                             })
                         })
                 })
@@ -1278,18 +1273,14 @@ fn observe(field: Field, subject: &Subject<'_>) -> Option<Vec<String>> {
         });
     }
     match field {
-        Field::SignerPublisher | Field::SignerIssuer | Field::SignerLeafThumbprint => {
+        field if field.is_signer() => {
             let signers = facts.signers.as_ref()?;
             Some(
                 signers
                     .iter()
                     .map(|s| {
-                        let v = match field {
-                            Field::SignerPublisher => s.publisher.as_deref(),
-                            Field::SignerIssuer => s.issuer.as_deref(),
-                            _ => s.leaf_thumbprint_sha256.as_deref(),
-                        }
-                        .unwrap_or("(none)");
+                        let v = crate::ops::signer::observed(field, s);
+                        let v = v.as_deref().unwrap_or("(none)");
                         if s.status.is_trusted() {
                             v.to_owned()
                         } else {

@@ -34,7 +34,10 @@ pub use mode::ModeOptions;
 pub use palisade_core::{Mode, ObjectType, PolicyId, RuleId, RuleSetId, SchemaVersion, ScriptKind};
 pub use precedence::{AllowTiebreak, PrecedenceOptions, PriorityDirection, TierTiebreak};
 pub use settings::{AdvancedValue, ControlLevel, PolicySettings, TimeZoneBasis};
-pub use tree::{Criterion, Field, FieldClass, Match, Operator, Strength};
+pub use tree::{
+    Criterion, Field, FieldClass, MAX_KEY_BITS, MAX_SIGNATURE_INDEX, Match, Operator,
+    SignerOptions, SignerSource, Strength, SubjectComponent, TbsPosition,
+};
 pub use unknown::{
     ApprovalScope, CompliancePreset, DriverBootPolicy, Level, LocationClass, OriginClass,
     PreexistingPolicy, PromptOption, PromptSettings, Reauth, ScopeLimit, UnknownPolicy,

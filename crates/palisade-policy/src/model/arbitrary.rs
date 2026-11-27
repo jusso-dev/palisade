@@ -67,6 +67,10 @@ fn value_for(class: FieldClass, operator: Operator) -> BoxedStrategy<String> {
         .prop_map(|b| b.into_iter().map(char::from).collect())
         .boxed(),
         (FieldClass::Version, _) => "[0-9]{1,4}(\\.[0-9]{1,4}){0,3}".boxed(),
+        (FieldClass::Digest, _) => {
+            prop_oneof!["[0-9a-f]{40}", "[0-9a-f]{64}", "[0-9A-F]{96}"].boxed()
+        }
+        (FieldClass::OidSet, _) => "[0-2](\\.[0-9]{1,5}){1,6}".boxed(),
         (FieldClass::Sid, _) => SID.boxed(),
         (FieldClass::PrincipalSet, _) => prop_oneof![
             SID,

@@ -21,6 +21,7 @@ Appears at: `/rule_sets/rules/match/all/all/all/criterion`, `/rule_sets/rules/ma
 | `match_ads` | boolean | no |  |  | 1.0.0 | Only for positive tests of `path.full`: `true` lets a value that names no alternate data stream also match a stream of a file it matches, so `C:\\Tools\\*` matches `C:\\Tools\\a.exe:s` (#32). Unset means `false`: a stream is its own object. |
 | `operator` | [`Operator`](types.md#operator) | yes |  |  | 1.0.0 | How it is compared. |
 | `safety_critical` | boolean | no |  |  | 1.0.0 | Only in a mandatory blocklist: when the fact is unknown, this criterion counts towards the deny applying (`match`, or `no_match` under an odd number of `not` nodes), so the shipped blocklists fail closed (#32, #87). Unset means `false`. |
+| `signer` | [`SignerOptions`](signer-options.md) | no |  |  | 1.0.0 | Only for `signer.*` fields: which signatures take part, and what each must also satisfy (#31). The options bind to the signature the field is read from, so `min_key_bits` on a publisher test needs the publisher's own signature to have the key size. Unset means every option's default. |
 | `values` | array of string | no |  | at most 25 items | 1.0.0 | 1 to 25 values. Each is at most 2048 bytes of UTF-8; the schema can only bound the length in characters, so validation checks the bytes. `is_true` and `is_false` take no values, and the key may be left out. |
 
 Unknown fields are rejected.

@@ -98,6 +98,7 @@ pub fn criterion(field: Field, operator: Operator, values: &[&str]) -> Match {
         match_ads: None,
         include_sub_ous: None,
         safety_critical: false,
+        signer: None,
     })
 }
 
@@ -431,6 +432,7 @@ impl FactsBuilder {
             publisher: Some(publisher.to_owned()),
             issuer: None,
             leaf_thumbprint_sha256: None,
+            details: Default::default(),
         });
         self.0 = self.0.with_signers(signers);
         self

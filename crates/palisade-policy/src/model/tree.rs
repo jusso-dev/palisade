@@ -131,6 +131,13 @@ pub struct Criterion {
     /// closed (#32, #87). Unset means `false`.
     #[serde(default, skip_serializing_if = "core::ops::Not::not")]
     pub safety_critical: bool,
+    /// Only for `signer.*` fields: which signatures take part, and what
+    /// each must also satisfy (#31). The options bind to the signature the
+    /// field is read from, so `min_key_bits` on a publisher test needs the
+    /// publisher's own signature to have the key size. Unset means every
+    /// option's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signer: Option<Box<SignerOptions>>,
 }
 
 impl Criterion {
@@ -151,17 +158,129 @@ impl Criterion {
             match_ads: None,
             include_sub_ous: None,
             safety_critical: false,
+            signer: None,
         }
     }
+}
+
+/// The options of a signer criterion (#31).
+///
+/// A signer criterion matches if any signature that takes part satisfies
+/// it. A signature takes part when its status is accepted, it comes from
+/// the chosen source and has the chosen index, and it meets every
+/// constraint here (`signed_after`, `countersigned`, `min_key_bits` and
+/// `disallowed_algorithms`). A constraint whose fact is unknown makes that
+/// signature's result unknown, never a match.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SignerOptions {
+    /// Only for `signer.publisher`: the part of the leaf subject compared.
+    /// Unset means `cn`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component: Option<SubjectComponent>,
+    /// Only for `signer.tbs_hash`: where in the chain the certificate must
+    /// be. Unset means `any`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<TbsPosition>,
+    /// The signature statuses that can match. Unset means `valid`,
+    /// `valid_expired_timestamped` and `catalog_signed`. `digest_mismatch`
+    /// cannot be listed: see `allow_digest_mismatch`. Validation warns when
+    /// a rule that lets an object run accepts any other status.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(min = 1, max = 6))]
+    pub accept_status: Option<Vec<crate::facts::SignerStatus>>,
+    /// Let a signature whose signed digest does not match the file take
+    /// part: the file was changed after it was signed. Validation always
+    /// warns about it. Unset means `false`.
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub allow_digest_mismatch: bool,
+    /// Where the signature must come from. Unset means `any`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<SignerSource>,
+    /// Only the signature at this index, counted from 0 among the
+    /// signatures of `source`: 0 is the primary embedded signature, 1 the
+    /// first nested one. Unset means any signature.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(max = MAX_SIGNATURE_INDEX))]
+    pub signature_index: Option<u8>,
+    /// A trusted timestamp must show that the signature was made at or
+    /// after this instant: an RFC 3339 time with an offset, such as
+    /// `2024-01-01T00:00:00Z`. A signature with no trusted timestamp is
+    /// unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(min = 1, max = 64))]
+    pub signed_after: Option<String>,
+    /// The signature must carry an RFC 3161 timestamp that verifies.
+    /// Unset means `false`: no requirement.
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub countersigned: bool,
+    /// Every key in the signature's chain must be at least this strong, in
+    /// RSA-equivalent bits (see [`crate::facts::SignerDetails::min_key_bits`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1, max = MAX_KEY_BITS))]
+    pub min_key_bits: Option<u32>,
+    /// The signature must use none of these digest algorithms, in the
+    /// file digest, the signer information or any certificate of its chain.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = 6))]
+    pub disallowed_algorithms: Vec<crate::facts::DigestAlgorithm>,
+}
+
+/// The largest `signature_index`.
+pub const MAX_SIGNATURE_INDEX: u8 = 63;
+
+/// The largest `min_key_bits`.
+pub const MAX_KEY_BITS: u32 = 16_384;
+
+/// The part of the leaf certificate's subject that `signer.publisher`
+/// compares (#31).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SubjectComponent {
+    /// The common name.
+    #[default]
+    Cn,
+    /// The organisation.
+    O,
+    /// The whole distinguished name, as RFC 4514 writes it.
+    FullDn,
+}
+
+/// Where the certificate of a `signer.tbs_hash` test must be (#31).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TbsPosition {
+    /// The leaf: the certificate that signed.
+    Leaf,
+    /// Any certificate between the leaf and the root.
+    Intermediate,
+    /// The root of the chain.
+    Root,
+    /// Anywhere in the chain.
+    #[default]
+    Any,
+}
+
+/// Where the signatures a signer criterion looks at come from (#31).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SignerSource {
+    /// Embedded in the file.
+    Embedded,
+    /// A signed catalog that lists the file's hash.
+    Catalog,
+    /// Either.
+    #[default]
+    Any,
 }
 
 /// The identity facts a criterion can test (#31).
 ///
 /// This is the part of the #31 catalogue that has a matcher: hashes, the
-/// signer, the path and the version resource. The other families (signer
-/// constraints such as EKU and TBS hashes, packaged apps, installers,
-/// ownership, origin and process relationships) arrive in later minor
-/// versions, each with its facts and matcher.
+/// signer and its certificates, the path and the version resource. The
+/// other families (packaged apps, installers, ownership, origin and process
+/// relationships) arrive in later minor versions, each with its facts and
+/// matcher.
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -383,6 +502,33 @@ pub enum Field {
     /// policy's clock.
     #[serde(rename = "time.date")]
     TimeDate,
+    /// The SHA-1 thumbprint of the leaf certificate. Compatibility only
+    /// (ADR 0008).
+    #[serde(rename = "signer.leaf_thumbprint_sha1")]
+    SignerLeafThumbprintSha1,
+    /// The subject common name of the highest certificate below the root,
+    /// as the signature provides it: the PCA.
+    #[serde(rename = "signer.pca")]
+    SignerPca,
+    /// The SHA-256 thumbprint of the chain's root certificate.
+    #[serde(rename = "signer.root_thumbprint")]
+    SignerRootThumbprint,
+    /// The SHA-1 thumbprint of the chain's root certificate. Compatibility
+    /// only (ADR 0008).
+    #[serde(rename = "signer.root_thumbprint_sha1")]
+    SignerRootThumbprintSha1,
+    /// The hash of a chain certificate's `tbsCertificate`, under the
+    /// certificate's own signature digest (40, 64, 96 or 128 hex digits).
+    /// It survives re-issuance with the same key material, so it is the
+    /// way to block a stolen certificate. `signer.position` says which
+    /// certificate.
+    #[serde(rename = "signer.tbs_hash")]
+    SignerTbsHash,
+    /// The extended key usages of the leaf certificate, as dotted OIDs,
+    /// such as `1.3.6.1.5.5.7.3.3` (code signing). A leaf without the
+    /// extension has none.
+    #[serde(rename = "signer.eku")]
+    SignerEku,
 }
 
 /// The type of a field's value, which decides the operators it accepts and
@@ -436,6 +582,11 @@ pub enum FieldClass {
     TimeOfDay,
     /// A calendar date (#32).
     Date,
+    /// A hexadecimal digest of 40, 64, 96 or 128 digits: SHA-1 to SHA-512,
+    /// as a certificate's signature algorithm chose (#31).
+    Digest,
+    /// A set of object identifiers, in dotted form (#31).
+    OidSet,
 }
 
 impl FieldClass {
@@ -459,7 +610,9 @@ impl FieldClass {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Strength {
     /// Attributes anyone can set or copy: file names, extensions, version
-    /// resource strings, a first-page hash, or an issuer alone.
+    /// resource strings, a first-page hash, or a certificate authority
+    /// alone (an issuer, a PCA, a root thumbprint or an EKU), which vouches
+    /// for every file it signs.
     Weak,
     /// Identities that rest on a trust decision: a publisher, or a path,
     /// which an allow rule only trusts where users cannot write (#32).
@@ -471,7 +624,7 @@ pub enum Strength {
 
 impl Field {
     /// Every field, in declaration order.
-    pub const ALL: [Self; 64] = [
+    pub const ALL: [Self; 70] = [
         Self::HashSha256,
         Self::HashSha384,
         Self::HashSha512,
@@ -536,7 +689,31 @@ impl Field {
         Self::TimeWeekday,
         Self::TimeLocalTime,
         Self::TimeDate,
+        Self::SignerLeafThumbprintSha1,
+        Self::SignerPca,
+        Self::SignerRootThumbprint,
+        Self::SignerRootThumbprintSha1,
+        Self::SignerTbsHash,
+        Self::SignerEku,
     ];
+
+    /// Whether the field is read from the object's signatures
+    /// ([`crate::facts::SignerFact`]), so the `signer` options apply.
+    #[must_use]
+    pub const fn is_signer(self) -> bool {
+        matches!(
+            self,
+            Self::SignerPublisher
+                | Self::SignerIssuer
+                | Self::SignerLeafThumbprint
+                | Self::SignerLeafThumbprintSha1
+                | Self::SignerPca
+                | Self::SignerRootThumbprint
+                | Self::SignerRootThumbprintSha1
+                | Self::SignerTbsHash
+                | Self::SignerEku
+        )
+    }
 
     /// Whether the field describes the context of an evaluation (the user,
     /// device or session) rather than the object (#33). A context field
@@ -554,17 +731,21 @@ impl Field {
             | Self::HashAuthenticodeSha256
             | Self::HashPageSha256
             | Self::HashMsiFuzzySha256
-            | Self::SignerLeafThumbprint => FieldClass::Hash { hex_len: 64 },
+            | Self::SignerLeafThumbprint
+            | Self::SignerRootThumbprint => FieldClass::Hash { hex_len: 64 },
             Self::HashSha384 => FieldClass::Hash { hex_len: 96 },
             Self::HashSha512 => FieldClass::Hash { hex_len: 128 },
-            Self::HashAuthenticodeSha1 | Self::HashPageSha1 | Self::HashSha1 => {
-                FieldClass::Hash { hex_len: 40 }
-            }
+            Self::HashAuthenticodeSha1
+            | Self::HashPageSha1
+            | Self::HashSha1
+            | Self::SignerLeafThumbprintSha1
+            | Self::SignerRootThumbprintSha1 => FieldClass::Hash { hex_len: 40 },
             Self::HashMd5 => FieldClass::Hash { hex_len: 32 },
             Self::PathFull | Self::PathDirectory => FieldClass::Path,
             Self::PathFileName | Self::PathExtension => FieldClass::FileName,
             Self::SignerPublisher
             | Self::SignerIssuer
+            | Self::SignerPca
             | Self::MetaOriginalFilename
             | Self::MetaInternalName
             | Self::MetaFileDescription
@@ -607,6 +788,8 @@ impl Field {
             Self::TimeWeekday => FieldClass::Weekday,
             Self::TimeLocalTime => FieldClass::TimeOfDay,
             Self::TimeDate => FieldClass::Date,
+            Self::SignerTbsHash => FieldClass::Digest,
+            Self::SignerEku => FieldClass::OidSet,
         }
     }
 
@@ -616,12 +799,21 @@ impl Field {
     pub const fn is_weak_hash(self) -> bool {
         matches!(
             self,
-            Self::HashSha1 | Self::HashMd5 | Self::HashAuthenticodeSha1 | Self::HashPageSha1
+            Self::HashSha1
+                | Self::HashMd5
+                | Self::HashAuthenticodeSha1
+                | Self::HashPageSha1
+                | Self::SignerLeafThumbprintSha1
+                | Self::SignerRootThumbprintSha1
         )
     }
 
     /// How firmly a positive test of this field identifies an object (#31).
     /// `None` for a context field (#33), which identifies no object.
+    ///
+    /// A certificate authority vouches for every file it signs, so the
+    /// issuer, the PCA, the root thumbprint and the EKUs are weak alone.
+    /// A TBS hash is strong, as #31 rates it.
     #[must_use]
     pub const fn strength(self) -> Option<Strength> {
         Some(match self {
@@ -630,7 +822,8 @@ impl Field {
             | Self::HashSha512
             | Self::HashAuthenticodeSha256
             | Self::HashMsiFuzzySha256
-            | Self::SignerLeafThumbprint => Strength::Strong,
+            | Self::SignerLeafThumbprint
+            | Self::SignerTbsHash => Strength::Strong,
             Self::SignerPublisher | Self::PathFull | Self::PathDirectory => Strength::Medium,
             Self::HashAuthenticodeSha1
             | Self::HashPageSha256
@@ -638,6 +831,11 @@ impl Field {
             | Self::HashSha1
             | Self::HashMd5
             | Self::SignerIssuer
+            | Self::SignerPca
+            | Self::SignerRootThumbprint
+            | Self::SignerLeafThumbprintSha1
+            | Self::SignerRootThumbprintSha1
+            | Self::SignerEku
             | Self::PathFileName
             | Self::PathExtension
             | Self::MetaOriginalFilename
@@ -901,7 +1099,10 @@ impl Operator {
     #[must_use]
     pub const fn applies_to(self, class: FieldClass) -> bool {
         match class {
-            FieldClass::Hash { .. } | FieldClass::Sid | FieldClass::SessionType => {
+            FieldClass::Hash { .. }
+            | FieldClass::Digest
+            | FieldClass::Sid
+            | FieldClass::SessionType => {
                 matches!(self, Self::Equals | Self::NotEquals)
             }
             FieldClass::Path | FieldClass::FileName | FieldClass::Text => self.is_text(),
@@ -912,7 +1113,8 @@ impl Operator {
             FieldClass::PrincipalSet
             | FieldClass::TagSet
             | FieldClass::NameSet
-            | FieldClass::MacSet => self.is_set(),
+            | FieldClass::MacSet
+            | FieldClass::OidSet => self.is_set(),
             FieldClass::Bool => matches!(self, Self::IsTrue | Self::IsFalse),
             FieldClass::Number | FieldClass::IntegrityLevel => self.is_ordered(),
             FieldClass::Date => self.is_ordered() || matches!(self, Self::DateBetween),

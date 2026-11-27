@@ -42,6 +42,10 @@ toml = { workspace = true }
 name = "decision_snapshots"
 required-features = ["test-util"]
 
+[[test]]
+name = "signer_criteria"
+required-features = ["test-util"]
+
 [[bench]]
 name = "criterion_eval"
 harness = false

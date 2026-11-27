@@ -1570,6 +1570,7 @@ fn os_signed(path: &str, writable: bool) -> ObjectFacts {
             publisher: Some(OS_PUBLISHER.into()),
             issuer: None,
             leaf_thumbprint_sha256: None,
+            details: Default::default(),
         }])
         .with_path(PathFact::new(path, &VolumeMap::new()).with_user_writable(writable))
         .with_location_class([LocationClass::Windows])
@@ -1803,6 +1804,7 @@ fn agent_file_facts() -> ObjectFacts {
             publisher: Some("Palisade Agent".into()),
             issuer: Some("Example Code Signing CA".into()),
             leaf_thumbprint_sha256: Some(sha('d')),
+            details: Default::default(),
         }])
         .with_path(
             PathFact::new("C:\\Program Files\\Palisade\\agent.exe", &VolumeMap::new())
@@ -1876,6 +1878,7 @@ fn agent_facts(publisher: &str, hash: char) -> ObjectFacts {
             publisher: Some(publisher.into()),
             issuer: None,
             leaf_thumbprint_sha256: None,
+            details: Default::default(),
         }])
         .with_location_class([LocationClass::ProgramFiles])
 }

@@ -605,8 +605,11 @@ fn context_compatibility_table() {
         }
     }
     // The set, yes-or-no, ordered, network and time operators apply to no
-    // identity field.
-    for field in Field::ALL.into_iter().filter(|f| !f.is_context()) {
+    // identity field, except the set operators to `signer.eku` (#31).
+    for field in Field::ALL
+        .into_iter()
+        .filter(|f| !f.is_context() && *f != Field::SignerEku)
+    {
         for op in Operator::ALL.into_iter().filter(|op| {
             op.is_set()
                 || op.is_ordered()
