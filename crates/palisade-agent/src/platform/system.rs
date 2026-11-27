@@ -378,7 +378,18 @@ impl Environment for StdEnvironment {
             .collect())
     }
 
+    /// The interface the OS routes internet-bound traffic through, as
+    /// classified by `platform::connection` (Windows). `Unknown` elsewhere,
+    /// and on Windows whenever the answer is not clear (ADR 0018).
     fn connection_type(&self) -> Result<ConnectionType> {
+        #[cfg(windows)]
+        {
+            // A documentation address (RFC 5737): never contacted, only
+            // routed, so the answer is the default route's interface.
+            let route = crate::ffi::best_route([192, 0, 2, 1]);
+            Ok(super::connection::classify(route))
+        }
+        #[cfg(not(windows))]
         Ok(ConnectionType::Unknown)
     }
 

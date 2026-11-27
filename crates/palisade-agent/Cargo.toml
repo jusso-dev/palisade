@@ -55,7 +55,11 @@ windows-version = { workspace = true }
 windows-sys = { workspace = true, features = [
     "Wdk_System_Threading",
     "Win32_Foundation",
+    # The primary connection type: the best route's interface row.
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
     "Win32_NetworkManagement_NetManagement",
+    "Win32_Networking_WinSock",
     "Win32_Security",
     "Win32_System_RemoteDesktop",
     "Win32_System_Threading",

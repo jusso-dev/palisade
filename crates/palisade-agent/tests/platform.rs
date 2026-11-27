@@ -168,6 +168,23 @@ fn captured_environment_describes_this_machine() {
         _ => env.architecture(),
     };
     assert_eq!(env.architecture(), expected);
+    // The hosted runners are online. Their adapter is wired or virtual, so
+    // the answer is wired, or unknown when the OS reports a type and
+    // medium that do not clearly agree; it is never offline or a guess.
+    let connection = env.connection_type().unwrap();
+    eprintln!("connection type: {connection:?}");
+    if cfg!(windows) {
+        assert!(
+            matches!(
+                connection,
+                palisade_core::platform::ConnectionType::Wired
+                    | palisade_core::platform::ConnectionType::Unknown
+            ),
+            "{connection:?}"
+        );
+    } else {
+        assert_eq!(connection, palisade_core::platform::ConnectionType::Unknown);
+    }
     if cfg!(windows) {
         let v = env.os_version().unwrap();
         assert_eq!(v.major, 10, "{v}");

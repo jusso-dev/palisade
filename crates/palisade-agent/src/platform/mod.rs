@@ -19,6 +19,7 @@
 
 #![forbid(unsafe_code)]
 
+pub(crate) mod connection;
 pub(crate) mod nt;
 mod signature;
 mod system;

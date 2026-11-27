@@ -25,6 +25,7 @@ use windows_sys::Win32::Foundation::{
     HANDLE, NTSTATUS, STATUS_ACCESS_DENIED, STATUS_BUFFER_OVERFLOW, STATUS_BUFFER_TOO_SMALL,
     STATUS_INFO_LENGTH_MISMATCH, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
+use windows_sys::Win32::NetworkManagement::IpHelper::{GetBestInterface, GetIfEntry2, MIB_IF_ROW2};
 use windows_sys::Win32::NetworkManagement::NetManagement::{
     LOCALGROUP_MEMBERS_INFO_0, MAX_PREFERRED_LENGTH, NERR_Success, NetApiBufferFree,
     NetLocalGroupGetMembers,
@@ -382,6 +383,45 @@ impl Drop for Token {
 }
 
 // ---------------------------------------------------------------------------
+// Network
+// ---------------------------------------------------------------------------
+
+/// `ERROR_NETWORK_UNREACHABLE` and `ERROR_HOST_UNREACHABLE`: no route.
+const NO_ROUTE: [u32; 2] = [1231, 1232];
+
+/// The interface the OS routes an IPv4 packet for `dest` (in network byte
+/// order, as the OS takes it) through, and that interface's row.
+pub(crate) fn best_route(dest: [u8; 4]) -> crate::platform::connection::Route {
+    use crate::platform::connection::{InterfaceRow, Route};
+    let mut index = 0_u32;
+    // SAFETY: the address is a plain value; `index` is a live local the OS
+    // writes the interface index to.
+    let status = unsafe { GetBestInterface(u32::from_ne_bytes(dest), &raw mut index) };
+    if NO_ROUTE.contains(&status) {
+        return Route::Unreachable;
+    }
+    if status != 0 {
+        return Route::Failed;
+    }
+    let mut row = MIB_IF_ROW2 {
+        InterfaceIndex: index,
+        ..MIB_IF_ROW2::default()
+    };
+    // SAFETY: `row` is a live, writable `MIB_IF_ROW2` with only
+    // `InterfaceIndex` set, as the call requires; the OS fills the rest of
+    // the structure, which is plain integers, arrays and GUIDs.
+    if unsafe { GetIfEntry2(&raw mut row) } != 0 {
+        return Route::Failed;
+    }
+    Route::Through(InterfaceRow {
+        if_type: row.Type,
+        physical_medium: row.PhysicalMediumType,
+        oper_status: row.OperStatus,
+        media_connect_state: row.MediaConnectState,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Sessions
 // ---------------------------------------------------------------------------
 
@@ -671,6 +711,18 @@ mod tests {
         assert!(cmd.bytes.len() > 2 * size_of::<usize>());
         let opened = Process::open(std::process::id()).unwrap();
         assert_eq!(opened.creation_time().unwrap(), me.creation_time().unwrap());
+    }
+
+    #[test]
+    fn the_best_route_reads_an_interface_or_reports_no_route() {
+        use crate::platform::connection::Route;
+        // A public address: the hosted runners have a route to it.
+        let route = best_route([192, 0, 2, 1]);
+        match route {
+            Route::Through(row) => assert_ne!(row.if_type, 0, "{row:?}"),
+            Route::Unreachable => {}
+            Route::Failed => panic!("the route lookup failed"),
+        }
     }
 
     #[test]
