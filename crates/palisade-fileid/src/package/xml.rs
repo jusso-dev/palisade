@@ -251,15 +251,15 @@ fn check_decl(d: &quick_xml::events::BytesDecl<'_>) -> Result<(), XmlError> {
     if d.version().map_err(|_| bad())?.as_ref() != b"1.0" {
         return Err(bad());
     }
-    if let Some(e) = d.encoding() {
-        if !e.map_err(|_| bad())?.eq_ignore_ascii_case(b"utf-8") {
-            return Err(bad());
-        }
+    if let Some(e) = d.encoding()
+        && !e.map_err(|_| bad())?.eq_ignore_ascii_case(b"utf-8")
+    {
+        return Err(bad());
     }
-    if let Some(sa) = d.standalone() {
-        if !matches!(sa.map_err(|_| bad())?.as_ref(), b"yes" | b"no") {
-            return Err(bad());
-        }
+    if let Some(sa) = d.standalone()
+        && !matches!(sa.map_err(|_| bad())?.as_ref(), b"yes" | b"no")
+    {
+        return Err(bad());
     }
     // Nothing else, and in order: the names, as written, must be a prefix
     // of `version encoding standalone` with optional ones left out.

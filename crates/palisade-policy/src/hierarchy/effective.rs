@@ -663,10 +663,10 @@ impl<'a, 'h> Builder<'a, 'h> {
             let mut set = entry.set.clone();
             set.band = entry.band;
             for rule in &mut set.rules {
-                if let Some(p) = rules.get(&rule.id) {
-                    if matches!(p.status, RuleStatus::Suppressed { .. }) {
-                        rule.enabled = false;
-                    }
+                if let Some(p) = rules.get(&rule.id)
+                    && matches!(p.status, RuleStatus::Suppressed { .. })
+                {
+                    rule.enabled = false;
                 }
             }
             sets.insert(*id, set);
@@ -684,15 +684,16 @@ impl<'a, 'h> Builder<'a, 'h> {
         }
         // Unset `mode_disconnected` means the effective mode itself, so a
         // merged one that is not at least as strict is dropped.
-        if let Some(offline) = mode_options.mode_disconnected {
-            if offline != mode.mode && strictness(offline) <= strictness(mode.mode) {
-                adjustments.push(ModeAdjustment {
-                    path: "/policy/mode_options/mode_disconnected".to_owned(),
-                    from: serde_json::to_value(offline).unwrap_or_default(),
-                    to: serde_json::Value::Null,
-                });
-                mode_options.mode_disconnected = None;
-            }
+        if let Some(offline) = mode_options.mode_disconnected
+            && offline != mode.mode
+            && strictness(offline) <= strictness(mode.mode)
+        {
+            adjustments.push(ModeAdjustment {
+                path: "/policy/mode_options/mode_disconnected".to_owned(),
+                from: serde_json::to_value(offline).unwrap_or_default(),
+                to: serde_json::Value::Null,
+            });
+            mode_options.mode_disconnected = None;
         }
         mode.adjustments = adjustments;
         // The provenance of the mode options shows their final values.
@@ -1701,15 +1702,15 @@ fn apply_floor(
         }
     }
     for (i, set) in sets.values_mut().enumerate() {
-        if let Some(m) = set.mode_override {
-            if strictness(m) < f {
-                adjustments.push(ModeAdjustment {
-                    path: format!("/rule_sets/{i}/mode_override"),
-                    from: json(&m),
-                    to: json(&floor),
-                });
-                set.mode_override = Some(floor);
-            }
+        if let Some(m) = set.mode_override
+            && strictness(m) < f
+        {
+            adjustments.push(ModeAdjustment {
+                path: format!("/rule_sets/{i}/mode_override"),
+                from: json(&m),
+                to: json(&floor),
+            });
+            set.mode_override = Some(floor);
         }
         if floor == Mode::Enforce {
             for (j, rule) in set.rules.iter_mut().enumerate() {

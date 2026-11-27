@@ -529,17 +529,16 @@ pub(crate) fn x509_text(tlv: &Tlv<'_>) -> Result<Option<DecodedText>> {
             lossy: false,
         },
         tag::BMP_STRING => {
-            if content.len() % 2 != 0 {
+            if !content.len().is_multiple_of(2) {
                 return Err(invalid);
             }
             let mut lossy = false;
             let text = content
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|pair| {
-                    let unit = match pair {
-                        [hi, lo] => u16::from_be_bytes([*hi, *lo]),
-                        _ => 0xd800,
-                    };
+                    let unit = u16::from_be_bytes(*pair);
                     char::from_u32(u32::from(unit)).unwrap_or_else(|| {
                         lossy = true;
                         char::REPLACEMENT_CHARACTER
@@ -549,17 +548,16 @@ pub(crate) fn x509_text(tlv: &Tlv<'_>) -> Result<Option<DecodedText>> {
             DecodedText { text, lossy }
         }
         tag::UNIVERSAL_STRING => {
-            if content.len() % 4 != 0 {
+            if !content.len().is_multiple_of(4) {
                 return Err(invalid);
             }
             let mut lossy = false;
             let text = content
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .map(|quad| {
-                    let value = match quad {
-                        [a, b, c, d] => u32::from_be_bytes([*a, *b, *c, *d]),
-                        _ => u32::MAX,
-                    };
+                    let value = u32::from_be_bytes(*quad);
                     char::from_u32(value).unwrap_or_else(|| {
                         lossy = true;
                         char::REPLACEMENT_CHARACTER
@@ -651,15 +649,14 @@ pub(crate) struct Text {
 
 /// Decodes a BMPString (UTF-16BE; unpaired surrogates become U+FFFD).
 pub(crate) fn bmp_text(content: &[u8], at: usize) -> Result<Text> {
-    if content.len() % 2 != 0 {
+    if !content.len().is_multiple_of(2) {
         return Err(err(Asn1ErrorKind::InvalidValue, at));
     }
     let units = content
-        .chunks_exact(2)
-        .map(|pair| match pair {
-            [hi, lo] => u16::from_be_bytes([*hi, *lo]),
-            _ => 0,
-        })
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| u16::from_be_bytes(*pair))
         // Text is often written NUL-terminated.
         .take_while(|unit| *unit != 0);
     let mut text = String::new();
@@ -757,7 +754,7 @@ fn digits(text: &[u8]) -> Option<u32> {
 }
 
 const fn is_leap(year: u32) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+    (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
 }
 
 const fn days_in_month(year: u32, month: u32) -> u32 {

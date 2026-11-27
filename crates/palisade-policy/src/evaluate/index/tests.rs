@@ -402,10 +402,10 @@ pub(crate) fn pool_document() -> impl Strategy<Value = ValidatedPolicy> {
                         }
                         // Some denies fail closed, so the always-evaluated
                         // list is exercised.
-                        if let crate::model::Action::Deny(o) = &mut rule.action {
-                            if k % 3 == 0 {
-                                o.unknown_as = crate::model::UnknownAs::Match;
-                            }
+                        if let crate::model::Action::Deny(o) = &mut rule.action
+                            && k % 3 == 0
+                        {
+                            o.unknown_as = crate::model::UnknownAs::Match;
                         }
                         set.rules.push(rule);
                     }
@@ -593,8 +593,8 @@ proptest! {
                     // may differ.
                     let record = |d: &Option<crate::decision::Decision>| {
                         let mut v = serde_json::to_value(d).unwrap();
-                        if policy.document().policy.unknown.by_location.is_empty() {
-                            if let Some(u) = v.get_mut("unknown").and_then(|u| u.as_object_mut()) {
+                        if policy.document().policy.unknown.by_location.is_empty()
+                            && let Some(u) = v.get_mut("unknown").and_then(|u| u.as_object_mut()) {
                                 u.remove("locations");
                                 for (key, acl) in [
                                     ("unknown_locations", "user_writable_other"),
@@ -605,7 +605,6 @@ proptest! {
                                     }
                                 }
                             }
-                        }
                         v
                     };
                     prop_assert_eq!(record(&d), record(&want));
@@ -651,10 +650,10 @@ proptest! {
 pub(crate) fn restrict(pool: &PoolFacts, computed: FactSet) -> PoolFacts {
     let mut facts = ObjectFacts::new();
     for field in Field::ALL {
-        if let Some(v) = pool.facts.get(field) {
-            if computed.contains(FactSet::of_field(field)) {
-                facts.set(field, v);
-            }
+        if let Some(v) = pool.facts.get(field)
+            && computed.contains(FactSet::of_field(field))
+        {
+            facts.set(field, v);
         }
     }
     if computed.contains(FactSet::SIGNERS) {

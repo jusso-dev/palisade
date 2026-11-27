@@ -263,11 +263,8 @@ impl Digest {
             });
         }
         let mut bytes = Vec::with_capacity(alg.digest_len());
-        for (pair_index, pair) in hex.as_bytes().chunks_exact(2).enumerate() {
+        for (pair_index, &[hi, lo]) in hex.as_bytes().as_chunks::<2>().0.iter().enumerate() {
             let index = pair_index.saturating_mul(2);
-            let &[hi, lo] = pair else {
-                return Err(DigestError::InvalidHex { index });
-            };
             let hi = hex_value(hi).ok_or(DigestError::InvalidHex { index })?;
             let lo = hex_value(lo).ok_or(DigestError::InvalidHex {
                 index: index.saturating_add(1),

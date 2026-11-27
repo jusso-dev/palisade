@@ -165,10 +165,10 @@ fn normalize_once(raw: &str, volumes: &VolumeMap) -> NormalizedPath {
         if let Some(path) = drive_path(rest) {
             return path;
         }
-        if let Some(device) = strip_prefix_ignore_ascii_case(rest, "GLOBALROOT") {
-            if starts_with_ignore_ascii_case(device, DEVICE_PREFIX) {
-                return device_path(device, volumes);
-            }
+        if let Some(device) = strip_prefix_ignore_ascii_case(rest, "GLOBALROOT")
+            && starts_with_ignore_ascii_case(device, DEVICE_PREFIX)
+        {
+            return device_path(device, volumes);
         }
         return opaque_device(rest);
     }

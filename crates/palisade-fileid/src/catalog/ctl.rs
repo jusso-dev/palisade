@@ -949,18 +949,19 @@ fn parse_name_value(nv: &Tlv<'_>, warnings: &mut Warnings) -> Result<NameValue> 
 /// warning.
 fn utf16le_text(bytes: &[u8], warnings: &mut Warnings) -> String {
     let end = bytes
-        .chunks_exact(2)
-        .position(|pair| pair == [0, 0])
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .position(|pair| pair == &[0, 0])
         .map_or(bytes.len(), |units| units.saturating_mul(2));
     let body = bytes.get(..end).unwrap_or_default();
     let mut truncated = body.len() > MAX_VALUE_BYTES;
     let body = body.get(..MAX_VALUE_BYTES).unwrap_or(body);
     let mut units: Vec<u16> = body
-        .chunks_exact(2)
-        .map(|pair| match pair {
-            [lo, hi] => u16::from_le_bytes([*lo, *hi]),
-            _ => 0,
-        })
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| u16::from_le_bytes(*pair))
         .collect();
     // A cut at the byte limit can split a surrogate pair: drop its first
     // half rather than report the text as ill-formed.
@@ -1000,14 +1001,14 @@ fn tag_is_hex_of(tag: &str, digest: &[u8]) -> bool {
     if bytes.len() != digest.len().saturating_mul(2) {
         return false;
     }
-    digest.iter().zip(bytes.chunks_exact(2)).all(|(b, pair)| {
-        let hi = DIGITS.get(usize::from(b >> 4)).copied();
-        let lo = DIGITS.get(usize::from(b & 0x0f)).copied();
-        match pair {
-            [h, l] => Some(h.to_ascii_uppercase()) == hi && Some(l.to_ascii_uppercase()) == lo,
-            _ => false,
-        }
-    })
+    digest
+        .iter()
+        .zip(bytes.as_chunks::<2>().0)
+        .all(|(b, [h, l])| {
+            let hi = DIGITS.get(usize::from(b >> 4)).copied();
+            let lo = DIGITS.get(usize::from(b & 0x0f)).copied();
+            Some(h.to_ascii_uppercase()) == hi && Some(l.to_ascii_uppercase()) == lo
+        })
 }
 
 #[cfg(test)]

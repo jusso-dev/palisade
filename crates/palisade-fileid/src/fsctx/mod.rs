@@ -116,17 +116,17 @@ impl PathForms {
             dfs: None,
             final_path: None,
         };
-        if let Ok(p) = normalized {
-            if p.short_name_candidates().is_empty() {
-                match p.root() {
-                    Root::Drive(_) => forms.dos_path = Some(p.clone()),
-                    Root::Unc { .. } => forms.unc_path = Some(p.clone()),
-                    Root::NtDevice(_) => forms.nt_path = Some(p.clone()),
-                    Root::VolumeGuid(_) => forms.volume_guid_path = Some(p.clone()),
-                    Root::DosDevice(_) => {}
-                }
-                forms.long_path = Some(p);
+        if let Ok(p) = normalized
+            && p.short_name_candidates().is_empty()
+        {
+            match p.root() {
+                Root::Drive(_) => forms.dos_path = Some(p.clone()),
+                Root::Unc { .. } => forms.unc_path = Some(p.clone()),
+                Root::NtDevice(_) => forms.nt_path = Some(p.clone()),
+                Root::VolumeGuid(_) => forms.volume_guid_path = Some(p.clone()),
+                Root::DosDevice(_) => {}
             }
+            forms.long_path = Some(p);
         }
         forms
     }

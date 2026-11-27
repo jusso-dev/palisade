@@ -129,15 +129,15 @@ pub fn prepare(config: &Config, host: &[HostAddr]) -> Result<Prepared, Vec<Strin
             }
             Err(e) => errors.push(format!("listen.{}: {e}", l.kind)),
         }
-        if let Some(url) = &l.public_url {
-            if let Err(e) = tls::leaf_covers(&identity, &url.host) {
-                errors.push(format!(
+        if let Some(url) = &l.public_url
+            && let Err(e) = tls::leaf_covers(&identity, &url.host)
+        {
+            errors.push(format!(
                     "listen.{}.public_url: host of {} is not in the subject alternative names of {} ({e})",
                     l.kind,
                     url.url,
                     config.tls.cert_file.display()
                 ));
-            }
         }
     }
     errors.extend(resolved_overlaps(config, host));
@@ -184,19 +184,19 @@ pub fn placement_warnings(config: &Config, host: &[HostAddr]) -> Vec<String> {
     for l in &config.listeners {
         let name = l.kind;
         let addrs = net::resolve(&l.bind, l.port, host);
-        if let BindTarget::Ip(ip) = l.bind {
-            if ip.is_unspecified() {
-                out.push(format!(
+        if let BindTarget::Ip(ip) = l.bind
+            && ip.is_unspecified()
+        {
+            out.push(format!(
                     "listen.{name}: binds every interface ({ip}) under deployment.profile = \"overlay\"; bind the overlay address or interface instead"
                 ));
-            }
         }
-        if let BindTarget::Interface(iface) = &l.bind {
-            if addrs.is_empty() {
-                out.push(format!(
+        if let BindTarget::Interface(iface) = &l.bind
+            && addrs.is_empty()
+        {
+            out.push(format!(
                     "listen.{name}: interface {iface} has no address now; the server will keep retrying until it appears"
                 ));
-            }
         }
         let public = public_addrs(&addrs, host);
         if !public.is_empty() {

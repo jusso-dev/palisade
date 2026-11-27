@@ -1091,7 +1091,7 @@ fn signed_metadata_is_read_from_pe_signatures() {
     entry.extend_from_slice(&0x0200_u16.to_le_bytes());
     entry.extend_from_slice(&2_u16.to_le_bytes());
     entry.extend_from_slice(&der);
-    while entry.len() % 8 != 0 {
+    while !entry.len().is_multiple_of(8) {
         entry.push(0);
     }
     let image = common::PeBuilder {

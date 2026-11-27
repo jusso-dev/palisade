@@ -338,10 +338,10 @@ fn digest_set_lists(set: &Tlv<'_>, wanted: &DigestId) -> Result<bool> {
 pub(crate) fn parse_digest_alg(id: &Tlv<'_>) -> Result<DigestId> {
     let mut r = id.expect(tag::SEQUENCE)?.reader();
     let alg = read_oid(&mut r)?;
-    if let Some(params) = r.read_optional(tag::NULL)? {
-        if !params.content.is_empty() {
-            return Err(SignatureError::AlgorithmParameters);
-        }
+    if let Some(params) = r.read_optional(tag::NULL)?
+        && !params.content.is_empty()
+    {
+        return Err(SignatureError::AlgorithmParameters);
     }
     if !r.is_empty() {
         return Err(SignatureError::AlgorithmParameters);
@@ -453,10 +453,11 @@ fn parse_digest_info<'a>(r: &mut Reader<'a>, fixed_len: bool) -> Result<(DigestI
     let digest = di.read(tag::OCTET_STRING)?.content;
     di.finish()?;
     r.finish()?;
-    if let Ok(alg) = digest_alg {
-        if fixed_len && digest.len() != alg.digest_len() {
-            return Err(SignatureError::DigestLength);
-        }
+    if let Ok(alg) = digest_alg
+        && fixed_len
+        && digest.len() != alg.digest_len()
+    {
+        return Err(SignatureError::DigestLength);
     }
     Ok((digest_alg, digest))
 }

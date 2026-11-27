@@ -871,10 +871,10 @@ impl TrustAnchor {
                 offered: offered.trust_version,
             });
         }
-        if let Some(current) = &self.current {
-            if offered.issued_at < current.issued_at {
-                return Err(Rejection::IssuedBeforeCurrent);
-            }
+        if let Some(current) = &self.current
+            && offered.issued_at < current.issued_at
+        {
+            return Err(Rejection::IssuedBeforeCurrent);
         }
         if !Validity::not_in_future(offered.issued_at, now, self.skew) {
             return Err(Rejection::IssuedInFuture);

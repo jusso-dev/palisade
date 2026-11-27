@@ -41,7 +41,7 @@ fn import_section(rva: u32, imports: &[Import<'_>], pe32_plus: bool) -> Vec<u8> 
     let mut out = vec![0_u8; descriptors];
     for (i, (module, functions)) in imports.iter().enumerate() {
         // Thunk array.
-        while out.len() % 8 != 0 {
+        while !out.len().is_multiple_of(8) {
             out.push(0);
         }
         let thunks_at = out.len();
@@ -50,7 +50,7 @@ fn import_section(rva: u32, imports: &[Import<'_>], pe32_plus: bool) -> Vec<u8> 
             let slot = thunks_at + j * thunk;
             let value: u64 = match f {
                 Ok(name) => {
-                    while out.len() % 2 != 0 {
+                    while !out.len().is_multiple_of(2) {
                         out.push(0);
                     }
                     let at = out.len();
@@ -862,7 +862,7 @@ fn bad_descriptors_and_thunks_warn_once() {
         let mut out = vec![0_u8; 5 * 20];
         let name_at = out.len();
         out.extend_from_slice(b"ok.dll\0");
-        while out.len() % 8 != 0 {
+        while !out.len().is_multiple_of(8) {
             out.push(0);
         }
         let thunks_at = out.len();

@@ -1170,15 +1170,14 @@ pub fn answer(
         .map(str::trim)
         .filter(|j| !j.is_empty())
         .map(str::to_owned);
-    if let Some(j) = &justification {
-        if j.chars().count() > crate::model::limits::MAX_TEXT_CHARS
+    if let Some(j) = &justification
+        && (j.chars().count() > crate::model::limits::MAX_TEXT_CHARS
             || j.chars().any(|c| {
                 (c.is_control() && !matches!(c, '\t' | '\n' | '\r'))
                     || crate::validate::is_bidi_control(c)
-            })
-        {
-            return Err(AnswerError::InvalidJustification);
-        }
+            }))
+    {
+        return Err(AnswerError::InvalidJustification);
     }
     if prompt.require_justification
         && justification.is_none()

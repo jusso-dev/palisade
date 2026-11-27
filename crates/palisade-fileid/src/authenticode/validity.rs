@@ -789,15 +789,16 @@ impl Judge<'_, '_> {
             return;
         }
         let policy = self.ctx.policy;
-        if let (Some(cutoff), Some(latest)) = (policy.sha1_timestamp_cutoff, ts.latest()) {
-            if ts.uses_sha1() && latest > cutoff {
-                ts.set_status(TimestampStatus::Sha1PastCutoff);
-                *sha1_dropped = true;
-                v.warn(ValidityWarning::Sha1TimestampPastCutoff {
-                    timestamp: ts.index,
-                });
-                return;
-            }
+        if let (Some(cutoff), Some(latest)) = (policy.sha1_timestamp_cutoff, ts.latest())
+            && ts.uses_sha1()
+            && latest > cutoff
+        {
+            ts.set_status(TimestampStatus::Sha1PastCutoff);
+            *sha1_dropped = true;
+            v.warn(ValidityWarning::Sha1TimestampPastCutoff {
+                timestamp: ts.index,
+            });
+            return;
         }
         let Some(chain) = ts.tsa_chain.as_ref() else {
             return;

@@ -277,11 +277,11 @@ mod tests {
         let mut out = std::collections::BTreeSet::new();
         for (marker, end) in [("command == \"", '"'), ("\n        \"", '"')] {
             for piece in body.split(marker).skip(1) {
-                if let Some((word, _)) = piece.split_once(end) {
-                    if !word.is_empty() && word.chars().all(|c| c.is_ascii_lowercase() || c == '-')
-                    {
-                        out.insert(word.to_owned());
-                    }
+                if let Some((word, _)) = piece.split_once(end)
+                    && !word.is_empty()
+                    && word.chars().all(|c| c.is_ascii_lowercase() || c == '-')
+                {
+                    out.insert(word.to_owned());
                 }
             }
         }

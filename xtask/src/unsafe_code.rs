@@ -598,15 +598,12 @@ fn tokenize(source: &str) -> Result<TokenStream, String> {
     // would read the rest of the file differently. Only `#!` directly
     // followed by `[` (ASCII whitespace allowed) is accepted.
     let body = source.strip_prefix('\u{feff}').unwrap_or(source);
-    if let Some(rest) = body.strip_prefix("#!") {
-        if !rest
+    if let Some(rest) = body.strip_prefix("#!")
+        && !rest
             .trim_start_matches([' ', '\t', '\r', '\n'])
             .starts_with('[')
-        {
-            return Err(
-                "starts with `#!` that is not an inner attribute (a shebang line)".to_owned(),
-            );
-        }
+    {
+        return Err("starts with `#!` that is not an inner attribute (a shebang line)".to_owned());
     }
     let tokens = TokenStream::from_str(source).map_err(|e| e.to_string())?;
     if has_quote_before_literal(tokens.clone()) {

@@ -759,13 +759,13 @@ fn validate_database(
     let migration = raw
         .migration
         .and_then(|m| db_login(m.user, m.password_file, "database.migration", base, errors));
-    if let (Some(r), Some(m)) = (&runtime, &migration) {
-        if r.user == m.user {
-            errors.push(format!(
+    if let (Some(r), Some(m)) = (&runtime, &migration)
+        && r.user == m.user
+    {
+        errors.push(format!(
                 "database.migration.user: must differ from database.user (`{}`); the server must not serve requests as the role that owns the schema (ADR 0006)",
                 r.user
             ));
-        }
     }
     let tls = match raw.tls.as_deref() {
         None | Some("verify-full") => Some(DbTls::VerifyFull),

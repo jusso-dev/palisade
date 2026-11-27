@@ -49,15 +49,15 @@ fn covers_depth(a: &Match, b: &Match, depth: usize) -> bool {
     if let Match::All(as_) = a {
         return !as_.is_empty() && as_.iter().all(|ac| covers_depth(ac, b, d));
     }
-    if let Match::Any(as_) = a {
-        if as_.iter().any(|ac| covers_depth(ac, b, d)) {
-            return true;
-        }
+    if let Match::Any(as_) = a
+        && as_.iter().any(|ac| covers_depth(ac, b, d))
+    {
+        return true;
     }
-    if let Match::All(bs) = b {
-        if bs.iter().any(|bc| covers_depth(a, bc, d)) {
-            return true;
-        }
+    if let Match::All(bs) = b
+        && bs.iter().any(|bc| covers_depth(a, bc, d))
+    {
+        return true;
     }
     match (a, b) {
         (Match::Criterion(ca), Match::Criterion(cb)) => criterion_covers(ca, cb),
@@ -124,10 +124,10 @@ pub fn criterion_covers(a: &Criterion, b: &Criterion) -> bool {
         return false;
     }
     let class = a.field.class();
-    if matches!(class, FieldClass::Version) {
-        if let (Some(ra), Some(rb)) = (range(a), range(b)) {
-            return ra.0 <= rb.0 && rb.1 <= ra.1;
-        }
+    if matches!(class, FieldClass::Version)
+        && let (Some(ra), Some(rb)) = (range(a), range(b))
+    {
+        return ra.0 <= rb.0 && rb.1 <= ra.1;
     }
     if a.operator != b.operator || !a.operator.is_positive() {
         return false;

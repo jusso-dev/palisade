@@ -887,11 +887,10 @@ proptest! {
         // Truncating at a line start leaves well-formed YAML that usually
         // no longer matches the model; any error must still be located.
         let cut = yaml.char_indices().map(|(i, _)| i).filter(|i| *i == 0 || yaml.as_bytes()[i - 1] == b'\n').nth(cut % 40);
-        if let Some(cut) = cut {
-            if let Err(e) = from_str(&yaml[..cut]) {
+        if let Some(cut) = cut
+            && let Err(e) = from_str(&yaml[..cut]) {
                 prop_assert!(e.location().is_some(), "{}", e);
             }
-        }
     }
 }
 

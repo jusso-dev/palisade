@@ -627,37 +627,37 @@ fn trust_tier(
             });
         }
     }
-    if signer.is_none() {
-        if let Some(found) = &found {
-            let best = found
-                .matches
-                .iter()
-                .enumerate()
-                .find(|(i, _)| usable.get(*i).copied().unwrap_or(false));
-            if let Some((i, m)) = best {
-                let chain = m.signer.and_then(|s| s.trust.chain.as_ref());
-                let identity = m.signer.and_then(|s| s.identity.as_ref());
-                signer = Some(TrustedSigner {
-                    source: TrustSource::Catalog,
-                    signature: None,
-                    catalog_match: Some(i),
-                    publisher_name: identity
-                        .and_then(|i| i.publisher_name.as_ref())
-                        .map(|n| n.value.clone()),
-                    publisher_dn: identity.and_then(|i| i.publisher_dn.clone()),
-                    product_name: version
-                        .and_then(|v| v.get(VersionField::ProductName))
-                        .filter(|p| !p.trim().is_empty())
-                        .map(str::to_owned),
-                    leaf: chain.and_then(ChainReport::leaf_cert).map(cert_brief),
-                    pca: chain.and_then(ChainReport::pca_cert).map(cert_brief),
-                    root: chain.and_then(full_root).map(cert_brief),
-                    well_known_root_id: chain.and_then(|c| c.well_known_root_id),
-                    anchored_to: chain
-                        .and_then(|c| c.anchored_to.as_ref())
-                        .map(|a| a.label.clone()),
-                });
-            }
+    if signer.is_none()
+        && let Some(found) = &found
+    {
+        let best = found
+            .matches
+            .iter()
+            .enumerate()
+            .find(|(i, _)| usable.get(*i).copied().unwrap_or(false));
+        if let Some((i, m)) = best {
+            let chain = m.signer.and_then(|s| s.trust.chain.as_ref());
+            let identity = m.signer.and_then(|s| s.identity.as_ref());
+            signer = Some(TrustedSigner {
+                source: TrustSource::Catalog,
+                signature: None,
+                catalog_match: Some(i),
+                publisher_name: identity
+                    .and_then(|i| i.publisher_name.as_ref())
+                    .map(|n| n.value.clone()),
+                publisher_dn: identity.and_then(|i| i.publisher_dn.clone()),
+                product_name: version
+                    .and_then(|v| v.get(VersionField::ProductName))
+                    .filter(|p| !p.trim().is_empty())
+                    .map(str::to_owned),
+                leaf: chain.and_then(ChainReport::leaf_cert).map(cert_brief),
+                pca: chain.and_then(ChainReport::pca_cert).map(cert_brief),
+                root: chain.and_then(full_root).map(cert_brief),
+                well_known_root_id: chain.and_then(|c| c.well_known_root_id),
+                anchored_to: chain
+                    .and_then(|c| c.anchored_to.as_ref())
+                    .map(|a| a.label.clone()),
+            });
         }
     }
 
@@ -749,11 +749,11 @@ fn context_tier(
     // path, and kept only if that path still names the same file, so the
     // record never pairs this file's content with another file's mark.
     id.fs.motw = read_motw(file);
-    if let Field::Unavailable(why) = &id.fs.motw {
-        if cfg!(all(windows, feature = "os-trust")) {
-            let why = why.clone();
-            id.error(Tier::Context, "motw_unreadable", why);
-        }
+    if let Field::Unavailable(why) = &id.fs.motw
+        && cfg!(all(windows, feature = "os-trust"))
+    {
+        let why = why.clone();
+        id.error(Tier::Context, "motw_unreadable", why);
     }
     id.fs.path_variables = match (ctx.known_folders, id.fs.path.computed()) {
         (None, _) => Field::Unavailable("no known folders in the context".to_owned()),

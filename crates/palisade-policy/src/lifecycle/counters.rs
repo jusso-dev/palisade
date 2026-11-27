@@ -64,10 +64,10 @@ impl Sketch {
         let index = usize::try_from(hash >> (64 - HLL_BITS)).unwrap_or(0);
         let rest = (hash << HLL_BITS) | (1 << (HLL_BITS - 1));
         let rank = u8::try_from(rest.leading_zeros() + 1).unwrap_or(u8::MAX);
-        if let Some(r) = self.registers.get(index) {
-            if r.load(Ordering::Relaxed) < rank {
-                r.fetch_max(rank, Ordering::Relaxed);
-            }
+        if let Some(r) = self.registers.get(index)
+            && r.load(Ordering::Relaxed) < rank
+        {
+            r.fetch_max(rank, Ordering::Relaxed);
         }
     }
 

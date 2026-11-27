@@ -266,10 +266,10 @@ pub fn bench_targets(root: &Path) -> Result<Vec<String>, String> {
             let path = file
                 .map_err(|e| format!("cannot read {}: {e}", benches.display()))?
                 .path();
-            if path.extension().is_some_and(|e| e == "rs") {
-                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                    found.push(stem.to_owned());
-                }
+            if path.extension().is_some_and(|e| e == "rs")
+                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+            {
+                found.push(stem.to_owned());
             }
         }
     }

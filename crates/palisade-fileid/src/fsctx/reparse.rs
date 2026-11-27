@@ -202,17 +202,14 @@ fn u32_at(b: &[u8], at: usize) -> Option<u32> {
 }
 
 fn utf16(bytes: &[u8]) -> Result<String, ReparseError> {
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return Err(ReparseError::BadName);
     }
     let units: Vec<u16> = bytes
-        .chunks_exact(2)
-        .map(|c| {
-            u16::from_le_bytes([
-                c.first().copied().unwrap_or(0),
-                c.get(1).copied().unwrap_or(0),
-            ])
-        })
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| u16::from_le_bytes(*c))
         .collect();
     let s = String::from_utf16(&units).map_err(|_| ReparseError::BadString)?;
     if s.contains('\0') {
@@ -253,11 +250,8 @@ fn is_volume_target(substitute: &str) -> bool {
 fn alias_strings(data: &[u8]) -> Result<Vec<String>, ReparseError> {
     let mut out = Vec::new();
     let mut current = Vec::new();
-    for c in data.chunks_exact(2) {
-        let u = u16::from_le_bytes([
-            c.first().copied().unwrap_or(0),
-            c.get(1).copied().unwrap_or(0),
-        ]);
+    for c in data.as_chunks::<2>().0 {
+        let u = u16::from_le_bytes(*c);
         if u == 0 {
             out.push(String::from_utf16(&current).map_err(|_| ReparseError::BadString)?);
             current.clear();

@@ -612,7 +612,7 @@ pub fn verify_page_hashes(data: &[u8], info: &PeInfo, signed: &PageHashes) -> Pa
     // A table parsed from a signature is always whole entries, but the
     // fields are public: trailing bytes must not be silently ignored.
     let record = OFFSET_SIZE.saturating_add(signed.algorithm.digest_len());
-    if signed.table.len() % record != 0 {
+    if !signed.table.len().is_multiple_of(record) {
         return PageHashCheck::Unavailable(PageHashError::MalformedTable {
             len: signed.table.len(),
         });

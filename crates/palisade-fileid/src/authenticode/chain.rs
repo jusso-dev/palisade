@@ -1308,11 +1308,11 @@ impl<'p, 'i> Search<'p, 'i> {
                     .map(Vec::as_slice)
                     .unwrap_or_default()
                 {
-                    if let Some(s) = seen.get_mut(i) {
-                        if !*s {
-                            *s = true;
-                            next.push(i);
-                        }
+                    if let Some(s) = seen.get_mut(i)
+                        && !*s
+                    {
+                        *s = true;
+                        next.push(i);
                     }
                 }
             }
@@ -1474,12 +1474,11 @@ impl<'p, 'i> Search<'p, 'i> {
             .enumerate()
             .max_by_key(|(_, p)| key(p))
             .map(|(i, p)| (i, key(p)));
-        if let Some((i, worst_key)) = worst {
-            if key(path) < worst_key {
-                if let Some(slot) = self.paths.get_mut(i) {
-                    *slot = path.to_vec();
-                }
-            }
+        if let Some((i, worst_key)) = worst
+            && key(path) < worst_key
+            && let Some(slot) = self.paths.get_mut(i)
+        {
+            *slot = path.to_vec();
         }
     }
 

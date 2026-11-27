@@ -211,14 +211,14 @@ impl HierarchyDocument {
             .map(|n| n.node.id)
             .collect();
         for (i, lib) in self.libraries.iter().enumerate() {
-            if let Realm::Tenant(t) = lib.realm {
-                if !tenants.contains(&t) {
-                    errors.push(herr(
-                        HierarchyCode::UnknownNode,
-                        format!("/libraries/{i}/realm"),
-                        format!("tenant {t} does not exist"),
-                    ));
-                }
+            if let Realm::Tenant(t) = lib.realm
+                && !tenants.contains(&t)
+            {
+                errors.push(herr(
+                    HierarchyCode::UnknownNode,
+                    format!("/libraries/{i}/realm"),
+                    format!("tenant {t} does not exist"),
+                ));
             }
         }
 
@@ -353,14 +353,14 @@ fn unknown_scope_bounds(
     // Every dynamic group of each tenant could apply to its devices.
     let mut dynamic: BTreeMap<NodeId, Vec<(usize, String)>> = BTreeMap::new();
     for info in nodes.values() {
-        if info.node.kind == NodeKind::DynamicGroup {
-            if let Some(t) = info.tenant {
-                dynamic.entry(t).or_default().extend(
-                    own(info)
-                        .into_iter()
-                        .map(|(s, d)| (s, format!("dynamic group: {d}"))),
-                );
-            }
+        if info.node.kind == NodeKind::DynamicGroup
+            && let Some(t) = info.tenant
+        {
+            dynamic.entry(t).or_default().extend(
+                own(info)
+                    .into_iter()
+                    .map(|(s, d)| (s, format!("dynamic group: {d}"))),
+            );
         }
     }
     let dynamic_total = |info: &NodeInfo| {
@@ -1038,14 +1038,14 @@ fn check_policies(
             ));
             continue;
         }
-        if let Realm::Tenant(t) = entry.realm {
-            if !tenants.contains(&t) {
-                errors.push(herr(
-                    HierarchyCode::UnknownNode,
-                    format!("{base}/realm"),
-                    format!("tenant {t} does not exist"),
-                ));
-            }
+        if let Realm::Tenant(t) = entry.realm
+            && !tenants.contains(&t)
+        {
+            errors.push(herr(
+                HierarchyCode::UnknownNode,
+                format!("{base}/realm"),
+                format!("tenant {t} does not exist"),
+            ));
         }
         let from = match entry.realm {
             Realm::Global => Visibility::Global,

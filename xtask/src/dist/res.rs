@@ -246,7 +246,7 @@ fn utf16z(text: &str) -> Vec<u8> {
 }
 
 fn pad4(out: &mut Vec<u8>) {
-    while out.len() % 4 != 0 {
+    while !out.len().is_multiple_of(4) {
         out.push(0);
     }
 }
@@ -324,7 +324,9 @@ mod tests {
 
     fn text(value: &[u8]) -> String {
         let units: Vec<u16> = value
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .collect();
         assert_eq!(units.last(), Some(&0), "text values end with NUL");

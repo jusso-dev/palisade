@@ -55,10 +55,10 @@ pub fn generate() -> Value {
     object.insert("allOf".to_owned(), Value::Array(cross_field_rules()));
     // A reader accepts its own major and minor versions up to its own, so
     // the schema does too.
-    if let Some(Value::Object(props)) = object.get_mut("properties") {
-        if let Some(Value::Object(version)) = props.get_mut("schema_version") {
-            version.insert("pattern".to_owned(), readable_versions().into());
-        }
+    if let Some(Value::Object(props)) = object.get_mut("properties")
+        && let Some(Value::Object(version)) = props.get_mut("schema_version")
+    {
+        version.insert("pattern".to_owned(), readable_versions().into());
     }
     if let Some(Value::Object(defs)) = object.get_mut("$defs") {
         for (name, def) in rule_defs() {

@@ -610,11 +610,11 @@ pub fn write_zip_with(files: &[File], style: &ZipStyle) -> Vec<u8> {
             &[]
         };
         let (method, mut body) = AppxBuilder::compressed(f);
-        if let Some((name, raw)) = &style.raw_deflate {
-            if *name == f.name {
-                assert_eq!(method, 8, "{name} is not deflated");
-                body = raw.clone();
-            }
+        if let Some((name, raw)) = &style.raw_deflate
+            && *name == f.name
+        {
+            assert_eq!(method, 8, "{name} is not deflated");
+            body = raw.clone();
         }
         if method == 8 && style.no_final_block {
             body.truncate(body.len() - 2);

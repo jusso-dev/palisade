@@ -175,13 +175,10 @@ pub fn parse_stream_info(bytes: &[u8]) -> Result<StreamList, RecordError> {
             .and_then(|end| rec.get(STREAM_HEADER..end))
             .ok_or(RecordError::Truncated { offset })?;
         let units: Vec<u16> = raw
-            .chunks_exact(2)
-            .map(|c| {
-                u16::from_le_bytes([
-                    c.first().copied().unwrap_or(0),
-                    c.get(1).copied().unwrap_or(0),
-                ])
-            })
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u16::from_le_bytes(*c))
             .collect();
         let full = String::from_utf16(&units).map_err(|_| RecordError::BadStreamName { offset })?;
         // `:name:type`, where the default stream is `::$DATA`.
@@ -286,7 +283,7 @@ mod tests {
     /// as the OS does.
     fn two(a: &str, b: &str) -> Vec<u8> {
         let mut first = stream_record(0, a, 10);
-        while first.len() % 8 != 0 {
+        while !first.len().is_multiple_of(8) {
             first.push(0);
         }
         let next = u32::try_from(first.len()).unwrap();
@@ -314,13 +311,13 @@ mod tests {
         assert!(!list.truncated);
         // Unnamed or non-data streams are neither default nor alternate.
         let mut odd = stream_record(0, "::$INDEX_ALLOCATION", 0);
-        while odd.len() % 8 != 0 {
+        while !odd.len().is_multiple_of(8) {
             odd.push(0);
         }
         let next = u32::try_from(odd.len()).unwrap();
         odd[..4].copy_from_slice(&next.to_le_bytes());
         let mut tail = stream_record(0, ":$EFS:$LOGGED_UTILITY_STREAM", 0);
-        while tail.len() % 8 != 0 {
+        while !tail.len().is_multiple_of(8) {
             tail.push(0);
         }
         let next2 = u32::try_from(tail.len()).unwrap();
@@ -432,7 +429,7 @@ mod tests {
     #[test]
     fn stream_count_is_bounded() {
         let mut one = stream_record(0, ":s:$DATA", 1);
-        while one.len() % 8 != 0 {
+        while !one.len().is_multiple_of(8) {
             one.push(0);
         }
         let step = u32::try_from(one.len()).unwrap();

@@ -347,19 +347,17 @@ fn write_corpus_fuzz_seeds() {
             | Kind::TruncatedSignature
             | Kind::Malformed => {
                 std::fs::write(dir.join(format!("corpus-{}", f.name)), &f.bytes).unwrap();
-                if let Ok(info) = pe::parse(&f.bytes) {
-                    if let Some(range) = info.certificate_table {
-                        let start = (range.offset as usize).min(f.bytes.len());
-                        let end =
-                            (range.offset.saturating_add(range.size) as usize).min(f.bytes.len());
-                        let table = &f.bytes[start..end];
-                        // The PKCS#7 blob after the 8-byte WIN_CERTIFICATE header.
-                        if table.len() > 8 {
-                            let len = u32::from_le_bytes(table[..4].try_into().unwrap()) as usize;
-                            let blob = &table[8..len.clamp(8, table.len())];
-                            std::fs::write(dir.join(format!("corpus-{}.p7", f.name)), blob)
-                                .unwrap();
-                        }
+                if let Ok(info) = pe::parse(&f.bytes)
+                    && let Some(range) = info.certificate_table
+                {
+                    let start = (range.offset as usize).min(f.bytes.len());
+                    let end = (range.offset.saturating_add(range.size) as usize).min(f.bytes.len());
+                    let table = &f.bytes[start..end];
+                    // The PKCS#7 blob after the 8-byte WIN_CERTIFICATE header.
+                    if table.len() > 8 {
+                        let len = u32::from_le_bytes(table[..4].try_into().unwrap()) as usize;
+                        let blob = &table[8..len.clamp(8, table.len())];
+                        std::fs::write(dir.join(format!("corpus-{}.p7", f.name)), blob).unwrap();
                     }
                 }
             }

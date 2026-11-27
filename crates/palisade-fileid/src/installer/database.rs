@@ -228,7 +228,7 @@ pub(crate) struct StringPool {
 
 impl StringPool {
     fn parse(pool: &[u8], data: &[u8]) -> Result<Self, TableError> {
-        if pool.len() % 4 != 0 {
+        if !pool.len().is_multiple_of(4) {
             return Err(TableError::StringPool("pool length"));
         }
         let word = |i: usize| -> u32 {
@@ -648,7 +648,7 @@ impl<'a> Database<'a> {
         let entry = self.stream_entry(table, true);
         let len = entry.map_or(0, |e| e.size);
         let row_size_u64 = u64::try_from(row_size).unwrap_or(u64::MAX);
-        if row_size == 0 || len % row_size_u64 != 0 {
+        if row_size == 0 || !len.is_multiple_of(row_size_u64) {
             return Err(TableError::RowSize {
                 table: table.to_owned(),
             });

@@ -200,10 +200,10 @@ impl SingleResponse {
         if cert.issuer.der != issuer.subject.der {
             return false;
         }
-        if let (Some(aki), Some(ski)) = (&cert.authority_key_id, &issuer.subject_key_id) {
-            if aki != ski {
-                return false;
-            }
+        if let (Some(aki), Some(ski)) = (&cert.authority_key_id, &issuer.subject_key_id)
+            && aki != ski
+        {
+            return false;
         }
         if !self.serial.eq_ignore_ascii_case(&cert.serial) {
             return false;

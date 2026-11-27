@@ -675,13 +675,13 @@ impl MappingSet {
                 ));
             }
         }
-        if let (Some(have), Some(new)) = (&self.format, &doc.source.format) {
-            if have != new {
-                return Err(err(
-                    "source".to_owned(),
-                    format!("the set already translates `third_party:{have}`"),
-                ));
-            }
+        if let (Some(have), Some(new)) = (&self.format, &doc.source.format)
+            && have != new
+        {
+            return Err(err(
+                "source".to_owned(),
+                format!("the set already translates `third_party:{have}`"),
+            ));
         }
         let ctx = FileContext {
             version,

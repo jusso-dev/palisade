@@ -664,14 +664,14 @@ impl Validator {
                 self.name(&format!("{base}/version"), version);
             }
             self.metadata(&format!("{base}/metadata"), &set.metadata);
-            if let Some(category) = &set.category_path {
-                if let Some(problem) = category_problem(category) {
-                    self.push(
-                        ErrorCode::InvalidCategory,
-                        &format!("{base}/category_path"),
-                        problem,
-                    );
-                }
+            if let Some(category) = &set.category_path
+                && let Some(problem) = category_problem(category)
+            {
+                self.push(
+                    ErrorCode::InvalidCategory,
+                    &format!("{base}/category_path"),
+                    problem,
+                );
             }
             if set.mandatory && set.allow_child_suppress == Some(true) {
                 self.push(
@@ -1122,16 +1122,16 @@ impl Validator {
                     format!("`{key}` is not a known advanced setting"),
                 );
             }
-            if let crate::model::AdvancedValue::Text(text) = value {
-                if text.len() > MAX_VALUE_BYTES || text.chars().any(char::is_control) {
-                    self.push(
+            if let crate::model::AdvancedValue::Text(text) = value
+                && (text.len() > MAX_VALUE_BYTES || text.chars().any(char::is_control))
+            {
+                self.push(
                         ErrorCode::InvalidValue,
                         &path,
                         format!(
                             "advanced text values are at most {MAX_VALUE_BYTES} bytes with no control characters"
                         ),
                     );
-                }
             }
         }
     }
@@ -1426,10 +1426,10 @@ fn regex_count(tree: &Match) -> usize {
     let mut count = 0usize;
     let mut stack = vec![tree];
     while let Some(node) = stack.pop() {
-        if let Match::Criterion(c) = node {
-            if c.operator.is_regex() {
-                count = count.saturating_add(c.values.len());
-            }
+        if let Match::Criterion(c) = node
+            && c.operator.is_regex()
+        {
+            count = count.saturating_add(c.values.len());
         }
         stack.extend(node.children());
     }

@@ -98,13 +98,13 @@ pub fn recommend(id: &FileIdentity) -> Recommendation {
     // A file whose version resource claims a protected binary's name is
     // allowed only through that binary's own trusted signer: a hash rule
     // would allow an impostor or a copy outside its folders.
-    if let Some(original) = id.masquerade.claims_protected.as_deref() {
-        if id.trusted_signer().is_none() {
-            rec.rationale.push(format!(
+    if let Some(original) = id.masquerade.claims_protected.as_deref()
+        && id.trusted_signer().is_none()
+    {
+        rec.rationale.push(format!(
                 "its OriginalFilename {original:?} names a protected binary and no trusted signer vouches for it, so no allow rule is recommended"
             ));
-            return rec;
-        }
+        return rec;
     }
 
     let signing = id.signing_state.computed();

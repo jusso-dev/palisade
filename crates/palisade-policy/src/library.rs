@@ -840,18 +840,18 @@ impl Catalogue {
                 continue;
             }
             let versions = by_id.entry(lib.id).or_default();
-            if let Some(first) = versions.values().next() {
-                if first.content.kind() != lib.content.kind() || first.realm != lib.realm {
-                    errors.push(err(
-                        LibraryCode::KindChanged,
-                        format!("{base}/content"),
-                        format!(
-                            "every version of library {} must have the same kind and realm as {}",
-                            lib.id,
-                            first.label()
-                        ),
-                    ));
-                }
+            if let Some(first) = versions.values().next()
+                && (first.content.kind() != lib.content.kind() || first.realm != lib.realm)
+            {
+                errors.push(err(
+                    LibraryCode::KindChanged,
+                    format!("{base}/content"),
+                    format!(
+                        "every version of library {} must have the same kind and realm as {}",
+                        lib.id,
+                        first.label()
+                    ),
+                ));
             }
             if versions.contains_key(&lib.version) {
                 errors.push(err(
@@ -1374,14 +1374,14 @@ fn check_library(base: &str, lib: &Library, errors: &mut Vec<LibraryError>) {
             problem,
         ));
     }
-    if let Some(owner) = &lib.owner {
-        if crate::context::normalize_principal(owner).is_none() {
-            errors.push(err(
-                LibraryCode::InvalidOwner,
-                format!("{base}/owner"),
-                "the owner is a SID or a directory object ID",
-            ));
-        }
+    if let Some(owner) = &lib.owner
+        && crate::context::normalize_principal(owner).is_none()
+    {
+        errors.push(err(
+            LibraryCode::InvalidOwner,
+            format!("{base}/owner"),
+            "the owner is a SID or a directory object ID",
+        ));
     }
     if lib.derived_from.is_some_and(|d| d.version == 0) {
         errors.push(err(

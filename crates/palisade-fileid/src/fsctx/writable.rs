@@ -121,10 +121,10 @@ impl WritabilityCache {
         }
         self.misses = self.misses.saturating_add(1);
         let w = evaluate(&sd.descriptor, kind, options);
-        if self.entries.len() >= self.max_entries {
-            if let Some(old) = self.order.pop_front() {
-                self.entries.remove(&old);
-            }
+        if self.entries.len() >= self.max_entries
+            && let Some(old) = self.order.pop_front()
+        {
+            self.entries.remove(&old);
         }
         self.entries.insert(key, w.clone());
         self.order.push_back(key);

@@ -633,10 +633,10 @@ pub fn check_sources(root: &Path, files: &[String]) -> Result<Vec<String>, Strin
         let text = text.replace("\r\n", "\n");
         v.extend(markdown::accessibility(path, &text));
         for line in text.lines() {
-            if let Some(target) = stage::include_target(line) {
-                if let Some(resolved) = stage::resolve(stage::dir_of(path), target) {
-                    included.insert(resolved);
-                }
+            if let Some(target) = stage::include_target(line)
+                && let Some(resolved) = stage::resolve(stage::dir_of(path), target)
+            {
+                included.insert(resolved);
             }
         }
         for (line, info, body) in markdown::fenced_blocks(&text) {

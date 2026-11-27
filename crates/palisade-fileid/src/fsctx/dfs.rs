@@ -251,10 +251,10 @@ impl<R: DfsResolver> DfsCache<R> {
                 };
             }
         }
-        if let Some((at, neg)) = self.negatives.get(&share) {
-            if now.saturating_duration_since(*at) < self.negative_ttl {
-                return Err(neg.clone());
-            }
+        if let Some((at, neg)) = self.negatives.get(&share)
+            && now.saturating_duration_since(*at) < self.negative_ttl
+        {
+            return Err(neg.clone());
         }
         match self.lookup(path) {
             Ok(Some(r)) if path.starts_with(&r.entry) => {

@@ -994,10 +994,10 @@ fn parse_extension(id: &[u8], value: &Tlv<'_>, ext: &mut Extensions) -> Result<b
             if let Some(names) = r.read_optional(tag::context_cons(1))? {
                 asn1::validate(&names)?;
             }
-            if let Some(serial) = r.read_optional(tag::context_prim(2))? {
-                if serial.content.is_empty() {
-                    return Err(serial.error(Asn1ErrorKind::InvalidValue).into());
-                }
+            if let Some(serial) = r.read_optional(tag::context_prim(2))?
+                && serial.content.is_empty()
+            {
+                return Err(serial.error(Asn1ErrorKind::InvalidValue).into());
             }
             r.finish()?;
         }

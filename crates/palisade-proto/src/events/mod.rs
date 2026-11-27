@@ -2109,10 +2109,10 @@ impl Event {
         if self.min_version() > self.schema_version {
             fail(EventErrorCode::NewerThanVersion, "/schema_version");
         }
-        if let Some(source) = &self.source {
-            if (source.kind == SourceKind::ThirdParty) != source.format.is_some() {
-                fail(EventErrorCode::SourceFormat, "/source/format");
-            }
+        if let Some(source) = &self.source
+            && (source.kind == SourceKind::ThirdParty) != source.format.is_some()
+        {
+            fail(EventErrorCode::SourceFormat, "/source/format");
         }
         if self
             .network

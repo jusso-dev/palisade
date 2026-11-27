@@ -160,7 +160,7 @@ fn sign(unsigned: &[u8], cert: &[u8], checksum: u32) -> Vec<u8> {
         .unwrap()
         .entry_offset as usize;
     let mut out = unsigned.to_vec();
-    while out.len() % 8 != 0 {
+    while !out.len().is_multiple_of(8) {
         out.push(0);
     }
     let at = out.len() as u32;

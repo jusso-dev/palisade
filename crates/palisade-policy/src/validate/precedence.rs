@@ -55,20 +55,22 @@ impl Validator {
                 // has an order must use the custom range, whatever its
                 // action: a `defer` or `audit` rule is placed in the same
                 // order. Mandatory rule sets are decided before any order.
-                if model == PrecedenceModel::FirstMatch && !set.read_only && !set.mandatory {
-                    if let Some(order) = rule.order.filter(|o| {
+                if model == PrecedenceModel::FirstMatch
+                    && !set.read_only
+                    && !set.mandatory
+                    && let Some(order) = rule.order.filter(|o| {
                         !order_ranges::CUSTOM.contains(o) && o <= order_ranges::CATCH_ALL.end()
-                    }) {
-                        self.push(
-                            ErrorCode::OrderReserved,
-                            &format!("{path}/order"),
-                            format!(
-                                "order {order} is reserved; rules of custom rule sets use {} to {}",
-                                order_ranges::CUSTOM.start(),
-                                order_ranges::CUSTOM.end()
-                            ),
-                        );
-                    }
+                    })
+                {
+                    self.push(
+                        ErrorCode::OrderReserved,
+                        &format!("{path}/order"),
+                        format!(
+                            "order {order} is reserved; rules of custom rule sets use {} to {}",
+                            order_ranges::CUSTOM.start(),
+                            order_ranges::CUSTOM.end()
+                        ),
+                    );
                 }
                 // Mandatory and exclusion rules are decided before the
                 // model, and the other non-terminal rules never decide.

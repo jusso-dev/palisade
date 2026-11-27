@@ -91,11 +91,11 @@ fn schema_node<'a>(
                 .find(|s| s.get("type") != Some(&serde_json::json!("null")))?;
             continue;
         }
-        if node.get("properties").is_none() {
-            if let Some(items) = node.get("items") {
-                node = items;
-                continue;
-            }
+        if node.get("properties").is_none()
+            && let Some(items) = node.get("items")
+        {
+            node = items;
+            continue;
         }
         break;
     }

@@ -56,7 +56,7 @@ fn import_section(rva: u32, module: &str, function: &str) -> Vec<u8> {
     out.extend_from_slice(&0_u16.to_le_bytes());
     out.extend_from_slice(function.as_bytes());
     out.push(0);
-    if out.len() % 2 != 0 {
+    if !out.len().is_multiple_of(2) {
         out.push(0);
     }
     let name = out.len();

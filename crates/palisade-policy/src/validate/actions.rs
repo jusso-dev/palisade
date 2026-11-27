@@ -244,14 +244,14 @@ impl Validator {
 
         self.tags(&format!("{base}/tags"), &e.tags);
 
-        if let Some(secs) = e.suppress_duplicates_secs {
-            if secs > MAX_SUPPRESS_DUPLICATES_SECS {
-                self.push(
-                    ErrorCode::InvalidEffect,
-                    &format!("{base}/suppress_duplicates_secs"),
-                    format!("{secs} is outside 0..={MAX_SUPPRESS_DUPLICATES_SECS}"),
-                );
-            }
+        if let Some(secs) = e.suppress_duplicates_secs
+            && secs > MAX_SUPPRESS_DUPLICATES_SECS
+        {
+            self.push(
+                ErrorCode::InvalidEffect,
+                &format!("{base}/suppress_duplicates_secs"),
+                format!("{secs} is outside 0..={MAX_SUPPRESS_DUPLICATES_SECS}"),
+            );
         }
     }
 }
