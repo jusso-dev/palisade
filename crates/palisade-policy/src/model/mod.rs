@@ -328,11 +328,13 @@ pub struct Rule {
     pub enforcement_override: EnforcementOverride,
     /// Who, where and when the rule applies (#38). Unset means everyone,
     /// everywhere, always, within the policy's and the rule set's scopes.
+    // Boxed: most rules have none, and a large hash set has tens of
+    // thousands of rules, so an inline scope would dominate its memory (#42).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scope: Option<Scope>,
+    pub scope: Option<Box<Scope>>,
     /// Governance metadata (#40).
-    #[serde(default, skip_serializing_if = "Metadata::is_empty")]
-    pub metadata: Metadata,
+    #[serde(default, skip_serializing_if = "RuleMetadata::is_empty")]
+    pub metadata: RuleMetadata,
 }
 
 const fn default_true() -> bool {
@@ -443,6 +445,86 @@ impl Metadata {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self == &Self::default()
+    }
+}
+
+/// A rule's [`Metadata`], kept out of line and only when it is set (#42).
+///
+/// Reads and writes go through `Deref` and `DerefMut`, so it is used like a
+/// `Metadata`; writing to an empty one allocates it. Most rules of a large
+/// hash set carry no metadata, and an inline `Metadata` on each would
+/// dominate the set's memory. Its JSON form and schema are `Metadata`'s.
+#[derive(Clone, Default)]
+pub struct RuleMetadata(Option<Box<Metadata>>);
+
+/// What an empty [`RuleMetadata`] reads as.
+static EMPTY_METADATA: std::sync::LazyLock<Metadata> = std::sync::LazyLock::new(Metadata::default);
+
+impl RuleMetadata {
+    /// Whether no field is set.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.as_deref().is_none_or(Metadata::is_empty)
+    }
+}
+
+impl From<Metadata> for RuleMetadata {
+    fn from(m: Metadata) -> Self {
+        Self((!m.is_empty()).then(|| Box::new(m)))
+    }
+}
+
+impl core::ops::Deref for RuleMetadata {
+    type Target = Metadata;
+    fn deref(&self) -> &Metadata {
+        self.0.as_deref().unwrap_or(&EMPTY_METADATA)
+    }
+}
+
+impl core::ops::DerefMut for RuleMetadata {
+    fn deref_mut(&mut self) -> &mut Metadata {
+        self.0.get_or_insert_with(Box::default)
+    }
+}
+
+impl PartialEq for RuleMetadata {
+    fn eq(&self, other: &Self) -> bool {
+        **self == **other
+    }
+}
+
+impl Eq for RuleMetadata {}
+
+impl core::fmt::Debug for RuleMetadata {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        (**self).fmt(f)
+    }
+}
+
+impl Serialize for RuleMetadata {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        (**self).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for RuleMetadata {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Metadata::deserialize(deserializer).map(Self::from)
+    }
+}
+
+impl JsonSchema for RuleMetadata {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        Metadata::schema_name()
+    }
+    fn schema_id() -> std::borrow::Cow<'static, str> {
+        Metadata::schema_id()
+    }
+    fn inline_schema() -> bool {
+        Metadata::inline_schema()
+    }
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        Metadata::json_schema(generator)
     }
 }
 

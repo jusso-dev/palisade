@@ -20,20 +20,25 @@ test-util = []
 hmac = { workspace = true }
 jiff = { workspace = true }
 palisade-core = { workspace = true, features = ["std", "schema"] }
+arc-swap = { workspace = true }
 regex-automata = { workspace = true }
 regex-syntax = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+self_cell = { workspace = true }
 # SHA-256 of the effective policy's canonical form (#37), trace IDs from event
 # IDs, and the digest of withheld facts (#41).
 sha2 = { workspace = true }
+smallvec = { workspace = true }
 unicode-normalization = { workspace = true }
 yaml-rust2 = { workspace = true }
 
 [dev-dependencies]
+allocation-counter = { workspace = true }
 boon = { workspace = true }
 criterion = { workspace = true }
+hdrhistogram = { workspace = true }
 insta = { workspace = true }
 proptest = { workspace = true }
 toml = { workspace = true }
@@ -56,6 +61,10 @@ harness = false
 
 [[bench]]
 name = "simulate"
+harness = false
+
+[[bench]]
+name = "policy_eval"
 harness = false
 
 [lints]

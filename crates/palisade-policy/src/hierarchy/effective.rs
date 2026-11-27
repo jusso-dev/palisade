@@ -830,7 +830,7 @@ impl<'a, 'h> Builder<'a, 'h> {
             let scopes = e
                 .scopes
                 .iter()
-                .chain(e.set.rules.iter().filter_map(|r| r.scope.as_ref()));
+                .chain(e.set.rules.iter().filter_map(|r| r.scope.as_deref()));
             for scope in scopes {
                 for (_, r, _) in crate::scope::set_refs(scope) {
                     found.push((r, format!("/effective/rule_sets/{id}")));

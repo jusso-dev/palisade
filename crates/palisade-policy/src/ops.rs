@@ -235,7 +235,8 @@ use palisade_core::path::{NormalizedPath, normalize};
 
 use crate::context::{
     ContextFact, Date, EvaluationContext, IntegrityLevel, SessionType, Weekday,
-    normalize_principal, normalize_sid, parse_time_of_day,
+    normalize_principal, normalize_principal_into, normalize_sid, normalize_sid_into,
+    parse_time_of_day,
 };
 use crate::facts::{ObjectFacts, PathFact, PathVariable, PathVariables};
 use crate::model::limits::MAX_VALUE_BYTES;
@@ -560,8 +561,9 @@ pub struct CompiledCriterion {
 
 #[derive(Clone, Debug)]
 enum Values {
-    /// Lowercase hex digests, and their required length.
-    Hash(Vec<String>, usize),
+    /// Digests as bytes, all of `hex_len / 2` bytes, concatenated; and the
+    /// required number of hex digits.
+    Hash(Box<[u8]>, usize),
     /// NFC-normalised, case-folded literals.
     Text(Vec<String>),
     /// Literal path values, for `equals` and `starts_with` on path fields.
@@ -799,40 +801,44 @@ impl CompiledCriterion {
                 // A member that is neither a SID nor an object ID could be
                 // any principal, so a value it might be is unknown rather
                 // than absent: it must not let `not_member_of` match, nor
-                // fail an `all_of` that the readable members satisfy.
-                let mut unreadable = false;
-                let have: Vec<String> = members
-                    .iter()
-                    .filter_map(|m| {
-                        let n = normalize_principal(m);
-                        unreadable |= n.is_none();
-                        n
-                    })
-                    .collect();
-                if unreadable {
-                    notes.insert(Note::FactMalformed);
-                }
-                let held = |w: &String| {
-                    if have.contains(w) {
-                        Tri::Match
-                    } else if unreadable {
-                        Tri::Unknown
-                    } else {
-                        Tri::NoMatch
+                // fail an `all_of` that the readable members satisfy. The
+                // members are normalised into a reused buffer, so the test
+                // does not allocate (#42).
+                scratch::with_buffer(|canon| {
+                    let mut unreadable = false;
+                    for member in members {
+                        canon.clear();
+                        unreadable |= !normalize_principal_into(member, canon);
                     }
-                };
-                if self.operator == Operator::AllOf {
-                    want.iter().map(held).fold(Tri::Match, Tri::and)
-                } else {
-                    want.iter().map(held).fold(Tri::NoMatch, Tri::or)
-                }
+                    if unreadable {
+                        notes.insert(Note::FactMalformed);
+                    }
+                    let mut held = |w: &String| {
+                        let found = members.iter().any(|member| {
+                            canon.clear();
+                            normalize_principal_into(member, canon) && canon == w
+                        });
+                        if found {
+                            Tri::Match
+                        } else if unreadable {
+                            Tri::Unknown
+                        } else {
+                            Tri::NoMatch
+                        }
+                    };
+                    if self.operator == Operator::AllOf {
+                        want.iter().map(&mut held).fold(Tri::Match, Tri::and)
+                    } else {
+                        want.iter().map(&mut held).fold(Tri::NoMatch, Tri::or)
+                    }
+                })
             }
             (ContextFact::Set(members), Values::Tags(want)) => {
-                let have: Vec<String> = members
-                    .iter()
-                    .map(|m| fold(m, self.case_sensitive))
-                    .collect();
-                self.set_test(want.iter().map(|w| have.contains(w)))
+                self.set_test(want.iter().map(|w| {
+                    members
+                        .iter()
+                        .any(|m| with_folded(m, self.case_sensitive, |m| m == w))
+                }))
             }
             (ContextFact::Number(n), _) => self.ordered(Ordinal::Number(n)),
             (ContextFact::Level(l), _) => self.ordered(Ordinal::Level(l)),
@@ -876,13 +882,14 @@ impl CompiledCriterion {
                     Tri::Unknown
                 }
             },
-            (ContextFact::Text(fact), Values::Sid(want)) => match normalize_sid(fact) {
-                Some(have) => Tri::from_bool(want.contains(&have)),
-                None => {
+            (ContextFact::Text(fact), Values::Sid(want)) => scratch::with_buffer(|have| {
+                if normalize_sid_into(fact, have) {
+                    Tri::from_bool(want.iter().any(|w| w == have))
+                } else {
                     notes.insert(Note::FactMalformed);
                     Tri::Unknown
                 }
-            },
+            }),
             (ContextFact::Names(account, upn), _) => {
                 let mut result = Tri::NoMatch;
                 for form in [account, upn] {
@@ -915,11 +922,16 @@ impl CompiledCriterion {
             Values::Hash(values, hex_len) => {
                 // A malformed digest is a fault in whoever computed it, not
                 // evidence that the object differs.
-                if fact.len() != *hex_len || !fact.bytes().all(|b| b.is_ascii_hexdigit()) {
+                let mut have = [0u8; 64];
+                let Some(have) = have.get_mut(..hex_len / 2) else {
+                    notes.insert(Note::FactMalformed);
+                    return Tri::Unknown;
+                };
+                if fact.len() != *hex_len || anchor::decode_hex_into(fact, have).is_none() {
                     notes.insert(Note::FactMalformed);
                     return Tri::Unknown;
                 }
-                Tri::from_bool(values.iter().any(|v| fact.eq_ignore_ascii_case(v)))
+                Tri::from_bool(values.chunks_exact(have.len()).any(|v| v == have))
             }
             Values::Version(values) => match version_fact(fact, notes) {
                 Some(have) => Tri::from_bool(values.iter().any(|want| match self.operator {
@@ -936,18 +948,15 @@ impl CompiledCriterion {
                 Some(have) => Tri::from_bool(*min <= have && have <= *max),
                 None => Tri::Unknown,
             },
-            Values::Regex(patterns) => {
-                let text: String = fact.nfc().collect();
-                Tri::from_bool(patterns.iter().any(|p| p.is_match(&text)))
-            }
-            Values::Wildcard(patterns) => {
-                let text = fold(fact, self.case_sensitive);
-                Tri::from_bool(patterns.iter().any(|p| p.is_match(&text)))
-            }
-            Values::Text(values) => {
-                let fact = fold(fact, self.case_sensitive);
-                Tri::from_bool(values.iter().any(|v| self.text_op(&fact, v)))
-            }
+            Values::Regex(patterns) => with_nfc(fact, |text| {
+                Tri::from_bool(patterns.iter().any(|p| p.is_match(text)))
+            }),
+            Values::Wildcard(patterns) => with_folded(fact, self.case_sensitive, |text| {
+                Tri::from_bool(patterns.iter().any(|p| p.is_match(text)))
+            }),
+            Values::Text(values) => with_folded(fact, self.case_sensitive, |fact| {
+                Tri::from_bool(values.iter().any(|v| self.text_op(fact, v)))
+            }),
             // Only built for path fields, which `eval_path_form` handles,
             // and for context fields, which `eval_context` handles.
             Values::PathLiteral(_)
@@ -1091,8 +1100,7 @@ impl CompiledCriterion {
         notes: &mut Notes,
     ) -> Tri {
         match &self.values {
-            Values::PathLiteral(values) => {
-                let fact = fold(raw, self.case_sensitive);
+            Values::PathLiteral(values) => with_folded(raw, self.case_sensitive, |fact| {
                 let mut result = Tri::NoMatch;
                 for value in values {
                     // On `path.full`, a value that names a stream only
@@ -1102,23 +1110,23 @@ impl CompiledCriterion {
                         continue;
                     }
                     result = result.or(self.with_base(value.variable, ctx, notes, |base| {
-                        let want = join(base, &value.rest);
+                        let (want_base, want_rest) = joined(base, &value.rest);
                         match self.operator {
-                            Operator::StartsWith => {
-                                fact.strip_prefix(want.as_str()).is_some_and(|rest| {
+                            Operator::StartsWith => strip_joined(fact, want_base, want_rest)
+                                .is_some_and(|rest| {
                                     rest.is_empty()
                                         || rest.starts_with('\\')
-                                        || want.ends_with('\\')
-                                })
+                                        || joined_ends_with_separator(want_base, want_rest)
+                                }),
+                            _ => {
+                                strip_joined(fact, want_base, want_rest).is_some_and(str::is_empty)
                             }
-                            _ => fact == want,
                         }
                     }));
                 }
                 result
-            }
-            Values::PathWildcard(values) => {
-                let fact = fold(raw, self.case_sensitive);
+            }),
+            Values::PathWildcard(values) => with_folded(raw, self.case_sensitive, |fact| {
                 let mut result = Tri::NoMatch;
                 for value in values {
                     if value.names_stream != fact_stream {
@@ -1137,7 +1145,7 @@ impl CompiledCriterion {
                     }));
                 }
                 result
-            }
+            }),
             // A regular expression cannot say whether it names a stream, so
             // on `path.full` it never matches one.
             Values::Regex(_) if fact_stream => Tri::NoMatch,
@@ -1145,12 +1153,13 @@ impl CompiledCriterion {
             // stream when the fact is one, and only values that do not when
             // it is not.
             Values::Text(values) if self.field == Field::PathFull => {
-                let fact = fold(raw, self.case_sensitive);
-                Tri::from_bool(
-                    values
-                        .iter()
-                        .any(|v| names_stream(v) == fact_stream && self.text_op(&fact, v)),
-                )
+                with_folded(raw, self.case_sensitive, |fact| {
+                    Tri::from_bool(
+                        values
+                            .iter()
+                            .any(|v| names_stream(v) == fact_stream && self.text_op(fact, v)),
+                    )
+                })
             }
             _ => self.eval_value(raw, notes),
         }
@@ -1175,8 +1184,11 @@ impl CompiledCriterion {
             return Tri::Unknown;
         }
         Tri::from_bool(bases.iter().any(|base| {
-            let base = fold(base.as_str().trim_end_matches('\\'), self.case_sensitive);
-            test(&base)
+            with_folded(
+                base.as_str().trim_end_matches('\\'),
+                self.case_sensitive,
+                &test,
+            )
         }))
     }
 }
@@ -1192,16 +1204,28 @@ fn names_stream(v: &str) -> bool {
     !only_drive && last.contains(':')
 }
 
-/// `base` followed by `rest`, keeping the separator of a drive root:
-/// `C:` and `""` give `C:\`.
-fn join(base: &str, rest: &str) -> String {
-    let mut out = String::with_capacity(base.len() + rest.len() + 1);
-    out.push_str(base);
-    out.push_str(rest);
+/// `base` followed by `rest`, keeping the separator of a drive root (`C:`
+/// and `""` give `C:\`), as two parts, so it is never built.
+fn joined<'a>(base: &'a str, rest: &'a str) -> (&'a str, &'a str) {
     if rest.is_empty() && base.len() == 2 && base.ends_with(':') {
-        out.push('\\');
+        (base, "\\")
+    } else {
+        (base, rest)
     }
-    out
+}
+
+/// `fact` without the joined prefix `base` `rest`, if it starts with it.
+fn strip_joined<'a>(fact: &'a str, base: &str, rest: &str) -> Option<&'a str> {
+    fact.strip_prefix(base)?.strip_prefix(rest)
+}
+
+/// Whether the joined text `base` `rest` ends with `\`.
+fn joined_ends_with_separator(base: &str, rest: &str) -> bool {
+    if rest.is_empty() {
+        base.ends_with('\\')
+    } else {
+        rest.ends_with('\\')
+    }
 }
 
 /// Every option of a criterion that does not apply to it, in field order:
@@ -1275,12 +1299,16 @@ fn compile_values(
 
     Ok(match field.class() {
         FieldClass::Hash { hex_len } => Values::Hash(
-            each(values, |v| match normalize_hex(v) {
-                Some(hex) if hex.len() == hex_len => Ok(hex),
-                _ => Err(CompileErrorKind::InvalidValue(format!(
-                    "expected {hex_len} hexadecimal digits, optionally after `0x`"
-                ))),
-            })?,
+            each(values, |v| {
+                match normalize_hex(v).as_deref().and_then(anchor::decode_hex) {
+                    Some(bytes) if bytes.len() * 2 == hex_len => Ok(bytes),
+                    _ => Err(CompileErrorKind::InvalidValue(format!(
+                        "expected {hex_len} hexadecimal digits, optionally after `0x`"
+                    ))),
+                }
+            })?
+            .concat()
+            .into_boxed_slice(),
             hex_len,
         ),
         FieldClass::Digest => Values::Text(each(values, |v| match normalize_hex(v) {
@@ -1568,7 +1596,7 @@ pub fn fold(s: &str, case_sensitive: bool) -> String {
 
 /// The Unicode simple upper-case mapping: `c` itself when its upper case is
 /// not exactly one character.
-fn simple_upper(c: char) -> char {
+pub(crate) fn simple_upper(c: char) -> char {
     let mut upper = c.to_uppercase();
     match (upper.next(), upper.next()) {
         (Some(u), None) => u,
@@ -1883,6 +1911,11 @@ fn wildcard_regex(pattern: &str, path: bool) -> Result<Regex, CompileErrorKind> 
     // The text is generated here, with every literal escaped.
     engine().build(&re).map_err(|e| build_error(&e))
 }
+
+pub(crate) mod anchor;
+pub(crate) mod scratch;
+
+use scratch::{with_folded, with_nfc};
 
 #[cfg(test)]
 mod tests;

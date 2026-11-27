@@ -128,21 +128,35 @@ use std::sync::Arc;
 
 use crate::condition::{CompiledMatch, TreeError, Unparseable};
 use crate::context::EvaluationContext;
-use crate::decision::{Decision, Directives, RuleRef, TraceId, TrustGrant, WindowClose};
+use crate::decision::{
+    Decision, Directives, ReasonCode, RuleRef, TraceId, TrustGrant, WindowClose,
+};
+use crate::demand::FactSet;
 use crate::facts::{ObjectFacts, PathVariables};
 use crate::mode::{self, DeviceState};
 use crate::model::{
     Action, Mode, ObjectType, Policy, Rule, RuleId, RuleSet, RuleSetId, RuleSetKind, UnknownAs,
 };
 use crate::ops::{EvalContext, Tri};
-use crate::precedence::{Candidate, MatchSet, Precedence, Resolver, Spec, Verdict, most_specific};
+use crate::precedence::{Candidate, Precedence, Resolver, Spec, Verdict, most_specific};
 use crate::scope::compile::Env;
 use crate::scope::{
     Bias, CompiledScope, NoLibrary, OnWindowClose, ScopeEvaluation, ScopeLevel, ScopeLibrary,
     ScopeNote, ScopeNotes, eval_chain,
 };
 use crate::unknown::{SelfImage, StageSix, UnknownScope};
+
+/// The rules of one decision, kept inline: a decision with up to this many
+/// matching rules does not allocate for them (#42).
+type Rules<'a, 'p> = smallvec::SmallVec<[&'a Compiled<'p>; 16]>;
 use crate::validate::ValidatedPolicy;
+
+pub mod index;
+
+#[cfg(test)]
+pub(crate) use index::tests as index_tests;
+
+pub use index::{ALWAYS_EVAL_WARN, IndexStats, NeedFacts, RequiredFacts};
 
 /// The object being decided, and what is known about it.
 #[derive(Clone, Copy, Debug)]
@@ -191,12 +205,93 @@ enum Role {
     Trust,
 }
 
+/// The candidates of one stage, kept inline.
+type Candidates = smallvec::SmallVec<[Candidate; 16]>;
+
+/// A rule's match tree, ready to evaluate.
+#[derive(Debug)]
+enum Tree<'p> {
+    /// A compiled tree.
+    Compiled(CompiledMatch),
+    /// A single `equals` test of a hash field, read straight from the
+    /// validated document, whose values are canonical lowercase hex. The
+    /// hash index holds the same digests, so a compiled copy would only
+    /// double the memory of a large hash set (#42). Matching is the same as
+    /// a compiled criterion's: a missing or malformed fact is `Unknown`.
+    Hash {
+        field: crate::model::Field,
+        hex_len: usize,
+        values: &'p [String],
+    },
+}
+
+impl Tree<'_> {
+    fn compile<'p>(rule: &'p Rule) -> Result<Tree<'p>, Vec<crate::condition::TreeError>> {
+        use crate::model::{FieldClass, Match, Operator};
+        if let Match::Criterion(c) = &rule.match_ {
+            // Only a criterion with no options: `safety_critical` changes
+            // what an unknown hash means (#32).
+            if let (FieldClass::Hash { hex_len }, Operator::Equals, None, false) = (
+                c.field.class(),
+                c.operator,
+                c.case_sensitive,
+                c.safety_critical,
+            ) {
+                // The leaf thumbprint is read from the signers, not the
+                // hash facts.
+                let canonical = c.values.iter().all(|v| {
+                    v.len() == hex_len
+                        && v.bytes()
+                            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                });
+                if !c.field.is_signer() && canonical && !c.values.is_empty() {
+                    return Ok(Tree::Hash {
+                        field: c.field,
+                        hex_len,
+                        values: &c.values,
+                    });
+                }
+            }
+        }
+        CompiledMatch::compile(&rule.match_).map(Tree::Compiled)
+    }
+
+    /// The tree's result. `mandatory` is whether the rule is a mandatory
+    /// deny, whose `safety_critical` criteria fail closed (#32, #87).
+    fn eval(
+        &self,
+        facts: &ObjectFacts,
+        ctx: &EvalContext<'_>,
+        unparseable: Unparseable,
+        mandatory: bool,
+    ) -> Tri {
+        match self {
+            Self::Compiled(tree) if mandatory => {
+                tree.eval_mandatory(facts, ctx, unparseable).result
+            }
+            Self::Compiled(tree) => tree.eval_with(facts, ctx, unparseable).result,
+            Self::Hash {
+                field,
+                hex_len,
+                values,
+            } => match facts.get(*field) {
+                Some(fact)
+                    if fact.len() == *hex_len && fact.bytes().all(|b| b.is_ascii_hexdigit()) =>
+                {
+                    Tri::from_bool(values.iter().any(|v| fact.eq_ignore_ascii_case(v)))
+                }
+                _ => Tri::Unknown,
+            },
+        }
+    }
+}
+
 /// One enabled rule, ready to evaluate.
 #[derive(Debug)]
 struct Compiled<'p> {
     set: &'p RuleSet,
     rule: &'p Rule,
-    tree: CompiledMatch,
+    tree: Tree<'p>,
     role: Role,
     spec: Spec,
     unknown_as: UnknownAs,
@@ -259,13 +354,12 @@ impl Compiled<'_> {
             variables: subject.variables,
             context: subject.context,
         };
-        let evaluation = if self.role == Role::Mandatory {
-            self.tree
-                .eval_mandatory(subject.facts, &ctx, self.unparseable)
-        } else {
-            self.tree.eval_with(subject.facts, &ctx, self.unparseable)
-        };
-        let tree = evaluation.result;
+        let tree = self.tree.eval(
+            subject.facts,
+            &ctx,
+            self.unparseable,
+            self.role == Role::Mandatory,
+        );
         if tree == Tri::NoMatch {
             return false;
         }
@@ -344,9 +438,9 @@ struct Layer<'a, 'p> {
     /// Its deciding rule, or `None` for the implicit deny.
     winner: Option<&'a Compiled<'p>>,
     /// The rules decided over.
-    kept: Vec<&'a Compiled<'p>>,
+    kept: Rules<'a, 'p>,
     /// The denies set aside because they do not enforce.
-    dropped: Vec<RuleRef>,
+    dropped: smallvec::SmallVec<[RuleRef; 4]>,
     /// Whether the decision blocks in an enforcing mode.
     blocks: bool,
 }
@@ -369,6 +463,17 @@ pub struct Evaluator<'p> {
     /// Where the policy's unknown settings apply (#38, #39).
     unknown_scope: UnknownScope,
     clock: Option<crate::lifecycle::RuleClock>,
+    /// The candidate indexes over `rules` (#42).
+    index: index::RuleIndex,
+    /// Whether a decision can depend on facts the decision cache does not
+    /// key (#42): scopes (#38) and activity windows (#40).
+    cache_unsafe: bool,
+    /// Whether the unknown-application policy can prompt (#39), whose
+    /// directive carries the file's SHA-256.
+    prompts: bool,
+    /// Whether a level of the unknown-application policy depends on the
+    /// object's location class (#39), which reads the path's ACL.
+    by_location: bool,
 }
 
 /// What one evaluation knows besides the matching rules.
@@ -437,7 +542,7 @@ impl<'p> Evaluator<'p> {
                         None => continue,
                     },
                 };
-                let tree = CompiledMatch::compile(&rule.match_).map_err(|errors| BuildError {
+                let tree = Tree::compile(rule).map_err(|errors| BuildError {
                     rule_id: rule.id,
                     errors,
                 })?;
@@ -481,11 +586,9 @@ impl<'p> Evaluator<'p> {
                     twins.push(Compiled {
                         set,
                         rule,
-                        tree: CompiledMatch::compile(&rule.match_).map_err(|errors| {
-                            BuildError {
-                                rule_id: rule.id,
-                                errors,
-                            }
+                        tree: Tree::compile(rule).map_err(|errors| BuildError {
+                            rule_id: rule.id,
+                            errors,
                         })?,
                         role: Role::Annotation,
                         spec: compiled.spec,
@@ -520,8 +623,13 @@ impl<'p> Evaluator<'p> {
                 .collect(),
         );
         // Twins come last, so the ordinals of real rules (for counters) are
-        // positions in the policy.
+        // positions in the policy. The index is built over every rule,
+        // twins included, so its ordinals are positions in `rules`.
         rules.extend(twins);
+        let index = index::RuleIndex::build(&rules);
+        let cache_unsafe = policy.scope.is_some()
+            || !policy.rule_set_scopes.is_empty()
+            || rules.iter().any(|r| !r.scopes.is_empty() || r.timed);
         Ok(Self {
             policy,
             rules,
@@ -529,6 +637,17 @@ impl<'p> Evaluator<'p> {
             self_images: Vec::new(),
             unknown_scope,
             clock: None,
+            index,
+            cache_unsafe,
+            prompts: {
+                use crate::model::Level;
+                let u = &policy.unknown;
+                u.default == Level::Prompt
+                    || u.by_location.values().any(|l| *l == Level::Prompt)
+                    || u.by_origin.values().any(|l| *l == Level::Prompt)
+                    || u.by_type.values().any(|l| *l == Level::Prompt)
+            },
+            by_location: !policy.unknown.by_location.is_empty(),
         })
     }
 
@@ -635,11 +754,11 @@ impl<'p> Evaluator<'p> {
     /// applies the modes.
     #[must_use]
     pub fn evaluate(&self, subject: &Subject<'_>, trace_id: TraceId) -> Decision {
-        let (matched, notes) = self.matching_with_notes(subject);
-        let inputs = self.inputs(subject, &matched);
-        self.run(&matched, subject, &inputs, trace_id)
+        let selection = self.select_all(subject);
+        let inputs = self.inputs(subject, &selection.matched);
+        self.run(&selection.matched, subject, &inputs, trace_id)
             .0
-            .with_scope_notes(notes)
+            .with_scope_notes(selection.notes)
     }
 
     /// Decides one object on a device in `state`, applying the effective
@@ -686,19 +805,133 @@ impl<'p> Evaluator<'p> {
         if mode::device_mode(self.policy, state) == Mode::Disabled {
             return None;
         }
-        let (matched, notes) = self.matching_with_notes(subject);
-        self.decide_in(subject, &matched, state, trace_id)
-            .map(|d| d.with_scope_notes(notes))
+        let selection = self.select_all(subject);
+        Some(
+            self.decide_in(subject, &selection.matched, state, trace_id)
+                .with_scope_notes(selection.notes),
+        )
     }
 
-    /// [`evaluate_in`](Self::evaluate_in) over the rules that apply.
+    /// Decides one object with the facts computed so far, as the agent's
+    /// lazy fact protocol needs (#42, [`index`]): `computed` names the
+    /// classes the agent has computed, besides the cheap ones and any
+    /// whose facts are present.
+    ///
+    /// Returns `Ok(None)` when the device is disabled, as
+    /// [`evaluate_in`](Self::evaluate_in) does. Once the decision no longer
+    /// depends on a missing fact, the result is the same as `evaluate_in`
+    /// with the same facts.
+    ///
+    /// # Errors
+    ///
+    /// [`NeedFacts`] with the classes to compute next, when a rule that
+    /// could still apply reads a class that has not been computed.
+    pub fn evaluate_with(
+        &self,
+        subject: &Subject<'_>,
+        computed: FactSet,
+        state: &DeviceState,
+        trace_id: TraceId,
+    ) -> Result<Option<Decision>, NeedFacts> {
+        match self.evaluate_watched(subject, computed, state, trace_id, &mut |_| false) {
+            Ok(d) => Ok(d.map(|(d, _)| d)),
+            Err(index::Stop::Need(need)) => Err(need),
+            // Nothing expires without a watchdog; if it did, block.
+            Err(index::Stop::Timeout(t)) => Ok(Some(self.timed_out(subject, &t, true, trace_id))),
+        }
+    }
+
+    /// [`evaluate_with`](Self::evaluate_with), with a watchdog asked before
+    /// each match tree is evaluated, and whether the decision rests on an
+    /// unknown fact, for the decision cache ([`crate::engine`]).
+    pub(crate) fn evaluate_watched(
+        &self,
+        subject: &Subject<'_>,
+        computed: FactSet,
+        state: &DeviceState,
+        trace_id: TraceId,
+        expired: &mut dyn FnMut(&RuleRef) -> bool,
+    ) -> Result<Option<(Decision, bool)>, index::Stop> {
+        if mode::device_mode(self.policy, state) == Mode::Disabled {
+            return Ok(None);
+        }
+        let selection = self.select(subject, computed, expired)?;
+        let decision = self
+            .decide_in(subject, &selection.matched, state, trace_id)
+            .with_scope_notes(selection.notes);
+        // A decision that rests on an unknown fact, or on facts the cache
+        // does not key, is not cached.
+        Ok(Some((decision, selection.unknown || self.cache_unsafe)))
+    }
+
+    /// The fallback decision of a selection the watchdog stopped (#42).
+    ///
+    /// - A mandatory deny that already matched decides, as it always does
+    ///   (ADR 0004): the object is blocked by it, in every mode.
+    /// - If the mandatory tier was not finished, a mandatory deny could
+    ///   still match, so the object is blocked, whatever `block` says.
+    /// - Otherwise the implicit deny, with the reason `eval_timeout`, in
+    ///   enforce mode if `block`, and relaxed to `allowed_audit` if not.
+    pub(crate) fn timed_out(
+        &self,
+        subject: &Subject<'_>,
+        timeout: &index::Timeout,
+        block: bool,
+        trace_id: TraceId,
+    ) -> Decision {
+        // The mandatory denies that matched decide as stage 1 does: the
+        // most specific, with the others listed as overridden.
+        let mandatory: Rules<'_, 'p> = timeout
+            .mandatory
+            .iter()
+            .filter_map(|&i| self.rules.get(i as usize))
+            .collect();
+        if !mandatory.is_empty() {
+            let inputs = self.inputs(subject, &mandatory);
+            return self.run(&mandatory, subject, &inputs, trace_id).0;
+        }
+        let blocked = Decision::implicit_deny(trace_id).with_reason(ReasonCode::EvalTimeout);
+        if block || !timeout.mandatory_done {
+            blocked
+        } else {
+            blocked
+                .timed_out_audit()
+                .with_reason(ReasonCode::EvalTimeout)
+        }
+    }
+
+    /// The decision of the linear scan over every rule, with every fact
+    /// computed: the reference the indexes are tested against.
+    #[cfg(test)]
+    pub(crate) fn evaluate_linear(&self, subject: &Subject<'_>, trace_id: TraceId) -> Decision {
+        let (matched, notes) = self.matching_with_notes(subject);
+        let inputs = self.inputs(subject, &matched);
+        self.run(&matched, subject, &inputs, trace_id)
+            .0
+            .with_scope_notes(notes)
+    }
+
+    /// The facts the policy can read, computed when it was loaded.
+    #[must_use]
+    pub const fn required_facts(&self) -> RequiredFacts {
+        self.index.required()
+    }
+
+    /// What the candidate indexes hold.
+    #[must_use]
+    pub const fn index_stats(&self) -> IndexStats {
+        self.index.stats()
+    }
+
+    /// [`evaluate_in`](Self::evaluate_in) over the rules that apply, on a
+    /// device that is not disabled.
     fn decide_in(
         &self,
         subject: &Subject<'_>,
         matched: &[&Compiled<'p>],
         state: &DeviceState,
         trace_id: TraceId,
-    ) -> Option<Decision> {
+    ) -> Decision {
         let t = subject.object_type;
         let inputs = self.inputs(subject, matched);
         let (full, winner) = self.run(matched, subject, &inputs, trace_id);
@@ -707,7 +940,7 @@ impl<'p> Evaluator<'p> {
         if !full.outcome().stops() {
             let mode = self.mode_of(t, winner, state, boot).mode;
             let learning = mode == Mode::Learning && full.unhandled();
-            return Some(full.in_mode(mode).with_learning(learning));
+            return full.in_mode(mode).with_learning(learning);
         }
         // Layer 1: the modes, without the session.
         let base = DeviceState {
@@ -726,14 +959,13 @@ impl<'p> Evaluator<'p> {
             let effective = self.mode_of(t, winner, &base, boot);
             let learning = effective.mode == Mode::Learning && full.unhandled();
             let directives = one.directives();
-            return Some(full.relaxed(effective, directives, learning));
+            return full.relaxed(effective, directives, learning);
         }
         let Some(_) = state.session else {
-            return Some(
-                one.decision
-                    .with_overridden(one.dropped)
-                    .in_mode(Mode::Enforce),
-            );
+            return one
+                .decision
+                .with_overridden(one.dropped)
+                .in_mode(Mode::Enforce);
         };
         // Layer 2: what the session relaxes of what layer 1 enforced.
         let two = self.enforcing(
@@ -746,16 +978,15 @@ impl<'p> Evaluator<'p> {
         );
         let mut dropped = one.dropped.clone();
         dropped.extend(two.dropped.iter().copied());
+
         if two.blocks {
-            return Some(two.decision.with_overridden(dropped).in_mode(Mode::Enforce));
+            return two.decision.with_overridden(dropped).in_mode(Mode::Enforce);
         }
         let effective = self.mode_of(t, one.winner, state, boot);
         let directives = two.directives();
-        Some(
-            one.decision
-                .with_overridden(one.dropped)
-                .relaxed(effective, directives, false),
-        )
+        one.decision
+            .with_overridden(one.dropped)
+            .relaxed(effective, directives, false)
     }
 
     /// The effective mode of a decision decided by `rule`, or by stage 6
@@ -800,33 +1031,42 @@ impl<'p> Evaluator<'p> {
             return Layer {
                 decision,
                 winner,
-                kept: rules.to_vec(),
-                dropped: Vec::new(),
+                kept: rules.iter().copied().collect(),
+                dropped: smallvec::SmallVec::new(),
                 blocks: true,
             };
         }
-        let (dropped, kept): (Vec<&Compiled<'p>>, Vec<&Compiled<'p>>) =
-            rules.iter().partition(|r| {
-                matches!(r.role, Role::Policy(Verdict::Deny)) && !enforces(&decision, Some(r))
-            });
+        let mut kept = Rules::new();
+        let mut dropped = smallvec::SmallVec::new();
+        for &r in rules {
+            if matches!(r.role, Role::Policy(Verdict::Deny)) && !enforces(&decision, Some(r)) {
+                dropped.push(r.reference);
+            } else {
+                kept.push(r);
+            }
+        }
         let (decision, winner) = self.run(&kept, subject, inputs, trace_id);
         let blocks = decision.outcome().stops() && enforces(&decision, winner);
         Layer {
             decision,
             winner,
             kept,
-            dropped: dropped.iter().map(|r| r.reference).collect(),
+            dropped,
             blocks,
         }
     }
 
-    /// The enabled rules that apply to the subject.
+    /// The enabled rules that apply to the subject, found through the
+    /// candidate indexes ([`index`]). Kept with this signature for code
+    /// that lists the matching rules, such as the decision trace (#41).
+    #[allow(dead_code)]
     fn matching(&self, subject: &Subject<'_>) -> Vec<&Compiled<'p>> {
-        self.matching_with_notes(subject).0
+        self.select_all(subject).matched.into_vec()
     }
 
-    /// The enabled rules that apply to the subject, and the scope notes of
-    /// every rule whose tree was not `NoMatch`.
+    /// The same rules, found by evaluating every rule, and the scope notes
+    /// of every rule whose tree was not `NoMatch`: the reference the
+    /// indexes are tested against.
     fn matching_with_notes(&self, subject: &Subject<'_>) -> (Vec<&Compiled<'p>>, ScopeNotes) {
         let mut notes = ScopeNotes::default();
         let matched = self
@@ -835,6 +1075,12 @@ impl<'p> Evaluator<'p> {
             .filter(|r| self.live(r) && r.applies(subject, &mut notes))
             .collect();
         (matched, notes)
+    }
+
+    /// The rules that apply, found by evaluating every rule.
+    #[cfg(test)]
+    fn matching_linear(&self, subject: &Subject<'_>) -> Vec<&Compiled<'p>> {
+        self.matching_with_notes(subject).0
     }
 
     /// Runs the stages over the rules that apply, and returns the decision
@@ -847,11 +1093,12 @@ impl<'p> Evaluator<'p> {
         inputs: &Inputs<'_>,
         trace_id: TraceId,
     ) -> (Decision, Option<&'a Compiled<'p>>) {
-        let mut mandatory = Vec::new();
-        let mut exclusions = Vec::new();
-        let mut policy = Vec::new();
-        let mut annotations = Vec::new();
-        let mut trust = Vec::new();
+        let mut mandatory = Rules::new();
+        let mut exclusions = Rules::new();
+        let mut policy: smallvec::SmallVec<[(&Compiled<'p>, Verdict); 16]> =
+            smallvec::SmallVec::new();
+        let mut annotations = crate::decision::RuleRefs::new();
+        let mut trust = Rules::new();
         for &rule in matched {
             match rule.role {
                 Role::Mandatory => mandatory.push(rule),
@@ -870,7 +1117,7 @@ impl<'p> Evaluator<'p> {
                 let overridden = exclusions
                     .iter()
                     .chain(policy.iter().map(|(r, _)| r))
-                    .chain(&trust)
+                    .chain(trust.iter())
                     .map(|r| r.reference)
                     .collect();
                 let d = Decision::self_allow(trace_id).with_context(
@@ -880,16 +1127,14 @@ impl<'p> Evaluator<'p> {
                 );
                 return (d, None);
             }
-            let set = MatchSet {
-                candidates: stage.iter().map(|r| r.candidate(Verdict::Deny)).collect(),
-            };
+            let set: Candidates = stage.iter().map(|r| r.candidate(Verdict::Deny)).collect();
             if let Some(i) = most_specific(&set) {
                 let winner = stage[i];
                 let overridden = mandatory
                     .iter()
                     .chain(&exclusions)
                     .chain(policy.iter().map(|(r, _)| r))
-                    .chain(&trust)
+                    .chain(trust.iter())
                     .filter(|r| r.rule.id != winner.rule.id)
                     .map(|r| r.reference)
                     .collect();
@@ -903,15 +1148,14 @@ impl<'p> Evaluator<'p> {
         // Stage 4: the precedence model. The managed `system_baseline` is a
         // floor: its rules are decided over only when no other rule matched,
         // so under no model does it override a tenant's rule.
-        let deciding: Vec<(&Compiled<'p>, Verdict)> = if policy.iter().any(|(r, _)| !r.floor) {
-            policy.iter().filter(|(r, _)| !r.floor).copied().collect()
-        } else {
-            policy.clone()
-        };
-        let set = MatchSet {
-            candidates: deciding.iter().map(|(r, v)| r.candidate(*v)).collect(),
-        };
-        let Some(i) = self.resolver.resolve(&set).winner else {
+        let tenant = policy.iter().any(|(r, _)| !r.floor);
+        let deciding: smallvec::SmallVec<[(&Compiled<'p>, Verdict); 16]> = policy
+            .iter()
+            .filter(|(r, _)| !tenant || !r.floor)
+            .copied()
+            .collect();
+        let set: Candidates = deciding.iter().map(|(r, v)| r.candidate(*v)).collect();
+        let Some(i) = self.resolver.pick(&set) else {
             // Stage 6: nothing decided. Trust sources only grant to an
             // object a rule allowed, so they are overridden here.
             let overridden = trust.iter().map(|r| r.reference).collect();
@@ -922,7 +1166,7 @@ impl<'p> Evaluator<'p> {
             return (d, None);
         };
         let (winner, verdict) = deciding[i];
-        let mut overridden: Vec<RuleRef> = policy
+        let mut overridden: crate::decision::RuleRefs = policy
             .iter()
             .filter(|(r, _)| r.rule.id != winner.rule.id)
             .map(|(r, _)| r.reference)

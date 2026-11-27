@@ -1,0 +1,49 @@
+# The performance budget of policy evaluation (#42).
+#
+# Reference hardware: a 4-core x64 laptop-class CPU, or its ARM64
+# equivalent, in a release build. The policies and objects are in
+# `src/reference.rs`. Pure evaluation: the facts are already in memory, so
+# hashing, signature checks and ACL checks are not counted here (#3, #4).
+#
+# `tests/budget.rs` reads this file. `cargo test -p palisade-policy --test
+# budget` runs it in smoke mode (a few hundred decisions, no timing check),
+# which CI does on every pull request. `PALISADE_BUDGET=enforce cargo test
+# --release -p palisade-policy --test budget -- --nocapture` measures each
+# case with an HDR histogram and fails on a breach; run it on reference
+# hardware. Shared CI runners are too noisy for absolute timings
+# (docs/testing.md); the regression gate against `main` is #25's
+# `cargo xtask bench-compare`, with `regression_pct` below.
+
+# A slower mean than this, against the `main` baseline, is a regression.
+regression_pct = 10
+
+# Decisions measured per case in enforce mode, after a warm-up.
+samples = 200000
+
+# Pure evaluation on the reference policy: 10,000 rules, a 100,000-entry
+# hash set, 500 publisher rules, 200 path rules and 50 regex leaves.
+[budget.eval]
+p50_ns = 5000
+p99_ns = 50000
+p999_ns = 200000
+
+# The same with a 1,000,000-entry hash set.
+[budget.eval_1m_hashset]
+p99_ns = 60000
+
+# A decision-cache hit.
+[budget.cache_hit]
+p99_ns = 1000
+
+# Compiling the policy and building its indexes, off the hot path.
+[budget.load_reference_policy]
+max_ms = 500
+
+# Memory: the heap bytes the loaded engine still holds, the validated policy
+# it keeps included, counted by a counting allocator. Deterministic, so the
+# smoke run checks it too.
+[budget.memory]
+reference_policy_mib = 64
+million_hashset_mib = 160
+# The default decision-cache bound (CacheConfig::default).
+decision_cache_mib = 32

@@ -1263,7 +1263,7 @@ fn scope_refs(
         scopes.extend(a.scopes.iter_mut());
     }
     for set in &mut doc.rule_sets {
-        scopes.extend(set.rules.iter_mut().filter_map(|r| r.scope.as_mut()));
+        scopes.extend(set.rules.iter_mut().filter_map(|r| r.scope.as_deref_mut()));
     }
     for scope in scopes {
         crate::scope::for_each_set_ref(scope, |r| pin(r, used, refs));

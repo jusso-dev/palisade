@@ -260,7 +260,7 @@ jobs:
       # rerun the library tests). A test in xtask/src/ci.rs keeps the list complete.
       - run: >-
           cargo test --workspace --all-features --locked
-          --bench criterion_eval --bench hash_and_parse --bench simulate
+          --bench criterion_eval --bench hash_and_parse --bench simulate --bench policy_eval
 
   # The database tests (#127) against a real Postgres, as a service
   # container on the hosted runner. The image is the official one, pinned

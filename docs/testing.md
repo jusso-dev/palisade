@@ -340,12 +340,14 @@ Benchmarks use [criterion](https://docs.rs/criterion), in `crates/<crate>/benche
 | Crate | Bench | What it measures |
 |---|---|---|
 | `palisade-policy` | `criterion_eval` | One compiled criterion against an object's facts: hash, 25-value text, path wildcard, regex and version range |
+| `palisade-policy` | `policy_eval` | Whole-policy evaluation on the #42 reference policy (10k rules, a 100k hash set), under `deny_wins`, `first_match` and `specificity`; a decision-cache hit; loading the reference and 1M-hash policies |
 | `palisade-fileid` | `hash_and_parse` | Flat hashing of 1 MiB with each algorithm set, streamed hashing, PE parsing (full and metadata-only) and the Authenticode hash |
 
 Run them locally, on a quiet machine:
 
 ```sh
 cargo bench -p palisade-policy --bench criterion_eval
+cargo bench -p palisade-policy --bench policy_eval
 cargo bench -p palisade-fileid --bench hash_and_parse
 cargo bench -p palisade-policy --bench criterion_eval -- --save-baseline before   # then, after a change:
 cargo bench -p palisade-policy --bench criterion_eval -- --baseline before
@@ -392,7 +394,13 @@ The gate was checked by slowing one benchmark (`hash_1mib/sha256`) by 20% on pur
 comparison measured it at +19.7%, reported it as regressed and failed, and reported the other
 eleven benchmarks within ±5% as unchanged.
 
-Benchmarks over whole policies (100 to 100k rules), the decision cache and bundle loading, and
-the absolute performance budget of evaluation, arrive with the code they measure (#42, #43).
-The gate covers them as soon as they are added, because it runs every `crates/*/benches/*.rs`.
-The 100 MB and 1 GB file hashing runs stay local and on demand.
+The policy performance budget (#42) is in `crates/palisade-policy/perf-budget.toml`, and
+`crates/palisade-policy/tests/budget.rs` checks it. CI runs that test in its smoke mode: it checks
+the memory budget, which is counted by a counting allocator and so is the same on every runner, and
+reports the timings without comparing them. On reference hardware,
+`PALISADE_BUDGET=enforce cargo test --release -p palisade-policy --test budget -- --nocapture`
+fails on any breach.
+
+Bundle-loading benchmarks arrive with the code they measure (#43). The gate covers the policy
+benchmarks (`policy_eval`, over whole policies and the decision cache) as it does every
+`crates/*/benches/*.rs`. The 100 MB and 1 GB file hashing runs stay local and on demand.

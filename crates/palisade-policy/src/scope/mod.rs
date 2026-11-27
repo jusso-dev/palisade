@@ -269,7 +269,7 @@ pub fn rule_set_scopes(set: &crate::model::RuleSet) -> Vec<(String, &Scope)> {
     set.rules
         .iter()
         .enumerate()
-        .filter_map(|(i, r)| r.scope.as_ref().map(|s| (format!("/rules/{i}/scope"), s)))
+        .filter_map(|(i, r)| r.scope.as_deref().map(|s| (format!("/rules/{i}/scope"), s)))
         .collect()
 }
 

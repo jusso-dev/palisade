@@ -1372,3 +1372,56 @@ proptest! {
         }
     }
 }
+
+#[test]
+fn unindexed_rules_are_a_warning_above_500() {
+    // A deny on a negation alone has no index anchor; a hash allow does.
+    let unindexed = |n: usize| {
+        let base = with_rule(
+            Match::All(vec![
+                leaf(Field::PathExtension, Operator::Equals, &["exe"]),
+                Match::Not(Box::new(leaf(
+                    Field::MetaProductName,
+                    Operator::Regex,
+                    &["x.*"],
+                ))),
+            ]),
+            Action::deny(),
+        );
+        let mut doc = base.clone();
+        let rule = base.rule_sets[0].rules[0].clone();
+        doc.rule_sets[0].rules = (0..n)
+            .map(|i| {
+                let mut r = rule.clone();
+                let mut id = *r.id.0.as_bytes();
+                id[14..16].copy_from_slice(&u16::try_from(i).unwrap().to_be_bytes());
+                r.id = crate::model::RuleId(palisade_core::Uuid7::from_bytes(id).unwrap());
+                // An extension is an index anchor; a regex on the product is
+                // not, so make every other rule unindexed.
+                if i % 2 == 1 {
+                    r.match_ = Match::Not(Box::new(leaf(
+                        Field::MetaProductName,
+                        Operator::Equals,
+                        &["x"],
+                    )));
+                }
+                r
+            })
+            .collect();
+        doc
+    };
+    let warnings = |doc: PolicyDocument| -> Vec<ErrorCode> {
+        match doc.validate() {
+            Ok(p) => p.warnings().iter().map(|w| w.code).collect(),
+            Err(errors) => errors
+                .iter()
+                .filter(|e| e.code.severity() == Severity::Warning)
+                .map(|e| e.code)
+                .collect(),
+        }
+    };
+    assert!(!warnings(unindexed(1000)).contains(&ErrorCode::UnindexedRules));
+    assert!(warnings(unindexed(1002)).contains(&ErrorCode::UnindexedRules));
+    assert_eq!(ErrorCode::UnindexedRules.severity(), Severity::Warning);
+    assert_eq!(ErrorCode::UnindexedRules.as_str(), "unindexed_rules");
+}

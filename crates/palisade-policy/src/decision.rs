@@ -98,6 +98,9 @@ pub enum ReasonCode {
     /// The object is one of Palisade's own pinned images, which tenant rules
     /// cannot block (#39).
     SelfAllow,
+    /// Evaluation ran out of its time budget, and the fallback decided
+    /// (#42).
+    EvalTimeout,
 }
 
 /// A rule's human short ID, `R-` and 6 to 12 digits, kept as a number and
@@ -328,6 +331,13 @@ impl Directives {
     }
 }
 
+/// A list of rules in a decision, kept inline: up to eight without a heap
+/// allocation (#42). It serialises as a plain JSON array.
+pub(crate) type RuleRefs = smallvec::SmallVec<[RuleRef; RULE_REFS_INLINE]>;
+
+/// How many rules a decision's lists hold without a heap allocation.
+pub(crate) const RULE_REFS_INLINE: usize = 8;
+
 /// The typed result of evaluating one object.
 ///
 /// The fields are read through accessors, so a decision is always one of
@@ -339,8 +349,8 @@ pub struct Decision {
     would_have_been: Outcome,
     action: ActionKind,
     matched_rule: Option<RuleRef>,
-    overridden: Vec<RuleRef>,
-    annotations: Vec<RuleRef>,
+    overridden: RuleRefs,
+    annotations: RuleRefs,
     mode: Mode,
     learning_candidate: bool,
     directives: Directives,
@@ -389,8 +399,8 @@ impl Decision {
             would_have_been: outcome,
             action: kind,
             matched_rule: Some(RuleRef::new(policy, set, rule)),
-            overridden: Vec::new(),
-            annotations: Vec::new(),
+            overridden: RuleRefs::new(),
+            annotations: RuleRefs::new(),
             mode: Mode::Enforce,
             learning_candidate: false,
             directives: Directives::of(&rule.action),
@@ -413,8 +423,8 @@ impl Decision {
             would_have_been: Outcome::Blocked,
             action: ActionKind::Deny,
             matched_rule: None,
-            overridden: Vec::new(),
-            annotations: Vec::new(),
+            overridden: RuleRefs::new(),
+            annotations: RuleRefs::new(),
             mode: Mode::Enforce,
             learning_candidate: false,
             directives: Directives::default(),
@@ -443,8 +453,8 @@ impl Decision {
             would_have_been: outcome,
             action,
             matched_rule: None,
-            overridden: Vec::new(),
-            annotations: Vec::new(),
+            overridden: RuleRefs::new(),
+            annotations: RuleRefs::new(),
             mode: Mode::Enforce,
             learning_candidate: false,
             directives,
@@ -465,8 +475,8 @@ impl Decision {
             would_have_been: Outcome::Allowed,
             action: ActionKind::Allow,
             matched_rule: None,
-            overridden: Vec::new(),
-            annotations: Vec::new(),
+            overridden: RuleRefs::new(),
+            annotations: RuleRefs::new(),
             mode: Mode::Enforce,
             learning_candidate: false,
             directives: Directives::default(),
@@ -525,8 +535,8 @@ impl Decision {
     /// the order in which rules were evaluated.
     pub(crate) fn with_context(
         mut self,
-        mut overridden: Vec<RuleRef>,
-        mut annotations: Vec<RuleRef>,
+        mut overridden: RuleRefs,
+        mut annotations: RuleRefs,
         mut trust_sources: Vec<TrustGrant>,
     ) -> Self {
         overridden.sort_by_key(|r| r.rule_id);
@@ -539,8 +549,12 @@ impl Decision {
     }
 
     /// Adds rules to [`overridden`](Self::overridden), keeping it sorted.
-    pub(crate) fn with_overridden(mut self, more: Vec<RuleRef>) -> Self {
+    pub(crate) fn with_overridden(mut self, more: impl IntoIterator<Item = RuleRef>) -> Self {
+        let before = self.overridden.len();
         self.overridden.extend(more);
+        if self.overridden.len() == before {
+            return self;
+        }
         self.overridden.sort_by_key(|r| r.rule_id);
         self
     }
@@ -644,6 +658,28 @@ impl Decision {
         self.effects.notification_text = None;
         self.effects.help_url = None;
         self
+    }
+
+    /// The same decision, with another reason code.
+    #[must_use]
+    pub(crate) const fn with_reason(mut self, reason_code: ReasonCode) -> Self {
+        self.reason_code = reason_code;
+        self
+    }
+
+    /// The fallback block of a decision that ran out of time, relaxed to
+    /// `allowed_audit` (#42, `on_eval_timeout: allow_audit`): it runs, and
+    /// `would_have_been` stays `blocked`.
+    #[must_use]
+    pub(crate) fn timed_out_audit(self) -> Self {
+        self.relaxed(
+            crate::mode::EffectiveMode {
+                mode: Mode::Audit,
+                by_session: false,
+            },
+            Directives::default(),
+            false,
+        )
     }
 
     /// The effective mode the decision was made in (#36).

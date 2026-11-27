@@ -163,7 +163,7 @@ impl RuleBuilder {
             priority: None,
             enforcement_override: crate::model::EnforcementOverride::default(),
             scope: None,
-            metadata: Metadata::default(),
+            metadata: crate::model::RuleMetadata::default(),
         })
     }
 

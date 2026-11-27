@@ -111,6 +111,11 @@ impl ObjectFacts {
     pub fn get(&self, field: Field) -> Option<&str> {
         self.values.get(&field).map(String::as_str)
     }
+
+    /// The hash, version-resource and version fields that have a value.
+    pub(crate) fn fields(&self) -> impl Iterator<Item = Field> + '_ {
+        self.values.keys().copied()
+    }
 }
 
 /// Whether a field's fact is stored in [`ObjectFacts::set`]'s map.
