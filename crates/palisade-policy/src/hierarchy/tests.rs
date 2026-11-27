@@ -2520,7 +2520,7 @@ fn single_policy_effective(extra: Value) -> Option<EffectivePolicy> {
 }
 
 #[test]
-fn the_effective_policy_keeps_a_policys_own_unknown_scopes() {
+fn the_effective_policy_keeps_each_policy_own_unknown_scopes() {
     use crate::context::SessionType;
     use crate::decision::ReasonCode;
     // The reviewer's case: no `policy.scope`, `default: allow` limited to
