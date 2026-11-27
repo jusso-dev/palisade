@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["cbor"]};
+window.SIDEBAR_ITEMS = {"mod":["cbor","keys","serial"]};
