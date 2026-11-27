@@ -305,606 +305,623 @@
 <a href=#305 id=305 data-nosnippet>305</a>        <span class="self">Self</span>::from_value(body.to_value()<span class="question-mark">?</span>)
 <a href=#306 id=306 data-nosnippet>306</a>    }
 <a href=#307 id=307 data-nosnippet>307</a>
-<a href=#308 id=308 data-nosnippet>308</a>    <span class="doccomment">/// The policy, without governance metadata.
-<a href=#309 id=309 data-nosnippet>309</a>    </span><span class="attr">#[must_use]
-<a href=#310 id=310 data-nosnippet>310</a>    </span><span class="kw">pub const fn </span>document(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>PolicyDocument {
-<a href=#311 id=311 data-nosnippet>311</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.document
-<a href=#312 id=312 data-nosnippet>312</a>    }
-<a href=#313 id=313 data-nosnippet>313</a>
-<a href=#314 id=314 data-nosnippet>314</a>    <span class="doccomment">/// The inlined library sets, sorted by ID and version.
-<a href=#315 id=315 data-nosnippet>315</a>    </span><span class="attr">#[must_use]
-<a href=#316 id=316 data-nosnippet>316</a>    </span><span class="kw">pub fn </span>libraries(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[InlineLibrary] {
-<a href=#317 id=317 data-nosnippet>317</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.libraries
-<a href=#318 id=318 data-nosnippet>318</a>    }
-<a href=#319 id=319 data-nosnippet>319</a>
-<a href=#320 id=320 data-nosnippet>320</a>    <span class="doccomment">/// Where it came from.
-<a href=#321 id=321 data-nosnippet>321</a>    </span><span class="attr">#[must_use]
-<a href=#322 id=322 data-nosnippet>322</a>    </span><span class="kw">pub const fn </span>source_revisions(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>SourceRevisions {
-<a href=#323 id=323 data-nosnippet>323</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.source_revisions
-<a href=#324 id=324 data-nosnippet>324</a>    }
-<a href=#325 id=325 data-nosnippet>325</a>
-<a href=#326 id=326 data-nosnippet>326</a>    <span class="doccomment">/// SHA-256 of the governance metadata the server kept: the policy's,
-<a href=#327 id=327 data-nosnippet>327</a>    /// and every rule set's and rule's by ID ([`metadata_digest`]).
-<a href=#328 id=328 data-nosnippet>328</a>    </span><span class="attr">#[must_use]
-<a href=#329 id=329 data-nosnippet>329</a>    </span><span class="kw">pub const fn </span>metadata_digest(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>Sha256Digest {
-<a href=#330 id=330 data-nosnippet>330</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.metadata_digest
-<a href=#331 id=331 data-nosnippet>331</a>    }
-<a href=#332 id=332 data-nosnippet>332</a>
-<a href=#333 id=333 data-nosnippet>333</a>    <span class="kw">fn </span>to_value(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Value, serial::Error&gt; {
-<a href=#334 id=334 data-nosnippet>334</a>        serial::to_value(<span class="kw-2">&amp;</span>BodyRepr {
-<a href=#335 id=335 data-nosnippet>335</a>            document: <span class="self">self</span>.document.clone(),
-<a href=#336 id=336 data-nosnippet>336</a>            libraries: <span class="self">self</span>.libraries.clone(),
-<a href=#337 id=337 data-nosnippet>337</a>            source_revisions: <span class="self">self</span>.source_revisions.clone(),
-<a href=#338 id=338 data-nosnippet>338</a>            metadata_digest: Bytes32(<span class="self">self</span>.metadata_digest),
-<a href=#339 id=339 data-nosnippet>339</a>        })
-<a href=#340 id=340 data-nosnippet>340</a>    }
-<a href=#341 id=341 data-nosnippet>341</a>
-<a href=#342 id=342 data-nosnippet>342</a>    <span class="kw">fn </span>from_value(value: Value) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, serial::Error&gt; {
-<a href=#343 id=343 data-nosnippet>343</a>        <span class="kw">let </span>r: BodyRepr = serial::from_value(value)<span class="question-mark">?</span>;
-<a href=#344 id=344 data-nosnippet>344</a>        <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
-<a href=#345 id=345 data-nosnippet>345</a>            document: r.document,
-<a href=#346 id=346 data-nosnippet>346</a>            libraries: r.libraries,
-<a href=#347 id=347 data-nosnippet>347</a>            source_revisions: r.source_revisions,
-<a href=#348 id=348 data-nosnippet>348</a>            metadata_digest: r.metadata_digest.<span class="number">0</span>,
-<a href=#349 id=349 data-nosnippet>349</a>        })
-<a href=#350 id=350 data-nosnippet>350</a>    }
-<a href=#351 id=351 data-nosnippet>351</a>
-<a href=#352 id=352 data-nosnippet>352</a>    <span class="doccomment">/// The same body in canonical order, without recomputing the digest.
-<a href=#353 id=353 data-nosnippet>353</a>    </span><span class="kw">fn </span>sorted(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
-<a href=#354 id=354 data-nosnippet>354</a>        <span class="kw">let </span><span class="kw-2">mut </span>out = <span class="self">self</span>.clone();
-<a href=#355 id=355 data-nosnippet>355</a>        sort_document(<span class="kw-2">&amp;mut </span>out.document);
-<a href=#356 id=356 data-nosnippet>356</a>        sort_libraries(<span class="kw-2">&amp;mut </span>out.libraries);
-<a href=#357 id=357 data-nosnippet>357</a>        out.source_revisions.normalise();
-<a href=#358 id=358 data-nosnippet>358</a>        out
-<a href=#359 id=359 data-nosnippet>359</a>    }
-<a href=#360 id=360 data-nosnippet>360</a>}
-<a href=#361 id=361 data-nosnippet>361</a>
-<a href=#362 id=362 data-nosnippet>362</a><span class="doccomment">/// SHA-256 over the governance metadata of `doc`: a JSON object with the
-<a href=#363 id=363 data-nosnippet>363</a>/// policy's metadata, and every non-empty rule set's and rule's by ID.
-<a href=#364 id=364 data-nosnippet>364</a>/// Field and key order is fixed, so the digest is deterministic.
-<a href=#365 id=365 data-nosnippet>365</a></span><span class="attr">#[must_use]
-<a href=#366 id=366 data-nosnippet>366</a></span><span class="kw">pub fn </span>metadata_digest(doc: <span class="kw-2">&amp;</span>PolicyDocument) -&gt; Sha256Digest {
-<a href=#367 id=367 data-nosnippet>367</a>    <span class="kw">use </span>std::collections::BTreeMap;
-<a href=#368 id=368 data-nosnippet>368</a>    <span class="attr">#[derive(Serialize)]
-<a href=#369 id=369 data-nosnippet>369</a>    </span><span class="kw">struct </span>All&lt;<span class="lifetime">'a</span>&gt; {
-<a href=#370 id=370 data-nosnippet>370</a>        policy: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>Metadata,
-<a href=#371 id=371 data-nosnippet>371</a>        rule_sets: BTreeMap&lt;String, <span class="kw-2">&amp;</span><span class="lifetime">'a </span>Metadata&gt;,
-<a href=#372 id=372 data-nosnippet>372</a>        rules: BTreeMap&lt;String, <span class="kw-2">&amp;</span><span class="lifetime">'a </span>Metadata&gt;,
-<a href=#373 id=373 data-nosnippet>373</a>    }
-<a href=#374 id=374 data-nosnippet>374</a>    <span class="kw">let </span>all = All {
-<a href=#375 id=375 data-nosnippet>375</a>        policy: <span class="kw-2">&amp;</span>doc.policy.metadata,
-<a href=#376 id=376 data-nosnippet>376</a>        rule_sets: doc
-<a href=#377 id=377 data-nosnippet>377</a>            .rule_sets
-<a href=#378 id=378 data-nosnippet>378</a>            .iter()
-<a href=#379 id=379 data-nosnippet>379</a>            .filter(|s| !s.metadata.is_empty())
-<a href=#380 id=380 data-nosnippet>380</a>            .map(|s| (s.id.to_string(), <span class="kw-2">&amp;</span>s.metadata))
-<a href=#381 id=381 data-nosnippet>381</a>            .collect(),
-<a href=#382 id=382 data-nosnippet>382</a>        rules: doc
-<a href=#383 id=383 data-nosnippet>383</a>            .rule_sets
-<a href=#384 id=384 data-nosnippet>384</a>            .iter()
-<a href=#385 id=385 data-nosnippet>385</a>            .flat_map(|s| <span class="kw-2">&amp;</span>s.rules)
-<a href=#386 id=386 data-nosnippet>386</a>            .filter(|r| !r.metadata.is_empty())
-<a href=#387 id=387 data-nosnippet>387</a>            .map(|r| (r.id.to_string(), <span class="kw-2">&amp;*</span>r.metadata))
-<a href=#388 id=388 data-nosnippet>388</a>            .collect(),
-<a href=#389 id=389 data-nosnippet>389</a>    };
-<a href=#390 id=390 data-nosnippet>390</a>    <span class="kw">let </span>json = serde_json::to_vec(<span class="kw-2">&amp;</span>all).unwrap_or_default();
-<a href=#391 id=391 data-nosnippet>391</a>    Sha256::digest(<span class="kw-2">&amp;</span>json).into()
-<a href=#392 id=392 data-nosnippet>392</a>}
-<a href=#393 id=393 data-nosnippet>393</a>
-<a href=#394 id=394 data-nosnippet>394</a><span class="kw">fn </span>take_metadata(doc: <span class="kw-2">&amp;mut </span>PolicyDocument) -&gt; Sha256Digest {
-<a href=#395 id=395 data-nosnippet>395</a>    <span class="kw">let </span>digest = metadata_digest(doc);
-<a href=#396 id=396 data-nosnippet>396</a>    doc.policy.metadata = Metadata::default();
-<a href=#397 id=397 data-nosnippet>397</a>    <span class="kw">for </span>set <span class="kw">in </span><span class="kw-2">&amp;mut </span>doc.rule_sets {
-<a href=#398 id=398 data-nosnippet>398</a>        set.metadata = Metadata::default();
-<a href=#399 id=399 data-nosnippet>399</a>        <span class="kw">for </span>rule <span class="kw">in </span><span class="kw-2">&amp;mut </span>set.rules {
-<a href=#400 id=400 data-nosnippet>400</a>            rule.metadata = <span class="kw">crate</span>::model::RuleMetadata::default();
-<a href=#401 id=401 data-nosnippet>401</a>        }
-<a href=#402 id=402 data-nosnippet>402</a>    }
-<a href=#403 id=403 data-nosnippet>403</a>    digest
-<a href=#404 id=404 data-nosnippet>404</a>}
-<a href=#405 id=405 data-nosnippet>405</a>
-<a href=#406 id=406 data-nosnippet>406</a><span class="kw">fn </span>sort_document(doc: <span class="kw-2">&amp;mut </span>PolicyDocument) {
-<a href=#407 id=407 data-nosnippet>407</a>    doc.policy.rule_sets.sort_unstable();
-<a href=#408 id=408 data-nosnippet>408</a>    doc.policy.rule_set_scopes.sort_by_key(|a| a.rule_set);
-<a href=#409 id=409 data-nosnippet>409</a>    doc.policy
-<a href=#410 id=410 data-nosnippet>410</a>        .location_profiles
-<a href=#411 id=411 data-nosnippet>411</a>        .sort_by(|a, b| a.name.cmp(<span class="kw-2">&amp;</span>b.name));
-<a href=#412 id=412 data-nosnippet>412</a>    doc.rule_sets.sort_by_key(|s| s.id);
-<a href=#413 id=413 data-nosnippet>413</a>    <span class="kw">for </span>set <span class="kw">in </span><span class="kw-2">&amp;mut </span>doc.rule_sets {
-<a href=#414 id=414 data-nosnippet>414</a>        set.rules.sort_by_key(|r| r.id);
-<a href=#415 id=415 data-nosnippet>415</a>    }
-<a href=#416 id=416 data-nosnippet>416</a>}
-<a href=#417 id=417 data-nosnippet>417</a>
-<a href=#418 id=418 data-nosnippet>418</a><span class="kw">fn </span>sort_libraries(libraries: <span class="kw-2">&amp;mut </span>Vec&lt;InlineLibrary&gt;) {
-<a href=#419 id=419 data-nosnippet>419</a>    libraries.sort_by_key(|l| (l.id, l.resolved_version));
-<a href=#420 id=420 data-nosnippet>420</a>    libraries.dedup_by_key(|l| (l.id, l.resolved_version));
+<a href=#308 id=308 data-nosnippet>308</a>    <span class="doccomment">/// A body with a metadata digest already computed, as a delta carries
+<a href=#309 id=309 data-nosnippet>309</a>    /// it: `document` must hold no governance metadata of its own.
+<a href=#310 id=310 data-nosnippet>310</a>    ///
+<a href=#311 id=311 data-nosnippet>311</a>    /// # Errors
+<a href=#312 id=312 data-nosnippet>312</a>    ///
+<a href=#313 id=313 data-nosnippet>313</a>    /// As [`Body::new`].
+<a href=#314 id=314 data-nosnippet>314</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>with_digest(
+<a href=#315 id=315 data-nosnippet>315</a>        document: PolicyDocument,
+<a href=#316 id=316 data-nosnippet>316</a>        libraries: Vec&lt;InlineLibrary&gt;,
+<a href=#317 id=317 data-nosnippet>317</a>        source_revisions: SourceRevisions,
+<a href=#318 id=318 data-nosnippet>318</a>        metadata_digest: Sha256Digest,
+<a href=#319 id=319 data-nosnippet>319</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, serial::Error&gt; {
+<a href=#320 id=320 data-nosnippet>320</a>        <span class="kw">let </span><span class="kw-2">mut </span>body = <span class="self">Self</span>::new(document, libraries, source_revisions)<span class="question-mark">?</span>;
+<a href=#321 id=321 data-nosnippet>321</a>        body.metadata_digest = metadata_digest;
+<a href=#322 id=322 data-nosnippet>322</a>        <span class="prelude-val">Ok</span>(body)
+<a href=#323 id=323 data-nosnippet>323</a>    }
+<a href=#324 id=324 data-nosnippet>324</a>
+<a href=#325 id=325 data-nosnippet>325</a>    <span class="doccomment">/// The policy, without governance metadata.
+<a href=#326 id=326 data-nosnippet>326</a>    </span><span class="attr">#[must_use]
+<a href=#327 id=327 data-nosnippet>327</a>    </span><span class="kw">pub const fn </span>document(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>PolicyDocument {
+<a href=#328 id=328 data-nosnippet>328</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.document
+<a href=#329 id=329 data-nosnippet>329</a>    }
+<a href=#330 id=330 data-nosnippet>330</a>
+<a href=#331 id=331 data-nosnippet>331</a>    <span class="doccomment">/// The inlined library sets, sorted by ID and version.
+<a href=#332 id=332 data-nosnippet>332</a>    </span><span class="attr">#[must_use]
+<a href=#333 id=333 data-nosnippet>333</a>    </span><span class="kw">pub fn </span>libraries(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[InlineLibrary] {
+<a href=#334 id=334 data-nosnippet>334</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.libraries
+<a href=#335 id=335 data-nosnippet>335</a>    }
+<a href=#336 id=336 data-nosnippet>336</a>
+<a href=#337 id=337 data-nosnippet>337</a>    <span class="doccomment">/// Where it came from.
+<a href=#338 id=338 data-nosnippet>338</a>    </span><span class="attr">#[must_use]
+<a href=#339 id=339 data-nosnippet>339</a>    </span><span class="kw">pub const fn </span>source_revisions(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>SourceRevisions {
+<a href=#340 id=340 data-nosnippet>340</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.source_revisions
+<a href=#341 id=341 data-nosnippet>341</a>    }
+<a href=#342 id=342 data-nosnippet>342</a>
+<a href=#343 id=343 data-nosnippet>343</a>    <span class="doccomment">/// SHA-256 of the governance metadata the server kept: the policy's,
+<a href=#344 id=344 data-nosnippet>344</a>    /// and every rule set's and rule's by ID ([`metadata_digest`]).
+<a href=#345 id=345 data-nosnippet>345</a>    </span><span class="attr">#[must_use]
+<a href=#346 id=346 data-nosnippet>346</a>    </span><span class="kw">pub const fn </span>metadata_digest(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>Sha256Digest {
+<a href=#347 id=347 data-nosnippet>347</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.metadata_digest
+<a href=#348 id=348 data-nosnippet>348</a>    }
+<a href=#349 id=349 data-nosnippet>349</a>
+<a href=#350 id=350 data-nosnippet>350</a>    <span class="kw">fn </span>to_value(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Value, serial::Error&gt; {
+<a href=#351 id=351 data-nosnippet>351</a>        serial::to_value(<span class="kw-2">&amp;</span>BodyRepr {
+<a href=#352 id=352 data-nosnippet>352</a>            document: <span class="self">self</span>.document.clone(),
+<a href=#353 id=353 data-nosnippet>353</a>            libraries: <span class="self">self</span>.libraries.clone(),
+<a href=#354 id=354 data-nosnippet>354</a>            source_revisions: <span class="self">self</span>.source_revisions.clone(),
+<a href=#355 id=355 data-nosnippet>355</a>            metadata_digest: Bytes32(<span class="self">self</span>.metadata_digest),
+<a href=#356 id=356 data-nosnippet>356</a>        })
+<a href=#357 id=357 data-nosnippet>357</a>    }
+<a href=#358 id=358 data-nosnippet>358</a>
+<a href=#359 id=359 data-nosnippet>359</a>    <span class="kw">fn </span>from_value(value: Value) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, serial::Error&gt; {
+<a href=#360 id=360 data-nosnippet>360</a>        <span class="kw">let </span>r: BodyRepr = serial::from_value(value)<span class="question-mark">?</span>;
+<a href=#361 id=361 data-nosnippet>361</a>        <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
+<a href=#362 id=362 data-nosnippet>362</a>            document: r.document,
+<a href=#363 id=363 data-nosnippet>363</a>            libraries: r.libraries,
+<a href=#364 id=364 data-nosnippet>364</a>            source_revisions: r.source_revisions,
+<a href=#365 id=365 data-nosnippet>365</a>            metadata_digest: r.metadata_digest.<span class="number">0</span>,
+<a href=#366 id=366 data-nosnippet>366</a>        })
+<a href=#367 id=367 data-nosnippet>367</a>    }
+<a href=#368 id=368 data-nosnippet>368</a>
+<a href=#369 id=369 data-nosnippet>369</a>    <span class="doccomment">/// The same body in canonical order, without recomputing the digest.
+<a href=#370 id=370 data-nosnippet>370</a>    </span><span class="kw">fn </span>sorted(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
+<a href=#371 id=371 data-nosnippet>371</a>        <span class="kw">let </span><span class="kw-2">mut </span>out = <span class="self">self</span>.clone();
+<a href=#372 id=372 data-nosnippet>372</a>        sort_document(<span class="kw-2">&amp;mut </span>out.document);
+<a href=#373 id=373 data-nosnippet>373</a>        sort_libraries(<span class="kw-2">&amp;mut </span>out.libraries);
+<a href=#374 id=374 data-nosnippet>374</a>        out.source_revisions.normalise();
+<a href=#375 id=375 data-nosnippet>375</a>        out
+<a href=#376 id=376 data-nosnippet>376</a>    }
+<a href=#377 id=377 data-nosnippet>377</a>}
+<a href=#378 id=378 data-nosnippet>378</a>
+<a href=#379 id=379 data-nosnippet>379</a><span class="doccomment">/// SHA-256 over the governance metadata of `doc`: a JSON object with the
+<a href=#380 id=380 data-nosnippet>380</a>/// policy's metadata, and every non-empty rule set's and rule's by ID.
+<a href=#381 id=381 data-nosnippet>381</a>/// Field and key order is fixed, so the digest is deterministic.
+<a href=#382 id=382 data-nosnippet>382</a></span><span class="attr">#[must_use]
+<a href=#383 id=383 data-nosnippet>383</a></span><span class="kw">pub fn </span>metadata_digest(doc: <span class="kw-2">&amp;</span>PolicyDocument) -&gt; Sha256Digest {
+<a href=#384 id=384 data-nosnippet>384</a>    <span class="kw">use </span>std::collections::BTreeMap;
+<a href=#385 id=385 data-nosnippet>385</a>    <span class="attr">#[derive(Serialize)]
+<a href=#386 id=386 data-nosnippet>386</a>    </span><span class="kw">struct </span>All&lt;<span class="lifetime">'a</span>&gt; {
+<a href=#387 id=387 data-nosnippet>387</a>        policy: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>Metadata,
+<a href=#388 id=388 data-nosnippet>388</a>        rule_sets: BTreeMap&lt;String, <span class="kw-2">&amp;</span><span class="lifetime">'a </span>Metadata&gt;,
+<a href=#389 id=389 data-nosnippet>389</a>        rules: BTreeMap&lt;String, <span class="kw-2">&amp;</span><span class="lifetime">'a </span>Metadata&gt;,
+<a href=#390 id=390 data-nosnippet>390</a>    }
+<a href=#391 id=391 data-nosnippet>391</a>    <span class="kw">let </span>all = All {
+<a href=#392 id=392 data-nosnippet>392</a>        policy: <span class="kw-2">&amp;</span>doc.policy.metadata,
+<a href=#393 id=393 data-nosnippet>393</a>        rule_sets: doc
+<a href=#394 id=394 data-nosnippet>394</a>            .rule_sets
+<a href=#395 id=395 data-nosnippet>395</a>            .iter()
+<a href=#396 id=396 data-nosnippet>396</a>            .filter(|s| !s.metadata.is_empty())
+<a href=#397 id=397 data-nosnippet>397</a>            .map(|s| (s.id.to_string(), <span class="kw-2">&amp;</span>s.metadata))
+<a href=#398 id=398 data-nosnippet>398</a>            .collect(),
+<a href=#399 id=399 data-nosnippet>399</a>        rules: doc
+<a href=#400 id=400 data-nosnippet>400</a>            .rule_sets
+<a href=#401 id=401 data-nosnippet>401</a>            .iter()
+<a href=#402 id=402 data-nosnippet>402</a>            .flat_map(|s| <span class="kw-2">&amp;</span>s.rules)
+<a href=#403 id=403 data-nosnippet>403</a>            .filter(|r| !r.metadata.is_empty())
+<a href=#404 id=404 data-nosnippet>404</a>            .map(|r| (r.id.to_string(), <span class="kw-2">&amp;*</span>r.metadata))
+<a href=#405 id=405 data-nosnippet>405</a>            .collect(),
+<a href=#406 id=406 data-nosnippet>406</a>    };
+<a href=#407 id=407 data-nosnippet>407</a>    <span class="kw">let </span>json = serde_json::to_vec(<span class="kw-2">&amp;</span>all).unwrap_or_default();
+<a href=#408 id=408 data-nosnippet>408</a>    Sha256::digest(<span class="kw-2">&amp;</span>json).into()
+<a href=#409 id=409 data-nosnippet>409</a>}
+<a href=#410 id=410 data-nosnippet>410</a>
+<a href=#411 id=411 data-nosnippet>411</a><span class="kw">fn </span>take_metadata(doc: <span class="kw-2">&amp;mut </span>PolicyDocument) -&gt; Sha256Digest {
+<a href=#412 id=412 data-nosnippet>412</a>    <span class="kw">let </span>digest = metadata_digest(doc);
+<a href=#413 id=413 data-nosnippet>413</a>    doc.policy.metadata = Metadata::default();
+<a href=#414 id=414 data-nosnippet>414</a>    <span class="kw">for </span>set <span class="kw">in </span><span class="kw-2">&amp;mut </span>doc.rule_sets {
+<a href=#415 id=415 data-nosnippet>415</a>        set.metadata = Metadata::default();
+<a href=#416 id=416 data-nosnippet>416</a>        <span class="kw">for </span>rule <span class="kw">in </span><span class="kw-2">&amp;mut </span>set.rules {
+<a href=#417 id=417 data-nosnippet>417</a>            rule.metadata = <span class="kw">crate</span>::model::RuleMetadata::default();
+<a href=#418 id=418 data-nosnippet>418</a>        }
+<a href=#419 id=419 data-nosnippet>419</a>    }
+<a href=#420 id=420 data-nosnippet>420</a>    digest
 <a href=#421 id=421 data-nosnippet>421</a>}
 <a href=#422 id=422 data-nosnippet>422</a>
-<a href=#423 id=423 data-nosnippet>423</a><span class="doccomment">/// The part of a document that decisions depend on: every name,
-<a href=#424 id=424 data-nosnippet>424</a>/// description and display-only field cleared, and the revision 0.
-<a href=#425 id=425 data-nosnippet>425</a></span><span class="kw">fn </span>decision_view(doc: <span class="kw-2">&amp;</span>PolicyDocument) -&gt; PolicyDocument {
-<a href=#426 id=426 data-nosnippet>426</a>    <span class="kw">let </span><span class="kw-2">mut </span>doc = doc.clone();
-<a href=#427 id=427 data-nosnippet>427</a>    <span class="kw">let </span>p = <span class="kw-2">&amp;mut </span>doc.policy;
-<a href=#428 id=428 data-nosnippet>428</a>    p.name.clear();
-<a href=#429 id=429 data-nosnippet>429</a>    p.description = <span class="prelude-val">None</span>;
-<a href=#430 id=430 data-nosnippet>430</a>    p.revision = <span class="number">0</span>;
-<a href=#431 id=431 data-nosnippet>431</a>    <span class="kw">for </span>set <span class="kw">in </span><span class="kw-2">&amp;mut </span>doc.rule_sets {
-<a href=#432 id=432 data-nosnippet>432</a>        set.name.clear();
-<a href=#433 id=433 data-nosnippet>433</a>        set.description = <span class="prelude-val">None</span>;
-<a href=#434 id=434 data-nosnippet>434</a>        set.version = <span class="prelude-val">None</span>;
-<a href=#435 id=435 data-nosnippet>435</a>        set.hidden = <span class="bool-val">false</span>;
-<a href=#436 id=436 data-nosnippet>436</a>        set.category_path = <span class="prelude-val">None</span>;
-<a href=#437 id=437 data-nosnippet>437</a>        set.allow_child_suppress = <span class="prelude-val">None</span>;
-<a href=#438 id=438 data-nosnippet>438</a>        <span class="kw">for </span>rule <span class="kw">in </span><span class="kw-2">&amp;mut </span>set.rules {
-<a href=#439 id=439 data-nosnippet>439</a>            rule.name.clear();
-<a href=#440 id=440 data-nosnippet>440</a>            rule.description = <span class="prelude-val">None</span>;
-<a href=#441 id=441 data-nosnippet>441</a>        }
-<a href=#442 id=442 data-nosnippet>442</a>    }
-<a href=#443 id=443 data-nosnippet>443</a>    doc
-<a href=#444 id=444 data-nosnippet>444</a>}
-<a href=#445 id=445 data-nosnippet>445</a>
-<a href=#446 id=446 data-nosnippet>446</a><span class="doccomment">/// A bundle: header and body.
-<a href=#447 id=447 data-nosnippet>447</a></span><span class="attr">#[derive(Clone, Debug, PartialEq, Eq)]
-<a href=#448 id=448 data-nosnippet>448</a></span><span class="kw">pub struct </span>PolicyBundle {
-<a href=#449 id=449 data-nosnippet>449</a>    <span class="doccomment">/// The header.
-<a href=#450 id=450 data-nosnippet>450</a>    </span><span class="kw">pub </span>header: Header,
-<a href=#451 id=451 data-nosnippet>451</a>    <span class="doccomment">/// The body.
-<a href=#452 id=452 data-nosnippet>452</a>    </span><span class="kw">pub </span>body: Body,
-<a href=#453 id=453 data-nosnippet>453</a>}
-<a href=#454 id=454 data-nosnippet>454</a>
-<a href=#455 id=455 data-nosnippet>455</a><span class="doccomment">/// Bounds on what [`PolicyBundle::decode`] and [`decode_header`] read.
-<a href=#456 id=456 data-nosnippet>456</a></span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-<a href=#457 id=457 data-nosnippet>457</a></span><span class="kw">pub struct </span>BundleLimits {
-<a href=#458 id=458 data-nosnippet>458</a>    <span class="doccomment">/// The largest bundle, in bytes. [`DEFAULT_MAX_BYTES`] by default.
-<a href=#459 id=459 data-nosnippet>459</a>    </span><span class="kw">pub </span>max_bytes: usize,
-<a href=#460 id=460 data-nosnippet>460</a>    <span class="doccomment">/// The most CBOR data items in one bundle.
-<a href=#461 id=461 data-nosnippet>461</a>    </span><span class="kw">pub </span>max_items: usize,
-<a href=#462 id=462 data-nosnippet>462</a>}
-<a href=#463 id=463 data-nosnippet>463</a>
-<a href=#464 id=464 data-nosnippet>464</a><span class="kw">impl </span>BundleLimits {
-<a href=#465 id=465 data-nosnippet>465</a>    <span class="doccomment">/// 64 MiB and 4 Mi items.
-<a href=#466 id=466 data-nosnippet>466</a>    </span><span class="kw">pub const </span>DEFAULT: <span class="self">Self </span>= <span class="self">Self </span>{
-<a href=#467 id=467 data-nosnippet>467</a>        max_bytes: DEFAULT_MAX_BYTES,
-<a href=#468 id=468 data-nosnippet>468</a>        max_items: Limits::DEFAULT.max_items,
-<a href=#469 id=469 data-nosnippet>469</a>    };
+<a href=#423 id=423 data-nosnippet>423</a><span class="kw">fn </span>sort_document(doc: <span class="kw-2">&amp;mut </span>PolicyDocument) {
+<a href=#424 id=424 data-nosnippet>424</a>    doc.policy.rule_sets.sort_unstable();
+<a href=#425 id=425 data-nosnippet>425</a>    doc.policy.rule_set_scopes.sort_by_key(|a| a.rule_set);
+<a href=#426 id=426 data-nosnippet>426</a>    doc.policy
+<a href=#427 id=427 data-nosnippet>427</a>        .location_profiles
+<a href=#428 id=428 data-nosnippet>428</a>        .sort_by(|a, b| a.name.cmp(<span class="kw-2">&amp;</span>b.name));
+<a href=#429 id=429 data-nosnippet>429</a>    doc.rule_sets.sort_by_key(|s| s.id);
+<a href=#430 id=430 data-nosnippet>430</a>    <span class="kw">for </span>set <span class="kw">in </span><span class="kw-2">&amp;mut </span>doc.rule_sets {
+<a href=#431 id=431 data-nosnippet>431</a>        set.rules.sort_by_key(|r| r.id);
+<a href=#432 id=432 data-nosnippet>432</a>    }
+<a href=#433 id=433 data-nosnippet>433</a>}
+<a href=#434 id=434 data-nosnippet>434</a>
+<a href=#435 id=435 data-nosnippet>435</a><span class="kw">fn </span>sort_libraries(libraries: <span class="kw-2">&amp;mut </span>Vec&lt;InlineLibrary&gt;) {
+<a href=#436 id=436 data-nosnippet>436</a>    libraries.sort_by_key(|l| (l.id, l.resolved_version));
+<a href=#437 id=437 data-nosnippet>437</a>    libraries.dedup_by_key(|l| (l.id, l.resolved_version));
+<a href=#438 id=438 data-nosnippet>438</a>}
+<a href=#439 id=439 data-nosnippet>439</a>
+<a href=#440 id=440 data-nosnippet>440</a><span class="doccomment">/// The part of a document that decisions depend on: every name,
+<a href=#441 id=441 data-nosnippet>441</a>/// description and display-only field cleared, and the revision 0.
+<a href=#442 id=442 data-nosnippet>442</a></span><span class="kw">fn </span>decision_view(doc: <span class="kw-2">&amp;</span>PolicyDocument) -&gt; PolicyDocument {
+<a href=#443 id=443 data-nosnippet>443</a>    <span class="kw">let </span><span class="kw-2">mut </span>doc = doc.clone();
+<a href=#444 id=444 data-nosnippet>444</a>    <span class="kw">let </span>p = <span class="kw-2">&amp;mut </span>doc.policy;
+<a href=#445 id=445 data-nosnippet>445</a>    p.name.clear();
+<a href=#446 id=446 data-nosnippet>446</a>    p.description = <span class="prelude-val">None</span>;
+<a href=#447 id=447 data-nosnippet>447</a>    p.revision = <span class="number">0</span>;
+<a href=#448 id=448 data-nosnippet>448</a>    <span class="kw">for </span>set <span class="kw">in </span><span class="kw-2">&amp;mut </span>doc.rule_sets {
+<a href=#449 id=449 data-nosnippet>449</a>        set.name.clear();
+<a href=#450 id=450 data-nosnippet>450</a>        set.description = <span class="prelude-val">None</span>;
+<a href=#451 id=451 data-nosnippet>451</a>        set.version = <span class="prelude-val">None</span>;
+<a href=#452 id=452 data-nosnippet>452</a>        set.hidden = <span class="bool-val">false</span>;
+<a href=#453 id=453 data-nosnippet>453</a>        set.category_path = <span class="prelude-val">None</span>;
+<a href=#454 id=454 data-nosnippet>454</a>        set.allow_child_suppress = <span class="prelude-val">None</span>;
+<a href=#455 id=455 data-nosnippet>455</a>        <span class="kw">for </span>rule <span class="kw">in </span><span class="kw-2">&amp;mut </span>set.rules {
+<a href=#456 id=456 data-nosnippet>456</a>            rule.name.clear();
+<a href=#457 id=457 data-nosnippet>457</a>            rule.description = <span class="prelude-val">None</span>;
+<a href=#458 id=458 data-nosnippet>458</a>        }
+<a href=#459 id=459 data-nosnippet>459</a>    }
+<a href=#460 id=460 data-nosnippet>460</a>    doc
+<a href=#461 id=461 data-nosnippet>461</a>}
+<a href=#462 id=462 data-nosnippet>462</a>
+<a href=#463 id=463 data-nosnippet>463</a><span class="doccomment">/// A bundle: header and body.
+<a href=#464 id=464 data-nosnippet>464</a></span><span class="attr">#[derive(Clone, Debug, PartialEq, Eq)]
+<a href=#465 id=465 data-nosnippet>465</a></span><span class="kw">pub struct </span>PolicyBundle {
+<a href=#466 id=466 data-nosnippet>466</a>    <span class="doccomment">/// The header.
+<a href=#467 id=467 data-nosnippet>467</a>    </span><span class="kw">pub </span>header: Header,
+<a href=#468 id=468 data-nosnippet>468</a>    <span class="doccomment">/// The body.
+<a href=#469 id=469 data-nosnippet>469</a>    </span><span class="kw">pub </span>body: Body,
 <a href=#470 id=470 data-nosnippet>470</a>}
 <a href=#471 id=471 data-nosnippet>471</a>
-<a href=#472 id=472 data-nosnippet>472</a><span class="kw">impl </span>Default <span class="kw">for </span>BundleLimits {
-<a href=#473 id=473 data-nosnippet>473</a>    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
-<a href=#474 id=474 data-nosnippet>474</a>        <span class="self">Self</span>::DEFAULT
-<a href=#475 id=475 data-nosnippet>475</a>    }
-<a href=#476 id=476 data-nosnippet>476</a>}
-<a href=#477 id=477 data-nosnippet>477</a>
-<a href=#478 id=478 data-nosnippet>478</a><span class="doccomment">/// Why bytes are not a bundle this crate reads.
-<a href=#479 id=479 data-nosnippet>479</a></span><span class="attr">#[derive(Clone, Debug, PartialEq, Eq)]
-<a href=#480 id=480 data-nosnippet>480</a></span><span class="kw">pub enum </span>BundleError {
-<a href=#481 id=481 data-nosnippet>481</a>    <span class="doccomment">/// Larger than the limit.
-<a href=#482 id=482 data-nosnippet>482</a>    </span>TooLarge {
-<a href=#483 id=483 data-nosnippet>483</a>        <span class="doccomment">/// The size, in bytes.
-<a href=#484 id=484 data-nosnippet>484</a>        </span>size: usize,
-<a href=#485 id=485 data-nosnippet>485</a>        <span class="doccomment">/// The limit.
-<a href=#486 id=486 data-nosnippet>486</a>        </span>limit: usize,
-<a href=#487 id=487 data-nosnippet>487</a>    },
-<a href=#488 id=488 data-nosnippet>488</a>    <span class="doccomment">/// Not canonical CBOR, or over a CBOR limit.
-<a href=#489 id=489 data-nosnippet>489</a>    </span>Cbor(DecodeError),
-<a href=#490 id=490 data-nosnippet>490</a>    <span class="doccomment">/// The CBOR does not have a bundle's shape.
-<a href=#491 id=491 data-nosnippet>491</a>    </span>Shape(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str),
-<a href=#492 id=492 data-nosnippet>492</a>    <span class="doccomment">/// A required header field is missing.
-<a href=#493 id=493 data-nosnippet>493</a>    </span>Missing(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str),
-<a href=#494 id=494 data-nosnippet>494</a>    <span class="doccomment">/// An integer does not fit its field.
-<a href=#495 id=495 data-nosnippet>495</a>    </span>Overflow(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str),
-<a href=#496 id=496 data-nosnippet>496</a>    <span class="doccomment">/// An ID is not a UUIDv7.
-<a href=#497 id=497 data-nosnippet>497</a>    </span>InvalidId(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str),
-<a href=#498 id=498 data-nosnippet>498</a>    <span class="doccomment">/// A key this reader does not know, and that it must not skip.
-<a href=#499 id=499 data-nosnippet>499</a>    </span>UnknownCriticalKey(i64),
-<a href=#500 id=500 data-nosnippet>500</a>    <span class="doccomment">/// A bundle format this reader does not implement.
-<a href=#501 id=501 data-nosnippet>501</a>    </span>UnsupportedFormat(u64),
-<a href=#502 id=502 data-nosnippet>502</a>    <span class="doccomment">/// A schema major version this reader does not implement.
-<a href=#503 id=503 data-nosnippet>503</a>    </span>UnsupportedSchema(SchemaVersion),
-<a href=#504 id=504 data-nosnippet>504</a>    <span class="doccomment">/// The body does not read as a policy.
-<a href=#505 id=505 data-nosnippet>505</a>    </span>Body(serial::Error),
-<a href=#506 id=506 data-nosnippet>506</a>    <span class="doccomment">/// The body is not in canonical form: for example, its rules are not
-<a href=#507 id=507 data-nosnippet>507</a>    /// sorted, or a field holds a default the writer leaves out.
-<a href=#508 id=508 data-nosnippet>508</a>    </span>NonCanonical,
-<a href=#509 id=509 data-nosnippet>509</a>}
-<a href=#510 id=510 data-nosnippet>510</a>
-<a href=#511 id=511 data-nosnippet>511</a><span class="kw">impl </span>fmt::Display <span class="kw">for </span>BundleError {
-<a href=#512 id=512 data-nosnippet>512</a>    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; fmt::Result {
-<a href=#513 id=513 data-nosnippet>513</a>        <span class="kw">match </span><span class="self">self </span>{
-<a href=#514 id=514 data-nosnippet>514</a>            <span class="self">Self</span>::TooLarge { size, limit } =&gt; <span class="macro">write!</span>(
-<a href=#515 id=515 data-nosnippet>515</a>                f,
-<a href=#516 id=516 data-nosnippet>516</a>                <span class="string">"the bundle is {size} bytes, over the limit of {limit}; split it into a group bundle and a device bundle, or replace hash rules with signer rules"
-<a href=#517 id=517 data-nosnippet>517</a>            </span>),
-<a href=#518 id=518 data-nosnippet>518</a>            <span class="self">Self</span>::Cbor(e) =&gt; <span class="macro">write!</span>(f, <span class="string">"not canonical CBOR: {e}"</span>),
-<a href=#519 id=519 data-nosnippet>519</a>            <span class="self">Self</span>::Shape(what) =&gt; <span class="macro">write!</span>(f, <span class="string">"not a bundle: {what}"</span>),
-<a href=#520 id=520 data-nosnippet>520</a>            <span class="self">Self</span>::Missing(field) =&gt; <span class="macro">write!</span>(f, <span class="string">"the header has no `{field}`"</span>),
-<a href=#521 id=521 data-nosnippet>521</a>            <span class="self">Self</span>::Overflow(field) =&gt; <span class="macro">write!</span>(f, <span class="string">"`{field}` is out of range"</span>),
-<a href=#522 id=522 data-nosnippet>522</a>            <span class="self">Self</span>::InvalidId(field) =&gt; <span class="macro">write!</span>(f, <span class="string">"`{field}` is not a UUIDv7"</span>),
-<a href=#523 id=523 data-nosnippet>523</a>            <span class="self">Self</span>::UnknownCriticalKey(id) =&gt; <span class="macro">write!</span>(f, <span class="string">"unknown critical key {id}"</span>),
-<a href=#524 id=524 data-nosnippet>524</a>            <span class="self">Self</span>::UnsupportedFormat(v) =&gt; <span class="macro">write!</span>(
-<a href=#525 id=525 data-nosnippet>525</a>                f,
-<a href=#526 id=526 data-nosnippet>526</a>                <span class="string">"bundle format {v} is not supported: this reader implements {FORMAT_VERSION}"
-<a href=#527 id=527 data-nosnippet>527</a>            </span>),
-<a href=#528 id=528 data-nosnippet>528</a>            <span class="self">Self</span>::UnsupportedSchema(v) =&gt; <span class="macro">write!</span>(
-<a href=#529 id=529 data-nosnippet>529</a>                f,
-<a href=#530 id=530 data-nosnippet>530</a>                <span class="string">"schema version {v} is not supported: this reader implements {}"</span>,
-<a href=#531 id=531 data-nosnippet>531</a>                <span class="kw">crate</span>::schema::CURRENT
-<a href=#532 id=532 data-nosnippet>532</a>            ),
-<a href=#533 id=533 data-nosnippet>533</a>            <span class="self">Self</span>::Body(e) =&gt; <span class="macro">write!</span>(f, <span class="string">"invalid bundle body: {e}"</span>),
-<a href=#534 id=534 data-nosnippet>534</a>            <span class="self">Self</span>::NonCanonical =&gt; f.write_str(<span class="string">"the bundle body is not in canonical form"</span>),
-<a href=#535 id=535 data-nosnippet>535</a>        }
-<a href=#536 id=536 data-nosnippet>536</a>    }
-<a href=#537 id=537 data-nosnippet>537</a>}
-<a href=#538 id=538 data-nosnippet>538</a>
-<a href=#539 id=539 data-nosnippet>539</a><span class="kw">impl </span>std::error::Error <span class="kw">for </span>BundleError {}
-<a href=#540 id=540 data-nosnippet>540</a>
-<a href=#541 id=541 data-nosnippet>541</a><span class="kw">fn </span>k(name: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str) -&gt; Value {
-<a href=#542 id=542 data-nosnippet>542</a>    <span class="comment">// Every name used here is registered; `keys` tests that.
-<a href=#543 id=543 data-nosnippet>543</a>    </span>Value::int(keys::id(name).unwrap_or(i64::MIN))
-<a href=#544 id=544 data-nosnippet>544</a>}
-<a href=#545 id=545 data-nosnippet>545</a>
-<a href=#546 id=546 data-nosnippet>546</a><span class="kw">fn </span>uuid(id: Uuid7) -&gt; Value {
-<a href=#547 id=547 data-nosnippet>547</a>    Value::Bytes(id.as_bytes().to_vec())
-<a href=#548 id=548 data-nosnippet>548</a>}
-<a href=#549 id=549 data-nosnippet>549</a>
-<a href=#550 id=550 data-nosnippet>550</a><span class="kw">fn </span>triple(a: u64, b: u64, c: u64) -&gt; Value {
-<a href=#551 id=551 data-nosnippet>551</a>    Value::Array(<span class="macro">vec!</span>[Value::Uint(a), Value::Uint(b), Value::Uint(c)])
-<a href=#552 id=552 data-nosnippet>552</a>}
-<a href=#553 id=553 data-nosnippet>553</a>
-<a href=#554 id=554 data-nosnippet>554</a><span class="kw">fn </span>map(entries: Vec&lt;(Value, Value)&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;Value, serial::Error&gt; {
-<a href=#555 id=555 data-nosnippet>555</a>    Map::new(entries)
-<a href=#556 id=556 data-nosnippet>556</a>        .map(Value::Map)
-<a href=#557 id=557 data-nosnippet>557</a>        .map_err(serial::Error::Encode)
-<a href=#558 id=558 data-nosnippet>558</a>}
-<a href=#559 id=559 data-nosnippet>559</a>
-<a href=#560 id=560 data-nosnippet>560</a><span class="kw">impl </span>Header {
-<a href=#561 id=561 data-nosnippet>561</a>    <span class="kw">fn </span>to_value(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Value, serial::Error&gt; {
-<a href=#562 id=562 data-nosnippet>562</a>        <span class="kw">let </span>(scope_key, scope_id) = <span class="kw">match </span><span class="self">self</span>.target.scope {
-<a href=#563 id=563 data-nosnippet>563</a>            TargetScope::Group(id) =&gt; (<span class="string">"group"</span>, id),
-<a href=#564 id=564 data-nosnippet>564</a>            TargetScope::Device(id) =&gt; (<span class="string">"device"</span>, id),
-<a href=#565 id=565 data-nosnippet>565</a>        };
-<a href=#566 id=566 data-nosnippet>566</a>        <span class="kw">let </span>s = <span class="self">self</span>.schema_version;
-<a href=#567 id=567 data-nosnippet>567</a>        <span class="kw">let </span>a = <span class="self">self</span>.min_agent_version;
-<a href=#568 id=568 data-nosnippet>568</a>        <span class="kw">let </span><span class="kw-2">mut </span>entries = <span class="macro">vec!</span>[
-<a href=#569 id=569 data-nosnippet>569</a>            (k(<span class="string">"format_version"</span>), Value::Uint(<span class="self">self</span>.format_version.into())),
-<a href=#570 id=570 data-nosnippet>570</a>            (k(<span class="string">"schema_version"</span>), triple(s.major, s.minor, s.patch)),
-<a href=#571 id=571 data-nosnippet>571</a>            (k(<span class="string">"tenant"</span>), uuid(<span class="self">self</span>.target.tenant)),
-<a href=#572 id=572 data-nosnippet>572</a>            (k(<span class="string">"target"</span>), map(<span class="macro">vec!</span>[(k(scope_key), uuid(scope_id))])<span class="question-mark">?</span>),
-<a href=#573 id=573 data-nosnippet>573</a>            (k(<span class="string">"policy_version"</span>), Value::Uint(<span class="self">self</span>.policy_version)),
-<a href=#574 id=574 data-nosnippet>574</a>            (
-<a href=#575 id=575 data-nosnippet>575</a>                k(<span class="string">"min_agent_version"</span>),
-<a href=#576 id=576 data-nosnippet>576</a>                triple(a.major.into(), a.minor.into(), a.patch.into()),
-<a href=#577 id=577 data-nosnippet>577</a>            ),
-<a href=#578 id=578 data-nosnippet>578</a>            (k(<span class="string">"generated_at"</span>), Value::int(<span class="self">self</span>.generated_at)),
-<a href=#579 id=579 data-nosnippet>579</a>        ];
-<a href=#580 id=580 data-nosnippet>580</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(t) = <span class="self">self</span>.expires_at {
-<a href=#581 id=581 data-nosnippet>581</a>            entries.push((k(<span class="string">"expires_at"</span>), Value::int(t)));
-<a href=#582 id=582 data-nosnippet>582</a>        }
-<a href=#583 id=583 data-nosnippet>583</a>        map(entries)
-<a href=#584 id=584 data-nosnippet>584</a>    }
-<a href=#585 id=585 data-nosnippet>585</a>
-<a href=#586 id=586 data-nosnippet>586</a>    <span class="kw">fn </span>from_value(value: Value) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, BundleError&gt; {
-<a href=#587 id=587 data-nosnippet>587</a>        <span class="kw">let </span>Value::Map(m) = value <span class="kw">else </span>{
-<a href=#588 id=588 data-nosnippet>588</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::Shape(<span class="string">"the header is not a map"</span>));
-<a href=#589 id=589 data-nosnippet>589</a>        };
-<a href=#590 id=590 data-nosnippet>590</a>        <span class="comment">// The format version is read first, so a newer format is reported
-<a href=#591 id=591 data-nosnippet>591</a>        // as such rather than as an unknown key.
-<a href=#592 id=592 data-nosnippet>592</a>        </span><span class="kw">let </span>format = <span class="kw">match </span>m.get(<span class="kw-2">&amp;</span>k(<span class="string">"format_version"</span>)) {
-<a href=#593 id=593 data-nosnippet>593</a>            <span class="prelude-val">Some</span>(Value::Uint(v)) =&gt; <span class="kw-2">*</span>v,
-<a href=#594 id=594 data-nosnippet>594</a>            <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::Shape(<span class="string">"`format_version` is not an integer"</span>)),
-<a href=#595 id=595 data-nosnippet>595</a>            <span class="prelude-val">None </span>=&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::Missing(<span class="string">"format_version"</span>)),
-<a href=#596 id=596 data-nosnippet>596</a>        };
-<a href=#597 id=597 data-nosnippet>597</a>        <span class="kw">if </span>format != u64::from(FORMAT_VERSION) {
-<a href=#598 id=598 data-nosnippet>598</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::UnsupportedFormat(format));
+<a href=#472 id=472 data-nosnippet>472</a><span class="doccomment">/// Bounds on what [`PolicyBundle::decode`] and [`decode_header`] read.
+<a href=#473 id=473 data-nosnippet>473</a></span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+<a href=#474 id=474 data-nosnippet>474</a></span><span class="kw">pub struct </span>BundleLimits {
+<a href=#475 id=475 data-nosnippet>475</a>    <span class="doccomment">/// The largest bundle, in bytes. [`DEFAULT_MAX_BYTES`] by default.
+<a href=#476 id=476 data-nosnippet>476</a>    </span><span class="kw">pub </span>max_bytes: usize,
+<a href=#477 id=477 data-nosnippet>477</a>    <span class="doccomment">/// The most CBOR data items in one bundle.
+<a href=#478 id=478 data-nosnippet>478</a>    </span><span class="kw">pub </span>max_items: usize,
+<a href=#479 id=479 data-nosnippet>479</a>}
+<a href=#480 id=480 data-nosnippet>480</a>
+<a href=#481 id=481 data-nosnippet>481</a><span class="kw">impl </span>BundleLimits {
+<a href=#482 id=482 data-nosnippet>482</a>    <span class="doccomment">/// 64 MiB and 4 Mi items.
+<a href=#483 id=483 data-nosnippet>483</a>    </span><span class="kw">pub const </span>DEFAULT: <span class="self">Self </span>= <span class="self">Self </span>{
+<a href=#484 id=484 data-nosnippet>484</a>        max_bytes: DEFAULT_MAX_BYTES,
+<a href=#485 id=485 data-nosnippet>485</a>        max_items: Limits::DEFAULT.max_items,
+<a href=#486 id=486 data-nosnippet>486</a>    };
+<a href=#487 id=487 data-nosnippet>487</a>}
+<a href=#488 id=488 data-nosnippet>488</a>
+<a href=#489 id=489 data-nosnippet>489</a><span class="kw">impl </span>Default <span class="kw">for </span>BundleLimits {
+<a href=#490 id=490 data-nosnippet>490</a>    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
+<a href=#491 id=491 data-nosnippet>491</a>        <span class="self">Self</span>::DEFAULT
+<a href=#492 id=492 data-nosnippet>492</a>    }
+<a href=#493 id=493 data-nosnippet>493</a>}
+<a href=#494 id=494 data-nosnippet>494</a>
+<a href=#495 id=495 data-nosnippet>495</a><span class="doccomment">/// Why bytes are not a bundle this crate reads.
+<a href=#496 id=496 data-nosnippet>496</a></span><span class="attr">#[derive(Clone, Debug, PartialEq, Eq)]
+<a href=#497 id=497 data-nosnippet>497</a></span><span class="kw">pub enum </span>BundleError {
+<a href=#498 id=498 data-nosnippet>498</a>    <span class="doccomment">/// Larger than the limit.
+<a href=#499 id=499 data-nosnippet>499</a>    </span>TooLarge {
+<a href=#500 id=500 data-nosnippet>500</a>        <span class="doccomment">/// The size, in bytes.
+<a href=#501 id=501 data-nosnippet>501</a>        </span>size: usize,
+<a href=#502 id=502 data-nosnippet>502</a>        <span class="doccomment">/// The limit.
+<a href=#503 id=503 data-nosnippet>503</a>        </span>limit: usize,
+<a href=#504 id=504 data-nosnippet>504</a>    },
+<a href=#505 id=505 data-nosnippet>505</a>    <span class="doccomment">/// Not canonical CBOR, or over a CBOR limit.
+<a href=#506 id=506 data-nosnippet>506</a>    </span>Cbor(DecodeError),
+<a href=#507 id=507 data-nosnippet>507</a>    <span class="doccomment">/// The CBOR does not have a bundle's shape.
+<a href=#508 id=508 data-nosnippet>508</a>    </span>Shape(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str),
+<a href=#509 id=509 data-nosnippet>509</a>    <span class="doccomment">/// A required header field is missing.
+<a href=#510 id=510 data-nosnippet>510</a>    </span>Missing(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str),
+<a href=#511 id=511 data-nosnippet>511</a>    <span class="doccomment">/// An integer does not fit its field.
+<a href=#512 id=512 data-nosnippet>512</a>    </span>Overflow(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str),
+<a href=#513 id=513 data-nosnippet>513</a>    <span class="doccomment">/// An ID is not a UUIDv7.
+<a href=#514 id=514 data-nosnippet>514</a>    </span>InvalidId(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str),
+<a href=#515 id=515 data-nosnippet>515</a>    <span class="doccomment">/// A key this reader does not know, and that it must not skip.
+<a href=#516 id=516 data-nosnippet>516</a>    </span>UnknownCriticalKey(i64),
+<a href=#517 id=517 data-nosnippet>517</a>    <span class="doccomment">/// A bundle format this reader does not implement.
+<a href=#518 id=518 data-nosnippet>518</a>    </span>UnsupportedFormat(u64),
+<a href=#519 id=519 data-nosnippet>519</a>    <span class="doccomment">/// A schema major version this reader does not implement.
+<a href=#520 id=520 data-nosnippet>520</a>    </span>UnsupportedSchema(SchemaVersion),
+<a href=#521 id=521 data-nosnippet>521</a>    <span class="doccomment">/// The body does not read as a policy.
+<a href=#522 id=522 data-nosnippet>522</a>    </span>Body(serial::Error),
+<a href=#523 id=523 data-nosnippet>523</a>    <span class="doccomment">/// The body is not in canonical form: for example, its rules are not
+<a href=#524 id=524 data-nosnippet>524</a>    /// sorted, or a field holds a default the writer leaves out.
+<a href=#525 id=525 data-nosnippet>525</a>    </span>NonCanonical,
+<a href=#526 id=526 data-nosnippet>526</a>}
+<a href=#527 id=527 data-nosnippet>527</a>
+<a href=#528 id=528 data-nosnippet>528</a><span class="kw">impl </span>fmt::Display <span class="kw">for </span>BundleError {
+<a href=#529 id=529 data-nosnippet>529</a>    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; fmt::Result {
+<a href=#530 id=530 data-nosnippet>530</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#531 id=531 data-nosnippet>531</a>            <span class="self">Self</span>::TooLarge { size, limit } =&gt; <span class="macro">write!</span>(
+<a href=#532 id=532 data-nosnippet>532</a>                f,
+<a href=#533 id=533 data-nosnippet>533</a>                <span class="string">"the bundle is {size} bytes, over the limit of {limit}; split it into a group bundle and a device bundle, or replace hash rules with signer rules"
+<a href=#534 id=534 data-nosnippet>534</a>            </span>),
+<a href=#535 id=535 data-nosnippet>535</a>            <span class="self">Self</span>::Cbor(e) =&gt; <span class="macro">write!</span>(f, <span class="string">"not canonical CBOR: {e}"</span>),
+<a href=#536 id=536 data-nosnippet>536</a>            <span class="self">Self</span>::Shape(what) =&gt; <span class="macro">write!</span>(f, <span class="string">"not a bundle: {what}"</span>),
+<a href=#537 id=537 data-nosnippet>537</a>            <span class="self">Self</span>::Missing(field) =&gt; <span class="macro">write!</span>(f, <span class="string">"the header has no `{field}`"</span>),
+<a href=#538 id=538 data-nosnippet>538</a>            <span class="self">Self</span>::Overflow(field) =&gt; <span class="macro">write!</span>(f, <span class="string">"`{field}` is out of range"</span>),
+<a href=#539 id=539 data-nosnippet>539</a>            <span class="self">Self</span>::InvalidId(field) =&gt; <span class="macro">write!</span>(f, <span class="string">"`{field}` is not a UUIDv7"</span>),
+<a href=#540 id=540 data-nosnippet>540</a>            <span class="self">Self</span>::UnknownCriticalKey(id) =&gt; <span class="macro">write!</span>(f, <span class="string">"unknown critical key {id}"</span>),
+<a href=#541 id=541 data-nosnippet>541</a>            <span class="self">Self</span>::UnsupportedFormat(v) =&gt; <span class="macro">write!</span>(
+<a href=#542 id=542 data-nosnippet>542</a>                f,
+<a href=#543 id=543 data-nosnippet>543</a>                <span class="string">"bundle format {v} is not supported: this reader implements {FORMAT_VERSION}"
+<a href=#544 id=544 data-nosnippet>544</a>            </span>),
+<a href=#545 id=545 data-nosnippet>545</a>            <span class="self">Self</span>::UnsupportedSchema(v) =&gt; <span class="macro">write!</span>(
+<a href=#546 id=546 data-nosnippet>546</a>                f,
+<a href=#547 id=547 data-nosnippet>547</a>                <span class="string">"schema version {v} is not supported: this reader implements {}"</span>,
+<a href=#548 id=548 data-nosnippet>548</a>                <span class="kw">crate</span>::schema::CURRENT
+<a href=#549 id=549 data-nosnippet>549</a>            ),
+<a href=#550 id=550 data-nosnippet>550</a>            <span class="self">Self</span>::Body(e) =&gt; <span class="macro">write!</span>(f, <span class="string">"invalid bundle body: {e}"</span>),
+<a href=#551 id=551 data-nosnippet>551</a>            <span class="self">Self</span>::NonCanonical =&gt; f.write_str(<span class="string">"the bundle body is not in canonical form"</span>),
+<a href=#552 id=552 data-nosnippet>552</a>        }
+<a href=#553 id=553 data-nosnippet>553</a>    }
+<a href=#554 id=554 data-nosnippet>554</a>}
+<a href=#555 id=555 data-nosnippet>555</a>
+<a href=#556 id=556 data-nosnippet>556</a><span class="kw">impl </span>std::error::Error <span class="kw">for </span>BundleError {}
+<a href=#557 id=557 data-nosnippet>557</a>
+<a href=#558 id=558 data-nosnippet>558</a><span class="kw">fn </span>k(name: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str) -&gt; Value {
+<a href=#559 id=559 data-nosnippet>559</a>    <span class="comment">// Every name used here is registered; `keys` tests that.
+<a href=#560 id=560 data-nosnippet>560</a>    </span>Value::int(keys::id(name).unwrap_or(i64::MIN))
+<a href=#561 id=561 data-nosnippet>561</a>}
+<a href=#562 id=562 data-nosnippet>562</a>
+<a href=#563 id=563 data-nosnippet>563</a><span class="kw">fn </span>uuid(id: Uuid7) -&gt; Value {
+<a href=#564 id=564 data-nosnippet>564</a>    Value::Bytes(id.as_bytes().to_vec())
+<a href=#565 id=565 data-nosnippet>565</a>}
+<a href=#566 id=566 data-nosnippet>566</a>
+<a href=#567 id=567 data-nosnippet>567</a><span class="kw">fn </span>triple(a: u64, b: u64, c: u64) -&gt; Value {
+<a href=#568 id=568 data-nosnippet>568</a>    Value::Array(<span class="macro">vec!</span>[Value::Uint(a), Value::Uint(b), Value::Uint(c)])
+<a href=#569 id=569 data-nosnippet>569</a>}
+<a href=#570 id=570 data-nosnippet>570</a>
+<a href=#571 id=571 data-nosnippet>571</a><span class="kw">fn </span>map(entries: Vec&lt;(Value, Value)&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;Value, serial::Error&gt; {
+<a href=#572 id=572 data-nosnippet>572</a>    Map::new(entries)
+<a href=#573 id=573 data-nosnippet>573</a>        .map(Value::Map)
+<a href=#574 id=574 data-nosnippet>574</a>        .map_err(serial::Error::Encode)
+<a href=#575 id=575 data-nosnippet>575</a>}
+<a href=#576 id=576 data-nosnippet>576</a>
+<a href=#577 id=577 data-nosnippet>577</a><span class="kw">impl </span>Header {
+<a href=#578 id=578 data-nosnippet>578</a>    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>to_value(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Value, serial::Error&gt; {
+<a href=#579 id=579 data-nosnippet>579</a>        <span class="kw">let </span>(scope_key, scope_id) = <span class="kw">match </span><span class="self">self</span>.target.scope {
+<a href=#580 id=580 data-nosnippet>580</a>            TargetScope::Group(id) =&gt; (<span class="string">"group"</span>, id),
+<a href=#581 id=581 data-nosnippet>581</a>            TargetScope::Device(id) =&gt; (<span class="string">"device"</span>, id),
+<a href=#582 id=582 data-nosnippet>582</a>        };
+<a href=#583 id=583 data-nosnippet>583</a>        <span class="kw">let </span>s = <span class="self">self</span>.schema_version;
+<a href=#584 id=584 data-nosnippet>584</a>        <span class="kw">let </span>a = <span class="self">self</span>.min_agent_version;
+<a href=#585 id=585 data-nosnippet>585</a>        <span class="kw">let </span><span class="kw-2">mut </span>entries = <span class="macro">vec!</span>[
+<a href=#586 id=586 data-nosnippet>586</a>            (k(<span class="string">"format_version"</span>), Value::Uint(<span class="self">self</span>.format_version.into())),
+<a href=#587 id=587 data-nosnippet>587</a>            (k(<span class="string">"schema_version"</span>), triple(s.major, s.minor, s.patch)),
+<a href=#588 id=588 data-nosnippet>588</a>            (k(<span class="string">"tenant"</span>), uuid(<span class="self">self</span>.target.tenant)),
+<a href=#589 id=589 data-nosnippet>589</a>            (k(<span class="string">"target"</span>), map(<span class="macro">vec!</span>[(k(scope_key), uuid(scope_id))])<span class="question-mark">?</span>),
+<a href=#590 id=590 data-nosnippet>590</a>            (k(<span class="string">"policy_version"</span>), Value::Uint(<span class="self">self</span>.policy_version)),
+<a href=#591 id=591 data-nosnippet>591</a>            (
+<a href=#592 id=592 data-nosnippet>592</a>                k(<span class="string">"min_agent_version"</span>),
+<a href=#593 id=593 data-nosnippet>593</a>                triple(a.major.into(), a.minor.into(), a.patch.into()),
+<a href=#594 id=594 data-nosnippet>594</a>            ),
+<a href=#595 id=595 data-nosnippet>595</a>            (k(<span class="string">"generated_at"</span>), Value::int(<span class="self">self</span>.generated_at)),
+<a href=#596 id=596 data-nosnippet>596</a>        ];
+<a href=#597 id=597 data-nosnippet>597</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(t) = <span class="self">self</span>.expires_at {
+<a href=#598 id=598 data-nosnippet>598</a>            entries.push((k(<span class="string">"expires_at"</span>), Value::int(t)));
 <a href=#599 id=599 data-nosnippet>599</a>        }
-<a href=#600 id=600 data-nosnippet>600</a>        <span class="kw">let </span><span class="kw-2">mut </span>h = HeaderFields::default();
-<a href=#601 id=601 data-nosnippet>601</a>        <span class="kw">for </span>(key, v) <span class="kw">in </span>m.into_entries() {
-<a href=#602 id=602 data-nosnippet>602</a>            <span class="kw">let </span><span class="prelude-val">Some</span>(id) = key.as_i64() <span class="kw">else </span>{
-<a href=#603 id=603 data-nosnippet>603</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::Shape(<span class="string">"a header key is not an integer"</span>));
-<a href=#604 id=604 data-nosnippet>604</a>            };
-<a href=#605 id=605 data-nosnippet>605</a>            <span class="kw">match </span>keys::name(id) {
-<a href=#606 id=606 data-nosnippet>606</a>                <span class="prelude-val">Some</span>(<span class="string">"format_version"</span>) =&gt; {}
-<a href=#607 id=607 data-nosnippet>607</a>                <span class="prelude-val">Some</span>(<span class="string">"schema_version"</span>) =&gt; {
-<a href=#608 id=608 data-nosnippet>608</a>                    <span class="kw">let </span>[a, b, c] = ints(v, <span class="string">"schema_version"</span>)<span class="question-mark">?</span>;
-<a href=#609 id=609 data-nosnippet>609</a>                    h.schema_version = <span class="prelude-val">Some</span>(SchemaVersion::new(a, b, c));
-<a href=#610 id=610 data-nosnippet>610</a>                }
-<a href=#611 id=611 data-nosnippet>611</a>                <span class="prelude-val">Some</span>(<span class="string">"tenant"</span>) =&gt; h.tenant = <span class="prelude-val">Some</span>(read_uuid(v, <span class="string">"tenant"</span>)<span class="question-mark">?</span>),
-<a href=#612 id=612 data-nosnippet>612</a>                <span class="prelude-val">Some</span>(<span class="string">"target"</span>) =&gt; h.target = <span class="prelude-val">Some</span>(read_target(v)<span class="question-mark">?</span>),
-<a href=#613 id=613 data-nosnippet>613</a>                <span class="prelude-val">Some</span>(<span class="string">"policy_version"</span>) =&gt; h.policy_version = <span class="prelude-val">Some</span>(uint(v, <span class="string">"policy_version"</span>)<span class="question-mark">?</span>),
-<a href=#614 id=614 data-nosnippet>614</a>                <span class="prelude-val">Some</span>(<span class="string">"min_agent_version"</span>) =&gt; {
-<a href=#615 id=615 data-nosnippet>615</a>                    <span class="kw">let </span>[a, b, c] = ints(v, <span class="string">"min_agent_version"</span>)<span class="question-mark">?</span>;
-<a href=#616 id=616 data-nosnippet>616</a>                    <span class="kw">let </span>n = |x: u64| {
-<a href=#617 id=617 data-nosnippet>617</a>                        u32::try_from(x).map_err(|<span class="kw">_</span>| BundleError::Overflow(<span class="string">"min_agent_version"</span>))
-<a href=#618 id=618 data-nosnippet>618</a>                    };
-<a href=#619 id=619 data-nosnippet>619</a>                    h.min_agent_version = <span class="prelude-val">Some</span>(AgentVersion::new(n(a)<span class="question-mark">?</span>, n(b)<span class="question-mark">?</span>, n(c)<span class="question-mark">?</span>));
-<a href=#620 id=620 data-nosnippet>620</a>                }
-<a href=#621 id=621 data-nosnippet>621</a>                <span class="prelude-val">Some</span>(<span class="string">"generated_at"</span>) =&gt; h.generated_at = <span class="prelude-val">Some</span>(int(<span class="kw-2">&amp;</span>v, <span class="string">"generated_at"</span>)<span class="question-mark">?</span>),
-<a href=#622 id=622 data-nosnippet>622</a>                <span class="prelude-val">Some</span>(<span class="string">"expires_at"</span>) =&gt; h.expires_at = <span class="prelude-val">Some</span>(int(<span class="kw-2">&amp;</span>v, <span class="string">"expires_at"</span>)<span class="question-mark">?</span>),
-<a href=#623 id=623 data-nosnippet>623</a>                <span class="kw">_ if </span>id &lt; <span class="number">0 </span>=&gt; {}
-<a href=#624 id=624 data-nosnippet>624</a>                <span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::UnknownCriticalKey(id)),
-<a href=#625 id=625 data-nosnippet>625</a>            }
-<a href=#626 id=626 data-nosnippet>626</a>        }
-<a href=#627 id=627 data-nosnippet>627</a>        <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
-<a href=#628 id=628 data-nosnippet>628</a>            format_version: FORMAT_VERSION,
-<a href=#629 id=629 data-nosnippet>629</a>            schema_version: h
-<a href=#630 id=630 data-nosnippet>630</a>                .schema_version
-<a href=#631 id=631 data-nosnippet>631</a>                .ok_or(BundleError::Missing(<span class="string">"schema_version"</span>))<span class="question-mark">?</span>,
-<a href=#632 id=632 data-nosnippet>632</a>            target: Target {
-<a href=#633 id=633 data-nosnippet>633</a>                tenant: h.tenant.ok_or(BundleError::Missing(<span class="string">"tenant"</span>))<span class="question-mark">?</span>,
-<a href=#634 id=634 data-nosnippet>634</a>                scope: h.target.ok_or(BundleError::Missing(<span class="string">"target"</span>))<span class="question-mark">?</span>,
-<a href=#635 id=635 data-nosnippet>635</a>            },
-<a href=#636 id=636 data-nosnippet>636</a>            policy_version: h
-<a href=#637 id=637 data-nosnippet>637</a>                .policy_version
-<a href=#638 id=638 data-nosnippet>638</a>                .ok_or(BundleError::Missing(<span class="string">"policy_version"</span>))<span class="question-mark">?</span>,
-<a href=#639 id=639 data-nosnippet>639</a>            min_agent_version: h
-<a href=#640 id=640 data-nosnippet>640</a>                .min_agent_version
-<a href=#641 id=641 data-nosnippet>641</a>                .ok_or(BundleError::Missing(<span class="string">"min_agent_version"</span>))<span class="question-mark">?</span>,
-<a href=#642 id=642 data-nosnippet>642</a>            generated_at: h.generated_at.ok_or(BundleError::Missing(<span class="string">"generated_at"</span>))<span class="question-mark">?</span>,
-<a href=#643 id=643 data-nosnippet>643</a>            expires_at: h.expires_at,
-<a href=#644 id=644 data-nosnippet>644</a>        })
-<a href=#645 id=645 data-nosnippet>645</a>    }
-<a href=#646 id=646 data-nosnippet>646</a>}
-<a href=#647 id=647 data-nosnippet>647</a>
-<a href=#648 id=648 data-nosnippet>648</a><span class="attr">#[derive(Default)]
-<a href=#649 id=649 data-nosnippet>649</a></span><span class="kw">struct </span>HeaderFields {
-<a href=#650 id=650 data-nosnippet>650</a>    schema_version: <span class="prelude-ty">Option</span>&lt;SchemaVersion&gt;,
-<a href=#651 id=651 data-nosnippet>651</a>    tenant: <span class="prelude-ty">Option</span>&lt;Uuid7&gt;,
-<a href=#652 id=652 data-nosnippet>652</a>    target: <span class="prelude-ty">Option</span>&lt;TargetScope&gt;,
-<a href=#653 id=653 data-nosnippet>653</a>    policy_version: <span class="prelude-ty">Option</span>&lt;u64&gt;,
-<a href=#654 id=654 data-nosnippet>654</a>    min_agent_version: <span class="prelude-ty">Option</span>&lt;AgentVersion&gt;,
-<a href=#655 id=655 data-nosnippet>655</a>    generated_at: <span class="prelude-ty">Option</span>&lt;i64&gt;,
-<a href=#656 id=656 data-nosnippet>656</a>    expires_at: <span class="prelude-ty">Option</span>&lt;i64&gt;,
-<a href=#657 id=657 data-nosnippet>657</a>}
-<a href=#658 id=658 data-nosnippet>658</a>
-<a href=#659 id=659 data-nosnippet>659</a><span class="kw">fn </span>uint(v: Value, field: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str) -&gt; <span class="prelude-ty">Result</span>&lt;u64, BundleError&gt; {
-<a href=#660 id=660 data-nosnippet>660</a>    <span class="kw">match </span>v {
-<a href=#661 id=661 data-nosnippet>661</a>        Value::Uint(n) =&gt; <span class="prelude-val">Ok</span>(n),
-<a href=#662 id=662 data-nosnippet>662</a>        Value::Nint(<span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(BundleError::Overflow(field)),
-<a href=#663 id=663 data-nosnippet>663</a>        <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(BundleError::Shape(<span class="string">"an integer field holds something else"</span>)),
-<a href=#664 id=664 data-nosnippet>664</a>    }
-<a href=#665 id=665 data-nosnippet>665</a>}
-<a href=#666 id=666 data-nosnippet>666</a>
-<a href=#667 id=667 data-nosnippet>667</a><span class="kw">fn </span>int(v: <span class="kw-2">&amp;</span>Value, field: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str) -&gt; <span class="prelude-ty">Result</span>&lt;i64, BundleError&gt; {
-<a href=#668 id=668 data-nosnippet>668</a>    <span class="kw">match </span>v {
-<a href=#669 id=669 data-nosnippet>669</a>        Value::Uint(<span class="kw">_</span>) | Value::Nint(<span class="kw">_</span>) =&gt; v.as_i64().ok_or(BundleError::Overflow(field)),
-<a href=#670 id=670 data-nosnippet>670</a>        <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(BundleError::Shape(<span class="string">"an integer field holds something else"</span>)),
-<a href=#671 id=671 data-nosnippet>671</a>    }
-<a href=#672 id=672 data-nosnippet>672</a>}
-<a href=#673 id=673 data-nosnippet>673</a>
-<a href=#674 id=674 data-nosnippet>674</a><span class="kw">fn </span>ints(v: Value, field: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str) -&gt; <span class="prelude-ty">Result</span>&lt;[u64; <span class="number">3</span>], BundleError&gt; {
-<a href=#675 id=675 data-nosnippet>675</a>    <span class="kw">let </span>Value::Array(items) = v <span class="kw">else </span>{
-<a href=#676 id=676 data-nosnippet>676</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::Shape(<span class="string">"a version is not an array"</span>));
-<a href=#677 id=677 data-nosnippet>677</a>    };
-<a href=#678 id=678 data-nosnippet>678</a>    <span class="kw">let </span>parts: Vec&lt;u64&gt; = items
-<a href=#679 id=679 data-nosnippet>679</a>        .into_iter()
-<a href=#680 id=680 data-nosnippet>680</a>        .map(|x| uint(x, field))
-<a href=#681 id=681 data-nosnippet>681</a>        .collect::&lt;<span class="prelude-ty">Result</span>&lt;<span class="kw">_</span>, <span class="kw">_</span>&gt;&gt;()<span class="question-mark">?</span>;
-<a href=#682 id=682 data-nosnippet>682</a>    parts
-<a href=#683 id=683 data-nosnippet>683</a>        .try_into()
-<a href=#684 id=684 data-nosnippet>684</a>        .map_err(|<span class="kw">_</span>| BundleError::Shape(<span class="string">"a version is not three integers"</span>))
-<a href=#685 id=685 data-nosnippet>685</a>}
-<a href=#686 id=686 data-nosnippet>686</a>
-<a href=#687 id=687 data-nosnippet>687</a><span class="kw">fn </span>read_uuid(v: Value, field: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str) -&gt; <span class="prelude-ty">Result</span>&lt;Uuid7, BundleError&gt; {
-<a href=#688 id=688 data-nosnippet>688</a>    <span class="kw">let </span>Value::Bytes(b) = v <span class="kw">else </span>{
-<a href=#689 id=689 data-nosnippet>689</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::Shape(<span class="string">"an ID is not a byte string"</span>));
-<a href=#690 id=690 data-nosnippet>690</a>    };
-<a href=#691 id=691 data-nosnippet>691</a>    <span class="kw">let </span>bytes: [u8; <span class="number">16</span>] = b.try_into().map_err(|<span class="kw">_</span>| BundleError::InvalidId(field))<span class="question-mark">?</span>;
-<a href=#692 id=692 data-nosnippet>692</a>    Uuid7::from_bytes(bytes).ok_or(BundleError::InvalidId(field))
-<a href=#693 id=693 data-nosnippet>693</a>}
-<a href=#694 id=694 data-nosnippet>694</a>
-<a href=#695 id=695 data-nosnippet>695</a><span class="kw">fn </span>read_target(v: Value) -&gt; <span class="prelude-ty">Result</span>&lt;TargetScope, BundleError&gt; {
-<a href=#696 id=696 data-nosnippet>696</a>    <span class="kw">let </span>Value::Map(m) = v <span class="kw">else </span>{
-<a href=#697 id=697 data-nosnippet>697</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::Shape(<span class="string">"the target is not a map"</span>));
-<a href=#698 id=698 data-nosnippet>698</a>    };
-<a href=#699 id=699 data-nosnippet>699</a>    <span class="kw">let </span><span class="kw-2">mut </span>entries = m.into_entries();
-<a href=#700 id=700 data-nosnippet>700</a>    <span class="kw">if </span>entries.len() != <span class="number">1 </span>{
-<a href=#701 id=701 data-nosnippet>701</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::Shape(<span class="string">"the target names more than one scope"</span>));
-<a href=#702 id=702 data-nosnippet>702</a>    }
-<a href=#703 id=703 data-nosnippet>703</a>    <span class="kw">let </span>(key, id) = entries.remove(<span class="number">0</span>);
-<a href=#704 id=704 data-nosnippet>704</a>    <span class="kw">match </span>key.as_i64().and_then(keys::name) {
-<a href=#705 id=705 data-nosnippet>705</a>        <span class="prelude-val">Some</span>(<span class="string">"group"</span>) =&gt; <span class="prelude-val">Ok</span>(TargetScope::Group(read_uuid(id, <span class="string">"target"</span>)<span class="question-mark">?</span>)),
-<a href=#706 id=706 data-nosnippet>706</a>        <span class="prelude-val">Some</span>(<span class="string">"device"</span>) =&gt; <span class="prelude-val">Ok</span>(TargetScope::Device(read_uuid(id, <span class="string">"target"</span>)<span class="question-mark">?</span>)),
-<a href=#707 id=707 data-nosnippet>707</a>        <span class="kw">_ </span>=&gt; <span class="kw">match </span>key.as_i64() {
-<a href=#708 id=708 data-nosnippet>708</a>            <span class="prelude-val">Some</span>(id) <span class="kw">if </span>id &gt;= <span class="number">0 </span>=&gt; <span class="prelude-val">Err</span>(BundleError::UnknownCriticalKey(id)),
-<a href=#709 id=709 data-nosnippet>709</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(BundleError::Shape(
-<a href=#710 id=710 data-nosnippet>710</a>                <span class="string">"the target is neither a group nor a device"</span>,
-<a href=#711 id=711 data-nosnippet>711</a>            )),
-<a href=#712 id=712 data-nosnippet>712</a>        },
-<a href=#713 id=713 data-nosnippet>713</a>    }
-<a href=#714 id=714 data-nosnippet>714</a>}
-<a href=#715 id=715 data-nosnippet>715</a>
-<a href=#716 id=716 data-nosnippet>716</a><span class="doccomment">/// Whether `written` is `read` with only ignorable map entries (negative
-<a href=#717 id=717 data-nosnippet>717</a>/// keys) removed: what a reader that drops fields it does not know gives
-<a href=#718 id=718 data-nosnippet>718</a>/// back. Everything else must be identical.
-<a href=#719 id=719 data-nosnippet>719</a></span><span class="kw">fn </span>same_but_dropped(read: <span class="kw-2">&amp;</span>Value, written: <span class="kw-2">&amp;</span>Value) -&gt; bool {
-<a href=#720 id=720 data-nosnippet>720</a>    <span class="kw">match </span>(read, written) {
-<a href=#721 id=721 data-nosnippet>721</a>        (Value::Map(r), Value::Map(w)) =&gt; {
-<a href=#722 id=722 data-nosnippet>722</a>            <span class="kw">let </span><span class="kw-2">mut </span>w = w.entries().iter().peekable();
-<a href=#723 id=723 data-nosnippet>723</a>            <span class="kw">for </span>(key, value) <span class="kw">in </span>r.entries() {
-<a href=#724 id=724 data-nosnippet>724</a>                <span class="kw">match </span>w.peek() {
-<a href=#725 id=725 data-nosnippet>725</a>                    <span class="prelude-val">Some</span>((wk, wv)) <span class="kw">if </span>wk == key =&gt; {
-<a href=#726 id=726 data-nosnippet>726</a>                        <span class="kw">if </span>!same_but_dropped(value, wv) {
-<a href=#727 id=727 data-nosnippet>727</a>                            <span class="kw">return </span><span class="bool-val">false</span>;
-<a href=#728 id=728 data-nosnippet>728</a>                        }
-<a href=#729 id=729 data-nosnippet>729</a>                        w.next();
-<a href=#730 id=730 data-nosnippet>730</a>                    }
-<a href=#731 id=731 data-nosnippet>731</a>                    <span class="kw">_ if </span>key.as_i64().is_some_and(|id| id &lt; <span class="number">0</span>) =&gt; {}
-<a href=#732 id=732 data-nosnippet>732</a>                    <span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="bool-val">false</span>,
-<a href=#733 id=733 data-nosnippet>733</a>                }
-<a href=#734 id=734 data-nosnippet>734</a>            }
-<a href=#735 id=735 data-nosnippet>735</a>            w.next().is_none()
-<a href=#736 id=736 data-nosnippet>736</a>        }
-<a href=#737 id=737 data-nosnippet>737</a>        (Value::Array(r), Value::Array(w)) =&gt; {
-<a href=#738 id=738 data-nosnippet>738</a>            r.len() == w.len() &amp;&amp; r.iter().zip(w).all(|(a, b)| same_but_dropped(a, b))
-<a href=#739 id=739 data-nosnippet>739</a>        }
-<a href=#740 id=740 data-nosnippet>740</a>        <span class="kw">_ </span>=&gt; read == written,
-<a href=#741 id=741 data-nosnippet>741</a>    }
-<a href=#742 id=742 data-nosnippet>742</a>}
-<a href=#743 id=743 data-nosnippet>743</a>
-<a href=#744 id=744 data-nosnippet>744</a><span class="doccomment">/// Splits `bytes` into the header item and the rest, checking only the
-<a href=#745 id=745 data-nosnippet>745</a>/// outer array and the size.
-<a href=#746 id=746 data-nosnippet>746</a></span><span class="kw">fn </span>split(bytes: <span class="kw-2">&amp;</span>[u8], limits: <span class="kw-2">&amp;</span>BundleLimits) -&gt; <span class="prelude-ty">Result</span>&lt;(), BundleError&gt; {
-<a href=#747 id=747 data-nosnippet>747</a>    <span class="kw">if </span>bytes.len() &gt; limits.max_bytes {
-<a href=#748 id=748 data-nosnippet>748</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::TooLarge {
-<a href=#749 id=749 data-nosnippet>749</a>            size: bytes.len(),
-<a href=#750 id=750 data-nosnippet>750</a>            limit: limits.max_bytes,
-<a href=#751 id=751 data-nosnippet>751</a>        });
-<a href=#752 id=752 data-nosnippet>752</a>    }
-<a href=#753 id=753 data-nosnippet>753</a>    <span class="comment">// `[header, body]`: an array of two items, 0x82.
-<a href=#754 id=754 data-nosnippet>754</a>    </span><span class="kw">match </span>bytes.first() {
-<a href=#755 id=755 data-nosnippet>755</a>        <span class="prelude-val">Some</span>(<span class="number">0x82</span>) =&gt; <span class="prelude-val">Ok</span>(()),
-<a href=#756 id=756 data-nosnippet>756</a>        <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(BundleError::Shape(<span class="string">"not an array of a header and a body"</span>)),
-<a href=#757 id=757 data-nosnippet>757</a>    }
-<a href=#758 id=758 data-nosnippet>758</a>}
-<a href=#759 id=759 data-nosnippet>759</a>
-<a href=#760 id=760 data-nosnippet>760</a><span class="doccomment">/// The most data items a header can have, with room for ignorable fields.
-<a href=#761 id=761 data-nosnippet>761</a></span><span class="kw">const </span>HEADER_ITEMS: usize = <span class="number">256</span>;
-<a href=#762 id=762 data-nosnippet>762</a>
-<a href=#763 id=763 data-nosnippet>763</a><span class="doccomment">/// Reads only the header of a bundle. The body is not read or checked, so
-<a href=#764 id=764 data-nosnippet>764</a>/// this is cheap on a large bundle, and safe on untrusted input: the
-<a href=#765 id=765 data-nosnippet>765</a>/// header is canonical CBOR and bounded to a few hundred items.
-<a href=#766 id=766 data-nosnippet>766</a>///
-<a href=#767 id=767 data-nosnippet>767</a>/// `palisade-proto` calls this for the envelope checks (#225), and
-<a href=#768 id=768 data-nosnippet>768</a>/// [`PolicyBundle::decode`] after the signature verifies.
-<a href=#769 id=769 data-nosnippet>769</a>///
-<a href=#770 id=770 data-nosnippet>770</a>/// # Errors
-<a href=#771 id=771 data-nosnippet>771</a>///
-<a href=#772 id=772 data-nosnippet>772</a>/// [`BundleError`] if the bytes are over the size limit, do not start with
-<a href=#773 id=773 data-nosnippet>773</a>/// a canonical header, or the header is for another format.
-<a href=#774 id=774 data-nosnippet>774</a></span><span class="kw">pub fn </span>decode_header(bytes: <span class="kw-2">&amp;</span>[u8], limits: <span class="kw-2">&amp;</span>BundleLimits) -&gt; <span class="prelude-ty">Result</span>&lt;Header, BundleError&gt; {
-<a href=#775 id=775 data-nosnippet>775</a>    split(bytes, limits)<span class="question-mark">?</span>;
-<a href=#776 id=776 data-nosnippet>776</a>    <span class="kw">let </span>cbor_limits = Limits {
-<a href=#777 id=777 data-nosnippet>777</a>        max_bytes: limits.max_bytes,
-<a href=#778 id=778 data-nosnippet>778</a>        max_items: HEADER_ITEMS,
-<a href=#779 id=779 data-nosnippet>779</a>        ..Limits::DEFAULT
-<a href=#780 id=780 data-nosnippet>780</a>    };
-<a href=#781 id=781 data-nosnippet>781</a>    <span class="kw">let </span>(value, <span class="kw">_</span>) = cbor::decode_prefix(<span class="kw-2">&amp;</span>bytes[<span class="number">1</span>..], <span class="kw-2">&amp;</span>cbor_limits).map_err(|<span class="kw-2">mut </span>e| {
-<a href=#782 id=782 data-nosnippet>782</a>        e.offset += <span class="number">1</span>;
-<a href=#783 id=783 data-nosnippet>783</a>        BundleError::Cbor(e)
-<a href=#784 id=784 data-nosnippet>784</a>    })<span class="question-mark">?</span>;
-<a href=#785 id=785 data-nosnippet>785</a>    Header::from_value(value)
-<a href=#786 id=786 data-nosnippet>786</a>}
-<a href=#787 id=787 data-nosnippet>787</a>
-<a href=#788 id=788 data-nosnippet>788</a><span class="kw">impl </span>PolicyBundle {
-<a href=#789 id=789 data-nosnippet>789</a>    <span class="doccomment">/// Builds a bundle.
-<a href=#790 id=790 data-nosnippet>790</a>    </span><span class="attr">#[must_use]
-<a href=#791 id=791 data-nosnippet>791</a>    </span><span class="kw">pub const fn </span>new(header: Header, body: Body) -&gt; <span class="self">Self </span>{
-<a href=#792 id=792 data-nosnippet>792</a>        <span class="self">Self </span>{ header, body }
-<a href=#793 id=793 data-nosnippet>793</a>    }
-<a href=#794 id=794 data-nosnippet>794</a>
-<a href=#795 id=795 data-nosnippet>795</a>    <span class="doccomment">/// The canonical bytes.
-<a href=#796 id=796 data-nosnippet>796</a>    ///
-<a href=#797 id=797 data-nosnippet>797</a>    /// # Errors
-<a href=#798 id=798 data-nosnippet>798</a>    ///
-<a href=#799 id=799 data-nosnippet>799</a>    /// [`serial::Error`] if the body holds a name with no registered key,
-<a href=#800 id=800 data-nosnippet>800</a>    /// which the key registry tests rule out.
-<a href=#801 id=801 data-nosnippet>801</a>    </span><span class="kw">pub fn </span>to_bytes(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;u8&gt;, serial::Error&gt; {
-<a href=#802 id=802 data-nosnippet>802</a>        <span class="kw">let </span>value = Value::Array(<span class="macro">vec!</span>[<span class="self">self</span>.header.to_value()<span class="question-mark">?</span>, <span class="self">self</span>.body.to_value()<span class="question-mark">?</span>]);
-<a href=#803 id=803 data-nosnippet>803</a>        cbor::encode(<span class="kw-2">&amp;</span>value).map_err(serial::Error::Encode)
-<a href=#804 id=804 data-nosnippet>804</a>    }
-<a href=#805 id=805 data-nosnippet>805</a>
-<a href=#806 id=806 data-nosnippet>806</a>    <span class="doccomment">/// Reads a bundle, strictly: the CBOR must be canonical, the format
-<a href=#807 id=807 data-nosnippet>807</a>    /// and schema supported, every critical key known, and the body in
-<a href=#808 id=808 data-nosnippet>808</a>    /// canonical form, so that the bytes are exactly what
-<a href=#809 id=809 data-nosnippet>809</a>    /// [`to_bytes`](Self::to_bytes) writes for the result (apart from
-<a href=#810 id=810 data-nosnippet>810</a>    /// ignorable fields this reader does not know, which it drops).
-<a href=#811 id=811 data-nosnippet>811</a>    ///
-<a href=#812 id=812 data-nosnippet>812</a>    /// This does not check `min_agent_version`, and it does not verify a
-<a href=#813 id=813 data-nosnippet>813</a>    /// signature: verification comes first (#225).
-<a href=#814 id=814 data-nosnippet>814</a>    ///
-<a href=#815 id=815 data-nosnippet>815</a>    /// # Errors
-<a href=#816 id=816 data-nosnippet>816</a>    ///
-<a href=#817 id=817 data-nosnippet>817</a>    /// [`BundleError`] for anything else.
-<a href=#818 id=818 data-nosnippet>818</a>    </span><span class="kw">pub fn </span>decode(bytes: <span class="kw-2">&amp;</span>[u8], limits: <span class="kw-2">&amp;</span>BundleLimits) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, BundleError&gt; {
-<a href=#819 id=819 data-nosnippet>819</a>        split(bytes, limits)<span class="question-mark">?</span>;
-<a href=#820 id=820 data-nosnippet>820</a>        <span class="kw">let </span>cbor_limits = Limits {
-<a href=#821 id=821 data-nosnippet>821</a>            max_bytes: limits.max_bytes,
-<a href=#822 id=822 data-nosnippet>822</a>            max_items: limits.max_items,
-<a href=#823 id=823 data-nosnippet>823</a>            ..Limits::DEFAULT
-<a href=#824 id=824 data-nosnippet>824</a>        };
-<a href=#825 id=825 data-nosnippet>825</a>        <span class="kw">let </span>value = cbor::decode_with_limits(bytes, <span class="kw-2">&amp;</span>cbor_limits).map_err(BundleError::Cbor)<span class="question-mark">?</span>;
-<a href=#826 id=826 data-nosnippet>826</a>        <span class="kw">let </span>Value::Array(<span class="kw-2">mut </span>items) = value <span class="kw">else </span>{
-<a href=#827 id=827 data-nosnippet>827</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::Shape(<span class="string">"not an array"</span>));
-<a href=#828 id=828 data-nosnippet>828</a>        };
-<a href=#829 id=829 data-nosnippet>829</a>        <span class="kw">let </span>body_value = items
-<a href=#830 id=830 data-nosnippet>830</a>            .pop()
-<a href=#831 id=831 data-nosnippet>831</a>            .ok_or(BundleError::Shape(<span class="string">"not an array of a header and a body"</span>))<span class="question-mark">?</span>;
-<a href=#832 id=832 data-nosnippet>832</a>        <span class="kw">let </span>header_value = items
-<a href=#833 id=833 data-nosnippet>833</a>            .pop()
-<a href=#834 id=834 data-nosnippet>834</a>            .ok_or(BundleError::Shape(<span class="string">"not an array of a header and a body"</span>))<span class="question-mark">?</span>;
-<a href=#835 id=835 data-nosnippet>835</a>        <span class="kw">let </span>header = Header::from_value(header_value.clone())<span class="question-mark">?</span>;
-<a href=#836 id=836 data-nosnippet>836</a>        <span class="kw">if </span>!header.schema_version.is_readable_by(<span class="kw">crate</span>::schema::CURRENT) {
-<a href=#837 id=837 data-nosnippet>837</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::UnsupportedSchema(header.schema_version));
-<a href=#838 id=838 data-nosnippet>838</a>        }
-<a href=#839 id=839 data-nosnippet>839</a>        <span class="kw">let </span>body = Body::from_value(body_value.clone()).map_err(|e| <span class="kw">match </span>e {
-<a href=#840 id=840 data-nosnippet>840</a>            serial::Error::UnknownCriticalKey(id) =&gt; BundleError::UnknownCriticalKey(id),
-<a href=#841 id=841 data-nosnippet>841</a>            e =&gt; BundleError::Body(e),
-<a href=#842 id=842 data-nosnippet>842</a>        })<span class="question-mark">?</span>;
-<a href=#843 id=843 data-nosnippet>843</a>        <span class="comment">// The canonical form of what was read must be what was read, apart
-<a href=#844 id=844 data-nosnippet>844</a>        // from unknown ignorable entries.
-<a href=#845 id=845 data-nosnippet>845</a>        </span><span class="kw">let </span>again = body.sorted().to_value().map_err(BundleError::Body)<span class="question-mark">?</span>;
-<a href=#846 id=846 data-nosnippet>846</a>        <span class="kw">let </span>header_again = header.to_value().map_err(BundleError::Body)<span class="question-mark">?</span>;
-<a href=#847 id=847 data-nosnippet>847</a>        <span class="kw">if </span>!same_but_dropped(<span class="kw-2">&amp;</span>body_value, <span class="kw-2">&amp;</span>again) || !same_but_dropped(<span class="kw-2">&amp;</span>header_value, <span class="kw-2">&amp;</span>header_again)
-<a href=#848 id=848 data-nosnippet>848</a>        {
-<a href=#849 id=849 data-nosnippet>849</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::NonCanonical);
-<a href=#850 id=850 data-nosnippet>850</a>        }
-<a href=#851 id=851 data-nosnippet>851</a>        <span class="prelude-val">Ok</span>(<span class="self">Self </span>{ header, body })
-<a href=#852 id=852 data-nosnippet>852</a>    }
-<a href=#853 id=853 data-nosnippet>853</a>
-<a href=#854 id=854 data-nosnippet>854</a>    <span class="doccomment">/// Validates the body as a policy (#30): decoding checks the encoding
-<a href=#855 id=855 data-nosnippet>855</a>    /// and the model's shape, not the rules validation applies. A loader
-<a href=#856 id=856 data-nosnippet>856</a>    /// calls this after [`decode`](Self::decode) and before it evaluates
-<a href=#857 id=857 data-nosnippet>857</a>    /// anything.
-<a href=#858 id=858 data-nosnippet>858</a>    ///
-<a href=#859 id=859 data-nosnippet>859</a>    /// # Errors
-<a href=#860 id=860 data-nosnippet>860</a>    ///
-<a href=#861 id=861 data-nosnippet>861</a>    /// Every finding of [`PolicyDocument::validate`].
-<a href=#862 id=862 data-nosnippet>862</a>    </span><span class="kw">pub fn </span>validate(
-<a href=#863 id=863 data-nosnippet>863</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#864 id=864 data-nosnippet>864</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw">crate</span>::validate::ValidatedPolicy, Vec&lt;<span class="kw">crate</span>::validate::ValidationError&gt;&gt; {
-<a href=#865 id=865 data-nosnippet>865</a>        <span class="self">self</span>.body.document.clone().validate()
-<a href=#866 id=866 data-nosnippet>866</a>    }
-<a href=#867 id=867 data-nosnippet>867</a>
-<a href=#868 id=868 data-nosnippet>868</a>    <span class="doccomment">/// SHA-256 of the canonical bytes ([`bundle_hash`]).
-<a href=#869 id=869 data-nosnippet>869</a>    ///
-<a href=#870 id=870 data-nosnippet>870</a>    /// # Errors
-<a href=#871 id=871 data-nosnippet>871</a>    ///
-<a href=#872 id=872 data-nosnippet>872</a>    /// As [`to_bytes`](Self::to_bytes).
-<a href=#873 id=873 data-nosnippet>873</a>    </span><span class="kw">pub fn </span>bundle_hash(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Sha256Digest, serial::Error&gt; {
-<a href=#874 id=874 data-nosnippet>874</a>        <span class="self">self</span>.to_bytes().map(|b| bundle_hash(<span class="kw-2">&amp;</span>b))
-<a href=#875 id=875 data-nosnippet>875</a>    }
-<a href=#876 id=876 data-nosnippet>876</a>
-<a href=#877 id=877 data-nosnippet>877</a>    <span class="doccomment">/// SHA-256 over the decision-relevant part of the body: the policy
-<a href=#878 id=878 data-nosnippet>878</a>    /// without its names, descriptions, display-only rule set fields and
-<a href=#879 id=879 data-nosnippet>879</a>    /// revision, and the inlined libraries. The header, the source
-<a href=#880 id=880 data-nosnippet>880</a>    /// revisions and the metadata digest are left out, so a text-only
-<a href=#881 id=881 data-nosnippet>881</a>    /// edit, a new `policy_version` or a new `generated_at` keeps it. It is
-<a href=#882 id=882 data-nosnippet>882</a>    /// meant as the policy part of the decision cache key (#42).
-<a href=#883 id=883 data-nosnippet>883</a>    ///
-<a href=#884 id=884 data-nosnippet>884</a>    /// A cache keyed by it must not hand back a stored [`Decision`] as is:
-<a href=#885 id=885 data-nosnippet>885</a>    /// a decision names the policy revision it was made under
-<a href=#886 id=886 data-nosnippet>886</a>    /// ([`RuleRef::policy_revision`]), and rule names and display IDs, which
-<a href=#887 id=887 data-nosnippet>887</a>    /// this hash leaves out. Re-stamp the revision (and anything else taken
-<a href=#888 id=888 data-nosnippet>888</a>    /// from the current policy) when serving a cached decision, or key the
-<a href=#889 id=889 data-nosnippet>889</a>    /// cache by the bundle hash instead. The engine's cache (#293) keys by
-<a href=#890 id=890 data-nosnippet>890</a>    /// the snapshot generation today, which changes on every swap, so it is
-<a href=#891 id=891 data-nosnippet>891</a>    /// not affected.
-<a href=#892 id=892 data-nosnippet>892</a>    ///
-<a href=#893 id=893 data-nosnippet>893</a>    /// [`Decision`]: crate::decision::Decision
-<a href=#894 id=894 data-nosnippet>894</a>    /// [`RuleRef::policy_revision`]: crate::decision::RuleRef::policy_revision
-<a href=#895 id=895 data-nosnippet>895</a>    ///
-<a href=#896 id=896 data-nosnippet>896</a>    /// # Errors
-<a href=#897 id=897 data-nosnippet>897</a>    ///
-<a href=#898 id=898 data-nosnippet>898</a>    /// As [`to_bytes`](Self::to_bytes).
-<a href=#899 id=899 data-nosnippet>899</a>    </span><span class="kw">pub fn </span>decision_hash(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Sha256Digest, serial::Error&gt; {
-<a href=#900 id=900 data-nosnippet>900</a>        <span class="kw">let </span>doc = serial::to_value(<span class="kw-2">&amp;</span>decision_view(<span class="kw-2">&amp;</span><span class="self">self</span>.body.document))<span class="question-mark">?</span>;
-<a href=#901 id=901 data-nosnippet>901</a>        <span class="kw">let </span>libraries = serial::to_value(<span class="kw-2">&amp;</span><span class="self">self</span>.body.libraries)<span class="question-mark">?</span>;
-<a href=#902 id=902 data-nosnippet>902</a>        <span class="kw">let </span>value = map(<span class="macro">vec!</span>[(k(<span class="string">"document"</span>), doc), (k(<span class="string">"libraries"</span>), libraries)])<span class="question-mark">?</span>;
-<a href=#903 id=903 data-nosnippet>903</a>        <span class="kw">let </span>bytes = cbor::encode(<span class="kw-2">&amp;</span>value).map_err(serial::Error::Encode)<span class="question-mark">?</span>;
-<a href=#904 id=904 data-nosnippet>904</a>        <span class="prelude-val">Ok</span>(Sha256::digest(<span class="kw-2">&amp;</span>bytes).into())
-<a href=#905 id=905 data-nosnippet>905</a>    }
-<a href=#906 id=906 data-nosnippet>906</a>}
-<a href=#907 id=907 data-nosnippet>907</a>
-<a href=#908 id=908 data-nosnippet>908</a><span class="attr">#[cfg(test)]
-<a href=#909 id=909 data-nosnippet>909</a></span><span class="kw">mod </span>tests;
+<a href=#600 id=600 data-nosnippet>600</a>        map(entries)
+<a href=#601 id=601 data-nosnippet>601</a>    }
+<a href=#602 id=602 data-nosnippet>602</a>
+<a href=#603 id=603 data-nosnippet>603</a>    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>from_value(value: Value) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, BundleError&gt; {
+<a href=#604 id=604 data-nosnippet>604</a>        <span class="kw">let </span>Value::Map(m) = value <span class="kw">else </span>{
+<a href=#605 id=605 data-nosnippet>605</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::Shape(<span class="string">"the header is not a map"</span>));
+<a href=#606 id=606 data-nosnippet>606</a>        };
+<a href=#607 id=607 data-nosnippet>607</a>        <span class="comment">// The format version is read first, so a newer format is reported
+<a href=#608 id=608 data-nosnippet>608</a>        // as such rather than as an unknown key.
+<a href=#609 id=609 data-nosnippet>609</a>        </span><span class="kw">let </span>format = <span class="kw">match </span>m.get(<span class="kw-2">&amp;</span>k(<span class="string">"format_version"</span>)) {
+<a href=#610 id=610 data-nosnippet>610</a>            <span class="prelude-val">Some</span>(Value::Uint(v)) =&gt; <span class="kw-2">*</span>v,
+<a href=#611 id=611 data-nosnippet>611</a>            <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::Shape(<span class="string">"`format_version` is not an integer"</span>)),
+<a href=#612 id=612 data-nosnippet>612</a>            <span class="prelude-val">None </span>=&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::Missing(<span class="string">"format_version"</span>)),
+<a href=#613 id=613 data-nosnippet>613</a>        };
+<a href=#614 id=614 data-nosnippet>614</a>        <span class="kw">if </span>format != u64::from(FORMAT_VERSION) {
+<a href=#615 id=615 data-nosnippet>615</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::UnsupportedFormat(format));
+<a href=#616 id=616 data-nosnippet>616</a>        }
+<a href=#617 id=617 data-nosnippet>617</a>        <span class="kw">let </span><span class="kw-2">mut </span>h = HeaderFields::default();
+<a href=#618 id=618 data-nosnippet>618</a>        <span class="kw">for </span>(key, v) <span class="kw">in </span>m.into_entries() {
+<a href=#619 id=619 data-nosnippet>619</a>            <span class="kw">let </span><span class="prelude-val">Some</span>(id) = key.as_i64() <span class="kw">else </span>{
+<a href=#620 id=620 data-nosnippet>620</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::Shape(<span class="string">"a header key is not an integer"</span>));
+<a href=#621 id=621 data-nosnippet>621</a>            };
+<a href=#622 id=622 data-nosnippet>622</a>            <span class="kw">match </span>keys::name(id) {
+<a href=#623 id=623 data-nosnippet>623</a>                <span class="prelude-val">Some</span>(<span class="string">"format_version"</span>) =&gt; {}
+<a href=#624 id=624 data-nosnippet>624</a>                <span class="prelude-val">Some</span>(<span class="string">"schema_version"</span>) =&gt; {
+<a href=#625 id=625 data-nosnippet>625</a>                    <span class="kw">let </span>[a, b, c] = ints(v, <span class="string">"schema_version"</span>)<span class="question-mark">?</span>;
+<a href=#626 id=626 data-nosnippet>626</a>                    h.schema_version = <span class="prelude-val">Some</span>(SchemaVersion::new(a, b, c));
+<a href=#627 id=627 data-nosnippet>627</a>                }
+<a href=#628 id=628 data-nosnippet>628</a>                <span class="prelude-val">Some</span>(<span class="string">"tenant"</span>) =&gt; h.tenant = <span class="prelude-val">Some</span>(read_uuid(v, <span class="string">"tenant"</span>)<span class="question-mark">?</span>),
+<a href=#629 id=629 data-nosnippet>629</a>                <span class="prelude-val">Some</span>(<span class="string">"target"</span>) =&gt; h.target = <span class="prelude-val">Some</span>(read_target(v)<span class="question-mark">?</span>),
+<a href=#630 id=630 data-nosnippet>630</a>                <span class="prelude-val">Some</span>(<span class="string">"policy_version"</span>) =&gt; h.policy_version = <span class="prelude-val">Some</span>(uint(v, <span class="string">"policy_version"</span>)<span class="question-mark">?</span>),
+<a href=#631 id=631 data-nosnippet>631</a>                <span class="prelude-val">Some</span>(<span class="string">"min_agent_version"</span>) =&gt; {
+<a href=#632 id=632 data-nosnippet>632</a>                    <span class="kw">let </span>[a, b, c] = ints(v, <span class="string">"min_agent_version"</span>)<span class="question-mark">?</span>;
+<a href=#633 id=633 data-nosnippet>633</a>                    <span class="kw">let </span>n = |x: u64| {
+<a href=#634 id=634 data-nosnippet>634</a>                        u32::try_from(x).map_err(|<span class="kw">_</span>| BundleError::Overflow(<span class="string">"min_agent_version"</span>))
+<a href=#635 id=635 data-nosnippet>635</a>                    };
+<a href=#636 id=636 data-nosnippet>636</a>                    h.min_agent_version = <span class="prelude-val">Some</span>(AgentVersion::new(n(a)<span class="question-mark">?</span>, n(b)<span class="question-mark">?</span>, n(c)<span class="question-mark">?</span>));
+<a href=#637 id=637 data-nosnippet>637</a>                }
+<a href=#638 id=638 data-nosnippet>638</a>                <span class="prelude-val">Some</span>(<span class="string">"generated_at"</span>) =&gt; h.generated_at = <span class="prelude-val">Some</span>(int(<span class="kw-2">&amp;</span>v, <span class="string">"generated_at"</span>)<span class="question-mark">?</span>),
+<a href=#639 id=639 data-nosnippet>639</a>                <span class="prelude-val">Some</span>(<span class="string">"expires_at"</span>) =&gt; h.expires_at = <span class="prelude-val">Some</span>(int(<span class="kw-2">&amp;</span>v, <span class="string">"expires_at"</span>)<span class="question-mark">?</span>),
+<a href=#640 id=640 data-nosnippet>640</a>                <span class="kw">_ if </span>id &lt; <span class="number">0 </span>=&gt; {}
+<a href=#641 id=641 data-nosnippet>641</a>                <span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::UnknownCriticalKey(id)),
+<a href=#642 id=642 data-nosnippet>642</a>            }
+<a href=#643 id=643 data-nosnippet>643</a>        }
+<a href=#644 id=644 data-nosnippet>644</a>        <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
+<a href=#645 id=645 data-nosnippet>645</a>            format_version: FORMAT_VERSION,
+<a href=#646 id=646 data-nosnippet>646</a>            schema_version: h
+<a href=#647 id=647 data-nosnippet>647</a>                .schema_version
+<a href=#648 id=648 data-nosnippet>648</a>                .ok_or(BundleError::Missing(<span class="string">"schema_version"</span>))<span class="question-mark">?</span>,
+<a href=#649 id=649 data-nosnippet>649</a>            target: Target {
+<a href=#650 id=650 data-nosnippet>650</a>                tenant: h.tenant.ok_or(BundleError::Missing(<span class="string">"tenant"</span>))<span class="question-mark">?</span>,
+<a href=#651 id=651 data-nosnippet>651</a>                scope: h.target.ok_or(BundleError::Missing(<span class="string">"target"</span>))<span class="question-mark">?</span>,
+<a href=#652 id=652 data-nosnippet>652</a>            },
+<a href=#653 id=653 data-nosnippet>653</a>            policy_version: h
+<a href=#654 id=654 data-nosnippet>654</a>                .policy_version
+<a href=#655 id=655 data-nosnippet>655</a>                .ok_or(BundleError::Missing(<span class="string">"policy_version"</span>))<span class="question-mark">?</span>,
+<a href=#656 id=656 data-nosnippet>656</a>            min_agent_version: h
+<a href=#657 id=657 data-nosnippet>657</a>                .min_agent_version
+<a href=#658 id=658 data-nosnippet>658</a>                .ok_or(BundleError::Missing(<span class="string">"min_agent_version"</span>))<span class="question-mark">?</span>,
+<a href=#659 id=659 data-nosnippet>659</a>            generated_at: h.generated_at.ok_or(BundleError::Missing(<span class="string">"generated_at"</span>))<span class="question-mark">?</span>,
+<a href=#660 id=660 data-nosnippet>660</a>            expires_at: h.expires_at,
+<a href=#661 id=661 data-nosnippet>661</a>        })
+<a href=#662 id=662 data-nosnippet>662</a>    }
+<a href=#663 id=663 data-nosnippet>663</a>}
+<a href=#664 id=664 data-nosnippet>664</a>
+<a href=#665 id=665 data-nosnippet>665</a><span class="attr">#[derive(Default)]
+<a href=#666 id=666 data-nosnippet>666</a></span><span class="kw">struct </span>HeaderFields {
+<a href=#667 id=667 data-nosnippet>667</a>    schema_version: <span class="prelude-ty">Option</span>&lt;SchemaVersion&gt;,
+<a href=#668 id=668 data-nosnippet>668</a>    tenant: <span class="prelude-ty">Option</span>&lt;Uuid7&gt;,
+<a href=#669 id=669 data-nosnippet>669</a>    target: <span class="prelude-ty">Option</span>&lt;TargetScope&gt;,
+<a href=#670 id=670 data-nosnippet>670</a>    policy_version: <span class="prelude-ty">Option</span>&lt;u64&gt;,
+<a href=#671 id=671 data-nosnippet>671</a>    min_agent_version: <span class="prelude-ty">Option</span>&lt;AgentVersion&gt;,
+<a href=#672 id=672 data-nosnippet>672</a>    generated_at: <span class="prelude-ty">Option</span>&lt;i64&gt;,
+<a href=#673 id=673 data-nosnippet>673</a>    expires_at: <span class="prelude-ty">Option</span>&lt;i64&gt;,
+<a href=#674 id=674 data-nosnippet>674</a>}
+<a href=#675 id=675 data-nosnippet>675</a>
+<a href=#676 id=676 data-nosnippet>676</a><span class="kw">fn </span>uint(v: Value, field: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str) -&gt; <span class="prelude-ty">Result</span>&lt;u64, BundleError&gt; {
+<a href=#677 id=677 data-nosnippet>677</a>    <span class="kw">match </span>v {
+<a href=#678 id=678 data-nosnippet>678</a>        Value::Uint(n) =&gt; <span class="prelude-val">Ok</span>(n),
+<a href=#679 id=679 data-nosnippet>679</a>        Value::Nint(<span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(BundleError::Overflow(field)),
+<a href=#680 id=680 data-nosnippet>680</a>        <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(BundleError::Shape(<span class="string">"an integer field holds something else"</span>)),
+<a href=#681 id=681 data-nosnippet>681</a>    }
+<a href=#682 id=682 data-nosnippet>682</a>}
+<a href=#683 id=683 data-nosnippet>683</a>
+<a href=#684 id=684 data-nosnippet>684</a><span class="kw">fn </span>int(v: <span class="kw-2">&amp;</span>Value, field: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str) -&gt; <span class="prelude-ty">Result</span>&lt;i64, BundleError&gt; {
+<a href=#685 id=685 data-nosnippet>685</a>    <span class="kw">match </span>v {
+<a href=#686 id=686 data-nosnippet>686</a>        Value::Uint(<span class="kw">_</span>) | Value::Nint(<span class="kw">_</span>) =&gt; v.as_i64().ok_or(BundleError::Overflow(field)),
+<a href=#687 id=687 data-nosnippet>687</a>        <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(BundleError::Shape(<span class="string">"an integer field holds something else"</span>)),
+<a href=#688 id=688 data-nosnippet>688</a>    }
+<a href=#689 id=689 data-nosnippet>689</a>}
+<a href=#690 id=690 data-nosnippet>690</a>
+<a href=#691 id=691 data-nosnippet>691</a><span class="kw">fn </span>ints(v: Value, field: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str) -&gt; <span class="prelude-ty">Result</span>&lt;[u64; <span class="number">3</span>], BundleError&gt; {
+<a href=#692 id=692 data-nosnippet>692</a>    <span class="kw">let </span>Value::Array(items) = v <span class="kw">else </span>{
+<a href=#693 id=693 data-nosnippet>693</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::Shape(<span class="string">"a version is not an array"</span>));
+<a href=#694 id=694 data-nosnippet>694</a>    };
+<a href=#695 id=695 data-nosnippet>695</a>    <span class="kw">let </span>parts: Vec&lt;u64&gt; = items
+<a href=#696 id=696 data-nosnippet>696</a>        .into_iter()
+<a href=#697 id=697 data-nosnippet>697</a>        .map(|x| uint(x, field))
+<a href=#698 id=698 data-nosnippet>698</a>        .collect::&lt;<span class="prelude-ty">Result</span>&lt;<span class="kw">_</span>, <span class="kw">_</span>&gt;&gt;()<span class="question-mark">?</span>;
+<a href=#699 id=699 data-nosnippet>699</a>    parts
+<a href=#700 id=700 data-nosnippet>700</a>        .try_into()
+<a href=#701 id=701 data-nosnippet>701</a>        .map_err(|<span class="kw">_</span>| BundleError::Shape(<span class="string">"a version is not three integers"</span>))
+<a href=#702 id=702 data-nosnippet>702</a>}
+<a href=#703 id=703 data-nosnippet>703</a>
+<a href=#704 id=704 data-nosnippet>704</a><span class="kw">fn </span>read_uuid(v: Value, field: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str) -&gt; <span class="prelude-ty">Result</span>&lt;Uuid7, BundleError&gt; {
+<a href=#705 id=705 data-nosnippet>705</a>    <span class="kw">let </span>Value::Bytes(b) = v <span class="kw">else </span>{
+<a href=#706 id=706 data-nosnippet>706</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::Shape(<span class="string">"an ID is not a byte string"</span>));
+<a href=#707 id=707 data-nosnippet>707</a>    };
+<a href=#708 id=708 data-nosnippet>708</a>    <span class="kw">let </span>bytes: [u8; <span class="number">16</span>] = b.try_into().map_err(|<span class="kw">_</span>| BundleError::InvalidId(field))<span class="question-mark">?</span>;
+<a href=#709 id=709 data-nosnippet>709</a>    Uuid7::from_bytes(bytes).ok_or(BundleError::InvalidId(field))
+<a href=#710 id=710 data-nosnippet>710</a>}
+<a href=#711 id=711 data-nosnippet>711</a>
+<a href=#712 id=712 data-nosnippet>712</a><span class="kw">fn </span>read_target(v: Value) -&gt; <span class="prelude-ty">Result</span>&lt;TargetScope, BundleError&gt; {
+<a href=#713 id=713 data-nosnippet>713</a>    <span class="kw">let </span>Value::Map(m) = v <span class="kw">else </span>{
+<a href=#714 id=714 data-nosnippet>714</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::Shape(<span class="string">"the target is not a map"</span>));
+<a href=#715 id=715 data-nosnippet>715</a>    };
+<a href=#716 id=716 data-nosnippet>716</a>    <span class="kw">let </span><span class="kw-2">mut </span>entries = m.into_entries();
+<a href=#717 id=717 data-nosnippet>717</a>    <span class="kw">if </span>entries.len() != <span class="number">1 </span>{
+<a href=#718 id=718 data-nosnippet>718</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::Shape(<span class="string">"the target names more than one scope"</span>));
+<a href=#719 id=719 data-nosnippet>719</a>    }
+<a href=#720 id=720 data-nosnippet>720</a>    <span class="kw">let </span>(key, id) = entries.remove(<span class="number">0</span>);
+<a href=#721 id=721 data-nosnippet>721</a>    <span class="kw">match </span>key.as_i64().and_then(keys::name) {
+<a href=#722 id=722 data-nosnippet>722</a>        <span class="prelude-val">Some</span>(<span class="string">"group"</span>) =&gt; <span class="prelude-val">Ok</span>(TargetScope::Group(read_uuid(id, <span class="string">"target"</span>)<span class="question-mark">?</span>)),
+<a href=#723 id=723 data-nosnippet>723</a>        <span class="prelude-val">Some</span>(<span class="string">"device"</span>) =&gt; <span class="prelude-val">Ok</span>(TargetScope::Device(read_uuid(id, <span class="string">"target"</span>)<span class="question-mark">?</span>)),
+<a href=#724 id=724 data-nosnippet>724</a>        <span class="kw">_ </span>=&gt; <span class="kw">match </span>key.as_i64() {
+<a href=#725 id=725 data-nosnippet>725</a>            <span class="prelude-val">Some</span>(id) <span class="kw">if </span>id &gt;= <span class="number">0 </span>=&gt; <span class="prelude-val">Err</span>(BundleError::UnknownCriticalKey(id)),
+<a href=#726 id=726 data-nosnippet>726</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(BundleError::Shape(
+<a href=#727 id=727 data-nosnippet>727</a>                <span class="string">"the target is neither a group nor a device"</span>,
+<a href=#728 id=728 data-nosnippet>728</a>            )),
+<a href=#729 id=729 data-nosnippet>729</a>        },
+<a href=#730 id=730 data-nosnippet>730</a>    }
+<a href=#731 id=731 data-nosnippet>731</a>}
+<a href=#732 id=732 data-nosnippet>732</a>
+<a href=#733 id=733 data-nosnippet>733</a><span class="doccomment">/// Whether `written` is `read` with only ignorable map entries (negative
+<a href=#734 id=734 data-nosnippet>734</a>/// keys) removed: what a reader that drops fields it does not know gives
+<a href=#735 id=735 data-nosnippet>735</a>/// back. Everything else must be identical.
+<a href=#736 id=736 data-nosnippet>736</a></span><span class="kw">fn </span>same_but_dropped(read: <span class="kw-2">&amp;</span>Value, written: <span class="kw-2">&amp;</span>Value) -&gt; bool {
+<a href=#737 id=737 data-nosnippet>737</a>    <span class="kw">match </span>(read, written) {
+<a href=#738 id=738 data-nosnippet>738</a>        (Value::Map(r), Value::Map(w)) =&gt; {
+<a href=#739 id=739 data-nosnippet>739</a>            <span class="kw">let </span><span class="kw-2">mut </span>w = w.entries().iter().peekable();
+<a href=#740 id=740 data-nosnippet>740</a>            <span class="kw">for </span>(key, value) <span class="kw">in </span>r.entries() {
+<a href=#741 id=741 data-nosnippet>741</a>                <span class="kw">match </span>w.peek() {
+<a href=#742 id=742 data-nosnippet>742</a>                    <span class="prelude-val">Some</span>((wk, wv)) <span class="kw">if </span>wk == key =&gt; {
+<a href=#743 id=743 data-nosnippet>743</a>                        <span class="kw">if </span>!same_but_dropped(value, wv) {
+<a href=#744 id=744 data-nosnippet>744</a>                            <span class="kw">return </span><span class="bool-val">false</span>;
+<a href=#745 id=745 data-nosnippet>745</a>                        }
+<a href=#746 id=746 data-nosnippet>746</a>                        w.next();
+<a href=#747 id=747 data-nosnippet>747</a>                    }
+<a href=#748 id=748 data-nosnippet>748</a>                    <span class="kw">_ if </span>key.as_i64().is_some_and(|id| id &lt; <span class="number">0</span>) =&gt; {}
+<a href=#749 id=749 data-nosnippet>749</a>                    <span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="bool-val">false</span>,
+<a href=#750 id=750 data-nosnippet>750</a>                }
+<a href=#751 id=751 data-nosnippet>751</a>            }
+<a href=#752 id=752 data-nosnippet>752</a>            w.next().is_none()
+<a href=#753 id=753 data-nosnippet>753</a>        }
+<a href=#754 id=754 data-nosnippet>754</a>        (Value::Array(r), Value::Array(w)) =&gt; {
+<a href=#755 id=755 data-nosnippet>755</a>            r.len() == w.len() &amp;&amp; r.iter().zip(w).all(|(a, b)| same_but_dropped(a, b))
+<a href=#756 id=756 data-nosnippet>756</a>        }
+<a href=#757 id=757 data-nosnippet>757</a>        <span class="kw">_ </span>=&gt; read == written,
+<a href=#758 id=758 data-nosnippet>758</a>    }
+<a href=#759 id=759 data-nosnippet>759</a>}
+<a href=#760 id=760 data-nosnippet>760</a>
+<a href=#761 id=761 data-nosnippet>761</a><span class="doccomment">/// Splits `bytes` into the header item and the rest, checking only the
+<a href=#762 id=762 data-nosnippet>762</a>/// outer array and the size.
+<a href=#763 id=763 data-nosnippet>763</a></span><span class="kw">fn </span>split(bytes: <span class="kw-2">&amp;</span>[u8], limits: <span class="kw-2">&amp;</span>BundleLimits) -&gt; <span class="prelude-ty">Result</span>&lt;(), BundleError&gt; {
+<a href=#764 id=764 data-nosnippet>764</a>    <span class="kw">if </span>bytes.len() &gt; limits.max_bytes {
+<a href=#765 id=765 data-nosnippet>765</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::TooLarge {
+<a href=#766 id=766 data-nosnippet>766</a>            size: bytes.len(),
+<a href=#767 id=767 data-nosnippet>767</a>            limit: limits.max_bytes,
+<a href=#768 id=768 data-nosnippet>768</a>        });
+<a href=#769 id=769 data-nosnippet>769</a>    }
+<a href=#770 id=770 data-nosnippet>770</a>    <span class="comment">// `[header, body]`: an array of two items, 0x82.
+<a href=#771 id=771 data-nosnippet>771</a>    </span><span class="kw">match </span>bytes.first() {
+<a href=#772 id=772 data-nosnippet>772</a>        <span class="prelude-val">Some</span>(<span class="number">0x82</span>) =&gt; <span class="prelude-val">Ok</span>(()),
+<a href=#773 id=773 data-nosnippet>773</a>        <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(BundleError::Shape(<span class="string">"not an array of a header and a body"</span>)),
+<a href=#774 id=774 data-nosnippet>774</a>    }
+<a href=#775 id=775 data-nosnippet>775</a>}
+<a href=#776 id=776 data-nosnippet>776</a>
+<a href=#777 id=777 data-nosnippet>777</a><span class="doccomment">/// The most data items a header can have, with room for ignorable fields.
+<a href=#778 id=778 data-nosnippet>778</a></span><span class="kw">const </span>HEADER_ITEMS: usize = <span class="number">256</span>;
+<a href=#779 id=779 data-nosnippet>779</a>
+<a href=#780 id=780 data-nosnippet>780</a><span class="doccomment">/// Reads only the header of a bundle. The body is not read or checked, so
+<a href=#781 id=781 data-nosnippet>781</a>/// this is cheap on a large bundle, and safe on untrusted input: the
+<a href=#782 id=782 data-nosnippet>782</a>/// header is canonical CBOR and bounded to a few hundred items.
+<a href=#783 id=783 data-nosnippet>783</a>///
+<a href=#784 id=784 data-nosnippet>784</a>/// `palisade-proto` calls this for the envelope checks (#225), and
+<a href=#785 id=785 data-nosnippet>785</a>/// [`PolicyBundle::decode`] after the signature verifies.
+<a href=#786 id=786 data-nosnippet>786</a>///
+<a href=#787 id=787 data-nosnippet>787</a>/// # Errors
+<a href=#788 id=788 data-nosnippet>788</a>///
+<a href=#789 id=789 data-nosnippet>789</a>/// [`BundleError`] if the bytes are over the size limit, do not start with
+<a href=#790 id=790 data-nosnippet>790</a>/// a canonical header, or the header is for another format.
+<a href=#791 id=791 data-nosnippet>791</a></span><span class="kw">pub fn </span>decode_header(bytes: <span class="kw-2">&amp;</span>[u8], limits: <span class="kw-2">&amp;</span>BundleLimits) -&gt; <span class="prelude-ty">Result</span>&lt;Header, BundleError&gt; {
+<a href=#792 id=792 data-nosnippet>792</a>    split(bytes, limits)<span class="question-mark">?</span>;
+<a href=#793 id=793 data-nosnippet>793</a>    <span class="kw">let </span>cbor_limits = Limits {
+<a href=#794 id=794 data-nosnippet>794</a>        max_bytes: limits.max_bytes,
+<a href=#795 id=795 data-nosnippet>795</a>        max_items: HEADER_ITEMS,
+<a href=#796 id=796 data-nosnippet>796</a>        ..Limits::DEFAULT
+<a href=#797 id=797 data-nosnippet>797</a>    };
+<a href=#798 id=798 data-nosnippet>798</a>    <span class="kw">let </span>(value, <span class="kw">_</span>) = cbor::decode_prefix(<span class="kw-2">&amp;</span>bytes[<span class="number">1</span>..], <span class="kw-2">&amp;</span>cbor_limits).map_err(|<span class="kw-2">mut </span>e| {
+<a href=#799 id=799 data-nosnippet>799</a>        e.offset += <span class="number">1</span>;
+<a href=#800 id=800 data-nosnippet>800</a>        BundleError::Cbor(e)
+<a href=#801 id=801 data-nosnippet>801</a>    })<span class="question-mark">?</span>;
+<a href=#802 id=802 data-nosnippet>802</a>    Header::from_value(value)
+<a href=#803 id=803 data-nosnippet>803</a>}
+<a href=#804 id=804 data-nosnippet>804</a>
+<a href=#805 id=805 data-nosnippet>805</a><span class="kw">impl </span>PolicyBundle {
+<a href=#806 id=806 data-nosnippet>806</a>    <span class="doccomment">/// Builds a bundle.
+<a href=#807 id=807 data-nosnippet>807</a>    </span><span class="attr">#[must_use]
+<a href=#808 id=808 data-nosnippet>808</a>    </span><span class="kw">pub const fn </span>new(header: Header, body: Body) -&gt; <span class="self">Self </span>{
+<a href=#809 id=809 data-nosnippet>809</a>        <span class="self">Self </span>{ header, body }
+<a href=#810 id=810 data-nosnippet>810</a>    }
+<a href=#811 id=811 data-nosnippet>811</a>
+<a href=#812 id=812 data-nosnippet>812</a>    <span class="doccomment">/// The canonical bytes.
+<a href=#813 id=813 data-nosnippet>813</a>    ///
+<a href=#814 id=814 data-nosnippet>814</a>    /// # Errors
+<a href=#815 id=815 data-nosnippet>815</a>    ///
+<a href=#816 id=816 data-nosnippet>816</a>    /// [`serial::Error`] if the body holds a name with no registered key,
+<a href=#817 id=817 data-nosnippet>817</a>    /// which the key registry tests rule out.
+<a href=#818 id=818 data-nosnippet>818</a>    </span><span class="kw">pub fn </span>to_bytes(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;u8&gt;, serial::Error&gt; {
+<a href=#819 id=819 data-nosnippet>819</a>        <span class="kw">let </span>value = Value::Array(<span class="macro">vec!</span>[<span class="self">self</span>.header.to_value()<span class="question-mark">?</span>, <span class="self">self</span>.body.to_value()<span class="question-mark">?</span>]);
+<a href=#820 id=820 data-nosnippet>820</a>        cbor::encode(<span class="kw-2">&amp;</span>value).map_err(serial::Error::Encode)
+<a href=#821 id=821 data-nosnippet>821</a>    }
+<a href=#822 id=822 data-nosnippet>822</a>
+<a href=#823 id=823 data-nosnippet>823</a>    <span class="doccomment">/// Reads a bundle, strictly: the CBOR must be canonical, the format
+<a href=#824 id=824 data-nosnippet>824</a>    /// and schema supported, every critical key known, and the body in
+<a href=#825 id=825 data-nosnippet>825</a>    /// canonical form, so that the bytes are exactly what
+<a href=#826 id=826 data-nosnippet>826</a>    /// [`to_bytes`](Self::to_bytes) writes for the result (apart from
+<a href=#827 id=827 data-nosnippet>827</a>    /// ignorable fields this reader does not know, which it drops).
+<a href=#828 id=828 data-nosnippet>828</a>    ///
+<a href=#829 id=829 data-nosnippet>829</a>    /// This does not check `min_agent_version`, and it does not verify a
+<a href=#830 id=830 data-nosnippet>830</a>    /// signature: verification comes first (#225).
+<a href=#831 id=831 data-nosnippet>831</a>    ///
+<a href=#832 id=832 data-nosnippet>832</a>    /// # Errors
+<a href=#833 id=833 data-nosnippet>833</a>    ///
+<a href=#834 id=834 data-nosnippet>834</a>    /// [`BundleError`] for anything else.
+<a href=#835 id=835 data-nosnippet>835</a>    </span><span class="kw">pub fn </span>decode(bytes: <span class="kw-2">&amp;</span>[u8], limits: <span class="kw-2">&amp;</span>BundleLimits) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, BundleError&gt; {
+<a href=#836 id=836 data-nosnippet>836</a>        split(bytes, limits)<span class="question-mark">?</span>;
+<a href=#837 id=837 data-nosnippet>837</a>        <span class="kw">let </span>cbor_limits = Limits {
+<a href=#838 id=838 data-nosnippet>838</a>            max_bytes: limits.max_bytes,
+<a href=#839 id=839 data-nosnippet>839</a>            max_items: limits.max_items,
+<a href=#840 id=840 data-nosnippet>840</a>            ..Limits::DEFAULT
+<a href=#841 id=841 data-nosnippet>841</a>        };
+<a href=#842 id=842 data-nosnippet>842</a>        <span class="kw">let </span>value = cbor::decode_with_limits(bytes, <span class="kw-2">&amp;</span>cbor_limits).map_err(BundleError::Cbor)<span class="question-mark">?</span>;
+<a href=#843 id=843 data-nosnippet>843</a>        <span class="kw">let </span>Value::Array(<span class="kw-2">mut </span>items) = value <span class="kw">else </span>{
+<a href=#844 id=844 data-nosnippet>844</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::Shape(<span class="string">"not an array"</span>));
+<a href=#845 id=845 data-nosnippet>845</a>        };
+<a href=#846 id=846 data-nosnippet>846</a>        <span class="kw">let </span>body_value = items
+<a href=#847 id=847 data-nosnippet>847</a>            .pop()
+<a href=#848 id=848 data-nosnippet>848</a>            .ok_or(BundleError::Shape(<span class="string">"not an array of a header and a body"</span>))<span class="question-mark">?</span>;
+<a href=#849 id=849 data-nosnippet>849</a>        <span class="kw">let </span>header_value = items
+<a href=#850 id=850 data-nosnippet>850</a>            .pop()
+<a href=#851 id=851 data-nosnippet>851</a>            .ok_or(BundleError::Shape(<span class="string">"not an array of a header and a body"</span>))<span class="question-mark">?</span>;
+<a href=#852 id=852 data-nosnippet>852</a>        <span class="kw">let </span>header = Header::from_value(header_value.clone())<span class="question-mark">?</span>;
+<a href=#853 id=853 data-nosnippet>853</a>        <span class="kw">if </span>!header.schema_version.is_readable_by(<span class="kw">crate</span>::schema::CURRENT) {
+<a href=#854 id=854 data-nosnippet>854</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::UnsupportedSchema(header.schema_version));
+<a href=#855 id=855 data-nosnippet>855</a>        }
+<a href=#856 id=856 data-nosnippet>856</a>        <span class="kw">let </span>body = Body::from_value(body_value.clone()).map_err(|e| <span class="kw">match </span>e {
+<a href=#857 id=857 data-nosnippet>857</a>            serial::Error::UnknownCriticalKey(id) =&gt; BundleError::UnknownCriticalKey(id),
+<a href=#858 id=858 data-nosnippet>858</a>            e =&gt; BundleError::Body(e),
+<a href=#859 id=859 data-nosnippet>859</a>        })<span class="question-mark">?</span>;
+<a href=#860 id=860 data-nosnippet>860</a>        <span class="comment">// The canonical form of what was read must be what was read, apart
+<a href=#861 id=861 data-nosnippet>861</a>        // from unknown ignorable entries.
+<a href=#862 id=862 data-nosnippet>862</a>        </span><span class="kw">let </span>again = body.sorted().to_value().map_err(BundleError::Body)<span class="question-mark">?</span>;
+<a href=#863 id=863 data-nosnippet>863</a>        <span class="kw">let </span>header_again = header.to_value().map_err(BundleError::Body)<span class="question-mark">?</span>;
+<a href=#864 id=864 data-nosnippet>864</a>        <span class="kw">if </span>!same_but_dropped(<span class="kw-2">&amp;</span>body_value, <span class="kw-2">&amp;</span>again) || !same_but_dropped(<span class="kw-2">&amp;</span>header_value, <span class="kw-2">&amp;</span>header_again)
+<a href=#865 id=865 data-nosnippet>865</a>        {
+<a href=#866 id=866 data-nosnippet>866</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(BundleError::NonCanonical);
+<a href=#867 id=867 data-nosnippet>867</a>        }
+<a href=#868 id=868 data-nosnippet>868</a>        <span class="prelude-val">Ok</span>(<span class="self">Self </span>{ header, body })
+<a href=#869 id=869 data-nosnippet>869</a>    }
+<a href=#870 id=870 data-nosnippet>870</a>
+<a href=#871 id=871 data-nosnippet>871</a>    <span class="doccomment">/// Validates the body as a policy (#30): decoding checks the encoding
+<a href=#872 id=872 data-nosnippet>872</a>    /// and the model's shape, not the rules validation applies. A loader
+<a href=#873 id=873 data-nosnippet>873</a>    /// calls this after [`decode`](Self::decode) and before it evaluates
+<a href=#874 id=874 data-nosnippet>874</a>    /// anything.
+<a href=#875 id=875 data-nosnippet>875</a>    ///
+<a href=#876 id=876 data-nosnippet>876</a>    /// # Errors
+<a href=#877 id=877 data-nosnippet>877</a>    ///
+<a href=#878 id=878 data-nosnippet>878</a>    /// Every finding of [`PolicyDocument::validate`].
+<a href=#879 id=879 data-nosnippet>879</a>    </span><span class="kw">pub fn </span>validate(
+<a href=#880 id=880 data-nosnippet>880</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#881 id=881 data-nosnippet>881</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw">crate</span>::validate::ValidatedPolicy, Vec&lt;<span class="kw">crate</span>::validate::ValidationError&gt;&gt; {
+<a href=#882 id=882 data-nosnippet>882</a>        <span class="self">self</span>.body.document.clone().validate()
+<a href=#883 id=883 data-nosnippet>883</a>    }
+<a href=#884 id=884 data-nosnippet>884</a>
+<a href=#885 id=885 data-nosnippet>885</a>    <span class="doccomment">/// SHA-256 of the canonical bytes ([`bundle_hash`]).
+<a href=#886 id=886 data-nosnippet>886</a>    ///
+<a href=#887 id=887 data-nosnippet>887</a>    /// # Errors
+<a href=#888 id=888 data-nosnippet>888</a>    ///
+<a href=#889 id=889 data-nosnippet>889</a>    /// As [`to_bytes`](Self::to_bytes).
+<a href=#890 id=890 data-nosnippet>890</a>    </span><span class="kw">pub fn </span>bundle_hash(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Sha256Digest, serial::Error&gt; {
+<a href=#891 id=891 data-nosnippet>891</a>        <span class="self">self</span>.to_bytes().map(|b| bundle_hash(<span class="kw-2">&amp;</span>b))
+<a href=#892 id=892 data-nosnippet>892</a>    }
+<a href=#893 id=893 data-nosnippet>893</a>
+<a href=#894 id=894 data-nosnippet>894</a>    <span class="doccomment">/// SHA-256 over the decision-relevant part of the body: the policy
+<a href=#895 id=895 data-nosnippet>895</a>    /// without its names, descriptions, display-only rule set fields and
+<a href=#896 id=896 data-nosnippet>896</a>    /// revision, and the inlined libraries. The header, the source
+<a href=#897 id=897 data-nosnippet>897</a>    /// revisions and the metadata digest are left out, so a text-only
+<a href=#898 id=898 data-nosnippet>898</a>    /// edit, a new `policy_version` or a new `generated_at` keeps it. It is
+<a href=#899 id=899 data-nosnippet>899</a>    /// meant as the policy part of the decision cache key (#42).
+<a href=#900 id=900 data-nosnippet>900</a>    ///
+<a href=#901 id=901 data-nosnippet>901</a>    /// A cache keyed by it must not hand back a stored [`Decision`] as is:
+<a href=#902 id=902 data-nosnippet>902</a>    /// a decision names the policy revision it was made under
+<a href=#903 id=903 data-nosnippet>903</a>    /// ([`RuleRef::policy_revision`]), and rule names and display IDs, which
+<a href=#904 id=904 data-nosnippet>904</a>    /// this hash leaves out. Re-stamp the revision (and anything else taken
+<a href=#905 id=905 data-nosnippet>905</a>    /// from the current policy) when serving a cached decision, or key the
+<a href=#906 id=906 data-nosnippet>906</a>    /// cache by the bundle hash instead. The engine's cache (#293) keys by
+<a href=#907 id=907 data-nosnippet>907</a>    /// the snapshot generation today, which changes on every swap, so it is
+<a href=#908 id=908 data-nosnippet>908</a>    /// not affected.
+<a href=#909 id=909 data-nosnippet>909</a>    ///
+<a href=#910 id=910 data-nosnippet>910</a>    /// [`Decision`]: crate::decision::Decision
+<a href=#911 id=911 data-nosnippet>911</a>    /// [`RuleRef::policy_revision`]: crate::decision::RuleRef::policy_revision
+<a href=#912 id=912 data-nosnippet>912</a>    ///
+<a href=#913 id=913 data-nosnippet>913</a>    /// # Errors
+<a href=#914 id=914 data-nosnippet>914</a>    ///
+<a href=#915 id=915 data-nosnippet>915</a>    /// As [`to_bytes`](Self::to_bytes).
+<a href=#916 id=916 data-nosnippet>916</a>    </span><span class="kw">pub fn </span>decision_hash(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Sha256Digest, serial::Error&gt; {
+<a href=#917 id=917 data-nosnippet>917</a>        <span class="kw">let </span>doc = serial::to_value(<span class="kw-2">&amp;</span>decision_view(<span class="kw-2">&amp;</span><span class="self">self</span>.body.document))<span class="question-mark">?</span>;
+<a href=#918 id=918 data-nosnippet>918</a>        <span class="kw">let </span>libraries = serial::to_value(<span class="kw-2">&amp;</span><span class="self">self</span>.body.libraries)<span class="question-mark">?</span>;
+<a href=#919 id=919 data-nosnippet>919</a>        <span class="kw">let </span>value = map(<span class="macro">vec!</span>[(k(<span class="string">"document"</span>), doc), (k(<span class="string">"libraries"</span>), libraries)])<span class="question-mark">?</span>;
+<a href=#920 id=920 data-nosnippet>920</a>        <span class="kw">let </span>bytes = cbor::encode(<span class="kw-2">&amp;</span>value).map_err(serial::Error::Encode)<span class="question-mark">?</span>;
+<a href=#921 id=921 data-nosnippet>921</a>        <span class="prelude-val">Ok</span>(Sha256::digest(<span class="kw-2">&amp;</span>bytes).into())
+<a href=#922 id=922 data-nosnippet>922</a>    }
+<a href=#923 id=923 data-nosnippet>923</a>}
+<a href=#924 id=924 data-nosnippet>924</a>
+<a href=#925 id=925 data-nosnippet>925</a><span class="attr">#[cfg(test)]
+<a href=#926 id=926 data-nosnippet>926</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["DeltaError","Op"],"fn":["apply","diff","worth_sending"],"struct":["BundleDelta"]};
