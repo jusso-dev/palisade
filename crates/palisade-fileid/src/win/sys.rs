@@ -15,13 +15,19 @@ use std::fs::File;
 use std::io;
 use std::os::windows::io::AsRawHandle as _;
 
-use windows_sys::Win32::Foundation::{CloseHandle, ERROR_IO_PENDING, HANDLE};
+use windows_sys::Win32::Foundation::{CloseHandle, ERROR_IO_PENDING, HANDLE, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::NetworkManagement::NetManagement::NetApiBufferFree;
+use windows_sys::Win32::NetworkManagement::WNet::WNetGetConnectionW;
+use windows_sys::Win32::Storage::DistributedFileSystem::{
+    DFS_INFO_3, DFS_STORAGE_INFO, DFS_STORAGE_STATE_ACTIVE, NetDfsGetClientInfo,
+};
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_BASIC_INFO, FILE_CASE_SENSITIVE_INFO, FILE_ID_INFO, FILE_INFO_BY_HANDLE_CLASS,
     FILE_REMOTE_PROTOCOL_INFO, FILE_STANDARD_INFO, FILE_TYPE_DISK, FileBasicInfo,
     FileCaseSensitiveInfo, FileIdInfo, FileRemoteProtocolInfo, FileStandardInfo, FileStreamInfo,
-    GetDriveTypeW, GetFileInformationByHandleEx, GetFileType, GetFinalPathNameByHandleW,
-    GetVolumeInformationByHandleW,
+    FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, GetDriveTypeW,
+    GetFileInformationByHandleEx, GetFileType, GetFinalPathNameByHandleW,
+    GetVolumeInformationByHandleW, WIN32_FIND_DATAW,
 };
 use windows_sys::Win32::System::IO::{DeviceIoControl, GetOverlappedResult, OVERLAPPED};
 use windows_sys::Win32::System::Ioctl::{
@@ -464,6 +470,175 @@ pub(crate) fn case_sensitive_dir(dir: &File) -> io::Result<bool> {
     // `FileCaseSensitiveInfo`: one `u32`, valid for every bit pattern.
     let info: FILE_CASE_SENSITIVE_INFO = unsafe { info_by_handle(dir, FileCaseSensitiveInfo) }?;
     Ok(info.Flags & 1 != 0)
+}
+
+/// `WNetGetConnectionW` of `drive` (`Z:`): the remote name (`\\server\share`
+/// or `\\server\share\dir`) the drive letter is mapped to in **this
+/// process's logon session**. `Ok(None)` if the letter is not a network
+/// connection.
+pub(crate) fn mapped_drive_target(drive: char) -> io::Result<Option<String>> {
+    let local = wide(&format!("{drive}:"))?;
+    let mut units = 512_u32;
+    loop {
+        let mut buf = vec![0_u16; usize::try_from(units).unwrap_or(0)];
+        let mut len = units;
+        // SAFETY: `local` is a live, NUL-terminated UTF-16 string the call
+        // only reads; `buf` is a live, writable buffer of `len` units and
+        // `len` a live local that says so. On `ERROR_MORE_DATA` the OS
+        // writes the size needed to `len` and nothing to `buf`.
+        let r = unsafe { WNetGetConnectionW(local.as_ptr(), buf.as_mut_ptr(), &raw mut len) };
+        match r {
+            0 => {
+                let end = buf.iter().position(|&u| u == 0).unwrap_or(buf.len());
+                let text = buf.get(..end).unwrap_or_default();
+                return String::from_utf16(text)
+                    .map(Some)
+                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "not valid UTF-16"));
+            }
+            // ERROR_NOT_CONNECTED, ERROR_BAD_DEVICE: not a network drive.
+            2250 | 1200 => return Ok(None),
+            // ERROR_MORE_DATA.
+            234 if len > units
+                && usize::try_from(len).unwrap_or(usize::MAX) <= MAX_QUERY_BYTES / 2 =>
+            {
+                units = len;
+            }
+            e => return Err(io::Error::from_raw_os_error(i32::try_from(e).unwrap_or(-1))),
+        }
+    }
+}
+
+/// The long name of the single entry `path` names (`FindFirstFileExW`,
+/// `cFileName`). `path` must not contain wildcards; the caller checks.
+pub(crate) fn find_long_name(path: &str) -> io::Result<String> {
+    let w = wide(path)?;
+    let mut data = WIN32_FIND_DATAW::default();
+    // SAFETY: `w` is a live, NUL-terminated UTF-16 string the call only
+    // reads; `data` is a live, writable `WIN32_FIND_DATAW`, the structure
+    // `FindExInfoBasic` fills. The search filter is null and the flags 0,
+    // as `FindExSearchNameMatch` requires.
+    let h = unsafe {
+        FindFirstFileExW(
+            w.as_ptr(),
+            FindExInfoBasic,
+            (&raw mut data).cast(),
+            FindExSearchNameMatch,
+            std::ptr::null(),
+            0,
+        )
+    };
+    if h == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: `h` is the search handle just returned, closed once, here.
+    let _ = unsafe { FindClose(h) };
+    let end = data
+        .cFileName
+        .iter()
+        .position(|&u| u == 0)
+        .unwrap_or(data.cFileName.len());
+    String::from_utf16(data.cFileName.get(..end).unwrap_or_default())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "not valid UTF-16"))
+}
+
+/// A buffer `NetDfsGetClientInfo` allocated, freed once on drop.
+struct NetBuf(*mut u8);
+
+impl Drop for NetBuf {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            // SAFETY: `self.0` is the buffer the OS allocated for this call
+            // and handed over; it is freed once, here.
+            let _ = unsafe { NetApiBufferFree(self.0.cast()) };
+        }
+    }
+}
+
+/// Reads a NUL-terminated UTF-16 string the OS returned, capped at 32,767
+/// units.
+///
+/// # Safety
+///
+/// `p` must be null or point to a NUL-terminated UTF-16 string that stays
+/// alive for the call.
+unsafe fn read_pwstr(p: *const u16) -> Option<String> {
+    if p.is_null() {
+        return None;
+    }
+    let mut len = 0_usize;
+    // SAFETY: the caller guarantees a NUL-terminated string; the loop stops
+    // at the NUL or the cap, so it never reads past the terminator.
+    while len < 32_767 && unsafe { *p.add(len) } != 0 {
+        len += 1;
+    }
+    // SAFETY: the `len` units before the NUL were just read, so they are
+    // valid to read as a slice; it is copied out at once.
+    let units = unsafe { std::slice::from_raw_parts(p, len) };
+    String::from_utf16(units).ok()
+}
+
+/// The DFS referral that covers `path` (`NetDfsGetClientInfo`, level 3):
+/// the entry path and the active target as `\\server\share`. `Ok(None)` if
+/// `path` is not in a DFS namespace, and an error if no storage is marked
+/// active. May block on the network.
+pub(crate) fn dfs_client_info(path: &str) -> io::Result<Option<(String, String)>> {
+    let w = wide(path)?;
+    let mut buf: *mut u8 = std::ptr::null_mut();
+    // SAFETY: `w` is a live, NUL-terminated UTF-16 string the call only
+    // reads; the server and share are null (looked up from the path);
+    // `buf` is a live local the OS sets to a buffer it allocates, owned by
+    // `NetBuf` below.
+    let r = unsafe {
+        NetDfsGetClientInfo(
+            w.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            3,
+            &raw mut buf,
+        )
+    };
+    let owned = NetBuf(buf);
+    match r {
+        0 => {}
+        // NERR_DfsNoSuchVolume, ERROR_NOT_FOUND, ERROR_FILE_NOT_FOUND,
+        // ERROR_BAD_NETPATH: the path is not in a namespace.
+        2662 | 1168 | 2 | 53 => return Ok(None),
+        e => return Err(io::Error::from_raw_os_error(i32::try_from(e).unwrap_or(-1))),
+    }
+    if owned.0.is_null() {
+        return Ok(None);
+    }
+    // SAFETY: on success, level 3 returns one `DFS_INFO_3` at `buf`, with
+    // `Storage` pointing at `NumberOfStorages` `DFS_STORAGE_INFO`, all in
+    // the buffer `owned` keeps alive until the end of this function. Every
+    // string is copied out before it is freed.
+    unsafe {
+        let info = &*owned.0.cast::<DFS_INFO_3>();
+        let Some(entry) = read_pwstr(info.EntryPath) else {
+            return Ok(None);
+        };
+        let n = usize::try_from(info.NumberOfStorages).unwrap_or(0).min(64);
+        if info.Storage.is_null() {
+            return Ok(None);
+        }
+        let storages: &[DFS_STORAGE_INFO] = std::slice::from_raw_parts(info.Storage, n);
+        // Only the storage the client marked active is its target. The
+        // `DFS_STORAGE_INFO` reference says "It is possible that no targets
+        // will be marked active"; another storage is then not the client's
+        // target, so the lookup is unresolved, never a guessed target.
+        let Some(s) = storages
+            .iter()
+            .find(|s| s.State & DFS_STORAGE_STATE_ACTIVE != 0)
+        else {
+            return Err(io::Error::other(
+                "DFS referral has no active target in the client cache",
+            ));
+        };
+        match (read_pwstr(s.ServerName), read_pwstr(s.ShareName)) {
+            (Some(server), Some(share)) => Ok(Some((entry, format!(r"\\{server}\{share}")))),
+            _ => Ok(None),
+        }
+    }
 }
 
 /// The system Windows directory (`GetSystemWindowsDirectoryW`), which is
