@@ -16,7 +16,7 @@
 //! evaluates with exactly the sets the server compiled in.
 
 use core::fmt;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::format::{
     Body, BundleLimits, Header, InlineLibrary, PolicyBundle, SetContent, SourceRevisions,
@@ -194,21 +194,33 @@ pub fn compile(
         )));
     }
     let mut libraries = Vec::new();
+    // Each distinct set version is copied into the bundle once, however
+    // many references name it: a large set referenced from many scopes
+    // must not be cloned per reference before `Body::new` deduplicates.
+    let mut inlined: BTreeSet<(LibraryId, u32)> = BTreeSet::new();
     let mut failed = None;
     set_refs_mut(&mut doc, |r| {
         let resolved = source
             .catalogue
             .resolve(r, source.from)
             .ok()
-            .and_then(|lib| Some((lib, SetContent::of(&lib.content)?)));
+            .and_then(|lib| {
+                if inlined.contains(&(lib.id, lib.version)) {
+                    return Some((lib, None));
+                }
+                Some((lib, Some(SetContent::of(&lib.content)?)))
+            });
         match resolved {
             Some((lib, content)) => {
                 r.pin = Pin::Version(lib.version);
-                libraries.push(InlineLibrary {
-                    id: lib.id,
-                    resolved_version: lib.version,
-                    content,
-                });
+                if let Some(content) = content {
+                    inlined.insert((lib.id, lib.version));
+                    libraries.push(InlineLibrary {
+                        id: lib.id,
+                        resolved_version: lib.version,
+                        content,
+                    });
+                }
             }
             None => {
                 failed.get_or_insert(CompileError::UnresolvedSet {

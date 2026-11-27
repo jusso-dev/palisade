@@ -665,3 +665,34 @@ mod coverage {
         assert!(both.network_set(&r(Pin::Version(2))).is_some());
     }
 }
+
+#[test]
+fn a_set_named_by_many_references_is_inlined_once() {
+    // Many rules name the same set version: it is copied into the bundle
+    // once, and every reference is pinned to it.
+    let mut doc = policy(json!(1)).into_document();
+    let template = doc.rule_sets[0].rules[0].clone();
+    for n in 10..60 {
+        let mut r = template.clone();
+        r.id = crate::test_util::rule_id(n);
+        doc.rule_sets[0].rules.push(r);
+    }
+    let policy = doc.validate().unwrap();
+    let cat = catalogue();
+    let (bundle, _) = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
+    let inlined: Vec<(LibraryId, u32)> = bundle
+        .body
+        .libraries()
+        .iter()
+        .map(|l| (l.id, l.resolved_version))
+        .collect();
+    assert_eq!(inlined.len(), 1, "{inlined:?}");
+    assert_eq!(inlined[0].1, 1);
+    let mut pins = 0;
+    for rule in &bundle.body.document().rule_sets[0].rules {
+        if rule.scope.is_some() {
+            pins += 1;
+        }
+    }
+    assert_eq!(pins, 51);
+}

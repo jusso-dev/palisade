@@ -234,6 +234,10 @@ pub fn apply(
     if bundle_hash(&bytes) != delta.result_bundle_hash {
         return Err(DeltaError::ResultMismatch);
     }
+    // The result must be a bundle the agent can load under the same limits
+    // as the base: a delta that grows it past them is refused here, not
+    // left to fail on the next load.
+    PolicyBundle::decode(&bytes, limits).map_err(DeltaError::Decode)?;
     Ok((bundle, bytes))
 }
 

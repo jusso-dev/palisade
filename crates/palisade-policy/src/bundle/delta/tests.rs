@@ -188,6 +188,37 @@ fn delta_bytes_are_strict() {
     ));
 }
 
+#[test]
+fn a_delta_that_grows_the_bundle_past_the_limits_is_refused() {
+    // The base fits the limits; the result, with an extra rule, does not.
+    // The agent would fail to load it, so `apply` refuses it.
+    let old = bundle(base(), 1);
+    let bigger = PolicyBuilder::new()
+        .rule_set(
+            RuleSetBuilder::allowlist(1)
+                .rule(RuleBuilder::allow(1, hash('a')))
+                .rule(RuleBuilder::allow(2, publisher("CN=Example")))
+                .rule(RuleBuilder::allow(4, hash('c'))),
+        )
+        .rule_set(RuleSetBuilder::mandatory_blocklist(2).rule(RuleBuilder::deny(3, hash('b'))))
+        .build();
+    let new = bundle(bigger, 2);
+    let old_bytes = old.to_bytes().unwrap();
+    let new_len = new.to_bytes().unwrap().len();
+    assert!(new_len > old_bytes.len());
+    let delta = diff(&old, &new).unwrap();
+    let tight = BundleLimits {
+        max_bytes: new_len - 1,
+        ..BundleLimits::DEFAULT
+    };
+    assert!(matches!(
+        apply(&old_bytes, &delta, &tight),
+        Err(DeltaError::Decode(BundleError::TooLarge { .. }))
+    ));
+    // Within the default limits the same delta applies.
+    apply(&old_bytes, &delta, &BundleLimits::DEFAULT).unwrap();
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(128))]
 
