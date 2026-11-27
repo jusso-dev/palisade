@@ -8,10 +8,15 @@
 //! map's `HashMethod`. The signature signs the block map's hash, so the
 //! map is what ties every file's content to the signature.
 //!
+//! A bundle's block map lists only its bundle manifest; [`verify_bundle`]
+//! checks its payload packages against the bundle manifest instead (the
+//! signature still covers their bytes, through the local records).
+//!
 //! [`verify`] checks the map against an [`Archive`] and fails closed: a
 //! file the archive has but the map does not list (or the reverse), a name
 //! listed twice, a size, local-header size or compressed size that does not
-//! match, a block count that does not fit the size, or any block whose hash
+//! match, a deflated file whose blocks do not all give their compressed
+//! size, a block count that does not fit the size, or any block whose hash
 //! differs is a mismatch.
 
 #![forbid(unsafe_code)]
@@ -229,8 +234,67 @@ fn local_header_len(m: &Member) -> u64 {
     m.data_offset.saturating_sub(m.local_offset)
 }
 
+/// A payload package of a bundle, as its bundle manifest lists it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Payload<'n> {
+    /// `FileName`: the member's name in the bundle.
+    pub file_name: &'n str,
+    /// `Offset`: where the member's data starts in the bundle file.
+    pub offset: Option<u64>,
+    /// `Size`: the member's size.
+    pub size: Option<u64>,
+}
+
 /// Checks `map` against `archive`.
 pub fn verify(map: &BlockMap, archive: &Archive<'_>) -> Result<(), BlockMapError> {
+    verify_with(map, archive, None)
+}
+
+/// Checks a bundle's `map` against `archive`. A bundle's block map lists
+/// its bundle manifest and nothing else: the payload packages are not in
+/// it. Each payload must instead be listed in `payloads` (the bundle
+/// manifest) exactly once, and be a stored member (the OS packaging tool
+/// never compresses one) whose data starts at the manifest's `Offset` and
+/// has its `Size`, so no member escapes both. Their bytes are covered by
+/// the signature through the local records. A payload that is not in the
+/// archive (a flat bundle's) is a mismatch.
+pub fn verify_bundle(
+    map: &BlockMap,
+    archive: &Archive<'_>,
+    payloads: &[Payload<'_>],
+) -> Result<(), BlockMapError> {
+    verify_with(map, archive, Some(payloads))
+}
+
+fn verify_with(
+    map: &BlockMap,
+    archive: &Archive<'_>,
+    payloads: Option<&[Payload<'_>]>,
+) -> Result<(), BlockMapError> {
+    // A bundle's payloads, by folded part name; each once.
+    let mut by_part: BTreeMap<String, Payload<'_>> = BTreeMap::new();
+    for p in payloads.unwrap_or_default() {
+        if by_part.insert(fold(p.file_name), *p).is_some() {
+            return Err(BlockMapError::Duplicate(p.file_name.to_owned()));
+        }
+    }
+    let mut payloads_seen = BTreeSet::new();
+    // A bundle's block map lists its bundle manifest and nothing else (the
+    // OS packaging tool writes it so, and the OS reader requires it).
+    if payloads.is_some()
+        && !(map.files.len() == 1
+            && map
+                .files
+                .first()
+                .is_some_and(|f| fold(&f.name) == fold(super::BUNDLE_MANIFEST)))
+    {
+        let name = map
+            .files
+            .iter()
+            .find(|f| fold(&f.name) != fold(super::BUNDLE_MANIFEST))
+            .map_or_else(|| super::BUNDLE_MANIFEST.to_owned(), |f| f.name.clone());
+        return Err(BlockMapError::Unlisted(name));
+    }
     // Listed files by folded name; each name once.
     let mut listed: BTreeMap<String, &MappedFile> = BTreeMap::new();
     for f in &map.files {
@@ -257,6 +321,19 @@ pub fn verify(map: &BlockMap, archive: &Archive<'_>) -> Result<(), BlockMapError
         if UNMAPPED.iter().any(|u| fold(u) == key) {
             continue;
         }
+        if let Some(p) = by_part.get(&key) {
+            // A payload package: stored, and where and how large the
+            // bundle manifest says. The block map must not list it too.
+            if m.method != 0
+                || p.size != Some(m.size)
+                || p.offset != Some(m.data_offset)
+                || listed.contains_key(&key)
+            {
+                return Err(BlockMapError::Size(m.name.clone()));
+            }
+            payloads_seen.insert(key);
+            continue;
+        }
         let Some(f) = listed.get(&key) else {
             return Err(BlockMapError::Unlisted(m.name.clone()));
         };
@@ -266,20 +343,31 @@ pub fn verify(map: &BlockMap, archive: &Archive<'_>) -> Result<(), BlockMapError
         if f.size != m.size || f.lfh_size != local_header_len(m) {
             return Err(BlockMapError::Size(f.name.clone()));
         }
-        // Block sizes, when given, are the compressed size of each block
-        // of a deflated file (an empty file has no blocks and no sizes);
-        // a stored file's blocks carry none.
+        // A deflated file's blocks each give their compressed size (an
+        // empty file has no blocks); a stored file's give none. The OS
+        // packaging tool compresses each 64 KiB block with a full flush and
+        // ends the stream with an empty final block, the two bytes `03 00`
+        // that no block counts, so the sizes sum to the compressed size or
+        // to two bytes less: the two cases the OS reader accepts, and
+        // nothing else.
         let given: Vec<u64> = f.block_sizes.iter().flatten().copied().collect();
         if m.method == 8 {
-            if given.len() == f.block_sizes.len()
-                && !f.blocks.is_empty()
-                && given.iter().try_fold(0_u64, |a, &x| a.checked_add(x)) != Some(m.compressed_size)
-            {
+            let sum = given.iter().try_fold(0_u64, |a, &x| a.checked_add(x));
+            let fits = sum.is_some_and(|s| {
+                s == m.compressed_size || s.checked_add(2) == Some(m.compressed_size)
+            });
+            if !f.blocks.is_empty() && (given.len() != f.blocks.len() || !fits) {
                 return Err(BlockMapError::Size(f.name.clone()));
             }
         } else if !given.is_empty() {
             return Err(BlockMapError::Size(f.name.clone()));
         }
+    }
+    if let Some(missing) = by_part.keys().find(|k| !payloads_seen.contains(*k)) {
+        let name = by_part
+            .get(missing)
+            .map_or_else(String::new, |p| p.file_name.to_owned());
+        return Err(BlockMapError::Unlisted(name));
     }
     if let Some(missing) = listed.keys().find(|k| !seen.contains(*k)) {
         let name = listed

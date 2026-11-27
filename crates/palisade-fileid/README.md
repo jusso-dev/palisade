@@ -741,10 +741,13 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   `AXPC`, `AXCD`, `AXCT`, `AXBM` and optional `AXCI` hashes), the block map
   is checked against every file and block, and the signer's subject must
   equal `Identity@Publisher` (`PublisherMismatch` otherwise). Anything wrong
-  with any of those leaves no signature valid. On Windows,
+  with any of those leaves no signature valid. A bundle's block map lists
+  only its bundle manifest; each payload package must be a stored member at
+  the offset and of the size the bundle manifest gives. On Windows,
   `tests/package_os.rs` checks the family names against the OS package
   identity API and the signature verdicts against the OS trust-verification
-  API.
+  API, on the committed fixtures and on a package and bundle that the OS
+  SDK's own packaging and signing tools build and sign during the test.
 
 ## Handling untrusted input
 

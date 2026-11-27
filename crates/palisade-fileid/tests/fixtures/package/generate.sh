@@ -4,9 +4,13 @@
 # Every package here is made from scratch, never copied from a vendor:
 #
 # 1. `tests/package.rs` builds the unsigned test package and bundle byte by
-#    byte with `tests/common/appx.rs` (a ZIP archive with a manifest, an
-#    executable, a multi-block deflated file, a block map with real block
-#    hashes, and content types).
+#    byte with `tests/common/appx.rs`, in the shape the OS packaging tool
+#    writes (a ZIP archive with a schema-valid manifest, an executable, a
+#    multi-block deflated file with a full flush after each block and an
+#    empty final block, a block map with real block hashes and compressed
+#    block sizes, and content types; a bundle holds two real packages,
+#    stored, at the offsets its bundle manifest gives, and its block map
+#    lists only the bundle manifest).
 # 2. osslsigncode signs them with a throwaway key from a test-only CA that
 #    nothing trusts. The signer's subject is the manifests' publisher, so
 #    the publisher check passes; `other-publisher.msix` is signed by a

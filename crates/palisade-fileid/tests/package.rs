@@ -387,7 +387,10 @@ fn bundles() {
         (m.kind.as_str(), m.arch.as_str(), m.file_name.as_str()),
         ("application", "x64", "app_x64.msix")
     );
-    assert_eq!((m.offset, m.size), (Some(100), Some(32)));
+    let signed = fixture("bundle-signed.msixbundle");
+    let a = Archive::parse(&signed).unwrap();
+    let x64 = a.member("app_x64.msix").unwrap();
+    assert_eq!((m.offset, m.size), (Some(x64.data_offset), Some(x64.size)));
     assert_eq!(id.members[1].resource_id, "en-us");
     assert!(
         id.signature_valid(),
@@ -913,32 +916,7 @@ fn round_two_review_cases() {
     )
     .unwrap();
     // big.bin has three blocks; give them sizes that wrap.
-    let mut n = 0;
-    let patched: String = map_xml
-        .split("<Block ")
-        .enumerate()
-        .map(|(i, part)| {
-            if i == 0 {
-                return part.to_owned();
-            }
-            let inside_big = map_xml
-                .split("<Block ")
-                .take(i)
-                .collect::<String>()
-                .rsplit("<File ")
-                .next()
-                .unwrap()
-                .contains("assets\\big.bin");
-            if inside_big {
-                n += 1;
-                let size = if n == 1 { u64::MAX } else { 1 };
-                format!("<Block Size=\"{size}\" {part}")
-            } else {
-                format!("<Block {part}")
-            }
-        })
-        .collect();
-    assert_eq!(n, 3);
+    let patched = with_block_sizes(&map_xml, "assets\\big.bin", &[u64::MAX, 1, 1]);
     let map = palisade_fileid::package::blockmap::parse(patched.as_bytes()).unwrap();
     assert!(palisade_fileid::package::blockmap::verify(&map, &archive).is_err());
 
@@ -1055,4 +1033,316 @@ fn many_namespaces_parse_quickly() {
     let start = std::time::Instant::now();
     palisade_fileid::package::xml::parse(doc.as_bytes()).unwrap();
     assert!(start.elapsed() < std::time::Duration::from_secs(10));
+}
+
+/// `map_xml` with the `Size` of each block of `file` (as the map writes its
+/// name) replaced by `sizes`, in order; blocks without one gain one.
+fn with_block_sizes(map_xml: &str, file: &str, sizes: &[u64]) -> String {
+    let start = map_xml.find(&format!("Name=\"{file}\"")).unwrap();
+    let end = start + map_xml[start..].find("</File>").unwrap();
+    let mut body = String::new();
+    let mut n = 0;
+    for (i, part) in map_xml[start..end].split("<Block ").enumerate() {
+        if i == 0 {
+            body.push_str(part);
+            continue;
+        }
+        let hash_at = part.find("Hash=").unwrap();
+        let hash_end = hash_at + part[hash_at + 6..].find('"').unwrap() + 7;
+        let close = part.find("/>").unwrap();
+        body.push_str(&format!(
+            "<Block {} Size=\"{}\"{}",
+            &part[hash_at..hash_end],
+            sizes[n],
+            &part[close..]
+        ));
+        n += 1;
+    }
+    assert_eq!(n, sizes.len(), "{file}");
+    format!("{}{body}{}", &map_xml[..start], &map_xml[end..])
+}
+
+fn block_map_of(archive: &Archive<'_>) -> palisade_fileid::package::blockmap::BlockMap {
+    palisade_fileid::package::blockmap::parse(
+        &archive
+            .read(archive.member("AppxBlockMap.xml").unwrap())
+            .unwrap(),
+    )
+    .unwrap()
+}
+
+// The tests below pin the archive shapes the OS packaging tool writes, each
+// taken from its open-source implementation (the msix-packaging SDK,
+// `src/msix/pack` and `src/msix/unpack`), and check that the same shape
+// with a byte changed is still refused.
+
+#[test]
+fn the_packaging_tool_zip64_layout_reads() {
+    // `ZipObjectWriter::Close` writes ZIP64 end records and a classic end
+    // record of markers only ("Because we only use zip64"), whose disk
+    // numbers the `EndCentralDirectoryRecord` constructor leaves at 0 in
+    // that SDK but the OS tool writes as `0xffff`: osslsigncode's
+    // `appx.c` notes "packaging tool writes FFFFs here", and the SDK's own
+    // reader (`EndCentralDirectoryRecord::Read`) accepts 0 or `0xffff` for
+    // both, as long as they are equal. `ZipObjectWriter::EndFile` writes a
+    // data descriptor with 8-byte sizes (`DataDescriptor`: "8 bytes
+    // (zip64)") whether or not the entry has a ZIP64 extra field, and
+    // central entries only carry that field when a value does not fit.
+    let tool = ZipStyle::packaging_tool();
+    let data = AppxBuilder::package().build_with(&tool);
+    let a = Archive::parse(&data).unwrap();
+    assert!(a.zip64);
+    assert!(a.members.iter().all(|m| !m.has_zip64_extra));
+    let id = parse_package(&data).unwrap();
+    assert_eq!(id.name, "Palisade.TestApp");
+    palisade_fileid::package::blockmap::verify(&block_map_of(&a), &a).unwrap();
+
+    // Disk numbers: both the marker or both 0; never one of each, never
+    // any other value, and never the marker without ZIP64 records.
+    let eocd = data.len() - 22;
+    let disks = |d: u16, cd: u16| {
+        let mut x = data.clone();
+        x[eocd + 4..eocd + 6].copy_from_slice(&d.to_le_bytes());
+        x[eocd + 6..eocd + 8].copy_from_slice(&cd.to_le_bytes());
+        Archive::parse(&x).map(|_| ())
+    };
+    assert!(disks(0, 0).is_ok());
+    assert!(disks(0xffff, 0xffff).is_ok());
+    for (d, cd) in [(0xffff, 0), (0, 0xffff), (1, 1), (0xfffe, 0xfffe)] {
+        assert_eq!(disks(d, cd), Err(ZipError::MultiDisk), "{d:#x} {cd:#x}");
+    }
+    let classic = AppxBuilder::package().build_with(&ZipStyle {
+        disk_marker: true,
+        ..descriptors()
+    });
+    assert_eq!(Archive::parse(&classic).unwrap_err(), ZipError::MultiDisk);
+    // The ZIP64 record's own disk numbers must still be 0.
+    let rec = data.len() - 22 - 20 - 56;
+    let mut x = data.clone();
+    x[rec + 16] = 1;
+    x[rec + 20] = 1;
+    assert_eq!(Archive::parse(&x).unwrap_err(), ZipError::MultiDisk);
+
+    // Descriptor width: 8 bytes in a ZIP64 archive, 4 bytes otherwise.
+    // Written the other way, each is refused (the sizes read at the wrong
+    // width do not match, or the next header is not where it should be).
+    for (style, what) in [
+        (
+            ZipStyle {
+                narrow_descriptors: true,
+                ..ZipStyle::packaging_tool()
+            },
+            "4-byte sizes in a ZIP64 archive",
+        ),
+        (
+            ZipStyle {
+                wide_descriptors: true,
+                ..descriptors()
+            },
+            "8-byte sizes without ZIP64",
+        ),
+    ] {
+        let x = AppxBuilder::package().build_with(&style);
+        assert!(
+            matches!(Archive::parse(&x), Err(ZipError::LocalHeader(_))),
+            "{what}"
+        );
+    }
+    // A descriptor size changed by one is refused.
+    let a = Archive::parse(&data).unwrap();
+    let m = a.member("app/tool.exe").unwrap();
+    let mut x = data.clone();
+    let d = (m.data_offset + m.compressed_size) as usize;
+    x[d + 8] ^= 1;
+    assert!(Archive::parse(&x).is_err());
+}
+
+#[test]
+fn the_packaging_tool_deflate_and_block_sizes_verify() {
+    // `DeflateStream::Write` compresses every 64 KiB block with
+    // `Z_FULL_FLUSH` and ends the stream with `Z_FINISH`, an empty final
+    // block (`03 00`); `BlockMapWriter::AddBlock` records each block's
+    // flushed size. So the block sizes sum to the compressed size less
+    // two, which the OS reader accepts, as it does sizes that sum to the
+    // compressed size exactly (`AppxPackageObject::VerifyFile`: "case 1"
+    // and "case 2", nothing else).
+    let data = AppxBuilder::package().build();
+    let a = Archive::parse(&data).unwrap();
+    let big = a.member("assets/big.bin").unwrap();
+    let raw = a.raw_data(big);
+    assert_eq!(&raw[raw.len() - 6..], &[0, 0, 0xff, 0xff, 3, 0]);
+    let map_xml =
+        String::from_utf8(a.read(a.member("AppxBlockMap.xml").unwrap()).unwrap()).unwrap();
+    let (_, sizes) = deflate_blocks(&a.read(big).unwrap());
+    let sizes: Vec<u64> = sizes.iter().map(|&s| s as u64).collect();
+    assert_eq!(sizes.iter().sum::<u64>() + 2, big.compressed_size);
+    let check = |sizes: &[u64]| {
+        let xml = with_block_sizes(&map_xml, "assets\\big.bin", sizes);
+        let map = palisade_fileid::package::blockmap::parse(xml.as_bytes()).unwrap();
+        palisade_fileid::package::blockmap::verify(&map, &a)
+    };
+    check(&sizes).unwrap();
+    // The final block counted in the last block: also the OS's case 1.
+    let mut exact = sizes.clone();
+    *exact.last_mut().unwrap() += 2;
+    check(&exact).unwrap();
+    // Anything else is refused: one or three bytes off, either way.
+    for (delta, up) in [(1, true), (1, false), (3, true), (3, false)] {
+        let mut off = sizes.clone();
+        off[0] = if up { off[0] + delta } else { off[0] - delta };
+        assert!(
+            matches!(check(&off), Err(BlockMapError::Size(_))),
+            "{delta} {up}"
+        );
+    }
+    // A deflated file whose blocks give no sizes, or only some, is
+    // refused: the OS reader reads a missing size as 64 KiB, which never
+    // fits a compressed file this size.
+    let mut unsized_map = String::new();
+    let at = map_xml.find("Name=\"assets\\big.bin\"").unwrap();
+    let end = at + map_xml[at..].find("</File>").unwrap();
+    unsized_map.push_str(&map_xml[..at]);
+    let file = &map_xml[at..end];
+    let first_block = file.find("<Block ").unwrap();
+    unsized_map.push_str(&file[..first_block]);
+    for part in file[first_block..].split("<Block ").skip(1) {
+        let hash_at = part.find("Hash=").unwrap();
+        let hash_end = hash_at + part[hash_at + 6..].find('"').unwrap() + 7;
+        unsized_map.push_str(&format!("<Block {}/>", &part[hash_at..hash_end]));
+    }
+    unsized_map.push_str(&map_xml[end..]);
+    let map = palisade_fileid::package::blockmap::parse(unsized_map.as_bytes()).unwrap();
+    assert!(matches!(
+        palisade_fileid::package::blockmap::verify(&map, &a),
+        Err(BlockMapError::Size(_))
+    ));
+
+    // A member that ends on its last full flush, with no final block, is
+    // not a complete DEFLATE stream and is refused. (The SDK's own writer
+    // always ends the stream; its only such members are in its negative
+    // test packages.)
+    let cut = AppxBuilder::package().build_with(&ZipStyle {
+        no_final_block: true,
+        ..ZipStyle::default()
+    });
+    let a = Archive::parse(&cut).unwrap();
+    assert!(matches!(
+        a.read(a.member("assets/big.bin").unwrap()),
+        Err(ZipError::Corrupt(_))
+    ));
+}
+
+#[test]
+fn bundle_payloads_are_checked_against_the_bundle_manifest() {
+    // `AppxBundleWriter` adds the payload packages stored and without
+    // block map entries, so a bundle's block map lists the bundle manifest
+    // only, and its reader requires exactly that (`AppxPackageObject`:
+    // "Block map contains invalid files", "Packages cannot be compressed",
+    // and the bundle manifest's `Size` must be the member's). The bundle
+    // manifest gives each payload's `Offset` (where its data starts) and
+    // `Size` (`BundleManifestSchema`: both required).
+    use palisade_fileid::package::blockmap::{Payload, verify, verify_bundle};
+    let b = AppxBuilder::bundle();
+    let data = b.build();
+    let a = Archive::parse(&data).unwrap();
+    let map = block_map_of(&a);
+    assert_eq!(map.files.len(), 1);
+    let id = parse_package(&data).unwrap();
+    assert!(id.is_bundle);
+    let payloads: Vec<Payload<'_>> = id
+        .members
+        .iter()
+        .map(|m| Payload {
+            file_name: &m.file_name,
+            offset: m.offset,
+            size: m.size,
+        })
+        .collect();
+    verify_bundle(&map, &a, &payloads).unwrap();
+    // As a package's block map it does not cover the payloads.
+    assert!(matches!(verify(&map, &a), Err(BlockMapError::Unlisted(_))));
+    // The payloads are real packages that parse on their own.
+    for m in &id.members {
+        let inner = a.read(a.member(&m.file_name).unwrap()).unwrap();
+        assert_eq!(parse_package(&inner).unwrap().name, "Palisade.TestBundle");
+    }
+
+    let with = |f: &dyn Fn(&mut Payload<'_>)| {
+        let mut p = payloads.clone();
+        f(&mut p[0]);
+        verify_bundle(&map, &a, &p)
+    };
+    // Wrong offset or size, or none given.
+    for bad in [
+        with(&|p| p.offset = p.offset.map(|o| o + 1)),
+        with(&|p| p.offset = None),
+        with(&|p| p.size = p.size.map(|s| s - 1)),
+        with(&|p| p.size = None),
+    ] {
+        assert!(matches!(bad, Err(BlockMapError::Size(_))), "{bad:?}");
+    }
+    // A payload listed twice, or listed but not in the archive (a flat
+    // bundle, whose packages are separate files, is not verified here).
+    let mut twice = payloads.clone();
+    twice.push(payloads[0]);
+    assert!(matches!(
+        verify_bundle(&map, &a, &twice),
+        Err(BlockMapError::Duplicate(_))
+    ));
+    let mut extra = payloads.clone();
+    extra.push(Payload {
+        file_name: "missing.msix",
+        offset: Some(1),
+        size: Some(1),
+    });
+    assert!(matches!(
+        verify_bundle(&map, &a, &extra),
+        Err(BlockMapError::Unlisted(_))
+    ));
+    // A member the bundle manifest does not list.
+    assert!(matches!(
+        verify_bundle(&map, &a, &payloads[..1]),
+        Err(BlockMapError::Unlisted(_))
+    ));
+    // A compressed payload, even at the right place and size.
+    let mut deflated = b.clone();
+    deflated.files[0].deflate = true;
+    let d = deflated.build();
+    let da = Archive::parse(&d).unwrap();
+    let dp: Vec<Payload<'_>> = da
+        .members
+        .iter()
+        .take(2)
+        .map(|m| Payload {
+            file_name: &m.name,
+            offset: Some(m.data_offset),
+            size: Some(m.size),
+        })
+        .collect();
+    assert!(matches!(
+        verify_bundle(&block_map_of(&da), &da, &dp),
+        Err(BlockMapError::Size(_))
+    ));
+    // A block map that lists a payload too, or a file besides the bundle
+    // manifest.
+    let mut listed = b.clone();
+    listed.blockmap_extra = format!(
+        "<File Name=\"app_x64.msix\" Size=\"{}\" LfhSize=\"42\"><Block Hash=\"{}\"/></File>",
+        payloads[0].size.unwrap(),
+        "A".repeat(43) + "="
+    );
+    let l = listed.build();
+    let la = Archive::parse(&l).unwrap();
+    assert!(verify_bundle(&block_map_of(&la), &la, &payloads).is_err());
+
+    // Through parse_package: a signed bundle with one payload byte changed
+    // fails the signature, and with the bundle manifest's offset changed
+    // (block map and digest left alone) fails too.
+    let signed = fixture("bundle-signed.msixbundle");
+    assert!(parse_package(&signed).unwrap().signature_valid());
+    let sa = Archive::parse(&signed).unwrap();
+    let x64 = sa.member("app_x64.msix").unwrap();
+    let mut flipped = signed.clone();
+    flipped[(x64.data_offset + 40) as usize] ^= 1;
+    assert!(!parse_package(&flipped).unwrap().signature_valid());
 }

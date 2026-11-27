@@ -56,8 +56,10 @@
 //! Anything wrong with the signature, the block map or the publisher
 //! demotes every signature so that none is valid. Bundles are identified
 //! by their bundle manifest; their member packages are listed, not parsed
-//! or verified one by one (the bundle's own signature and block map cover
-//! their bytes).
+//! or verified one by one. A bundle's block map lists only the bundle
+//! manifest; each payload package must be a stored member at the offset
+//! and of the size the bundle manifest gives ([`blockmap::verify_bundle`]),
+//! and the signature covers its bytes through the local records (`AXPC`).
 
 #![forbid(unsafe_code)]
 
@@ -544,7 +546,21 @@ fn verify_signature(archive: &Archive<'_>, id: &PackageIdentity) -> Option<Packa
     // The block map, last: it inflates every file, so it runs only for a
     // signature that is otherwise sound.
     if report.primary.is_some() {
-        if let Err(e) = blockmap::verify(&map, archive) {
+        let checked = if id.is_bundle {
+            let payloads: Vec<blockmap::Payload<'_>> = id
+                .members
+                .iter()
+                .map(|m| blockmap::Payload {
+                    file_name: &m.file_name,
+                    offset: m.offset,
+                    size: m.size,
+                })
+                .collect();
+            blockmap::verify_bundle(&map, archive, &payloads)
+        } else {
+            blockmap::verify(&map, archive)
+        };
+        if let Err(e) = checked {
             return fail(report, PackageSignatureIssue::BlockMap(e));
         }
     }

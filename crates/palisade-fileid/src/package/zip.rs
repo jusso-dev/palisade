@@ -10,12 +10,19 @@
 //!   (an archive comment is not allowed), and, when the archive needs
 //!   ZIP64, exactly one ZIP64 locator and record right before it, with
 //!   counts, sizes and offsets that agree with the classic record;
-//! - one disk only;
+//! - one disk only (with ZIP64, the classic record's two disk numbers may
+//!   both be the `0xffff` marker, as the OS packaging tool writes them; the
+//!   ZIP64 record's must still be 0);
 //! - the central directory runs from its stated offset to the ZIP64
 //!   record or the end record, with no gap and nothing after it;
 //! - local entries tile the file from offset 0 to the central directory
 //!   in central-directory order: each local header, its data and its data
 //!   descriptor end where the next local header starts;
+//! - a data descriptor's sizes are 8 bytes when the archive has ZIP64 end
+//!   records or the entry a ZIP64 extra field, and 4 bytes otherwise (the
+//!   OS packaging tool writes ZIP64 archives with 8-byte descriptor sizes
+//!   for every entry, extra field or not, and signing tools read them that
+//!   way);
 //! - each local header agrees with its central entry (name, method,
 //!   flags, CRC and sizes, or zero for those three when a data descriptor
 //!   follows, which must carry its signature and whose values must then
@@ -30,8 +37,7 @@
 //!   OPC compares them, so two spellings of one part are a duplicate;
 //! - extra data, in a local header or a central entry, is either empty or
 //!   exactly one ZIP64 block with exactly the fields its `0xffffffff`
-//!   markers call for (none with a data descriptor); and a data descriptor
-//!   uses 8-byte sizes exactly when its central entry has a ZIP64 block;
+//!   markers call for (none with a data descriptor);
 //! - method 0 (stored, sizes equal) or 8 (deflate); no encryption, no
 //!   patch data, no strong encryption flags;
 //! - every member's data inflates to exactly its declared size and CRC.
@@ -342,7 +348,11 @@ impl<'a> Archive<'a> {
                 false,
             )
         };
-        if disk != 0 || cd_disk != 0 || (!zip64 && n_disk != n_total) {
+        // With ZIP64, the classic disk numbers may be the `0xffff` marker
+        // (packaging tools write it); the ZIP64 record, checked above, holds
+        // the real ones, which must be 0.
+        let disk_ok = disk == 0 || (zip64 && disk == 0xffff);
+        if !disk_ok || cd_disk != disk || (!zip64 && n_disk != n_total) {
             return Err(ZipError::MultiDisk);
         }
         let count = to_usize(entries).ok_or(ZipError::TooManyEntries)?;
@@ -379,7 +389,7 @@ impl<'a> Archive<'a> {
             if m.local_offset != next {
                 return Err(ZipError::LocalHeader(m.name.clone()));
             }
-            Self::local_entry(data, m)?;
+            Self::local_entry(data, m, zip64)?;
             next = m.end_offset;
         }
         if next != cd_off {
@@ -472,7 +482,7 @@ impl<'a> Archive<'a> {
         })
     }
 
-    fn local_entry(data: &[u8], m: &mut Member) -> Result<()> {
+    fn local_entry(data: &[u8], m: &mut Member, zip64: bool) -> Result<()> {
         let bad = || ZipError::LocalHeader(m.name.clone());
         let at = to_usize(m.local_offset).ok_or_else(bad)?;
         if u32_at(data, at) != Some(LOCAL_SIG) {
@@ -525,8 +535,10 @@ impl<'a> Archive<'a> {
             }
             let p = d + 4;
             let d_crc = u32_at(data, p).ok_or_else(bad)?;
-            // 8-byte sizes when the entry has a ZIP64 extra field.
-            let (dc, du, n) = if m.has_zip64_extra {
+            // 8-byte sizes in a ZIP64 archive or with a ZIP64 extra field:
+            // the OS packaging tool writes them for every descriptor of the
+            // ZIP64 archives it makes, and osslsigncode reads them so.
+            let (dc, du, n) = if zip64 || m.has_zip64_extra {
                 (
                     u64_at(data, p + 4).ok_or_else(bad)?,
                     u64_at(data, p + 12).ok_or_else(bad)?,

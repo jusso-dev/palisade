@@ -6,7 +6,10 @@
 //! `AppxBlockMap.xml` (with real SHA-256 block hashes of every file),
 //! `[Content_Types].xml`, the central directory and the end record.
 //! Deflate here is a plain fixed-Huffman encoder of literals only, which is
-//! valid DEFLATE every reader accepts. Everything is deterministic.
+//! valid DEFLATE every reader accepts, laid out as the OS packaging tool
+//! lays it out ([`deflate_blocks`]). A bundle puts its payload packages
+//! first, as that tool does, so their offsets do not depend on the bundle
+//! manifest that records them. Everything is deterministic.
 
 #![allow(dead_code, clippy::cast_possible_truncation, clippy::unwrap_used)]
 
@@ -25,55 +28,89 @@ pub fn crc32(data: &[u8]) -> u32 {
     !crc
 }
 
-/// Raw DEFLATE with one fixed-Huffman block of literals.
-pub fn deflate_literals(data: &[u8]) -> Vec<u8> {
-    struct Bits {
-        out: Vec<u8>,
-        acc: u32,
-        n: u32,
+/// Raw DEFLATE in the shape the OS packaging tool writes: each 64 KiB
+/// block of the input compressed on its own and ended with a full flush
+/// (here a fixed-Huffman block of literals, then the empty stored block
+/// `00 00 ff ff` that byte-aligns it), and the stream closed by an empty
+/// final fixed-Huffman block, the two bytes `03 00`. The tool flushes every
+/// block because it cannot tell which block is the last, so that final
+/// block is not counted in any block's size. Returns the stream and the
+/// compressed size of each block (the block map's `Size`).
+pub fn deflate_blocks(data: &[u8]) -> (Vec<u8>, Vec<usize>) {
+    let mut out = Vec::new();
+    let mut sizes = Vec::new();
+    for block in data.chunks(65536) {
+        let start = out.len();
+        let mut bits = Bits::default();
+        bits.put(0, 1); // not final
+        bits.put(1, 2); // fixed Huffman
+        for &c in block {
+            bits.literal(c);
+        }
+        bits.code(0, 7); // end of block (256)
+        // Full flush: an empty, non-final stored block, byte-aligned.
+        bits.put(0, 1);
+        bits.put(0, 2);
+        out.extend_from_slice(&bits.finish());
+        out.extend_from_slice(&[0x00, 0x00, 0xff, 0xff]);
+        sizes.push(out.len() - start);
     }
-    impl Bits {
-        fn put(&mut self, v: u32, len: u32) {
-            for i in 0..len {
-                self.acc |= ((v >> i) & 1) << self.n;
-                self.n += 1;
-                if self.n == 8 {
-                    self.out.push(self.acc as u8);
-                    self.acc = 0;
-                    self.n = 0;
-                }
+    // The empty final block.
+    out.extend_from_slice(&[0x03, 0x00]);
+    (out, sizes)
+}
+
+#[derive(Default)]
+struct Bits {
+    out: Vec<u8>,
+    acc: u32,
+    n: u32,
+}
+
+impl Bits {
+    fn put(&mut self, v: u32, len: u32) {
+        for i in 0..len {
+            self.acc |= ((v >> i) & 1) << self.n;
+            self.n += 1;
+            if self.n == 8 {
+                self.out.push(self.acc as u8);
+                self.acc = 0;
+                self.n = 0;
             }
         }
-        /// Huffman codes are sent most significant bit first.
-        fn code(&mut self, v: u32, len: u32) {
-            let mut r = 0;
-            for i in 0..len {
-                r |= ((v >> i) & 1) << (len - 1 - i);
-            }
-            self.put(r, len);
-        }
     }
-    let mut b = Bits {
-        out: Vec::new(),
-        acc: 0,
-        n: 0,
-    };
-    b.put(1, 1); // final
-    b.put(1, 2); // fixed Huffman
-    for &c in data {
+    /// Huffman codes are sent most significant bit first.
+    fn code(&mut self, v: u32, len: u32) {
+        let mut r = 0;
+        for i in 0..len {
+            r |= ((v >> i) & 1) << (len - 1 - i);
+        }
+        self.put(r, len);
+    }
+    fn literal(&mut self, c: u8) {
         let c = u32::from(c);
         if c < 144 {
-            b.code(0x30 + c, 8);
+            self.code(0x30 + c, 8);
         } else {
-            b.code(0x190 + (c - 144), 9);
+            self.code(0x190 + (c - 144), 9);
         }
     }
-    b.code(0, 7); // end of block (256)
-    if b.n > 0 {
-        b.out.push(b.acc as u8);
+    fn finish(mut self) -> Vec<u8> {
+        if self.n > 0 {
+            self.out.push(self.acc as u8);
+        }
+        self.out
     }
-    b.out
 }
+
+/// A real 1x1 PNG image, for the logos the manifest schema requires.
+pub const PNG: &[u8] = &[
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+    0x89, 0x00, 0x00, 0x00, 0x0b, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0x63, 0x60, 0x00, 0x02, 0x00,
+    0x00, 0x05, 0x00, 0x01, 0xe9, 0xfa, 0xdc, 0xd8, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44,
+    0xae, 0x42, 0x60, 0x82,
+];
 
 /// One file in the package.
 #[derive(Clone, Debug)]
@@ -139,6 +176,8 @@ pub fn manifest(name: &str, publisher: &str, version: &str, arch: &str) -> Strin
   <Resources><Resource Language="en-us"/></Resources>
   <Applications>
     <Application Id="App" Executable="app/tool.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="Palisade Test App" Description="Palisade test app"
+          BackgroundColor="transparent" Square150x150Logo="logo.png" Square44x44Logo="logo.png"/>
       <Extensions>
         <uap3:Extension Category="windows.appExecutionAlias" Executable="app/tool.exe">
           <uap3:AppExecutionAlias>
@@ -154,6 +193,62 @@ pub fn manifest(name: &str, publisher: &str, version: &str, arch: &str) -> Strin
     <rescap:Capability Name="runFullTrust"/>
     <DeviceCapability Name="webcam"/>
   </Capabilities>
+</Package>
+"#
+    )
+}
+
+/// A minimal desktop app manifest for the OS SDK's packaging tool, which
+/// validates manifests against its schema: one full-trust application with
+/// its visual elements and logos (`logo.png`), and no extensions.
+pub fn sdk_manifest(name: &str, publisher: &str, version: &str, arch: &str) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+         IgnorableNamespaces="uap rescap">
+  <Identity Name="{name}" Publisher="{publisher}" Version="{version}" ProcessorArchitecture="{arch}"/>
+  <Properties>
+    <DisplayName>Palisade SDK Probe</DisplayName>
+    <PublisherDisplayName>Palisade Tests</PublisherDisplayName>
+    <Logo>logo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.22621.0"/>
+  </Dependencies>
+  <Resources><Resource Language="en-us"/></Resources>
+  <Applications>
+    <Application Id="App" Executable="tool.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="Palisade SDK Probe" Description="Palisade SDK probe"
+          BackgroundColor="transparent" Square150x150Logo="logo.png" Square44x44Logo="logo.png"/>
+    </Application>
+  </Applications>
+  <Capabilities><rescap:Capability Name="runFullTrust"/></Capabilities>
+</Package>
+"#
+    )
+}
+
+/// The bundle manifest's part name.
+pub const BUNDLE_MANIFEST: &str = "AppxMetadata/AppxBundleManifest.xml";
+
+/// The manifest of a resource package for `language`.
+pub fn resource_manifest(name: &str, publisher: &str, version: &str, language: &str) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
+  <Identity Name="{name}" Publisher="{publisher}" Version="{version}" ResourceId="{language}"/>
+  <Properties>
+    <ResourcePackage>true</ResourcePackage>
+    <DisplayName>Palisade Test App</DisplayName>
+    <PublisherDisplayName>Palisade Tests</PublisherDisplayName>
+    <Logo>logo.png</Logo>
+  </Properties>
+  <Resources><Resource Language="{language}"/></Resources>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.22621.0"/>
+  </Dependencies>
 </Package>
 "#
     )
@@ -182,7 +277,7 @@ impl AppxBuilder {
                 },
                 File {
                     name: "logo.png".into(),
-                    data: vec![0x89, b'P', b'N', b'G', 1, 2, 3],
+                    data: PNG.to_vec(),
                     deflate: false,
                 },
             ],
@@ -191,45 +286,107 @@ impl AppxBuilder {
         }
     }
 
-    /// A bundle with a bundle manifest listing two (opaque) packages.
+    /// A small package (manifest, executable, logo) with the given
+    /// identity: a bundle's application payload.
+    pub fn small_package(name: &str, version: &str, arch: &str) -> Self {
+        let mut b = Self::package();
+        b.files[0].data = manifest(name, PUBLISHER, version, arch).into_bytes();
+        b.files.retain(|f| f.name != "assets/big.bin");
+        b
+    }
+
+    /// A resource package for `language`: a bundle's resource payload.
+    pub fn resource_package(name: &str, version: &str, language: &str) -> Self {
+        Self {
+            files: vec![
+                File {
+                    name: "AppxManifest.xml".into(),
+                    data: resource_manifest(name, PUBLISHER, version, language).into_bytes(),
+                    deflate: true,
+                },
+                File {
+                    name: "logo.png".into(),
+                    data: PNG.to_vec(),
+                    deflate: false,
+                },
+            ],
+            blockmap_extra: String::new(),
+            blockmap_skip: None,
+        }
+    }
+
+    /// A bundle of two payload packages (an x64 application package and an
+    /// `en-us` resource package, both real packages with the bundle's
+    /// identity) and a bundle manifest that lists them with the offset and
+    /// size of their data, as the OS packaging tool lays a bundle out:
+    /// payloads first and stored, then the manifest. The offsets are those
+    /// of [`Self::build`] (no data descriptors).
     pub fn bundle() -> Self {
+        let payloads = [
+            File {
+                name: "app_x64.msix".into(),
+                data: Self::small_package("Palisade.TestBundle", "2.0.0.0", "x64").build(),
+                deflate: false,
+            },
+            File {
+                name: "app_en-us.msix".into(),
+                data: Self::resource_package("Palisade.TestBundle", "2.0.0.0", "en-us").build(),
+                deflate: false,
+            },
+        ];
+        let mut at = 0;
+        let mut place = Vec::new();
+        for p in &payloads {
+            let data = at + Self::local_header_len(&p.name);
+            place.push((data, p.data.len()));
+            at = data + p.data.len();
+        }
+        let ((x64_at, x64_len), (en_at, en_len)) = (place[0], place[1]);
         let bundle_manifest = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <Bundle xmlns="http://schemas.microsoft.com/appx/2013/bundle" SchemaVersion="5.0">
   <Identity Name="Palisade.TestBundle" Publisher="{PUBLISHER}" Version="2.0.0.0"/>
   <Packages>
-    <Package Type="application" Version="2.0.0.0" Architecture="x64" FileName="app_x64.msix" Offset="100" Size="32"/>
-    <Package Type="resource" Version="2.0.0.0" ResourceId="en-us" FileName="app_en-us.msix" Offset="200" Size="16"/>
+    <Package Type="application" Version="2.0.0.0" Architecture="x64" FileName="app_x64.msix" Offset="{x64_at}" Size="{x64_len}">
+      <Resources><Resource Language="en-us"/></Resources>
+    </Package>
+    <Package Type="resource" Version="2.0.0.0" ResourceId="en-us" FileName="app_en-us.msix" Offset="{en_at}" Size="{en_len}">
+      <Resources><Resource Language="en-us"/></Resources>
+    </Package>
   </Packages>
 </Bundle>
 "#
         );
+        let mut files = payloads.to_vec();
+        files.push(File {
+            name: BUNDLE_MANIFEST.into(),
+            data: bundle_manifest.into_bytes(),
+            deflate: true,
+        });
         Self {
-            files: vec![
-                File {
-                    name: "AppxMetadata/AppxBundleManifest.xml".into(),
-                    data: bundle_manifest.into_bytes(),
-                    deflate: true,
-                },
-                File {
-                    name: "app_x64.msix".into(),
-                    data: vec![0x50; 32],
-                    deflate: false,
-                },
-                File {
-                    name: "app_en-us.msix".into(),
-                    data: vec![0x51; 16],
-                    deflate: false,
-                },
-            ],
+            files,
             blockmap_extra: String::new(),
             blockmap_skip: None,
         }
     }
 
+    /// The bundle manifest, for a bundle builder.
+    pub fn bundle_manifest(&self) -> &[u8] {
+        &self
+            .files
+            .iter()
+            .find(|f| f.name == BUNDLE_MANIFEST)
+            .unwrap()
+            .data
+    }
+
+    fn is_bundle(&self) -> bool {
+        self.files.iter().any(|f| f.name == BUNDLE_MANIFEST)
+    }
+
     fn compressed(f: &File) -> (u16, Vec<u8>) {
         if f.deflate {
-            (8, deflate_literals(&f.data))
+            (8, deflate_blocks(&f.data).0)
         } else {
             (0, f.data.clone())
         }
@@ -240,14 +397,18 @@ impl AppxBuilder {
         30 + name.len()
     }
 
-    /// The block map for the payload files.
+    /// The block map for the payload files: every file of a package, with
+    /// each block's compressed size for a deflated file, or only the bundle
+    /// manifest of a bundle (its payload packages are not listed).
     pub fn block_map(&self) -> String {
         let mut out = String::from(
             "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n<BlockMap xmlns=\"http://schemas.microsoft.com/appx/2010/blockmap\" HashMethod=\"http://www.w3.org/2001/04/xmlenc#sha256\">",
         );
         out.push_str(&self.blockmap_extra);
         for f in &self.files {
-            if self.blockmap_skip.as_deref() == Some(f.name.as_str()) {
+            if self.blockmap_skip.as_deref() == Some(f.name.as_str())
+                || (self.is_bundle() && f.name != BUNDLE_MANIFEST)
+            {
                 continue;
             }
             out.push_str(&format!(
@@ -256,14 +417,29 @@ impl AppxBuilder {
                 f.data.len(),
                 Self::local_header_len(&f.name)
             ));
-            for block in f.data.chunks(65536) {
+            let sizes = deflate_blocks(&f.data).1;
+            for (i, block) in f.data.chunks(65536).enumerate() {
                 let h = Sha256::digest(block);
-                out.push_str(&format!("<Block Hash=\"{}\"/>", base64(&h)));
+                if f.deflate {
+                    out.push_str(&format!(
+                        "<Block Hash=\"{}\" Size=\"{}\"/>",
+                        base64(&h),
+                        sizes[i]
+                    ));
+                } else {
+                    out.push_str(&format!("<Block Hash=\"{}\"/>", base64(&h)));
+                }
             }
             out.push_str("</File>");
         }
         out.push_str("</BlockMap>");
         out
+    }
+
+    /// `[Content_Types].xml` for a bundle, as the OS packaging tool writes
+    /// it: payload packages and the bundle manifest by extension.
+    pub fn bundle_content_types() -> String {
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"msix\" ContentType=\"application/vnd.ms-appx\"/><Default Extension=\"xml\" ContentType=\"application/vnd.ms-appx.bundlemanifest+xml\"/><Override PartName=\"/AppxBlockMap.xml\" ContentType=\"application/vnd.ms-appx.blockmap+xml\"/></Types>".into()
     }
 
     pub fn content_types() -> String {
@@ -289,7 +465,12 @@ impl AppxBuilder {
         });
         all.push(File {
             name: "[Content_Types].xml".into(),
-            data: Self::content_types().into_bytes(),
+            data: if self.is_bundle() {
+                Self::bundle_content_types()
+            } else {
+                Self::content_types()
+            }
+            .into_bytes(),
             deflate: true,
         });
         all
@@ -310,6 +491,38 @@ pub struct ZipStyle {
     pub central_extra_tail: Vec<u8>,
     /// Extra bytes put in the first member's local extra field.
     pub local_extra: Vec<u8>,
+    /// With `zip64`: central entries carry their real 32-bit sizes and
+    /// offset and no ZIP64 extra field, as the OS packaging tool writes
+    /// entries whose values fit.
+    pub plain_entries: bool,
+    /// The classic end record's two disk numbers are the `0xffff` marker,
+    /// as the OS packaging tool writes them in its ZIP64 archives.
+    pub disk_marker: bool,
+    /// Deflated members end on their last full flush, without the empty
+    /// final block (for negative tests).
+    pub no_final_block: bool,
+    /// Data descriptors with 4-byte sizes even in a ZIP64 archive (for
+    /// negative tests).
+    pub narrow_descriptors: bool,
+    /// Data descriptors with 8-byte sizes even without ZIP64 (for negative
+    /// tests).
+    pub wide_descriptors: bool,
+}
+
+impl ZipStyle {
+    /// The layout the OS packaging tool writes: a data descriptor with
+    /// 8-byte sizes after every member, ZIP64 end records whose classic
+    /// record holds the `0xffff` and `0xffffffff` markers (disk numbers
+    /// included), and central entries without ZIP64 extra fields.
+    pub fn packaging_tool() -> Self {
+        Self {
+            descriptors: true,
+            zip64: true,
+            plain_entries: true,
+            disk_marker: true,
+            ..Self::default()
+        }
+    }
 }
 
 /// Writes `files` as a ZIP archive in order.
@@ -329,7 +542,10 @@ pub fn write_zip_with(files: &[File], style: &ZipStyle) -> Vec<u8> {
         } else {
             &[]
         };
-        let (method, body) = AppxBuilder::compressed(f);
+        let (method, mut body) = AppxBuilder::compressed(f);
+        if method == 8 && style.no_final_block {
+            body.truncate(body.len() - 2);
+        }
         let crc = crc32(&f.data);
         let offset = out.len() as u32;
         let name = f.name.as_bytes();
@@ -355,7 +571,7 @@ pub fn write_zip_with(files: &[File], style: &ZipStyle) -> Vec<u8> {
         if style.descriptors {
             out.extend_from_slice(&0x0807_4b50_u32.to_le_bytes());
             out.extend_from_slice(&crc.to_le_bytes());
-            if style.zip64 {
+            if (style.zip64 && !style.narrow_descriptors) || style.wide_descriptors {
                 out.extend_from_slice(&(body.len() as u64).to_le_bytes());
                 out.extend_from_slice(&(f.data.len() as u64).to_le_bytes());
             } else {
@@ -372,7 +588,8 @@ pub fn write_zip_with(files: &[File], style: &ZipStyle) -> Vec<u8> {
         central.extend_from_slice(&0_u16.to_le_bytes());
         central.extend_from_slice(&0x5821_u16.to_le_bytes());
         central.extend_from_slice(&crc.to_le_bytes());
-        if style.zip64 {
+        let extras = style.zip64 && !style.plain_entries;
+        if extras {
             central.extend_from_slice(&u32::MAX.to_le_bytes());
             central.extend_from_slice(&u32::MAX.to_le_bytes());
         } else {
@@ -380,17 +597,17 @@ pub fn write_zip_with(files: &[File], style: &ZipStyle) -> Vec<u8> {
             central.extend_from_slice(&(f.data.len() as u32).to_le_bytes());
         }
         central.extend_from_slice(&(name.len() as u16).to_le_bytes());
-        let zip64_len: u16 = if style.zip64 { 28 } else { 0 };
+        let zip64_len: u16 = if extras { 28 } else { 0 };
         central.extend_from_slice(&(zip64_len + tail.len() as u16).to_le_bytes());
         central.extend_from_slice(&[0; 6]);
         central.extend_from_slice(&[0; 4]);
-        if style.zip64 {
+        if extras {
             central.extend_from_slice(&u32::MAX.to_le_bytes());
         } else {
             central.extend_from_slice(&offset.to_le_bytes());
         }
         central.extend_from_slice(name);
-        if style.zip64 {
+        if extras {
             central.extend_from_slice(&1_u16.to_le_bytes());
             central.extend_from_slice(&24_u16.to_le_bytes());
             central.extend_from_slice(&(f.data.len() as u64).to_le_bytes());
@@ -418,7 +635,9 @@ pub fn write_zip_with(files: &[File], style: &ZipStyle) -> Vec<u8> {
         out.extend_from_slice(&1_u32.to_le_bytes());
     }
     out.extend_from_slice(&0x0605_4b50_u32.to_le_bytes());
-    out.extend_from_slice(&[0; 4]);
+    let disk: u16 = if style.disk_marker { u16::MAX } else { 0 };
+    out.extend_from_slice(&disk.to_le_bytes());
+    out.extend_from_slice(&disk.to_le_bytes());
     let (n, size, off) = if style.zip64 {
         (u16::MAX, u32::MAX, u32::MAX)
     } else {

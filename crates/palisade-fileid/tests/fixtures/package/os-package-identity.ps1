@@ -10,6 +10,18 @@
 #   PFN <tab> publisher <tab> family name
 #   FULL <tab> x64|bundle <tab> full name (of the first publisher)
 #   SIG <tab> file name <tab> result code (hex)
+#   DIAG <tab> file name <tab> route=result
+#
+# DIAG lines ask the OS about each package by other routes, so that one
+# run shows why a package is or is not recognised:
+#   handle    WinVerifyTrust as for SIG, with an open file handle too
+#   subject   the subject type the OS signature layer assigns the file
+#             (CryptSIPRetrieveSubjectGuid): the package or bundle GUID
+#             when the OS takes it for one
+#   reader    the OS packaging API's package or bundle reader
+#             (CreatePackageReader / CreateBundleReader), which validates
+#             the container, the manifest and the block map
+#   cmdlet    Get-AuthenticodeSignature's status and message
 #
 # Exit codes: 0 done, 3 a needed OS component is not available.
 param(
@@ -74,9 +86,18 @@ public static class PalisadePackageId {
     [DllImport("wintrust.dll", CharSet = CharSet.Unicode)]
     public static extern int WinVerifyTrust(IntPtr hwnd, ref Guid action, ref WINTRUST_DATA data);
     public static int Verify(string path) {
+        return Verify(path, IntPtr.Zero);
+    }
+    // The same, with the file open: the OS reads through the handle.
+    public static int VerifyHandle(string path) {
+        using (var fs = new System.IO.FileStream(path, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read)) {
+            return Verify(path, fs.SafeFileHandle.DangerousGetHandle());
+        }
+    }
+    public static int Verify(string path, IntPtr handle) {
         // WINTRUST_ACTION_GENERIC_VERIFY_V2.
         var action = new Guid("00AAC56B-CD44-11d0-8CC2-00C04FC295EE");
-        var file = new WINTRUST_FILE_INFO { cbStruct = (uint)Marshal.SizeOf(typeof(WINTRUST_FILE_INFO)), pcwszFilePath = path };
+        var file = new WINTRUST_FILE_INFO { cbStruct = (uint)Marshal.SizeOf(typeof(WINTRUST_FILE_INFO)), pcwszFilePath = path, hFile = handle };
         IntPtr pFile = Marshal.AllocHGlobal(Marshal.SizeOf(file));
         try {
             Marshal.StructureToPtr(file, pFile, false);
@@ -95,6 +116,54 @@ public static class PalisadePackageId {
             return rc;
         } finally {
             Marshal.FreeHGlobal(pFile);
+        }
+    }
+    [DllImport("crypt32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern bool CryptSIPRetrieveSubjectGuid(string fileName, IntPtr file, out Guid subject);
+    // The subject type the OS signature layer assigns the file.
+    public static string Subject(string path) {
+        Guid g;
+        if (CryptSIPRetrieveSubjectGuid(path, IntPtr.Zero, out g)) {
+            string s = g.ToString().ToUpperInvariant();
+            if (s == "0AC5DF4B-CE07-4DE2-B76E-23C839A09FD1") { return s + " (package)"; }
+            if (s == "0F5F58B3-AADE-4B9A-A434-95742D92ECEB") { return s + " (bundle)"; }
+            return s;
+        }
+        return "error " + Marshal.GetLastWin32Error().ToString("x8");
+    }
+    [ComImport, Guid("beb94909-e451-438b-b5a7-d79e767b75d8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IPackageFactory {
+        [PreserveSig] int CreatePackageWriter(IntPtr output, IntPtr settings, out IntPtr writer);
+        [PreserveSig] int CreatePackageReader(IntPtr input, out IntPtr reader);
+    }
+    [ComImport, Guid("bba65864-965f-4a5f-855f-f074bdbf3a7b"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IBundleFactory {
+        [PreserveSig] int CreateBundleWriter(IntPtr output, ulong version, out IntPtr writer);
+        [PreserveSig] int CreateBundleReader(IntPtr input, out IntPtr reader);
+    }
+    [DllImport("shlwapi.dll", CharSet = CharSet.Unicode)]
+    public static extern int SHCreateStreamOnFileEx(string file, uint mode, uint attributes, bool create, IntPtr template, out IntPtr stream);
+    // The OS packaging API's reader: its result code.
+    public static string Reader(string path, bool bundle) {
+        IntPtr stream;
+        // STGM_READ | STGM_SHARE_DENY_WRITE.
+        int hr = SHCreateStreamOnFileEx(path, 0x20, 0, false, IntPtr.Zero, out stream);
+        if (hr != 0) { return "open " + hr.ToString("x8"); }
+        try {
+            IntPtr reader = IntPtr.Zero;
+            if (bundle) {
+                var f = (IBundleFactory)Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("378E0446-5384-43B7-8877-E7DBDD883446")));
+                hr = f.CreateBundleReader(stream, out reader);
+            } else {
+                var f = (IPackageFactory)Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("5842A140-FF9F-4166-8F5C-62F5B7B0C781")));
+                hr = f.CreatePackageReader(stream, out reader);
+            }
+            if (reader != IntPtr.Zero) { Marshal.Release(reader); }
+            return hr.ToString("x8");
+        } catch (Exception e) {
+            return "error " + e.Message;
+        } finally {
+            Marshal.Release(stream);
         }
     }
     public static string Family(string name, string publisher) {
@@ -126,5 +195,19 @@ foreach ($file in Get-ChildItem -LiteralPath $Dir -File) {
     if ($file.Extension -notin '.msix', '.msixbundle') { continue }
     $rc = [PalisadePackageId]::Verify($file.FullName)
     $lines.Add(("SIG`t{0}`t{1:x8}" -f $file.Name, $rc))
+    # Diagnostics. Each route is asked on its own, so one that fails does
+    # not hide the others.
+    $diag = [ordered]@{}
+    try { $diag.handle = '{0:x8}' -f [PalisadePackageId]::VerifyHandle($file.FullName) } catch { $diag.handle = "error $_" }
+    try { $diag.subject = [PalisadePackageId]::Subject($file.FullName) } catch { $diag.subject = "error $_" }
+    try { $diag.reader = [PalisadePackageId]::Reader($file.FullName, $file.Extension -eq '.msixbundle') } catch { $diag.reader = "error $_" }
+    try {
+        $a = Get-AuthenticodeSignature -LiteralPath $file.FullName
+        $diag.cmdlet = "$($a.Status) $($a.StatusMessage)"
+    } catch { $diag.cmdlet = "error $_" }
+    foreach ($k in $diag.Keys) {
+        $v = ([string]$diag[$k]) -replace '\s+', ' '
+        $lines.Add(("DIAG`t{0}`t{1}={2}" -f $file.Name, $k, $v))
+    }
 }
 Set-Content -LiteralPath $Out -Value $lines -Encoding UTF8
