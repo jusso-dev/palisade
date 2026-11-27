@@ -158,7 +158,9 @@ impl FileFacts {
         }
         let basic = sys::basic_info(file)?;
         let standard = sys::standard_info(file)?;
-        let remote = sys::is_remote(file);
+        // Any sign of a redirector, not only `FileRemoteProtocolInfo`,
+        // which has been seen to miss a share (#54).
+        let remote = super::volume::network_evidence(file, None).is_network();
         let file_id = sys::file_id_info(file)
             .ok()
             .map(|id| (id.VolumeSerialNumber, id.FileId.Identifier))
@@ -235,7 +237,7 @@ const fn is_placeholder(attributes: u32) -> bool {
 
 /// The volume root of the opened `file`, as a volume GUID path, from its
 /// final path.
-fn volume_root(file: &File) -> io::Result<String> {
+pub(crate) fn volume_root(file: &File) -> io::Result<String> {
     let guid_path = sys::final_path_by_handle(file, OPENED_NAME_GUID)?;
     // `\\?\Volume{GUID}\rest`: the volume device is everything before the
     // fourth backslash, without it.

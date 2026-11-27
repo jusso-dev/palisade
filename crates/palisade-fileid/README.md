@@ -215,6 +215,12 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     weak-ACL fixture tree (a user-writable folder under a locked one, an
     explicit deny, a `WRITE_DAC` grant to Users) and compare every result
     with the OS access check, and check the stock system folders too.
+  - `win::volume` (Windows, `os-trust` feature): `read_volume` fills a
+    `VolumeInfo` for the volume an open handle is on (drive type, bus and
+    hot-plug state from the storage queries, OS volume by GUID, file
+    system and journal support), and `is_case_sensitive_dir` reads the
+    per-directory case-sensitivity flag. Windows tests attach a VHD and
+    share a local folder over SMB.
 - `authenticode` certificate chains, signer trust and identity
   ([#49](https://github.com/jusso-dev/palisade/issues/49)):
   - `CertSummary::from_der` parses an X.509 v1, v2 or v3 certificate. It

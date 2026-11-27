@@ -67,8 +67,9 @@
 //! A directory can be marked case-sensitive, and then two names that differ
 //! only in case are two entries. The folded key and
 //! [`NormalizedPath::starts_with`] cannot see that flag, so they treat such
-//! names as one. Reading the flag needs the OS and is left to the OS
-//! backend (#54).
+//! names as one. The Windows backend reads the flag
+//! (`palisade_fileid::win::volume::is_case_sensitive_dir`), so a caller can
+//! tell when a folded key may join two distinct entries.
 //!
 //! # 8.3 short names
 //!
