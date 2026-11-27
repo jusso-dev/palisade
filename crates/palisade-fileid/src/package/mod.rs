@@ -66,6 +66,7 @@
 pub mod blockmap;
 pub mod identity;
 pub mod manifest;
+mod os_ids;
 pub mod xml;
 pub mod zip;
 

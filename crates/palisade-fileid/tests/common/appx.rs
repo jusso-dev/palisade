@@ -13,6 +13,8 @@
 
 #![allow(dead_code, clippy::cast_possible_truncation, clippy::unwrap_used)]
 
+use palisade_fileid::package::blockmap::NS as BLOCK_MAP;
+use palisade_fileid::package::manifest::ns::{BUNDLE_2013, DESKTOP, FOUNDATION, RESCAP, UAP, UAP3};
 use sha2::{Digest as _, Sha256};
 
 /// CRC-32 (IEEE).
@@ -157,11 +159,11 @@ pub struct AppxBuilder {
 pub fn manifest(name: &str, publisher: &str, version: &str, arch: &str) -> String {
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
-<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
-         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
-         xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
-         xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
-         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+<Package xmlns="{FOUNDATION}"
+         xmlns:uap="{UAP}"
+         xmlns:uap3="{UAP3}"
+         xmlns:desktop="{DESKTOP}"
+         xmlns:rescap="{RESCAP}"
          IgnorableNamespaces="uap uap3 desktop rescap">
   <Identity Name="{name}" Publisher="{publisher}" Version="{version}" ProcessorArchitecture="{arch}"/>
   <Properties>
@@ -204,9 +206,9 @@ pub fn manifest(name: &str, publisher: &str, version: &str, arch: &str) -> Strin
 pub fn sdk_manifest(name: &str, publisher: &str, version: &str, arch: &str) -> String {
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
-<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
-         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
-         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+<Package xmlns="{FOUNDATION}"
+         xmlns:uap="{UAP}"
+         xmlns:rescap="{RESCAP}"
          IgnorableNamespaces="uap rescap">
   <Identity Name="{name}" Publisher="{publisher}" Version="{version}" ProcessorArchitecture="{arch}"/>
   <Properties>
@@ -237,7 +239,7 @@ pub const BUNDLE_MANIFEST: &str = "AppxMetadata/AppxBundleManifest.xml";
 pub fn resource_manifest(name: &str, publisher: &str, version: &str, language: &str) -> String {
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
-<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
+<Package xmlns="{FOUNDATION}">
   <Identity Name="{name}" Publisher="{publisher}" Version="{version}" ResourceId="{language}"/>
   <Properties>
     <ResourcePackage>true</ResourcePackage>
@@ -344,7 +346,7 @@ impl AppxBuilder {
         let ((x64_at, x64_len), (en_at, en_len)) = (place[0], place[1]);
         let bundle_manifest = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
-<Bundle xmlns="http://schemas.microsoft.com/appx/2013/bundle" SchemaVersion="5.0">
+<Bundle xmlns="{BUNDLE_2013}" SchemaVersion="5.0">
   <Identity Name="Palisade.TestBundle" Publisher="{PUBLISHER}" Version="2.0.0.0"/>
   <Packages>
     <Package Type="application" Version="2.0.0.0" Architecture="x64" FileName="app_x64.msix" Offset="{x64_at}" Size="{x64_len}">
@@ -401,8 +403,8 @@ impl AppxBuilder {
     /// each block's compressed size for a deflated file, or only the bundle
     /// manifest of a bundle (its payload packages are not listed).
     pub fn block_map(&self) -> String {
-        let mut out = String::from(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n<BlockMap xmlns=\"http://schemas.microsoft.com/appx/2010/blockmap\" HashMethod=\"http://www.w3.org/2001/04/xmlenc#sha256\">",
+        let mut out = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n<BlockMap xmlns=\"{BLOCK_MAP}\" HashMethod=\"http://www.w3.org/2001/04/xmlenc#sha256\">",
         );
         out.push_str(&self.blockmap_extra);
         for f in &self.files {

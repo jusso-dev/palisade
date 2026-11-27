@@ -4,8 +4,8 @@
 //! [`identity_and_signatures_match_the_os`] runs
 //! `tests/fixtures/package/os-package-identity.ps1`, which asks the OS
 //! package identity API for the family name of a package from each
-//! publisher in `publisher_ids.txt`, and the OS signature check for the
-//! signed fixtures and tampered copies. It compares the OS family names
+//! publisher in `os_publisher_ids.txt` and `publisher_ids.txt`, and the OS
+//! signature check for the signed fixtures and tampered copies. It compares the OS family names
 //! with [`publisher_id`], and the OS verdicts with
 //! [`PackageIdentity::signature_valid`]. The script also asks the OS about
 //! each package by other routes (`DIAG` lines: with a file handle, the
@@ -173,7 +173,9 @@ fn tamper(data: &[u8], needle: &[u8]) -> Vec<u8> {
 
 #[test]
 fn identity_and_signatures_match_the_os() {
-    let vectors = std::fs::read_to_string(format!("{FIXTURES}/publisher_ids.txt")).unwrap();
+    // The OS-reported publishers, then the independent vectors.
+    let mut vectors = std::fs::read_to_string(format!("{FIXTURES}/os_publisher_ids.txt")).unwrap();
+    vectors.push_str(&std::fs::read_to_string(format!("{FIXTURES}/publisher_ids.txt")).unwrap());
     let publishers: Vec<&str> = vectors
         .lines()
         .filter_map(|l| l.split_once('\t').map(|(p, _)| p))

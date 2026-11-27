@@ -30,7 +30,7 @@ use crate::authenticode::DigestAlgorithm;
 use crate::hash::{AlgorithmSet, MultiHasher};
 
 /// The block map namespace.
-pub const NS: &str = "http://schemas.microsoft.com/appx/2010/blockmap";
+pub const NS: &str = super::os_ids::BLOCK_MAP;
 /// The uncompressed block size.
 pub const BLOCK: u64 = 64 * 1024;
 
@@ -442,7 +442,7 @@ mod tests {
     fn base64_is_strict() {
         assert_eq!(base64("aGVsbG8=").as_deref(), Some(&b"hello"[..]));
         assert_eq!(base64("aGVsbA==").as_deref(), Some(&b"hell"[..]));
-        assert_eq!(base64("aGVs").as_deref(), Some(&b"hel"[..]));
+        assert_eq!(base64("YWJj").as_deref(), Some(&b"abc"[..]));
         for bad in [
             "",
             "aGVsbG8",

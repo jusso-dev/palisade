@@ -14,6 +14,8 @@ mod appx;
 use appx::*;
 use palisade_fileid::authenticode::{SignatureKind, SignatureStatus, TrustConfig, evaluate_trust};
 use palisade_fileid::package::blockmap::BlockMapError;
+use palisade_fileid::package::blockmap::NS as BLOCK_MAP;
+use palisade_fileid::package::manifest::ns::FOUNDATION;
 use palisade_fileid::package::zip::{Archive, ZipError};
 use palisade_fileid::package::{
     PackageError, PackageSignatureIssue, PackageVersion, parse_package, publisher_id,
@@ -25,26 +27,24 @@ fn fixture(name: &str) -> Vec<u8> {
     std::fs::read(format!("{FIXTURES}/{name}")).unwrap()
 }
 
-/// Publisher IDs the OS reports, from public documentation of well-known
-/// packages and from the OS's own family names, with the publisher strings
-/// they come from. The algorithm is easy to get subtly wrong (bit order,
-/// padding, alphabet), so it is pinned here and checked again by an
-/// independent computation in `publisher_ids.txt`.
-const KNOWN: &[(&str, &str)] = &[
-    (
-        "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
-        "8wekyb3d8bbwe",
-    ),
-    (
-        "CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
-        "cw5n1h2txyewy",
-    ),
-];
+/// Publisher IDs the OS reports for two well-known publishers, from public
+/// documentation of well-known packages and from the OS's own family names:
+/// `os_publisher_ids.txt`, which `publisher_ids.py` checks too. The algorithm is easy to get subtly
+/// wrong (bit order, padding, alphabet), so it is pinned here, and checked
+/// again by that script's independent computation of every vector.
+const KNOWN_IDS: [&str; 2] = ["8wekyb3d8bbwe", "cw5n1h2txyewy"];
 
 #[test]
 fn publisher_ids_match_the_os() {
-    for (publisher, id) in KNOWN {
-        assert_eq!(publisher_id(publisher), *id, "{publisher}");
+    let text = std::fs::read_to_string(format!("{FIXTURES}/os_publisher_ids.txt")).unwrap();
+    let known: Vec<(&str, &str)> = text
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(|l| l.split_once('\t').unwrap())
+        .collect();
+    assert_eq!(known.iter().map(|k| k.1).collect::<Vec<_>>(), KNOWN_IDS);
+    for (publisher, id) in known {
+        assert_eq!(publisher_id(publisher), id, "{publisher}");
     }
 }
 
@@ -730,7 +730,7 @@ fn zip_differentials_are_refused() {
 #[test]
 fn manifests_are_strict() {
     let mut doctype = AppxBuilder::package();
-    doctype.files[0].data = br#"<?xml version="1.0"?><!DOCTYPE p [<!ENTITY x "y">]><Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"><Identity Name="A.B.C" Publisher="CN=x" Version="1.0.0.0"/></Package>"#.to_vec();
+    doctype.files[0].data = format!(r#"<?xml version="1.0"?><!DOCTYPE p [<!ENTITY x "y">]><Package xmlns="{FOUNDATION}"><Identity Name="A.B.C" Publisher="CN=x" Version="1.0.0.0"/></Package>"#).into_bytes();
     assert!(matches!(
         parse_package(&doctype.build()).unwrap_err(),
         PackageError::Manifest(_)
@@ -997,8 +997,8 @@ fn the_block_map_total_is_capped() {
     let archive = Archive::parse(&data).unwrap();
     let huge = palisade_fileid::package::MAX_PACKAGE_SIZE / 2 + 1;
     let blocks = huge.div_ceil(65536);
-    let mut xml = String::from(
-        "<BlockMap xmlns=\"http://schemas.microsoft.com/appx/2010/blockmap\" HashMethod=\"http://www.w3.org/2001/04/xmlenc#sha256\">",
+    let mut xml = format!(
+        "<BlockMap xmlns=\"{BLOCK_MAP}\" HashMethod=\"http://www.w3.org/2001/04/xmlenc#sha256\">",
     );
     let hash = "A".repeat(43) + "=";
     for name in ["AppxManifest.xml", "app\\tool.exe"] {

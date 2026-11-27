@@ -1,5 +1,3 @@
-CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US	8wekyb3d8bbwe
-CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US	cw5n1h2txyewy
 CN=Palisade Test Package Signer, O=Palisade Tests	z7f8548hk0k6w
 CN=Palisade Tests	v0tfq3dypmtgt
 CN=a	2zbdsnss4mwk0

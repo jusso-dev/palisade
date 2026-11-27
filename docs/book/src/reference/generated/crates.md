@@ -20,7 +20,7 @@ flowchart RL
 | Crate | Purpose | May use |
 |---|---|---|
 | [`palisade-core`](../../../../../crates/palisade-core/README.md) | Shared types for every Palisade crate. It does no I/O, so the kernel driver can reuse it. | no workspace crate |
-| [`palisade-fileid`](../../../../../crates/palisade-fileid/README.md) | File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes), signature and certificate chain extraction, version-info metadata, and Windows Installer package identity. | `palisade-core` |
+| [`palisade-fileid`](../../../../../crates/palisade-fileid/README.md) | File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes), signature and certificate chain extraction, version-info metadata, and Windows Installer and app package identity. | `palisade-core` |
 | [`palisade-policy`](../../../../../crates/palisade-policy/README.md) | The policy model, conditions, precedence and evaluation, with a decision trace. Evaluation is pure and deterministic: no network or filesystem access. | `palisade-core`, `palisade-fileid` |
 | [`palisade-proto`](../../../../../crates/palisade-proto/README.md) | Wire types between agent and server: messages, the event schema and schema versioning. | `palisade-core`, `palisade-fileid`, `palisade-policy` |
 | [`palisade-agent`](../../../../../crates/palisade-agent/README.md) | The Windows endpoint agent: a Windows service that collects execution events, caches policy locally and drives enforcement. | `palisade-core`, `palisade-fileid`, `palisade-policy`, `palisade-proto` |

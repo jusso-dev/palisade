@@ -734,7 +734,7 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
 
   The publisher ID is the OS algorithm (SHA-256 of the UTF-16LE publisher,
   first 8 bytes, 13 characters of Crockford base32), pinned against
-  publisher IDs the OS reports and 58 vectors from an independent Python
+  publisher IDs the OS reports and 56 vectors from an independent Python
   script (`tests/fixtures/package/publisher_ids.py`). `AppxSignature.p7x`
   (`PKCX` and an Authenticode SignedData, `SignatureKind::Package`) is
   verified by the shared Authenticode code against the package digest (the
@@ -872,11 +872,14 @@ and summary information); `tests/fixtures/installer` holds that test product
 signed by osslsigncode with SHA-256, SHA-1 and SHA-256 plus
 `MsiDigitalSignatureEx`, under a throwaway test root, and its normalised
 hash computed by an independent Python script. The package tests build
-every package with `tests/common/appx.rs` (a ZIP writer, real block hashes,
-literal-only DEFLATE); `tests/fixtures/package` holds the test package and
-bundle, unsigned and signed by osslsigncode under a throwaway root, and a
-copy signed by another publisher. No vendor package is
-committed. The script tests use scripts in `tests/fixtures/script`, written
+every package with `tests/common/appx.rs` (a ZIP writer in the layout the
+OS packaging tool writes, real block hashes and block sizes, literal-only
+DEFLATE flushed per block as that tool flushes it); `tests/fixtures/package`
+holds the test package and bundle, unsigned and signed by osslsigncode under
+a throwaway root, and a copy signed by another publisher. On Windows the OS
+SDK's own packaging and signing tools also build and sign a package and a
+bundle during the test, and the OS and this crate must agree on them. No
+vendor package is committed. The script tests use scripts in `tests/fixtures/script`, written
 by its `generate.sh` and signed by jsign with a throwaway test CA, in every
 format, encoding (UTF-8, UTF-8 with BOM, UTF-16LE, UTF-16BE where the
 package signs it) and line ending (CRLF, LF, CR); a second implementation

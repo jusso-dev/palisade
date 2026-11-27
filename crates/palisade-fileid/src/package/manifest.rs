@@ -16,23 +16,9 @@ use super::xml::{self, Element, XmlError};
 
 /// Namespace URIs.
 pub mod ns {
-    /// The foundation namespace (the default in every package manifest).
-    pub const FOUNDATION: &str = "http://schemas.microsoft.com/appx/manifest/foundation/windows10";
-    /// The 2010 package namespace, used by older packages.
-    pub const APPX_2010: &str = "http://schemas.microsoft.com/appx/2010/manifest";
-    /// The 2013 package namespace (Windows 8.1 packages).
-    pub const APPX_2013: &str = "http://schemas.microsoft.com/appx/2013/manifest";
-    /// The universal application platform namespace.
-    pub const UAP: &str = "http://schemas.microsoft.com/appx/manifest/uap/windows10";
-    /// Restricted capabilities.
-    pub const RESCAP: &str =
-        "http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities";
-    /// Desktop extensions.
-    pub const DESKTOP: &str = "http://schemas.microsoft.com/appx/manifest/desktop/windows10";
-    /// Bundle manifests (2013).
-    pub const BUNDLE_2013: &str = "http://schemas.microsoft.com/appx/2013/bundle";
-    /// Bundle manifests (2016 extensions).
-    pub const BUNDLE_2016: &str = "http://schemas.microsoft.com/appx/2016/bundle";
+    pub use super::super::os_ids::{
+        APPX_2010, APPX_2013, BUNDLE_2013, BUNDLE_2016, DESKTOP, FOUNDATION, RESCAP, UAP, UAP3,
+    };
 
     /// The namespaces whose `Package` element is a package manifest.
     pub const PACKAGE: [&str; 3] = [FOUNDATION, APPX_2010, APPX_2013];
@@ -327,12 +313,12 @@ pub fn parse_package_manifest(data: &[u8]) -> Result<PackageManifest, ManifestEr
     if root.name != "Package" || !ns::PACKAGE.contains(&&*root.ns) {
         return Err(ManifestError::NotManifest);
     }
-    let fnd = [&*root.ns];
-    let identity = the_identity(&root, &fnd, false)?;
-    let props = section(&root, &fnd, "Properties")?;
+    let foundation = [&*root.ns];
+    let identity = the_identity(&root, &foundation, false)?;
+    let props = section(&root, &foundation, "Properties")?;
     let text = |name: &'static str| -> Result<Option<String>, ManifestError> {
         let Some(p) = props else { return Ok(None) };
-        Ok(section(p, &fnd, name)?
+        Ok(section(p, &foundation, name)?
             .map(|e| e.text.trim().to_owned())
             .filter(|t| !t.is_empty() && t.len() <= MAX_VALUE))
     };
@@ -350,8 +336,8 @@ pub fn parse_package_manifest(data: &[u8]) -> Result<PackageManifest, ManifestEr
         extensions: Vec::new(),
         dependencies: Vec::new(),
     };
-    if let Some(apps) = section(&root, &fnd, "Applications")? {
-        for app in apps.children_named(&fnd, "Application") {
+    if let Some(apps) = section(&root, &foundation, "Applications")? {
+        for app in apps.children_named(&foundation, "Application") {
             let a = Application {
                 id: value(app, "Id")?,
                 executable: value(app, "Executable")?,
@@ -363,7 +349,7 @@ pub fn parse_package_manifest(data: &[u8]) -> Result<PackageManifest, ManifestEr
         }
     }
     collect_extensions(&root, None, &mut out.extensions)?;
-    if let Some(caps) = section(&root, &fnd, "Capabilities")? {
+    if let Some(caps) = section(&root, &foundation, "Capabilities")? {
         for c in &caps.children {
             if let Some(name) = value(c, "Name")? {
                 let cap = Capability {
@@ -375,7 +361,7 @@ pub fn parse_package_manifest(data: &[u8]) -> Result<PackageManifest, ManifestEr
             }
         }
     }
-    if let Some(deps) = section(&root, &fnd, "Dependencies")? {
+    if let Some(deps) = section(&root, &foundation, "Dependencies")? {
         for d in &deps.children {
             let Some(name) = value(d, "Name")? else {
                 continue;
