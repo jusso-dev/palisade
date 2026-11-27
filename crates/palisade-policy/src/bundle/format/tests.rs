@@ -578,3 +578,246 @@ proptest! {
         prop_assert_eq!(validated.document(), expected.document());
     }
 }
+
+/// Each malformed header field and the error the reader gives for it, by
+/// name, so the envelope can report exactly what is wrong.
+#[test]
+fn malformed_header_fields_are_named() {
+    let (header_map, body) = parts(&bytes_of(sample()));
+    let three = |a, b, c| Value::Array(vec![Value::Uint(a), Value::Uint(b), Value::Uint(c)]);
+    let one = |k: i64, v: Value| Value::Map(Map::new(vec![(Value::int(k), v)]).unwrap());
+    let uuid = Value::Bytes(id(5).as_bytes().to_vec());
+    let critical = i64::try_from(keys::KEYS.len()).unwrap() + 700;
+    let cases: Vec<(&str, i64, Value, BundleError)> = vec![
+        (
+            "text format version",
+            key("format_version"),
+            Value::Text("1".into()),
+            BundleError::Shape("`format_version` is not an integer"),
+        ),
+        (
+            "text policy version",
+            key("policy_version"),
+            Value::Text("7".into()),
+            BundleError::Shape("an integer field holds something else"),
+        ),
+        (
+            "text generated_at",
+            key("generated_at"),
+            Value::Null,
+            BundleError::Shape("an integer field holds something else"),
+        ),
+        (
+            "generated_at beyond i64",
+            key("generated_at"),
+            Value::Uint(u64::MAX),
+            BundleError::Overflow("generated_at"),
+        ),
+        (
+            "schema version as text",
+            key("schema_version"),
+            Value::Text("1.0.0".into()),
+            BundleError::Shape("a version is not an array"),
+        ),
+        (
+            "schema version of two parts",
+            key("schema_version"),
+            Value::Array(vec![Value::Uint(1), Value::Uint(0)]),
+            BundleError::Shape("a version is not three integers"),
+        ),
+        (
+            "negative schema part",
+            key("schema_version"),
+            Value::Array(vec![Value::Uint(1), Value::int(-1), Value::Uint(0)]),
+            BundleError::Overflow("schema_version"),
+        ),
+        (
+            "tenant as text",
+            key("tenant"),
+            Value::Text("t".into()),
+            BundleError::Shape("an ID is not a byte string"),
+        ),
+        (
+            "tenant of 15 bytes",
+            key("tenant"),
+            Value::Bytes(vec![0; 15]),
+            BundleError::InvalidId("tenant"),
+        ),
+        (
+            "target as an array",
+            key("target"),
+            Value::Array(vec![]),
+            BundleError::Shape("the target is not a map"),
+        ),
+        (
+            "target naming two scopes",
+            key("target"),
+            Value::Map(
+                Map::new(vec![
+                    (Value::int(key("group")), uuid.clone()),
+                    (Value::int(key("device")), uuid.clone()),
+                ])
+                .unwrap(),
+            ),
+            BundleError::Shape("the target names more than one scope"),
+        ),
+        (
+            "target of an unknown critical kind",
+            key("target"),
+            one(critical, uuid.clone()),
+            BundleError::UnknownCriticalKey(critical),
+        ),
+        (
+            "target of a known key that is no scope",
+            key("target"),
+            one(key("tenant"), uuid.clone()),
+            BundleError::UnknownCriticalKey(key("tenant")),
+        ),
+        (
+            "target of an ignorable kind",
+            key("target"),
+            one(-5, uuid),
+            BundleError::Shape("the target is neither a group nor a device"),
+        ),
+        (
+            "min agent version part beyond u32",
+            key("min_agent_version"),
+            three(1 << 33, 0, 0),
+            BundleError::Overflow("min_agent_version"),
+        ),
+    ];
+    for (what, k, v, expected) in cases {
+        let bytes = join(with_entry(header_map.clone(), k, v), body.clone());
+        assert_eq!(decode(&bytes), Err(expected.clone()), "{what}");
+        assert_eq!(
+            decode_header(&bytes, &BundleLimits::DEFAULT),
+            Err(expected),
+            "{what} (header only)"
+        );
+    }
+    // A missing format version, and a header key that is not an integer.
+    let no_format = Map::new(
+        header_map
+            .entries()
+            .iter()
+            .filter(|(k, _)| k.as_i64() != Some(key("format_version")))
+            .cloned()
+            .collect(),
+    )
+    .unwrap();
+    assert_eq!(
+        decode(&join(no_format, body.clone())),
+        Err(BundleError::Missing("format_version"))
+    );
+    let mut entries = header_map.into_entries();
+    entries.push((Value::Text("x".into()), Value::Null));
+    assert_eq!(
+        decode(&join(Map::new(entries).unwrap(), body.clone())),
+        Err(BundleError::Shape("a header key is not an integer"))
+    );
+    // A header that is not a map at all.
+    let bytes = cbor::encode(&Value::Array(vec![Value::Uint(1), body])).unwrap();
+    assert_eq!(
+        decode(&bytes),
+        Err(BundleError::Shape("the header is not a map"))
+    );
+}
+
+#[test]
+fn every_bundle_error_explains_itself() {
+    let errors = [
+        BundleError::TooLarge { size: 2, limit: 1 },
+        BundleError::Cbor(cbor::decode(&[0xff]).unwrap_err()),
+        BundleError::Shape("s"),
+        BundleError::Missing("tenant"),
+        BundleError::Overflow("policy_version"),
+        BundleError::InvalidId("tenant"),
+        BundleError::UnknownCriticalKey(9),
+        BundleError::UnsupportedFormat(2),
+        BundleError::UnsupportedSchema(SchemaVersion::new(2, 0, 0)),
+        BundleError::Body(serial::Error::Float),
+        BundleError::NonCanonical,
+    ];
+    let texts: std::collections::BTreeSet<String> =
+        errors.iter().map(ToString::to_string).collect();
+    assert_eq!(texts.len(), errors.len(), "two errors share a message");
+    assert!(texts.iter().all(|t| !t.is_empty()));
+    assert_eq!(AgentVersion::new(1, 2, 3).to_string(), "1.2.3");
+    assert_eq!(BundleLimits::default(), BundleLimits::DEFAULT);
+}
+
+#[test]
+fn only_the_sets_a_scope_reads_can_be_inlined() {
+    let lib =
+        |content: serde_json::Value| -> LibraryContent { serde_json::from_value(content).unwrap() };
+    let cases = [
+        (
+            lib(serde_json::json!({"kind": "principal_set", "principals": ["S-1-5-32-544"]})),
+            Some(SetContent::PrincipalSet(vec!["S-1-5-32-544".to_owned()])),
+        ),
+        (
+            lib(serde_json::json!({"kind": "device_set", "devices": ["d"]})),
+            Some(SetContent::DeviceSet(vec!["d".to_owned()])),
+        ),
+        (
+            lib(serde_json::json!({"kind": "network_set", "entries": ["10.0.0.0/8"]})),
+            Some(SetContent::NetworkSet(vec!["10.0.0.0/8".to_owned()])),
+        ),
+        (
+            lib(serde_json::json!({"kind": "schedule_set", "entries": ["{}"]})),
+            Some(SetContent::ScheduleSet(vec!["{}".to_owned()])),
+        ),
+        (
+            lib(serde_json::json!({"kind": "message_template", "text": "t"})),
+            None,
+        ),
+    ];
+    for (content, expected) in cases {
+        assert_eq!(SetContent::of(&content), expected);
+    }
+}
+
+#[test]
+fn sources_and_profiles_are_kept_in_canonical_order() {
+    let mut doc = sample();
+    doc.policy.location_profiles = ["zeta", "alpha"]
+        .iter()
+        .map(|n| {
+            serde_json::from_value(serde_json::json!({
+                "name": n, "all": [{"server_reachable": true}],
+            }))
+            .unwrap()
+        })
+        .collect();
+    let sources = SourceRevisions {
+        policies: vec![
+            (PolicyId(id(9)), 2),
+            (PolicyId(id(3)), 1),
+            (PolicyId(id(9)), 2),
+        ],
+        libraries: vec![(LibraryId(id(4)), 2), (LibraryId(id(4)), 1)],
+    };
+    let body = Body::new(doc, Vec::new(), sources).unwrap();
+    let names: Vec<&str> = body
+        .document()
+        .policy
+        .location_profiles
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
+    assert_eq!(names, ["alpha", "zeta"]);
+    let s = body.source_revisions();
+    assert_eq!(s.policies, [(PolicyId(id(3)), 1), (PolicyId(id(9)), 2)]);
+    assert_eq!(s.libraries, [(LibraryId(id(4)), 1), (LibraryId(id(4)), 2)]);
+}
+
+#[test]
+fn a_metadata_digest_must_be_32_bytes() {
+    let (header_map, body) = parts(&bytes_of(sample()));
+    let Value::Map(body) = body else { panic!() };
+    let short = with_entry(body, key("metadata_digest"), Value::Bytes(vec![0; 31]));
+    assert!(matches!(
+        decode(&join(header_map, Value::Map(short))),
+        Err(BundleError::Body(serial::Error::Message(m))) if m.contains("32 bytes")
+    ));
+}
