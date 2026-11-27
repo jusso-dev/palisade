@@ -14,7 +14,7 @@
 //!   registered keys in place of names and text in NFC.
 //! - [`format`](mod@format): the bundle itself, a header that decodes on its own and a
 //!   body in canonical order, with the bundle hash and the decision hash.
-//! - [`compile`]: builds a bundle from a validated or effective policy and
+//! - [`compile`](mod@compile): builds a bundle from a validated or effective policy and
 //!   the library catalogue, and [`compile::BundleSets`] resolves the
 //!   inlined sets when a loaded bundle is evaluated.
 //! - [`delta`]: the difference between two bundles, applied only to the

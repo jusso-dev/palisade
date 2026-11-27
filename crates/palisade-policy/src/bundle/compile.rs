@@ -1,7 +1,7 @@
 //! Compiling a bundle from a policy (#43).
 //!
 //! [`compile`] takes a [`ValidatedPolicy`], usually the flattened policy of
-//! an [`EffectivePolicy`](crate::hierarchy::EffectivePolicy) (inheritance
+//! an [`EffectivePolicy`] (inheritance
 //! already merged, match-tree references already expanded, scope set
 //! references pinned to versions), and the library catalogue those pins
 //! name. It inlines every library set a scope reads, records the sources,
@@ -10,7 +10,7 @@
 //! (#42).
 //!
 //! [`BundleSets`] is the inlined sets as a
-//! [`ScopeLibrary`](crate::scope::ScopeLibrary), so a loaded bundle
+//! [`ScopeLibrary`], so a loaded bundle
 //! evaluates with exactly the sets the server compiled in.
 
 use core::fmt;
