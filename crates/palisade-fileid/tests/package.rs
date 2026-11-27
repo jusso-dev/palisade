@@ -877,6 +877,36 @@ fn write_unsigned_packages() {
 }
 
 #[test]
+#[ignore = "reads a directory; run by tests/fixtures/package/generate.sh"]
+fn check_generated_packages() {
+    // The freshly generated fixtures, before they replace the committed
+    // ones: each parses, and the signed ones are valid or not as the tests
+    // rely on.
+    let dir = std::env::var_os("PALISADE_PACKAGE_CHECK").expect("set PALISADE_PACKAGE_CHECK");
+    let dir = std::path::Path::new(&dir);
+    let read = |name: &str| std::fs::read(dir.join(name)).unwrap();
+    for (name, valid) in [
+        ("app-signed.msix", true),
+        ("bundle-signed.msixbundle", true),
+        ("app-zip64.msix", true),
+        ("app-sha384.msix", true),
+        ("other-publisher.msix", false),
+        ("app-desc.msix", false),
+        ("app-classic.msix", false),
+    ] {
+        let id = parse_package(&read(name)).unwrap();
+        assert_eq!(
+            id.signature_valid(),
+            valid,
+            "{name}: {:?}",
+            id.signature.as_ref().map(|s| &s.issue)
+        );
+    }
+    assert_eq!(read("app.msix"), AppxBuilder::package().build());
+    assert_eq!(read("bundle.msixbundle"), AppxBuilder::bundle().build());
+}
+
+#[test]
 #[ignore = "writes files; run by cargo xtask fuzz"]
 fn write_package_fuzz_seeds() {
     let dir = std::env::var_os("PALISADE_FUZZ_SEED_DIR").expect("set PALISADE_FUZZ_SEED_DIR");
@@ -1472,4 +1502,130 @@ fn a_signed_classic_archive_is_never_valid() {
         id.signature.as_ref().unwrap().issue,
         Some(PackageSignatureIssue::NotZip64)
     );
+}
+
+#[test]
+fn a_flag_set_only_in_the_local_header_is_refused() {
+    // Bit 13 (masked local header values) is refused in a central entry;
+    // set only in the local header it must not pass the comparison.
+    let mut data = AppxBuilder::package().build();
+    let a = Archive::parse(&data).unwrap();
+    let m = a.member("app/tool.exe").unwrap();
+    let at = m.local_offset as usize + 7;
+    data[at] |= 0x20;
+    assert!(matches!(
+        Archive::parse(&data),
+        Err(ZipError::LocalHeader(_))
+    ));
+}
+
+#[test]
+fn each_block_size_must_cover_its_block() {
+    // Block sizes that add up to the compressed size but cut the stream in
+    // the wrong place (`1, a + b - 1` for `a, b`) are refused: each block's
+    // compressed bytes must inflate to exactly its 64 KiB block.
+    let data = AppxBuilder::package().build();
+    let a = Archive::parse(&data).unwrap();
+    let big = a.member("assets/big.bin").unwrap();
+    let map_xml =
+        String::from_utf8(a.read(a.member("AppxBlockMap.xml").unwrap()).unwrap()).unwrap();
+    let (_, sizes) = deflate_blocks(&a.read(big).unwrap());
+    let sizes: Vec<u64> = sizes.iter().map(|&s| s as u64).collect();
+    assert_eq!(sizes.len(), 3);
+    let check = |sizes: &[u64]| {
+        let xml = with_block_sizes(&map_xml, "assets\\big.bin", sizes);
+        let map = palisade_fileid::package::blockmap::parse(xml.as_bytes()).unwrap();
+        palisade_fileid::package::blockmap::verify(&map, &a)
+    };
+    check(&sizes).unwrap();
+    // Same total, wrong cut, in each pair of neighbouring blocks.
+    for i in 0..2 {
+        for shift in [1_u64, 7, sizes[i] - 1] {
+            let mut moved = sizes.clone();
+            moved[i] -= shift;
+            moved[i + 1] += shift;
+            let r = check(&moved);
+            assert!(
+                matches!(r, Err(BlockMapError::Size(_))),
+                "block {i} shifted by {shift}: {r:?}"
+            );
+            let mut moved = sizes.clone();
+            moved[i] += shift.min(moved[i + 1] - 1);
+            moved[i + 1] -= shift.min(moved[i + 1] - 1);
+            assert!(
+                matches!(check(&moved), Err(BlockMapError::Size(_))),
+                "block {i} grown by {shift}"
+            );
+        }
+    }
+    // The final empty block counted in the last block still verifies.
+    let mut last = sizes.clone();
+    *last.last_mut().unwrap() += 2;
+    check(&last).unwrap();
+}
+
+#[test]
+fn manifest_booleans_and_bundle_defaults_follow_the_schemas() {
+    // `xs:boolean`: `true` and `1` are true; `false`, `0`, other case and
+    // absence are false.
+    for (value, want) in [
+        ("true", true),
+        ("1", true),
+        ("false", false),
+        ("0", false),
+        ("TRUE", false),
+        (" 1 ", true),
+    ] {
+        let mut b = AppxBuilder::package();
+        b.files[0].data = String::from_utf8(b.files[0].data.clone())
+            .unwrap()
+            .replace(
+                "<DisplayName>",
+                &format!("<Framework>{value}</Framework><DisplayName>"),
+            )
+            .into_bytes();
+        let id = parse_package(&b.build()).unwrap();
+        assert_eq!(id.is_framework, want, "{value:?}");
+    }
+    // A bundle package without `Type` is a resource package (the bundle
+    // schema's default); an explicit `Type` is kept.
+    let mut b = AppxBuilder::bundle();
+    let at = b
+        .files
+        .iter()
+        .position(|f| f.name == BUNDLE_MANIFEST)
+        .unwrap();
+    b.files[at].data = String::from_utf8(b.files[at].data.clone())
+        .unwrap()
+        .replace("<Package Type=\"resource\" ", "<Package ")
+        .into_bytes();
+    let id = parse_package(&b.build()).unwrap();
+    let kinds: Vec<&str> = id.members.iter().map(|m| m.kind.as_str()).collect();
+    assert_eq!(kinds, ["application", "resource"]);
+    assert!(!String::from_utf8_lossy(&b.files[at].data).contains("Type=\"resource\""));
+}
+
+#[test]
+fn the_block_map_counts_local_extra_fields() {
+    // The builder's `LfhSize` is the whole local header, extra field
+    // included, so a local extra field the reader accepts (a ZIP64 block a
+    // classic entry's sizes call for is the only kind) is not what makes a
+    // block map check fail; one it refuses still fails in the reader.
+    let unknown = AppxBuilder::package().build_with(&ZipStyle {
+        local_extra: vec![0xfe, 0xca, 0, 0],
+        ..ZipStyle::default()
+    });
+    assert!(matches!(
+        Archive::parse(&unknown),
+        Err(ZipError::LocalHeader(_))
+    ));
+    let map = AppxBuilder::package().block_map_for(&[1, 2, 3, 4]);
+    let plain = AppxBuilder::package().block_map();
+    let lfh = |xml: &str| {
+        let at = xml.find("Name=\"AppxManifest.xml\"").unwrap();
+        let rest = &xml[at..];
+        let v = &rest[rest.find("LfhSize=\"").unwrap() + 9..];
+        v[..v.find('"').unwrap()].parse::<u64>().unwrap()
+    };
+    assert_eq!(lfh(&map), lfh(&plain) + 4);
 }

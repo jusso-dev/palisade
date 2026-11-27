@@ -110,7 +110,10 @@ public static class PalisadePackageId {
                 dwUnionChoice = 1,       // WTD_CHOICE_FILE
                 pFile = pFile,
                 dwStateAction = 1,       // WTD_STATEACTION_VERIFY
-                dwProvFlags = 0x40,      // WTD_CACHE_ONLY_URL_RETRIEVAL
+                // WTD_REVOCATION_CHECK_NONE | WTD_CACHE_ONLY_URL_RETRIEVAL:
+                // no revocation checking and no network, so the verdict
+                // does not depend on the runner's network or CRL caches.
+                dwProvFlags = 0x10 | 0x1000,
             };
             int rc = WinVerifyTrust(IntPtr.Zero, ref action, ref data);
             data.dwStateAction = 2;      // WTD_STATEACTION_CLOSE

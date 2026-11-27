@@ -261,8 +261,15 @@ pub fn parse(data: &[u8]) -> Result<Element, XmlError> {
     let mut count = 0_usize;
     let mut nss = Namespaces::default();
     let mut budget = MAX_TREE_BYTES;
+    let mut first = true;
     loop {
         let event = reader.read_event().or_else(|e| err(e.to_string()))?;
+        // An XML declaration is allowed once, as the very first thing in
+        // the document (after an optional byte order mark).
+        if matches!(event, Event::Decl(_)) && !first {
+            return err("an XML declaration that is not at the start");
+        }
+        first = false;
         match event {
             Event::DocType(_) => return err("document type declarations are not allowed"),
             Event::Start(ref e) | Event::Empty(ref e) => {
@@ -342,6 +349,26 @@ pub fn parse(data: &[u8]) -> Result<Element, XmlError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_xml_declaration_comes_first_and_once() {
+        for ok in [
+            &b"<?xml version=\"1.0\"?><a/>"[..],
+            b"\xef\xbb\xbf<?xml version=\"1.0\"?><a/>",
+            b"<a/>",
+        ] {
+            assert!(parse(ok).is_ok(), "{}", String::from_utf8_lossy(ok));
+        }
+        for bad in [
+            &b"<a/><?xml version=\"1.0\"?>"[..],
+            b"<a><?xml version=\"1.0\"?></a>",
+            b"<?xml version=\"1.0\"?><?xml version=\"1.0\"?><a/>",
+            b"<!-- c --><?xml version=\"1.0\"?><a/>",
+            b" <?xml version=\"1.0\"?><a/>",
+        ] {
+            assert!(parse(bad).is_err(), "{}", String::from_utf8_lossy(bad));
+        }
+    }
 
     #[test]
     fn resolves_namespaces_and_refuses_doctypes() {

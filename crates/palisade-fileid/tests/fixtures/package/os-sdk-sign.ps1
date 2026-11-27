@@ -51,6 +51,7 @@ try {
         }
     }
 } finally {
-    Remove-Item -LiteralPath ("Cert:\CurrentUser\My\" + $cert.Thumbprint) -ErrorAction SilentlyContinue
+    # -DeleteKey also removes the throwaway certificate's private key.
+    Remove-Item -LiteralPath ("Cert:\CurrentUser\My\" + $cert.Thumbprint) -DeleteKey -ErrorAction SilentlyContinue
 }
 Set-Content -LiteralPath (Join-Path $Dir 'sign.txt') -Value $lines -Encoding UTF8

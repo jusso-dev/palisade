@@ -396,8 +396,9 @@ impl AppxBuilder {
         }
     }
 
+    /// A local header without an extra field (`ZipStyle::local_extra` adds
+    /// one to the first member, which [`Self::block_map_for`] counts).
     fn local_header_len(name: &str) -> usize {
-        // No local extra fields in any style.
         30 + name.len()
     }
 
@@ -405,6 +406,13 @@ impl AppxBuilder {
     /// each block's compressed size for a deflated file, or only the bundle
     /// manifest of a bundle (its payload packages are not listed).
     pub fn block_map(&self) -> String {
+        self.block_map_for(&[])
+    }
+
+    /// [`Self::block_map`] for an archive whose first member's local header
+    /// carries `first_local_extra` (`ZipStyle::local_extra`): `LfhSize` is
+    /// the whole local header, extra field included.
+    pub fn block_map_for(&self, first_local_extra: &[u8]) -> String {
         let mut out = format!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n<BlockMap xmlns=\"{BLOCK_MAP}\" HashMethod=\"http://www.w3.org/2001/04/xmlenc#sha256\">",
         );
@@ -420,6 +428,11 @@ impl AppxBuilder {
                 f.name.replace('/', "\\"),
                 f.data.len(),
                 Self::local_header_len(&f.name)
+                    + if self.files.first().is_some_and(|first| first.name == f.name) {
+                        first_local_extra.len()
+                    } else {
+                        0
+                    }
             ));
             let sizes = deflate_blocks(&f.data).1;
             for (i, block) in f.data.chunks(65536).enumerate() {
@@ -452,7 +465,7 @@ impl AppxBuilder {
 
     /// The unsigned archive, in `style`.
     pub fn build_with(&self, style: &ZipStyle) -> Vec<u8> {
-        write_zip_with(&self.all_files(), style)
+        write_zip_with(&self.all_files_for(&style.local_extra), style)
     }
 
     /// The unsigned archive, laid out as the OS packaging tool writes it
@@ -469,10 +482,14 @@ impl AppxBuilder {
     }
 
     fn all_files(&self) -> Vec<File> {
+        self.all_files_for(&[])
+    }
+
+    fn all_files_for(&self, first_local_extra: &[u8]) -> Vec<File> {
         let mut all: Vec<File> = self.files.clone();
         all.push(File {
             name: "AppxBlockMap.xml".into(),
-            data: self.block_map().into_bytes(),
+            data: self.block_map_for(first_local_extra).into_bytes(),
             deflate: true,
         });
         all.push(File {

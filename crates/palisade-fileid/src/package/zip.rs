@@ -512,8 +512,11 @@ impl<'a> Archive<'a> {
             return Err(bad());
         }
         // Flags must agree except for bits that only describe the central
-        // record (none that matter here): compare the meaningful ones.
-        let meaningful = FLAG_ENCRYPTED | FLAG_DESCRIPTOR | FLAG_PATCH | FLAG_STRONG | FLAG_UTF8;
+        // record (none that matter here): compare the meaningful ones,
+        // including every bit the central entry is refused for, so a bit
+        // set only in the local header cannot slip past.
+        let meaningful =
+            FLAG_ENCRYPTED | FLAG_DESCRIPTOR | FLAG_PATCH | FLAG_STRONG | FLAG_UTF8 | FLAG_MASKED;
         let central_flags = u16_at(data, m.central_raw.0 + 8).ok_or_else(bad)?;
         if flags & meaningful != central_flags & meaningful {
             return Err(bad());
@@ -632,34 +635,15 @@ impl<'a> Archive<'a> {
             total = raw.len() as u64;
             sink(raw);
         } else {
-            use miniz_oxide::inflate::stream::{InflateState, inflate};
-            use miniz_oxide::{DataFormat, MZError, MZFlush, MZStatus};
-            let mut state = InflateState::new_boxed(DataFormat::Raw);
-            let mut buf = vec![0_u8; 64 * 1024];
-            let mut input = raw;
-            // Streamed into a fixed buffer. `Finish` would ask for the whole
-            // output at once, so `None` is used and progress is required on
-            // every call: a call that neither reads nor writes means the
-            // data is truncated or invalid.
-            loop {
-                let r = inflate(&mut state, input, &mut buf, MZFlush::None);
-                input = input.get(r.bytes_consumed..).unwrap_or_default();
-                let chunk = buf.get(..r.bytes_written).unwrap_or_default();
-                total = total.saturating_add(chunk.len() as u64);
-                if total > m.size {
-                    return Err(corrupt());
-                }
+            let end = inflate_raw(raw, m.size, |chunk| {
                 crc = crc32(chunk, crc);
+                total = total.saturating_add(chunk.len() as u64);
                 sink(chunk);
-                match r.status {
-                    Ok(MZStatus::StreamEnd) => break,
-                    Ok(MZStatus::Ok) | Err(MZError::Buf)
-                        if r.bytes_written > 0 || r.bytes_consumed > 0 => {}
-                    _ => return Err(corrupt()),
-                }
-            }
-            // The deflate stream must use all of the compressed data.
-            if !input.is_empty() {
+            })
+            .ok_or_else(corrupt)?;
+            // The deflate stream must end, and use all of the compressed
+            // data.
+            if end != Inflated::StreamEnd {
                 return Err(corrupt());
             }
         }
@@ -676,6 +660,56 @@ impl<'a> Archive<'a> {
         self.data
             .get(at..at.saturating_add(len))
             .unwrap_or_default()
+    }
+}
+
+/// How [`inflate_raw`] finished, having used all of its input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Inflated {
+    /// The final block ended.
+    StreamEnd,
+    /// The input ended on a block boundary with no final block yet (a
+    /// segment of a stream that a full flush ended).
+    Open,
+}
+
+/// Inflates raw DEFLATE `input`, feeding the output to `sink` in chunks
+/// and stopping with `None` once it passes `max` bytes. Returns how it
+/// ended, or `None` if the data is invalid, has bytes after the final
+/// block, or stops in the middle of a block.
+pub(crate) fn inflate_raw(input: &[u8], max: u64, mut sink: impl FnMut(&[u8])) -> Option<Inflated> {
+    use miniz_oxide::inflate::stream::{InflateState, inflate};
+    use miniz_oxide::{DataFormat, MZError, MZFlush, MZStatus};
+    let mut state = InflateState::new_boxed(DataFormat::Raw);
+    let mut buf = vec![0_u8; 64 * 1024];
+    let mut input = input;
+    let mut total = 0_u64;
+    // Streamed into a fixed buffer. `Finish` would ask for the whole output
+    // at once, so `None` is used and progress is required on every call: a
+    // call that neither reads nor writes means the data is truncated or
+    // invalid, or (with no input left) that it stopped between blocks.
+    loop {
+        let r = inflate(&mut state, input, &mut buf, MZFlush::None);
+        input = input.get(r.bytes_consumed..).unwrap_or_default();
+        let chunk = buf.get(..r.bytes_written).unwrap_or_default();
+        total = total.saturating_add(chunk.len() as u64);
+        if total > max {
+            return None;
+        }
+        sink(chunk);
+        match r.status {
+            Ok(MZStatus::StreamEnd) => {
+                return input.is_empty().then_some(Inflated::StreamEnd);
+            }
+            Ok(MZStatus::Ok) | Err(MZError::Buf) if r.bytes_written > 0 || r.bytes_consumed > 0 => {
+            }
+            // No input left and no progress: the input stopped before a
+            // final block. That is a clean stop only after a full flush,
+            // whose empty stored block `00 00 ff ff` ends on a byte and on a
+            // block boundary; the caller checks the input ends with it.
+            Err(MZError::Buf) if input.is_empty() => return Some(Inflated::Open),
+            _ => return None,
+        }
     }
 }
 

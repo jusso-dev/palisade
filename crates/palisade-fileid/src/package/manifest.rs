@@ -153,9 +153,9 @@ pub struct PackageManifest {
     pub display_name: Option<String>,
     /// `Properties/PublisherDisplayName`.
     pub publisher_display_name: Option<String>,
-    /// `Properties/Framework` is `true`.
+    /// `Properties/Framework` is true (`true` or `1`).
     pub is_framework: bool,
-    /// `Properties/ResourcePackage` is `true`.
+    /// `Properties/ResourcePackage` is true (`true` or `1`).
     pub is_resource_package: bool,
     /// Applications.
     pub applications: Vec<Application>,
@@ -181,7 +181,7 @@ impl PackageManifest {
 /// One package listed in a bundle manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BundleMember {
-    /// `Type`: `application` or `resource`.
+    /// `Type`: `application` or `resource` (the default when omitted).
     pub kind: String,
     /// `Version`.
     pub version: Option<PackageVersion>,
@@ -323,7 +323,9 @@ pub fn parse_package_manifest(data: &[u8]) -> Result<PackageManifest, ManifestEr
             .filter(|t| !t.is_empty() && t.len() <= MAX_VALUE))
     };
     let flag = |name: &'static str| -> Result<bool, ManifestError> {
-        Ok(text(name)?.is_some_and(|t| t.eq_ignore_ascii_case("true")))
+        // `xs:boolean`: `true` or `1` (lower case only); anything else,
+        // `false` and `0` included, is false.
+        Ok(text(name)?.is_some_and(|t| t == "true" || t == "1"))
     };
     let mut out = PackageManifest {
         identity,
@@ -430,7 +432,8 @@ pub fn parse_bundle_manifest(data: &[u8]) -> Result<BundleManifest, ManifestErro
                     .transpose()
             };
             let m = BundleMember {
-                kind: value(p, "Type")?.unwrap_or_else(|| "application".into()),
+                // The bundle schema's default for an omitted `Type`.
+                kind: value(p, "Type")?.unwrap_or_else(|| "resource".into()),
                 version: value(p, "Version")?
                     .as_deref()
                     .and_then(PackageVersion::parse),

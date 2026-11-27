@@ -396,6 +396,9 @@ fn check_blocks(
         return Err(BlockMapError::HashMethod);
     };
     let block = usize::try_from(BLOCK).unwrap_or(usize::MAX);
+    if m.method == 8 && !f.block_sizes.is_empty() {
+        check_block_sizes(f, archive, m)?;
+    }
     let mut pending: Vec<u8> = Vec::with_capacity(block);
     let mut index = 0_usize;
     let mut ok = true;
@@ -431,6 +434,58 @@ fn check_blocks(
         Ok(())
     } else {
         Err(BlockMapError::Hash(f.name.clone()))
+    }
+}
+
+/// A deflated file's block sizes, block by block: block `i`'s compressed
+/// bytes (its `Size`, from where block `i - 1` ended) must be a complete
+/// DEFLATE segment, ended by the full flush the OS packaging tool writes
+/// after every block (an empty stored block, `00 00 ff ff`), that inflates
+/// to exactly its uncompressed block (64 KiB, or the rest of the file for
+/// the last). Only the sum is not enough: sizes that add up but cut the
+/// stream elsewhere describe blocks that do not exist. What follows the
+/// last block is the empty final block (`03 00`) or nothing, when the last
+/// size counts it; `verify_with` has checked the sum allows exactly that.
+/// Each block's content is hashed separately, in [`check_blocks`].
+fn check_block_sizes(
+    f: &MappedFile,
+    archive: &Archive<'_>,
+    m: &Member,
+) -> Result<(), BlockMapError> {
+    let bad = || BlockMapError::Size(f.name.clone());
+    let raw = archive.raw_data(m);
+    let mut at = 0_usize;
+    let mut left = m.size;
+    let count = f.block_sizes.len();
+    for (i, size) in f.block_sizes.iter().enumerate() {
+        let size = size.and_then(|s| usize::try_from(s).ok()).ok_or_else(bad)?;
+        let end = at.checked_add(size).ok_or_else(bad)?;
+        let segment = raw.get(at..end).ok_or_else(bad)?;
+        let want = left.min(BLOCK);
+        let last = i + 1 == count;
+        // The last block may also carry the empty final block.
+        let (body, closes) = if last && segment.ends_with(&[0x03, 0x00]) && end == raw.len() {
+            let body = segment.get(..segment.len() - 2).ok_or_else(bad)?;
+            (body, true)
+        } else {
+            (segment, false)
+        };
+        if !body.ends_with(&[0x00, 0x00, 0xff, 0xff]) && !(closes && body.is_empty()) {
+            return Err(bad());
+        }
+        let mut out = 0_u64;
+        let ended =
+            super::zip::inflate_raw(body, want, |c| out = out.saturating_add(c.len() as u64));
+        if ended != Some(super::zip::Inflated::Open) || out != want {
+            return Err(bad());
+        }
+        left -= want;
+        at = end;
+    }
+    // After the last block: nothing, or exactly the empty final block.
+    match raw.get(at..) {
+        Some([]) | Some([0x03, 0x00]) if left == 0 => Ok(()),
+        _ => Err(bad()),
     }
 }
 
