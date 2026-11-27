@@ -71,3 +71,5 @@ stops unreviewed code from entering the most privileged component.
 
 - Issues #20, #19 (workspace metadata), #23 (cargo-deny licences), #28 (DCO, headers, notices).
   Epic #8 (driver).
+- [ADR 0019](0019-contributor-sign-off-dco.md): contributor sign-off (DCO, no CLA), the decision
+  this ADR left to #28.
