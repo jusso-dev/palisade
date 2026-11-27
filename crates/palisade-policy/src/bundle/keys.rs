@@ -537,6 +537,8 @@ pub const KEYS: &[Key] = &[
     k(486, "vulnerable_version_allowed"),
     k(487, "warning"),
     k(488, "weak_identity"),
+    k(489, "resolved_version"),
+    k(490, "content"),
     k(-1, "description"),
     k(-2, "hidden"),
     k(-3, "category_path"),

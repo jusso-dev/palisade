@@ -305,3 +305,22 @@ fn pattern_seeds_compile_and_match_as_stated() {
         assert_eq!(result, want, "{field} {operator} {pattern:?} on {fact:?}");
     }
 }
+
+/// The golden bundles, and each truncated after its header, so the fuzzer
+/// starts from inputs that pass the header and reach the body.
+#[test]
+#[ignore = "writes files; run on demand to seed the fuzz corpus"]
+fn write_bundle_fuzz_seeds() {
+    let dir = seed_dir();
+    let sources = files(&manifest_dir().join("tests/golden/bundles"), "cbor");
+    assert!(!sources.is_empty(), "no golden bundles");
+    for (i, source) in sources.iter().enumerate() {
+        let bytes = fs::read(source).unwrap();
+        fs::write(dir.join(format!("seed-{i}")), &bytes).unwrap();
+        fs::write(
+            dir.join(format!("seed-{i}-half")),
+            &bytes[..bytes.len() / 2],
+        )
+        .unwrap();
+    }
+}

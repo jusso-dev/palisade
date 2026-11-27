@@ -6,6 +6,7 @@
 #   cargo +nightly fuzz run fuzz_policy_json            # from crates/palisade-policy
 #   cargo +nightly fuzz run fuzz_policy_yaml
 #   cargo +nightly fuzz run fuzz_wildcard_regex_compile
+#   cargo +nightly fuzz run fuzz_bundle_decode
 [package]
 name = "palisade-policy-fuzz"
 version = "0.0.0"
@@ -41,6 +42,13 @@ bench = false
 [[bin]]
 name = "fuzz_wildcard_regex_compile"
 path = "fuzz_targets/fuzz_wildcard_regex_compile.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_bundle_decode"
+path = "fuzz_targets/fuzz_bundle_decode.rs"
 test = false
 doc = false
 bench = false

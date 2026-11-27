@@ -23,6 +23,12 @@
 //!   well as having no keys;
 //! - maps of data (such as `mode_by_type`) keep their own keys.
 //!
+//! An internally tagged or untagged enum is buffered by serde before it is
+//! read, and a unit variant inside the buffer arrives as an integer that
+//! serde cannot match to a name. Such enums may hold only fields that are
+//! not enums; `Action`, the one internally tagged enum in a policy
+//! document, has its own reader and is not buffered.
+//!
 //! When reading a struct, a key whose ID is not registered is skipped if
 //! it is ignorable (negative) and refused if it is critical
 //! ([`Error::UnknownCriticalKey`]).

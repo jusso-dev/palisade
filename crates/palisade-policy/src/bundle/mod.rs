@@ -12,7 +12,15 @@
 //!   variant names, each critical or ignorable.
 //! - [`serial`]: the policy model through serde as CBOR values, with
 //!   registered keys in place of names and text in NFC.
+//! - [`format`]: the bundle itself, a header that decodes on its own and a
+//!   body in canonical order, with the bundle hash and the decision hash.
 
 pub mod cbor;
+pub mod format;
 pub mod keys;
 pub mod serial;
+
+pub use format::{
+    AgentVersion, Body, BundleError, BundleLimits, Header, InlineLibrary, PolicyBundle, SetContent,
+    SourceRevisions, Target, TargetScope, bundle_hash, decode_header,
+};
