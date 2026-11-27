@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_REPARSE_BYTES","TAG_APPEXECLINK","TAG_CLOUD","TAG_DEDUP","TAG_MOUNT_POINT","TAG_SYMLINK"],"enum":["ReparseError","ReparseKind","ReparseTarget"],"fn":["parse_reparse_point"],"struct":["AppExecLink","LinkTarget","ReparsePoint"]};

@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-48180a7c.js";
+            window.path_to_searchindex_js = "searchindex-250fa0cb.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-cbfaa793.js"></script>
@@ -5526,8 +5526,12 @@ with the OS access check, and check the stock system folders too.</li>
 <code>VolumeInfo</code> for the volume an open handle is on (drive type, bus and
 hot-plug state from the storage queries, OS volume by GUID, file
 system and journal support), and <code>is_case_sensitive_dir</code> reads the
-per-directory case-sensitivity flag. Windows tests attach a VHD and
-share a local folder over SMB.</li>
+per-directory case-sensitivity flag. A file is a network file if any
+of three signs says so (the remote-protocol query, the handle's NT path
+under a redirector device, the name it was opened by), and a handle with
+no local volume root keeps only its serial, so a share never reads as
+local NTFS. Windows tests attach a VHD and share a local folder over
+SMB.</li>
 <li><code>fsctx::dfs</code> and <code>win::paths</code> (Windows, <code>os-trust</code> feature): the OS
 path forms of an opened file (NT, volume GUID, final, long with every
 8.3 name expanded by <code>OsShortNames</code>, the UNC form of a mapped drive in
@@ -5535,6 +5539,22 @@ the caller's logon session) and DFS targets through <code>DfsCache</code>, which
 bounds each lookup to 2 s and caches referrals and failures.
 <code>PathForms::network_key</code> gives one key for a mapped drive, a DFS path
 and a short-name spelling of one file on a share.</li>
+<li><code>fsctx::streams</code>, <code>fsctx::reparse</code>, <code>fsctx::meta</code> and <code>win::links</code>
+(Windows, <code>os-trust</code> feature): alternate data streams with a tag for
+well-known names, and each stream's content classified by the bounded
+streaming classifier with the stream's own name as the hint (a tag is
+not a pass: tagged streams are classified too; a stream that was not
+read, or whose kind the classifier could not establish, counts as
+possibly executable); reparse points
+(symbolic links, junctions, volume mount points, app execution aliases
+with the package family name, app ID and target they claim (unverified
+until checked against the installed package, #53), cloud placeholders,
+deduplication), parsed by a bounded, fuzzed parser; hard links, counted
+and listed up to 16 when the path still names the opened file; and the
+file ID, USN, timestamps and attributes.
+<code>win::links::read_details</code> fills them into an <code>FsContext</code>. Windows tests
+make a symbolic link, a relative link, a junction, a mount point and an
+app execution alias, 21 hard links and tagged and executable streams.</li>
 </ul>
 </li>
 <li>

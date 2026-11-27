@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_HARD_LINK_NAMES"],"struct":["FileAttributes","FileMeta","HardLinks"]};
