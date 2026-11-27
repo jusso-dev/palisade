@@ -1,10 +1,8 @@
-//! Windows implementations: the registry, and the device facts the
-//! environment reports.
+//! The registry, and the device facts the environment reports.
 //!
 //! These go through safe wrapper crates (`windows-registry`,
-//! `windows-version`), so the agent still forbids `unsafe` code (ADR 0011).
-//! The agent is a native 64-bit process, so registry reads see the 64-bit
-//! view.
+//! `windows-version`), with no `unsafe` code (ADR 0011). The agent is a
+//! native 64-bit process, so registry reads see the 64-bit view.
 
 use palisade_core::platform::{
     ErrorKind, Hive, OsVersion, PlatformError, Registry, RegistryValue, Result,

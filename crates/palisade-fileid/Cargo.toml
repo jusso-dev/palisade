@@ -14,8 +14,7 @@ workspace = true
 
 [features]
 # OS-backed reads on Windows (`palisade_fileid::win`, ADR 0003). Off by
-# default. Intended for the agent, and the CLI for diagnostics; neither
-# depends on this crate yet.
+# default. The agent enables it on Windows; the CLI may, for diagnostics.
 os-trust = ["dep:windows-sys"]
 # Content tagging (`palisade_fileid::tags`, #44): the built-in tag set and
 # organisation pattern rules. Off by default; the agent runs it off the

@@ -12,6 +12,9 @@
 # Changing this file needs code owner review (.github/CODEOWNERS).
 # The workspace sets `unsafe_code = "deny"`; the files below relax it.
 
+# Process, token, session and local-group queries for the agent's
+# identity and process backends (#29).
+crates/palisade-agent/src/ffi.rs
 # Security descriptors and the OS access check (#54).
 crates/palisade-fileid/src/win/security.rs
 # File and volume calls for the Windows backend (#46, #54).

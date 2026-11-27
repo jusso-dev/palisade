@@ -19,6 +19,8 @@
 //! (safe-boot detection) and `Updating` (#66) are entered by the components
 //! that own them when they land.
 
+#![forbid(unsafe_code)]
+
 use std::fmt;
 
 /// An agent operating state, as exposed in health and events.

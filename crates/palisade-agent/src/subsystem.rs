@@ -21,6 +21,8 @@
 //! backoff. Subsystems must not block async worker threads; blocking work
 //! goes through `tokio::task::spawn_blocking` (ADR 0009).
 
+#![forbid(unsafe_code)]
+
 use std::{fmt, future::Future, pin::Pin, sync::Arc, time::Duration};
 
 use tokio::{sync::watch, time::Instant};

@@ -1279,6 +1279,7 @@ version = "0.1.0"
 dependencies = [
  "if-addrs",
  "palisade-core",
+ "palisade-fileid",
  "palisade-proto",
  "serde",
  "sha2",
@@ -1288,6 +1289,7 @@ dependencies = [
  "tracing-subscriber",
  "windows-registry",
  "windows-service",
+ "windows-sys 0.61.2",
  "windows-version",
 ]
 

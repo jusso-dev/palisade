@@ -54,11 +54,26 @@ the real implementations:
 | `FileSystem` | `StdFileSystem` | Reads, size and times on every OS, opened so other processes can keep writing and deleting. Owner SID, security descriptor, streams, file ID and USN report `Unsupported` until they are read through `palisade_fileid::win` (#54) for the file inventory (#60) |
 | `Environment` | `StdEnvironment` | Variables, architecture and interface addresses everywhere; host name, domain and OS version from the OS on Windows. The connection type is `Unknown` until network location (#38) defines it |
 | `Registry` | `windows::WindowsRegistry` | Done, on Windows |
-| `IdentityProvider`, `ProcessInfo`, `SignatureVerifier` | | With the process tracker (#59), which reads tokens and resolves each image's identity |
+| `IdentityProvider` | `windows::WindowsIdentity` | On Windows: a process's token (user, groups with deny-only flags, session ID and kind, integrity level, elevation type and state), account names, local group members by SID, and the directory group cache (filled by the directory sync, #38) |
+| `ProcessInfo` | `windows::WindowsProcesses` | On Windows: process records keyed by process ID and creation time, with parent ID, image path and command line, read through one handle |
+| `SignatureVerifier` | | Next, through `palisade_fileid` |
+
+The Windows identity and process backends fail closed
+([ADR 0018](../../docs/adr/0018-fail-open-vs-fail-closed-defaults-revised.md)). A token is read
+in full or not at all: if the OS refuses its user, groups, integrity level or elevation type, the
+query fails instead of returning a token with a part guessed, so a failed elevation query never
+reads as "not elevated". Only the session kind falls back: session 0 is always `Services`, whatever the protocol query says, and a non-zero session whose protocol cannot be read is `Unknown`, never `Console`. A
+group that is in a token but not enabled is reported as deny-only, like a group UAC filtered,
+since the OS does not use it to grant access. A process that has exited is `NotFound`, even
+while a handle keeps its object alive, and a process key whose creation time does not match the
+process now using its ID is `NotFound` too, so a reused process ID is never read as the process
+it replaced. A local group's members are listed only if the SID names a local group whose name
+resolves back to the same SID: the bare name the OS enumerates by must itself be a local group with that SID, so a local group that only shares a domain group's name is never listed in its place. An account name lookup that fails for any reason other than "no such account" is an error, not `None`.
 
 Each implementation passes the same contract checks as the mocks
 (`palisade_core::test_util::contract`), in `tests/platform.rs`, on every CI runner. The Windows
-registry and environment tests run on the Windows runners.
+registry, environment, identity and process tests run on the Windows runners, against the
+test process itself and its token.
 
 ## The fake agent
 
@@ -123,15 +138,19 @@ signer = "Example OS Publisher"         # optional: the image's signature publis
 
 `palisade-core`, `palisade-fileid`, `palisade-policy`, `palisade-proto`. Must never depend on `palisade-server` or any HTTP server or database stack. The rules are enforced by `cargo xtask check-deps`.
 
-Third-party: `tokio` (the only async runtime, ADR 0009), `tracing` and `tracing-subscriber` (logging), `serde` and `toml` (configuration), `if-addrs` (interface addresses, as in the server), and, on Windows only, `windows-service` (the safe service control manager API), `windows-registry` (safe registry reads) and `windows-version` (the running OS version). With `test-util` only: `palisade-proto` (the event schema) and `sha2` (the simulator's placeholder chain).
+Workspace: `palisade-fileid`, for SIDs, and on Windows with its `os-trust` feature, for account names (ADR 0003: the agent is the crate that enables it).
+
+Third-party: `tokio` (the only async runtime, ADR 0009), `tracing` and `tracing-subscriber` (logging), `serde` and `toml` (configuration), `if-addrs` (interface addresses, as in the server), and, on Windows only, `windows-service` (the safe service control manager API), `windows-registry` (safe registry reads), `windows-version` (the running OS version) and `windows-sys` (the process, token, session and local-group calls in `ffi`). With `test-util` only: `palisade-proto` (the event schema) and `sha2` (the simulator's placeholder chain).
 
 ## Unsafe code
 
-None. The crate root is `#![forbid(unsafe_code)]`. The service entry point is written by hand, not with the wrapper crate's macro, which expands to `unsafe`. The registry and OS version are read through safe wrapper crates. FFI that needs `unsafe` will go in `palisade_agent::ffi` ([ADR 0011](../../docs/adr/0011-msrv-and-unsafe-code-policy.md)).
+Only in `ffi` (Windows only), the one file listed in [`unsafe-allowlist.txt`](../../unsafe-allowlist.txt) ([ADR 0011](../../docs/adr/0011-msrv-and-unsafe-code-policy.md)). It wraps the process, token, session, account and local-group calls once, each `unsafe` block with a `// SAFETY:` comment, owns every buffer it hands to the OS, closes every handle on drop, and returns raw bytes for variable-length records. The portable `platform::nt` decodes those records without `unsafe` code, checking every pointer inside a record against the record's bounds, and its tests run on every OS.
+
+The library root cannot say `#![forbid(unsafe_code)]`, because `forbid` cannot be relaxed by `ffi`, so it keeps the workspace's `deny`, and every other module, and the binary root, forbids unsafe code itself. The service entry point is written by hand, not with the wrapper crate's macro, which expands to `unsafe`. The registry and OS version are read through safe wrapper crates.
 
 ## Platform support
 
-The service host is platform-independent and builds and tests on Linux, other desktop OS and Windows. `--console` and `--simulate` work everywhere. `--service` and the registry backend are Windows only; elsewhere `--service` exits with an error.
+The service host is platform-independent and builds and tests on Linux, other desktop OS and Windows. `--console` and `--simulate` work everywhere. `--service` and the registry, identity and process backends are Windows only; elsewhere `--service` exits with an error.
 
 ## Feature flags
 

@@ -1,5 +1,7 @@
 //! Command-line parsing for the `palisade-agent` binary.
 
+#![forbid(unsafe_code)]
+
 use std::{ffi::OsString, fmt, path::PathBuf};
 
 /// Usage text printed by `--help` and after a usage error.

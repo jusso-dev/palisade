@@ -1,6 +1,8 @@
 //! The service host: runtime, logging, the built-in subsystems and the
 //! platform-independent run loop shared by console and service mode.
 
+#![forbid(unsafe_code)]
+
 use std::{
     future::Future,
     io,

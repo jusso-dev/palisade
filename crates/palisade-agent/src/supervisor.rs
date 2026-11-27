@@ -37,6 +37,8 @@
 //! - **Timeouts** longer than about ten years are capped, so no deadline
 //!   computation can overflow.
 
+#![forbid(unsafe_code)]
+
 use std::{
     collections::VecDeque,
     fmt,

@@ -1,10 +1,13 @@
 #![doc = include_str!("../README.md")]
-// No FFI module exists yet: the service control manager is reached through a
-// safe wrapper crate, so the whole crate forbids unsafe code (ADR 0011).
-#![forbid(unsafe_code)]
+// ADR 0011: `unsafe` code only in `ffi` (Windows only), which is on
+// `unsafe-allowlist.txt`. The root cannot `forbid` it, since `forbid`
+// cannot be relaxed, so it keeps the workspace's `deny`, and every other
+// module forbids it at its own root.
 
 pub mod cli;
 pub mod config;
+#[cfg(windows)]
+mod ffi;
 pub mod host;
 pub mod lifecycle;
 pub mod platform;

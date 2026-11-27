@@ -26,6 +26,8 @@ test-util = [
 [dependencies]
 # The platform traits (#29).
 palisade-core = { workspace = true, features = ["std"] }
+# SIDs in their binary and text forms, for the identity backend (#29).
+palisade-fileid = { workspace = true }
 # The event schema, for the simulator's events.
 palisade-proto = { workspace = true, optional = true }
 # Interface addresses for the environment backend, as in the server.
@@ -39,11 +41,24 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
+# Account lookups through `palisade_fileid::win` (ADR 0003: only the agent
+# enables `os-trust`).
+palisade-fileid = { workspace = true, features = ["os-trust"] }
 # Safe registry reads, for the registry and environment backends (#29).
 windows-registry = { workspace = true }
 windows-service = { workspace = true }
 # The running OS version, without `unsafe` in this crate.
 windows-version = { workspace = true }
+# Process, token, session and local-group queries, for `palisade_agent::ffi`
+# only (ADR 0011).
+windows-sys = { workspace = true, features = [
+    "Wdk_System_Threading",
+    "Win32_Foundation",
+    "Win32_NetworkManagement_NetManagement",
+    "Win32_Security",
+    "Win32_System_RemoteDesktop",
+    "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 palisade-core = { workspace = true, features = ["std", "test-util"] }
