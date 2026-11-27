@@ -258,16 +258,33 @@ pub(crate) fn parent_pid(record: Record<'_>) -> Result<Option<u32>> {
 /// UTF-16 is an error, not replaced: a rule must never match a guess.
 pub(crate) fn unicode_string(record: Record<'_>, what: &str) -> Result<String> {
     let truncated = || malformed(what, "truncated");
+    // The whole header (`Length`, `MaximumLength`, padding, `Buffer`) must
+    // be present, even for an empty string.
+    let header = record.ptr.checked_mul(2).ok_or_else(truncated)?;
+    if record.bytes.len() < header {
+        return Err(truncated());
+    }
     let len = usize::from(record.u16_at(0).ok_or_else(truncated)?);
+    let capacity = usize::from(record.u16_at(2).ok_or_else(truncated)?);
     if len % 2 != 0 {
         return Err(malformed(what, "odd length"));
+    }
+    if len > capacity {
+        return Err(malformed(what, "the length exceeds the maximum length"));
     }
     if len == 0 {
         return Ok(String::new());
     }
     let pointer = record.ptr_at(record.ptr).ok_or_else(truncated)?;
+    let start = pointer
+        .checked_sub(record.base)
+        .ok_or_else(|| malformed(what, "the buffer is outside the record"))?;
+    if start < header {
+        return Err(malformed(what, "the buffer overlaps the header"));
+    }
     let text = record
-        .tail_at(pointer)
+        .bytes
+        .get(start..)
         .and_then(|t| t.get(..len))
         .ok_or_else(|| malformed(what, "the buffer is outside the record"))?;
     let units: Vec<u16> = text
@@ -275,6 +292,16 @@ pub(crate) fn unicode_string(record: Record<'_>, what: &str) -> Result<String> {
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
     String::from_utf16(&units).map_err(|_| malformed(what, "not valid UTF-16"))
+}
+
+/// Whether a local group whose name resolves to `local` (the SID and
+/// `SID_NAME_USE` of the **bare** name that `NetLocalGroupGetMembers` will
+/// enumerate) is the group `requested`: a local group (an alias) with
+/// exactly that SID. Anything else must not be listed in its place.
+pub(crate) fn is_requested_local_group(requested: &Sid, local: &[u8], kind: i32) -> bool {
+    /// `SidTypeAlias`.
+    const ALIAS: i32 = 4;
+    kind == ALIAS && Sid::from_bytes(local).is_ok_and(|(s, n)| s == *requested && n == local.len())
 }
 
 #[cfg(test)]
@@ -551,6 +578,59 @@ mod tests {
         b.u16(2).u16(4).pad().pointer(BASE - 64);
         assert!(unicode_string(b.record(), "cmd").is_err());
         assert!(unicode_string(Builder::new(8).record(), "cmd").is_err());
+    }
+
+    #[test]
+    fn unicode_string_headers_are_checked() {
+        for ptr in [4, 8] {
+            // Only `Length`, or `Length` and `MaximumLength`: truncated,
+            // even when the length is zero.
+            for short in [&[0_u8, 0][..], &[0, 0, 0, 0]] {
+                let mut b = Builder::new(ptr);
+                b.raw(short);
+                assert!(unicode_string(b.record(), "cmd").is_err(), "{short:?}");
+            }
+            // A complete header with length zero is the empty string.
+            let mut b = Builder::new(ptr);
+            b.u16(0).u16(0).pad().pointer(0);
+            assert_eq!(unicode_string(b.record(), "cmd").unwrap(), "");
+            // `Length` above `MaximumLength`.
+            let mut b = unicode(ptr, &[0x61, 0x62]);
+            b.bytes[2..4].copy_from_slice(&2_u16.to_le_bytes());
+            assert!(unicode_string(b.record(), "cmd").is_err());
+            // A buffer pointing into the header.
+            for into in [0, 2, ptr] {
+                let mut b = Builder::new(ptr);
+                b.u16(4)
+                    .u16(4)
+                    .pad()
+                    .pointer(BASE + into)
+                    .raw(&[0x61, 0, 0x62, 0]);
+                assert!(
+                    unicode_string(b.record(), "cmd").is_err(),
+                    "ptr {ptr} at {into}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn local_group_matches_only_the_requested_alias() {
+        let ops = Sid::from_str("S-1-5-21-1-2-3-1100").unwrap();
+        let other = Sid::from_str("S-1-5-21-9-9-9-1100").unwrap();
+        assert!(is_requested_local_group(&ops, &ops.to_bytes(), 4));
+        // A local `Ops` with another SID (`DOMAIN\Ops` resolved, but the
+        // bare name is a different local group).
+        assert!(!is_requested_local_group(&ops, &other.to_bytes(), 4));
+        // The right SID, but not a local group (a user, a domain group).
+        for kind in [1, 2, 5] {
+            assert!(!is_requested_local_group(&ops, &ops.to_bytes(), kind));
+        }
+        // Malformed, or with trailing bytes.
+        assert!(!is_requested_local_group(&ops, &[], 4));
+        let mut long = ops.to_bytes();
+        long.push(0);
+        assert!(!is_requested_local_group(&ops, &long, 4));
     }
 
     #[test]

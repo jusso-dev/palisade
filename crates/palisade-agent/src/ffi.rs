@@ -30,8 +30,8 @@ use windows_sys::Win32::NetworkManagement::NetManagement::{
     NetLocalGroupGetMembers,
 };
 use windows_sys::Win32::Security::{
-    GetLengthSid, GetTokenInformation, LookupAccountNameW, SID_NAME_USE, TOKEN_INFORMATION_CLASS,
-    TOKEN_QUERY,
+    GetLengthSid, GetTokenInformation, LookupAccountNameW, LookupAccountSidW, SID_NAME_USE,
+    TOKEN_INFORMATION_CLASS, TOKEN_QUERY,
 };
 use windows_sys::Win32::System::RemoteDesktop::{
     WTS_CURRENT_SERVER_HANDLE, WTSClientProtocolType, WTSFreeMemory, WTSQuerySessionInformationW,
@@ -194,12 +194,19 @@ impl Process {
                 });
             }
             let e = io::Error::last_os_error();
-            if e.raw_os_error() != i32::try_from(ERROR_INSUFFICIENT_BUFFER).ok()
-                || units * 2 > MAX_RECORD_BYTES
-            {
+            if e.raw_os_error() != i32::try_from(ERROR_INSUFFICIENT_BUFFER).ok() {
                 return Err(e);
             }
-            units *= 4;
+            // Grow within the cap: the last try is exactly
+            // `MAX_RECORD_BYTES`, never more.
+            let cap_units = MAX_RECORD_BYTES / 2;
+            if units >= cap_units {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "image path is longer than the record limit",
+                ));
+            }
+            units = units.saturating_mul(4).min(cap_units);
         }
     }
 
@@ -467,6 +474,72 @@ pub(crate) fn lookup_account_name(name: &str) -> io::Result<(Vec<u8>, i32)> {
     Ok((bytes, use_))
 }
 
+/// `ERROR_NONE_MAPPED`: no account has this SID (or name).
+const NONE_MAPPED: i32 = 1332;
+
+/// The account name of `sid` (a binary SID), as `(domain, name)`, with
+/// `LookupAccountSidW`. `Ok(None)` only when no account has the SID
+/// (`ERROR_NONE_MAPPED`); any other failure, such as an unreachable domain
+/// controller, is an error.
+pub(crate) fn lookup_account_sid(sid: &[u8]) -> io::Result<Option<(String, String)>> {
+    // `u32` words keep the SID aligned as the OS's `SID` structure needs.
+    let mut words = vec![0_u32; sid.len().div_ceil(4)];
+    for (w, c) in words.iter_mut().zip(sid.chunks(4)) {
+        let mut b = [0_u8; 4];
+        if let Some(p) = b.get_mut(..c.len()) {
+            p.copy_from_slice(c);
+        }
+        *w = u32::from_ne_bytes(b);
+    }
+    let psid = words.as_mut_ptr().cast();
+    let mut name = vec![0_u16; 256];
+    let mut domain = vec![0_u16; 256];
+    loop {
+        let (mut nl, mut dl) = (u32_len(name.len()), u32_len(domain.len()));
+        let mut use_: SID_NAME_USE = 0;
+        // SAFETY: `psid` points at `words`, a binary SID (the caller's
+        // bytes, from `Sid::to_bytes`), 4-byte aligned and alive for the
+        // call; a null system name is the local computer. `name` and
+        // `domain` are live, writable buffers of `nl` and `dl` UTF-16
+        // units, the lengths passed, and the lengths and `use_` are live
+        // locals.
+        let ok = unsafe {
+            LookupAccountSidW(
+                std::ptr::null(),
+                psid,
+                name.as_mut_ptr(),
+                &raw mut nl,
+                domain.as_mut_ptr(),
+                &raw mut dl,
+                &raw mut use_,
+            )
+        };
+        if ok != 0 {
+            let text = |b: &[u16], n: u32| {
+                let n = usize::try_from(n).unwrap_or(0).min(b.len());
+                String::from_utf16(b.get(..n).unwrap_or_default()).map_err(|_| {
+                    io::Error::new(io::ErrorKind::InvalidData, "account name is not UTF-16")
+                })
+            };
+            return Ok(Some((text(&domain, dl)?, text(&name, nl)?)));
+        }
+        let e = io::Error::last_os_error();
+        match e.raw_os_error() {
+            Some(NONE_MAPPED) => return Ok(None),
+            Some(c) if c == i32::try_from(ERROR_INSUFFICIENT_BUFFER).unwrap_or(-1) => {
+                let need = |n: u32, cur: usize| usize::try_from(n).unwrap_or(usize::MAX).max(cur);
+                let (n, d) = (need(nl, name.len()), need(dl, domain.len()));
+                if n > 4096 || d > 4096 || (n == name.len() && d == domain.len()) {
+                    return Err(e);
+                }
+                name.resize(n, 0);
+                domain.resize(d, 0);
+            }
+            _ => return Err(e),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Local groups
 // ---------------------------------------------------------------------------
@@ -484,20 +557,29 @@ impl Drop for NetBuffer {
     }
 }
 
+/// Why [`local_group_members`] failed.
+#[derive(Debug)]
+pub(crate) enum MembersError {
+    /// The group has more than [`MAX_GROUP_MEMBERS`] members. The
+    /// enumeration was still run to its end.
+    TooMany,
+    /// The OS call failed, with the network management status as the OS
+    /// error code (such as `NERR_GroupNotFound`).
+    Os(io::Error),
+}
+
 /// The binary SIDs of the direct members of the local group `name` (its
-/// name, without a domain), with `NetLocalGroupGetMembers`. Fails with the
-/// network management status as the OS error code, such as
-/// `NERR_GroupNotFound`, or with [`io::ErrorKind::OutOfMemory`] past
-/// [`MAX_GROUP_MEMBERS`].
-pub(crate) fn local_group_members(name: &str) -> io::Result<Vec<Vec<u8>>> {
+/// name, without a domain), with `NetLocalGroupGetMembers`.
+pub(crate) fn local_group_members(name: &str) -> Result<Vec<Vec<u8>>, MembersError> {
     if name.contains('\0') {
-        return Err(io::Error::new(
+        return Err(MembersError::Os(io::Error::new(
             io::ErrorKind::InvalidInput,
             "group name contains a NUL character",
-        ));
+        )));
     }
     let wide: Vec<u16> = name.encode_utf16().chain([0]).collect();
     let mut members = Vec::new();
+    let mut over_limit = false;
     let mut resume = 0_usize;
     loop {
         let mut buf = NetBuffer(std::ptr::null_mut());
@@ -519,12 +601,15 @@ pub(crate) fn local_group_members(name: &str) -> io::Result<Vec<Vec<u8>>> {
             )
         };
         if status != NERR_Success && status != ERROR_MORE_DATA {
-            return Err(io::Error::from_raw_os_error(
+            return Err(MembersError::Os(io::Error::from_raw_os_error(
                 i32::try_from(status).unwrap_or(i32::MAX),
-            ));
+            )));
         }
         let count = usize::try_from(read).unwrap_or(0);
-        if !buf.0.is_null() && count > 0 {
+        // Past the limit, stop copying but keep paging to the end: an
+        // enumeration abandoned at `ERROR_MORE_DATA` can leak its RPC
+        // connection. Each page is freed by `NetBuffer` as it drops.
+        if !over_limit && !buf.0.is_null() && count > 0 {
             let entries: *const LOCALGROUP_MEMBERS_INFO_0 = buf.0.cast_const().cast();
             for i in 0..count {
                 // SAFETY: the OS returned `read` contiguous, aligned
@@ -543,20 +628,22 @@ pub(crate) fn local_group_members(name: &str) -> io::Result<Vec<Vec<u8>>> {
                     unsafe { std::slice::from_raw_parts(psid.cast::<u8>().cast_const(), len) };
                 members.push(sid.to_vec());
             }
-        }
-        if members.len() > MAX_GROUP_MEMBERS {
-            return Err(io::Error::new(
-                io::ErrorKind::OutOfMemory,
-                "too many group members",
-            ));
+            if members.len() > MAX_GROUP_MEMBERS {
+                over_limit = true;
+                members = Vec::new();
+            }
         }
         if status == NERR_Success {
-            return Ok(members);
+            return if over_limit {
+                Err(MembersError::TooMany)
+            } else {
+                Ok(members)
+            };
         }
         if count == 0 {
-            return Err(io::Error::other(
+            return Err(MembersError::Os(io::Error::other(
                 "the OS reported more members but returned none",
-            ));
+            )));
         }
     }
 }
@@ -612,8 +699,16 @@ mod tests {
         let short = name.rsplit('\\').next().unwrap();
         let members = local_group_members(short).unwrap();
         assert!(!members.is_empty());
+        let (domain, bare) = lookup_account_sid(&admins.to_bytes()).unwrap().unwrap();
+        assert_eq!(format!("{domain}\\{bare}"), name);
+        // A well-formed SID no account has.
+        let nobody = palisade_fileid::fsctx::Sid::new(5, &[21, 1, 2, 3, 999_999]).unwrap();
+        assert_eq!(lookup_account_sid(&nobody.to_bytes()).unwrap(), None);
         let e = local_group_members("No Such Palisade Group").unwrap_err();
-        assert!(e.raw_os_error().is_some());
+        assert!(
+            matches!(e, MembersError::Os(ref e) if e.raw_os_error().is_some()),
+            "{e:?}"
+        );
         assert!(local_group_members("a\0b").is_err());
     }
 }

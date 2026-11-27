@@ -62,13 +62,13 @@ The Windows identity and process backends fail closed
 ([ADR 0018](../../docs/adr/0018-fail-open-vs-fail-closed-defaults-revised.md)). A token is read
 in full or not at all: if the OS refuses its user, groups, integrity level or elevation type, the
 query fails instead of returning a token with a part guessed, so a failed elevation query never
-reads as "not elevated". Only the session kind falls back, to `Unknown`, never to `Console`. A
+reads as "not elevated". Only the session kind falls back: session 0 is always `Services`, whatever the protocol query says, and a non-zero session whose protocol cannot be read is `Unknown`, never `Console`. A
 group that is in a token but not enabled is reported as deny-only, like a group UAC filtered,
 since the OS does not use it to grant access. A process that has exited is `NotFound`, even
 while a handle keeps its object alive, and a process key whose creation time does not match the
 process now using its ID is `NotFound` too, so a reused process ID is never read as the process
 it replaced. A local group's members are listed only if the SID names a local group whose name
-resolves back to the same SID.
+resolves back to the same SID: the bare name the OS enumerates by must itself be a local group with that SID, so a local group that only shares a domain group's name is never listed in its place. An account name lookup that fails for any reason other than "no such account" is an error, not `None`.
 
 Each implementation passes the same contract checks as the mocks
 (`palisade_core::test_util::contract`), in `tests/platform.rs`, on every CI runner. The Windows

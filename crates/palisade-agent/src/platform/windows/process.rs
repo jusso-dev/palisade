@@ -57,7 +57,25 @@ pub(super) fn open_key(key: ProcessKey) -> Result<Process> {
     Ok(process)
 }
 
+/// Reads the record of the open `process`, then checks on the same handle
+/// that it is still running: a process that exited while it was read is
+/// [`ErrorKind::NotFound`](palisade_core::platform::ErrorKind::NotFound),
+/// whether the reads succeeded or failed.
 fn record(process: &Process, key: ProcessKey) -> Result<ProcessRecord> {
+    let read = read_record(process, key);
+    if process
+        .has_exited()
+        .map_err(|e| os_error(&e, "process state"))?
+    {
+        return Err(PlatformError::not_found(format!(
+            "process {} exited while it was read",
+            key.pid
+        )));
+    }
+    read
+}
+
+fn read_record(process: &Process, key: ProcessKey) -> Result<ProcessRecord> {
     let basic = process
         .basic_information()
         .map_err(|e| os_error(&e, "process basic information"))?;

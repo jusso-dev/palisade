@@ -41,8 +41,24 @@ pub(crate) fn io_error(error: &std::io::Error, context: &str) -> PlatformError {
             ErrorKind::InvalidInput
         }
         std::io::ErrorKind::Unsupported => ErrorKind::Unsupported,
-        std::io::ErrorKind::OutOfMemory => ErrorKind::TooLarge,
         _ => ErrorKind::Other,
     };
     PlatformError::new(kind, format!("{context}: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn io_errors_keep_their_kind() {
+        let kind = |k: std::io::ErrorKind| io_error(&std::io::Error::from(k), "x").kind();
+        assert_eq!(kind(std::io::ErrorKind::NotFound), ErrorKind::NotFound);
+        assert_eq!(
+            kind(std::io::ErrorKind::PermissionDenied),
+            ErrorKind::AccessDenied
+        );
+        // An allocation failure is not a size limit.
+        assert_eq!(kind(std::io::ErrorKind::OutOfMemory), ErrorKind::Other);
+    }
 }

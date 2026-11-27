@@ -15,6 +15,9 @@
 //!   ([`ALLOWED_LOCATIONS`]);
 //! - a crate in [`FORBID_AT_ROOT`] has a library or binary root without a
 //!   crate-level `#![forbid(unsafe_code)]`;
+//! - in a crate with an allowlisted module ([`MODULE_FORBID_CRATES`]), a
+//!   top-level module outside [`ALLOWED_LOCATIONS`] does not start with
+//!   `#![forbid(unsafe_code)]` ([`check_module_roots`]);
 //! - a file is a symbolic link (in the working tree, or recorded as one in
 //!   the git index), a listed file cannot be inspected, or a Rust file cannot
 //!   be tokenised;
@@ -64,6 +67,54 @@ pub const FORBID_AT_ROOT: &[&str] = &[
     "palisade-cli",
     "xtask",
 ];
+
+/// Crates with an allowlisted module, whose library root therefore keeps
+/// the workspace `deny`: every other top-level module must say
+/// `#![forbid(unsafe_code)]` itself ([`check_module_roots`]).
+pub const MODULE_FORBID_CRATES: &[&str] = &["crates/palisade-agent", "crates/palisade-fileid"];
+
+/// The top-level module files of the crate at `crate_dir` among `files`
+/// (repository-relative paths): `src/<name>.rs` and `src/<name>/mod.rs`,
+/// except the crate roots (`lib.rs`, `main.rs`) and the allowlisted
+/// locations.
+fn top_level_modules<'a>(
+    crate_dir: &str,
+    files: &'a [(String, String)],
+) -> Vec<&'a (String, String)> {
+    let src = format!("{crate_dir}/src/");
+    files
+        .iter()
+        .filter(|(path, _)| {
+            let Some(rest) = path.strip_prefix(&src) else {
+                return false;
+            };
+            let top = match rest.split_once('/') {
+                None => rest.ends_with(".rs") && rest != "lib.rs" && rest != "main.rs",
+                Some((_, tail)) => tail == "mod.rs",
+            };
+            top && !is_allowed_location(path)
+        })
+        .collect()
+}
+
+/// Every top-level module of each crate in [`MODULE_FORBID_CRATES`] that
+/// is not an allowlisted location must start with
+/// `#![forbid(unsafe_code)]`, since its crate root cannot forbid it.
+pub fn check_module_roots(files: &[(String, String)]) -> Vec<String> {
+    let mut v = Vec::new();
+    for crate_dir in MODULE_FORBID_CRATES {
+        for (path, source) in top_level_modules(crate_dir, files) {
+            match forbids_unsafe_code(source) {
+                Ok(true) => {}
+                Ok(false) => v.push(format!(
+                    "{path}: a top-level module of a crate with an allowlisted module must start with #![forbid(unsafe_code)] (ADR 0011)"
+                )),
+                Err(e) => v.push(format!("{path}: cannot tokenise ({e}); check-unsafe fails closed")),
+            }
+        }
+    }
+    v
+}
 
 /// Cargo config files Cargo reads from a directory's `.cargo/`.
 pub const CARGO_CONFIG_FILES: &[&str] = &[".cargo/config.toml", ".cargo/config"];
@@ -1225,5 +1276,61 @@ mod tests {
                 assert_eq!(check_cargo_config(config, &source), Vec::<String>::new());
             }
         }
+    }
+
+    #[test]
+    fn module_roots_must_forbid_in_crates_with_an_ffi_module() {
+        let f = |p: &str, src: &str| (p.to_owned(), src.to_owned());
+        let forbid = "//! Docs\n#![forbid(unsafe_code)]\n";
+        let files = vec![
+            f("crates/palisade-agent/src/lib.rs", "pub mod a;"),
+            f("crates/palisade-agent/src/main.rs", "fn main() {}"),
+            f("crates/palisade-agent/src/ffi.rs", "#![allow(unsafe_code)]"),
+            f(
+                "crates/palisade-agent/src/ffi/etw.rs",
+                "#![allow(unsafe_code)]",
+            ),
+            f("crates/palisade-agent/src/good.rs", forbid),
+            f("crates/palisade-agent/src/dir/mod.rs", forbid),
+            f("crates/palisade-agent/src/dir/inner.rs", "fn f() {}"),
+            f("crates/palisade-agent/src/bad.rs", "fn f() {}"),
+            f("crates/palisade-fileid/src/win/mod.rs", ""),
+            f(
+                "crates/palisade-fileid/src/pe/mod.rs",
+                "#![deny(unsafe_code)]",
+            ),
+            f("crates/palisade-core/src/x.rs", "fn f() {}"),
+        ];
+        let v = check_module_roots(&files);
+        assert_eq!(v.len(), 2, "{v:?}");
+        assert!(
+            v[0].starts_with("crates/palisade-agent/src/bad.rs"),
+            "{v:?}"
+        );
+        assert!(
+            v[1].starts_with("crates/palisade-fileid/src/pe/mod.rs"),
+            "{v:?}"
+        );
+    }
+
+    #[test]
+    fn this_repository_module_roots_forbid() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        if !root.join(".git").exists() {
+            return;
+        }
+        let (paths, _) = repository_files(&root).unwrap();
+        let files: Vec<(String, String)> = paths
+            .into_iter()
+            .filter(|p| is_rust_path(p))
+            .map(|p| {
+                let source = std::fs::read_to_string(root.join(&p)).unwrap();
+                (p, source)
+            })
+            .collect();
+        assert_eq!(check_module_roots(&files), Vec::<String>::new());
     }
 }

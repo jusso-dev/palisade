@@ -379,29 +379,27 @@ mod windows {
 
     #[test]
     fn a_process_that_exited_is_not_found() {
+        // A child that stays alive until it is killed, so it is always
+        // found first.
         let mut child = std::process::Command::new("cmd.exe")
-            .args(["/c", "exit 0"])
+            .args(["/c", "ping -n 60 127.0.0.1 >NUL"])
+            .stdout(std::process::Stdio::null())
             .spawn()
             .unwrap();
         let pid = child.id();
-        // Found while it runs; once it has exited, gone, even though
-        // `child` still holds a handle to it (which also keeps its ID from
-        // being reused).
-        let key = WindowsProcesses.by_pid(pid).map(|r| r.key);
+        let key = WindowsProcesses.by_pid(pid).unwrap().key;
+        assert_eq!(WindowsProcesses.get(key).unwrap().key, key);
+        WindowsIdentity::new().token(key).unwrap();
+        child.kill().unwrap();
         child.wait().unwrap();
-        assert_eq!(
-            WindowsProcesses.by_pid(pid).unwrap_err().kind(),
-            ErrorKind::NotFound
-        );
-        if let Ok(k) = key {
-            assert_eq!(
-                WindowsProcesses.get(k).unwrap_err().kind(),
-                ErrorKind::NotFound
-            );
-            assert_eq!(
-                WindowsIdentity::new().token(k).unwrap_err().kind(),
-                ErrorKind::NotFound
-            );
+        // Gone, even though `child` still holds a handle to it (which
+        // also keeps its ID from being reused).
+        for e in [
+            WindowsProcesses.by_pid(pid).unwrap_err(),
+            WindowsProcesses.get(key).unwrap_err(),
+            WindowsIdentity::new().token(key).unwrap_err(),
+        ] {
+            assert_eq!(e.kind(), ErrorKind::NotFound, "{e}");
         }
         drop(child);
         // Process IDs are multiples of 4, so this one never exists.
@@ -409,6 +407,22 @@ mod windows {
             WindowsProcesses.by_pid(0xFFFF_FFF1).unwrap_err().kind(),
             ErrorKind::NotFound
         );
+    }
+
+    #[test]
+    fn the_system_process_is_described() {
+        // PID 4 is the System process, the root of every chain: it has no
+        // parent. The OS may refuse some of its fields (it has no image
+        // file), and the backend then fails rather than guess; but it is
+        // running, so it is never `NotFound`.
+        match WindowsProcesses.by_pid(4) {
+            Ok(system) => {
+                assert_eq!(system.key.pid, 4);
+                assert_eq!(system.parent_pid, None);
+                assert!(ancestry(&WindowsProcesses, system.key).unwrap().is_empty());
+            }
+            Err(e) => assert_ne!(e.kind(), ErrorKind::NotFound, "{e}"),
+        }
     }
 
     #[test]

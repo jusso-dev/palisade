@@ -778,6 +778,7 @@ fn check_unsafe(root: &Path) -> Result<Vec<String>, String> {
     }
     let allowlist = unsafe_code::parse_allowlist(&read(&root.join("unsafe-allowlist.txt"))?);
     violations.extend(unsafe_code::check_files(&files, &allowlist));
+    violations.extend(unsafe_code::check_module_roots(&files));
 
     // Library and binary roots of the crates with no allowlisted module.
     let metadata = cargo_metadata(root, &["--no-deps"])?;
