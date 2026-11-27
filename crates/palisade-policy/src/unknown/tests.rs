@@ -1499,6 +1499,7 @@ fn agent_temp_directories_add_the_temp_class() {
             volume: None,
             writable_dirs: &[],
             temp_dirs: &temp,
+            os_volume: false,
         },
     );
     assert_eq!(
@@ -2260,9 +2261,13 @@ fn external_volumes_are_never_protected_locations() {
         classes("D:\\Program Files\\a.exe", Some(false), None),
         level_set(&[L::OtherFixed])
     );
-    // Without them, the drive-letter fallback applies on a local disk.
+    // Without them, the drive-letter fallback needs the known fixed OS
+    // volume; an undescribed volume is just `other_fixed`.
     let p = PathFact::new("D:\\Windows\\a.exe", &VolumeMap::new()).with_user_writable(false);
-    assert_eq!(classify(&p, &no_vars, None, &[]), level_set(&[L::Windows]));
+    assert_eq!(
+        classify(&p, &no_vars, None, &[]),
+        level_set(&[L::OtherFixed])
+    );
 }
 
 #[test]
@@ -3580,22 +3585,180 @@ fn the_example_applies_the_strictest_matching_entry() {
 }
 
 #[test]
-fn without_volume_facts_or_variables_a_usb_windows_folder_is_windows() {
-    // Pins what the docs say: the drive-root fallback applies on any drive
-    // when `%WINDIR%` is unset and the volume kind is unknown.
+fn without_a_known_os_volume_a_windows_folder_is_not_windows() {
+    // A missing fact never grants a protected class (ADR 0018): without
+    // `%WINDIR%`, `D:\Windows` on a volume not known to be the fixed OS
+    // volume gets no `windows` class from the drive-root fallback.
     use LocationClass as L;
     let p = PathFact::new("D:\\Windows\\a.exe", &VolumeMap::new()).with_user_writable(false);
+    let none = PathVariables::new();
+    let with = |volume, os_volume| {
+        location::classify_with(
+            &p,
+            &none,
+            &location::Hints {
+                volume,
+                os_volume,
+                ..location::Hints::default()
+            },
+        )
+    };
+    assert_eq!(with(None, false), BTreeSet::from([L::OtherFixed]));
+    assert_eq!(with(None, true), BTreeSet::from([L::OtherFixed]));
     assert_eq!(
-        classify(&p, &PathVariables::new(), None, &[]),
-        BTreeSet::from([L::Windows])
+        with(Some(VolumeKind::Fixed), false),
+        BTreeSet::from([L::OtherFixed])
     );
+    assert_eq!(
+        with(Some(VolumeKind::Removable), true),
+        BTreeSet::from([L::Removable])
+    );
+    assert_eq!(
+        with(Some(VolumeKind::Optical), true),
+        BTreeSet::from([L::Optical])
+    );
+    assert_eq!(
+        with(Some(VolumeKind::Network), true),
+        BTreeSet::from([L::Network])
+    );
+    // With `%WINDIR%` set, the variable decides, as before.
     let windir = PathVariables::new().with(crate::facts::PathVariable::Windir, &["C:\\Windows"]);
     assert_eq!(
         classify(&p, &windir, None, &[]),
         BTreeSet::from([L::OtherFixed])
     );
+    // `D:\Users\<name>` is `user_profile`, not `other_fixed`.
+    let u = PathFact::new("D:\\Users\\alice\\a.exe", &VolumeMap::new()).with_user_writable(false);
     assert_eq!(
-        classify(&p, &PathVariables::new(), Some(VolumeKind::Removable), &[]),
-        BTreeSet::from([L::Removable])
+        classify(&u, &none, None, &[]),
+        BTreeSet::from([L::UserProfile])
     );
+}
+
+#[test]
+fn on_the_known_fixed_os_volume_the_drive_root_fallbacks_apply() {
+    use LocationClass as L;
+    let none = PathVariables::new();
+    let os = location::Hints {
+        volume: Some(VolumeKind::Fixed),
+        os_volume: true,
+        ..location::Hints::default()
+    };
+    for (raw, want) in [
+        ("D:\\Windows\\a.exe", L::Windows),
+        ("D:\\Program Files\\App\\a.exe", L::ProgramFiles),
+        ("D:\\Program Files (x86)\\App\\a.exe", L::ProgramFiles),
+    ] {
+        let p = PathFact::new(raw, &VolumeMap::new()).with_user_writable(false);
+        assert_eq!(
+            location::classify_with(&p, &none, &os),
+            BTreeSet::from([want]),
+            "{raw}"
+        );
+    }
+    // The `temp` fallback needs no volume fact: it only makes an object
+    // look less safe.
+    let t = PathFact::new("E:\\Windows\\Temp\\a.exe", &VolumeMap::new()).with_user_writable(false);
+    assert!(classify(&t, &none, None, &[]).contains(&L::Temp));
+}
+
+/// Random drive paths, some under the folders the fallbacks know.
+fn arb_drive_path() -> impl Strategy<Value = String> {
+    (
+        prop::sample::select(vec!["C", "D", "E"]),
+        prop::sample::select(vec![
+            "Windows",
+            "Windows\\System32",
+            "Windows\\Temp",
+            "Program Files\\App",
+            "Program Files (x86)\\App",
+            "Users\\alice",
+            "Data",
+            "Data\\INetCache",
+        ]),
+        prop::sample::select(vec!["a.exe", "b.dll", "c.ps1:stream"]),
+    )
+        .prop_map(|(d, dir, f)| format!("{d}:\\{dir}\\{f}"))
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(1024))]
+
+    /// Removing any volume or variable fact never adds a protected class.
+    /// The facts describe one possible device: Windows runs from
+    /// `os_drive`, the variables (when set) point there, the OS drive is a
+    /// fixed volume (if its kind is reported at all), and the agent may or
+    /// may not say whether the file's volume is the OS volume. Facts that
+    /// contradict each other, such as `%WINDIR%` on a drive reported as
+    /// removable, are not generated, and the variables hold what Windows
+    /// sets: `%WINDIR%` is `X:\Windows`, and `%PROGRAMFILES%` both program
+    /// folders. (A variable narrower than its fallback, such as a
+    /// `%PROGRAMFILES%` without the `(x86)` folder, lets the fallback on the
+    /// known OS volume add `program_files` for the other folder when the
+    /// variable is dropped; that is the fallback doing its job.)
+    #[test]
+    fn removing_a_volume_or_variable_fact_never_adds_a_protected_class(
+        raw in arb_drive_path(),
+        writable in prop::option::of(any::<bool>()),
+        volume in prop::option::of(prop::sample::select(vec![
+            VolumeKind::Fixed, VolumeKind::Removable, VolumeKind::Optical, VolumeKind::Network,
+        ])),
+        os_drive in prop::sample::select(vec!['C', 'D', 'E']),
+        os_known in any::<bool>(),
+        has_windir in any::<bool>(),
+        has_program_files in any::<bool>(),
+        drop_volume in any::<bool>(),
+        drop_os in any::<bool>(),
+        drop_windir in any::<bool>(),
+        drop_program_files in any::<bool>(),
+    ) {
+        use crate::facts::PathVariable as V;
+        let on_os = raw.starts_with(os_drive);
+        let os_volume = os_known && on_os;
+        // The OS drive is fixed, if its kind is reported.
+        let volume = if on_os && volume.is_some() { Some(VolumeKind::Fixed) } else { volume };
+        let windir_value = format!("{os_drive}:\\Windows");
+        let program_files_value = [
+            format!("{os_drive}:\\Program Files"),
+            format!("{os_drive}:\\Program Files (x86)"),
+        ];
+        let windir = has_windir.then_some(windir_value.as_str());
+        let program_files = has_program_files.then_some(&program_files_value);
+        let mut p = PathFact::new(&raw, &VolumeMap::new());
+        p.user_writable = writable;
+        let vars = |w: Option<&str>, pf: Option<&[String; 2]>| {
+            let mut v = PathVariables::new();
+            if let Some(w) = w {
+                v = v.with(V::Windir, &[w]);
+            }
+            if let Some(pf) = pf {
+                v = v.with(V::ProgramFiles, &[pf[0].as_str(), pf[1].as_str()]);
+            }
+            v
+        };
+        let protected = |c: &BTreeSet<LocationClass>| {
+            [LocationClass::Windows, LocationClass::ProgramFiles]
+                .into_iter()
+                .filter(|x| c.contains(x))
+                .collect::<BTreeSet<_>>()
+        };
+        let full = location::classify_with(
+            &p,
+            &vars(windir, program_files),
+            &location::Hints { volume, os_volume, ..location::Hints::default() },
+        );
+        let partial = location::classify_with(
+            &p,
+            &vars(windir.filter(|_| !drop_windir), program_files.filter(|_| !drop_program_files)),
+            &location::Hints {
+                volume: volume.filter(|_| !drop_volume),
+                os_volume: os_volume && !drop_os,
+                ..location::Hints::default()
+            },
+        );
+        prop_assert!(
+            protected(&partial).is_subset(&protected(&full)),
+            "{raw}: {partial:?} has more protected classes than {full:?}"
+        );
+    }
 }

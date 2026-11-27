@@ -7,25 +7,40 @@
 //! left the classes unset. Every rule below only ever adds classes, so
 //! a missing ACL fact can only make an object look less safe.
 //!
-//! Volume facts are the exception: without them, a drive path is taken to
-//! be on a fixed volume. A file on a USB drive or a disc whose volume kind
-//! is not known therefore loses the `removable` or `optical` class, and
-//! it is classified as if it were on a fixed disk:
+//! The protected classes `program_files` and `windows` are the exception
+//! that needs care, because a missing fact must never grant one (ADR 0018):
 //!
-//! - it can be `program_files` or `windows`, which a known removable or
-//!   optical volume never is. With `%PROGRAMFILES%` and `%WINDIR%` set, only
-//!   a path under those folders is (so in practice only the system drive).
-//!   Without them, the drive-root fallbacks give `X:\Program Files` and
-//!   `X:\Windows` on **any** drive, including `D:\Windows\a.exe` on a USB
-//!   drive;
-//! - otherwise, it is `other_fixed`.
+//! - With `%PROGRAMFILES%` or `%WINDIR%` set, the class comes from the
+//!   variable: a path under it, on a drive whose volume is fixed or not
+//!   known. The variable names a folder on the volume Windows runs from,
+//!   so a path under it is on that volume, and a missing volume fact does
+//!   not change that. A path on a volume known to be removable, optical or
+//!   network never gets the class.
+//! - Without the variable, the drive-root fallback (`X:\Program Files`,
+//!   `X:\Program Files (x86)`, `X:\Windows`) counts only when the volume
+//!   is known to be fixed ([`Hints::volume`]) **and** known to be the volume
+//!   Windows runs from ([`Hints::os_volume`]). A `\Windows` folder on a USB
+//!   drive, a second disk, or a volume the agent did not describe gets no
+//!   protected class from it.
 //!
-//! A policy that is stricter for `removable` or `optical` than for the
-//! classes such a file gets instead (such as `removable: block` with
-//! `default: detect`) is only as strict as the volume facts: the agent must
-//! supply the volume kind ([`Hints::volume`]) or the location classes
-//! themselves for those entries to apply, and should supply the path
-//! variables so the drive-root fallbacks are not used.
+//! So removing a volume or variable fact never adds a protected class: a
+//! missing fact can make an object look less safe, never more.
+//!
+//! Without a volume fact, a drive path is otherwise treated as on a fixed
+//! volume, so a file on a USB drive or a disc whose volume kind is not
+//! known loses only the `removable` or `optical` class. A policy that is
+//! stricter for `removable` or `optical` than for the classes such a file
+//! gets instead (such as `removable: block` with `default: detect`) is only
+//! as strict as the volume facts: the agent must supply the volume kind or
+//! the location classes themselves for those entries to apply. Such a file
+//! is `other_fixed` only as the table says: a drive path on a fixed or
+//! unknown volume that is in none of `user_profile`, `temp`,
+//! `program_files` and `windows` (`D:\Users\alice\a.exe` is
+//! `user_profile`, not `other_fixed`).
+//!
+//! The `%WINDIR%\Temp` fallback (`X:\Windows\Temp` on any drive, without
+//! `%WINDIR%`) is kept as it is: `temp` makes an object look less safe, so
+//! granting it on a missing fact fails closed.
 //!
 //! | Class | When |
 //! |---|---|
@@ -35,18 +50,18 @@
 //! | `user_profile` | under `%USERPROFILE%`, `%APPDATA%`, `%LOCALAPPDATA%` or `%PUBLIC%`, or under `X:\Users\<name>` on any drive |
 //! | `temp` | under `%TEMP%` or `%WINDIR%\Temp` (without `%WINDIR%`, `X:\Windows\Temp`), any `INetCache` or `Temporary Internet Files` folder below the drive or share root, or a directory the agent lists as a temporary cache |
 //! | `user_writable_other` | the ACL facts say a non-administrator can write the file or a directory above it, or they are not known; under a directory the scanner flagged; or the path is not a drive or UNC path |
-//! | `program_files` | under `%PROGRAMFILES%`; without that variable, `X:\Program Files` or `X:\Program Files (x86)` |
-//! | `windows` | under `%WINDIR%`; without that variable, `X:\Windows` |
-//! | `other_fixed` | a drive path on a fixed (or unknown) volume in none of `user_profile`, `temp`, `program_files` and `windows`; it can come with `user_writable_other` and `ads` |
+//! | `program_files` | under `%PROGRAMFILES%`; without that variable, `X:\Program Files` or `X:\Program Files (x86)` on a volume known to be fixed and the OS volume |
+//! | `windows` | under `%WINDIR%`; without that variable, `X:\Windows` on a volume known to be fixed and the OS volume |
+//! | `other_fixed` | a drive path on a fixed or unknown volume that is in none of `user_profile`, `temp`, `program_files` and `windows`; it can come with `user_writable_other` and `ads` |
 //!
 //! `program_files` and `windows` are the protected classes, so they are
 //! never given to a file on a removable, optical or network volume, or to
 //! a network path: a disc or share holding its own `\Windows` folder is
 //! not the system's. The drive-letter fallbacks apply only when the
-//! variables are not set. When the path has an alias (the other spelling
-//! of a mapped drive or a UNC path), both spellings are classified and the
-//! classes joined, except that the protected classes need both spellings
-//! to be local. Paths compare without case, at component boundaries.
+//! variables are not set, and only on the known fixed OS volume. When the
+//! path has an alias (the other spelling of a mapped drive or a UNC path),
+//! both spellings are classified and the classes joined, except that the
+//! protected classes need both spellings to be local. Paths compare without case, at component boundaries.
 
 use std::collections::BTreeSet;
 
@@ -80,6 +95,11 @@ pub struct Hints<'a> {
     /// Further temporary and cache directories the agent knows of, such as
     /// a browser's download cache or a mail client's attachment cache.
     pub temp_dirs: &'a [NormalizedPath],
+    /// The file's volume is known to be the one Windows runs from. Only
+    /// then, with `volume` known to be fixed, do the drive-root fallbacks
+    /// give `program_files` and `windows` when `%PROGRAMFILES%` or
+    /// `%WINDIR%` is not set. `false`, the default, means not known.
+    pub os_volume: bool,
 }
 
 /// Folder names that are temporary internet caches wherever they are.
@@ -100,6 +120,7 @@ pub fn classify(
             volume,
             writable_dirs,
             temp_dirs: &[],
+            os_volume: false,
         },
     )
 }
@@ -183,6 +204,11 @@ fn classify_one(
     // folders.
     let local =
         p.kind() == PathKind::Drive && matches!(hints.volume, None | Some(VolumeKind::Fixed));
+    // A drive-root fallback may grant a protected class only on a volume
+    // known to be the fixed OS volume: a missing fact never grants one
+    // (ADR 0018). Under a variable the path is on the OS volume already.
+    let os_root =
+        p.kind() == PathKind::Drive && hints.volume == Some(VolumeKind::Fixed) && hints.os_volume;
     let has = |v: PathVariable| !variables.get(v).is_empty();
 
     if under_var(&[
@@ -219,7 +245,7 @@ fn classify_one(
     let program_files = if has(PathVariable::ProgramFiles) {
         under_var(&[PathVariable::ProgramFiles])
     } else {
-        under_root("Program Files") || under_root("Program Files (x86)")
+        os_root && (under_root("Program Files") || under_root("Program Files (x86)"))
     };
     if local && program_files {
         out.insert(L::ProgramFiles);
@@ -227,7 +253,7 @@ fn classify_one(
     let windows = if has(PathVariable::Windir) {
         under_var(&[PathVariable::Windir])
     } else {
-        under_root("Windows")
+        os_root && under_root("Windows")
     };
     if local && windows {
         out.insert(L::Windows);
