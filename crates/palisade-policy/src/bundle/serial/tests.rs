@@ -321,3 +321,72 @@ proptest! {
         prop_assert_eq!(a, b);
     }
 }
+
+#[test]
+fn every_error_explains_itself() {
+    let errors = [
+        Error::UnregisteredKey("x".to_owned()),
+        Error::UnknownCriticalKey(9),
+        Error::UnknownVariant(9),
+        Error::Float,
+        Error::Encode(cbor::EncodeError::NotNfc),
+        Error::Message("m".to_owned()),
+    ];
+    let texts: BTreeSet<String> = errors.iter().map(ToString::to_string).collect();
+    assert_eq!(texts.len(), errors.len());
+}
+
+#[test]
+fn scalars_and_containers_round_trip() {
+    assert_eq!(round_trip(&-5i8), -5);
+    assert_eq!(round_trip(&-300i16), -300);
+    assert_eq!(round_trip(&-70_000i32), -70_000);
+    assert_eq!(round_trip(&i64::MIN), i64::MIN);
+    assert_eq!(round_trip(&7u8), 7);
+    assert_eq!(round_trip(&300u16), 300);
+    assert_eq!(round_trip(&u64::MAX), u64::MAX);
+    assert_eq!(round_trip(&-1i128), -1);
+    assert_eq!(round_trip(&5u128), 5);
+    assert_eq!(round_trip(&'x'), 'x');
+    assert_eq!(round_trip(&()), ());
+    assert_eq!(round_trip(&(1u8, "two".to_owned())), (1, "two".to_owned()));
+    assert_eq!(round_trip(&Some(3u8)), Some(3));
+    assert_eq!(round_trip(&None::<u8>), None);
+    assert!(to_value(&(u128::MAX)).is_err());
+    assert!(to_value(&i128::MIN).is_err());
+    struct Raw(Vec<u8>);
+    impl Serialize for Raw {
+        fn serialize<S: ::serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            s.serialize_bytes(&self.0)
+        }
+    }
+    assert_eq!(
+        to_value(&Raw(vec![1, 2])).unwrap(),
+        Value::Bytes(vec![1, 2])
+    );
+}
+
+#[test]
+fn malformed_shapes_are_refused() {
+    // A struct with a text key, an enum that is neither an ID nor a
+    // one-entry map, and a variant ID that is not an integer.
+    let text_key =
+        Value::Map(cbor::Map::new(vec![(Value::Text("k".to_owned()), Value::Null)]).unwrap());
+    assert!(from_value::<PolicySettings>(text_key).is_err());
+    assert!(from_value::<Mode>(Value::Bool(true)).is_err());
+    let two = Value::Map(
+        cbor::Map::new(vec![
+            (Value::Uint(0), Value::Null),
+            (Value::Uint(1), Value::Null),
+        ])
+        .unwrap(),
+    );
+    assert!(from_value::<crate::scope::NetworkRef>(two).is_err());
+    let text_variant =
+        Value::Map(cbor::Map::new(vec![(Value::Text("cidr".to_owned()), Value::Null)]).unwrap());
+    assert!(from_value::<crate::scope::NetworkRef>(text_variant).is_err());
+    // A unit variant given content.
+    let unit_with_content =
+        Value::Map(cbor::Map::new(vec![(to_value(&Mode::Audit).unwrap(), Value::Null)]).unwrap());
+    assert!(from_value::<Mode>(unit_with_content).is_err());
+}
