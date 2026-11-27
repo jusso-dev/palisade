@@ -1444,10 +1444,10 @@ fn overlap(allow: &Match, deny: &Match) -> Option<String> {
         let full = vec![(0u64, u64::MAX)];
         let a = a.unwrap_or_else(|| full.clone());
         let d = d.unwrap_or(full);
-        for (alo, ahi) in &a {
-            for (dlo, dhi) in &d {
-                let lo = (*alo).max(*dlo);
-                let hi = (*ahi).min(*dhi);
+        for (allow_lo, allow_hi) in &a {
+            for (deny_lo, deny_hi) in &d {
+                let lo = (*allow_lo).max(*deny_lo);
+                let hi = (*allow_hi).min(*deny_hi);
                 if lo <= hi {
                     return Some(format!("{} to {}", show(lo), show(hi)));
                 }

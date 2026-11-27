@@ -270,10 +270,11 @@ mod tests {
         let b = branches(&tree).unwrap();
         assert_eq!(b.len(), 2);
         assert!(b.iter().all(|br| br.len() == 1));
-        let lits = literals(&tree);
-        assert_eq!(lits.iter().filter(|(_, pos)| *pos).count(), 2);
+        let found = literals(&tree);
+        assert_eq!(found.iter().filter(|(_, pos)| *pos).count(), 2);
         assert!(
-            lits.iter()
+            found
+                .iter()
                 .any(|(c, pos)| c.field == Field::PathFileName && !pos)
         );
         let double = Match::Not(Box::new(crit(Field::PathFileName, Operator::NotEquals)));

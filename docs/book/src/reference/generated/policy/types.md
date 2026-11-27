@@ -218,6 +218,16 @@ matcher.
 | `signer.tbs_hash` | The hash of a chain certificate's `tbsCertificate`, under the certificate's own signature digest (40, 64, 96 or 128 hex digits). It identifies that one certificate: the `tbsCertificate` includes the serial number and the validity period (RFC 5280), so a certificate reissued with the same key has another TBS hash, and each issue needs its own rule. No criterion yet names a key across the certificates that carry it. `signer.position` says which certificate. A 40-digit (SHA-1) value is compatibility only (ADR 0008). |
 | `signer.eku` | The extended key usages of the leaf certificate, as dotted OIDs, such as `1.3.6.1.5.5.7.3.3` (code signing). A leaf without the extension has none. |
 
+## FindingSeverity
+
+How serious a policy-assistant finding is (#40).
+
+| Value | Meaning |
+|---|---|
+| `info` | Informational. |
+| `warning` | Probably a mistake or a risk. |
+| `error` | Blocks publishing unless a tenant administrator overrides it. |
+
 ## Level
 
 How an unknown object is handled. The variants are declared from least
@@ -422,6 +432,16 @@ The ID of an approval request template (#11).
 
 Type: [`Uuid7`](types.md#uuid7).
 
+## RiskRating
+
+The risk an exception carries.
+
+| Value | Meaning |
+|---|---|
+| `low` | Low. |
+| `medium` | Medium. |
+| `high` | High. |
+
 ## RuleId
 
 The stable ID of a rule. It is never reused, even after the rule is deleted.
@@ -447,6 +467,20 @@ The purpose of a rule set.
 | `elevation` | Elevation rules (#12). |
 | `containment` | Containment rules (#14). |
 | `mixed` | Any mix of actions. |
+
+## RuleSource
+
+Where a rule came from.
+
+| Value | Meaning |
+|---|---|
+| `manual` | Written by an administrator. |
+| `learned` | From learning mode (#5). |
+| `recommendation` | Accepted from a recommendation (#5). |
+| `catalogue` | From the curated catalogue. |
+| `import` | Imported from another format. |
+| `api` | Created through the API (#15). |
+| `approval_request` | From an approved user request (#11). |
 
 ## SchemaVersion
 
@@ -549,6 +583,12 @@ The clock that schedules are interpreted in.
 | `utc` | Coordinated Universal Time. |
 | `user_local` | The time zone of the session's user, if the agent can read it, and otherwise the device's (#38). |
 
+## Timestamp
+
+An RFC 3339 date-time, such as `2026-11-25T09:30:00Z`. Read as UTC; fractions of a second are dropped.
+
+Type: string; format `date-time`.
+
 ## TokenProfileRef
 
 The ID of an access token profile for elevation (#12, #150).
@@ -582,6 +622,12 @@ When an event is sent to the server.
 | `immediate` | As soon as possible. |
 | `batched` | With the next batch. |
 | `local_only` | Never: kept in the local log only. |
+
+## UtcDate
+
+An RFC 3339 full date, such as `2026-11-25`, in UTC.
+
+Type: string; format `date`.
 
 ## Uuid7
 

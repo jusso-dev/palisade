@@ -47,6 +47,12 @@ every rule still names the object by a hash, signer or path. An example, validat
 {{#include ../../../examples/policies/context-criteria.yaml}}
 ```
 
+Rules also have a **lifecycle** and **governance metadata**: an activity window (`activates_at`, `expires_at`) with what happens on expiry (`on_expire`), a review date, an owner and a justification. Specified in [#40](https://github.com/jusso-dev/palisade/issues/40). In governance mode, allow, trust and exception rules must carry that metadata, and exceptions must expire within a year. An example, validated in CI:
+
+```yaml
+{{#include ../../../examples/policies/rule-lifecycle.yaml}}
+```
+
 See also: [`Rule`](../reference/generated/policy/rule.md),
 [`Match`](../reference/generated/policy/match.md),
 [`Criterion`](../reference/generated/policy/criterion.md) and

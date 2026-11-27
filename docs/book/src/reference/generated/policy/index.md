@@ -24,12 +24,14 @@ Schema: [`schemas/policy/v1.json`](https://github.com/jusso-dev/palisade/blob/ma
 - [`DeviceRef`](device-ref.md): A device or group of devices (#38).
 - [`DirectoryGroup`](directory-group.md): A directory group.
 - [`Effects`](effects.md): The effect flags of one rule. Unset fields take the action's default.
+- [`GovernanceSettings`](governance-settings.md): The tenant's governance settings (#40). Every field is optional.
 - [`LibraryRef`](library-ref.md): A reference to a library from a match tree or a hierarchy assignment.
 - [`LocationProfile`](location-profile.md): A named network location, such as `corporate`: every test must match (#38). The agent evaluates the profiles when the network changes and on every heartbeat, and scopes test the result with `location_profile`.
 - [`Match`](match.md): A condition tree (#33).
-- [`Metadata`](metadata.md): Governance metadata (#40). More fields arrive with #40.
+- [`Metadata`](metadata.md): Governance metadata (#40), on a policy, a rule set or a rule. Every field is optional. Metadata is not decision-relevant: it never changes what a rule decides (`PolicyDocument::decision_relevant`).
 - [`ModeOptions`](mode-options.md): Mode settings besides the base `mode`. Each is optional in a document.
 - [`NetworkRef`](network-ref.md): A network location test (#38). Address tests match when any local interface address does.
+- [`OnExpire`](on-expire.md): What happens when a rule expires.
 - [`OuRef`](ou-ref.md): A directory organisational unit.
 - [`Policy`](policy.md): The decision part of a policy: which rule sets apply, and how.
 - [`PolicySettings`](policy-settings.md): Settings that apply to the whole policy. Every field is optional in a document and has the default shown in the schema.
@@ -61,6 +63,7 @@ Each example passes this schema and full validation (`cargo test -p palisade-pol
 - [`finance-workstations.yaml`](../../../../../examples/policies/finance-workstations.yaml): Finance workstations: allow one line-of-business suite by publisher, product and minimum version, and keep PowerShell in audit while scripts are reviewed. `signer.publisher` is the signer's common name (the `CN` of the leaf certificate's subject), not the whole distinguished name.
 - [`first-match.yaml`](../../../../../examples/policies/first-match.yaml): A firewall-style policy: rules are ordered, and the first rule that matches and does not defer decides (#35). Curated rule sets come first (curated_first, the default). The mandatory blocklist is checked before every ordered rule, whatever its order.
 - [`minimal.yaml`](../../../../../examples/policies/minimal.yaml): The smallest valid policy: no rule sets, so nothing is allowed and every file is reported (audit mode) by the implicit deny.
+- [`rule-lifecycle.yaml`](../../../../../examples/policies/rule-lifecycle.yaml): Rule lifecycle and governance (#40). Governance mode is on, so every allow carries a justification and a review date, and the exception (a path allow for a vendor tool) also carries an expiry within a year, an approver and a risk rating. A temporary deny becomes an audit rule when it expires, so its matches are still recorded.
 - [`scoped-rules.yaml`](../../../../../examples/policies/scoped-rules.yaml): Rule scoping: who, where and when a rule applies. Scopes narrow a rule; they never identify the object, which is the match tree's job, and they never widen a rule. A rule applies only when the policy's scope, its rule set's assignment scopes and its own scope all match.
 - [`staged-rollout.yaml`](../../../../../examples/policies/staged-rollout.yaml): A staged rollout (#36): the policy is in audit, so what it would block is reported but runs. Executables are already enforced, a disconnected device enforces everything, and a new blocklist is tried in monitor mode. The mandatory blocklist blocks in every mode, and one deny rule is enforced in audit too (`always_enforce`).
 - [`unknown-applications.yaml`](../../../../../examples/policies/unknown-applications.yaml): Unknown-application handling (#39), starting from the Essential Eight maturity level 1 preset: unknown objects in user profiles, temporary folders and other user-writable locations are blocked, and elsewhere they are detected.
