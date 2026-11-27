@@ -81,9 +81,10 @@ Do not prefix names with `test_`.
 ### Fixtures
 
 - Fixtures are synthetic and built at test time where possible. `palisade-fileid` builds its PE
-  images byte by byte (`crates/palisade-fileid/tests/common`). The only committed binaries are
-  a few of those images signed with throwaway test keys for the identity corpus
-  (`crates/palisade-fileid/tests/fixtures/identity`), each listed in its manifest with its generator.
+  images byte by byte (`crates/palisade-fileid/tests/common`). The identity corpus
+  (`crates/palisade-fileid/tests/fixtures/identity`) signs some of them at test time with keys
+  from a deterministic RNG, so no signed executable is committed; its manifest pins their
+  digests, which its `generate.sh` computes and checks with independent tools.
 - Small committed fixtures (policy documents, PKCS#7 signatures) live in the crate's
   `tests/fixtures/`, each set with a note, or a script, that says how it was made.
 - Never commit malware, antivirus test strings or third-party signed binaries

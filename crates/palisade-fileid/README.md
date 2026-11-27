@@ -895,9 +895,9 @@ and `write_corpus_fuzz_seeds` feeds it to the PE, PKCS#7 and X.509 fuzz
 targets.
 
 Fixtures are synthetic PE images built byte by byte at test time
-(`tests/common`). The only PE files checked in are five small images of the
-identity corpus (`tests/fixtures/identity/files`), built the same way and signed by its
-`generate.sh` with throwaway test keys; no third-party binary is. The signature tests use
+(`tests/common`). The identity corpus signs some of them at test time
+(`tests/fixtures/identity/signed.rs`), so no signed executable of its is
+checked in; no third-party binary is. The signature tests use
 small PKCS#7 signatures in `tests/fixtures/authenticode`, made over that
 synthetic image by osslsigncode with throwaway keys from a test-only CA, plus
 one Ed25519 test certificate and one RSA-PSS signature value. The chain tests
@@ -942,10 +942,12 @@ regenerate them.
 
 The identity corpus (`tests/fixtures/identity`, #55) is a manifest of files with their
 source, licence, generator and expected values: synthetic images built by
-`tests/identity_corpus.rs`, a few of them signed by a corpus test CA and
-committed with a test catalog, and OS binaries referenced by path and read
-only on the Windows runners. Its digests come from tools independent of
-this crate (`shasum`, osslsigncode's `extract-data`, openssl). On Windows,
+`tests/identity_corpus.rs`, some of them signed at test time by a corpus
+test CA with deterministic keys (with test catalogs and a CRL), and OS
+binaries referenced by path and read only on the Windows runners. Its
+digests come from tools independent of this crate (`shasum`, osslsigncode's
+`extract-data`, openssl), and its `generate.sh` checks every signature with
+osslsigncode. On Windows,
 `tests/identity_os.rs` also compares records of OS binaries with the OS's
 own tooling (file hash, signature status and signer, version resource).
 See [tests/fixtures/identity/README.md](tests/fixtures/identity/README.md).

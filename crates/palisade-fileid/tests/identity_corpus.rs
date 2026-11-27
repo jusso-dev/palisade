@@ -3,8 +3,11 @@
 //!
 //! See `fixtures/identity/README.md` for the entry kinds and how the files and the
 //! independent digests are made. Synthetic files are built here
-//! ([`corpus_files`]); generated files are committed under `fixtures/identity/files/`;
-//! OS files are read by path on Windows CI only.
+//! (`fixtures/identity/synthetic.rs`); generated (signed) files are built here too, by
+//! `fixtures/identity/signed.rs`, deterministically, and their digests are
+//! the ones `fixtures/identity/generate.sh` computes with independent
+//! tools; OS files are read by path on Windows CI only. Nothing signed is
+//! committed.
 
 // Test code: helpers may unwrap or index, since a failure should fail
 // loudly, and fixture sizes are small constants.
@@ -16,11 +19,15 @@
 )]
 
 mod common;
+mod corpus;
+#[path = "fixtures/identity/signed.rs"]
+mod signed;
+#[path = "fixtures/identity/synthetic.rs"]
+mod synthetic;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use common::*;
 use palisade_fileid::authenticode::TrustConfig;
 use palisade_fileid::catalog::{CatalogSource, CatalogStoreBuilder, StoreLimits};
 use palisade_fileid::fsctx::{KnownFolders, normalize_win32};
@@ -28,6 +35,7 @@ use palisade_fileid::identity::{
     ExpectedSigner, FileIdentity, IdentityContext, ProtectedList, ProtectedVendor, Tiers, identify,
     identify_bytes,
 };
+use synthetic::corpus_files;
 use yaml_rust2::{Yaml, YamlLoader};
 
 const CORPUS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/identity");
@@ -35,173 +43,37 @@ const CORPUS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/identi
 /// 2026-11-25T00:00:00Z: inside every corpus certificate's validity.
 const NOW: i64 = 1_795_564_800;
 
-// ---------------------------------------------------------------------------
-// Synthetic files.
-
-fn version_image(strings: &[(&str, &str)], file: (u16, u16, u16, u16)) -> PeBuilder {
-    let spec = VersionSpec {
-        fixed: Some(fixed_info(file, file)),
-        tables: vec![(
-            "040904B0",
-            strings.iter().map(|(k, v)| string(k, v)).collect(),
-        )],
-        translations: vec![(0x0409, 0x04b0)],
-    };
-    with_version(&spec)
+/// Every generated corpus file: the signed files, the catalogs, the CA and
+/// its CRL, by name, built from the synthetic files.
+fn generated_files() -> BTreeMap<&'static str, Vec<u8>> {
+    signed::generated(&corpus_files())
 }
 
-/// A version resource that claims to be the OS PowerShell host.
-fn powershell_strings() -> Vec<(&'static str, &'static str)> {
-    vec![
-        ("CompanyName", "Palisade Tests"),
-        ("FileDescription", "Windows PowerShell"),
-        ("FileVersion", "10.0.0.1"),
-        ("InternalName", "POWERSHELL"),
-        ("OriginalFilename", "PowerShell.EXE.MUI"),
-        ("ProductName", "Palisade Test OS"),
-        ("ProductVersion", "10.0.0.1"),
-    ]
+fn generated(name: &str) -> Vec<u8> {
+    generated_files()
+        .remove(name)
+        .unwrap_or_else(|| panic!("no generated file {name}"))
 }
 
-/// A plain tool's version resource.
-fn tool_strings() -> Vec<(&'static str, &'static str)> {
-    vec![
-        ("CompanyName", "Example Org"),
-        ("FileDescription", "Example tool"),
-        ("FileVersion", "1.2.3.4"),
-        ("InternalName", "extool"),
-        ("OriginalFilename", "extool.exe"),
-        ("ProductName", "Example Suite"),
-        ("ProductVersion", "1.2.0.0"),
-    ]
-}
-
-/// An import section for a section at `rva` importing `module!function`.
-fn import_section(rva: u32, module: &str, function: &str) -> Vec<u8> {
-    let mut out = vec![0_u8; 40];
-    let thunks = out.len();
-    out.resize(thunks + 16, 0);
-    let hint = out.len();
-    out.extend_from_slice(&0_u16.to_le_bytes());
-    out.extend_from_slice(function.as_bytes());
-    out.push(0);
-    if out.len() % 2 != 0 {
-        out.push(0);
+/// Writes every synthetic and generated corpus file, for `generate.sh` to
+/// check with independent tools.
+///
+/// ```sh
+/// PALISADE_CORPUS_OUT=/tmp/corpus cargo test -p palisade-fileid \
+///     --test identity_corpus -- --ignored --exact write_corpus_files
+/// ```
+#[test]
+#[ignore = "writes files; run by fixtures/identity/generate.sh"]
+fn write_corpus_files() {
+    let dir =
+        PathBuf::from(std::env::var_os("PALISADE_CORPUS_OUT").expect("set PALISADE_CORPUS_OUT"));
+    std::fs::create_dir_all(dir.join("unsigned")).unwrap();
+    for (name, bytes) in corpus_files() {
+        std::fs::write(dir.join("unsigned").join(format!("{name}.bin")), bytes).unwrap();
     }
-    let name = out.len();
-    out.extend_from_slice(module.as_bytes());
-    out.push(0);
-    out[thunks..thunks + 8].copy_from_slice(&u64::from(rva + hint as u32).to_le_bytes());
-    out[0..4].copy_from_slice(&(rva + thunks as u32).to_le_bytes());
-    out[12..16].copy_from_slice(&(rva + name as u32).to_le_bytes());
-    out[16..20].copy_from_slice(&(rva + thunks as u32).to_le_bytes());
-    out
-}
-
-/// A native-subsystem image importing the kernel: a driver.
-fn driver_image() -> Vec<u8> {
-    let builder = PeBuilder {
-        subsystem: 1,
-        ..PeBuilder::default()
-    };
-    // The import table goes in the second section, at RVA 0x2000.
-    let rva = 0x2000;
-    let mut image = builder
-        .section(
-            ".idata",
-            import_section(rva, "ntoskrnl.exe", "IoCreateDevice"),
-            IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ,
-        )
-        .build();
-    let dir = PeBuilder::default().data_directory_offset(1);
-    image[dir..dir + 4].copy_from_slice(&rva.to_le_bytes());
-    image[dir + 4..dir + 8].copy_from_slice(&40_u32.to_le_bytes());
-    image
-}
-
-/// A manifest requesting administrator rights.
-fn elevated_image() -> Vec<u8> {
-    let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<assembly xmlns="urn:example:asm.v1" manifestVersion="1.0">
-<trustInfo xmlns="urn:example:asm.v3"><security><requestedPrivileges>
-<requestedExecutionLevel level="requireAdministrator" uiAccess="false"/>
-</requestedPrivileges></security></trustInfo></assembly>"#;
-    PeBuilder {
-        resources: vec![Leaf {
-            type_id: 24,
-            name_id: 1,
-            lang: 0x0409,
-            data: xml.to_vec(),
-        }],
-        ..PeBuilder::default()
+    for (name, bytes) in generated_files() {
+        std::fs::write(dir.join(name), bytes).unwrap();
     }
-    .build()
-}
-
-/// An image with a CLR runtime header directory entry (.NET).
-fn dotnet_image() -> Vec<u8> {
-    let mut image = PeBuilder::default().build();
-    let dir = PeBuilder::default().data_directory_offset(14);
-    image[dir..dir + 4].copy_from_slice(&0x1000_u32.to_le_bytes());
-    image[dir + 4..dir + 8].copy_from_slice(&72_u32.to_le_bytes());
-    image
-}
-
-/// Every synthetic corpus file, by its `generator` name. The same bytes
-/// are written for `generate.sh` to sign ([`write_corpus_unsigned`]).
-fn corpus_files() -> BTreeMap<&'static str, Vec<u8>> {
-    let mut m = BTreeMap::new();
-    m.insert("plain", PeBuilder::default().build());
-    m.insert("dll", PeBuilder::dll().build());
-    m.insert(
-        "pe32",
-        PeBuilder::pe32()
-            .section(".data", vec![7; 3000], IMAGE_SCN_CNT_INITIALIZED_DATA)
-            .build(),
-    );
-    m.insert("tool", version_image(&tool_strings(), (1, 2, 3, 4)).build());
-    m.insert(
-        "tool-v2",
-        version_image(&tool_strings(), (2, 0, 0, 0)).build(),
-    );
-    m.insert(
-        "powershell",
-        version_image(&powershell_strings(), (10, 0, 0, 1)).build(),
-    );
-    m.insert("driver", driver_image());
-    m.insert("elevated", elevated_image());
-    m.insert("dotnet", dotnet_image());
-    m.insert(
-        "overlay",
-        PeBuilder {
-            overlay: b"overlay data".to_vec(),
-            ..PeBuilder::default()
-        }
-        .build(),
-    );
-    // Not a PE image.
-    m.insert("text", b"Palisade corpus: a plain text file.\n".to_vec());
-    m.insert("empty", Vec::new());
-    m.insert(
-        "script",
-        b"Write-Output 'Palisade corpus script'\r\n".to_vec(),
-    );
-    // A script whose language its shebang names.
-    m.insert(
-        "python",
-        b"#!/usr/bin/env python3\nprint('Palisade corpus script')\n".to_vec(),
-    );
-    // The flat member of the catalog fixtures (`tests/catalog.rs`), which
-    // `corpus.cat` lists by its flat SHA-256.
-    m.insert(
-        "flat-member",
-        b"Palisade catalog test: a flat (non-PE) member file.\n".to_vec(),
-    );
-    // A PE whose headers are cut short: not a parseable image.
-    let mut truncated = PeBuilder::default().build();
-    truncated.truncate(0x90);
-    m.insert("truncated", truncated);
-    m
 }
 
 /// Writes the synthetic files `generate.sh` signs or lists in a catalog.
@@ -240,7 +112,7 @@ fn write_identity_fuzz_seeds() {
         .map(|(name, bytes)| (format!("{name}.exe"), bytes))
         .collect();
     for e in manifest().into_iter().filter(|e| e.source == "generated") {
-        let bytes = std::fs::read(format!("{CORPUS}/files/{}", e.file)).unwrap();
+        let bytes = generated(&e.file);
         seeds.push((e.path_as.unwrap_or(e.file), bytes));
     }
     for (i, (name, bytes)) in seeds.into_iter().enumerate() {
@@ -326,7 +198,7 @@ fn manifest() -> Vec<Entry> {
 // Contexts.
 
 fn corpus_ca() -> Vec<u8> {
-    std::fs::read(format!("{CORPUS}/files/ca.der")).unwrap()
+    generated("ca.der")
 }
 
 /// The machine layout corpus paths use.
@@ -367,6 +239,8 @@ struct Contexts {
     trusted: TrustConfig,
     catalogs: palisade_fileid::catalog::CatalogStore,
     revocation: palisade_fileid::authenticode::RevocationSet,
+    /// The corpus CA's CRL, which revokes the vendor's second certificate.
+    crl_revocation: palisade_fileid::authenticode::RevocationSet,
     validity: palisade_fileid::authenticode::ValidityPolicy,
     protected: ProtectedList,
     folders: KnownFolders,
@@ -382,15 +256,39 @@ impl Contexts {
         trusted
             .add_well_known_root(9, root.tbs_hash.as_deref().unwrap())
             .unwrap();
-        let mut b = CatalogStoreBuilder::new(StoreLimits::default())
+        let b = CatalogStoreBuilder::new(StoreLimits::default())
             .trust(CatalogSource::System, trusted.clone());
-        let report = b.add_dir(CatalogSource::System, Path::new(&format!("{CORPUS}/files")));
-        assert!(report.errors.is_empty(), "{report:?}");
+        // Validity is judged, as an agent does: a catalog whose validity
+        // was not judged never vouches (#50).
+        let mut b = b.validity(palisade_fileid::catalog::ValidityOptions {
+            policy: palisade_fileid::authenticode::ValidityPolicy::default(),
+            revocation: palisade_fileid::authenticode::RevocationSet::new(),
+            tsa_trust: trusted.clone(),
+            now: NOW,
+            clock_floor: None,
+        });
+        for name in ["corpus.cat", "expired.cat"] {
+            let report = b.add_bytes(
+                CatalogSource::System,
+                Some(PathBuf::from(name)),
+                &generated(name),
+            );
+            assert!(report.errors.is_empty(), "{name}: {report:?}");
+        }
         Self {
             untrusted: TrustConfig::new(),
             trusted,
             catalogs: b.build(),
             revocation: palisade_fileid::authenticode::RevocationSet::new(),
+            crl_revocation: {
+                let mut r = palisade_fileid::authenticode::RevocationSet::new();
+                r.add_crl(
+                    palisade_fileid::authenticode::Crl::from_der(&generated("ca-2025-2027.crl"))
+                        .unwrap(),
+                )
+                .unwrap();
+                r
+            },
             validity: palisade_fileid::authenticode::ValidityPolicy::default(),
             protected: protected_list(),
             folders: folders(),
@@ -413,6 +311,13 @@ impl Contexts {
                 ctx.tsa_trust = &self.trusted;
                 ctx.catalogs = Some(&self.catalogs);
             }
+            // Trusted, with the corpus CA's CRL.
+            "trusted_crl" => {
+                ctx.code_trust = &self.trusted;
+                ctx.tsa_trust = &self.trusted;
+                ctx.catalogs = Some(&self.catalogs);
+                ctx.revocation = &self.crl_revocation;
+            }
             other => panic!("unknown context {other}"),
         }
         ctx
@@ -434,8 +339,7 @@ fn identify_entry(e: &Entry, contexts: &Contexts) -> Option<FileIdentity> {
             Some(identify_bytes(bytes, Some(name), Tiers::ALL, &ctx))
         }
         "generated" => {
-            let bytes = std::fs::read(format!("{CORPUS}/files/{}", e.file))
-                .unwrap_or_else(|err| panic!("{}: {err}", e.id));
+            let bytes = generated(&e.file);
             Some(identify_bytes(&bytes, Some(name), Tiers::ALL, &ctx))
         }
         "os" => {
@@ -601,7 +505,7 @@ fn corpus_matches_the_manifest() {
 // Regression tests that need the corpus files and contexts.
 
 fn signed_powershell() -> Vec<u8> {
-    std::fs::read(format!("{CORPUS}/files/signed-powershell.exe")).unwrap()
+    generated("signed-powershell.exe")
 }
 
 /// A protected binary with a valid embedded signature, judged under a
@@ -758,8 +662,7 @@ fn clock_floor_applies_to_catalog_files() {
 fn catalog_revocation_is_judged_at_the_floor() {
     use palisade_fileid::authenticode::{Crl, RevocationFailure, RevocationMode, RevocationSet};
     let contexts = Contexts::new();
-    let crl =
-        Crl::from_der(&std::fs::read(format!("{CORPUS}/files/ca-2025-2027.crl")).unwrap()).unwrap();
+    let crl = Crl::from_der(&generated("ca-2025-2027.crl")).unwrap();
     let mut revocation = RevocationSet::new();
     revocation.add_crl(crl).unwrap();
     revocation.mode = RevocationMode::OnlineRequired;
@@ -844,7 +747,7 @@ fn named_streams_are_checked() {
 #[test]
 fn invalid_files_get_no_rule() {
     let contexts = Contexts::new();
-    let tampered = std::fs::read(format!("{CORPUS}/files/tampered-tool.exe")).unwrap();
+    let tampered = generated("tampered-tool.exe");
     let id = identify_bytes(
         &tampered,
         Some("x.exe"),
@@ -904,18 +807,166 @@ fn every_synthetic_file_is_in_the_manifest() {
 }
 
 #[test]
-fn every_committed_file_is_in_the_manifest() {
+fn every_generated_file_is_in_the_manifest() {
     let listed: BTreeSet<String> = manifest()
         .into_iter()
         .filter(|e| e.source == "generated")
         .map(|e| e.file)
         .collect();
-    let support = ["ca.der", "ca-2025-2027.crl", "corpus.cat", ".gitattributes"];
-    for entry in std::fs::read_dir(format!("{CORPUS}/files")).unwrap() {
-        let name = entry.unwrap().file_name().into_string().unwrap();
+    let support = ["ca.der", "ca-2025-2027.crl", "corpus.cat", "expired.cat"];
+    for name in generated_files().keys() {
         assert!(
-            listed.contains(&name) || support.contains(&name.as_str()),
-            "{name} is committed but not in the manifest"
+            listed.contains(*name) || support.contains(name),
+            "{name} is generated but not in the manifest"
+        );
+    }
+    // Nothing executable is committed: the files are built here.
+    assert!(!Path::new(&format!("{CORPUS}/files")).exists());
+}
+
+/// B1 (#294 review): a catalog signed by an expired, untimestamped signer
+/// under a trusted CA vouches for nothing; B2: a SHA-1-only embedded
+/// signature from a trusted signer vouches for nothing either. Neither may
+/// give a publisher rule.
+#[test]
+fn expired_catalogs_and_sha1_signatures_vouch_for_nothing() {
+    use palisade_fileid::identity::{RuleLevel, SigningStateKind, recommend};
+    let contexts = Contexts::new();
+    let ctx = contexts.get("trusted");
+    let driver = identify_bytes(
+        &corpus_files()["driver"],
+        Some("palisade.sys"),
+        Tiers::ALL,
+        &ctx,
+    );
+    let s = driver.signing_state.computed().unwrap();
+    assert_eq!(s.state, SigningStateKind::Untrusted, "{s:?}");
+    assert!(s.signer.is_none());
+    let m = &driver.catalog_matches.computed().unwrap()[0];
+    assert!(m.trusted, "the signer chains to the trusted CA");
+    assert_eq!(
+        m.validity,
+        Some(palisade_fileid::authenticode::VerificationError::Expired)
+    );
+    assert!(!matches!(
+        recommend(&driver).level,
+        RuleLevel::Publisher | RuleLevel::PublisherProduct | RuleLevel::FilePublisher
+    ));
+    // The same catalog's validity never judged: still no vouching.
+    let mut unjudged = CatalogStoreBuilder::new(StoreLimits::default())
+        .trust(CatalogSource::System, contexts.trusted.clone());
+    unjudged.add_bytes(CatalogSource::System, None, &generated("expired.cat"));
+    let store = unjudged.build();
+    let mut ctx2 = contexts.get("trusted");
+    ctx2.catalogs = Some(&store);
+    let id = identify_bytes(
+        &corpus_files()["driver"],
+        Some("palisade.sys"),
+        Tiers::ALL,
+        &ctx2,
+    );
+    assert_ne!(
+        id.signing_state.computed().unwrap().state,
+        SigningStateKind::Trusted
+    );
+
+    let sha1 = identify_bytes(
+        &generated("sha1-signed-tool.exe"),
+        Some("extool.exe"),
+        Tiers::ALL,
+        &ctx,
+    );
+    let s = sha1.signing_state.computed().unwrap();
+    assert_eq!(s.embedded, palisade_fileid::identity::EmbeddedState::Valid);
+    assert!(s.embedded_sha1_only);
+    assert!(s.signer.is_none());
+    assert_eq!(s.state, SigningStateKind::Untrusted);
+    assert!(!matches!(
+        recommend(&sha1).level,
+        RuleLevel::Publisher | RuleLevel::PublisherProduct | RuleLevel::FilePublisher
+    ));
+}
+
+/// M1 (#294 review): a validly signed file whose signer is revoked is
+/// invalid and gets no rule at all; M2: a file whose masquerade checks
+/// could not run gets no rule either.
+#[test]
+fn revoked_and_unassessed_files_get_no_rule() {
+    use palisade_fileid::identity::{RuleLevel, SigningStateKind, recommend};
+    let contexts = Contexts::new();
+    let id = identify_bytes(
+        &generated("revoked-signed-tool.exe"),
+        Some("extool.exe"),
+        Tiers::ALL,
+        &contexts.get("trusted_crl"),
+    );
+    let s = id.signing_state.computed().unwrap();
+    assert_eq!(s.state, SigningStateKind::Invalid, "{s:?}");
+    let rec = recommend(&id);
+    assert_eq!(rec.level, RuleLevel::None, "{rec:?}");
+    assert!(rec.values.is_empty());
+
+    // Nothing trusted: the PowerShell host at its own path cannot be told
+    // from an impostor, so its checks are unassessed and nothing is
+    // reported (score 0). Before #294's review this got a hash rule.
+    let mut id = identify_bytes(
+        &signed_powershell(),
+        Some(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"),
+        Tiers::ALL,
+        &contexts.get("default"),
+    );
+    assert_eq!(id.masquerade.score, 0);
+    assert!(
+        id.masquerade.unassessed.contains(&"known_binary_relocated"),
+        "{:?}",
+        id.masquerade
+    );
+    assert_eq!(recommend(&id).level, RuleLevel::None);
+    // And with the unassessed checks taken away, its OriginalFilename still
+    // names a protected binary no trusted signer vouches for.
+    assert!(id.masquerade.claims_protected.is_some());
+    id.masquerade.unassessed.clear();
+    let rec = recommend(&id);
+    assert_eq!(rec.level, RuleLevel::None, "{rec:?}");
+    assert!(rec.values.is_empty());
+}
+
+/// #294 review (CodeRabbit, `masquerade.rs`): a protected binary is
+/// "moved" only when every folder it may live in was resolved. With the
+/// machine's System32 known only by an 8.3 short name (which cannot be
+/// compared) or not at all, the PowerShell host is never reported as
+/// moved, wherever it is: the location is unassessed.
+#[test]
+fn location_is_unassessed_unless_every_folder_is_known() {
+    use palisade_fileid::identity::MasqueradeReason;
+    let contexts = Contexts::new();
+    let mut short = folders();
+    short.system32 = vec![normalize_win32(r"C:\WINDOW~1\System32").unwrap()];
+    let mut unknown = folders();
+    unknown.system32.clear();
+    for (path, partial) in [
+        (
+            r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            &short,
+        ),
+        (r"C:\Users\alice\powershell.exe", &short),
+        (r"C:\Users\alice\powershell.exe", &unknown),
+    ] {
+        let mut ctx = contexts.get("trusted");
+        ctx.known_folders = Some(partial);
+        let id = identify_bytes(&signed_powershell(), Some(path), Tiers::ALL, &ctx);
+        assert!(
+            !id.masquerade.reasons.iter().any(|r| matches!(
+                r,
+                MasqueradeReason::KnownBinaryRelocated { moved: true, .. }
+            )),
+            "{path}: {:?}",
+            id.masquerade
+        );
+        assert!(
+            id.masquerade.unassessed.contains(&"known_binary_location"),
+            "{path}: {:?}",
+            id.masquerade
         );
     }
 }

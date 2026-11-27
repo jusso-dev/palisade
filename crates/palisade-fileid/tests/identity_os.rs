@@ -11,9 +11,9 @@
 //!   version are equal;
 //! - a file the OS reports as embedded-signed has a cryptographically valid
 //!   embedded signature here, with the same signer certificate;
-//! - a file the OS reports as catalog-signed has no embedded signature here
-//!   (its catalog is found when the OS catalog root is given, which the
-//!   corpus test does not depend on).
+//! - a file has an embedded signature here exactly when its certificate
+//!   table is not empty, read by the script from the file itself (the OS's
+//!   `SignatureType` says `Catalog` for a file signed both ways).
 
 #![cfg(windows)]
 // Test code: a failure should fail loudly.
@@ -86,18 +86,35 @@ fn identity_matches_os_tooling() {
         .filter(|l| !l.is_empty())
     {
         let f: Vec<&str> = line.split('\t').collect();
-        assert_eq!(f.len(), 8, "{line}");
-        let (path, sha256, status, kind, thumb, original, version, company) =
-            (f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7]);
+        assert_eq!(f.len(), 9, "{line}");
+        let (path, sha256, status, kind, thumb, original, version, company, embedded_count) =
+            (f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8]);
         let id = identify(Path::new(path), Tiers::EXECUTION, &ctx).unwrap();
         let h = id.hashes.computed().unwrap();
         assert_eq!(h.sha256.as_deref(), Some(sha256), "{path}");
         let v = id.version();
+        // The OS file-version API (GetFileVersionInfo) "is querying fixed
+        // version from language neutral file (exe/dll) and the non-fixed part
+        // from mui file, merges them" (its documentation): for a file with a
+        // language resource satellite, the strings are the satellite's, whose
+        // `OriginalFilename` names the satellite (`NOTEPAD.EXE.MUI`). This
+        // crate reads the binary's own resource. One trailing `.MUI` on the
+        // OS side is that difference and nothing else: the names must
+        // otherwise be equal.
+        let os_original = original
+            .len()
+            .checked_sub(4)
+            .filter(|&at| {
+                original
+                    .get(at..)
+                    .is_some_and(|t| t.eq_ignore_ascii_case(".mui"))
+            })
+            .map_or(original, |at| &original[..at]);
         assert_eq!(
             v.and_then(|v| v.original_file_name.as_deref())
                 .unwrap_or(""),
-            original,
-            "{path}"
+            os_original,
+            "{path}: OS {original:?}"
         );
         assert_eq!(
             v.and_then(|v| v.company_name.as_deref()).unwrap_or(""),
@@ -109,6 +126,14 @@ fn identity_matches_os_tooling() {
         }
         let state = id.signing_state.computed().unwrap();
         let sigs = id.signatures.computed().unwrap();
+        // Embedded presence is the file's own certificate table, not the
+        // OS's `SignatureType`, which says `Catalog` for a file signed both
+        // ways.
+        if embedded_count == "0" {
+            assert_eq!(state.embedded, EmbeddedState::Unsigned, "{path}");
+        } else {
+            assert_ne!(state.embedded, EmbeddedState::Unsigned, "{path}");
+        }
         if status == "Valid" && kind == "Authenticode" {
             assert_eq!(state.embedded, EmbeddedState::Valid, "{path}");
             let leaf = sigs
@@ -118,8 +143,6 @@ fn identity_matches_os_tooling() {
                 .map(|c| c.sha1_thumbprint.as_str())
                 .collect::<Vec<_>>();
             assert!(leaf.contains(&thumb), "{path}: {leaf:?} vs {thumb}");
-        } else if status == "Valid" && kind == "Catalog" {
-            assert_eq!(state.embedded, EmbeddedState::Unsigned, "{path}");
         }
         assert!(h.authenticode.computed().unwrap().conformant, "{path}");
         assert_eq!(id.masquerade.score, 0, "{path}: {:?}", id.masquerade);

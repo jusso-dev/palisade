@@ -158,6 +158,27 @@ impl Key {
     }
 
     /// The subject key identifier: SHA-256 of the public key, first 20 bytes.
+    /// An RSA PKCS#1 v1.5 signature over the SHA-1 of `message` (for
+    /// fixtures that must rest on SHA-1).
+    pub fn sign_sha1(&self, message: &[u8]) -> Vec<u8> {
+        match self {
+            // The PKCS#1 v1.5 DigestInfo prefix for SHA-1 (RFC 8017, 9.2).
+            Self::Rsa(k) => k
+                .sign(
+                    Pkcs1v15Sign {
+                        hash_len: Some(20),
+                        prefix: Box::new([
+                            0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05,
+                            0x00, 0x04, 0x14,
+                        ]),
+                    },
+                    &<sha1::Sha1 as sha1::Digest>::digest(message),
+                )
+                .unwrap(),
+            Self::P256 { .. } => panic!("SHA-1 fixtures are RSA"),
+        }
+    }
+
     pub fn key_id(&self) -> Vec<u8> {
         Sha256::digest(self.spki())[..20].to_vec()
     }
@@ -208,6 +229,17 @@ pub struct Cert {
 
 /// Issues `spec`, signed by `issuer` (or self-signed when `None`).
 pub fn issue(spec: &Spec<'_>, issuer: Option<(&Cert, &Key)>) -> Cert {
+    issue_with(spec, issuer, None)
+}
+
+/// [`issue`], with a CRL distribution point naming `crl_url` (never
+/// fetched by the tests), so a policy that requires revocation answers
+/// asks about the certificate.
+pub fn issue_with_crl_dp(spec: &Spec<'_>, issuer: Option<(&Cert, &Key)>, crl_url: &str) -> Cert {
+    issue_with(spec, issuer, Some(crl_url))
+}
+
+fn issue_with(spec: &Spec<'_>, issuer: Option<(&Cert, &Key)>, crl_url: Option<&str>) -> Cert {
     let subject = name(spec.cn);
     let key_id = spec.key.key_id();
     let (issuer_name, signer, aki) = match issuer {
@@ -232,6 +264,12 @@ pub fn issue(spec: &Spec<'_>, issuer: Option<(&Cert, &Key)>) -> Cert {
             };
             exts.push(ext("2.5.29.37", false, &seq(&[&oid(eku)])));
         }
+    }
+    if let Some(url) = crl_url {
+        // CRLDistributionPoints: one point, fullName [0] { uri [6] }.
+        let uri = tlv(0x86, url.as_bytes());
+        let point = seq(&[&tlv(0xa0, &tlv(0xa0, &uri))]);
+        exts.push(ext("2.5.29.31", false, &seq(&[&point])));
     }
     exts.push(ext("2.5.29.14", false, &octets(&key_id)));
     exts.push(ext("2.5.29.35", false, &seq(&[&tlv(0x80, &aki)])));

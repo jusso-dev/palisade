@@ -1,5 +1,6 @@
-# The file identity corpus (#55). See README.md for the format, and
-# generate.sh for how the generated files and the digests are made.
+# The file identity corpus (#55). See README.md for the format. Generated
+# files are built at test time by signed.rs; their digests here come from
+# generate.sh, which computes them with shasum, openssl and osslsigncode.
 
 - id: "plain-exe"
   file: "plain.exe"
@@ -338,7 +339,7 @@
     catalog: "listed_trusted"
     signer_source: "catalog"
     publisher: "Palisade Corpus OS Signer"
-    signer_leaf_sha1_thumbprint: "bbc0a5ee57f34ab5fbc646084966af48526e2901"
+    signer_leaf_sha1_thumbprint: "a70a47602d3a047dc8b5967a45459cbefaa24468"
     catalog_matches: 1
     recommended_level: "publisher"
 
@@ -392,14 +393,14 @@
   file: "signed-tool.exe"
   source: "generated"
   licence: "Apache-2.0 OR MIT"
-  generator: "generate.sh"
+  generator: "signed.rs"
   description: "The tool signed by the corpus vendor signer."
   context: "trusted"
   path_as: "extool.exe"
   expected:
-    sha256: "adf84c7e7bb63026cfacb5447b8b09fdd0a422d31a9c630905e8b52ce3980017"
-    sha1: "6cf259f0248cb94adf0c831a78bd0ce54751ed85"
-    md5: "4b2da4a6ef9ba12f864dfadbe9e294a9"
+    sha256: "db0e2ef876ba59070a9579a660a88e2ffaa6f4233ea2c4ccd56149017dad9f56"
+    sha1: "b6a5c156c7b70a7be18f50aa62bbcbb4cd562178"
+    md5: "2b1dbf2f2eabe07ae27956687ebfa3bd"
     authenticode_sha256: "bb315a34a23b4cc8f185907f6954fc105c431ec15bf655180d25348cf58def5b"
     signing_state: "trusted"
     embedded: "valid"
@@ -408,7 +409,7 @@
     signatures: 1
     signer_source: "embedded"
     publisher: "Palisade Corpus Vendor"
-    signer_leaf_sha1_thumbprint: "8c67a28662534589e56293f6e43e0e713f271c4c"
+    signer_leaf_sha1_thumbprint: "ff4b0ee9a994e74f549ebe5394384cde0b3edc54"
     original_file_name: "extool.exe"
     masquerade_score: 0
     recommended_level: "file_publisher"
@@ -417,7 +418,7 @@
   file: "signed-tool.exe"
   source: "generated"
   licence: "Apache-2.0 OR MIT"
-  generator: "generate.sh"
+  generator: "signed.rs"
   description: "The signed tool with nothing trusted: valid but untrusted, so its vendor claim is not backed."
   path_as: "extool.exe"
   expected:
@@ -431,14 +432,14 @@
   file: "signed-tool-v2.exe"
   source: "generated"
   licence: "Apache-2.0 OR MIT"
-  generator: "generate.sh"
+  generator: "signed.rs"
   description: "Version 2 of the signed tool, for compare."
   context: "trusted"
   path_as: "extool.exe"
   expected:
-    sha256: "52b4eaca0928ea9f45fae903e0199f03a55438e3d275b5a88b1c399e75e5a0af"
-    sha1: "69e33ece193add70320e2e4f0ea4c0091042bc85"
-    md5: "aec50091d8b4dafb195fcaddcee2df29"
+    sha256: "d885e676783d58bf44b869f22f6986ef08a0f9da5f71a98995a1ce20cf775b8b"
+    sha1: "e393a6179077c747eeed292e8eb1a5be45b965ef"
+    md5: "9698a54bf5ef71f85978300041d69ace"
     authenticode_sha256: "162a51cc3748a0f3f2e371c827e08f3f2e8515f3e4f5d99f252e02eeda59472b"
     signing_state: "trusted"
     file_version: "2.0.0.0"
@@ -448,15 +449,15 @@
   file: "tampered-tool.exe"
   source: "generated"
   licence: "Apache-2.0 OR MIT"
-  generator: "generate.sh"
+  generator: "signed.rs"
   description: "The signed tool with one code byte changed after signing."
   context: "trusted"
   path_as: "extool.exe"
   expected:
-    sha256: "2702e8b31f5d51dd2d0a1a1c839c85f8036bd8b59c6b42e5e79183ce7fcc503b"
-    sha1: "e11ac510a41ababa6b6f2e62c87d78b3a0e1ebed"
-    md5: "3201ab021300f6f97c58a0eaf676aad5"
-    authenticode_sha256: "3c7a9c654824c0611b66c3f93e8d87144fbcd5fb64c562f5d4f79f66d4e42052"
+    sha256: "1e2fb7e2118b5dce990ddf2f21b6b60063eadb2282c20bd891ed5b9b7ae7713c"
+    sha1: "8807e4d4ee90e696a092de745d21d7f88fa26f20"
+    md5: "151778e814117ed84f27b2ac4c330ebb"
+    authenticode_sha256: "7a92fe13a126a4f6019056654b31be894f08c5f73f18a60439cc552290eaeb0c"
     signing_state: "invalid"
     embedded: "invalid"
     verification_error: "invalid_hash"
@@ -467,13 +468,13 @@
   file: "rogue-signed.exe"
   source: "generated"
   licence: "Apache-2.0 OR MIT"
-  generator: "generate.sh"
+  generator: "signed.rs"
   description: "The plain image signed by a self-signed certificate nothing trusts. Its Authenticode hash, which leaves the signature out, is still listed in corpus.cat, so the catalog vouches for it."
   context: "trusted"
   expected:
-    sha256: "4f5d46b8548d98f3b285d803359cb99451315cf4419d84beed1d03ffc827adf8"
-    sha1: "f875df7a2d7f5f85e1601b51547b29d5d173f8e4"
-    md5: "50bc9b3dc132a3cb0d9bfaef2daedbf9"
+    sha256: "03dcf766d8b28e5353cca77e2911a7b88cc1c8bca86845c37b7916e22b40fceb"
+    sha1: "c5d8683a0141c1797a755e7f80b6bcbaa754fc0e"
+    md5: "85bafd609ff2f1c36277dc684c69f2fd"
     authenticode_sha256: "5d876fe0b3bdd41254d4349c547926bd02e4fa093498f289e712a29027f2589f"
     signing_state: "trusted"
     embedded: "valid"
@@ -484,14 +485,14 @@
   file: "signed-powershell.exe"
   source: "generated"
   licence: "Apache-2.0 OR MIT"
-  generator: "generate.sh"
+  generator: "signed.rs"
   description: "The acceptance case of #55: the protected PowerShell host, signed by its expected (OS) signer, copied to a temp folder as notepad.exe."
   context: "trusted"
   path_as: "C:\\Users\\alice\\AppData\\Local\\Temp\\notepad.exe"
   expected:
-    sha256: "642a4817fb1dfc21b2cf0f7590ee2cd6910db506cb7840ff0f930ee74dce65e8"
-    sha1: "2637ec38117c317fbf99d37c5f6f16e96da8ac0d"
-    md5: "f2528e9014615ada8d1447befe6ac11d"
+    sha256: "a8789a82132bcd2c07cd7504f89b8ad8e1690441a63b9aefe9176dc17761f352"
+    sha1: "8892591729ed6093dc8fd48cd6c50a546f193d7c"
+    md5: "c684eab674b913ab620057e9c13ba1d6"
     authenticode_sha256: "10d284f8fa52b246683a7f742004f12d9738d05f553d419f743b2e2ff3ab2ac6"
     signing_state: "trusted"
     original_file_name: "PowerShell.EXE.MUI"
@@ -503,7 +504,7 @@
   file: "signed-powershell.exe"
   source: "generated"
   licence: "Apache-2.0 OR MIT"
-  generator: "generate.sh"
+  generator: "signed.rs"
   description: "The same host where it belongs: nothing suspicious."
   context: "trusted"
   path_as: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
@@ -516,7 +517,7 @@
   file: "signed-powershell.exe"
   source: "generated"
   licence: "Apache-2.0 OR MIT"
-  generator: "generate.sh"
+  generator: "signed.rs"
   description: "The host under its own name, but outside its folder."
   context: "trusted"
   path_as: "C:\\Users\\alice\\powershell.exe"
@@ -547,3 +548,74 @@
     is_dll: true
     authenticode_conformant: true
     masquerade_score: 0
+
+# Review regressions (#294): each must hold, or an allow rule is
+# recommended for a file nothing vouches for.
+
+- id: "driver-expired-catalog"
+  file: "palisade.sys"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "driver"
+  description: "The driver image, listed only in expired.cat, whose signer certificate (under the trusted corpus CA) was valid in 2020 only and which carries no timestamp: the catalog has expired, so it vouches for nothing."
+  context: "trusted"
+  expected:
+    sha256: "3150d1d2908b2028e67876631cb24e2cd98bc8e7336f870c7e2b8bc283766152"
+    signing_state: "untrusted"
+    embedded: "unsigned"
+    catalog: "listed_untrusted"
+    catalog_matches: 1
+    # A hash rule, as for any unsigned file: never a publisher rule.
+    recommended_level: "authenticode_hash"
+
+- id: "sha1-signed-tool"
+  file: "sha1-signed-tool.exe"
+  source: "generated"
+  licence: "Apache-2.0 OR MIT"
+  generator: "signed.rs"
+  description: "The tool signed by the trusted corpus vendor with SHA-1 content and signer digests: a valid signature, but SHA-1 vouches for nothing (ADR 0008, ADR 0017), so it is not trusted and no publisher rule is recommended."
+  context: "trusted"
+  path_as: "extool.exe"
+  expected:
+    sha256: "4ebe79599344a87d83fbfe6f96eb7df2202496dd59652a47ed9f8e791a847185"
+    sha1: "e9de2b8eb87fe7bc6af09e6918b355bc2a88a00e"
+    md5: "1883aaa6dab04b1766df6dd595d8a41a"
+    authenticode_sha256: "bb315a34a23b4cc8f185907f6954fc105c431ec15bf655180d25348cf58def5b"
+    signing_state: "untrusted"
+    embedded: "valid"
+    signatures: 1
+    # Not trusted, so its "Example Org" company name is not backed by the
+    # vendor's signer: an impersonation, and no rule.
+    masquerade_reasons: ["signer_impersonation"]
+    recommended_level: "none"
+
+- id: "revoked-signed-tool"
+  file: "revoked-signed-tool.exe"
+  source: "generated"
+  licence: "Apache-2.0 OR MIT"
+  generator: "signed.rs"
+  description: "The tool signed by a corpus vendor certificate the corpus CRL revokes for key compromise: invalid, and no allow rule of any kind, a hash rule included."
+  context: "trusted_crl"
+  path_as: "extool.exe"
+  expected:
+    sha256: "a422708e725bfab6d869217a101b9c248555c3aaec975fbb206855897b905a37"
+    sha1: "eea3ebe53adc81ac28d423440053cab52962c53b"
+    md5: "e8b58d45dfb8bf75e24ff2ac5ab33ad2"
+    authenticode_sha256: "bb315a34a23b4cc8f185907f6954fc105c431ec15bf655180d25348cf58def5b"
+    signing_state: "invalid"
+    embedded: "valid"
+    verification_error: "revoked"
+    recommended_level: "none"
+
+- id: "powershell-in-place-nothing-trusted"
+  file: "signed-powershell.exe"
+  source: "generated"
+  licence: "Apache-2.0 OR MIT"
+  generator: "signed.rs"
+  description: "The protected PowerShell host at its own path, with nothing trusted: whether its signer is the expected one cannot be told, so the relocation and impersonation checks are unassessed and nothing is reported. Unassessed is not clean (ADR 0018), and a hash rule would allow a renamed impostor, so no allow rule is recommended."
+  context: "default"
+  path_as: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+  expected:
+    signing_state: "untrusted"
+    masquerade_score: 0
+    recommended_level: "none"
