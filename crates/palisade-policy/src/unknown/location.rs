@@ -73,7 +73,7 @@
 //! | `removable`, `optical` | the volume is of that kind |
 //! | `user_profile` | under `%USERPROFILE%`, `%APPDATA%`, `%LOCALAPPDATA%` or `%PUBLIC%`, or under `X:\Users\<name>` on any drive |
 //! | `temp` | under `%TEMP%` or `%WINDIR%\Temp`, any `INetCache` or `Temporary Internet Files` folder below the drive or share root, or a directory the agent lists as a temporary cache |
-//! | `user_writable_other` | the ACL facts say a non-administrator can write the file or a directory above it, or they are not known; under a directory the scanner flagged; or the path is not a drive or UNC path |
+//! | `user_writable_other` | the ACL facts say a non-administrator can write the file or a directory above it, or it is under a directory the scanner flagged; `Unknown` without the ACL fact, or when the path is not usable |
 //! | `program_files` | under `%PROGRAMFILES%`, on a fixed volume |
 //! | `windows` | under `%WINDIR%`, on a fixed volume |
 //! | `other_fixed` | a drive path on a fixed volume that is in none of `user_profile`, `temp`, `program_files` and `windows`; it can come with `user_writable_other` and `ads` |
