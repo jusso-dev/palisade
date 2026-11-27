@@ -17,6 +17,7 @@ slow-timeout = "60s"
 # too, where they skip themselves without PALISADE_TEST_DATABASE_ADMIN_URL.
 [test-groups]
 postgres = { max-threads = 4 }
+diskpart = { max-threads = 1 }
 
 [[profile.default.overrides]]
 filter = "package(palisade-server) & binary(postgres)"
@@ -39,3 +40,12 @@ path = "junit.xml"
 [[profile.ci.overrides]]
 filter = "package(palisade-fileid) & test(smb_share_queries_are_reported)"
 success-output = "immediate"
+
+# The VHD tests in `palisade-fileid`'s `win_volume` binary run DiskPart,
+# which must not run two scripts at once or within 15 s of each other
+# (#54). nextest gives each test its own process, so this group runs them
+# one at a time; each test also waits before its first script. Like the
+# Postgres group, the `ci` profile inherits it from `default`.
+[[profile.default.overrides]]
+filter = "package(palisade-fileid) & binary(win_volume) & test(/vhd/)"
+test-group = "diskpart"

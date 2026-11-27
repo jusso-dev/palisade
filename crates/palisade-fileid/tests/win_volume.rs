@@ -59,11 +59,16 @@ fn powershell(script: &str, env: &[(&str, &str)]) -> String {
         .envs(env.iter().copied()))
 }
 
-/// DiskPart runs are serialised across the tests in this binary, and each
-/// is followed by this wait. The DiskPart documentation says to "allow at
-/// least 15 seconds between each script for a complete shutdown of the
-/// previous execution", or the next script may fail
-/// (<https://learn.microsoft.com/windows-server/administration/windows-commands/diskpart-scripts-and-examples>).
+/// The wait around DiskPart scripts. The OS command reference ("diskpart
+/// scripts and examples") says to "allow at least 15 seconds between each
+/// script for a complete shutdown of the previous execution", or the next
+/// script may fail.
+///
+/// nextest runs each test in its own process, so the in-process lock below
+/// does not serialise the VHD tests there: `.config/nextest.toml` puts them
+/// in the `diskpart` test group (one at a time), and each test also waits
+/// this long before its first script, so a script from the test before it
+/// has finished. The lock covers `cargo test`, which runs them as threads.
 const DISKPART_GAP: Duration = Duration::from_secs(15);
 
 static DISKPART: Mutex<()> = Mutex::new(());
@@ -145,6 +150,8 @@ struct Vhd {
     script_dir: Scratch,
     file: PathBuf,
     mount: PathBuf,
+    /// [`Vhd::detach`] ran, so `Drop` has nothing left to do.
+    detached: bool,
 }
 
 impl Vhd {
@@ -166,7 +173,10 @@ impl Vhd {
             script_dir: scratch(&format!("dp-{fs}")),
             file,
             mount,
+            detached: false,
         };
+        // A script from another test process may have just ended.
+        std::thread::sleep(DISKPART_GAP);
         let f = plain(&vhd.file);
         let m = plain(&vhd.mount);
         vhd.diskpart(
@@ -185,22 +195,41 @@ impl Vhd {
     }
 }
 
-impl Drop for Vhd {
-    fn drop(&mut self) {
-        // A panic here would abort the test binary, so a failure is
-        // reported and flagged instead (see `CLEANUP_FAILED`).
+impl Vhd {
+    /// Detaches and deletes the VHD: `Ok` only if both worked.
+    fn try_detach(&mut self) -> Result<(), String> {
+        self.detached = true;
         let f = plain(&self.file);
         let (ok, text) = diskpart(
             &self.script_dir.0.join("detach.txt"),
             &format!("select vdisk file=\"{f}\"\r\ndetach vdisk\r\n"),
         );
         if !ok {
-            CLEANUP_FAILED.store(true, Ordering::SeqCst);
-            eprintln!("detaching {f} failed: {text}");
+            return Err(format!("detaching {f} failed: {text}"));
         }
-        if let Err(e) = std::fs::remove_file(&self.file) {
+        std::fs::remove_file(&self.file).map_err(|e| format!("deleting {f} failed: {e}"))
+    }
+
+    /// Detaches and deletes the VHD at the end of a test, failing the test
+    /// if either step fails.
+    fn detach(mut self) {
+        if let Err(e) = self.try_detach() {
+            panic!("{e}");
+        }
+    }
+}
+
+impl Drop for Vhd {
+    /// A fallback for a test that panicked before [`Vhd::detach`]. A panic
+    /// here would abort the test binary, so a failure is printed and
+    /// flagged instead (see `CLEANUP_FAILED`).
+    fn drop(&mut self) {
+        if self.detached {
+            return;
+        }
+        if let Err(e) = self.try_detach() {
             CLEANUP_FAILED.store(true, Ordering::SeqCst);
-            eprintln!("deleting {f} failed: {e}");
+            eprintln!("{e}");
         }
     }
 }
@@ -230,6 +259,7 @@ fn an_attached_vhd_is_a_virtual_disk() {
     let host = read_volume(&open_dir(&dir.0));
     assert_ne!(host.serial, v.serial);
     assert_ne!(host.bus_type, Some(BusType::FileBackedVirtual));
+    vhd.detach();
 }
 
 #[test]
@@ -243,6 +273,7 @@ fn a_fat_vhd_has_no_owners_or_journal() {
     assert_eq!(v.supports_usn, Some(false), "{v:?}");
     assert!(!v.supports_owner());
     assert!(v.location_class().is_untrusted_location());
+    vhd.detach();
 }
 
 /// An SMB share of a local folder, removed when dropped.
