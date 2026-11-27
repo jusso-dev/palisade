@@ -101,7 +101,7 @@ fn unsupported(what: &str) -> PlatformError {
 /// `file:name:$DATA`, on Windows): those are data even on a directory.
 /// `file::$DATA` and other stream types, such as a directory's
 /// `::$INDEX_ALLOCATION`, do not count, nor does a drive letter's colon.
-fn names_a_stream(path: &str) -> bool {
+pub(crate) fn names_a_stream(path: &str) -> bool {
     if !cfg!(windows) {
         return false;
     }

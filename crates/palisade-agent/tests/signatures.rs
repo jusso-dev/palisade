@@ -449,3 +449,53 @@ fn fileid_signatures_meet_the_contract() {
         .with_catalogs_ok(catalog_store("v2-expired-timestamped.cat", true, Y2026));
     palisade_core::test_util::contract::signatures(&with_store, &signed, &other, missing).unwrap();
 }
+
+#[test]
+fn an_unknown_certificate_entry_is_malformed_not_unsigned() {
+    // CodeRabbit on #323: an entry whose revision fileid does not know is
+    // skipped, which left a signed image whose entry was altered reading
+    // as unsigned.
+    let pkcs7 = fixture("authenticode/rsa2048-sha256.p7");
+    let mut entry = Vec::new();
+    entry.extend_from_slice(&(u32::try_from(pkcs7.len()).unwrap() + 8).to_le_bytes());
+    entry.extend_from_slice(&0x0300_u16.to_le_bytes());
+    entry.extend_from_slice(&2_u16.to_le_bytes());
+    entry.extend_from_slice(&pkcs7);
+    while entry.len() % 8 != 0 {
+        entry.push(0);
+    }
+    let image = PeBuilder {
+        certificate: Some(entry),
+        ..PeBuilder::default()
+    }
+    .build();
+    let dir = Dir::new("unknown-entry");
+    let path = dir.write("altered.exe", &image);
+    let v = FileidSignatures::with_clock(trusted_settings(&pkcs7), clock(Y2030));
+    let r = v.embedded(&path).unwrap();
+    assert_eq!(r.len(), 1, "{r:#?}");
+    assert_eq!(r[0].status, VerificationError::MalformedSignature, "{r:#?}");
+    // An image with no certificate table at all is still unsigned.
+    let plain = dir.write("plain.exe", &PeBuilder::default().build());
+    assert!(v.embedded(&plain).unwrap().is_empty());
+}
+
+#[cfg(windows)]
+#[test]
+fn a_named_stream_on_a_directory_is_read() {
+    // CodeRabbit on #323: a directory's named data stream reports the
+    // directory attribute, so it was refused before either path read it.
+    let pkcs7 = fixture("authenticode/rsa2048-sha256.p7");
+    let dir = Dir::new("dir-stream");
+    let folder = dir.0.join("folder");
+    std::fs::create_dir(&folder).unwrap();
+    let stream = format!("{}:payload", folder.to_str().unwrap());
+    std::fs::write(&stream, signed_image(&pkcs7)).unwrap();
+    let v = FileidSignatures::with_clock(trusted_settings(&pkcs7), clock(Y2030));
+    let r = v.embedded(&stream).unwrap();
+    assert_eq!(r.len(), 1, "{r:#?}");
+    assert_eq!(r[0].status, VerificationError::Ok, "{r:#?}");
+    // The directory itself is still refused.
+    let err = v.embedded(folder.to_str().unwrap()).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::InvalidInput);
+}

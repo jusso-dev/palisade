@@ -16,8 +16,8 @@ use palisade_core::platform::{
     SignatureVerifier, UtcTime,
 };
 use palisade_fileid::authenticode::{
-    CertSummary, ChainReport, DigestAlgorithm, RevocationSet, SigningState, TrustConfig,
-    ValidityContext, ValidityPolicy, VerificationError, VerifyOptions, evaluate_trust,
+    CertSummary, ChainReport, DigestAlgorithm, ReportWarning, RevocationSet, SigningState,
+    TrustConfig, ValidityContext, ValidityPolicy, VerificationError, VerifyOptions, evaluate_trust,
     evaluate_validity, hash_pe, verify_pe,
 };
 use palisade_fileid::catalog::{
@@ -159,7 +159,10 @@ impl<C: Clock> FileidSignatures<C> {
         }
         let file = open_shared(p).map_err(|e| io_error(&e, path))?;
         let meta = file.metadata().map_err(|e| io_error(&e, path))?;
-        if meta.is_dir() {
+        // A named data stream on a directory reports the directory
+        // attribute but holds data: decide from the path, as the shared
+        // file-system backend does. The directory itself is still refused.
+        if meta.is_dir() && !super::system::names_a_stream(path) {
             return Err(PlatformError::new(
                 ErrorKind::InvalidInput,
                 format!("a directory has no signature: {path}"),
@@ -271,16 +274,29 @@ impl<C: Clock> SignatureVerifier for FileidSignatures<C> {
         let Ok(report) = verify_pe(&data, &VerifyOptions::default()) else {
             return Ok(malformed());
         };
+        // A certificate entry of an unknown revision or type is skipped by
+        // the parser, so a signed image whose entry was altered can read as
+        // unsigned. Any such entry means the signature cannot be read.
+        let unknown_entry = report
+            .warnings
+            .iter()
+            .any(|w| matches!(w, ReportWarning::UnknownEntry { .. }));
         if report.signatures.is_empty() {
             // An unreadable certificate table is a malformed signature,
             // not an unsigned file.
             return Ok(match report.signing_state {
-                SigningState::Unsigned => Vec::new(),
+                SigningState::Unsigned if !unknown_entry => Vec::new(),
                 _ => malformed(),
             });
         }
         let s = &self.settings;
-        let trust = evaluate_trust(&report, &s.trust, info.version_info.as_ref());
+        // `relax_trust` hands chain building the certificates a policy
+        // option lets issue despite basic constraints. `evaluate_validity`
+        // still refuses the relaxation unless an option names the issuer,
+        // so with no options this is the configured trust, unchanged.
+        let mut chain_trust = s.trust.clone();
+        s.policy.relax_trust(&mut chain_trust);
+        let trust = evaluate_trust(&report, &chain_trust, info.version_info.as_ref());
         let digests = revocation_digests(&data);
         let ctx = ValidityContext {
             now: self.clock.now_utc().unix_secs(),
@@ -330,7 +346,17 @@ impl<C: Clock> SignatureVerifier for FileidSignatures<C> {
         })?;
         let data = self.read(path)?;
         let found = store.lookup(&FileDigests::of_bytes(&data));
-        let Some(best) = found.matches.first() else {
+        // Prefer a match the agent accepts: a trusted catalog, judged Ok,
+        // with no SHA-1 in it. Lookup orders by digest kind, so a SHA-1
+        // match in one catalog could otherwise hide a SHA-2 match in
+        // another. With none acceptable, the first (best-ordered) match
+        // decides, as before.
+        let best = found
+            .matches
+            .iter()
+            .find(|m| catalog_status(m) == VerificationError::Ok)
+            .or_else(|| found.matches.first());
+        let Some(best) = best else {
             if !self.catalogs_complete {
                 return Err(PlatformError::new(
                     ErrorKind::TooLarge,
