@@ -36,7 +36,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-9b23768b.js";
+            window.path_to_searchindex_js = "../../searchindex-64e8229c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-de2a680a.js"></script>
@@ -186,8 +186,8 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="palisade-fileid"><a class="header" href="#palisade-fileid">palisade-fileid</a></h1>
-<p>File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes), signature and certificate chain extraction, version-info metadata, and Windows Installer package identity.</p>
-<p><strong>Status:</strong> early. PE header and version-resource parsing, flat hashing, the Authenticode image hash, page hashes, Authenticode signature verification, certificate chains, signer trust and signer identity, timestamps, expiry and revocation, catalog parsing, catalog signatures and the catalog member index, content-based file type detection, Windows Installer package identity and signatures, and script signature blocks and signed metadata work; the rest of <a href="https://github.com/jusso-dev/palisade/issues/3">#3</a> is still to come.</p>
+<p>File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes), signature and certificate chain extraction, version-info metadata, and Windows Installer and app package identity.</p>
+<p><strong>Status:</strong> early. PE header and version-resource parsing, flat hashing, the Authenticode image hash, page hashes, Authenticode signature verification, certificate chains, signer trust and signer identity, timestamps, expiry and revocation, catalog parsing, catalog signatures and the catalog member index, content-based file type detection, Windows Installer package identity and signatures, script signature blocks and signed metadata, and app package (MSIX/AppX and bundle) identity and signatures work; the rest of <a href="https://github.com/jusso-dev/palisade/issues/3">#3</a> is still to come.</p>
 <h2 id="what-is-here"><a class="header" href="#what-is-here">What is here</a></h2>
 <ul>
 <li>
@@ -937,6 +937,48 @@ lookup hook (#51, #55), feeding signed metadata into the file identity
 record (#55), other package identity (#53) and interpreter enforcement
 (#92 to #95).</p>
 </li>
+<li>
+<p><code>package</code>: app packages and bundles
+(<a href="https://github.com/jusso-dev/palisade/issues/53">#53</a>): <code>.msix</code>, <code>.appx</code>,
+<code>.msixbundle</code> and <code>.appxbundle</code>. <code>package::parse_package(&amp;bytes)</code> reads the
+archive with a strict ZIP reader (<code>package::zip</code>), which accepts only the
+shape packaging tools write and refuses everything ZIP readers disagree
+about: archive comments, data before or between records, central entries
+that disagree with local headers, duplicate names (case-insensitively),
+traversal names, encryption, ZIP64 records that do not match, members that
+do not inflate to their CRC. It reads <code>AppxManifest.xml</code> or
+<code>AppxMetadata/AppxBundleManifest.xml</code> with a bounded, namespace-aware XML
+reader that refuses DTDs (so no entity is ever expanded). The result is a
+<code>PackageIdentity</code>: name, publisher DN, publisher ID, package family name
+and full name, version, architecture, resource ID, display names,
+framework and resource flags, applications, capabilities (restricted
+<code>rescap:</code> ones flagged; <code>runs_full_trust()</code>), extensions (full-trust
+processes, app execution aliases, services, COM servers and others, with
+their namespace), dependencies (target device families with min and max
+versions, package dependencies), and for a bundle its member packages with
+type, architecture, version, resource ID, offset and size.</p>
+<p>The publisher ID is the OS algorithm (SHA-256 of the UTF-16LE publisher,
+first 8 bytes, 13 characters of Crockford base32), pinned against
+publisher IDs the OS reports and 56 vectors from an independent Python
+script (<code>tests/fixtures/package/publisher_ids.py</code>). <code>AppxSignature.p7x</code>
+(<code>PKCX</code> and an Authenticode SignedData, <code>SignatureKind::Package</code>) is
+verified by the shared Authenticode code against the package digest (the
+<code>AXPC</code>, <code>AXCD</code>, <code>AXCT</code>, <code>AXBM</code> and optional <code>AXCI</code> hashes), the block map
+is checked against every file and block, and the signer's subject must
+equal <code>Identity@Publisher</code> (<code>PublisherMismatch</code> otherwise). Anything wrong
+with any of those leaves no signature valid, and so does a signature on
+an archive without ZIP64 end records, which the OS rejects whatever its
+digest (Windows CI: the OS signing tool always writes them). A bundle's block map lists
+only its bundle manifest; each payload package must be a stored member at
+the offset and of the size the bundle manifest gives. On Windows,
+<code>tests/package_os.rs</code> checks the family names against the OS package
+identity API and the signature verdicts against the OS trust-verification
+API, on the committed fixtures and on a package and bundle that the OS
+SDK's own packaging and signing tools build and sign during the test. It
+also has the SDK's signing tool sign the test builder's packages in every
+archive layout, and requires the digest that tool signs to equal this
+crate's, tag by tag.</p>
+</li>
 </ul>
 <h2 id="handling-untrusted-input"><a class="header" href="#handling-untrusted-input">Handling untrusted input</a></h2>
 <p>Every file this crate reads may be hostile, so the parser:</p>
@@ -996,7 +1038,10 @@ and the <code>Zone.Identifier</code> parser, which are also fuzzed (<code>fsctx_
 to catalog files, which are capped at 64 MiB and fuzzed with lookups
 (<code>fuzz_ctl</code>), and to installer packages, which are capped at 1 GiB, 65,536
 directory entries, 16 storage levels, 4,194,304 strings and 4,096 tables,
-and fuzzed end to end (<code>fuzz_msi_tables</code>).</p>
+and fuzzed end to end (<code>fuzz_msi_tables</code>), and to app packages, which are
+capped at 4 GiB, 65,535 members, 64 MiB per member read into memory, 16 MiB
+of manifest, block map or signature, and 64 levels and 200,000 elements of
+XML, and fuzzed end to end (<code>fuzz_appx_manifest</code>).</p>
 <p>The parser has no <code>unsafe</code> code, and its modules say <code>#![forbid(unsafe_code)]</code>.</p>
 <h2 id="testing-and-fuzzing"><a class="header" href="#testing-and-fuzzing">Testing and fuzzing</a></h2>
 <p><strong>Fixture corpus (#25).</strong> <code>tests/corpus/</code> builds a whole test corpus from Rust
@@ -1050,8 +1095,15 @@ committed. The installer tests build every package at test time
 and summary information); <code>tests/fixtures/installer</code> holds that test product
 signed by osslsigncode with SHA-256, SHA-1 and SHA-256 plus
 <code>MsiDigitalSignatureEx</code>, under a throwaway test root, and its normalised
-hash computed by an independent Python script. No vendor package is
-committed. The script tests use scripts in <code>tests/fixtures/script</code>, written
+hash computed by an independent Python script. The package tests build
+every package with <code>tests/common/appx.rs</code> (a ZIP writer in the layout the
+OS packaging tool writes, real block hashes and block sizes, literal-only
+DEFLATE flushed per block as that tool flushes it); <code>tests/fixtures/package</code>
+holds the test package and bundle, unsigned and signed by osslsigncode under
+a throwaway root, and a copy signed by another publisher. On Windows the OS
+SDK's own packaging and signing tools also build and sign a package and a
+bundle during the test, and the OS and this crate must agree on them. No
+vendor package is committed. The script tests use scripts in <code>tests/fixtures/script</code>, written
 by its <code>generate.sh</code> and signed by jsign with a throwaway test CA, in every
 format, encoding (UTF-8, UTF-8 with BOM, UTF-16LE, UTF-16BE where the
 package signs it) and line ending (CRLF, LF, CR); a second implementation
@@ -1098,6 +1150,9 @@ PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/fuzz_msi_tables" \
   cargo test -p palisade-fileid --test installer -- --ignored write_installer_fuzz_seeds
 cargo +nightly fuzz run fuzz_msi_tables -- -max_total_time=60
 cargo +nightly fuzz run fuzz_tags -- -timeout=1 -max_total_time=60
+PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/fuzz_appx_manifest" \
+  cargo test -p palisade-fileid --test package -- --ignored write_package_fuzz_seeds
+cargo +nightly fuzz run fuzz_appx_manifest -- -max_total_time=60
 </code></pre>
 <p><code>benches/hash_and_parse.rs</code> (criterion) measures flat hashing, streamed
 hashing, PE parsing and the Authenticode hash over the same synthetic inputs:
@@ -1106,6 +1161,8 @@ hashing, PE parsing and the Authenticode hash over the same synthetic inputs:
 <p><code>palisade-core</code> (for the shared <code>VerificationError</code> table, with its <code>serde</code>
 feature), plus the RustCrypto <code>sha2</code>, <code>sha1</code> and <code>md-5</code> crates,
 <code>ring</code> for signature verification and the hash cache record MAC (ADR 0008),
+<code>miniz_oxide</code> (raw DEFLATE for app package members; <code>forbid(unsafe_code)</code>,
+only <code>with-alloc</code>),
 used only inside <code>authenticode/crypto.rs</code> and <code>hash/mac.rs</code>, <code>serde</code>
 (derive only, no format crate) so certificate and chain reports serialise
 with stable field names, <code>quick-xml</code> for the application manifest (no

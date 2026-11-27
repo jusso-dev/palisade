@@ -1,6 +1,6 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="palisade-fileid"><title>palisade_fileid - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="palisade_fileid" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate palisade_fileid</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../palisade_fileid/index.html">palisade_<wbr>fileid</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#palisade-fileid" title="palisade-fileid">palisade-fileid</a><ul><li><a href="#what-is-here" title="What is here">What is here</a></li><li><a href="#handling-untrusted-input" title="Handling untrusted input">Handling untrusted input</a></li><li><a href="#testing-and-fuzzing" title="Testing and fuzzing">Testing and fuzzing</a></li><li><a href="#allowed-dependencies" title="Allowed dependencies">Allowed dependencies</a></li><li><a href="#platform-support" title="Platform support">Platform support</a></li><li><a href="#feature-flags" title="Feature flags">Feature flags</a></li><li><a href="#stability" title="Stability">Stability</a></li></ul></li></ul><h3><a href="#modules">Crate Items</a></h3><ul class="block"><li><a href="#modules" title="Modules">Modules</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>palisade_<wbr>fileid</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/palisade_fileid/lib.rs.html#1-18">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="palisade-fileid"><a class="doc-anchor" href="#palisade-fileid">§</a>palisade-fileid</h2>
-<p>File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes), signature and certificate chain extraction, version-info metadata, and Windows Installer package identity.</p>
-<p><strong>Status:</strong> early. PE header and version-resource parsing, flat hashing, the Authenticode image hash, page hashes, Authenticode signature verification, certificate chains, signer trust and signer identity, timestamps, expiry and revocation, catalog parsing, catalog signatures and the catalog member index, content-based file type detection, Windows Installer package identity and signatures, and script signature blocks and signed metadata work; the rest of <a href="https://github.com/jusso-dev/palisade/issues/3">#3</a> is still to come.</p>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="palisade-fileid"><title>palisade_fileid - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="palisade_fileid" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate palisade_fileid</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../palisade_fileid/index.html">palisade_<wbr>fileid</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#palisade-fileid" title="palisade-fileid">palisade-fileid</a><ul><li><a href="#what-is-here" title="What is here">What is here</a></li><li><a href="#handling-untrusted-input" title="Handling untrusted input">Handling untrusted input</a></li><li><a href="#testing-and-fuzzing" title="Testing and fuzzing">Testing and fuzzing</a></li><li><a href="#allowed-dependencies" title="Allowed dependencies">Allowed dependencies</a></li><li><a href="#platform-support" title="Platform support">Platform support</a></li><li><a href="#feature-flags" title="Feature flags">Feature flags</a></li><li><a href="#stability" title="Stability">Stability</a></li></ul></li></ul><h3><a href="#modules">Crate Items</a></h3><ul class="block"><li><a href="#modules" title="Modules">Modules</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>palisade_<wbr>fileid</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/palisade_fileid/lib.rs.html#1-19">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="palisade-fileid"><a class="doc-anchor" href="#palisade-fileid">§</a>palisade-fileid</h2>
+<p>File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes), signature and certificate chain extraction, version-info metadata, and Windows Installer and app package identity.</p>
+<p><strong>Status:</strong> early. PE header and version-resource parsing, flat hashing, the Authenticode image hash, page hashes, Authenticode signature verification, certificate chains, signer trust and signer identity, timestamps, expiry and revocation, catalog parsing, catalog signatures and the catalog member index, content-based file type detection, Windows Installer package identity and signatures, script signature blocks and signed metadata, and app package (MSIX/AppX and bundle) identity and signatures work; the rest of <a href="https://github.com/jusso-dev/palisade/issues/3">#3</a> is still to come.</p>
 <h3 id="what-is-here"><a class="doc-anchor" href="#what-is-here">§</a>What is here</h3>
 <ul>
 <li>
@@ -750,6 +750,48 @@ lookup hook (#51, #55), feeding signed metadata into the file identity
 record (#55), other package identity (#53) and interpreter enforcement
 (#92 to #95).</p>
 </li>
+<li>
+<p><code>package</code>: app packages and bundles
+(<a href="https://github.com/jusso-dev/palisade/issues/53">#53</a>): <code>.msix</code>, <code>.appx</code>,
+<code>.msixbundle</code> and <code>.appxbundle</code>. <code>package::parse_package(&amp;bytes)</code> reads the
+archive with a strict ZIP reader (<code>package::zip</code>), which accepts only the
+shape packaging tools write and refuses everything ZIP readers disagree
+about: archive comments, data before or between records, central entries
+that disagree with local headers, duplicate names (case-insensitively),
+traversal names, encryption, ZIP64 records that do not match, members that
+do not inflate to their CRC. It reads <code>AppxManifest.xml</code> or
+<code>AppxMetadata/AppxBundleManifest.xml</code> with a bounded, namespace-aware XML
+reader that refuses DTDs (so no entity is ever expanded). The result is a
+<code>PackageIdentity</code>: name, publisher DN, publisher ID, package family name
+and full name, version, architecture, resource ID, display names,
+framework and resource flags, applications, capabilities (restricted
+<code>rescap:</code> ones flagged; <code>runs_full_trust()</code>), extensions (full-trust
+processes, app execution aliases, services, COM servers and others, with
+their namespace), dependencies (target device families with min and max
+versions, package dependencies), and for a bundle its member packages with
+type, architecture, version, resource ID, offset and size.</p>
+<p>The publisher ID is the OS algorithm (SHA-256 of the UTF-16LE publisher,
+first 8 bytes, 13 characters of Crockford base32), pinned against
+publisher IDs the OS reports and 56 vectors from an independent Python
+script (<code>tests/fixtures/package/publisher_ids.py</code>). <code>AppxSignature.p7x</code>
+(<code>PKCX</code> and an Authenticode SignedData, <code>SignatureKind::Package</code>) is
+verified by the shared Authenticode code against the package digest (the
+<code>AXPC</code>, <code>AXCD</code>, <code>AXCT</code>, <code>AXBM</code> and optional <code>AXCI</code> hashes), the block map
+is checked against every file and block, and the signer’s subject must
+equal <code>Identity@Publisher</code> (<code>PublisherMismatch</code> otherwise). Anything wrong
+with any of those leaves no signature valid, and so does a signature on
+an archive without ZIP64 end records, which the OS rejects whatever its
+digest (Windows CI: the OS signing tool always writes them). A bundle’s block map lists
+only its bundle manifest; each payload package must be a stored member at
+the offset and of the size the bundle manifest gives. On Windows,
+<code>tests/package_os.rs</code> checks the family names against the OS package
+identity API and the signature verdicts against the OS trust-verification
+API, on the committed fixtures and on a package and bundle that the OS
+SDK’s own packaging and signing tools build and sign during the test. It
+also has the SDK’s signing tool sign the test builder’s packages in every
+archive layout, and requires the digest that tool signs to equal this
+crate’s, tag by tag.</p>
+</li>
 </ul>
 <h3 id="handling-untrusted-input"><a class="doc-anchor" href="#handling-untrusted-input">§</a>Handling untrusted input</h3>
 <p>Every file this crate reads may be hostile, so the parser:</p>
@@ -809,7 +851,10 @@ and the <code>Zone.Identifier</code> parser, which are also fuzzed (<code>fsctx_
 to catalog files, which are capped at 64 MiB and fuzzed with lookups
 (<code>fuzz_ctl</code>), and to installer packages, which are capped at 1 GiB, 65,536
 directory entries, 16 storage levels, 4,194,304 strings and 4,096 tables,
-and fuzzed end to end (<code>fuzz_msi_tables</code>).</p>
+and fuzzed end to end (<code>fuzz_msi_tables</code>), and to app packages, which are
+capped at 4 GiB, 65,535 members, 64 MiB per member read into memory, 16 MiB
+of manifest, block map or signature, and 64 levels and 200,000 elements of
+XML, and fuzzed end to end (<code>fuzz_appx_manifest</code>).</p>
 <p>The parser has no <code>unsafe</code> code, and its modules say <code>#![forbid(unsafe_code)]</code>.</p>
 <h3 id="testing-and-fuzzing"><a class="doc-anchor" href="#testing-and-fuzzing">§</a>Testing and fuzzing</h3>
 <p><strong>Fixture corpus (#25).</strong> <code>tests/corpus/</code> builds a whole test corpus from Rust
@@ -863,8 +908,15 @@ committed. The installer tests build every package at test time
 and summary information); <code>tests/fixtures/installer</code> holds that test product
 signed by osslsigncode with SHA-256, SHA-1 and SHA-256 plus
 <code>MsiDigitalSignatureEx</code>, under a throwaway test root, and its normalised
-hash computed by an independent Python script. No vendor package is
-committed. The script tests use scripts in <code>tests/fixtures/script</code>, written
+hash computed by an independent Python script. The package tests build
+every package with <code>tests/common/appx.rs</code> (a ZIP writer in the layout the
+OS packaging tool writes, real block hashes and block sizes, literal-only
+DEFLATE flushed per block as that tool flushes it); <code>tests/fixtures/package</code>
+holds the test package and bundle, unsigned and signed by osslsigncode under
+a throwaway root, and a copy signed by another publisher. On Windows the OS
+SDK’s own packaging and signing tools also build and sign a package and a
+bundle during the test, and the OS and this crate must agree on them. No
+vendor package is committed. The script tests use scripts in <code>tests/fixtures/script</code>, written
 by its <code>generate.sh</code> and signed by jsign with a throwaway test CA, in every
 format, encoding (UTF-8, UTF-8 with BOM, UTF-16LE, UTF-16BE where the
 package signs it) and line ending (CRLF, LF, CR); a second implementation
@@ -909,7 +961,10 @@ cargo +nightly fuzz run fuzz_classify -- -timeout=1 -max_total_time=60
 PALISADE_FUZZ_SEED_DIR=&quot;$PWD/fuzz/corpus/fuzz_msi_tables&quot; \
   cargo test -p palisade-fileid --test installer -- --ignored write_installer_fuzz_seeds
 cargo +nightly fuzz run fuzz_msi_tables -- -max_total_time=60
-cargo +nightly fuzz run fuzz_tags -- -timeout=1 -max_total_time=60</code></pre></div>
+cargo +nightly fuzz run fuzz_tags -- -timeout=1 -max_total_time=60
+PALISADE_FUZZ_SEED_DIR=&quot;$PWD/fuzz/corpus/fuzz_appx_manifest&quot; \
+  cargo test -p palisade-fileid --test package -- --ignored write_package_fuzz_seeds
+cargo +nightly fuzz run fuzz_appx_manifest -- -max_total_time=60</code></pre></div>
 <p><code>benches/hash_and_parse.rs</code> (criterion) measures flat hashing, streamed
 hashing, PE parsing and the Authenticode hash over the same synthetic inputs:
 <code>cargo bench -p palisade-fileid</code>.</p>
@@ -917,6 +972,8 @@ hashing, PE parsing and the Authenticode hash over the same synthetic inputs:
 <p><code>palisade-core</code> (for the shared <code>VerificationError</code> table, with its <code>serde</code>
 feature), plus the RustCrypto <code>sha2</code>, <code>sha1</code> and <code>md-5</code> crates,
 <code>ring</code> for signature verification and the hash cache record MAC (ADR 0008),
+<code>miniz_oxide</code> (raw DEFLATE for app package members; <code>forbid(unsafe_code)</code>,
+only <code>with-alloc</code>),
 used only inside <code>authenticode/crypto.rs</code> and <code>hash/mac.rs</code>, <code>serde</code>
 (derive only, no format crate) so certificate and chain reports serialise
 with stable field names, <code>quick-xml</code> for the application manifest (no
@@ -968,6 +1025,7 @@ names for its identity backend, #29); the CLI may, for local diagnostics.</li>
 </div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="authenticode/index.html" title="mod palisade_fileid::authenticode">authenticode</a></dt><dd>Authenticode for PE images.</dd><dt><a class="mod" href="catalog/index.html" title="mod palisade_fileid::catalog">catalog</a></dt><dd>Catalog-signed files (#51): catalog parsing, catalog signature checks,
 the catalog store and its member index.</dd><dt><a class="mod" href="filetype/index.html" title="mod palisade_fileid::filetype">filetype</a></dt><dd>Content-based file type detection (#44).</dd><dt><a class="mod" href="fsctx/index.html" title="mod palisade_fileid::fsctx">fsctx</a></dt><dd>File-system context (#54): the attributes of a file that come from where
 and how it is stored, not from its content.</dd><dt><a class="mod" href="hash/index.html" title="mod palisade_fileid::hash">hash</a></dt><dd>Whole-file (“flat”) hashes, computed in one streaming pass (#46).</dd><dt><a class="mod" href="installer/index.html" title="mod palisade_fileid::installer">installer</a></dt><dd>Windows Installer packages (#53): <code>.msi</code> databases, <code>.msp</code> patches,
-<code>.mst</code> transforms and <code>.msm</code> merge modules.</dd><dt><a class="mod" href="pe/index.html" title="mod palisade_fileid::pe">pe</a></dt><dd>A hardened PE32 / PE32+ parser (#45).</dd><dt><a class="mod" href="script/index.html" title="mod palisade_fileid::script">script</a></dt><dd>Script signature blocks (#52): the embedded Authenticode signatures of
+<code>.mst</code> transforms and <code>.msm</code> merge modules.</dd><dt><a class="mod" href="package/index.html" title="mod palisade_fileid::package">package</a></dt><dd>Packaged apps (#53): <code>.msix</code>/<code>.appx</code> packages and <code>.msixbundle</code>/
+<code>.appxbundle</code> bundles.</dd><dt><a class="mod" href="pe/index.html" title="mod palisade_fileid::pe">pe</a></dt><dd>A hardened PE32 / PE32+ parser (#45).</dd><dt><a class="mod" href="script/index.html" title="mod palisade_fileid::script">script</a></dt><dd>Script signature blocks (#52): the embedded Authenticode signatures of
 PowerShell, VBScript, JScript and Windows Script Files, and the signed
 metadata attributes that give such files version-like identity.</dd><dt><a class="mod" href="tags/index.html" title="mod palisade_fileid::tags">tags</a></dt><dd>Content tagging (#44, feature <code>content-rules</code>).</dd></dl></section></div></main></body></html>

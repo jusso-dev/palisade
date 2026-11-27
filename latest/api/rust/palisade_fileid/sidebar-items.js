@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["authenticode","catalog","filetype","fsctx","hash","installer","pe","script","tags"]};
+window.SIDEBAR_ITEMS = {"mod":["authenticode","catalog","filetype","fsctx","hash","installer","package","pe","script","tags"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["family_name","full_name","publisher_id"],"struct":["PackageVersion"]};

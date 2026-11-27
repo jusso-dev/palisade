@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_ENTRIES","MAX_MEMBER_SIZE"],"enum":["ZipError"],"fn":["crc","decode_part_name","fold"],"struct":["Archive","Member"]};

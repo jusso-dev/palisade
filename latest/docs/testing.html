@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-9b23768b.js";
+            window.path_to_searchindex_js = "../searchindex-64e8229c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-de2a680a.js"></script>
@@ -414,10 +414,11 @@ change to the command list, run <code>cargo insta test -p xtask</code> and revie
 separate cargo-fuzz workspace per crate (<code>crates/&lt;crate&gt;/fuzz/</code>), so normal builds never compile
 them, and only they need a nightly toolchain. There are three projects:</p>
 <ul>
-<li><code>crates/palisade-fileid/fuzz</code>, with thirteen targets: <code>pe_parse</code>, <code>version_info_parse</code>,
+<li><code>crates/palisade-fileid/fuzz</code>, with fourteen targets: <code>pe_parse</code>, <code>version_info_parse</code>,
 <code>authenticode_ranges</code>, <code>authenticode_pkcs7</code>, <code>fsctx_parse</code>, <code>x509_chain</code>, <code>timestamp_crl</code>,
-<code>fuzz_ctl</code>, <code>fuzz_classify</code>, <code>fuzz_msi_tables</code>, <code>legacy_parse</code>, <code>fuzz_tags</code> and <code>script_sig</code>.
-The project builds <code>palisade-fileid</code> with its <code>content-rules</code> feature, for <code>fuzz_tags</code>.</li>
+<code>fuzz_ctl</code>, <code>fuzz_classify</code>, <code>fuzz_msi_tables</code>, <code>legacy_parse</code>, <code>fuzz_tags</code>, <code>script_sig</code> and
+<code>fuzz_appx_manifest</code>. The project builds <code>palisade-fileid</code> with its <code>content-rules</code> feature,
+for <code>fuzz_tags</code>.</li>
 <li><code>crates/palisade-proto/fuzz</code>, with one target: <code>trust_set_decode</code>.</li>
 <li><code>crates/palisade-policy/fuzz</code>, with three targets: <code>fuzz_policy_json</code> (the strict JSON reader,
 validation and the evaluator build), <code>fuzz_policy_yaml</code> (the YAML reader) and

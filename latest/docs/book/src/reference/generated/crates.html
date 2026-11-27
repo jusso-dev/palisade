@@ -36,7 +36,7 @@
             const path_to_root = "../../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../../searchindex-9b23768b.js";
+            window.path_to_searchindex_js = "../../../../../searchindex-64e8229c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../../../../toc-de2a680a.js"></script>
@@ -254,7 +254,7 @@
 </thead>
 <tbody>
 <tr><td><a href="../../../../../crates/palisade-core/index.html"><code>palisade-core</code></a></td><td>Shared types for every Palisade crate. It does no I/O, so the kernel driver can reuse it.</td><td>no workspace crate</td></tr>
-<tr><td><a href="../../../../../crates/palisade-fileid/index.html"><code>palisade-fileid</code></a></td><td>File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes), signature and certificate chain extraction, version-info metadata, and Windows Installer package identity.</td><td><code>palisade-core</code></td></tr>
+<tr><td><a href="../../../../../crates/palisade-fileid/index.html"><code>palisade-fileid</code></a></td><td>File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes), signature and certificate chain extraction, version-info metadata, and Windows Installer and app package identity.</td><td><code>palisade-core</code></td></tr>
 <tr><td><a href="../../../../../crates/palisade-policy/index.html"><code>palisade-policy</code></a></td><td>The policy model, conditions, precedence and evaluation, with a decision trace. Evaluation is pure and deterministic: no network or filesystem access.</td><td><code>palisade-core</code>, <code>palisade-fileid</code></td></tr>
 <tr><td><a href="../../../../../crates/palisade-proto/index.html"><code>palisade-proto</code></a></td><td>Wire types between agent and server: messages, the event schema and schema versioning.</td><td><code>palisade-core</code>, <code>palisade-fileid</code>, <code>palisade-policy</code></td></tr>
 <tr><td><a href="../../../../../crates/palisade-agent/index.html"><code>palisade-agent</code></a></td><td>The Windows endpoint agent: a Windows service that collects execution events, caches policy locally and drives enforcement.</td><td><code>palisade-core</code>, <code>palisade-fileid</code>, <code>palisade-policy</code>, <code>palisade-proto</code></td></tr>

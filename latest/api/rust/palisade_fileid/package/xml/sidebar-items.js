@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_ATTRS","MAX_ATTR_LEN","MAX_DEPTH","MAX_ELEMENTS","MAX_INPUT","MAX_NS_LEN","MAX_TREE_BYTES"],"fn":["parse"],"struct":["Element","XmlError"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_ITEMS","MAX_VALUE"],"enum":["ManifestError"],"fn":["parse_bundle_manifest","parse_package_manifest"],"mod":["ns"],"struct":["Application","BundleManifest","BundleMember","Capability","Dependency","Extension","Identity","PackageManifest"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BLOCK","NS"],"enum":["BlockMapError"],"fn":["parse","verify","verify_bundle"],"struct":["BlockMap","MappedFile","Payload"]};

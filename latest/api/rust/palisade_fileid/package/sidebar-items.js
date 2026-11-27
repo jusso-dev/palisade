@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_METADATA_SIZE","MAX_PACKAGE_SIZE","MAX_SIGNATURE_SIZE","SIP_GUID_BUNDLE","SIP_GUID_PACKAGE"],"enum":["PackageError","PackageSignatureIssue"],"fn":["parse_package","signed_digest"],"mod":["blockmap","identity","manifest","xml","zip"],"struct":["PackageIdentity","PackageSignature"]};

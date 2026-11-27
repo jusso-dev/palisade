@@ -119,7 +119,7 @@
 <a href=#119 id=119 data-nosnippet>119</a><span class="kw">use </span>std::fmt;
 <a href=#120 id=120 data-nosnippet>120</a>
 <a href=#121 id=121 data-nosnippet>121</a><span class="kw">use </span><span class="kw">crate</span>::authenticode::pkcs7::Subject;
-<a href=#122 id=122 data-nosnippet>122</a><span class="kw">use </span><span class="kw">crate</span>::authenticode::verify::verify_detached;
+<a href=#122 id=122 data-nosnippet>122</a><span class="kw">use </span><span class="kw">crate</span>::authenticode::verify::{Expected, verify_detached};
 <a href=#123 id=123 data-nosnippet>123</a><span class="kw">use </span><span class="kw">crate</span>::authenticode::{
 <a href=#124 id=124 data-nosnippet>124</a>    AuthenticodeHashes, AuthenticodeStatus, SignatureKind, SignatureReport, SignatureStatus,
 <a href=#125 id=125 data-nosnippet>125</a>};
@@ -1296,7 +1296,7 @@
 <a href=#1296 id=1296 data-nosnippet>1296</a>        </span>warnings.push(InstallerWarning::SignatureTooLarge);
 <a href=#1297 id=1297 data-nosnippet>1297</a>        <span class="kw">return </span><span class="prelude-val">Some</span>(verify_detached(
 <a href=#1298 id=1298 data-nosnippet>1298</a>            <span class="kw-2">&amp;</span>[],
-<a href=#1299 id=1299 data-nosnippet>1299</a>            content,
+<a href=#1299 id=1299 data-nosnippet>1299</a>            <span class="kw-2">&amp;</span>Expected::Digests(content),
 <a href=#1300 id=1300 data-nosnippet>1300</a>            Subject::Sip(SIP_GUID_MSI),
 <a href=#1301 id=1301 data-nosnippet>1301</a>            SignatureKind::Msi,
 <a href=#1302 id=1302 data-nosnippet>1302</a>        ));
@@ -1304,7 +1304,7 @@
 <a href=#1304 id=1304 data-nosnippet>1304</a>    <span class="kw">let </span>der = cf.stream(sig);
 <a href=#1305 id=1305 data-nosnippet>1305</a>    <span class="kw">let </span><span class="kw-2">mut </span>report = verify_detached(
 <a href=#1306 id=1306 data-nosnippet>1306</a>        <span class="kw-2">&amp;</span>der,
-<a href=#1307 id=1307 data-nosnippet>1307</a>        content,
+<a href=#1307 id=1307 data-nosnippet>1307</a>        <span class="kw-2">&amp;</span>Expected::Digests(content),
 <a href=#1308 id=1308 data-nosnippet>1308</a>        Subject::Sip(SIP_GUID_MSI),
 <a href=#1309 id=1309 data-nosnippet>1309</a>        SignatureKind::Msi,
 <a href=#1310 id=1310 data-nosnippet>1310</a>    );

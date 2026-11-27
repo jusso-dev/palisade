@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-9b23768b.js";
+            window.path_to_searchindex_js = "../searchindex-64e8229c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-de2a680a.js"></script>
@@ -287,7 +287,9 @@ runtime, logging and the Windows service crates), exempted with a note that name
 raised to <code>safe-to-deploy</code> the same way. The server's Postgres layer (#127) added 72 more (<code>sqlx</code>
 with its Postgres driver, migration support and the rustls-based TLS with the OS trust store),
 exempted with a note that names #127, and raised 31 baseline exemptions (<code>syn</code>, <code>url</code>, the
-Unicode and ICU crates and their helpers) to <code>safe-to-deploy</code> the same way. The
+Unicode and ICU crates and their helpers) to <code>safe-to-deploy</code> the same way. App package
+identity (#53) added 2 more (<code>miniz_oxide</code>, raw DEFLATE for package members, and its checksum
+crate <code>adler2</code>), exempted with a note that names #53. The
 exemptions are the backlog.
 Each one is removed when the crate is audited, or when an imported audit covers it
 (<code>cargo vet prune</code> removes exemptions that are no longer needed).</p>
