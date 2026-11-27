@@ -619,6 +619,13 @@ pub(crate) fn local_group_members(name: &str) -> Result<Vec<Vec<u8>>, MembersErr
                 if psid.is_null() {
                     continue;
                 }
+                if members.len() == MAX_GROUP_MEMBERS {
+                    // One more member would pass the limit: copy no more
+                    // of this page, and keep paging only to free the rest.
+                    over_limit = true;
+                    members = Vec::new();
+                    break;
+                }
                 // SAFETY: `psid` is a valid SID inside the OS's buffer,
                 // alive until `buf` is dropped.
                 let len = usize::try_from(unsafe { GetLengthSid(psid) }).unwrap_or(0);
@@ -627,10 +634,6 @@ pub(crate) fn local_group_members(name: &str) -> Result<Vec<Vec<u8>>, MembersErr
                 let sid =
                     unsafe { std::slice::from_raw_parts(psid.cast::<u8>().cast_const(), len) };
                 members.push(sid.to_vec());
-            }
-            if members.len() > MAX_GROUP_MEMBERS {
-                over_limit = true;
-                members = Vec::new();
             }
         }
         if status == NERR_Success {
