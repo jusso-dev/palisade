@@ -36,7 +36,7 @@
             const path_to_root = "../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../searchindex-250fa0cb.js";
+            window.path_to_searchindex_js = "../../../../searchindex-92677b07.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../../../toc-cbfaa793.js"></script>
@@ -198,7 +198,7 @@ Specified in <a href="https://github.com/jusso-dev/palisade/issues/31">#31</a> (
 <tr><td>Hash</td><td><code>hash.sha256</code>, <code>hash.sha384</code>, <code>hash.sha512</code>, <code>hash.authenticode_sha256</code></td><td>strong: names exactly one file</td></tr>
 <tr><td>Hash (compatibility)</td><td><code>hash.sha1</code>, <code>hash.md5</code>, <code>hash.authenticode_sha1</code>, page hashes</td><td>weak alone (<a href="../../../adr/0008-cryptographic-algorithms.html">ADR 0008</a>)</td></tr>
 <tr><td>Publisher</td><td><code>signer.publisher</code> (CN, O or full DN)</td><td>medium</td></tr>
-<tr><td>Certificate</td><td><code>signer.leaf_thumbprint</code>, <code>signer.tbs_hash</code></td><td>strong: names one certificate</td></tr>
+<tr><td>Certificate</td><td><code>signer.leaf_thumbprint</code>, <code>signer.tbs_hash</code></td><td>strong: names one certificate (a TBS hash above the leaf names a CA, so it is weak in an allow)</td></tr>
 <tr><td>Certificate authority</td><td><code>signer.issuer</code>, <code>signer.pca</code>, <code>signer.root_thumbprint</code>, <code>signer.eku</code>, SHA-1 thumbprints</td><td>weak alone: a CA vouches for every file it signs</td></tr>
 <tr><td>Path</td><td><code>path.full</code>, <code>path.directory</code>, <code>path.file_name</code>, <code>path.extension</code></td><td>medium, and only where users cannot write</td></tr>
 <tr><td>Metadata</td><td><code>meta.original_filename</code>, <code>meta.product_name</code>, <code>meta.file_version</code>, ...</td><td>weak: easy to copy into another file</td></tr>
@@ -211,7 +211,8 @@ allow "anything not named X". A path rule only allows a file in a location that 
 cannot write (ISM-1392); the engine checks the path's ACL safety at evaluation time.</p>
 <p><strong>Hash rules</strong> are the most precise and the most work: every update needs a new rule.
 <strong>Publisher rules</strong> trust what a signer signs, optionally narrowed by product name and minimum
-version (ISM-1471: use publisher <em>and</em> product names). By default a signer
+version (ISM-1471: use publisher <em>and</em> product names). The <code>publisher_product</code> preset
+(<code>palisade_policy::model::preset::PublisherProduct</code>) builds that form. By default a signer
 criterion only trusts signatures that are valid, valid with an expired but timestamped
 certificate, or catalog-signed; a criterion's <code>signer</code> options can accept other statuses, require
 a timestamp after a date or a minimum key size, reject algorithms, or pick the signature's source
