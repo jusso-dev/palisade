@@ -8,10 +8,11 @@
 
 use alloc::{format, string::String, vec, vec::Vec};
 
+use crate::VerificationError;
 use crate::platform::{
     Clock, Elevation, Environment, ErrorKind, FileSystem, Hive, IdentityProvider, OpenFile,
-    ProcessInfo, ProcessKey, ProcessRecord, Registry, RegistryValue, SessionKind, TokenInfo,
-    ancestry, expand_env_vars,
+    ProcessInfo, ProcessKey, ProcessRecord, Registry, RegistryValue, SessionKind, SignatureSource,
+    SignatureVerifier, TokenInfo, ancestry, expand_env_vars,
 };
 
 /// The result of a contract check.
@@ -48,6 +49,10 @@ pub fn clock<C: Clock + ?Sized>(clock: &C) -> Outcome {
 /// - the open file's size is the length of `contents`;
 /// - reading in small chunks returns `contents`, then 0 at the end;
 /// - a read at an offset past the end returns 0, up to `u64::MAX`;
+/// - the owner, if any, is a SID, and the security descriptor, if any, is
+///   self-relative; both fail with [`ErrorKind::NotFound`] for `missing`.
+///   An implementation that cannot read them yet may answer
+///   [`ErrorKind::Unsupported`];
 /// - the alternate data streams, if listed, have non-empty names without a
 ///   `:`. An implementation that cannot list them yet may answer
 ///   [`ErrorKind::Unsupported`].
@@ -98,6 +103,45 @@ pub fn file_system<F: FileSystem + ?Sized>(
         ensure(past == 0, || {
             format!("read at {offset}, past the end, returned {past}")
         })?;
+    }
+    // Owner and descriptor: absent, or well formed; never for a missing
+    // path. An implementation that cannot read them yet may answer
+    // [`ErrorKind::Unsupported`].
+    match fs.owner_sid(path) {
+        Ok(Some(owner)) => ensure(looks_like_sid(&owner), || {
+            format!("owner {owner:?} is not a SID")
+        })?,
+        Ok(None) => {}
+        Err(e) if e.kind() == ErrorKind::Unsupported => {}
+        Err(e) => return Err(format!("owner_sid: {e}")),
+    }
+    match fs.security_descriptor(path) {
+        // A self-relative descriptor: revision 1, `SE_SELF_RELATIVE` set,
+        // at least the 20-byte header.
+        Ok(Some(sd)) => ensure(
+            sd.len() >= 20
+                && sd.first() == Some(&1)
+                && sd.get(3).is_some_and(|control_hi| control_hi & 0x80 != 0),
+            || format!("descriptor {sd:?} is not self-relative"),
+        )?,
+        Ok(None) => {}
+        Err(e) if e.kind() == ErrorKind::Unsupported => {}
+        Err(e) => return Err(format!("security_descriptor: {e}")),
+    }
+    for (what, result) in [
+        ("owner_sid", fs.owner_sid(missing).map(|_| ())),
+        (
+            "security_descriptor",
+            fs.security_descriptor(missing).map(|_| ()),
+        ),
+    ] {
+        match result {
+            Err(e) => ensure(
+                matches!(e.kind(), ErrorKind::NotFound | ErrorKind::Unsupported),
+                || format!("{what} of {missing} gave {e}, not NotFound"),
+            )?,
+            Ok(()) => return Err(format!("{what} of {missing} succeeded")),
+        }
     }
     let streams = match fs.streams(path) {
         Ok(streams) => streams,
@@ -336,6 +380,89 @@ pub fn identity<I: IdentityProvider + ?Sized>(
             })?,
             Ok(Some(n)) => return Err(format!("{bad:?} has the name {n:?}")),
         }
+    }
+    Ok(())
+}
+
+/// Signature queries, for a verifier where `signed` has exactly one
+/// embedded signature that is valid under its configuration, `unsigned`
+/// has none, and neither is catalog-signed, and `missing` does not exist:
+///
+/// - `signed` has one embedded result, [`VerificationError::Ok`], with a
+///   chain whose leaf is first and whose links name their issuer;
+/// - `unsigned` has no embedded result;
+/// - every result is from the source asked for;
+/// - `missing` fails with [`ErrorKind::NotFound`] on both paths, never
+///   "unsigned";
+/// - the catalog path either answers or is [`ErrorKind::Unsupported`]
+///   (no store), and never claims a catalog signature for `unsigned`.
+///
+/// # Errors
+///
+/// The first rule `verifier` breaks.
+pub fn signatures<S: SignatureVerifier + ?Sized>(
+    verifier: &S,
+    signed: &str,
+    unsigned: &str,
+    missing: &str,
+) -> Outcome {
+    let results = verifier
+        .embedded(signed)
+        .map_err(|e| format!("embedded {signed}: {e}"))?;
+    let [result] = results.as_slice() else {
+        return Err(format!("{signed} has {} embedded results", results.len()));
+    };
+    ensure(result.source == SignatureSource::Embedded, || {
+        format!("embedded result from {:?}", result.source)
+    })?;
+    ensure(result.status == VerificationError::Ok, || {
+        format!("{signed} is {:?}, not Ok", result.status)
+    })?;
+    ensure(!result.chain.is_empty(), || {
+        "a valid signature without a chain".into()
+    })?;
+    for pair in result.chain.windows(2) {
+        if let [child, parent] = pair {
+            ensure(child.issuer == parent.subject, || {
+                format!("{} is not issued by {}", child.subject, parent.subject)
+            })?;
+        }
+    }
+    let none = verifier
+        .embedded(unsigned)
+        .map_err(|e| format!("embedded {unsigned}: {e}"))?;
+    ensure(none.is_empty(), || {
+        format!("{unsigned} has embedded results {none:?}")
+    })?;
+    match verifier.catalog(unsigned) {
+        Ok(None) => {}
+        Ok(Some(r)) => return Err(format!("{unsigned} has a catalog signature {r:?}")),
+        Err(e) => ensure(e.kind() == ErrorKind::Unsupported, || {
+            format!("catalog {unsigned}: {e}")
+        })?,
+    }
+    for (what, kind) in [
+        (
+            "embedded",
+            verifier
+                .embedded(missing)
+                .map(|_| ())
+                .err()
+                .map(|e| e.kind()),
+        ),
+        (
+            "catalog",
+            verifier
+                .catalog(missing)
+                .map(|_| ())
+                .err()
+                .map(|e| e.kind()),
+        ),
+    ] {
+        ensure(
+            matches!(kind, Some(ErrorKind::NotFound | ErrorKind::Unsupported)),
+            || format!("{what} of {missing} gave {kind:?}, not NotFound"),
+        )?;
     }
     Ok(())
 }
