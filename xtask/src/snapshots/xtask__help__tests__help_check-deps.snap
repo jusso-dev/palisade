@@ -1,7 +1,11 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
+Enforce the allowed dependency directions between crates
+
 Usage: cargo xtask check-deps
 
-Enforce the allowed dependency directions between crates
+Options:
+  -h, --help
+          Print help

@@ -1,8 +1,17 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
-Usage: cargo xtask docs serve [--port <n>] [--open]
+Stage the book and serve it at http://127.0.0.1:3000/ with mdbook serve, until interrupted; run it again after editing a page (links are checked by docs build)
 
-Stage the book and serve it at http://127.0.0.1:3000/ with mdbook serve, until
-interrupted; run it again after editing a page (links are checked by docs build)
+Usage: cargo xtask docs serve [OPTIONS]
+
+Options:
+      --port <n>
+          The port to listen on, 1024 to 65535 (default 3000)
+
+      --open
+          Open the book in a browser
+
+  -h, --help
+          Print help

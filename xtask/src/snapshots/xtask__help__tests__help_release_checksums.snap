@@ -1,0 +1,15 @@
+---
+source: xtask/src/help.rs
+expression: help_for(&path)
+---
+Write SHA256SUMS for every file in a directory
+
+Usage: cargo xtask release checksums <DIR>
+
+Arguments:
+  <DIR>
+          The directory
+
+Options:
+  -h, --help
+          Print help

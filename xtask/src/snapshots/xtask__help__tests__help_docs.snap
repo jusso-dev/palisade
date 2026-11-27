@@ -1,0 +1,20 @@
+---
+source: xtask/src/help.rs
+expression: help_for(&path)
+---
+The documentation site (docs/ci.md#documentation-site)
+
+Usage: cargo xtask docs <COMMAND>
+
+Commands:
+  generate         Regenerate the reference pages in docs/book/src/reference/generated
+  check            Fail if the generated pages are stale, or a doc page is not in the book, is not accessible, or has an untested example
+  build            Build the book into target/book (warnings are errors), then check every internal link; needs mdbook, mdbook-mermaid-ssr, a headless browser and lychee
+  serve            Stage the book and serve it at http://127.0.0.1:3000/ with mdbook serve, until interrupted; run it again after editing a page (links are checked by docs build)
+  assemble         Assemble the GitHub Pages tree: the book and the Rust API docs under <dir>/<version>/, the version list and the root redirect
+  version-for-ref  Print the docs version for a ref: latest for main, vX.Y for tag vX.Y.Z
+  help             Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help

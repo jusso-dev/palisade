@@ -1,7 +1,14 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
-Usage: cargo xtask golden [--update]
+Check the corpus's hashes against testdata/golden/fixtures.txt
 
-Check the corpus's hashes against testdata/golden/fixtures.txt, or rewrite it
+Usage: cargo xtask golden [OPTIONS]
+
+Options:
+      --update
+          Rewrite testdata/golden/fixtures.txt instead of checking it
+
+  -h, --help
+          Print help

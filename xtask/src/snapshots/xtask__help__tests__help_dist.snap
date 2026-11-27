@@ -1,13 +1,40 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
-Usage: cargo xtask dist [--target <triple>] [--msi] [--sign <signer>] [--out <dir>] [--bump-patch]
-       [--compare-sizes <sizes.json>] [--from <dir>] [--no-timestamp]
+Release-build the Windows binaries (with --msi, the installer package) or the Linux server, with symbols and size reports, as CI does (docs/packaging.md)
 
-Release-build the Windows binaries (with --msi, the installer package) or the
-Linux server, with symbols and size reports, as CI does (docs/packaging.md)
+Usage: cargo xtask dist [OPTIONS]
+       cargo xtask dist <COMMAND>
 
-Usage: cargo xtask dist driver
+Commands:
+  driver  Explain how the optional kernel driver is packaged (local-only, #8)
+  help    Print this message or the help of the given subcommand(s)
 
-Explain how the optional kernel driver is packaged (local-only, #8)
+Options:
+      --target <triple>
+          The target triple (default: this machine's)
+
+      --msi
+          Also build and validate the installer package (Windows targets)
+
+      --sign <signer>
+          Sign the executables and package with this signer
+
+      --out <dir>
+          Where to write the output
+
+      --bump-patch
+          Build as the next patch version (the package upgrade test)
+
+      --compare-sizes <sizes.json>
+          Warn about size changes against this earlier size report
+
+      --from <dir>
+          Package these prebuilt (and signed) executables instead of building them (needs --msi)
+
+      --no-timestamp
+          Sign without a timestamp server (the CI test of the signing path only)
+
+  -h, --help
+          Print help

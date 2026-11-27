@@ -1,0 +1,17 @@
+---
+source: xtask/src/help.rs
+expression: help_for(&path)
+---
+The ADR tooling (docs/adr/PROCESS.md)
+
+Usage: cargo xtask adr <COMMAND>
+
+Commands:
+  new    Copy docs/adr/0000-template.md to the next ADR number, as `proposed`
+  index  Regenerate the ADR index table in docs/adr/README.md
+  lint   Check every ADR's file name, number, status, date and sections (Security impact included), supersession links, and that the index is current
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help

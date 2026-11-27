@@ -1,9 +1,14 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
-Usage: cargo xtask deps-report [--base <commit>]
+Print the dependency report: duplicates, third-party crates per crate, third-party unsafe counts and code that runs at build time
 
-Print the dependency report: duplicates, third-party crates per crate,
-third-party unsafe counts and code that runs at build time; with --base,
-only when Cargo.lock changed, adding cargo tree -d and unsafe changes
+Usage: cargo xtask deps-report [OPTIONS]
+
+Options:
+      --base <commit>
+          Only when Cargo.lock changed since <commit>, adding cargo tree -d and unsafe changes
+
+  -h, --help
+          Print help

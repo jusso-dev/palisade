@@ -1,9 +1,15 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
-Usage: cargo xtask check-commit-msg
+Check a commit message file against Conventional Commits (the opt-in commit-msg hook in .githooks/ runs this)
 
-<file>
-Check a commit message file against Conventional Commits (the
-opt-in commit-msg hook in .githooks/ runs this)
+Usage: cargo xtask check-commit-msg <FILE>
+
+Arguments:
+  <FILE>
+          The commit message file
+
+Options:
+  -h, --help
+          Print help

@@ -1,0 +1,15 @@
+---
+source: xtask/src/help.rs
+expression: help_for(&path)
+---
+Check every file in a directory against its SHA256SUMS
+
+Usage: cargo xtask release verify-checksums <DIR>
+
+Arguments:
+  <DIR>
+          The directory
+
+Options:
+  -h, --help
+          Print help

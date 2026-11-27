@@ -1,7 +1,18 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
-Usage: cargo xtask test-summary <label> <junit.xml>
-
 Summarise a nextest JUnit report for the GitHub job page
+
+Usage: cargo xtask test-summary <LABEL> <JUNIT>
+
+Arguments:
+  <LABEL>
+          The label for the summary
+
+  <JUNIT>
+          The JUnit report
+
+Options:
+  -h, --help
+          Print help

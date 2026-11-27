@@ -1,0 +1,18 @@
+---
+source: xtask/src/help.rs
+expression: help_for(&path)
+---
+Verify every signature in a directory, including inside packages
+
+Usage: cargo xtask release verify [OPTIONS] <DIR>
+
+Arguments:
+  <DIR>
+          The directory
+
+Options:
+      --allow-untimestamped
+          Accept signatures without a timestamp
+
+  -h, --help
+          Print help

@@ -1,0 +1,15 @@
+---
+source: xtask/src/help.rs
+expression: help_for(&path)
+---
+Print a version's release notes from CHANGELOG.md
+
+Usage: cargo xtask release notes <VERSION>
+
+Arguments:
+  <VERSION>
+          The version
+
+Options:
+  -h, --help
+          Print help

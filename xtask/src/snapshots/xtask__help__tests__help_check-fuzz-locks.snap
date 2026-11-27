@@ -1,7 +1,11 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
+Check that every crates/*/fuzz/Cargo.lock is current (cargo metadata --locked)
+
 Usage: cargo xtask check-fuzz-locks
 
-Check that every crates/*/fuzz/Cargo.lock is current (cargo metadata --locked)
+Options:
+  -h, --help
+          Print help

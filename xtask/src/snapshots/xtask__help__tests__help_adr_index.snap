@@ -1,7 +1,11 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
+Regenerate the ADR index table in docs/adr/README.md
+
 Usage: cargo xtask adr index
 
-Regenerate the ADR index table in docs/adr/README.md
+Options:
+  -h, --help
+          Print help

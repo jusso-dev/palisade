@@ -30,17 +30,21 @@ the pinned toolchain and needs no other tools.
 | `check-fuzz-locks` | Runs `cargo metadata --locked` on every `crates/*/fuzz/Cargo.toml` and fails, with the minimal re-lock command, if a fuzz workspace's committed lockfile is out of date. Code: `src/fuzz_locks.rs`. |
 | `coverage-gate --base <commit>` | Measures `palisade-policy` line coverage at `<commit>` (in a temporary worktree) and at the working tree, and fails if it decreased. Needs cargo-llvm-cov and cargo-nextest. Code: `src/coverage_gate.rs`. |
 | `bench-compare --base <commit>` | Runs every criterion bench at `<commit>` and at the working tree (twice each, alternating, keeping the faster), writes a comparison table to the job summary, and fails if a median is more than 10% slower with non-overlapping confidence intervals. Code: `src/bench_compare.rs`. |
-| `fuzz [--seconds N] [--target NAME]` | Builds every cargo-fuzz target, seeds its corpus from the test fixtures, runs it for `N` seconds (default 60) and writes the results, with a base64 reproducer for each finding, to the job summary. Needs the pinned nightly and cargo-fuzz. Its tests keep the target list in step with each fuzz `Cargo.toml` and `fuzz.yml`. Code: `src/fuzz.rs`; see `docs/testing.md`. |
+| `fuzz [--seconds N] [--target NAME \| --shard I/N]` | Builds every cargo-fuzz target, seeds its corpus from the test fixtures, runs it for `N` seconds (default 60) and writes the results, with a base64 reproducer for each finding, to the job summary. Needs the pinned nightly and cargo-fuzz. Its tests keep the target list in step with each fuzz `Cargo.toml` and `fuzz.yml`. Code: `src/fuzz.rs`; see `docs/testing.md`. |
 
 Each command prints one line per violation and exits non-zero if there are
 any. Each rule set has unit tests with passing and failing fixtures:
 `cargo test -p xtask`.
 
-`cargo xtask help` lists every command, and `cargo xtask <command> --help`
-(or `-h`) prints that command's entry, or for a group such as `docs` every
-command in it. The list in `src/help.rs` is the one source of both; its tests
-snapshot the list and every command's help (`src/snapshots/`, checked by the
-`snapshots` CI job) and fail if a command `main` dispatches has no entry.
+The command line is declared once with clap (`src/cli.rs`): `cargo xtask
+help` (or `--help`) lists every command, and `cargo xtask <command> --help`,
+`-h` or `cargo xtask help <command>` prints its usage and options. A wrong
+command line exits with status 2 and clap's message. Values with rules of
+their own (a target triple, a signer, a shard, the fuzz time) are still
+checked by the command's module. Tests in `src/help.rs` snapshot the help of
+every command and sub-command (`src/snapshots/`, checked by the
+`snapshots` CI job), fail if any command or argument has no help text, and
+parse every command line the workflows and scripts use.
 
 Commands that need an external tool check for it first through
 `src/tools.rs`, which reads the version from the tool's version command:
@@ -60,7 +64,8 @@ More commands are planned in #29; `sbom` is filled in by #226.
 
 No workspace crates: no product crate may depend on `xtask`, and `xtask`
 reads the workspace through `cargo metadata` instead of linking it. Third-party:
-`serde_json`, `toml` and `yaml-rust2`, to read `cargo metadata` output,
+`clap`, for the command line (the workspace's version, as `pal` and the
+server use); `serde_json`, `toml` and `yaml-rust2`, to read `cargo metadata` output,
 manifests, workflow files and JSON Schemas; `proc-macro2`, to tokenise Rust
 source; and `sha2`, for the term digests in `check-workflows` and
 `check-banned-terms`, and the WiX package checksum in `dist`.

@@ -1,0 +1,15 @@
+---
+source: xtask/src/help.rs
+expression: help_for(&path)
+---
+Bump the version and write the changelog section (RELEASE_DATE gives the date)
+
+Usage: cargo xtask release prepare <VERSION>
+
+Arguments:
+  <VERSION>
+          The new version
+
+Options:
+  -h, --help
+          Print help

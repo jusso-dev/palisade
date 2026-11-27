@@ -10,6 +10,7 @@ mod adr;
 mod banned_terms;
 mod bench_compare;
 mod ci;
+mod cli;
 mod clippy_config;
 mod commit_msg;
 mod coverage;
@@ -38,112 +39,61 @@ use std::{
     process::{Command, ExitCode},
 };
 
-/// The command list; see `src/help.rs`.
-const HELP: &str = help::TEXT;
-
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    // `cargo xtask <command> --help`: the command's entry from the list.
-    match help::for_args(&args) {
-        Some(Ok(entries)) => {
-            print!("{}", help::render(&entries));
-            return ExitCode::SUCCESS;
-        }
-        Some(Err(error)) => {
-            eprintln!("{error}\n");
-            eprint!("{HELP}");
-            return ExitCode::FAILURE;
-        }
-        None => {}
-    }
-    if let [command, label, path] = args.as_slice() {
-        if command == "test-summary" {
-            return test_summary(label, Path::new(path));
-        }
-        if command == "coverage-summary" {
-            return coverage_summary(label, Path::new(path));
-        }
-    }
-    if let [command, rest @ ..] = args.as_slice() {
-        if command == "fuzz" {
-            return run_fuzz(rest);
-        }
-        if command == "adr" {
-            return run_adr(rest);
-        }
-        if command == "docs" {
-            return run_docs(rest);
-        }
-        if command == "check-banned-terms" {
-            return run_banned_terms(rest);
-        }
-        if command == "dist" {
-            return run_dist(rest);
-        }
-        if command == "sign" {
-            return run_sign(rest);
-        }
-        if command == "release" {
-            return run_release(rest);
-        }
-    }
-    if let [command, path] = args.as_slice()
-        && command == "check-commit-msg"
-    {
-        return check_commit_msg(Path::new(path));
-    }
-    match args.as_slice() {
-        [command, flag, base] if command == "deps-report" && flag == "--base" => {
-            return deps_report(Some(base));
-        }
-        [command, flag, base] if command == "coverage-gate" && flag == "--base" => {
-            return coverage_gate(base);
-        }
-        [command, flag, base] if command == "bench-compare" && flag == "--base" => {
-            return bench_compare(base);
-        }
-        [command, flag] if command == "golden" && flag == "--update" => return golden(true),
-        [command] if command == "ci" => return run_ci(false),
-        [command, fast] if command == "ci" && fast == "--fast" => return run_ci(true),
-        _ => {}
-    }
-    let command = match args.as_slice() {
-        [command] => command.as_str(),
-        _ => "",
+    use clap::Parser as _;
+    use cli::Command as C;
+    let parsed = match cli::Cli::try_parse() {
+        Ok(parsed) => parsed,
+        // `--help`, `help <command>` and errors: clap prints them, to
+        // stdout for help and stderr for errors, and exits 0 or 2.
+        Err(error) => error.exit(),
     };
-    let result = match command {
-        "check-deps" => run_check("check-deps", check_deps),
-        "check-manifests" => run_check("check-manifests", check_manifests),
-        "check-fuzz-locks" => run_check("check-fuzz-locks", check_fuzz_locks),
-        "check-testdata" => run_check("check-testdata", check_testdata),
-        "fixtures" => return fixtures().map_or_else(fail("fixtures"), |_| ExitCode::SUCCESS),
-        "golden" => return golden(false),
-        "audit" => return run_audit(),
-        "check-supply-chain" => run_check("check-supply-chain", check_supply_chain),
-        "check-unsafe" => run_check("check-unsafe", check_unsafe),
-        "deps-report" => return deps_report(None),
-        "sbom" => {
+    let check = |name, f| {
+        if run_check(name, f) {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        }
+    };
+    match parsed.command {
+        C::Adr(command) => run_adr(command),
+        C::Audit => run_audit(),
+        C::Ci { fast } => run_ci(fast),
+        C::BenchCompare(b) => bench_compare(&b.base),
+        C::CheckCommitMsg { file } => check_commit_msg(&file),
+        C::CheckBannedTerms { digest } => run_banned_terms(digest.as_deref()),
+        C::CheckDeps => check("check-deps", check_deps),
+        C::CheckFuzzLocks => check("check-fuzz-locks", check_fuzz_locks),
+        C::CheckTestdata => check("check-testdata", check_testdata),
+        C::CheckManifests => check("check-manifests", check_manifests),
+        C::CheckSupplyChain => check("check-supply-chain", check_supply_chain),
+        C::CheckUnsafe => check("check-unsafe", check_unsafe),
+        C::Dist(args) => match args.command {
+            Some(cli::DistCommand::Driver) => {
+                eprintln!("{}", dist::DRIVER_NOTE);
+                ExitCode::FAILURE
+            }
+            None => run_dist(&args.to_words()),
+        },
+        C::Sign(args) => run_sign(&args.to_words()),
+        C::Release(command) => run_release(command),
+        C::Docs(command) => run_docs(command),
+        C::DepsReport { base } => deps_report(base.as_deref()),
+        C::Sbom => {
             eprintln!(
                 "sbom: not implemented yet. CycloneDX output is reserved at {SBOM_DIR}/<crate>.cdx.json; \
                  generating and attesting it is #226; the release pipeline's provenance job runs it once RELEASE_PROVENANCE is on (docs/releasing.md#provenance)."
             );
-            return ExitCode::FAILURE;
+            ExitCode::FAILURE
         }
-        "check-workflows" => run_check("check-workflows", check_workflows),
-        "threat-coverage" => run_check("threat-coverage", check_threat_coverage),
-        "help" | "--help" | "-h" => {
-            print!("{HELP}");
-            return ExitCode::SUCCESS;
-        }
-        _ => {
-            eprint!("{HELP}");
-            return ExitCode::FAILURE;
-        }
-    };
-    if result {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::FAILURE
+        C::CheckWorkflows => check("check-workflows", check_workflows),
+        C::ThreatCoverage => check("threat-coverage", check_threat_coverage),
+        C::TestSummary { label, junit } => test_summary(&label, &junit),
+        C::CoverageSummary { label, coverage } => coverage_summary(&label, &coverage),
+        C::CoverageGate(b) => coverage_gate(&b.base),
+        C::Fixtures => fixtures().map_or_else(fail("fixtures"), |_| ExitCode::SUCCESS),
+        C::Golden { update } => golden(update),
+        C::Fuzz(args) => run_fuzz(&args.to_words()),
     }
 }
 
@@ -414,33 +364,45 @@ fn run_sign(args: &[String]) -> ExitCode {
 }
 
 /// `cargo xtask release`: see `src/release/mod.rs`.
-fn run_release(args: &[String]) -> ExitCode {
+fn run_release(command: cli::ReleaseCommand) -> ExitCode {
+    use cli::ReleaseCommand as R;
     let root = workspace_root();
-    let result: Result<(), String> = match args {
-        [cmd, version] if cmd == "prepare" => {
+    let result: Result<(), String> = match command {
+        R::Prepare { version } => {
             let date = std::env::var("RELEASE_DATE").unwrap_or_default();
             if release::is_calendar_date(&date) {
-                release::prepare(&root, version, &date).map(|section| print!("{section}"))
+                release::prepare(&root, &version, &date).map(|section| print!("{section}"))
             } else {
-                Err("set RELEASE_DATE to a real date, YYYY-MM-DD (the date the release is cut)".to_owned())
+                Err(
+                    "set RELEASE_DATE to a real date, YYYY-MM-DD (the date the release is cut)"
+                        .to_owned(),
+                )
             }
         }
-        [cmd, tag] if cmd == "check-tag" => release::check_tag(&root, tag).map(|v| {
-            println!("check-tag: {tag} is version {v}{}", if release::is_prerelease(&v) { " (pre-release)" } else { "" });
+        R::CheckTag { tag } => release::check_tag(&root, &tag).map(|v| {
+            println!(
+                "check-tag: {tag} is version {v}{}",
+                if release::is_prerelease(&v) {
+                    " (pre-release)"
+                } else {
+                    ""
+                }
+            );
         }),
-        [cmd, version] if cmd == "notes" => read(&root.join("CHANGELOG.md"))
-            .and_then(|c| release::changelog::excerpt(&c, version))
+        R::Notes { version } => read(&root.join("CHANGELOG.md"))
+            .and_then(|c| release::changelog::excerpt(&c, &version))
             .map(|notes| print!("{notes}")),
-        [cmd, dir] if cmd == "checksums" => {
-            let dir = Path::new(dir);
+        R::Checksums { dir } => {
+            let dir = dir.as_path();
             release::checksums::for_dir(dir).and_then(|sums| {
-                std::fs::write(dir.join("SHA256SUMS"), &sums).map_err(|e| format!("cannot write SHA256SUMS: {e}"))?;
+                std::fs::write(dir.join("SHA256SUMS"), &sums)
+                    .map_err(|e| format!("cannot write SHA256SUMS: {e}"))?;
                 print!("{sums}");
                 Ok(())
             })
         }
-        [cmd, dir] if cmd == "verify-checksums" => {
-            let dir = Path::new(dir);
+        R::VerifyChecksums { dir } => {
+            let dir = dir.as_path();
             (|| {
                 let sums = read(&dir.join("SHA256SUMS"))?;
                 // Every listed name and every file present are read; a name
@@ -453,11 +415,17 @@ fn run_release(args: &[String]) -> ExitCode {
                         names.push(name.to_owned());
                     }
                 }
-                for entry in std::fs::read_dir(dir).map_err(|e| format!("cannot read {}: {e}", dir.display()))? {
+                for entry in std::fs::read_dir(dir)
+                    .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
+                {
                     let entry = entry.map_err(|e| e.to_string())?;
                     let name = entry.file_name().to_string_lossy().into_owned();
                     let kind = entry.file_type().map_err(|e| format!("{name}: {e}"))?;
-                    if kind.is_file() && name != "SHA256SUMS" && name != "SHA256SUMS.sig" && !names.contains(&name) {
+                    if kind.is_file()
+                        && name != "SHA256SUMS"
+                        && name != "SHA256SUMS.sig"
+                        && !names.contains(&name)
+                    {
                         names.push(name);
                     }
                 }
@@ -466,9 +434,12 @@ fn run_release(args: &[String]) -> ExitCode {
                     let path = dir.join(&name);
                     let meta = std::fs::symlink_metadata(&path);
                     match meta {
-                        Ok(m) if m.file_type().is_symlink() => return Err(format!("{name}: is a link")),
+                        Ok(m) if m.file_type().is_symlink() => {
+                            return Err(format!("{name}: is a link"));
+                        }
                         Ok(_) => {
-                            let data = std::fs::read(&path).map_err(|e| format!("cannot read {name}: {e}"))?;
+                            let data = std::fs::read(&path)
+                                .map_err(|e| format!("cannot read {name}: {e}"))?;
                             files.push((name, data));
                         }
                         // Missing: checksums::verify reports it as listed but missing.
@@ -477,25 +448,32 @@ fn run_release(args: &[String]) -> ExitCode {
                     }
                 }
                 let problems = release::checksums::verify(&sums, &files);
-                if problems.is_empty() { Ok(()) } else { Err(problems.join("\n")) }
+                if problems.is_empty() {
+                    Ok(())
+                } else {
+                    Err(problems.join("\n"))
+                }
             })()
         }
-        [cmd] if cmd == "provenance" => {
+        R::Provenance => {
             let enabled = std::env::var("RELEASE_PROVENANCE").is_ok_and(|v| v == "on");
             release::provenance(&root, enabled)
         }
-        [cmd, dir, rest @ ..] if cmd == "verify" && rest.len() <= 1 => {
-            let timestamp = match rest.first() {
-                None => Ok(release::sign::Timestamp::Required),
-                Some(flag) if flag == "--allow-untimestamped" => Ok(release::sign::Timestamp::IfConfigured),
-                Some(other) => Err(format!("unexpected argument `{other}`")),
+        R::Verify {
+            dir,
+            allow_untimestamped,
+        } => {
+            let t = if allow_untimestamped {
+                release::sign::Timestamp::IfConfigured
+            } else {
+                release::sign::Timestamp::Required
             };
-            timestamp.and_then(|t| {
-                let work = dist::target_dir(&root)?.join("release-verify");
-                release::verify_dir(&root, Path::new(dir), &work, t).map(|n| println!("verify: {n} file(s) signed and valid"))
+            dist::target_dir(&root).and_then(|target| {
+                let work = target.join("release-verify");
+                release::verify_dir(&root, &dir, &work, t)
+                    .map(|n| println!("verify: {n} file(s) signed and valid"))
             })
         }
-        _ => Err("usage: cargo xtask release prepare <version> | check-tag <tag> | notes <version> | checksums <dir> | verify-checksums <dir> | provenance | verify <dir> [--allow-untimestamped]".to_owned()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -928,27 +906,21 @@ fn deps_report(base: Option<&str>) -> ExitCode {
 }
 
 /// `cargo xtask check-banned-terms [--digest <term>]`.
-fn run_banned_terms(args: &[String]) -> ExitCode {
-    match args {
-        [] => {
-            if run_check("check-banned-terms", check_banned_terms) {
-                ExitCode::SUCCESS
-            } else {
-                ExitCode::FAILURE
-            }
+fn run_banned_terms(digest: Option<&str>) -> ExitCode {
+    let Some(term) = digest else {
+        return if run_check("check-banned-terms", check_banned_terms) {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        };
+    };
+    match banned_terms::digest_line(term) {
+        Ok(line) => {
+            println!("{line}");
+            ExitCode::SUCCESS
         }
-        [flag, term] if flag == "--digest" => match banned_terms::digest_line(term) {
-            Ok(line) => {
-                println!("{line}");
-                ExitCode::SUCCESS
-            }
-            Err(error) => {
-                eprintln!("check-banned-terms: error: {error}");
-                ExitCode::FAILURE
-            }
-        },
-        _ => {
-            eprint!("{HELP}");
+        Err(error) => {
+            eprintln!("check-banned-terms: error: {error}");
             ExitCode::FAILURE
         }
     }
@@ -963,46 +935,50 @@ fn check_banned_terms(root: &Path) -> Result<Vec<String>, String> {
 }
 
 /// `cargo xtask docs <generate|check|build|assemble|version-for-ref>`.
-fn run_docs(args: &[String]) -> ExitCode {
+fn run_docs(command: cli::DocsCommand) -> ExitCode {
+    use cli::DocsCommand as D;
     let root = workspace_root();
     let target =
         std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| root.join("target"), PathBuf::from);
     // `Ok(None)`: done, nothing to report. `Ok(Some(v))`: a check that
     // passed if `v` is empty.
-    let result: Result<Option<Vec<String>>, String> = (|| match args {
-        [c] if c == "generate" => {
+    let result: Result<Option<Vec<String>>, String> = (|| match command {
+        D::Generate => {
             let pages = docs::generate(&root, &docs::cli_help(&root)?)?;
             docs::write(&root, &pages)?;
             println!("docs: wrote {} generated pages", pages.len());
             Ok(None)
         }
-        [c] if c == "check" => {
+        D::Check => {
             let pages = docs::generate(&root, &docs::cli_help(&root)?)?;
             let (files, mut v) = unsafe_code::repository_files(&root)?;
             v.extend(docs::stale(&root, &pages)?);
             v.extend(docs::check_sources(&root, &files)?);
             Ok(Some(v))
         }
-        [c, rest @ ..] if c == "build" => {
-            let site_url = match rest {
-                [] => None,
-                [flag, url] if flag == "--site-url" => Some(url.as_str()),
-                _ => return Err("usage: cargo xtask docs build [--site-url <path>]".to_owned()),
-            };
+        D::Build { site_url } => {
             let (files, mut v) = unsafe_code::repository_files(&root)?;
-            v.extend(docs::build(&root, &files, site_url)?);
+            v.extend(docs::build(&root, &files, site_url.as_deref())?);
             Ok(Some(v))
         }
-        [c, rest @ ..] if c == "serve" => {
-            let serve_args = docs::parse_serve_args(rest)?;
+        D::Serve { port, open } => {
+            // The port is checked by `docs::parse_serve_args`, as before.
+            let mut words = Vec::new();
+            if let Some(port) = port {
+                words.extend(["--port".to_owned(), port]);
+            }
+            if open {
+                words.push("--open".to_owned());
+            }
+            let serve_args = docs::parse_serve_args(&words)?;
             let (files, mut v) = unsafe_code::repository_files(&root)?;
             v.extend(docs::serve(&root, &files, &serve_args)?);
             if v.is_empty() { Ok(None) } else { Ok(Some(v)) }
         }
-        [c, dir, flag, version] if c == "assemble" && flag == "--version" => {
+        D::Assemble { dir, version } => {
             let versions = docs::assemble::assemble(
-                Path::new(dir),
-                version,
+                &dir,
+                &version,
                 &target.join(docs::OUT),
                 &target.join("doc"),
             )?;
@@ -1012,11 +988,10 @@ fn run_docs(args: &[String]) -> ExitCode {
             );
             Ok(None)
         }
-        [c, git_ref] if c == "version-for-ref" => {
-            println!("{}", docs::assemble::version_for_ref(git_ref)?);
+        D::VersionForRef { git_ref } => {
+            println!("{}", docs::assemble::version_for_ref(&git_ref)?);
             Ok(None)
         }
-        _ => Err(format!("unknown docs command\n\n{HELP}")),
     })();
     match result {
         Ok(None) => ExitCode::SUCCESS,
@@ -1128,11 +1103,12 @@ fn check_threat_coverage(root: &Path) -> Result<Vec<String>, String> {
 }
 
 /// `cargo xtask adr new|index|lint`.
-fn run_adr(args: &[String]) -> ExitCode {
+fn run_adr(command: cli::AdrCommand) -> ExitCode {
+    use cli::AdrCommand as A;
     let root = workspace_root();
     let readme_path = root.join(adr::DIR).join("README.md");
-    match args {
-        [lint] if lint == "lint" => {
+    match command {
+        A::Lint => {
             let result = adr::read_dir(&root.join(adr::DIR))
                 .and_then(|files| Ok(adr::lint(&files, &read(&readme_path)?)));
             match result {
@@ -1153,7 +1129,7 @@ fn run_adr(args: &[String]) -> ExitCode {
                 }
             }
         }
-        [index] if index == "index" => {
+        A::Index => {
             let result = adr::read_dir(&root.join(adr::DIR)).and_then(|files| {
                 let adrs = adr::index_entries(&files)?;
                 let readme = read(&readme_path)?;
@@ -1175,7 +1151,7 @@ fn run_adr(args: &[String]) -> ExitCode {
                 }
             }
         }
-        [new, title] if new == "new" => {
+        A::New { title } => {
             let result = adr::read_dir(&root.join(adr::DIR)).and_then(|files| {
                 let template = files
                     .iter()
@@ -1184,7 +1160,7 @@ fn run_adr(args: &[String]) -> ExitCode {
                     .ok_or_else(|| format!("{}/{} is missing", adr::DIR, adr::TEMPLATE))?;
                 let names: Vec<String> = files.into_iter().map(|(n, _)| n).collect();
                 let (name, text) =
-                    adr::new_adr(&names, &template, title, &supply_chain::today_utc()?)?;
+                    adr::new_adr(&names, &template, &title, &supply_chain::today_utc()?)?;
                 let path = root.join(adr::DIR).join(&name);
                 std::fs::OpenOptions::new()
                     .write(true)
@@ -1207,10 +1183,6 @@ fn run_adr(args: &[String]) -> ExitCode {
                     ExitCode::FAILURE
                 }
             }
-        }
-        _ => {
-            eprintln!("usage: cargo xtask adr new \"<title>\" | adr index | adr lint");
-            ExitCode::FAILURE
         }
     }
 }

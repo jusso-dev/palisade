@@ -1,7 +1,24 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
-Usage: cargo xtask sign --signer <none|test-ca|pfx|cloud-hsm> [--verify] [--no-timestamp] <file>...
-
 Authenticode-sign and verify files (docs/releasing.md#code-signing)
+
+Usage: cargo xtask sign [OPTIONS] --signer <signer> <file>...
+
+Arguments:
+  <file>...
+          The files to sign
+
+Options:
+      --signer <signer>
+          The signer: none, test-ca, pfx or cloud-hsm
+
+      --verify
+          Only verify the files' signatures
+
+      --no-timestamp
+          Sign without a timestamp server (the CI test of the signing path only)
+
+  -h, --help
+          Print help

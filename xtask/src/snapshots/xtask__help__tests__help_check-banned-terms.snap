@@ -1,8 +1,14 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
-Usage: cargo xtask check-banned-terms [--digest <term>]
+No commercial vendor or product names in any file or path (docs/banned-terms.txt, docs/NAMING.md)
 
-No commercial vendor or product names in any file or path
-(docs/banned-terms.txt, docs/NAMING.md); --digest prints a list line
+Usage: cargo xtask check-banned-terms [OPTIONS]
+
+Options:
+      --digest <term>
+          Print the list line for a new term instead of checking
+
+  -h, --help
+          Print help
