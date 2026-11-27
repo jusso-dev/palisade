@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["VolumeKind"],"fn":["classify","classify_with","unclassified"],"struct":["Classified","Hints"]};

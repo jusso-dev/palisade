@@ -36,10 +36,10 @@
             const path_to_root = "../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../searchindex-d161a978.js";
+            window.path_to_searchindex_js = "../../../../searchindex-502751e7.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../../toc-55ef34c3.js"></script>
+        <script src="../../../../toc-4baf6b72.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -186,15 +186,12 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="unknown-applications"><a class="header" href="#unknown-applications">Unknown applications</a></h1>
-<p>When no rule decides, the <strong>unknown-application policy</strong> does. Specified in
-<a href="https://github.com/jusso-dev/palisade/issues/39">#39</a>.</p>
-<p>Today the engine applies the <strong>implicit deny</strong>: anything not explicitly allowed is blocked (in
+<p>When no rule decides, the <strong>unknown-application policy</strong> (<code>policy.unknown</code>) does. Specified in
+<a href="https://github.com/jusso-dev/palisade/issues/39">#39</a>. It never overrides an explicit allow or
+deny.</p>
+<p>By default it applies the <strong>implicit deny</strong>: anything not explicitly allowed is blocked (in
 <code>enforce</code> mode) or reported (in <code>audit</code>, <code>monitor</code> and <code>learning</code>). The decision's reason code is
 <code>implicit_deny_unknown</code>, so reports can tell "blocked by a rule" from "never allowed".</p>
-<p>Planned refinements in #39: per-location and per-origin variants (user-writable folders,
-files downloaded from the internet, removable or network media), graded <code>detect</code>, <code>restrict</code> and
-<code>block</code> levels, prompt-based handling, and built-in safe defaults so a default-deny policy does not
-stop Windows itself from working.</p>
 <p>The smallest policy shows the implicit deny on its own, validated in CI:</p>
 <pre><code class="language-yaml"># yaml-language-server: $schema=https://raw.githubusercontent.com/jusso-dev/palisade/main/schemas/policy/v1.json
 #
@@ -207,6 +204,72 @@ policy:
   revision: 1
   mode: audit
 </code></pre>
+<h2 id="levels-and-overrides"><a class="header" href="#levels-and-overrides">Levels and overrides</a></h2>
+<p>A policy can choose a level other than <code>block</code> for unknown objects: <code>restrict</code> (run in a
+containment profile), <code>prompt</code> (ask the user), <code>detect</code> (allow and report) or <code>allow</code>. It can set
+that level per object type, per location class (<code>user_profile</code>, <code>temp</code>, <code>program_files</code>,
+<code>removable</code>, <code>network</code> and others) and per origin (<code>internet</code>, <code>email_attachment</code>,
+<code>removable_copy</code> and others). The most restrictive matching entry wins, and <code>default</code> applies when
+none matches. The Essential Eight presets <code>e8_ml1</code> to <code>e8_ml3</code> set a documented starting point, and
+validation warns when a policy is weaker than its preset.</p>
+<pre><code class="language-yaml"># yaml-language-server: $schema=https://raw.githubusercontent.com/jusso-dev/palisade/main/schemas/policy/v1.json
+#
+# Unknown-application handling (#39), starting from the Essential Eight
+# maturity level 1 preset: unknown objects in user profiles, temporary
+# folders and other user-writable locations are blocked, and elsewhere they
+# are detected.
+#
+# The level applied is the most restrictive entry that matches, so the
+# overrides below only apply where no stricter entry does:
+# - A download (`internet`) is contained rather than detected, except in a
+#   user profile, temporary folder or other user-writable location, where
+#   `block` outranks `restrict`.
+# - An unknown PowerShell script asks the user, falling back to block, only
+#   where nothing stricter matches: a downloaded script in a program folder
+#   is contained (`restrict` outranks `prompt`), and one in a user profile
+#   is blocked.
+schema_version: "1.0.0"
+policy:
+  id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f
+  name: Unknown application handling
+  revision: 1
+  mode: enforce
+  unknown:
+    preset: e8_ml1
+    default: detect
+    by_location:
+      user_profile: block
+      temp: block
+      user_writable_other: block
+    by_origin:
+      internet: restrict
+    by_type:
+      script.powershell: prompt
+    restrict_profile: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d0c01
+    prompt:
+      options:
+        - allow_once
+        - allow_always_local
+        - request_approval
+        - block
+      require_justification: true
+      timeout_secs: 60
+      fallback: block
+    effects:
+      severity: high
+      tags:
+        - unhandled
+</code></pre>
+<h2 id="missing-facts-never-make-an-object-look-safer"><a class="header" href="#missing-facts-never-make-an-object-look-safer">Missing facts never make an object look safer</a></h2>
+<p>The endpoint agent supplies the facts stage 6 decides on: the path variables, the volume a file is
+on, and where the file came from. If one is missing, the engine does not guess. A location class or
+origin that the missing fact could make true is treated as possible, and its level applies too. A
+missing fact can therefore make a decision stricter, never looser. The decision lists the missing
+facts, and the explanation names them.</p>
+<p>If the agent sends no origin facts at all, every origin is possible. Under the default
+<code>preexisting_policy: baseline_only</code>, that blocks every unknown object in <code>enforce</code> mode.</p>
+<p>The full rules, including scopes, inheritance and the built-in <code>system_baseline</code>, are in the
+policy crate's README.</p>
 <hr>
 <p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/book/src/concepts/unknown-applications.md"><code>docs/book/src/concepts/unknown-applications.md</code></a> on GitHub.</small></p>
 

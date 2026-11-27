@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MANDATORY_EXCEPTIONS","MAX_WRITABLE_DIRS","SYSTEM_BASELINE_ID","SYSTEM_BASELINE_RULE_ID"],"enum":["BaselineError"],"fn":["is_system_baseline","system_baseline"],"struct":["SystemBaseline"]};

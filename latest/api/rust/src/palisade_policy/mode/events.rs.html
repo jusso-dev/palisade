@@ -10,7 +10,7 @@
 <a href=#10 id=10 data-nosnippet>10</a>//! |---|---|---|---|
 <a href=#11 id=11 data-nosnippet>11</a>//! | none (device `disabled`) | – | – | – |
 <a href=#12 id=12 data-nosnippet>12</a>//! | `ignored` | none | none | none |
-<a href=#13 id=13 data-nosnippet>13</a>//! | `blocked` | the rule's `log` | the rule's `log` | the rule's `log` |
+<a href=#13 id=13 data-nosnippet>13</a>//! | `blocked`, `pending_user` | the rule's `log` | the rule's `log` | the rule's `log` |
 <a href=#14 id=14 data-nosnippet>14</a>//! | would-block (`allowed_audit`) | – | event | event |
 <a href=#15 id=15 data-nosnippet>15</a>//! | `allowed_override` | event | event | event |
 <a href=#16 id=16 data-nosnippet>16</a>//! | `allowed` | the rule's `log` | summary | event |
@@ -90,23 +90,25 @@
 <a href=#90 id=90 data-nosnippet>90</a>    <span class="kw">let </span>log = of_log(d.effects().log);
 <a href=#91 id=91 data-nosnippet>91</a>    <span class="kw">let </span>report = <span class="kw">match </span>d.outcome() {
 <a href=#92 id=92 data-nosnippet>92</a>        Outcome::Ignored =&gt; Report::None,
-<a href=#93 id=93 data-nosnippet>93</a>        Outcome::Blocked =&gt; log,
-<a href=#94 id=94 data-nosnippet>94</a>        Outcome::AllowedAudit | Outcome::AllowedOverride =&gt; Report::Event,
-<a href=#95 id=95 data-nosnippet>95</a>        Outcome::Allowed =&gt; <span class="kw">match </span>d.mode() {
-<a href=#96 id=96 data-nosnippet>96</a>            Mode::Enforce =&gt; log,
-<a href=#97 id=97 data-nosnippet>97</a>            Mode::Monitor =&gt; <span class="kw">match </span>log {
-<a href=#98 id=98 data-nosnippet>98</a>                Report::None =&gt; Report::None,
-<a href=#99 id=99 data-nosnippet>99</a>                Report::Summary | Report::Sampled | Report::Event =&gt; Report::Summary,
-<a href=#100 id=100 data-nosnippet>100</a>            },
-<a href=#101 id=101 data-nosnippet>101</a>            Mode::Audit | Mode::Learning =&gt; Report::Event,
-<a href=#102 id=102 data-nosnippet>102</a>            <span class="comment">// `evaluate_in` never decides in `disabled`; if a decision
-<a href=#103 id=103 data-nosnippet>103</a>            // claims it anyway, report it rather than drop it.
-<a href=#104 id=104 data-nosnippet>104</a>            </span>Mode::Disabled =&gt; Report::Event,
-<a href=#105 id=105 data-nosnippet>105</a>        },
-<a href=#106 id=106 data-nosnippet>106</a>    };
-<a href=#107 id=107 data-nosnippet>107</a>    EventFidelity {
-<a href=#108 id=108 data-nosnippet>108</a>        report,
-<a href=#109 id=109 data-nosnippet>109</a>        learning_candidate: report == Report::Event &amp;&amp; d.learning_candidate(),
-<a href=#110 id=110 data-nosnippet>110</a>    }
-<a href=#111 id=111 data-nosnippet>111</a>}
+<a href=#93 id=93 data-nosnippet>93</a>        <span class="comment">// A pending prompt (#39) stands only where a block would, and its
+<a href=#94 id=94 data-nosnippet>94</a>        // effects are a deny's, so it is reported like one.
+<a href=#95 id=95 data-nosnippet>95</a>        </span>Outcome::Blocked | Outcome::PendingUser =&gt; log,
+<a href=#96 id=96 data-nosnippet>96</a>        Outcome::AllowedAudit | Outcome::AllowedOverride =&gt; Report::Event,
+<a href=#97 id=97 data-nosnippet>97</a>        Outcome::Allowed =&gt; <span class="kw">match </span>d.mode() {
+<a href=#98 id=98 data-nosnippet>98</a>            Mode::Enforce =&gt; log,
+<a href=#99 id=99 data-nosnippet>99</a>            Mode::Monitor =&gt; <span class="kw">match </span>log {
+<a href=#100 id=100 data-nosnippet>100</a>                Report::None =&gt; Report::None,
+<a href=#101 id=101 data-nosnippet>101</a>                Report::Summary | Report::Sampled | Report::Event =&gt; Report::Summary,
+<a href=#102 id=102 data-nosnippet>102</a>            },
+<a href=#103 id=103 data-nosnippet>103</a>            Mode::Audit | Mode::Learning =&gt; Report::Event,
+<a href=#104 id=104 data-nosnippet>104</a>            <span class="comment">// `evaluate_in` never decides in `disabled`; if a decision
+<a href=#105 id=105 data-nosnippet>105</a>            // claims it anyway, report it rather than drop it.
+<a href=#106 id=106 data-nosnippet>106</a>            </span>Mode::Disabled =&gt; Report::Event,
+<a href=#107 id=107 data-nosnippet>107</a>        },
+<a href=#108 id=108 data-nosnippet>108</a>    };
+<a href=#109 id=109 data-nosnippet>109</a>    EventFidelity {
+<a href=#110 id=110 data-nosnippet>110</a>        report,
+<a href=#111 id=111 data-nosnippet>111</a>        learning_candidate: report == Report::Event &amp;&amp; d.learning_candidate(),
+<a href=#112 id=112 data-nosnippet>112</a>    }
+<a href=#113 id=113 data-nosnippet>113</a>}
 </code></pre></div></section></main></body></html>

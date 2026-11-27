@@ -37,10 +37,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-d161a978.js";
+            window.path_to_searchindex_js = "searchindex-502751e7.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-55ef34c3.js"></script>
+        <script src="toc-4baf6b72.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -1096,15 +1096,12 @@ effective policy, so everything in <a href="#rules-and-conditions">Rules</a> and
 <p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/book/src/concepts/groups-and-inheritance.md"><code>docs/book/src/concepts/groups-and-inheritance.md</code></a> on GitHub.</small></p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="unknown-applications"><a class="header" href="#unknown-applications">Unknown applications</a></h1>
-<p>When no rule decides, the <strong>unknown-application policy</strong> does. Specified in
-<a href="https://github.com/jusso-dev/palisade/issues/39">#39</a>.</p>
-<p>Today the engine applies the <strong>implicit deny</strong>: anything not explicitly allowed is blocked (in
+<p>When no rule decides, the <strong>unknown-application policy</strong> (<code>policy.unknown</code>) does. Specified in
+<a href="https://github.com/jusso-dev/palisade/issues/39">#39</a>. It never overrides an explicit allow or
+deny.</p>
+<p>By default it applies the <strong>implicit deny</strong>: anything not explicitly allowed is blocked (in
 <code>enforce</code> mode) or reported (in <code>audit</code>, <code>monitor</code> and <code>learning</code>). The decision's reason code is
 <code>implicit_deny_unknown</code>, so reports can tell "blocked by a rule" from "never allowed".</p>
-<p>Planned refinements in #39: per-location and per-origin variants (user-writable folders,
-files downloaded from the internet, removable or network media), graded <code>detect</code>, <code>restrict</code> and
-<code>block</code> levels, prompt-based handling, and built-in safe defaults so a default-deny policy does not
-stop Windows itself from working.</p>
 <p>The smallest policy shows the implicit deny on its own, validated in CI:</p>
 <pre><code class="language-yaml"># yaml-language-server: $schema=https://raw.githubusercontent.com/jusso-dev/palisade/main/schemas/policy/v1.json
 #
@@ -1117,6 +1114,72 @@ policy:
   revision: 1
   mode: audit
 </code></pre>
+<h2 id="levels-and-overrides"><a class="header" href="#levels-and-overrides">Levels and overrides</a></h2>
+<p>A policy can choose a level other than <code>block</code> for unknown objects: <code>restrict</code> (run in a
+containment profile), <code>prompt</code> (ask the user), <code>detect</code> (allow and report) or <code>allow</code>. It can set
+that level per object type, per location class (<code>user_profile</code>, <code>temp</code>, <code>program_files</code>,
+<code>removable</code>, <code>network</code> and others) and per origin (<code>internet</code>, <code>email_attachment</code>,
+<code>removable_copy</code> and others). The most restrictive matching entry wins, and <code>default</code> applies when
+none matches. The Essential Eight presets <code>e8_ml1</code> to <code>e8_ml3</code> set a documented starting point, and
+validation warns when a policy is weaker than its preset.</p>
+<pre><code class="language-yaml"># yaml-language-server: $schema=https://raw.githubusercontent.com/jusso-dev/palisade/main/schemas/policy/v1.json
+#
+# Unknown-application handling (#39), starting from the Essential Eight
+# maturity level 1 preset: unknown objects in user profiles, temporary
+# folders and other user-writable locations are blocked, and elsewhere they
+# are detected.
+#
+# The level applied is the most restrictive entry that matches, so the
+# overrides below only apply where no stricter entry does:
+# - A download (`internet`) is contained rather than detected, except in a
+#   user profile, temporary folder or other user-writable location, where
+#   `block` outranks `restrict`.
+# - An unknown PowerShell script asks the user, falling back to block, only
+#   where nothing stricter matches: a downloaded script in a program folder
+#   is contained (`restrict` outranks `prompt`), and one in a user profile
+#   is blocked.
+schema_version: "1.0.0"
+policy:
+  id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f
+  name: Unknown application handling
+  revision: 1
+  mode: enforce
+  unknown:
+    preset: e8_ml1
+    default: detect
+    by_location:
+      user_profile: block
+      temp: block
+      user_writable_other: block
+    by_origin:
+      internet: restrict
+    by_type:
+      script.powershell: prompt
+    restrict_profile: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d0c01
+    prompt:
+      options:
+        - allow_once
+        - allow_always_local
+        - request_approval
+        - block
+      require_justification: true
+      timeout_secs: 60
+      fallback: block
+    effects:
+      severity: high
+      tags:
+        - unhandled
+</code></pre>
+<h2 id="missing-facts-never-make-an-object-look-safer"><a class="header" href="#missing-facts-never-make-an-object-look-safer">Missing facts never make an object look safer</a></h2>
+<p>The endpoint agent supplies the facts stage 6 decides on: the path variables, the volume a file is
+on, and where the file came from. If one is missing, the engine does not guess. A location class or
+origin that the missing fact could make true is treated as possible, and its level applies too. A
+missing fact can therefore make a decision stricter, never looser. The decision lists the missing
+facts, and the explanation names them.</p>
+<p>If the agent sends no origin facts at all, every origin is possible. Under the default
+<code>preexisting_policy: baseline_only</code>, that blocks every unknown object in <code>enforce</code> mode.</p>
+<p>The full rules, including scopes, inheritance and the built-in <code>system_baseline</code>, are in the
+policy crate's README.</p>
 <hr>
 <p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/book/src/concepts/unknown-applications.md"><code>docs/book/src/concepts/unknown-applications.md</code></a> on GitHub.</small></p>
 <div style="break-before: page; page-break-before: always;"></div>
@@ -1320,6 +1383,7 @@ document.</p>
 <li><a href="#policysettings"><code>PolicySettings</code></a>: Settings that apply to the whole policy. Every field is optional in a document and has the default shown in the schema.</li>
 <li><a href="#precedenceoptions"><code>PrecedenceOptions</code></a>: Settings of the precedence models. Each is optional in a document.</li>
 <li><a href="#principalref"><code>PrincipalRef</code></a>: A user or group (#38). Each is an object with one key, the kind.</li>
+<li><a href="#promptsettings"><code>PromptSettings</code></a>: How the <code>prompt</code> level asks the user.</li>
 <li><a href="#reflist"><code>RefList</code></a>: An <code>include</code> and an <code>exclude</code> list. An empty <code>include</code> means every entry; a match in <code>exclude</code> always wins.</li>
 <li><a href="#reflist2"><code>RefList2</code></a>: An <code>include</code> and an <code>exclude</code> list. An empty <code>include</code> means every entry; a match in <code>exclude</code> always wins.</li>
 <li><a href="#reflist3"><code>RefList3</code></a>: An <code>include</code> and an <code>exclude</code> list. An empty <code>include</code> means every entry; a match in <code>exclude</code> always wins.</li>
@@ -1328,7 +1392,9 @@ document.</p>
 <li><a href="#rulesetscope"><code>RuleSetScope</code></a>: The scopes of one rule-set assignment: every one must match for the set's rules to apply.</li>
 <li><a href="#schedule"><code>Schedule</code></a>: When a scope is active (#38).</li>
 <li><a href="#scope"><code>Scope</code></a>: Who, where and when a rule applies (#38).</li>
+<li><a href="#scopelimit"><code>ScopeLimit</code></a>: One contributing policy's limit on where its unknown settings apply, in an effective policy (<code>UnknownPolicy::scope_limits</code>). It holds when every scope of <code>all_of</code> matches and, if <code>any_of</code> is not empty, one of its scopes matches.</li>
 <li><a href="#sessionfilter"><code>SessionFilter</code></a>: Session criteria (#38).</li>
+<li><a href="#unknownpolicy"><code>UnknownPolicy</code></a>: The unknown-application policy (#39). Every field is optional in a document; the defaults block every unknown object.</li>
 <li><a href="#window"><code>Window</code></a>: One weekly window.</li>
 </ul>
 <p>Enumerations and string formats: <a href="#value-types">Value types</a>.</p>
@@ -1342,6 +1408,7 @@ document.</p>
 <li><a href="https://github.com/jusso-dev/palisade/blob/main/docs/examples/policies/minimal.yaml"><code>minimal.yaml</code></a>: The smallest valid policy: no rule sets, so nothing is allowed and every file is reported (audit mode) by the implicit deny.</li>
 <li><a href="https://github.com/jusso-dev/palisade/blob/main/docs/examples/policies/scoped-rules.yaml"><code>scoped-rules.yaml</code></a>: Rule scoping: who, where and when a rule applies. Scopes narrow a rule; they never identify the object, which is the match tree's job, and they never widen a rule. A rule applies only when the policy's scope, its rule set's assignment scopes and its own scope all match.</li>
 <li><a href="https://github.com/jusso-dev/palisade/blob/main/docs/examples/policies/staged-rollout.yaml"><code>staged-rollout.yaml</code></a>: A staged rollout (#36): the policy is in audit, so what it would block is reported but runs. Executables are already enforced, a disconnected device enforces everything, and a new blocklist is tried in monitor mode. The mandatory blocklist blocks in every mode, and one deny rule is enforced in audit too (<code>always_enforce</code>).</li>
+<li><a href="https://github.com/jusso-dev/palisade/blob/main/docs/examples/policies/unknown-applications.yaml"><code>unknown-applications.yaml</code></a>: Unknown-application handling (#39), starting from the Essential Eight maturity level 1 preset: unknown objects in user profiles, temporary folders and other user-writable locations are blocked, and elsewhere they are detected.</li>
 <li><a href="https://github.com/jusso-dev/palisade/blob/main/docs/examples/policies/workstation-baseline.yaml"><code>workstation-baseline.yaml</code></a>: A workstation baseline with hash, publisher and path rules (ISM-0955). The same document as tests/fixtures/valid/workstation-baseline.json.</li>
 </ul>
 <hr>
@@ -1477,7 +1544,7 @@ warns.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/policy/v1.json`. Do not edit by hand. -->
 <p>The client connected to a remote desktop session, for per-client
 scoping on multi-session hosts. Each list that is set must match.</p>
-<p>Appears at: <code>/policy/rule_set_scopes/scopes/sessions/client</code>, <code>/policy/scope/sessions/client</code>, <code>/rule_sets/rules/scope/sessions/client</code>.</p>
+<p>Appears at: <code>/policy/rule_set_scopes/scopes/sessions/client</code>, <code>/policy/scope/sessions/client</code>, <code>/policy/unknown/scope_limits/all_of/sessions/client</code>, <code>/policy/unknown/scope_limits/any_of/sessions/client</code>, <code>/policy/unknown/scopes/sessions/client</code>, <code>/rule_sets/rules/scope/sessions/client</code>.</p>
 <h2 id="fields-1"><a class="header" href="#fields-1">Fields</a></h2>
 <div class="table-wrapper">
 <table>
@@ -1546,7 +1613,7 @@ negative ones (#32): <code>not_contains [a, b]</code> means neither <code>a</cod
 <h1 id="daterange"><a class="header" href="#daterange">DateRange</a></h1>
 <!-- Generated by `cargo xtask docs generate` from `schemas/policy/v1.json`. Do not edit by hand. -->
 <p>An inclusive range of dates. <code>to</code> unset means the single day <code>from</code>.</p>
-<p>Appears at: <code>/policy/rule_set_scopes/scopes/schedule/dates</code>, <code>/policy/rule_set_scopes/scopes/schedule/except_dates</code>, <code>/policy/scope/schedule/dates</code>, <code>/policy/scope/schedule/except_dates</code>, <code>/rule_sets/rules/scope/schedule/dates</code>, <code>/rule_sets/rules/scope/schedule/except_dates</code>.</p>
+<p>Appears at: <code>/policy/rule_set_scopes/scopes/schedule/dates</code>, <code>/policy/rule_set_scopes/scopes/schedule/except_dates</code>, <code>/policy/scope/schedule/dates</code>, <code>/policy/scope/schedule/except_dates</code>, <code>/policy/unknown/scope_limits/all_of/schedule/dates</code>, <code>/policy/unknown/scope_limits/all_of/schedule/except_dates</code>, and more.</p>
 <h2 id="fields-4"><a class="header" href="#fields-4">Fields</a></h2>
 <div class="table-wrapper">
 <table>
@@ -1566,7 +1633,7 @@ negative ones (#32): <code>not_contains [a, b]</code> means neither <code>a</cod
 <h1 id="deviceref"><a class="header" href="#deviceref">DeviceRef</a></h1>
 <!-- Generated by `cargo xtask docs generate` from `schemas/policy/v1.json`. Do not edit by hand. -->
 <p>A device or group of devices (#38).</p>
-<p>Appears at: <code>/policy/rule_set_scopes/scopes/devices/exclude</code>, <code>/policy/rule_set_scopes/scopes/devices/include</code>, <code>/policy/scope/devices/exclude</code>, <code>/policy/scope/devices/include</code>, <code>/rule_sets/rules/scope/devices/exclude</code>, <code>/rule_sets/rules/scope/devices/include</code>.</p>
+<p>Appears at: <code>/policy/rule_set_scopes/scopes/devices/exclude</code>, <code>/policy/rule_set_scopes/scopes/devices/include</code>, <code>/policy/scope/devices/exclude</code>, <code>/policy/scope/devices/include</code>, <code>/policy/unknown/scope_limits/all_of/devices/exclude</code>, <code>/policy/unknown/scope_limits/all_of/devices/include</code>, and more.</p>
 <h2 id="variants-1"><a class="header" href="#variants-1">Variants</a></h2>
 <h3 id="device_id"><a class="header" href="#device_id"><code>device_id</code></a></h3>
 <p>The device's Palisade ID.</p>
@@ -1660,7 +1727,7 @@ works out which sets a device is in.</p>
 <h1 id="directorygroup"><a class="header" href="#directorygroup">DirectoryGroup</a></h1>
 <!-- Generated by `cargo xtask docs generate` from `schemas/policy/v1.json`. Do not edit by hand. -->
 <p>A directory group.</p>
-<p>Appears at: <code>/policy/rule_set_scopes/scopes/principals/exclude/directory_group</code>, <code>/policy/rule_set_scopes/scopes/principals/include/directory_group</code>, <code>/policy/scope/principals/exclude/directory_group</code>, <code>/policy/scope/principals/include/directory_group</code>, <code>/rule_sets/rules/scope/principals/exclude/directory_group</code>, <code>/rule_sets/rules/scope/principals/include/directory_group</code>.</p>
+<p>Appears at: <code>/policy/rule_set_scopes/scopes/principals/exclude/directory_group</code>, <code>/policy/rule_set_scopes/scopes/principals/include/directory_group</code>, <code>/policy/scope/principals/exclude/directory_group</code>, <code>/policy/scope/principals/include/directory_group</code>, <code>/policy/unknown/scope_limits/all_of/principals/exclude/directory_group</code>, <code>/policy/unknown/scope_limits/all_of/principals/include/directory_group</code>, and more.</p>
 <h2 id="fields-5"><a class="header" href="#fields-5">Fields</a></h2>
 <div class="table-wrapper">
 <table>
@@ -1680,7 +1747,7 @@ works out which sets a device is in.</p>
 <h1 id="effects"><a class="header" href="#effects">Effects</a></h1>
 <!-- Generated by `cargo xtask docs generate` from `schemas/policy/v1.json`. Do not edit by hand. -->
 <p>The effect flags of one rule. Unset fields take the action's default.</p>
-<p>Appears at: <code>/rule_sets/rules/effects</code>.</p>
+<p>Appears at: <code>/policy/unknown/effects</code>, <code>/rule_sets/rules/effects</code>.</p>
 <h2 id="fields-6"><a class="header" href="#fields-6">Fields</a></h2>
 <div class="table-wrapper">
 <table>
@@ -1866,7 +1933,7 @@ policy, and validation rejects one that is left (<code>unresolved_ref</code>).</
 <!-- Generated by `cargo xtask docs generate` from `schemas/policy/v1.json`. Do not edit by hand. -->
 <p>A network location test (#38). Address tests match when any local
 interface address does.</p>
-<p>Appears at: <code>/policy/location_profiles/all</code>, <code>/policy/rule_set_scopes/scopes/network/exclude</code>, <code>/policy/rule_set_scopes/scopes/network/include</code>, <code>/policy/scope/network/exclude</code>, <code>/policy/scope/network/include</code>, <code>/rule_sets/rules/scope/network/exclude</code>, and more.</p>
+<p>Appears at: <code>/policy/location_profiles/all</code>, <code>/policy/rule_set_scopes/scopes/network/exclude</code>, <code>/policy/rule_set_scopes/scopes/network/include</code>, <code>/policy/scope/network/exclude</code>, <code>/policy/scope/network/include</code>, <code>/policy/unknown/scope_limits/all_of/network/exclude</code>, and more.</p>
 <h2 id="variants-3"><a class="header" href="#variants-3">Variants</a></h2>
 <h3 id="cidr"><a class="header" href="#cidr"><code>cidr</code></a></h3>
 <p>An address block, such as <code>10.20.0.0/16</code> or <code>2001:db8::/32</code>.</p>
@@ -1960,7 +2027,7 @@ suffixes.</p>
 <h1 id="ouref"><a class="header" href="#ouref">OuRef</a></h1>
 <!-- Generated by `cargo xtask docs generate` from `schemas/policy/v1.json`. Do not edit by hand. -->
 <p>A directory organisational unit.</p>
-<p>Appears at: <code>/policy/rule_set_scopes/scopes/devices/exclude/ou</code>, <code>/policy/rule_set_scopes/scopes/devices/include/ou</code>, <code>/policy/scope/devices/exclude/ou</code>, <code>/policy/scope/devices/include/ou</code>, <code>/rule_sets/rules/scope/devices/exclude/ou</code>, <code>/rule_sets/rules/scope/devices/include/ou</code>.</p>
+<p>Appears at: <code>/policy/rule_set_scopes/scopes/devices/exclude/ou</code>, <code>/policy/rule_set_scopes/scopes/devices/include/ou</code>, <code>/policy/scope/devices/exclude/ou</code>, <code>/policy/scope/devices/include/ou</code>, <code>/policy/unknown/scope_limits/all_of/devices/exclude/ou</code>, <code>/policy/unknown/scope_limits/all_of/devices/include/ou</code>, and more.</p>
 <h2 id="fields-11"><a class="header" href="#fields-11">Fields</a></h2>
 <div class="table-wrapper">
 <table>
@@ -2034,6 +2101,7 @@ document and has the default shown in the schema.</p>
 <tr><td><code>rule_sets</code></td><td>array of <a href="#rulesetid"><code>RuleSetId</code></a></td><td>no</td><td></td><td>at most 1000 items</td><td>1.0.0</td><td>The rule sets that apply, in order, by ID.</td></tr>
 <tr><td><code>scope</code></td><td><a href="#scope"><code>Scope</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>Who, where and when the whole policy applies (#38). Every rule must also be in this scope.</td></tr>
 <tr><td><code>settings</code></td><td><a href="#policysettings"><code>PolicySettings</code></a></td><td>no</td><td><code>{"allow_unknown_advanced":false,"capture_command_line":false,"decision_cache_ttl_secs":300,"dll_control":"enforce","driver_control":"enforce","group_cache_max_age_secs":86400,"max_ancestor_depth":8,"poll_interval_secs":900,"script_control":"enforce","time_zone_basis":"device_local"}</code></td><td></td><td>1.0.0</td><td>Typed settings. Every field has a documented default.</td></tr>
+<tr><td><code>unknown</code></td><td><a href="#unknownpolicy"><code>UnknownPolicy</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>What happens when no rule decides (#39). The default blocks every unknown object.</td></tr>
 </tbody>
 </table>
 </div>
@@ -2067,7 +2135,7 @@ document and has the default shown in the schema.</p>
 <h1 id="principalref"><a class="header" href="#principalref">PrincipalRef</a></h1>
 <!-- Generated by `cargo xtask docs generate` from `schemas/policy/v1.json`. Do not edit by hand. -->
 <p>A user or group (#38). Each is an object with one key, the kind.</p>
-<p>Appears at: <code>/policy/rule_set_scopes/scopes/principals/exclude</code>, <code>/policy/rule_set_scopes/scopes/principals/include</code>, <code>/policy/scope/principals/exclude</code>, <code>/policy/scope/principals/include</code>, <code>/rule_sets/rules/scope/principals/exclude</code>, <code>/rule_sets/rules/scope/principals/include</code>.</p>
+<p>Appears at: <code>/policy/rule_set_scopes/scopes/principals/exclude</code>, <code>/policy/rule_set_scopes/scopes/principals/include</code>, <code>/policy/scope/principals/exclude</code>, <code>/policy/scope/principals/include</code>, <code>/policy/unknown/scope_limits/all_of/principals/exclude</code>, <code>/policy/unknown/scope_limits/all_of/principals/include</code>, and more.</p>
 <h2 id="variants-4"><a class="header" href="#variants-4">Variants</a></h2>
 <h3 id="sid"><a class="header" href="#sid"><code>sid</code></a></h3>
 <p>A user or group SID, such as <code>S-1-5-32-544</code>.</p>
@@ -2158,12 +2226,37 @@ an object run, and only widen a deny (validation).</p>
 <hr>
 <p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/book/src/reference/generated/policy/principal-ref.md"><code>docs/book/src/reference/generated/policy/principal-ref.md</code></a> on GitHub.</small></p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="promptsettings"><a class="header" href="#promptsettings">PromptSettings</a></h1>
+<!-- Generated by `cargo xtask docs generate` from `schemas/policy/v1.json`. Do not edit by hand. -->
+<p>How the <code>prompt</code> level asks the user.</p>
+<p>Appears at: <code>/policy/unknown/prompt</code>.</p>
+<h2 id="fields-15"><a class="header" href="#fields-15">Fields</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Required</th><th>Default</th><th>Constraints</th><th>Since</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>fallback</code></td><td><a href="#level"><code>Level</code></a></td><td>no</td><td><code>"block"</code></td><td></td><td>1.0.0</td><td>The level applied when the prompt times out, when there is no interactive session, and for objects that cannot be prompted for. Any level but <code>prompt</code>; the default is <code>block</code>.</td></tr>
+<tr><td><code>local_approval_scope</code></td><td><a href="#approvalscope"><code>ApprovalScope</code></a></td><td>no</td><td><code>"user"</code></td><td></td><td>1.0.0</td><td>Who an <code>allow_always_local</code> approval applies to.</td></tr>
+<tr><td><code>options</code></td><td>array of <a href="#promptoption"><code>PromptOption</code></a></td><td>no</td><td><code>["allow_once","request_approval","block"]</code></td><td>1 to 4 items</td><td>1.0.0</td><td>The answers offered, each at most once. The default is <code>allow_once</code>, <code>request_approval</code> and <code>block</code>.</td></tr>
+<tr><td><code>reauth</code></td><td><a href="#reauth"><code>Reauth</code></a></td><td>no</td><td><code>"none"</code></td><td></td><td>1.0.0</td><td>What the user must do again before an answer counts.</td></tr>
+<tr><td><code>require_justification</code></td><td>boolean</td><td>no</td><td><code>false</code></td><td></td><td>1.0.0</td><td>The user must give a reason before an answer counts.</td></tr>
+<tr><td><code>temp_approval_days</code></td><td>integer</td><td>no</td><td><code>14</code></td><td>1 to 90; format <code>uint16</code></td><td>1.0.0</td><td>How long an <code>allow_always_local</code> approval lasts, in days, for an object from the internet, removable media or a network, or of unknown origin: 1 to 90, default 14. Other approvals do not expire.</td></tr>
+<tr><td><code>timeout_secs</code></td><td>integer</td><td>no</td><td><code>60</code></td><td>10 to 600; format <code>uint32</code></td><td>1.0.0</td><td>How long the prompt waits, in seconds: 10 to 600, default 60.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Unknown fields are rejected.</p>
+<hr>
+<p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/book/src/reference/generated/policy/prompt-settings.md"><code>docs/book/src/reference/generated/policy/prompt-settings.md</code></a> on GitHub.</small></p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="reflist"><a class="header" href="#reflist">RefList</a></h1>
 <!-- Generated by `cargo xtask docs generate` from `schemas/policy/v1.json`. Do not edit by hand. -->
 <p>An <code>include</code> and an <code>exclude</code> list. An empty <code>include</code> means every
 entry; a match in <code>exclude</code> always wins.</p>
-<p>Appears at: <code>/policy/rule_set_scopes/scopes/principals</code>, <code>/policy/scope/principals</code>, <code>/rule_sets/rules/scope/principals</code>.</p>
-<h2 id="fields-15"><a class="header" href="#fields-15">Fields</a></h2>
+<p>Appears at: <code>/policy/rule_set_scopes/scopes/principals</code>, <code>/policy/scope/principals</code>, <code>/policy/unknown/scope_limits/all_of/principals</code>, <code>/policy/unknown/scope_limits/any_of/principals</code>, <code>/policy/unknown/scopes/principals</code>, <code>/rule_sets/rules/scope/principals</code>.</p>
+<h2 id="fields-16"><a class="header" href="#fields-16">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -2183,8 +2276,8 @@ entry; a match in <code>exclude</code> always wins.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/policy/v1.json`. Do not edit by hand. -->
 <p>An <code>include</code> and an <code>exclude</code> list. An empty <code>include</code> means every
 entry; a match in <code>exclude</code> always wins.</p>
-<p>Appears at: <code>/policy/rule_set_scopes/scopes/devices</code>, <code>/policy/scope/devices</code>, <code>/rule_sets/rules/scope/devices</code>.</p>
-<h2 id="fields-16"><a class="header" href="#fields-16">Fields</a></h2>
+<p>Appears at: <code>/policy/rule_set_scopes/scopes/devices</code>, <code>/policy/scope/devices</code>, <code>/policy/unknown/scope_limits/all_of/devices</code>, <code>/policy/unknown/scope_limits/any_of/devices</code>, <code>/policy/unknown/scopes/devices</code>, <code>/rule_sets/rules/scope/devices</code>.</p>
+<h2 id="fields-17"><a class="header" href="#fields-17">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -2204,8 +2297,8 @@ entry; a match in <code>exclude</code> always wins.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/policy/v1.json`. Do not edit by hand. -->
 <p>An <code>include</code> and an <code>exclude</code> list. An empty <code>include</code> means every
 entry; a match in <code>exclude</code> always wins.</p>
-<p>Appears at: <code>/policy/rule_set_scopes/scopes/network</code>, <code>/policy/scope/network</code>, <code>/rule_sets/rules/scope/network</code>.</p>
-<h2 id="fields-17"><a class="header" href="#fields-17">Fields</a></h2>
+<p>Appears at: <code>/policy/rule_set_scopes/scopes/network</code>, <code>/policy/scope/network</code>, <code>/policy/unknown/scope_limits/all_of/network</code>, <code>/policy/unknown/scope_limits/any_of/network</code>, <code>/policy/unknown/scopes/network</code>, <code>/rule_sets/rules/scope/network</code>.</p>
+<h2 id="fields-18"><a class="header" href="#fields-18">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -2226,7 +2319,7 @@ entry; a match in <code>exclude</code> always wins.</p>
 <p>The scopes of one rule-set assignment: every one must match for the
 set's rules to apply.</p>
 <p>Appears at: <code>/policy/rule_set_scopes</code>.</p>
-<h2 id="fields-18"><a class="header" href="#fields-18">Fields</a></h2>
+<h2 id="fields-19"><a class="header" href="#fields-19">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -2246,7 +2339,7 @@ set's rules to apply.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/policy/v1.json`. Do not edit by hand. -->
 <p>A named, reusable, ordered collection of rules.</p>
 <p>Appears at: <code>/rule_sets</code>.</p>
-<h2 id="fields-19"><a class="header" href="#fields-19">Fields</a></h2>
+<h2 id="fields-20"><a class="header" href="#fields-20">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -2279,7 +2372,7 @@ set's rules to apply.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/policy/v1.json`. Do not edit by hand. -->
 <p>One rule: a match tree and the action taken when it matches.</p>
 <p>Appears at: <code>/rule_sets/rules</code>.</p>
-<h2 id="fields-20"><a class="header" href="#fields-20">Fields</a></h2>
+<h2 id="fields-21"><a class="header" href="#fields-21">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -2315,8 +2408,8 @@ on one of its days at <code>start</code> and lasts until <code>end</code> (which
 the next day: <code>22:00</code> to <code>06:00</code> wraps midnight) or for <code>duration_mins</code>.
 With no windows, every time of day is in. <code>dates</code> and <code>except_dates</code>
 test the local date of the moment being decided.</p>
-<p>Appears at: <code>/policy/rule_set_scopes/scopes/schedule</code>, <code>/policy/scope/schedule</code>, <code>/rule_sets/rules/scope/schedule</code>.</p>
-<h2 id="fields-21"><a class="header" href="#fields-21">Fields</a></h2>
+<p>Appears at: <code>/policy/rule_set_scopes/scopes/schedule</code>, <code>/policy/scope/schedule</code>, <code>/policy/unknown/scope_limits/all_of/schedule</code>, <code>/policy/unknown/scope_limits/any_of/schedule</code>, <code>/policy/unknown/scopes/schedule</code>, <code>/rule_sets/rules/scope/schedule</code>.</p>
+<h2 id="fields-22"><a class="header" href="#fields-22">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -2336,6 +2429,29 @@ test the local date of the moment being decided.</p>
 <hr>
 <p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/book/src/reference/generated/policy/schedule.md"><code>docs/book/src/reference/generated/policy/schedule.md</code></a> on GitHub.</small></p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="scopelimit"><a class="header" href="#scopelimit">ScopeLimit</a></h1>
+<!-- Generated by `cargo xtask docs generate` from `schemas/policy/v1.json`. Do not edit by hand. -->
+<p>One contributing policy's limit on where its unknown settings apply, in
+an effective policy (<code>UnknownPolicy::scope_limits</code>). It holds when
+every scope of <code>all_of</code> matches and, if <code>any_of</code> is not empty, one of
+its scopes matches.</p>
+<p>Appears at: <code>/policy/unknown/scope_limits</code>.</p>
+<h2 id="fields-23"><a class="header" href="#fields-23">Fields</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Required</th><th>Default</th><th>Constraints</th><th>Since</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>all_of</code></td><td>array of <a href="#scope"><code>Scope</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>The contributing policy's <code>policy.scope</code>, if it has one. At most one scope: the width of an entry is never more than its source policy's, so the authored limits apply to it unchanged.</td></tr>
+<tr><td><code>any_of</code></td><td>array of <a href="#scope"><code>Scope</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>The contributing policy's <code>unknown.scopes</code>.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Unknown fields are rejected.</p>
+<hr>
+<p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/book/src/reference/generated/policy/scope-limit.md"><code>docs/book/src/reference/generated/policy/scope-limit.md</code></a> on GitHub.</small></p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="scope"><a class="header" href="#scope">Scope</a></h1>
 <!-- Generated by `cargo xtask docs generate` from `schemas/policy/v1.json`. Do not edit by hand. -->
 <p>Who, where and when a rule applies (#38).</p>
@@ -2343,8 +2459,8 @@ test the local date of the moment being decided.</p>
 always. A scope only ever narrows: a rule applies when its match tree
 matches <strong>and</strong> every scope on the way to it matches (the policy's, its
 rule set assignment's, and its own).</p>
-<p>Appears at: <code>/policy/rule_set_scopes/scopes</code>, <code>/policy/scope</code>, <code>/rule_sets/rules/scope</code>.</p>
-<h2 id="fields-22"><a class="header" href="#fields-22">Fields</a></h2>
+<p>Appears at: <code>/policy/rule_set_scopes/scopes</code>, <code>/policy/scope</code>, <code>/policy/unknown/scope_limits/all_of</code>, <code>/policy/unknown/scope_limits/any_of</code>, <code>/policy/unknown/scopes</code>, <code>/rule_sets/rules/scope</code>.</p>
+<h2 id="fields-24"><a class="header" href="#fields-24">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -2371,8 +2487,8 @@ rule set assignment's, and its own).</p>
 <h1 id="sessionfilter"><a class="header" href="#sessionfilter">SessionFilter</a></h1>
 <!-- Generated by `cargo xtask docs generate` from `schemas/policy/v1.json`. Do not edit by hand. -->
 <p>Session criteria (#38).</p>
-<p>Appears at: <code>/policy/rule_set_scopes/scopes/sessions</code>, <code>/policy/scope/sessions</code>, <code>/rule_sets/rules/scope/sessions</code>.</p>
-<h2 id="fields-23"><a class="header" href="#fields-23">Fields</a></h2>
+<p>Appears at: <code>/policy/rule_set_scopes/scopes/sessions</code>, <code>/policy/scope/sessions</code>, <code>/policy/unknown/scope_limits/all_of/sessions</code>, <code>/policy/unknown/scope_limits/any_of/sessions</code>, <code>/policy/unknown/scopes/sessions</code>, <code>/rule_sets/rules/scope/sessions</code>.</p>
+<h2 id="fields-25"><a class="header" href="#fields-25">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -2407,6 +2523,19 @@ rule set assignment's, and its own).</p>
 </tbody>
 </table>
 </div>
+<h2 id="approvalscope"><a class="header" href="#approvalscope">ApprovalScope</a></h2>
+<p>Who a device-local approval applies to.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>user</code></td><td>Only the user who approved it. The default.</td></tr>
+<tr><td><code>device</code></td><td>Every user of the device.</td></tr>
+</tbody>
+</table>
+</div>
 <h2 id="combine"><a class="header" href="#combine">Combine</a></h2>
 <p>How a scope's dimensions combine.</p>
 <div class="table-wrapper">
@@ -2417,6 +2546,22 @@ rule set assignment's, and its own).</p>
 <tbody>
 <tr><td><code>all</code></td><td>Every dimension that is set must match. The default.</td></tr>
 <tr><td><code>any</code></td><td>At least one dimension that is set must match.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="compliancepreset"><a class="header" href="#compliancepreset">CompliancePreset</a></h2>
+<p>A compliance preset: a named starting configuration. Changes that make
+the policy weaker than its preset raise a compliance warning (#17).
+Ordered from the least to the most demanding.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>e8_ml1</code></td><td>Essential Eight maturity level 1: block in user profiles, temporary folders and other user-writable locations, detect elsewhere (ISM-1870).</td></tr>
+<tr><td><code>e8_ml2</code></td><td>Essential Eight maturity level 2: block in every location (ISM-1871).</td></tr>
+<tr><td><code>e8_ml3</code></td><td>Essential Eight maturity level 3: level 2, drivers blocked, and a mandatory blocklist required (ISM-1658). Drivers loaded during early boot are only audited unless <code>driver_boot_policy</code> is <code>enforce</code>; validation warns about that exemption.</td></tr>
 </tbody>
 </table>
 </div>
@@ -2440,6 +2585,20 @@ rule set assignment's, and its own).</p>
 <h2 id="date"><a class="header" href="#date">Date</a></h2>
 <p>A calendar date, <code>YYYY-MM-DD</code>.</p>
 <p>Type: string; matches <code>^[0-9]{4}-[0-9]{2}-[0-9]{2}$</code>.</p>
+<h2 id="driverbootpolicy"><a class="header" href="#driverbootpolicy">DriverBootPolicy</a></h2>
+<p>How unknown drivers are handled while the device boots, before the agent
+has fully started (<code>boot_phase: early</code>).</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>audit</code></td><td>Report what would be blocked, and block nothing. The default, until the tenant enables enforcement explicitly.</td></tr>
+<tr><td><code>enforce</code></td><td>Apply the unknown-handling level.</td></tr>
+</tbody>
+</table>
+</div>
 <h2 id="elevationauth"><a class="header" href="#elevationauth">ElevationAuth</a></h2>
 <p>The confirmation an <code>allow_elevated</code> action asks for.</p>
 <div class="table-wrapper">
@@ -2574,6 +2733,23 @@ versions, each with its facts and matcher.</p>
 <tr><td><code>time.weekday</code></td><td>Context (#33): the day of the week of the evaluation, as <code>mon</code> to <code>sun</code>, in the clock the policy's <code>time_zone_basis</code> names.</td></tr>
 <tr><td><code>time.local_time</code></td><td>Context (#33): the time of day of the evaluation, as <code>HH:MM</code>, in the policy's clock.</td></tr>
 <tr><td><code>time.date</code></td><td>Context (#33): the date of the evaluation, as <code>YYYY-MM-DD</code>, in the policy's clock.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="level"><a class="header" href="#level">Level</a></h2>
+<p>How an unknown object is handled. The variants are declared from least
+to most restrictive, so <code>Ord</code> is the restrictiveness order.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>allow</code></td><td>Allowed silently. Validation warns, and Essential Eight presets do not permit it for user profiles or temporary folders.</td></tr>
+<tr><td><code>detect</code></td><td>Allowed, but logged with severity medium and flagged unhandled.</td></tr>
+<tr><td><code>prompt</code></td><td>The user is asked (#11). Not for libraries, drivers, objects that a blocklist matched, or sessions with no interactive user; those get the prompt's fallback.</td></tr>
+<tr><td><code>restrict</code></td><td>Allowed inside the <code>restrict_profile</code> containment profile (#14). Only for executables, scripts and installers. It fails closed to <code>block</code> when the containment component is not installed.</td></tr>
+<tr><td><code>block</code></td><td>Blocked. The default.</td></tr>
 </tbody>
 </table>
 </div>
@@ -2734,6 +2910,21 @@ under every model (ADR 0004). The semantics of each model are in
 </tbody>
 </table>
 </div>
+<h2 id="preexistingpolicy"><a class="header" href="#preexistingpolicy">PreexistingPolicy</a></h2>
+<p>What happens to files that were on the device when the agent was
+installed (origin <code>preexisting</code>).</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>treat_as_unknown</code></td><td>They are unknown like any other object.</td></tr>
+<tr><td><code>local_approve</code></td><td>The agent approves each one locally at install (#69). The engine then sees the approvals as rules, and treats a file without one as unknown.</td></tr>
+<tr><td><code>baseline_only</code></td><td>They run only if the approved baseline (#5) allows them: at stage 6 they are blocked, whatever the levels say. The default.</td></tr>
+</tbody>
+</table>
+</div>
 <h2 id="prioritydirection"><a class="header" href="#prioritydirection">PriorityDirection</a></h2>
 <p>Which <code>priority</code> number wins.</p>
 <div class="table-wrapper">
@@ -2744,6 +2935,36 @@ under every model (ADR 0004). The semantics of each model are in
 <tbody>
 <tr><td><code>lower_wins</code></td><td>The lowest number wins. The default.</td></tr>
 <tr><td><code>higher_wins</code></td><td>The highest number wins.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="promptoption"><a class="header" href="#promptoption">PromptOption</a></h2>
+<p>An answer the user may give to a prompt.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>allow_once</code></td><td>Run this once.</td></tr>
+<tr><td><code>allow_always_local</code></td><td>Run it, and approve its hash on this device (<code>crate::unknown::LocalApproval</code>). The approval is uploaded for review, and is temporary for objects from the internet, removable media or a network.</td></tr>
+<tr><td><code>request_approval</code></td><td>Do not run it, and ask an administrator to approve it (#11).</td></tr>
+<tr><td><code>block</code></td><td>Do not run it.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="reauth"><a class="header" href="#reauth">Reauth</a></h2>
+<p>What the user must do before an answer counts. Ordered from the
+weakest to the strongest.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>none</code></td><td>Nothing more.</td></tr>
+<tr><td><code>password</code></td><td>Enter their password again.</td></tr>
+<tr><td><code>mfa</code></td><td>Complete multi-factor authentication.</td></tr>
 </tbody>
 </table>
 </div>
@@ -2926,11 +3147,43 @@ under every model (ADR 0004). The semantics of each model are in
 <hr>
 <p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/book/src/reference/generated/policy/types.md"><code>docs/book/src/reference/generated/policy/types.md</code></a> on GitHub.</small></p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="unknownpolicy"><a class="header" href="#unknownpolicy">UnknownPolicy</a></h1>
+<!-- Generated by `cargo xtask docs generate` from `schemas/policy/v1.json`. Do not edit by hand. -->
+<p>The unknown-application policy (#39). Every field is optional in a
+document; the defaults block every unknown object.</p>
+<p>Appears at: <code>/policy/unknown</code>.</p>
+<h2 id="fields-26"><a class="header" href="#fields-26">Fields</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Required</th><th>Default</th><th>Constraints</th><th>Since</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>allow_request</code></td><td>boolean</td><td>no</td><td><code>false</code></td><td></td><td>1.0.0</td><td>When an unknown object is blocked, the user may ask for approval (#11).</td></tr>
+<tr><td><code>by_location</code></td><td>map of <a href="#level"><code>Level</code></a></td><td>no</td><td></td><td>keys: one of <code>user_profile</code>, <code>temp</code>, <code>user_writable_other</code>, <code>program_files</code>, <code>windows</code>, <code>other_fixed</code>, <code>removable</code>, <code>network</code>, <code>optical</code>, <code>ads</code></td><td>1.0.0</td><td>The level per location class.</td></tr>
+<tr><td><code>by_origin</code></td><td>map of <a href="#level"><code>Level</code></a></td><td>no</td><td></td><td>keys: one of <code>internet</code>, <code>email_attachment</code>, <code>removable_copy</code>, <code>network_share</code>, <code>trusted_source</code>, <code>preexisting</code>, <code>unknown</code></td><td>1.0.0</td><td>The level per origin.</td></tr>
+<tr><td><code>by_type</code></td><td>object</td><td>no</td><td></td><td>keys: one of <code>executable</code>, <code>library</code>, <code>driver</code>, <code>script.powershell</code>, <code>script.batch</code>, <code>script.cmd</code>, <code>script.vbscript</code>, <code>script.jscript</code>, <code>script.wsf</code>, <code>script.wsc</code>, <code>script.python</code>, <code>script.java</code>, <code>script.reg</code>, <code>script.other</code>, <code>installer</code>, <code>compiled_html</code>, <code>html_application</code>, <code>control_panel_applet</code>, <code>packaged_app</code>, <code>command</code>, <code>com_object</code></td><td>1.0.0</td><td>The level per object type. <code>restrict</code> only for executables, scripts and installers; <code>prompt</code> not for libraries or drivers.</td></tr>
+<tr><td><code>default</code></td><td><a href="#level"><code>Level</code></a></td><td>no</td><td><code>"block"</code></td><td></td><td>1.0.0</td><td>The level when no entry below applies. The default is <code>block</code>.</td></tr>
+<tr><td><code>driver_boot_policy</code></td><td><a href="#driverbootpolicy"><code>DriverBootPolicy</code></a></td><td>no</td><td><code>"audit"</code></td><td></td><td>1.0.0</td><td>How unknown drivers are handled during early boot.</td></tr>
+<tr><td><code>effects</code></td><td><a href="#effects"><code>Effects</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>Logging, upload, notification, severity and tags of unknown-object decisions (#34). <code>log</code> must be <code>always</code> or <code>sampled</code>: an unhandled object is always reported.</td></tr>
+<tr><td><code>preexisting_policy</code></td><td><a href="#preexistingpolicy"><code>PreexistingPolicy</code></a></td><td>no</td><td><code>"baseline_only"</code></td><td></td><td>1.0.0</td><td>What happens to files present at install.</td></tr>
+<tr><td><code>preset</code></td><td><a href="#compliancepreset"><code>CompliancePreset</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>The compliance preset this policy started from, if any.</td></tr>
+<tr><td><code>prompt</code></td><td><a href="#promptsettings"><code>PromptSettings</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>How the <code>prompt</code> level asks.</td></tr>
+<tr><td><code>restrict_profile</code></td><td><a href="#containmentprofileref"><code>ContainmentProfileRef</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>The containment profile of the <code>restrict</code> level (#14). Required when any level, or the prompt's fallback, is <code>restrict</code>.</td></tr>
+<tr><td><code>scope_limits</code></td><td>array of <a href="#scopelimit"><code>ScopeLimit</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>Effective policies only (#37): where these settings apply, one <code>ScopeLimit</code> per contributing policy, kept as that policy wrote it. The settings apply to a subject when <strong>any</strong> entry holds; empty, the default, means no further limit. An effective policy has no <code>policy.scope</code>, so the hierarchy moves each contributing policy's <code>scope</code> and <code>scopes</code> here unexpanded (<code>UnknownPolicy::scope_limit_of</code>). The size is therefore linear in contributing policies, at most <code>MAX_CONTRIBUTING_POLICIES</code> (in <code>hierarchy::limits</code>) entries, and building an effective policy from valid policies never fails on it. Validation rejects it in a document it validates as authored, which writes <code>policy.scope</code> and <code>unknown.scopes</code> instead.</td></tr>
+<tr><td><code>scopes</code></td><td>array of <a href="#scope"><code>Scope</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>Where these settings apply, besides the policy's <code>scope</code> (#38): a subject in at least one of these scopes, at most 1000. Empty, the default, means wherever the policy applies. A subject outside it is decided by the built-in implicit deny (<code>crate::unknown</code>).</td></tr>
+</tbody>
+</table>
+</div>
+<p>Unknown fields are rejected.</p>
+<hr>
+<p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/book/src/reference/generated/policy/unknown-policy.md"><code>docs/book/src/reference/generated/policy/unknown-policy.md</code></a> on GitHub.</small></p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="window"><a class="header" href="#window">Window</a></h1>
 <!-- Generated by `cargo xtask docs generate` from `schemas/policy/v1.json`. Do not edit by hand. -->
 <p>One weekly window.</p>
-<p>Appears at: <code>/policy/rule_set_scopes/scopes/schedule/windows</code>, <code>/policy/scope/schedule/windows</code>, <code>/rule_sets/rules/scope/schedule/windows</code>.</p>
-<h2 id="fields-24"><a class="header" href="#fields-24">Fields</a></h2>
+<p>Appears at: <code>/policy/rule_set_scopes/scopes/schedule/windows</code>, <code>/policy/scope/schedule/windows</code>, <code>/policy/unknown/scope_limits/all_of/schedule/windows</code>, <code>/policy/unknown/scope_limits/any_of/schedule/windows</code>, <code>/policy/unknown/scopes/schedule/windows</code>, <code>/rule_sets/rules/scope/schedule/windows</code>.</p>
+<h2 id="fields-27"><a class="header" href="#fields-27">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -2954,7 +3207,7 @@ under every model (ADR 0004). The semantics of each model are in
 <p>Field order here is the serialisation order, so <code>Event::to_canonical_json</code>
 is deterministic.</p>
 <p>Schema: <a href="https://github.com/jusso-dev/palisade/blob/main/schemas/events/v1.json"><code>schemas/events/v1.json</code></a> (<code>$id</code> <code>https://github.com/jusso-dev/palisade/schemas/events/v1.json</code>), version 1.2.0. Regenerate the schema with <code>PALISADE_BLESS=1 cargo test -p palisade-proto --test events_schema</code>, then these pages with <code>cargo xtask docs generate</code>.</p>
-<h2 id="fields-25"><a class="header" href="#fields-25">Fields</a></h2>
+<h2 id="fields-28"><a class="header" href="#fields-28">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3044,7 +3297,7 @@ is deterministic.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>An account or group in a directory or on the device.</p>
 <p>Appears at: <code>/identity/group</code>, <code>/identity/member</code>.</p>
-<h2 id="fields-26"><a class="header" href="#fields-26">Fields</a></h2>
+<h2 id="fields-29"><a class="header" href="#fields-29">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3066,7 +3319,7 @@ is deterministic.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>An administrative action on the server (#132).</p>
 <p>Appears at: <code>/admin</code>.</p>
-<h2 id="fields-27"><a class="header" href="#fields-27">Fields</a></h2>
+<h2 id="fields-30"><a class="header" href="#fields-30">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3097,7 +3350,7 @@ is deterministic.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>Agent state.</p>
 <p>Appears at: <code>/agent</code>.</p>
-<h2 id="fields-28"><a class="header" href="#fields-28">Fields</a></h2>
+<h2 id="fields-31"><a class="header" href="#fields-31">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3120,7 +3373,7 @@ is deterministic.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>An approval request and its decision.</p>
 <p>Appears at: <code>/approval</code>.</p>
-<h2 id="fields-29"><a class="header" href="#fields-29">Fields</a></h2>
+<h2 id="fields-32"><a class="header" href="#fields-32">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3134,7 +3387,7 @@ is deterministic.</p>
 <tr><td><code>kind</code></td><td><a href="#approvalkind"><code>ApprovalKind</code></a></td><td>no</td><td></td><td></td><td>1.1.0</td><td>What is asked for.</td></tr>
 <tr><td><code>reason</code></td><td>string</td><td>no</td><td></td><td>1 to 1024 characters</td><td>1.1.0</td><td>The requester's or approver's reason.</td></tr>
 <tr><td><code>request_id</code></td><td><a href="#uuid7-1"><code>Uuid7</code></a></td><td>no</td><td></td><td></td><td>1.1.0</td><td>The request.</td></tr>
-<tr><td><code>requested_scope</code></td><td><a href="#approvalscope"><code>ApprovalScope</code></a></td><td>no</td><td></td><td></td><td>1.1.0</td><td>What the approval would cover.</td></tr>
+<tr><td><code>requested_scope</code></td><td><a href="#approvalscope-1"><code>ApprovalScope</code></a></td><td>no</td><td></td><td></td><td>1.1.0</td><td>What the approval would cover.</td></tr>
 <tr><td><code>ticket_ref</code></td><td>string</td><td>no</td><td></td><td>1 to 256 characters</td><td>1.1.0</td><td>The ITSM ticket reference.</td></tr>
 </tbody>
 </table>
@@ -3147,7 +3400,7 @@ is deterministic.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>A change to the OS audit policy.</p>
 <p>Appears at: <code>/audit_policy</code>.</p>
-<h2 id="fields-30"><a class="header" href="#fields-30">Fields</a></h2>
+<h2 id="fields-33"><a class="header" href="#fields-33">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3168,7 +3421,7 @@ is deterministic.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>Cache counters.</p>
 <p>Appears at: <code>/agent/cache</code>.</p>
-<h2 id="fields-31"><a class="header" href="#fields-31">Fields</a></h2>
+<h2 id="fields-34"><a class="header" href="#fields-34">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3189,7 +3442,7 @@ is deterministic.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>One change to an object.</p>
 <p>Appears at: <code>/admin/changes</code>.</p>
-<h2 id="fields-32"><a class="header" href="#fields-32">Fields</a></h2>
+<h2 id="fields-35"><a class="header" href="#fields-35">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3211,7 +3464,7 @@ is deterministic.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>A peripheral device.</p>
 <p>Appears at: <code>/device</code>.</p>
-<h2 id="fields-33"><a class="header" href="#fields-33">Fields</a></h2>
+<h2 id="fields-36"><a class="header" href="#fields-36">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3237,7 +3490,7 @@ is deterministic.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>A privilege elevation.</p>
 <p>Appears at: <code>/elevation</code>.</p>
-<h2 id="fields-34"><a class="header" href="#fields-34">Fields</a></h2>
+<h2 id="fields-37"><a class="header" href="#fields-37">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3261,7 +3514,7 @@ is deterministic.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>The file an event is about: the target of a decision.</p>
 <p>Appears at: <code>/file</code>.</p>
-<h2 id="fields-35"><a class="header" href="#fields-35">Fields</a></h2>
+<h2 id="fields-38"><a class="header" href="#fields-38">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3294,7 +3547,7 @@ is deterministic.</p>
 <p>A change to a monitored file (#183). The file as it is now is
 <code>super::Event::file</code>; this records what it was before.</p>
 <p>Appears at: <code>/fim</code>.</p>
-<h2 id="fields-36"><a class="header" href="#fields-36">Fields</a></h2>
+<h2 id="fields-39"><a class="header" href="#fields-39">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3323,7 +3576,7 @@ digest for scripts and other signable formats. SHA-1 and MD5 are for
 matching OS and imported data only, never the sole basis of a decision
 (ADR 0008).</p>
 <p>Appears at: <code>/file/hashes</code>, <code>/process/hashes</code>, <code>/process/parent/hashes</code>.</p>
-<h2 id="fields-37"><a class="header" href="#fields-37">Fields</a></h2>
+<h2 id="fields-40"><a class="header" href="#fields-40">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3346,7 +3599,7 @@ matching OS and imported data only, never the sole basis of a decision
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>The device an event is about.</p>
 <p>Appears at: <code>/host</code>.</p>
-<h2 id="fields-38"><a class="header" href="#fields-38">Fields</a></h2>
+<h2 id="fields-41"><a class="header" href="#fields-41">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3375,7 +3628,7 @@ matching OS and imported data only, never the sole basis of a decision
 <p>Identity details: logons and group membership changes. The account that
 logged on, or that made a change, is <code>super::Event::user</code>.</p>
 <p>Appears at: <code>/identity</code>.</p>
-<h2 id="fields-39"><a class="header" href="#fields-39">Fields</a></h2>
+<h2 id="fields-42"><a class="header" href="#fields-42">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3404,7 +3657,7 @@ rule-collection engines.</p>
 <p>These are the OS's own identifiers. Linking them to the Palisade policy
 and rule that produced the native policy fills <code>Event::policy</code> (#90).</p>
 <p>Appears at: <code>/native</code>.</p>
-<h2 id="fields-40"><a class="header" href="#fields-40">Fields</a></h2>
+<h2 id="fields-43"><a class="header" href="#fields-43">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3443,7 +3696,7 @@ and rule that produced the native policy fills <code>Event::policy</code> (#90).
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>A network connection or request.</p>
 <p>Appears at: <code>/network</code>.</p>
-<h2 id="fields-41"><a class="header" href="#fields-41">Fields</a></h2>
+<h2 id="fields-44"><a class="header" href="#fields-44">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3471,7 +3724,7 @@ and rule that produced the native policy fills <code>Event::policy</code> (#90).
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>Where a file came from.</p>
 <p>Appears at: <code>/process/origin</code>, <code>/process/parent/origin</code>.</p>
-<h2 id="fields-42"><a class="header" href="#fields-42">Fields</a></h2>
+<h2 id="fields-45"><a class="header" href="#fields-45">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3493,7 +3746,7 @@ and rule that produced the native policy fills <code>Event::policy</code> (#90).
 <p>A parent process. It has no parent of its own: the grandparent is
 summarised on the child.</p>
 <p>Appears at: <code>/process/parent</code>.</p>
-<h2 id="fields-43"><a class="header" href="#fields-43">Fields</a></h2>
+<h2 id="fields-46"><a class="header" href="#fields-46">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3523,7 +3776,7 @@ summarised on the child.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>The Palisade policy and rule behind a decision.</p>
 <p>Appears at: <code>/policy</code>.</p>
-<h2 id="fields-44"><a class="header" href="#fields-44">Fields</a></h2>
+<h2 id="fields-47"><a class="header" href="#fields-47">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3549,7 +3802,7 @@ summarised on the child.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>Who acted, as the server knows them.</p>
 <p>Appears at: <code>/admin/actor</code>, <code>/approval/decided_by</code>, <code>/elevation/approver</code>.</p>
-<h2 id="fields-45"><a class="header" href="#fields-45">Fields</a></h2>
+<h2 id="fields-48"><a class="header" href="#fields-48">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3572,7 +3825,7 @@ summarised on the child.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>One compliance probe and its result (#210).</p>
 <p>Appears at: <code>/probe</code>.</p>
-<h2 id="fields-46"><a class="header" href="#fields-46">Fields</a></h2>
+<h2 id="fields-49"><a class="header" href="#fields-49">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3597,7 +3850,7 @@ summarised on the child.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>A short description of a process.</p>
 <p>Appears at: <code>/process/grandparent</code>.</p>
-<h2 id="fields-47"><a class="header" href="#fields-47">Fields</a></h2>
+<h2 id="fields-50"><a class="header" href="#fields-50">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3618,7 +3871,7 @@ summarised on the child.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>The process that acted.</p>
 <p>Appears at: <code>/process</code>.</p>
-<h2 id="fields-48"><a class="header" href="#fields-48">Fields</a></h2>
+<h2 id="fields-51"><a class="header" href="#fields-51">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3651,7 +3904,7 @@ summarised on the child.</p>
 <p>Registry value data: recorded truncated, hashed, or both, never in full
 beyond the preview limit.</p>
 <p>Appears at: <code>/registry/new</code>, <code>/registry/old</code>.</p>
-<h2 id="fields-49"><a class="header" href="#fields-49">Fields</a></h2>
+<h2 id="fields-52"><a class="header" href="#fields-52">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3674,7 +3927,7 @@ beyond the preview limit.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>A registry key or value.</p>
 <p>Appears at: <code>/registry</code>.</p>
-<h2 id="fields-50"><a class="header" href="#fields-50">Fields</a></h2>
+<h2 id="fields-53"><a class="header" href="#fields-53">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3699,7 +3952,7 @@ beyond the preview limit.</p>
 <p>A restriction a script interpreter applied, or in audit mode would have
 applied, because the script is not allowed to run unrestricted.</p>
 <p>Appears at: <code>/restriction</code>.</p>
-<h2 id="fields-51"><a class="header" href="#fields-51">Fields</a></h2>
+<h2 id="fields-54"><a class="header" href="#fields-54">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3724,7 +3977,7 @@ applied, because the script is not allowed to run unrestricted.</p>
 exactly one of the two.
 A file-backed script's digests and signatures are in <code>Event::file</code>.</p>
 <p>Appears at: <code>/script</code>.</p>
-<h2 id="fields-52"><a class="header" href="#fields-52">Fields</a></h2>
+<h2 id="fields-55"><a class="header" href="#fields-55">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3754,7 +4007,7 @@ A file-backed script's digests and signatures are in <code>Event::file</code>.</
 codes as numbers, so values the decoder tables (#90) do not know yet are
 not lost.</p>
 <p>Appears at: <code>/file/signers</code>, <code>/process/parent/signers</code>, <code>/process/signers</code>.</p>
-<h2 id="fields-53"><a class="header" href="#fields-53">Fields</a></h2>
+<h2 id="fields-56"><a class="header" href="#fields-56">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3782,7 +4035,7 @@ not lost.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>The log an event was translated from.</p>
 <p>Appears at: <code>/source</code>.</p>
-<h2 id="fields-54"><a class="header" href="#fields-54">Fields</a></h2>
+<h2 id="fields-57"><a class="header" href="#fields-57">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3878,7 +4131,7 @@ not lost.</p>
 </tbody>
 </table>
 </div>
-<h2 id="approvalscope"><a class="header" href="#approvalscope">ApprovalScope</a></h2>
+<h2 id="approvalscope-1"><a class="header" href="#approvalscope-1">ApprovalScope</a></h2>
 <p>What an approval would cover.</p>
 <div class="table-wrapper">
 <table>
@@ -4452,7 +4705,7 @@ agent can be in. <code>EventMode::from_policy_mode</code> converts.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>The user an event is about.</p>
 <p>Appears at: <code>/user</code>.</p>
-<h2 id="fields-55"><a class="header" href="#fields-55">Fields</a></h2>
+<h2 id="fields-58"><a class="header" href="#fields-58">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -4479,7 +4732,7 @@ agent can be in. <code>EventMode::from_policy_mode</code> converts.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>The version resource of a PE file.</p>
 <p>Appears at: <code>/file/version_info</code>, <code>/process/parent/version_info</code>, <code>/process/version_info</code>.</p>
-<h2 id="fields-56"><a class="header" href="#fields-56">Fields</a></h2>
+<h2 id="fields-59"><a class="header" href="#fields-59">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -5851,7 +6104,7 @@ diagnostics, are its intended users; neither depends on this crate yet.</li>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="palisade-policy"><a class="header" href="#palisade-policy">palisade-policy</a></h1>
 <p>The policy model, conditions, precedence and evaluation, with a decision trace. Evaluation is pure and deterministic: no network or filesystem access.</p>
-<p><strong>Status:</strong> the policy object model, its JSON Schema and validation are in place (#30), with a YAML front end (#190). Single criteria can be matched against an object's facts (#31, #32), and whole match trees can be evaluated, with context criteria for the user, device, session, network and time (#33). Rule actions, effect flags and the typed <code>Decision</code> are defined (#34). The evaluation pipeline and the five precedence models turn the matching rules into one decision (#35). Enforcement modes, their resolution per decision and the mode state machine are in place (#36). The group hierarchy, inheritance, reusable libraries and the effective policy of a device are in place (#37). Rules, rule-set assignments and policies can be scoped by user, group, device, network location, session and time (#38). Every decision can be traced, explained and simulated (#41). Indexing is still to come (#42). Work is tracked in <a href="https://github.com/jusso-dev/palisade/issues/2">#2</a>.</p>
+<p><strong>Status:</strong> the policy object model, its JSON Schema and validation are in place (#30), with a YAML front end (#190). Single criteria can be matched against an object's facts (#31, #32), and whole match trees can be evaluated, with context criteria for the user, device, session, network and time (#33). Rule actions, effect flags and the typed <code>Decision</code> are defined (#34). The evaluation pipeline and the five precedence models turn the matching rules into one decision (#35). Enforcement modes, their resolution per decision and the mode state machine are in place (#36). The group hierarchy, inheritance, reusable libraries and the effective policy of a device are in place (#37). Rules, rule-set assignments and policies can be scoped by user, group, device, network location, session and time (#38). Every decision can be traced, explained and simulated (#41). Indexing is still to come (#42). The unknown-application policy decides what happens when no rule does, with the built-in <code>system_baseline</code>, Palisade's self-allow and the Essential Eight presets (#39). Work is tracked in <a href="https://github.com/jusso-dev/palisade/issues/2">#2</a>.</p>
 <h2 id="modules"><a class="header" href="#modules">Modules</a></h2>
 <ul>
 <li><code>model</code>: the canonical policy object model. A <code>PolicyDocument</code> holds one <code>Policy</code> and the <code>RuleSet</code>s it references by ID. Each rule has a match tree (<code>all</code> / <code>any</code> / <code>not</code> / <code>criterion</code>) and an action. Strict serde: unknown fields are rejected, and enums are <code>snake_case</code> strings.</li>
@@ -5860,6 +6113,7 @@ diagnostics, are its intended users; neither depends on this crate yet.</li>
 <li><code>validate</code>: <code>PolicyDocument::validate</code> reports every finding in one pass. Each finding has a stable code, a severity and the JSON Pointer of the field. It normalises hash values to lowercase hex, compiles every criterion, checks each rule's <code>order</code> and <code>priority</code> against the precedence model, and flags rules that can match without a positive identity criterion (naming the criteria on one such path through the tree), rules that match on negations or context alone, allow rules whose only identity is weak, and unsupported regular expressions. A document that passes becomes a <code>ValidatedPolicy</code>.</li>
 <li><code>decision</code>: the typed <code>Decision</code> every consumer gets: outcome, the enforce-mode outcome (<code>would_have_been</code>), the deciding action and rule (<code>RuleRef</code>), <code>audit</code> annotations, the mode, directives, effects with defaults applied, a reason code and a trace ID. Its JSON form is stable and snapshot-tested. <code>Decision::from_rule</code> builds the enforce-mode decision of one deciding rule, and <code>Decision::implicit_deny</code> the decision when none decides. The pipeline adds the rules the deciding rule overrode, the <code>audit</code> annotations and the trust-source grants (#35), then applies the effective mode (#36): <code>would_have_been</code> keeps the enforce-mode outcome, and <code>learning_candidate</code> marks an object to learn.</li>
 <li><code>evaluate</code>: the evaluation pipeline (#35). An <code>Evaluator</code> compiles a validated policy once, and <code>Evaluator::evaluate</code> decides one object in fixed stages: the mandatory deny tier, exclusions (<code>ignore</code>), the policy's precedence model, then the implicit deny. See <a href="#precedence">Precedence</a>. <code>Evaluator::evaluate_in</code> then applies the device's modes; see <a href="#modes-1">Modes</a>.</li>
+<li><code>unknown</code>: stage 6, the unknown-application policy (#39). See <a href="#unknown-applications-1">Unknown applications</a>.</li>
 <li><code>mode</code>: enforcement modes (#36). <code>mode::resolve</code> gives the effective mode of one decision from the policy, the object type, the deciding rule and the device state (<code>DeviceState</code>: base mode, connectivity, override session, lockdown); <code>ProtectionStatus</code> reports a device's protection; <code>mode::machine</code> is the state machine of legal mode changes, with time boxes that revert on a monotonic and a wall clock.</li>
 <li><code>library</code>: reusable libraries (#37): rule sets, application definitions, match fragments, and hash, publisher, path, principal, device, network and schedule sets, and message templates. A <code>ref</code> node in a match tree names one by ID and pin (<code>latest</code> or a version). <code>Catalogue</code> checks every library version, resolves references and rejects reference cycles, naming the path. <code>Catalogue::expand</code> replaces each reference with its tree. Libraries are global (read-only to tenants) or one tenant's, have an owner, and can be duplicated into an editable copy that records <code>derived_from</code>.</li>
 <li><code>hierarchy</code>: the scope hierarchy (#37): global, tenant, nested groups (at most 8 deep), devices, dynamic groups and templates, with the built-in <code>unassigned</code>, <code>unmanaged</code> and <code>staging</code> groups. <code>HierarchyDocument::validate</code> checks a snapshot, and <code>ValidatedHierarchy::effective_policy</code> computes one device's effective policy: a pure function of the snapshot, the libraries at their resolved versions and the device's dynamic groups, with per-rule and per-setting provenance and a content hash. <code>place</code> runs the automatic placement rules. See <a href="#hierarchy">Hierarchy</a>.</li>
@@ -5914,8 +6168,9 @@ diagnostics, are its intended users; neither depends on this crate yet.</li>
 <li><strong>Mandatory deny.</strong> A matching rule of a <code>mandatory</code> blocklist blocks (<code>mandatory_deny</code>). No allow, elevation, trust source or exclusion changes that, under any model.</li>
 <li><strong>Exclusion.</strong> A matching <code>ignore</code> rule makes the object <code>ignored</code>.</li>
 <li><strong>Policy.</strong> The policy's <code>precedence_model</code> chooses among the matching <code>allow</code>, <code>allow_contained</code>, <code>allow_elevated</code> and <code>deny</code> rules.</li>
-<li><strong>Unknown.</strong> If nothing decided, the implicit deny (<code>implicit_deny_unknown</code>, #39).</li>
+<li><strong>Unknown.</strong> If nothing decided, the policy's <code>unknown</code> policy decides; its default is the implicit deny (<code>implicit_deny_unknown</code>, #39). See <a href="#unknown-applications-1">Unknown applications</a>.</li>
 </ol>
+<p>Between stages 1 and 2, one of Palisade's own pinned images (<code>Evaluator::with_self_images</code>) is allowed (<code>self_allow</code>).</p>
 <p>An override session (#9) lowers the mode of stages 3 and 4 (see <a href="#modes-1">Modes</a>); post-allow attribute rules (#33) are the stage still to come between them. The result is the enforce-mode decision; <code>Evaluator::evaluate_in</code> applies the modes on top of it. <code>audit</code> rules never decide: every one that matches is an annotation. <code>trust_source</code> rules never let an object run: their grants are attached only to an allowed object. <code>defer</code> rules have no opinion. When several mandatory denies or exclusions match, the most specific decides.</p>
 <p>The decision names the deciding rule (<code>matched_rule</code>) and <strong>every rule it overrode</strong> (<code>overridden</code>): the other candidates of the deciding stage, every candidate of the later stages, and the trust sources of an object that is not allowed.</p>
 <div class="table-wrapper">
@@ -5961,7 +6216,7 @@ diagnostics, are its intended users; neither depends on this crate yet.</li>
 <tr><td><code>disabled</code></td><td>Only a device can be disabled (see the state machine below). The engine is not consulted: <code>evaluate_in</code> returns <code>None</code>, and not even a mandatory deny applies.</td></tr>
 <tr><td><code>monitor</code></td><td>Evaluated fully. A would-block runs as <code>allowed_audit</code>, with <code>would_have_been: blocked</code>.</td></tr>
 <tr><td><code>audit</code></td><td>As <code>monitor</code>; the agent sends a full event for every decision rather than would-blocks and summaries (#16).</td></tr>
-<tr><td><code>learning</code></td><td>As <code>audit</code>. An object that only the implicit deny would block is a <code>learning_candidate</code> (#5). An object a deny rule would block is never one.</td></tr>
+<tr><td><code>learning</code></td><td>As <code>audit</code>. An object that no rule decided, so that stage 6 handled it, is a <code>learning_candidate</code> (#5). An object a deny rule would block is never one.</td></tr>
 <tr><td><code>enforce</code></td><td>Blocked means blocked.</td></tr>
 </tbody>
 </table>
@@ -5993,6 +6248,7 @@ diagnostics, are its intended users; neither depends on this crate yet.</li>
 <li><strong>Precedence.</strong> The model is chosen by the global node or the tenant, or by a group if its tenant allows it (<code>precedence_not_allowed</code>). With no node choosing, the highest-ranked policy's model applies. Every policy in one effective policy must use that model (<code>precedence_conflict</code>).</li>
 <li><strong>First match across levels.</strong> Each rule set carries the band of the first layer that contributed it (<code>RuleSet::band</code>). The hierarchy sets the band and replaces any value a policy gives. <code>level_order: top_down</code> (the default) puts global rules first, then the tenant, the groups from the tenant down, the dynamic groups and the device. <code>bottom_up</code> reverses that order, and <code>flat</code> ignores levels.</li>
 <li><strong>Determinism.</strong> The content hash is the SHA-256 of the effective policy's canonical JSON (sorted keys, revision left out) with the resolved library versions. It never depends on the order of anything in the snapshot (property-tested).</li>
+<li><strong>Unknown-application limits.</strong> A device's effective policy holds at most <code>limits::MAX_UNKNOWN_SCOPE_VALUES</code> (20,000) unknown-application scope values: over every contributing policy, its <code>scope</code> and its <code>unknown.scopes</code>. Building one at that size takes about 40 ms and serialises to about 1.5 MiB (release build; about 77 bytes per value), and each agent receives it. Snapshot validation rejects a hierarchy where any device could exceed the cap (<code>too_many</code> at the node's assignments), so an effective policy from a valid snapshot never does. The check is an upper bound: a node's own layers plus every dynamic group of its tenant, because a device's dynamic groups are only known when its policy is computed. It is pessimistic for tenants with many dynamic-group policies, and the error lists the largest contributors, dynamic groups included.</li>
 <li><strong>Placement.</strong> Each tenant's placement rules are first-match on directory OU, directory group, hostname wildcard, CIDR, tags and OS, and end with an implicit catch-all to <code>unassigned</code> that cannot be removed. A group can opt out of placement as a source and as a target (<code>allow_auto_assignment: false</code>). Placement runs on first contact and on reconnect, and on a user change only if the tenant sets <code>place_on_user_change</code>.</li>
 </ul>
 <h2 id="trace-explain-and-simulate"><a class="header" href="#trace-explain-and-simulate">Trace, explain and simulate</a></h2>
@@ -6056,6 +6312,64 @@ diagnostics, are its intended users; neither depends on this crate yet.</li>
 <p><strong>Schedules.</strong> <code>timezone_basis</code> is <code>device_local</code>, <code>utc</code> or <code>user_local</code>, defaulting to <code>settings.time_zone_basis</code>. <code>user_local</code> uses the session user's time zone if the agent could read it, and otherwise the device's (<code>timezone_fallback</code>). Zones are IANA names, read from the time zone database bundled into the binary. <code>windows</code> are <code>{days, start, end | duration_mins}</code>. A window starts on one of its days at <code>start</code>, includes its start and excludes its end, and may wrap midnight (<code>22:00</code> to <code>06:00</code>). <code>dates</code> limit the schedule to absolute date ranges and <code>except_dates</code> remove days such as holidays. Both test the local date of the instant decided. Across daylight-saving changes, a local time that occurs twice means its first occurrence, and a skipped one moves forward by the gap. This is the "compatible" rule of the ECMAScript Temporal proposal. A scheduled rule outside its windows is absent. If the agent's trusted time is missing or its integrity is flagged (#18), or the zone is unknown, scheduled allows go inactive and scheduled denies stay active (<code>clock_untrusted</code>). On an allow, in a scope with <code>combine: all</code> and no <code>negate</code>, so that the rule stops applying when the schedule closes, <code>on_window_close</code> (<code>none</code>, <code>warn</code>, <code>warn_then_terminate</code>, with <code>grace_secs</code>, default 300) gives the decision a <code>window_close</code> directive with the instant the schedule closes, for the agent and tray to act on (#4, #11). A schedule that is not well formed, such as an unvalidated library schedule, reads as an untrusted clock does (<code>fact_malformed</code>).</p>
 <p><strong>Network location.</strong> <code>policy.location_profiles</code> names locations such as <code>corporate</code> (<code>dns_suffix: corp.example.org</code> and <code>server_reachable: true</code>). The agent evaluates them with <code>scope::CompiledProfiles</code> on every network change and heartbeat (60 seconds by default). <code>scope::LocationTracker</code> keeps the previous location until a new one has been stable for 5 seconds, and scopes test the result with <code>location_profile</code>.</p>
 <p><strong>Library sets.</strong> <code>principal_set</code>, <code>device_set</code>, <code>network_set</code>, <code>schedule_set</code> and client <code>device_sets</code> refer to library sets by <code>{id, pin}</code>, where <code>pin</code> is <code>latest</code> (the default) or a version number. Hierarchy validation checks each one like a tree reference, pins it to the version it resolves to, and counts it for in-use checks, so a new version of a set changes an effective policy's content hash. A schedule set holds one schedule, written as JSON. <code>Evaluator::with_library</code>, <code>trace::Tracer::with_library</code> and <code>Simulator::with_library</code> resolve principal, network and schedule sets through a <code>scope::ScopeLibrary</code> (#37 provides one: <code>ResolvedLibraries</code>). A set it cannot resolve is unknown (<code>set_unresolved</code>). Device-set membership is worked out by the server and arrives as a fact.</p>
+<h2 id="unknown-applications-1"><a class="header" href="#unknown-applications-1">Unknown applications</a></h2>
+<p><code>policy.unknown</code> decides an object no rule decides (stage 6, #39). Stage 6 never overrides an explicit allow or deny. Every field is optional, and the default blocks every unknown object.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Default</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>default</code></td><td><code>block</code></td><td>The level when no entry below applies.</td></tr>
+<tr><td><code>by_location</code></td><td>none</td><td>Level per location class: <code>user_profile</code>, <code>temp</code>, <code>user_writable_other</code>, <code>program_files</code>, <code>windows</code>, <code>other_fixed</code>, <code>removable</code>, <code>network</code>, <code>optical</code>, <code>ads</code>.</td></tr>
+<tr><td><code>by_origin</code></td><td>none</td><td>Level per origin: <code>internet</code>, <code>email_attachment</code>, <code>removable_copy</code>, <code>network_share</code>, <code>trusted_source</code>, <code>preexisting</code>, <code>unknown</code>.</td></tr>
+<tr><td><code>by_type</code></td><td>none</td><td>Level per object type.</td></tr>
+<tr><td><code>restrict_profile</code></td><td>none</td><td>The containment profile of <code>restrict</code> (#14). Required when any level is <code>restrict</code>.</td></tr>
+<tr><td><code>prompt</code></td><td>see below</td><td>How <code>prompt</code> asks.</td></tr>
+<tr><td><code>effects</code></td><td>a deny's</td><td>Effect flags of stage-6 decisions. <code>log</code> must be <code>always</code> or <code>sampled</code>.</td></tr>
+<tr><td><code>allow_request</code></td><td><code>false</code></td><td>A blocked user may ask for approval (#11).</td></tr>
+<tr><td><code>preexisting_policy</code></td><td><code>baseline_only</code></td><td>Files present at install: <code>treat_as_unknown</code>, <code>local_approve</code> (#69), or <code>baseline_only</code> (blocked at stage 6, so only the approved baseline allows them).</td></tr>
+<tr><td><code>driver_boot_policy</code></td><td><code>audit</code></td><td>Drivers loaded in early boot (<code>boot_phase: early</code>): <code>audit</code> reports only, <code>enforce</code> applies the level.</td></tr>
+<tr><td><code>preset</code></td><td>none</td><td>The compliance preset the policy started from.</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Levels</strong>, ordered <code>block &gt; restrict &gt; prompt &gt; detect &gt; allow</code>. The level applied is the <strong>most restrictive</strong> of every entry that matches: the object type, each of its location classes (a path can be in several, such as <code>user_profile</code> and <code>temp</code>) and each origin. <code>default</code> applies only when none matches.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Level</th><th>Outcome</th><th>Reason</th></tr>
+</thead>
+<tbody>
+<tr><td><code>block</code></td><td><code>blocked</code></td><td><code>implicit_deny_unknown</code></td></tr>
+<tr><td><code>restrict</code></td><td><code>allowed</code>, with <code>directives.containment</code></td><td><code>unknown_restricted</code>; <code>restrict_unavailable</code> (blocked) without the containment component (<code>device.containment_available</code>) or for a type other than executable, script or installer</td></tr>
+<tr><td><code>prompt</code></td><td><code>pending_user</code>, with <code>directives.prompt</code></td><td><code>unknown_prompt</code></td></tr>
+<tr><td><code>detect</code></td><td><code>allowed</code>, logged with severity medium</td><td><code>unknown_detected</code></td></tr>
+<tr><td><code>allow</code></td><td><code>allowed</code>, silently (validation warns)</td><td><code>unknown_allowed</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Every stage-6 decision is <code>unhandled</code> and carries <code>unknown</code>: the resolved and applied levels, the entries that applied, any fallback reason, and the object's locations and origins. Location classes come from the agent (<code>ObjectFacts::location_class</code>); without them the engine classifies the path (<code>unknown::classify</code>), and a class whose deciding fact is missing (no usable path, no ACL fact, no volume kind, an unset variable) is <code>Unknown</code>, never a definite match: see below. Both spellings of a path with an alias are classified.</p>
+<p><strong>Missing facts never make an object look safer</strong> (ADR 0018). A location class can relax a decision as well as tighten it, because stage 6 takes the most restrictive entry among an object's classes and <code>default</code> when none has one. So the classifier never grants a class from a guess. Each location class and origin is three-valued, with the crate's Kleene logic: <code>Match</code> (the facts establish it), <code>NoMatch</code> (they rule it out) or <code>Unknown</code> (a missing fact could make it true). Stage 6 resolves and applies the level of the <code>Match</code> classes as above, then applies each <code>Unknown</code> class's entry (or <code>default</code> where it has none) too, and the most restrictive applied level wins (fallback <code>missing_fact</code>). Removing a fact can only make a class <code>Unknown</code>, so it never lowers the level; with every fact present nothing is <code>Unknown</code> and every class and decision is what it was before. The decision's <code>unknown</code> carries <code>unknown_locations</code>, <code>unknown_origins</code> and <code>missing_facts</code>, and the explanation names the missing facts.</p>
+<ul>
+<li><strong>Path variables.</strong> With a variable set, it decides the classes it covers (<code>Match</code> or <code>NoMatch</code>): a <code>%PROGRAMFILES%</code> listing only <code>C:\Program Files</code> makes <code>C:\Program Files (x86)</code> not <code>program_files</code>. Without it, those classes are <code>Unknown</code> for every path: <code>windows</code> and <code>%WINDIR%\Temp</code> without <code>%WINDIR%</code>, <code>program_files</code> without <code>%PROGRAMFILES%</code>, <code>temp</code> without <code>%TEMP%</code>, <code>user_profile</code> without <code>%USERPROFILE%</code>, <code>%APPDATA%</code>, <code>%LOCALAPPDATA%</code> or <code>%PUBLIC%</code>. There are no drive-root guesses: <code>X:\Windows</code>, <code>X:\Program Files</code> and <code>X:\Windows\Temp</code> are not the system's folders unless the variable says so.</li>
+<li><strong>Volume kind</strong> (<code>PathFact::volume</code>). Without it, <code>removable</code>, <code>optical</code>, <code>network</code> (for a drive path) and the classes that need a fixed volume (<code>program_files</code>, <code>windows</code>, <code>other_fixed</code>) are <code>Unknown</code>.</li>
+<li><strong>Path.</strong> With no usable path, every class the path decides is <code>Unknown</code>, except that a known removable, optical or network volume still rules out <code>program_files</code>, <code>windows</code> and <code>other_fixed</code>.</li>
+<li><strong>ACL</strong> (<code>PathFact::user_writable</code>). Without it, <code>user_writable_other</code> is <code>Unknown</code> (unless a directory the scanner flagged establishes it). A writable ACL or a flagged directory is <code>Match</code>, and a safe ACL is <code>NoMatch</code>. So a policy whose <code>user_writable_other</code> entry is weaker than its <code>default</code> cannot be relaxed by dropping the fact.</li>
+<li><code>other_fixed</code> is a drive path on a fixed volume that is in none of <code>user_profile</code>, <code>temp</code>, <code>program_files</code> and <code>windows</code>, so it is <code>Unknown</code> whenever one of those is.</li>
+<li><strong>Origins</strong> (<code>ObjectFacts::origin</code>). <code>None</code> means origin collection did not run or report: every origin, <code>unknown</code> included, is <code>Unknown</code>, so the level comes from the type and location entries and <code>default</code>, and every <code>by_origin</code> entry joins as a possible candidate. Objects without origin facts can therefore be decided by <code>by_origin</code> entries. Under the default <code>preexisting_policy: baseline_only</code>, the <code>preexisting</code> origin then blocks: <strong>an agent that sends no origin facts gets every unknown object blocked in enforce mode</strong> (would-block in <code>audit</code>, <code>monitor</code> and <code>learning</code>), and <code>missing_facts</code> names <code>origin</code>. A reported set is complete; an empty one means no evidence was found, which is exactly <code>{unknown}</code>.</li>
+</ul>
+<p>A missing fact can therefore make many objects stricter for a policy with a strict entry for the class it decides. That fails closed and only affects objects no rule decided; the endpoint agent is expected to supply every variable, the volume kind and the origin set.</p>
+<p><strong>Prompts.</strong> <code>prompt.options</code> is a subset of <code>allow_once</code>, <code>allow_always_local</code>, <code>request_approval</code> and <code>block</code> (default: all but <code>allow_always_local</code>), with <code>require_justification</code>, <code>reauth</code> (<code>none</code>, <code>password</code>, <code>mfa</code>), <code>timeout_secs</code> (10 to 600, default 60) and <code>fallback</code> (default <code>block</code>). A prompt is never shown for an object a blocklist rule matched (even one set aside by a non-enforcing mode), for a library or driver, or without an interactive session (a console or remote-desktop session of a user who is not the system account): those get the fallback. <code>unknown::answer</code> turns the user's answer into the final outcome; a timeout or a prompt that could not be shown applies the fallback. <code>allow_always_local</code> creates a <code>LocalApproval</code> for the exact SHA-256, scoped to the user or device (<code>local_approval_scope</code>) and uploaded for review. For objects from the internet, email, removable media, a network share, or of unknown origin, or on removable, optical or network volumes, it expires after <code>temp_approval_days</code> (default 14).</p>
+<p><strong>Scope.</strong> <code>policy.scope</code> limits the unknown settings as it limits the rules (#38). For a subject outside it, or when a fact the scope needs is unknown, the settings do not apply and the built-in default decides: the implicit deny (<code>implicit_deny_unknown</code>, fallback <code>policy_out_of_scope</code>, and a trace paragraph that names the policy scope). So <code>default: allow</code> never reaches a device, user or session the policy does not cover. Validation checks <code>policy.scope</code> as an allow's scope when any unknown level is weaker than <code>block</code>, so <code>user_pattern</code> cannot widen it. <code>unknown.scopes</code> narrows the settings further: they apply where <code>policy.scope</code> matches and any entry of <code>unknown.scopes</code> matches. An effective policy (#37) has no scope of its own. It carries each contributing policy's limit, unexpanded, in the effective-only field <code>unknown.scope_limits</code>: one entry per contributing policy, <code>{all_of: [policy.scope], any_of: unknown.scopes}</code>. Its unknown settings apply to a subject when any entry holds (every scope of <code>all_of</code> and, if any, one of <code>any_of</code>), and to everyone if one contributing policy has no limit. Validation rejects <code>scope_limits</code> in an authored document. So the settings apply exactly where each contributing policy's own evaluation would apply them, never more widely.</p>
+<p><strong>Inheritance.</strong> An effective policy's <code>unknown</code> is the strictest combination of every assigned policy's (<code>UnknownPolicy::stricter</code>). Levels are compared as stage 6 applies them, each with its own policy's prompt fallback and containment profile: in every context (type, classes, origins, session, containment), the merged policy applies a level at least as strict as each policy's. One policy cannot always reproduce two exactly, so where it cannot it is stricter, in three cases: the merged prompt fallback is the strictest of the policies that prompt; a <code>restrict</code> in one policy, next to a prompt with a blocking fallback in another, becomes <code>block</code> everywhere in the merged policy, including where the prompt could have been shown (a static merge cannot see the session: with A <code>{default: allow}</code> and B <code>{default: restrict, by_origin: {internet: prompt}, prompt.fallback: block}</code>, an internet script in a console session is blocked, though A allows it and B would ask); and entries merge key by key, so an entry only one policy sets is compared with the other's <code>default</code> even where another of its entries decides the object. For example, with A <code>{default: block, by_type: {executable: detect}}</code> and B <code>{default: detect, by_location: {temp: detect}}</code>, each detects an executable in <code>temp</code>, but the merged policy blocks it. Each case fails closed. The scopes merge too: each policy's <code>scope</code> and <code>unknown.scopes</code> become one <code>unknown.scope_limits</code> entry, so the merged settings apply exactly where some contributing policy would apply its own, and the implicit deny decides elsewhere. The hierarchy collects those entries in one pass, so building an effective policy is linear in its contributing policies.</p>
+<p><strong>Modes.</strong> A <code>blocked</code> or <code>pending_user</code> stage-6 result is relaxed to <code>allowed_audit</code> in a mode that does not enforce, so no prompt is shown in <code>audit</code>, <code>monitor</code> or <code>learning</code>.</p>
+<p><strong>Built-in safe defaults.</strong></p>
+<ul>
+<li><code>system_baseline</code> (<code>unknown::system_baseline</code>, <code>PolicyDocument::with_system_baseline</code>): a managed, read-only <code>baseline</code> rule set with one allow for binaries with a trusted signature from the OS publishers the agent reports, under <code>%WINDIR%</code> or <code>%PROGRAMFILES%</code>, where no non-administrator can write. The known user-writable folders inside the Windows directory are excluded (<code>unknown::baseline::MANDATORY_EXCEPTIONS</code>: <code>System32\spool\drivers\color</code>, <code>System32\Tasks</code>, <code>Windows\Tasks</code>, <code>Windows\Temp</code>, the RSA <code>MachineKeys</code> store, <code>System32\Com\dmp</code>, <code>System32\FxsTmp</code>, <code>System32\spool\PRINTERS</code> and <code>SERVERS</code>, <code>Registration\CRMLog</code>, <code>Windows\tracing</code>), along with every directory the writable-path scanner flagged and any alternate data stream. It is a <strong>floor</strong> at stage 4: it is decided over only when no tenant allow or deny matched, so under every model (including <code>first_match</code> with <code>curated_first</code>) a tenant's rule wins over it. A mandatory deny still blocks what it covers. Its inputs are checked: publishers are trimmed text, and flagged directories are drive or UNC paths with no stream or wildcard. The caller must supply the path variables <code>%WINDIR%</code>, <code>%PROGRAMFILES%</code> and <code>%SYSTEM32%</code> (the native and, on 64-bit Windows, the 32-bit system directory). Without <code>%SYSTEM32%</code> the <code>System32</code> exceptions are unknown, so the allow cannot show a file is outside them and does not apply: OS binaries are then decided by stage 6, which blocks them under the default.</li>
+<li><strong>Self-allow.</strong> <code>Evaluator::with_self_images</code> pins the agent's images (<code>SelfImage::new</code>: the facts the agent's parser computed, the context the image runs in, and its publisher) by SHA-256 and trusted signer; a pinned image is allowed right after the mandatory tier. <code>PolicyDocument::validate_with_self_images</code> rejects every deny, mandatory or not, whose tree is not <code>NoMatch</code> on an image's facts and context with the devices' path variables (<code>deny_matches_self</code>): a deny that matches, or could match depending on facts it does not settle, could block the agent.</li>
+</ul>
+<p><strong>Compliance presets</strong> (<code>UnknownPolicy::preset</code>): <code>e8_ml1</code> blocks in <code>user_profile</code>, <code>temp</code> and <code>user_writable_other</code> and detects elsewhere (ISM-1870); <code>e8_ml2</code> blocks everywhere (ISM-1871); <code>e8_ml3</code> also blocks drivers and requires a mandatory blocklist (<code>mandatory_blocklist_required</code>, ISM-1658). <code>e8_ml3</code> keeps <code>driver_boot_policy: audit</code>: a driver loaded during early boot is reported, not blocked, because blocking an unrecognised boot-start driver can leave a device unable to boot (ADR 0018). The exemption is explicit: an <code>e8_ml3</code> policy with <code>driver_boot_policy: audit</code> warns (<code>compliance_weakened</code> at <code>/policy/unknown/driver_boot_policy</code>) until it is set to <code>enforce</code>. A preset-tagged policy that is weaker than its preset for any type, set of one or two location classes and origin (with a prompt counted at its fallback) warns (<code>compliance_weakened</code>), and a silent <code>allow</code> in a user profile or temporary folder is an error (<code>unknown_allow_not_permitted</code>). Other checks: <code>unknown_level_not_valid_for_type</code>, <code>restrict_profile_required</code>, <code>invalid_prompt_settings</code> and <code>unknown_allow</code> (a warning).</p>
 <h2 id="schema-versioning"><a class="header" href="#schema-versioning">Schema versioning</a></h2>
 <p>Documents carry <code>schema_version</code> (semver). A reader accepts the same major version and any minor version. A minor version adds optional fields; a major version is a breaking change and gets a new schema file. <code>PolicyDocument::from_json</code> checks the version before reading the rest of the document.</p>
 <p>The test <code>committed_schema_is_current</code> fails when the committed schema is stale. After changing the model, regenerate the schema:</p>

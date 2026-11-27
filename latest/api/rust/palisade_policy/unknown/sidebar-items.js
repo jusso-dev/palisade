@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["AnswerError","EntryKind","FallbackReason","MissingFact","PromptAnswer"],"fn":["answer","interactive","prompt_valid_for","resolve_level","restrict_valid_for"],"mod":["baseline","location","selfpin"],"struct":["AnswerResult","AppliedEntry","Classes","LocalApproval","PromptDirective","PromptFallback","UnknownHandling"]};

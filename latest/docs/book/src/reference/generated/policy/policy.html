@@ -36,10 +36,10 @@
             const path_to_root = "../../../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../../../searchindex-d161a978.js";
+            window.path_to_searchindex_js = "../../../../../../searchindex-502751e7.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../../../../toc-55ef34c3.js"></script>
+        <script src="../../../../../../toc-4baf6b72.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -210,6 +210,7 @@
 <tr><td><code>rule_sets</code></td><td>array of <a href="types.html#rulesetid"><code>RuleSetId</code></a></td><td>no</td><td></td><td>at most 1000 items</td><td>1.0.0</td><td>The rule sets that apply, in order, by ID.</td></tr>
 <tr><td><code>scope</code></td><td><a href="scope.html"><code>Scope</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>Who, where and when the whole policy applies (#38). Every rule must also be in this scope.</td></tr>
 <tr><td><code>settings</code></td><td><a href="policy-settings.html"><code>PolicySettings</code></a></td><td>no</td><td><code>{"allow_unknown_advanced":false,"capture_command_line":false,"decision_cache_ttl_secs":300,"dll_control":"enforce","driver_control":"enforce","group_cache_max_age_secs":86400,"max_ancestor_depth":8,"poll_interval_secs":900,"script_control":"enforce","time_zone_basis":"device_local"}</code></td><td></td><td>1.0.0</td><td>Typed settings. Every field has a documented default.</td></tr>
+<tr><td><code>unknown</code></td><td><a href="unknown-policy.html"><code>UnknownPolicy</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>What happens when no rule decides (#39). The default blocks every unknown object.</td></tr>
 </tbody>
 </table>
 </div>

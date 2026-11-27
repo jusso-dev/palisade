@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ApprovalScope","CompliancePreset","DriverBootPolicy","Level","LocationClass","OriginClass","PreexistingPolicy","PromptOption","Reauth"],"mod":["limits"],"struct":["PromptSettings","ScopeLimit","UnknownPolicy"]};

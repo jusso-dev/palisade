@@ -36,10 +36,10 @@
             const path_to_root = "../../../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../../../searchindex-d161a978.js";
+            window.path_to_searchindex_js = "../../../../../../searchindex-502751e7.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../../../../toc-55ef34c3.js"></script>
+        <script src="../../../../../../toc-4baf6b72.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -223,6 +223,7 @@
 <li><a href="policy-settings.html"><code>PolicySettings</code></a>: Settings that apply to the whole policy. Every field is optional in a document and has the default shown in the schema.</li>
 <li><a href="precedence-options.html"><code>PrecedenceOptions</code></a>: Settings of the precedence models. Each is optional in a document.</li>
 <li><a href="principal-ref.html"><code>PrincipalRef</code></a>: A user or group (#38). Each is an object with one key, the kind.</li>
+<li><a href="prompt-settings.html"><code>PromptSettings</code></a>: How the <code>prompt</code> level asks the user.</li>
 <li><a href="ref-list.html"><code>RefList</code></a>: An <code>include</code> and an <code>exclude</code> list. An empty <code>include</code> means every entry; a match in <code>exclude</code> always wins.</li>
 <li><a href="ref-list2.html"><code>RefList2</code></a>: An <code>include</code> and an <code>exclude</code> list. An empty <code>include</code> means every entry; a match in <code>exclude</code> always wins.</li>
 <li><a href="ref-list3.html"><code>RefList3</code></a>: An <code>include</code> and an <code>exclude</code> list. An empty <code>include</code> means every entry; a match in <code>exclude</code> always wins.</li>
@@ -231,7 +232,9 @@
 <li><a href="rule-set-scope.html"><code>RuleSetScope</code></a>: The scopes of one rule-set assignment: every one must match for the set's rules to apply.</li>
 <li><a href="schedule.html"><code>Schedule</code></a>: When a scope is active (#38).</li>
 <li><a href="scope.html"><code>Scope</code></a>: Who, where and when a rule applies (#38).</li>
+<li><a href="scope-limit.html"><code>ScopeLimit</code></a>: One contributing policy's limit on where its unknown settings apply, in an effective policy (<code>UnknownPolicy::scope_limits</code>). It holds when every scope of <code>all_of</code> matches and, if <code>any_of</code> is not empty, one of its scopes matches.</li>
 <li><a href="session-filter.html"><code>SessionFilter</code></a>: Session criteria (#38).</li>
+<li><a href="unknown-policy.html"><code>UnknownPolicy</code></a>: The unknown-application policy (#39). Every field is optional in a document; the defaults block every unknown object.</li>
 <li><a href="window.html"><code>Window</code></a>: One weekly window.</li>
 </ul>
 <p>Enumerations and string formats: <a href="types.html">Value types</a>.</p>
@@ -245,6 +248,7 @@
 <li><a href="https://github.com/jusso-dev/palisade/blob/main/docs/examples/policies/minimal.yaml"><code>minimal.yaml</code></a>: The smallest valid policy: no rule sets, so nothing is allowed and every file is reported (audit mode) by the implicit deny.</li>
 <li><a href="https://github.com/jusso-dev/palisade/blob/main/docs/examples/policies/scoped-rules.yaml"><code>scoped-rules.yaml</code></a>: Rule scoping: who, where and when a rule applies. Scopes narrow a rule; they never identify the object, which is the match tree's job, and they never widen a rule. A rule applies only when the policy's scope, its rule set's assignment scopes and its own scope all match.</li>
 <li><a href="https://github.com/jusso-dev/palisade/blob/main/docs/examples/policies/staged-rollout.yaml"><code>staged-rollout.yaml</code></a>: A staged rollout (#36): the policy is in audit, so what it would block is reported but runs. Executables are already enforced, a disconnected device enforces everything, and a new blocklist is tried in monitor mode. The mandatory blocklist blocks in every mode, and one deny rule is enforced in audit too (<code>always_enforce</code>).</li>
+<li><a href="https://github.com/jusso-dev/palisade/blob/main/docs/examples/policies/unknown-applications.yaml"><code>unknown-applications.yaml</code></a>: Unknown-application handling (#39), starting from the Essential Eight maturity level 1 preset: unknown objects in user profiles, temporary folders and other user-writable locations are blocked, and elsewhere they are detected.</li>
 <li><a href="https://github.com/jusso-dev/palisade/blob/main/docs/examples/policies/workstation-baseline.yaml"><code>workstation-baseline.yaml</code></a>: A workstation baseline with hash, publisher and path rules (ISM-0955). The same document as tests/fixtures/valid/workstation-baseline.json.</li>
 </ul>
 <hr>

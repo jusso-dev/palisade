@@ -1,0 +1,86 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Location classes from a normalised path and ACL facts (#39, #4)."><title>palisade_policy::unknown::location - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="palisade_policy" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module location</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../palisade_policy/index.html">palisade_<wbr>policy</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module location</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#three-valued-classes" title="Three-valued classes">Three-valued classes</a></li></ul><h3><a href="#structs">Module Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="../index.html">In palisade_<wbr>policy::<wbr>unknown</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">palisade_policy</a>::<wbr><a href="../index.html">unknown</a></div><h1>Module <span>location</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/palisade_policy/unknown/location.rs.html#1-362">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Location classes from a normalised path and ACL facts (#39, #4).</p>
+<p>The agent normally sets <a href="../../facts/struct.ObjectFacts.html#structfield.location_class" title="field palisade_policy::facts::ObjectFacts::location_class"><code>ObjectFacts::location_class</code></a>
+itself, because it knows the volume, the path variables and the
+writable-path scanner’s results. Those classes are facts: exactly those,
+and no others. <a href="fn.classify.html" title="fn palisade_policy::unknown::location::classify"><code>classify</code></a> is the reference rule the agent follows, and
+the engine uses it, with the path’s volume fact
+(<a href="../../facts/struct.PathFact.html#structfield.volume" title="field palisade_policy::facts::PathFact::volume"><code>PathFact::volume</code></a>) and the path
+variables of the evaluation, when the agent left the classes unset.</p>
+<h2 id="three-valued-classes"><a class="doc-anchor" href="#three-valued-classes">§</a>Three-valued classes</h2>
+<p>A location class can relax a decision as well as tighten it: stage 6
+takes the most restrictive entry among the classes an object is in, and
+<code>default</code> when it is in none with an entry. So the classifier never
+grants a class from a guess. For each class it answers, with the crate’s
+Kleene logic (<a href="../../ops/enum.Tri.html" title="enum palisade_policy::ops::Tri"><code>Tri</code></a>):</p>
+<ul>
+<li><code>Match</code>: the facts establish it;</li>
+<li><code>NoMatch</code>: the facts rule it out;</li>
+<li><code>Unknown</code>: a missing fact could make it true. The missing facts are
+listed (<a href="struct.Classified.html#structfield.missing" title="field palisade_policy::unknown::location::Classified::missing"><code>Classified::missing</code></a>, <a href="../enum.MissingFact.html" title="enum palisade_policy::unknown::MissingFact"><code>MissingFact</code></a>).</li>
+</ul>
+<p>Stage 6 resolves the level from the <code>Match</code> classes, as before, and then
+also applies every <code>Unknown</code> class’s entry (or <code>default</code> where it has
+none), taking the most restrictive (<a href="../index.html" title="mod palisade_policy::unknown"><code>crate::unknown</code></a>). Removing a fact
+only turns a <code>Match</code> or <code>NoMatch</code> class into <code>Unknown</code>, which can only
+add to that maximum, so <strong>a missing fact never makes an object look
+safer</strong> (ADR 0018). With every fact present nothing is <code>Unknown</code>, and
+the classes are exactly those this classifier gave before.</p>
+<p>What makes a class <code>Unknown</code>:</p>
+<ul>
+<li><strong>A missing path variable</strong>, for the classes it decides. Without
+<code>%WINDIR%</code>, <code>windows</code> and the <code>%WINDIR%\Temp</code> part of <code>temp</code> are
+<code>Unknown</code> for every path; without <code>%PROGRAMFILES%</code>, <code>program_files</code>
+is; without <code>%TEMP%</code>, <code>temp</code> is (unless a cache folder or the agent’s
+temporary folders establish it); without <code>%USERPROFILE%</code>, <code>%APPDATA%</code>,
+<code>%LOCALAPPDATA%</code> or <code>%PUBLIC%</code>, <code>user_profile</code> is (unless the path is
+under <code>X:\Users\&lt;name&gt;</code>). There are no drive-root guesses: a folder
+named <code>\Windows</code>, <code>\Program Files</code> or <code>\Windows\Temp</code> is not the
+system’s unless the variable says so. With a variable present, it
+decides: <code>Match</code> or <code>NoMatch</code>, never <code>Unknown</code>, for the folders it
+lists, so a <code>%PROGRAMFILES%</code> that lists only <code>C:\Program Files</code> makes
+<code>C:\Program Files (x86)</code> <code>NoMatch</code>.</li>
+<li><strong>An unknown volume kind</strong>, for <code>removable</code>, <code>optical</code>, <code>network</code> (on
+a drive path), and the classes that need a fixed volume:
+<code>program_files</code>, <code>windows</code> and <code>other_fixed</code>.</li>
+<li><strong>No usable path</strong> (none, or not a drive or UNC path, or an 8.3 short
+name the agent could not expand): every class the path decides. A
+known removable, optical or network volume still rules out
+<code>program_files</code>, <code>windows</code> and <code>other_fixed</code>, which no path on it can
+be in.</li>
+<li><strong>No ACL fact</strong> (<a href="../../facts/struct.PathFact.html#structfield.user_writable" title="field palisade_policy::facts::PathFact::user_writable"><code>PathFact::user_writable</code></a>):
+<code>user_writable_other</code>, unless a directory the scanner flagged
+establishes it. A writable ACL or a flagged directory is <code>Match</code>, and
+a safe ACL is <code>NoMatch</code>.</li>
+<li>Derived classes follow the logic: <code>other_fixed</code> (a drive path on a
+fixed volume in none of <code>user_profile</code>, <code>temp</code>, <code>program_files</code> and
+<code>windows</code>) is <code>Unknown</code> whenever one of those is.</li>
+</ul>
+<p><strong>Consequence.</strong> A missing variable can make many paths <code>Unknown</code> for
+one class, so a policy with a strict entry for that class blocks more
+unknown objects while the fact is missing. That fails closed, and only
+affects objects no rule decided. The endpoint agent is expected to
+supply the volume kind and every variable; the decision names what was
+missing (<a href="../struct.UnknownHandling.html#structfield.missing_facts" title="field palisade_policy::unknown::UnknownHandling::missing_facts"><code>crate::unknown::UnknownHandling::missing_facts</code></a>).</p>
+<div class="table"><table><thead><tr><th>Class</th><th><code>Match</code> when</th></tr></thead><tbody>
+<tr><td><code>ads</code></td><td>the path names an alternate data stream</td></tr>
+<tr><td><code>network</code></td><td>a UNC path, a mapped drive (its alias is UNC), or a network volume</td></tr>
+<tr><td><code>removable</code>, <code>optical</code></td><td>the volume is of that kind</td></tr>
+<tr><td><code>user_profile</code></td><td>under <code>%USERPROFILE%</code>, <code>%APPDATA%</code>, <code>%LOCALAPPDATA%</code> or <code>%PUBLIC%</code>, or under <code>X:\Users\&lt;name&gt;</code> on any drive</td></tr>
+<tr><td><code>temp</code></td><td>under <code>%TEMP%</code> or <code>%WINDIR%\Temp</code>, any <code>INetCache</code> or <code>Temporary Internet Files</code> folder below the drive or share root, or a directory the agent lists as a temporary cache</td></tr>
+<tr><td><code>user_writable_other</code></td><td>the ACL facts say a non-administrator can write the file or a directory above it, or it is under a directory the scanner flagged; <code>Unknown</code> without the ACL fact, or when the path is not usable</td></tr>
+<tr><td><code>program_files</code></td><td>under <code>%PROGRAMFILES%</code>, on a fixed volume</td></tr>
+<tr><td><code>windows</code></td><td>under <code>%WINDIR%</code>, on a fixed volume</td></tr>
+<tr><td><code>other_fixed</code></td><td>a drive path on a fixed volume that is in none of <code>user_profile</code>, <code>temp</code>, <code>program_files</code> and <code>windows</code>; it can come with <code>user_writable_other</code> and <code>ads</code></td></tr>
+</tbody></table>
+</div>
+<p><code>program_files</code> and <code>windows</code> are the protected classes, so they are
+never given to a file on a removable, optical or network volume, or to
+a network path: a disc or share holding its own <code>\Windows</code> folder is
+not the system’s. When the path has an alias (the other spelling of a
+mapped drive or a UNC path), both spellings are classified and a class
+is the <code>or</code> of the two, except that a network spelling of either rules
+out the protected classes. Paths compare without case, at component
+boundaries.</p>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.Classified.html" title="struct palisade_policy::unknown::location::Classified">Classified</a></dt><dd>The location classes of one path: what the facts say about each class,
+and the facts that were missing.</dd><dt><a class="struct" href="struct.Hints.html" title="struct palisade_policy::unknown::location::Hints">Hints</a></dt><dd>Facts the agent adds to the path when it classifies a location.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.VolumeKind.html" title="enum palisade_policy::unknown::location::VolumeKind">Volume<wbr>Kind</a></dt><dd>The kind of volume a file is on, as the agent reports it (#4).</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.classify.html" title="fn palisade_policy::unknown::location::classify">classify</a></dt><dd>The location classes of <code>path</code>, with no scanner or temporary-folder
+facts.</dd><dt><a class="fn" href="fn.classify_with.html" title="fn palisade_policy::unknown::location::classify_with">classify_<wbr>with</a></dt><dd>The location classes of <code>path</code>, with the agent’s hints.</dd><dt><a class="fn" href="fn.unclassified.html" title="fn palisade_policy::unknown::location::unclassified">unclassified</a></dt><dd>The classes of an object with no path: every class is <code>Unknown</code>.</dd></dl></section></div></main></body></html>

@@ -151,9 +151,9 @@
 <a href=#151 id=151 data-nosnippet>151</a>            .unwrap_or_else(|| <span class="string">"(unknown)"</span>.to_owned());
 <a href=#152 id=152 data-nosnippet>152</a>        <span class="kw">let </span>e = devices.entry(device.clone()).or_default();
 <a href=#153 id=153 data-nosnippet>153</a>        e.<span class="number">0 </span>+= <span class="number">1</span>;
-<a href=#154 id=154 data-nosnippet>154</a>        <span class="kw">let </span>would = d.as_ref().is_some_and(|d| {
-<a href=#155 id=155 data-nosnippet>155</a>            d.outcome() == Outcome::AllowedAudit &amp;&amp; d.would_have_been() == Outcome::Blocked
-<a href=#156 id=156 data-nosnippet>156</a>        });
+<a href=#154 id=154 data-nosnippet>154</a>        <span class="kw">let </span>would = d
+<a href=#155 id=155 data-nosnippet>155</a>            .as_ref()
+<a href=#156 id=156 data-nosnippet>156</a>            .is_some_and(|d| d.outcome() == Outcome::AllowedAudit &amp;&amp; d.would_have_been().stops());
 <a href=#157 id=157 data-nosnippet>157</a>        <span class="kw">if </span>would {
 <a href=#158 id=158 data-nosnippet>158</a>            e.<span class="number">1 </span>+= <span class="number">1</span>;
 <a href=#159 id=159 data-nosnippet>159</a>            total += <span class="number">1</span>;
