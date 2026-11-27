@@ -1,0 +1,7 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask check-fuzz-locks
+
+Check that every crates/*/fuzz/Cargo.lock is current (cargo metadata --locked)

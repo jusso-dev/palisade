@@ -1,0 +1,9 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask check-commit-msg
+
+<file>
+Check a commit message file against Conventional Commits (the
+opt-in commit-msg hook in .githooks/ runs this)

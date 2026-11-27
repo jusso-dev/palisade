@@ -1,0 +1,7 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask test-summary <label> <junit.xml>
+
+Summarise a nextest JUnit report for the GitHub job page

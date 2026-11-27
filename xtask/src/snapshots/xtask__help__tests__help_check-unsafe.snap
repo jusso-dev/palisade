@@ -1,0 +1,7 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask check-unsafe
+
+Enforce the unsafe-code allowlist (unsafe-allowlist.txt, ADR 0011)

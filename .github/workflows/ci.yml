@@ -203,7 +203,7 @@ jobs:
           CARGO_NET_OFFLINE: "true"
         run: >-
           cargo insta test --check --unreferenced reject --all-features
-          -p palisade-policy -p palisade-proto
+          -p palisade-policy -p palisade-proto -p xtask
 
   # Every cargo-fuzz target, seeded from the synthetic test fixtures, for 60 s
   # each. A finding fails the job and is written to the job summary with a

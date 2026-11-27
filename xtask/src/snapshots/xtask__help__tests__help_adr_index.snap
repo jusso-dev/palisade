@@ -1,0 +1,7 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask adr index
+
+Regenerate the ADR index table in docs/adr/README.md

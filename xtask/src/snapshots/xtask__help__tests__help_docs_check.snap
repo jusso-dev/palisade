@@ -1,0 +1,8 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask docs check
+
+Fail if the generated pages are stale, or a doc page is not in the book,
+is not accessible, or has an untested example

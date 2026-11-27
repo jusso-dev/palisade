@@ -1,0 +1,9 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask deps-report [--base <commit>]
+
+Print the dependency report: duplicates, third-party crates per crate,
+third-party unsafe counts and code that runs at build time; with --base,
+only when Cargo.lock changed, adding cargo tree -d and unsafe changes

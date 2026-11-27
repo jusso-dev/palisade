@@ -20,6 +20,7 @@ mod dist;
 mod docs;
 mod fuzz;
 mod fuzz_locks;
+mod help;
 mod hooks;
 mod junit;
 mod manifests;
@@ -28,6 +29,7 @@ mod report;
 mod supply_chain;
 mod testdata;
 mod threat_coverage;
+mod tools;
 mod unsafe_code;
 mod workflows;
 
@@ -36,87 +38,24 @@ use std::{
     process::{Command, ExitCode},
 };
 
-const HELP: &str = "\
-Usage: cargo xtask <command>
-
-Commands:
-  adr new \"<title>\"
-                   Copy docs/adr/0000-template.md to the next ADR number, as `proposed`
-  adr index        Regenerate the ADR index table in docs/adr/README.md
-  adr lint         Check every ADR's file name, number, status, date and sections (Security
-                   impact included), supersession links, and that the index is current
-  audit            Run cargo-audit over the root and fuzz lockfiles, ignoring exactly the
-                   advisories deny.toml ignores
-  ci [--fast]      Run the checks from .github/workflows/ci.yml locally (--fast skips coverage,
-                   fuzz, docs, the book build, feature-powerset, msrv, package, sign-test and
-                   server-image)
-  bench-compare --base <commit>
-                   Run every criterion bench at <commit> and at the working tree, and fail if a
-                   median is more than 10% slower outside the noise (bench.yml)
-  check-commit-msg <file>
-                   Check a commit message file against Conventional Commits (the
-                   opt-in commit-msg hook in .githooks/ runs this)
-  check-banned-terms [--digest <term>]
-                   No commercial vendor or product names in any file or path
-                   (docs/banned-terms.txt, docs/NAMING.md); --digest prints a list line
-  check-deps       Enforce the allowed dependency directions between crates
-  check-fuzz-locks Check that every crates/*/fuzz/Cargo.lock is current (cargo metadata --locked)
-  check-testdata   Fail if any file in the repository that starts like an executable (MZ) is not
-                   allowlisted in testdata/manifest.txt
-  check-manifests  Enforce workspace inheritance of package fields, lints and dependency versions,
-                   and that every crate README documents its features
-  check-supply-chain
-                   Enforce the duplicate-version budget, deny.toml ignore expiry and reasons,
-                   the cargo-vet criteria and exemption notes, and no audit.toml
-  check-unsafe     Enforce the unsafe-code allowlist (unsafe-allowlist.txt, ADR 0011)
-  dist [--target <triple>] [--msi] [--sign <signer>] [--out <dir>] [--bump-patch]
-       [--compare-sizes <sizes.json>] [--from <dir>] [--no-timestamp]
-                   Release-build the Windows binaries (with --msi, the installer package) or the
-                   Linux server, with symbols and size reports, as CI does (docs/packaging.md)
-  dist driver      Explain how the optional kernel driver is packaged (local-only, #8)
-  sign --signer <none|test-ca|pfx|cloud-hsm> [--verify] [--no-timestamp] <file>...
-                   Authenticode-sign and verify files (docs/releasing.md#code-signing)
-  release <prepare|check-tag|notes|checksums|verify-checksums|provenance|verify> ...
-                   The release pipeline's steps (docs/releasing.md)
-  docs generate    Regenerate the reference pages in docs/book/src/reference/generated
-  docs check       Fail if the generated pages are stale, or a doc page is not in the book,
-                   is not accessible, or has an untested example
-  docs build [--site-url <path>]
-                   Build the book into target/book (warnings are errors), then check every
-                   internal link; needs mdbook, mdbook-mermaid-ssr, a headless browser and lychee
-  docs assemble <dir> --version <latest|vX.Y>
-                   Assemble the GitHub Pages tree: the book and the Rust API docs under
-                   <dir>/<version>/, the version list and the root redirect
-  docs version-for-ref <git ref>
-                   Print the docs version for a ref: latest for main, vX.Y for tag vX.Y.Z
-  deps-report [--base <commit>]
-                   Print the dependency report: duplicates, third-party crates per crate,
-                   third-party unsafe counts and code that runs at build time; with --base,
-                   only when Cargo.lock changed, adding cargo tree -d and unsafe changes
-  sbom             Reserved for the SBOM (#226); prints where it will be written and fails
-  check-workflows  Enforce the CI runner and action policy for .github/workflows,
-                   and that nothing under .github names a cloud-managed build service
-  threat-coverage  Check the threat model's tables, and that every test, fuzz target and CI
-                   check it cites exists (docs/security/threat-model.md)
-  test-summary <label> <junit.xml>
-                   Summarise a nextest JUnit report for the GitHub job page
-  coverage-summary <label> <coverage.json>
-                   Summarise a cargo-llvm-cov JSON summary for the GitHub job page
-  coverage-gate --base <commit>
-                   Fail if palisade-policy line coverage is lower than at <commit>; needs
-                   cargo-llvm-cov and cargo-nextest
-  fixtures         Build the generated test fixture corpus into target/fixtures/
-  golden [--update]
-                   Check the corpus's hashes against testdata/golden/fixtures.txt, or rewrite it
-  fuzz [--seconds N] [--target NAME | --shard I/N]
-                   Build every cargo-fuzz target, seed it from the test fixtures and run it for
-                   N seconds (default 60), or only NAME, or only every N-th target starting at
-                   index I (as CI's shards do); needs the pinned nightly and cargo-fuzz
-  help             Show this message
-";
+/// The command list; see `src/help.rs`.
+const HELP: &str = help::TEXT;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // `cargo xtask <command> --help`: the command's entry from the list.
+    match help::for_args(&args) {
+        Some(Ok(entries)) => {
+            print!("{}", help::render(&entries));
+            return ExitCode::SUCCESS;
+        }
+        Some(Err(error)) => {
+            eprintln!("{error}\n");
+            eprint!("{HELP}");
+            return ExitCode::FAILURE;
+        }
+        None => {}
+    }
     if let [command, label, path] = args.as_slice() {
         if command == "test-summary" {
             return test_summary(label, Path::new(path));

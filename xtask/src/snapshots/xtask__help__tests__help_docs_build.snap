@@ -1,0 +1,8 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask docs build [--site-url <path>]
+
+Build the book into target/book (warnings are errors), then check every
+internal link; needs mdbook, mdbook-mermaid-ssr, a headless browser and lychee

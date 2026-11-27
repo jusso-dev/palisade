@@ -17,5 +17,9 @@ sha2.workspace = true
 toml.workspace = true
 yaml-rust2.workspace = true
 
+[dev-dependencies]
+# `--help` snapshots (src/help.rs); already a workspace dev-dependency.
+insta.workspace = true
+
 [lints]
 workspace = true

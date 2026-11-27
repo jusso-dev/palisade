@@ -1,0 +1,13 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask dist [--target <triple>] [--msi] [--sign <signer>] [--out <dir>] [--bump-patch]
+       [--compare-sizes <sizes.json>] [--from <dir>] [--no-timestamp]
+
+Release-build the Windows binaries (with --msi, the installer package) or the
+Linux server, with symbols and size reports, as CI does (docs/packaging.md)
+
+Usage: cargo xtask dist driver
+
+Explain how the optional kernel driver is packaged (local-only, #8)

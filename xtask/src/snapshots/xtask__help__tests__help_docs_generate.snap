@@ -1,0 +1,7 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask docs generate
+
+Regenerate the reference pages in docs/book/src/reference/generated

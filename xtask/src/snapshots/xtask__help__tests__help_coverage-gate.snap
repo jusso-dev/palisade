@@ -1,0 +1,8 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask coverage-gate --base <commit>
+
+Fail if palisade-policy line coverage is lower than at <commit>; needs
+cargo-llvm-cov and cargo-nextest

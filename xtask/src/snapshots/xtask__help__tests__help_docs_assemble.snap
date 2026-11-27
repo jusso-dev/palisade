@@ -1,0 +1,8 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask docs assemble <dir> --version <latest|vX.Y>
+
+Assemble the GitHub Pages tree: the book and the Rust API docs under
+<dir>/<version>/, the version list and the root redirect
