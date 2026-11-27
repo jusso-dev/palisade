@@ -322,7 +322,7 @@
 <a href=#322 id=322 data-nosnippet>322</a>            .iter()
 <a href=#323 id=323 data-nosnippet>323</a>            .filter(|a| a.rule_set == <span class="self">self</span>.set.id)
 <a href=#324 id=324 data-nosnippet>324</a>            .flat_map(|a| <span class="kw-2">&amp;</span>a.scopes)
-<a href=#325 id=325 data-nosnippet>325</a>            .chain(<span class="kw-2">&amp;</span><span class="self">self</span>.rule.scope)
+<a href=#325 id=325 data-nosnippet>325</a>            .chain(<span class="self">self</span>.rule.scope.as_deref())
 <a href=#326 id=326 data-nosnippet>326</a>            .collect()
 <a href=#327 id=327 data-nosnippet>327</a>    }
 <a href=#328 id=328 data-nosnippet>328</a>

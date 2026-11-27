@@ -1,0 +1,77 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Candidate indexes, so evaluation is not linear in the number of rules (#42)."><title>palisade_policy::evaluate::index - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="palisade_policy" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module index</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../palisade_policy/index.html">palisade_<wbr>policy</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module index</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#lazy-facts" title="Lazy facts">Lazy facts</a></li></ul><h3><a href="#structs">Module Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#constants" title="Constants">Constants</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="../index.html">In palisade_<wbr>policy::<wbr>evaluate</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">palisade_policy</a>::<wbr><a href="../index.html">evaluate</a></div><h1>Module <span>index</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/palisade_policy/evaluate/index.rs.html#1-1181">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Candidate indexes, so evaluation is not linear in the number of rules
+(#42).</p>
+<p>When an <a href="../struct.Evaluator.html" title="struct palisade_policy::evaluate::Evaluator"><code>Evaluator</code></a> is built, each rule is filed under the keys of
+its <strong>anchor</strong> (<a href="../../ops/index.html" title="mod palisade_policy::ops"><code>crate::ops</code></a> defines the anchor of one criterion): a
+set of keys such that, whenever the rule’s match tree is <code>Match</code>, the
+object’s facts contain at least one of them. The anchor of a tree is:</p>
+<ul>
+<li>a criterion: its own anchor, if it has one;</li>
+<li><code>all</code>: the anchor of one anchored child, since every child must
+match: the one on the cheapest facts (the path and the context come
+before hashes, then signers and the version resource), then the most
+selective (hashes, the leaf thumbprint, the publisher, other text,
+principals, path prefixes);</li>
+<li><code>any</code>: the union of its children’s anchors, if every child has one;</li>
+<li><code>not</code>: none.</li>
+</ul>
+<p>The indexes, one map per field:</p>
+<ul>
+<li><strong>hash</strong>: decoded digest to rules, per hash field. A rule whose
+criterion lists 25 digests is filed 25 times, so one probe replaces
+scanning every hash rule.</li>
+<li><strong>signer</strong>: leaf thumbprint, the leaf certificate’s TBS hash
+(<code>signer.tbs_hash</code> at <code>position: leaf</code> only; a CA’s TBS hash covers
+every file it signed, so it is evaluated always), and the folded
+publisher and issuer.</li>
+<li><strong>meta</strong>: folded version-resource strings, file name and extension.</li>
+<li><strong>path</strong>: folded literal path prefixes of <code>path.full</code> and
+<code>path.directory</code>, cut at a separator, with values that start with a
+path variable filed under the variable. Wildcards are filed under
+their literal part before the first wildcard character, so
+<code>C:\Program Files\*\x.exe</code> is under <code>C:\PROGRAM FILES</code>. A probe looks
+up every prefix of the folded fact that ends at a separator.</li>
+<li><strong>principal</strong>: canonical SIDs and object IDs of <code>user.sid</code>,
+<code>user.primary_group</code>, <code>user.groups</code> and <code>device.groups</code>.</li>
+<li><strong>always</strong>: rules with no anchor, every <code>deny</code> with
+<code>unknown_as: match</code>, which applies when its tree is <code>Unknown</code> and so
+cannot be skipped on a probe that finds nothing, and every rule with a
+<code>safety_critical</code> criterion, which counts as matching when its fact
+is unknown (#32). Each is evaluated
+for every object of its types. Validation warns when a policy has
+more than <a href="constant.ALWAYS_EVAL_WARN.html" title="constant palisade_policy::evaluate::index::ALWAYS_EVAL_WARN"><code>ALWAYS_EVAL_WARN</code></a> of them (<code>unindexed_rules</code>).</li>
+</ul>
+<p>Mandatory denies have their own set of indexes, probed first.</p>
+<p>Candidate selection is the union of the probes, then the full match
+tree is evaluated for each candidate only. A rule that is not a
+candidate cannot be <code>Match</code>, and is not an always-evaluated deny, so it
+does not apply: the matching rules are exactly those that a linear scan
+finds, and the decision is the same (a property test checks this
+against the linear scan, with the same decision and deciding rule).</p>
+<h2 id="lazy-facts"><a class="doc-anchor" href="#lazy-facts">§</a>Lazy facts</h2>
+<p><a href="../struct.Evaluator.html#method.evaluate_with" title="method palisade_policy::evaluate::Evaluator::evaluate_with"><code>Evaluator::evaluate_with</code></a> takes the classes of facts that have been
+computed (<a href="../../demand/struct.FactSet.html" title="struct palisade_policy::demand::FactSet"><code>FactSet</code></a>). Probing reads only facts that are there, and
+never asks for any. Then:</p>
+<ul>
+<li>If a rule of the object’s type is anchored on a class that has not
+been computed, it could still match, unless the facts computed so far
+already make its tree <code>NoMatch</code> (only checked for rules that read
+classes besides their anchor’s). Then that class is needed, with the
+classes it reads in that round or an earlier one. Its later rounds
+are asked for once it is a candidate whose tree is still <code>Unknown</code>.</li>
+<li>A candidate whose tree is <code>Unknown</code> needs the classes it reads that
+have not been computed. A tree that is <code>Match</code> or <code>NoMatch</code> is
+settled: Kleene logic is monotone, so more facts never change it.</li>
+</ul>
+<p>If anything is needed, the evaluator answers <a href="struct.NeedFacts.html" title="struct palisade_policy::evaluate::index::NeedFacts"><code>NeedFacts</code></a> with the
+needed classes of the earliest round (<a href="../../demand/struct.FactSet.html#associatedconstant.ROUNDS" title="associated constant palisade_policy::demand::FactSet::ROUNDS"><code>FactSet::ROUNDS</code></a>). Every class
+it asks for is read by a candidate. A rule only becomes a candidate
+later if it was anchored on a class that was missing, and then its
+classes were already needed; a settled tree stays settled. So every
+class of a round is asked for the first time that round is reached,
+and a decision takes at most three rounds after the cheap facts. If no
+rule could match given the cheap facts, the decision is made without
+asking for anything.</p>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.IndexStats.html" title="struct palisade_policy::evaluate::index::IndexStats">Index<wbr>Stats</a></dt><dd>What an index holds, for reports and the <code>unindexed_rules</code> warning.</dd><dt><a class="struct" href="struct.NeedFacts.html" title="struct palisade_policy::evaluate::index::NeedFacts">Need<wbr>Facts</a></dt><dd>The classes of facts are missing: compute them and evaluate again
+(#42). Every class named is read by a rule that could still apply.</dd><dt><a class="struct" href="struct.RequiredFacts.html" title="struct palisade_policy::evaluate::index::RequiredFacts">Required<wbr>Facts</a></dt><dd>The facts a policy can read, computed when it is loaded, so the agent
+can decide to compute some eagerly (#42).</dd></dl><h2 id="constants" class="section-header">Constants<a href="#constants" class="anchor">§</a></h2><dl class="item-table"><dt><a class="constant" href="constant.ALWAYS_EVAL_WARN.html" title="constant palisade_policy::evaluate::index::ALWAYS_EVAL_WARN">ALWAYS_<wbr>EVAL_<wbr>WARN</a></dt><dd>More always-evaluated rules than this makes validation warn
+(<code>unindexed_rules</code>).</dd></dl></section></div></main></body></html>

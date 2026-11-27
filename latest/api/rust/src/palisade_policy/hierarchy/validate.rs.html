@@ -1263,7 +1263,7 @@
 <a href=#1263 id=1263 data-nosnippet>1263</a>        scopes.extend(a.scopes.iter_mut());
 <a href=#1264 id=1264 data-nosnippet>1264</a>    }
 <a href=#1265 id=1265 data-nosnippet>1265</a>    <span class="kw">for </span>set <span class="kw">in </span><span class="kw-2">&amp;mut </span>doc.rule_sets {
-<a href=#1266 id=1266 data-nosnippet>1266</a>        scopes.extend(set.rules.iter_mut().filter_map(|r| r.scope.as_mut()));
+<a href=#1266 id=1266 data-nosnippet>1266</a>        scopes.extend(set.rules.iter_mut().filter_map(|r| r.scope.as_deref_mut()));
 <a href=#1267 id=1267 data-nosnippet>1267</a>    }
 <a href=#1268 id=1268 data-nosnippet>1268</a>    <span class="kw">for </span>scope <span class="kw">in </span>scopes {
 <a href=#1269 id=1269 data-nosnippet>1269</a>        <span class="kw">crate</span>::scope::for_each_set_ref(scope, |r| pin(r, used, refs));

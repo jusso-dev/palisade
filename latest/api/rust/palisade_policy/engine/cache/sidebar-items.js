@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ENTRY_OVERHEAD"],"enum":["FileIdentity"],"fn":["cacheable","object_key"],"struct":["CacheConfig","CacheKey","CacheStats","DecisionCache","KeyPlan","KeySeed"]};

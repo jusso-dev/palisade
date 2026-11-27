@@ -834,7 +834,7 @@
 <a href=#834 id=834 data-nosnippet>834</a>        <span class="kw">for </span>set <span class="kw">in </span><span class="kw-2">&amp;mut </span>doc.rule_sets {
 <a href=#835 id=835 data-nosnippet>835</a>            set.metadata = Metadata::default();
 <a href=#836 id=836 data-nosnippet>836</a>            <span class="kw">for </span>rule <span class="kw">in </span><span class="kw-2">&amp;mut </span>set.rules {
-<a href=#837 id=837 data-nosnippet>837</a>                rule.metadata = Metadata::default();
+<a href=#837 id=837 data-nosnippet>837</a>                rule.metadata = <span class="kw">crate</span>::model::RuleMetadata::default();
 <a href=#838 id=838 data-nosnippet>838</a>            }
 <a href=#839 id=839 data-nosnippet>839</a>        }
 <a href=#840 id=840 data-nosnippet>840</a>        doc

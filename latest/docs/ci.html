@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-bcef50cb.js";
+            window.path_to_searchindex_js = "../searchindex-b35a2510.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-de2a680a.js"></script>
@@ -633,7 +633,7 @@ cargo xtask fixtures               # the corpus, into target/fixtures/
 cargo xtask golden                 # --update to rewrite testdata/golden/fixtures.txt
 cargo xtask coverage-gate --base origin/main   # cargo-llvm-cov and cargo-nextest
 cargo xtask fuzz                   # needs nightly-2026-11-20 and cargo-fuzz 0.13
-cargo test --workspace --all-features --locked --bench criterion_eval --bench hash_and_parse
+cargo test --workspace --all-features --locked --bench criterion_eval --bench hash_and_parse --bench simulate --bench policy_eval
 cargo hack check --each-feature --all-targets --locked \
   -p palisade-core -p palisade-fileid -p palisade-policy \
   -p palisade-proto -p palisade-server -p palisade-cli \

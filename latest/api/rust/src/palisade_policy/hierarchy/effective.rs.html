@@ -830,7 +830,7 @@
 <a href=#830 id=830 data-nosnippet>830</a>            <span class="kw">let </span>scopes = e
 <a href=#831 id=831 data-nosnippet>831</a>                .scopes
 <a href=#832 id=832 data-nosnippet>832</a>                .iter()
-<a href=#833 id=833 data-nosnippet>833</a>                .chain(e.set.rules.iter().filter_map(|r| r.scope.as_ref()));
+<a href=#833 id=833 data-nosnippet>833</a>                .chain(e.set.rules.iter().filter_map(|r| r.scope.as_deref()));
 <a href=#834 id=834 data-nosnippet>834</a>            <span class="kw">for </span>scope <span class="kw">in </span>scopes {
 <a href=#835 id=835 data-nosnippet>835</a>                <span class="kw">for </span>(<span class="kw">_</span>, r, <span class="kw">_</span>) <span class="kw">in </span><span class="kw">crate</span>::scope::set_refs(scope) {
 <a href=#836 id=836 data-nosnippet>836</a>                    found.push((r, <span class="macro">format!</span>(<span class="string">"/effective/rule_sets/{id}"</span>)));

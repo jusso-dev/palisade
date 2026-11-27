@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["BuildError","Evaluator","Subject"]};
+window.SIDEBAR_ITEMS = {"mod":["index"],"struct":["BuildError","Evaluator","Subject"]};

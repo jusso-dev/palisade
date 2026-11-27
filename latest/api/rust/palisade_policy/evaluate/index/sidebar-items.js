@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ALWAYS_EVAL_WARN"],"struct":["IndexStats","NeedFacts","RequiredFacts"]};

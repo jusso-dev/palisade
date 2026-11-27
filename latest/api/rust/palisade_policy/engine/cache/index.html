@@ -1,0 +1,61 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="The decision cache (#42)."><title>palisade_policy::engine::cache - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="palisade_policy" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module cache</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../palisade_policy/index.html">palisade_<wbr>policy</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module cache</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#key" title="Key">Key</a></li><li><a href="#not-cached" title="Not cached">Not cached</a></li><li><a href="#invalidation" title="Invalidation">Invalidation</a></li><li><a href="#size" title="Size">Size</a></li></ul><h3><a href="#structs">Module Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#constants" title="Constants">Constants</a></li><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="../index.html">In palisade_<wbr>policy::<wbr>engine</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">palisade_policy</a>::<wbr><a href="../index.html">engine</a></div><h1>Module <span>cache</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/palisade_policy/engine/cache.rs.html#1-882">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>The decision cache (#42).</p>
+<p>A bounded, sharded LRU cache of decisions. Repeated launches of the same
+file by the same principal in the same context skip evaluation.</p>
+<h2 id="key"><a class="doc-anchor" href="#key">§</a>Key</h2>
+<p><a href="struct.CacheKey.html" title="struct palisade_policy::engine::cache::CacheKey"><code>CacheKey</code></a> is <code>(file identity, object type, subject key, context key, policy key)</code>:</p>
+<ul>
+<li><strong>File identity</strong> (<a href="enum.FileIdentity.html" title="enum palisade_policy::engine::cache::FileIdentity"><code>FileIdentity</code></a>): the volume serial, file ID,
+change stamp (change journal USN or last-write time) and size, or the
+SHA-256 when known. Any write changes the stamp, so a modified file
+gets a new key even before its change notification arrives.</li>
+<li><strong>Subject key</strong>: a hash of the token SIDs that the policy’s principal
+rules test, and nothing else (<a href="struct.KeyPlan.html" title="struct palisade_policy::engine::cache::KeyPlan"><code>KeyPlan</code></a>). A policy without principal
+rules gives every user the same key, so one entry serves them all.</li>
+<li><strong>Context key</strong>: a hash of only the context facts the policy reads:
+the other user, device and session facts, if any rule tests them,
+and the device state (mode, connectivity, lockdown). Schedule slots
+and network location (#38) join it when they exist.</li>
+<li><strong>Object key</strong>: a hash of the object’s facts that do not follow from
+the file’s identity: its path (one file can have several, through
+hard links), the path’s alias and ACL, and the path variables. The
+file’s content facts (hashes, signatures, version resource) follow
+from its identity and change stamp, and are not hashed again.</li>
+<li><strong>Policy key</strong>: the snapshot’s generation, which changes on every
+policy swap, so an entry for an older policy can never be found.
+The bundle’s decision hash (#43) becomes this key once bundles exist.</li>
+</ul>
+<h2 id="not-cached"><a class="doc-anchor" href="#not-cached">§</a>Not cached</h2>
+<p><a href="fn.cacheable.html" title="fn palisade_policy::engine::cache::cacheable"><code>cacheable</code></a> leaves out a decision that rests on an unknown fact, one
+with a prompt (an approval request, a custom notification, a reason
+prompt or a re-authentication), one made during an override session,
+one in <code>learning</code> (which must be seen by the learning pipeline every
+time, #5), and every decision while the clock is not trusted
+(<a href="../trait.Clock.html" title="trait palisade_policy::engine::Clock"><code>super::Clock</code></a>). Instance limits and condition timeouts (#33) are not
+modelled by the engine yet; when they are, they join this list.</p>
+<h2 id="invalidation"><a class="doc-anchor" href="#invalidation">§</a>Invalidation</h2>
+<ul>
+<li>On a policy swap: the generation changes, and the whole cache is
+purged.</li>
+<li>On a write, rename or delete notification for a file
+(<a href="../struct.Engine.html#method.invalidate_file" title="method palisade_policy::engine::Engine::invalidate_file"><code>super::Engine::invalidate_file</code></a>): every entry for that file.</li>
+<li>On logoff (<a href="../struct.Engine.html#method.invalidate_session" title="method palisade_policy::engine::Engine::invalidate_session"><code>super::Engine::invalidate_session</code></a>): every entry made in
+that session.</li>
+<li>At a deadline (<a href="../struct.Engine.html#method.evaluate" title="method palisade_policy::engine::Engine::evaluate"><code>super::Engine::evaluate</code></a> takes one, such as the next
+schedule boundary): the entry expires then.</li>
+<li>After the policy’s <code>decision_cache_ttl_secs</code> (at most 86400).</li>
+</ul>
+<p>Expiry uses the monotonic clock, so setting the wall clock back cannot
+extend an entry.</p>
+<h2 id="size"><a class="doc-anchor" href="#size">§</a>Size</h2>
+<p>Each shard holds at most its share of <a href="struct.CacheConfig.html#structfield.max_bytes" title="field palisade_policy::engine::cache::CacheConfig::max_bytes"><code>CacheConfig::max_bytes</code></a>,
+counted with <a href="constant.ENTRY_OVERHEAD.html" title="constant palisade_policy::engine::cache::ENTRY_OVERHEAD"><code>ENTRY_OVERHEAD</code></a> plus the heap size of the decision. The
+least recently used entries are evicted first. Hits, misses, inserts,
+evictions and invalidations are counted (<a href="struct.CacheStats.html" title="struct palisade_policy::engine::cache::CacheStats"><code>CacheStats</code></a>).</p>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.CacheConfig.html" title="struct palisade_policy::engine::cache::CacheConfig">Cache<wbr>Config</a></dt><dd>Sizes and lifetimes of the cache.</dd><dt><a class="struct" href="struct.CacheKey.html" title="struct palisade_policy::engine::cache::CacheKey">Cache<wbr>Key</a></dt><dd>The key of one cached decision.</dd><dt><a class="struct" href="struct.CacheStats.html" title="struct palisade_policy::engine::cache::CacheStats">Cache<wbr>Stats</a></dt><dd>What the cache has done, for the hit-ratio metrics.</dd><dt><a class="struct" href="struct.DecisionCache.html" title="struct palisade_policy::engine::cache::DecisionCache">Decision<wbr>Cache</a></dt><dd>The cache. Shared by every thread that evaluates.</dd><dt><a class="struct" href="struct.KeyPlan.html" title="struct palisade_policy::engine::cache::KeyPlan">KeyPlan</a></dt><dd>What parts of the context a policy reads, so the cache key covers
+exactly those (#42).</dd><dt><a class="struct" href="struct.KeySeed.html" title="struct palisade_policy::engine::cache::KeySeed">KeySeed</a></dt><dd>The secret key of the cache-key hashes: SipHash with a random 128-bit
+key chosen when the engine starts, so a crafted context cannot be built
+to collide with another.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.FileIdentity.html" title="enum palisade_policy::engine::cache::FileIdentity">File<wbr>Identity</a></dt><dd>The identity of the file a decision is about.</dd></dl><h2 id="constants" class="section-header">Constants<a href="#constants" class="anchor">§</a></h2><dl class="item-table"><dt><a class="constant" href="constant.ENTRY_OVERHEAD.html" title="constant palisade_policy::engine::cache::ENTRY_OVERHEAD">ENTRY_<wbr>OVERHEAD</a></dt><dd>The bytes counted for one entry besides its decision: the slot (key,
+links, expiry), the map’s entry and its control bytes, and the <code>Arc</code>
+header, rounded up.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.cacheable.html" title="fn palisade_policy::engine::cache::cacheable">cacheable</a></dt><dd>Whether a decision may be cached. See the module documentation.</dd><dt><a class="fn" href="fn.object_key.html" title="fn palisade_policy::engine::cache::object_key">object_<wbr>key</a></dt><dd>A hash of the facts of an object that its file identity does not fix:
+the path, its alias, whether its short name was resolved, its ACL
+fact, and the path variables that path criteria expand.</dd></dl></section></div></main></body></html>
