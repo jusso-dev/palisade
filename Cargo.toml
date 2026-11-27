@@ -51,7 +51,7 @@ clap = { version = "4.6.9", default-features = false, features = ["std", "derive
 # Benchmarks only (dev-dependency). 0.7 was chosen when the MSRV was 1.85;
 # moving to a newer release is a separate change. The default plotting and
 # parallel features are left out.
-criterion = { version = "0.7.0", default-features = false, features = ["cargo_bench_support"] }
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 # Benchmarks only (dev-dependency of palisade-policy): the percentile
 # harness of the performance budget (#42). The default serialisation and
 # sync features are left out.
