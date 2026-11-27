@@ -47,14 +47,17 @@
 //!   a drive path), and the classes that need a fixed volume:
 //!   `program_files`, `windows` and `other_fixed`.
 //! - **No usable path** (none, or not a drive or UNC path, or an 8.3 short
-//!   name the agent could not expand): every class the path decides.
+//!   name the agent could not expand): every class the path decides. A
+//!   known removable, optical or network volume still rules out
+//!   `program_files`, `windows` and `other_fixed`, which no path on it can
+//!   be in.
+//! - **No ACL fact** ([`PathFact::user_writable`](crate::facts::PathFact::user_writable)):
+//!   `user_writable_other`, unless a directory the scanner flagged
+//!   establishes it. A writable ACL or a flagged directory is `Match`, and
+//!   a safe ACL is `NoMatch`.
 //! - Derived classes follow the logic: `other_fixed` (a drive path on a
 //!   fixed volume in none of `user_profile`, `temp`, `program_files` and
 //!   `windows`) is `Unknown` whenever one of those is.
-//!
-//! `user_writable_other` is not three-valued: a file whose ACL facts are
-//! missing, or that has no usable path, is in it (`Match`), as before,
-//! because a path not shown safe is not trusted.
 //!
 //! **Consequence.** A missing variable can make many paths `Unknown` for
 //! one class, so a policy with a strict entry for that class blocks more
@@ -154,19 +157,11 @@ pub fn classify(
     )
 }
 
-/// The classes of an object with no path: `user_writable_other` (a file
-/// not shown safe is not trusted, as before), and every other class
-/// `Unknown`.
+/// The classes of an object with no path: every class is `Unknown`.
 #[must_use]
 pub fn unclassified() -> Classified {
     Classified {
-        classes: Classes::new(&LocationClass::ALL, |c| {
-            if c == LocationClass::UserWritableOther {
-                Tri::Match
-            } else {
-                Tri::Unknown
-            }
-        }),
+        classes: Classes::new(&LocationClass::ALL, |_| Tri::Unknown),
         missing: BTreeSet::from([MissingFact::Path]),
     }
 }
@@ -248,16 +243,20 @@ fn classify_one(
         volume(VolumeKind::Network, missing)
     };
     if !p.is_resolved() || path.short_name_unresolved {
-        // Without a usable path, the file is not shown safe, so it is
-        // `user_writable_other` (as before); nothing else the path decides
-        // is known.
+        // Without a usable path nothing the path decides is known, except
+        // what the volume rules out: a known removable, optical or network
+        // volume can hold no protected folder and no `other_fixed` file.
         missing.insert(MissingFact::Path);
+        let on_fixed = match hints.volume {
+            Some(v) => Tri::from_bool(v == VolumeKind::Fixed),
+            None => Tri::Unknown,
+        };
         return Classes::new(&L::ALL, |c| match c {
             L::Ads => ads,
             L::Removable => removable,
             L::Optical => optical,
             L::Network => network,
-            L::UserWritableOther => Tri::Match,
+            L::ProgramFiles | L::Windows | L::OtherFixed => on_fixed.and(Tri::Unknown),
             _ => Tri::Unknown,
         });
     }
@@ -290,15 +289,19 @@ fn classify_one(
         ));
     let program_files_var = var(PathVariable::ProgramFiles);
     let windows_var = var(PathVariable::Windir);
-    // Unknown ACL facts read as writable, as before: the class is a fact
-    // about trust, and a file not shown safe is not trusted.
-    if path.user_writable.is_none() {
-        missing.insert(MissingFact::UserWritable);
-    }
-    let writable = Tri::from_bool(
-        path.user_writable != Some(false)
-            || hints.writable_dirs.iter().any(|d| under(file, d.as_str())),
-    );
+    // A scanner-flagged directory or a writable ACL establishes the class;
+    // a safe ACL rules it out; without the ACL fact it is `Unknown`.
+    let writable = if hints.writable_dirs.iter().any(|d| under(file, d.as_str())) {
+        Tri::Match
+    } else {
+        match path.user_writable {
+            Some(w) => Tri::from_bool(w),
+            None => {
+                missing.insert(MissingFact::UserWritable);
+                Tri::Unknown
+            }
+        }
+    };
     // Only a fixed local volume can hold the system's own folders, and
     // `other_fixed` is a drive path on one.
     let fixed = if p.kind() == PathKind::Drive {

@@ -810,17 +810,16 @@ impl<'a, 'h> Builder<'a, 'h> {
         for layer in self.layers {
             for (_, doc) in self.policies(layer) {
                 let u = &doc.policy.unknown;
-                let scopes = doc
-                    .policy
-                    .scope
-                    .iter()
-                    .chain(&u.scopes)
-                    .chain(u.scope_groups.iter().flat_map(|g| &g.all_of));
+                let scopes = doc.policy.scope.iter().chain(&u.scopes).chain(
+                    u.scope_limits
+                        .iter()
+                        .flat_map(|l| l.all_of.iter().chain(&l.any_of)),
+                );
                 for scope in scopes {
                     for (_, r, _) in crate::scope::set_refs(scope) {
                         found.push((
                             r,
-                            format!("/effective/policy/unknown/scope_groups ({})", doc.policy.id),
+                            format!("/effective/policy/unknown/scope_limits ({})", doc.policy.id),
                         ));
                     }
                 }
@@ -1224,30 +1223,53 @@ impl<'a, 'h> Builder<'a, 'h> {
     ///
     /// A policy's `scope` and its `unknown.scopes` limit where its unknown
     /// settings apply (#38): `scope` and any of `scopes`. The effective
-    /// policy has no scope of its own, so that limit moves into
-    /// `unknown.scope_groups`, one all-of group (`scope`, one entry of
-    /// `scopes`) per entry ([`UnknownPolicy::scope_groups_of`](crate::model::UnknownPolicy::scope_groups_of)).
+    /// policy has no scope of its own, so that limit moves, unexpanded, into
+    /// one entry of `unknown.scope_limits`
+    /// ([`UnknownPolicy::scope_limit_of`](crate::model::UnknownPolicy::scope_limit_of)):
+    /// at most one entry per contributing policy.
     /// The merged settings apply to a subject in at least one contributing
     /// policy's limit (everyone if one has none), exactly where that
     /// policy's own evaluation would apply its settings, and the built-in
     /// implicit deny decides for any other. Where several limits overlap,
     /// the merged settings are at least as strict as each policy's.
+    ///
+    /// The fold is linear in the contributing policies. Levels and settings
+    /// merge pairwise ([`UnknownPolicy::stricter_settings`](crate::model::UnknownPolicy::stricter_settings)),
+    /// which costs nothing that grows with the limits, and the limits are
+    /// collected in one pass, de-duplicated by a canonical form, so no limit
+    /// is cloned or compared more than once.
     fn unknown(&self) -> crate::model::UnknownPolicy {
         let mut acc: Option<crate::model::UnknownPolicy> = None;
+        let mut limits: Vec<crate::model::ScopeLimit> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut everywhere = false;
         for layer in self.layers {
             for (_, d) in self.policies(layer).into_iter().rev() {
-                let mut u = d.policy.unknown.clone();
-                u.scope_groups = u
-                    .scope_groups_of(d.policy.scope.as_ref(), stage_six_scope)
-                    .unwrap_or_default();
-                u.scopes = Vec::new();
+                match d
+                    .policy
+                    .unknown
+                    .scope_limit_of(d.policy.scope.as_ref(), stage_six_scope)
+                {
+                    // A policy with no limit applies everywhere, which
+                    // absorbs every other limit.
+                    None => everywhere = true,
+                    Some(l) if !everywhere => {
+                        if seen.insert(l.canonical()) {
+                            limits.push(l);
+                        }
+                    }
+                    Some(_) => {}
+                }
                 acc = Some(match acc {
-                    None => u,
-                    Some(outer) => u.stricter(&outer),
+                    None => d.policy.unknown.without_limits(),
+                    Some(outer) => d.policy.unknown.stricter_settings(&outer),
                 });
             }
         }
-        acc.unwrap_or_default()
+        let mut u = acc.unwrap_or_default();
+        u.scopes = Vec::new();
+        u.scope_limits = if everywhere { Vec::new() } else { limits };
+        u
     }
 
     /// The merged settings and their provenance.

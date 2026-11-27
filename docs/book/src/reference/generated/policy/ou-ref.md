@@ -4,7 +4,7 @@
 
 A directory organisational unit.
 
-Appears at: `/policy/rule_set_scopes/scopes/devices/exclude/ou`, `/policy/rule_set_scopes/scopes/devices/include/ou`, `/policy/scope/devices/exclude/ou`, `/policy/scope/devices/include/ou`, `/policy/unknown/scope_groups/all_of/devices/exclude/ou`, `/policy/unknown/scope_groups/all_of/devices/include/ou`, and more.
+Appears at: `/policy/rule_set_scopes/scopes/devices/exclude/ou`, `/policy/rule_set_scopes/scopes/devices/include/ou`, `/policy/scope/devices/exclude/ou`, `/policy/scope/devices/include/ou`, `/policy/unknown/scope_limits/all_of/devices/exclude/ou`, `/policy/unknown/scope_limits/all_of/devices/include/ou`, and more.
 
 ## Fields
 

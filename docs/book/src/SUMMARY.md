@@ -49,7 +49,7 @@
     - [RuleSet](reference/generated/policy/rule-set.md)
     - [Rule](reference/generated/policy/rule.md)
     - [Schedule](reference/generated/policy/schedule.md)
-    - [ScopeGroup](reference/generated/policy/scope-group.md)
+    - [ScopeLimit](reference/generated/policy/scope-limit.md)
     - [Scope](reference/generated/policy/scope.md)
     - [SessionFilter](reference/generated/policy/session-filter.md)
     - [Value types](reference/generated/policy/types.md)

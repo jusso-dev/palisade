@@ -457,9 +457,14 @@ impl<'p> Evaluator<'p> {
             policy.unknown.scopes.iter().map(compile).collect(),
             policy
                 .unknown
-                .scope_groups
+                .scope_limits
                 .iter()
-                .map(|g| g.all_of.iter().map(compile).collect())
+                .map(|l| {
+                    (
+                        l.all_of.iter().map(compile).collect(),
+                        l.any_of.iter().map(compile).collect(),
+                    )
+                })
                 .collect(),
         );
         Ok(Self {

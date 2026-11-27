@@ -37,7 +37,7 @@ pub use settings::{AdvancedValue, ControlLevel, PolicySettings, TimeZoneBasis};
 pub use tree::{Criterion, Field, FieldClass, Match, Operator, Strength};
 pub use unknown::{
     ApprovalScope, CompliancePreset, DriverBootPolicy, Level, LocationClass, OriginClass,
-    PreexistingPolicy, PromptOption, PromptSettings, Reauth, ScopeGroup, UnknownPolicy,
+    PreexistingPolicy, PromptOption, PromptSettings, Reauth, ScopeLimit, UnknownPolicy,
 };
 
 use crate::scope::{LocationProfile, RuleSetScope, Scope};

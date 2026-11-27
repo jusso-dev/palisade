@@ -9,7 +9,7 @@ always. A scope only ever narrows: a rule applies when its match tree
 matches **and** every scope on the way to it matches (the policy's, its
 rule set assignment's, and its own).
 
-Appears at: `/policy/rule_set_scopes/scopes`, `/policy/scope`, `/policy/unknown/scope_groups/all_of`, `/policy/unknown/scopes`, `/rule_sets/rules/scope`.
+Appears at: `/policy/rule_set_scopes/scopes`, `/policy/scope`, `/policy/unknown/scope_limits/all_of`, `/policy/unknown/scope_limits/any_of`, `/policy/unknown/scopes`, `/rule_sets/rules/scope`.
 
 ## Fields
 

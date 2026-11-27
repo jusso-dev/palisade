@@ -4,7 +4,7 @@
 
 One weekly window.
 
-Appears at: `/policy/rule_set_scopes/scopes/schedule/windows`, `/policy/scope/schedule/windows`, `/policy/unknown/scope_groups/all_of/schedule/windows`, `/policy/unknown/scopes/schedule/windows`, `/rule_sets/rules/scope/schedule/windows`.
+Appears at: `/policy/rule_set_scopes/scopes/schedule/windows`, `/policy/scope/schedule/windows`, `/policy/unknown/scope_limits/all_of/schedule/windows`, `/policy/unknown/scope_limits/any_of/schedule/windows`, `/policy/unknown/scopes/schedule/windows`, `/rule_sets/rules/scope/schedule/windows`.
 
 ## Fields
 

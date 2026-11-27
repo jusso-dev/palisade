@@ -239,9 +239,12 @@ pub fn document_scopes(doc: &crate::model::PolicyDocument) -> Vec<(String, &Scop
     for (i, s) in u.scopes.iter().enumerate() {
         out.push((format!("/policy/unknown/scopes/{i}"), s));
     }
-    for (i, g) in u.scope_groups.iter().enumerate() {
-        for (j, s) in g.all_of.iter().enumerate() {
-            out.push((format!("/policy/unknown/scope_groups/{i}/all_of/{j}"), s));
+    for (i, l) in u.scope_limits.iter().enumerate() {
+        for (j, s) in l.all_of.iter().enumerate() {
+            out.push((format!("/policy/unknown/scope_limits/{i}/all_of/{j}"), s));
+        }
+        for (j, s) in l.any_of.iter().enumerate() {
+            out.push((format!("/policy/unknown/scope_limits/{i}/any_of/{j}"), s));
         }
     }
     for (i, a) in doc.policy.rule_set_scopes.iter().enumerate() {

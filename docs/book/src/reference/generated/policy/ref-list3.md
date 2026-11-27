@@ -5,7 +5,7 @@
 An `include` and an `exclude` list. An empty `include` means every
 entry; a match in `exclude` always wins.
 
-Appears at: `/policy/rule_set_scopes/scopes/network`, `/policy/scope/network`, `/policy/unknown/scope_groups/all_of/network`, `/policy/unknown/scopes/network`, `/rule_sets/rules/scope/network`.
+Appears at: `/policy/rule_set_scopes/scopes/network`, `/policy/scope/network`, `/policy/unknown/scope_limits/all_of/network`, `/policy/unknown/scope_limits/any_of/network`, `/policy/unknown/scopes/network`, `/rule_sets/rules/scope/network`.
 
 ## Fields
 

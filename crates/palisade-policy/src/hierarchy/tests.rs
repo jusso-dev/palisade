@@ -18,8 +18,16 @@ use crate::mode::{DeviceState, strictness};
 use crate::model::{ControlLevel, Field, ObjectType, RuleSetId};
 use palisade_core::path::VolumeMap;
 
+/// A fixed UUIDv7 for `n`. Below 0x10000 it is the same as it always was;
+/// larger `n` use the last field too, so tests can make as many IDs as they
+/// need.
 pub(crate) fn id(n: u32) -> String {
-    format!("01936b2e-{n:04x}-7b3d-9f21-0a1b2c3d4e5f")
+    let (hi, lo) = (n & 0xffff, n >> 16);
+    if lo == 0 {
+        format!("01936b2e-{hi:04x}-7b3d-9f21-0a1b2c3d4e5f")
+    } else {
+        format!("01936b2e-{hi:04x}-7b3d-9f21-{lo:012x}")
+    }
 }
 
 fn node_id(n: u32) -> NodeId {
@@ -2419,8 +2427,9 @@ fn a_policy_scope_limits_its_unknown_settings_in_the_effective_policy() {
     let v = e.policy().unwrap();
     let u = &v.document().policy.unknown;
     assert!(u.scopes.is_empty());
-    assert_eq!(u.scope_groups.len(), 1);
-    assert!(u.scope_groups[0].all_of[0].sessions.is_some());
+    assert_eq!(u.scope_limits.len(), 1);
+    assert!(u.scope_limits[0].all_of[0].sessions.is_some());
+    assert!(u.scope_limits[0].any_of.is_empty());
     let decide = |session: SessionType| {
         let mut ctx = EvaluationContext::new();
         ctx.session.session_type = Some(session);
@@ -2471,7 +2480,7 @@ fn a_policy_scope_limits_its_unknown_settings_in_the_effective_policy() {
         .policy
         .unknown
         .clone();
-    assert!(merged.scopes.is_empty() && merged.scope_groups.is_empty());
+    assert!(merged.scopes.is_empty() && merged.scope_limits.is_empty());
 }
 
 /// The stage-6 reason code of an executable decided by `v` in a session of
@@ -2644,4 +2653,149 @@ proptest! {
             prop_assert_eq!(got, want, "session {:?} admin {:?}", session, admin);
         }
     }
+}
+
+/// Policy `n`'s document entry, with `scope` (one value) and `per`
+/// `unknown.scopes`.
+fn limited_policy(n: u32, per: usize) -> Value {
+    let device = |k: usize| {
+        format!(
+            "01936b2e-0000-7b3d-9f21-{:012x}",
+            (n as usize) * 100_000 + k
+        )
+    };
+    let scopes: Vec<Value> = (0..per)
+        .map(|k| json!({"devices": {"include": [{"device_id": device(k)}]}}))
+        .collect();
+    policy_with(
+        n,
+        "enforce",
+        vec![],
+        json!({"scope": {"sessions": {"types": ["console"]}}, "unknown": {"default": "detect", "scopes": scopes}}),
+    )
+}
+
+/// A snapshot with `policies` limited policies of `per` scopes each on
+/// group 11 (the device is in it), and `dynamic` more on a dynamic group.
+fn capped_snapshot(policies: u32, per: usize, dynamic: u32) -> Value {
+    let mut nodes = base_nodes();
+    let slots: Vec<(u32, u32)> = (0..policies).map(|k| (1000 + k, k)).collect();
+    set_node(&mut nodes, 11, json!({"assignments": assign(&slots)}));
+    let mut docs: Vec<Value> = (0..policies)
+        .map(|k| limited_policy(1000 + k, per))
+        .collect();
+    if dynamic > 0 {
+        let slots: Vec<(u32, u32)> = (0..dynamic).map(|k| (5000 + k, k)).collect();
+        nodes.push(node(
+            30,
+            "dynamic_group",
+            Some(2),
+            json!({"assignments": assign(&slots)}),
+        ));
+        docs.extend((0..dynamic).map(|k| limited_policy(5000 + k, per)));
+    }
+    snapshot(nodes, docs, vec![])
+}
+
+#[test]
+fn unknown_limits_build_up_to_the_cap_and_are_rejected_past_it() {
+    use crate::hierarchy::limits::MAX_UNKNOWN_SCOPE_VALUES;
+    // 19 policies of `scope` plus 1000 `unknown.scopes`, and one of
+    // `scope` plus 980: exactly the cap.
+    let per = 999;
+    let policies = u32::try_from(MAX_UNKNOWN_SCOPE_VALUES / (per + 1)).unwrap();
+    assert_eq!((policies as usize) * (per + 1), MAX_UNKNOWN_SCOPE_VALUES);
+    let start = std::time::Instant::now();
+    let h = validated(&capped_snapshot(policies, per, 0));
+    let e = effective(&h, 20);
+    let elapsed = start.elapsed();
+    let u = &e.policy().unwrap().document().policy.unknown;
+    assert_eq!(u.scope_limits.len(), policies as usize);
+    let total: usize = u
+        .scope_limits
+        .iter()
+        .map(crate::model::ScopeLimit::size)
+        .sum();
+    assert_eq!(total, MAX_UNKNOWN_SCOPE_VALUES);
+    // Generous: about 40 ms on a release build, far more in a debug build.
+    assert!(elapsed < std::time::Duration::from_secs(60), "{elapsed:?}");
+    // One more scope value is rejected by snapshot validation, before any
+    // effective policy is built.
+    let mut over = capped_snapshot(policies, per, 0);
+    let last = over["policies"].as_array_mut().unwrap().last_mut().unwrap();
+    last["document"]["policy"]["unknown"]["scopes"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"devices": {"include": [{"device_id": "01936b2e-0000-7b3d-9f21-ffffffffffff"}]}}));
+    let found = errors(&over);
+    let (code, path) = found
+        .iter()
+        .find(|(c, _)| c == "too_many")
+        .unwrap_or_else(|| panic!("{found:?}"));
+    assert_eq!(
+        (code.as_str(), path.as_str()),
+        ("too_many", "/nodes/4/assignments")
+    );
+    let message = HierarchyDocument::from_json(&over.to_string())
+        .unwrap()
+        .validate()
+        .unwrap_err()
+        .into_iter()
+        .find(|e| e.code == HierarchyCode::TooMany)
+        .unwrap()
+        .message;
+    assert!(
+        message.contains(&format!("up to {}", MAX_UNKNOWN_SCOPE_VALUES + 1)),
+        "{message}"
+    );
+    assert!(
+        message.contains("upper bound") && message.contains(&MAX_UNKNOWN_SCOPE_VALUES.to_string())
+    );
+    // The largest contributor first: the policy that went over.
+    assert!(
+        message.contains("Largest: policy `Policy 1019` on `Node 11` (1001)"),
+        "{message}"
+    );
+}
+
+#[test]
+fn dynamic_group_limits_count_towards_every_device_of_the_tenant() {
+    use crate::hierarchy::limits::MAX_UNKNOWN_SCOPE_VALUES;
+    // Half the cap on the device's group and half plus one on a dynamic
+    // group it is not in: still rejected, because the bound counts every
+    // dynamic group of the tenant, and the message says so.
+    let per = 999;
+    let half = u32::try_from(MAX_UNKNOWN_SCOPE_VALUES / (per + 1) / 2).unwrap();
+    let mut snap = capped_snapshot(half, per, half);
+    let last = snap["policies"].as_array_mut().unwrap().last_mut().unwrap();
+    last["document"]["policy"]["unknown"]["scopes"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"devices": {"include": [{"device_id": "01936b2e-0000-7b3d-9f21-fffffffffffe"}]}}));
+    let message = HierarchyDocument::from_json(&snap.to_string())
+        .unwrap()
+        .validate()
+        .unwrap_err()
+        .into_iter()
+        .find(|e| e.code == HierarchyCode::TooMany)
+        .unwrap()
+        .message;
+    assert!(message.contains("dynamic group: policy"), "{message}");
+    // Exactly at the cap with the dynamic group, it is valid.
+    validated(&capped_snapshot(half, per, half));
+}
+
+#[test]
+fn the_worst_case_composition_is_built_only_up_to_the_cap() {
+    // Every contributing policy at its authored maximum would be far over
+    // the cap; snapshot validation rejects it at once, without building any
+    // effective policy, so this cannot hang.
+    use crate::hierarchy::limits::{MAX_ASSIGNMENTS_PER_NODE, MAX_UNKNOWN_SCOPE_VALUES};
+    use crate::scope::limits::MAX_SCOPE_ENTRIES;
+    let policies = u32::try_from(MAX_ASSIGNMENTS_PER_NODE).unwrap();
+    let start = std::time::Instant::now();
+    let found = errors(&capped_snapshot(policies, MAX_SCOPE_ENTRIES, policies));
+    assert!(found.iter().any(|(c, _)| c == "too_many"), "{found:?}");
+    assert!(start.elapsed() < std::time::Duration::from_secs(60));
+    assert!((policies as usize) * 2 * (MAX_SCOPE_ENTRIES + 1) > MAX_UNKNOWN_SCOPE_VALUES);
 }

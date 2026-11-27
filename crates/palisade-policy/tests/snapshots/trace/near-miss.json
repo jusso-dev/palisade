@@ -243,9 +243,7 @@
         }
       ],
       "locations": [],
-      "origins": [
-        "unknown"
-      ],
+      "origins": [],
       "unknown_locations": [
         "user_profile",
         "temp",
@@ -262,7 +260,8 @@
         "removable_copy",
         "network_share",
         "trusted_source",
-        "preexisting"
+        "preexisting",
+        "unknown"
       ],
       "missing_facts": [
         "volume_kind",

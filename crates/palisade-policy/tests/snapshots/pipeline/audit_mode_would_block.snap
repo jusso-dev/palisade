@@ -1,6 +1,5 @@
 ---
 source: crates/palisade-policy/tests/decision_snapshots.rs
-assertion_line: 104
 ---
 {
   "outcome": "allowed_audit",
@@ -43,15 +42,12 @@ assertion_line: 104
         "level": "block"
       }
     ],
-    "locations": [
-      "user_writable_other"
-    ],
-    "origins": [
-      "unknown"
-    ],
+    "locations": [],
+    "origins": [],
     "unknown_locations": [
       "user_profile",
       "temp",
+      "user_writable_other",
       "program_files",
       "windows",
       "other_fixed",
@@ -66,7 +62,8 @@ assertion_line: 104
       "removable_copy",
       "network_share",
       "trusted_source",
-      "preexisting"
+      "preexisting",
+      "unknown"
     ],
     "missing_facts": [
       "path",

@@ -629,8 +629,8 @@ fn missing_location_facts_classify_from_the_path_or_fail_closed() {
     let v = valid(doc(
         serde_json::json!({"default": "detect", "by_location": {"user_writable_other": "block"}}),
     ));
-    // No path at all: `user_writable_other`, as before, and every other
-    // location class `Unknown`.
+    // No path at all: every location class is `Unknown` (round six; it
+    // was a definite `user_writable_other`), so the strictest applies.
     let d = decide(
         &v,
         ObjectType::Executable,
@@ -638,10 +638,11 @@ fn missing_location_facts_classify_from_the_path_or_fail_closed() {
     );
     assert_eq!(d.outcome(), Outcome::Blocked);
     let u = d.unknown().unwrap();
-    assert_eq!(u.locations, vec![LocationClass::UserWritableOther]);
-    assert_eq!(u.unknown_locations.len(), LocationClass::ALL.len() - 1);
+    assert!(u.locations.is_empty());
+    assert_eq!(u.unknown_locations, LocationClass::ALL.to_vec());
     assert!(u.missing_facts.contains(&MissingFact::Path));
-    // A path with unknown ACL facts is user-writable.
+    // A path with unknown ACL facts could be user-writable, so the
+    // `user_writable_other` entry applies too.
     let facts = ObjectFacts::new()
         .with_path(
             PathFact::new("D:\\data\\a.exe", &VolumeMap::new()).with_volume(VolumeKind::Fixed),
@@ -1462,12 +1463,10 @@ fn locations_are_classified_from_paths() {
             vec![L::OtherFixed],
         ),
         ("D:\\Tools\\a.exe", Some(false), None, vec![L::OtherFixed]),
-        (
-            "D:\\Tools\\a.exe",
-            None,
-            None,
-            vec![L::UserWritableOther, L::OtherFixed],
-        ),
+        // Round six: without the ACL fact `user_writable_other` is
+        // `Unknown`, not established (see
+        // `without_the_acl_fact_a_file_could_be_user_writable`).
+        ("D:\\Tools\\a.exe", None, None, vec![L::OtherFixed]),
         (
             "E:\\a.exe",
             Some(false),
@@ -1499,10 +1498,13 @@ fn locations_are_classified_from_paths() {
             vec![L::OtherFixed, L::Ads],
         ),
         (
+            // Round six: an unusable path decides nothing, so every class
+            // it would decide is `Unknown` (it used to be a definite
+            // `user_writable_other`).
             "relative\\a.exe",
             Some(false),
             None,
-            vec![L::UserWritableOther],
+            vec![],
         ),
     ];
     for (raw, writable, volume, want) in cases {
@@ -3108,6 +3110,41 @@ fn a_merged_fallback_comes_from_the_sides_that_prompt() {
     assert_eq!(c.stricter(&a).prompt.fallback, Level::Block);
 }
 
+#[test]
+fn a_restrict_next_to_a_blocking_prompt_elsewhere_is_deliberately_blocked_everywhere() {
+    // Exception 2 of `UnknownPolicy::stricter`, pinned: B prompts for
+    // internet downloads with a `block` fallback, so its `restrict` default
+    // becomes `block` in the merged policy. A static merge cannot know that
+    // in this console session B's prompt could have been shown, so the
+    // object is blocked though A allows it and B would only ask. It fails
+    // closed; a context-aware merge is deferred (#37).
+    let a = unknown(serde_json::json!({
+        "default": "allow", "by_type": {"script.other": "allow"}, "prompt": {"fallback": "block"},
+    }));
+    let mut b = unknown(serde_json::json!({
+        "default": "restrict", "by_origin": {"internet": "prompt"}, "prompt": {"fallback": "block"},
+    }));
+    b.restrict_profile = PROFILE
+        .parse()
+        .map(crate::model::ContainmentProfileRef)
+        .ok();
+    let locations = BTreeSet::from([LocationClass::UserProfile]);
+    let origins = BTreeSet::from([OriginClass::Internet]);
+    let ctx = Ctx {
+        t: ObjectType::Script(ScriptKind::Other),
+        locations: &locations,
+        origins: &origins,
+        session: Some(SessionType::Console),
+        containment: Some(true),
+        blocklisted: false,
+    };
+    assert_eq!(applied(&a, &ctx).level, Level::Allow);
+    assert_eq!(applied(&b, &ctx).level, Level::Prompt);
+    for m in [a.stricter(&b), b.stricter(&a)] {
+        assert_eq!(applied(&m, &ctx).level, Level::Block, "{m:?}");
+    }
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(512))]
 
@@ -3219,12 +3256,46 @@ proptest! {
         let keyed = if keyed == Level::Prompt { any_fallback.max(Level::Prompt) } else { keyed };
         let top = la.level.max(lb.level);
         let bound = uncontained(top.max(fallback_bound).max(keyed));
-        // Exception 2.
-        let restrict_raised = lm.level == Level::Block && bound == Level::Restrict;
+        // Exception 2, only where it can arise: some input prompts with a
+        // `block` fallback somewhere (in any session: a static merge cannot
+        // depend on the session), and the merged level being raised is a
+        // `restrict`. Two restrict-only inputs never qualify.
+        let blocking_prompt =
+            [&a, &b].into_iter().any(|p| prompts(p) && usable(p.prompt.fallback) == Level::Block);
+        let restrict_raised = blocking_prompt && lm.level == Level::Block && bound == Level::Restrict;
         prop_assert!(
             lm.level <= bound || restrict_raised,
             "{lm:?} stricter than {la:?} and {lb:?} (bound {bound:?}, aligned {align})"
         );
+    }
+
+    /// The control for exception 2: two policies that only restrict an
+    /// executable, with containment available, merge into one that
+    /// restricts it. Neither prompts, so no promotion to `block` is allowed.
+    #[test]
+    fn two_restrict_only_policies_merge_to_restrict(
+        session in prop::option::of(prop::sample::select(SessionType::ALL.to_vec())),
+        class in prop::sample::select(LocationClass::ALL.to_vec()),
+        by_location in any::<bool>(),
+    ) {
+        let restrict = |u: serde_json::Value| -> UnknownPolicy {
+            let mut p: UnknownPolicy = serde_json::from_value(u).unwrap();
+            p.restrict_profile = PROFILE.parse().map(crate::model::ContainmentProfileRef).ok();
+            p
+        };
+        let a = restrict(serde_json::json!({"default": "restrict"}));
+        let b = if by_location {
+            restrict(serde_json::json!({"default": "detect", "by_location": {class.as_str(): "restrict"}}))
+        } else {
+            restrict(serde_json::json!({"default": "restrict", "by_type": {"executable": "restrict"}}))
+        };
+        let locations = BTreeSet::from([class]);
+        let origins = BTreeSet::from([OriginClass::Unknown]);
+        let ctx = Ctx { t: ObjectType::Executable, locations: &locations, origins: &origins, session, containment: Some(true), blocklisted: false };
+        prop_assert_eq!(applied(&a, &ctx).level, Level::Restrict);
+        for m in [a.stricter(&b), b.stricter(&a)] {
+            prop_assert_eq!(applied(&m, &ctx).level, Level::Restrict, "{:?}", m);
+        }
     }
 
     /// The library case of the review, in the property: both sides detect a
@@ -3906,7 +3977,9 @@ fn with_full_facts_the_classes_are_what_they_were() {
         "\\\\server\\share\\a.exe",
         "relative\\a.exe",
     ] {
-        for writable in [Some(false), Some(true), None] {
+        // Full facts include the ACL fact; without it the old classifier
+        // guessed `user_writable_other` (round six made that `Unknown`).
+        for writable in [Some(false), Some(true)] {
             for volume in [
                 VolumeKind::Fixed,
                 VolumeKind::Removable,
@@ -3918,13 +3991,15 @@ fn with_full_facts_the_classes_are_what_they_were() {
                 let now = classify(&p, &variables, Some(volume), &[]);
                 let before =
                     super::previous_classifier::classify(&p, &variables, Some(volume), &[]);
-                if p.path.is_resolved() {
-                    assert!(
-                        now.classes.unknown().is_empty(),
-                        "{raw} {volume:?}: {:?}",
-                        now.classes.unknown()
-                    );
+                if !p.path.is_resolved() {
+                    // An unusable path is a missing fact, not full facts.
+                    continue;
                 }
+                assert!(
+                    now.classes.unknown().is_empty(),
+                    "{raw} {volume:?}: {:?}",
+                    now.classes.unknown()
+                );
                 assert_eq!(
                     now.classes.matching(),
                     before,
@@ -3945,7 +4020,7 @@ proptest! {
     fn with_full_facts_every_decision_is_what_it_was(
         p in arb_full_policy(),
         raw in arb_round5_path(),
-        writable in prop::option::of(any::<bool>()),
+        writable in any::<bool>(),
         volume in prop::sample::select(vec![VolumeKind::Fixed, VolumeKind::Removable, VolumeKind::Optical, VolumeKind::Network]),
         origins in prop::collection::btree_set(prop::sample::select(OriginClass::ALL.to_vec()), 0..3),
         t in prop::sample::select(ObjectType::ALL.to_vec()),
@@ -3954,7 +4029,7 @@ proptest! {
         d.policy.unknown = p;
         let Ok(v) = d.validate() else { return Ok(()) };
         let mut path = PathFact::new(&raw, &VolumeMap::new());
-        path.user_writable = writable;
+        path.user_writable = Some(writable);
         path.volume = Some(volume);
         let variables = vars();
         let before = super::previous_classifier::classify(&path, &variables, Some(volume), &[]);
@@ -4048,63 +4123,312 @@ fn arb_round5_variables() -> impl Strategy<Value = PathVariables> {
         })
 }
 
+/// An unknown policy built for the missing-fact property. Every level is
+/// drawn from the full range, entries use the classes and origins the
+/// paths below can reach, and the prompt's fallback and
+/// `preexisting_policy` are varied. Validation requires a containment
+/// profile wherever `restrict` is used, so the profile is always set and
+/// whether containment is available is varied instead. A third of the
+/// policies prompt on the object type and two thirds of the fallbacks are
+/// `block`, so a definite match that undercut a prompt's blocking
+/// fallback (both round-six blockers) is reached often; every level stays
+/// possible everywhere.
+fn arb_fact_policy() -> impl Strategy<Value = UnknownPolicy> {
+    let level = || prop::sample::select(Level::ALL.to_vec());
+    (
+        level(),
+        prop::collection::btree_map(
+            prop::sample::select(LocationClass::ALL.to_vec()),
+            level(),
+            0..4,
+        ),
+        prop::collection::btree_map(
+            prop::sample::select(OriginClass::ALL.to_vec()),
+            level(),
+            0..4,
+        ),
+        prop::option::of(level()),
+        prop::option::of(level()),
+        prop::option::of(level()),
+        prop_oneof![
+            2 => Just(Level::Block),
+            1 => prop::sample::select(vec![Level::Restrict, Level::Detect, Level::Allow]),
+        ],
+        prop::sample::select(vec![
+            PreexistingPolicy::BaselineOnly,
+            PreexistingPolicy::TreatAsUnknown,
+            PreexistingPolicy::LocalApprove,
+        ]),
+        prop::bool::weighted(0.5),
+    )
+        .prop_map(
+            |(
+                default,
+                mut by_location,
+                mut by_origin,
+                executable,
+                unknown,
+                writable,
+                fallback,
+                preexisting,
+                prompts,
+            )| {
+                // The origin and class a missing fact must not make definite get
+                // entries often, so a relaxation through them is reached.
+                if let Some(l) = unknown {
+                    by_origin.insert(OriginClass::Unknown, l);
+                }
+                if let Some(l) = writable {
+                    by_location.insert(LocationClass::UserWritableOther, l);
+                }
+                let mut p = UnknownPolicy {
+                    default,
+                    by_location,
+                    by_origin,
+                    preexisting_policy: preexisting,
+                    ..UnknownPolicy::default()
+                };
+                match (prompts, executable) {
+                    (true, _) => {
+                        p.by_type.insert(ObjectType::Executable, Level::Prompt);
+                    }
+                    (false, Some(l)) => {
+                        p.by_type.insert(ObjectType::Executable, l);
+                    }
+                    (false, None) => {}
+                }
+                p.prompt.fallback = fallback;
+                p.restrict_profile = PROFILE
+                    .parse()
+                    .map(crate::model::ContainmentProfileRef)
+                    .ok();
+                p
+            },
+        )
+}
+
+/// Every variable the classifier reads, as Windows sets them on a device
+/// whose OS is on drive `os`.
+fn complete_variables(os: &str) -> PathVariables {
+    PathVariables::new()
+        .with(PV::Windir, &[&format!("{os}:\\Windows")])
+        .with(
+            PV::ProgramFiles,
+            &[
+                &format!("{os}:\\Program Files"),
+                &format!("{os}:\\Program Files (x86)"),
+            ],
+        )
+        .with(PV::UserProfile, &[&format!("{os}:\\Users\\alice")])
+        .with(
+            PV::AppData,
+            &[&format!("{os}:\\Users\\alice\\AppData\\Roaming")],
+        )
+        .with(
+            PV::LocalAppData,
+            &[&format!("{os}:\\Users\\alice\\AppData\\Local")],
+        )
+        .with(
+            PV::Temp,
+            &[&format!("{os}:\\Users\\alice\\AppData\\Local\\Temp")],
+        )
+        .with(PV::Public, &[&format!("{os}:\\Users\\Public")])
+}
+
 /// The facts one step of the property can remove.
 #[derive(Clone, Copy, Debug)]
 enum Drop {
     Volume,
     Origin,
+    Acl,
+    Path,
     Variable(PV),
 }
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(1024))]
 
-    /// Removing any one volume, variable or origin fact never makes stage
-    /// six's applied level less restrictive, for any unknown policy, path
-    /// and partial facts (#39, ADR 0018).
+    /// Removing any one volume, ACL, path, variable or origin fact never
+    /// makes stage six's applied level less restrictive, for any unknown
+    /// policy, path and partial facts (#39, ADR 0018).
+    ///
+    /// Nothing that could mask a relaxation is left at a default: the
+    /// `preexisting_policy` (under `baseline_only` a missing origin always
+    /// brings in `block`, which hid the case where it did not), the
+    /// containment profile and availability, the session and whether its
+    /// user is the system account, a blocklist match, and whether the agent
+    /// supplied the location classes itself.
     #[test]
     fn removing_a_fact_never_lowers_the_applied_level(
-        p in arb_full_policy(),
+        p in arb_fact_policy(),
+        complete in any::<bool>(),
+        os in prop::sample::select(vec!["C", "D"]),
         raw in arb_round5_path(),
         writable in prop::option::of(any::<bool>()),
         volume in prop::option::of(prop::sample::select(vec![VolumeKind::Fixed, VolumeKind::Removable, VolumeKind::Optical, VolumeKind::Network])),
         variables in arb_round5_variables(),
         origins in prop::option::of(prop::collection::btree_set(prop::sample::select(OriginClass::ALL.to_vec()), 0..3)),
-        t in prop::sample::select(ObjectType::ALL.to_vec()),
+        supplied in prop::option::of(prop::collection::btree_set(prop::sample::select(LocationClass::ALL.to_vec()), 1..3)),
+        t in prop_oneof![Just(ObjectType::Executable), prop::sample::select(ObjectType::ALL.to_vec())],
         session in prop::option::of(prop::sample::select(SessionType::ALL.to_vec())),
+        system in prop::option::of(any::<bool>()),
         containment in prop::option::of(any::<bool>()),
+        blocklisted in any::<bool>(),
+    ) {
+        // Half the cases start from complete facts. Dropping a fact from an
+        // already partial set is weak: each class a missing fact already
+        // left `Unknown` brings in `default`, which can mask a relaxation.
+        // Agent-supplied classes are complete facts too, so with them set,
+        // a path fact has nothing to decide; start without them.
+        let supplied = if complete { None } else { supplied };
+        let (variables, volume, writable, origins) = if complete {
+            (
+                complete_variables(os),
+                Some(volume.unwrap_or(VolumeKind::Fixed)),
+                Some(writable.unwrap_or(false)),
+                Some(origins.unwrap_or_default()),
+            )
+        } else {
+            (variables, volume, writable, origins)
+        };
+        let u = p;
+        let rules = if blocklisted {
+            // An audit rule of a blocklist matching every object of the
+            // type: nothing is prompted for, and no rule decides.
+            vec![(SET, "blocklist", false, vec![serde_json::json!({
+                "id": rule_id(77), "name": "Watch",
+                "match": {"criterion": {"field": "hash.sha256", "operator": "equals", "values": [sha('a')]}},
+                "action": {"type": "audit"},
+            })])]
+        } else {
+            vec![]
+        };
+        let mut d = doc_with(serde_json::json!({}), &rules);
+        d.policy.unknown = u;
+        // The generator only builds valid policies: a skipped case would
+        // hide what it was meant to test.
+        let v = d.validate().unwrap_or_else(|e| panic!("{e:#?}"));
+        let build = |volume: Option<VolumeKind>, writable: Option<bool>, path: bool, origins: &Option<BTreeSet<OriginClass>>| {
+            let mut f = ObjectFacts::new().with(Field::HashSha256, sha('a'));
+            if path {
+                let mut fact = PathFact::new(&raw, &VolumeMap::new());
+                fact.user_writable = writable;
+                fact.volume = volume;
+                f = f.with_path(fact);
+            }
+            f.location_class = supplied.clone();
+            f.origin = origins.clone();
+            f
+        };
+        // The case's own context, and the contexts that decide whether a
+        // prompt or a restriction can apply, each with and without
+        // containment.
+        let contexts = [
+            (session, system),
+            (Some(SessionType::Console), Some(false)),
+            (Some(SessionType::Service), Some(false)),
+        ];
+        for (session, system) in contexts {
+            for containment in [containment, Some(true), Some(false)] {
+                let mut context = EvaluationContext::new();
+                context.session.session_type = session;
+                context.user.is_system = system;
+                context.device.containment_available = containment;
+                let level = |f: &ObjectFacts, vars: &PathVariables| {
+                    Evaluator::new(&v).unwrap().evaluate(
+                        &Subject { object_type: t, facts: f, variables: vars, context: &context }, TRACE,
+                    ).unknown().unwrap().applied
+                };
+                let before = level(&build(volume, writable, true, &origins), &variables);
+                // Every fact, one at a time.
+                for drop in [
+                    Drop::Volume, Drop::Origin, Drop::Acl, Drop::Path,
+                    Drop::Variable(PV::Windir), Drop::Variable(PV::ProgramFiles), Drop::Variable(PV::UserProfile),
+                    Drop::Variable(PV::AppData), Drop::Variable(PV::LocalAppData), Drop::Variable(PV::Temp), Drop::Variable(PV::Public),
+                ] {
+                    let after = match drop {
+                        Drop::Volume => level(&build(None, writable, true, &origins), &variables),
+                        Drop::Origin => level(&build(volume, writable, true, &None), &variables),
+                        Drop::Acl => level(&build(volume, None, true, &origins), &variables),
+                        Drop::Path => level(&build(volume, writable, false, &origins), &variables),
+                        Drop::Variable(var) => level(&build(volume, writable, true, &origins), &without(&variables, var)),
+                    };
+                    prop_assert!(after >= before, "dropping {drop:?} ({session:?}, containment {containment:?}): {before:?} -> {after:?}");
+                }
+            }
+        }
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(1024))]
+
+    /// The lemma the missing-fact property rests on, checked directly: a
+    /// class is a definite `Match` or `NoMatch` only when the facts that
+    /// decide it are present. So removing any one fact leaves every
+    /// location class and origin as it was or makes it `Unknown`; it never
+    /// makes one a definite `Match` (or `NoMatch`) it was not with the full
+    /// facts. Both round-six blockers broke this: a missing origin made
+    /// `unknown` a definite match, and a missing ACL fact made
+    /// `user_writable_other` one.
+    #[test]
+    fn removing_a_fact_never_makes_a_class_definite(
+        raw in arb_round5_path(),
+        writable in prop::option::of(any::<bool>()),
+        short_name in prop::bool::weighted(0.1),
+        volume in prop::option::of(prop::sample::select(vec![VolumeKind::Fixed, VolumeKind::Removable, VolumeKind::Optical, VolumeKind::Network])),
+        variables in arb_round5_variables(),
+        origins in prop::option::of(prop::collection::btree_set(prop::sample::select(OriginClass::ALL.to_vec()), 0..3)),
+        supplied in prop::option::of(prop::collection::btree_set(prop::sample::select(LocationClass::ALL.to_vec()), 1..3)),
         drop in prop::sample::select(vec![
-            Drop::Volume, Drop::Origin,
+            Drop::Volume, Drop::Origin, Drop::Acl, Drop::Path,
             Drop::Variable(PV::Windir), Drop::Variable(PV::ProgramFiles), Drop::Variable(PV::UserProfile),
             Drop::Variable(PV::AppData), Drop::Variable(PV::LocalAppData), Drop::Variable(PV::Temp), Drop::Variable(PV::Public),
         ]),
     ) {
-        let mut d = doc(serde_json::json!({}));
-        d.policy.unknown = p;
-        let Ok(v) = d.validate() else { return Ok(()) };
-        let build = |volume: Option<VolumeKind>, origins: &Option<BTreeSet<OriginClass>>| {
-            let mut path = PathFact::new(&raw, &VolumeMap::new());
-            path.user_writable = writable;
-            path.volume = volume;
-            let mut f = ObjectFacts::new().with(Field::HashSha256, sha('a')).with_path(path);
+        let v = valid(doc(serde_json::json!({})));
+        let build = |volume: Option<VolumeKind>, writable: Option<bool>, path: bool, origins: &Option<BTreeSet<OriginClass>>| {
+            let mut f = ObjectFacts::new().with(Field::HashSha256, sha('a'));
+            if path {
+                let mut fact = PathFact::new(&raw, &VolumeMap::new());
+                fact.user_writable = writable;
+                fact.volume = volume;
+                fact.short_name_unresolved = short_name;
+                f = f.with_path(fact);
+            }
+            f.location_class = supplied.clone();
             f.origin = origins.clone();
             f
         };
-        let mut context = EvaluationContext::new();
-        context.session.session_type = session;
-        context.user.is_system = Some(false);
-        context.device.containment_available = containment;
-        let level = |f: &ObjectFacts, vars: &PathVariables| {
-            Evaluator::new(&v).unwrap().evaluate(
-                &Subject { object_type: t, facts: f, variables: vars, context: &context }, TRACE,
-            ).unknown().unwrap().applied
+        let context = interactive_context();
+        // Each class's value, read back from the decision.
+        let classes = |f: &ObjectFacts, vars: &PathVariables| {
+            let d = Evaluator::new(&v).unwrap().evaluate(
+                &Subject { object_type: ObjectType::Executable, facts: f, variables: vars, context: &context }, TRACE,
+            );
+            let u = d.unknown().unwrap().clone();
+            let loc = |c: LocationClass| if u.locations.contains(&c) { Tri::Match } else if u.unknown_locations.contains(&c) { Tri::Unknown } else { Tri::NoMatch };
+            let ori = |o: OriginClass| if u.origins.contains(&o) { Tri::Match } else if u.unknown_origins.contains(&o) { Tri::Unknown } else { Tri::NoMatch };
+            (
+                LocationClass::ALL.map(loc).to_vec(),
+                OriginClass::ALL.map(ori).to_vec(),
+            )
         };
-        let before = level(&build(volume, &origins), &variables);
-        let after = match drop {
-            Drop::Volume => level(&build(None, &origins), &variables),
-            Drop::Origin => level(&build(volume, &None), &variables),
-            Drop::Variable(var) => level(&build(volume, &origins), &without(&variables, var)),
+        let full = classes(&build(volume, writable, true, &origins), &variables);
+        let partial = match drop {
+            Drop::Volume => classes(&build(None, writable, true, &origins), &variables),
+            Drop::Origin => classes(&build(volume, writable, true, &None), &variables),
+            Drop::Acl => classes(&build(volume, None, true, &origins), &variables),
+            Drop::Path => classes(&build(volume, writable, false, &origins), &variables),
+            Drop::Variable(var) => classes(&build(volume, writable, true, &origins), &without(&variables, var)),
         };
-        prop_assert!(after >= before, "dropping {drop:?}: {before:?} -> {after:?}");
+        for (i, (f, p)) in full.0.iter().zip(&partial.0).enumerate() {
+            prop_assert!(p == f || *p == Tri::Unknown,
+                "dropping {drop:?}: {:?} went from {f:?} to {p:?}", LocationClass::ALL[i]);
+        }
+        for (i, (f, p)) in full.1.iter().zip(&partial.1).enumerate() {
+            prop_assert!(p == f || *p == Tri::Unknown,
+                "dropping {drop:?}: {:?} went from {f:?} to {p:?}", OriginClass::ALL[i]);
+        }
     }
 }

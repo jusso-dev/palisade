@@ -562,28 +562,54 @@ pub struct UnknownPolicy {
     /// decided by the built-in implicit deny ([`crate::unknown`]).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub scopes: Vec<crate::scope::Scope>,
-    /// The effective form of where these settings apply, written by the
-    /// hierarchy (#37): a subject in **every** scope of at least one group.
-    /// Empty, the default, means no further limit. An effective policy has
-    /// no `policy.scope`, so each contributing policy's `scope` and
-    /// `scopes` become groups here: `scope` and each of `scopes`, one group
-    /// per entry ([`UnknownPolicy::scope_groups_of`]). The settings then
-    /// apply exactly where they applied in each contributing policy, never
-    /// more widely. At most 1000 groups of at most 8 scopes (the hierarchy
-    /// writes groups of 1 or 2). A policy document may carry it, so that an
-    /// effective policy validates as any document, but is meant to write
-    /// `scope` and `scopes` instead.
+    /// Effective policies only (#37): where these settings apply, one
+    /// [`ScopeLimit`] per contributing policy, kept as that policy wrote it.
+    /// The settings apply to a subject when **any** entry holds; empty, the
+    /// default, means no further limit. An effective policy has no
+    /// `policy.scope`, so the hierarchy moves each contributing policy's
+    /// `scope` and `scopes` here unexpanded
+    /// ([`UnknownPolicy::scope_limit_of`]). The size is therefore linear in
+    /// contributing policies, at most
+    /// [`MAX_CONTRIBUTING_POLICIES`](crate::hierarchy::limits::MAX_CONTRIBUTING_POLICIES)
+    /// entries, and building an effective policy from valid policies never
+    /// fails on it. Validation rejects it in a document it validates as
+    /// authored, which writes `policy.scope` and `unknown.scopes` instead.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub scope_groups: Vec<ScopeGroup>,
+    pub scope_limits: Vec<ScopeLimit>,
 }
 
-/// Scopes that must all match: one entry of
-/// [`UnknownPolicy::scope_groups`]. An empty group matches everywhere.
+/// One contributing policy's limit on where its unknown settings apply, in
+/// an effective policy ([`UnknownPolicy::scope_limits`]). It holds when
+/// every scope of `all_of` matches and, if `any_of` is not empty, one of
+/// its scopes matches.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ScopeGroup {
-    /// The scopes, all of which must match.
+pub struct ScopeLimit {
+    /// The contributing policy's `policy.scope`, if it has one. At most one
+    /// scope: the width of an entry is never more than its source policy's,
+    /// so the authored limits apply to it unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub all_of: Vec<crate::scope::Scope>,
+    /// The contributing policy's `unknown.scopes`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub any_of: Vec<crate::scope::Scope>,
+}
+
+impl ScopeLimit {
+    /// A canonical form, for de-duplicating limits without comparing them
+    /// pairwise: the limit's JSON, with object keys sorted.
+    #[must_use]
+    pub fn canonical(&self) -> String {
+        serde_json::to_value(self)
+            .map(|v| v.to_string())
+            .unwrap_or_default()
+    }
+
+    /// How many scope values the limit holds.
+    #[must_use]
+    pub fn size(&self) -> usize {
+        self.all_of.len() + self.any_of.len()
+    }
 }
 
 impl Default for UnknownPolicy {
@@ -601,7 +627,7 @@ impl Default for UnknownPolicy {
             preexisting_policy: PreexistingPolicy::BaselineOnly,
             driver_boot_policy: DriverBootPolicy::Audit,
             scopes: Vec::new(),
-            scope_groups: Vec::new(),
+            scope_limits: Vec::new(),
         }
     }
 }
@@ -676,7 +702,14 @@ impl UnknownPolicy {
     /// - Where a side prompts and falls back to `block`, a merged `restrict`
     ///   becomes `block` unless that side's own entry there is `restrict`
     ///   or stricter: the side blocks wherever no prompt can be shown, and
-    ///   a `restrict` there would let the object run.
+    ///   a `restrict` there would let the object run. Whether a prompt can
+    ///   be shown depends on the session, which a static merge cannot see,
+    ///   so the `restrict` becomes `block` everywhere, including where the
+    ///   prompt could have been shown: with A `{default: allow}` and B
+    ///   `{default: restrict, by_origin: {internet: prompt}, prompt.fallback:
+    ///   block}`, an internet script in a console session is blocked,
+    ///   though A allows it and B would ask. A merge that carries a
+    ///   condition per entry would be exact.
     /// - Entries are merged key by key: an entry only one side sets is
     ///   compared with the other side's `default`, even for an object that
     ///   another entry of that side decides. So when one side matches an
@@ -705,8 +738,8 @@ impl UnknownPolicy {
     /// - `allow_request` only if both allow it; the stricter
     ///   `preexisting_policy` and `driver_boot_policy`; the more demanding
     ///   compliance preset; where the settings apply: anywhere either side's
-    ///   `scopes` and `scope_groups` would apply them, as `scope_groups`
-    ///   (everywhere if either side has no limit);
+    ///   limit holds, as `scope_limits` (everywhere if either side has no
+    ///   limit);
     /// - effects: per flag, the nearer layer's value, except that the
     ///   higher severity and the more immediate upload win, and `always`
     ///   logging is kept; tags are joined.
@@ -716,7 +749,45 @@ impl UnknownPolicy {
     /// layer, where it sets one.
     #[must_use]
     pub fn stricter(&self, other: &Self) -> Self {
-        let (a, b) = (self.as_applied(), other.as_applied());
+        let mut out = self
+            .without_limits()
+            .stricter_settings(&other.without_limits());
+        out.scope_limits = match (self.limits(), other.limits()) {
+            (Some(mut a), Some(b)) => {
+                let mut seen: std::collections::HashSet<String> =
+                    a.iter().map(ScopeLimit::canonical).collect();
+                for l in b {
+                    if seen.insert(l.canonical()) {
+                        a.push(l);
+                    }
+                }
+                a
+            }
+            _ => Vec::new(),
+        };
+        out
+    }
+
+    /// This policy without `scopes` or `scope_limits`.
+    #[must_use]
+    pub fn without_limits(&self) -> Self {
+        Self {
+            scopes: Vec::new(),
+            scope_limits: Vec::new(),
+            ..self.clone()
+        }
+    }
+
+    /// [`stricter`](Self::stricter) of every part but where the settings
+    /// apply: the result has no `scopes` and no `scope_limits`. Its cost
+    /// does not grow with either side's limits, so the hierarchy can fold
+    /// many policies with it and collect their limits separately.
+    #[must_use]
+    pub fn stricter_settings(&self, other: &Self) -> Self {
+        let (a, b) = (
+            self.without_limits().as_applied(),
+            other.without_limits().as_applied(),
+        );
         let mut out = a.merged(&b);
         let has = |p: &Self, level: Level| p.entry_levels().any(|l| l == level);
         let (a_prompts, b_prompts) = (has(&a, Level::Prompt), has(&b, Level::Prompt));
@@ -812,50 +883,40 @@ impl UnknownPolicy {
         self.entry_levels().any(|l| l != Level::Block)
     }
 
-    /// Where these settings apply, as [`scope_groups`](Self::scope_groups),
-    /// in a policy whose `scope` is `policy_scope`: the conjunction of
-    /// `policy_scope`, any of `scopes` and any of `scope_groups`, written
-    /// as a disjunction of groups. `None` means everywhere. Each scope is
-    /// passed through `each`, which the hierarchy uses to drop options that
-    /// only act on a deciding rule.
+    /// Where these settings apply, as [`scope_limits`](Self::scope_limits),
+    /// in an authored policy whose `scope` is `policy_scope`: one limit,
+    /// `policy_scope` and any of `scopes`, kept unexpanded. `None` means
+    /// everywhere. Each scope is passed through `each`, which the hierarchy
+    /// uses to drop options that only act on a deciding rule.
+    ///
+    /// The policy's own `scope_limits` are not read: they belong to
+    /// effective policies, which validation rejects as authored input, so
+    /// every contributing policy yields at most one limit, of at most one
+    /// `all_of` scope and its own `scopes`. That is what keeps an effective
+    /// policy linear in contributing policies, and within the authored
+    /// limits per entry.
     #[must_use]
-    pub fn scope_groups_of(
+    pub fn scope_limit_of(
         &self,
         policy_scope: Option<&crate::scope::Scope>,
         each: impl Fn(crate::scope::Scope) -> crate::scope::Scope,
-    ) -> Option<Vec<ScopeGroup>> {
-        if policy_scope.is_none() && self.scopes.is_empty() && self.scope_groups.is_empty() {
-            return None;
-        }
-        // Distribute: P and (U1 or U2) and (G1 or G2) is the "or" of every
-        // (P, Ui, Gj).
-        let singles: Vec<Vec<crate::scope::Scope>> = if self.scopes.is_empty() {
-            vec![Vec::new()]
-        } else {
-            self.scopes.iter().map(|s| vec![s.clone()]).collect()
+    ) -> Option<ScopeLimit> {
+        let limit = ScopeLimit {
+            all_of: policy_scope.cloned().map(&each).into_iter().collect(),
+            any_of: self.scopes.iter().cloned().map(&each).collect(),
         };
-        let groups: Vec<Vec<crate::scope::Scope>> = if self.scope_groups.is_empty() {
-            vec![Vec::new()]
+        (!limit.all_of.is_empty() || !limit.any_of.is_empty()).then_some(limit)
+    }
+
+    /// Where these settings apply, as alternatives: this policy's
+    /// `scope_limits` if it has any (an effective policy), else its own
+    /// `scopes` as one limit. `None` means everywhere.
+    fn limits(&self) -> Option<Vec<ScopeLimit>> {
+        if self.scope_limits.is_empty() {
+            self.scope_limit_of(None, |s| s).map(|l| vec![l])
         } else {
-            self.scope_groups.iter().map(|g| g.all_of.clone()).collect()
-        };
-        let mut out = Vec::new();
-        for u in &singles {
-            for g in &groups {
-                let all_of: Vec<crate::scope::Scope> = policy_scope
-                    .into_iter()
-                    .cloned()
-                    .chain(u.iter().cloned())
-                    .chain(g.iter().cloned())
-                    .map(&each)
-                    .collect();
-                let group = ScopeGroup { all_of };
-                if !out.contains(&group) {
-                    out.push(group);
-                }
-            }
+            Some(self.scope_limits.clone())
         }
-        Some(out)
     }
 
     /// `default` and every entry's level, without the prompt's fallback.
@@ -936,23 +997,9 @@ impl UnknownPolicy {
             } else {
                 DriverBootPolicy::Audit
             },
-            // Where either side applies, as groups; a side that applies
-            // everywhere absorbs the other.
+            // Where the settings apply is merged by `stricter`.
             scopes: Vec::new(),
-            scope_groups: match (
-                self.scope_groups_of(None, |s| s),
-                other.scope_groups_of(None, |s| s),
-            ) {
-                (Some(mut a), Some(b)) => {
-                    for g in b {
-                        if !a.contains(&g) {
-                            a.push(g);
-                        }
-                    }
-                    a
-                }
-                _ => Vec::new(),
-            },
+            scope_limits: Vec::new(),
         }
     }
 

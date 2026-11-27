@@ -4,7 +4,7 @@
 
 A user or group (#38). Each is an object with one key, the kind.
 
-Appears at: `/policy/rule_set_scopes/scopes/principals/exclude`, `/policy/rule_set_scopes/scopes/principals/include`, `/policy/scope/principals/exclude`, `/policy/scope/principals/include`, `/policy/unknown/scope_groups/all_of/principals/exclude`, `/policy/unknown/scope_groups/all_of/principals/include`, and more.
+Appears at: `/policy/rule_set_scopes/scopes/principals/exclude`, `/policy/rule_set_scopes/scopes/principals/include`, `/policy/scope/principals/exclude`, `/policy/scope/principals/include`, `/policy/unknown/scope_limits/all_of/principals/exclude`, `/policy/unknown/scope_limits/all_of/principals/include`, and more.
 
 ## Variants
 

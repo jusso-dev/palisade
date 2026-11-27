@@ -151,6 +151,12 @@ pub struct AppliedEntry {
     pub key: String,
     /// The entry's level.
     pub level: Level,
+    /// The entry belongs to a class a missing fact left `Unknown`, and it
+    /// made the decision stricter: the object might not be in that class
+    /// ([`FallbackReason::MissingFact`]). `false` for an entry of a class the
+    /// facts establish.
+    #[serde(skip_serializing_if = "core::ops::Not::not")]
+    pub possible: bool,
 }
 
 /// Why stage 6 did not apply the level it resolved.
@@ -193,9 +199,8 @@ pub enum MissingFact {
     /// The kind of volume the file is on ([`crate::facts::PathFact::volume`]).
     VolumeKind,
     /// Whether a non-administrator can write the file
-    /// ([`crate::facts::PathFact::user_writable`]). Without it the file is
-    /// `user_writable_other`, a `Match`, as it always was: the fact is
-    /// recorded here so the trace can name it.
+    /// ([`crate::facts::PathFact::user_writable`]). Without it,
+    /// `user_writable_other` is `Unknown`.
     UserWritable,
     /// `%WINDIR%`.
     Windir,
@@ -345,6 +350,7 @@ pub fn resolve_level(
             kind: EntryKind::Type,
             key: t.to_string(),
             level,
+            possible: false,
         });
     }
     for class in locations {
@@ -353,6 +359,7 @@ pub fn resolve_level(
                 kind: EntryKind::Location,
                 key: class.as_str().to_owned(),
                 level,
+                possible: false,
             });
         }
     }
@@ -362,6 +369,7 @@ pub fn resolve_level(
                 kind: EntryKind::Origin,
                 key: origin.as_str().to_owned(),
                 level,
+                possible: false,
             });
         }
     }
@@ -372,6 +380,7 @@ pub fn resolve_level(
                 kind: EntryKind::Default,
                 key: "default".to_owned(),
                 level: policy.default,
+                possible: false,
             }],
         );
     };
@@ -464,31 +473,35 @@ pub struct PromptDirective {
 }
 
 /// Where a policy's unknown settings apply (#38): its `scope`, its
-/// `unknown.scopes` and its `unknown.scope_groups`, compiled. The settings
+/// `unknown.scopes` and its `unknown.scope_limits`, compiled. The settings
 /// apply to a subject only when the `scope` is `Match`, one of `scopes` is
-/// `Match` (if there are any), and every scope of one group is `Match` (if
-/// there are any groups). Facts are read so that the settings apply less,
+/// `Match` (if there are any), and one limit holds (if there are any): all
+/// of its `all_of` and, if it has any, one of its `any_of`. Facts are read so that the settings apply less,
 /// and an `Unknown` result counts as out of scope, so a missing fact never
 /// lets the settings allow what the built-in implicit deny would block.
 #[derive(Debug, Default)]
 pub(crate) struct UnknownScope {
     policy: Option<Arc<CompiledScope>>,
     any_of: Vec<Arc<CompiledScope>>,
-    groups: Vec<Vec<Arc<CompiledScope>>>,
+    limits: Vec<CompiledLimit>,
 }
+
+/// One compiled [`ScopeLimit`](crate::model::ScopeLimit): `all_of`, then
+/// `any_of`.
+pub(crate) type CompiledLimit = (Vec<Arc<CompiledScope>>, Vec<Arc<CompiledScope>>);
 
 impl UnknownScope {
     /// The compiled policy `scope`, `unknown.scopes` and
-    /// `unknown.scope_groups`.
+    /// `unknown.scope_limits`.
     pub(crate) const fn new(
         policy: Option<Arc<CompiledScope>>,
         any_of: Vec<Arc<CompiledScope>>,
-        groups: Vec<Vec<Arc<CompiledScope>>>,
+        limits: Vec<CompiledLimit>,
     ) -> Self {
         Self {
             policy,
             any_of,
-            groups,
+            limits,
         }
     }
 
@@ -517,16 +530,25 @@ impl UnknownScope {
             }
             result = result.and(any);
         }
-        if !self.groups.is_empty() {
+        if !self.limits.is_empty() {
             let mut any = Tri::NoMatch;
-            for group in &self.groups {
-                let mut all = Tri::Match;
-                for s in group {
+            for (all_of, any_of) in &self.limits {
+                let mut holds = Tri::Match;
+                for s in all_of {
                     let e = eval(s);
                     notes.extend(e.notes);
-                    all = all.and(e.result);
+                    holds = holds.and(e.result);
                 }
-                any = any.or(all);
+                if !any_of.is_empty() {
+                    let mut one = Tri::NoMatch;
+                    for s in any_of {
+                        let e = eval(s);
+                        notes.extend(e.notes);
+                        one = one.or(e.result);
+                    }
+                    holds = holds.and(one);
+                }
+                any = any.or(holds);
             }
             result = result.and(any);
         }
@@ -634,17 +656,11 @@ impl<'a> StageSix<'a> {
             Some(set) if !set.is_empty() => Classes::certain(&OriginClass::ALL, set),
             // Collection ran and found no evidence: exactly `{unknown}`.
             Some(_) => Classes::certain(&OriginClass::ALL, &BTreeSet::from([OriginClass::Unknown])),
-            // Collection did not run or report: the origin is `unknown`, and
-            // any other origin could be true.
+            // Collection did not run or report: the object could have any
+            // origin, `unknown` included, so every origin is `Unknown`.
             None => {
                 missing.insert(MissingFact::Origin);
-                Classes::new(&OriginClass::ALL, |o| {
-                    if o == OriginClass::Unknown {
-                        Tri::Match
-                    } else {
-                        Tri::Unknown
-                    }
-                })
+                Classes::new(&OriginClass::ALL, |_| Tri::Unknown)
             }
         };
         let sha256 = facts
@@ -705,31 +721,92 @@ impl Known<'_> {
         } else {
             self.applicable(resolved)
         };
-        let unknown_levels = self
+        // Each class a missing fact left `Unknown` is a candidate: its
+        // entry, or `default` where it has none.
+        let entry = |kind: EntryKind, key: &str, level: Option<Level>| AppliedEntry {
+            kind: if level.is_some() {
+                kind
+            } else {
+                EntryKind::Default
+            },
+            key: if level.is_some() {
+                key.to_owned()
+            } else {
+                "default".to_owned()
+            },
+            level: level.unwrap_or(self.policy.default),
+            possible: true,
+        };
+        let mut candidates: Vec<AppliedEntry> = self
             .locations
             .unknown()
             .into_iter()
-            .map(|c| self.policy.by_location.get(&c).copied())
-            .chain(
-                self.origins
-                    .unknown()
-                    .into_iter()
-                    .map(|o| self.policy.by_origin.get(&o).copied()),
-            )
-            .map(|l| l.unwrap_or(self.policy.default))
-            // An origin that could be `preexisting` is blocked under
-            // `baseline_only`, as a known one is.
-            .chain(
-                (baseline_only && self.origins.get(OriginClass::Preexisting) == Tri::Unknown)
-                    .then_some(Level::Block),
-            );
-        for level in unknown_levels {
-            let (candidate, _) = self.applicable(level);
-            if candidate > applied {
-                applied = candidate;
-                fallback = Some(FallbackReason::MissingFact);
+            .map(|c| {
+                entry(
+                    EntryKind::Location,
+                    c.as_str(),
+                    self.policy.by_location.get(&c).copied(),
+                )
+            })
+            .chain(self.origins.unknown().into_iter().map(|o| {
+                entry(
+                    EntryKind::Origin,
+                    o.as_str(),
+                    self.policy.by_origin.get(&o).copied(),
+                )
+            }))
+            .collect();
+        // An origin that could be `preexisting` is blocked under
+        // `baseline_only`, as a known one is.
+        let possibly_preexisting =
+            baseline_only && self.origins.get(OriginClass::Preexisting) == Tri::Unknown;
+        if possibly_preexisting {
+            candidates.push(AppliedEntry {
+                kind: EntryKind::Origin,
+                key: OriginClass::Preexisting.as_str().to_owned(),
+                level: Level::Block,
+                possible: true,
+            });
+        }
+        // The level the facts alone give; a candidate changes the decision
+        // only if it applies a stricter one.
+        let definite = applied;
+        let mut decisive: Vec<(AppliedEntry, Option<FallbackReason>)> = Vec::new();
+        for c in candidates {
+            let (candidate, reason) = self.applicable(c.level);
+            if candidate > definite {
+                if candidate > applied {
+                    applied = candidate;
+                    decisive.clear();
+                }
+                if candidate == applied {
+                    decisive.push((c, reason));
+                }
             }
         }
+        if applied > definite {
+            // A possible `restrict` that cannot contain keeps its own reason,
+            // so the decision says why it blocked; the missing facts are in
+            // `missing_facts`.
+            fallback = decisive
+                .iter()
+                .find_map(|(_, r)| match r {
+                    Some(
+                        r @ (FallbackReason::RestrictUnavailable
+                        | FallbackReason::RestrictNotValidForType),
+                    ) => Some(*r),
+                    _ => None,
+                })
+                .filter(|_| decisive.iter().all(|(c, _)| c.level == Level::Restrict))
+                .or(Some(FallbackReason::MissingFact));
+        }
+        let mut entries = entries;
+        for (e, _) in decisive {
+            if !entries.contains(&e) {
+                entries.push(e);
+            }
+        }
+        entries.sort();
         (resolved, applied, fallback, entries)
     }
 

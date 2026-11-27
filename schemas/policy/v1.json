@@ -2896,21 +2896,25 @@
       },
       "type": "object"
     },
-    "ScopeGroup": {
+    "ScopeLimit": {
       "additionalProperties": false,
-      "description": "Scopes that must all match: one entry of\n[`UnknownPolicy::scope_groups`]. An empty group matches everywhere.",
+      "description": "One contributing policy's limit on where its unknown settings apply, in\nan effective policy ([`UnknownPolicy::scope_limits`]). It holds when\nevery scope of `all_of` matches and, if `any_of` is not empty, one of\nits scopes matches.",
       "properties": {
         "all_of": {
-          "description": "The scopes, all of which must match.",
+          "description": "The contributing policy's `policy.scope`, if it has one. At most one\nscope: the width of an entry is never more than its source policy's,\nso the authored limits apply to it unchanged.",
+          "items": {
+            "$ref": "#/$defs/Scope"
+          },
+          "type": "array"
+        },
+        "any_of": {
+          "description": "The contributing policy's `unknown.scopes`.",
           "items": {
             "$ref": "#/$defs/Scope"
           },
           "type": "array"
         }
       },
-      "required": [
-        "all_of"
-      ],
       "type": "object"
     },
     "ScopeSubject": {
@@ -3255,10 +3259,10 @@
           ],
           "description": "The containment profile of the `restrict` level (#14). Required when\nany level, or the prompt's fallback, is `restrict`."
         },
-        "scope_groups": {
-          "description": "The effective form of where these settings apply, written by the\nhierarchy (#37): a subject in **every** scope of at least one group.\nEmpty, the default, means no further limit. An effective policy has\nno `policy.scope`, so each contributing policy's `scope` and\n`scopes` become groups here: `scope` and each of `scopes`, one group\nper entry ([`UnknownPolicy::scope_groups_of`]). The settings then\napply exactly where they applied in each contributing policy, never\nmore widely. At most 1000 groups of at most 8 scopes (the hierarchy\nwrites groups of 1 or 2). A policy document may carry it, so that an\neffective policy validates as any document, but is meant to write\n`scope` and `scopes` instead.",
+        "scope_limits": {
+          "description": "Effective policies only (#37): where these settings apply, one\n[`ScopeLimit`] per contributing policy, kept as that policy wrote it.\nThe settings apply to a subject when **any** entry holds; empty, the\ndefault, means no further limit. An effective policy has no\n`policy.scope`, so the hierarchy moves each contributing policy's\n`scope` and `scopes` here unexpanded\n([`UnknownPolicy::scope_limit_of`]). The size is therefore linear in\ncontributing policies, at most\n[`MAX_CONTRIBUTING_POLICIES`](crate::hierarchy::limits::MAX_CONTRIBUTING_POLICIES)\nentries, and building an effective policy from valid policies never\nfails on it. Validation rejects it in a document it validates as\nauthored, which writes `policy.scope` and `unknown.scopes` instead.",
           "items": {
-            "$ref": "#/$defs/ScopeGroup"
+            "$ref": "#/$defs/ScopeLimit"
           },
           "type": "array"
         },

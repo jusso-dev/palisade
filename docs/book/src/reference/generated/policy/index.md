@@ -44,7 +44,7 @@ Schema: [`schemas/policy/v1.json`](https://github.com/jusso-dev/palisade/blob/ma
 - [`RuleSetScope`](rule-set-scope.md): The scopes of one rule-set assignment: every one must match for the set's rules to apply.
 - [`Schedule`](schedule.md): When a scope is active (#38).
 - [`Scope`](scope.md): Who, where and when a rule applies (#38).
-- [`ScopeGroup`](scope-group.md): Scopes that must all match: one entry of `UnknownPolicy::scope_groups`. An empty group matches everywhere.
+- [`ScopeLimit`](scope-limit.md): One contributing policy's limit on where its unknown settings apply, in an effective policy (`UnknownPolicy::scope_limits`). It holds when every scope of `all_of` matches and, if `any_of` is not empty, one of its scopes matches.
 - [`SessionFilter`](session-filter.md): Session criteria (#38).
 - [`UnknownPolicy`](unknown-policy.md): The unknown-application policy (#39). Every field is optional in a document; the defaults block every unknown object.
 - [`Window`](window.md): One weekly window.

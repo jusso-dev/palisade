@@ -10,7 +10,7 @@ the next day: `22:00` to `06:00` wraps midnight) or for `duration_mins`.
 With no windows, every time of day is in. `dates` and `except_dates`
 test the local date of the moment being decided.
 
-Appears at: `/policy/rule_set_scopes/scopes/schedule`, `/policy/scope/schedule`, `/policy/unknown/scope_groups/all_of/schedule`, `/policy/unknown/scopes/schedule`, `/rule_sets/rules/scope/schedule`.
+Appears at: `/policy/rule_set_scopes/scopes/schedule`, `/policy/scope/schedule`, `/policy/unknown/scope_limits/all_of/schedule`, `/policy/unknown/scope_limits/any_of/schedule`, `/policy/unknown/scopes/schedule`, `/rule_sets/rules/scope/schedule`.
 
 ## Fields
 

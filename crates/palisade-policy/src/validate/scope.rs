@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::{ErrorCode, Validator};
 use crate::context::{normalize_object_id, normalize_sid};
+use crate::hierarchy::limits::MAX_CONTRIBUTING_POLICIES;
 use crate::model::limits::MAX_NAME_CHARS;
 use crate::model::{ActionKind, PolicyDocument, RuleSetId};
 use crate::scope::limits::{
@@ -123,31 +124,58 @@ impl Validator {
                 &profiles,
             );
         }
-        let groups = &policy.unknown.scope_groups;
-        if groups.len() > MAX_SCOPE_ENTRIES {
+        // `scope_limits` hold an effective policy's contributing limits
+        // (#37). An authored document writes `policy.scope` and
+        // `unknown.scopes` instead, so there they are an error.
+        let limits = &policy.unknown.scope_limits;
+        if self.compile_values && !limits.is_empty() {
             self.push(
                 ErrorCode::InvalidScope,
-                "/policy/unknown/scope_groups",
+                "/policy/unknown/scope_limits",
+                "`scope_limits` is written by the hierarchy for an effective policy; limit a policy with `policy.scope` and `unknown.scopes`",
+            );
+        }
+        if limits.len() > MAX_CONTRIBUTING_POLICIES {
+            self.push(
+                ErrorCode::InvalidScope,
+                "/policy/unknown/scope_limits",
                 format!(
-                    "{} groups; at most {MAX_SCOPE_ENTRIES} are allowed",
-                    groups.len()
+                    "{} limits; an effective policy has at most one per contributing policy, {MAX_CONTRIBUTING_POLICIES}",
+                    limits.len()
                 ),
             );
         }
-        for (i, g) in groups.iter().enumerate() {
-            let base = format!("/policy/unknown/scope_groups/{i}/all_of");
-            if g.all_of.len() > MAX_ASSIGNMENT_SCOPES {
+        for (i, l) in limits.iter().enumerate() {
+            let base = format!("/policy/unknown/scope_limits/{i}");
+            // `all_of` holds one contributing policy's `policy.scope`, so it
+            // is never wider than one scope; `any_of` is that policy's
+            // `unknown.scopes`, so the authored limit applies to it. No
+            // entry is wider than its source policy's own limit.
+            if l.all_of.len() > 1 {
                 self.push(
                     ErrorCode::InvalidScope,
-                    &base,
+                    &format!("{base}/all_of"),
                     format!(
-                        "{} scopes; a group holds at most {MAX_ASSIGNMENT_SCOPES}",
-                        g.all_of.len()
+                        "{} scopes; a limit holds one policy's scope, at most 1",
+                        l.all_of.len()
                     ),
                 );
             }
-            for (j, scope) in g.all_of.iter().enumerate() {
-                self.scope(&format!("{base}/{j}"), scope, covered, &profiles);
+            if l.any_of.len() > MAX_SCOPE_ENTRIES {
+                self.push(
+                    ErrorCode::InvalidScope,
+                    &format!("{base}/any_of"),
+                    format!(
+                        "{} scopes; at most {MAX_SCOPE_ENTRIES} are allowed",
+                        l.any_of.len()
+                    ),
+                );
+            }
+            for (j, scope) in l.all_of.iter().enumerate() {
+                self.scope(&format!("{base}/all_of/{j}"), scope, covered, &profiles);
+            }
+            for (j, scope) in l.any_of.iter().enumerate() {
+                self.scope(&format!("{base}/any_of/{j}"), scope, covered, &profiles);
             }
         }
         let mut seen = BTreeSet::new();
