@@ -266,7 +266,9 @@ mod tests {
     /// Every command `main` dispatches on, as the string literal it
     /// compares the first argument with.
     fn dispatched_commands() -> std::collections::BTreeSet<String> {
-        let main = include_str!("main.rs");
+        // A Windows checkout may have CRLF line endings, so normalise
+        // before splitting on "\n" patterns.
+        let main = include_str!("main.rs").replace("\r\n", "\n");
         let body = main
             .split_once("fn main() -> ExitCode {")
             .and_then(|(_, rest)| rest.split_once("\n}\n"))
