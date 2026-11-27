@@ -277,7 +277,7 @@ to ship: tags are public.
 A published release is never deleted or replaced: someone may already have it, and a deleted
 release cannot be audited. To withdraw one:
 
-1. Edit the release: put **Withdrawn: <reason>. Use <version> instead.** at the top of its
+1. Edit the release: put `**Withdrawn: <reason>. Use <version> instead.**` at the top of its
    notes, and mark it as a pre-release so it is no longer *latest*.
 2. Publish a security advisory if the reason is a vulnerability.
 3. Release the fixed version as usual.

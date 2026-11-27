@@ -37,7 +37,8 @@ runners, so this is a quick local check, not a replacement.
 - the tools CI uses, at the versions CI installs: cargo-nextest, cargo-deny, cargo-audit,
   cargo-vet, cargo-hack, cargo-llvm-cov, cargo-insta, cargo-fuzz, zizmor and actionlint (the
   release archive, checked against its SHA-256, as the CI job does);
-- the documentation tools: mdBook, lychee and typos;
+- the documentation tools: mdBook, mdbook-mermaid-ssr, lychee and typos (not the headless browser
+  that mdbook-mermaid-ssr renders diagrams with, so `cargo xtask docs build` names it as missing);
 - a Postgres 17 service (the image and digest the CI `postgres` job uses), with
   `PALISADE_TEST_DATABASE_ADMIN_URL` set, so the server's database tests run instead of skipping.
 
@@ -153,7 +154,7 @@ signatures, identity, processes, the environment, the registry and the event sin
 `palisade_core::test_util` (feature `test-util`) has an in-memory mock of each, and `MockPlatform`
 bundles them:
 
-```rust
+```rust,ignore
 use palisade_core::platform::{Clock, UtcTime};
 use palisade_core::test_util::{MockFile, MockPlatform};
 

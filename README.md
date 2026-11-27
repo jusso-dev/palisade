@@ -99,6 +99,8 @@ A quick start that installs Palisade on a disposable Windows virtual machine arr
 
 ## Documentation and project policies
 
+The documentation site, <https://jusso-dev.github.io/palisade/>, brings all of these together with the concepts, the policy, event and CLI reference, and the Essential Eight mapping. It is built from this repository by `cargo xtask docs` ([docs/ci.md](docs/ci.md#documentation-site)).
+
 - [CONTRIBUTING.md](CONTRIBUTING.md): development setup, coding standards, tests and pull requests
 - [SECURITY.md](SECURITY.md): how to report a vulnerability privately
 - [docs/security/threat-model.md](docs/security/threat-model.md): STRIDE threat model, attack trees and residual risks

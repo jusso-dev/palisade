@@ -140,7 +140,7 @@ and control panel item enforcement (#98, M2).
   palisade-policy = { workspace = true, features = ["test-util"] }
   ```
 
-  ```rust
+  ```rust,ignore
   let policy = PolicyBuilder::new()
       .rule_set(RuleSetBuilder::allowlist(1).rule(RuleBuilder::allow(1, hash('a'))))
       .validate();

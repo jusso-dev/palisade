@@ -6,7 +6,9 @@ the pinned toolchain and needs no other tools.
 
 | Command | What it does |
 |---|---|
-| `ci [--fast]` | Runs every check in `.github/workflows/ci.yml` locally, with the same commands. `--fast` skips coverage, fuzz, docs, feature-powerset, msrv and the package, signing and server-image builds. A unit test keeps its step list identical to `ci.yml`. Steps: `src/ci.rs`. |
+| `ci [--fast]` | Runs every check in `.github/workflows/ci.yml` locally, with the same commands. `--fast` skips coverage, fuzz, docs, the book build, feature-powerset, msrv and the package, signing and server-image builds. A unit test keeps its step list identical to `ci.yml`. Steps: `src/ci.rs`. |
+| `check-banned-terms [--digest <term>]` | No commercial vendor or product name in any file or path, matched as whole words in any letter case ([`docs/NAMING.md`](../docs/NAMING.md)). The list, `docs/banned-terms.txt`, holds SHA-256 digests only; `--digest` prints the line for a new term. Rules: `src/banned_terms.rs`. |
+| `docs generate`, `docs check`, `docs build`, `docs assemble` | The documentation site (#27): generates the reference pages, checks that they are current and that every page is in the book and accessible, builds the book with mdBook and checks its links, and assembles the GitHub Pages tree. Code: `src/docs/`; see [`docs/ci.md`](../docs/ci.md#documentation-site). |
 | `check-deps` | The allowed dependency directions between workspace crates, and crates banned from the `palisade-policy` and `palisade-agent` dependency trees. Rules: `src/deps.rs`. |
 | `check-manifests` | Every member crate inherits version, edition, MSRV, licence, repository, authors, `publish` and lints from the workspace, and takes every dependency from `[workspace.dependencies]`. `test-util` is never on by default and only dev-dependencies may enable it (an explicit `--features test-util` on the command line still can). Every crate README has no HTML comments, opens with a purpose paragraph, has the required sections and documents every feature. Rules: `src/manifests.rs`. |
 | `adr new "<title>"`, `adr index`, `adr lint` | The ADR tooling from `docs/adr/PROCESS.md`: scaffold the next ADR from the template, regenerate the index in `docs/adr/README.md`, and check every ADR's file name, number, title, Status, Date and Deciders lines, sections (present, in order, not empty), supersession links and the index. Rules: `src/adr.rs`. |
@@ -42,9 +44,9 @@ More commands are planned in #29; `sbom` is filled in by #226.
 No workspace crates: no product crate may depend on `xtask`, and `xtask`
 reads the workspace through `cargo metadata` instead of linking it. Third-party:
 `serde_json`, `toml` and `yaml-rust2`, to read `cargo metadata` output,
-manifests and workflow files; `proc-macro2`, to tokenise Rust source; and
-`sha2`, for the service-name digests in `check-workflows` and the WiX package checksum in
-`dist`.
+manifests, workflow files and JSON Schemas; `proc-macro2`, to tokenise Rust
+source; and `sha2`, for the term digests in `check-workflows` and
+`check-banned-terms`, and the WiX package checksum in `dist`.
 
 ## Platform support
 

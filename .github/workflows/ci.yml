@@ -321,6 +321,66 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo doc --workspace --no-deps --all-features --locked
 
+  # The documentation site (#27, docs/ci.md#documentation-site): generated
+  # pages up to date, every page in the book and accessible, then the book
+  # built with every warning an error, every Mermaid diagram rendered, and
+  # every internal link and anchor checked. External links are checked
+  # weekly by links.yml, so a third-party outage never fails a PR.
+  docs-book:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      LYCHEE_VERSION: "0.24.2"
+      LYCHEE_SHA256: 1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: mdbook@0.5.2,mdbook-mermaid-ssr@0.3.0
+      - name: Install lychee (checksum-verified release)
+        run: |
+          archive="lychee-x86_64-unknown-linux-gnu.tar.gz"
+          curl -sSfL -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/lycheeverse/lychee/releases/download/lychee-v${LYCHEE_VERSION}/$archive"
+          echo "$LYCHEE_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" --strip-components=1 lychee-x86_64-unknown-linux-gnu/lychee
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - run: cargo xtask docs check
+      - run: cargo xtask docs build
+
+  spelling:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: typos@1.52.2
+      # The accepted words are in _typos.toml.
+      - run: typos
+
+  # No commercial vendor or product names in any file or path (docs/NAMING.md).
+  banned-terms:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo xtask check-banned-terms
+
   deps:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -550,7 +610,7 @@ jobs:
   # The single required check from this workflow for branch protection.
   ci-ok:
     if: always()
-    needs: [fmt, clippy, test, postgres, coverage, coverage-gate, snapshots, fixtures, fuzz-locks, fuzz, bench, msrv, docs, deps, supply-chain, feature-powerset, runner-guard, doc-checks, workflow-lint, package, sign-test, server-image]
+    needs: [fmt, clippy, test, postgres, coverage, coverage-gate, snapshots, fixtures, fuzz-locks, fuzz, bench, msrv, docs, docs-book, spelling, banned-terms, deps, supply-chain, feature-powerset, runner-guard, doc-checks, workflow-lint, package, sign-test, server-image]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

@@ -32,6 +32,12 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ("xtask", &[]),
 ];
 
+/// The workspace crates and the crates each may depend on, in layering
+/// order. The docs crate map is generated from this.
+pub fn allowed_rules() -> &'static [(&'static str, &'static [&'static str])] {
+    ALLOWED
+}
+
 const PROTO_USERS: &[&str] = &[
     "palisade-core",
     "palisade-fileid",

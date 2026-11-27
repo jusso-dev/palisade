@@ -1,0 +1,35 @@
+# Spell check (`typos`, run by the `spelling` CI job). Words here are
+# correct in context: British or accepted spellings, identifiers, and test
+# vectors that are not words.
+
+[files]
+extend-exclude = [
+    # Base64 certificate bodies.
+    "*.pem.txt",
+    # cargo-vet's imported audits are third-party text.
+    "supply-chain/imports.lock",
+    # Signed script fixtures: their signature blocks are base64, and the
+    # files cannot be edited without breaking the signatures (#52).
+    "crates/palisade-fileid/tests/fixtures/script/",
+]
+
+[default.extend-words]
+# Accepted spellings.
+unparseable = "unparseable"
+writeable = "writeable"
+mis = "mis"
+alls = "alls"
+# Identifiers and abbreviations: OS structure fields and flags.
+seh = "seh"
+struc = "struc"
+# Short variable names in test generators.
+ot = "ot"
+pn = "pn"
+# Test vectors: base64 and hex inputs, a French product name, a word with
+# its accent removed, and a deliberate misspelling a matcher must not match.
+fo = "fo"
+ba = "ba"
+afe = "afe"
+caf = "caf"
+exemple = "exemple"
+edtor = "edtor"

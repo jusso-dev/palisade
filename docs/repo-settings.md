@@ -26,6 +26,7 @@ same settings are also available under **Settings** in the web UI.
 | Discussions | On, with a Q&A category | The support channel in [SUPPORT.md](../SUPPORT.md) |
 | Labels and milestones | Exactly the lists in `.github/labels.yml` and `.github/milestones.yml` | Synced by `labels.yml`; see [Labels and milestones](#labels-and-milestones) |
 | `DCO` check | Runs on every pull request; not yet required | See [DCO check](#dco-check) |
+| GitHub Pages | Deploy from the `gh-pages` branch, root folder | Serves the documentation site; see [GitHub Pages](#github-pages) |
 
 ## Code security
 
@@ -111,6 +112,43 @@ the allowlist does not stop Dependabot from opening pull requests.
 Runners are not a setting: every job runs on a GitHub-hosted runner, and the runner-guard check
 rejects anything else. Self-hosted runners must never be registered for this repository, and
 cloud-managed build services are never used ([docs/ci.md](ci.md)).
+
+## GitHub Pages
+
+The documentation site is published by `.github/workflows/pages.yml`, which pushes the built site to
+the `gh-pages` branch ([docs/ci.md](ci.md#publishing)). The Pages deployment actions are not on
+the action allowlist, so Pages serves that branch directly. This is a one-time setting, made after
+the first run of `pages.yml` has created the branch:
+
+```sh
+# Serve the gh-pages branch, root folder.
+gh api -X POST repos/jusso-dev/palisade/pages \
+  -f build_type=legacy -f 'source[branch]=gh-pages' -f 'source[path]=/'
+```
+
+Or in the web UI: **Settings → Pages → Build and deployment → Source: Deploy from a branch**,
+branch `gh-pages`, folder `/ (root)`. Then check it:
+
+```sh
+gh api repos/jusso-dev/palisade/pages    # "build_type": "legacy", source gh-pages and /
+```
+
+The site is then at <https://jusso-dev.github.io/palisade/>, which redirects to `latest/`. The
+first deployment needs this setting before Pages serves anything: after making it, rerun
+`pages.yml` once (**Actions → Pages → Run workflow** on `main`).
+
+A push made with a workflow's `GITHUB_TOKEN` does not start a Pages build, so `pages.yml`'s push
+alone would update `gh-pages` but not the site. After each push it therefore requests the build
+itself (`POST repos/jusso-dev/palisade/pages/builds`), with the same token and only the job's
+`pages: write` permission, even when the site is unchanged, so rerunning `pages.yml` also
+retries a build request that failed. No personal token or deployment action is needed. A push to
+`gh-pages` made by hand, by someone with admin rights, still starts a build as usual.
+
+Serving a branch still runs GitHub's own `pages-build-deployment` workflow. If the Actions
+allowlist above stops that workflow, its run shows a startup failure naming the blocked action,
+and the site is not updated. The fix widens the allowlist, so it is a maintainer decision: add the
+action it names to `patterns_allowed`, or allow actions created by GitHub, and record the change
+on this page. `pages.yml` itself needs neither.
 
 ## Branch protection for `main`
 

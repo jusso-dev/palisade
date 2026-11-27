@@ -54,8 +54,8 @@ const EXIT_START_FAILED: u32 = 1;
 const EXIT_UNCLEAN_STOP: u32 = 2;
 /// Service-specific exit code: the service thread panicked.
 const EXIT_PANICKED: u32 = 3;
-/// Slack added to wait hints on top of the shutdown budget.
-const WAIT_HINT_SLACK: Duration = Duration::from_secs(5);
+/// Margin added to wait hints on top of the shutdown budget.
+const WAIT_HINT_MARGIN: Duration = Duration::from_secs(5);
 
 /// The parsed command line, handed from `main` to the service thread.
 static ARGS: OnceLock<Args> = OnceLock::new();
@@ -129,7 +129,7 @@ fn service_main() {
         if let Some(status) = STATUS.get() {
             Reporter(*status).report(
                 ServiceState::StopPending,
-                request.budget + WAIT_HINT_SLACK,
+                request.budget + WAIT_HINT_MARGIN,
                 0,
             );
         }
@@ -147,7 +147,7 @@ fn service_main() {
     // Set before any status is reported, so before any control is accepted.
     let _ = STATUS.set(status);
     let reporter = Reporter(status);
-    reporter.report(ServiceState::StartPending, WAIT_HINT_SLACK, 0);
+    reporter.report(ServiceState::StartPending, WAIT_HINT_MARGIN, 0);
     let exit =
         std::panic::catch_unwind(AssertUnwindSafe(|| run(&reporter, rx))).unwrap_or(EXIT_PANICKED);
     set_exit(if exit == 0 {

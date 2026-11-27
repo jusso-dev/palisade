@@ -28,6 +28,9 @@ type.
 | `postgres` | ubuntu-latest | `cargo nextest run -p palisade-server --test postgres --locked --profile ci` against a Postgres 17 service container (official image, pinned by digest), with `PALISADE_TEST_DATABASE_ADMIN_URL` set. Elsewhere those tests skip themselves. `cargo xtask ci` runs this step only when that variable is set locally |
 | `msrv` | ubuntu-latest | `cargo +1.94.0 check --workspace --all-targets --all-features --locked`, after checking that the version matches `rust-version` in `Cargo.toml` |
 | `docs` | ubuntu-latest | `cargo doc --workspace --no-deps --all-features --locked` with `RUSTDOCFLAGS=-D warnings` |
+| `docs-book` | ubuntu-latest | `cargo xtask docs check`, then `cargo xtask docs build`: the documentation site, with every warning an error and every internal link checked (see [Documentation site](#documentation-site)) |
+| `spelling` | ubuntu-latest | `typos` over the whole repository, with the accepted words in `_typos.toml` |
+| `banned-terms` | ubuntu-latest | `cargo xtask check-banned-terms`: no vendor or product names anywhere ([NAMING.md](NAMING.md)) |
 | `deps` | ubuntu-latest | `cargo xtask check-deps`, `cargo xtask check-manifests`, `cargo xtask check-unsafe`, `cargo deny --locked check` for the root workspace and for each fuzz workspace (with the root `deny.toml`), `cargo xtask audit` (cargo-audit over the root and every fuzz lockfile, with the ignores from `deny.toml`) |
 | `supply-chain` | ubuntu-latest | `cargo vet --locked`, `cargo xtask check-supply-chain`, and on PRs `cargo xtask deps-report --base <base>` to the job summary ([dependencies.md](dependencies.md)) |
 | `feature-powerset` | ubuntu-latest | `cargo hack check --each-feature --all-targets --locked` on the portable crates (`core`, `fileid`, `policy`, `proto`, `server`, `cli`, `console`) and `agent`, so the agent is also built without `test-util`, as a release build is |
@@ -221,14 +224,27 @@ job here with a write scope (`issues: write`, plus `contents: read` for the
 checkout). Details:
 [repo-settings.md](repo-settings.md#labels-and-milestones).
 
+### `pages.yml` (every push to `main`, every release tag, and on demand)
+
+| Job | Runners | What it runs |
+|---|---|---|
+| `publish` | ubuntu-latest | `cargo xtask docs check` and `docs build`, `cargo doc`, then `cargo xtask docs assemble` into a clone of `gh-pages`, a push, and a Pages build request. The only job with `contents: write` and `pages: write`; see [Publishing](#publishing) |
+
+### `links.yml` (weekly on Monday at 05:29 UTC, and on demand)
+
+| Job | Runners | What it runs |
+|---|---|---|
+| `links` | ubuntu-latest | `cargo xtask docs build`, then `lychee` over every link in the built book, external ones included |
+| `report` | ubuntu-latest | On failure, opens an issue titled "Documentation site has broken external links" with the `area:infra` label, or comments on the open one |
+
 ### `audit.yml` (daily at 03:17 UTC, and on demand)
 
 Runs `cargo deny check advisories` and `cargo xtask audit` (cargo-audit with the same ignores) against `main`, for the root workspace and every fuzz workspace's lockfile. Both
 also run on every PR (the `deps` job). A new advisory can affect `main`
 without any change here, which is why this is also scheduled. On failure, a second job opens an issue titled "Scheduled advisory
 audit is failing" with the `area:security` label, or comments on the open
-one. That job, the `report` job in `fuzz.yml` and the `sync` job in `labels.yml`
-are the only places with `issues: write`.
+one. That job, the `report` jobs in `fuzz.yml` and `links.yml`, and the `sync` job in
+`labels.yml` are the only places with `issues: write`.
 
 ### Dependabot (`.github/dependabot.yml`)
 
@@ -244,6 +260,43 @@ covers only the root workspace, so a fuzz-only bump is reviewed in its PR.
 The fuzz crates are never shipped ([testing.md](testing.md#fuzzing)). They are labelled
 `area:security` (Cargo) or `area:infra` (actions), because the label sync
 deletes Dependabot's default labels.
+
+## Documentation site
+
+The book at <https://jusso-dev.github.io/palisade/> is built from the repository's own Markdown
+(`docs/`, the root policy files and every crate README) by `cargo xtask docs`. `docs/book/` holds
+only the book's configuration, theme, the pages that are new, and the generated reference.
+
+| Command | What it does |
+|---|---|
+| `cargo xtask docs generate` | Regenerates `docs/book/src/reference/generated/`: the policy and event reference from `schemas/*/v1.json`, the CLI reference from each binary's `--help`, the crate map from the crate READMEs and `xtask/src/deps.rs`, and the reference and ADR lists in `SUMMARY.md`. Commit the result |
+| `cargo xtask docs check` | Fails if a generated page or list is stale; if a `docs/**/*.md`, crate README or root Markdown file is not in the book; if a page has no single title, skips a heading level or has an image without alt text; if a policy example is inline instead of included from `docs/examples/policies/` (where `palisade-policy`'s `tests/yaml.rs` validates it), or an example there is not shown; if a `rust` block is untested and not marked `ignore`; or if the disclaimer is missing from the README or the theme |
+| `cargo xtask docs build` | Stages the sources into `target/book-src` (repository links that are not chapters become links to GitHub; a broken one fails), runs `mdbook build` with every warning an error, renders every Mermaid diagram (a diagram that does not parse fails), checks every internal link and anchor with `lychee --offline`, and checks every page has the disclaimer banner. The site is in `target/book` |
+| `cargo xtask docs assemble <dir> --version <name>` | Assembles the GitHub Pages tree: the book and the `cargo doc` API docs under `<dir>/<name>/` and `<dir>/<name>/api/rust/`, `versions.json` for the version switcher, and a root redirect to `latest/` |
+
+`docs build` needs [mdBook](https://github.com/rust-lang/mdBook) 0.5.2,
+[mdbook-mermaid-ssr](https://github.com/CommanderStorm/mdbook-mermaid-ssr) 0.3.0 with the
+headless browser its README names (GitHub's Ubuntu runner image has one), and [lychee](https://github.com/lycheeverse/lychee)
+0.24.2; it names any that is missing. Search is mdBook's built-in search.
+
+Spelling is checked with [typos](https://github.com/crate-ci/typos) 1.52.2 over the whole
+repository; `_typos.toml` lists the accepted words (British spellings, test vectors and
+abbreviations). `cargo xtask check-banned-terms` fails on any commercial vendor or product name
+in any file or path, matched as whole words in any letter case; the list is
+`docs/banned-terms.txt`, which holds only SHA-256 digests ([NAMING.md](NAMING.md)).
+
+### Publishing
+
+`pages.yml` builds the site on every push to `main` (as `latest`) and on every release tag
+`vX.Y.Z` (as `vX.Y`), and pushes it to the `gh-pages` branch. A push made with the
+workflow's token does not start a Pages build, so the job then requests one through the REST
+API. Its write permissions, `contents: write` for the push and `pages: write` for the build
+request, are on that job only. It does not use the Pages deployment actions, which are not on
+the [action allowlist](#runner-and-action-policy); GitHub Pages serves the branch instead. One-time setting for the maintainer, in [repo-settings.md](repo-settings.md#github-pages).
+
+`links.yml` checks every external link in the built book once a week, and opens or updates an
+issue when one is broken. Pull requests check internal links only (offline), so a third-party
+site being down never fails a PR.
 
 ## Runner and action policy
 
@@ -306,14 +359,14 @@ automatically. One command runs every check in `ci.yml`, with the same
 command lines:
 
 ```sh
-cargo xtask ci          # everything, including coverage, fuzz, docs, feature-powerset and msrv
+cargo xtask ci          # everything, including coverage, fuzz, docs, the book, feature-powerset and msrv
 cargo xtask ci --fast   # skips those slow steps, and the package, signing and server-image builds
 ```
 
 It runs every step even after one fails, and lists the failed ones at the
 end. Before it starts, it checks that the extra tools are installed
-(cargo-nextest, cargo-deny, cargo-audit, cargo-vet, cargo-hack, actionlint, zizmor and,
-without `--fast`, cargo-llvm-cov, the fuzzing nightly with cargo-fuzz, and the
+(cargo-nextest, cargo-deny, cargo-audit, cargo-vet, cargo-hack, typos, actionlint, zizmor and,
+without `--fast`, cargo-llvm-cov, the fuzzing nightly with cargo-fuzz, mdBook, and the
 MSRV toolchain), and prints the install command for
 each one that is missing, at the version CI uses. Jobs that differ only by
 runner run once, on your machine. Steps whose job runs only on one OS run
@@ -341,6 +394,10 @@ cargo xtask check-unsafe
 cargo xtask check-workflows
 cargo xtask adr lint
 cargo xtask threat-coverage
+cargo xtask check-banned-terms
+cargo xtask docs check
+cargo xtask docs build             # needs mdbook 0.5.2, mdbook-mermaid-ssr 0.3.0, lychee 0.24.2
+typos                              # needs typos 1.52.2
 cargo deny --locked check          # needs cargo-deny 0.22
 cargo deny --locked --manifest-path crates/palisade-fileid/fuzz/Cargo.toml --config deny.toml check
 cargo deny --locked --manifest-path crates/palisade-proto/fuzz/Cargo.toml --config deny.toml check
@@ -403,5 +460,4 @@ runners like everything else:
   report, and the benchmark comparison.
 - The absolute performance budget of policy evaluation, with the benchmarks
   it is measured on (#42).
-- The mdBook build and link check, with the documentation site (#27).
 - The `vm-smoke` subset of the Windows VM harness (#26).

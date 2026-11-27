@@ -399,11 +399,11 @@ mod tests {
             Err(RecordError::BadStreamName { .. })
         ));
         // Unpaired surrogate.
-        let mut sur = stream_record(0, "::$DATA", 1);
-        sur[24] = 0x00;
-        sur[25] = 0xd8;
+        let mut surrogate = stream_record(0, "::$DATA", 1);
+        surrogate[24] = 0x00;
+        surrogate[25] = 0xd8;
         assert!(matches!(
-            parse_stream_info(&sur),
+            parse_stream_info(&surrogate),
             Err(RecordError::BadStreamName { .. })
         ));
         // A next offset inside the header, which would loop, or inside the
