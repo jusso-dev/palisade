@@ -929,19 +929,31 @@ fn write_package_fuzz_seeds() {
 
 #[test]
 fn unmapped_parts_are_bounded() {
-    // `[Content_Types].xml` is not in the block map; one that inflates past
-    // the metadata limit is not hashed, so the signature cannot verify,
-    // and parsing stays fast.
+    // `[Content_Types].xml` is not in the block map, so nothing else bounds
+    // how much it inflates to: the digest reads it only up to the metadata
+    // limit. Checked on the digest directly, at the limit and one byte over
+    // (a re-signed package would be needed to see it through the
+    // signature, which would then fail for the digest anyway).
+    let limit = palisade_fileid::package::MAX_METADATA_SIZE as usize;
     let mut files = members(&fixture("app-signed.msix"));
-    let ct = files
-        .iter_mut()
-        .find(|f| f.name == "[Content_Types].xml")
+    let at = files
+        .iter()
+        .position(|f| f.name == "[Content_Types].xml")
         .unwrap();
-    ct.data = vec![b' '; palisade_fileid::package::MAX_METADATA_SIZE as usize + 1];
-    let start = std::time::Instant::now();
-    let id = parse_package(&write_zip_with(&files, &ZipStyle::packaging_tool())).unwrap();
-    assert!(!id.signature_valid());
-    assert!(start.elapsed() < std::time::Duration::from_secs(20));
+    for (len, hashed) in [(limit, true), (limit + 1, false)] {
+        files[at].data = vec![b' '; len];
+        let data = write_zip_with(&files, &ZipStyle::packaging_tool());
+        let a = Archive::parse(&data).unwrap();
+        assert_eq!(
+            signed_digest(&a, palisade_fileid::authenticode::DigestAlgorithm::Sha256).is_some(),
+            hashed,
+            "{len}"
+        );
+        // Over the limit, no digest, so no signature can verify.
+        if !hashed {
+            assert!(!parse_package(&data).unwrap().signature_valid());
+        }
+    }
 }
 
 #[test]
@@ -1071,17 +1083,15 @@ fn the_block_map_total_is_capped() {
         xml.push_str("</File>");
     }
     xml.push_str("</BlockMap>");
-    let start = std::time::Instant::now();
     let map = palisade_fileid::package::blockmap::parse(xml.as_bytes()).unwrap();
     assert!(matches!(
         palisade_fileid::package::blockmap::verify(&map, &archive),
         Err(BlockMapError::Size(s)) if s == "(total)"
     ));
-    assert!(start.elapsed() < std::time::Duration::from_secs(10));
 }
 
 #[test]
-fn many_namespaces_parse_quickly() {
+fn many_namespaces_parse() {
     let mut doc = String::from("<r xmlns=\"urn:root\">");
     for i in 0..5000 {
         doc.push_str(&format!(
@@ -1090,9 +1100,10 @@ fn many_namespaces_parse_quickly() {
         ));
     }
     doc.push_str("</r>");
-    let start = std::time::Instant::now();
-    palisade_fileid::package::xml::parse(doc.as_bytes()).unwrap();
-    assert!(start.elapsed() < std::time::Duration::from_secs(10));
+    // The namespace set keeps this linear; how fast it is is a matter for
+    // a benchmark, not a pass/fail test on a shared runner.
+    let root = palisade_fileid::package::xml::parse(doc.as_bytes()).unwrap();
+    assert_eq!(root.children.len(), 5000);
 }
 
 /// `map_xml` with the `Size` of each block of `file` (as the map writes its

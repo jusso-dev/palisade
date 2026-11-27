@@ -52,7 +52,9 @@ def main():
     for p in vectors():
         pid = publisher_id(p)
         out.append(f"{p}\t{pid}\n")
-    sys.stdout.write("".join(out))
+    # UTF-8 bytes, whatever the console's code page: the vectors include
+    # characters a legacy code page cannot encode.
+    sys.stdout.buffer.write("".join(out).encode("utf-8"))
 
 
 if __name__ == "__main__":

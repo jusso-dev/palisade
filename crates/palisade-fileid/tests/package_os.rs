@@ -237,20 +237,30 @@ fn identity_and_signatures_match_the_os() {
         };
         assert_eq!(value, &want, "{key}");
     }
+    // Each fixture has an expected verdict, and both sides must give it:
+    // agreeing that a package meant to be intact is broken proves nothing.
     // Whether this API also compares the signer with the manifest's
     // publisher is not documented, so for the other-publisher package only
     // our verdict (invalid) is asserted; its OS code is still required.
     for (name, id) in &ours {
         let code = os.code(name);
-        if name == "other-publisher.msix" {
-            assert!(!id.signature_valid());
-            continue;
+        let expected = match name.as_str() {
+            "app-signed.msix" | "app-zip64.msix" | "bundle-signed.msixbundle" => Some(true),
+            "app-desc.msix" | "app-classic.msix" | "tampered.msix" => Some(false),
+            "other-publisher.msix" => None,
+            _ => panic!("no expected verdict for {name}"),
+        };
+        match expected {
+            Some(want) => {
+                assert_eq!(id.signature_valid(), want, "{name}: ours\n{text}");
+                assert_eq!(
+                    INTACT.contains(&code),
+                    want,
+                    "{name}: OS {code:#010x}\n{text}"
+                );
+            }
+            None => assert!(!id.signature_valid(), "{name}"),
         }
-        assert_eq!(
-            id.signature_valid(),
-            INTACT.contains(&code),
-            "{name}: OS {code:#010x}\n{text}"
-        );
     }
 }
 
@@ -542,13 +552,22 @@ fn the_os_signer_computes_our_digest() {
             let code = os.code(name);
             let ours = parse_package(data).map(|id| id.signature_valid());
             // Refused here or signature not valid: both are "not valid".
-            let agree = ours.as_ref().is_ok_and(|v| *v) == INTACT.contains(&code);
-            if !agree {
+            let ours_valid = ours.as_ref().is_ok_and(|v| *v);
+            let os_intact = INTACT.contains(&code);
+            // Each layout has an expected verdict, and both sides must give
+            // it: agreeing that a layout meant to verify is broken proves
+            // nothing. `zip64-extras` is the one the tool signs into a shape
+            // no reader may accept (4-byte descriptor sizes, the
+            // uncompressed size written as 0): refused by both.
+            let want = name != "zip64-extras.msix";
+            let ok = ours_valid == want && os_intact == want;
+            if !ok {
                 problems += 1;
             }
             report.push_str(&format!(
-                "{name}: OS {code:#010x}, ours {ours:?}{}\n",
-                if agree { "" } else { " DISAGREE" }
+                "{name}: OS {code:#010x}, ours {ours:?}, expected {}{}\n",
+                if want { "valid" } else { "not valid" },
+                if ok { "" } else { " WRONG" }
             ));
         }
     }
