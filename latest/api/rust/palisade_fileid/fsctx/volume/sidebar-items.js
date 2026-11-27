@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["BusType","DriveType","FsType","LocationClass"],"struct":["VolumeInfo"]};
+window.SIDEBAR_ITEMS = {"enum":["BusType","DriveType","FsType","LocationClass"],"fn":["combined_hotplug","nt_path_on_network","opened_name_on_network","parse_hotplug_info","parse_storage_device_descriptor"],"struct":["HotplugInfo","NetworkEvidence","StorageDevice","VolumeInfo"]};

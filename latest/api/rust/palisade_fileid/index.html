@@ -223,6 +223,12 @@ without following junctions or mount points. Windows tests build a
 weak-ACL fixture tree (a user-writable folder under a locked one, an
 explicit deny, a <code>WRITE_DAC</code> grant to Users) and compare every result
 with the OS access check, and check the stock system folders too.</li>
+<li><code>win::volume</code> (Windows, <code>os-trust</code> feature): <code>read_volume</code> fills a
+<code>VolumeInfo</code> for the volume an open handle is on (drive type, bus and
+hot-plug state from the storage queries, OS volume by GUID, file
+system and journal support), and <code>is_case_sensitive_dir</code> reads the
+per-directory case-sensitivity flag. Windows tests attach a VHD and
+share a local folder over SMB.</li>
 </ul>
 </li>
 <li>
