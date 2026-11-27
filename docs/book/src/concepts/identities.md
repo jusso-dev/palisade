@@ -25,8 +25,10 @@ version (ISM-1471: use publisher *and* product names). By default a signer
 criterion only trusts signatures that are valid, valid with an expired but timestamped
 certificate, or catalog-signed; a criterion's `signer` options can accept other statuses, require
 a timestamp after a date or a minimum key size, reject algorithms, or pick the signature's source
-and index. To block a stolen certificate, deny its `signer.tbs_hash`: it survives re-issuance with
-the same key. **Path rules** are the easiest to write and
+and index. To block a stolen certificate, deny its `signer.tbs_hash`. That blocks one
+certificate only: the hashed data includes the serial number and the validity period, so a
+certificate reissued with the same key has a new TBS hash and needs its own rule. No criterion
+yet names a key across all the certificates that carry it. **Path rules** are the easiest to write and
 the easiest to get wrong.
 
 A workstation baseline with hash, publisher and path rules (ISM-0955), validated in CI:

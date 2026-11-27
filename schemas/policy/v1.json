@@ -1176,7 +1176,7 @@
         },
         {
           "const": "signer.tbs_hash",
-          "description": "The hash of a chain certificate's `tbsCertificate`, under the\ncertificate's own signature digest (40, 64, 96 or 128 hex digits).\nIt survives re-issuance with the same key material, so it is the\nway to block a stolen certificate. `signer.position` says which\ncertificate.",
+          "description": "The hash of a chain certificate's `tbsCertificate`, under the\ncertificate's own signature digest (40, 64, 96 or 128 hex digits).\nIt identifies that one certificate: the `tbsCertificate` includes\nthe serial number and the validity period (RFC 5280), so a\ncertificate reissued with the same key has another TBS hash, and\neach issue needs its own rule. No criterion yet names a key across\nthe certificates that carry it. `signer.position` says which\ncertificate. A 40-digit (SHA-1) value is compatibility only\n(ADR 0008).",
           "type": "string"
         },
         {

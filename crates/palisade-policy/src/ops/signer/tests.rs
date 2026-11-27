@@ -417,6 +417,103 @@ fn signed_after_needs_a_trusted_timestamp() {
 }
 
 #[test]
+fn fractional_signed_after_rounds_up() {
+    // Trusted timestamps are whole seconds: a threshold half a second after
+    // midnight needs a timestamp of at least one second after it.
+    let c = publisher(SignerOptions {
+        signed_after: Some("2024-01-01T00:00:00.500Z".into()),
+        ..opts()
+    });
+    for (at, expected) in [
+        (JAN_2024 - 1, NoMatch),
+        (JAN_2024, NoMatch),
+        (JAN_2024 + 1, Match),
+        (JAN_2024 + 2, Match),
+    ] {
+        let mut s = full();
+        s.details.timestamp = Some(at);
+        assert_eq!(eval(&c, vec![s]), expected, "{at}");
+    }
+    // A whole-second threshold is unchanged.
+    assert_eq!(super::instant("2024-01-01T00:00:00Z"), Some(JAN_2024));
+    assert_eq!(
+        super::instant("2024-01-01T00:00:00.000000001Z"),
+        Some(JAN_2024 + 1)
+    );
+    assert_eq!(super::instant("2023-12-31T23:59:59.999Z"), Some(JAN_2024));
+}
+
+#[test]
+fn observations_follow_the_selectors() {
+    let s = full();
+    let sel =
+        |field, o: SignerOptions| super::Selector::of(&crit(field, Operator::Equals, &["x"], o));
+    let at = |position| {
+        sel(
+            Field::SignerTbsHash,
+            SignerOptions {
+                position: Some(position),
+                ..opts()
+            },
+        )
+    };
+    let of = |component| {
+        sel(
+            Field::SignerPublisher,
+            SignerOptions {
+                component: Some(component),
+                ..opts()
+            },
+        )
+    };
+    let observed = |field, sel| super::observed(field, sel, &s);
+    assert_eq!(
+        observed(Field::SignerTbsHash, at(TbsPosition::Leaf)).as_deref(),
+        Some(LEAF_TBS)
+    );
+    assert_eq!(
+        observed(Field::SignerTbsHash, at(TbsPosition::Root)).as_deref(),
+        Some(ROOT_TBS)
+    );
+    assert_eq!(
+        observed(Field::SignerTbsHash, at(TbsPosition::Intermediate)).as_deref(),
+        Some(MID_TBS)
+    );
+    assert_eq!(
+        observed(Field::SignerTbsHash, sel(Field::SignerTbsHash, opts())),
+        Some(format!("{LEAF_TBS}, {MID_TBS}, {ROOT_TBS}"))
+    );
+    assert_eq!(
+        observed(Field::SignerPublisher, of(SubjectComponent::Cn)).as_deref(),
+        Some("Example Software Ltd")
+    );
+    assert_eq!(
+        observed(Field::SignerPublisher, of(SubjectComponent::O)).as_deref(),
+        Some("Example Software")
+    );
+    assert_eq!(
+        observed(Field::SignerPublisher, of(SubjectComponent::FullDn)).as_deref(),
+        Some("CN=Example Software Ltd,O=Example Software,C=AU")
+    );
+    // An unknown position is unknown, not another position's hash.
+    let mut no_root = full();
+    no_root.details.root_tbs_hash = None;
+    assert_eq!(
+        super::observed(Field::SignerTbsHash, at(TbsPosition::Root), &no_root),
+        None
+    );
+    // An option on a field it does not apply to selects nothing.
+    let stray = sel(
+        Field::SignerIssuer,
+        SignerOptions {
+            component: Some(SubjectComponent::O),
+            ..opts()
+        },
+    );
+    assert_eq!(stray, super::Selector::default());
+}
+
+#[test]
 fn countersigned() {
     let c = publisher(SignerOptions {
         countersigned: true,

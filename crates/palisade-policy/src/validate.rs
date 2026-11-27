@@ -785,7 +785,7 @@ impl Validator {
                 (true, Identity::WeakHashOnly) => self.push(
                     ErrorCode::WeakHashOnlyAllow,
                     &tree,
-                    format!("{rule_desc} has a path through {through} whose only identity is SHA-1 or MD5, which are compatibility hashes (ADR 0008); require a SHA-256 or another identity on every path"),
+                    format!("{rule_desc} has a path through {through} whose only identity is SHA-1 or MD5 (including SHA-1 thumbprints and TBS hashes), which are compatibility hashes (ADR 0008); require a SHA-256 or another identity on every path"),
                 ),
                 (true, Identity::Weak) => self.push(
                     ErrorCode::WeakIdentity,
@@ -1279,6 +1279,11 @@ fn guaranteed_identity(node: &Match, pointer: &str) -> Guarantee {
                 _ if !c.operator.is_positive() => Identity::None,
                 None => Identity::None,
                 Some(_) if c.field.is_weak_hash() => Identity::WeakHashOnly,
+                Some(_) if c.field == crate::model::Field::SignerTbsHash => match sha1_values(c) {
+                    Sha1Values::All => Identity::WeakHashOnly,
+                    Sha1Values::Some => Identity::Weak,
+                    Sha1Values::None => Identity::Sound,
+                },
                 Some(Strength::Weak) => Identity::Weak,
                 Some(_) => Identity::Sound,
             };
@@ -1291,6 +1296,25 @@ fn guaranteed_identity(node: &Match, pointer: &str) -> Guarantee {
                 }],
             }
         }
+    }
+}
+
+/// How many values of a `signer.tbs_hash` criterion are 40-digit (SHA-1)
+/// digests. The field takes SHA-1 to SHA-512 values, so its strength
+/// depends on them (#31, ADR 0008): SHA-1 values alone are a weak hash, and
+/// a list that mixes them in is only as strong as its weakest value.
+enum Sha1Values {
+    None,
+    Some,
+    All,
+}
+
+fn sha1_values(c: &Criterion) -> Sha1Values {
+    let sha1 = |v: &String| ops::normalize_hex(v).is_some_and(|h| h.len() == 40);
+    match c.values.iter().filter(|v| sha1(v)).count() {
+        0 => Sha1Values::None,
+        n if n == c.values.len() => Sha1Values::All,
+        _ => Sha1Values::Some,
     }
 }
 

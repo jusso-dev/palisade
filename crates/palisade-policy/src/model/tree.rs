@@ -234,7 +234,20 @@ pub const MAX_KEY_BITS: u32 = 16_384;
 
 /// The part of the leaf certificate's subject that `signer.publisher`
 /// compares (#31).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SubjectComponent {
     /// The common name.
@@ -247,7 +260,20 @@ pub enum SubjectComponent {
 }
 
 /// Where the certificate of a `signer.tbs_hash` test must be (#31).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum TbsPosition {
     /// The leaf: the certificate that signed.
@@ -519,9 +545,13 @@ pub enum Field {
     SignerRootThumbprintSha1,
     /// The hash of a chain certificate's `tbsCertificate`, under the
     /// certificate's own signature digest (40, 64, 96 or 128 hex digits).
-    /// It survives re-issuance with the same key material, so it is the
-    /// way to block a stolen certificate. `signer.position` says which
-    /// certificate.
+    /// It identifies that one certificate: the `tbsCertificate` includes
+    /// the serial number and the validity period (RFC 5280), so a
+    /// certificate reissued with the same key has another TBS hash, and
+    /// each issue needs its own rule. No criterion yet names a key across
+    /// the certificates that carry it. `signer.position` says which
+    /// certificate. A 40-digit (SHA-1) value is compatibility only
+    /// (ADR 0008).
     #[serde(rename = "signer.tbs_hash")]
     SignerTbsHash,
     /// The extended key usages of the leaf certificate, as dotted OIDs,

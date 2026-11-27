@@ -29,7 +29,8 @@
 //! - `signer.eku` holds the leaf's extended key usages as a set of OIDs,
 //!   compared arc by arc, so `1.3.6.01` equals `1.3.6.1`.
 //! - `signed_after` needs a trusted timestamp at or after the instant; the
-//!   signer's own claimed signing time is never used.
+//!   signer's own claimed signing time is never used. Timestamps are whole
+//!   seconds, so a fractional instant is rounded up.
 //! - `min_key_bits` needs every key of the chain to be at least that
 //!   strong, in RSA-equivalent bits ([`KeyFact::rsa_equivalent_bits`]).
 
@@ -216,9 +217,14 @@ pub(crate) fn option_problems(c: &Criterion) -> Vec<(&'static str, CompileErrorK
     out
 }
 
-/// An RFC 3339 instant with an offset, in seconds since the Unix epoch.
+/// An RFC 3339 instant with an offset, in seconds since the Unix epoch,
+/// rounded up to a whole second. Trusted timestamps are whole seconds, so
+/// rounding up keeps `timestamp >= instant` false for every timestamp
+/// before the instant: `00:00:00.500Z` rejects a signature at `00:00:00Z`.
 fn instant(s: &str) -> Option<i64> {
-    s.parse::<jiff::Timestamp>().ok().map(|t| t.as_second())
+    let t = s.parse::<jiff::Timestamp>().ok()?;
+    let up = i64::from(t.subsec_nanosecond() > 0);
+    Some(t.as_second().saturating_add(up))
 }
 
 /// Compiles the options of a criterion whose options passed
@@ -402,20 +408,76 @@ impl CompiledCriterion {
     }
 }
 
-/// What a signer field reads from one signature, for the decision trace:
-/// the value, or the values joined with `, `, or `None` if it is unknown.
-pub(crate) fn observed(field: Field, s: &SignerFact) -> Option<String> {
+/// Which part of a signature a signer criterion reads: the publisher's
+/// subject component and the TBS hash's position. Other fields read one
+/// fact, and have the default selector.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct Selector {
+    component: SubjectComponent,
+    position: TbsPosition,
+}
+
+impl Selector {
+    /// The selector of a criterion, with each option kept only on the
+    /// field it applies to.
+    pub(crate) fn of(c: &Criterion) -> Self {
+        let o = c.signer.as_deref();
+        Self {
+            component: o
+                .and_then(|o| o.component)
+                .filter(|_| c.field == Field::SignerPublisher)
+                .unwrap_or_default(),
+            position: o
+                .and_then(|o| o.position)
+                .filter(|_| c.field == Field::SignerTbsHash)
+                .unwrap_or_default(),
+        }
+    }
+}
+
+/// What a signer field reads from one signature with `sel`, for the
+/// decision trace: the value the criterion compared, or the values joined
+/// with `, ` (the EKUs, or the TBS hashes of several positions), or `None`
+/// if none is known.
+pub(crate) fn observed(field: Field, sel: Selector, s: &SignerFact) -> Option<String> {
     let d = &s.details;
     let one = |v: &Option<String>| v.clone();
+    let joined = |parts: Vec<&String>| {
+        (!parts.is_empty()).then(|| {
+            parts
+                .iter()
+                .map(|p| p.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+    };
     match field {
-        Field::SignerPublisher => one(&s.publisher),
+        Field::SignerPublisher => match sel.component {
+            SubjectComponent::Cn => one(&s.publisher),
+            SubjectComponent::O => one(&d.subject_organization),
+            SubjectComponent::FullDn => one(&d.subject_dn),
+        },
         Field::SignerIssuer => one(&s.issuer),
         Field::SignerLeafThumbprint => one(&s.leaf_thumbprint_sha256),
         Field::SignerLeafThumbprintSha1 => one(&d.leaf_thumbprint_sha1),
         Field::SignerPca => one(&d.pca),
         Field::SignerRootThumbprint => one(&d.root_thumbprint_sha256),
         Field::SignerRootThumbprintSha1 => one(&d.root_thumbprint_sha1),
-        Field::SignerTbsHash => one(&d.leaf_tbs_hash),
+        Field::SignerTbsHash => {
+            let mid = d.intermediate_tbs_hashes.iter().flatten();
+            match sel.position {
+                TbsPosition::Leaf => one(&d.leaf_tbs_hash),
+                TbsPosition::Root => one(&d.root_tbs_hash),
+                TbsPosition::Intermediate => joined(mid.collect()),
+                TbsPosition::Any => joined(
+                    d.leaf_tbs_hash
+                        .iter()
+                        .chain(mid)
+                        .chain(d.root_tbs_hash.iter())
+                        .collect(),
+                ),
+            }
+        }
         Field::SignerEku => d.eku.as_ref().map(|e| e.join(", ")),
         _ => None,
     }

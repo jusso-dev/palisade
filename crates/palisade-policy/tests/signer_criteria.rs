@@ -308,3 +308,130 @@ fn certificate_authority_identities_alone_are_weak() {
         assert!(findings(deny_policy(tree)).is_empty());
     }
 }
+
+#[test]
+fn sha1_tbs_hashes_are_compatibility_only() {
+    let tbs = |values: &[&str]| {
+        signer_crit(
+            Field::SignerTbsHash,
+            Operator::Equals,
+            values,
+            SignerOptions {
+                position: Some(TbsPosition::Leaf),
+                ..SignerOptions::default()
+            },
+        )
+    };
+    let sha1 = "a".repeat(40);
+    let sha256 = "b".repeat(64);
+    let sha384 = "c".repeat(96);
+    // SHA-1 alone: rejected, as the SHA-1 thumbprints are (ADR 0008),
+    // whatever the case or prefix.
+    for values in [
+        vec![sha1.as_str()],
+        vec![&*format!("0x{}", sha1.to_uppercase()), &"d".repeat(40)],
+    ] {
+        assert_eq!(
+            findings(allow_policy(tbs(&values))),
+            [(
+                ErrorCode::WeakHashOnlyAllow,
+                Severity::Error,
+                RULE.to_owned()
+            )],
+            "{values:?}"
+        );
+    }
+    // SHA-256 and longer: a sound identity.
+    assert!(findings(allow_policy(tbs(&[&sha256, &sha384]))).is_empty());
+    // A list that mixes SHA-1 in is as weak as its weakest value.
+    assert_eq!(
+        findings(allow_policy(tbs(&[&sha256, &sha1]))),
+        [(ErrorCode::WeakIdentity, Severity::Warning, RULE.to_owned())]
+    );
+    // With a strong identity beside it, a SHA-1 TBS hash only narrows.
+    assert!(findings(allow_policy(all(vec![hash('a'), tbs(&[&sha1])]))).is_empty());
+    // A deny may block on a SHA-1 TBS hash.
+    assert!(findings(deny_policy(tbs(&[&sha1]))).is_empty());
+}
+
+#[test]
+fn traces_show_the_selected_value() {
+    use palisade_policy::mode::DeviceState;
+    use palisade_policy::trace::{ObjectExtras, TraceLevel, TraceOptions, Tracer};
+
+    let root = "4".repeat(64);
+    let tree = all(vec![
+        hash('a'),
+        signer_crit(
+            Field::SignerTbsHash,
+            Operator::Equals,
+            &[&root],
+            SignerOptions {
+                position: Some(TbsPosition::Root),
+                ..SignerOptions::default()
+            },
+        ),
+        signer_crit(
+            Field::SignerPublisher,
+            Operator::Equals,
+            &["Example Software"],
+            SignerOptions {
+                component: Some(SubjectComponent::O),
+                ..SignerOptions::default()
+            },
+        ),
+    ]);
+    let policy = deny_policy(tree).validate();
+    let mut sig = SignerFact::new(SignerStatus::Valid, SignatureSource::Embedded);
+    sig.publisher = Some("Example Software Ltd".into());
+    sig.details.subject_organization = Some("Example Software".into());
+    sig.details.leaf_tbs_hash = Some("3".repeat(64));
+    sig.details.root_tbs_hash = Some(root.clone());
+    let mut f = facts().sha256('a').build();
+    f.signers = Some(vec![sig]);
+    let variables = PathVariables::new();
+    let context = EvaluationContext::new();
+    let subject = Subject {
+        object_type: ObjectType::Executable,
+        facts: &f,
+        variables: &variables,
+        context: &context,
+    };
+    let trace = Tracer::new(&policy).unwrap().trace(
+        &subject,
+        &ObjectExtras::default(),
+        &DeviceState::of(&policy.document().policy),
+        TRACE,
+        &TraceOptions::at(TraceLevel::Full),
+    );
+    let decisive = trace.decisive.unwrap();
+    let observed: Vec<(Field, Vec<String>)> = decisive
+        .criteria
+        .iter()
+        .filter(|c| c.field != Field::HashSha256)
+        .map(|c| (c.field, c.observed.clone().unwrap().values))
+        .collect();
+    assert_eq!(
+        observed,
+        [
+            (Field::SignerTbsHash, vec![root.clone()]),
+            (Field::SignerPublisher, vec!["Example Software".to_owned()]),
+        ]
+    );
+    let used: Vec<(String, Vec<String>)> = trace
+        .facts_used
+        .iter()
+        .filter(|o| o.field.starts_with("signer."))
+        .map(|o| (o.field.clone(), o.values.clone()))
+        .collect();
+    assert_eq!(
+        used,
+        [
+            (
+                "signer.publisher".to_owned(),
+                vec!["Example Software".to_owned()]
+            ),
+            ("signer.tbs_hash".to_owned(), vec![root]),
+        ]
+    );
+}
