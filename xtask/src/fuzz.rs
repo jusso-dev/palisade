@@ -137,6 +137,10 @@ const PATTERN_SEEDS: Seed = Seed {
     test: "fuzz_seeds",
     name: "write_pattern_fuzz_seeds",
 };
+const BUNDLE_SEEDS: Seed = Seed {
+    test: "fuzz_seeds",
+    name: "write_bundle_fuzz_seeds",
+};
 
 /// Seeds from the generated fixture corpus (#25): PEs, their signatures and
 /// the test PKI's certificates.
@@ -250,6 +254,11 @@ pub const PROJECTS: &[Project] = &[
                 name: "fuzz_wildcard_regex_compile",
                 dict: None,
                 seeds: &[PATTERN_SEEDS],
+            },
+            Target {
+                name: "fuzz_bundle_decode",
+                dict: None,
+                seeds: &[BUNDLE_SEEDS],
             },
         ],
     },

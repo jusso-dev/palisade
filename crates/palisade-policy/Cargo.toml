@@ -55,6 +55,10 @@ required-features = ["test-util"]
 name = "publisher_product"
 required-features = ["test-util"]
 
+[[test]]
+name = "bundle_golden"
+required-features = ["test-util"]
+
 [[bench]]
 name = "criterion_eval"
 harness = false

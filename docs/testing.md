@@ -231,10 +231,10 @@ them, and only they need a nightly toolchain. There are three projects:
   `fuzz_appx_manifest`. The project builds `palisade-fileid` with its `content-rules` feature,
   for `fuzz_tags`.
 - `crates/palisade-proto/fuzz`, with one target: `trust_set_decode`.
-- `crates/palisade-policy/fuzz`, with three targets: `fuzz_policy_json` (the strict JSON reader,
-  validation and the evaluator build), `fuzz_policy_yaml` (the YAML reader) and
+- `crates/palisade-policy/fuzz`, with four targets: `fuzz_policy_json` (the strict JSON reader,
+  validation and the evaluator build), `fuzz_policy_yaml` (the YAML reader),
   `fuzz_wildcard_regex_compile` (compiling and matching wildcards, regular expressions and text
-  values).
+  values) and `fuzz_bundle_decode` (the policy bundle's header-only and strict decoders, #43).
 
 Target names are unique across projects, so `--target` names one without its project. Each fuzz
 workspace has its own committed `Cargo.lock`. Dependabot keeps it up to date, cargo-deny checks it against the root `deny.toml` on every PR and daily, and
