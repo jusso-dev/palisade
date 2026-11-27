@@ -36,8 +36,8 @@ use std::path::Path;
 use super::file::volume_root;
 use super::sys;
 use crate::fsctx::volume::{
-    NetworkEvidence, nt_path_on_network, opened_name_on_network, parse_hotplug_info,
-    parse_storage_device_descriptor,
+    NetworkEvidence, combined_hotplug, nt_path_on_network, opened_name_on_network,
+    parse_hotplug_info, parse_storage_device_descriptor,
 };
 use crate::fsctx::{DriveType, FsType, Root, VolumeInfo, normalize_win32};
 
@@ -160,14 +160,7 @@ fn read_volume_with(file: &File, opened: Option<&str>) -> VolumeInfo {
         let hotplug = sys::hotplug_bytes(&device)
             .ok()
             .and_then(|b| parse_hotplug_info(&b));
-        // Removable media counts as hot-pluggable: it can be swapped while
-        // the system runs, whatever the device says.
-        let removable = storage.is_some_and(|s| s.removable_media);
-        info.is_hotplug = match hotplug {
-            Some(h) => Some(h.is_hotplug() || removable),
-            None if removable => Some(true),
-            None => None,
-        };
+        info.is_hotplug = combined_hotplug(storage, hotplug);
     }
     VolumeInfo::settle(info, evidence, true)
 }
@@ -225,7 +218,15 @@ mod tests {
         let path = format!(r"{windir}\System32\cmd.exe");
         let f = File::open(&path).unwrap();
         let e = network_evidence(&f, Some(&path));
-        assert_eq!(e.remote_protocol, Some(false), "{e:?}");
+        // The remote-protocol query does not answer reliably either way on
+        // every runner (#54: on Windows 11 Arm64 it fails on a local file
+        // with an error outside the "not supported" set, so it is unknown).
+        // It must never say "network" here; the other two signs decide.
+        eprintln!(
+            "remote_protocol on a local file: {:?}",
+            sys::remote_protocol(&f)
+        );
+        assert_ne!(e.remote_protocol, Some(true), "{e:?}");
         assert_eq!(e.nt_path_on_network, Some(false), "{e:?}");
         assert_eq!(e.opened_as_network, Some(false), "{e:?}");
         assert_eq!(
@@ -244,9 +245,12 @@ mod tests {
         use std::fmt::Write as _;
         use std::process::Command;
 
-        fn ps(script: &str) -> String {
+        /// Runs `script`; each value it needs is passed in the environment
+        /// (`$env:NAME`), never written into the script source.
+        fn ps(script: &str, env: &[(&str, &str)]) -> String {
             let out = Command::new("powershell")
                 .args(["-NoProfile", "-NonInteractive", "-Command", script])
+                .envs(env.iter().copied())
                 .output()
                 .unwrap();
             format!(
@@ -263,9 +267,14 @@ mod tests {
         let plain = dir.to_str().unwrap().trim_start_matches(r"\\?\").to_owned();
         std::fs::write(dir.join("tool.exe"), b"MZ").unwrap();
         let share = format!("palisade-diag-{}", std::process::id());
-        let created = ps(&format!(
-            "New-SmbShare -Name '{share}' -Path '{plain}' -ReadAccess 'Everyone' | Out-Null; 'ok'"
-        ));
+        let vars = [
+            ("PALISADE_SHARE", share.as_str()),
+            ("PALISADE_PATH", plain.as_str()),
+        ];
+        let created = ps(
+            "New-SmbShare -Name $env:PALISADE_SHARE -Path $env:PALISADE_PATH -ReadAccess 'Everyone' | Out-Null; 'ok'",
+            &vars,
+        );
         assert!(created.ends_with("ok"), "{created}");
 
         let host = std::env::var("COMPUTERNAME").unwrap_or_default();
@@ -274,7 +283,8 @@ mod tests {
             report,
             "OS: {}",
             ps(
-                "$o = Get-CimInstance Win32_OperatingSystem; \"$($o.Caption) $($o.Version) $($o.OSArchitecture) type=$($o.ProductType)\""
+                "$o = Get-CimInstance Win32_OperatingSystem; \"$($o.Caption) $($o.Version) $($o.OSArchitecture) type=$($o.ProductType)\"",
+                &[]
             )
         );
         let mut networked = Vec::new();
@@ -318,24 +328,27 @@ mod tests {
             report,
             "SMB connections: {}",
             ps(
-                "Get-SmbConnection | Format-Table -AutoSize ServerName,ShareName,Dialect | Out-String"
+                "Get-SmbConnection | Format-Table -AutoSize ServerName,ShareName,Dialect | Out-String",
+                &[]
             )
         );
         let _ = writeln!(
             report,
             "Services: {}",
             ps(
-                "Get-Service LanmanWorkstation,LanmanServer,MRxSmb -ErrorAction SilentlyContinue | Format-Table -AutoSize Name,Status | Out-String"
+                "Get-Service LanmanWorkstation,LanmanServer,MRxSmb -ErrorAction SilentlyContinue | Format-Table -AutoSize Name,Status | Out-String",
+                &[]
             )
         );
         let _ = writeln!(
             report,
             "Redirector drivers: {}",
             ps(
-                "Get-CimInstance Win32_SystemDriver | Where-Object { $_.Name -match '^(mrxsmb|mrxsmb20|rdbss|mup|bowser|srv2|srvnet)$' } | Format-Table -AutoSize Name,State | Out-String"
+                "Get-CimInstance Win32_SystemDriver | Where-Object { $_.Name -match '^(mrxsmb|mrxsmb20|rdbss|mup|bowser|srv2|srvnet)$' } | Format-Table -AutoSize Name,State | Out-String",
+                &[]
             )
         );
-        let _ = ps(&format!("Remove-SmbShare -Name '{share}' -Force"));
+        let _ = ps("Remove-SmbShare -Name $env:PALISADE_SHARE -Force", &vars);
         let _ = std::fs::remove_dir_all(&dir);
         eprintln!("{report}");
         // Through the handle alone, every name of the share must show some

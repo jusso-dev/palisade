@@ -32,3 +32,10 @@ slow-timeout = "60s"
 # Written to target/nextest/ci/junit.xml. `cargo xtask test-summary` turns it
 # into the job summary and one annotation per failed test.
 path = "junit.xml"
+
+# The Windows SMB diagnostic test (#54) prints every raw OS answer for a
+# file on a local share. Show that output even when it passes, so the CI
+# log records how each runner image answers.
+[[profile.ci.overrides]]
+filter = "package(palisade-fileid) & test(smb_share_queries_are_reported)"
+success-output = "immediate"

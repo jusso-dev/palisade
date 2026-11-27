@@ -51,7 +51,7 @@ pub use sid::{Sid, SidError};
 pub use vars::{KnownFolders, PathVariable, path_variables_matched};
 pub use volume::{
     BusType, DriveType, FsType, HotplugInfo, LocationClass, NetworkEvidence, StorageDevice,
-    VolumeInfo, nt_path_on_network, opened_name_on_network, parse_hotplug_info,
+    VolumeInfo, combined_hotplug, nt_path_on_network, opened_name_on_network, parse_hotplug_info,
     parse_storage_device_descriptor,
 };
 

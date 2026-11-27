@@ -536,6 +536,25 @@ impl HotplugInfo {
     }
 }
 
+/// The value of [`VolumeInfo::is_hotplug`] from the two storage queries,
+/// either of which may have failed. Removable media counts as
+/// hot-pluggable: it can be swapped while the system runs, whatever the
+/// hot-plug flags say. Either query reporting removable media is enough.
+/// `None` only when neither query answered and so nothing is known.
+#[must_use]
+pub fn combined_hotplug(
+    storage: Option<StorageDevice>,
+    hotplug: Option<HotplugInfo>,
+) -> Option<bool> {
+    let removable =
+        storage.is_some_and(|s| s.removable_media) || hotplug.is_some_and(|h| h.media_removable);
+    match hotplug {
+        Some(h) => Some(h.is_hotplug() || removable),
+        None if removable => Some(true),
+        None => None,
+    }
+}
+
 /// Parses the `STORAGE_HOTPLUG_INFO` bytes the OS returned: a `u32` size
 /// and four one-byte flags. `None` if shorter.
 #[must_use]
@@ -586,6 +605,50 @@ mod tests {
         );
         assert_eq!(parse_hotplug_info(&[8, 0, 0, 0, 1]), None);
         assert_eq!(parse_hotplug_info(&[4, 0, 0, 0, 1, 1, 1, 1]), None);
+    }
+
+    #[test]
+    fn removable_media_is_hot_pluggable_from_either_query() {
+        let flags = |media_removable, media_hotplug, device_hotplug| HotplugInfo {
+            media_removable,
+            media_hotplug,
+            device_hotplug,
+        };
+        let disk = |removable_media| StorageDevice {
+            bus_type: BusType::Sata,
+            removable_media,
+        };
+        // The storage query failed; the hot-plug reply says removable
+        // media with both hot-plug flags clear.
+        let only_removable = flags(true, false, false);
+        assert!(!only_removable.is_hotplug());
+        assert_eq!(combined_hotplug(None, Some(only_removable)), Some(true));
+        assert_eq!(
+            combined_hotplug(Some(disk(false)), Some(only_removable)),
+            Some(true)
+        );
+        // Removable media from the storage query alone.
+        assert_eq!(combined_hotplug(Some(disk(true)), None), Some(true));
+        assert_eq!(
+            combined_hotplug(Some(disk(true)), Some(flags(false, false, false))),
+            Some(true)
+        );
+        // Either hot-plug flag.
+        assert_eq!(
+            combined_hotplug(None, Some(flags(false, false, true))),
+            Some(true)
+        );
+        assert_eq!(
+            combined_hotplug(None, Some(flags(false, true, false))),
+            Some(true)
+        );
+        // A fixed, non-pluggable disk, and nothing known.
+        assert_eq!(
+            combined_hotplug(Some(disk(false)), Some(flags(false, false, false))),
+            Some(false)
+        );
+        assert_eq!(combined_hotplug(Some(disk(false)), None), None);
+        assert_eq!(combined_hotplug(None, None), None);
     }
 
     fn fixed(bus: BusType, os: bool) -> VolumeInfo {

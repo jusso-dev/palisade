@@ -12,6 +12,9 @@ use std::fs::{File, OpenOptions};
 use std::os::windows::fs::OpenOptionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use palisade_fileid::fsctx::{BusType, DriveType, FsType, LocationClass};
 use palisade_fileid::win::volume::{
@@ -46,11 +49,60 @@ fn run(cmd: &mut Command) -> String {
     text
 }
 
-fn powershell(script: &str) -> String {
+/// Runs a PowerShell `script`. Each value it needs is passed in the
+/// environment and read as `$env:NAME`, never written into the script
+/// source, so a path with a `'` (`C:\Users\O'Brien\...`) cannot break it.
+fn powershell(script: &str, env: &[(&str, &str)]) -> String {
     run(Command::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-Command"])
-        .arg(script))
+        .arg(script)
+        .envs(env.iter().copied()))
 }
+
+/// DiskPart runs are serialised across the tests in this binary, and each
+/// is followed by this wait. The DiskPart documentation says to "allow at
+/// least 15 seconds between each script for a complete shutdown of the
+/// previous execution", or the next script may fail
+/// (<https://learn.microsoft.com/windows-server/administration/windows-commands/diskpart-scripts-and-examples>).
+const DISKPART_GAP: Duration = Duration::from_secs(15);
+
+static DISKPART: Mutex<()> = Mutex::new(());
+
+/// Runs the DiskPart script `script` from the file `path`, holding the
+/// process-wide lock and waiting [`DISKPART_GAP`] afterwards, whatever the
+/// result. Returns whether it succeeded, and its output.
+fn diskpart(path: &Path, script: &str) -> (bool, String) {
+    // A test that panicked while holding the lock leaves nothing to undo.
+    let _guard = DISKPART
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let result = std::fs::write(path, script)
+        .map_err(|e| e.to_string())
+        .and_then(|()| {
+            Command::new("diskpart")
+                .arg("/s")
+                .arg(plain(path))
+                .output()
+                .map_err(|e| e.to_string())
+        });
+    std::thread::sleep(DISKPART_GAP);
+    match result {
+        Ok(out) => (
+            out.status.success(),
+            format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            ),
+        ),
+        Err(e) => (false, e),
+    }
+}
+
+/// Set when a VHD could not be detached or deleted after its test. The
+/// test that attaches the next VHD fails on it, since a disk left attached
+/// can change what later tests see.
+static CLEANUP_FAILED: AtomicBool = AtomicBool::new(false);
 
 /// `\\?\C:\x` as `C:\x`, for tools that do not take the literal prefix.
 fn plain(p: &Path) -> String {
@@ -97,12 +149,16 @@ struct Vhd {
 
 impl Vhd {
     fn diskpart(&self, name: &str, script: &str) -> String {
-        let path = self.script_dir.0.join(name);
-        std::fs::write(&path, script).unwrap();
-        run(Command::new("diskpart").arg("/s").arg(plain(&path)))
+        let (ok, text) = diskpart(&self.script_dir.0.join(name), script);
+        assert!(ok, "diskpart {name} failed: {text}");
+        text
     }
 
     fn attach(dir: &Scratch, fs: &str) -> Self {
+        assert!(
+            !CLEANUP_FAILED.load(Ordering::SeqCst),
+            "an earlier VHD was not detached; see its test's output"
+        );
         let file = dir.0.join("disk.vhdx");
         let mount = dir.0.join("mnt");
         std::fs::create_dir(&mount).unwrap();
@@ -131,17 +187,21 @@ impl Vhd {
 
 impl Drop for Vhd {
     fn drop(&mut self) {
+        // A panic here would abort the test binary, so a failure is
+        // reported and flagged instead (see `CLEANUP_FAILED`).
         let f = plain(&self.file);
-        let script = self.script_dir.0.join("detach.txt");
-        let _ = std::fs::write(
-            &script,
-            format!("select vdisk file=\"{f}\"\r\ndetach vdisk\r\n"),
+        let (ok, text) = diskpart(
+            &self.script_dir.0.join("detach.txt"),
+            &format!("select vdisk file=\"{f}\"\r\ndetach vdisk\r\n"),
         );
-        let _ = Command::new("diskpart")
-            .arg("/s")
-            .arg(plain(&script))
-            .output();
-        let _ = std::fs::remove_file(&self.file);
+        if !ok {
+            CLEANUP_FAILED.store(true, Ordering::SeqCst);
+            eprintln!("detaching {f} failed: {text}");
+        }
+        if let Err(e) = std::fs::remove_file(&self.file) {
+            CLEANUP_FAILED.store(true, Ordering::SeqCst);
+            eprintln!("deleting {f} failed: {e}");
+        }
     }
 }
 
@@ -192,7 +252,8 @@ impl Drop for Share {
     fn drop(&mut self) {
         let _ = Command::new("powershell")
             .args(["-NoProfile", "-NonInteractive", "-Command"])
-            .arg(format!("Remove-SmbShare -Name '{}' -Force", self.0))
+            .arg("Remove-SmbShare -Name $env:PALISADE_SHARE -Force")
+            .env("PALISADE_SHARE", &self.0)
             .output();
     }
 }
@@ -202,11 +263,13 @@ fn a_file_on_a_local_smb_share_is_on_the_network() {
     let dir = scratch("smb");
     std::fs::write(dir.0.join("tool.exe"), b"MZ").unwrap();
     let share = Share(format!("palisade-vol-{}", std::process::id()));
-    powershell(&format!(
-        "New-SmbShare -Name '{}' -Path '{}' -ReadAccess 'Everyone' | Out-Null",
-        share.0,
-        plain(&dir.0)
-    ));
+    powershell(
+        "New-SmbShare -Name $env:PALISADE_SHARE -Path $env:PALISADE_PATH -ReadAccess 'Everyone' | Out-Null",
+        &[
+            ("PALISADE_SHARE", share.0.as_str()),
+            ("PALISADE_PATH", plain(&dir.0).as_str()),
+        ],
+    );
     let unc = format!(r"\\localhost\{}\tool.exe", share.0);
     let file = File::open(&unc).unwrap();
     // The handle alone, and the handle with the name it was opened by.
