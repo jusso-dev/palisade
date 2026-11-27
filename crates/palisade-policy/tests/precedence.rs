@@ -161,6 +161,7 @@ fn facts(o: &Object) -> ObjectFacts {
             publisher: Some(publisher.clone()),
             issuer: None,
             leaf_thumbprint_sha256: None,
+            details: Default::default(),
         }]);
     }
     facts

@@ -71,6 +71,19 @@ A calendar date, `YYYY-MM-DD`.
 
 Type: string; matches `^[0-9]{4}-[0-9]{2}-[0-9]{2}$`.
 
+## DigestAlgorithm
+
+A digest algorithm a signature uses (#31, ADR 0008).
+
+| Value | Meaning |
+|---|---|
+| `md2` | MD2. |
+| `md5` | MD5. |
+| `sha1` | SHA-1. |
+| `sha256` | SHA-256. |
+| `sha384` | SHA-384. |
+| `sha512` | SHA-512. |
+
 ## DriverBootPolicy
 
 How unknown drivers are handled while the device boots, before the agent
@@ -127,10 +140,10 @@ How serious an event is (#16).
 The identity facts a criterion can test (#31).
 
 This is the part of the #31 catalogue that has a matcher: hashes, the
-signer, the path and the version resource. The other families (signer
-constraints such as EKU and TBS hashes, packaged apps, installers,
-ownership, origin and process relationships) arrive in later minor
-versions, each with its facts and matcher.
+signer and its certificates, the path and the version resource. The
+other families (packaged apps, installers, ownership, origin and process
+relationships) arrive in later minor versions, each with its facts and
+matcher.
 
 | Value | Meaning |
 |---|---|
@@ -198,6 +211,12 @@ versions, each with its facts and matcher.
 | `time.weekday` | Context (#33): the day of the week of the evaluation, as `mon` to `sun`, in the clock the policy's `time_zone_basis` names. |
 | `time.local_time` | Context (#33): the time of day of the evaluation, as `HH:MM`, in the policy's clock. |
 | `time.date` | Context (#33): the date of the evaluation, as `YYYY-MM-DD`, in the policy's clock. |
+| `signer.leaf_thumbprint_sha1` | The SHA-1 thumbprint of the leaf certificate. Compatibility only (ADR 0008). |
+| `signer.pca` | The subject common name of the highest certificate below the root, as the signature provides it: the PCA. |
+| `signer.root_thumbprint` | The SHA-256 thumbprint of the chain's root certificate. |
+| `signer.root_thumbprint_sha1` | The SHA-1 thumbprint of the chain's root certificate. Compatibility only (ADR 0008). |
+| `signer.tbs_hash` | The hash of a chain certificate's `tbsCertificate`, under the certificate's own signature digest (40, 64, 96 or 128 hex digits). It identifies that one certificate: the `tbsCertificate` includes the serial number and the validity period (RFC 5280), so a certificate reissued with the same key has another TBS hash, and each issue needs its own rule. No criterion yet names a key across the certificates that carry it. `signer.position` says which certificate. A 40-digit (SHA-1) value is compatibility only (ADR 0008). |
+| `signer.eku` | The extended key usages of the leaf certificate, as dotted OIDs, such as `1.3.6.1.5.5.7.3.3` (code signing). A leaf without the extension has none. |
 
 ## Level
 
@@ -457,6 +476,53 @@ How a session was started.
 | `service` | A service. |
 | `batch` | A batch job, such as a scheduled task. |
 | `network` | A network logon. |
+
+## SignerSource
+
+Where the signatures a signer criterion looks at come from (#31).
+
+| Value | Meaning |
+|---|---|
+| `embedded` | Embedded in the file. |
+| `catalog` | A signed catalog that lists the file's hash. |
+| `any` | Either. |
+
+## SignerStatus
+
+The result of verifying one signature (#31, #48). An unsigned object
+has no `SignerFact` at all.
+
+| Value | Meaning |
+|---|---|
+| `valid` | The signature and chain verify, and the certificate is in date. |
+| `valid_expired_timestamped` | The certificate has expired, but a trusted timestamp shows that the signature was made while it was valid. |
+| `catalog_signed` | The signature verifies through a signed catalog. |
+| `expired` | The certificate has expired, with no trusted timestamp. |
+| `revoked` | The certificate has been revoked. |
+| `untrusted_root` | The chain ends at a root that is not trusted. |
+| `digest_mismatch` | The file's content does not match the signed digest. |
+
+## SubjectComponent
+
+The part of the leaf certificate's subject that `signer.publisher`
+compares (#31).
+
+| Value | Meaning |
+|---|---|
+| `cn` | The common name. |
+| `o` | The organisation. |
+| `full_dn` | The whole distinguished name, as RFC 4514 writes it. |
+
+## TbsPosition
+
+Where the certificate of a `signer.tbs_hash` test must be (#31).
+
+| Value | Meaning |
+|---|---|
+| `leaf` | The leaf: the certificate that signed. |
+| `intermediate` | Any certificate between the leaf and the root. |
+| `root` | The root of the chain. |
+| `any` | Anywhere in the chain. |
 
 ## TierTiebreak
 

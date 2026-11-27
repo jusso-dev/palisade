@@ -122,10 +122,13 @@
 //! # Signers
 //!
 //! A signer criterion looks at every signature on the object and matches
-//! if any of them matches. Only signatures whose status is valid, valid
-//! with an expired but timestamped certificate, or catalog-signed take
-//! part: a revoked, untrusted, expired or digest-mismatched signature never
-//! vouches for an object, and an unsigned object matches no signer.
+//! if any of them matches. By default only signatures whose status is
+//! valid, valid with an expired but timestamped certificate, or
+//! catalog-signed take part: a revoked, untrusted, expired or
+//! digest-mismatched signature never vouches for an object, and an
+//! unsigned object matches no signer. The criterion's `signer` options
+//! choose other statuses, a source and an index, and add constraints on the
+//! same signature; see [`signer`].
 //!
 //! # Context
 //!
@@ -221,6 +224,7 @@
 //! Validation rejects the option anywhere else.
 
 pub mod net;
+pub mod signer;
 
 use std::net::IpAddr;
 
@@ -233,7 +237,7 @@ use crate::context::{
     ContextFact, Date, EvaluationContext, IntegrityLevel, SessionType, Weekday,
     normalize_principal, normalize_sid, parse_time_of_day,
 };
-use crate::facts::{ObjectFacts, PathFact, PathVariable, PathVariables, SignerFact};
+use crate::facts::{ObjectFacts, PathFact, PathVariable, PathVariables};
 use crate::model::limits::MAX_VALUE_BYTES;
 use crate::model::{ActionKind, Criterion, Field, FieldClass, Operator};
 
@@ -549,6 +553,8 @@ pub struct CompiledCriterion {
     include_sub_ous: bool,
     /// `safety_critical`: an unknown result counts towards a deny applying.
     safety_critical: bool,
+    /// The `signer` options, for signer fields.
+    signer: signer::SignerOpts,
     values: Values,
 }
 
@@ -652,7 +658,8 @@ impl CompiledCriterion {
         if c.case_sensitive.is_some() && !class.has_case() {
             return Err(whole(CompileErrorKind::CaseSensitivityNotApplicable));
         }
-        let options = option_problems(c);
+        let mut options = option_problems(c);
+        options.extend(signer::option_problems(c).into_iter().map(|(_, kind)| kind));
         if !options.is_empty() {
             return Err(options
                 .into_iter()
@@ -687,6 +694,7 @@ impl CompiledCriterion {
             match_ads: c.match_ads.unwrap_or(false),
             include_sub_ous: c.include_sub_ous.unwrap_or(false),
             safety_critical: c.safety_critical,
+            signer: signer::compile_options(c),
             values,
         })
     }
@@ -751,9 +759,7 @@ impl CompiledCriterion {
             };
         }
         match self.field {
-            Field::SignerPublisher | Field::SignerIssuer | Field::SignerLeafThumbprint => {
-                self.eval_signers(facts.signers.as_deref(), notes)
-            }
+            field if field.is_signer() => self.eval_signers(facts.signers.as_deref(), notes),
             Field::PathFull | Field::PathDirectory | Field::PathFileName | Field::PathExtension => {
                 let Some(path) = &facts.path else {
                     notes.insert(Note::FactMissing);
@@ -780,37 +786,6 @@ impl CompiledCriterion {
                 }
             },
         }
-    }
-
-    fn eval_signers(&self, signers: Option<&[SignerFact]>, notes: &mut Notes) -> Tri {
-        let Some(signers) = signers else {
-            notes.insert(Note::FactMissing);
-            return Tri::Unknown;
-        };
-        let mut result = Tri::NoMatch;
-        let mut untrusted = false;
-        for signer in signers {
-            if !signer.status.is_trusted() {
-                untrusted = true;
-                continue;
-            }
-            let fact = match self.field {
-                Field::SignerPublisher => signer.publisher.as_deref(),
-                Field::SignerIssuer => signer.issuer.as_deref(),
-                _ => signer.leaf_thumbprint_sha256.as_deref(),
-            };
-            result = result.or(match fact {
-                Some(fact) => self.eval_value(fact, notes),
-                None => {
-                    notes.insert(Note::FactMissing);
-                    Tri::Unknown
-                }
-            });
-        }
-        if result == Tri::NoMatch && untrusted {
-            notes.insert(Note::SignerNotTrusted);
-        }
-        result
     }
 
     /// A fact about the user, device or session.
@@ -1308,6 +1283,17 @@ fn compile_values(
             })?,
             hex_len,
         ),
+        FieldClass::Digest => Values::Text(each(values, |v| match normalize_hex(v) {
+            Some(hex) if matches!(hex.len(), 40 | 64 | 96 | 128) => Ok(hex),
+            _ => Err(invalid(
+                "expected 40, 64, 96 or 128 hexadecimal digits (a SHA-1 to SHA-512 digest), optionally after `0x`",
+            )),
+        })?),
+        FieldClass::OidSet => Values::Tags(each(values, |v| {
+            signer::canonical_oid(v).ok_or_else(|| {
+                invalid("expected an object identifier in dotted form, such as `1.3.6.1.5.5.7.3.3`")
+            })
+        })?),
         FieldClass::Version => {
             let versions = each(values, |v| {
                 Version::parse_strict(v).ok_or_else(|| {

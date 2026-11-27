@@ -135,6 +135,7 @@ fn facts() -> ObjectFacts {
             publisher: Some("Example Ltd".to_owned()),
             issuer: None,
             leaf_thumbprint_sha256: None,
+            details: Default::default(),
         }])
 }
 

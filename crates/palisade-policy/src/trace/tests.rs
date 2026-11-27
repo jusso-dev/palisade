@@ -195,6 +195,7 @@ fn signer(publisher: &str, status: SignerStatus) -> SignerFact {
         publisher: Some(publisher.to_owned()),
         issuer: None,
         leaf_thumbprint_sha256: None,
+        details: Default::default(),
     }
 }
 

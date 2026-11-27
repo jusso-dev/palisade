@@ -239,6 +239,7 @@ fn finance_example_keeps_the_admin_console_to_its_own_rule() {
                 publisher: Some("Example Accounting Pty Ltd".to_owned()),
                 issuer: Some("Example Issuing CA".to_owned()),
                 leaf_thumbprint_sha256: None,
+                details: Default::default(),
             }])
     };
     let user = |admin: bool, remote: bool| {
@@ -318,6 +319,7 @@ fn context_example_narrows_each_identity_by_context() {
         publisher: Some("Example Remote Tools Ltd".to_owned()),
         issuer: None,
         leaf_thumbprint_sha256: None,
+        details: Default::default(),
     }]);
     let mut office = EvaluationContext::new();
     office.network.locations = Some(vec!["corporate".to_owned()]);

@@ -1447,9 +1447,7 @@ fn check_library(base: &str, lib: &Library, errors: &mut Vec<LibraryError>) {
         }
         LibraryContent::MatchFragment { tree } => check_depth(&format!("{c}/tree"), tree, errors),
         LibraryContent::HashSet { field, hashes } => {
-            if !matches!(field.class(), FieldClass::Hash { .. })
-                || *field == Field::SignerLeafThumbprint
-            {
+            if !matches!(field.class(), FieldClass::Hash { .. }) || field.is_signer() {
                 errors.push(err(
                     LibraryCode::InvalidEntry,
                     format!("{c}/field"),

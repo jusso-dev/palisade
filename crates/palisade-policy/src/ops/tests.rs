@@ -66,6 +66,7 @@ fn signer(status: SignerStatus, publisher: &str) -> SignerFact {
         publisher: Some(publisher.to_owned()),
         issuer: Some("Example Issuing CA".to_owned()),
         leaf_thumbprint_sha256: Some(SHA.to_owned()),
+        details: Default::default(),
     }
 }
 
@@ -364,7 +365,10 @@ fn compatibility_table() {
         ] {
             let class = field.class();
             let expected = match class {
-                crate::model::FieldClass::Hash { .. } => op == Operator::Equals,
+                crate::model::FieldClass::Hash { .. } | crate::model::FieldClass::Digest => {
+                    op == Operator::Equals
+                }
+                crate::model::FieldClass::OidSet => false,
                 crate::model::FieldClass::Version => {
                     matches!(
                         op,

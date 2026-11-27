@@ -249,6 +249,7 @@ fn identity_and_context_together() {
         publisher: Some("Example Tools Ltd".to_owned()),
         issuer: None,
         leaf_thumbprint_sha256: None,
+        details: Default::default(),
     }]);
     let variables = PathVariables::new();
     let run = |context: &EvaluationContext| {

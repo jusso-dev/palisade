@@ -220,6 +220,11 @@ pub enum ErrorCode {
     /// The `e8_ml3` preset needs a mandatory blocklist, and the policy
     /// references none (#39).
     MandatoryBlocklistRequired,
+    /// A signer criterion matches signatures that the default would not
+    /// trust: `allow_digest_mismatch`, or an `accept_status` beyond the
+    /// default in a rule that lets an object run, trusts it or excludes it
+    /// (#31).
+    SignatureStatusRelaxed,
 }
 
 impl ErrorCode {
@@ -293,6 +298,7 @@ impl ErrorCode {
             Self::ComplianceWeakened => "compliance_weakened",
             Self::DenyMatchesSelf => "deny_matches_self",
             Self::MandatoryBlocklistRequired => "mandatory_blocklist_required",
+            Self::SignatureStatusRelaxed => "signature_status_relaxed",
         }
     }
 
@@ -306,7 +312,8 @@ impl ErrorCode {
             | Self::DuplicatePriority
             | Self::PrecedenceOptionUnused
             | Self::UnknownAllow
-            | Self::ComplianceWeakened => Severity::Warning,
+            | Self::ComplianceWeakened
+            | Self::SignatureStatusRelaxed => Severity::Warning,
             _ => Severity::Error,
         }
     }
@@ -459,7 +466,7 @@ fn normalize_hashes(doc: &mut PolicyDocument) {
                 Match::Not(child) => stack.push(child),
                 Match::Ref(_) => {}
                 Match::Criterion(c) => {
-                    if let FieldClass::Hash { .. } = c.field.class() {
+                    if let FieldClass::Hash { .. } | FieldClass::Digest = c.field.class() {
                         for value in &mut c.values {
                             if let Some(hex) = ops::normalize_hex(value) {
                                 *value = hex;
@@ -736,6 +743,7 @@ impl Validator {
         }
         for (c, path) in ordered {
             self.criterion(&path, c, mandatory);
+            self.signer_options(&path, c, rule.action.kind());
         }
 
         // The recursive analysis is bounded by the depth limit, so it only
@@ -777,12 +785,12 @@ impl Validator {
                 (true, Identity::WeakHashOnly) => self.push(
                     ErrorCode::WeakHashOnlyAllow,
                     &tree,
-                    format!("{rule_desc} has a path through {through} whose only identity is SHA-1 or MD5, which are compatibility hashes (ADR 0008); require a SHA-256 or another identity on every path"),
+                    format!("{rule_desc} has a path through {through} whose only identity is SHA-1 or MD5 (including SHA-1 thumbprints and TBS hashes), which are compatibility hashes (ADR 0008); require a SHA-256 or another identity on every path"),
                 ),
                 (true, Identity::Weak) => self.push(
                     ErrorCode::WeakIdentity,
                     &tree,
-                    format!("{rule_desc} has a path through {through} whose only identities are weak (file names, extensions or version-resource strings), which anyone can copy; add a hash, a publisher or a path"),
+                    format!("{rule_desc} has a path through {through} whose only identities are weak (file names, extensions, version-resource strings, or a certificate authority, which vouches for every file it signs); add a hash, a publisher, a leaf certificate or a path"),
                 ),
                 _ => {}
             }
@@ -811,7 +819,7 @@ impl Validator {
             );
         }
         let problems = ops::option_problems(c);
-        let options_ok = problems.is_empty();
+        let options_ok = problems.is_empty() && ops::signer::option_problems(c).is_empty();
         for kind in &problems {
             if let CompileErrorKind::OptionNotApplicable(option, _) = kind {
                 self.compile_error(&format!("{base}/{option}"), kind);
@@ -888,6 +896,7 @@ impl Validator {
                     anchored: None,
                     match_ads: None,
                     include_sub_ous: None,
+                    signer: None,
                     ..c.clone()
                 };
                 &without_options
@@ -901,6 +910,43 @@ impl Validator {
                     self.compile_error(&path, &e.kind);
                 }
             }
+        }
+    }
+
+    /// The `signer` options of a criterion (#31): each misplaced or invalid
+    /// option is an error, and a status that a rule letting an object run
+    /// accepts beyond the default, or a digest mismatch it allows, is a
+    /// warning.
+    fn signer_options(&mut self, base: &str, c: &Criterion, action: ActionKind) {
+        for (option, kind) in ops::signer::option_problems(c) {
+            self.compile_error(&format!("{base}/{option}"), &kind);
+        }
+        let Some(o) = c.signer.as_deref().filter(|_| c.field.is_signer()) else {
+            return;
+        };
+        if o.allow_digest_mismatch {
+            self.push(
+                ErrorCode::SignatureStatusRelaxed,
+                &format!("{base}/signer/allow_digest_mismatch"),
+                "`allow_digest_mismatch` lets this criterion match a file that was changed after it was signed",
+            );
+        }
+        let relaxed: Vec<String> = o
+            .accept_status
+            .iter()
+            .flatten()
+            .filter(|s| !s.is_trusted() && **s != crate::facts::SignerStatus::DigestMismatch)
+            .map(|s| format!("`{}`", serde_name(s)))
+            .collect();
+        if action.needs_identity() && !relaxed.is_empty() {
+            self.push(
+                ErrorCode::SignatureStatusRelaxed,
+                &format!("{base}/signer/accept_status"),
+                format!(
+                    "this rule trusts signatures whose status is {}, which do not show that the signer still vouches for the file",
+                    relaxed.join(", ")
+                ),
+            );
         }
     }
 
@@ -1233,6 +1279,11 @@ fn guaranteed_identity(node: &Match, pointer: &str) -> Guarantee {
                 _ if !c.operator.is_positive() => Identity::None,
                 None => Identity::None,
                 Some(_) if c.field.is_weak_hash() => Identity::WeakHashOnly,
+                Some(_) if c.field == crate::model::Field::SignerTbsHash => match sha1_values(c) {
+                    Sha1Values::All => Identity::WeakHashOnly,
+                    Sha1Values::Some => Identity::Weak,
+                    Sha1Values::None => Identity::Sound,
+                },
                 Some(Strength::Weak) => Identity::Weak,
                 Some(_) => Identity::Sound,
             };
@@ -1245,6 +1296,25 @@ fn guaranteed_identity(node: &Match, pointer: &str) -> Guarantee {
                 }],
             }
         }
+    }
+}
+
+/// How many values of a `signer.tbs_hash` criterion are 40-digit (SHA-1)
+/// digests. The field takes SHA-1 to SHA-512 values, so its strength
+/// depends on them (#31, ADR 0008): SHA-1 values alone are a weak hash, and
+/// a list that mixes them in is only as strong as its weakest value.
+enum Sha1Values {
+    None,
+    Some,
+    All,
+}
+
+fn sha1_values(c: &Criterion) -> Sha1Values {
+    let sha1 = |v: &String| ops::normalize_hex(v).is_some_and(|h| h.len() == 40);
+    match c.values.iter().filter(|v| sha1(v)).count() {
+        0 => Sha1Values::None,
+        n if n == c.values.len() => Sha1Values::All,
+        _ => Sha1Values::Some,
     }
 }
 

@@ -46,6 +46,7 @@ Schema: [`schemas/policy/v1.json`](https://github.com/jusso-dev/palisade/blob/ma
 - [`Scope`](scope.md): Who, where and when a rule applies (#38).
 - [`ScopeLimit`](scope-limit.md): One contributing policy's limit on where its unknown settings apply, in an effective policy (`UnknownPolicy::scope_limits`). It holds when every scope of `all_of` matches and, if `any_of` is not empty, one of its scopes matches.
 - [`SessionFilter`](session-filter.md): Session criteria (#38).
+- [`SignerOptions`](signer-options.md): The options of a signer criterion (#31).
 - [`UnknownPolicy`](unknown-policy.md): The unknown-application policy (#39). Every field is optional in a document; the defaults block every unknown object.
 - [`Window`](window.md): One weekly window.
 

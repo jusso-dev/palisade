@@ -74,6 +74,7 @@ fn eval(operator: Operator, values: &[String], fact: Quad, action: ActionKind) -
         match_ads: None,
         include_sub_ous: None,
         safety_critical: false,
+        signer: None,
     };
     let compiled = CompiledCriterion::compile(&criterion).unwrap();
     let facts = ObjectFacts::new().with(Field::MetaFileVersion, text(fact));

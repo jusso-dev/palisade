@@ -78,6 +78,7 @@ use crate::model::{
     ActionKind, Field, Mode, ObjectType, Operator, Policy, PolicyId, PrecedenceModel, RuleId,
     UnknownAs,
 };
+use crate::ops::signer::Selector;
 use crate::ops::{Note, Tri};
 use crate::validate::ValidatedPolicy;
 
@@ -930,7 +931,9 @@ impl<'p> Tracer<'p> {
         // Unknown facts and warnings, over the enabled rules in scope.
         let mut unknown: BTreeMap<Field, UnknownTally> = BTreeMap::new();
         let mut warn: BTreeMap<WarningCode, BTreeMap<RuleId, RuleRef>> = BTreeMap::new();
-        let mut used: BTreeSet<Field> = BTreeSet::new();
+        // A signer field read with several components or positions is
+        // reported once for each.
+        let mut used: BTreeSet<(Field, Selector)> = BTreeSet::new();
         for (i, r) in self.rules.iter().enumerate() {
             let Some(res) = result(i) else { continue };
             if !r.rule.enabled || !res.type_applies {
@@ -958,7 +961,7 @@ impl<'p> Tracer<'p> {
             }
             let contributing = r.contributing(res);
             for ((leaf, lr), counts) in r.leaves.iter().zip(&res.leaves).zip(contributing) {
-                used.insert(leaf.criterion.field);
+                used.insert((leaf.criterion.field, Selector::of(leaf.criterion)));
                 if lr.notes.contains(Note::PathAclUnsafe) {
                     warn.entry(WarningCode::PathAclUnsafe)
                         .or_default()
@@ -1031,12 +1034,7 @@ impl<'p> Tracer<'p> {
                         .and_then(|&i| result(i))
                         .is_some_and(|res| {
                             r.leaves.iter().zip(&res.leaves).any(|(l, lr)| {
-                                matches!(
-                                    l.criterion.field,
-                                    Field::SignerPublisher
-                                        | Field::SignerIssuer
-                                        | Field::SignerLeafThumbprint
-                                ) && lr.effective == Tri::Match
+                                l.criterion.field.is_signer() && lr.effective == Tri::Match
                             })
                         })
                 })
@@ -1113,7 +1111,7 @@ impl<'p> Tracer<'p> {
             );
             trace.facts_used = used
                 .into_iter()
-                .map(|f| Observed::new(f, observe(f, subject), privacy))
+                .map(|(f, sel)| Observed::new(f, observe(f, sel, subject), privacy))
                 .collect();
         }
         trace.decision = decision;
@@ -1241,15 +1239,18 @@ fn criteria(
                 expected,
                 expected_truncated,
                 contributing: contributing.get(i).copied().unwrap_or(false),
-                observed: with_observed
-                    .then(|| Observed::new(c.field, observe(c.field, subject), privacy)),
+                observed: with_observed.then(|| {
+                    Observed::new(c.field, observe(c.field, Selector::of(c), subject), privacy)
+                }),
             }
         })
         .collect()
 }
 
-/// The raw values of a fact, or `None` if it is unknown.
-fn observe(field: Field, subject: &Subject<'_>) -> Option<Vec<String>> {
+/// The raw values of a fact, or `None` if it is unknown. `sel` picks the
+/// part of a signature a signer criterion reads, so the trace shows the
+/// value that was compared.
+fn observe(field: Field, sel: Selector, subject: &Subject<'_>) -> Option<Vec<String>> {
     use crate::context::ContextFact;
     let facts = subject.facts;
     if field.is_context() {
@@ -1278,18 +1279,14 @@ fn observe(field: Field, subject: &Subject<'_>) -> Option<Vec<String>> {
         });
     }
     match field {
-        Field::SignerPublisher | Field::SignerIssuer | Field::SignerLeafThumbprint => {
+        field if field.is_signer() => {
             let signers = facts.signers.as_ref()?;
             Some(
                 signers
                     .iter()
                     .map(|s| {
-                        let v = match field {
-                            Field::SignerPublisher => s.publisher.as_deref(),
-                            Field::SignerIssuer => s.issuer.as_deref(),
-                            _ => s.leaf_thumbprint_sha256.as_deref(),
-                        }
-                        .unwrap_or("(none)");
+                        let v = crate::ops::signer::observed(field, sel, s);
+                        let v = v.as_deref().unwrap_or("(none)");
                         if s.status.is_trusted() {
                             v.to_owned()
                         } else {

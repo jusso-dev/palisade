@@ -522,6 +522,7 @@ impl FactsSnapshot {
                         publisher: s.publisher.clone(),
                         issuer: s.issuer.clone(),
                         leaf_thumbprint_sha256: s.leaf_thumbprint_sha256.clone(),
+                        details: Default::default(),
                     })
                     .collect(),
             );
