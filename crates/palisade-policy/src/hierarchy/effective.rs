@@ -806,6 +806,19 @@ impl<'a, 'h> Builder<'a, 'h> {
     fn scope_set_versions(&mut self) {
         let mut seen: BTreeMap<LibraryId, (crate::library::Pin, String)> = BTreeMap::new();
         let mut found = Vec::new();
+        // The policies' scopes also limit their unknown settings (#39).
+        for layer in self.layers {
+            for (_, doc) in self.policies(layer) {
+                if let Some(scope) = &doc.policy.scope {
+                    for (_, r, _) in crate::scope::set_refs(scope) {
+                        found.push((
+                            r,
+                            format!("/effective/policy/unknown/scopes ({})", doc.policy.id),
+                        ));
+                    }
+                }
+            }
+        }
         for (id, e) in &self.sets {
             let scopes = e
                 .scopes
@@ -1201,13 +1214,29 @@ impl<'a, 'h> Builder<'a, 'h> {
     /// within a layer from the highest `slot_order` down, so where a value
     /// cannot be compared the nearest layer's lowest slot gives it, as for
     /// every other merge here. With no policy, the default (block).
+    ///
+    /// A policy's `scope` limits where its unknown settings apply (#38). The
+    /// effective policy has no scope of its own, so each policy's scope
+    /// moves into `unknown.scopes`: the merged settings apply to a subject
+    /// in at least one contributing policy's scope (all of them if one has
+    /// no scope), and the built-in implicit deny decides for any other.
+    /// Where several scopes overlap, the merged settings are at least as
+    /// strict as each policy's.
     fn unknown(&self) -> crate::model::UnknownPolicy {
         let mut acc: Option<crate::model::UnknownPolicy> = None;
         for layer in self.layers {
             for (_, d) in self.policies(layer).into_iter().rev() {
+                let mut u = d.policy.unknown.clone();
+                u.scopes = d
+                    .policy
+                    .scope
+                    .iter()
+                    .cloned()
+                    .map(stage_six_scope)
+                    .collect();
                 acc = Some(match acc {
-                    None => d.policy.unknown.clone(),
-                    Some(outer) => d.policy.unknown.stricter(&outer),
+                    None => u,
+                    Some(outer) => u.stricter(&outer),
                 });
             }
         }
@@ -1508,6 +1537,18 @@ impl<'a, 'h> Builder<'a, 'h> {
             adjustments: Vec::new(),
         }
     }
+}
+
+/// A policy's `scope` as it limits stage 6 (#39): without the options that
+/// only act on a deciding rule (an instance limit, what happens when a
+/// window closes), which stage 6 has no use for.
+fn stage_six_scope(mut s: crate::scope::Scope) -> crate::scope::Scope {
+    s.max_instances_per_session = 0;
+    if let Some(schedule) = &mut s.schedule {
+        schedule.on_window_close = crate::scope::OnWindowClose::None;
+        schedule.grace_secs = None;
+    }
+    s
 }
 
 /// Raises everything below `floor` to it. See the module documentation.

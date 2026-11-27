@@ -85,6 +85,7 @@ pub mod location;
 pub mod selfpin;
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use serde::Serialize;
 
@@ -98,6 +99,8 @@ use crate::model::{
     LocationClass, LogLevel, Notify, ObjectType, OriginClass, PreexistingPolicy, PromptOption,
     Reauth, UnknownPolicy, Upload,
 };
+use crate::ops::Tri;
+use crate::scope::{Bias, CompiledScope, ScopeLevel, ScopeNotes, eval_chain};
 
 pub use baseline::{SystemBaseline, system_baseline};
 pub use location::{VolumeKind, classify};
@@ -146,6 +149,11 @@ pub enum FallbackReason {
     /// The object was present at install, and only the baseline may allow
     /// it (`preexisting_policy: baseline_only`).
     PreexistingBaselineOnly,
+    /// The subject is outside the policy's `scope` (or, in an effective
+    /// policy, outside every contributing policy's scope), or a fact the
+    /// scope needs is unknown. The policy's unknown settings do not apply,
+    /// so the built-in implicit deny decides (#38).
+    PolicyOutOfScope,
 }
 
 /// How stage 6 handled an object, carried by its [`Decision`].
@@ -299,12 +307,63 @@ pub struct PromptDirective {
     pub sha256: Option<String>,
 }
 
+/// Where a policy's unknown settings apply (#38): its `scope` and its
+/// `unknown.scopes`, compiled. The settings apply to a subject only when
+/// the `scope` is `Match` and, if `unknown.scopes` is not empty, one of
+/// them is `Match`. Facts are read so that the settings apply less, and an
+/// `Unknown` result counts as out of scope, so a missing fact never lets
+/// the settings allow what the built-in implicit deny would block.
+#[derive(Debug, Default)]
+pub(crate) struct UnknownScope {
+    policy: Option<Arc<CompiledScope>>,
+    any_of: Vec<Arc<CompiledScope>>,
+}
+
+impl UnknownScope {
+    /// The compiled policy `scope` and `unknown.scopes`.
+    pub(crate) const fn new(
+        policy: Option<Arc<CompiledScope>>,
+        any_of: Vec<Arc<CompiledScope>>,
+    ) -> Self {
+        Self { policy, any_of }
+    }
+
+    /// Whether the settings apply in `context`, and what the scopes noticed.
+    fn applies(&self, context: &EvaluationContext) -> (bool, ScopeNotes) {
+        let eval = |s: &Arc<CompiledScope>| {
+            eval_chain(
+                &[(ScopeLevel::Policy, Arc::clone(s))],
+                context,
+                Bias::Permissive,
+            )
+        };
+        let mut notes = ScopeNotes::default();
+        let mut result = Tri::Match;
+        if let Some(s) = &self.policy {
+            let e = eval(s);
+            notes.extend(e.notes);
+            result = result.and(e.result);
+        }
+        if !self.any_of.is_empty() {
+            let mut any = Tri::NoMatch;
+            for s in &self.any_of {
+                let e = eval(s);
+                notes.extend(e.notes);
+                any = any.or(e.result);
+            }
+            result = result.and(any);
+        }
+        (result == Tri::Match, notes)
+    }
+}
+
 /// What stage 6 needs about one evaluation. The location classes, origins
 /// and hash are only computed when stage 6 runs, so an object that a rule
 /// decides pays nothing for them.
 #[derive(Debug)]
 pub(crate) struct StageSix<'a> {
     policy: &'a UnknownPolicy,
+    scope: &'a UnknownScope,
     object_type: ObjectType,
     facts: &'a ObjectFacts,
     variables: &'a PathVariables,
@@ -317,6 +376,11 @@ pub(crate) struct StageSix<'a> {
 /// The facts stage 6 decides on, computed when it runs.
 struct Known<'a> {
     six: &'a StageSix<'a>,
+    /// The settings that decide: the policy's, or the built-in default
+    /// when the subject is out of the policy's scope.
+    policy: &'a UnknownPolicy,
+    /// The subject is out of the policy's scope.
+    out_of_scope: bool,
     locations: BTreeSet<LocationClass>,
     origins: BTreeSet<OriginClass>,
     interactive: bool,
@@ -329,6 +393,7 @@ impl<'a> StageSix<'a> {
     /// rule that would block it matched.
     pub(crate) fn new(
         policy: &'a UnknownPolicy,
+        scope: &'a UnknownScope,
         object_type: ObjectType,
         facts: &'a ObjectFacts,
         variables: &'a PathVariables,
@@ -337,19 +402,38 @@ impl<'a> StageSix<'a> {
     ) -> Self {
         Self {
             policy,
+            scope,
             object_type,
             facts,
             variables,
             context,
             blocklisted,
+            // From the policy even out of its scope: the built-in default is
+            // `audit` too, so the policy's choice is never weaker.
             boot_audit: object_type == ObjectType::Driver
                 && context.device.boot_phase == Some(BootPhase::Early)
                 && policy.driver_boot_policy == DriverBootPolicy::Audit,
         }
     }
 
-    /// The stage-6 decision, as enforce mode sees it.
+    /// The stage-6 decision, as enforce mode sees it. Out of the policy's
+    /// scope, the built-in default decides: the implicit deny.
     pub(crate) fn decide(&self, trace_id: TraceId) -> Decision {
+        let (in_scope, notes) = self.scope.applies(self.context);
+        if in_scope {
+            return self.decide_with(self.policy, false, trace_id);
+        }
+        let builtin = UnknownPolicy::default();
+        self.decide_with(&builtin, true, trace_id)
+            .with_scope_notes(notes)
+    }
+
+    fn decide_with(
+        &self,
+        policy: &UnknownPolicy,
+        out_of_scope: bool,
+        trace_id: TraceId,
+    ) -> Decision {
         let facts = self.facts;
         let locations = match &facts.location_class {
             Some(set) if !set.is_empty() => set.clone(),
@@ -368,6 +452,8 @@ impl<'a> StageSix<'a> {
             .filter(|h| h.len() == 64);
         Known {
             six: self,
+            policy,
+            out_of_scope,
             locations,
             origins,
             interactive: interactive(self.context),
@@ -381,13 +467,24 @@ impl<'a> StageSix<'a> {
 impl Known<'_> {
     /// The level applied, the reason for any fallback, and the entries.
     fn levels(&self) -> (Level, Level, Option<FallbackReason>, Vec<AppliedEntry>) {
+        // The trace shows what the policy's own entries resolved to, even
+        // when the policy does not apply.
         let (resolved, entries) = resolve_level(
             self.six.policy,
             self.six.object_type,
             &self.locations,
             &self.origins,
         );
-        if self.six.policy.preexisting_policy == PreexistingPolicy::BaselineOnly
+        if self.out_of_scope {
+            // The built-in default, the implicit deny, blocks everything.
+            return (
+                resolved,
+                Level::Block,
+                Some(FallbackReason::PolicyOutOfScope),
+                entries,
+            );
+        }
+        if self.policy.preexisting_policy == PreexistingPolicy::BaselineOnly
             && self.origins.contains(&OriginClass::Preexisting)
             && resolved != Level::Block
         {
@@ -420,7 +517,7 @@ impl Known<'_> {
                     Some(reason) => {
                         // Validation keeps `prompt` out of the fallback; if
                         // it is there anyway, it blocks.
-                        let fallback = match self.six.policy.prompt.fallback {
+                        let fallback = match self.policy.prompt.fallback {
                             Level::Prompt => Level::Block,
                             other => other,
                         };
@@ -432,7 +529,7 @@ impl Known<'_> {
             Level::Restrict if !restrict_valid_for(self.six.object_type) => {
                 (Level::Block, Some(FallbackReason::RestrictNotValidForType))
             }
-            Level::Restrict if !self.containment || self.six.policy.restrict_profile.is_none() => {
+            Level::Restrict if !self.containment || self.policy.restrict_profile.is_none() => {
                 (Level::Block, Some(FallbackReason::RestrictUnavailable))
             }
             other => (other, None),
@@ -458,7 +555,7 @@ impl Known<'_> {
         let mut directives = Directives::default();
         match applied {
             Level::Block => {
-                if self.six.policy.allow_request && effects.notify != Notify::None {
+                if self.policy.allow_request && effects.notify != Notify::None {
                     directives.request = Some(RequestDirective { template: None });
                 }
             }
@@ -521,7 +618,7 @@ impl Known<'_> {
     /// A decision that shows no notification carries no notification text
     /// or link either.
     fn effects(&self, applied: Level) -> crate::model::ResolvedEffects {
-        let mut e: Effects = self.six.policy.effects.clone();
+        let mut e: Effects = self.policy.effects.clone();
         let kind = match applied {
             Level::Block | Level::Prompt => ActionKind::Deny,
             Level::Restrict => ActionKind::AllowContained,
@@ -545,7 +642,7 @@ impl Known<'_> {
     }
 
     fn prompt_directive(&self) -> PromptDirective {
-        let p = &self.six.policy.prompt;
+        let p = &self.policy.prompt;
         let fallback_level = match p.fallback {
             Level::Prompt => Level::Block,
             other => other,
@@ -558,7 +655,7 @@ impl Known<'_> {
             outcome,
             reason_code,
             containment: (level == Level::Restrict)
-                .then_some(self.six.policy.restrict_profile)
+                .then_some(self.policy.restrict_profile)
                 .flatten()
                 .map(|profile_id| Containment { profile_id }),
         };

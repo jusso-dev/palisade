@@ -1199,19 +1199,28 @@ fn presets_produce_the_documented_configuration() {
     for p in [CompliancePreset::E8Ml1, CompliancePreset::E8Ml2] {
         assert_eq!(codes(doc(preset_json(p))), vec![], "{p:?}");
     }
+    // The early-boot exemption is reported (deliberate, see
+    // `ml3_warns_while_early_boot_drivers_are_only_audited`).
+    let boot = (
+        ErrorCode::ComplianceWeakened,
+        "/policy/unknown/driver_boot_policy".to_owned(),
+    );
     assert_eq!(
         codes(doc(preset_json(CompliancePreset::E8Ml3))),
-        vec![(
-            ErrorCode::MandatoryBlocklistRequired,
-            "/policy/rule_sets".to_owned()
-        )]
+        vec![
+            boot.clone(),
+            (
+                ErrorCode::MandatoryBlocklistRequired,
+                "/policy/rule_sets".to_owned()
+            )
+        ]
     );
     assert_eq!(
         codes(doc_with(
             preset_json(CompliancePreset::E8Ml3),
             &[mandatory_set()]
         )),
-        vec![]
+        vec![boot]
     );
 }
 
@@ -2335,11 +2344,13 @@ fn stage_six_never_shows_a_link_without_a_notification() {
 #[test]
 fn ml3_needs_an_enabled_mandatory_rule() {
     let (id, kind, m, mut rules) = mandatory_set();
+    let ml3 = || {
+        let mut u = preset_json(CompliancePreset::E8Ml3);
+        u["driver_boot_policy"] = "enforce".into();
+        u
+    };
     rules[0]["enabled"] = false.into();
-    let found = codes(doc_with(
-        preset_json(CompliancePreset::E8Ml3),
-        &[(id, kind, m, rules)],
-    ));
+    let found = codes(doc_with(ml3(), &[(id, kind, m, rules)]));
     assert_eq!(
         found,
         vec![(
@@ -2347,10 +2358,7 @@ fn ml3_needs_an_enabled_mandatory_rule() {
             "/policy/rule_sets".to_owned()
         )]
     );
-    let found = codes(doc_with(
-        preset_json(CompliancePreset::E8Ml3),
-        &[(id, kind, m, vec![])],
-    ));
+    let found = codes(doc_with(ml3(), &[(id, kind, m, vec![])]));
     assert_eq!(
         found,
         vec![(
@@ -2548,11 +2556,13 @@ proptest! {
         prop_assert!(m.prompt.fallback >= a.prompt.fallback.max(b.prompt.fallback));
     }
 
-    /// Over policies with random fallbacks and effects, the merged policy
-    /// is valid, and for every object its level, counted at the prompt's
-    /// fallback where that is weaker (`Level::floor`, as the preset checks
-    /// count it), is at least each side's. Where both sides make the same
-    /// kind of decision, the merged effects log and rate it at least as
+    /// Over policies with random fallbacks, restrict levels and effects,
+    /// the merged policy is valid, and in every context (type, classes,
+    /// origins, session, containment, a blocklist match) it applies a level
+    /// at least as strict as each side's, and never one stricter than the
+    /// strictest of them except where one policy cannot reproduce both
+    /// ([`UnknownPolicy::stricter`]). Where both sides make the same kind
+    /// of decision, the merged effects log and rate it at least as
     /// strongly.
     #[test]
     fn merged_decisions_are_at_least_as_strict_as_both(
@@ -2563,6 +2573,7 @@ proptest! {
         origins in prop::collection::btree_set(prop::sample::select(OriginClass::ALL.to_vec()), 1..3),
         session in prop::option::of(prop::sample::select(SessionType::ALL.to_vec())),
         containment in prop::option::of(any::<bool>()),
+        blocklisted in any::<bool>(),
     ) {
         let m = a.stricter(&b);
         let validated = |u: &UnknownPolicy| {
@@ -2570,16 +2581,15 @@ proptest! {
             d.policy.unknown = u.clone();
             d.validate()
         };
-        let (Ok(va), Ok(vb)) = (validated(&a), validated(&b)) else { return Ok(()) };
+        let (Ok(_), Ok(_)) = (validated(&a), validated(&b)) else { return Ok(()) };
         let vm = validated(&m);
         prop_assert!(vm.is_ok(), "{:?}", vm.err());
+        let ctx = Ctx { t, locations: &locations, origins: &origins, session, containment, blocklisted };
+        let (la, lb, lm) = (applied(&a, &ctx), applied(&b, &ctx), applied(&m, &ctx));
+        prop_assert!(lm.never_weaker(la), "{lm:?} weaker than {la:?}");
+        prop_assert!(lm.never_weaker(lb), "{lm:?} weaker than {lb:?}");
         let vm = vm.unwrap();
-        let floor = |p: &UnknownPolicy| {
-            let fallback = match p.prompt.fallback { Level::Prompt => Level::Block, f => f };
-            resolve_level(p, t, &locations, &origins).0.floor(fallback)
-        };
-        prop_assert!(floor(&m) >= floor(&a), "{:?} < {:?}", floor(&m), floor(&a));
-        prop_assert!(floor(&m) >= floor(&b), "{:?} < {:?}", floor(&m), floor(&b));
+        let (va, vb) = (validated(&a).unwrap(), validated(&b).unwrap());
         let mut context = EvaluationContext::new();
         context.session.session_type = session;
         context.device.containment_available = containment;
@@ -2857,5 +2867,613 @@ proptest! {
         let mut d = doc(serde_json::json!({}));
         d.policy.unknown = UnknownPolicy { prompt: m, ..UnknownPolicy::default() };
         prop_assert!(d.validate().is_ok());
+    }
+}
+
+// ------------------------------------------- review fixes (#277, CodeRabbit)
+
+/// One stage-6 context: what [`Known::applicable`] depends on.
+struct Ctx<'a> {
+    t: ObjectType,
+    locations: &'a BTreeSet<LocationClass>,
+    origins: &'a BTreeSet<OriginClass>,
+    session: Option<SessionType>,
+    containment: Option<bool>,
+    blocklisted: bool,
+}
+
+/// What a policy applies in one context, for the merge oracle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Applied {
+    /// The level applied.
+    level: Level,
+    /// For a prompt: the level its timeout or a failed prompt ends in.
+    on_timeout: Option<Level>,
+}
+
+impl Applied {
+    /// Whether `self` is never weaker than `other`: a stricter level, or a
+    /// prompt that ends no weaker. A prompt is an answer away from
+    /// running, so it is weaker than `restrict` or `block`, and stricter
+    /// than `detect` or `allow` only if its timeout is too.
+    fn never_weaker(self, other: Self) -> bool {
+        match (self.level, other.level) {
+            (Level::Prompt, Level::Prompt) => self.on_timeout >= other.on_timeout,
+            (Level::Prompt, o) => o <= Level::Detect && self.on_timeout >= Some(o),
+            (s, _) => s >= other.level,
+        }
+    }
+}
+
+/// The level `p` applies in `ctx`, as stage 6 decides it: through the
+/// evaluator, so the oracle is the engine and not a model of it.
+fn applied(p: &UnknownPolicy, ctx: &Ctx<'_>) -> Applied {
+    let mut d = if ctx.blocklisted {
+        // An audit rule of a blocklist matches every object of the type,
+        // so nothing is prompted for, and nothing is decided by a rule.
+        let rule = serde_json::json!({
+            "id": rule_id(77), "name": "Watch",
+            "match": {"criterion": {"field": "hash.sha256", "operator": "equals", "values": [sha('a')]}},
+            "action": {"type": "audit"},
+        });
+        doc_with(
+            serde_json::json!({}),
+            &[(SET, "blocklist", false, vec![rule])],
+        )
+    } else {
+        doc(serde_json::json!({}))
+    };
+    d.policy.unknown = p.clone();
+    let v = d.validate().unwrap_or_else(|e| panic!("{e:#?}"));
+    let mut context = EvaluationContext::new();
+    context.session.session_type = ctx.session;
+    context.device.containment_available = ctx.containment;
+    let facts = ObjectFacts::new()
+        .with(Field::HashSha256, sha('a'))
+        .with_location_class(ctx.locations.iter().copied())
+        .with_origin(ctx.origins.iter().copied());
+    let got = decide_with(&v, ctx.t, &facts, &context);
+    let u = got.unknown().expect("stage 6 decides");
+    Applied {
+        level: u.applied,
+        on_timeout: got.directives().prompt.as_ref().map(|p| p.fallback.level),
+    }
+}
+
+/// The merge as it was before the review fix: levels compared as written,
+/// the fallback the stricter of both, and a level a type cannot take
+/// replaced with `block`.
+fn old_merge(a: &UnknownPolicy, b: &UnknownPolicy) -> UnknownPolicy {
+    let mut m = a.stricter(b);
+    let pick = |x: Option<&Level>, dx: Level, y: Option<&Level>, dy: Level| {
+        x.copied().unwrap_or(dx).max(y.copied().unwrap_or(dy))
+    };
+    m.default = a.default.max(b.default);
+    m.prompt.fallback = a.prompt.fallback.max(b.prompt.fallback);
+    for (k, l) in &mut m.by_location {
+        *l = pick(
+            a.by_location.get(k),
+            a.default,
+            b.by_location.get(k),
+            b.default,
+        );
+    }
+    for (k, l) in &mut m.by_origin {
+        *l = pick(a.by_origin.get(k), a.default, b.by_origin.get(k), b.default);
+    }
+    for (t, l) in &mut m.by_type {
+        let level = pick(a.by_type.get(t), a.default, b.by_type.get(t), b.default);
+        let usable = match level {
+            Level::Prompt => prompt_valid_for(*t),
+            Level::Restrict => restrict_valid_for(*t),
+            _ => true,
+        };
+        *l = if usable { level } else { Level::Block };
+    }
+    m
+}
+
+fn unknown(v: serde_json::Value) -> UnknownPolicy {
+    serde_json::from_value(v).unwrap()
+}
+
+#[test]
+fn a_merged_restrict_never_undercuts_a_prompt_that_falls_back_to_block() {
+    // The reviewer's case: A prompts and falls back to `block`, B
+    // restricts. Without an interactive session A blocks.
+    let a = unknown(serde_json::json!({"default": "prompt", "prompt": {"fallback": "block"}}));
+    let b = unknown(serde_json::json!({"default": "restrict", "restrict_profile": PROFILE}));
+    let locations = BTreeSet::from([LocationClass::OtherFixed]);
+    let origins = BTreeSet::from([OriginClass::Unknown]);
+    let ctx = Ctx {
+        t: ObjectType::Executable,
+        locations: &locations,
+        origins: &origins,
+        session: Some(SessionType::Service),
+        containment: Some(true),
+        blocklisted: false,
+    };
+    let la = applied(&a, &ctx);
+    assert_eq!(la.level, Level::Block);
+    // The old merge restricts, so the new oracle rejects it.
+    let old = applied(&old_merge(&a, &b), &ctx);
+    assert_eq!(old.level, Level::Restrict);
+    assert!(!old.never_weaker(la), "the oracle must catch the old merge");
+    // The fixed merge blocks, in both orders.
+    for m in [a.stricter(&b), b.stricter(&a)] {
+        let lm = applied(&m, &ctx);
+        assert_eq!(lm.level, Level::Block, "{m:?}");
+        assert!(lm.never_weaker(la));
+    }
+}
+
+#[test]
+fn the_old_merge_also_failed_the_oracle_for_unpromptable_types() {
+    // A prompts with fallback `detect`; B detects libraries. Each side
+    // detects a library; the old merge blocked it, which the oracle's
+    // upper bound reports as stricter than needed, and the new merge
+    // detects it.
+    let a = unknown(serde_json::json!({"default": "prompt", "prompt": {"fallback": "detect"}}));
+    let b = unknown(serde_json::json!({"default": "detect", "by_type": {"library": "detect"}}));
+    let locations = BTreeSet::from([LocationClass::ProgramFiles]);
+    let origins = BTreeSet::from([OriginClass::Unknown]);
+    let ctx = Ctx {
+        t: ObjectType::Library,
+        locations: &locations,
+        origins: &origins,
+        session: Some(SessionType::Console),
+        containment: Some(true),
+        blocklisted: false,
+    };
+    assert_eq!(applied(&a, &ctx).level, Level::Detect);
+    assert_eq!(applied(&b, &ctx).level, Level::Detect);
+    assert_eq!(applied(&old_merge(&b, &a), &ctx).level, Level::Block);
+    assert_eq!(applied(&b.stricter(&a), &ctx).level, Level::Detect);
+    assert_eq!(applied(&a.stricter(&b), &ctx).level, Level::Detect);
+}
+
+#[test]
+fn a_merged_fallback_comes_from_the_sides_that_prompt() {
+    // B never prompts, so its `block` fallback never applies, and the
+    // merged prompt keeps A's `detect` fallback.
+    let a = unknown(serde_json::json!({"default": "prompt", "prompt": {"fallback": "detect"}}));
+    let b = unknown(serde_json::json!({"default": "detect"}));
+    let m = a.stricter(&b);
+    assert_eq!(m.prompt.fallback, Level::Detect);
+    // A side's `prompt` fallback is unusable and counts as `block`.
+    let c = UnknownPolicy {
+        default: Level::Prompt,
+        prompt: PromptSettings {
+            fallback: Level::Prompt,
+            ..PromptSettings::default()
+        },
+        ..UnknownPolicy::default()
+    };
+    assert_eq!(c.stricter(&a).prompt.fallback, Level::Block);
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(512))]
+
+    /// The merged policy is never stricter than the strictest side applies
+    /// in the same context, except in the cases one policy cannot
+    /// reproduce (see [`UnknownPolicy::stricter`]): the merged prompt's
+    /// fallback is one setting, a `restrict` turns to `block` where a
+    /// side's prompt falls back to `block`, and an entry only one side sets
+    /// is compared with the other side's `default`. So the bound is checked
+    /// for two policies that set the same entries.
+    #[test]
+    fn merged_decisions_are_no_stricter_than_needed(
+        a in arb_full_policy(),
+        b in arb_full_policy(),
+        t in prop::sample::select(ObjectType::ALL.to_vec()),
+        locations in prop::collection::btree_set(prop::sample::select(LocationClass::ALL.to_vec()), 1..3),
+        origins in prop::collection::btree_set(prop::sample::select(OriginClass::ALL.to_vec()), 1..3),
+        session in prop::option::of(prop::sample::select(SessionType::ALL.to_vec())),
+        containment in prop::option::of(any::<bool>()),
+    ) {
+        let validates = |u: &UnknownPolicy| {
+            let mut d = doc(serde_json::json!({}));
+            d.policy.unknown = u.clone();
+            d.validate().is_ok()
+        };
+        // `b` takes `a`'s keys, with its own levels.
+        let mut b = b;
+        fn same_keys<K: Ord + Copy>(
+            a: &std::collections::BTreeMap<K, Level>,
+            b: &std::collections::BTreeMap<K, Level>,
+            fill: Level,
+        ) -> std::collections::BTreeMap<K, Level> {
+            a.keys().map(|k| (*k, b.get(k).copied().unwrap_or(fill))).collect()
+        }
+        b.by_location = same_keys(&a.by_location, &b.by_location, b.default);
+        b.by_origin = same_keys(&a.by_origin, &b.by_origin, b.default);
+        b.by_type = same_keys(&a.by_type, &b.by_type, b.default)
+            .into_iter()
+            .map(|(t, l)| {
+                let ok = (l != Level::Prompt || prompt_valid_for(t))
+                    && (l != Level::Restrict || restrict_valid_for(t));
+                (t, if ok { l } else { Level::Block })
+            })
+            .collect();
+        // As in the oracle above: invalid inputs (random effects) are skipped.
+        if !(validates(&a) && validates(&b)) {
+            return Ok(());
+        }
+        let ctx = Ctx { t, locations: &locations, origins: &origins, session, containment, blocklisted: false };
+        let (la, lb) = (applied(&a, &ctx), applied(&b, &ctx));
+        let lm = applied(&a.stricter(&b), &ctx);
+        let top = la.level.max(lb.level);
+        let fallback_bound = [la, lb]
+            .iter()
+            .filter_map(|x| x.on_timeout)
+            .chain([a.prompt.fallback, b.prompt.fallback].into_iter().map(|f| if f == Level::Prompt { Level::Block } else { f }))
+            .max()
+            .unwrap_or(Level::Allow)
+            .max(Level::Detect);
+        // A `restrict` fallback blocks where nothing can be contained.
+        let fallback_bound = if fallback_bound == Level::Restrict
+            && (containment != Some(true) || !restrict_valid_for(t))
+        {
+            Level::Block
+        } else {
+            fallback_bound
+        };
+        let restrict_raised = lm.level == Level::Block && top == Level::Restrict;
+        prop_assert!(
+            lm.level <= top.max(fallback_bound) || restrict_raised,
+            "{lm:?} stricter than {la:?} and {lb:?}"
+        );
+    }
+}
+
+// -------------------------------------------------- policy scope (#38)
+
+/// A document whose policy has `scope` and an unknown policy `unknown`.
+fn scoped_doc(unknown: serde_json::Value, scope: serde_json::Value) -> PolicyDocument {
+    let mut d = doc(unknown);
+    d.policy.scope = Some(serde_json::from_value(scope).unwrap());
+    d
+}
+
+fn console_only() -> serde_json::Value {
+    serde_json::json!({"sessions": {"types": ["console"]}})
+}
+
+fn in_session(session: Option<SessionType>) -> EvaluationContext {
+    let mut c = interactive_context();
+    c.session.session_type = session;
+    c
+}
+
+#[test]
+fn the_policy_scope_limits_its_unknown_settings() {
+    let v = valid(scoped_doc(
+        serde_json::json!({"default": "allow"}),
+        console_only(),
+    ));
+    let facts = object(&[LocationClass::OtherFixed], &[]);
+    // In scope: the policy's level.
+    let inside = decide_with(
+        &v,
+        ObjectType::Executable,
+        &facts,
+        &in_session(Some(SessionType::Console)),
+    );
+    assert_eq!(inside.reason_code(), ReasonCode::UnknownAllowed);
+    assert_eq!(inside.outcome(), Outcome::Allowed);
+    // Out of scope, and with the session unknown: the implicit deny, even
+    // with `default: allow`.
+    for session in [Some(SessionType::Rdp), None] {
+        let outside = decide_with(&v, ObjectType::Executable, &facts, &in_session(session));
+        assert_eq!(outside.outcome(), Outcome::Blocked, "{session:?}");
+        assert_eq!(outside.reason_code(), ReasonCode::ImplicitDenyUnknown);
+        let u = outside.unknown().unwrap();
+        assert_eq!(u.fallback, Some(FallbackReason::PolicyOutOfScope));
+        assert_eq!((u.resolved, u.applied), (Level::Allow, Level::Block));
+    }
+    // An unknown session is noted.
+    let unknown_session = decide_with(&v, ObjectType::Executable, &facts, &in_session(None));
+    assert!(
+        unknown_session
+            .scope_notes()
+            .contains(&crate::scope::ScopeNote::FactMissing)
+    );
+}
+
+#[test]
+fn out_of_scope_prompts_restrictions_and_requests_take_the_builtin_default() {
+    let v = valid(scoped_doc(
+        serde_json::json!({
+            "default": "prompt", "by_origin": {"internet": "restrict"},
+            "restrict_profile": PROFILE, "allow_request": true,
+        }),
+        console_only(),
+    ));
+    let rdp = in_session(Some(SessionType::Rdp));
+    for origins in [&[][..], &[OriginClass::Internet][..]] {
+        let d = decide_with(
+            &v,
+            ObjectType::Executable,
+            &object(&[LocationClass::OtherFixed], origins),
+            &rdp,
+        );
+        assert_eq!(d.outcome(), Outcome::Blocked);
+        assert_eq!(d.reason_code(), ReasonCode::ImplicitDenyUnknown);
+        assert!(d.directives().prompt.is_none());
+        assert!(d.directives().containment.is_none());
+        // The built-in default raises no request.
+        assert!(d.directives().request.is_none());
+    }
+}
+
+#[test]
+fn a_policy_without_a_scope_applies_its_unknown_settings_everywhere() {
+    let v = valid(doc(serde_json::json!({"default": "detect"})));
+    for session in [Some(SessionType::Console), Some(SessionType::Service), None] {
+        let d = decide_with(
+            &v,
+            ObjectType::Executable,
+            &object(&[LocationClass::OtherFixed], &[]),
+            &in_session(session),
+        );
+        assert_eq!(d.reason_code(), ReasonCode::UnknownDetected, "{session:?}");
+    }
+}
+
+#[test]
+fn unknown_scopes_apply_when_any_of_them_matches() {
+    let mut d = doc(serde_json::json!({"default": "detect"}));
+    d.policy.unknown.scopes = vec![
+        serde_json::from_value(console_only()).unwrap(),
+        serde_json::from_value(serde_json::json!({"sessions": {"types": ["service"]}})).unwrap(),
+    ];
+    let v = valid(d);
+    let facts = object(&[LocationClass::OtherFixed], &[]);
+    for (session, want) in [
+        (SessionType::Console, ReasonCode::UnknownDetected),
+        (SessionType::Service, ReasonCode::UnknownDetected),
+        (SessionType::Batch, ReasonCode::ImplicitDenyUnknown),
+    ] {
+        let got = decide_with(
+            &v,
+            ObjectType::Executable,
+            &facts,
+            &in_session(Some(session)),
+        );
+        assert_eq!(got.reason_code(), want, "{session:?}");
+    }
+}
+
+#[test]
+fn a_policy_scope_is_checked_as_an_allow_when_unknown_settings_permit() {
+    // A name pattern may not widen where something runs.
+    let pattern = serde_json::json!({"principals": {"include": [{"user_pattern": "*\\alice"}]}});
+    let found = codes(scoped_doc(
+        serde_json::json!({"default": "detect"}),
+        pattern.clone(),
+    ));
+    assert!(
+        found.contains(&(
+            ErrorCode::UserPatternNotAllowed,
+            "/policy/scope/principals/include/0".to_owned()
+        )),
+        "{found:?}"
+    );
+    // With every level `block` and only a deny under it, the scope cannot
+    // widen anything.
+    let deny = serde_json::json!({
+        "id": rule_id(5), "name": "D",
+        "match": {"criterion": {"field": "hash.sha256", "operator": "equals", "values": [sha('d')]}},
+        "action": {"type": "deny"},
+    });
+    let mut d = doc_with(
+        serde_json::json!({}),
+        &[(SET, "blocklist", false, vec![deny.clone()])],
+    );
+    d.policy.scope = Some(serde_json::from_value(pattern.clone()).unwrap());
+    assert_eq!(codes(d), vec![]);
+    let mut d = doc_with(
+        serde_json::json!({"default": "detect"}),
+        &[(SET, "blocklist", false, vec![deny])],
+    );
+    d.policy.scope = Some(serde_json::from_value(pattern).unwrap());
+    assert!(codes(d).contains(&(
+        ErrorCode::UserPatternNotAllowed,
+        "/policy/scope/principals/include/0".to_owned()
+    )));
+    // At most 1000 `unknown.scopes`.
+    let mut d = doc(serde_json::json!({}));
+    d.policy.unknown.scopes = vec![serde_json::from_value(console_only()).unwrap(); 1001];
+    assert!(codes(d).contains(&(ErrorCode::InvalidScope, "/policy/unknown/scopes".to_owned())));
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    /// Out of the policy's scope, stage 6 is the implicit deny whatever the
+    /// unknown settings; in scope, it is what the same policy without a
+    /// scope decides.
+    #[test]
+    fn out_of_scope_is_always_the_implicit_deny(
+        p in arb_full_policy(),
+        t in prop::sample::select(ObjectType::ALL.to_vec()),
+        locations in prop::collection::btree_set(prop::sample::select(LocationClass::ALL.to_vec()), 1..3),
+        origins in prop::collection::btree_set(prop::sample::select(OriginClass::ALL.to_vec()), 1..3),
+        session in prop::option::of(prop::sample::select(SessionType::ALL.to_vec())),
+    ) {
+        let mut scoped = doc(serde_json::json!({}));
+        scoped.policy.unknown = p.clone();
+        let mut open = scoped.clone();
+        scoped.policy.scope = Some(serde_json::from_value(console_only()).unwrap());
+        let (Ok(vs), Ok(vo)) = (scoped.validate(), open.clone().validate()) else { return Ok(()) };
+        let _ = &mut open;
+        let facts = ObjectFacts::new()
+            .with(Field::HashSha256, sha('a'))
+            .with_location_class(locations.iter().copied())
+            .with_origin(origins.iter().copied());
+        let ctx = in_session(session);
+        let got = decide_with(&vs, t, &facts, &ctx);
+        if session == Some(SessionType::Console) {
+            let want = decide_with(&vo, t, &facts, &ctx);
+            prop_assert_eq!(got.outcome(), want.outcome());
+            prop_assert_eq!(got.reason_code(), want.reason_code());
+        } else {
+            prop_assert_eq!(got.outcome(), Outcome::Blocked);
+            prop_assert_eq!(got.reason_code(), ReasonCode::ImplicitDenyUnknown);
+            prop_assert_eq!(got.unknown().unwrap().fallback, Some(FallbackReason::PolicyOutOfScope));
+        }
+    }
+}
+
+// ------------------------------------------------ e8_ml3 early boot
+
+#[test]
+fn ml3_warns_while_early_boot_drivers_are_only_audited() {
+    let found = codes(doc_with(
+        preset_json(CompliancePreset::E8Ml3),
+        &[mandatory_set()],
+    ));
+    assert_eq!(
+        found,
+        vec![(
+            ErrorCode::ComplianceWeakened,
+            "/policy/unknown/driver_boot_policy".to_owned()
+        )]
+    );
+    let mut enforced = preset_json(CompliancePreset::E8Ml3);
+    enforced["driver_boot_policy"] = "enforce".into();
+    assert_eq!(codes(doc_with(enforced, &[mandatory_set()])), vec![]);
+    // Other presets do not block drivers, so they have no such exemption.
+    for p in [CompliancePreset::E8Ml1, CompliancePreset::E8Ml2] {
+        assert_eq!(codes(doc(preset_json(p))), vec![], "{p:?}");
+    }
+    // The preset itself keeps `audit`.
+    assert_eq!(
+        UnknownPolicy::preset(CompliancePreset::E8Ml3).driver_boot_policy,
+        DriverBootPolicy::Audit
+    );
+}
+
+// ------------------------------------------------ location classifier
+
+#[test]
+fn the_windows_temp_fallback_applies_only_without_windir() {
+    use LocationClass as L;
+    let with = |raw: &str, v: &PathVariables| {
+        let p = PathFact::new(raw, &VolumeMap::new()).with_user_writable(false);
+        classify(&p, v, None, &[])
+    };
+    let windir = PathVariables::new().with(crate::facts::PathVariable::Windir, &["C:\\Windows"]);
+    // Another drive's `\Windows\Temp` is not the system's.
+    assert!(!with("D:\\Windows\\Temp\\a.exe", &windir).contains(&L::Temp));
+    assert!(with("C:\\Windows\\Temp\\a.exe", &windir).contains(&L::Temp));
+    // Without `%WINDIR%`, any drive's `\Windows\Temp` is.
+    let none = PathVariables::new();
+    assert!(with("D:\\Windows\\Temp\\a.exe", &none).contains(&L::Temp));
+}
+
+#[test]
+fn a_unc_server_or_share_name_is_not_a_cache_folder() {
+    use LocationClass as L;
+    let with = |raw: &str| {
+        let p = PathFact::new(raw, &VolumeMap::new()).with_user_writable(false);
+        classify(&p, &PathVariables::new(), None, &[])
+    };
+    assert!(!with("\\\\INetCache\\apps\\a.exe").contains(&L::Temp));
+    assert!(!with("\\\\server\\INetCache\\a.exe").contains(&L::Temp));
+    assert!(with("\\\\server\\apps\\INetCache\\a.exe").contains(&L::Temp));
+    assert!(with("D:\\data\\INetCache\\x\\a.exe").contains(&L::Temp));
+    // A drive root has no directory name to mistake.
+    assert!(!with("D:\\a.exe").contains(&L::Temp));
+}
+
+#[test]
+fn without_volume_facts_a_removable_drive_is_other_fixed() {
+    use LocationClass as L;
+    let p = PathFact::new("E:\\setup.exe", &VolumeMap::new()).with_user_writable(false);
+    let unknown_volume = classify(&p, &PathVariables::new(), None, &[]);
+    assert_eq!(unknown_volume, BTreeSet::from([L::OtherFixed]));
+    let removable = classify(&p, &PathVariables::new(), Some(VolumeKind::Removable), &[]);
+    assert!(removable.contains(&L::Removable));
+}
+
+#[test]
+fn the_baseline_needs_the_system32_variable() {
+    // Without `%SYSTEM32%` its exceptions are unknown, so the baseline's
+    // allow does not apply and stage 6 decides (the README says so).
+    let v = baseline_doc(serde_json::json!({}), &[]);
+    let facts = os_signed("C:\\Windows\\System32\\winlogon.exe", false);
+    let decide = |variables: &PathVariables| {
+        let context = interactive_context();
+        Evaluator::new(&v).unwrap().evaluate(
+            &Subject {
+                object_type: ObjectType::Executable,
+                facts: &facts,
+                variables,
+                context: &context,
+            },
+            TRACE,
+        )
+    };
+    assert_eq!(decide(&variables_full()).outcome(), Outcome::Allowed);
+    let d = decide(&vars());
+    assert_eq!(d.outcome(), Outcome::Blocked);
+    assert_eq!(d.reason_code(), ReasonCode::ImplicitDenyUnknown);
+}
+
+#[test]
+fn the_example_applies_the_strictest_matching_entry() {
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../docs/examples/policies/unknown-applications.yaml"
+    ))
+    .unwrap();
+    let v = valid(PolicyDocument::from_yaml(&text).unwrap());
+    let ps = ObjectType::Script(ScriptKind::Powershell);
+    let cases = [
+        // A download in a user profile is blocked, not contained.
+        (
+            ObjectType::Executable,
+            LocationClass::UserProfile,
+            Some(OriginClass::Internet),
+            ReasonCode::ImplicitDenyUnknown,
+        ),
+        (
+            ObjectType::Executable,
+            LocationClass::ProgramFiles,
+            Some(OriginClass::Internet),
+            ReasonCode::UnknownRestricted,
+        ),
+        // A downloaded PowerShell script in a program folder is contained, not prompted.
+        (
+            ps,
+            LocationClass::ProgramFiles,
+            Some(OriginClass::Internet),
+            ReasonCode::UnknownRestricted,
+        ),
+        (
+            ps,
+            LocationClass::ProgramFiles,
+            None,
+            ReasonCode::UnknownPrompt,
+        ),
+        (
+            ps,
+            LocationClass::UserProfile,
+            None,
+            ReasonCode::ImplicitDenyUnknown,
+        ),
+        (
+            ObjectType::Executable,
+            LocationClass::ProgramFiles,
+            None,
+            ReasonCode::UnknownDetected,
+        ),
+    ];
+    for (t, class, origin, want) in cases {
+        let origins: Vec<OriginClass> = origin.into_iter().collect();
+        let d = decide(&v, t, &object(&[class], &origins));
+        assert_eq!(d.reason_code(), want, "{t} {class:?} {origin:?}");
     }
 }

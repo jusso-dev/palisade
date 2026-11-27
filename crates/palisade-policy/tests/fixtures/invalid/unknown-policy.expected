@@ -6,4 +6,5 @@ unknown_allow /policy/unknown/by_location/temp
 unknown_allow_not_permitted /policy/unknown
 unknown_allow_not_permitted /policy/unknown
 compliance_weakened /policy/unknown
+compliance_weakened /policy/unknown/driver_boot_policy
 mandatory_blocklist_required /policy/rule_sets

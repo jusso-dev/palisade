@@ -2397,3 +2397,80 @@ fn within_a_layer_the_lowest_slot_gives_what_cannot_be_compared() {
     let u = &e.policy().unwrap().document().policy.unknown;
     assert_eq!(u.restrict_profile.unwrap().to_string(), id(80));
 }
+
+#[test]
+fn a_policy_scope_limits_its_unknown_settings_in_the_effective_policy() {
+    use crate::context::SessionType;
+    use crate::decision::ReasonCode;
+    let console = json!({"sessions": {"types": ["console"]}});
+    let mut nodes = base_nodes();
+    set_node(&mut nodes, 11, json!({"assignments": assign(&[(50, 0)])}));
+    let h = validated(&snapshot(
+        nodes,
+        vec![policy_with(
+            50,
+            "enforce",
+            vec![],
+            json!({"scope": console, "unknown": {"default": "detect"}}),
+        )],
+        vec![],
+    ));
+    let e = effective(&h, 20);
+    let v = e.policy().unwrap();
+    let u = &v.document().policy.unknown;
+    assert_eq!(u.scopes.len(), 1);
+    assert!(u.scopes[0].sessions.is_some());
+    let decide = |session: SessionType| {
+        let mut ctx = EvaluationContext::new();
+        ctx.session.session_type = Some(session);
+        let facts = ObjectFacts::new();
+        let vars = PathVariables::new();
+        Evaluator::new(v)
+            .unwrap()
+            .evaluate(
+                &Subject {
+                    object_type: ObjectType::Executable,
+                    facts: &facts,
+                    variables: &vars,
+                    context: &ctx,
+                },
+                TraceId([1; 16]),
+            )
+            .reason_code()
+    };
+    assert_eq!(decide(SessionType::Console), ReasonCode::UnknownDetected);
+    assert_eq!(decide(SessionType::Batch), ReasonCode::ImplicitDenyUnknown);
+    // A second, unscoped policy applies everywhere, so the merged settings
+    // do too.
+    let mut nodes = base_nodes();
+    set_node(&mut nodes, 11, json!({"assignments": assign(&[(50, 0)])}));
+    set_node(&mut nodes, 20, json!({"assignments": assign(&[(51, 0)])}));
+    let h = validated(&snapshot(
+        nodes,
+        vec![
+            policy_with(
+                50,
+                "enforce",
+                vec![],
+                json!({"scope": console, "unknown": {"default": "detect"}}),
+            ),
+            policy_with(
+                51,
+                "enforce",
+                vec![],
+                json!({"unknown": {"default": "detect"}}),
+            ),
+        ],
+        vec![],
+    ));
+    assert!(
+        effective(&h, 20)
+            .policy()
+            .unwrap()
+            .document()
+            .policy
+            .unknown
+            .scopes
+            .is_empty()
+    );
+}

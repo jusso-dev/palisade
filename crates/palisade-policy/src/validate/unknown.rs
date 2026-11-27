@@ -166,6 +166,18 @@ impl Validator {
                 ),
             );
         }
+        if preset == crate::model::CompliancePreset::E8Ml3
+            && u.driver_boot_policy == crate::model::DriverBootPolicy::Audit
+        {
+            // Kept by the preset on purpose: blocking an unrecognised
+            // boot-start driver can leave the device unable to boot (ADR
+            // 0018). The exemption is reported, not silent.
+            self.push(
+                ErrorCode::ComplianceWeakened,
+                &format!("{BASE}/driver_boot_policy"),
+                "under the `e8_ml3` preset unknown drivers are blocked, except during early boot: `driver_boot_policy: audit` only reports drivers loaded before the agent has fully started; set `enforce` once the device's boot-start drivers are known",
+            );
+        }
         if preset == crate::model::CompliancePreset::E8Ml3 {
             let referenced: BTreeSet<_> = doc.policy.rule_sets.iter().collect();
             let has_mandatory = doc.rule_sets.iter().any(|s| {

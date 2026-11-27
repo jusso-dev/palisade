@@ -150,6 +150,14 @@ pub fn explain(trace: &Trace, verbosity: Verbosity) -> ExplainDoc {
         doc.paragraphs
             .push(Message::new("overridden").arg("count", overridden.to_string()));
     }
+    if trace
+        .decision
+        .as_ref()
+        .and_then(|d| d.unknown())
+        .is_some_and(|u| u.fallback == Some(crate::unknown::FallbackReason::PolicyOutOfScope))
+    {
+        doc.paragraphs.push(Message::new("unknown-out-of-scope"));
+    }
     for u in &trace.unknown_facts {
         for e in &u.effects {
             doc.paragraphs.push(
@@ -295,10 +303,13 @@ fn summary(trace: &Trace) -> Message {
         ReasonCode::SelfAllow => Message::new("summary-self-allow"),
         ReasonCode::Exclusion => Message::new("summary-excluded").arg("rule", rule),
         ReasonCode::InstanceLimit => Message::new("summary-instance-limit").arg("rule", rule),
-        ReasonCode::AuditModeWouldBlock | ReasonCode::OverrideSession
-            if d.would_have_been() == Outcome::PendingUser =>
-        {
+        ReasonCode::AuditModeWouldBlock if d.would_have_been() == Outcome::PendingUser => {
             Message::new("summary-would-ask")
+                .arg("mode", mode_name(d.mode()))
+                .arg("object", object)
+        }
+        ReasonCode::OverrideSession if d.would_have_been() == Outcome::PendingUser => {
+            Message::new("summary-override-ask")
                 .arg("mode", mode_name(d.mode()))
                 .arg("object", object)
         }
@@ -584,6 +595,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
         "Blocked: no rule decides this { $object }, and it could not be contained on this device.",
     ),
     (
+        "summary-override-ask",
+        "Allowed by an override session in { $mode } mode. Without it you would be asked whether this { $object } may run.",
+    ),
+    (
         "summary-would-ask",
         "Allowed in { $mode } mode. In enforce mode you would be asked whether this { $object } may run.",
     ),
@@ -635,6 +650,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     (
         "overridden",
         "Other matching rules overridden by the deciding rule: { $count }.",
+    ),
+    (
+        "unknown-out-of-scope",
+        "The policy's scope does not cover this user, device or session, or a fact it needs is unknown, so its unknown-application settings do not apply: the built-in implicit deny decides.",
     ),
     (
         "unknown-allow",

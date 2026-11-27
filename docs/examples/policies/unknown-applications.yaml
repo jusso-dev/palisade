@@ -3,8 +3,17 @@
 # Unknown-application handling (#39), starting from the Essential Eight
 # maturity level 1 preset: unknown objects in user profiles, temporary
 # folders and other user-writable locations are blocked, and elsewhere they
-# are detected. Downloads are contained rather than detected, and unknown
-# scripts in program folders ask the user, falling back to block.
+# are detected.
+#
+# The level applied is the most restrictive entry that matches, so the
+# overrides below only apply where no stricter entry does:
+# - A download (`internet`) is contained rather than detected, except in a
+#   user profile, temporary folder or other user-writable location, where
+#   `block` outranks `restrict`.
+# - An unknown PowerShell script asks the user, falling back to block, only
+#   where nothing stricter matches: a downloaded script in a program folder
+#   is contained (`restrict` outranks `prompt`), and one in a user profile
+#   is blocked.
 schema_version: "1.0.0"
 policy:
   id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f

@@ -131,7 +131,7 @@ use crate::scope::{
     Bias, CompiledScope, NoLibrary, OnWindowClose, ScopeEvaluation, ScopeLevel, ScopeLibrary,
     ScopeNote, ScopeNotes, eval_chain,
 };
-use crate::unknown::{SelfImage, StageSix};
+use crate::unknown::{SelfImage, StageSix, UnknownScope};
 use crate::validate::ValidatedPolicy;
 
 /// The object being decided, and what is known about it.
@@ -350,6 +350,8 @@ pub struct Evaluator<'p> {
     rules: Vec<Compiled<'p>>,
     resolver: Resolver,
     self_images: Vec<SelfImage>,
+    /// Where the policy's unknown settings apply (#38, #39).
+    unknown_scope: UnknownScope,
 }
 
 /// What one evaluation knows besides the matching rules.
@@ -450,11 +452,16 @@ impl<'p> Evaluator<'p> {
                 });
             }
         }
+        let unknown_scope = UnknownScope::new(
+            policy_scope,
+            policy.unknown.scopes.iter().map(compile).collect(),
+        );
         Ok(Self {
             policy,
             rules,
             resolver: Resolver::new(policy.precedence_model, &policy.precedence_options),
             self_images: Vec::new(),
+            unknown_scope,
         })
     }
 
@@ -476,6 +483,7 @@ impl<'p> Evaluator<'p> {
         Inputs {
             six: StageSix::new(
                 &self.policy.unknown,
+                &self.unknown_scope,
                 subject.object_type,
                 subject.facts,
                 subject.variables,

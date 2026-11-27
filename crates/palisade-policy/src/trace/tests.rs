@@ -2877,3 +2877,96 @@ fn early_boot_drivers_and_prompts_are_traced_as_decided() {
     let doc = explain(&tr, Verbosity::Short);
     assert_eq!(doc.summary.id, "summary-would-ask");
 }
+
+#[test]
+fn an_override_session_that_lets_a_prompt_run_names_the_session() {
+    use crate::model::unknown::Level;
+    let mut doc = crate::model::PolicyDocument::from_json(&serde_json::json!({
+        "schema_version": "1.0.0",
+        "policy": {"id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f", "name": "P", "revision": 1, "mode": "enforce"},
+    }).to_string()).unwrap();
+    doc.policy.unknown.default = Level::Prompt;
+    let policy = doc.validate().unwrap();
+    let vars = PathVariables::new();
+    let mut ctx = EvaluationContext::new();
+    ctx.session.session_type = Some(crate::context::SessionType::Console);
+    ctx.user.is_system = Some(false);
+    let facts = ObjectFacts::new();
+    let subject = Subject {
+        object_type: ObjectType::Executable,
+        facts: &facts,
+        variables: &vars,
+        context: &ctx,
+    };
+    let opts = TraceOptions::at(TraceLevel::Standard);
+    let tracer = Tracer::new(&policy).unwrap();
+    let session = DeviceState {
+        session: Some(SessionKind::Audit),
+        ..DeviceState::of(&policy.document().policy)
+    };
+    let tr = tracer.trace(&subject, &ObjectExtras::default(), &session, TRACE, &opts);
+    let d = tr.decision.as_ref().unwrap();
+    assert_eq!(d.reason_code(), ReasonCode::OverrideSession);
+    assert_eq!(d.would_have_been(), Outcome::PendingUser);
+    let doc = explain(&tr, Verbosity::Short);
+    assert_eq!(doc.summary.id, "summary-override-ask");
+    let text = Catalog::english().format(&doc.summary);
+    assert!(text.contains("override session"), "{text}");
+    // Audit mode without a session keeps its summary.
+    let mut audit = policy.document().clone();
+    audit.policy.mode = Mode::Audit;
+    let audit = audit.validate().unwrap();
+    let tr = Tracer::new(&audit).unwrap().trace(
+        &subject,
+        &ObjectExtras::default(),
+        &DeviceState::of(&audit.document().policy),
+        TRACE,
+        &opts,
+    );
+    assert_eq!(
+        explain(&tr, Verbosity::Short).summary.id,
+        "summary-would-ask"
+    );
+}
+
+#[test]
+fn an_out_of_scope_unknown_decision_explains_the_policy_scope() {
+    let mut doc = crate::model::PolicyDocument::from_json(&serde_json::json!({
+        "schema_version": "1.0.0",
+        "policy": {"id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f", "name": "P", "revision": 1, "mode": "enforce",
+                   "scope": {"sessions": {"types": ["console"]}},
+                   "unknown": {"default": "detect"}},
+    }).to_string()).unwrap();
+    doc.policy.name = "P".into();
+    let policy = doc.validate().unwrap();
+    let vars = PathVariables::new();
+    let mut ctx = EvaluationContext::new();
+    ctx.session.session_type = Some(crate::context::SessionType::Batch);
+    let facts = ObjectFacts::new();
+    let subject = Subject {
+        object_type: ObjectType::Executable,
+        facts: &facts,
+        variables: &vars,
+        context: &ctx,
+    };
+    let tr = Tracer::new(&policy).unwrap().trace(
+        &subject,
+        &ObjectExtras::default(),
+        &DeviceState::of(&policy.document().policy),
+        TRACE,
+        &TraceOptions::at(TraceLevel::Standard),
+    );
+    assert_eq!(
+        tr.decision.as_ref().unwrap().reason_code(),
+        ReasonCode::ImplicitDenyUnknown
+    );
+    let doc = explain(&tr, Verbosity::Normal);
+    assert_eq!(doc.summary.id, "summary-implicit");
+    assert!(
+        doc.paragraphs
+            .iter()
+            .any(|p| p.id == "unknown-out-of-scope"),
+        "{:?}",
+        doc.paragraphs
+    );
+}

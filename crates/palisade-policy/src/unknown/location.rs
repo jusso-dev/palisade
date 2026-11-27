@@ -5,7 +5,17 @@
 //! results. [`classify`] is the reference rule it uses, and the engine falls
 //! back to it, with no volume facts and no scanner results, when the agent
 //! left the classes unset. Every rule below only ever adds classes, so
-//! missing facts can only make an object look less safe.
+//! a missing ACL fact can only make an object look less safe.
+//!
+//! Volume facts are the exception: without them, a drive path is taken to
+//! be on a fixed volume, so a file on a USB drive or a disc whose volume
+//! kind is not known is `other_fixed`, not `removable` or `optical`. A
+//! policy that is stricter for `removable` or `optical` than for
+//! `other_fixed` (such as `removable: block` with `default: detect`) is
+//! only as strict as the volume facts: the agent must supply the volume
+//! kind ([`Hints::volume`]) or the location classes themselves for those
+//! entries to apply. Missing volume facts never give a protected class,
+//! because `program_files` and `windows` need a path under those folders.
 //!
 //! | Class | When |
 //! |---|---|
@@ -13,7 +23,7 @@
 //! | `network` | a UNC path, a mapped drive (its alias is UNC), or a network volume |
 //! | `removable`, `optical` | the volume is of that kind |
 //! | `user_profile` | under `%USERPROFILE%`, `%APPDATA%`, `%LOCALAPPDATA%` or `%PUBLIC%`, or under `X:\Users\<name>` on any drive |
-//! | `temp` | under `%TEMP%`, `%WINDIR%\Temp`, any `INetCache` or `Temporary Internet Files` folder, or a directory the agent lists as a temporary cache |
+//! | `temp` | under `%TEMP%` or `%WINDIR%\Temp` (without `%WINDIR%`, `X:\Windows\Temp`), any `INetCache` or `Temporary Internet Files` folder below the drive or share root, or a directory the agent lists as a temporary cache |
 //! | `user_writable_other` | the ACL facts say a non-administrator can write the file or a directory above it, or they are not known; under a directory the scanner flagged; or the path is not a drive or UNC path |
 //! | `program_files` | under `%PROGRAMFILES%`; without that variable, `X:\Program Files` or `X:\Program Files (x86)` |
 //! | `windows` | under `%WINDIR%`; without that variable, `X:\Windows` |
@@ -174,16 +184,19 @@ fn classify_one(
     {
         out.insert(L::UserProfile);
     }
-    let windir_temp = variables.get(PathVariable::Windir).iter().any(|w| {
-        under(
-            file,
-            &format!("{}\\Temp", w.as_str().trim_end_matches('\\')),
-        )
-    });
+    let windir_temp = if has(PathVariable::Windir) {
+        variables.get(PathVariable::Windir).iter().any(|w| {
+            under(
+                file,
+                &format!("{}\\Temp", w.as_str().trim_end_matches('\\')),
+            )
+        })
+    } else {
+        under_root("Windows\\Temp")
+    };
     if under_var(&[PathVariable::Temp])
         || windir_temp
-        || under_root("Windows\\Temp")
-        || has_cache_component(file)
+        || has_cache_component(p)
         || hints.temp_dirs.iter().any(|d| under(file, d.as_str()))
     {
         out.insert(L::Temp);
@@ -240,9 +253,12 @@ fn in_users_dir(p: &NormalizedPath) -> bool {
     matches!(parts.next(), Some(first) if fold(first, false) == "USERS") && parts.next().is_some()
 }
 
-/// Whether a directory above the file is a temporary internet cache.
-fn has_cache_component(path: &str) -> bool {
-    let mut parts: Vec<&str> = path.split('\\').collect();
+/// Whether a directory above the file, below the drive or share root, is
+/// a temporary internet cache. A UNC path's server and share names are
+/// part of its root, not directories.
+fn has_cache_component(p: &NormalizedPath) -> bool {
+    let body = &p.without_stream()[p.root().len()..];
+    let mut parts: Vec<&str> = body.split('\\').filter(|s| !s.is_empty()).collect();
     // The last component is the file itself.
     parts.pop();
     let wanted: Vec<String> = CACHE_COMPONENTS.iter().map(|c| fold(c, false)).collect();

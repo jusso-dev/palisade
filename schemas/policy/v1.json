@@ -322,7 +322,7 @@
         },
         {
           "const": "e8_ml3",
-          "description": "Essential Eight maturity level 3: level 2, drivers blocked, and a\nmandatory blocklist required (ISM-1658).",
+          "description": "Essential Eight maturity level 3: level 2, drivers blocked, and a\nmandatory blocklist required (ISM-1658). Drivers loaded during early\nboot are only audited unless `driver_boot_policy` is `enforce`;\nvalidation warns about that exemption.",
           "type": "string"
         }
       ]
@@ -3237,6 +3237,13 @@
             }
           ],
           "description": "The containment profile of the `restrict` level (#14). Required when\nany level, or the prompt's fallback, is `restrict`."
+        },
+        "scopes": {
+          "description": "Where these settings apply, besides the policy's `scope` (#38): a\nsubject in at least one of these scopes, at most 1000. Empty, the\ndefault, means wherever the policy applies. An effective policy (#37)\nsets it to the scopes of the policies it was built from; a policy\ndocument normally limits itself with `policy.scope` instead. A\nsubject outside it is decided by the built-in implicit deny\n([`crate::unknown`]).",
+          "items": {
+            "$ref": "#/$defs/Scope"
+          },
+          "type": "array"
         }
       },
       "type": "object"

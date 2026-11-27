@@ -83,9 +83,45 @@ impl Validator {
                 .map(|r| r.action.kind())
                 .collect()
         };
+        // The policy's scope also limits where its unknown settings apply
+        // (#39). Out of scope the implicit deny decides, so the scope only
+        // widens what runs: as an allow's does, if any setting is weaker
+        // than `block`.
+        let unknown_permits = policy.unknown.permits();
         if let Some(scope) = &policy.scope {
-            let covered = Covered::of_all(kinds_of(&mut policy.rule_sets.iter()));
+            let mut kinds = kinds_of(&mut policy.rule_sets.iter());
+            if unknown_permits {
+                kinds.push(ActionKind::Allow);
+            }
+            let covered = Covered::of_all(kinds);
             self.scope("/policy/scope", scope, covered, &profiles);
+        }
+        let unknown_scopes = &policy.unknown.scopes;
+        // An effective policy holds one per contributing policy, and the
+        // agent validates it as any document.
+        if unknown_scopes.len() > MAX_SCOPE_ENTRIES {
+            self.push(
+                ErrorCode::InvalidScope,
+                "/policy/unknown/scopes",
+                format!(
+                    "{} scopes; at most {MAX_SCOPE_ENTRIES} are allowed",
+                    unknown_scopes.len()
+                ),
+            );
+        }
+        // They limit stage 6 only, so the per-rule options do not apply.
+        let covered = Covered {
+            permits: unknown_permits,
+            restricts: false,
+            only_allows: false,
+        };
+        for (i, scope) in unknown_scopes.iter().enumerate() {
+            self.scope(
+                &format!("/policy/unknown/scopes/{i}"),
+                scope,
+                covered,
+                &profiles,
+            );
         }
         let mut seen = BTreeSet::new();
         for (i, a) in policy.rule_set_scopes.iter().enumerate() {

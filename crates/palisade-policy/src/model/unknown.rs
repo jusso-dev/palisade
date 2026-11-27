@@ -494,7 +494,9 @@ pub enum CompliancePreset {
     /// (ISM-1871).
     E8Ml2,
     /// Essential Eight maturity level 3: level 2, drivers blocked, and a
-    /// mandatory blocklist required (ISM-1658).
+    /// mandatory blocklist required (ISM-1658). Drivers loaded during early
+    /// boot are only audited unless `driver_boot_policy` is `enforce`;
+    /// validation warns about that exemption.
     E8Ml3,
 }
 
@@ -554,6 +556,15 @@ pub struct UnknownPolicy {
     pub preexisting_policy: PreexistingPolicy,
     /// How unknown drivers are handled during early boot.
     pub driver_boot_policy: DriverBootPolicy,
+    /// Where these settings apply, besides the policy's `scope` (#38): a
+    /// subject in at least one of these scopes, at most 1000. Empty, the
+    /// default, means wherever the policy applies. An effective policy (#37)
+    /// sets it to the scopes of the policies it was built from; a policy
+    /// document normally limits itself with `policy.scope` instead. A
+    /// subject outside it is decided by the built-in implicit deny
+    /// ([`crate::unknown`]).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub scopes: Vec<crate::scope::Scope>,
 }
 
 impl Default for UnknownPolicy {
@@ -570,6 +581,7 @@ impl Default for UnknownPolicy {
             allow_request: false,
             preexisting_policy: PreexistingPolicy::BaselineOnly,
             driver_boot_policy: DriverBootPolicy::Audit,
+            scopes: Vec::new(),
         }
     }
 }
@@ -588,7 +600,13 @@ impl UnknownPolicy {
     ///   `temp` and `user_writable_other`.
     /// - `e8_ml2`: `default: block`.
     /// - `e8_ml3`: `default: block`, and `block` for `driver`. Validation
-    ///   also requires a mandatory blocklist.
+    ///   also requires a mandatory blocklist. Early-boot drivers are
+    ///   exempt: `driver_boot_policy` stays `audit`, so a driver the device
+    ///   loads before the agent has fully started is reported, not
+    ///   blocked, because blocking an unrecognised boot-start driver can
+    ///   leave the device unable to boot (ADR 0018). Validation warns
+    ///   (`compliance_weakened`) while the exemption is in place; set
+    ///   `driver_boot_policy: enforce` to close it.
     #[must_use]
     pub fn preset(preset: CompliancePreset) -> Self {
         let mut p = Self {
@@ -615,19 +633,46 @@ impl UnknownPolicy {
     }
 
     /// The strictest combination of `self` and `other`, for building an
-    /// effective policy from several layers (#37). Every part that can
-    /// let an unknown object run takes the more restrictive side, so the
-    /// result is never weaker than either side for any object or answer:
+    /// effective policy from several layers (#37).
     ///
-    /// - levels, entries and the prompt fallback: the more restrictive (an
-    ///   entry only one side sets is compared with the other side's
-    ///   `default`); a level a type cannot take becomes `block`;
+    /// The goal is the **applied** level: in every context (object type,
+    /// location classes, origins, whether the session is interactive,
+    /// whether containment is available, whether a blocklist rule
+    /// matched), the merged policy applies a level at least as strict as
+    /// the level each side applies there with its own prompt fallback and
+    /// containment profile, and the prompt's timeout ends no weaker. A
+    /// level is compared as stage 6 applies it ([`crate::unknown`]): a
+    /// prompt that cannot be shown is its side's fallback, and a `restrict`
+    /// that cannot contain is `block`.
+    ///
+    /// One policy cannot always reproduce the strictest of two exactly, so
+    /// where it cannot, the merged policy is the stricter. Two cases:
+    ///
+    /// - The prompt fallback is one setting for the whole policy, so it is
+    ///   the strictest fallback of the sides that prompt anywhere, and at
+    ///   least `detect` if the merged policy prompts and either side
+    ///   detects anywhere.
+    /// - Where a side prompts and falls back to `block`, a merged `restrict`
+    ///   becomes `block` unless that side's own entry there is `restrict`
+    ///   or stricter: the side blocks wherever no prompt can be shown, and
+    ///   a `restrict` there would let the object run.
+    ///
+    /// How each part merges:
+    ///
+    /// - `default` and each entry: the more restrictive level, after each
+    ///   side's levels are replaced with what that side applies wherever
+    ///   the context does not matter (an entry only one side sets is
+    ///   compared with the other side's `default`). So a `prompt` for a
+    ///   library or driver counts as that side's own fallback, a `restrict`
+    ///   for a type that cannot be contained, or without a containment
+    ///   profile, as `block`, and a `prompt` fallback as `block`. No
+    ///   assumption is made that an unusable level ends in `block`;
     /// - the prompt: only the answers both sides offer (or `block`), a
     ///   justification if either asks, the stronger re-authentication, a
     ///   user scope if either uses it, and the shorter temporary approval;
     /// - `allow_request` only if both allow it; the stricter
     ///   `preexisting_policy` and `driver_boot_policy`; the more demanding
-    ///   compliance preset;
+    ///   compliance preset; the `scopes` of both sides;
     /// - effects: per flag, the nearer layer's value, except that the
     ///   higher severity and the more immediate upload win, and `always`
     ///   logging is kept; tags are joined.
@@ -637,32 +682,112 @@ impl UnknownPolicy {
     /// layer, where it sets one.
     #[must_use]
     pub fn stricter(&self, other: &Self) -> Self {
-        let mut out = self.merged(other);
-        // Where the merged policy prompts, an object can end in the merged
-        // fallback. Each side gave that object a level no higher than
-        // `prompt`, and one below `prompt` can only be `allow` or `detect`,
-        // which the fallback must not undercut. So if the merged policy
-        // prompts anywhere and either side detects anywhere, the fallback
-        // is at least `detect`. (A side's own prompt ends in its own
-        // fallback, which the merged fallback already covers.)
-        let detects = |p: &Self| {
-            core::iter::once(p.default)
-                .chain(p.by_location.values().copied())
-                .chain(p.by_origin.values().copied())
-                .chain(p.by_type.values().copied())
-                .any(|l| l == Level::Detect)
+        let (a, b) = (self.as_applied(), other.as_applied());
+        let mut out = a.merged(&b);
+        let has = |p: &Self, level: Level| p.entry_levels().any(|l| l == level);
+        let (a_prompts, b_prompts) = (has(&a, Level::Prompt), has(&b, Level::Prompt));
+        // Only a side that prompts somewhere ever applies its fallback.
+        out.prompt.fallback = match (a_prompts, b_prompts) {
+            (true, false) => a.prompt.fallback,
+            (false, true) => b.prompt.fallback,
+            _ => a.prompt.fallback.max(b.prompt.fallback),
         };
-        let prompts = core::iter::once(out.default)
-            .chain(out.by_location.values().copied())
-            .chain(out.by_origin.values().copied())
-            .chain(out.by_type.values().copied())
-            .any(|l| l == Level::Prompt);
-        if prompts && (detects(self) || detects(other)) {
+        // Where the merged policy prompts and no prompt can be shown, the
+        // object ends in the merged fallback. A side that does not prompt
+        // there gave it a level below `prompt`: `allow` or `detect`, which
+        // the fallback must not undercut.
+        if has(&out, Level::Prompt) && (has(&a, Level::Detect) || has(&b, Level::Detect)) {
             out.prompt.fallback = out.prompt.fallback.max(Level::Detect);
+        }
+        // A side that prompts and falls back to `block` blocks wherever no
+        // prompt can be shown. A merged `restrict` in such a place would let
+        // the object run, so it becomes `block` unless that side's own
+        // entry there is `restrict` or stricter: then the side's level
+        // there is never a prompt.
+        let blocking: Vec<&Self> = [(&a, a_prompts), (&b, b_prompts)]
+            .into_iter()
+            .filter(|(p, prompts)| *prompts && p.prompt.fallback == Level::Block)
+            .map(|(p, _)| p)
+            .collect();
+        fn raise<K: Ord>(merged: &mut BTreeMap<K, Level>, sides: &[&BTreeMap<K, Level>]) {
+            for (k, l) in merged.iter_mut() {
+                let covered = sides
+                    .iter()
+                    .all(|s| s.get(k).is_some_and(|x| *x >= Level::Restrict));
+                if *l == Level::Restrict && !covered {
+                    *l = Level::Block;
+                }
+            }
+        }
+        if !blocking.is_empty() {
+            let locations: Vec<_> = blocking.iter().map(|p| &p.by_location).collect();
+            raise(&mut out.by_location, &locations);
+            let origins: Vec<_> = blocking.iter().map(|p| &p.by_origin).collect();
+            raise(&mut out.by_origin, &origins);
+            let types: Vec<_> = blocking.iter().map(|p| &p.by_type).collect();
+            raise(&mut out.by_type, &types);
+            // The default applies only where no entry of either side does,
+            // so each side is at its own default there.
+            if out.default == Level::Restrict && blocking.iter().any(|p| p.default == Level::Prompt)
+            {
+                out.default = Level::Block;
+            }
         }
         out
     }
 
+    /// The same policy, with every level replaced by what stage 6 applies
+    /// for it wherever that does not depend on the context: a `prompt`
+    /// fallback is never `prompt` (it blocks), `restrict` without a
+    /// containment profile blocks, and each `by_type` level the type cannot
+    /// take is what stage 6 applies instead, with this policy's own
+    /// fallback. So two of these can be compared level by level.
+    fn as_applied(&self) -> Self {
+        let mut p = self.clone();
+        if p.prompt.fallback == Level::Prompt {
+            p.prompt.fallback = Level::Block;
+        }
+        if p.restrict_profile.is_none() {
+            p.prompt.fallback = contained(p.prompt.fallback);
+            p.map_levels(contained);
+        }
+        let fallback = p.prompt.fallback;
+        for (t, level) in &mut p.by_type {
+            *level = for_type(*t, *level, fallback);
+        }
+        p
+    }
+
+    /// Replaces `default` and every entry's level, not the fallback.
+    fn map_levels(&mut self, f: impl Fn(Level) -> Level) {
+        self.default = f(self.default);
+        for l in self
+            .by_location
+            .values_mut()
+            .chain(self.by_origin.values_mut())
+            .chain(self.by_type.values_mut())
+        {
+            *l = f(*l);
+        }
+    }
+
+    /// Whether the policy can let an unknown object run: any level but
+    /// `block` (a prompt's fallback only applies where a level prompts).
+    #[must_use]
+    pub fn permits(&self) -> bool {
+        self.entry_levels().any(|l| l != Level::Block)
+    }
+
+    /// `default` and every entry's level, without the prompt's fallback.
+    fn entry_levels(&self) -> impl Iterator<Item = Level> + '_ {
+        core::iter::once(self.default)
+            .chain(self.by_location.values().copied())
+            .chain(self.by_origin.values().copied())
+            .chain(self.by_type.values().copied())
+    }
+
+    /// The level-by-level merge of two policies that are each
+    /// [`as_applied`](Self::as_applied).
     fn merged(&self, other: &Self) -> Self {
         fn merge<K: Ord + Copy>(
             a: &BTreeMap<K, Level>,
@@ -694,20 +819,21 @@ impl UnknownPolicy {
                 &other.by_origin,
                 other.default,
             ),
-            // A level a type cannot take is the block it falls back to
-            // anyway (a prompt's fallback can only be weaker, so blocking
-            // is at least as strict).
-            by_type: merge(&self.by_type, self.default, &other.by_type, other.default)
-                .into_iter()
-                .map(|(t, l)| {
-                    let usable = match l {
-                        Level::Prompt => crate::unknown::prompt_valid_for(t),
-                        Level::Restrict => crate::unknown::restrict_valid_for(t),
-                        _ => true,
+            // A side without an entry for the type gives it its default,
+            // as that side applies it to the type.
+            by_type: {
+                let mut out = BTreeMap::new();
+                for t in self.by_type.keys().chain(other.by_type.keys()) {
+                    let side = |p: &Self| {
+                        p.by_type
+                            .get(t)
+                            .copied()
+                            .unwrap_or_else(|| for_type(*t, p.default, p.prompt.fallback))
                     };
-                    (t, if usable { l } else { Level::Block })
-                })
-                .collect(),
+                    out.insert(*t, side(self).max(side(other)));
+                }
+                out
+            },
             restrict_profile: self.restrict_profile.or(other.restrict_profile),
             prompt: self.prompt.stricter(&other.prompt),
             effects: stricter_effects(&self.effects, &other.effects),
@@ -730,6 +856,18 @@ impl UnknownPolicy {
             } else {
                 DriverBootPolicy::Audit
             },
+            // Where either side applies; empty (everywhere) absorbs.
+            scopes: if self.scopes.is_empty() || other.scopes.is_empty() {
+                Vec::new()
+            } else {
+                let mut scopes = self.scopes.clone();
+                for s in &other.scopes {
+                    if !scopes.contains(s) {
+                        scopes.push(s.clone());
+                    }
+                }
+                scopes
+            },
         }
     }
 
@@ -741,6 +879,30 @@ impl UnknownPolicy {
             .chain(self.by_origin.values().copied())
             .chain(self.by_type.values().copied())
             .chain(core::iter::once(self.prompt.fallback))
+    }
+}
+
+/// `restrict` without a containment profile: stage 6 blocks.
+fn contained(level: Level) -> Level {
+    if level == Level::Restrict {
+        Level::Block
+    } else {
+        level
+    }
+}
+
+/// What stage 6 applies to an object of type `t` at `level`, as far as the
+/// type alone decides: a type that cannot be prompted for gets `fallback`,
+/// and a type that cannot be contained is blocked.
+fn for_type(t: ObjectType, level: Level, fallback: Level) -> Level {
+    let level = match level {
+        Level::Prompt if !crate::unknown::prompt_valid_for(t) => fallback,
+        other => other,
+    };
+    match level {
+        Level::Restrict if !crate::unknown::restrict_valid_for(t) => Level::Block,
+        Level::Prompt if !crate::unknown::prompt_valid_for(t) => Level::Block,
+        other => other,
     }
 }
 
