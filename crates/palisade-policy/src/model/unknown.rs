@@ -569,9 +569,8 @@ pub struct UnknownPolicy {
     /// `policy.scope`, so the hierarchy moves each contributing policy's
     /// `scope` and `scopes` here unexpanded
     /// ([`UnknownPolicy::scope_limit_of`]). The size is therefore linear in
-    /// contributing policies, at most
-    /// [`MAX_CONTRIBUTING_POLICIES`](crate::hierarchy::limits::MAX_CONTRIBUTING_POLICIES)
-    /// entries, and building an effective policy from valid policies never
+    /// contributing policies, at most `MAX_CONTRIBUTING_POLICIES` (in
+    /// `hierarchy::limits`) entries, and building an effective policy from valid policies never
     /// fails on it. Validation rejects it in a document it validates as
     /// authored, which writes `policy.scope` and `unknown.scopes` instead.
     #[serde(skip_serializing_if = "Vec::is_empty")]
