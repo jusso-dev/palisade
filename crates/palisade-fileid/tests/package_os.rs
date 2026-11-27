@@ -39,6 +39,7 @@ use std::process::Command;
 
 use appx::{AppxBuilder, PUBLISHER, ZipStyle, sdk_manifest};
 use palisade_fileid::authenticode::DigestAlgorithm;
+use palisade_fileid::package::manifest::ns::{DESKTOP, UAP3};
 use palisade_fileid::package::zip::Archive;
 use palisade_fileid::package::{
     PackageIdentity, PackageVersion, full_name, parse_package, publisher_id, signed_digest,
@@ -416,6 +417,25 @@ fn the_os_signer_computes_our_digest() {
             b.build_with(&ZipStyle::packaging_tool()),
         ),
         ("bundle.msixbundle", AppxBuilder::bundle().build()),
+        // The plain layout with a manifest the OS manifest validator
+        // refuses (an extension `Executable` without `EntryPoint`, as the
+        // fixtures had before), to tell a refused manifest from a refused
+        // signature.
+        ("plain-bad-manifest.msix", {
+            let mut bad = b.clone();
+            bad.files[0].data = sdk_manifest_with_bare_extension(&bad.files[0].data);
+            bad.build()
+        }),
+        // The committed unsigned fixtures, signed by the OS tool instead of
+        // osslsigncode.
+        (
+            "fixture-app.msix",
+            std::fs::read(format!("{FIXTURES}/app.msix")).unwrap(),
+        ),
+        (
+            "fixture-bundle.msixbundle",
+            std::fs::read(format!("{FIXTURES}/bundle.msixbundle")).unwrap(),
+        ),
     ];
     let dir = Scratch::new("os-sign-layouts");
     for (name, data) in &layouts {
@@ -452,6 +472,9 @@ fn the_os_signer_computes_our_digest() {
                 report.push_str(&format!(
                     "{name}: signed by the OS tool, refused here: {e}\n"
                 ));
+                let before = &layouts.iter().find(|(n, _)| n == name).unwrap().1;
+                report.push_str(&format!("{name}: before signing:\n{}", zip_dump(before)));
+                report.push_str(&format!("{name}: after signing:\n{}", zip_dump(&data)));
                 problems += 1;
                 continue;
             }
@@ -514,4 +537,101 @@ fn the_os_signer_computes_our_digest() {
     }
     eprintln!("{log}\n{report}");
     assert_eq!(problems, 0, "{log}\n{report}");
+}
+
+/// `manifest` (an [`sdk_manifest`]) with an app execution alias extension
+/// that names an `Executable` but no `EntryPoint`, which the OS manifest
+/// validator refuses.
+fn sdk_manifest_with_bare_extension(manifest: &[u8]) -> Vec<u8> {
+    String::from_utf8(manifest.to_vec())
+        .unwrap()
+        .replace(
+            "xmlns:rescap=",
+            &format!("xmlns:uap3=\"{UAP3}\" xmlns:desktop=\"{DESKTOP}\" xmlns:rescap="),
+        )
+        .replace(
+            "IgnorableNamespaces=\"uap rescap\"",
+            "IgnorableNamespaces=\"uap uap3 desktop rescap\"",
+        )
+        .replace(
+            "</Application>",
+            "<Extensions><uap3:Extension Category=\"windows.appExecutionAlias\" Executable=\"tool.exe\"><uap3:AppExecutionAlias><desktop:ExecutionAlias Alias=\"palisade-probe.exe\"/></uap3:AppExecutionAlias></uap3:Extension></Extensions></Application>",
+        )
+        .into_bytes()
+}
+
+/// The raw ZIP records of `data`, for a failure report: the end records,
+/// then for each central entry its fields and extra field, its local
+/// header's fields and extra field, and the bytes between its data and the
+/// next record (its data descriptor, if any). Read at fixed offsets, so it
+/// works on archives this crate's reader refuses. Offsets in a test
+/// package are small, so the casts are exact.
+#[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+fn zip_dump(data: &[u8]) -> String {
+    let get = |at: usize, n: usize| data.get(at..at.saturating_add(n)).unwrap_or_default();
+    let u16_at =
+        |at: usize| usize::from(u16::from_le_bytes(get(at, 2).try_into().unwrap_or([0; 2])));
+    let u32_at = |at: usize| u32::from_le_bytes(get(at, 4).try_into().unwrap_or([0; 4]));
+    let u64_at = |at: usize| u64::from_le_bytes(get(at, 8).try_into().unwrap_or([0; 8]));
+    let Some(eocd) = data.windows(4).rposition(|w| w == [0x50, 0x4b, 0x05, 0x06]) else {
+        return "  no end record\n".into();
+    };
+    let mut out = format!("  end record at {eocd}: {}\n", hex(get(eocd, 22)));
+    let mut cd = u32_at(eocd + 16) as usize;
+    if eocd >= 20 && get(eocd - 20, 4) == [0x50, 0x4b, 0x06, 0x07] {
+        let rec = u64_at(eocd - 12) as usize;
+        out.push_str(&format!("  ZIP64 locator: {}\n", hex(get(eocd - 20, 20))));
+        out.push_str(&format!("  ZIP64 record at {rec}: {}\n", hex(get(rec, 56))));
+        cd = u64_at(rec + 48) as usize;
+    }
+    let mut entries = Vec::new();
+    let mut at = cd;
+    while u32_at(at) == 0x0201_4b50 && entries.len() < 64 {
+        let (nl, el, cl) = (u16_at(at + 28), u16_at(at + 30), u16_at(at + 32));
+        let extra = get(at + 46 + nl, el);
+        let mut local = u64::from(u32_at(at + 42));
+        let mut csize = u64::from(u32_at(at + 20));
+        if extra.len() >= 4 && extra[..2] == [1, 0] {
+            // The ZIP64 fields, in order, for the 32-bit fields marked.
+            let mut p = 4;
+            let mut next = || {
+                let v = extra
+                    .get(p..p + 8)
+                    .map_or(0, |b| u64::from_le_bytes(b.try_into().unwrap()));
+                p += 8;
+                v
+            };
+            if u32_at(at + 24) == u32::MAX {
+                next();
+            }
+            if u32_at(at + 20) == u32::MAX {
+                csize = next();
+            }
+            if u32_at(at + 42) == u32::MAX {
+                local = next();
+            }
+        }
+        entries.push((at, nl, extra, local as usize, csize as usize));
+        at += 46 + nl + el + cl;
+    }
+    for (i, &(c, nl, extra, local, csize)) in entries.iter().enumerate() {
+        let name = String::from_utf8_lossy(get(c + 46, nl));
+        out.push_str(&format!(
+            "  {name}: central {} extra [{}]\n",
+            hex(get(c + 4, 42)),
+            hex(extra)
+        ));
+        let (lnl, lel) = (u16_at(local + 26), u16_at(local + 28));
+        let data_at = local + 30 + lnl + lel;
+        let end = data_at + csize;
+        let following = entries.get(i + 1).map_or(cd, |e| e.3);
+        out.push_str(&format!(
+            "    local at {local}: {} extra [{}] then after the data ({} bytes to the next record): {}\n",
+            hex(get(local + 4, 26)),
+            hex(get(local + 30 + lnl, lel)),
+            following as i64 - end as i64,
+            hex(get(end, following.saturating_sub(end).min(32)))
+        ));
+    }
+    out
 }

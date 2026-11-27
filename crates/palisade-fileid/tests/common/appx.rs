@@ -181,12 +181,12 @@ pub fn manifest(name: &str, publisher: &str, version: &str, arch: &str) -> Strin
       <uap:VisualElements DisplayName="Palisade Test App" Description="Palisade test app"
           BackgroundColor="transparent" Square150x150Logo="logo.png" Square44x44Logo="logo.png"/>
       <Extensions>
-        <uap3:Extension Category="windows.appExecutionAlias" Executable="app/tool.exe">
+        <uap3:Extension Category="windows.appExecutionAlias" Executable="app/tool.exe" EntryPoint="Windows.FullTrustApplication">
           <uap3:AppExecutionAlias>
             <desktop:ExecutionAlias Alias="palisade-tool.exe"/>
           </uap3:AppExecutionAlias>
         </uap3:Extension>
-        <desktop:Extension Category="windows.fullTrustProcess" Executable="app/helper.exe"/>
+        <desktop:Extension Category="windows.fullTrustProcess" Executable="app/helper.exe" EntryPoint="Windows.FullTrustApplication"/>
       </Extensions>
     </Application>
   </Applications>
