@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_MAX_BYTES","FORMAT_VERSION"],"enum":["BundleError","SetContent","TargetScope"],"fn":["bundle_hash","decode_header","hex","metadata_digest"],"struct":["AgentVersion","Body","BundleLimits","Header","InlineLibrary","PolicyBundle","SourceRevisions","Target"],"type":["Sha256Digest"]};

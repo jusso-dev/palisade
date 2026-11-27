@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-64e8229c.js";
+            window.path_to_searchindex_js = "../searchindex-21b5d656.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-de2a680a.js"></script>
@@ -420,10 +420,10 @@ them, and only they need a nightly toolchain. There are three projects:</p>
 <code>fuzz_appx_manifest</code>. The project builds <code>palisade-fileid</code> with its <code>content-rules</code> feature,
 for <code>fuzz_tags</code>.</li>
 <li><code>crates/palisade-proto/fuzz</code>, with one target: <code>trust_set_decode</code>.</li>
-<li><code>crates/palisade-policy/fuzz</code>, with three targets: <code>fuzz_policy_json</code> (the strict JSON reader,
-validation and the evaluator build), <code>fuzz_policy_yaml</code> (the YAML reader) and
+<li><code>crates/palisade-policy/fuzz</code>, with four targets: <code>fuzz_policy_json</code> (the strict JSON reader,
+validation and the evaluator build), <code>fuzz_policy_yaml</code> (the YAML reader),
 <code>fuzz_wildcard_regex_compile</code> (compiling and matching wildcards, regular expressions and text
-values).</li>
+values) and <code>fuzz_bundle_decode</code> (the policy bundle's header-only and strict decoders, #43).</li>
 </ul>
 <p>Target names are unique across projects, so <code>--target</code> names one without its project. Each fuzz
 workspace has its own committed <code>Cargo.lock</code>. Dependabot keeps it up to date, cargo-deny checks it against the root <code>deny.toml</code> on every PR and daily, and
