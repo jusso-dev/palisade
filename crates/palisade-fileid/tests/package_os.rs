@@ -554,19 +554,15 @@ fn the_os_signer_computes_our_digest() {
             // Refused here or signature not valid: both are "not valid".
             let ours_valid = ours.as_ref().is_ok_and(|v| *v);
             let os_intact = INTACT.contains(&code);
-            // Each layout has an expected verdict, and both sides must give
-            // it: agreeing that a layout meant to verify is broken proves
-            // nothing. `zip64-extras` is the one the tool signs into a shape
-            // no reader may accept (4-byte descriptor sizes, the
-            // uncompressed size written as 0): refused by both.
-            let want = name != "zip64-extras.msix";
-            let ok = ours_valid == want && os_intact == want;
+            // Every layout the OS tool signs must verify on both sides:
+            // agreeing that a layout meant to verify is broken proves
+            // nothing.
+            let ok = ours_valid && os_intact;
             if !ok {
                 problems += 1;
             }
             report.push_str(&format!(
-                "{name}: OS {code:#010x}, ours {ours:?}, expected {}{}\n",
-                if want { "valid" } else { "not valid" },
+                "{name}: OS {code:#010x}, ours {ours:?}, expected valid{}\n",
                 if ok { "" } else { " WRONG" }
             ));
         }

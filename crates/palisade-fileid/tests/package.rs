@@ -1255,9 +1255,13 @@ fn the_packaging_tool_zip64_layout_reads() {
         ..zip64()
     });
     assert!(matches!(Archive::parse(&x), Err(ZipError::LocalHeader(_))));
-    // The OS signing tool's rewrite of ZIP64 extras (seen on CI): 4-byte
-    // sizes with the uncompressed size 0. The values must match the central
-    // entry, so it is refused.
+    // The OS signing tool, rewriting a ZIP64-extra entry whose local header
+    // gave version 2.0 but whose descriptor had 8-byte sizes (a shape no
+    // writer produces, which the test builder wrote before it tied the
+    // version to the width), kept the 2.0 and wrote 4-byte sizes, cutting
+    // the 8-byte compressed size to its low half and so writing 0 where the
+    // uncompressed size goes (Windows CI, d2696a8). The values must match
+    // the central entry, so that output is refused.
     let mut x = AppxBuilder::package().build_with(&ZipStyle {
         narrow_descriptors: true,
         ..ZipStyle::packaging_tool()
