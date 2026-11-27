@@ -1279,9 +1279,12 @@ fn guaranteed_identity(node: &Match, pointer: &str) -> Guarantee {
                 _ if !c.operator.is_positive() => Identity::None,
                 None => Identity::None,
                 Some(_) if c.field.is_weak_hash() => Identity::WeakHashOnly,
+                // SHA-1 values alone are a weak hash whatever the position;
+                // otherwise a TBS hash that may name a CA is weak (#31).
                 Some(_) if c.field == crate::model::Field::SignerTbsHash => match sha1_values(c) {
                     Sha1Values::All => Identity::WeakHashOnly,
                     Sha1Values::Some => Identity::Weak,
+                    Sha1Values::None if names_ca(c) => Identity::Weak,
                     Sha1Values::None => Identity::Sound,
                 },
                 Some(Strength::Weak) => Identity::Weak,
@@ -1316,6 +1319,13 @@ fn sha1_values(c: &Criterion) -> Sha1Values {
         n if n == c.values.len() => Sha1Values::All,
         _ => Sha1Values::Some,
     }
+}
+
+/// Whether a `signer.tbs_hash` test may name a CA certificate rather than
+/// the signer's own: its `position` is not `leaf` (#31).
+fn names_ca(c: &Criterion) -> bool {
+    c.field == crate::model::Field::SignerTbsHash
+        && c.signer.as_deref().and_then(|o| o.position) != Some(crate::model::TbsPosition::Leaf)
 }
 
 /// Names the nodes of a witness for a message, such as
