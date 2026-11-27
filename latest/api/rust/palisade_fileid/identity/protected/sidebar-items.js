@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_LIST_VERSION"],"enum":["ExpectedSigner"],"struct":["ExpectedDir","ProtectedBinary","ProtectedList","ProtectedVendor"]};

@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-b4b19249.js";
+            window.path_to_searchindex_js = "../searchindex-4ff309dc.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-de2a680a.js"></script>
@@ -262,7 +262,10 @@ their <code>#[ignore = "..."]</code> reason.</li>
 <h3 id="fixtures"><a class="header" href="#fixtures">Fixtures</a></h3>
 <ul>
 <li>Fixtures are synthetic and built at test time where possible. <code>palisade-fileid</code> builds its PE
-images byte by byte (<code>crates/palisade-fileid/tests/common</code>), so no binaries are committed.</li>
+images byte by byte (<code>crates/palisade-fileid/tests/common</code>). The identity corpus
+(<code>crates/palisade-fileid/tests/fixtures/identity</code>) signs some of them at test time with keys
+from a deterministic RNG, so no signed executable is committed; its manifest pins their
+digests, which its <code>generate.sh</code> computes and checks with independent tools.</li>
 <li>Small committed fixtures (policy documents, PKCS#7 signatures) live in the crate's
 <code>tests/fixtures/</code>, each set with a note, or a script, that says how it was made.</li>
 <li>Never commit malware, antivirus test strings or third-party signed binaries
@@ -414,11 +417,11 @@ change to the command list, run <code>cargo insta test -p xtask</code> and revie
 separate cargo-fuzz workspace per crate (<code>crates/&lt;crate&gt;/fuzz/</code>), so normal builds never compile
 them, and only they need a nightly toolchain. There are three projects:</p>
 <ul>
-<li><code>crates/palisade-fileid/fuzz</code>, with fourteen targets: <code>pe_parse</code>, <code>version_info_parse</code>,
+<li><code>crates/palisade-fileid/fuzz</code>, with fifteen targets: <code>pe_parse</code>, <code>version_info_parse</code>,
 <code>authenticode_ranges</code>, <code>authenticode_pkcs7</code>, <code>fsctx_parse</code>, <code>x509_chain</code>, <code>timestamp_crl</code>,
-<code>fuzz_ctl</code>, <code>fuzz_classify</code>, <code>fuzz_msi_tables</code>, <code>legacy_parse</code>, <code>fuzz_tags</code>, <code>script_sig</code> and
-<code>fuzz_appx_manifest</code>. The project builds <code>palisade-fileid</code> with its <code>content-rules</code> feature,
-for <code>fuzz_tags</code>.</li>
+<code>fuzz_ctl</code>, <code>fuzz_classify</code>, <code>fuzz_msi_tables</code>, <code>legacy_parse</code>, <code>fuzz_tags</code>, <code>script_sig</code>,
+<code>fuzz_appx_manifest</code> and <code>identity_bytes</code>. The project builds <code>palisade-fileid</code> with its
+<code>content-rules</code> feature, for <code>fuzz_tags</code>.</li>
 <li><code>crates/palisade-proto/fuzz</code>, with one target: <code>trust_set_decode</code>.</li>
 <li><code>crates/palisade-policy/fuzz</code>, with four targets: <code>fuzz_policy_json</code> (the strict JSON reader,
 validation and the evaluator build), <code>fuzz_policy_yaml</code> (the YAML reader),
@@ -517,7 +520,7 @@ cargo llvm-cov report --html --open      # line-by-line, from the same run
 <tbody>
 <tr><td><code>palisade-policy</code></td><td><code>criterion_eval</code></td><td>One compiled criterion against an object's facts: hash, 25-value text, path wildcard, regex and version range</td></tr>
 <tr><td><code>palisade-policy</code></td><td><code>policy_eval</code></td><td>Whole-policy evaluation on the #42 reference policy (10k rules, a 100k hash set), under <code>deny_wins</code>, <code>first_match</code> and <code>specificity</code>; a decision-cache hit; loading the reference and 1M-hash policies</td></tr>
-<tr><td><code>palisade-fileid</code></td><td><code>hash_and_parse</code></td><td>Flat hashing of 1 MiB with each algorithm set, streamed hashing, PE parsing (full and metadata-only) and the Authenticode hash</td></tr>
+<tr><td><code>palisade-fileid</code></td><td><code>hash_and_parse</code></td><td>Flat hashing of 1 MiB with each algorithm set, streamed hashing, PE parsing (full and metadata-only), the Authenticode hash, and each file identity tier on a small and a 1 MiB image</td></tr>
 </tbody>
 </table>
 </div>

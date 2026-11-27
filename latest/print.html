@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-b4b19249.js";
+            window.path_to_searchindex_js = "searchindex-4ff309dc.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-de2a680a.js"></script>
@@ -5213,7 +5213,17 @@ Options:
   -V, --version      Print the version.
 </code></pre>
 <h2 id="pal"><a class="header" href="#pal"><code>pal</code></a></h2>
-<pre><code class="language-text">pal 0.1.0: not implemented yet, see https://github.com/jusso-dev/palisade/issues/15
+<pre><code class="language-text">The `pal` command-line tool for Palisade.
+
+Usage: pal &lt;COMMAND&gt;
+
+Commands:
+  fileid  Inspect file identities: hashes, signatures, version information and the masquerade assessment
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
 </code></pre>
 <hr>
 <p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/book/src/reference/generated/cli.md"><code>docs/book/src/reference/generated/cli.md</code></a> on GitHub.</small></p>
@@ -5516,7 +5526,7 @@ cargo check --workspace --all-targets --target x86_64-pc-windows-gnu
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="palisade-fileid"><a class="header" href="#palisade-fileid">palisade-fileid</a></h1>
 <p>File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes), signature and certificate chain extraction, version-info metadata, and Windows Installer and app package identity.</p>
-<p><strong>Status:</strong> early. PE header and version-resource parsing, flat hashing, the Authenticode image hash, page hashes, Authenticode signature verification, certificate chains, signer trust and signer identity, timestamps, expiry and revocation, catalog parsing, catalog signatures and the catalog member index, content-based file type detection, Windows Installer package identity and signatures, script signature blocks and signed metadata, and app package (MSIX/AppX and bundle) identity and signatures work; the rest of <a href="https://github.com/jusso-dev/palisade/issues/3">#3</a> is still to come.</p>
+<p><strong>Status:</strong> early. PE header and version-resource parsing, flat hashing, the Authenticode image hash, page hashes, Authenticode signature verification, certificate chains, signer trust and signer identity, timestamps, expiry and revocation, catalog parsing, catalog signatures and the catalog member index, content-based file type detection, Windows Installer package identity and signatures, script signature blocks and signed metadata, app package (MSIX/AppX and bundle) identity and signatures, and the unified file identity record with renamed-binary detection work; the rest of <a href="https://github.com/jusso-dev/palisade/issues/3">#3</a> is still to come.</p>
 <h2 id="what-is-here"><a class="header" href="#what-is-here">What is here</a></h2>
 <ul>
 <li>
@@ -6156,6 +6166,53 @@ checks the product fields, the PackageCode and the signature verdict
 against the OS installer API and the OS signature check.</p>
 </li>
 <li>
+<p><code>identity</code>: the unified file identity record
+(<a href="https://github.com/jusso-dev/palisade/issues/55">#55</a>).
+<code>identity::identify(path, tiers, &amp;ctx)</code> and
+<code>identity::identify_bytes(bytes, name_hint, tiers, &amp;ctx)</code> run the
+modules above over one file and fold their outputs into one
+<code>FileIdentity</code> (schema <code>fileid.v1</code>, serde JSON with stable <code>snake_case</code>
+names). The file is opened once and, when it fits in memory (512 MiB by
+default), read once, so PE metadata, digests and signatures all describe
+the same bytes.</p>
+<ul>
+<li>Tiers (<code>Tier</code>, <code>Tiers</code>): T0 stat, T1 classify, T2 hash, T3 trust, T4
+context, T5 deep. <code>FileIdentity::merge</code> folds a later tier's record
+into an earlier one of the same content.</li>
+<li>Every group is a <code>Field</code>: <code>computed</code>, <code>not_requested</code>,
+<code>not_applicable</code>, <code>unavailable</code> (with why) or <code>not_yet_supported</code> (with
+the issue numbers). <code>kind</code> is the content classification of
+<code>filetype</code> (#44). Groups other issues still deliver are in the schema
+already: <code>script</code> (#52), <code>installer</code> and <code>package</code> (#53),
+and the owner, writability, streams, reparse points, file ID, volume
+and provenance (#54).</li>
+<li><code>signing_state</code> folds the embedded signatures (#48, #49, #50) and the
+catalog lookup (#51) into <code>trusted</code>, <code>untrusted</code>, <code>invalid</code>, <code>unsigned</code>
+or <code>unverified</code>. It is <code>trusted</code> only for an embedded signature that
+passed every check, or a trusted catalog match that does not rely on
+SHA-1. It is <code>unsigned</code> only when a catalog lookup ran too; a format
+whose signatures are not read yet is <code>unverified</code>.</li>
+<li><code>hashes.authoritative</code> names the identity digest: the Authenticode
+SHA-256 of a conformant image, otherwise the flat SHA-256, <code>none</code> for
+an empty file (#47).</li>
+<li><code>strengths</code> (<code>IdentityStrength</code>: strong, medium, weak, insecure) says
+how far a rule can rely on each attribute, as <code>identity::strength</code>
+documents. A path counts as user-writable until #54 reads its ACLs.</li>
+<li><code>masquerade</code> (<code>identity::masquerade</code>) scores renamed and masquerading
+binaries from 0 to 100: <code>name_mismatch</code> (after benign differences such
+as versions, <code>_x64</code>, copy markers and the installer family),
+<code>extension_mismatch</code> (executable content of any kind behind a name
+that claims something else, from <code>filetype</code>), <code>known_binary_relocated</code> and
+<code>protected_name_claimed</code> (against the <code>ProtectedList</code> of interpreters
+and proxy-execution binaries, their folders and expected signer),
+<code>signer_impersonation</code> (protected vendors), <code>bidi_control</code>,
+<code>homoglyph</code>, <code>double_extension</code> and <code>trailing_dot_or_space</code>. A check
+without its input is listed in <code>unassessed</code>, never read as clean.</li>
+<li><code>identity::recommend</code> gives the rule level <code>pal fileid explain</code> prints;
+<code>identity::compare</code> the differences <code>pal fileid compare</code> prints.</li>
+</ul>
+</li>
+<li>
 <p><code>filetype</code>: content-based file type detection
 (<a href="https://github.com/jusso-dev/palisade/issues/44">#44</a>).
 <code>filetype::classify(&amp;mut reader, name_hint)</code> decides what a file is from
@@ -6400,7 +6457,9 @@ revoked leaf. <code>cargo xtask fixtures</code> writes the corpus to <code>targe
 and <code>write_corpus_fuzz_seeds</code> feeds it to the PE, PKCS#7 and X.509 fuzz
 targets.</p>
 <p>Fixtures are synthetic PE images built byte by byte at test time
-(<code>tests/common</code>); no PE binaries are checked in. The signature tests use
+(<code>tests/common</code>). The identity corpus signs some of them at test time
+(<code>tests/fixtures/identity/signed.rs</code>), so no signed executable of its is
+checked in; no third-party binary is. The signature tests use
 small PKCS#7 signatures in <code>tests/fixtures/authenticode</code>, made over that
 synthetic image by osslsigncode with throwaway keys from a test-only CA, plus
 one Ed25519 test certificate and one RSA-PSS signature value. The chain tests
@@ -6442,6 +6501,17 @@ the tests themselves with a key generated per run. On Windows, a test
 compares the verdicts with the OS's own. No private keys and no third-party binaries are
 committed; the <code>generate.sh</code> scripts document how every file was made and
 regenerate them.</p>
+<p>The identity corpus (<code>tests/fixtures/identity</code>, #55) is a manifest of files with their
+source, licence, generator and expected values: synthetic images built by
+<code>tests/identity_corpus.rs</code>, some of them signed at test time by a corpus
+test CA with deterministic keys (with test catalogs and a CRL), and OS
+binaries referenced by path and read only on the Windows runners. Its
+digests come from tools independent of this crate (<code>shasum</code>, osslsigncode's
+<code>extract-data</code>, openssl), and its <code>generate.sh</code> checks every signature with
+osslsigncode. On Windows,
+<code>tests/identity_os.rs</code> also compares records of OS binaries with the OS's
+own tooling (file hash, signature status and signer, version resource).
+See <a href="https://github.com/jusso-dev/palisade/blob/main/crates/palisade-fileid/tests/fixtures/identity/README.md">tests/fixtures/identity/README.md</a>.</p>
 <pre><code class="language-sh">cargo test -p palisade-fileid
 </code></pre>
 <p>The <code>properties</code> tests (proptest) feed random and mutated images to the parsers
@@ -6482,10 +6552,13 @@ cargo +nightly fuzz run fuzz_tags -- -timeout=1 -max_total_time=60
 PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/fuzz_appx_manifest" \
   cargo test -p palisade-fileid --test package -- --ignored write_package_fuzz_seeds
 cargo +nightly fuzz run fuzz_appx_manifest -- -max_total_time=60
+PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/identity_bytes" \
+  cargo test -p palisade-fileid --test identity_corpus -- --ignored write_identity_fuzz_seeds
+cargo +nightly fuzz run identity_bytes -- -dict=fuzz/pe.dict -max_total_time=60
 </code></pre>
 <p><code>benches/hash_and_parse.rs</code> (criterion) measures flat hashing, streamed
-hashing, PE parsing and the Authenticode hash over the same synthetic inputs:
-<code>cargo bench -p palisade-fileid</code>.</p>
+hashing, PE parsing, the Authenticode hash and each identity tier over the
+same synthetic inputs: <code>cargo bench -p palisade-fileid</code>.</p>
 <h2 id="allowed-dependencies-1"><a class="header" href="#allowed-dependencies-1">Allowed dependencies</a></h2>
 <p><code>palisade-core</code> (for the shared <code>VerificationError</code> table, with its <code>serde</code>
 feature), plus the RustCrypto <code>sha2</code>, <code>sha1</code> and <code>md-5</code> crates,
@@ -6513,9 +6586,10 @@ for the tagger's multi-pattern search. It is already a dependency of
 <code>palisade-policy</code> through <code>regex-automata</code>, so it adds no crate to the
 workspace.</p>
 <p>Dev-dependencies: <code>proptest</code> for the property tests, <code>criterion</code> for the
-benchmarks, and <code>rsa</code> with <code>rand_core</code> for the fixture generator
-(<code>tests/corpus/</code>): throwaway RSA test-CA keys from a seeded RNG, and their
-signatures. They are never in a shipped build.</p>
+benchmarks, <code>serde_json</code> for the serialised forms, <code>yaml-rust2</code> to read
+the identity corpus manifest, and <code>rsa</code> with <code>rand_core</code> for the fixture
+generator (<code>tests/corpus/</code>): throwaway RSA test-CA keys from a seeded RNG,
+and their signatures. They are never in a shipped build.</p>
 <h2 id="platform-support-1"><a class="header" href="#platform-support-1">Platform support</a></h2>
 <p>Portable parsing, hashing, signature verification and file-system context
 logic on all platforms. OS-backed reads live in the <code>win</code> module, compiled
@@ -7464,15 +7538,68 @@ the console events above on Windows.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="palisade-cli"><a class="header" href="#palisade-cli">palisade-cli</a></h1>
 <p>The <code>pal</code> command-line tool for policy-as-code and administration.</p>
-<p><strong>Status:</strong> skeleton. The crate compiles but has no functionality yet. Work is tracked in <a href="https://github.com/jusso-dev/palisade/issues/15">#15</a>.</p>
+<p><strong>Status:</strong> early. <code>pal fileid</code> (alias <code>pal file</code>) inspects file identities
+(<a href="https://github.com/jusso-dev/palisade/issues/55">#55</a>). The policy-as-code
+and administration commands are tracked in
+<a href="https://github.com/jusso-dev/palisade/issues/15">#15</a>.</p>
+<h2 id="commands-1"><a class="header" href="#commands-1">Commands</a></h2>
+<pre><code class="language-text">pal fileid inspect &lt;path|dir&gt; [--tiers all|t0..t5] [--json|--yaml|--table] [--recursive]
+                              [--anchor &lt;cert&gt;]... [--well-known-root ID=HASH]... [--catroot &lt;dir&gt;]
+pal fileid hash    &lt;path&gt; --alg sha256,authenticode-sha256,page-sha256,... [--json]
+pal fileid certs   &lt;path|dir|catalog&gt; [--which all|leaf|root | --leaf | --root] --out &lt;dir&gt; [--pem]
+pal fileid compare &lt;a&gt; &lt;b&gt; [--json] [--anchor &lt;cert&gt;]...
+pal fileid explain &lt;path&gt; [--json] [--anchor &lt;cert&gt;]...
+</code></pre>
+<ul>
+<li><code>inspect</code> prints the full <code>palisade_fileid::identity::FileIdentity</code>
+record (schema <code>fileid.v1</code>): one line per attribute by default, pretty
+JSON with <code>--json</code>, or YAML. For a directory it prints one record per
+file, and with <code>--json</code> one compact JSON object per line. <code>--recursive</code>
+walks subdirectories without following symbolic links.</li>
+<li><code>--tiers</code> picks the computation tiers: <code>t0</code> stat, <code>t1</code> PE headers and
+version information, <code>t2</code> hashes, <code>t3</code> signatures, chains and catalogs,
+<code>t4</code> file system context, <code>t5</code> deep content. A range (<code>t0..t3</code>) or a list
+(<code>t0,t2</code>) works too.</li>
+<li>Trust comes only from the command line. With no <code>--anchor</code>, signatures
+are checked but no signer is trusted. <code>--anchor</code> adds a trust anchor
+certificate (DER or PEM) for code signers, catalog signers and
+timestamping authorities. <code>--well-known-root</code> names an OS root by its
+TBS hash; protected binaries such as interpreters are expected to chain
+to one. <code>--catroot</code> loads every <code>*.cat</code> under a directory (such as the OS
+catalog root) and looks files up in it. Revocation is not fetched
+(offline).</li>
+<li><code>hash</code> prints only the selected digests. <code>msi-normalised</code> and
+<code>script-normalised</code> are not computed yet (#53, #52) and exit 1.</li>
+<li><code>certs</code> writes each certificate of a signed PE file, cabinet, catalog or
+other PKCS#7 file (nested signatures included) to
+<code>&lt;out&gt;/&lt;sha256 thumbprint&gt;.der</code> (or <code>.pem</code>), once each, through
+<code>palisade_fileid::authenticode::extract_certificates</code>.</li>
+<li><code>compare</code> lists the rule-relevant attributes in which two files differ,
+for example to check that an update keeps its publisher and product.</li>
+<li><code>explain</code> lists every attribute with its identity strength and
+recommends a rule level, with the reasons and the levels it refused.</li>
+</ul>
+<p>Every string from a file, in every format and in error messages, is
+printed with control and bidirectional characters escaped (<code>\uXXXX</code> in JSON
+and YAML, which parse back to the same string; <code>\u{...}</code> elsewhere), so a
+crafted name cannot rewrite the terminal.</p>
+<p>Exit codes: <code>0</code> success, <code>1</code> a file could not be read or a requested value
+is not available, <code>2</code> a bad argument.</p>
 <h2 id="allowed-dependencies-6"><a class="header" href="#allowed-dependencies-6">Allowed dependencies</a></h2>
-<p><code>palisade-core</code>, <code>palisade-fileid</code>, <code>palisade-policy</code>, <code>palisade-proto</code>. The rules are enforced by <code>cargo xtask check-deps</code>.</p>
+<p><code>palisade-core</code>, <code>palisade-fileid</code>, <code>palisade-policy</code>, <code>palisade-proto</code>. The rules are enforced by <code>cargo xtask check-deps</code>.
+Third-party: <code>clap</code> (command line), <code>serde_json</code> (JSON output) and, on
+Unix, <code>libc</code> (for <code>O_NONBLOCK</code>), all already in the workspace. YAML is written by a small emitter here, so every
+string is a double-quoted, escaped scalar; <code>yaml-rust2</code> is a dev-dependency
+that parses it back in the tests.</p>
 <h2 id="platform-support-6"><a class="header" href="#platform-support-6">Platform support</a></h2>
-<p>All platforms. Commands that talk to a local agent will be Windows only.</p>
+<p>All platforms. On Windows, <code>pal fileid</code> reads the known folders from the
+environment for the path variables and the protected binaries' expected
+locations. Commands that talk to a local agent will be Windows only.</p>
 <h2 id="feature-flags-6"><a class="header" href="#feature-flags-6">Feature flags</a></h2>
 <p>None yet.</p>
 <h2 id="stability-6"><a class="header" href="#stability-6">Stability</a></h2>
-<p>Unstable and not published. Anything may change.</p>
+<p>Unstable and not published. Anything may change. The JSON form of
+<code>inspect</code> follows the <code>fileid.v1</code> evolution rules: fields are only added.</p>
 <hr>
 <p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/crates/palisade-cli/README.md"><code>crates/palisade-cli/README.md</code></a> on GitHub.</small></p>
 <div style="break-before: page; page-break-before: always;"></div>
@@ -13558,7 +13685,10 @@ their <code>#[ignore = "..."]</code> reason.</li>
 <h3 id="fixtures"><a class="header" href="#fixtures">Fixtures</a></h3>
 <ul>
 <li>Fixtures are synthetic and built at test time where possible. <code>palisade-fileid</code> builds its PE
-images byte by byte (<code>crates/palisade-fileid/tests/common</code>), so no binaries are committed.</li>
+images byte by byte (<code>crates/palisade-fileid/tests/common</code>). The identity corpus
+(<code>crates/palisade-fileid/tests/fixtures/identity</code>) signs some of them at test time with keys
+from a deterministic RNG, so no signed executable is committed; its manifest pins their
+digests, which its <code>generate.sh</code> computes and checks with independent tools.</li>
 <li>Small committed fixtures (policy documents, PKCS#7 signatures) live in the crate's
 <code>tests/fixtures/</code>, each set with a note, or a script, that says how it was made.</li>
 <li>Never commit malware, antivirus test strings or third-party signed binaries
@@ -13710,11 +13840,11 @@ change to the command list, run <code>cargo insta test -p xtask</code> and revie
 separate cargo-fuzz workspace per crate (<code>crates/&lt;crate&gt;/fuzz/</code>), so normal builds never compile
 them, and only they need a nightly toolchain. There are three projects:</p>
 <ul>
-<li><code>crates/palisade-fileid/fuzz</code>, with fourteen targets: <code>pe_parse</code>, <code>version_info_parse</code>,
+<li><code>crates/palisade-fileid/fuzz</code>, with fifteen targets: <code>pe_parse</code>, <code>version_info_parse</code>,
 <code>authenticode_ranges</code>, <code>authenticode_pkcs7</code>, <code>fsctx_parse</code>, <code>x509_chain</code>, <code>timestamp_crl</code>,
-<code>fuzz_ctl</code>, <code>fuzz_classify</code>, <code>fuzz_msi_tables</code>, <code>legacy_parse</code>, <code>fuzz_tags</code>, <code>script_sig</code> and
-<code>fuzz_appx_manifest</code>. The project builds <code>palisade-fileid</code> with its <code>content-rules</code> feature,
-for <code>fuzz_tags</code>.</li>
+<code>fuzz_ctl</code>, <code>fuzz_classify</code>, <code>fuzz_msi_tables</code>, <code>legacy_parse</code>, <code>fuzz_tags</code>, <code>script_sig</code>,
+<code>fuzz_appx_manifest</code> and <code>identity_bytes</code>. The project builds <code>palisade-fileid</code> with its
+<code>content-rules</code> feature, for <code>fuzz_tags</code>.</li>
 <li><code>crates/palisade-proto/fuzz</code>, with one target: <code>trust_set_decode</code>.</li>
 <li><code>crates/palisade-policy/fuzz</code>, with four targets: <code>fuzz_policy_json</code> (the strict JSON reader,
 validation and the evaluator build), <code>fuzz_policy_yaml</code> (the YAML reader),
@@ -13813,7 +13943,7 @@ cargo llvm-cov report --html --open      # line-by-line, from the same run
 <tbody>
 <tr><td><code>palisade-policy</code></td><td><code>criterion_eval</code></td><td>One compiled criterion against an object's facts: hash, 25-value text, path wildcard, regex and version range</td></tr>
 <tr><td><code>palisade-policy</code></td><td><code>policy_eval</code></td><td>Whole-policy evaluation on the #42 reference policy (10k rules, a 100k hash set), under <code>deny_wins</code>, <code>first_match</code> and <code>specificity</code>; a decision-cache hit; loading the reference and 1M-hash policies</td></tr>
-<tr><td><code>palisade-fileid</code></td><td><code>hash_and_parse</code></td><td>Flat hashing of 1 MiB with each algorithm set, streamed hashing, PE parsing (full and metadata-only) and the Authenticode hash</td></tr>
+<tr><td><code>palisade-fileid</code></td><td><code>hash_and_parse</code></td><td>Flat hashing of 1 MiB with each algorithm set, streamed hashing, PE parsing (full and metadata-only), the Authenticode hash, and each file identity tier on a small and a 1 MiB image</td></tr>
 </tbody>
 </table>
 </div>

@@ -166,36 +166,37 @@
 <a href=#166 id=166 data-nosnippet>166</a><span class="kw">pub use </span>pkcs7::{MAX_CERTIFICATES, MAX_TIMESTAMPS, MAX_WARNINGS};
 <a href=#167 id=167 data-nosnippet>167</a><span class="kw">pub use </span>revocation::{
 <a href=#168 id=168 data-nosnippet>168</a>    CertRevocation, CertificateMatch, Coverage, Crl, CrlEntry, CrlError, MAX_CRL_CHECKS,
-<a href=#169 id=169 data-nosnippet>169</a>    MAX_CRL_ENTRIES, MAX_CRL_SIZE, MAX_CRLS, MAX_OCSP_RESPONSES, RevocationFailure, RevocationMode,
-<a href=#170 id=170 data-nosnippet>170</a>    RevocationReason, RevocationSet, RevocationSource, RevokedCertificate,
-<a href=#171 id=171 data-nosnippet>171</a>};
-<a href=#172 id=172 data-nosnippet>172</a><span class="kw">pub use </span>signature::{
-<a href=#173 id=173 data-nosnippet>173</a>    BadSignature, CertificateEntry, CertificateTableError, Curve, DigestAlgorithm, InvalidReason,
-<a href=#174 id=174 data-nosnippet>174</a>    KeyAlgorithm, OsCiIssue, PageHashes, ReportWarning, SignatureAlgorithm, SignatureCheck,
-<a href=#175 id=175 data-nosnippet>175</a>    SignatureError, SignatureInfo, SignatureKind, SignatureReport, SignatureStatus,
-<a href=#176 id=176 data-nosnippet>176</a>    SignatureWarning, SignedMetadata, SignerAttributes, SignerIdentifier, SigningState,
-<a href=#177 id=177 data-nosnippet>177</a>    StatementType, TimestampKind, TimestampToken, Unsupported, VerifyOptions,
-<a href=#178 id=178 data-nosnippet>178</a>};
-<a href=#179 id=179 data-nosnippet>179</a><span class="kw">pub use </span>timestamp::{
-<a href=#180 id=180 data-nosnippet>180</a>    MAX_FILE_TIMESTAMPS, MAX_TIMESTAMP_WARNINGS, MAX_TOKEN_CERTIFICATES, TimestampError,
-<a href=#181 id=181 data-nosnippet>181</a>    TimestampInfo, TimestampStatus, TimestampWarning, parse_timestamp_time, verify_timestamps,
-<a href=#182 id=182 data-nosnippet>182</a>};
-<a href=#183 id=183 data-nosnippet>183</a><span class="kw">pub use </span>trust::{
-<a href=#184 id=184 data-nosnippet>184</a>    FilePublisherOsRule, IdentityIssue, NameSource, OsRuleRoot, PackagePublisherError,
-<a href=#185 id=185 data-nosnippet>185</a>    PublisherName, PublisherOsRule, SignerIdentity, SignerTrust, TrustReport, UntrustedReason,
-<a href=#186 id=186 data-nosnippet>186</a>    VendorHint, evaluate_trust,
-<a href=#187 id=187 data-nosnippet>187</a>};
-<a href=#188 id=188 data-nosnippet>188</a><span class="kw">pub use </span>validity::{
-<a href=#189 id=189 data-nosnippet>189</a>    CertificateOptions, ChainRevocation, ErrorIgnoreFlags, ExpiryPolicy, IgnoreFlag, RelaxedCheck,
-<a href=#190 id=190 data-nosnippet>190</a>    SignatureValidity, TimeValidity, ValidityContext, ValidityPolicy, ValidityReport,
-<a href=#191 id=191 data-nosnippet>191</a>    ValidityWarning, evaluate_validity, status_error,
-<a href=#192 id=192 data-nosnippet>192</a>};
-<a href=#193 id=193 data-nosnippet>193</a><span class="kw">pub use </span>verify::{
-<a href=#194 id=194 data-nosnippet>194</a>    MAX_CERTIFICATE_ENTRIES, MAX_CERTIFICATE_TABLE_SIZE, MAX_NESTING_DEPTH, MAX_SIGNATURES,
-<a href=#195 id=195 data-nosnippet>195</a>    verify_certificate_table, verify_pe, verify_signatures,
-<a href=#196 id=196 data-nosnippet>196</a>};
-<a href=#197 id=197 data-nosnippet>197</a><span class="kw">pub use </span>x509::{
-<a href=#198 id=198 data-nosnippet>198</a>    AttributeKind, BasicConstraints, CertSummary, CertificateError, DistinguishedName, KeyUsage,
-<a href=#199 id=199 data-nosnippet>199</a>    NameAttribute,
-<a href=#200 id=200 data-nosnippet>200</a>};
+<a href=#169 id=169 data-nosnippet>169</a>    MAX_CRL_ENTRIES, MAX_CRL_SIZE, MAX_CRLS, MAX_OCSP_RESPONSES, RevocationChecker,
+<a href=#170 id=170 data-nosnippet>170</a>    RevocationFailure, RevocationMode, RevocationReason, RevocationSet, RevocationSource,
+<a href=#171 id=171 data-nosnippet>171</a>    RevokedCertificate,
+<a href=#172 id=172 data-nosnippet>172</a>};
+<a href=#173 id=173 data-nosnippet>173</a><span class="kw">pub use </span>signature::{
+<a href=#174 id=174 data-nosnippet>174</a>    BadSignature, CertificateEntry, CertificateTableError, Curve, DigestAlgorithm, InvalidReason,
+<a href=#175 id=175 data-nosnippet>175</a>    KeyAlgorithm, OsCiIssue, PageHashes, ReportWarning, SignatureAlgorithm, SignatureCheck,
+<a href=#176 id=176 data-nosnippet>176</a>    SignatureError, SignatureInfo, SignatureKind, SignatureReport, SignatureStatus,
+<a href=#177 id=177 data-nosnippet>177</a>    SignatureWarning, SignedMetadata, SignerAttributes, SignerIdentifier, SigningState,
+<a href=#178 id=178 data-nosnippet>178</a>    StatementType, TimestampKind, TimestampToken, Unsupported, VerifyOptions,
+<a href=#179 id=179 data-nosnippet>179</a>};
+<a href=#180 id=180 data-nosnippet>180</a><span class="kw">pub use </span>timestamp::{
+<a href=#181 id=181 data-nosnippet>181</a>    MAX_FILE_TIMESTAMPS, MAX_TIMESTAMP_WARNINGS, MAX_TOKEN_CERTIFICATES, TimestampError,
+<a href=#182 id=182 data-nosnippet>182</a>    TimestampInfo, TimestampStatus, TimestampWarning, parse_timestamp_time, verify_timestamps,
+<a href=#183 id=183 data-nosnippet>183</a>};
+<a href=#184 id=184 data-nosnippet>184</a><span class="kw">pub use </span>trust::{
+<a href=#185 id=185 data-nosnippet>185</a>    FilePublisherOsRule, IdentityIssue, NameSource, OsRuleRoot, PackagePublisherError,
+<a href=#186 id=186 data-nosnippet>186</a>    PublisherName, PublisherOsRule, SignerIdentity, SignerTrust, TrustReport, UntrustedReason,
+<a href=#187 id=187 data-nosnippet>187</a>    VendorHint, evaluate_trust,
+<a href=#188 id=188 data-nosnippet>188</a>};
+<a href=#189 id=189 data-nosnippet>189</a><span class="kw">pub use </span>validity::{
+<a href=#190 id=190 data-nosnippet>190</a>    CertificateOptions, ChainRevocation, ErrorIgnoreFlags, ExpiryPolicy, IgnoreFlag, RelaxedCheck,
+<a href=#191 id=191 data-nosnippet>191</a>    SignatureValidity, TimeValidity, ValidityContext, ValidityPolicy, ValidityReport,
+<a href=#192 id=192 data-nosnippet>192</a>    ValidityWarning, evaluate_validity, status_error,
+<a href=#193 id=193 data-nosnippet>193</a>};
+<a href=#194 id=194 data-nosnippet>194</a><span class="kw">pub use </span>verify::{
+<a href=#195 id=195 data-nosnippet>195</a>    MAX_CERTIFICATE_ENTRIES, MAX_CERTIFICATE_TABLE_SIZE, MAX_NESTING_DEPTH, MAX_SIGNATURES,
+<a href=#196 id=196 data-nosnippet>196</a>    verify_certificate_table, verify_pe, verify_signatures,
+<a href=#197 id=197 data-nosnippet>197</a>};
+<a href=#198 id=198 data-nosnippet>198</a><span class="kw">pub use </span>x509::{
+<a href=#199 id=199 data-nosnippet>199</a>    AttributeKind, BasicConstraints, CertSummary, CertificateError, DistinguishedName, KeyUsage,
+<a href=#200 id=200 data-nosnippet>200</a>    NameAttribute,
+<a href=#201 id=201 data-nosnippet>201</a>};
 </code></pre></div></section></main></body></html>

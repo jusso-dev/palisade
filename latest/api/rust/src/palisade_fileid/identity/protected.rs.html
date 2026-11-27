@@ -1,0 +1,268 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `crates/palisade-fileid/src/identity/protected.rs`."><title>protected.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="palisade_fileid" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">palisade_fileid/identity/</div>protected.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! The protected-binary and protected-vendor lists the masquerade
+<a href=#2 id=2 data-nosnippet>2</a>//! assessment checks against.
+<a href=#3 id=3 data-nosnippet>3</a>//!
+<a href=#4 id=4 data-nosnippet>4</a>//! Both are policy content: the server ships them in the signed, versioned
+<a href=#5 id=5 data-nosnippet>5</a>//! policy bundle (#43, #225), and the agent passes them in through
+<a href=#6 id=6 data-nosnippet>6</a>//! [`super::IdentityContext`]. [`ProtectedList::defaults`] is the built-in
+<a href=#7 id=7 data-nosnippet>7</a>//! list, used until a bundle provides one. It covers the interpreters and
+<a href=#8 id=8 data-nosnippet>8</a>//! proxy-execution binaries of the recommended user-mode blocklist, with
+<a href=#9 id=9 data-nosnippet>9</a>//! their expected locations and signer.
+<a href=#10 id=10 data-nosnippet>10</a>//!
+<a href=#11 id=11 data-nosnippet>11</a>//! An expected signer is never a name in the code. [`ExpectedSigner::OsVendor`]
+<a href=#12 id=12 data-nosnippet>12</a>//! means "a trusted signer whose chain ends at a root in the policy's
+<a href=#13 id=13 data-nosnippet>13</a>//! well-known OS root table" ([`crate::authenticode::TrustConfig`]), so the
+<a href=#14 id=14 data-nosnippet>14</a>//! defaults name no vendor. The protected-vendor list is empty by default
+<a href=#15 id=15 data-nosnippet>15</a>//! for the same reason; an organisation adds the vendors it relies on.
+<a href=#16 id=16 data-nosnippet>16</a>
+<a href=#17 id=17 data-nosnippet>17</a></span><span class="attr">#![forbid(unsafe_code)]
+<a href=#18 id=18 data-nosnippet>18</a>
+<a href=#19 id=19 data-nosnippet>19</a></span><span class="kw">use </span>serde::Serialize;
+<a href=#20 id=20 data-nosnippet>20</a>
+<a href=#21 id=21 data-nosnippet>21</a><span class="kw">use </span><span class="kw">crate</span>::fsctx::{PathVariable, fold_case};
+<a href=#22 id=22 data-nosnippet>22</a>
+<a href=#23 id=23 data-nosnippet>23</a><span class="kw">use </span><span class="kw">super</span>::record::TrustedSigner;
+<a href=#24 id=24 data-nosnippet>24</a>
+<a href=#25 id=25 data-nosnippet>25</a><span class="doccomment">/// The version of [`ProtectedList::defaults`]. Raised whenever the
+<a href=#26 id=26 data-nosnippet>26</a>/// built-in list changes.
+<a href=#27 id=27 data-nosnippet>27</a></span><span class="kw">pub const </span>DEFAULT_LIST_VERSION: u32 = <span class="number">1</span>;
+<a href=#28 id=28 data-nosnippet>28</a>
+<a href=#29 id=29 data-nosnippet>29</a><span class="doccomment">/// Who must have signed a protected binary.
+<a href=#30 id=30 data-nosnippet>30</a></span><span class="attr">#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+<a href=#31 id=31 data-nosnippet>31</a>#[serde(tag = <span class="string">"kind"</span>, content = <span class="string">"value"</span>, rename_all = <span class="string">"snake_case"</span>)]
+<a href=#32 id=32 data-nosnippet>32</a></span><span class="kw">pub enum </span>ExpectedSigner {
+<a href=#33 id=33 data-nosnippet>33</a>    <span class="doccomment">/// A trusted signer whose chain ends at a well-known OS root (the
+<a href=#34 id=34 data-nosnippet>34</a>    /// policy's well-known root table).
+<a href=#35 id=35 data-nosnippet>35</a>    </span>OsVendor,
+<a href=#36 id=36 data-nosnippet>36</a>    <span class="doccomment">/// A trusted signer whose chain reaches the trust anchor with this
+<a href=#37 id=37 data-nosnippet>37</a>    /// label.
+<a href=#38 id=38 data-nosnippet>38</a>    </span>Anchor(String),
+<a href=#39 id=39 data-nosnippet>39</a>    <span class="doccomment">/// A trusted signer with this publisher name, compared
+<a href=#40 id=40 data-nosnippet>40</a>    /// case-insensitively.
+<a href=#41 id=41 data-nosnippet>41</a>    </span>Publisher(String),
+<a href=#42 id=42 data-nosnippet>42</a>}
+<a href=#43 id=43 data-nosnippet>43</a>
+<a href=#44 id=44 data-nosnippet>44</a><span class="kw">impl </span>ExpectedSigner {
+<a href=#45 id=45 data-nosnippet>45</a>    <span class="doccomment">/// Whether `trust` holds what [`Self::matches`] needs: the well-known
+<a href=#46 id=46 data-nosnippet>46</a>    /// root table for [`Self::OsVendor`], the named anchor for
+<a href=#47 id=47 data-nosnippet>47</a>    /// [`Self::Anchor`]. Without it, a trusted signer cannot be told apart
+<a href=#48 id=48 data-nosnippet>48</a>    /// from the expected one.
+<a href=#49 id=49 data-nosnippet>49</a>    </span><span class="attr">#[must_use]
+<a href=#50 id=50 data-nosnippet>50</a>    </span><span class="kw">pub fn </span>checkable(<span class="kw-2">&amp;</span><span class="self">self</span>, trust: <span class="kw-2">&amp;</span><span class="kw">crate</span>::authenticode::TrustConfig) -&gt; bool {
+<a href=#51 id=51 data-nosnippet>51</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#52 id=52 data-nosnippet>52</a>            <span class="self">Self</span>::OsVendor =&gt; !trust.well_known_roots().is_empty(),
+<a href=#53 id=53 data-nosnippet>53</a>            <span class="self">Self</span>::Anchor(label) =&gt; trust.anchors().iter().any(|a| <span class="kw-2">&amp;</span>a.label == label),
+<a href=#54 id=54 data-nosnippet>54</a>            <span class="self">Self</span>::Publisher(<span class="kw">_</span>) =&gt; <span class="bool-val">true</span>,
+<a href=#55 id=55 data-nosnippet>55</a>        }
+<a href=#56 id=56 data-nosnippet>56</a>    }
+<a href=#57 id=57 data-nosnippet>57</a>
+<a href=#58 id=58 data-nosnippet>58</a>    <span class="doccomment">/// Whether `signer`, a trusted signer of the file, is this one.
+<a href=#59 id=59 data-nosnippet>59</a>    </span><span class="attr">#[must_use]
+<a href=#60 id=60 data-nosnippet>60</a>    </span><span class="kw">pub fn </span>matches(<span class="kw-2">&amp;</span><span class="self">self</span>, signer: <span class="kw-2">&amp;</span>TrustedSigner) -&gt; bool {
+<a href=#61 id=61 data-nosnippet>61</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#62 id=62 data-nosnippet>62</a>            <span class="self">Self</span>::OsVendor =&gt; signer.well_known_root_id.is_some(),
+<a href=#63 id=63 data-nosnippet>63</a>            <span class="self">Self</span>::Anchor(label) =&gt; signer.anchored_to.as_deref() == <span class="prelude-val">Some</span>(label.as_str()),
+<a href=#64 id=64 data-nosnippet>64</a>            <span class="self">Self</span>::Publisher(name) =&gt; signer
+<a href=#65 id=65 data-nosnippet>65</a>                .publisher_name
+<a href=#66 id=66 data-nosnippet>66</a>                .as_deref()
+<a href=#67 id=67 data-nosnippet>67</a>                .is_some_and(|p| fold_case(p.trim()) == fold_case(name.trim())),
+<a href=#68 id=68 data-nosnippet>68</a>        }
+<a href=#69 id=69 data-nosnippet>69</a>    }
+<a href=#70 id=70 data-nosnippet>70</a>}
+<a href=#71 id=71 data-nosnippet>71</a>
+<a href=#72 id=72 data-nosnippet>72</a><span class="doccomment">/// A folder a protected binary is expected in: a path variable and the
+<a href=#73 id=73 data-nosnippet>73</a>/// components below it.
+<a href=#74 id=74 data-nosnippet>74</a></span><span class="attr">#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+<a href=#75 id=75 data-nosnippet>75</a></span><span class="kw">pub struct </span>ExpectedDir {
+<a href=#76 id=76 data-nosnippet>76</a>    <span class="doccomment">/// The known folder, serialised as its token (`%SYSTEM32%`).
+<a href=#77 id=77 data-nosnippet>77</a>    </span><span class="attr">#[serde(serialize_with = <span class="string">"serialize_variable"</span>)]
+<a href=#78 id=78 data-nosnippet>78</a>    </span><span class="kw">pub </span>variable: PathVariable,
+<a href=#79 id=79 data-nosnippet>79</a>    <span class="doccomment">/// The folders below it, in order (empty for the folder itself).
+<a href=#80 id=80 data-nosnippet>80</a>    </span><span class="kw">pub </span>below: Vec&lt;String&gt;,
+<a href=#81 id=81 data-nosnippet>81</a>}
+<a href=#82 id=82 data-nosnippet>82</a>
+<a href=#83 id=83 data-nosnippet>83</a><span class="kw">fn </span>serialize_variable&lt;S: serde::Serializer&gt;(v: <span class="kw-2">&amp;</span>PathVariable, s: S) -&gt; <span class="prelude-ty">Result</span>&lt;S::Ok, S::Error&gt; {
+<a href=#84 id=84 data-nosnippet>84</a>    s.serialize_str(v.token())
+<a href=#85 id=85 data-nosnippet>85</a>}
+<a href=#86 id=86 data-nosnippet>86</a>
+<a href=#87 id=87 data-nosnippet>87</a><span class="kw">impl </span>ExpectedDir {
+<a href=#88 id=88 data-nosnippet>88</a>    <span class="kw">fn </span>new(variable: PathVariable, below: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span>str]) -&gt; <span class="self">Self </span>{
+<a href=#89 id=89 data-nosnippet>89</a>        <span class="self">Self </span>{
+<a href=#90 id=90 data-nosnippet>90</a>            variable,
+<a href=#91 id=91 data-nosnippet>91</a>            below: below.iter().map(|s| (<span class="kw-2">*</span>s).to_owned()).collect(),
+<a href=#92 id=92 data-nosnippet>92</a>        }
+<a href=#93 id=93 data-nosnippet>93</a>    }
+<a href=#94 id=94 data-nosnippet>94</a>}
+<a href=#95 id=95 data-nosnippet>95</a>
+<a href=#96 id=96 data-nosnippet>96</a><span class="doccomment">/// One protected binary.
+<a href=#97 id=97 data-nosnippet>97</a></span><span class="attr">#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+<a href=#98 id=98 data-nosnippet>98</a></span><span class="kw">pub struct </span>ProtectedBinary {
+<a href=#99 id=99 data-nosnippet>99</a>    <span class="doccomment">/// The `OriginalFilename` values it carries, compared
+<a href=#100 id=100 data-nosnippet>100</a>    /// case-insensitively, with any `.mui` suffix dropped.
+<a href=#101 id=101 data-nosnippet>101</a>    </span><span class="kw">pub </span>original_names: Vec&lt;String&gt;,
+<a href=#102 id=102 data-nosnippet>102</a>    <span class="doccomment">/// The on-disk names it is installed under. Any other name is a
+<a href=#103 id=103 data-nosnippet>103</a>    /// rename.
+<a href=#104 id=104 data-nosnippet>104</a>    </span><span class="kw">pub </span>file_names: Vec&lt;String&gt;,
+<a href=#105 id=105 data-nosnippet>105</a>    <span class="doccomment">/// The folders it is installed in. Empty means its location is not
+<a href=#106 id=106 data-nosnippet>106</a>    /// checked.
+<a href=#107 id=107 data-nosnippet>107</a>    </span><span class="kw">pub </span>expected_dirs: Vec&lt;ExpectedDir&gt;,
+<a href=#108 id=108 data-nosnippet>108</a>    <span class="doccomment">/// Who signs it.
+<a href=#109 id=109 data-nosnippet>109</a>    </span><span class="kw">pub </span>signer: ExpectedSigner,
+<a href=#110 id=110 data-nosnippet>110</a>}
+<a href=#111 id=111 data-nosnippet>111</a>
+<a href=#112 id=112 data-nosnippet>112</a><span class="doccomment">/// A vendor whose name in a version resource must be backed by its
+<a href=#113 id=113 data-nosnippet>113</a>/// signature.
+<a href=#114 id=114 data-nosnippet>114</a></span><span class="attr">#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+<a href=#115 id=115 data-nosnippet>115</a></span><span class="kw">pub struct </span>ProtectedVendor {
+<a href=#116 id=116 data-nosnippet>116</a>    <span class="doccomment">/// The names it appears under in `CompanyName` and `ProductName`.
+<a href=#117 id=117 data-nosnippet>117</a>    </span><span class="kw">pub </span>names: Vec&lt;String&gt;,
+<a href=#118 id=118 data-nosnippet>118</a>    <span class="doccomment">/// Who signs its files.
+<a href=#119 id=119 data-nosnippet>119</a>    </span><span class="kw">pub </span>signer: ExpectedSigner,
+<a href=#120 id=120 data-nosnippet>120</a>}
+<a href=#121 id=121 data-nosnippet>121</a>
+<a href=#122 id=122 data-nosnippet>122</a><span class="doccomment">/// The protected-binary and protected-vendor lists.
+<a href=#123 id=123 data-nosnippet>123</a></span><span class="attr">#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+<a href=#124 id=124 data-nosnippet>124</a></span><span class="kw">pub struct </span>ProtectedList {
+<a href=#125 id=125 data-nosnippet>125</a>    <span class="doccomment">/// The list's version, from the policy bundle.
+<a href=#126 id=126 data-nosnippet>126</a>    </span><span class="kw">pub </span>version: u32,
+<a href=#127 id=127 data-nosnippet>127</a>    <span class="doccomment">/// The protected binaries.
+<a href=#128 id=128 data-nosnippet>128</a>    </span><span class="kw">pub </span>binaries: Vec&lt;ProtectedBinary&gt;,
+<a href=#129 id=129 data-nosnippet>129</a>    <span class="doccomment">/// The protected vendors.
+<a href=#130 id=130 data-nosnippet>130</a>    </span><span class="kw">pub </span>vendors: Vec&lt;ProtectedVendor&gt;,
+<a href=#131 id=131 data-nosnippet>131</a>}
+<a href=#132 id=132 data-nosnippet>132</a>
+<a href=#133 id=133 data-nosnippet>133</a><span class="kw">impl </span>Default <span class="kw">for </span>ProtectedList {
+<a href=#134 id=134 data-nosnippet>134</a>    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
+<a href=#135 id=135 data-nosnippet>135</a>        <span class="self">Self</span>::defaults()
+<a href=#136 id=136 data-nosnippet>136</a>    }
+<a href=#137 id=137 data-nosnippet>137</a>}
+<a href=#138 id=138 data-nosnippet>138</a>
+<a href=#139 id=139 data-nosnippet>139</a><span class="kw">impl </span>ProtectedList {
+<a href=#140 id=140 data-nosnippet>140</a>    <span class="doccomment">/// An empty list: nothing is protected.
+<a href=#141 id=141 data-nosnippet>141</a>    </span><span class="attr">#[must_use]
+<a href=#142 id=142 data-nosnippet>142</a>    </span><span class="kw">pub const fn </span>empty() -&gt; <span class="self">Self </span>{
+<a href=#143 id=143 data-nosnippet>143</a>        <span class="self">Self </span>{
+<a href=#144 id=144 data-nosnippet>144</a>            version: <span class="number">0</span>,
+<a href=#145 id=145 data-nosnippet>145</a>            binaries: Vec::new(),
+<a href=#146 id=146 data-nosnippet>146</a>            vendors: Vec::new(),
+<a href=#147 id=147 data-nosnippet>147</a>        }
+<a href=#148 id=148 data-nosnippet>148</a>    }
+<a href=#149 id=149 data-nosnippet>149</a>
+<a href=#150 id=150 data-nosnippet>150</a>    <span class="doccomment">/// The built-in list (version [`DEFAULT_LIST_VERSION`]).
+<a href=#151 id=151 data-nosnippet>151</a>    ///
+<a href=#152 id=152 data-nosnippet>152</a>    /// Every binary here is an OS component signed by the OS vendor. The
+<a href=#153 id=153 data-nosnippet>153</a>    /// .NET Framework tools (`msbuild`, `installutil`, `regasm`,
+<a href=#154 id=154 data-nosnippet>154</a>    /// `regsvcs`) are installed under versioned folders, so only their
+<a href=#155 id=155 data-nosnippet>155</a>    /// names are checked; policy content can add their folders.
+<a href=#156 id=156 data-nosnippet>156</a>    </span><span class="attr">#[must_use]
+<a href=#157 id=157 data-nosnippet>157</a>    </span><span class="kw">pub fn </span>defaults() -&gt; <span class="self">Self </span>{
+<a href=#158 id=158 data-nosnippet>158</a>        <span class="kw">use </span>PathVariable::{ProgramFiles, System32, WinDir};
+<a href=#159 id=159 data-nosnippet>159</a>        <span class="kw">let </span>os = |names: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span>str], dirs: Vec&lt;ExpectedDir&gt;| {
+<a href=#160 id=160 data-nosnippet>160</a>            <span class="kw">let </span>file_names: Vec&lt;String&gt; = names.iter().map(|s| (<span class="kw-2">*</span>s).to_owned()).collect();
+<a href=#161 id=161 data-nosnippet>161</a>            ProtectedBinary {
+<a href=#162 id=162 data-nosnippet>162</a>                original_names: file_names.clone(),
+<a href=#163 id=163 data-nosnippet>163</a>                file_names,
+<a href=#164 id=164 data-nosnippet>164</a>                expected_dirs: dirs,
+<a href=#165 id=165 data-nosnippet>165</a>                signer: ExpectedSigner::OsVendor,
+<a href=#166 id=166 data-nosnippet>166</a>            }
+<a href=#167 id=167 data-nosnippet>167</a>        };
+<a href=#168 id=168 data-nosnippet>168</a>        <span class="kw">let </span>sys32 = || <span class="macro">vec!</span>[ExpectedDir::new(System32, <span class="kw-2">&amp;</span>[])];
+<a href=#169 id=169 data-nosnippet>169</a>        <span class="kw">let </span><span class="kw-2">mut </span>binaries = <span class="macro">vec!</span>[
+<a href=#170 id=170 data-nosnippet>170</a>            os(
+<a href=#171 id=171 data-nosnippet>171</a>                <span class="kw-2">&amp;</span>[<span class="string">"powershell.exe"</span>],
+<a href=#172 id=172 data-nosnippet>172</a>                <span class="macro">vec!</span>[ExpectedDir::new(System32, <span class="kw-2">&amp;</span>[<span class="string">"WindowsPowerShell"</span>, <span class="string">"v1.0"</span>])],
+<a href=#173 id=173 data-nosnippet>173</a>            ),
+<a href=#174 id=174 data-nosnippet>174</a>            os(
+<a href=#175 id=175 data-nosnippet>175</a>                <span class="kw-2">&amp;</span>[<span class="string">"powershell_ise.exe"</span>],
+<a href=#176 id=176 data-nosnippet>176</a>                <span class="macro">vec!</span>[ExpectedDir::new(System32, <span class="kw-2">&amp;</span>[<span class="string">"WindowsPowerShell"</span>, <span class="string">"v1.0"</span>])],
+<a href=#177 id=177 data-nosnippet>177</a>            ),
+<a href=#178 id=178 data-nosnippet>178</a>            os(<span class="kw-2">&amp;</span>[<span class="string">"cmd.exe"</span>], sys32()),
+<a href=#179 id=179 data-nosnippet>179</a>            os(<span class="kw-2">&amp;</span>[<span class="string">"cscript.exe"</span>], sys32()),
+<a href=#180 id=180 data-nosnippet>180</a>            os(<span class="kw-2">&amp;</span>[<span class="string">"wscript.exe"</span>], sys32()),
+<a href=#181 id=181 data-nosnippet>181</a>            os(<span class="kw-2">&amp;</span>[<span class="string">"mshta.exe"</span>], sys32()),
+<a href=#182 id=182 data-nosnippet>182</a>            os(<span class="kw-2">&amp;</span>[<span class="string">"rundll32.exe"</span>], sys32()),
+<a href=#183 id=183 data-nosnippet>183</a>            os(<span class="kw-2">&amp;</span>[<span class="string">"regsvr32.exe"</span>], sys32()),
+<a href=#184 id=184 data-nosnippet>184</a>            os(<span class="kw-2">&amp;</span>[<span class="string">"certutil.exe"</span>], sys32()),
+<a href=#185 id=185 data-nosnippet>185</a>            os(<span class="kw-2">&amp;</span>[<span class="string">"bitsadmin.exe"</span>], sys32()),
+<a href=#186 id=186 data-nosnippet>186</a>            os(<span class="kw-2">&amp;</span>[<span class="string">"cmstp.exe"</span>], sys32()),
+<a href=#187 id=187 data-nosnippet>187</a>            os(<span class="kw-2">&amp;</span>[<span class="string">"odbcconf.exe"</span>], sys32()),
+<a href=#188 id=188 data-nosnippet>188</a>            os(<span class="kw-2">&amp;</span>[<span class="string">"forfiles.exe"</span>], sys32()),
+<a href=#189 id=189 data-nosnippet>189</a>            os(<span class="kw-2">&amp;</span>[<span class="string">"wmic.exe"</span>], <span class="macro">vec!</span>[ExpectedDir::new(System32, <span class="kw-2">&amp;</span>[<span class="string">"wbem"</span>])]),
+<a href=#190 id=190 data-nosnippet>190</a>            os(<span class="kw-2">&amp;</span>[<span class="string">"hh.exe"</span>], <span class="macro">vec!</span>[ExpectedDir::new(WinDir, <span class="kw-2">&amp;</span>[])]),
+<a href=#191 id=191 data-nosnippet>191</a>            os(<span class="kw-2">&amp;</span>[<span class="string">"msbuild.exe"</span>], Vec::new()),
+<a href=#192 id=192 data-nosnippet>192</a>            os(<span class="kw-2">&amp;</span>[<span class="string">"installutil.exe"</span>], Vec::new()),
+<a href=#193 id=193 data-nosnippet>193</a>            os(<span class="kw-2">&amp;</span>[<span class="string">"regasm.exe"</span>], Vec::new()),
+<a href=#194 id=194 data-nosnippet>194</a>            os(<span class="kw-2">&amp;</span>[<span class="string">"regsvcs.exe"</span>], Vec::new()),
+<a href=#195 id=195 data-nosnippet>195</a>        ];
+<a href=#196 id=196 data-nosnippet>196</a>        <span class="comment">// PowerShell 7 is installed separately; its `OriginalFilename` is
+<a href=#197 id=197 data-nosnippet>197</a>        // that of the managed entry point.
+<a href=#198 id=198 data-nosnippet>198</a>        </span>binaries.push(ProtectedBinary {
+<a href=#199 id=199 data-nosnippet>199</a>            original_names: <span class="macro">vec!</span>[<span class="string">"pwsh.dll"</span>.to_owned(), <span class="string">"pwsh.exe"</span>.to_owned()],
+<a href=#200 id=200 data-nosnippet>200</a>            file_names: <span class="macro">vec!</span>[<span class="string">"pwsh.exe"</span>.to_owned()],
+<a href=#201 id=201 data-nosnippet>201</a>            expected_dirs: <span class="macro">vec!</span>[ExpectedDir::new(ProgramFiles, <span class="kw-2">&amp;</span>[<span class="string">"PowerShell"</span>, <span class="string">"7"</span>])],
+<a href=#202 id=202 data-nosnippet>202</a>            signer: ExpectedSigner::OsVendor,
+<a href=#203 id=203 data-nosnippet>203</a>        });
+<a href=#204 id=204 data-nosnippet>204</a>        <span class="self">Self </span>{
+<a href=#205 id=205 data-nosnippet>205</a>            version: DEFAULT_LIST_VERSION,
+<a href=#206 id=206 data-nosnippet>206</a>            binaries,
+<a href=#207 id=207 data-nosnippet>207</a>            vendors: Vec::new(),
+<a href=#208 id=208 data-nosnippet>208</a>        }
+<a href=#209 id=209 data-nosnippet>209</a>    }
+<a href=#210 id=210 data-nosnippet>210</a>
+<a href=#211 id=211 data-nosnippet>211</a>    <span class="doccomment">/// The protected binaries whose original names include `original`
+<a href=#212 id=212 data-nosnippet>212</a>    /// (compared case-insensitively, with a `.mui` suffix dropped).
+<a href=#213 id=213 data-nosnippet>213</a>    </span><span class="kw">pub fn </span>binaries_named&lt;<span class="lifetime">'a</span>&gt;(
+<a href=#214 id=214 data-nosnippet>214</a>        <span class="kw-2">&amp;</span><span class="lifetime">'a </span><span class="self">self</span>,
+<a href=#215 id=215 data-nosnippet>215</a>        original: <span class="kw-2">&amp;</span>str,
+<a href=#216 id=216 data-nosnippet>216</a>    ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">'a </span>ProtectedBinary&gt; + <span class="lifetime">'a </span>{
+<a href=#217 id=217 data-nosnippet>217</a>        <span class="kw">let </span>key = original_name_key(original);
+<a href=#218 id=218 data-nosnippet>218</a>        <span class="self">self</span>.binaries
+<a href=#219 id=219 data-nosnippet>219</a>            .iter()
+<a href=#220 id=220 data-nosnippet>220</a>            .filter(<span class="kw">move </span>|b| b.original_names.iter().any(|n| original_name_key(n) == key))
+<a href=#221 id=221 data-nosnippet>221</a>    }
+<a href=#222 id=222 data-nosnippet>222</a>}
+<a href=#223 id=223 data-nosnippet>223</a>
+<a href=#224 id=224 data-nosnippet>224</a><span class="doccomment">/// An `OriginalFilename` for comparison: trimmed, case-folded, with a
+<a href=#225 id=225 data-nosnippet>225</a>/// trailing `.mui` (the resource-only satellite's name) dropped.
+<a href=#226 id=226 data-nosnippet>226</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>original_name_key(name: <span class="kw-2">&amp;</span>str) -&gt; String {
+<a href=#227 id=227 data-nosnippet>227</a>    <span class="kw">let </span>folded = fold_case(name.trim());
+<a href=#228 id=228 data-nosnippet>228</a>    folded
+<a href=#229 id=229 data-nosnippet>229</a>        .strip_suffix(<span class="string">".MUI"</span>)
+<a href=#230 id=230 data-nosnippet>230</a>        .map(str::to_owned)
+<a href=#231 id=231 data-nosnippet>231</a>        .unwrap_or(folded)
+<a href=#232 id=232 data-nosnippet>232</a>}
+<a href=#233 id=233 data-nosnippet>233</a>
+<a href=#234 id=234 data-nosnippet>234</a><span class="attr">#[cfg(test)]
+<a href=#235 id=235 data-nosnippet>235</a></span><span class="kw">mod </span>tests {
+<a href=#236 id=236 data-nosnippet>236</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#237 id=237 data-nosnippet>237</a>
+<a href=#238 id=238 data-nosnippet>238</a>    <span class="attr">#[test]
+<a href=#239 id=239 data-nosnippet>239</a>    </span><span class="kw">fn </span>defaults_cover_the_blocklist_interpreters() {
+<a href=#240 id=240 data-nosnippet>240</a>        <span class="kw">let </span>list = ProtectedList::defaults();
+<a href=#241 id=241 data-nosnippet>241</a>        <span class="kw">for </span>name <span class="kw">in </span>[
+<a href=#242 id=242 data-nosnippet>242</a>            <span class="string">"PowerShell.EXE"</span>,
+<a href=#243 id=243 data-nosnippet>243</a>            <span class="string">"pwsh.dll"</span>,
+<a href=#244 id=244 data-nosnippet>244</a>            <span class="string">"Cmd.Exe"</span>,
+<a href=#245 id=245 data-nosnippet>245</a>            <span class="string">"cscript.exe"</span>,
+<a href=#246 id=246 data-nosnippet>246</a>            <span class="string">"wscript.exe"</span>,
+<a href=#247 id=247 data-nosnippet>247</a>            <span class="string">"MSHTA.EXE"</span>,
+<a href=#248 id=248 data-nosnippet>248</a>            <span class="string">"RUNDLL32.EXE"</span>,
+<a href=#249 id=249 data-nosnippet>249</a>            <span class="string">"REGSVR32.EXE"</span>,
+<a href=#250 id=250 data-nosnippet>250</a>            <span class="string">"MSBuild.exe"</span>,
+<a href=#251 id=251 data-nosnippet>251</a>            <span class="string">"InstallUtil.exe"</span>,
+<a href=#252 id=252 data-nosnippet>252</a>            <span class="string">"CertUtil.exe"</span>,
+<a href=#253 id=253 data-nosnippet>253</a>            <span class="string">"bitsadmin.exe"</span>,
+<a href=#254 id=254 data-nosnippet>254</a>            <span class="string">"wmic.exe"</span>,
+<a href=#255 id=255 data-nosnippet>255</a>            <span class="string">"powershell.exe.mui"</span>,
+<a href=#256 id=256 data-nosnippet>256</a>        ] {
+<a href=#257 id=257 data-nosnippet>257</a>            <span class="macro">assert_eq!</span>(list.binaries_named(name).count(), <span class="number">1</span>, <span class="string">"{name}"</span>);
+<a href=#258 id=258 data-nosnippet>258</a>        }
+<a href=#259 id=259 data-nosnippet>259</a>        <span class="macro">assert_eq!</span>(list.binaries_named(<span class="string">"notepad.exe"</span>).count(), <span class="number">0</span>);
+<a href=#260 id=260 data-nosnippet>260</a>        <span class="macro">assert!</span>(list.vendors.is_empty());
+<a href=#261 id=261 data-nosnippet>261</a>        <span class="macro">assert!</span>(
+<a href=#262 id=262 data-nosnippet>262</a>            list.binaries
+<a href=#263 id=263 data-nosnippet>263</a>                .iter()
+<a href=#264 id=264 data-nosnippet>264</a>                .all(|b| b.signer == ExpectedSigner::OsVendor)
+<a href=#265 id=265 data-nosnippet>265</a>        );
+<a href=#266 id=266 data-nosnippet>266</a>    }
+<a href=#267 id=267 data-nosnippet>267</a>}
+</code></pre></div></section></main></body></html>

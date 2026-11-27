@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["IdentityStrength"],"fn":["classify"],"struct":["AttributeStrength"]};

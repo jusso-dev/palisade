@@ -36,7 +36,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-b4b19249.js";
+            window.path_to_searchindex_js = "../../searchindex-4ff309dc.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-de2a680a.js"></script>
@@ -187,15 +187,68 @@
                     <main>
                         <h1 id="palisade-cli"><a class="header" href="#palisade-cli">palisade-cli</a></h1>
 <p>The <code>pal</code> command-line tool for policy-as-code and administration.</p>
-<p><strong>Status:</strong> skeleton. The crate compiles but has no functionality yet. Work is tracked in <a href="https://github.com/jusso-dev/palisade/issues/15">#15</a>.</p>
+<p><strong>Status:</strong> early. <code>pal fileid</code> (alias <code>pal file</code>) inspects file identities
+(<a href="https://github.com/jusso-dev/palisade/issues/55">#55</a>). The policy-as-code
+and administration commands are tracked in
+<a href="https://github.com/jusso-dev/palisade/issues/15">#15</a>.</p>
+<h2 id="commands"><a class="header" href="#commands">Commands</a></h2>
+<pre><code class="language-text">pal fileid inspect &lt;path|dir&gt; [--tiers all|t0..t5] [--json|--yaml|--table] [--recursive]
+                              [--anchor &lt;cert&gt;]... [--well-known-root ID=HASH]... [--catroot &lt;dir&gt;]
+pal fileid hash    &lt;path&gt; --alg sha256,authenticode-sha256,page-sha256,... [--json]
+pal fileid certs   &lt;path|dir|catalog&gt; [--which all|leaf|root | --leaf | --root] --out &lt;dir&gt; [--pem]
+pal fileid compare &lt;a&gt; &lt;b&gt; [--json] [--anchor &lt;cert&gt;]...
+pal fileid explain &lt;path&gt; [--json] [--anchor &lt;cert&gt;]...
+</code></pre>
+<ul>
+<li><code>inspect</code> prints the full <code>palisade_fileid::identity::FileIdentity</code>
+record (schema <code>fileid.v1</code>): one line per attribute by default, pretty
+JSON with <code>--json</code>, or YAML. For a directory it prints one record per
+file, and with <code>--json</code> one compact JSON object per line. <code>--recursive</code>
+walks subdirectories without following symbolic links.</li>
+<li><code>--tiers</code> picks the computation tiers: <code>t0</code> stat, <code>t1</code> PE headers and
+version information, <code>t2</code> hashes, <code>t3</code> signatures, chains and catalogs,
+<code>t4</code> file system context, <code>t5</code> deep content. A range (<code>t0..t3</code>) or a list
+(<code>t0,t2</code>) works too.</li>
+<li>Trust comes only from the command line. With no <code>--anchor</code>, signatures
+are checked but no signer is trusted. <code>--anchor</code> adds a trust anchor
+certificate (DER or PEM) for code signers, catalog signers and
+timestamping authorities. <code>--well-known-root</code> names an OS root by its
+TBS hash; protected binaries such as interpreters are expected to chain
+to one. <code>--catroot</code> loads every <code>*.cat</code> under a directory (such as the OS
+catalog root) and looks files up in it. Revocation is not fetched
+(offline).</li>
+<li><code>hash</code> prints only the selected digests. <code>msi-normalised</code> and
+<code>script-normalised</code> are not computed yet (#53, #52) and exit 1.</li>
+<li><code>certs</code> writes each certificate of a signed PE file, cabinet, catalog or
+other PKCS#7 file (nested signatures included) to
+<code>&lt;out&gt;/&lt;sha256 thumbprint&gt;.der</code> (or <code>.pem</code>), once each, through
+<code>palisade_fileid::authenticode::extract_certificates</code>.</li>
+<li><code>compare</code> lists the rule-relevant attributes in which two files differ,
+for example to check that an update keeps its publisher and product.</li>
+<li><code>explain</code> lists every attribute with its identity strength and
+recommends a rule level, with the reasons and the levels it refused.</li>
+</ul>
+<p>Every string from a file, in every format and in error messages, is
+printed with control and bidirectional characters escaped (<code>\uXXXX</code> in JSON
+and YAML, which parse back to the same string; <code>\u{...}</code> elsewhere), so a
+crafted name cannot rewrite the terminal.</p>
+<p>Exit codes: <code>0</code> success, <code>1</code> a file could not be read or a requested value
+is not available, <code>2</code> a bad argument.</p>
 <h2 id="allowed-dependencies"><a class="header" href="#allowed-dependencies">Allowed dependencies</a></h2>
-<p><code>palisade-core</code>, <code>palisade-fileid</code>, <code>palisade-policy</code>, <code>palisade-proto</code>. The rules are enforced by <code>cargo xtask check-deps</code>.</p>
+<p><code>palisade-core</code>, <code>palisade-fileid</code>, <code>palisade-policy</code>, <code>palisade-proto</code>. The rules are enforced by <code>cargo xtask check-deps</code>.
+Third-party: <code>clap</code> (command line), <code>serde_json</code> (JSON output) and, on
+Unix, <code>libc</code> (for <code>O_NONBLOCK</code>), all already in the workspace. YAML is written by a small emitter here, so every
+string is a double-quoted, escaped scalar; <code>yaml-rust2</code> is a dev-dependency
+that parses it back in the tests.</p>
 <h2 id="platform-support"><a class="header" href="#platform-support">Platform support</a></h2>
-<p>All platforms. Commands that talk to a local agent will be Windows only.</p>
+<p>All platforms. On Windows, <code>pal fileid</code> reads the known folders from the
+environment for the path variables and the protected binaries' expected
+locations. Commands that talk to a local agent will be Windows only.</p>
 <h2 id="feature-flags"><a class="header" href="#feature-flags">Feature flags</a></h2>
 <p>None yet.</p>
 <h2 id="stability"><a class="header" href="#stability">Stability</a></h2>
-<p>Unstable and not published. Anything may change.</p>
+<p>Unstable and not published. Anything may change. The JSON form of
+<code>inspect</code> follows the <code>fileid.v1</code> evolution rules: fields are only added.</p>
 <hr>
 <p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/crates/palisade-cli/README.md"><code>crates/palisade-cli/README.md</code></a> on GitHub.</small></p>
 
