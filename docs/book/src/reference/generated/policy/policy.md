@@ -24,5 +24,6 @@ Appears at: `/policy`.
 | `rule_sets` | array of [`RuleSetId`](types.md#rulesetid) | no |  | at most 1000 items | 1.0.0 | The rule sets that apply, in order, by ID. |
 | `scope` | [`Scope`](scope.md) | no |  |  | 1.0.0 | Who, where and when the whole policy applies (#38). Every rule must also be in this scope. |
 | `settings` | [`PolicySettings`](policy-settings.md) | no | `{"allow_unknown_advanced":false,"capture_command_line":false,"decision_cache_ttl_secs":300,"dll_control":"enforce","driver_control":"enforce","group_cache_max_age_secs":86400,"max_ancestor_depth":8,"poll_interval_secs":900,"script_control":"enforce","time_zone_basis":"device_local"}` |  | 1.0.0 | Typed settings. Every field has a documented default. |
+| `unknown` | [`UnknownPolicy`](unknown-policy.md) | no |  |  | 1.0.0 | What happens when no rule decides (#39). The default blocks every unknown object. |
 
 Unknown fields are rejected.

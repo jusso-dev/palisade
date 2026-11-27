@@ -4,7 +4,7 @@
 
 The effect flags of one rule. Unset fields take the action's default.
 
-Appears at: `/rule_sets/rules/effects`.
+Appears at: `/policy/unknown/effects`, `/rule_sets/rules/effects`.
 
 ## Fields
 

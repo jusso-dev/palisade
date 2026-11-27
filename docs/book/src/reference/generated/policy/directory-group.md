@@ -4,7 +4,7 @@
 
 A directory group.
 
-Appears at: `/policy/rule_set_scopes/scopes/principals/exclude/directory_group`, `/policy/rule_set_scopes/scopes/principals/include/directory_group`, `/policy/scope/principals/exclude/directory_group`, `/policy/scope/principals/include/directory_group`, `/rule_sets/rules/scope/principals/exclude/directory_group`, `/rule_sets/rules/scope/principals/include/directory_group`.
+Appears at: `/policy/rule_set_scopes/scopes/principals/exclude/directory_group`, `/policy/rule_set_scopes/scopes/principals/include/directory_group`, `/policy/scope/principals/exclude/directory_group`, `/policy/scope/principals/include/directory_group`, `/policy/unknown/scope_groups/all_of/principals/exclude/directory_group`, `/policy/unknown/scope_groups/all_of/principals/include/directory_group`, and more.
 
 ## Fields
 

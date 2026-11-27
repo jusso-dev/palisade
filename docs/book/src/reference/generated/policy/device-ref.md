@@ -4,7 +4,7 @@
 
 A device or group of devices (#38).
 
-Appears at: `/policy/rule_set_scopes/scopes/devices/exclude`, `/policy/rule_set_scopes/scopes/devices/include`, `/policy/scope/devices/exclude`, `/policy/scope/devices/include`, `/rule_sets/rules/scope/devices/exclude`, `/rule_sets/rules/scope/devices/include`.
+Appears at: `/policy/rule_set_scopes/scopes/devices/exclude`, `/policy/rule_set_scopes/scopes/devices/include`, `/policy/scope/devices/exclude`, `/policy/scope/devices/include`, `/policy/unknown/scope_groups/all_of/devices/exclude`, `/policy/unknown/scope_groups/all_of/devices/include`, and more.
 
 ## Variants
 
