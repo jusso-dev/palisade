@@ -4,10 +4,16 @@
 //! every rule with where it comes from and whether it takes part, the
 //! settings with their sources, the effective mode per object type, the
 //! active override session and lockdown, and the protection status (#36).
-//! The view reads one policy document, so every rule's provenance is that
-//! document's rule set. A device's effective policy from the group
-//! hierarchy (#37, `hierarchy::EffectivePolicy`) records group provenance
-//! too; showing it here is a follow-up under #41.
+//! Each rule's provenance is its policy and rule set.
+//! [`effective_view_with_groups`] puts first the hierarchy nodes it came
+//! from, when the policy is a device's effective policy from the group
+//! hierarchy (#37, [`crate::hierarchy::EffectivePolicy`]): which global,
+//! tenant, group, dynamic-group, template or device layer contributed its
+//! rule set, how, and which node suppressed it, if one did
+//! ([`super::groups`]). The view is for administrators, so it writes names
+//! unredacted ([`Privacy::DEFAULT`]); pass a [`Privacy`] to
+//! [`effective_view_with_groups`] to redact
+//! them as a trace would.
 
 use std::collections::BTreeMap;
 
@@ -19,7 +25,8 @@ use crate::mode::{self, DeviceState, ProtectionStatus, SessionKind};
 use crate::model::{ActionKind, Mode, ObjectType, PolicyId};
 use crate::validate::ValidatedPolicy;
 
-use super::{InheritanceStep, RuleStage};
+use super::groups::GroupProvenance;
+use super::{InheritanceStep, Privacy, RuleStage};
 
 /// One rule as the device sees it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -39,6 +46,8 @@ pub struct EffectiveRule {
     /// [`Evaluator::evaluate_in`]: crate::evaluate::Evaluator::evaluate_in
     pub active: bool,
     /// Why not, if it does not: `disabled` (the rule is disabled),
+    /// `suppressed` (a hierarchy node disabled it with `suppress_inherited`,
+    /// shown with group provenance, [`effective_view_with_groups`]),
     /// `not_yet_active` or `expired` (outside its activity window at the
     /// view's clock, #40), or `device_disabled` (the device mode is
     /// `disabled`, so no rule runs). An expired rule with `on_expire:
@@ -106,6 +115,30 @@ pub fn effective_view(
     state: &DeviceState,
     clock: Option<&crate::lifecycle::RuleClock>,
 ) -> EffectiveView {
+    view(policy, state, clock, None, &Privacy::DEFAULT)
+}
+
+/// The same as [`effective_view`], with each rule's provenance starting at
+/// the hierarchy nodes it came from (`groups`, built from the effective
+/// policy `policy` is), and every name written as `privacy` says.
+#[must_use]
+pub fn effective_view_with_groups(
+    policy: &ValidatedPolicy,
+    state: &DeviceState,
+    clock: Option<&crate::lifecycle::RuleClock>,
+    groups: &GroupProvenance,
+    privacy: &Privacy,
+) -> EffectiveView {
+    view(policy, state, clock, Some(groups), privacy)
+}
+
+fn view(
+    policy: &ValidatedPolicy,
+    state: &DeviceState,
+    clock: Option<&crate::lifecycle::RuleClock>,
+    groups: Option<&GroupProvenance>,
+    privacy: &Privacy,
+) -> EffectiveView {
     let doc = policy.document();
     let p = &doc.policy;
     let sets: BTreeMap<_, _> = doc.rule_sets.iter().map(|s| (s.id, s)).collect();
@@ -127,12 +160,18 @@ pub fn effective_view(
             };
             rules.push(EffectiveRule {
                 rule: RuleRef::new(p, set, rule),
-                name: rule.name.clone(),
+                name: privacy.text(&rule.name).0,
                 action: rule.action.kind(),
                 stage: RuleStage::of(set, rule),
                 active: activity.is_active() && !device_disabled,
                 inactive_reason: if !rule.enabled {
-                    Some("disabled")
+                    // A node's `suppress_inherited` disables the rule in
+                    // the effective policy (#37); say so when it is known.
+                    Some(if groups.is_some_and(|g| g.suppressed(rule.id)) {
+                        "suppressed"
+                    } else {
+                        "disabled"
+                    })
                 } else if window.is_some() {
                     window
                 } else if device_disabled {
@@ -141,18 +180,20 @@ pub fn effective_view(
                     None
                 },
                 rule_set_mode: set.mode_override,
-                provenance: vec![
-                    InheritanceStep {
-                        node: "policy",
-                        id: p.id.to_string(),
-                        name: p.name.clone(),
-                    },
-                    InheritanceStep {
-                        node: "rule_set",
-                        id: set.id.to_string(),
-                        name: set.name.clone(),
-                    },
-                ],
+                provenance: groups
+                    .map(|g| g.steps(set.id, rule.id, privacy))
+                    .unwrap_or_default()
+                    .into_iter()
+                    .chain([
+                        InheritanceStep::document("policy", p.id.to_string(), &p.name, privacy),
+                        InheritanceStep::document(
+                            "rule_set",
+                            set.id.to_string(),
+                            &set.name,
+                            privacy,
+                        ),
+                    ])
+                    .collect(),
             });
         }
     }

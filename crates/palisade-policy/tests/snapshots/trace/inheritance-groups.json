@@ -1,0 +1,24 @@
+[
+  {
+    "node": "group",
+    "id": "01936b2e-000a-7b3d-9f21-0a1b2c3d4e5f",
+    "name": "Finance",
+    "via": "policy 01936b2e-0033-7b3d-9f21-0a1b2c3d4e5f (slot 0)",
+    "outcome": "contributed"
+  },
+  {
+    "node": "policy",
+    "id": "01936b2e-0014-7b3d-9f21-0a1b2c3d4e5f",
+    "name": "KIOSK-07"
+  },
+  {
+    "node": "rule_set",
+    "id": "01936b2e-003d-7b3d-9f21-0a1b2c3d4e5f",
+    "name": "Set 61"
+  },
+  {
+    "node": "rule",
+    "id": "01936b2e-0048-7b3d-9f21-0a1b2c3d4e5f",
+    "name": "Rule 72"
+  }
+]
