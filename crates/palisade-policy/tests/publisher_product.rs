@@ -9,7 +9,10 @@ use palisade_policy::decision::Outcome;
 use palisade_policy::evaluate::{Evaluator, Subject};
 use palisade_policy::facts::{ObjectFacts, PathVariables, SignerStatus};
 use palisade_policy::model::preset::PublisherProduct;
-use palisade_policy::model::{Criterion, Field, Match, Operator, SignerOptions, TbsPosition};
+use palisade_policy::model::{
+    Criterion, Field, Match, Operator, PrecedenceModel, PrecedenceOptions, SignerOptions,
+    TbsPosition, TierTiebreak,
+};
 use palisade_policy::precedence::{Spec, Tier};
 use palisade_policy::test_util::{
     PolicyBuilder, RuleBuilder, RuleSetBuilder, TRACE, facts, publisher,
@@ -102,6 +105,40 @@ fn preset_builds_the_recommended_tree() {
                 Field::MetaFileVersion,
                 Operator::VersionBetween,
                 v(&["2.0", "2.9"])
+            ),
+        ]
+    );
+    // Values are trimmed.
+    let padded = PublisherProduct::new("  Example Software Ltd\t", " Example Editor ")
+        .min_version(" 2.0 ")
+        .into_match();
+    let Match::All(c) = &padded else { panic!() };
+    let values: Vec<&str> = c
+        .iter()
+        .filter_map(|m| match m {
+            Match::Criterion(c) => Some(c.values[0].as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(values, ["Example Software Ltd", "Example Editor", "2.0"]);
+    // Bad values are left to validation, which reports each one.
+    let bad = PublisherProduct::new("Example Software Ltd", "   ")
+        .min_version("two")
+        .into_match();
+    let codes: Vec<(ErrorCode, String)> = findings(allow_policy(bad))
+        .into_iter()
+        .map(|(code, _, path)| (code, path))
+        .collect();
+    assert_eq!(
+        codes,
+        [
+            (
+                ErrorCode::InvalidValue,
+                format!("{RULE}/all/1/criterion/values/0")
+            ),
+            (
+                ErrorCode::InvalidValue,
+                format!("{RULE}/all/2/criterion/values/0")
             ),
         ]
     );
@@ -236,8 +273,12 @@ fn signer_precedence_tiers() {
             crit(Field::SignerLeafThumbprintSha1, &[&sha1]),
             Tier::Signer,
         ),
-        (tbs_at(None), Tier::Signer),
-        (tbs_at(Some(TbsPosition::Root)), Tier::Signer),
+        (tbs_at(Some(TbsPosition::Leaf)), Tier::Signer),
+        // A TBS hash that may name a CA ranks with the CA identities.
+        (tbs_at(None), Tier::Metadata),
+        (tbs_at(Some(TbsPosition::Any)), Tier::Metadata),
+        (tbs_at(Some(TbsPosition::Intermediate)), Tier::Metadata),
+        (tbs_at(Some(TbsPosition::Root)), Tier::Metadata),
         (crit(Field::SignerIssuer, &["CA"]), Tier::Metadata),
         (crit(Field::SignerPca, &["PCA"]), Tier::Metadata),
         (
@@ -265,4 +306,308 @@ fn signer_precedence_tiers() {
         crit(Field::MetaProductName, &["Editor"]),
     ]);
     assert_eq!(Spec::of(&with_product).tier, Tier::SignerProduct);
+    // At a CA position it does not combine into tiers 2 or 3.
+    for position in [None, Some(TbsPosition::Root)] {
+        let ca_product = Match::All(vec![
+            tbs_at(position),
+            crit(Field::MetaProductName, &["Editor"]),
+        ]);
+        assert_eq!(Spec::of(&ca_product).tier, Tier::Metadata, "{position:?}");
+        let ca_file_version = Match::All(vec![
+            tbs_at(position),
+            crit(Field::MetaOriginalFilename, &["editor.exe"]),
+            Match::Criterion(Criterion::new(
+                Field::MetaFileVersion,
+                Operator::VersionGe,
+                ["2.0"],
+            )),
+        ]);
+        assert_eq!(
+            Spec::of(&ca_file_version).tier,
+            Tier::Metadata,
+            "{position:?}"
+        );
+    }
+}
+
+/// A file signed by "Evil Corp" through the shared root `R` (whose TBS
+/// hash is [`TBS`]), with the product, name and version an allow for
+/// another publisher's product would look for.
+fn evil_corp() -> ObjectFacts {
+    let mut f = facts()
+        .with(Field::MetaProductName, "Example Editor")
+        .with(Field::MetaOriginalFilename, "editor.exe")
+        .with(Field::MetaFileVersion, "2.5")
+        .signer(SignerStatus::Valid, "Evil Corp")
+        .build();
+    let s = &mut f.signers.as_mut().unwrap()[0];
+    s.leaf_thumbprint_sha256 = Some(LEAF_THUMB.to_owned());
+    s.details.leaf_tbs_hash = Some(LEAF_TBS.to_owned());
+    s.details.intermediate_tbs_hashes = Some(vec![]);
+    s.details.root_tbs_hash = Some(TBS.to_owned());
+    f
+}
+
+const LEAF_THUMB: &str = "5555555555555555555555555555555555555555555555555555555555555555";
+const LEAF_TBS: &str = "6666666666666666666666666666666666666666666666666666666666666666";
+
+fn crit(field: Field, operator: Operator, values: &[&str]) -> Match {
+    Match::Criterion(Criterion::new(field, operator, values.iter().copied()))
+}
+
+fn leaf_tbs(value: &str) -> Match {
+    Match::Criterion(Criterion {
+        signer: Some(Box::new(SignerOptions {
+            position: Some(TbsPosition::Leaf),
+            ..SignerOptions::default()
+        })),
+        ..Criterion::new(Field::SignerTbsHash, Operator::Equals, [value])
+    })
+}
+
+/// An allow rule and a deny rule decided under `model` and `options`, in
+/// separate allow and block lists, or in one mixed set with `mixed`.
+fn decide_pair(
+    allow: Match,
+    deny: Match,
+    model: PrecedenceModel,
+    options: PrecedenceOptions,
+    mixed: bool,
+    facts: &ObjectFacts,
+) -> Outcome {
+    let mut p = PolicyBuilder::new().precedence(model);
+    p = if mixed {
+        p.rule_set(
+            RuleSetBuilder::mixed(1)
+                .rule(RuleBuilder::allow(1, allow))
+                .rule(RuleBuilder::deny(2, deny)),
+        )
+    } else {
+        p.rule_set(RuleSetBuilder::allowlist(1).rule(RuleBuilder::allow(1, allow)))
+            .rule_set(RuleSetBuilder::blocklist(2).rule(RuleBuilder::deny(2, deny)))
+    };
+    let mut doc = p.build();
+    doc.policy.precedence_options = options;
+    let policy = doc.validate().unwrap();
+    decide(&policy, facts)
+}
+
+fn opts(f: impl FnOnce(&mut PrecedenceOptions)) -> PrecedenceOptions {
+    let mut o = PrecedenceOptions::default();
+    f(&mut o);
+    o
+}
+
+/// The review probes of #317: an allow that names only a CA (a TBS hash at
+/// the root) must not outrank a deny of one publisher the CA signs for.
+#[test]
+fn a_ca_tbs_allow_never_outranks_a_publisher_deny() {
+    let root = || tbs_at(Some(TbsPosition::Root));
+    let evil = || publisher("Evil Corp");
+    let cases = [
+        // `specificity`: the CA plus a product is not tier 3.
+        (
+            "specificity, CA + product vs publisher",
+            Match::All(vec![
+                root(),
+                crit(
+                    Field::MetaProductName,
+                    Operator::Equals,
+                    &["Example Editor"],
+                ),
+            ]),
+            evil(),
+            PrecedenceModel::Specificity,
+            PrecedenceOptions::default(),
+            false,
+        ),
+        // `specificity`: the CA plus a file name and version is not tier 2.
+        (
+            "specificity, CA + file + version vs publisher_product",
+            Match::All(vec![
+                root(),
+                crit(
+                    Field::MetaOriginalFilename,
+                    Operator::Equals,
+                    &["editor.exe"],
+                ),
+                crit(Field::MetaFileVersion, Operator::VersionGe, &["2.0"]),
+            ]),
+            PublisherProduct::new("Evil Corp", "Example Editor").into_match(),
+            PrecedenceModel::Specificity,
+            PrecedenceOptions::default(),
+            false,
+        ),
+        // `specificity` with ties going to the allow: the CA is not tier 4.
+        (
+            "specificity, same_tier_tiebreak allow",
+            root(),
+            evil(),
+            PrecedenceModel::Specificity,
+            opts(|o| o.same_tier_tiebreak = TierTiebreak::Allow),
+            false,
+        ),
+        // `allow_wins` with granularity: the publisher deny is the more
+        // specific rule of the set.
+        (
+            "allow_wins, granularity_tiebreak, one mixed set",
+            root(),
+            evil(),
+            PrecedenceModel::AllowWins,
+            opts(|o| o.granularity_tiebreak = true),
+            true,
+        ),
+    ];
+    // Every probe is checked, so a failure names each one that regressed.
+    let allowed: Vec<&str> = cases
+        .into_iter()
+        .filter(|(_, allow, deny, model, options, mixed)| {
+            decide_pair(
+                allow.clone(),
+                deny.clone(),
+                *model,
+                *options,
+                *mixed,
+                &evil_corp(),
+            ) != Outcome::Blocked
+        })
+        .map(|(name, ..)| name)
+        .collect();
+    assert!(
+        allowed.is_empty(),
+        "a CA-wide allow beat a publisher deny: {allowed:?}"
+    );
+}
+
+/// The leaf thumbprint and the leaf TBS hash rank with the publisher, in
+/// both directions, under `specificity` and `allow_wins` with granularity.
+#[test]
+fn leaf_certificate_identities_rank_with_the_publisher() {
+    let leaf_ids = || {
+        [
+            crit(Field::SignerLeafThumbprint, Operator::Equals, &[LEAF_THUMB]),
+            leaf_tbs(LEAF_TBS),
+        ]
+    };
+    for leaf in leaf_ids() {
+        // Same tier as a publisher: the tie-break decides.
+        for (tiebreak, expected) in [
+            (TierTiebreak::Deny, Outcome::Blocked),
+            (TierTiebreak::Allow, Outcome::Allowed),
+        ] {
+            let options = opts(|o| o.same_tier_tiebreak = tiebreak);
+            // Leaf allow, publisher deny.
+            assert_eq!(
+                decide_pair(
+                    leaf.clone(),
+                    publisher("Evil Corp"),
+                    PrecedenceModel::Specificity,
+                    options,
+                    false,
+                    &evil_corp()
+                ),
+                expected,
+                "{leaf:?} allow, {tiebreak:?}"
+            );
+            // Publisher allow, leaf deny.
+            let flipped = if expected == Outcome::Blocked {
+                Outcome::Blocked
+            } else {
+                Outcome::Allowed
+            };
+            assert_eq!(
+                decide_pair(
+                    publisher("Evil Corp"),
+                    leaf.clone(),
+                    PrecedenceModel::Specificity,
+                    options,
+                    false,
+                    &evil_corp()
+                ),
+                flipped,
+                "{leaf:?} deny, {tiebreak:?}"
+            );
+        }
+        // A more specific rule wins either way: a publisher and product
+        // (tier 3) beats a leaf identity (tier 4) under `specificity`.
+        let product = || PublisherProduct::new("Evil Corp", "Example Editor").into_match();
+        let allow_ties = opts(|o| o.same_tier_tiebreak = TierTiebreak::Allow);
+        assert_eq!(
+            decide_pair(
+                leaf.clone(),
+                product(),
+                PrecedenceModel::Specificity,
+                allow_ties,
+                false,
+                &evil_corp()
+            ),
+            Outcome::Blocked,
+            "{leaf:?} allow vs tier-3 deny"
+        );
+        assert_eq!(
+            decide_pair(
+                product(),
+                leaf.clone(),
+                PrecedenceModel::Specificity,
+                PrecedenceOptions::default(),
+                false,
+                &evil_corp()
+            ),
+            Outcome::Allowed,
+            "tier-3 allow vs {leaf:?} deny"
+        );
+        // `allow_wins` with granularity, in one set: the most specific rules
+        // of the set take part. Equal tiers: the allow wins.
+        let granular = opts(|o| o.granularity_tiebreak = true);
+        assert_eq!(
+            decide_pair(
+                leaf.clone(),
+                publisher("Evil Corp"),
+                PrecedenceModel::AllowWins,
+                granular,
+                true,
+                &evil_corp()
+            ),
+            Outcome::Allowed,
+            "{leaf:?} allow, allow_wins"
+        );
+        assert_eq!(
+            decide_pair(
+                publisher("Evil Corp"),
+                leaf.clone(),
+                PrecedenceModel::AllowWins,
+                granular,
+                true,
+                &evil_corp()
+            ),
+            Outcome::Allowed,
+            "{leaf:?} deny, allow_wins"
+        );
+        // A more specific deny in the set beats a leaf allow.
+        assert_eq!(
+            decide_pair(
+                leaf.clone(),
+                product(),
+                PrecedenceModel::AllowWins,
+                granular,
+                true,
+                &evil_corp()
+            ),
+            Outcome::Blocked,
+            "{leaf:?} allow vs tier-3 deny, allow_wins"
+        );
+        // ...and a leaf deny beats a CA-wide allow.
+        assert_eq!(
+            decide_pair(
+                tbs_at(Some(TbsPosition::Root)),
+                leaf,
+                PrecedenceModel::AllowWins,
+                granular,
+                true,
+                &evil_corp()
+            ),
+            Outcome::Blocked,
+            "CA allow vs leaf deny, allow_wins"
+        );
+    }
 }

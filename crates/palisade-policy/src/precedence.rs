@@ -81,7 +81,8 @@ pub enum Tier {
     SignerFileVersion,
     /// 3: a signer with a product name, tested together.
     SignerProduct,
-    /// 4: a signer alone: its publisher or its certificate thumbprint.
+    /// 4: a signer alone: its publisher, its leaf certificate's
+    /// thumbprint, or its leaf certificate's TBS hash (`position: leaf`).
     Signer,
     /// 5: one file by its full path (`path.full` with `equals`).
     PathFile,
@@ -90,9 +91,11 @@ pub enum Tier {
     /// specific. `contains` and `ends_with` on a path fix no directory and
     /// are in tier 7.
     PathDirectory,
-    /// 7: version-resource metadata, a file name, an extension or a
-    /// certificate issuer (which names a whole certification authority),
-    /// or no guaranteed identity at all.
+    /// 7: version-resource metadata, a file name, an extension, a
+    /// certificate authority (the issuer, the PCA, the root thumbprints,
+    /// the EKUs, or a TBS hash whose `position` is not `leaf`, each of
+    /// which vouches for every file the CA signs), or no guaranteed
+    /// identity at all.
     Metadata,
 }
 
@@ -238,7 +241,7 @@ fn features(node: &Match) -> Features {
         Match::Criterion(c) if c.operator.is_positive() => {
             let f = c.field;
             Features {
-                signer: is_signer_identity(f),
+                signer: is_signer_identity(c),
                 file: matches!(
                     f,
                     Field::PathFileName | Field::MetaOriginalFilename | Field::MetaInternalName
@@ -255,19 +258,23 @@ fn features(node: &Match) -> Features {
     }
 }
 
-/// The signer fields that name the signer itself (tier 4): the publisher,
-/// and the leaf thumbprints and TBS hashes, which name its certificate (a
-/// TBS hash at another position is ranked with them, so a block of a stolen
-/// CA certificate is as specific as the allows it overrides). The issuer,
-/// the PCA, the root and the EKUs name a certificate authority: tier 7.
-const fn is_signer_identity(f: Field) -> bool {
-    matches!(
-        f,
-        Field::SignerPublisher
-            | Field::SignerLeafThumbprint
-            | Field::SignerLeafThumbprintSha1
-            | Field::SignerTbsHash
-    )
+/// Whether a signer criterion names the signer itself (tiers 2 to 4): the
+/// publisher, a leaf thumbprint, or the TBS hash of the leaf certificate
+/// (`position: leaf`). A TBS hash at any other position may name a CA
+/// certificate, and the issuer, the PCA, the root and the EKUs name a
+/// certificate authority. Those vouch for every file the CA signs, so they
+/// are tier 7: ranking a CA-wide allow with the publisher would let it beat
+/// a deny of one publisher the CA also signs for.
+fn is_signer_identity(c: &crate::model::Criterion) -> bool {
+    match c.field {
+        Field::SignerPublisher | Field::SignerLeafThumbprint | Field::SignerLeafThumbprintSha1 => {
+            true
+        }
+        Field::SignerTbsHash => {
+            c.signer.as_deref().and_then(|o| o.position) == Some(crate::model::TbsPosition::Leaf)
+        }
+        _ => false,
+    }
 }
 
 fn criterion_spec(c: &crate::model::Criterion) -> Option<Spec> {
@@ -285,7 +292,7 @@ fn criterion_spec(c: &crate::model::Criterion) -> Option<Spec> {
         | Field::HashMsiFuzzySha256
         | Field::HashSha1
         | Field::HashMd5 => Tier::Hash,
-        f if is_signer_identity(f) => Tier::Signer,
+        _ if is_signer_identity(c) => Tier::Signer,
         Field::PathFull if c.operator == Operator::Equals => Tier::PathFile,
         Field::PathFull | Field::PathDirectory
             if matches!(

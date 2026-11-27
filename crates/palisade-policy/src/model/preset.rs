@@ -64,11 +64,15 @@ impl PublisherProduct {
     }
 
     /// The match tree: an `all` of the publisher, the product name, then
-    /// the original file name and the version test that are set. Values are
-    /// not checked here; validating the policy checks them.
+    /// the original file name and the version test that are set. Values
+    /// are trimmed of leading and trailing white space, which a copied name
+    /// often carries and a fact never matches. Values are not otherwise
+    /// checked here: validating the policy rejects an empty value or a
+    /// malformed version, as for any criterion.
     #[must_use]
     pub fn into_match(self) -> Match {
         let test = |field, operator, values: Vec<String>| {
+            let values = values.into_iter().map(|v| v.trim().to_owned());
             Match::Criterion(Criterion::new(field, operator, values))
         };
         let mut all = vec![
