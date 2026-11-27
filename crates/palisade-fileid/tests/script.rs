@@ -1635,6 +1635,117 @@ fn encoded_scripts_are_unsigned_with_a_warning() {
     assert_eq!(report.size, 2);
 }
 
+/// A script component with a `<signature>` block exactly as a `.wsf`
+/// carries one: the signed `.wsf` fixture's text, which verifies as a
+/// `.wsf`.
+fn signed_component() -> Vec<u8> {
+    let data = fixture("wsf-utf8-crlf.wsf");
+    assert_eq!(
+        verify(&data, ScriptKind::WindowsScriptFile).signing_state,
+        ScriptSigningState::Valid
+    );
+    data
+}
+
+#[test]
+fn script_components_are_unsigned_with_a_warning() {
+    let kind = ScriptKind::ScriptComponent;
+    assert!(!kind.signature_supported() && !kind.is_encoded());
+    // A signature block that would be valid in a `.wsf` is not read.
+    let wsf_signed = signed_component();
+    // A component with a `<component>` wrapper around the same block.
+    let text = String::from_utf8(wsf_signed.clone()).unwrap();
+    let wrapped = text
+        .replacen("<job id=\"t\">", "<component>\r\n<job id=\"t\">", 1)
+        .replacen("</job>", "</job>\r\n</component>", 1);
+    for data in [
+        wsf_signed.clone(),
+        wrapped.into_bytes(),
+        b"<component><script>x</script></component>\r\n".to_vec(),
+        Vec::new(),
+    ] {
+        let report = verify(&data, kind);
+        assert_eq!(report.signing_state, ScriptSigningState::Unsigned);
+        assert_eq!(report.warnings, vec![ScriptWarning::UnsupportedFormat]);
+        assert!(report.signatures.signatures.is_empty());
+        assert!(report.signatures.primary.is_none());
+        assert!(report.signature().is_none());
+        assert!(report.block.is_none());
+        assert!(report.encoding.is_none() && report.sip_digests.is_none());
+        assert_eq!(report.size, data.len() as u64);
+    }
+    // A block that does not parse is unsigned too, never "invalid but
+    // signed" or valid: nothing in a component is read.
+    let mut broken = wsf_signed.clone();
+    let mid = broken.len() / 2;
+    broken[mid] ^= 0x55;
+    assert_eq!(
+        verify(&broken, kind).signing_state,
+        ScriptSigningState::Unsigned
+    );
+    // Over the size limit too.
+    let tiny = ScriptOptions {
+        max_size: 1,
+        ..ScriptOptions::default()
+    };
+    let report = verify_script(&wsf_signed, kind, &tiny);
+    assert_eq!(report.signing_state, ScriptSigningState::Unsigned);
+    assert_eq!(report.warnings, vec![ScriptWarning::UnsupportedFormat]);
+    // Never trusted, under any anchor policy, even when the same signed
+    // text from a signer the anchors trust is trusted in its own format.
+    let signer = Signer::new();
+    let signed = sign_ps1(&signer, BODY, &[]);
+    let anchored = signer.trust();
+    let anchors = ScriptTrustAnchors {
+        policy: &anchored,
+        os_root_store: Some(&anchored),
+    };
+    let as_ps1 = evaluate_script_trust(
+        &verify(&signed, ScriptKind::PowerShell),
+        &anchors,
+        ScriptAnchorPolicy::Either,
+    );
+    assert!(as_ps1.anchor.is_some());
+    for policy in [
+        ScriptAnchorPolicy::OsRootStore,
+        ScriptAnchorPolicy::PolicyAnchors,
+        ScriptAnchorPolicy::Either,
+    ] {
+        for data in [&signed, &wsf_signed] {
+            let trust = evaluate_script_trust(&verify(data, kind), &anchors, policy);
+            assert_eq!(trust.anchor, None, "{policy:?}");
+            assert_eq!(trust.trust.primary, None);
+            assert!(trust.signed_metadata.is_none() && trust.publisher_product.is_none());
+        }
+    }
+}
+
+#[test]
+fn script_component_files_are_not_read() {
+    let dir = std::env::temp_dir().join(format!("palisade-wsc-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("component.wsc");
+    let data = signed_component();
+    std::fs::write(&path, &data).unwrap();
+    assert_eq!(
+        ScriptKind::from_path(&path),
+        Some(ScriptKind::ScriptComponent)
+    );
+    for max_size in [1, DEFAULT_MAX_SCRIPT_SIZE] {
+        let options = ScriptOptions {
+            max_size,
+            ..ScriptOptions::default()
+        };
+        let report = verify_script_file(&path, ScriptKind::ScriptComponent, &options).unwrap();
+        assert_eq!(report.signing_state, ScriptSigningState::Unsigned);
+        assert_eq!(report.warnings, vec![ScriptWarning::UnsupportedFormat]);
+        assert!(report.signatures.primary.is_none());
+        assert_eq!(report.size, data.len() as u64);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn size_limit() {
     let data = fixture("ps1-utf8-crlf.ps1");
@@ -1680,6 +1791,8 @@ fn extensions() {
         ("js", ScriptKind::JScript),
         ("wsf", ScriptKind::WindowsScriptFile),
         ("jse", ScriptKind::EncodedJScript),
+        ("wsc", ScriptKind::ScriptComponent),
+        ("SCT", ScriptKind::ScriptComponent),
     ] {
         assert_eq!(ScriptKind::from_extension(ext), Some(kind), "{ext}");
     }

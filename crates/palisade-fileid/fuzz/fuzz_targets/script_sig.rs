@@ -11,7 +11,7 @@ use palisade_fileid::script::{
     TextIssue, evaluate_script_trust, verify_script,
 };
 
-const KINDS: [ScriptKind; 8] = [
+const KINDS: [ScriptKind; 9] = [
     ScriptKind::PowerShell,
     ScriptKind::PowerShellXml,
     ScriptKind::Mof,
@@ -20,6 +20,7 @@ const KINDS: [ScriptKind; 8] = [
     ScriptKind::WindowsScriptFile,
     ScriptKind::EncodedVbScript,
     ScriptKind::EncodedJScript,
+    ScriptKind::ScriptComponent,
 ];
 
 fuzz_target!(|data: &[u8]| {
@@ -42,7 +43,7 @@ fuzz_target!(|data: &[u8]| {
         assert_eq!(sig.digest_match, Some(true));
         assert!(report.text_issue.is_none());
         assert!(report.block.is_some());
-        assert!(!kind.is_encoded());
+        assert!(kind.signature_supported());
     }
     if report.signing_state == ScriptSigningState::DigestMismatch {
         assert_eq!(report.signature().unwrap().status, SignatureStatus::DigestMismatch);

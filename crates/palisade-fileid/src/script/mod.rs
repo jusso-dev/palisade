@@ -82,6 +82,9 @@
 //!   not verified ([`ScriptWarning::NestedSignaturesIgnored`]).
 //! - Encoded scripts (`.vbe`, `.jse`) are not read at all: they are
 //!   unsigned, with [`ScriptWarning::UnsupportedEncoding`].
+//! - Script components (`.wsc`, `.sct`) are not read either: unsigned,
+//!   with [`ScriptWarning::UnsupportedFormat`], even with a `<signature>`
+//!   block. How the OS signs them is not established; #95 verifies them.
 //! - Files over [`ScriptOptions::max_size`] are not read:
 //!   [`ScriptSigningState::TooLargeForSignatureCheck`].
 //!
@@ -96,6 +99,7 @@
 //!   signing state, are #51 and #55.
 //! - Feeding the signed metadata into the unified file identity record is
 //!   #55; interpreter enforcement is #92 to #95.
+//! - Verifying script component (`.wsc`, `.sct`) signatures: #95.
 
 #![forbid(unsafe_code)]
 
@@ -150,6 +154,13 @@ pub enum ScriptKind {
     /// Encoded JScript (`.jse`). Not read: always unsigned, with
     /// [`ScriptWarning::UnsupportedEncoding`].
     EncodedJScript,
+    /// Windows Script Components (`.wsc`, and scriptlets, `.sct`). Not
+    /// read: always unsigned, with [`ScriptWarning::UnsupportedFormat`].
+    /// Whether and how the OS signs these is not established, so no
+    /// signature in one is verified here, even a `<signature>` block like a
+    /// `.wsf` one. A signed component reads as unsigned, never as valid.
+    /// Verification is #95's.
+    ScriptComponent,
 }
 
 impl ScriptKind {
@@ -165,6 +176,7 @@ impl ScriptKind {
             "wsf" => Self::WindowsScriptFile,
             "vbe" => Self::EncodedVbScript,
             "jse" => Self::EncodedJScript,
+            "wsc" | "sct" => Self::ScriptComponent,
             _ => return None,
         })
     }
@@ -181,8 +193,27 @@ impl ScriptKind {
         matches!(self, Self::EncodedVbScript | Self::EncodedJScript)
     }
 
-    /// The block format, or `None` for an encoded script.
-    fn style(self) -> Option<&'static Style> {
+    /// Whether a signature in this format is checked at all. `false` for
+    /// encoded scripts and script components: they are never read and
+    /// always reported unsigned, with a warning.
+    #[must_use]
+    pub const fn signature_supported(self) -> bool {
+        self.style().is_some()
+    }
+
+    /// Why a format whose signature is not checked is reported unsigned.
+    const fn unsupported_warning(self) -> Option<ScriptWarning> {
+        match self {
+            Self::EncodedVbScript | Self::EncodedJScript => {
+                Some(ScriptWarning::UnsupportedEncoding)
+            }
+            Self::ScriptComponent => Some(ScriptWarning::UnsupportedFormat),
+            _ => None,
+        }
+    }
+
+    /// The block format, or `None` for a format that is not read.
+    const fn style(self) -> Option<&'static Style> {
         match self {
             Self::PowerShell => Some(&POWERSHELL),
             Self::PowerShellXml => Some(&POWERSHELL_XML),
@@ -190,7 +221,7 @@ impl ScriptKind {
             Self::VbScript => Some(&VBSCRIPT),
             Self::JScript => Some(&JSCRIPT),
             Self::WindowsScriptFile => Some(&WSF),
-            Self::EncodedVbScript | Self::EncodedJScript => None,
+            Self::EncodedVbScript | Self::EncodedJScript | Self::ScriptComponent => None,
         }
     }
 }
@@ -476,6 +507,9 @@ pub enum ScriptSigningState {
 pub enum ScriptWarning {
     /// An encoded script, which is not read: it is reported unsigned.
     UnsupportedEncoding,
+    /// A format whose signatures are not checked (a script component),
+    /// which is not read: it is reported unsigned, whatever it holds.
+    UnsupportedFormat,
     /// The signer carries this many nested signatures (counted up to the
     /// collection limit). They are checked as DER, but not verified: only
     /// the outer signature counts.
@@ -635,10 +669,10 @@ pub fn verify_script(data: &[u8], kind: ScriptKind, options: &ScriptOptions) -> 
         size,
         ..not_read(kind, options)
     };
-    // Encoded scripts are unsigned whatever their size, as in
-    // `verify_script_file`.
+    // Encoded scripts and script components are unsigned whatever their
+    // size or content, as in `verify_script_file`.
     let Some(style) = kind.style() else {
-        report.warnings.push(ScriptWarning::UnsupportedEncoding);
+        report.warnings.extend(kind.unsupported_warning());
         return report;
     };
     if size > options.max_size {
@@ -906,8 +940,8 @@ fn verify_script_file_with(
         return Err(not_a_file());
     }
     let size = metadata.len();
-    if kind.is_encoded() {
-        // Encoded scripts are never read.
+    if !kind.signature_supported() {
+        // Encoded scripts and script components are never read.
         return Ok(ScriptReport {
             size,
             ..verify_script(&[], kind, options)

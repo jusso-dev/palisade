@@ -687,7 +687,10 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     WSF block with no `</job>` after it, non-strict base64, trailing bytes
     and a signature for another format's package are all invalid, never
     signed. Encoded scripts (`.vbe`, `.jse`) are unsigned with
-    an `UnsupportedEncoding` warning; files over 32 MiB (configurable) are
+    an `UnsupportedEncoding` warning, and script components (`.wsc`,
+    `.sct`), whose signing is not established, are unsigned with an
+    `UnsupportedFormat` warning, even with a `<signature>` block
+    (verification is #95's); files over 32 MiB (configurable) are
     `TooLargeForSignatureCheck`.
   - `SignedMetadata`: the signed metadata attributes (1.3.6.1.4.1.311.2.7.1
     to .10: internal name, file and product version, description, product,
