@@ -676,32 +676,41 @@ pub fn check_sources(root: &Path, files: &[String]) -> Result<Vec<String>, Strin
     Ok(v)
 }
 
-fn tool_version(name: &str) -> &'static str {
-    TOOLS
-        .iter()
-        .find(|t| t.name == name)
-        .map_or("", |t| t.version)
-}
-
-/// Checks that each of [`TOOLS`] is installed, naming every missing one.
-pub fn require_tools() -> Result<(), String> {
-    let mut missing = Vec::new();
-    for DocsTool { name, install, .. } in TOOLS {
-        let ok = Command::new(name)
-            .arg("--version")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success());
-        if !ok {
-            missing.push(format!("  {name} {}: {install}", tool_version(name)));
+/// Checks each of [`TOOLS`] with `probe`: an error naming every missing
+/// one, and otherwise one warning line per tool at another version than
+/// CI's.
+pub fn check_tools(probe: &mut dyn crate::tools::Probe) -> Result<Vec<String>, String> {
+    use crate::tools::{Status, check, problem};
+    let (mut missing, mut warnings) = (Vec::new(), Vec::new());
+    for DocsTool {
+        name,
+        version,
+        install,
+    } in TOOLS
+    {
+        let command = [(*name).to_owned(), "--version".to_owned()];
+        let status = check(probe, &command, Some(version));
+        if let Some(line) = problem(name, Some(version), install, &status) {
+            if status == Status::Missing {
+                missing.push(format!("  {line}"));
+            } else {
+                warnings.push(line);
+            }
         }
     }
     if missing.is_empty() {
-        Ok(())
+        Ok(warnings)
     } else {
         Err(format!("missing tools:\n{}", missing.join("\n")))
     }
+}
+
+/// [`check_tools`] with the real tools, printing any version warnings.
+pub fn require_tools() -> Result<(), String> {
+    for warning in check_tools(&mut crate::tools::ProcessProbe)? {
+        println!("docs: warning: {warning}");
+    }
+    Ok(())
 }
 
 /// `docs build`: stage, `mdbook build`, then the offline link check. Any
@@ -821,6 +830,36 @@ fn read(path: &Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn docs_tools_are_detected() {
+        use crate::tools::tests::FakeProbe;
+        let all_present = [
+            ("mdbook --version", Some("mdbook v0.5.2\n")),
+            (
+                "mdbook-mermaid-ssr --version",
+                Some("mdbook-mermaid-ssr 0.3.0\n"),
+            ),
+            ("lychee --version", Some("lychee 0.24.2\n")),
+        ];
+        assert_eq!(
+            check_tools(&mut FakeProbe::with(&all_present)),
+            Ok(Vec::new())
+        );
+        // Another version: a warning, not an error.
+        let mut old = all_present;
+        old[0].1 = Some("mdbook v0.4.40\n");
+        assert_eq!(
+            check_tools(&mut FakeProbe::with(&old)).unwrap(),
+            ["mdbook 0.5.2 is needed, found `mdbook v0.4.40`: cargo install --locked mdbook@0.5.2"]
+        );
+        // Missing tools: one error naming every one, with how to install.
+        let err = check_tools(&mut FakeProbe::with(&all_present[..1])).unwrap_err();
+        assert_eq!(
+            err,
+            "missing tools:\n  mdbook-mermaid-ssr 0.3.0 is not installed: cargo install --locked mdbook-mermaid-ssr@0.3.0, plus the headless browser its README names\n  lychee 0.24.2 is not installed: the release archive from https://github.com/lycheeverse/lychee/releases (CI uses 0.24.2)"
+        );
+    }
 
     fn root() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("..")

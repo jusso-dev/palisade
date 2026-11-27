@@ -1,0 +1,8 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask coverage-summary
+
+<label> <coverage.json>
+Summarise a cargo-llvm-cov JSON summary for the GitHub job page

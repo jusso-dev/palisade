@@ -1,0 +1,9 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask ci [--fast]
+
+Run the checks from .github/workflows/ci.yml locally (--fast skips coverage,
+fuzz, docs, the book build, feature-powerset, msrv, package, sign-test and
+server-image)

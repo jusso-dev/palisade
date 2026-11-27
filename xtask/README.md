@@ -34,7 +34,19 @@ the pinned toolchain and needs no other tools.
 
 Each command prints one line per violation and exits non-zero if there are
 any. Each rule set has unit tests with passing and failing fixtures:
-`cargo test -p xtask`. The workspace rules themselves are described in
+`cargo test -p xtask`.
+
+`cargo xtask help` lists every command, and `cargo xtask <command> --help`
+(or `-h`) prints that command's entry, or for a group such as `docs` every
+command in it. The list in `src/help.rs` is the one source of both; its tests
+snapshot the list and every command's help (`src/snapshots/`, checked by the
+`snapshots` CI job) and fail if a command `main` dispatches has no entry.
+
+Commands that need an external tool check for it first through
+`src/tools.rs`, which reads the version from the tool's version command:
+a missing tool stops the command with the install line for CI's version,
+and another version is a warning. Tests run the checks against a fake
+probe for each case: present, missing and at another version. The workspace rules themselves are described in
 [`docs/workspace.md`](../docs/workspace.md).
 
 More commands are planned in #29; `sbom` is filled in by #226.

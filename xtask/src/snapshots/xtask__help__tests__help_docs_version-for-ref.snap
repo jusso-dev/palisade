@@ -1,0 +1,7 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask docs version-for-ref <git ref>
+
+Print the docs version for a ref: latest for main, vX.Y for tag vX.Y.Z

@@ -1,0 +1,7 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask dist driver
+
+Explain how the optional kernel driver is packaged (local-only, #8)

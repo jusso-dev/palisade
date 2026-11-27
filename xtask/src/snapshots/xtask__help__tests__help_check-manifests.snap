@@ -1,0 +1,8 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask check-manifests
+
+Enforce workspace inheritance of package fields, lints and dependency versions,
+and that every crate README documents its features

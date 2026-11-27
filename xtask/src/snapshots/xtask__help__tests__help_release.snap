@@ -1,0 +1,7 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask release <prepare|check-tag|notes|checksums|verify-checksums|provenance|verify> ...
+
+The release pipeline's steps (docs/releasing.md)

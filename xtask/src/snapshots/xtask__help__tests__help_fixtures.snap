@@ -1,0 +1,7 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask fixtures
+
+Build the generated test fixture corpus into target/fixtures/

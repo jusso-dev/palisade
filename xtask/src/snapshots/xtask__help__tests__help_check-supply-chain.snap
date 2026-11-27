@@ -1,0 +1,8 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask check-supply-chain
+
+Enforce the duplicate-version budget, deny.toml ignore expiry and reasons,
+the cargo-vet criteria and exemption notes, and no audit.toml

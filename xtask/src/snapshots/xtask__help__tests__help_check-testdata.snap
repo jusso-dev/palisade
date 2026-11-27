@@ -1,0 +1,8 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask check-testdata
+
+Fail if any file in the repository that starts like an executable (MZ) is not
+allowlisted in testdata/manifest.txt

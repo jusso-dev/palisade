@@ -9,6 +9,8 @@
 
 use std::process::Command;
 
+use crate::tools::{self, Probe, ProcessProbe, Status};
+
 /// One local step: a CI command and the external tool it needs, if any.
 #[derive(Debug)]
 pub struct Step {
@@ -36,62 +38,76 @@ pub struct Step {
 /// connection.
 pub const POSTGRES_URL: &str = "PALISADE_TEST_DATABASE_ADMIN_URL";
 
-/// An external tool: the command that proves it is installed, and the
-/// install command for the version CI uses.
+/// An external tool: the command that proves it is installed, the version
+/// CI uses (when its version command prints one to compare), and the
+/// install command for that version.
 #[derive(Debug, Clone, Copy)]
 pub struct Tool {
     pub check: &'static [&'static str],
+    pub version: Option<&'static str>,
     pub install: &'static str,
 }
 
 const NEXTEST: Tool = Tool {
     check: &["cargo", "nextest", "--version"],
+    version: Some("0.9.152"),
     install: "cargo install --locked cargo-nextest@0.9.152",
 };
 const DENY: Tool = Tool {
     check: &["cargo", "deny", "--version"],
+    version: Some("0.22.0"),
     install: "cargo install --locked cargo-deny@0.22.0",
 };
 const AUDIT: Tool = Tool {
     check: &["cargo", "audit", "--version"],
+    version: Some("0.23.0"),
     install: "cargo install --locked cargo-audit@0.23.0",
 };
 const VET: Tool = Tool {
     check: &["cargo", "vet", "--version"],
+    version: Some("0.10.3"),
     install: "cargo install --locked cargo-vet@0.10.3",
 };
 const HACK: Tool = Tool {
     check: &["cargo", "hack", "--version"],
+    version: Some("0.6.46"),
     install: "cargo install --locked cargo-hack@0.6.46",
 };
 const LLVM_COV: Tool = Tool {
     check: &["cargo", "llvm-cov", "--version"],
+    version: Some("0.9.2"),
     install: "cargo install --locked cargo-llvm-cov@0.9.2",
 };
 const INSTA: Tool = Tool {
     check: &["cargo", "insta", "--version"],
+    version: Some("1.49.0"),
     install: "cargo install --locked cargo-insta@1.49.0",
 };
 const FUZZ: Tool = Tool {
     check: &["cargo", "+nightly-2026-11-20", "fuzz", "--version"],
+    version: Some("0.13.2"),
     install: "rustup toolchain install nightly-2026-11-20 --profile minimal && cargo install --locked cargo-fuzz@0.13.2",
 };
 const ACTIONLINT: Tool = Tool {
     check: &["actionlint", "-version"],
+    version: Some("1.7.12"),
     install: "see https://github.com/rhysd/actionlint/releases (CI uses 1.7.12)",
 };
 /// `docs build` checks for each of its tools itself (`crate::docs::TOOLS`)
 /// and names every one that is missing; this only gates the step.
 const MDBOOK: Tool = Tool {
     check: &["mdbook", "--version"],
+    version: Some("0.5.2"),
     install: "mdbook 0.5.2, mdbook-mermaid-ssr 0.3.0 and lychee 0.24.2; see docs/ci.md#documentation-site",
 };
 const TYPOS: Tool = Tool {
     check: &["typos", "--version"],
+    version: Some("1.52.2"),
     install: "cargo install --locked typos-cli@1.52.2",
 };
 const ZIZMOR: Tool = Tool {
     check: &["zizmor", "--version"],
+    version: Some("1.33.1"),
     install: "cargo install --locked zizmor@1.33.1",
 };
 
@@ -114,10 +130,12 @@ fn runs_here(os: Option<&str>) -> bool {
 
 const PODMAN: Tool = Tool {
     check: &["podman", "--version"],
+    version: None,
     install: "install podman (CI uses the one on the ubuntu-latest image)",
 };
 const DOTNET: Tool = Tool {
     check: &["dotnet", "--list-runtimes"],
+    version: None,
     install: "install the .NET runtime (CI uses the one on the hosted Windows images); WiX itself is fetched and checked by `cargo xtask dist`",
 };
 
@@ -162,7 +180,7 @@ pub const STEPS: &[Step] = &[
         env: &[("CARGO_NET_OFFLINE", "true")],
         ..step(
             "snapshots",
-            "cargo insta test --check --unreferenced reject --all-features -p palisade-policy -p palisade-proto",
+            "cargo insta test --check --unreferenced reject --all-features -p palisade-policy -p palisade-proto -p xtask",
         )
     },
     step("fixtures", "cargo xtask check-testdata"),
@@ -338,9 +356,17 @@ struct Planned {
     job: &'static str,
     command: String,
     env: &'static [(&'static str, &'static str)],
-    /// The command that proves the needed tool is installed, and how to
-    /// install it.
-    needs: Option<(Vec<String>, String)>,
+    /// The needed tool: the command that proves it is installed, the
+    /// version CI uses, and how to install it.
+    needs: Option<Needs>,
+}
+
+/// A tool a step needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Needs {
+    check: Vec<String>,
+    version: Option<String>,
+    install: String,
 }
 
 /// Runs the selected steps from `root`. Every step runs even after one
@@ -371,11 +397,10 @@ pub fn run(root: &std::path::Path, fast: bool, rust_version: &str) -> Result<boo
             job: s.job,
             command: s.command.to_owned(),
             env: s.env,
-            needs: s.tool.map(|t| {
-                (
-                    t.check.iter().map(|w| (*w).to_owned()).collect(),
-                    t.install.to_owned(),
-                )
+            needs: s.tool.map(|t| Needs {
+                check: t.check.iter().map(|w| (*w).to_owned()).collect(),
+                version: t.version.map(str::to_owned),
+                install: t.install.to_owned(),
             }),
         })
         .collect();
@@ -384,32 +409,25 @@ pub fn run(root: &std::path::Path, fast: bool, rust_version: &str) -> Result<boo
             job: "msrv",
             command: msrv_command(&toolchain),
             env: &[],
-            needs: Some((
-                vec![
+            needs: Some(Needs {
+                check: vec![
                     "cargo".to_owned(),
                     format!("+{toolchain}"),
                     "--version".to_owned(),
                 ],
-                format!("rustup toolchain install {toolchain} --profile minimal"),
-            )),
+                version: None,
+                install: format!("rustup toolchain install {toolchain} --profile minimal"),
+            }),
         });
     }
 
     // Find every missing tool first, so one run lists them all.
-    let mut missing = Vec::new();
-    for step in &selected {
-        let Some((check, install)) = &step.needs else {
-            continue;
-        };
-        if !succeeds(check) {
-            missing.push(format!("  {}\n    needs: {install}", step.command));
-        }
+    let (missing, other_versions) = tool_problems(&selected, &mut ProcessProbe);
+    for warning in &other_versions {
+        println!("ci: warning: {warning}");
     }
     if !missing.is_empty() {
-        return Err(format!(
-            "missing tools; install them, or run `cargo xtask ci --fast` to skip the slow steps:\n{}",
-            missing.join("\n")
-        ));
+        return Err(missing_tools_message(&missing));
     }
 
     let mut failed = Vec::new();
@@ -442,16 +460,41 @@ pub fn run(root: &std::path::Path, fast: bool, rust_version: &str) -> Result<boo
     }
 }
 
-fn succeeds(command: &[String]) -> bool {
-    let Some((program, args)) = command.split_first() else {
-        return false;
-    };
-    Command::new(program)
-        .args(args)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
+/// The tools `selected` needs that are missing (an error: `ci` stops
+/// before running anything), and those at another version than CI's (a
+/// warning: the steps still run, but may not match CI). Each tool is
+/// checked once, however many steps need it.
+fn tool_problems(selected: &[Planned], probe: &mut dyn Probe) -> (Vec<String>, Vec<String>) {
+    let mut checked: Vec<&Vec<String>> = Vec::new();
+    let (mut missing, mut other_versions) = (Vec::new(), Vec::new());
+    for step in selected {
+        let Some(needs) = &step.needs else {
+            continue;
+        };
+        match tools::check(probe, &needs.check, needs.version.as_deref()) {
+            Status::Missing => {
+                missing.push(format!("  {}\n    needs: {}", step.command, needs.install));
+            }
+            status @ Status::WrongVersion { .. } if !checked.contains(&&needs.check) => {
+                let name = needs.check.join(" ");
+                if let Some(line) =
+                    tools::problem(&name, needs.version.as_deref(), &needs.install, &status)
+                {
+                    other_versions.push(line);
+                }
+            }
+            _ => {}
+        }
+        checked.push(&needs.check);
+    }
+    (missing, other_versions)
+}
+
+fn missing_tools_message(missing: &[String]) -> String {
+    format!(
+        "missing tools; install them, or run `cargo xtask ci --fast` to skip the slow steps:\n{}",
+        missing.join("\n")
+    )
 }
 
 #[cfg(test)]
@@ -656,6 +699,94 @@ mod tests {
             );
             assert!(tool.install.contains(tool.version), "{}", tool.name);
         }
+    }
+
+    #[test]
+    fn every_pinned_tool_version_matches_its_install_hint() {
+        for tool in [
+            NEXTEST, DENY, AUDIT, VET, HACK, LLVM_COV, INSTA, FUZZ, ACTIONLINT, MDBOOK, TYPOS,
+            ZIZMOR, PODMAN, DOTNET,
+        ] {
+            match tool.version {
+                Some(v) => assert!(tool.install.contains(v), "{:?}", tool.check),
+                // Only tools CI takes from the runner image have no pin.
+                None => assert!(
+                    tool.install.contains("CI uses the one on"),
+                    "{:?}",
+                    tool.check
+                ),
+            }
+        }
+    }
+
+    fn planned(command: &str, tool: Tool) -> Planned {
+        Planned {
+            job: "test",
+            command: command.to_owned(),
+            env: &[],
+            needs: Some(Needs {
+                check: tool.check.iter().map(|w| (*w).to_owned()).collect(),
+                version: tool.version.map(str::to_owned),
+                install: tool.install.to_owned(),
+            }),
+        }
+    }
+
+    #[test]
+    fn missing_tools_stop_ci_and_other_versions_warn() {
+        use crate::tools::tests::FakeProbe;
+        let selected = [
+            planned("cargo nextest run", NEXTEST),
+            planned("cargo deny check", DENY),
+            planned("cargo deny check bans", DENY),
+            planned("typos", TYPOS),
+            Planned {
+                job: "fmt",
+                command: "cargo fmt --all --check".to_owned(),
+                env: &[],
+                needs: None,
+            },
+        ];
+        // Everything present at CI's versions.
+        let mut probe = FakeProbe::with(&[
+            (
+                "cargo nextest --version",
+                Some("cargo-nextest 0.9.152 (x 2026-11-13)\n"),
+            ),
+            ("cargo deny --version", Some("cargo-deny 0.22.0\n")),
+            ("typos --version", Some("typos-cli 1.52.2\n")),
+        ]);
+        assert_eq!(tool_problems(&selected, &mut probe), (vec![], vec![]));
+        // A step with no tool runs nothing.
+        assert!(!probe.asked.iter().any(|c| c.contains("fmt")));
+
+        // Missing: listed per step, with the install command; another
+        // version: one warning per tool.
+        let mut probe = FakeProbe::with(&[
+            (
+                "cargo nextest --version",
+                Some("cargo-nextest 0.9.100 (x 2026-01-01)\n"),
+            ),
+            ("typos --version", Some("typos-cli 1.52.2\n")),
+        ]);
+        let (missing, other) = tool_problems(&selected, &mut probe);
+        assert_eq!(
+            missing,
+            [
+                "  cargo deny check\n    needs: cargo install --locked cargo-deny@0.22.0",
+                "  cargo deny check bans\n    needs: cargo install --locked cargo-deny@0.22.0",
+            ]
+        );
+        assert_eq!(
+            other,
+            [
+                "cargo nextest --version 0.9.152 is needed, found `cargo-nextest 0.9.100 (x 2026-01-01)`: cargo install --locked cargo-nextest@0.9.152"
+            ]
+        );
+        assert_eq!(
+            missing_tools_message(&missing),
+            "missing tools; install them, or run `cargo xtask ci --fast` to skip the slow steps:\n  cargo deny check\n    needs: cargo install --locked cargo-deny@0.22.0\n  cargo deny check bans\n    needs: cargo install --locked cargo-deny@0.22.0"
+        );
     }
 
     #[test]

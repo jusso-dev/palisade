@@ -1,0 +1,8 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask check-workflows
+
+Enforce the CI runner and action policy for .github/workflows,
+and that nothing under .github names a cloud-managed build service

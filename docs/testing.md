@@ -216,7 +216,8 @@ Conventions:
 The older golden-file convention above (`PALISADE_BLESS=1`) stays for committed artefacts that are
 not snapshots of a test value: the JSON Schemas and the event registry. Snapshots of the compiled
 OS-native policy XML and of CLI output arrive with that code (#84, #15), using the same
-conventions.
+conventions. `xtask` snapshots its own `--help` output (`xtask/src/snapshots/`, #29); after a
+change to the command list, run `cargo insta test -p xtask` and review.
 
 ## Fuzzing
 

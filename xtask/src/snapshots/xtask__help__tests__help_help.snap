@@ -1,0 +1,7 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask help
+
+Show this message

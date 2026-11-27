@@ -1,0 +1,7 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask adr new "<title>"
+
+Copy docs/adr/0000-template.md to the next ADR number, as `proposed`

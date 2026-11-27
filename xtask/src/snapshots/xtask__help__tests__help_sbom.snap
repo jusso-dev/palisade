@@ -1,0 +1,7 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask sbom
+
+Reserved for the SBOM (#226); prints where it will be written and fails

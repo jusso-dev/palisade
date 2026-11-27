@@ -1,0 +1,8 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask audit
+
+Run cargo-audit over the root and fuzz lockfiles, ignoring exactly the
+advisories deny.toml ignores

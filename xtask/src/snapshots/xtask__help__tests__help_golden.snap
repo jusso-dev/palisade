@@ -1,0 +1,7 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask golden [--update]
+
+Check the corpus's hashes against testdata/golden/fixtures.txt, or rewrite it

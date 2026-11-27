@@ -1,0 +1,7 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask sign --signer <none|test-ca|pfx|cloud-hsm> [--verify] [--no-timestamp] <file>...
+
+Authenticode-sign and verify files (docs/releasing.md#code-signing)

@@ -1,0 +1,8 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask bench-compare --base <commit>
+
+Run every criterion bench at <commit> and at the working tree, and fail if a
+median is more than 10% slower outside the noise (bench.yml)
