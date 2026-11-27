@@ -44,10 +44,10 @@ certifies per commit by adding a `Signed-off-by: Name <email>` trailer, usually 
    a hosted bot or third-party action that is not on the allowlist. Contributors must sign before
    their first pull request, and a relicensing right asks them to trust the maintainer with more
    than the licence grants. Fails drivers 2, 3 and 4.
-3. **DCO sign-off, checked by a script in the repository.** Each commit carries `Signed-off-by:`. A
-   short shell script (`.github/scripts/check-dco.sh`), run by a workflow that uses only
-   `actions/checkout`, checks every non-merge commit in a pull request that is not exempt (see
-   Decision). No service, no secret, no extra rights. The DCO certifies the contributor's right to
+3. **DCO sign-off, checked by a script in the repository.** Each non-merge commit in a pull request
+   that is not exempt (see Decision) carries `Signed-off-by:`, and a short shell script
+   (`.github/scripts/check-dco.sh`), run by a workflow that uses only `actions/checkout`, checks
+   them. No service, no secret, no extra rights. The DCO certifies the contributor's right to
    submit, which is what driver 1 asks for; it does not allow relicensing, which driver 4 rules out
    anyway.
 4. **DCO sign-off, checked by a hosted app or a third-party action.** Same record as option 3, but
