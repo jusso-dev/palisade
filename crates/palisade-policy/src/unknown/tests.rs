@@ -109,6 +109,22 @@ fn decide(v: &ValidatedPolicy, t: ObjectType, facts: &ObjectFacts) -> Decision {
     decide_with(v, t, facts, &interactive_context())
 }
 
+/// [`decide`] with every path variable the classifier reads set
+/// ([`vars`]): full facts for an object classified from its path.
+fn decide_full(v: &ValidatedPolicy, t: ObjectType, facts: &ObjectFacts) -> Decision {
+    let variables = vars();
+    let context = interactive_context();
+    Evaluator::new(v).unwrap().evaluate(
+        &Subject {
+            object_type: t,
+            facts,
+            variables: &variables,
+            context: &context,
+        },
+        TRACE,
+    )
+}
+
 fn level_set<T: Ord + Copy>(items: &[T]) -> BTreeSet<T> {
     items.iter().copied().collect()
 }
@@ -613,21 +629,36 @@ fn missing_location_facts_classify_from_the_path_or_fail_closed() {
     let v = valid(doc(
         serde_json::json!({"default": "detect", "by_location": {"user_writable_other": "block"}}),
     ));
-    // No path at all.
-    let d = decide(&v, ObjectType::Executable, &ObjectFacts::new());
-    assert_eq!(d.outcome(), Outcome::Blocked);
-    assert_eq!(
-        d.unknown().unwrap().locations,
-        vec![LocationClass::UserWritableOther]
+    // No path at all: `user_writable_other`, as before, and every other
+    // location class `Unknown`.
+    let d = decide(
+        &v,
+        ObjectType::Executable,
+        &ObjectFacts::new().with_origin([]),
     );
-    // A path with unknown ACL facts is user-writable.
-    let facts = ObjectFacts::new().with_path(PathFact::new("D:\\data\\a.exe", &VolumeMap::new()));
-    let d = decide(&v, ObjectType::Executable, &facts);
     assert_eq!(d.outcome(), Outcome::Blocked);
-    // A safe path elsewhere on a fixed disk.
+    let u = d.unknown().unwrap();
+    assert_eq!(u.locations, vec![LocationClass::UserWritableOther]);
+    assert_eq!(u.unknown_locations.len(), LocationClass::ALL.len() - 1);
+    assert!(u.missing_facts.contains(&MissingFact::Path));
+    // A path with unknown ACL facts is user-writable.
     let facts = ObjectFacts::new()
-        .with_path(PathFact::new("D:\\data\\a.exe", &VolumeMap::new()).with_user_writable(false));
-    let d = decide(&v, ObjectType::Executable, &facts);
+        .with_path(
+            PathFact::new("D:\\data\\a.exe", &VolumeMap::new()).with_volume(VolumeKind::Fixed),
+        )
+        .with_origin([]);
+    let d = decide_full(&v, ObjectType::Executable, &facts);
+    assert_eq!(d.outcome(), Outcome::Blocked);
+    // A safe path elsewhere on a fixed disk (full facts: the volume and
+    // the origin collection's answer).
+    let facts = ObjectFacts::new()
+        .with_path(
+            PathFact::new("D:\\data\\a.exe", &VolumeMap::new())
+                .with_user_writable(false)
+                .with_volume(VolumeKind::Fixed),
+        )
+        .with_origin([]);
+    let d = decide_full(&v, ObjectType::Executable, &facts);
     assert_eq!(d.outcome(), Outcome::Allowed);
     assert_eq!(
         d.unknown().unwrap().locations,
@@ -682,7 +713,9 @@ fn the_default_prompt_timeout_is_sixty_seconds_and_falls_back_to_block() {
 #[test]
 fn allow_always_local_is_only_offered_with_a_hash() {
     let v = prompt_policy(serde_json::json!({}));
-    let facts = ObjectFacts::new().with_location_class([LocationClass::Temp]);
+    let facts = ObjectFacts::new()
+        .with_location_class([LocationClass::Temp])
+        .with_origin([]);
     let d = decide(&v, ObjectType::Executable, &facts);
     let p = d.directives().prompt.as_ref().unwrap();
     assert!(!p.options.contains(&PromptOption::AllowAlwaysLocal));
@@ -1335,8 +1368,19 @@ fn vars() -> PathVariables {
             crate::facts::PathVariable::Temp,
             &["C:\\Users\\alice\\AppData\\Local\\Temp"],
         )
+        // Every variable the classifier reads, so these are full facts.
+        .with(crate::facts::PathVariable::Public, &["C:\\Users\\Public"])
 }
 
+/// The classes the facts establish.
+fn known(c: location::Classified) -> BTreeSet<LocationClass> {
+    c.classes.matching()
+}
+
+/// The classes the facts establish for `raw`, with `vars()`. The table
+/// tests describe a fixed disk unless they name another volume, so the
+/// volume fact defaults to `Fixed` (full facts); a missing volume fact is
+/// tested on its own.
 fn classes(
     raw: &str,
     writable: Option<bool>,
@@ -1344,7 +1388,12 @@ fn classes(
 ) -> BTreeSet<LocationClass> {
     let mut p = PathFact::new(raw, &VolumeMap::new());
     p.user_writable = writable;
-    classify(&p, &vars(), volume, &[])
+    known(classify(
+        &p,
+        &vars(),
+        Some(volume.unwrap_or(VolumeKind::Fixed)),
+        &[],
+    ))
 }
 
 #[test]
@@ -1466,7 +1515,7 @@ fn a_mapped_drive_is_a_network_location() {
     let mut p = PathFact::new("Z:\\a.exe", &VolumeMap::new()).with_user_writable(false);
     p.alias = Some(palisade_core::path::normalize("\\\\server\\share\\a.exe"));
     assert_eq!(
-        classify(&p, &vars(), None, &[]),
+        known(classify(&p, &vars(), None, &[])),
         level_set(&[LocationClass::Network])
     );
 }
@@ -1475,15 +1524,16 @@ fn a_mapped_drive_is_a_network_location() {
 fn scanner_flagged_directories_are_user_writable() {
     let p = PathFact::new("C:\\Windows\\Tasks\\a.exe", &VolumeMap::new()).with_user_writable(false);
     let flagged = [palisade_core::path::normalize("C:\\Windows\\Tasks")];
+    let fixed = Some(VolumeKind::Fixed);
     assert_eq!(
-        classify(&p, &vars(), None, &flagged),
+        known(classify(&p, &vars(), fixed, &flagged)),
         level_set(&[LocationClass::UserWritableOther, LocationClass::Windows])
     );
     // A sibling with a common prefix is not.
     let p =
         PathFact::new("C:\\Windows\\TasksX\\a.exe", &VolumeMap::new()).with_user_writable(false);
     assert_eq!(
-        classify(&p, &vars(), None, &flagged),
+        known(classify(&p, &vars(), fixed, &flagged)),
         level_set(&[LocationClass::Windows])
     );
 }
@@ -1492,16 +1542,15 @@ fn scanner_flagged_directories_are_user_writable() {
 fn agent_temp_directories_add_the_temp_class() {
     let p = PathFact::new("D:\\MailCache\\a.exe", &VolumeMap::new()).with_user_writable(true);
     let temp = [palisade_core::path::normalize("D:\\MailCache")];
-    let got = location::classify_with(
+    let got = known(location::classify_with(
         &p,
         &vars(),
         &location::Hints {
             volume: None,
             writable_dirs: &[],
             temp_dirs: &temp,
-            os_volume: false,
         },
-    );
+    ));
     assert_eq!(
         got,
         level_set(&[LocationClass::Temp, LocationClass::UserWritableOther])
@@ -2250,7 +2299,7 @@ fn external_volumes_are_never_protected_locations() {
         "\\\\server\\share\\Program Files\\a.exe",
     ));
     let no_vars = PathVariables::new();
-    let got = classify(&p, &no_vars, None, &[]);
+    let got = known(classify(&p, &no_vars, None, &[]));
     assert_eq!(got, level_set(&[L::Network]));
     // With the variables set, only the system's own folders count.
     assert_eq!(
@@ -2261,13 +2310,12 @@ fn external_volumes_are_never_protected_locations() {
         classes("D:\\Program Files\\a.exe", Some(false), None),
         level_set(&[L::OtherFixed])
     );
-    // Without them, the drive-letter fallback needs the known fixed OS
-    // volume; an undescribed volume is just `other_fixed`.
+    // Without them, the drive-root folder is not a fact: `windows` is
+    // `Unknown`, even on a fixed disk.
     let p = PathFact::new("D:\\Windows\\a.exe", &VolumeMap::new()).with_user_writable(false);
-    assert_eq!(
-        classify(&p, &no_vars, None, &[]),
-        level_set(&[L::OtherFixed])
-    );
+    let c = classify(&p, &no_vars, Some(VolumeKind::Fixed), &[]).classes;
+    assert_eq!(c.get(L::Windows), Tri::Unknown);
+    assert_eq!(c.get(L::OtherFixed), Tri::Unknown);
 }
 
 #[test]
@@ -2281,7 +2329,7 @@ fn a_unc_path_with_a_drive_alias_is_classified_in_both_forms() {
     p.alias = Some(palisade_core::path::normalize(
         "C:\\Users\\alice\\AppData\\Local\\Temp\\a.exe",
     ));
-    let got = classify(&p, &vars(), None, &[]);
+    let got = known(classify(&p, &vars(), None, &[]));
     assert!(
         got.contains(&L::Temp) && got.contains(&L::UserProfile) && got.contains(&L::Network),
         "{got:?}"
@@ -3464,19 +3512,36 @@ fn ml3_warns_while_early_boot_drivers_are_only_audited() {
 // ------------------------------------------------ location classifier
 
 #[test]
-fn the_windows_temp_fallback_applies_only_without_windir() {
+fn a_windows_temp_folder_without_windir_is_unknown_not_temp() {
+    // Expectation changed in round 5: the `X:\Windows\Temp` fallback used
+    // to grant `temp` without `%WINDIR%`; a drive-root folder is not a fact,
+    // so `temp` is now `Unknown` (and stage 6 applies its level too).
     use LocationClass as L;
     let with = |raw: &str, v: &PathVariables| {
         let p = PathFact::new(raw, &VolumeMap::new()).with_user_writable(false);
-        classify(&p, v, None, &[])
+        classify(&p, v, Some(VolumeKind::Fixed), &[]).classes
     };
-    let windir = PathVariables::new().with(crate::facts::PathVariable::Windir, &["C:\\Windows"]);
-    // Another drive's `\Windows\Temp` is not the system's.
-    assert!(!with("D:\\Windows\\Temp\\a.exe", &windir).contains(&L::Temp));
-    assert!(with("C:\\Windows\\Temp\\a.exe", &windir).contains(&L::Temp));
-    // Without `%WINDIR%`, any drive's `\Windows\Temp` is.
+    // Full facts: every variable set, `%WINDIR%` among them.
+    let windir = vars();
+    // With `%WINDIR%`, it decides: another drive's `\Windows\Temp` is not
+    // the system's.
+    assert_eq!(
+        with("D:\\Windows\\Temp\\a.exe", &windir).get(L::Temp),
+        Tri::NoMatch
+    );
+    assert_eq!(
+        with("C:\\Windows\\Temp\\a.exe", &windir).get(L::Temp),
+        Tri::Match
+    );
+    // Without it, no `\Windows\Temp` is certain, on any drive.
     let none = PathVariables::new();
-    assert!(with("D:\\Windows\\Temp\\a.exe", &none).contains(&L::Temp));
+    for raw in [
+        "C:\\Windows\\Temp\\a.exe",
+        "D:\\Windows\\Temp\\a.exe",
+        "D:\\Tools\\a.exe",
+    ] {
+        assert_eq!(with(raw, &none).get(L::Temp), Tri::Unknown, "{raw}");
+    }
 }
 
 #[test]
@@ -3484,7 +3549,7 @@ fn a_unc_server_or_share_name_is_not_a_cache_folder() {
     use LocationClass as L;
     let with = |raw: &str| {
         let p = PathFact::new(raw, &VolumeMap::new()).with_user_writable(false);
-        classify(&p, &PathVariables::new(), None, &[])
+        known(classify(&p, &PathVariables::new(), None, &[]))
     };
     assert!(!with("\\\\INetCache\\apps\\a.exe").contains(&L::Temp));
     assert!(!with("\\\\server\\INetCache\\a.exe").contains(&L::Temp));
@@ -3495,13 +3560,26 @@ fn a_unc_server_or_share_name_is_not_a_cache_folder() {
 }
 
 #[test]
-fn without_volume_facts_a_removable_drive_is_other_fixed() {
+fn without_volume_facts_a_drive_could_be_removable() {
+    // Expectation changed in round 5: an unknown volume kind used to read
+    // as a fixed disk (`other_fixed`). It is now a missing fact: `removable`,
+    // `optical`, `network` and `other_fixed` are all `Unknown`.
     use LocationClass as L;
     let p = PathFact::new("E:\\setup.exe", &VolumeMap::new()).with_user_writable(false);
     let unknown_volume = classify(&p, &PathVariables::new(), None, &[]);
-    assert_eq!(unknown_volume, BTreeSet::from([L::OtherFixed]));
-    let removable = classify(&p, &PathVariables::new(), Some(VolumeKind::Removable), &[]);
-    assert!(removable.contains(&L::Removable));
+    for c in [L::Removable, L::Optical, L::Network, L::OtherFixed] {
+        assert_eq!(unknown_volume.classes.get(c), Tri::Unknown, "{c:?}");
+    }
+    assert!(unknown_volume.missing.contains(&MissingFact::VolumeKind));
+    let removable = known(classify(
+        &p,
+        &PathVariables::new(),
+        Some(VolumeKind::Removable),
+        &[],
+    ));
+    assert_eq!(removable, BTreeSet::from([L::Removable]));
+    let fixed = known(classify(&p, &vars(), Some(VolumeKind::Fixed), &[]));
+    assert_eq!(fixed, BTreeSet::from([L::OtherFixed]));
 }
 
 #[test]
@@ -3584,86 +3662,322 @@ fn the_example_applies_the_strictest_matching_entry() {
     }
 }
 
-#[test]
-fn without_a_known_os_volume_a_windows_folder_is_not_windows() {
-    // A missing fact never grants a protected class (ADR 0018): without
-    // `%WINDIR%`, `D:\Windows` on a volume not known to be the fixed OS
-    // volume gets no `windows` class from the drive-root fallback.
-    use LocationClass as L;
-    let p = PathFact::new("D:\\Windows\\a.exe", &VolumeMap::new()).with_user_writable(false);
-    let none = PathVariables::new();
-    let with = |volume, os_volume| {
-        location::classify_with(
-            &p,
-            &none,
-            &location::Hints {
-                volume,
-                os_volume,
-                ..location::Hints::default()
+// ------------------------------------- three-valued classes (#39, round 5)
+
+use crate::facts::PathVariable as PV;
+use crate::ops::Tri;
+
+/// Stage 6's applied level for an executable at `raw` (fixed unless
+/// `volume` says otherwise), under `u`, with `variables`, and `origins`
+/// (`None`: origin collection did not report).
+fn applied_level(
+    u: serde_json::Value,
+    raw: &str,
+    volume: Option<VolumeKind>,
+    variables: &PathVariables,
+    origins: Option<Vec<OriginClass>>,
+) -> Level {
+    let v = valid(doc(with_profile(u)));
+    let mut path = PathFact::new(raw, &VolumeMap::new()).with_user_writable(false);
+    path.volume = volume;
+    let mut facts = ObjectFacts::new()
+        .with(Field::HashSha256, sha('a'))
+        .with_path(path);
+    facts.origin = origins.map(|o| o.into_iter().collect());
+    let context = interactive_context();
+    Evaluator::new(&v)
+        .unwrap()
+        .evaluate(
+            &Subject {
+                object_type: ObjectType::Executable,
+                facts: &facts,
+                variables,
+                context: &context,
             },
+            TRACE,
         )
-    };
-    assert_eq!(with(None, false), BTreeSet::from([L::OtherFixed]));
-    assert_eq!(with(None, true), BTreeSet::from([L::OtherFixed]));
+        .unknown()
+        .unwrap()
+        .applied
+}
+
+fn without(v: &PathVariables, drop: PV) -> PathVariables {
+    let mut out = PathVariables::new();
+    for var in crate::facts::PathVariable::ALL {
+        if var != drop {
+            let vals: Vec<String> = v.get(var).iter().map(|p| p.as_str().to_owned()).collect();
+            let vals: Vec<&str> = vals.iter().map(String::as_str).collect();
+            out.set(var, &vals);
+        }
+    }
+    out
+}
+
+/// Every row of the round-five table, and the `(x86)` case: removing the
+/// fact never lowers the applied level. Each row names the level the old
+/// classifier gave without the fact, to show what it relaxed.
+#[test]
+fn removing_a_fact_never_relaxes_the_documented_cases() {
+    let ml1 = preset_json(CompliancePreset::E8Ml1);
+    let full = vars();
+    let fixed = Some(VolumeKind::Fixed);
+    let none = Some(vec![]);
+    type Row = (
+        &'static str,
+        serde_json::Value,
+        &'static str,
+        Option<VolumeKind>,
+        PathVariables,
+        Option<VolumeKind>,
+        PathVariables,
+    );
+    let rows: Vec<Row> = vec![
+        // The reviewer's case (the old code detected it without %WINDIR%).
+        (
+            "reviewer temp",
+            serde_json::json!({"default": "block", "by_location": {"temp": "detect"}}),
+            "D:\\Windows\\Temp\\a.exe",
+            fixed,
+            full.clone(),
+            fixed,
+            without(&full, PV::Windir),
+        ),
+        // `e8_ml1` on the real temp folder (ruling 1 of round four would have detected it).
+        (
+            "e8_ml1 C:\\Windows\\Temp",
+            ml1.clone(),
+            "C:\\Windows\\Temp\\a.exe",
+            fixed,
+            full.clone(),
+            fixed,
+            without(&full, PV::Windir),
+        ),
+        // `%TEMP%` (the old code detected it without the variable).
+        (
+            "e8_ml1 %TEMP%",
+            ml1.clone(),
+            "C:\\Users\\alice\\AppData\\Local\\Temp\\a.exe",
+            fixed,
+            full.clone(),
+            fixed,
+            without(&full, PV::Temp),
+        ),
+        // A redirected profile (the old code detected it without %USERPROFILE%).
+        (
+            "e8_ml1 %USERPROFILE%",
+            ml1.clone(),
+            "D:\\Profiles\\alice\\a.exe",
+            fixed,
+            full.clone().with(PV::UserProfile, &["D:\\Profiles\\alice"]),
+            fixed,
+            without(&full, PV::UserProfile),
+        ),
+        // `windows: block` (the old code detected it without %WINDIR%).
+        (
+            "windows: block",
+            serde_json::json!({"default": "detect", "by_location": {"windows": "block"}}),
+            "C:\\Windows\\a.exe",
+            fixed,
+            full.clone(),
+            fixed,
+            without(&full, PV::Windir),
+        ),
+        // The volume kind (the old code read an unknown volume as fixed).
+        (
+            "removable: block",
+            serde_json::json!({"default": "detect", "by_location": {"removable": "block"}}),
+            "E:\\setup.exe",
+            Some(VolumeKind::Removable),
+            full.clone(),
+            None,
+            full.clone(),
+        ),
+        // `(x86)` with a partial %PROGRAMFILES% list.
+        (
+            "program_files: allow, partial",
+            serde_json::json!({"default": "detect", "by_location": {"program_files": "allow"}}),
+            "C:\\Program Files (x86)\\App\\a.exe",
+            fixed,
+            without(&full, PV::ProgramFiles).with(PV::ProgramFiles, &["C:\\Program Files"]),
+            fixed,
+            without(&full, PV::ProgramFiles),
+        ),
+    ];
+    for (label, u, raw, vol_full, vars_full, vol_part, vars_part) in rows {
+        let before = applied_level(u.clone(), raw, vol_full, &vars_full, none.clone());
+        let after = applied_level(u, raw, vol_part, &vars_part, none.clone());
+        assert!(after >= before, "{label}: {before:?} -> {after:?}");
+    }
+    // The origin fact: under `baseline_only` (the default), no origin facts
+    // block an object `detect` would allow.
+    let u = serde_json::json!({"default": "detect"});
     assert_eq!(
-        with(Some(VolumeKind::Fixed), false),
-        BTreeSet::from([L::OtherFixed])
+        applied_level(u.clone(), "C:\\Tools\\a.exe", fixed, &full, none.clone()),
+        Level::Detect
     );
     assert_eq!(
-        with(Some(VolumeKind::Removable), true),
-        BTreeSet::from([L::Removable])
+        applied_level(u.clone(), "C:\\Tools\\a.exe", fixed, &full, None),
+        Level::Block
     );
     assert_eq!(
-        with(Some(VolumeKind::Optical), true),
-        BTreeSet::from([L::Optical])
+        applied_level(
+            serde_json::json!({"default": "detect", "preexisting_policy": "treat_as_unknown"}),
+            "C:\\Tools\\a.exe",
+            fixed,
+            &full,
+            None
+        ),
+        Level::Detect
+    );
+    // `by_origin` entries decide an object with no origin facts.
+    let internet = serde_json::json!({"default": "detect", "preexisting_policy": "treat_as_unknown", "by_origin": {"internet": "block"}});
+    assert_eq!(
+        applied_level(internet.clone(), "C:\\Tools\\a.exe", fixed, &full, None),
+        Level::Block
     );
     assert_eq!(
-        with(Some(VolumeKind::Network), true),
-        BTreeSet::from([L::Network])
-    );
-    // With `%WINDIR%` set, the variable decides, as before.
-    let windir = PathVariables::new().with(crate::facts::PathVariable::Windir, &["C:\\Windows"]);
-    assert_eq!(
-        classify(&p, &windir, None, &[]),
-        BTreeSet::from([L::OtherFixed])
-    );
-    // `D:\Users\<name>` is `user_profile`, not `other_fixed`.
-    let u = PathFact::new("D:\\Users\\alice\\a.exe", &VolumeMap::new()).with_user_writable(false);
-    assert_eq!(
-        classify(&u, &none, None, &[]),
-        BTreeSet::from([L::UserProfile])
+        applied_level(internet, "C:\\Tools\\a.exe", fixed, &full, none),
+        Level::Detect
     );
 }
 
 #[test]
-fn on_the_known_fixed_os_volume_the_drive_root_fallbacks_apply() {
-    use LocationClass as L;
-    let none = PathVariables::new();
-    let os = location::Hints {
-        volume: Some(VolumeKind::Fixed),
-        os_volume: true,
-        ..location::Hints::default()
-    };
-    for (raw, want) in [
-        ("D:\\Windows\\a.exe", L::Windows),
-        ("D:\\Program Files\\App\\a.exe", L::ProgramFiles),
-        ("D:\\Program Files (x86)\\App\\a.exe", L::ProgramFiles),
-    ] {
-        let p = PathFact::new(raw, &VolumeMap::new()).with_user_writable(false);
-        assert_eq!(
-            location::classify_with(&p, &none, &os),
-            BTreeSet::from([want]),
-            "{raw}"
+fn a_missing_fact_is_named_in_the_decision_and_explained() {
+    let v = valid(doc(serde_json::json!({"default": "detect"})));
+    let facts = ObjectFacts::new()
+        .with(Field::HashSha256, sha('a'))
+        .with_path(
+            PathFact::new("C:\\Tools\\a.exe", &VolumeMap::new())
+                .with_user_writable(false)
+                .with_volume(VolumeKind::Fixed),
         );
-    }
-    // The `temp` fallback needs no volume fact: it only makes an object
-    // look less safe.
-    let t = PathFact::new("E:\\Windows\\Temp\\a.exe", &VolumeMap::new()).with_user_writable(false);
-    assert!(classify(&t, &none, None, &[]).contains(&L::Temp));
+    let d = decide_full(&v, ObjectType::Executable, &facts);
+    let u = d.unknown().unwrap();
+    assert_eq!(u.applied, Level::Block);
+    assert_eq!(u.fallback, Some(FallbackReason::MissingFact));
+    assert_eq!(u.missing_facts, vec![MissingFact::Origin]);
+    assert!(u.unknown_origins.contains(&OriginClass::Preexisting));
+    // With the origin collection's answer, the same object is detected and
+    // nothing is missing.
+    let d = decide_full(&v, ObjectType::Executable, &facts.clone().with_origin([]));
+    let u = d.unknown().unwrap();
+    assert_eq!((u.applied, u.fallback), (Level::Detect, None));
+    assert!(
+        u.missing_facts.is_empty()
+            && u.unknown_locations.is_empty()
+            && u.unknown_origins.is_empty()
+    );
 }
 
-/// Random drive paths, some under the folders the fallbacks know.
-fn arb_drive_path() -> impl Strategy<Value = String> {
+#[test]
+fn an_empty_origin_set_is_the_unknown_origin() {
+    let v = valid(doc(
+        serde_json::json!({"default": "detect", "by_origin": {"unknown": "block"}}),
+    ));
+    let d = decide(
+        &v,
+        ObjectType::Executable,
+        &object(&[LocationClass::ProgramFiles], &[]),
+    );
+    assert_eq!(d.unknown().unwrap().origins, vec![OriginClass::Unknown]);
+    assert_eq!(d.unknown().unwrap().applied, Level::Block);
+}
+
+#[test]
+fn with_full_facts_the_classes_are_what_they_were() {
+    // The round-five classifier, given every fact (all variables, the
+    // volume kind), certain about every class, and equal to the 8923bd8
+    // classifier.
+    let variables = vars();
+    for raw in [
+        "C:\\Users\\alice\\Downloads\\a.exe",
+        "C:\\Users\\bob\\a.exe",
+        "C:\\Users\\alice\\AppData\\Local\\Temp\\x\\a.exe",
+        "C:\\Windows\\Temp\\a.exe",
+        "C:\\Users\\alice\\AppData\\Local\\Vendor\\INetCache\\Low\\a.exe",
+        "C:\\Program Files\\App\\a.exe",
+        "C:\\Program Files (x86)\\App\\a.exe",
+        "C:\\Windows\\System32\\a.exe",
+        "C:\\WindowsApps\\a.exe",
+        "D:\\Tools\\a.exe",
+        "D:\\Windows\\a.exe",
+        "D:\\Users\\alice\\a.exe",
+        "C:\\Tools\\a.txt:payload",
+        "\\\\server\\share\\a.exe",
+        "relative\\a.exe",
+    ] {
+        for writable in [Some(false), Some(true), None] {
+            for volume in [
+                VolumeKind::Fixed,
+                VolumeKind::Removable,
+                VolumeKind::Optical,
+                VolumeKind::Network,
+            ] {
+                let mut p = PathFact::new(raw, &VolumeMap::new());
+                p.user_writable = writable;
+                let now = classify(&p, &variables, Some(volume), &[]);
+                let before =
+                    super::previous_classifier::classify(&p, &variables, Some(volume), &[]);
+                if p.path.is_resolved() {
+                    assert!(
+                        now.classes.unknown().is_empty(),
+                        "{raw} {volume:?}: {:?}",
+                        now.classes.unknown()
+                    );
+                }
+                assert_eq!(
+                    now.classes.matching(),
+                    before,
+                    "{raw} {writable:?} {volume:?}"
+                );
+            }
+        }
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(1024))]
+
+    /// With full facts (every variable, the volume kind, the origin
+    /// collection's answer), every decision is what it was: the levels
+    /// come from the 8923bd8 classes, and nothing is `Unknown`.
+    #[test]
+    fn with_full_facts_every_decision_is_what_it_was(
+        p in arb_full_policy(),
+        raw in arb_round5_path(),
+        writable in prop::option::of(any::<bool>()),
+        volume in prop::sample::select(vec![VolumeKind::Fixed, VolumeKind::Removable, VolumeKind::Optical, VolumeKind::Network]),
+        origins in prop::collection::btree_set(prop::sample::select(OriginClass::ALL.to_vec()), 0..3),
+        t in prop::sample::select(ObjectType::ALL.to_vec()),
+    ) {
+        let mut d = doc(serde_json::json!({}));
+        d.policy.unknown = p;
+        let Ok(v) = d.validate() else { return Ok(()) };
+        let mut path = PathFact::new(&raw, &VolumeMap::new());
+        path.user_writable = writable;
+        path.volume = Some(volume);
+        let variables = vars();
+        let before = super::previous_classifier::classify(&path, &variables, Some(volume), &[]);
+        let facts = ObjectFacts::new().with(Field::HashSha256, sha('a')).with_path(path.clone()).with_origin(origins.iter().copied());
+        let given = ObjectFacts::new().with(Field::HashSha256, sha('a')).with_location_class(before.iter().copied()).with_origin(origins.iter().copied());
+        // Only resolved paths have full facts; an unusable path is a
+        // missing fact.
+        prop_assume!(path.path.is_resolved() && !before.is_empty());
+        let context = interactive_context();
+        let decide = |f: &ObjectFacts| Evaluator::new(&v).unwrap().evaluate(
+            &Subject { object_type: t, facts: f, variables: &variables, context: &context }, TRACE);
+        let (now, then) = (decide(&facts), decide(&given));
+        prop_assert_eq!(now.outcome(), then.outcome());
+        prop_assert_eq!(now.reason_code(), then.reason_code());
+        let u = now.unknown().unwrap();
+        prop_assert_eq!(&u.locations, &then.unknown().unwrap().locations);
+        prop_assert!(u.unknown_locations.is_empty() && u.unknown_origins.is_empty());
+        prop_assert_ne!(u.fallback, Some(FallbackReason::MissingFact));
+    }
+}
+
+/// Random paths, under the folders the classifier knows and elsewhere.
+fn arb_round5_path() -> impl Strategy<Value = String> {
     (
         prop::sample::select(vec!["C", "D", "E"]),
         prop::sample::select(vec![
@@ -3673,6 +3987,9 @@ fn arb_drive_path() -> impl Strategy<Value = String> {
             "Program Files\\App",
             "Program Files (x86)\\App",
             "Users\\alice",
+            "Users\\alice\\AppData\\Local\\Temp",
+            "Users\\Public",
+            "Profiles\\alice",
             "Data",
             "Data\\INetCache",
         ]),
@@ -3681,84 +3998,113 @@ fn arb_drive_path() -> impl Strategy<Value = String> {
         .prop_map(|(d, dir, f)| format!("{d}:\\{dir}\\{f}"))
 }
 
+/// A device's variables, each one possibly left out, and possibly
+/// partial: `%PROGRAMFILES%` may list only one folder, and the per-user
+/// variables may point anywhere.
+fn arb_round5_variables() -> impl Strategy<Value = PathVariables> {
+    (
+        prop::sample::select(vec!["C", "D"]),
+        prop::option::of(prop::sample::select(vec![0u8, 1, 2])),
+        prop::option::of(any::<bool>()),
+        prop::option::of(prop::sample::select(vec![
+            "C:\\Users\\alice",
+            "D:\\Profiles\\alice",
+        ])),
+        prop::option::of(prop::sample::select(vec![
+            "C:\\Users\\alice\\AppData\\Local\\Temp",
+            "D:\\Data",
+        ])),
+        prop::option::of(any::<bool>()),
+    )
+        .prop_map(|(os, pf, windir, profile, temp, public)| {
+            let mut v = PathVariables::new();
+            if windir.is_some() {
+                v.set(PV::Windir, &[&format!("{os}:\\Windows")]);
+            }
+            match pf {
+                Some(0) => v.set(PV::ProgramFiles, &[&format!("{os}:\\Program Files")]),
+                Some(1) => v.set(PV::ProgramFiles, &[&format!("{os}:\\Program Files (x86)")]),
+                Some(_) => v.set(
+                    PV::ProgramFiles,
+                    &[
+                        &format!("{os}:\\Program Files"),
+                        &format!("{os}:\\Program Files (x86)"),
+                    ],
+                ),
+                None => {}
+            }
+            if let Some(p) = profile {
+                v.set(PV::UserProfile, &[p]);
+                v.set(PV::AppData, &[&format!("{p}\\AppData\\Roaming")]);
+                v.set(PV::LocalAppData, &[&format!("{p}\\AppData\\Local")]);
+            }
+            if let Some(t) = temp {
+                v.set(PV::Temp, &[t]);
+            }
+            if public.is_some() {
+                v.set(PV::Public, &[&format!("{os}:\\Users\\Public")]);
+            }
+            v
+        })
+}
+
+/// The facts one step of the property can remove.
+#[derive(Clone, Copy, Debug)]
+enum Drop {
+    Volume,
+    Origin,
+    Variable(PV),
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(1024))]
 
-    /// Removing any volume or variable fact never adds a protected class.
-    /// The facts describe one possible device: Windows runs from
-    /// `os_drive`, the variables (when set) point there, the OS drive is a
-    /// fixed volume (if its kind is reported at all), and the agent may or
-    /// may not say whether the file's volume is the OS volume. Facts that
-    /// contradict each other, such as `%WINDIR%` on a drive reported as
-    /// removable, are not generated, and the variables hold what Windows
-    /// sets: `%WINDIR%` is `X:\Windows`, and `%PROGRAMFILES%` both program
-    /// folders. (A variable narrower than its fallback, such as a
-    /// `%PROGRAMFILES%` without the `(x86)` folder, lets the fallback on the
-    /// known OS volume add `program_files` for the other folder when the
-    /// variable is dropped; that is the fallback doing its job.)
+    /// Removing any one volume, variable or origin fact never makes stage
+    /// six's applied level less restrictive, for any unknown policy, path
+    /// and partial facts (#39, ADR 0018).
     #[test]
-    fn removing_a_volume_or_variable_fact_never_adds_a_protected_class(
-        raw in arb_drive_path(),
+    fn removing_a_fact_never_lowers_the_applied_level(
+        p in arb_full_policy(),
+        raw in arb_round5_path(),
         writable in prop::option::of(any::<bool>()),
-        volume in prop::option::of(prop::sample::select(vec![
-            VolumeKind::Fixed, VolumeKind::Removable, VolumeKind::Optical, VolumeKind::Network,
-        ])),
-        os_drive in prop::sample::select(vec!['C', 'D', 'E']),
-        os_known in any::<bool>(),
-        has_windir in any::<bool>(),
-        has_program_files in any::<bool>(),
-        drop_volume in any::<bool>(),
-        drop_os in any::<bool>(),
-        drop_windir in any::<bool>(),
-        drop_program_files in any::<bool>(),
+        volume in prop::option::of(prop::sample::select(vec![VolumeKind::Fixed, VolumeKind::Removable, VolumeKind::Optical, VolumeKind::Network])),
+        variables in arb_round5_variables(),
+        origins in prop::option::of(prop::collection::btree_set(prop::sample::select(OriginClass::ALL.to_vec()), 0..3)),
+        t in prop::sample::select(ObjectType::ALL.to_vec()),
+        session in prop::option::of(prop::sample::select(SessionType::ALL.to_vec())),
+        containment in prop::option::of(any::<bool>()),
+        drop in prop::sample::select(vec![
+            Drop::Volume, Drop::Origin,
+            Drop::Variable(PV::Windir), Drop::Variable(PV::ProgramFiles), Drop::Variable(PV::UserProfile),
+            Drop::Variable(PV::AppData), Drop::Variable(PV::LocalAppData), Drop::Variable(PV::Temp), Drop::Variable(PV::Public),
+        ]),
     ) {
-        use crate::facts::PathVariable as V;
-        let on_os = raw.starts_with(os_drive);
-        let os_volume = os_known && on_os;
-        // The OS drive is fixed, if its kind is reported.
-        let volume = if on_os && volume.is_some() { Some(VolumeKind::Fixed) } else { volume };
-        let windir_value = format!("{os_drive}:\\Windows");
-        let program_files_value = [
-            format!("{os_drive}:\\Program Files"),
-            format!("{os_drive}:\\Program Files (x86)"),
-        ];
-        let windir = has_windir.then_some(windir_value.as_str());
-        let program_files = has_program_files.then_some(&program_files_value);
-        let mut p = PathFact::new(&raw, &VolumeMap::new());
-        p.user_writable = writable;
-        let vars = |w: Option<&str>, pf: Option<&[String; 2]>| {
-            let mut v = PathVariables::new();
-            if let Some(w) = w {
-                v = v.with(V::Windir, &[w]);
-            }
-            if let Some(pf) = pf {
-                v = v.with(V::ProgramFiles, &[pf[0].as_str(), pf[1].as_str()]);
-            }
-            v
+        let mut d = doc(serde_json::json!({}));
+        d.policy.unknown = p;
+        let Ok(v) = d.validate() else { return Ok(()) };
+        let build = |volume: Option<VolumeKind>, origins: &Option<BTreeSet<OriginClass>>| {
+            let mut path = PathFact::new(&raw, &VolumeMap::new());
+            path.user_writable = writable;
+            path.volume = volume;
+            let mut f = ObjectFacts::new().with(Field::HashSha256, sha('a')).with_path(path);
+            f.origin = origins.clone();
+            f
         };
-        let protected = |c: &BTreeSet<LocationClass>| {
-            [LocationClass::Windows, LocationClass::ProgramFiles]
-                .into_iter()
-                .filter(|x| c.contains(x))
-                .collect::<BTreeSet<_>>()
+        let mut context = EvaluationContext::new();
+        context.session.session_type = session;
+        context.user.is_system = Some(false);
+        context.device.containment_available = containment;
+        let level = |f: &ObjectFacts, vars: &PathVariables| {
+            Evaluator::new(&v).unwrap().evaluate(
+                &Subject { object_type: t, facts: f, variables: vars, context: &context }, TRACE,
+            ).unknown().unwrap().applied
         };
-        let full = location::classify_with(
-            &p,
-            &vars(windir, program_files),
-            &location::Hints { volume, os_volume, ..location::Hints::default() },
-        );
-        let partial = location::classify_with(
-            &p,
-            &vars(windir.filter(|_| !drop_windir), program_files.filter(|_| !drop_program_files)),
-            &location::Hints {
-                volume: volume.filter(|_| !drop_volume),
-                os_volume: os_volume && !drop_os,
-                ..location::Hints::default()
-            },
-        );
-        prop_assert!(
-            protected(&partial).is_subset(&protected(&full)),
-            "{raw}: {partial:?} has more protected classes than {full:?}"
-        );
+        let before = level(&build(volume, &origins), &variables);
+        let after = match drop {
+            Drop::Volume => level(&build(None, &origins), &variables),
+            Drop::Origin => level(&build(volume, &None), &variables),
+            Drop::Variable(var) => level(&build(volume, &origins), &without(&variables, var)),
+        };
+        prop_assert!(after >= before, "dropping {drop:?}: {before:?} -> {after:?}");
     }
 }

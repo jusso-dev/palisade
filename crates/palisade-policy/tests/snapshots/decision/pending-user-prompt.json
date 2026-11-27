@@ -64,7 +64,10 @@
     ],
     "origins": [
       "internet"
-    ]
+    ],
+    "unknown_locations": [],
+    "unknown_origins": [],
+    "missing_facts": []
   },
   "trace_id": "03030303030303030303030303030303"
 }

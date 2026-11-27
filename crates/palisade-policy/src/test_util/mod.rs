@@ -401,6 +401,22 @@ impl FactsBuilder {
         self
     }
 
+    /// The kind of volume the path is on (#39). Call after [`Self::path`]
+    /// or [`Self::user_writable_path`]; without one it panics.
+    pub fn volume(mut self, volume: crate::unknown::VolumeKind) -> Self {
+        let path = self.0.path.take().expect("set the path before its volume");
+        self.0 = self.0.with_path(path.with_volume(volume));
+        self
+    }
+
+    /// The origins the agent's origin collection found (#39). An empty list
+    /// means it ran and found nothing: origin `unknown`. Without this call
+    /// the facts have no origin fact at all, which stage 6 treats as missing.
+    pub fn origins(mut self, origins: &[crate::model::OriginClass]) -> Self {
+        self.0 = self.0.with_origin(origins.iter().copied());
+        self
+    }
+
     /// One valid embedded signature by `publisher`.
     pub fn signed_by(self, publisher: &str) -> Self {
         self.signer(SignerStatus::Valid, publisher)

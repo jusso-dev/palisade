@@ -29,8 +29,17 @@ pub struct ObjectFacts {
     /// engine classifies the path itself
     /// ([`crate::unknown::location::classify`]).
     pub location_class: Option<BTreeSet<LocationClass>>,
-    /// Where the object came from (#4, #39). `None` (or empty) means its
-    /// origin is `unknown`.
+    /// Where the object came from (#4, #39). Two different states:
+    ///
+    /// - `None`: the agent's origin collection did not run or did not
+    ///   report. That is a missing fact: the origin is `unknown`, but stage 6
+    ///   cannot rule out any other origin, so every other origin's entry
+    ///   applies too ([`crate::unknown::MissingFact::Origin`]). Under the
+    ///   default `preexisting_policy: baseline_only`, that blocks the object.
+    /// - `Some(set)`: collection ran, and `set` is every origin it found. An
+    ///   empty set means it found no evidence, and is exactly `{unknown}`.
+    ///
+    /// Nothing turns one state into the other.
     pub origin: Option<BTreeSet<OriginClass>>,
 }
 
@@ -87,7 +96,8 @@ impl ObjectFacts {
         self
     }
 
-    /// The same facts, with the origins set.
+    /// The same facts, with the origins collection found. An empty list
+    /// means collection ran and found nothing: origin `unknown`.
     #[must_use]
     pub fn with_origin(mut self, origins: impl IntoIterator<Item = OriginClass>) -> Self {
         self.origin = Some(origins.into_iter().collect());
@@ -131,6 +141,11 @@ pub struct PathFact {
     /// means it was not determined. A path only identifies an object
     /// when this is `Some(false)`.
     pub user_writable: Option<bool>,
+    /// The kind of volume the file is on, as the agent reports it (#4,
+    /// #39). `None` means not known: stage 6 then cannot rule out
+    /// `removable`, `optical` or `network` for a drive path, nor rely on the
+    /// classes that need a fixed volume ([`crate::unknown::location`]).
+    pub volume: Option<crate::unknown::VolumeKind>,
 }
 
 impl PathFact {
@@ -143,7 +158,15 @@ impl PathFact {
             alias: None,
             short_name_unresolved: false,
             user_writable: None,
+            volume: None,
         }
+    }
+
+    /// The same path fact, with the volume kind set.
+    #[must_use]
+    pub const fn with_volume(mut self, volume: crate::unknown::VolumeKind) -> Self {
+        self.volume = Some(volume);
+        self
     }
 
     /// The same fact, with `user_writable` set.

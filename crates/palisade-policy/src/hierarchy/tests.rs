@@ -2424,7 +2424,7 @@ fn a_policy_scope_limits_its_unknown_settings_in_the_effective_policy() {
     let decide = |session: SessionType| {
         let mut ctx = EvaluationContext::new();
         ctx.session.session_type = Some(session);
-        let facts = ObjectFacts::new();
+        let facts = ObjectFacts::new().with_origin([]);
         let vars = PathVariables::new();
         Evaluator::new(v)
             .unwrap()
@@ -2487,7 +2487,7 @@ fn stage_six_reason(
     let mut ctx = EvaluationContext::new();
     ctx.session.session_type = session;
     ctx.user.groups = groups;
-    let facts = ObjectFacts::new();
+    let facts = ObjectFacts::new().with_origin([]);
     let vars = PathVariables::new();
     let d = Evaluator::new(v).unwrap().evaluate(
         &Subject {

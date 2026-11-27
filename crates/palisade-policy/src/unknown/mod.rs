@@ -13,9 +13,30 @@
 //! origin. `default` applies only when no entry does. The location classes
 //! come from [`ObjectFacts::location_class`], or, when the agent did not
 //! set them, from the path ([`location::classify`]). The origins come from
-//! [`ObjectFacts::origin`]; with none, the origin is `unknown`. A file with
-//! no usable path is in `user_writable_other`, so missing facts never make
-//! an object look safer.
+//! [`ObjectFacts::origin`].
+//!
+//! # Missing facts never make an object look safer
+//!
+//! Each location class and origin is three-valued: the facts establish it
+//! (`Match`), rule it out (`NoMatch`), or a missing fact could make it true
+//! (`Unknown`). The level above is resolved from the `Match` classes and
+//! applied; then each `Unknown` class's entry (or `default` where it has
+//! none) is applied too, and the most restrictive applied level wins, with
+//! [`FallbackReason::MissingFact`]. Removing a fact can only turn a class
+//! `Unknown`, so it never lowers the level (ADR 0018). The decision lists
+//! the `Unknown` classes and the missing facts ([`UnknownHandling`]), and the
+//! explanation names them. [`location`] says what makes a location class
+//! `Unknown`.
+//!
+//! Origins: when the agent's origin collection did not report
+//! ([`ObjectFacts::origin`] is `None`), the origin is `unknown`, and every
+//! other origin is `Unknown`, so the strictest matching `by_origin` entry
+//! applies. Under the default `preexisting_policy: baseline_only`, the
+//! `preexisting` origin then blocks: **an agent that sends no origin facts
+//! gets every unknown object blocked in enforce mode** (in `audit`,
+//! `monitor` and `learning` it shows as would-block), and `missing_facts`
+//! names `origin`. A reported set is complete; an empty one means no
+//! evidence was found, which is exactly `{unknown}`.
 //!
 //! # What each level decides
 //!
@@ -84,7 +105,7 @@ pub mod baseline;
 pub mod location;
 pub mod selfpin;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -103,7 +124,7 @@ use crate::ops::Tri;
 use crate::scope::{Bias, CompiledScope, ScopeLevel, ScopeNotes, eval_chain};
 
 pub use baseline::{SystemBaseline, system_baseline};
-pub use location::{VolumeKind, classify};
+pub use location::{Classified, VolumeKind, classify};
 pub use selfpin::SelfImage;
 
 /// Which kind of entry of an [`UnknownPolicy`] applied.
@@ -154,6 +175,132 @@ pub enum FallbackReason {
     /// scope needs is unknown. The policy's unknown settings do not apply,
     /// so the built-in implicit deny decides (#38).
     PolicyOutOfScope,
+    /// A fact stage 6 needed was missing, so a location or origin class it
+    /// could not rule out applied, and the object got a stricter level than
+    /// the classes it is known to be in would give it. The facts are in
+    /// [`UnknownHandling::missing_facts`].
+    MissingFact,
+}
+
+/// A fact whose absence left a location or origin class `Unknown` (#39).
+/// A missing fact never makes an object look safer: stage 6 applies the
+/// level of every class it cannot rule out ([`UnknownHandling`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MissingFact {
+    /// The object's path, or a usable (drive or UNC, fully expanded) path.
+    Path,
+    /// The kind of volume the file is on ([`crate::facts::PathFact::volume`]).
+    VolumeKind,
+    /// Whether a non-administrator can write the file
+    /// ([`crate::facts::PathFact::user_writable`]). Without it the file is
+    /// `user_writable_other`, a `Match`, as it always was: the fact is
+    /// recorded here so the trace can name it.
+    UserWritable,
+    /// `%WINDIR%`.
+    Windir,
+    /// `%PROGRAMFILES%`.
+    ProgramFiles,
+    /// `%USERPROFILE%`.
+    UserProfile,
+    /// `%APPDATA%`.
+    AppData,
+    /// `%LOCALAPPDATA%`.
+    LocalAppData,
+    /// `%PUBLIC%`.
+    Public,
+    /// `%TEMP%`.
+    Temp,
+    /// Where the object came from ([`ObjectFacts::origin`]).
+    Origin,
+}
+
+impl MissingFact {
+    /// The missing fact of an unset path variable the classifier reads.
+    #[must_use]
+    pub const fn variable(v: crate::facts::PathVariable) -> Option<Self> {
+        use crate::facts::PathVariable as V;
+        Some(match v {
+            V::Windir => Self::Windir,
+            V::ProgramFiles => Self::ProgramFiles,
+            V::UserProfile => Self::UserProfile,
+            V::AppData => Self::AppData,
+            V::LocalAppData => Self::LocalAppData,
+            V::Public => Self::Public,
+            V::Temp => Self::Temp,
+            V::System32 | V::ProgramData | V::OsDrive => return None,
+        })
+    }
+
+    /// The stable `snake_case` name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Path => "path",
+            Self::VolumeKind => "volume_kind",
+            Self::UserWritable => "user_writable",
+            Self::Windir => "windir",
+            Self::ProgramFiles => "program_files",
+            Self::UserProfile => "user_profile",
+            Self::AppData => "app_data",
+            Self::LocalAppData => "local_app_data",
+            Self::Public => "public",
+            Self::Temp => "temp",
+            Self::Origin => "origin",
+        }
+    }
+}
+
+/// What the facts say about each class of one kind (location or origin):
+/// `Match` (the facts establish it), `NoMatch` (they rule it out) or
+/// `Unknown` (a missing fact could make it true), with the crate's Kleene
+/// logic ([`Tri`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Classes<K: Ord + Copy> {
+    map: BTreeMap<K, Tri>,
+}
+
+impl<K: Ord + Copy> Classes<K> {
+    /// `f` of every class in `all`.
+    #[must_use]
+    pub fn new(all: &[K], f: impl Fn(K) -> Tri) -> Self {
+        Self {
+            map: all.iter().map(|k| (*k, f(*k))).collect(),
+        }
+    }
+
+    /// The classes the facts establish: those in `set`, and none of the
+    /// others.
+    #[must_use]
+    pub fn certain(all: &[K], set: &BTreeSet<K>) -> Self {
+        Self::new(all, |k| Tri::from_bool(set.contains(&k)))
+    }
+
+    /// What the facts say about `k`. A class not listed is `NoMatch`.
+    #[must_use]
+    pub fn get(&self, k: K) -> Tri {
+        self.map.get(&k).copied().unwrap_or(Tri::NoMatch)
+    }
+
+    /// The classes that are `Match`.
+    #[must_use]
+    pub fn matching(&self) -> BTreeSet<K> {
+        self.with(Tri::Match)
+    }
+
+    /// The classes that are `Unknown`.
+    #[must_use]
+    pub fn unknown(&self) -> BTreeSet<K> {
+        self.with(Tri::Unknown)
+    }
+
+    fn with(&self, t: Tri) -> BTreeSet<K> {
+        self.map
+            .iter()
+            .filter(|(_, v)| **v == t)
+            .map(|(k, _)| *k)
+            .collect()
+    }
 }
 
 /// How stage 6 handled an object, carried by its [`Decision`].
@@ -167,10 +314,19 @@ pub struct UnknownHandling {
     pub fallback: Option<FallbackReason>,
     /// The entries that applied, sorted. Only `default` when none did.
     pub entries: Vec<AppliedEntry>,
-    /// The object's location classes, sorted.
+    /// The location classes the facts establish, sorted.
     pub locations: Vec<LocationClass>,
-    /// The object's origins, sorted.
+    /// The origins the facts establish, sorted.
     pub origins: Vec<OriginClass>,
+    /// The location classes a missing fact left `Unknown`, sorted. Each
+    /// one's entry, or `default` if it has none, was applied too.
+    pub unknown_locations: Vec<LocationClass>,
+    /// The origins a missing fact left `Unknown`, sorted, applied the same
+    /// way.
+    pub unknown_origins: Vec<OriginClass>,
+    /// The facts that were missing, sorted. When one of them made the
+    /// object stricter, `fallback` is `missing_fact`.
+    pub missing_facts: Vec<MissingFact>,
 }
 
 /// The level of an object of type `t` in `locations` with `origins`: the
@@ -402,8 +558,9 @@ struct Known<'a> {
     policy: &'a UnknownPolicy,
     /// The subject is out of the policy's scope.
     out_of_scope: bool,
-    locations: BTreeSet<LocationClass>,
-    origins: BTreeSet<OriginClass>,
+    locations: Classes<LocationClass>,
+    origins: Classes<OriginClass>,
+    missing: BTreeSet<MissingFact>,
     interactive: bool,
     containment: bool,
     sha256: Option<String>,
@@ -456,16 +613,39 @@ impl<'a> StageSix<'a> {
         trace_id: TraceId,
     ) -> Decision {
         let facts = self.facts;
-        let locations = match &facts.location_class {
-            Some(set) if !set.is_empty() => set.clone(),
-            _ => facts.path.as_ref().map_or_else(
-                || BTreeSet::from([LocationClass::UserWritableOther]),
-                |p| classify(p, self.variables, None, &[]),
-            ),
+        let Classified {
+            classes: locations,
+            mut missing,
+        } = match &facts.location_class {
+            // The agent's classes are facts: those, and no others.
+            Some(set) if !set.is_empty() => Classified {
+                classes: Classes::certain(&LocationClass::ALL, set),
+                missing: BTreeSet::new(),
+            },
+            _ => facts
+                .path
+                .as_ref()
+                .map_or_else(location::unclassified, |p| {
+                    classify(p, self.variables, p.volume, &[])
+                }),
         };
         let origins = match &facts.origin {
-            Some(set) if !set.is_empty() => set.clone(),
-            _ => BTreeSet::from([OriginClass::Unknown]),
+            // Collection ran, and its set is complete.
+            Some(set) if !set.is_empty() => Classes::certain(&OriginClass::ALL, set),
+            // Collection ran and found no evidence: exactly `{unknown}`.
+            Some(_) => Classes::certain(&OriginClass::ALL, &BTreeSet::from([OriginClass::Unknown])),
+            // Collection did not run or report: the origin is `unknown`, and
+            // any other origin could be true.
+            None => {
+                missing.insert(MissingFact::Origin);
+                Classes::new(&OriginClass::ALL, |o| {
+                    if o == OriginClass::Unknown {
+                        Tri::Match
+                    } else {
+                        Tri::Unknown
+                    }
+                })
+            }
         };
         let sha256 = facts
             .get(Field::HashSha256)
@@ -477,6 +657,7 @@ impl<'a> StageSix<'a> {
             out_of_scope,
             locations,
             origins,
+            missing,
             interactive: interactive(self.context),
             containment: self.context.device.containment_available == Some(true),
             sha256,
@@ -487,15 +668,25 @@ impl<'a> StageSix<'a> {
 
 impl Known<'_> {
     /// The level applied, the reason for any fallback, and the entries.
+    ///
+    /// The level is resolved from the classes the facts establish, as
+    /// [`resolve_level`] does, and applied ([`Known::applicable`]). Then
+    /// every class a missing fact left `Unknown` is applied on its own: its
+    /// entry, or `default` if it has none. The most restrictive of all these
+    /// applied levels is the one applied. Each is applied before the
+    /// maximum is taken, so a `prompt` that a missing fact brings in cannot
+    /// undercut, through its fallback, a level the known classes give.
+    /// Removing a fact only turns a `Match` or `NoMatch` class into
+    /// `Unknown`, which only adds levels to that maximum, so a missing fact
+    /// never makes the object look safer (ADR 0018).
     fn levels(&self) -> (Level, Level, Option<FallbackReason>, Vec<AppliedEntry>) {
+        let t = self.six.object_type;
+        let known_locations = self.locations.matching();
+        let known_origins = self.origins.matching();
         // The trace shows what the policy's own entries resolved to, even
         // when the policy does not apply.
-        let (resolved, entries) = resolve_level(
-            self.six.policy,
-            self.six.object_type,
-            &self.locations,
-            &self.origins,
-        );
+        let (resolved, entries) =
+            resolve_level(self.six.policy, t, &known_locations, &known_origins);
         if self.out_of_scope {
             // The built-in default, the implicit deny, blocks everything.
             return (
@@ -505,18 +696,40 @@ impl Known<'_> {
                 entries,
             );
         }
-        if self.policy.preexisting_policy == PreexistingPolicy::BaselineOnly
-            && self.origins.contains(&OriginClass::Preexisting)
+        let baseline_only = self.policy.preexisting_policy == PreexistingPolicy::BaselineOnly;
+        let (mut applied, mut fallback) = if baseline_only
+            && known_origins.contains(&OriginClass::Preexisting)
             && resolved != Level::Block
         {
-            return (
-                resolved,
-                Level::Block,
-                Some(FallbackReason::PreexistingBaselineOnly),
-                entries,
+            (Level::Block, Some(FallbackReason::PreexistingBaselineOnly))
+        } else {
+            self.applicable(resolved)
+        };
+        let unknown_levels = self
+            .locations
+            .unknown()
+            .into_iter()
+            .map(|c| self.policy.by_location.get(&c).copied())
+            .chain(
+                self.origins
+                    .unknown()
+                    .into_iter()
+                    .map(|o| self.policy.by_origin.get(&o).copied()),
+            )
+            .map(|l| l.unwrap_or(self.policy.default))
+            // An origin that could be `preexisting` is blocked under
+            // `baseline_only`, as a known one is.
+            .chain(
+                (baseline_only && self.origins.get(OriginClass::Preexisting) == Tri::Unknown)
+                    .then_some(Level::Block),
             );
+        for level in unknown_levels {
+            let (candidate, _) = self.applicable(level);
+            if candidate > applied {
+                applied = candidate;
+                fallback = Some(FallbackReason::MissingFact);
+            }
         }
-        let (applied, fallback) = self.applicable(resolved);
         (resolved, applied, fallback, entries)
     }
 
@@ -564,8 +777,11 @@ impl Known<'_> {
             applied,
             fallback,
             entries,
-            locations: self.locations.iter().copied().collect(),
-            origins: self.origins.iter().copied().collect(),
+            locations: self.locations.matching().into_iter().collect(),
+            origins: self.origins.matching().into_iter().collect(),
+            unknown_locations: self.locations.unknown().into_iter().collect(),
+            unknown_origins: self.origins.unknown().into_iter().collect(),
+            missing_facts: self.missing.iter().copied().collect(),
         };
         let restrict_unavailable = matches!(
             fallback,
@@ -703,12 +919,15 @@ impl Known<'_> {
         }
     }
 
-    /// Whether an approval of this object is temporary.
+    /// Whether an approval of this object is temporary: it is, or could
+    /// be, from a temporary origin or in a temporary location.
     fn temporary(&self) -> bool {
-        TEMPORARY_ORIGINS.iter().any(|o| self.origins.contains(o))
+        TEMPORARY_ORIGINS
+            .iter()
+            .any(|o| self.origins.get(*o) != Tri::NoMatch)
             || TEMPORARY_LOCATIONS
                 .iter()
-                .any(|l| self.locations.contains(l))
+                .any(|l| self.locations.get(*l) != Tri::NoMatch)
     }
 }
 
@@ -947,5 +1166,7 @@ pub fn answer(
     })
 }
 
+#[cfg(test)]
+mod previous_classifier;
 #[cfg(test)]
 mod tests;

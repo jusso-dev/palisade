@@ -137,6 +137,35 @@ pub struct SnapshotPath {
     /// Whether users can write it: `null` if not determined.
     #[serde(default)]
     pub user_writable: Option<bool>,
+    /// The kind of volume it is on: `null` if not recorded (#39). Without
+    /// it, stage 6 cannot rule out a removable, optical or network volume.
+    #[serde(default)]
+    pub volume: Option<SnapshotVolume>,
+}
+
+/// The kind of volume a recorded file was on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapshotVolume {
+    /// A fixed disk.
+    Fixed,
+    /// A removable volume, such as a USB drive.
+    Removable,
+    /// An optical disc.
+    Optical,
+    /// A network volume.
+    Network,
+}
+
+impl From<SnapshotVolume> for crate::unknown::VolumeKind {
+    fn from(v: SnapshotVolume) -> Self {
+        match v {
+            SnapshotVolume::Fixed => Self::Fixed,
+            SnapshotVolume::Removable => Self::Removable,
+            SnapshotVolume::Optical => Self::Optical,
+            SnapshotVolume::Network => Self::Network,
+        }
+    }
 }
 
 /// A signature in a snapshot.
@@ -466,6 +495,7 @@ impl FactsSnapshot {
             fact.alias = p.alias.as_deref().map(|a| PathFact::new(a, &volumes).path);
             fact.short_name_unresolved = p.short_name_unresolved;
             fact.user_writable = p.user_writable;
+            fact.volume = p.volume.map(Into::into);
             facts.path = Some(fact);
         }
         if let Some(signers) = &self.facts.signers {

@@ -158,6 +158,16 @@ pub fn explain(trace: &Trace, verbosity: Verbosity) -> ExplainDoc {
     {
         doc.paragraphs.push(Message::new("unknown-out-of-scope"));
     }
+    if let Some(u) = trace
+        .decision
+        .as_ref()
+        .and_then(|d| d.unknown())
+        .filter(|u| u.fallback == Some(crate::unknown::FallbackReason::MissingFact))
+    {
+        let facts: Vec<&str> = u.missing_facts.iter().map(|f| f.as_str()).collect();
+        doc.paragraphs
+            .push(Message::new("unknown-missing-fact").arg("facts", facts.join(", ")));
+    }
     for u in &trace.unknown_facts {
         for e in &u.effects {
             doc.paragraphs.push(
@@ -650,6 +660,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     (
         "overridden",
         "Other matching rules overridden by the deciding rule: { $count }.",
+    ),
+    (
+        "unknown-missing-fact",
+        "Some facts about where this file is or where it came from were missing ({ $facts }), so the strictest setting it could fall under applied.",
     ),
     (
         "unknown-out-of-scope",

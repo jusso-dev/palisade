@@ -1475,6 +1475,7 @@ fn to_snapshot(i: usize, f: &ObjectFacts, s: &DeviceState, t: ObjectType) -> Fac
                 alias: None,
                 short_name_unresolved: p.short_name_unresolved,
                 user_writable: p.user_writable,
+                volume: None,
             }),
             signers: f.signers.as_ref().map(|v| {
                 v.iter()
@@ -2124,6 +2125,7 @@ fn object_keys_identify_one_object_across_spellings() {
             alias: None,
             short_name_unresolved: false,
             user_writable: None,
+            volume: None,
         }),
         ..SnapshotFacts::default()
     };
@@ -2360,6 +2362,7 @@ fn an_unexpanded_short_name_is_not_an_object_identity() {
             alias: None,
             short_name_unresolved: true,
             user_writable: None,
+            volume: None,
         }),
         signers: Some(vec![signer.clone()]),
         ..SnapshotFacts::default()
@@ -2827,7 +2830,8 @@ fn early_boot_drivers_and_prompts_are_traced_as_decided() {
     let vars = PathVariables::new();
     let mut ctx = EvaluationContext::new();
     ctx.device.boot_phase = Some(BootPhase::Early);
-    let facts = ObjectFacts::new();
+    // The origin collection ran and found nothing (not a missing fact).
+    let facts = ObjectFacts::new().with_origin([]);
     let subject = Subject {
         object_type: ObjectType::Driver,
         facts: &facts,
@@ -2891,7 +2895,8 @@ fn an_override_session_that_lets_a_prompt_run_names_the_session() {
     let mut ctx = EvaluationContext::new();
     ctx.session.session_type = Some(crate::context::SessionType::Console);
     ctx.user.is_system = Some(false);
-    let facts = ObjectFacts::new();
+    // The origin collection ran and found nothing (not a missing fact).
+    let facts = ObjectFacts::new().with_origin([]);
     let subject = Subject {
         object_type: ObjectType::Executable,
         facts: &facts,
@@ -2942,7 +2947,8 @@ fn an_out_of_scope_unknown_decision_explains_the_policy_scope() {
     let vars = PathVariables::new();
     let mut ctx = EvaluationContext::new();
     ctx.session.session_type = Some(crate::context::SessionType::Batch);
-    let facts = ObjectFacts::new();
+    // The origin collection ran and found nothing (not a missing fact).
+    let facts = ObjectFacts::new().with_origin([]);
     let subject = Subject {
         object_type: ObjectType::Executable,
         facts: &facts,

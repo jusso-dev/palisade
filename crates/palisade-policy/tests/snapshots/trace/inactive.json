@@ -152,11 +152,38 @@
           "level": "block"
         }
       ],
-      "locations": [
-        "other_fixed"
-      ],
+      "locations": [],
       "origins": [
         "unknown"
+      ],
+      "unknown_locations": [
+        "user_profile",
+        "temp",
+        "program_files",
+        "windows",
+        "other_fixed",
+        "removable",
+        "network",
+        "optical"
+      ],
+      "unknown_origins": [
+        "internet",
+        "email_attachment",
+        "removable_copy",
+        "network_share",
+        "trusted_source",
+        "preexisting"
+      ],
+      "missing_facts": [
+        "volume_kind",
+        "windir",
+        "program_files",
+        "user_profile",
+        "app_data",
+        "local_app_data",
+        "public",
+        "temp",
+        "origin"
       ]
     },
     "trace_id": "41414141414141414141414141414141",
