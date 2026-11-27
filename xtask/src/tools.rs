@@ -62,9 +62,12 @@ pub enum Status {
 }
 
 /// The version in `output`'s first line: its first word that starts with
-/// a digit, without a leading `v`, cut at the first character that is not
-/// a digit or a dot. `cargo-nextest 0.9.152 (26ebeda79 2026-11-13)` gives
-/// `0.9.152`, `mdbook v0.5.2` gives `0.5.2`, and `1.7.12` gives `1.7.12`.
+/// a digit, without a leading `v`, including any pre-release or build
+/// suffix (`-beta.1`, `+abc`), so a pre-release never reads as the release
+/// CI pins. Trailing punctuation (`,`, `;`, `)`, a final `.`) is dropped.
+/// `cargo-nextest 0.9.152 (26ebeda79 2026-11-13)` gives `0.9.152`,
+/// `mdbook v0.5.2` gives `0.5.2`, `1.7.12` gives `1.7.12`, and
+/// `tool 1.2.3-beta.1` gives `1.2.3-beta.1`.
 pub fn version_in(output: &str) -> Option<&str> {
     let first = output.lines().next()?;
     first.split_whitespace().find_map(|word| {
@@ -73,9 +76,9 @@ pub fn version_in(output: &str) -> Option<&str> {
             return None;
         }
         let end = word
-            .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+            .find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+')))
             .unwrap_or(word.len());
-        word.get(..end).map(|v| v.trim_end_matches('.'))
+        word.get(..end).map(|v| v.trim_end_matches(['.', '-', '+']))
     })
 }
 
@@ -172,7 +175,9 @@ pub mod tests {
             ("cargo-fuzz 0.13.2\n", "0.13.2"),
             ("lychee 0.24.2\n", "0.24.2"),
             ("tool 2.0.\n", "2.0"),
-            ("tool 1.2.3-beta.1\n", "1.2.3"),
+            ("tool 1.2.3-beta.1\n", "1.2.3-beta.1"),
+            ("tool 1.2.3+build.7 (x)\n", "1.2.3+build.7"),
+            ("tool 1.2.3, built today\n", "1.2.3"),
         ] {
             assert_eq!(version_in(output), Some(version), "{output:?}");
         }
@@ -196,6 +201,7 @@ pub mod tests {
             ("cargo deny --version", Some("cargo-deny 0.21.9\n")),
             ("odd --version", Some("garbled\n")),
             ("broken --version", None),
+            ("mdbook --version", Some("mdbook v0.5.2-beta.1\n")),
         ]);
         let nextest = cmd("cargo nextest --version");
         // Present, with or without a pinned version.
@@ -224,6 +230,13 @@ pub mod tests {
                 found: "cargo-nextest 0.9.152 (x 2026-11-13)".to_owned()
             }
         );
+        // A pre-release of the pinned version is not it.
+        assert_eq!(
+            check(&mut probe, &cmd("mdbook --version"), Some("0.5.2")),
+            Status::WrongVersion {
+                found: "mdbook v0.5.2-beta.1".to_owned()
+            }
+        );
         // Failed, and never installed, are both missing.
         assert_eq!(
             check(&mut probe, &cmd("broken --version"), Some("1")),
@@ -242,6 +255,7 @@ pub mod tests {
                 "cargo deny --version",
                 "odd --version",
                 "cargo nextest --version",
+                "mdbook --version",
                 "broken --version",
                 "absent --version",
                 ""
