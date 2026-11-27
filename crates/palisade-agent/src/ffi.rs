@@ -25,10 +25,16 @@ use windows_sys::Win32::Foundation::{
     HANDLE, NTSTATUS, STATUS_ACCESS_DENIED, STATUS_BUFFER_OVERFLOW, STATUS_BUFFER_TOO_SMALL,
     STATUS_INFO_LENGTH_MISMATCH, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
-use windows_sys::Win32::NetworkManagement::IpHelper::{GetBestInterface, GetIfEntry2, MIB_IF_ROW2};
+use windows_sys::Win32::NetworkManagement::IpHelper::{
+    GetBestRoute2, GetIfEntry2, MIB_IF_ROW2, MIB_IPFORWARD_ROW2,
+};
 use windows_sys::Win32::NetworkManagement::NetManagement::{
     LOCALGROUP_MEMBERS_INFO_0, MAX_PREFERRED_LENGTH, NERR_Success, NetApiBufferFree,
     NetLocalGroupGetMembers,
+};
+use windows_sys::Win32::Networking::WinSock::{
+    AF_INET, AF_INET6, IN_ADDR, IN_ADDR_0, IN6_ADDR, IN6_ADDR_0, SOCKADDR_IN, SOCKADDR_IN6,
+    SOCKADDR_INET,
 };
 use windows_sys::Win32::Security::{
     GetLengthSid, GetTokenInformation, LookupAccountNameW, LookupAccountSidW, SID_NAME_USE,
@@ -386,36 +392,74 @@ impl Drop for Token {
 // Network
 // ---------------------------------------------------------------------------
 
-/// `ERROR_NETWORK_UNREACHABLE` and `ERROR_HOST_UNREACHABLE`: no route.
-const NO_ROUTE: [u32; 2] = [1231, 1232];
-
-/// The interface the OS routes an IPv4 packet for `dest` (in network byte
-/// order, as the OS takes it) through, and that interface's row.
-pub(crate) fn best_route(dest: [u8; 4]) -> crate::platform::connection::Route {
-    use crate::platform::connection::{InterfaceRow, Route};
-    let mut index = 0_u32;
-    // SAFETY: the address is a plain value; `index` is a live local the OS
-    // writes the interface index to.
-    let status = unsafe { GetBestInterface(u32::from_ne_bytes(dest), &raw mut index) };
-    if NO_ROUTE.contains(&status) {
-        return Route::Unreachable;
+/// The interface the OS routes a packet for `dest` through
+/// (`GetBestRoute2`), and that interface's row (`GetIfEntry2`), joined by
+/// the interface LUID the route names, so an index reused in between
+/// cannot name another interface.
+pub(crate) fn best_route(dest: std::net::IpAddr) -> crate::platform::connection::Route {
+    use crate::platform::connection::{InterfaceRow, Route, route_from_status};
+    let mut destination = SOCKADDR_INET::default();
+    match dest {
+        std::net::IpAddr::V4(a) => {
+            destination.Ipv4 = SOCKADDR_IN {
+                sin_family: AF_INET,
+                sin_addr: IN_ADDR {
+                    S_un: IN_ADDR_0 {
+                        S_addr: u32::from_ne_bytes(a.octets()),
+                    },
+                },
+                ..SOCKADDR_IN::default()
+            };
+        }
+        std::net::IpAddr::V6(a) => {
+            destination.Ipv6 = SOCKADDR_IN6 {
+                sin6_family: AF_INET6,
+                sin6_addr: IN6_ADDR {
+                    u: IN6_ADDR_0 { Byte: a.octets() },
+                },
+                ..SOCKADDR_IN6::default()
+            };
+        }
     }
-    if status != 0 {
-        return Route::Failed;
+    let mut route = MIB_IPFORWARD_ROW2::default();
+    let mut source = SOCKADDR_INET::default();
+    // SAFETY: `destination` is a live, initialised `SOCKADDR_INET` of the
+    // address's family; no interface is named (a null LUID and index 0)
+    // and no source address is given (null), as the API allows. `route`
+    // and `source` are live, writable locals the OS fills; both are plain
+    // integers, unions of integer arrays and booleans the OS writes as 0
+    // or 1.
+    let status = unsafe {
+        GetBestRoute2(
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            &raw const destination,
+            0,
+            &raw mut route,
+            &raw mut source,
+        )
+    };
+    if let Some(route) = route_from_status(status) {
+        return route;
     }
     let mut row = MIB_IF_ROW2 {
-        InterfaceIndex: index,
+        InterfaceLuid: route.InterfaceLuid,
         ..MIB_IF_ROW2::default()
     };
     // SAFETY: `row` is a live, writable `MIB_IF_ROW2` with only
-    // `InterfaceIndex` set, as the call requires; the OS fills the rest of
-    // the structure, which is plain integers, arrays and GUIDs.
+    // `InterfaceLuid` set, as the call requires (it reads the LUID when it
+    // is non-zero); the OS fills the rest of the structure, which is plain
+    // integers, arrays and GUIDs.
     if unsafe { GetIfEntry2(&raw mut row) } != 0 {
         return Route::Failed;
     }
     Route::Through(InterfaceRow {
         if_type: row.Type,
         physical_medium: row.PhysicalMediumType,
+        tunnel_type: row.TunnelType,
+        // `HardwareInterface` is bit 0 of the flags byte.
+        hardware: row.InterfaceAndOperStatusFlags._bitfield & 1 != 0,
         oper_status: row.OperStatus,
         media_connect_state: row.MediaConnectState,
     })
@@ -716,13 +760,17 @@ mod tests {
     #[test]
     fn the_best_route_reads_an_interface_or_reports_no_route() {
         use crate::platform::connection::Route;
-        // A public address: the hosted runners have a route to it.
-        let route = best_route([192, 0, 2, 1]);
-        match route {
+        // The documentation addresses (RFC 5737, RFC 3849) the backend
+        // uses: routed, never contacted. The hosted runners have an IPv4
+        // default route; IPv6 may have none.
+        let v4 = best_route("192.0.2.1".parse().unwrap());
+        let v6 = best_route("2001:db8::1".parse().unwrap());
+        eprintln!("IPv4 route: {v4:?}\nIPv6 route: {v6:?}");
+        match v4 {
             Route::Through(row) => assert_ne!(row.if_type, 0, "{row:?}"),
-            Route::Unreachable => {}
-            Route::Failed => panic!("the route lookup failed"),
+            other => panic!("no IPv4 route on the runner: {other:?}"),
         }
+        assert_ne!(v6, Route::Failed);
     }
 
     #[test]
