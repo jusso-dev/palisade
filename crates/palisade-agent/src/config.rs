@@ -13,6 +13,8 @@
 //! policy keeps enforcing while the agent is down (ADR 0012). Only a file
 //! that does not exist (first install) falls back to the defaults.
 
+#![forbid(unsafe_code)]
+
 use std::{
     ffi::OsStr,
     fmt,

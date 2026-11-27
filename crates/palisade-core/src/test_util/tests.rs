@@ -330,6 +330,56 @@ fn token(user: &str) -> TokenInfo {
 }
 
 #[test]
+fn mock_identity_meets_the_contract() {
+    let mut id = MockIdentity::new();
+    let key = ProcessKey {
+        pid: 100,
+        created: START,
+    };
+    let system = TokenInfo {
+        session_id: 0,
+        session_kind: SessionKind::Services,
+        integrity: IntegrityLevel::System,
+        elevation: Elevation::Default,
+        elevated: true,
+        ..token("S-1-5-18")
+    };
+    id.set_current(system);
+    id.set_token(key, token("S-1-5-21-1-2-3-1001"));
+    id.set_local_group("S-1-5-32-544", vec!["S-1-5-21-1-2-3-500".into()]);
+    contract::identity(&id, key, "S-1-5-32-544", "s-1-5-21-1-2-3-500").unwrap();
+    assert!(contract::identity(&id, key, "S-1-5-32-544", "S-1-5-18").is_err());
+
+    // Tokens that break the rules.
+    let breaks = |t: TokenInfo| {
+        let mut id = MockIdentity::new();
+        id.set_current(t);
+        id.set_token(key, token("S-1-5-21-1-2-3-1001"));
+        id.set_local_group("S-1-5-32-544", vec!["S-1-5-18".into()]);
+        contract::identity(&id, key, "S-1-5-32-544", "S-1-5-18").is_err()
+    };
+    assert!(!breaks(token("S-1-0x00000000000F-1")));
+    assert!(breaks(token("alice")));
+    assert!(breaks(token("S-1-5-x")));
+    assert!(breaks(TokenInfo {
+        session_id: 0,
+        ..token("S-1-5-18")
+    }));
+    assert!(breaks(TokenInfo {
+        elevation: Elevation::Full,
+        elevated: false,
+        ..token("S-1-5-18")
+    }));
+    assert!(breaks(TokenInfo {
+        groups: vec![GroupMembership {
+            sid: "S-1-16-8192".into(),
+            deny_only: false,
+        }],
+        ..token("S-1-5-18")
+    }));
+}
+
+#[test]
 fn mock_identity_returns_scripted_tokens_and_groups() {
     let mut id = MockIdentity::new();
     assert_eq!(id.current().unwrap_err().kind(), ErrorKind::NotFound);

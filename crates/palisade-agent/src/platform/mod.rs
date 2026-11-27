@@ -1,26 +1,29 @@
 //! The agent's implementations of the `palisade_core::platform` traits.
 //!
-//! These use only the standard library and safe wrapper crates, so they
-//! build and run on every OS, and their contract tests
-//! (`palisade_core::test_util::contract`) run on every CI runner, Windows
-//! included. Where Windows needs something else, the difference lives in
-//! `windows` (compiled on Windows only).
+//! `system` holds the ones built on the standard library and safe wrapper
+//! crates, which build and run on every OS. `windows` (compiled on Windows
+//! only) holds the ones that need the OS: the registry, identity
+//! (`IdentityProvider`) and processes (`ProcessInfo`). Each passes the
+//! contract checks in `palisade_core::test_util::contract` on the CI
+//! runners of its OS.
 //!
-//! Not here yet, because each needs Windows FFI (ADR 0011) or comes with the
-//! M1 code that consumes it:
+//! `nt` decodes the raw token and process records the Windows backends
+//! read through `palisade_agent::ffi`. It has no `unsafe` code and no OS
+//! calls, so it is compiled, and tested, on every OS.
 //!
-//! - `FileSystem` owner SIDs, security descriptors, alternate data streams,
-//!   file IDs and USNs on Windows: they return [`ErrorKind::Unsupported`]
-//!   until the agent is wired to `palisade_fileid::win` (#54) by the file
-//!   inventory (#60).
-//! - `IdentityProvider`, `ProcessInfo` and `SignatureVerifier`: with the
-//!   process tracker, which reads tokens and resolves each image's identity
-//!   (#59).
-//! - `Registry`: with registry conditions in the evaluation context (#59).
+//! Not here yet:
 //!
-//! Until then, the simulator (`palisade-agent --simulate`, feature
-//! `test-util`) runs the agent's event building on the mocks.
+//! - `SignatureVerifier`, and the `FileSystem` owner SIDs, security
+//!   descriptors, alternate data streams, file IDs and USNs on Windows,
+//!   through `palisade_fileid` (#29, next). Until then those return
+//!   [`ErrorKind::Unsupported`].
+//!
+//! The simulator (`palisade-agent --simulate`, feature `test-util`) runs the
+//! agent's event building on the mocks.
 
+#![forbid(unsafe_code)]
+
+pub(crate) mod nt;
 mod system;
 #[cfg(windows)]
 pub mod windows;
@@ -38,6 +41,7 @@ pub(crate) fn io_error(error: &std::io::Error, context: &str) -> PlatformError {
             ErrorKind::InvalidInput
         }
         std::io::ErrorKind::Unsupported => ErrorKind::Unsupported,
+        std::io::ErrorKind::OutOfMemory => ErrorKind::TooLarge,
         _ => ErrorKind::Other,
     };
     PlatformError::new(kind, format!("{context}: {error}"))

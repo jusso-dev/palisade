@@ -9,8 +9,9 @@
 use alloc::{format, string::String, vec, vec::Vec};
 
 use crate::platform::{
-    Clock, Environment, ErrorKind, FileSystem, Hive, OpenFile, ProcessInfo, ProcessKey,
-    ProcessRecord, Registry, RegistryValue, ancestry, expand_env_vars,
+    Clock, Elevation, Environment, ErrorKind, FileSystem, Hive, IdentityProvider, OpenFile,
+    ProcessInfo, ProcessKey, ProcessRecord, Registry, RegistryValue, SessionKind, TokenInfo,
+    ancestry, expand_env_vars,
 };
 
 /// The result of a contract check.
@@ -210,6 +211,131 @@ pub fn processes<P: ProcessInfo + ?Sized>(processes: &P, process: ProcessKey) ->
             format!("{:?} is older than its parent {:?}", child.key, parent.key)
         })?;
         child = parent;
+    }
+    Ok(())
+}
+
+/// Whether `sid` has the shape of a SID in text form: `S-1-`, the
+/// authority (decimal, or `0x` and hexadecimal), then decimal
+/// sub-authorities.
+fn looks_like_sid(sid: &str) -> bool {
+    let Some(rest) = sid.strip_prefix("S-1-") else {
+        return false;
+    };
+    let decimal = |n: &str| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit());
+    let mut parts = rest.split('-');
+    let authority = parts.next().unwrap_or_default();
+    let hex = authority
+        .strip_prefix("0x")
+        .is_some_and(|h| !h.is_empty() && h.bytes().all(|b| b.is_ascii_hexdigit()));
+    (decimal(authority) || hex) && parts.all(decimal)
+}
+
+/// The rules every token must keep, whoever reads it.
+fn token_rules(token: &TokenInfo, what: &str) -> Outcome {
+    ensure(looks_like_sid(&token.user_sid), || {
+        format!("{what}: user {:?} is not a SID", token.user_sid)
+    })?;
+    for group in &token.groups {
+        ensure(looks_like_sid(&group.sid), || {
+            format!("{what}: group {:?} is not a SID", group.sid)
+        })?;
+        // The integrity label (S-1-16-*) is the integrity level, not a
+        // group.
+        ensure(!group.sid.starts_with("S-1-16-"), || {
+            format!(
+                "{what}: the integrity label {} is listed as a group",
+                group.sid
+            )
+        })?;
+    }
+    ensure(
+        (token.session_id == 0) == (token.session_kind == SessionKind::Services),
+        || {
+            format!(
+                "{what}: session {} is {:?}",
+                token.session_id, token.session_kind
+            )
+        },
+    )?;
+    let consistent = match token.elevation {
+        Elevation::Full => token.elevated,
+        Elevation::Limited => !token.elevated,
+        Elevation::Default => true,
+    };
+    ensure(consistent, || {
+        format!(
+            "{what}: elevation {:?} but elevated is {}",
+            token.elevation, token.elevated
+        )
+    })
+}
+
+/// Identity queries, for a provider where `process` is running with a
+/// readable token, and the local group `group` has `member` as a direct
+/// member:
+///
+/// - [`IdentityProvider::current`] and [`IdentityProvider::token`] of
+///   `process` return tokens whose user and groups are SIDs, without the
+///   integrity label among the groups, whose session is
+///   [`SessionKind::Services`] exactly when its ID is 0, and whose
+///   elevation type agrees with `elevated` (`Full` is elevated, `Limited`
+///   is not);
+/// - the token of `process` under a different creation time (a reused ID)
+///   fails with [`ErrorKind::NotFound`];
+/// - the members of `group` include `member`, in any letter case of
+///   `group`;
+/// - a SID argument that is not a SID fails with
+///   [`ErrorKind::InvalidInput`] or reads as nothing (`None`, or
+///   [`ErrorKind::NotFound`]), never as some other account.
+///
+/// # Errors
+///
+/// The first rule `identity` breaks.
+pub fn identity<I: IdentityProvider + ?Sized>(
+    identity: &I,
+    process: ProcessKey,
+    group: &str,
+    member: &str,
+) -> Outcome {
+    let current = identity.current().map_err(|e| format!("current: {e}"))?;
+    token_rules(&current, "current")?;
+    let token = identity.token(process).map_err(|e| format!("token: {e}"))?;
+    token_rules(&token, "token")?;
+    let reused = ProcessKey {
+        pid: process.pid,
+        created: process.created.saturating_add_micros(1),
+    };
+    match identity.token(reused) {
+        Err(e) => ensure(e.kind() == ErrorKind::NotFound, || {
+            format!("the token of a reused key gave {e}, not NotFound")
+        })?,
+        Ok(_) => return Err("the token of a key with the wrong creation time was read".into()),
+    }
+    for name in [String::from(group), group.to_ascii_lowercase()] {
+        let members = identity
+            .local_group_members(&name)
+            .map_err(|e| format!("members of {name}: {e}"))?;
+        ensure(
+            members.iter().any(|m| m.eq_ignore_ascii_case(member)),
+            || format!("{member} is not among the members of {name}: {members:?}"),
+        )?;
+    }
+    for bad in ["", "Administrators", "S-1"] {
+        match identity.local_group_members(bad) {
+            Err(e) => ensure(
+                matches!(e.kind(), ErrorKind::InvalidInput | ErrorKind::NotFound),
+                || format!("members of {bad:?} gave {e}"),
+            )?,
+            Ok(m) => return Err(format!("{bad:?} listed members {m:?}")),
+        }
+        match identity.account_name(bad) {
+            Ok(None) => {}
+            Err(e) => ensure(e.kind() == ErrorKind::InvalidInput, || {
+                format!("the name of {bad:?} gave {e}")
+            })?,
+            Ok(Some(n)) => return Err(format!("{bad:?} has the name {n:?}")),
+        }
     }
     Ok(())
 }

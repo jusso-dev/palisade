@@ -20,6 +20,8 @@
 //! the SCM call a freed closure. Gating must therefore stop accepting `STOP`
 //! while locked, or use a handler of its own in `palisade_agent::ffi`.
 
+#![forbid(unsafe_code)]
+
 use std::{
     panic::AssertUnwindSafe,
     process::ExitCode,

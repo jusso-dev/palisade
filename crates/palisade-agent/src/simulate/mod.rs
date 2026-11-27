@@ -16,6 +16,8 @@
 //! The decisions are scripted by the scenario, not evaluated: policy
 //! evaluation in the agent arrives with the policy cache (#61).
 
+#![forbid(unsafe_code)]
+
 pub mod scenario;
 
 use std::io::Write;

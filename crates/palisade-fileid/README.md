@@ -942,8 +942,8 @@ comment, and each wrapper is tested on the Windows runners.
   caller's job, and the agent's worker is still to come (#4, #59, #60).
 - `os-trust` (off by default): builds `palisade_fileid::win` on Windows. It
   adds OS-backed reads and never changes what the portable code reports. It
-  has no effect on other targets. The agent, and the CLI for local
-  diagnostics, are its intended users; neither depends on this crate yet.
+  has no effect on other targets. The agent enables it on Windows (account
+  names for its identity backend, #29); the CLI may, for local diagnostics.
 
 ## Stability
 
