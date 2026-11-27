@@ -234,13 +234,17 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     and a short-name spelling of one file on a share.
   - `fsctx::streams`, `fsctx::reparse`, `fsctx::meta` and `win::links`
     (Windows, `os-trust` feature): alternate data streams with a tag for
-    well-known names and an executable-content sniff of each stream's first
-    64 KiB (a tag is not a pass: tagged streams are sniffed too, and an
-    unsniffed stream counts as possibly executable); reparse points
+    well-known names, and each stream's content classified by the bounded
+    streaming classifier with the stream's own name as the hint (a tag is
+    not a pass: tagged streams are classified too; a stream that was not
+    read, or whose kind the classifier could not establish, counts as
+    possibly executable); reparse points
     (symbolic links, junctions, volume mount points, app execution aliases
-    with their package family name, app ID and target, cloud placeholders,
+    with the package family name, app ID and target they claim (unverified
+    until checked against the installed package, #53), cloud placeholders,
     deduplication), parsed by a bounded, fuzzed parser; hard links, counted
-    and listed up to 16; and the file ID, USN, timestamps and attributes.
+    and listed up to 16 when the path still names the opened file; and the
+    file ID, USN, timestamps and attributes.
     `win::links::read_details` fills them into an `FsContext`. Windows tests
     make a symbolic link, a relative link, a junction, a mount point and an
     app execution alias, 21 hard links and tagged and executable streams.

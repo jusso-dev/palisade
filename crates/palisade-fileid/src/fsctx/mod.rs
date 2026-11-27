@@ -227,8 +227,14 @@ pub struct FsContext {
     pub hard_links: Option<meta::HardLinks>,
     /// The alternate data streams.
     pub streams: Option<streams::FsStreams>,
-    /// The reparse point of the name itself. `None` means it was not read;
-    /// a read that found none is `Some(None)`.
+    /// The reparse point of the name's **last component** itself (a link,
+    /// junction or alias at that name). `None` means it was not read; a
+    /// read that found none is `Some(None)`.
+    ///
+    /// A folder above it can be a junction or mount point too, and this
+    /// does not say so. Whether the name reaches a different file from the
+    /// one it spells is told by comparing the original path with
+    /// [`PathForms::final_path`]; rules match the final path (T-agent-13).
     pub reparse: Option<Option<reparse::ReparsePoint>>,
 }
 

@@ -94,15 +94,24 @@ pub struct LinkTarget {
 }
 
 /// The fields of an app execution alias (`IO_REPARSE_TAG_APPEXECLINK`).
+///
+/// **Every field is a claim by whoever created the alias.** A standard
+/// user can create an alias in a folder they can write to and put any
+/// package family name, app ID and target path in it. None of these may
+/// decide anything on its own: a caller must first check the alias against
+/// the installed package identity (#53), that a package with this family
+/// name is installed for the user and that the target is that package's
+/// executable. Until then they say only what the alias claims to start.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AppExecLink {
     /// The structure version the alias reports (3 on current systems).
     pub version: u32,
-    /// The package family name of the app the alias starts.
+    /// The package family name the alias claims to start. Unverified.
     pub package_family_name: String,
-    /// The app user model ID (`PackageFamilyName!AppId`).
+    /// The app user model ID (`PackageFamilyName!AppId`) it claims.
+    /// Unverified.
     pub app_user_model_id: String,
-    /// The full path of the executable the alias starts.
+    /// The full path of the executable it claims to start. Unverified.
     pub target_path: String,
     /// Any further strings (version 3 adds the app type), as given.
     pub extra: Vec<String>,
@@ -489,10 +498,33 @@ mod tests {
         let at = b.len() - 4;
         b[at..at + 2].copy_from_slice(&0xD800_u16.to_le_bytes());
         assert_eq!(parse_reparse_point(&b), Err(ReparseError::BadString));
-        // Every prefix of a valid buffer parses or errors, never panics.
-        let full = link_buffer(TAG_SYMLINK, r"\??\C:\x", r"C:\x", Some(0));
-        for n in 0..full.len() {
-            let _ = parse_reparse_point(&full[..n]);
+        // Every prefix of every valid buffer kind parses or errors, never
+        // panics, and a prefix shorter than the stated length is an error.
+        for full in [
+            link_buffer(TAG_SYMLINK, r"\??\C:\x", r"C:\x", Some(0)),
+            link_buffer(TAG_SYMLINK, r"..\x", r"..\x", Some(1)),
+            link_buffer(TAG_MOUNT_POINT, r"\??\C:\Program Files\App", "", None),
+            link_buffer(
+                TAG_MOUNT_POINT,
+                r"\??\Volume{01234567-89ab-cdef-0123-456789abcdef}\",
+                "",
+                None,
+            ),
+            alias_buffer(&[
+                "Example.App_8wekyb3d8bbwe",
+                "Example.App_8wekyb3d8bbwe!App",
+                r"C:\Program Files\WindowsApps\Example\app.exe",
+                "0",
+            ]),
+        ] {
+            assert!(parse_reparse_point(&full).is_ok());
+            for n in 0..full.len() {
+                assert!(
+                    parse_reparse_point(&full[..n]).is_err(),
+                    "{n} of {}",
+                    full.len()
+                );
+            }
         }
     }
 }

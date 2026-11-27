@@ -8,7 +8,11 @@
 
 #![forbid(unsafe_code)]
 
+use std::ffi::OsStr;
+use std::io::{Read, Seek};
+
 use super::ntfs::StreamList;
+use crate::filetype::{Classification, classify};
 
 /// Why a stream name is known.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -68,8 +72,10 @@ pub struct StreamInfo {
     pub size: u64,
     /// The known name, if it is one.
     pub benign: Option<BenignStream>,
-    /// Whether the start of its content looks executable
-    /// ([`crate::filetype`]). `None` if it was not read.
+    /// Whether its content is executable, or may be: [`sniff_stream`].
+    /// `Some(true)` also when the classifier could not establish what the
+    /// content is (a parse error), so a damaged or oversized container is
+    /// never reported as plain data. `None` if it was not read.
     pub is_executable_content: Option<bool>,
 }
 
@@ -126,14 +132,30 @@ impl FsStreams {
     }
 }
 
-/// The most bytes of a stream read to sniff its content: enough for every
-/// magic number and structural check in [`crate::filetype`].
-pub const SNIFF_BYTES: usize = 64 * 1024;
-
-/// Whether `head`, the first bytes of a stream, looks executable.
+/// Whether a classification of a stream's content counts as executable
+/// for [`StreamInfo::is_executable_content`]: executable content, or any
+/// classification with a parse error. A parse error means the kind was not
+/// established (a compound file whose directory could not be read is
+/// `OtherCfb`, though it may be an installer), and a missing fact must not
+/// make the stream look like data (ADR 0018). `Some(true)` rather than
+/// `None` is used for it, so [`FsStreams::any_executable`] fails closed as
+/// well as [`FsStreams::may_hide_executable`].
 #[must_use]
-pub fn sniff_executable(head: &[u8]) -> bool {
-    crate::filetype::classify_bytes(head, None).is_executable_content()
+pub fn counts_as_executable(c: &Classification) -> bool {
+    c.is_executable_content() || c.parse_error.is_some()
+}
+
+/// Classifies the content of the stream named `name` from `reader`, the
+/// open stream, and says whether it [`counts_as_executable`].
+///
+/// The whole stream is available to the classifier, which bounds its own
+/// reads (the first 64 KiB, then a few targeted reads), so a structure past
+/// the first 64 KiB, such as an installer's directory, is still found. The
+/// stream's own name is the name hint: the classifier uses the extension to
+/// tell batch, PowerShell and HTML application content from plain text,
+/// and never lets a harmless extension hide content it recognises.
+pub fn sniff_stream<R: Read + Seek + ?Sized>(reader: &mut R, name: &str) -> bool {
+    counts_as_executable(&classify(reader, Some(OsStr::new(name))))
 }
 
 #[cfg(test)]
@@ -210,13 +232,95 @@ mod tests {
         assert!(!FsStreams::default().may_hide_executable());
     }
 
+    fn sniff(data: &[u8], name: &str) -> bool {
+        sniff_stream(&mut std::io::Cursor::new(data), name)
+    }
+
     #[test]
-    fn sniffing_finds_executable_heads() {
+    fn sniffing_finds_executable_content() {
         let mut pe = b"MZ".to_vec();
         pe.resize(512, 0);
-        assert!(sniff_executable(&pe));
-        assert!(sniff_executable(b"#!/bin/sh\necho hi\n"));
-        assert!(!sniff_executable(b"[ZoneTransfer]\r\nZoneId=3\r\n"));
-        assert!(!sniff_executable(b""));
+        assert!(sniff(&pe, "payload"));
+        assert!(sniff(b"#!/bin/sh\necho hi\n", "payload"));
+        assert!(!sniff(b"[ZoneTransfer]\r\nZoneId=3\r\n", "Zone.Identifier"));
+        assert!(!sniff(b"", "empty"));
+        assert!(!sniff(b"just some words", "notes"));
+    }
+
+    /// A version 3 compound file whose directory starts at `sector`, with
+    /// `clsid` on its root entry: just the header and the root entry, all
+    /// the classifier reads.
+    fn compound_file(sector: u32, clsid: [u8; 16]) -> Vec<u8> {
+        let offset = (usize::try_from(sector).unwrap() + 1) << 9;
+        let mut b = vec![0_u8; offset + 128];
+        b[..8].copy_from_slice(&[0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+        b[0x18..0x1a].copy_from_slice(&0x3e_u16.to_le_bytes());
+        b[0x1a..0x1c].copy_from_slice(&3_u16.to_le_bytes());
+        b[0x1c..0x1e].copy_from_slice(&0xfffe_u16.to_le_bytes());
+        b[0x1e..0x20].copy_from_slice(&9_u16.to_le_bytes());
+        b[0x30..0x34].copy_from_slice(&sector.to_le_bytes());
+        // The root entry: "Root Entry", type 5, the CLSID.
+        let name: Vec<u8> = "Root Entry"
+            .encode_utf16()
+            .chain([0])
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        b[offset..offset + name.len()].copy_from_slice(&name);
+        b[offset + 0x40..offset + 0x42]
+            .copy_from_slice(&u16::try_from(name.len()).unwrap().to_le_bytes());
+        b[offset + 0x42] = 5;
+        b[offset + 0x50..offset + 0x60].copy_from_slice(&clsid);
+        b
+    }
+
+    /// `{000C1084-0000-0000-C000-000000000046}`, the installer database CLSID.
+    const MSI: [u8; 16] = [
+        0x84, 0x10, 0x0c, 0x00, 0, 0, 0, 0, 0xc0, 0, 0, 0, 0, 0, 0, 0x46,
+    ];
+
+    #[test]
+    fn an_installer_whose_directory_is_past_64_kib_is_executable() {
+        // The reviewer's case: the directory at sector 200, 100 KiB in.
+        let msi = compound_file(200, MSI);
+        assert!(msi.len() > 64 * 1024);
+        let full = classify(&mut std::io::Cursor::new(&msi[..]), None);
+        assert_eq!(
+            full.content_kind,
+            crate::filetype::FileKind::Msi,
+            "{full:?}"
+        );
+        assert!(sniff(&msi, "payload"));
+        // Only the first 64 KiB, as the stream reader used to pass: the
+        // directory cannot be read, the kind is `OtherCfb` with a parse
+        // error, and that still counts as executable, never as data.
+        let head = classify(&mut std::io::Cursor::new(&msi[..64 * 1024]), None);
+        assert!(
+            head.parse_error.is_some() && !head.is_executable_content(),
+            "{head:?}"
+        );
+        assert!(counts_as_executable(&head));
+        assert!(sniff(&msi[..64 * 1024], "payload"));
+        // A plain compound file with a readable directory is data.
+        let other = compound_file(200, [7; 16]);
+        assert!(!sniff(&other, "payload"));
+    }
+
+    #[test]
+    fn the_stream_name_is_the_name_hint() {
+        for (name, content) in [
+            ("x.bat", &b"@echo off\r\ncopy a b\r\n"[..]),
+            ("x.cmd", &b"@echo off\r\ncopy a b\r\n"[..]),
+            ("x.ps1", &b"Get-ChildItem | Remove-Item\r\n"[..]),
+            (
+                "x.hta",
+                &b"<html><head><title>t</title></head><body>hi</body></html>"[..],
+            ),
+        ] {
+            assert!(sniff(content, name), "{name}");
+        }
+        // A harmless name does not hide content the classifier knows.
+        let vbs = b"Set sh = CreateObject(\"WScript.Shell\")\r\nsh.Run \"cmd.exe\"\r\n";
+        assert!(sniff(vbs, "notes.txt"));
+        assert!(sniff(vbs, "payload"));
     }
 }

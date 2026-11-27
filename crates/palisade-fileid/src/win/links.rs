@@ -17,7 +17,7 @@
 #![forbid(unsafe_code)]
 
 use std::fs::{File, OpenOptions};
-use std::io::{self, Read as _};
+use std::io;
 use std::os::windows::fs::OpenOptionsExt as _;
 use std::path::Path;
 
@@ -26,7 +26,7 @@ use super::sys;
 use crate::fsctx::FsContext;
 use crate::fsctx::meta::{FileAttributes, FileMeta, HardLinks, MAX_HARD_LINK_NAMES};
 use crate::fsctx::reparse::{ReparsePoint, parse_reparse_point};
-use crate::fsctx::streams::{FsStreams, SNIFF_BYTES, sniff_executable};
+use crate::fsctx::streams::{FsStreams, sniff_stream};
 
 /// `VOLUME_NAME_DOS` and `VOLUME_NAME_GUID` for `GetFinalPathNameByHandleW`.
 const VOLUME_NAME_DOS: u32 = 0;
@@ -72,29 +72,70 @@ pub fn read_reparse(file: &File) -> io::Result<Option<ReparsePoint>> {
 /// The hard links of the file at `path`, whose open handle is `file`: the
 /// count from the handle and, when there is more than one name, up to
 /// [`MAX_HARD_LINK_NAMES`] of them (`FindFirstFileNameW`, by path). A
-/// listing that fails leaves the names empty and marks them truncated; the
+/// listing that fails, or a `path` that no longer names the opened file
+/// (by file ID), leaves the names empty and marks them truncated; the
 /// count is still reported.
 pub fn hard_links(path: &Path, file: &File) -> io::Result<HardLinks> {
     let count = sys::standard_info(file)?.number_of_links;
     if count <= 1 {
         return Ok(HardLinks::new(count, Vec::new(), true));
     }
+    // The names are listed by path, not by handle, so `path` must still
+    // name the opened file: checked by file ID before and after listing,
+    // as `read_streams` binds each stream. On any mismatch, or if either ID
+    // cannot be read, no names are reported and the list is marked cut.
+    let unlisted = || HardLinks::new(count, Vec::new(), false);
+    let Some(id) = file_id(file) else {
+        return Ok(unlisted());
+    };
+    let same = || {
+        open_link_target(path)
+            .ok()
+            .and_then(|f| file_id(&f))
+            .is_some_and(|other| other == id)
+    };
+    if !same() {
+        return Ok(unlisted());
+    }
     let listed = path
         .to_str()
         .and_then(|text| sys::hard_link_names(text, MAX_HARD_LINK_NAMES + 1).ok());
+    if !same() {
+        return Ok(unlisted());
+    }
     Ok(match listed {
         Some((names, complete)) => HardLinks::new(count, names, complete),
-        None => HardLinks::new(count, Vec::new(), false),
+        None => unlisted(),
     })
+}
+
+/// The 64-bit volume serial and 128-bit file ID of the open `file`, or
+/// `None` if the file system reports no ID.
+fn file_id(file: &File) -> Option<(u64, [u8; 16])> {
+    sys::file_id_info(file)
+        .ok()
+        .map(|i| (i.VolumeSerialNumber, i.FileId.Identifier))
+        .filter(|(_, id)| *id != [0; 16])
+}
+
+/// Opens the file `path` names now, following links as the caller's open
+/// did, for reading its ID only.
+fn open_link_target(path: &Path) -> io::Result<File> {
+    OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES)
+        .share_mode(0x7)
+        .custom_flags(0x0200_0000 | 0x0010_0000)
+        .open(path)
 }
 
 /// At most this many streams of one file are read and sniffed; the rest
 /// are listed with `is_executable_content: None`.
 pub const MAX_SNIFFED_STREAMS: usize = 64;
 
-/// The alternate data streams of the open `file`, tagged, and the first
-/// [`SNIFF_BYTES`] of each (up to [`MAX_SNIFFED_STREAMS`] of them)
-/// sniffed for executable content.
+/// The alternate data streams of the open `file`, tagged, and the content
+/// of each (up to [`MAX_SNIFFED_STREAMS`] of them) classified with
+/// [`sniff_stream`]: by the bounded streaming classifier, with the stream's
+/// name as the hint, and with a parse error counted as executable.
 ///
 /// Each stream is opened through the file's final path and checked to be
 /// on the same file (same 128-bit file ID), as
@@ -126,13 +167,10 @@ pub fn read_streams(file: &File) -> io::Result<FsStreams> {
         if !same {
             continue;
         }
-        let mut head = Vec::with_capacity(
-            SNIFF_BYTES.min(usize::try_from(stream.size).unwrap_or(SNIFF_BYTES)),
-        );
-        let limit = u64::try_from(SNIFF_BYTES).unwrap_or(u64::MAX);
-        if handle.take(limit).read_to_end(&mut head).is_ok() {
-            stream.is_executable_content = Some(sniff_executable(&head));
-        }
+        // The classifier reads the open stream itself, within its own
+        // bounds, with the stream's name as the hint.
+        let mut handle = handle;
+        stream.is_executable_content = Some(sniff_stream(&mut handle, &stream.name));
     }
     Ok(out)
 }
@@ -385,6 +423,17 @@ mod tests {
         assert_eq!(many.count, 21);
         assert_eq!(many.names.len(), MAX_HARD_LINK_NAMES);
         assert!(many.truncated);
+
+        // The path now names another file with links of its own: the
+        // opened file's count is kept, but no names from the other file.
+        let opened = File::open(&first).unwrap();
+        let moved = dir.0.join("moved.exe");
+        std::fs::rename(&first, &moved).unwrap();
+        std::fs::write(&first, b"other").unwrap();
+        std::fs::hard_link(&first, dir.0.join("other-link.exe")).unwrap();
+        let swapped = hard_links(&first, &opened).unwrap();
+        assert_eq!(swapped.count, 21, "{swapped:?}");
+        assert!(swapped.names.is_empty() && swapped.truncated, "{swapped:?}");
     }
 
     #[test]
@@ -403,6 +452,7 @@ mod tests {
         pe.resize(512, 0);
         std::fs::write(format!("{base}:payload"), &pe).unwrap();
         std::fs::write(format!("{base}:notes"), b"just some words").unwrap();
+        std::fs::write(format!("{base}:run.bat"), b"@echo off\r\ncopy a b\r\n").unwrap();
 
         let s = read_streams(&File::open(&file).unwrap()).unwrap();
         assert!(!s.truncated);
@@ -420,8 +470,10 @@ mod tests {
         assert_eq!(by("payload").is_executable_content, Some(true));
         assert_eq!(by("payload").size, 512);
         assert_eq!(by("notes").is_executable_content, Some(false));
+        // The stream's own name is the hint for batch content.
+        assert_eq!(by("run.bat").is_executable_content, Some(true));
         assert!(s.any_executable());
-        assert_eq!(s.unknown().count(), 2);
+        assert_eq!(s.unknown().count(), 3);
         assert!(s.may_hide_executable());
 
         // A file with no streams has none, and nothing unread.
