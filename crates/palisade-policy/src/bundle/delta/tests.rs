@@ -47,7 +47,8 @@ fn round_trip(old: &PolicyBundle, new: &PolicyBundle) -> BundleDelta {
     let bytes = delta.to_bytes().unwrap();
     let read = BundleDelta::from_bytes(&bytes, &BundleLimits::DEFAULT).unwrap();
     assert_eq!(read, delta);
-    let (result, result_bytes) = apply(old, &read).unwrap();
+    let (result, result_bytes) =
+        apply(&old.to_bytes().unwrap(), &read, &BundleLimits::DEFAULT).unwrap();
     assert_eq!(&result, new);
     assert_eq!(result_bytes, new.to_bytes().unwrap());
     delta
@@ -107,7 +108,10 @@ fn a_wrong_base_is_rejected() {
     let old = bundle(base(), 1);
     let new = bundle(base(), 2);
     let delta = diff(&old, &new).unwrap();
-    assert_eq!(apply(&new, &delta).unwrap_err(), DeltaError::WrongBase);
+    assert_eq!(
+        apply(&new.to_bytes().unwrap(), &delta, &BundleLimits::DEFAULT).unwrap_err(),
+        DeltaError::WrongBase
+    );
 }
 
 #[test]
@@ -122,7 +126,10 @@ fn a_tampered_delta_fails_the_result_hash() {
     if let Some(Op::PutRule(_, rule)) = delta.ops.first_mut() {
         rule.match_ = hash('d');
     }
-    assert_eq!(apply(&old, &delta).unwrap_err(), DeltaError::ResultMismatch);
+    assert_eq!(
+        apply(&old.to_bytes().unwrap(), &delta, &BundleLimits::DEFAULT).unwrap_err(),
+        DeltaError::ResultMismatch
+    );
 }
 
 #[test]
@@ -132,14 +139,14 @@ fn operations_on_missing_rules_and_sets_are_errors() {
     let ghost = crate::test_util::rule_set_id(77);
     delta.ops = vec![Op::RemoveRuleSet(ghost)];
     assert_eq!(
-        apply(&old, &delta).unwrap_err(),
+        apply(&old.to_bytes().unwrap(), &delta, &BundleLimits::DEFAULT).unwrap_err(),
         DeltaError::MissingRuleSet(ghost)
     );
     let set = crate::test_util::rule_set_id(1);
     let rule = crate::test_util::rule_id(77);
     delta.ops = vec![Op::RemoveRule(set, rule)];
     assert_eq!(
-        apply(&old, &delta).unwrap_err(),
+        apply(&old.to_bytes().unwrap(), &delta, &BundleLimits::DEFAULT).unwrap_err(),
         DeltaError::MissingRule(rule)
     );
 }
@@ -194,7 +201,7 @@ proptest! {
         let (old, new) = (bundle(a, 1), bundle(b, 2));
         let delta = diff(&old, &new).unwrap();
         let read = BundleDelta::from_bytes(&delta.to_bytes().unwrap(), &BundleLimits::DEFAULT).unwrap();
-        let (_, bytes) = apply(&old, &read).unwrap();
+        let (_, bytes) = apply(&old.to_bytes().unwrap(), &read, &BundleLimits::DEFAULT).unwrap();
         prop_assert_eq!(bytes, new.to_bytes().unwrap());
     }
 
@@ -211,7 +218,30 @@ proptest! {
         }
         let new = bundle(edited, 2);
         let delta = diff(&old, &new).unwrap();
-        let (_, bytes) = apply(&old, &delta).unwrap();
+        let (_, bytes) = apply(&old.to_bytes().unwrap(), &delta, &BundleLimits::DEFAULT).unwrap();
         prop_assert_eq!(bytes, new.to_bytes().unwrap());
     }
+}
+
+#[test]
+fn a_schema_minor_bump_breaks_every_delta() {
+    // The new bundle is at a newer schema minor: header and policy both.
+    let old = bundle(base(), 1);
+    let mut doc = base();
+    let newer = palisade_core::SchemaVersion::new(
+        doc.schema_version.major,
+        doc.schema_version.minor + 1,
+        0,
+    );
+    doc.schema_version = newer;
+    let new = PolicyBundle::new(
+        Header {
+            schema_version: newer,
+            ..header(2)
+        },
+        Body::new(doc, Vec::new(), SourceRevisions::default()).unwrap(),
+    );
+    let delta = diff(&old, &new).unwrap();
+    let (_, bytes) = apply(&old.to_bytes().unwrap(), &delta, &BundleLimits::DEFAULT).unwrap();
+    assert_eq!(bytes, new.to_bytes().unwrap());
 }

@@ -2,10 +2,11 @@
 //!
 //! [`diff`] describes how to turn one bundle into another, and [`apply`]
 //! does it. A [`BundleDelta`] names the bundle it applies to and the
-//! bundle it produces by their [`bundle_hash`]es. `apply` refuses any other
-//! base, and checks that the result hashes to `result_bundle_hash` before
-//! it returns it, so a delta can only ever give the exact canonical bytes
-//! of the new bundle, or an error.
+//! bundle it produces by their [`bundle_hash`]es. `apply` takes the base as
+//! the bytes the agent verified and refuses any other base, and checks that
+//! the result hashes to `result_bundle_hash` before it returns it, so a
+//! delta can only ever give the exact canonical bytes of the new bundle,
+//! or an error.
 //!
 //! Operations work on the canonical body:
 //!
@@ -41,15 +42,15 @@ use crate::model::{Policy, PolicyDocument, Rule, RuleId, RuleSet, RuleSetId};
 pub enum Op {
     /// Adds or replaces a rule set's own fields. Its `rules` are empty
     /// here: they stay as they were, and change by `put_rule`.
-    PutRuleSet(RuleSet),
+    PutRuleSet(Box<RuleSet>),
     /// Removes a rule set and its rules.
     RemoveRuleSet(RuleSetId),
     /// Adds or replaces a rule in a rule set.
-    PutRule(RuleSetId, Rule),
+    PutRule(RuleSetId, Box<Rule>),
     /// Removes a rule from a rule set.
     RemoveRule(RuleSetId, RuleId),
     /// Replaces the policy, without its rule sets.
-    PutPolicy(Policy),
+    PutPolicy(Box<Policy>),
     /// Replaces the inlined libraries.
     PutLibraries(Vec<InlineLibrary>),
     /// Replaces the source revisions.
@@ -127,7 +128,7 @@ pub fn diff(old: &PolicyBundle, new: &PolicyBundle) -> Result<BundleDelta, Delta
     let mut ops = Vec::new();
     let policy_of = |d: &PolicyDocument| d.policy.clone();
     if policy_of(a) != policy_of(b) || a.schema_version != b.schema_version {
-        ops.push(Op::PutPolicy(b.policy.clone()));
+        ops.push(Op::PutPolicy(Box::new(b.policy.clone())));
     }
     let (ia, ib) = (index(a), index(b));
     for id in ia.keys().filter(|id| !ib.contains_key(id)) {
@@ -136,7 +137,7 @@ pub fn diff(old: &PolicyBundle, new: &PolicyBundle) -> Result<BundleDelta, Delta
     for (id, (set, rules)) in &ib {
         let before = ia.get(id);
         if before.is_none_or(|(s, _)| without_rules(s) != without_rules(set)) {
-            ops.push(Op::PutRuleSet(without_rules(set)));
+            ops.push(Op::PutRuleSet(Box::new(without_rules(set))));
         }
         let empty = BTreeMap::new();
         let old_rules = before.map_or(&empty, |(_, r)| r);
@@ -145,7 +146,7 @@ pub fn diff(old: &PolicyBundle, new: &PolicyBundle) -> Result<BundleDelta, Delta
         }
         for (rid, rule) in rules {
             if old_rules.get(rid) != Some(rule) {
-                ops.push(Op::PutRule(*id, (*rule).clone()));
+                ops.push(Op::PutRule(*id, Box::new((*rule).clone())));
             }
         }
     }
@@ -164,20 +165,28 @@ pub fn diff(old: &PolicyBundle, new: &PolicyBundle) -> Result<BundleDelta, Delta
     })
 }
 
-/// Applies `delta` to `old`, giving the bundle and its canonical bytes.
+/// Applies `delta` to the bundle whose canonical bytes are `old_bytes`, as
+/// the agent holds them, giving the new bundle and its canonical bytes.
+///
+/// The base is checked by hashing `old_bytes`, the bytes that were
+/// verified, not by encoding a decoded bundle again. The result takes the
+/// delta header's schema version, so a delta can cross a schema change.
 ///
 /// # Errors
 ///
-/// [`DeltaError::WrongBase`] unless `old` hashes to the delta's base,
+/// [`DeltaError::WrongBase`] unless `old_bytes` hash to the delta's base,
+/// [`DeltaError::Decode`] if they are not a bundle within `limits`,
 /// [`DeltaError::ResultMismatch`] unless the result hashes to its result,
-/// and the errors of operations that do not fit `old`.
+/// and the errors of operations that do not fit the base.
 pub fn apply(
-    old: &PolicyBundle,
+    old_bytes: &[u8],
     delta: &BundleDelta,
+    limits: &BundleLimits,
 ) -> Result<(PolicyBundle, Vec<u8>), DeltaError> {
-    if old.bundle_hash().map_err(DeltaError::Encode)? != delta.base_bundle_hash {
+    if bundle_hash(old_bytes) != delta.base_bundle_hash {
         return Err(DeltaError::WrongBase);
     }
+    let old = PolicyBundle::decode(old_bytes, limits).map_err(DeltaError::Decode)?;
     let mut doc = old.body.document().clone();
     let mut libraries = old.body.libraries().to_vec();
     let mut sources = old.body.source_revisions().clone();
@@ -185,7 +194,7 @@ pub fn apply(
         doc.rule_sets.drain(..).map(|s| (s.id, s)).collect();
     for op in &delta.ops {
         match op {
-            Op::PutPolicy(p) => doc.policy = p.clone(),
+            Op::PutPolicy(p) => doc.policy = (**p).clone(),
             Op::RemoveRuleSet(id) => {
                 sets.remove(id).ok_or(DeltaError::MissingRuleSet(*id))?;
             }
@@ -195,7 +204,7 @@ pub fn apply(
                     set.id,
                     RuleSet {
                         rules,
-                        ..set.clone()
+                        ..(**set).clone()
                     },
                 );
             }
@@ -210,13 +219,14 @@ pub fn apply(
             Op::PutRule(set, rule) => {
                 let s = sets.get_mut(set).ok_or(DeltaError::MissingRuleSet(*set))?;
                 s.rules.retain(|r| r.id != rule.id);
-                s.rules.push(rule.clone());
+                s.rules.push((**rule).clone());
             }
             Op::PutLibraries(l) => libraries = l.clone(),
             Op::PutSources(s) => sources = s.clone(),
         }
     }
     doc.rule_sets = sets.into_values().collect();
+    doc.schema_version = delta.header.schema_version;
     let body = Body::with_digest(doc, libraries, sources, delta.metadata_digest)
         .map_err(DeltaError::Encode)?;
     let bundle = PolicyBundle::new(delta.header, body);

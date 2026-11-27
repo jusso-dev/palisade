@@ -3,7 +3,7 @@ use std::net::IpAddr;
 use serde_json::json;
 
 use super::*;
-use crate::bundle::format::{BundleLimits, DEFAULT_MAX_BYTES, Target, TargetScope, decode_header};
+use crate::bundle::format::{BundleLimits, Target, TargetScope, decode_header};
 use crate::context::EvaluationContext;
 use crate::evaluate::{Evaluator, Subject};
 use crate::facts::PathVariables;
@@ -88,8 +88,8 @@ fn context(addr: &str) -> EvaluationContext {
 #[test]
 fn compiling_twice_gives_the_same_bytes() {
     let (policy, cat) = (policy(json!(2)), catalogue());
-    let (_, a) = compile(&source(&policy, &cat), header(), DEFAULT_MAX_BYTES).unwrap();
-    let (_, b) = compile(&source(&policy, &cat), header(), DEFAULT_MAX_BYTES).unwrap();
+    let (_, a) = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
+    let (_, b) = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
     assert_eq!(a, b);
     assert_eq!(decode_header(&a, &BundleLimits::DEFAULT).unwrap(), header());
 }
@@ -97,7 +97,7 @@ fn compiling_twice_gives_the_same_bytes() {
 #[test]
 fn only_the_pinned_version_of_a_set_is_inlined() {
     let (policy, cat) = (policy(json!(1)), catalogue());
-    let (bundle, _) = compile(&source(&policy, &cat), header(), DEFAULT_MAX_BYTES).unwrap();
+    let (bundle, _) = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
     let inlined: Vec<(u32, &SetContent)> = bundle
         .body
         .libraries()
@@ -114,7 +114,7 @@ fn only_the_pinned_version_of_a_set_is_inlined() {
 fn a_missing_set_fails_the_compile() {
     let policy = policy(json!(9));
     let cat = catalogue();
-    let err = compile(&source(&policy, &cat), header(), DEFAULT_MAX_BYTES).unwrap_err();
+    let err = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap_err();
     assert!(
         matches!(
             err,
@@ -130,7 +130,11 @@ fn a_missing_set_fails_the_compile() {
 #[test]
 fn an_oversized_bundle_fails_with_advice() {
     let (policy, cat) = (policy(json!(2)), catalogue());
-    let err = compile(&source(&policy, &cat), header(), 64).unwrap_err();
+    let tiny = BundleLimits {
+        max_bytes: 64,
+        ..BundleLimits::DEFAULT
+    };
+    let err = compile(&source(&policy, &cat), header(), &tiny).unwrap_err();
     assert!(matches!(err, CompileError::TooLarge { limit: 64, .. }));
     assert!(err.to_string().contains("split it"));
 }
@@ -138,7 +142,7 @@ fn an_oversized_bundle_fails_with_advice() {
 #[test]
 fn the_bundle_resolves_latest_only_when_it_holds_one_version() {
     let (policy, cat) = (policy(serde_json::Value::Null), catalogue());
-    let (bundle, _) = compile(&source(&policy, &cat), header(), DEFAULT_MAX_BYTES).unwrap();
+    let (bundle, _) = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
     let sets = BundleSets::new(&bundle);
     let latest = SetRef {
         id: LibraryId(NET.parse().unwrap()),
@@ -164,7 +168,7 @@ fn a_loaded_bundle_decides_as_the_policy_it_was_compiled_from() {
     let cat = catalogue();
     for pin in [json!(1), json!(2), serde_json::Value::Null] {
         let policy = policy(pin);
-        let (_, bytes) = compile(&source(&policy, &cat), header(), DEFAULT_MAX_BYTES).unwrap();
+        let (_, bytes) = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
         let loaded = PolicyBundle::decode(&bytes, &BundleLimits::DEFAULT).unwrap();
         let validated = loaded.validate().unwrap();
         let sets = BundleSets::new(&loaded);
@@ -202,7 +206,7 @@ fn a_loaded_bundle_decides_as_the_policy_it_was_compiled_from() {
 fn the_network_set_changes_what_the_bundle_allows() {
     let cat = catalogue();
     let policy = policy(json!(1));
-    let (bundle, _) = compile(&source(&policy, &cat), header(), DEFAULT_MAX_BYTES).unwrap();
+    let (bundle, _) = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
     let validated = bundle.validate().unwrap();
     let sets = BundleSets::new(&bundle);
     let agent = Evaluator::with_library(&validated, &sets).unwrap();
@@ -227,5 +231,280 @@ fn the_network_set_changes_what_the_bundle_allows() {
     assert!(
         decide("192.168.1.1").is_none(),
         "outside the pinned version"
+    );
+}
+
+// Review findings on #315: each test below failed on the code before its
+// fix.
+
+/// A profile `quarantine` matching the network set at v1, and an allow that
+/// excludes it, so the allow applies outside quarantine only.
+fn profile_policy() -> ValidatedPolicy {
+    let mut doc: PolicyDocument = PolicyBuilder::new()
+        .rule_set(RuleSetBuilder::mixed(1).rule(RuleBuilder::allow(1, hash('a'))))
+        .build();
+    doc.policy.location_profiles = vec![
+        serde_json::from_value(json!({
+            "name": "quarantine",
+            "all": [{"network_set": {"id": NET, "pin": 1}}],
+        }))
+        .unwrap(),
+    ];
+    doc.rule_sets[0].rules[0].scope = Some(Box::new(
+        serde_json::from_value(
+            json!({"network": {"exclude": [{"location_profile": "quarantine"}]}}),
+        )
+        .unwrap(),
+    ));
+    doc.validate().unwrap()
+}
+
+/// The profiles the agent sees as active on `addr`, through `library`.
+fn active(policy: &ValidatedPolicy, library: &dyn ScopeLibrary, addr: &str) -> Vec<String> {
+    crate::scope::CompiledProfiles::compile(&policy.document().policy.location_profiles, library)
+        .active(&context(addr).network)
+}
+
+#[test]
+fn a_location_profile_network_set_is_not_inlined_and_fails_open() {
+    let cat = catalogue();
+    let policy = profile_policy();
+    let (bundle, _) = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
+    let server = CatalogueLibrary {
+        catalogue: &cat,
+        from: Visibility::Global,
+    };
+    let sets = BundleSets::new(&bundle);
+    let validated = bundle.validate().unwrap();
+    assert_eq!(active(&policy, &server, "10.1.2.3"), ["QUARANTINE"]);
+    // The agent must see the same profile active, so the allow that
+    // excludes quarantine does not apply there.
+    assert_eq!(active(&validated, &sets, "10.1.2.3"), ["QUARANTINE"]);
+}
+
+#[test]
+fn latest_and_a_pin_of_one_set_diverge() {
+    // One rule reads the set at `latest` (v2), another pinned at v1: the
+    // bundle must resolve both exactly as the server does.
+    let mut doc = policy(json!(1)).into_document();
+    let mut latest = doc.rule_sets[0].rules[0].clone();
+    latest.id = crate::test_util::rule_id(3);
+    latest.scope = Some(Box::new(
+        serde_json::from_value(json!({"network": {"include": [{"network_set": {"id": NET}}]}}))
+            .unwrap(),
+    ));
+    latest.match_ = hash('c');
+    doc.rule_sets[0].rules.push(latest);
+    let policy = doc.validate().unwrap();
+    let cat = catalogue();
+    let (bundle, _) = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
+    let validated = bundle.validate().unwrap();
+    let sets = BundleSets::new(&bundle);
+    let server = Evaluator::with_library(
+        &policy,
+        &CatalogueLibrary {
+            catalogue: &cat,
+            from: Visibility::Global,
+        },
+    )
+    .unwrap();
+    let agent = Evaluator::with_library(&validated, &sets).unwrap();
+    let vars = PathVariables::default();
+    let f = facts().sha256('c').build();
+    let ctx = context("192.168.1.1");
+    let subject = Subject {
+        object_type: ObjectType::Executable,
+        facts: &f,
+        variables: &vars,
+        context: &ctx,
+    };
+    assert_eq!(
+        agent.evaluate(&subject, TRACE),
+        server.evaluate(&subject, TRACE)
+    );
+}
+
+#[test]
+fn nfc_on_write_makes_a_valid_policy_invalid_tags() {
+    // Two tags that differ only in normal form are distinct when validated,
+    // and equal once the bundle writes both in NFC.
+    let mut doc = policy(json!(1)).into_document();
+    doc.rule_sets[0].rules[0].effects.tags = vec!["caf\u{e9}".to_owned(), "cafe\u{301}".to_owned()];
+    let Ok(policy) = doc.validate() else {
+        return; // Validation already folds them: nothing to prove.
+    };
+    let cat = catalogue();
+    match compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT) {
+        Err(CompileError::Invalid(_)) => {}
+        Ok((bundle, _)) => {
+            assert!(
+                bundle.validate().is_ok(),
+                "the server shipped a bundle every agent refuses"
+            );
+        }
+        Err(e) => panic!("{e}"),
+    }
+}
+
+#[test]
+fn nfc_on_write_makes_a_valid_policy_invalid_name_length() {
+    // U+0958 is NFC-excluded: its NFC form is two characters. 100 of them
+    // are a valid 100-character name, and 200 characters in NFC.
+    let mut doc = policy(json!(1)).into_document();
+    doc.rule_sets[0].rules[0].name = "\u{958}".repeat(100);
+    let policy = doc.validate().unwrap();
+    let cat = catalogue();
+    match compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT) {
+        Err(CompileError::Invalid(_)) => {}
+        Ok((bundle, _)) => {
+            assert!(
+                bundle.validate().is_ok(),
+                "the server shipped a bundle every agent refuses"
+            );
+        }
+        Err(e) => panic!("{e}"),
+    }
+}
+
+#[test]
+fn a_valid_compiled_bundle_exceeds_the_agents_item_limit() {
+    // An agent configured with a tighter item limit than the bundle needs:
+    // the bundle is valid and under the byte limit, but that agent would
+    // refuse it. The server compiles against the agents' limits, so it
+    // must refuse it first.
+    let mut builder = RuleSetBuilder::allowlist(1);
+    for n in 1..=50 {
+        builder = builder.rule(RuleBuilder::allow(n, hash('a')));
+    }
+    let policy = PolicyBuilder::new().rule_set(builder).validate();
+    let cat = catalogue();
+    let agents = BundleLimits {
+        max_items: 500,
+        ..BundleLimits::DEFAULT
+    };
+    match compile(&source(&policy, &cat), header(), &agents) {
+        Err(CompileError::Invalid(why)) => assert!(why.contains("too many"), "{why}"),
+        Ok((_, bytes)) => {
+            PolicyBundle::decode(&bytes, &agents)
+                .expect("the server shipped a bundle every agent refuses");
+        }
+        Err(e) => panic!("{e}"),
+    }
+}
+
+/// The system baseline is built from facts the agent collects (the OS
+/// publishers and the writable directories it found), so it is the
+/// agent's to add, after it loads a bundle. A policy that already holds it
+/// is refused: compiled in, the baseline would be the server's guess at
+/// one device's facts, and the agent's reserved-ID check on `validate`
+/// would refuse the bundle.
+#[test]
+fn bundles_never_carry_the_system_baseline_and_the_agent_adds_it() {
+    let facts = crate::unknown::SystemBaseline {
+        publishers: vec!["Example OS Publisher".to_owned()],
+        writable_dirs: Vec::new(),
+    };
+    let cat = catalogue();
+    let plain = policy(json!(1));
+    let with_baseline = plain.clone().with_system_baseline(&facts).unwrap();
+    let err = compile(
+        &source(&with_baseline, &cat),
+        header(),
+        &BundleLimits::DEFAULT,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(&err, CompileError::Invalid(why) if why.contains("system_baseline")),
+        "{err}"
+    );
+    // The agent's path: load, validate, then add the baseline from its own
+    // facts. The result decides as the server's policy with the baseline.
+    let (bundle, _) = compile(&source(&plain, &cat), header(), &BundleLimits::DEFAULT).unwrap();
+    let on_agent = bundle
+        .validate()
+        .unwrap()
+        .with_system_baseline(&facts)
+        .unwrap();
+    assert!(
+        on_agent
+            .document()
+            .rule_sets
+            .iter()
+            .any(crate::unknown::baseline::is_system_baseline)
+    );
+    assert_eq!(
+        on_agent.document().rule_sets.len(),
+        with_baseline.document().rule_sets.len()
+    );
+}
+
+/// The sources a bundle records include every set it inlines, also those
+/// only a location profile reads.
+#[test]
+fn inlined_sets_are_recorded_as_sources() {
+    let cat = catalogue();
+    let policy = profile_policy();
+    let (bundle, _) = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
+    assert_eq!(
+        bundle.body.source_revisions().libraries,
+        [(LibraryId(NET.parse().unwrap()), 1)]
+    );
+}
+
+/// The differential test for profiles: an allow that applies outside the
+/// `quarantine` profile decides alike on the server and on the agent, on
+/// and off the quarantined network.
+#[test]
+fn a_loaded_bundle_decides_as_the_server_with_location_profiles() {
+    let cat = catalogue();
+    let policy = profile_policy();
+    let (_, bytes) = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
+    let loaded = PolicyBundle::decode(&bytes, &BundleLimits::DEFAULT).unwrap();
+    let validated = loaded.validate().unwrap();
+    let sets = BundleSets::new(&loaded);
+    let server_lib = CatalogueLibrary {
+        catalogue: &cat,
+        from: Visibility::Global,
+    };
+    let server = Evaluator::with_library(&policy, &server_lib).unwrap();
+    let agent = Evaluator::with_library(&validated, &sets).unwrap();
+    let vars = PathVariables::default();
+    let f = facts().sha256('a').build();
+    for addr in ["10.1.2.3", "192.168.1.1"] {
+        let mut server_ctx = context(addr);
+        server_ctx.network.locations = Some(active(&policy, &server_lib, addr));
+        let mut agent_ctx = context(addr);
+        agent_ctx.network.locations = Some(active(&validated, &sets, addr));
+        let decide = |e: &Evaluator<'_>, ctx: &EvaluationContext| {
+            e.evaluate(
+                &Subject {
+                    object_type: ObjectType::Executable,
+                    facts: &f,
+                    variables: &vars,
+                    context: ctx,
+                },
+                TRACE,
+            )
+        };
+        assert_eq!(
+            decide(&agent, &agent_ctx),
+            decide(&server, &server_ctx),
+            "{addr}"
+        );
+    }
+    let mut ctx = context("10.1.2.3");
+    ctx.network.locations = Some(active(&validated, &sets, "10.1.2.3"));
+    let quarantined = agent.evaluate(
+        &Subject {
+            object_type: ObjectType::Executable,
+            facts: &f,
+            variables: &vars,
+            context: &ctx,
+        },
+        TRACE,
+    );
+    assert!(
+        quarantined.matched_rule().is_none(),
+        "the allow must not apply in quarantine"
     );
 }
