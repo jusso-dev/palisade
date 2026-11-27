@@ -245,7 +245,8 @@ One command builds every target of every project, seeds its corpus from the synt
 ```sh
 rustup toolchain install nightly-2026-11-20 --profile minimal
 cargo install --locked cargo-fuzz@0.13.2
-cargo xtask fuzz                         # 60 s per target, as on a PR
+cargo xtask fuzz                         # 60 s per target, every target, as a PR runs them
+cargo xtask fuzz --shard 2/6             # only the targets of one of CI's 6 shards
 cargo xtask fuzz --seconds 1800 --target pe_parse
 ```
 
@@ -255,7 +256,11 @@ offline, so they cannot download anything or re-resolve the lockfile. The
 corpus and any findings go to `target/fuzz-smoke/<target>/`. Each target runs with a 10 s limit
 per input and a 2 GiB memory limit, so hangs and runaway allocation count as findings too.
 
-- **On every PR**, the `fuzz` job in `ci.yml` runs `cargo xtask fuzz`.
+- **On every PR**, the `fuzz` job in `ci.yml` runs every target for 60 s, split across 6 parallel
+  shards: shard `I` runs `cargo xtask fuzz --shard I/6`, the targets whose position in
+  `PROJECTS` (counted from 0 across all projects) is `I` modulo 6, and builds only the projects
+  those targets are in. Together the shards run every target exactly once, and `cargo xtask ci`
+  runs them all in one go.
 - **Every week**, `fuzz.yml` runs each target for 30 minutes, as one job per target. If any
   fails, it opens an `area:security` issue, or comments on the open one.
 
@@ -278,6 +283,10 @@ lockfile. To add a target:
 2. Add it to `PROJECTS` in `xtask/src/fuzz.rs`, with its dictionary and the ignored tests that
    write its seed inputs (they read the output directory from `PALISADE_FUZZ_SEED_DIR`).
 3. Add it to the matrix in `.github/workflows/fuzz.yml`.
+
+A test also fails if the PR `fuzz` job's shards would have more than 5 targets each. Then add
+shards: extend the `shard` list in the job's matrix in `.github/workflows/ci.yml`, and change the
+`/6` in its `SHARD` to the new count, so no shard nears its 30-minute limit.
 
 For a new crate's fuzz project, also add it to `PROJECTS` with the package whose tests write its
 seeds, commit its `Cargo.lock` (and keep `Cargo.lock` out of its `.gitignore`), add it to

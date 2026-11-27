@@ -1,9 +1,10 @@
-//! `cargo xtask fuzz [--seconds N]`: builds every cargo-fuzz target, seeds
-//! its corpus from the synthetic test fixtures, and runs it for `N` seconds
-//! (default [`DEFAULT_SECONDS`]).
+//! `cargo xtask fuzz [--seconds N] [--target NAME | --shard I/N]`: builds
+//! every cargo-fuzz target, seeds its corpus from the synthetic test
+//! fixtures, and runs it for `N` seconds (default [`DEFAULT_SECONDS`]).
 //!
-//! CI runs it on every pull request (the `fuzz` job in `ci.yml`), and
-//! `fuzz.yml` runs it weekly with a longer time per target. Every target
+//! CI runs it on every pull request (the `fuzz` job in `ci.yml`), split
+//! into a matrix of shards with `--shard`, and `fuzz.yml` runs it weekly
+//! with a longer time per target. Every target
 //! runs even after one fails. The results go to the job summary, including
 //! each crashing input as base64 so it can be reproduced without an
 //! artefact upload.
@@ -245,20 +246,89 @@ pub const PROJECTS: &[Project] = &[
     },
 ];
 
-/// What to run: the time per target, and optionally a single target.
+/// The largest shard count `--shard` accepts.
+pub const MAX_SHARDS: u32 = 16;
+
+/// What to run: the time per target, and optionally a single target or one
+/// shard of the targets.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Args {
     pub seconds: u32,
     pub target: Option<String>,
+    pub shard: Option<Shard>,
 }
 
-/// Reads `[--seconds N] [--target NAME]`, in any order. Without
-/// `--seconds`, each target runs for [`DEFAULT_SECONDS`].
+/// `--shard I/N`: the targets whose position in [`PROJECTS`] order, counted
+/// across all projects from 0, is `I` modulo `N`. The `N` shards together
+/// run every target exactly once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Shard {
+    pub index: u32,
+    pub count: u32,
+}
+
+impl Shard {
+    /// Reads `I/N`, with `1 <= N <=` [`MAX_SHARDS`] and `I < N`.
+    pub fn parse(value: &str) -> Result<Self, String> {
+        let bad = || {
+            format!("--shard must be I/N with 1 <= N <= {MAX_SHARDS} and 0 <= I < N, not `{value}`")
+        };
+        let number = |s: &str| {
+            if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            s.parse::<u32>().ok()
+        };
+        let (index, count) = value.split_once('/').ok_or_else(bad)?;
+        let (Some(index), Some(count)) = (number(index), number(count)) else {
+            return Err(bad());
+        };
+        if !(1..=MAX_SHARDS).contains(&count) || index >= count {
+            return Err(bad());
+        }
+        Ok(Self { index, count })
+    }
+}
+
+impl Args {
+    /// Whether the target at `position` in [`PROJECTS`] order, named
+    /// `name`, is selected.
+    fn selects(&self, position: usize, name: &str) -> bool {
+        let in_shard = self
+            .shard
+            .is_none_or(|s| u32::try_from(position).is_ok_and(|p| p % s.count == s.index));
+        in_shard && self.target.as_deref().is_none_or(|t| t == name)
+    }
+}
+
+/// Every project with at least one selected target, with those targets, in
+/// [`PROJECTS`] order.
+pub fn selected(args: &Args) -> Vec<(&'static Project, Vec<&'static Target>)> {
+    let mut position = 0;
+    let mut out = Vec::new();
+    for project in PROJECTS {
+        let mut targets = Vec::new();
+        for target in project.targets {
+            if args.selects(position, target.name) {
+                targets.push(target);
+            }
+            position += 1;
+        }
+        if !targets.is_empty() {
+            out.push((project, targets));
+        }
+    }
+    out
+}
+
+/// Reads `[--seconds N] [--target NAME | --shard I/N]`, in any order.
+/// Without `--seconds`, each target runs for [`DEFAULT_SECONDS`].
 pub fn parse_args(args: &[String]) -> Result<Args, String> {
-    const USAGE: &str = "usage: cargo xtask fuzz [--seconds N] [--target NAME]";
+    const USAGE: &str = "usage: cargo xtask fuzz [--seconds N] [--target NAME | --shard I/N]";
     let mut parsed = Args {
         seconds: DEFAULT_SECONDS,
         target: None,
+        shard: None,
     };
     let mut seen_seconds = false;
     let mut rest = args.iter();
@@ -286,8 +356,12 @@ pub fn parse_args(args: &[String]) -> Result<Args, String> {
                 }
                 parsed.target = Some(value.clone());
             }
+            "--shard" if parsed.shard.is_none() => parsed.shard = Some(Shard::parse(value)?),
             _ => return Err(USAGE.to_owned()),
         }
+    }
+    if parsed.target.is_some() && parsed.shard.is_some() {
+        return Err("--target and --shard cannot be used together".to_owned());
     }
     Ok(parsed)
 }
@@ -316,8 +390,9 @@ pub struct Outcome {
     pub artifacts: Vec<Artifact>,
 }
 
-/// Builds and runs every target from `root` for `seconds` each. Returns the
-/// outcomes; an `Err` means a project could not be built at all.
+/// Builds and runs every selected target from `root` for `seconds` each.
+/// Only projects with a selected target are built. Returns the outcomes; an
+/// `Err` means a project could not be built at all.
 pub fn run(root: &Path, args: &Args) -> Result<Vec<Outcome>, String> {
     let seconds = args.seconds;
     if !nightly(root, &["fuzz", "--version"])
@@ -330,15 +405,7 @@ pub fn run(root: &Path, args: &Args) -> Result<Vec<Outcome>, String> {
     }
     let work = root.join("target").join("fuzz-smoke");
     let mut outcomes = Vec::new();
-    for project in PROJECTS {
-        let selected: Vec<&Target> = project
-            .targets
-            .iter()
-            .filter(|t| args.target.as_deref().is_none_or(|name| t.name == name))
-            .collect();
-        if selected.is_empty() {
-            continue;
-        }
+    for (project, selected) in selected(args) {
         let fuzz_dir = root.join(project.dir);
         let crate_dir = fuzz_dir
             .parent()
@@ -828,6 +895,139 @@ mod tests {
         assert_eq!(matrix, all, "fuzz.yml must run every target in PROJECTS");
     }
 
+    /// The most targets one shard of the PR `fuzz` job may run. Each
+    /// target takes about 60 to 90 s with its seeding, and a shard may also
+    /// build up to every fuzz project (about 7 minutes together on a hosted
+    /// runner), so 5 keeps a shard near 10 minutes, a third of its limit.
+    const MAX_TARGETS_PER_SHARD: usize = 5;
+
+    /// The shard count of the `fuzz` job in `ci.yml`: the length of its
+    /// `matrix.shard` list, which must be `0..N`.
+    fn ci_shard_count() -> u32 {
+        let source = std::fs::read_to_string(repo().join(".github/workflows/ci.yml")).unwrap();
+        let docs = yaml_rust2::YamlLoader::load_from_str(&source).unwrap();
+        let shards: Vec<i64> = docs[0]["jobs"]["fuzz"]["strategy"]["matrix"]["shard"]
+            .as_vec()
+            .expect("ci.yml's fuzz job has a `shard` matrix")
+            .iter()
+            .map(|s| s.as_i64().unwrap())
+            .collect();
+        let count = u32::try_from(shards.len()).unwrap();
+        assert_eq!(
+            shards,
+            (0..i64::from(count)).collect::<Vec<_>>(),
+            "ci.yml's fuzz matrix must list the shards 0 to N-1 in order"
+        );
+        count
+    }
+
+    #[test]
+    fn ci_shards_stay_within_the_per_shard_budget() {
+        let count = ci_shard_count();
+        assert!((1..=MAX_SHARDS).contains(&count), "{count} shards");
+        let targets = PROJECTS.iter().map(|p| p.targets.len()).sum::<usize>();
+        let per_shard = targets.div_ceil(usize::try_from(count).unwrap());
+        assert!(
+            per_shard <= MAX_TARGETS_PER_SHARD,
+            "{targets} fuzz targets over {count} shards is {per_shard} per shard, more than \
+             {MAX_TARGETS_PER_SHARD}: add shards to the `fuzz` job's matrix in \
+             .github/workflows/ci.yml (the list and the N in its SHARD), so no shard nears \
+             its time limit"
+        );
+    }
+
+    #[test]
+    fn shards_partition_every_target_exactly_once() {
+        let all: Vec<&str> = PROJECTS
+            .iter()
+            .flat_map(|p| p.targets)
+            .map(|t| t.name)
+            .collect();
+        for count in 1..=MAX_SHARDS {
+            let mut seen = Vec::new();
+            for index in 0..count {
+                let args = Args {
+                    seconds: DEFAULT_SECONDS,
+                    target: None,
+                    shard: Some(Shard { index, count }),
+                };
+                let shard: Vec<&str> = selected(&args)
+                    .into_iter()
+                    .flat_map(|(_, targets)| targets)
+                    .map(|t| t.name)
+                    .collect();
+                // Round-robin: no shard has more than one target above
+                // another.
+                assert!(
+                    shard.len() <= all.len().div_ceil(usize::try_from(count).unwrap()),
+                    "{index}/{count}: {shard:?}"
+                );
+                seen.extend(shard);
+            }
+            let mut sorted = seen.clone();
+            sorted.sort_unstable();
+            let mut expected = all.clone();
+            expected.sort_unstable();
+            assert_eq!(sorted, expected, "shards of {count}");
+        }
+        // Only projects with a selected target are built.
+        for (project, targets) in selected(&Args {
+            seconds: DEFAULT_SECONDS,
+            target: None,
+            shard: Some(Shard {
+                index: 0,
+                count: MAX_SHARDS,
+            }),
+        }) {
+            assert!(!targets.is_empty(), "{}", project.dir);
+        }
+        let unsharded = Args {
+            seconds: DEFAULT_SECONDS,
+            target: None,
+            shard: None,
+        };
+        let every: Vec<&str> = selected(&unsharded)
+            .into_iter()
+            .flat_map(|(_, t)| t)
+            .map(|t| t.name)
+            .collect();
+        assert_eq!(every, all);
+    }
+
+    #[test]
+    fn shard_is_parsed_and_bounded() {
+        assert_eq!(Shard::parse("0/1"), Ok(Shard { index: 0, count: 1 }));
+        assert_eq!(Shard::parse("5/6"), Ok(Shard { index: 5, count: 6 }));
+        assert_eq!(
+            Shard::parse("15/16"),
+            Ok(Shard {
+                index: 15,
+                count: 16
+            })
+        );
+        for bad in [
+            "",
+            "1",
+            "/",
+            "0/",
+            "/1",
+            "1/1",
+            "6/6",
+            "0/0",
+            "0/17",
+            "-1/4",
+            "+1/4",
+            "1/+4",
+            "a/4",
+            "1/4/2",
+            "1 /4",
+            "1.0/4",
+            "0/99999999999",
+        ] {
+            assert!(Shard::parse(bad).is_err(), "{bad}");
+        }
+    }
+
     #[test]
     fn arguments_are_parsed_and_bounded() {
         let args = |a: &[&str]| a.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
@@ -835,6 +1035,7 @@ mod tests {
             Ok(Args {
                 seconds,
                 target: target.map(str::to_owned),
+                shard: None,
             })
         };
         assert_eq!(parse_args(&[]), parsed(DEFAULT_SECONDS, None));
@@ -850,6 +1051,14 @@ mod tests {
             parse_args(&args(&["--target", "pe_parse", "--seconds", "5"])),
             parsed(5, Some("pe_parse"))
         );
+        assert_eq!(
+            parse_args(&args(&["--shard", "2/6", "--seconds", "5"])),
+            Ok(Args {
+                seconds: 5,
+                target: None,
+                shard: Some(Shard { index: 2, count: 6 }),
+            })
+        );
         for bad in ["0", "3601", "-1", "1.5", "", "60s"] {
             assert!(parse_args(&args(&["--seconds", bad])).is_err(), "{bad}");
         }
@@ -860,6 +1069,12 @@ mod tests {
             &["--target", "no_such_target"],
             &["--target", "pe_parse", "--target", "fsctx_parse"],
             &["pe_parse"],
+            &["--shard"],
+            &["--shard", "6/6"],
+            &["--shard", "0/17"],
+            &["--shard", "0/2", "--shard", "1/2"],
+            &["--shard", "0/2", "--target", "pe_parse"],
+            &["--target", "pe_parse", "--shard", "0/1"],
         ] {
             assert!(parse_args(&args(bad)).is_err(), "{bad:?}");
         }

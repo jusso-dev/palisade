@@ -108,9 +108,10 @@ Commands:
   fixtures         Build the generated test fixture corpus into target/fixtures/
   golden [--update]
                    Check the corpus's hashes against testdata/golden/fixtures.txt, or rewrite it
-  fuzz [--seconds N] [--target NAME]
+  fuzz [--seconds N] [--target NAME | --shard I/N]
                    Build every cargo-fuzz target, seed it from the test fixtures and run it for
-                   N seconds (default 60), or only NAME; needs the pinned nightly and cargo-fuzz
+                   N seconds (default 60), or only NAME, or only every N-th target starting at
+                   index I (as CI's shards do); needs the pinned nightly and cargo-fuzz
   help             Show this message
 ";
 

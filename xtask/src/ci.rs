@@ -4,7 +4,8 @@
 //! [`STEPS`] lists every command. A unit test compares it with the `cargo`
 //! commands in `ci.yml` and fails if one has a command the other lacks, so
 //! the two cannot drift. Jobs that differ only by runner (the OS matrix) run
-//! once, on the local machine.
+//! once, on the local machine, and the sharded `fuzz` job runs unsharded:
+//! every target, once.
 
 use std::process::Command;
 
@@ -504,6 +505,46 @@ mod tests {
             || command == "cargo xtask release verify target/dist/signed --allow-untimestamped"
     }
 
+    /// The argument the sharded `fuzz` job adds to `cargo xtask fuzz`.
+    const FUZZ_SHARD_ARG: &str = " --shard \"$SHARD\"";
+
+    /// The shard argument is removed only from the `fuzz` job's command,
+    /// and that job's `SHARD` is exactly the matrix shard out of the
+    /// matrix's length, so no shard is skipped or run twice.
+    #[test]
+    fn fuzz_job_shards_cover_every_target() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows/ci.yml");
+        let docs = YamlLoader::load_from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let job = &docs[0]["jobs"]["fuzz"];
+        let shards = job["strategy"]["matrix"]["shard"].as_vec().unwrap().len();
+        let Yaml::Array(steps) = &job["steps"] else {
+            panic!("no fuzz job");
+        };
+        let fuzz_step = steps
+            .iter()
+            .find(|s| {
+                s["run"]
+                    .as_str()
+                    .is_some_and(|r| r.contains(FUZZ_SHARD_ARG))
+            })
+            .expect("the fuzz job runs `cargo xtask fuzz --shard \"$SHARD\"`");
+        assert_eq!(
+            fuzz_step["run"].as_str(),
+            Some(format!("cargo xtask fuzz{FUZZ_SHARD_ARG}").as_str())
+        );
+        assert_eq!(
+            fuzz_step["env"]["SHARD"].as_str(),
+            Some(format!("${{{{ matrix.shard }}}}/{shards}").as_str())
+        );
+        assert_eq!(job["strategy"]["fail-fast"].as_bool(), Some(false));
+        let others: Vec<(String, String)> = ci_yml_commands()
+            .into_iter()
+            .filter(|(job, c)| job != "fuzz" && c.contains(FUZZ_SHARD_ARG))
+            .collect();
+        assert!(others.is_empty(), "{others:?}");
+    }
+
     #[test]
     fn steps_match_ci_yml_exactly() {
         let mut ci: Vec<String> = ci_yml_commands()
@@ -513,6 +554,14 @@ mod tests {
                 let command = command.replace("cargo \"+$MSRV\" check", "cargo +$MSRV check");
                 // actionlint runs from where the job downloaded it.
                 let command = command.replace("\"$RUNNER_TEMP/actionlint\"", "actionlint");
+                // CI splits the fuzz targets across a matrix of shards
+                // (`SHARD` is `${{ matrix.shard }}/N`); locally one run
+                // covers every shard.
+                let command = if job == "fuzz" {
+                    command.replace(FUZZ_SHARD_ARG, "")
+                } else {
+                    command
+                };
                 format!("[{job}] {command}")
             })
             .filter(|c| !is_runner_only(c.split_once("] ").unwrap().1))
