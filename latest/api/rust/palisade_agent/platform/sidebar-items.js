@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["StdEnvironment","StdFile","StdFileSystem","SystemClock"]};
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_MAX_FILE_SIZE"],"struct":["FileidSignatures","SignatureSettings","StdEnvironment","StdFile","StdFileSystem","SystemClock"]};
