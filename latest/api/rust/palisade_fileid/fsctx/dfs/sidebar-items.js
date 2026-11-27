@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_TIMEOUT","MAX_HOPS"],"enum":["DfsOutcome"],"struct":["DfsCache","DfsReferral"],"trait":["DfsResolver"]};

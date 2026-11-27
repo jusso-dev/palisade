@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["acl","motw","ntfs","path","sid","vars","volume","writable"],"struct":["FsContext","PathForms"]};
+window.SIDEBAR_ITEMS = {"mod":["acl","dfs","motw","ntfs","path","sid","vars","volume","writable"],"struct":["FsContext","PathForms"]};

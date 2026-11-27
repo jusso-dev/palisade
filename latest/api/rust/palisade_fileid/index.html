@@ -229,6 +229,13 @@ hot-plug state from the storage queries, OS volume by GUID, file
 system and journal support), and <code>is_case_sensitive_dir</code> reads the
 per-directory case-sensitivity flag. Windows tests attach a VHD and
 share a local folder over SMB.</li>
+<li><code>fsctx::dfs</code> and <code>win::paths</code> (Windows, <code>os-trust</code> feature): the OS
+path forms of an opened file (NT, volume GUID, final, long with every
+8.3 name expanded by <code>OsShortNames</code>, the UNC form of a mapped drive in
+the caller’s logon session) and DFS targets through <code>DfsCache</code>, which
+bounds each lookup to 2 s and caches referrals and failures.
+<code>PathForms::network_key</code> gives one key for a mapped drive, a DFS path
+and a short-name spelling of one file on a share.</li>
 </ul>
 </li>
 <li>
