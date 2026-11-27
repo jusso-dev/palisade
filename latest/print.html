@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-9ca22253.js";
+            window.path_to_searchindex_js = "searchindex-48180a7c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-cbfaa793.js"></script>
@@ -12084,7 +12084,7 @@ enforcing (<a href="#0012-fail-open-versus-fail-closed-defaults">ADR 0012</a>); 
 <tr><td>T-engine-06</td><td>Decision trace naming the rule, model and inputs; deterministic engine with injected time (ADR 0009).</td><td>#41</td><td>TEST: <code>palisade-policy</code> <code>evaluate::tests::every_model_names_its_winner_and_every_overridden_rule</code>, <code>evaluate::tests::decisions_do_not_depend_on_list_order</code>; TEST-trace (#41)</td></tr>
 <tr><td>T-engine-07</td><td>User-facing messages use a reduced explanation; the full trace is for admins.</td><td>#147, #41</td><td>RT-engine-01</td></tr>
 <tr><td>T-engine-08</td><td>The YAML front end bounds size, depth, nodes and lookahead; regular expressions are linear-time, size-capped and counted per policy; PE debug entries and path lengths are capped; certificate chain building, CRLs and catalogs have work and size limits that fail closed.</td><td>#45, #190, #42</td><td>TEST: <code>palisade-policy</code> <code>dsl::tests::input_size_depth_and_node_count_are_bounded</code>, <code>ops::tests::oversized_patterns_are_rejected</code>, <code>ops::tests::pathological_patterns_match_in_linear_time</code>, <code>tests::regex_count_is_capped_per_policy</code>, <code>palisade-fileid</code> <code>pe::debug::tests::rsds_path_scan_is_capped</code>, <code>chain::hostile_certificate_sets_hit_the_work_limit_and_fail_closed</code>, <code>authenticode::revocation::tests::oversized_crls_are_rejected_before_parsing</code>, <code>catalog::decoded_size_is_bounded_before_the_signature_is_checked</code>, <code>catalog::store_limits_fail_closed</code></td></tr>
-<tr><td>T-engine-09</td><td>No unsafe code in the parsers: the workspace sets <code>unsafe_code = "forbid"</code>, a member crate cannot relax it, and the parser modules also carry <code>#![forbid(unsafe_code)]</code> (#19, ADR 0011). Property tests feed random and mutated input to the PE, version-info, signature, certificate, timestamp, CRL, catalog and path parsers on every test run; coverage-guided fuzz targets exist for each of them (#45, #25).</td><td>#19, #45, #25, #230</td><td>TEST: <code>xtask</code> <code>manifests::tests::own_package_fields_and_lints_fail</code>, <code>palisade-fileid</code> <code>properties::parse_never_panics_on_random_bytes</code>, <code>properties::parse_never_panics_on_mutated_images</code>, <code>properties::version_info_never_panics</code>, <code>chain::hostile_certificates_never_panic</code>, <code>validity::mutated_crls_never_panic</code>, <code>catalog::random_bytes_never_panic</code>, <code>fsctx::arbitrary_strings_never_panic</code>, <code>tags::scans_are_bounded_and_consistent</code>; fuzz: <code>pe_parse</code>, <code>version_info_parse</code>, <code>authenticode_ranges</code>, <code>authenticode_pkcs7</code>, <code>x509_chain</code>, <code>timestamp_crl</code>, <code>fuzz_ctl</code>, <code>fsctx_parse</code>, <code>fuzz_tags</code>; CI: <code>cargo xtask fuzz</code> (<code>fuzz</code> job in <code>ci.yml</code>)</td></tr>
+<tr><td>T-engine-09</td><td>No unsafe code in the parsers: the workspace sets <code>unsafe_code = "forbid"</code>, a member crate cannot relax it, and the parser modules also carry <code>#![forbid(unsafe_code)]</code> (#19, ADR 0011). Property tests feed random and mutated input to the PE, version-info, signature, certificate, timestamp, CRL, catalog and path parsers on every test run; coverage-guided fuzz targets exist for each of them (#45, #25).</td><td>#19, #45, #25, #230</td><td>TEST: <code>xtask</code> <code>manifests::tests::own_package_fields_and_lints_fail</code>, <code>palisade-fileid</code> <code>properties::parse_never_panics_on_random_bytes</code>, <code>properties::parse_never_panics_on_mutated_images</code>, <code>properties::version_info_never_panics</code>, <code>chain::hostile_certificates_never_panic</code>, <code>validity::mutated_crls_never_panic</code>, <code>catalog::random_bytes_never_panic</code>, <code>fsctx::arbitrary_strings_never_panic</code>, <code>tags::scans_are_bounded_and_consistent</code>; fuzz: <code>pe_parse</code>, <code>version_info_parse</code>, <code>authenticode_ranges</code>, <code>authenticode_pkcs7</code>, <code>x509_chain</code>, <code>timestamp_crl</code>, <code>fuzz_ctl</code>, <code>fsctx_parse</code>, <code>fuzz_tags</code>; CI: <code>cargo xtask fuzz --shard "$SHARD"</code> (<code>fuzz</code> job in <code>ci.yml</code>, every target across its shards)</td></tr>
 <tr><td>T-engine-10</td><td>An allow, trust or exclusion that rests on a path matches only when no non-administrator can write the file or any directory above it; when that is not known, the path criterion is unknown, never a match (#34, #32). The ACL evaluation reports the first writable ancestor (#54). Unknown files dropped there fall to the implicit deny. Still planned: lint errors for rules over folders with writable descendants, default deny exceptions in shipped templates (#124, #87), and ACL re-checks with drift reports (#212, ISM-1392, ISM-1746).</td><td>#54, #212, #124, #87</td><td>TEST: <code>palisade-policy</code> <code>ops::tests::allow_rules_only_trust_paths_users_cannot_write</code>, <code>ops::tests::every_action_that_runs_trusts_or_excludes_only_trusts_safe_paths</code>, <code>evaluate::tests::nothing_matching_is_the_implicit_deny</code>, <code>palisade-fileid</code> <code>fsctx::acl::tests::assess_path_reports_first_writable_ancestor</code>, <code>fsctx::acl::tests::users_modify_is_user_writable</code>; BYP-path-01, BYP-path-02, BYP-lol-08, RT-path-01</td></tr>
 <tr><td>T-engine-11</td><td>Only administrator owners are trusted, and owner-based trust also requires that the file's DACL grants no non-administrator write, append, delete, <code>WRITE_DAC</code> or <code>WRITE_OWNER</code> rights (the same ACL check as path rules, #54). With the driver, a write by a non-administrator to a file trusted by owner revokes that trust and, where policy says so, sets the owner to the writer (#117, #220).</td><td>#117, #54, #220</td><td>TEST: <code>palisade-fileid</code> <code>fsctx::acl::tests::owner_trust_blockers_follow_the_threat_model</code>; BYP-path-03, BYP-trust-05, BYP-trust-07</td></tr>
 <tr><td>T-engine-12</td><td>Direct versus chained inheritance with scope limits, the updater catalogue checks the updater's own signature rules, and provenance is recorded per file (#115).</td><td>#114, #116, #119</td><td>BYP-trust-01, BYP-trust-02</td></tr>
@@ -13311,7 +13311,8 @@ fuzz-only dependency is reviewed in its PR instead
 <p>One command builds every target of every project, seeds its corpus from the synthetic test fixtures, and runs it:</p>
 <pre><code class="language-sh">rustup toolchain install nightly-2026-11-20 --profile minimal
 cargo install --locked cargo-fuzz@0.13.2
-cargo xtask fuzz                         # 60 s per target, as on a PR
+cargo xtask fuzz                         # 60 s per target, every target, as a PR runs them
+cargo xtask fuzz --shard 2/6             # only the targets of one of CI's 6 shards
 cargo xtask fuzz --seconds 1800 --target pe_parse
 </code></pre>
 <p>The nightly is pinned by date in <code>xtask/src/fuzz.rs</code>, so a new nightly cannot break CI. The
@@ -13320,7 +13321,11 @@ offline, so they cannot download anything or re-resolve the lockfile. The
 corpus and any findings go to <code>target/fuzz-smoke/&lt;target&gt;/</code>. Each target runs with a 10 s limit
 per input and a 2 GiB memory limit, so hangs and runaway allocation count as findings too.</p>
 <ul>
-<li><strong>On every PR</strong>, the <code>fuzz</code> job in <code>ci.yml</code> runs <code>cargo xtask fuzz</code>.</li>
+<li><strong>On every PR</strong>, the <code>fuzz</code> job in <code>ci.yml</code> runs every target for 60 s, split across 6 parallel
+shards: shard <code>I</code> runs <code>cargo xtask fuzz --shard I/6</code>, the targets whose position in
+<code>PROJECTS</code> (counted from 0 across all projects) is <code>I</code> modulo 6, and builds only the projects
+those targets are in. Together the shards run every target exactly once, and <code>cargo xtask ci</code>
+runs them all in one go.</li>
 <li><strong>Every week</strong>, <code>fuzz.yml</code> runs each target for 30 minutes, as one job per target. If any
 fails, it opens an <code>area:security</code> issue, or comments on the open one.</li>
 </ul>
@@ -13344,6 +13349,9 @@ lockfile. To add a target:</p>
 write its seed inputs (they read the output directory from <code>PALISADE_FUZZ_SEED_DIR</code>).</li>
 <li>Add it to the matrix in <code>.github/workflows/fuzz.yml</code>.</li>
 </ol>
+<p>A test also fails if the PR <code>fuzz</code> job's shards would have more than 5 targets each. Then add
+shards: extend the <code>shard</code> list in the job's matrix in <code>.github/workflows/ci.yml</code>, and change the
+<code>/6</code> in its <code>SHARD</code> to the new count, so no shard nears its 30-minute limit.</p>
 <p>For a new crate's fuzz project, also add it to <code>PROJECTS</code> with the package whose tests write its
 seeds, commit its <code>Cargo.lock</code> (and keep <code>Cargo.lock</code> out of its <code>.gitignore</code>), add it to
 <code>.github/dependabot.yml</code>, and add its cargo-deny step to the <code>deps</code> job in <code>ci.yml</code>, to
@@ -13461,7 +13469,7 @@ type.</p>
 <tr><td><code>snapshots</code></td><td>ubuntu-latest</td><td><code>cargo fetch --locked</code>, then offline (<code>CARGO_NET_OFFLINE=true</code>) <code>cargo insta test --check --unreferenced reject --all-features -p palisade-policy -p palisade-proto</code>: every <code>insta</code> snapshot matches and none is unreferenced (<a href="#snapshot-tests">testing.md</a>). cargo-insta has no <code>--locked</code>, so the locked fetch and the offline run stand in for it</td></tr>
 <tr><td><code>fixtures</code></td><td>ubuntu-latest</td><td><code>cargo xtask check-testdata</code> (no executable file in the repository that <code>testdata/manifest.txt</code> does not allow), then <code>cargo xtask golden</code> (the generated fixture corpus matches <code>testdata/golden/fixtures.txt</code>) (<a href="#the-fixture-corpus">testing.md</a>)</td></tr>
 <tr><td><code>fuzz-locks</code></td><td>ubuntu-latest</td><td><code>cargo xtask check-fuzz-locks</code>: <code>cargo metadata --locked</code> on every <code>crates/*/fuzz/Cargo.toml</code>, so a stale fuzz lockfile fails in seconds</td></tr>
-<tr><td><code>fuzz</code></td><td>ubuntu-latest</td><td>After <code>fuzz-locks</code>, <code>cargo xtask fuzz</code>: every cargo-fuzz target, seeded from the test fixtures, for 60 s each, on the pinned nightly</td></tr>
+<tr><td><code>fuzz</code></td><td>ubuntu-latest, 6 shards</td><td>After <code>fuzz-locks</code>, <code>cargo xtask fuzz --shard I/6</code> in each of 6 parallel jobs: together, every cargo-fuzz target, seeded from the test fixtures, for 60 s each, on the pinned nightly</td></tr>
 <tr><td><code>bench</code></td><td>ubuntu-latest</td><td><code>cargo test --bench &lt;name&gt;</code> for every criterion bench: builds them and runs each benchmark once, without timing</td></tr>
 <tr><td><code>postgres</code></td><td>ubuntu-latest</td><td><code>cargo nextest run -p palisade-server --test postgres --locked --profile ci</code> against a Postgres 17 service container (official image, pinned by digest), with <code>PALISADE_TEST_DATABASE_ADMIN_URL</code> set. Elsewhere those tests skip themselves. <code>cargo xtask ci</code> runs this step only when that variable is set locally</td></tr>
 <tr><td><code>msrv</code></td><td>ubuntu-latest</td><td><code>cargo +1.94.0 check --workspace --all-targets --all-features --locked</code>, after checking that the version matches <code>rust-version</code> in <code>Cargo.toml</code></td></tr>
@@ -13507,12 +13515,15 @@ tests did not build, there is no report, and the step only warns.</p>
 <h4 id="coverage-fuzzing-and-benchmarks"><a class="header" href="#coverage-fuzzing-and-benchmarks">Coverage, fuzzing and benchmarks</a></h4>
 <p>Details and local commands are in <a href="#testing">testing.md</a>.</p>
 <ul>
-<li><code>coverage</code> runs the same nextest suite instrumented by cargo-llvm-cov, and
+<li>
+<p><code>coverage</code> runs the same nextest suite instrumented by cargo-llvm-cov, and
 <code>cargo xtask coverage-summary</code> writes line, function and region coverage
 per crate to the job summary. It is reported, not enforced: a crate below
 its target (80% lines for <code>palisade-policy</code> and <code>palisade-fileid</code>) gets a
-warning annotation and the job still passes.</li>
-<li><code>coverage-gate</code> is the one coverage rule that is enforced (#25):
+warning annotation and the job still passes.</p>
+</li>
+<li>
+<p><code>coverage-gate</code> is the one coverage rule that is enforced (#25):
 <code>palisade-policy</code> line coverage must not decrease. On a pull request,
 <code>cargo xtask coverage-gate</code> runs <code>cargo llvm-cov nextest -p palisade-policy</code>
 at the PR's base commit (in a temporary git worktree) and at the PR, with
@@ -13521,27 +13532,49 @@ and fails if the share of covered lines went down. Adding code at the same
 coverage ratio passes. Both numbers are in the job summary. Nothing is
 stored between runs: a baseline from <code>main</code> would need an artefact or a
 cache write from a pull request, and measuring the base again in the same
-job needs neither.</li>
-<li><code>fuzz-locks</code> runs <code>cargo metadata --locked</code> on each fuzz workspace (found
+job needs neither.</p>
+</li>
+<li>
+<p><code>fuzz-locks</code> runs <code>cargo metadata --locked</code> on each fuzz workspace (found
 on disk, so a new one is checked before it is listed anywhere). A pull
 request that changes a dependency of a crate a fuzz workspace builds, even
 indirectly, must re-lock that workspace; this job says so in seconds, with
 the minimal re-lock command (<code>cargo metadata --manifest-path &lt;dir&gt;/Cargo.toml</code>,
-which upgrades nothing). The <code>fuzz</code> job waits for it.</li>
-<li><code>fuzz</code> runs <code>cargo xtask fuzz</code>. It builds every target of every project
-listed in <code>xtask/src/fuzz.rs</code>, each from its fuzz workspace's committed
-<code>Cargo.lock</code>, seeds
-each corpus from the crate's synthetic fixtures, and runs each target for
-60 s. A crash, hang, leak or out-of-memory input fails the job, and the job
-summary shows each failing input up to 64 KiB as base64, with the command
-that reproduces it. The nightly toolchain is pinned by date. cargo-fuzz has
-no prebuilt binary in the install action, so it is built from crates.io
-with <code>cargo install --locked</code> (<code>fallback: cargo-install</code>, which passes no
-token).</li>
-<li><code>bench</code> builds every criterion bench and runs each benchmark once in test
+which upgrades nothing). The <code>fuzz</code> job waits for it.</p>
+</li>
+<li>
+<p><code>fuzz</code> runs <code>cargo xtask fuzz</code>, split across a matrix of 6 shards that
+run in parallel. Shard <code>I</code> runs <code>cargo xtask fuzz --shard I/6</code>: the
+targets whose position in the list in <code>xtask/src/fuzz.rs</code> (in project
+order, counted from 0 across all projects) is <code>I</code> modulo 6. Together the
+shards run every target exactly once. Each shard builds only the projects
+it has a target in, each from its fuzz workspace's committed <code>Cargo.lock</code>,
+seeds each corpus from the crate's synthetic fixtures, and runs each of
+its targets for 60 s. A crash, hang, leak or out-of-memory input fails
+that shard, and so <code>ci-ok</code>; the shards do not cancel each other
+(<code>fail-fast: false</code>), and each shard's summary shows each failing input up
+to 64 KiB as base64, with the command that reproduces it.</p>
+<p>Shards keep each job well under its 30-minute limit as targets are added.
+As one job, the 17 targets took 26 minutes (1,581 s) on <code>main</code>:
+about 7 minutes building the three projects (fileid about 70 s, proto
+about 175 s, policy about 155 s on a hosted runner), and 60 to 85 s per
+target with its seeding. With 6 shards each runs at most 3 targets
+(18 with the bundle decoder) and builds at most two projects, about
+8 minutes in all. A unit test in <code>xtask/src/fuzz.rs</code> reads the shard count
+from <code>ci.yml</code> and fails once a shard would get more than 5 targets; then
+add shards: extend the <code>shard</code> list and change the <code>/6</code> in the job's
+<code>SHARD</code> to match (a test in <code>xtask/src/ci.rs</code> checks the two agree).</p>
+<p>The nightly toolchain is pinned by date. cargo-fuzz has no prebuilt
+binary in the install action, so it is built from crates.io with
+<code>cargo install --locked</code> (<code>fallback: cargo-install</code>, which passes no
+token).</p>
+</li>
+<li>
+<p><code>bench</code> builds every criterion bench and runs each benchmark once in test
 mode, so a bench that no longer builds or panics fails. Timings are not
 measured on shared runners. A unit test fails if a <code>benches/*.rs</code> file is
-not named in the job.</li>
+not named in the job.</p>
+</li>
 </ul>
 <h4 id="main-snapshot"><a class="header" href="#main-snapshot"><code>main-snapshot</code></a></h4>
 <p>Every push to <code>main</code> whose CI passed replaces the files of one rolling pre-release, tagged
@@ -13814,7 +13847,8 @@ end. Before it starts, it checks that the extra tools are installed
 without <code>--fast</code>, cargo-llvm-cov, the fuzzing nightly with cargo-fuzz, mdBook, and the
 MSRV toolchain), and prints the install command for
 each one that is missing, at the version CI uses. Jobs that differ only by
-runner run once, on your machine. Steps whose job runs only on one OS run
+runner run once, on your machine, and the <code>fuzz</code> job's shards run as one
+<code>cargo xtask fuzz</code>, every target once. Steps whose job runs only on one OS run
 only there: on Windows, <code>ci</code> builds both packages (the <code>package</code> job, without
 its smoke test, which installs a service); on Linux, it builds the server
 binary and image (the <code>server-image</code> job, with podman). Elsewhere they are

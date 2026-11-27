@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-9ca22253.js";
+            window.path_to_searchindex_js = "../searchindex-48180a7c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-cbfaa793.js"></script>
@@ -431,7 +431,8 @@ fuzz-only dependency is reviewed in its PR instead
 <p>One command builds every target of every project, seeds its corpus from the synthetic test fixtures, and runs it:</p>
 <pre><code class="language-sh">rustup toolchain install nightly-2026-11-20 --profile minimal
 cargo install --locked cargo-fuzz@0.13.2
-cargo xtask fuzz                         # 60 s per target, as on a PR
+cargo xtask fuzz                         # 60 s per target, every target, as a PR runs them
+cargo xtask fuzz --shard 2/6             # only the targets of one of CI's 6 shards
 cargo xtask fuzz --seconds 1800 --target pe_parse
 </code></pre>
 <p>The nightly is pinned by date in <code>xtask/src/fuzz.rs</code>, so a new nightly cannot break CI. The
@@ -440,7 +441,11 @@ offline, so they cannot download anything or re-resolve the lockfile. The
 corpus and any findings go to <code>target/fuzz-smoke/&lt;target&gt;/</code>. Each target runs with a 10 s limit
 per input and a 2 GiB memory limit, so hangs and runaway allocation count as findings too.</p>
 <ul>
-<li><strong>On every PR</strong>, the <code>fuzz</code> job in <code>ci.yml</code> runs <code>cargo xtask fuzz</code>.</li>
+<li><strong>On every PR</strong>, the <code>fuzz</code> job in <code>ci.yml</code> runs every target for 60 s, split across 6 parallel
+shards: shard <code>I</code> runs <code>cargo xtask fuzz --shard I/6</code>, the targets whose position in
+<code>PROJECTS</code> (counted from 0 across all projects) is <code>I</code> modulo 6, and builds only the projects
+those targets are in. Together the shards run every target exactly once, and <code>cargo xtask ci</code>
+runs them all in one go.</li>
 <li><strong>Every week</strong>, <code>fuzz.yml</code> runs each target for 30 minutes, as one job per target. If any
 fails, it opens an <code>area:security</code> issue, or comments on the open one.</li>
 </ul>
@@ -464,6 +469,9 @@ lockfile. To add a target:</p>
 write its seed inputs (they read the output directory from <code>PALISADE_FUZZ_SEED_DIR</code>).</li>
 <li>Add it to the matrix in <code>.github/workflows/fuzz.yml</code>.</li>
 </ol>
+<p>A test also fails if the PR <code>fuzz</code> job's shards would have more than 5 targets each. Then add
+shards: extend the <code>shard</code> list in the job's matrix in <code>.github/workflows/ci.yml</code>, and change the
+<code>/6</code> in its <code>SHARD</code> to the new count, so no shard nears its 30-minute limit.</p>
 <p>For a new crate's fuzz project, also add it to <code>PROJECTS</code> with the package whose tests write its
 seeds, commit its <code>Cargo.lock</code> (and keep <code>Cargo.lock</code> out of its <code>.gitignore</code>), add it to
 <code>.github/dependabot.yml</code>, and add its cargo-deny step to the <code>deps</code> job in <code>ci.yml</code>, to

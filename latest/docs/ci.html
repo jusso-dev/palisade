@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-9ca22253.js";
+            window.path_to_searchindex_js = "../searchindex-48180a7c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-cbfaa793.js"></script>
@@ -210,7 +210,7 @@ type.</p>
 <tr><td><code>snapshots</code></td><td>ubuntu-latest</td><td><code>cargo fetch --locked</code>, then offline (<code>CARGO_NET_OFFLINE=true</code>) <code>cargo insta test --check --unreferenced reject --all-features -p palisade-policy -p palisade-proto</code>: every <code>insta</code> snapshot matches and none is unreferenced (<a href="testing.html#snapshot-tests">testing.md</a>). cargo-insta has no <code>--locked</code>, so the locked fetch and the offline run stand in for it</td></tr>
 <tr><td><code>fixtures</code></td><td>ubuntu-latest</td><td><code>cargo xtask check-testdata</code> (no executable file in the repository that <code>testdata/manifest.txt</code> does not allow), then <code>cargo xtask golden</code> (the generated fixture corpus matches <code>testdata/golden/fixtures.txt</code>) (<a href="testing.html#the-fixture-corpus">testing.md</a>)</td></tr>
 <tr><td><code>fuzz-locks</code></td><td>ubuntu-latest</td><td><code>cargo xtask check-fuzz-locks</code>: <code>cargo metadata --locked</code> on every <code>crates/*/fuzz/Cargo.toml</code>, so a stale fuzz lockfile fails in seconds</td></tr>
-<tr><td><code>fuzz</code></td><td>ubuntu-latest</td><td>After <code>fuzz-locks</code>, <code>cargo xtask fuzz</code>: every cargo-fuzz target, seeded from the test fixtures, for 60 s each, on the pinned nightly</td></tr>
+<tr><td><code>fuzz</code></td><td>ubuntu-latest, 6 shards</td><td>After <code>fuzz-locks</code>, <code>cargo xtask fuzz --shard I/6</code> in each of 6 parallel jobs: together, every cargo-fuzz target, seeded from the test fixtures, for 60 s each, on the pinned nightly</td></tr>
 <tr><td><code>bench</code></td><td>ubuntu-latest</td><td><code>cargo test --bench &lt;name&gt;</code> for every criterion bench: builds them and runs each benchmark once, without timing</td></tr>
 <tr><td><code>postgres</code></td><td>ubuntu-latest</td><td><code>cargo nextest run -p palisade-server --test postgres --locked --profile ci</code> against a Postgres 17 service container (official image, pinned by digest), with <code>PALISADE_TEST_DATABASE_ADMIN_URL</code> set. Elsewhere those tests skip themselves. <code>cargo xtask ci</code> runs this step only when that variable is set locally</td></tr>
 <tr><td><code>msrv</code></td><td>ubuntu-latest</td><td><code>cargo +1.94.0 check --workspace --all-targets --all-features --locked</code>, after checking that the version matches <code>rust-version</code> in <code>Cargo.toml</code></td></tr>
@@ -256,12 +256,15 @@ tests did not build, there is no report, and the step only warns.</p>
 <h4 id="coverage-fuzzing-and-benchmarks"><a class="header" href="#coverage-fuzzing-and-benchmarks">Coverage, fuzzing and benchmarks</a></h4>
 <p>Details and local commands are in <a href="testing.html">testing.md</a>.</p>
 <ul>
-<li><code>coverage</code> runs the same nextest suite instrumented by cargo-llvm-cov, and
+<li>
+<p><code>coverage</code> runs the same nextest suite instrumented by cargo-llvm-cov, and
 <code>cargo xtask coverage-summary</code> writes line, function and region coverage
 per crate to the job summary. It is reported, not enforced: a crate below
 its target (80% lines for <code>palisade-policy</code> and <code>palisade-fileid</code>) gets a
-warning annotation and the job still passes.</li>
-<li><code>coverage-gate</code> is the one coverage rule that is enforced (#25):
+warning annotation and the job still passes.</p>
+</li>
+<li>
+<p><code>coverage-gate</code> is the one coverage rule that is enforced (#25):
 <code>palisade-policy</code> line coverage must not decrease. On a pull request,
 <code>cargo xtask coverage-gate</code> runs <code>cargo llvm-cov nextest -p palisade-policy</code>
 at the PR's base commit (in a temporary git worktree) and at the PR, with
@@ -270,27 +273,49 @@ and fails if the share of covered lines went down. Adding code at the same
 coverage ratio passes. Both numbers are in the job summary. Nothing is
 stored between runs: a baseline from <code>main</code> would need an artefact or a
 cache write from a pull request, and measuring the base again in the same
-job needs neither.</li>
-<li><code>fuzz-locks</code> runs <code>cargo metadata --locked</code> on each fuzz workspace (found
+job needs neither.</p>
+</li>
+<li>
+<p><code>fuzz-locks</code> runs <code>cargo metadata --locked</code> on each fuzz workspace (found
 on disk, so a new one is checked before it is listed anywhere). A pull
 request that changes a dependency of a crate a fuzz workspace builds, even
 indirectly, must re-lock that workspace; this job says so in seconds, with
 the minimal re-lock command (<code>cargo metadata --manifest-path &lt;dir&gt;/Cargo.toml</code>,
-which upgrades nothing). The <code>fuzz</code> job waits for it.</li>
-<li><code>fuzz</code> runs <code>cargo xtask fuzz</code>. It builds every target of every project
-listed in <code>xtask/src/fuzz.rs</code>, each from its fuzz workspace's committed
-<code>Cargo.lock</code>, seeds
-each corpus from the crate's synthetic fixtures, and runs each target for
-60 s. A crash, hang, leak or out-of-memory input fails the job, and the job
-summary shows each failing input up to 64 KiB as base64, with the command
-that reproduces it. The nightly toolchain is pinned by date. cargo-fuzz has
-no prebuilt binary in the install action, so it is built from crates.io
-with <code>cargo install --locked</code> (<code>fallback: cargo-install</code>, which passes no
-token).</li>
-<li><code>bench</code> builds every criterion bench and runs each benchmark once in test
+which upgrades nothing). The <code>fuzz</code> job waits for it.</p>
+</li>
+<li>
+<p><code>fuzz</code> runs <code>cargo xtask fuzz</code>, split across a matrix of 6 shards that
+run in parallel. Shard <code>I</code> runs <code>cargo xtask fuzz --shard I/6</code>: the
+targets whose position in the list in <code>xtask/src/fuzz.rs</code> (in project
+order, counted from 0 across all projects) is <code>I</code> modulo 6. Together the
+shards run every target exactly once. Each shard builds only the projects
+it has a target in, each from its fuzz workspace's committed <code>Cargo.lock</code>,
+seeds each corpus from the crate's synthetic fixtures, and runs each of
+its targets for 60 s. A crash, hang, leak or out-of-memory input fails
+that shard, and so <code>ci-ok</code>; the shards do not cancel each other
+(<code>fail-fast: false</code>), and each shard's summary shows each failing input up
+to 64 KiB as base64, with the command that reproduces it.</p>
+<p>Shards keep each job well under its 30-minute limit as targets are added.
+As one job, the 17 targets took 26 minutes (1,581 s) on <code>main</code>:
+about 7 minutes building the three projects (fileid about 70 s, proto
+about 175 s, policy about 155 s on a hosted runner), and 60 to 85 s per
+target with its seeding. With 6 shards each runs at most 3 targets
+(18 with the bundle decoder) and builds at most two projects, about
+8 minutes in all. A unit test in <code>xtask/src/fuzz.rs</code> reads the shard count
+from <code>ci.yml</code> and fails once a shard would get more than 5 targets; then
+add shards: extend the <code>shard</code> list and change the <code>/6</code> in the job's
+<code>SHARD</code> to match (a test in <code>xtask/src/ci.rs</code> checks the two agree).</p>
+<p>The nightly toolchain is pinned by date. cargo-fuzz has no prebuilt
+binary in the install action, so it is built from crates.io with
+<code>cargo install --locked</code> (<code>fallback: cargo-install</code>, which passes no
+token).</p>
+</li>
+<li>
+<p><code>bench</code> builds every criterion bench and runs each benchmark once in test
 mode, so a bench that no longer builds or panics fails. Timings are not
 measured on shared runners. A unit test fails if a <code>benches/*.rs</code> file is
-not named in the job.</li>
+not named in the job.</p>
+</li>
 </ul>
 <h4 id="main-snapshot"><a class="header" href="#main-snapshot"><code>main-snapshot</code></a></h4>
 <p>Every push to <code>main</code> whose CI passed replaces the files of one rolling pre-release, tagged
@@ -563,7 +588,8 @@ end. Before it starts, it checks that the extra tools are installed
 without <code>--fast</code>, cargo-llvm-cov, the fuzzing nightly with cargo-fuzz, mdBook, and the
 MSRV toolchain), and prints the install command for
 each one that is missing, at the version CI uses. Jobs that differ only by
-runner run once, on your machine. Steps whose job runs only on one OS run
+runner run once, on your machine, and the <code>fuzz</code> job's shards run as one
+<code>cargo xtask fuzz</code>, every target once. Steps whose job runs only on one OS run
 only there: on Windows, <code>ci</code> builds both packages (the <code>package</code> job, without
 its smoke test, which installs a service); on Linux, it builds the server
 binary and image (the <code>server-image</code> job, with podman). Elsewhere they are
