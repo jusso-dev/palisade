@@ -344,9 +344,15 @@ impl Trust {
     }
 }
 
+/// The time the CLI checks signatures at. `pal fileid` is a one-shot
+/// diagnostic run by a person; it has no Clock of its own (#29).
 fn now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a one-shot CLI diagnostic reads the wall clock once; it has no Clock (#29)"
+    )]
+    let now = SystemTime::now();
+    now.duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 

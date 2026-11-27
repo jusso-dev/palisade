@@ -71,14 +71,13 @@ fn identity_matches_os_tooling() {
     assert!(status.success(), "{status}");
     let text = std::fs::read_to_string(&out).unwrap();
     std::fs::remove_file(&out).unwrap();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the OS checks these files at the real time, so this test does too"
+    )]
+    let now = std::time::SystemTime::now();
     let ctx = IdentityContext::untrusted(
-        i64::try_from(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-        )
-        .unwrap(),
+        i64::try_from(now.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()).unwrap(),
     );
     let mut checked = 0;
     for line in text
