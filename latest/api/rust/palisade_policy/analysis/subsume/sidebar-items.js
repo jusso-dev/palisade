@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["covers","criterion_covers"]};

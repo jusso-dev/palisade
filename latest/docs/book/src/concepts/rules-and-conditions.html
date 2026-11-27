@@ -36,10 +36,10 @@
             const path_to_root = "../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../searchindex-92677b07.js";
+            window.path_to_searchindex_js = "../../../../searchindex-45338655.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../../toc-cbfaa793.js"></script>
+        <script src="../../../../toc-de2a680a.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -545,6 +545,100 @@ rule_sets:
                   operator: ip_in_cidr
                   values: [10.0.0.0/8, "2001:db8::/32"]
         action: {type: deny}
+</code></pre>
+<p>Rules also have a <strong>lifecycle</strong> and <strong>governance metadata</strong>: an activity window (<code>activates_at</code>, <code>expires_at</code>) with what happens on expiry (<code>on_expire</code>), a review date, an owner and a justification. Specified in <a href="https://github.com/jusso-dev/palisade/issues/40">#40</a>. In governance mode, allow, trust and exception rules must carry that metadata, and exceptions must expire within a year. An example, validated in CI:</p>
+<pre><code class="language-yaml"># yaml-language-server: $schema=https://raw.githubusercontent.com/jusso-dev/palisade/main/schemas/policy/v1.json
+#
+# Rule lifecycle and governance (#40). Governance mode is on, so every
+# allow carries a justification and a review date, and the exception (a
+# path allow for a vendor tool) also carries an expiry within a year, an
+# approver and a risk rating. A temporary deny becomes an audit rule when it
+# expires, so its matches are still recorded.
+#
+# The tenant raises `weak_identity` to an error, so the policy assistant
+# reports the path exception as an error and the publish gate blocks the
+# bundle until an administrator overrides it with a reason (see
+# `tests/snapshots/lint/examples.txt`).
+schema_version: "1.0.0"
+policy:
+  id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f
+  name: Governed rules
+  revision: 1
+  mode: enforce
+  governance:
+    require_justification: true
+    stale_after_days: 90
+    expiry_notice_days:
+      - 14
+      - 3
+      - 0
+    severity:
+      weak_identity: error
+  rule_sets:
+    - 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60
+rule_sets:
+  - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60
+    name: Line-of-business
+    kind: mixed
+    metadata:
+      owner: grp-desktop-engineering
+    rules:
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e61
+        name: Payroll client
+        match:
+          all:
+            - criterion:
+                field: signer.publisher
+                operator: equals
+                values:
+                  - Example Payroll Ltd
+            - criterion:
+                field: meta.product_name
+                operator: equals
+                values:
+                  - Payroll Client
+        action:
+          type: allow
+        metadata:
+          owner: alice@example.org
+          justification: Payroll processing for the finance team.
+          ticket_ref: CHG-1042
+          source: manual
+          created_at: "2026-11-25T00:00:00Z"
+          review_by: "2027-11-25"
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e62
+        name: Vendor diagnostic tool (exception)
+        expires_at: "2027-05-25T00:00:00Z"
+        on_expire:
+          delete_after_days: 30
+        match:
+          criterion:
+            field: path.directory
+            operator: starts_with
+            values:
+              - C:\VendorTools\Diag
+        action:
+          type: allow
+        metadata:
+          justification: Vendor support needs this tool until the next release.
+          approved_by: ciso@example.org
+          approved_at: "2026-11-25T00:00:00Z"
+          created_at: "2026-11-25T00:00:00Z"
+          risk_rating: medium
+          compensating_controls: Folder ACL limited to administrators; reviewed quarterly.
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e63
+        name: Block the old installer during the migration
+        activates_at: "2026-12-01T00:00:00Z"
+        expires_at: "2027-03-01T00:00:00Z"
+        on_expire: convert_to_audit
+        match:
+          criterion:
+            field: hash.sha256
+            operator: equals
+            values:
+              - aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        action:
+          type: deny
 </code></pre>
 <p>See also: <a href="../reference/generated/policy/rule.html"><code>Rule</code></a>,
 <a href="../reference/generated/policy/match.html"><code>Match</code></a>,

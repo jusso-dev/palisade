@@ -1,0 +1,874 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `crates/palisade-policy/src/lifecycle/mod.rs`."><title>mod.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="palisade_policy" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">palisade_policy/lifecycle/</div>mod.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Rule lifecycle (#40): when a rule is active, which rules are
+<a href=#2 id=2 data-nosnippet>2</a>//! exceptions, review dates, expiry notices, review campaigns and bulk
+<a href=#3 id=3 data-nosnippet>3</a>//! changes. Everything here is pure: the caller supplies the time.
+<a href=#4 id=4 data-nosnippet>4</a>//!
+<a href=#5 id=5 data-nosnippet>5</a>//! # Active rules and the clock
+<a href=#6 id=6 data-nosnippet>6</a>//!
+<a href=#7 id=7 data-nosnippet>7</a>//! A rule is active when it is enabled, `activates_at` (if set) has been
+<a href=#8 id=8 data-nosnippet>8</a>//! reached, and `expires_at` (if set) has not. An inactive rule behaves
+<a href=#9 id=9 data-nosnippet>9</a>//! exactly as if it were absent: it never decides, annotates or grants
+<a href=#10 id=10 data-nosnippet>10</a>//! ([`Evaluator::at`](crate::evaluate::Evaluator::at)). The decision trace
+<a href=#11 id=11 data-nosnippet>11</a>//! (#41) reports it as inactive with [`Activity`]'s reason.
+<a href=#12 id=12 data-nosnippet>12</a>//!
+<a href=#13 id=13 data-nosnippet>13</a>//! Activity is checked against a [`RuleClock`]: the agent's time `now`,
+<a href=#14 id=14 data-nosnippet>14</a>//! its **floor** (the lower bound on real time that the agent keeps in
+<a href=#15 id=15 data-nosnippet>15</a>//! protected storage and never lowers), and whether the agent is
+<a href=#16 id=16 data-nosnippet>16</a>//! **anchored** (ADR 0012, ADR 0018). While the agent is anchored, `now`
+<a href=#17 id=17 data-nosnippet>17</a>//! is anchored time and the floor is raised to it, so the two agree. An
+<a href=#18 id=18 data-nosnippet>18</a>//! **offline-started** agent (after a restart, before its next check-in)
+<a href=#19 id=19 data-nosnippet>19</a>//! has only the wall clock for `now`, which anyone who can change the
+<a href=#20 id=20 data-nosnippet>20</a>//! clock controls.
+<a href=#21 id=21 data-nosnippet>21</a>//!
+<a href=#22 id=22 data-nosnippet>22</a>//! While the agent is offline-started, a time-bounded rule that lets an
+<a href=#23 id=23 data-nosnippet>23</a>//! object run, trusts it or excludes it ([`ActionKind::needs_identity`]) is
+<a href=#24 id=24 data-nosnippet>24</a>//! inactive, whatever the readings say: grants from the policy bundle do
+<a href=#25 id=25 data-nosnippet>25</a>//! not start or continue until the next check-in (ADR 0018, rule 2). It is
+<a href=#26 id=26 data-nosnippet>26</a>//! reported as `expired` once the floor has passed its expiry, and as
+<a href=#27 id=27 data-nosnippet>27</a>//! `not_yet_active` otherwise. This is the same result as with no clock at
+<a href=#28 id=28 data-nosnippet>28</a>//! all ([`activity_at`]). Every other rule, and every rule while anchored,
+<a href=#29 id=29 data-nosnippet>29</a>//! is judged from the two readings, each in the closed direction:
+<a href=#30 id=30 data-nosnippet>30</a>//!
+<a href=#31 id=31 data-nosnippet>31</a>//! - A rule that lets an object run, trusts it or excludes it
+<a href=#32 id=32 data-nosnippet>32</a>//!   ([`ActionKind::needs_identity`]) is active only while **both**
+<a href=#33 id=33 data-nosnippet>33</a>//!   readings are inside its window. It has expired once either reading
+<a href=#34 id=34 data-nosnippet>34</a>//!   reaches `expires_at`, and the floor never goes back, so **an expired
+<a href=#35 id=35 data-nosnippet>35</a>//!   allow never revives** after a clock rollback. It activates only once
+<a href=#36 id=36 data-nosnippet>36</a>//!   both readings reach `activates_at`, so setting the clock forwards
+<a href=#37 id=37 data-nosnippet>37</a>//!   cannot start it early.
+<a href=#38 id=38 data-nosnippet>38</a>//! - A deny, `audit` or `defer` rule is active while **either** reading is
+<a href=#39 id=39 data-nosnippet>39</a>//!   inside its window: it activates once either reaches `activates_at`,
+<a href=#40 id=40 data-nosnippet>40</a>//!   and expires only once both reach `expires_at`. Setting the clock
+<a href=#41 id=41 data-nosnippet>41</a>//!   forwards cannot end a deny early.
+<a href=#42 id=42 data-nosnippet>42</a>//!
+<a href=#43 id=43 data-nosnippet>43</a>//! With `on_expire: convert_to_audit` an expired rule becomes an `audit`
+<a href=#44 id=44 data-nosnippet>44</a>//! rule instead of absent: it records matches but never decides.
+<a href=#45 id=45 data-nosnippet>45</a>//! `delete_after_days` behaves as absent at once, and [`retire_due`] lists
+<a href=#46 id=46 data-nosnippet>46</a>//! it for deletion once the days have passed.
+<a href=#47 id=47 data-nosnippet>47</a>//!
+<a href=#48 id=48 data-nosnippet>48</a>//! # Exceptions
+<a href=#49 id=49 data-nosnippet>49</a>//!
+<a href=#50 id=50 data-nosnippet>50</a>//! An exception ([`is_exception`]) is a rule that weakens the default-deny
+<a href=#51 id=51 data-nosnippet>51</a>//! posture by its nature: an `ignore`, an allow whose path identity is in
+<a href=#52 id=52 data-nosnippet>52</a>//! a user-writable location (#31), an allow with a weak identity (file
+<a href=#53 id=53 data-nosnippet>53</a>//! name, metadata, or SHA-1 or MD5 only), or any rule with
+<a href=#54 id=54 data-nosnippet>54</a>//! `metadata.exception: true`. In governance mode an exception needs
+<a href=#55 id=55 data-nosnippet>55</a>//! `approved_at`, `expires_at` at most 365 days after it, `justification`,
+<a href=#56 id=56 data-nosnippet>56</a>//! `approved_by` and `risk_rating` ([`crate::validate`], `exception_*`
+<a href=#57 id=57 data-nosnippet>57</a>//! codes). The year counts from `approved_at` only ([`exception_start`]):
+<a href=#58 id=58 data-nosnippet>58</a>//! only a renewal in a review ([`ReviewAction::Renew`]) moves it, so an
+<a href=#59 id=59 data-nosnippet>59</a>//! attestation or a bulk extension never stretches an exception past a
+<a href=#60 id=60 data-nosnippet>60</a>//! year from its approval.
+<a href=#61 id=61 data-nosnippet>61</a>
+<a href=#62 id=62 data-nosnippet>62</a></span><span class="kw">pub mod </span>counters;
+<a href=#63 id=63 data-nosnippet>63</a>
+<a href=#64 id=64 data-nosnippet>64</a><span class="kw">use </span>serde::Serialize;
+<a href=#65 id=65 data-nosnippet>65</a>
+<a href=#66 id=66 data-nosnippet>66</a><span class="kw">use </span><span class="kw">crate</span>::decision::RuleRef;
+<a href=#67 id=67 data-nosnippet>67</a><span class="kw">use </span><span class="kw">crate</span>::model::lifecycle::limits::REVIEW_PERIOD_DAYS;
+<a href=#68 id=68 data-nosnippet>68</a><span class="kw">use </span><span class="kw">crate</span>::model::{
+<a href=#69 id=69 data-nosnippet>69</a>    Action, ActionKind, Date, Metadata, OnExpire, Policy, PolicyDocument, Rule, RuleId, RuleSet,
+<a href=#70 id=70 data-nosnippet>70</a>    RuleSetId, Timestamp,
+<a href=#71 id=71 data-nosnippet>71</a>};
+<a href=#72 id=72 data-nosnippet>72</a>
+<a href=#73 id=73 data-nosnippet>73</a><span class="kw">pub use </span>counters::{Counters, HitReport, RuleHits};
+<a href=#74 id=74 data-nosnippet>74</a>
+<a href=#75 id=75 data-nosnippet>75</a><span class="doccomment">/// The agent's view of time for rule activity (ADR 0012, ADR 0018).
+<a href=#76 id=76 data-nosnippet>76</a></span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+<a href=#77 id=77 data-nosnippet>77</a></span><span class="kw">pub struct </span>RuleClock {
+<a href=#78 id=78 data-nosnippet>78</a>    <span class="doccomment">/// The current time: anchored time while the agent is anchored, or
+<a href=#79 id=79 data-nosnippet>79</a>    /// the wall clock while it is offline-started. The server and tests
+<a href=#80 id=80 data-nosnippet>80</a>    /// pass real time.
+<a href=#81 id=81 data-nosnippet>81</a>    </span><span class="kw">pub </span>now: Timestamp,
+<a href=#82 id=82 data-nosnippet>82</a>    <span class="doccomment">/// The lower bound on real time the agent keeps in protected storage,
+<a href=#83 id=83 data-nosnippet>83</a>    /// which never goes backwards. Pass `now` where there is none (the
+<a href=#84 id=84 data-nosnippet>84</a>    /// server, the policy assistant).
+<a href=#85 id=85 data-nosnippet>85</a>    </span><span class="kw">pub </span>floor: Timestamp,
+<a href=#86 id=86 data-nosnippet>86</a>    <span class="doccomment">/// Whether `now` is trusted time: the agent holds anchored time, or
+<a href=#87 id=87 data-nosnippet>87</a>    /// the caller is the server. `false` while the agent is
+<a href=#88 id=88 data-nosnippet>88</a>    /// offline-started; time-bounded permissive rules are then inactive
+<a href=#89 id=89 data-nosnippet>89</a>    /// (see the module documentation).
+<a href=#90 id=90 data-nosnippet>90</a>    </span><span class="kw">pub </span>anchored: bool,
+<a href=#91 id=91 data-nosnippet>91</a>}
+<a href=#92 id=92 data-nosnippet>92</a>
+<a href=#93 id=93 data-nosnippet>93</a><span class="kw">impl </span>RuleClock {
+<a href=#94 id=94 data-nosnippet>94</a>    <span class="doccomment">/// An anchored clock whose floor is `now`: for the server, the policy
+<a href=#95 id=95 data-nosnippet>95</a>    /// assistant and tests.
+<a href=#96 id=96 data-nosnippet>96</a>    </span><span class="attr">#[must_use]
+<a href=#97 id=97 data-nosnippet>97</a>    </span><span class="kw">pub const fn </span>at(now: Timestamp) -&gt; <span class="self">Self </span>{
+<a href=#98 id=98 data-nosnippet>98</a>        <span class="self">Self </span>{
+<a href=#99 id=99 data-nosnippet>99</a>            now,
+<a href=#100 id=100 data-nosnippet>100</a>            floor: now,
+<a href=#101 id=101 data-nosnippet>101</a>            anchored: <span class="bool-val">true</span>,
+<a href=#102 id=102 data-nosnippet>102</a>        }
+<a href=#103 id=103 data-nosnippet>103</a>    }
+<a href=#104 id=104 data-nosnippet>104</a>
+<a href=#105 id=105 data-nosnippet>105</a>    <span class="doccomment">/// The clock of an offline-started agent: the wall clock `now` and
+<a href=#106 id=106 data-nosnippet>106</a>    /// the stored floor.
+<a href=#107 id=107 data-nosnippet>107</a>    </span><span class="attr">#[must_use]
+<a href=#108 id=108 data-nosnippet>108</a>    </span><span class="kw">pub const fn </span>offline_started(now: Timestamp, floor: Timestamp) -&gt; <span class="self">Self </span>{
+<a href=#109 id=109 data-nosnippet>109</a>        <span class="self">Self </span>{
+<a href=#110 id=110 data-nosnippet>110</a>            now,
+<a href=#111 id=111 data-nosnippet>111</a>            floor,
+<a href=#112 id=112 data-nosnippet>112</a>            anchored: <span class="bool-val">false</span>,
+<a href=#113 id=113 data-nosnippet>113</a>        }
+<a href=#114 id=114 data-nosnippet>114</a>    }
+<a href=#115 id=115 data-nosnippet>115</a>
+<a href=#116 id=116 data-nosnippet>116</a>    <span class="doccomment">/// The earlier of the two readings.
+<a href=#117 id=117 data-nosnippet>117</a>    </span><span class="attr">#[must_use]
+<a href=#118 id=118 data-nosnippet>118</a>    </span><span class="kw">pub const fn </span>earliest(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Timestamp {
+<a href=#119 id=119 data-nosnippet>119</a>        <span class="kw">if </span><span class="self">self</span>.now.<span class="number">0 </span>&lt; <span class="self">self</span>.floor.<span class="number">0 </span>{
+<a href=#120 id=120 data-nosnippet>120</a>            <span class="self">self</span>.now
+<a href=#121 id=121 data-nosnippet>121</a>        } <span class="kw">else </span>{
+<a href=#122 id=122 data-nosnippet>122</a>            <span class="self">self</span>.floor
+<a href=#123 id=123 data-nosnippet>123</a>        }
+<a href=#124 id=124 data-nosnippet>124</a>    }
+<a href=#125 id=125 data-nosnippet>125</a>
+<a href=#126 id=126 data-nosnippet>126</a>    <span class="doccomment">/// The later of the two readings.
+<a href=#127 id=127 data-nosnippet>127</a>    </span><span class="attr">#[must_use]
+<a href=#128 id=128 data-nosnippet>128</a>    </span><span class="kw">pub const fn </span>latest(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Timestamp {
+<a href=#129 id=129 data-nosnippet>129</a>        <span class="kw">if </span><span class="self">self</span>.now.<span class="number">0 </span>&gt; <span class="self">self</span>.floor.<span class="number">0 </span>{
+<a href=#130 id=130 data-nosnippet>130</a>            <span class="self">self</span>.now
+<a href=#131 id=131 data-nosnippet>131</a>        } <span class="kw">else </span>{
+<a href=#132 id=132 data-nosnippet>132</a>            <span class="self">self</span>.floor
+<a href=#133 id=133 data-nosnippet>133</a>        }
+<a href=#134 id=134 data-nosnippet>134</a>    }
+<a href=#135 id=135 data-nosnippet>135</a>}
+<a href=#136 id=136 data-nosnippet>136</a>
+<a href=#137 id=137 data-nosnippet>137</a><span class="doccomment">/// Whether a rule is active, and why not.
+<a href=#138 id=138 data-nosnippet>138</a></span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+<a href=#139 id=139 data-nosnippet>139</a>#[serde(rename_all = <span class="string">"snake_case"</span>)]
+<a href=#140 id=140 data-nosnippet>140</a></span><span class="kw">pub enum </span>Activity {
+<a href=#141 id=141 data-nosnippet>141</a>    <span class="doccomment">/// Active.
+<a href=#142 id=142 data-nosnippet>142</a>    </span>Active,
+<a href=#143 id=143 data-nosnippet>143</a>    <span class="doccomment">/// `enabled: false`.
+<a href=#144 id=144 data-nosnippet>144</a>    </span>Disabled,
+<a href=#145 id=145 data-nosnippet>145</a>    <span class="doccomment">/// `activates_at` is in the future.
+<a href=#146 id=146 data-nosnippet>146</a>    </span>NotYetActive,
+<a href=#147 id=147 data-nosnippet>147</a>    <span class="doccomment">/// `expires_at` has passed.
+<a href=#148 id=148 data-nosnippet>148</a>    </span>Expired,
+<a href=#149 id=149 data-nosnippet>149</a>}
+<a href=#150 id=150 data-nosnippet>150</a>
+<a href=#151 id=151 data-nosnippet>151</a><span class="kw">impl </span>Activity {
+<a href=#152 id=152 data-nosnippet>152</a>    <span class="doccomment">/// Whether the rule takes part in evaluation as written.
+<a href=#153 id=153 data-nosnippet>153</a>    </span><span class="attr">#[must_use]
+<a href=#154 id=154 data-nosnippet>154</a>    </span><span class="kw">pub const fn </span>is_active(<span class="self">self</span>) -&gt; bool {
+<a href=#155 id=155 data-nosnippet>155</a>        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::Active)
+<a href=#156 id=156 data-nosnippet>156</a>    }
+<a href=#157 id=157 data-nosnippet>157</a>}
+<a href=#158 id=158 data-nosnippet>158</a>
+<a href=#159 id=159 data-nosnippet>159</a><span class="doccomment">/// Whether `rule` is active at `clock`.
+<a href=#160 id=160 data-nosnippet>160</a></span><span class="attr">#[must_use]
+<a href=#161 id=161 data-nosnippet>161</a></span><span class="kw">pub fn </span>activity(rule: <span class="kw-2">&amp;</span>Rule, clock: <span class="kw-2">&amp;</span>RuleClock) -&gt; Activity {
+<a href=#162 id=162 data-nosnippet>162</a>    <span class="kw">if </span>!rule.enabled {
+<a href=#163 id=163 data-nosnippet>163</a>        <span class="kw">return </span>Activity::Disabled;
+<a href=#164 id=164 data-nosnippet>164</a>    }
+<a href=#165 id=165 data-nosnippet>165</a>    <span class="kw">let </span>permissive = rule.action.kind().needs_identity();
+<a href=#166 id=166 data-nosnippet>166</a>    <span class="kw">let </span>timed = rule.activates_at.is_some() || rule.expires_at.is_some();
+<a href=#167 id=167 data-nosnippet>167</a>    <span class="comment">// Offline-started: no bundle grant starts or continues (ADR 0018).
+<a href=#168 id=168 data-nosnippet>168</a>    </span><span class="kw">if </span>permissive &amp;&amp; timed &amp;&amp; !clock.anchored {
+<a href=#169 id=169 data-nosnippet>169</a>        <span class="kw">return if </span>rule.expires_at.is_some_and(|e| e &lt;= clock.floor) {
+<a href=#170 id=170 data-nosnippet>170</a>            Activity::Expired
+<a href=#171 id=171 data-nosnippet>171</a>        } <span class="kw">else </span>{
+<a href=#172 id=172 data-nosnippet>172</a>            Activity::NotYetActive
+<a href=#173 id=173 data-nosnippet>173</a>        };
+<a href=#174 id=174 data-nosnippet>174</a>    }
+<a href=#175 id=175 data-nosnippet>175</a>    <span class="comment">// A permissive rule needs both readings inside its window; any other
+<a href=#176 id=176 data-nosnippet>176</a>    // rule needs only one.
+<a href=#177 id=177 data-nosnippet>177</a>    </span><span class="kw">let </span>(start, end) = <span class="kw">if </span>permissive {
+<a href=#178 id=178 data-nosnippet>178</a>        (clock.earliest(), clock.latest())
+<a href=#179 id=179 data-nosnippet>179</a>    } <span class="kw">else </span>{
+<a href=#180 id=180 data-nosnippet>180</a>        (clock.latest(), clock.earliest())
+<a href=#181 id=181 data-nosnippet>181</a>    };
+<a href=#182 id=182 data-nosnippet>182</a>    <span class="kw">if </span>rule.expires_at.is_some_and(|e| e &lt;= end) {
+<a href=#183 id=183 data-nosnippet>183</a>        <span class="kw">return </span>Activity::Expired;
+<a href=#184 id=184 data-nosnippet>184</a>    }
+<a href=#185 id=185 data-nosnippet>185</a>    <span class="kw">if </span>rule.activates_at.is_some_and(|a| a &gt; start) {
+<a href=#186 id=186 data-nosnippet>186</a>        <span class="kw">return </span>Activity::NotYetActive;
+<a href=#187 id=187 data-nosnippet>187</a>    }
+<a href=#188 id=188 data-nosnippet>188</a>    Activity::Active
+<a href=#189 id=189 data-nosnippet>189</a>}
+<a href=#190 id=190 data-nosnippet>190</a>
+<a href=#191 id=191 data-nosnippet>191</a><span class="doccomment">/// Whether `rule` is active at `clock`, or with no clock at all: then a
+<a href=#192 id=192 data-nosnippet>192</a>/// time-bounded rule that lets an object run, trusts it or excludes it is
+<a href=#193 id=193 data-nosnippet>193</a>/// `not_yet_active`, and any other rule is active (the closed direction).
+<a href=#194 id=194 data-nosnippet>194</a>/// The evaluator, the decision trace and the effective view all judge
+<a href=#195 id=195 data-nosnippet>195</a>/// activity with this.
+<a href=#196 id=196 data-nosnippet>196</a></span><span class="attr">#[must_use]
+<a href=#197 id=197 data-nosnippet>197</a></span><span class="kw">pub fn </span>activity_at(rule: <span class="kw-2">&amp;</span>Rule, clock: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>RuleClock&gt;) -&gt; Activity {
+<a href=#198 id=198 data-nosnippet>198</a>    <span class="kw">if </span>!rule.enabled {
+<a href=#199 id=199 data-nosnippet>199</a>        <span class="kw">return </span>Activity::Disabled;
+<a href=#200 id=200 data-nosnippet>200</a>    }
+<a href=#201 id=201 data-nosnippet>201</a>    <span class="kw">if </span>rule.activates_at.is_none() &amp;&amp; rule.expires_at.is_none() {
+<a href=#202 id=202 data-nosnippet>202</a>        <span class="kw">return </span>Activity::Active;
+<a href=#203 id=203 data-nosnippet>203</a>    }
+<a href=#204 id=204 data-nosnippet>204</a>    <span class="kw">match </span>clock {
+<a href=#205 id=205 data-nosnippet>205</a>        <span class="prelude-val">Some</span>(clock) =&gt; activity(rule, clock),
+<a href=#206 id=206 data-nosnippet>206</a>        <span class="prelude-val">None </span><span class="kw">if </span>rule.action.kind().needs_identity() =&gt; Activity::NotYetActive,
+<a href=#207 id=207 data-nosnippet>207</a>        <span class="prelude-val">None </span>=&gt; Activity::Active,
+<a href=#208 id=208 data-nosnippet>208</a>    }
+<a href=#209 id=209 data-nosnippet>209</a>}
+<a href=#210 id=210 data-nosnippet>210</a>
+<a href=#211 id=211 data-nosnippet>211</a><span class="doccomment">/// What the rule does in an evaluation at `clock`: its own action, an
+<a href=#212 id=212 data-nosnippet>212</a>/// `audit` (an expired rule with `on_expire: convert_to_audit`), or
+<a href=#213 id=213 data-nosnippet>213</a>/// nothing.
+<a href=#214 id=214 data-nosnippet>214</a></span><span class="attr">#[must_use]
+<a href=#215 id=215 data-nosnippet>215</a></span><span class="kw">pub fn </span>effective_action(rule: <span class="kw-2">&amp;</span>Rule, clock: <span class="kw-2">&amp;</span>RuleClock) -&gt; <span class="prelude-ty">Option</span>&lt;Action&gt; {
+<a href=#216 id=216 data-nosnippet>216</a>    <span class="kw">match </span>activity(rule, clock) {
+<a href=#217 id=217 data-nosnippet>217</a>        Activity::Active =&gt; <span class="prelude-val">Some</span>(rule.action.clone()),
+<a href=#218 id=218 data-nosnippet>218</a>        Activity::Expired <span class="kw">if </span>rule.on_expire == OnExpire::ConvertToAudit =&gt; <span class="prelude-val">Some</span>(Action::Audit {}),
+<a href=#219 id=219 data-nosnippet>219</a>        Activity::Expired | Activity::Disabled | Activity::NotYetActive =&gt; <span class="prelude-val">None</span>,
+<a href=#220 id=220 data-nosnippet>220</a>    }
+<a href=#221 id=221 data-nosnippet>221</a>}
+<a href=#222 id=222 data-nosnippet>222</a>
+<a href=#223 id=223 data-nosnippet>223</a><span class="doccomment">/// Whether `rule` is an exception by its nature or by its metadata (see
+<a href=#224 id=224 data-nosnippet>224</a>/// the module documentation).
+<a href=#225 id=225 data-nosnippet>225</a></span><span class="attr">#[must_use]
+<a href=#226 id=226 data-nosnippet>226</a></span><span class="kw">pub fn </span>is_exception(rule: <span class="kw-2">&amp;</span>Rule) -&gt; bool {
+<a href=#227 id=227 data-nosnippet>227</a>    <span class="kw">if </span>rule.metadata.exception || <span class="macro">matches!</span>(rule.action, Action::Ignore {}) {
+<a href=#228 id=228 data-nosnippet>228</a>        <span class="kw">return </span><span class="bool-val">true</span>;
+<a href=#229 id=229 data-nosnippet>229</a>    }
+<a href=#230 id=230 data-nosnippet>230</a>    <span class="kw">if </span>!rule.action.kind().permits() {
+<a href=#231 id=231 data-nosnippet>231</a>        <span class="kw">return </span><span class="bool-val">false</span>;
+<a href=#232 id=232 data-nosnippet>232</a>    }
+<a href=#233 id=233 data-nosnippet>233</a>    <span class="kw">let </span>weak = <span class="kw">crate</span>::analysis::identity::weakest_identity(<span class="kw-2">&amp;</span>rule.match_);
+<a href=#234 id=234 data-nosnippet>234</a>    weak.is_weak() || <span class="kw">crate</span>::analysis::identity::has_path_identity(<span class="kw-2">&amp;</span>rule.match_)
+<a href=#235 id=235 data-nosnippet>235</a>}
+<a href=#236 id=236 data-nosnippet>236</a>
+<a href=#237 id=237 data-nosnippet>237</a><span class="doccomment">/// Whether a rule of this action needs a review date: allow and trust rules.
+<a href=#238 id=238 data-nosnippet>238</a></span><span class="attr">#[must_use]
+<a href=#239 id=239 data-nosnippet>239</a></span><span class="kw">pub const fn </span>needs_review(kind: ActionKind) -&gt; bool {
+<a href=#240 id=240 data-nosnippet>240</a>    kind.permits() || <span class="macro">matches!</span>(kind, ActionKind::TrustSource)
+<a href=#241 id=241 data-nosnippet>241</a>}
+<a href=#242 id=242 data-nosnippet>242</a>
+<a href=#243 id=243 data-nosnippet>243</a><span class="doccomment">/// When the object is due for review: `review_by`, or for an allow or trust
+<a href=#244 id=244 data-nosnippet>244</a>/// rule without one, a year after `created_at`. `None` if neither is known.
+<a href=#245 id=245 data-nosnippet>245</a></span><span class="attr">#[must_use]
+<a href=#246 id=246 data-nosnippet>246</a></span><span class="kw">pub fn </span>review_by(metadata: <span class="kw-2">&amp;</span>Metadata, kind: <span class="prelude-ty">Option</span>&lt;ActionKind&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;Date&gt; {
+<a href=#247 id=247 data-nosnippet>247</a>    metadata.review_by.or_else(|| {
+<a href=#248 id=248 data-nosnippet>248</a>        kind.filter(|k| needs_review(<span class="kw-2">*</span>k))
+<a href=#249 id=249 data-nosnippet>249</a>            .and(metadata.created_at)
+<a href=#250 id=250 data-nosnippet>250</a>            .and_then(|c| c.plus_days(REVIEW_PERIOD_DAYS))
+<a href=#251 id=251 data-nosnippet>251</a>            .map(Timestamp::date)
+<a href=#252 id=252 data-nosnippet>252</a>    })
+<a href=#253 id=253 data-nosnippet>253</a>}
+<a href=#254 id=254 data-nosnippet>254</a>
+<a href=#255 id=255 data-nosnippet>255</a><span class="doccomment">/// When an exception's year starts: its approval, `approved_at`. Neither
+<a href=#256 id=256 data-nosnippet>256</a>/// `created_at` nor `last_reviewed_at` counts, so a creation date written
+<a href=#257 id=257 data-nosnippet>257</a>/// in the future or an attestation cannot stretch it. Only a renewal in a
+<a href=#258 id=258 data-nosnippet>258</a>/// review ([`ReviewAction::Renew`]) re-approves an exception and so moves
+<a href=#259 id=259 data-nosnippet>259</a>/// its start.
+<a href=#260 id=260 data-nosnippet>260</a></span><span class="attr">#[must_use]
+<a href=#261 id=261 data-nosnippet>261</a></span><span class="kw">pub const fn </span>exception_start(m: <span class="kw-2">&amp;</span>Metadata) -&gt; <span class="prelude-ty">Option</span>&lt;Timestamp&gt; {
+<a href=#262 id=262 data-nosnippet>262</a>    m.approved_at
+<a href=#263 id=263 data-nosnippet>263</a>}
+<a href=#264 id=264 data-nosnippet>264</a>
+<a href=#265 id=265 data-nosnippet>265</a><span class="doccomment">/// The latest expiry an exception may have: 365 days after its approval,
+<a href=#266 id=266 data-nosnippet>266</a>/// counted from no later than `now` when a time is known, so an approval
+<a href=#267 id=267 data-nosnippet>267</a>/// dated in the future cannot stretch it. `None` without `approved_at`.
+<a href=#268 id=268 data-nosnippet>268</a></span><span class="attr">#[must_use]
+<a href=#269 id=269 data-nosnippet>269</a></span><span class="kw">pub fn </span>exception_limit(m: <span class="kw-2">&amp;</span>Metadata, now: <span class="prelude-ty">Option</span>&lt;Timestamp&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;Timestamp&gt; {
+<a href=#270 id=270 data-nosnippet>270</a>    <span class="kw">let </span>start = exception_start(m)<span class="question-mark">?</span>;
+<a href=#271 id=271 data-nosnippet>271</a>    <span class="kw">let </span>start = now.map_or(start, |n| start.min(n));
+<a href=#272 id=272 data-nosnippet>272</a>    start.plus_days(<span class="kw">crate</span>::model::lifecycle::limits::MAX_EXCEPTION_DAYS)
+<a href=#273 id=273 data-nosnippet>273</a>}
+<a href=#274 id=274 data-nosnippet>274</a>
+<a href=#275 id=275 data-nosnippet>275</a><span class="doccomment">/// A reference to one rule in a document, for review queues and reports.
+<a href=#276 id=276 data-nosnippet>276</a></span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+<a href=#277 id=277 data-nosnippet>277</a></span><span class="kw">pub struct </span>RuleLocation {
+<a href=#278 id=278 data-nosnippet>278</a>    <span class="doccomment">/// The rule set.
+<a href=#279 id=279 data-nosnippet>279</a>    </span><span class="kw">pub </span>rule_set_id: RuleSetId,
+<a href=#280 id=280 data-nosnippet>280</a>    <span class="doccomment">/// The rule.
+<a href=#281 id=281 data-nosnippet>281</a>    </span><span class="kw">pub </span>rule_id: RuleId,
+<a href=#282 id=282 data-nosnippet>282</a>}
+<a href=#283 id=283 data-nosnippet>283</a>
+<a href=#284 id=284 data-nosnippet>284</a><span class="doccomment">/// One rule due for review.
+<a href=#285 id=285 data-nosnippet>285</a></span><span class="attr">#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+<a href=#286 id=286 data-nosnippet>286</a></span><span class="kw">pub struct </span>ReviewItem {
+<a href=#287 id=287 data-nosnippet>287</a>    <span class="doccomment">/// The rule.
+<a href=#288 id=288 data-nosnippet>288</a>    </span><span class="kw">pub </span>rule: RuleLocation,
+<a href=#289 id=289 data-nosnippet>289</a>    <span class="doccomment">/// When it is due, or `null` when no date can be determined (no
+<a href=#290 id=290 data-nosnippet>290</a>    /// `review_by` and no `created_at`): such a rule is due at once.
+<a href=#291 id=291 data-nosnippet>291</a>    </span><span class="kw">pub </span>review_by: <span class="prelude-ty">Option</span>&lt;Date&gt;,
+<a href=#292 id=292 data-nosnippet>292</a>    <span class="doccomment">/// Its owner, if set.
+<a href=#293 id=293 data-nosnippet>293</a>    </span><span class="kw">pub </span>owner: <span class="prelude-ty">Option</span>&lt;String&gt;,
+<a href=#294 id=294 data-nosnippet>294</a>    <span class="doccomment">/// Whether it is an exception.
+<a href=#295 id=295 data-nosnippet>295</a>    </span><span class="kw">pub </span>exception: bool,
+<a href=#296 id=296 data-nosnippet>296</a>}
+<a href=#297 id=297 data-nosnippet>297</a>
+<a href=#298 id=298 data-nosnippet>298</a><span class="doccomment">/// The rules a review campaign covers: enabled allow and trust rules of
+<a href=#299 id=299 data-nosnippet>299</a>/// the policy's referenced rule sets, other than the managed
+<a href=#300 id=300 data-nosnippet>300</a>/// `system_baseline` the engine adds after validation ([`managed_baseline`]). A
+<a href=#301 id=301 data-nosnippet>301</a>/// read-only (curated) rule set is reviewed like any other.
+<a href=#302 id=302 data-nosnippet>302</a></span><span class="kw">fn </span>reviewable(doc: <span class="kw-2">&amp;</span>PolicyDocument) -&gt; <span class="kw">impl </span>Iterator&lt;Item = (<span class="kw-2">&amp;</span>RuleSet, <span class="kw-2">&amp;</span>Rule)&gt; {
+<a href=#303 id=303 data-nosnippet>303</a>    <span class="kw">let </span>exempt = managed_baseline(doc);
+<a href=#304 id=304 data-nosnippet>304</a>    referenced(doc)
+<a href=#305 id=305 data-nosnippet>305</a>        .filter(<span class="kw">move </span>|set| <span class="prelude-val">Some</span>(set.id) != exempt)
+<a href=#306 id=306 data-nosnippet>306</a>        .flat_map(|set| set.rules.iter().map(<span class="kw">move </span>|r| (set, r)))
+<a href=#307 id=307 data-nosnippet>307</a>        .filter(|(<span class="kw">_</span>, r)| r.enabled &amp;&amp; needs_review(r.action.kind()))
+<a href=#308 id=308 data-nosnippet>308</a>}
+<a href=#309 id=309 data-nosnippet>309</a>
+<a href=#310 id=310 data-nosnippet>310</a><span class="doccomment">/// The rules due for review on or before `as_of`: their [`review_by`] date
+<a href=#311 id=311 data-nosnippet>311</a>/// is at or before it, or cannot be determined. Sorted, undated first, then
+<a href=#312 id=312 data-nosnippet>312</a>/// by date, rule set and rule ID, so the result is deterministic evidence
+<a href=#313 id=313 data-nosnippet>313</a>/// (ISM-1582).
+<a href=#314 id=314 data-nosnippet>314</a></span><span class="attr">#[must_use]
+<a href=#315 id=315 data-nosnippet>315</a></span><span class="kw">pub fn </span>review_due(doc: <span class="kw-2">&amp;</span>PolicyDocument, as_of: Date) -&gt; Vec&lt;ReviewItem&gt; {
+<a href=#316 id=316 data-nosnippet>316</a>    <span class="kw">let </span><span class="kw-2">mut </span>out: Vec&lt;ReviewItem&gt; = reviewable(doc)
+<a href=#317 id=317 data-nosnippet>317</a>        .filter_map(|(set, r)| {
+<a href=#318 id=318 data-nosnippet>318</a>            <span class="kw">let </span>due = review_by(<span class="kw-2">&amp;</span>r.metadata, <span class="prelude-val">Some</span>(r.action.kind()));
+<a href=#319 id=319 data-nosnippet>319</a>            due.is_none_or(|d| d &lt;= as_of).then(|| ReviewItem {
+<a href=#320 id=320 data-nosnippet>320</a>                rule: RuleLocation {
+<a href=#321 id=321 data-nosnippet>321</a>                    rule_set_id: set.id,
+<a href=#322 id=322 data-nosnippet>322</a>                    rule_id: r.id,
+<a href=#323 id=323 data-nosnippet>323</a>                },
+<a href=#324 id=324 data-nosnippet>324</a>                review_by: due,
+<a href=#325 id=325 data-nosnippet>325</a>                owner: r.metadata.owner.clone(),
+<a href=#326 id=326 data-nosnippet>326</a>                exception: is_exception(r),
+<a href=#327 id=327 data-nosnippet>327</a>            })
+<a href=#328 id=328 data-nosnippet>328</a>        })
+<a href=#329 id=329 data-nosnippet>329</a>        .collect();
+<a href=#330 id=330 data-nosnippet>330</a>    out.sort_by_key(|a| (a.review_by, a.rule));
+<a href=#331 id=331 data-nosnippet>331</a>    out
+<a href=#332 id=332 data-nosnippet>332</a>}
+<a href=#333 id=333 data-nosnippet>333</a>
+<a href=#334 id=334 data-nosnippet>334</a><span class="doccomment">/// A deterministic summary of the review state, for evidence packs (#17).
+<a href=#335 id=335 data-nosnippet>335</a></span><span class="attr">#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+<a href=#336 id=336 data-nosnippet>336</a></span><span class="kw">pub struct </span>ReviewSummary {
+<a href=#337 id=337 data-nosnippet>337</a>    <span class="doccomment">/// Rules that need a review date.
+<a href=#338 id=338 data-nosnippet>338</a>    </span><span class="kw">pub </span>reviewable: usize,
+<a href=#339 id=339 data-nosnippet>339</a>    <span class="doccomment">/// Of those, due on or before the date.
+<a href=#340 id=340 data-nosnippet>340</a>    </span><span class="kw">pub </span>due: usize,
+<a href=#341 id=341 data-nosnippet>341</a>    <span class="doccomment">/// Of those, exceptions.
+<a href=#342 id=342 data-nosnippet>342</a>    </span><span class="kw">pub </span>exceptions_due: usize,
+<a href=#343 id=343 data-nosnippet>343</a>    <span class="doccomment">/// Rules reviewed in the last 365 days.
+<a href=#344 id=344 data-nosnippet>344</a>    </span><span class="kw">pub </span>reviewed_last_year: usize,
+<a href=#345 id=345 data-nosnippet>345</a>    <span class="doccomment">/// Of those, with no date that can be determined.
+<a href=#346 id=346 data-nosnippet>346</a>    </span><span class="kw">pub </span>undated: usize,
+<a href=#347 id=347 data-nosnippet>347</a>    <span class="doccomment">/// The earliest due date among the dated ones, if any.
+<a href=#348 id=348 data-nosnippet>348</a>    </span><span class="kw">pub </span>earliest_due: <span class="prelude-ty">Option</span>&lt;Date&gt;,
+<a href=#349 id=349 data-nosnippet>349</a>}
+<a href=#350 id=350 data-nosnippet>350</a>
+<a href=#351 id=351 data-nosnippet>351</a><span class="doccomment">/// The review summary of a policy on `as_of`.
+<a href=#352 id=352 data-nosnippet>352</a></span><span class="attr">#[must_use]
+<a href=#353 id=353 data-nosnippet>353</a></span><span class="kw">pub fn </span>review_summary(doc: <span class="kw-2">&amp;</span>PolicyDocument, as_of: Date) -&gt; ReviewSummary {
+<a href=#354 id=354 data-nosnippet>354</a>    <span class="kw">let </span>due = review_due(doc, as_of);
+<a href=#355 id=355 data-nosnippet>355</a>    <span class="kw">let </span>since = as_of.start().plus_days(-REVIEW_PERIOD_DAYS);
+<a href=#356 id=356 data-nosnippet>356</a>    <span class="kw">let </span>rules: Vec&lt;<span class="kw-2">&amp;</span>Rule&gt; = reviewable(doc).map(|(<span class="kw">_</span>, r)| r).collect();
+<a href=#357 id=357 data-nosnippet>357</a>    ReviewSummary {
+<a href=#358 id=358 data-nosnippet>358</a>        reviewable: rules.len(),
+<a href=#359 id=359 data-nosnippet>359</a>        due: due.len(),
+<a href=#360 id=360 data-nosnippet>360</a>        exceptions_due: due.iter().filter(|d| d.exception).count(),
+<a href=#361 id=361 data-nosnippet>361</a>        reviewed_last_year: rules
+<a href=#362 id=362 data-nosnippet>362</a>            .iter()
+<a href=#363 id=363 data-nosnippet>363</a>            .filter(|r| {
+<a href=#364 id=364 data-nosnippet>364</a>                r.metadata
+<a href=#365 id=365 data-nosnippet>365</a>                    .last_reviewed_at
+<a href=#366 id=366 data-nosnippet>366</a>                    .is_some_and(|t| since.is_none_or(|s| t &gt;= s))
+<a href=#367 id=367 data-nosnippet>367</a>            })
+<a href=#368 id=368 data-nosnippet>368</a>            .count(),
+<a href=#369 id=369 data-nosnippet>369</a>        undated: due.iter().filter(|d| d.review_by.is_none()).count(),
+<a href=#370 id=370 data-nosnippet>370</a>        earliest_due: due.iter().find_map(|d| d.review_by),
+<a href=#371 id=371 data-nosnippet>371</a>    }
+<a href=#372 id=372 data-nosnippet>372</a>}
+<a href=#373 id=373 data-nosnippet>373</a>
+<a href=#374 id=374 data-nosnippet>374</a><span class="doccomment">/// A review action on one rule.
+<a href=#375 id=375 data-nosnippet>375</a></span><span class="attr">#[derive(Clone, Debug, PartialEq, Eq)]
+<a href=#376 id=376 data-nosnippet>376</a></span><span class="kw">pub enum </span>ReviewAction {
+<a href=#377 id=377 data-nosnippet>377</a>    <span class="doccomment">/// The rule is still needed as it is: the next review is a year on.
+<a href=#378 id=378 data-nosnippet>378</a>    /// An exception's approval, and so its 365-day limit, is unchanged.
+<a href=#379 id=379 data-nosnippet>379</a>    </span>Attest,
+<a href=#380 id=380 data-nosnippet>380</a>    <span class="doccomment">/// The rule is renewed: as attest, and its expiry moves to
+<a href=#381 id=381 data-nosnippet>381</a>    /// `expires_at`. An exception is re-approved by the reviewer at the
+<a href=#382 id=382 data-nosnippet>382</a>    /// review ([`exception_start`]), so `expires_at` must be at most 365
+<a href=#383 id=383 data-nosnippet>383</a>    /// days after it.
+<a href=#384 id=384 data-nosnippet>384</a>    </span>Renew {
+<a href=#385 id=385 data-nosnippet>385</a>        <span class="doccomment">/// The new expiry.
+<a href=#386 id=386 data-nosnippet>386</a>        </span>expires_at: Timestamp,
+<a href=#387 id=387 data-nosnippet>387</a>    },
+<a href=#388 id=388 data-nosnippet>388</a>    <span class="doccomment">/// The rule is no longer needed: it is disabled.
+<a href=#389 id=389 data-nosnippet>389</a>    </span>Retire,
+<a href=#390 id=390 data-nosnippet>390</a>}
+<a href=#391 id=391 data-nosnippet>391</a>
+<a href=#392 id=392 data-nosnippet>392</a><span class="doccomment">/// Why a review or bulk change was refused.
+<a href=#393 id=393 data-nosnippet>393</a></span><span class="attr">#[derive(Clone, Debug, PartialEq, Eq)]
+<a href=#394 id=394 data-nosnippet>394</a></span><span class="kw">pub enum </span>ChangeError {
+<a href=#395 id=395 data-nosnippet>395</a>    <span class="doccomment">/// The actor or reviewer is empty, untrimmed or too long.
+<a href=#396 id=396 data-nosnippet>396</a>    </span>InvalidActor,
+<a href=#397 id=397 data-nosnippet>397</a>    <span class="doccomment">/// The new expiry is not after `now`, or not after `activates_at`.
+<a href=#398 id=398 data-nosnippet>398</a>    </span>InvalidExpiry,
+<a href=#399 id=399 data-nosnippet>399</a>    <span class="doccomment">/// The time is past the representable range.
+<a href=#400 id=400 data-nosnippet>400</a>    </span>TimeOverflow,
+<a href=#401 id=401 data-nosnippet>401</a>    <span class="doccomment">/// Renewing an exception for more than 365 days.
+<a href=#402 id=402 data-nosnippet>402</a>    </span>ExceptionTooLong,
+<a href=#403 id=403 data-nosnippet>403</a>}
+<a href=#404 id=404 data-nosnippet>404</a>
+<a href=#405 id=405 data-nosnippet>405</a><span class="kw">impl </span>core::fmt::Display <span class="kw">for </span>ChangeError {
+<a href=#406 id=406 data-nosnippet>406</a>    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>core::fmt::Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; core::fmt::Result {
+<a href=#407 id=407 data-nosnippet>407</a>        f.write_str(<span class="kw">match </span><span class="self">self </span>{
+<a href=#408 id=408 data-nosnippet>408</a>            <span class="self">Self</span>::InvalidActor =&gt; <span class="string">"the actor must be 1 to 128 trimmed characters"</span>,
+<a href=#409 id=409 data-nosnippet>409</a>            <span class="self">Self</span>::InvalidExpiry =&gt; <span class="string">"the new expiry must be in the future and after `activates_at`"</span>,
+<a href=#410 id=410 data-nosnippet>410</a>            <span class="self">Self</span>::TimeOverflow =&gt; <span class="string">"the time is out of range"</span>,
+<a href=#411 id=411 data-nosnippet>411</a>            <span class="self">Self</span>::ExceptionTooLong =&gt; {
+<a href=#412 id=412 data-nosnippet>412</a>                <span class="string">"an exception is renewed for at most 365 days from the review"
+<a href=#413 id=413 data-nosnippet>413</a>            </span>}
+<a href=#414 id=414 data-nosnippet>414</a>        })
+<a href=#415 id=415 data-nosnippet>415</a>    }
+<a href=#416 id=416 data-nosnippet>416</a>}
+<a href=#417 id=417 data-nosnippet>417</a>
+<a href=#418 id=418 data-nosnippet>418</a><span class="kw">impl </span>std::error::Error <span class="kw">for </span>ChangeError {}
+<a href=#419 id=419 data-nosnippet>419</a>
+<a href=#420 id=420 data-nosnippet>420</a><span class="doccomment">/// Whether `actor` is a valid metadata name: 1 to 128 trimmed characters
+<a href=#421 id=421 data-nosnippet>421</a>/// with no control characters.
+<a href=#422 id=422 data-nosnippet>422</a></span><span class="kw">fn </span>valid_actor(actor: <span class="kw-2">&amp;</span>str) -&gt; bool {
+<a href=#423 id=423 data-nosnippet>423</a>    !actor.is_empty()
+<a href=#424 id=424 data-nosnippet>424</a>        &amp;&amp; actor.trim() == actor
+<a href=#425 id=425 data-nosnippet>425</a>        &amp;&amp; actor.chars().count() &lt;= <span class="kw">crate</span>::model::limits::MAX_NAME_CHARS
+<a href=#426 id=426 data-nosnippet>426</a>        &amp;&amp; !actor.chars().any(char::is_control)
+<a href=#427 id=427 data-nosnippet>427</a>}
+<a href=#428 id=428 data-nosnippet>428</a>
+<a href=#429 id=429 data-nosnippet>429</a><span class="doccomment">/// Applies a review action to `rule`, by `reviewer` at `now`: sets
+<a href=#430 id=430 data-nosnippet>430</a>/// `last_reviewed_at` and `last_reviewed_by`, and `review_by` a year on.
+<a href=#431 id=431 data-nosnippet>431</a>/// The rule stays valid: renewing an exception re-approves it, so its
+<a href=#432 id=432 data-nosnippet>432</a>/// expiry is checked from the review. Attesting never moves
+<a href=#433 id=433 data-nosnippet>433</a>/// `approved_at`.
+<a href=#434 id=434 data-nosnippet>434</a>///
+<a href=#435 id=435 data-nosnippet>435</a>/// # Errors
+<a href=#436 id=436 data-nosnippet>436</a>///
+<a href=#437 id=437 data-nosnippet>437</a>/// Returns [`ChangeError`] for an invalid reviewer or expiry; the rule is
+<a href=#438 id=438 data-nosnippet>438</a>/// then unchanged.
+<a href=#439 id=439 data-nosnippet>439</a></span><span class="kw">pub fn </span>review(
+<a href=#440 id=440 data-nosnippet>440</a>    rule: <span class="kw-2">&amp;mut </span>Rule,
+<a href=#441 id=441 data-nosnippet>441</a>    action: <span class="kw-2">&amp;</span>ReviewAction,
+<a href=#442 id=442 data-nosnippet>442</a>    reviewer: <span class="kw-2">&amp;</span>str,
+<a href=#443 id=443 data-nosnippet>443</a>    now: Timestamp,
+<a href=#444 id=444 data-nosnippet>444</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), ChangeError&gt; {
+<a href=#445 id=445 data-nosnippet>445</a>    <span class="kw">if </span>!valid_actor(reviewer) {
+<a href=#446 id=446 data-nosnippet>446</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(ChangeError::InvalidActor);
+<a href=#447 id=447 data-nosnippet>447</a>    }
+<a href=#448 id=448 data-nosnippet>448</a>    <span class="kw">let </span>next = now
+<a href=#449 id=449 data-nosnippet>449</a>        .plus_days(REVIEW_PERIOD_DAYS)
+<a href=#450 id=450 data-nosnippet>450</a>        .map(Timestamp::date)
+<a href=#451 id=451 data-nosnippet>451</a>        .ok_or(ChangeError::TimeOverflow)<span class="question-mark">?</span>;
+<a href=#452 id=452 data-nosnippet>452</a>    <span class="kw">if let </span>ReviewAction::Renew { expires_at } = action {
+<a href=#453 id=453 data-nosnippet>453</a>        <span class="kw">if </span><span class="kw-2">*</span>expires_at &lt;= now || rule.activates_at.is_some_and(|a| <span class="kw-2">*</span>expires_at &lt;= a) {
+<a href=#454 id=454 data-nosnippet>454</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(ChangeError::InvalidExpiry);
+<a href=#455 id=455 data-nosnippet>455</a>        }
+<a href=#456 id=456 data-nosnippet>456</a>        <span class="kw">if </span>is_exception(rule)
+<a href=#457 id=457 data-nosnippet>457</a>            &amp;&amp; now
+<a href=#458 id=458 data-nosnippet>458</a>                .plus_days(<span class="kw">crate</span>::model::lifecycle::limits::MAX_EXCEPTION_DAYS)
+<a href=#459 id=459 data-nosnippet>459</a>                .is_none_or(|l| <span class="kw-2">*</span>expires_at &gt; l)
+<a href=#460 id=460 data-nosnippet>460</a>        {
+<a href=#461 id=461 data-nosnippet>461</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(ChangeError::ExceptionTooLong);
+<a href=#462 id=462 data-nosnippet>462</a>        }
+<a href=#463 id=463 data-nosnippet>463</a>    }
+<a href=#464 id=464 data-nosnippet>464</a>    rule.metadata.last_reviewed_at = <span class="prelude-val">Some</span>(now);
+<a href=#465 id=465 data-nosnippet>465</a>    rule.metadata.last_reviewed_by = <span class="prelude-val">Some</span>(reviewer.to_owned());
+<a href=#466 id=466 data-nosnippet>466</a>    rule.metadata.updated_at = <span class="prelude-val">Some</span>(now);
+<a href=#467 id=467 data-nosnippet>467</a>    rule.metadata.updated_by = <span class="prelude-val">Some</span>(reviewer.to_owned());
+<a href=#468 id=468 data-nosnippet>468</a>    <span class="kw">match </span>action {
+<a href=#469 id=469 data-nosnippet>469</a>        ReviewAction::Attest =&gt; {}
+<a href=#470 id=470 data-nosnippet>470</a>        ReviewAction::Renew { expires_at } =&gt; {
+<a href=#471 id=471 data-nosnippet>471</a>            rule.expires_at = <span class="prelude-val">Some</span>(<span class="kw-2">*</span>expires_at);
+<a href=#472 id=472 data-nosnippet>472</a>            <span class="kw">if </span>is_exception(rule) {
+<a href=#473 id=473 data-nosnippet>473</a>                rule.metadata.approved_by = <span class="prelude-val">Some</span>(reviewer.to_owned());
+<a href=#474 id=474 data-nosnippet>474</a>                rule.metadata.approved_at = <span class="prelude-val">Some</span>(now);
+<a href=#475 id=475 data-nosnippet>475</a>            }
+<a href=#476 id=476 data-nosnippet>476</a>        }
+<a href=#477 id=477 data-nosnippet>477</a>        ReviewAction::Retire =&gt; rule.enabled = <span class="bool-val">false</span>,
+<a href=#478 id=478 data-nosnippet>478</a>    }
+<a href=#479 id=479 data-nosnippet>479</a>    rule.metadata.review_by = <span class="prelude-val">Some</span>(next);
+<a href=#480 id=480 data-nosnippet>480</a>    <span class="prelude-val">Ok</span>(())
+<a href=#481 id=481 data-nosnippet>481</a>}
+<a href=#482 id=482 data-nosnippet>482</a>
+<a href=#483 id=483 data-nosnippet>483</a><span class="doccomment">/// One expiry notice the server sends to a rule's owner (#16):
+<a href=#484 id=484 data-nosnippet>484</a>/// `rule.expiring`.
+<a href=#485 id=485 data-nosnippet>485</a></span><span class="attr">#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+<a href=#486 id=486 data-nosnippet>486</a></span><span class="kw">pub struct </span>ExpiryNotice {
+<a href=#487 id=487 data-nosnippet>487</a>    <span class="doccomment">/// The rule.
+<a href=#488 id=488 data-nosnippet>488</a>    </span><span class="kw">pub </span>rule: RuleLocation,
+<a href=#489 id=489 data-nosnippet>489</a>    <span class="doccomment">/// Its owner, if set.
+<a href=#490 id=490 data-nosnippet>490</a>    </span><span class="kw">pub </span>owner: <span class="prelude-ty">Option</span>&lt;String&gt;,
+<a href=#491 id=491 data-nosnippet>491</a>    <span class="doccomment">/// When it expires.
+<a href=#492 id=492 data-nosnippet>492</a>    </span><span class="kw">pub </span>expires_at: Timestamp,
+<a href=#493 id=493 data-nosnippet>493</a>    <span class="doccomment">/// How many days before expiry this notice is: one of the policy's
+<a href=#494 id=494 data-nosnippet>494</a>    /// `expiry_notice_days`, `0` at expiry.
+<a href=#495 id=495 data-nosnippet>495</a>    </span><span class="kw">pub </span>days_before: u16,
+<a href=#496 id=496 data-nosnippet>496</a>    <span class="doccomment">/// When the notice is due.
+<a href=#497 id=497 data-nosnippet>497</a>    </span><span class="kw">pub </span>due_at: Timestamp,
+<a href=#498 id=498 data-nosnippet>498</a>}
+<a href=#499 id=499 data-nosnippet>499</a>
+<a href=#500 id=500 data-nosnippet>500</a><span class="doccomment">/// The expiry notices due in `(since, until]`, for every rule of the
+<a href=#501 id=501 data-nosnippet>501</a>/// policy's referenced rule sets with an `expires_at`. The server calls
+<a href=#502 id=502 data-nosnippet>502</a>/// this on a schedule with the previous run's `until` as `since`, so each
+<a href=#503 id=503 data-nosnippet>503</a>/// notice is sent once. Sorted by due time, then rule.
+<a href=#504 id=504 data-nosnippet>504</a></span><span class="attr">#[must_use]
+<a href=#505 id=505 data-nosnippet>505</a></span><span class="kw">pub fn </span>expiry_notices(
+<a href=#506 id=506 data-nosnippet>506</a>    doc: <span class="kw-2">&amp;</span>PolicyDocument,
+<a href=#507 id=507 data-nosnippet>507</a>    since: Timestamp,
+<a href=#508 id=508 data-nosnippet>508</a>    until: Timestamp,
+<a href=#509 id=509 data-nosnippet>509</a>) -&gt; Vec&lt;ExpiryNotice&gt; {
+<a href=#510 id=510 data-nosnippet>510</a>    <span class="kw">let </span>days = <span class="kw-2">&amp;</span>doc.policy.governance.expiry_notice_days;
+<a href=#511 id=511 data-nosnippet>511</a>    <span class="kw">let </span><span class="kw-2">mut </span>out = Vec::new();
+<a href=#512 id=512 data-nosnippet>512</a>    <span class="kw">for </span>set <span class="kw">in </span>referenced(doc) {
+<a href=#513 id=513 data-nosnippet>513</a>        <span class="kw">for </span>r <span class="kw">in </span>set.rules.iter().filter(|r| r.enabled) {
+<a href=#514 id=514 data-nosnippet>514</a>            <span class="kw">let </span><span class="prelude-val">Some</span>(expires_at) = r.expires_at <span class="kw">else </span>{
+<a href=#515 id=515 data-nosnippet>515</a>                <span class="kw">continue</span>;
+<a href=#516 id=516 data-nosnippet>516</a>            };
+<a href=#517 id=517 data-nosnippet>517</a>            <span class="kw">for </span>d <span class="kw">in </span>days {
+<a href=#518 id=518 data-nosnippet>518</a>                <span class="kw">let </span><span class="prelude-val">Some</span>(due_at) = expires_at.plus_days(-i64::from(<span class="kw-2">*</span>d)) <span class="kw">else </span>{
+<a href=#519 id=519 data-nosnippet>519</a>                    <span class="kw">continue</span>;
+<a href=#520 id=520 data-nosnippet>520</a>                };
+<a href=#521 id=521 data-nosnippet>521</a>                <span class="kw">if </span>since &lt; due_at &amp;&amp; due_at &lt;= until {
+<a href=#522 id=522 data-nosnippet>522</a>                    out.push(ExpiryNotice {
+<a href=#523 id=523 data-nosnippet>523</a>                        rule: RuleLocation {
+<a href=#524 id=524 data-nosnippet>524</a>                            rule_set_id: set.id,
+<a href=#525 id=525 data-nosnippet>525</a>                            rule_id: r.id,
+<a href=#526 id=526 data-nosnippet>526</a>                        },
+<a href=#527 id=527 data-nosnippet>527</a>                        owner: r.metadata.owner.clone(),
+<a href=#528 id=528 data-nosnippet>528</a>                        expires_at,
+<a href=#529 id=529 data-nosnippet>529</a>                        days_before: <span class="kw-2">*</span>d,
+<a href=#530 id=530 data-nosnippet>530</a>                        due_at,
+<a href=#531 id=531 data-nosnippet>531</a>                    });
+<a href=#532 id=532 data-nosnippet>532</a>                }
+<a href=#533 id=533 data-nosnippet>533</a>            }
+<a href=#534 id=534 data-nosnippet>534</a>        }
+<a href=#535 id=535 data-nosnippet>535</a>    }
+<a href=#536 id=536 data-nosnippet>536</a>    out.sort_by_key(|a| (a.due_at, a.rule, a.days_before));
+<a href=#537 id=537 data-nosnippet>537</a>    out.dedup_by(|a, b| a.rule == b.rule &amp;&amp; a.due_at == b.due_at);
+<a href=#538 id=538 data-nosnippet>538</a>    out
+<a href=#539 id=539 data-nosnippet>539</a>}
+<a href=#540 id=540 data-nosnippet>540</a>
+<a href=#541 id=541 data-nosnippet>541</a><span class="doccomment">/// The expired rules whose `on_expire: delete_after_days` has passed at
+<a href=#542 id=542 data-nosnippet>542</a>/// `now`: the server deletes them in a change set. Sorted.
+<a href=#543 id=543 data-nosnippet>543</a></span><span class="attr">#[must_use]
+<a href=#544 id=544 data-nosnippet>544</a></span><span class="kw">pub fn </span>retire_due(doc: <span class="kw-2">&amp;</span>PolicyDocument, now: Timestamp) -&gt; Vec&lt;RuleLocation&gt; {
+<a href=#545 id=545 data-nosnippet>545</a>    <span class="kw">let </span><span class="kw-2">mut </span>out: Vec&lt;RuleLocation&gt; = doc
+<a href=#546 id=546 data-nosnippet>546</a>        .rule_sets
+<a href=#547 id=547 data-nosnippet>547</a>        .iter()
+<a href=#548 id=548 data-nosnippet>548</a>        .flat_map(|set| set.rules.iter().map(<span class="kw">move </span>|r| (set, r)))
+<a href=#549 id=549 data-nosnippet>549</a>        .filter_map(|(set, r)| <span class="kw">match </span>(r.on_expire, r.expires_at) {
+<a href=#550 id=550 data-nosnippet>550</a>            (OnExpire::DeleteAfterDays(days), <span class="prelude-val">Some</span>(e))
+<a href=#551 id=551 data-nosnippet>551</a>                <span class="kw">if </span>e.plus_days(i64::from(days)).is_some_and(|t| t &lt;= now) =&gt;
+<a href=#552 id=552 data-nosnippet>552</a>            {
+<a href=#553 id=553 data-nosnippet>553</a>                <span class="prelude-val">Some</span>(RuleLocation {
+<a href=#554 id=554 data-nosnippet>554</a>                    rule_set_id: set.id,
+<a href=#555 id=555 data-nosnippet>555</a>                    rule_id: r.id,
+<a href=#556 id=556 data-nosnippet>556</a>                })
+<a href=#557 id=557 data-nosnippet>557</a>            }
+<a href=#558 id=558 data-nosnippet>558</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+<a href=#559 id=559 data-nosnippet>559</a>        })
+<a href=#560 id=560 data-nosnippet>560</a>        .collect();
+<a href=#561 id=561 data-nosnippet>561</a>    out.sort();
+<a href=#562 id=562 data-nosnippet>562</a>    out
+<a href=#563 id=563 data-nosnippet>563</a>}
+<a href=#564 id=564 data-nosnippet>564</a>
+<a href=#565 id=565 data-nosnippet>565</a><span class="doccomment">/// A bulk operation on several rules.
+<a href=#566 id=566 data-nosnippet>566</a></span><span class="attr">#[derive(Clone, Debug, PartialEq, Eq)]
+<a href=#567 id=567 data-nosnippet>567</a></span><span class="kw">pub enum </span>BulkOp {
+<a href=#568 id=568 data-nosnippet>568</a>    <span class="doccomment">/// Enable the rules.
+<a href=#569 id=569 data-nosnippet>569</a>    </span>Enable,
+<a href=#570 id=570 data-nosnippet>570</a>    <span class="doccomment">/// Disable the rules.
+<a href=#571 id=571 data-nosnippet>571</a>    </span>Disable,
+<a href=#572 id=572 data-nosnippet>572</a>    <span class="doccomment">/// Move each rule's expiry to this instant.
+<a href=#573 id=573 data-nosnippet>573</a>    </span>Extend(Timestamp),
+<a href=#574 id=574 data-nosnippet>574</a>    <span class="doccomment">/// Disable the rules, and mark them retired with a comment.
+<a href=#575 id=575 data-nosnippet>575</a>    </span>Retire,
+<a href=#576 id=576 data-nosnippet>576</a>}
+<a href=#577 id=577 data-nosnippet>577</a>
+<a href=#578 id=578 data-nosnippet>578</a><span class="doccomment">/// One change of a [`ChangeSet`].
+<a href=#579 id=579 data-nosnippet>579</a></span><span class="attr">#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+<a href=#580 id=580 data-nosnippet>580</a></span><span class="kw">pub struct </span>RuleChange {
+<a href=#581 id=581 data-nosnippet>581</a>    <span class="doccomment">/// The rule.
+<a href=#582 id=582 data-nosnippet>582</a>    </span><span class="kw">pub </span>rule: RuleLocation,
+<a href=#583 id=583 data-nosnippet>583</a>    <span class="doccomment">/// `enabled` before and after.
+<a href=#584 id=584 data-nosnippet>584</a>    </span><span class="kw">pub </span>enabled: (bool, bool),
+<a href=#585 id=585 data-nosnippet>585</a>    <span class="doccomment">/// `expires_at` before and after.
+<a href=#586 id=586 data-nosnippet>586</a>    </span><span class="kw">pub </span>expires_at: (<span class="prelude-ty">Option</span>&lt;Timestamp&gt;, <span class="prelude-ty">Option</span>&lt;Timestamp&gt;),
+<a href=#587 id=587 data-nosnippet>587</a>    <span class="doccomment">/// `metadata.comment` before and after.
+<a href=#588 id=588 data-nosnippet>588</a>    </span><span class="kw">pub </span>comment: (<span class="prelude-ty">Option</span>&lt;String&gt;, <span class="prelude-ty">Option</span>&lt;String&gt;),
+<a href=#589 id=589 data-nosnippet>589</a>}
+<a href=#590 id=590 data-nosnippet>590</a>
+<a href=#591 id=591 data-nosnippet>591</a><span class="doccomment">/// A bulk operation recorded as one change, with its reason, for the
+<a href=#592 id=592 data-nosnippet>592</a>/// immutable change history (#10).
+<a href=#593 id=593 data-nosnippet>593</a></span><span class="attr">#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+<a href=#594 id=594 data-nosnippet>594</a></span><span class="kw">pub struct </span>ChangeSet {
+<a href=#595 id=595 data-nosnippet>595</a>    <span class="doccomment">/// Who made it.
+<a href=#596 id=596 data-nosnippet>596</a>    </span><span class="kw">pub </span>actor: String,
+<a href=#597 id=597 data-nosnippet>597</a>    <span class="doccomment">/// When.
+<a href=#598 id=598 data-nosnippet>598</a>    </span><span class="kw">pub </span>at: Timestamp,
+<a href=#599 id=599 data-nosnippet>599</a>    <span class="doccomment">/// Why.
+<a href=#600 id=600 data-nosnippet>600</a>    </span><span class="kw">pub </span>reason: String,
+<a href=#601 id=601 data-nosnippet>601</a>    <span class="doccomment">/// Each rule changed, sorted.
+<a href=#602 id=602 data-nosnippet>602</a>    </span><span class="kw">pub </span>changes: Vec&lt;RuleChange&gt;,
+<a href=#603 id=603 data-nosnippet>603</a>}
+<a href=#604 id=604 data-nosnippet>604</a>
+<a href=#605 id=605 data-nosnippet>605</a><span class="doccomment">/// Why a bulk operation was refused.
+<a href=#606 id=606 data-nosnippet>606</a></span><span class="attr">#[derive(Clone, Debug, PartialEq, Eq)]
+<a href=#607 id=607 data-nosnippet>607</a></span><span class="kw">pub enum </span>BulkError {
+<a href=#608 id=608 data-nosnippet>608</a>    <span class="doccomment">/// No reason was given.
+<a href=#609 id=609 data-nosnippet>609</a>    </span>ReasonRequired,
+<a href=#610 id=610 data-nosnippet>610</a>    <span class="doccomment">/// A rule is not in the document.
+<a href=#611 id=611 data-nosnippet>611</a>    </span>UnknownRule(RuleLocation),
+<a href=#612 id=612 data-nosnippet>612</a>    <span class="doccomment">/// A read-only rule set cannot be edited.
+<a href=#613 id=613 data-nosnippet>613</a>    </span>ReadOnly(RuleLocation),
+<a href=#614 id=614 data-nosnippet>614</a>    <span class="doccomment">/// The actor is not a valid name, or an expiry is not after the time
+<a href=#615 id=615 data-nosnippet>615</a>    /// of the change.
+<a href=#616 id=616 data-nosnippet>616</a>    </span>Invalid(ChangeError),
+<a href=#617 id=617 data-nosnippet>617</a>    <span class="doccomment">/// Extending would put an exception's expiry more than 365 days after
+<a href=#618 id=618 data-nosnippet>618</a>    /// its approval: renew it in a review instead, which re-approves it.
+<a href=#619 id=619 data-nosnippet>619</a>    </span>ExceptionTooLong(RuleLocation),
+<a href=#620 id=620 data-nosnippet>620</a>    <span class="doccomment">/// Enabling the rule would leave the document invalid in governance
+<a href=#621 id=621 data-nosnippet>621</a>    /// mode: it lacks the metadata these codes name.
+<a href=#622 id=622 data-nosnippet>622</a>    </span>Governance(RuleLocation, Vec&lt;<span class="kw">crate</span>::validate::ErrorCode&gt;),
+<a href=#623 id=623 data-nosnippet>623</a>}
+<a href=#624 id=624 data-nosnippet>624</a>
+<a href=#625 id=625 data-nosnippet>625</a><span class="kw">impl </span>core::fmt::Display <span class="kw">for </span>BulkError {
+<a href=#626 id=626 data-nosnippet>626</a>    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>core::fmt::Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; core::fmt::Result {
+<a href=#627 id=627 data-nosnippet>627</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#628 id=628 data-nosnippet>628</a>            <span class="self">Self</span>::ReasonRequired =&gt; f.write_str(<span class="string">"a bulk change needs a reason"</span>),
+<a href=#629 id=629 data-nosnippet>629</a>            <span class="self">Self</span>::UnknownRule(r) =&gt; {
+<a href=#630 id=630 data-nosnippet>630</a>                <span class="macro">write!</span>(f, <span class="string">"rule {} is not in rule set {}"</span>, r.rule_id, r.rule_set_id)
+<a href=#631 id=631 data-nosnippet>631</a>            }
+<a href=#632 id=632 data-nosnippet>632</a>            <span class="self">Self</span>::ReadOnly(r) =&gt; <span class="macro">write!</span>(f, <span class="string">"rule set {} is read-only"</span>, r.rule_set_id),
+<a href=#633 id=633 data-nosnippet>633</a>            <span class="self">Self</span>::Invalid(e) =&gt; e.fmt(f),
+<a href=#634 id=634 data-nosnippet>634</a>            <span class="self">Self</span>::ExceptionTooLong(r) =&gt; <span class="macro">write!</span>(
+<a href=#635 id=635 data-nosnippet>635</a>                f,
+<a href=#636 id=636 data-nosnippet>636</a>                <span class="string">"rule {} is an exception, and the new expiry is more than 365 days after its approval; renew it in a review"</span>,
+<a href=#637 id=637 data-nosnippet>637</a>                r.rule_id
+<a href=#638 id=638 data-nosnippet>638</a>            ),
+<a href=#639 id=639 data-nosnippet>639</a>            <span class="self">Self</span>::Governance(r, codes) =&gt; {
+<a href=#640 id=640 data-nosnippet>640</a>                <span class="kw">let </span>names: Vec&lt;<span class="kw-2">&amp;</span>str&gt; = codes.iter().map(|c| c.as_str()).collect();
+<a href=#641 id=641 data-nosnippet>641</a>                <span class="macro">write!</span>(
+<a href=#642 id=642 data-nosnippet>642</a>                    f,
+<a href=#643 id=643 data-nosnippet>643</a>                    <span class="string">"rule {} cannot be enabled in governance mode until its metadata is complete: {}"</span>,
+<a href=#644 id=644 data-nosnippet>644</a>                    r.rule_id,
+<a href=#645 id=645 data-nosnippet>645</a>                    names.join(<span class="string">", "</span>)
+<a href=#646 id=646 data-nosnippet>646</a>                )
+<a href=#647 id=647 data-nosnippet>647</a>            }
+<a href=#648 id=648 data-nosnippet>648</a>        }
+<a href=#649 id=649 data-nosnippet>649</a>    }
+<a href=#650 id=650 data-nosnippet>650</a>}
+<a href=#651 id=651 data-nosnippet>651</a>
+<a href=#652 id=652 data-nosnippet>652</a><span class="kw">impl </span>std::error::Error <span class="kw">for </span>BulkError {}
+<a href=#653 id=653 data-nosnippet>653</a>
+<a href=#654 id=654 data-nosnippet>654</a><span class="doccomment">/// Applies `op` to every rule in `rules`, as one change set with `reason`.
+<a href=#655 id=655 data-nosnippet>655</a>/// Nothing changes unless every rule can be changed.
+<a href=#656 id=656 data-nosnippet>656</a>///
+<a href=#657 id=657 data-nosnippet>657</a>/// # Errors
+<a href=#658 id=658 data-nosnippet>658</a>///
+<a href=#659 id=659 data-nosnippet>659</a>/// Returns [`BulkError`] if there is no reason, a rule is missing, a rule
+<a href=#660 id=660 data-nosnippet>660</a>/// set is read-only, an exception would be extended past a year from its
+<a href=#661 id=661 data-nosnippet>661</a>/// approval, or a rule to enable lacks the metadata governance mode needs.
+<a href=#662 id=662 data-nosnippet>662</a></span><span class="kw">pub fn </span>bulk(
+<a href=#663 id=663 data-nosnippet>663</a>    doc: <span class="kw-2">&amp;mut </span>PolicyDocument,
+<a href=#664 id=664 data-nosnippet>664</a>    rules: <span class="kw-2">&amp;</span>[RuleLocation],
+<a href=#665 id=665 data-nosnippet>665</a>    op: <span class="kw-2">&amp;</span>BulkOp,
+<a href=#666 id=666 data-nosnippet>666</a>    actor: <span class="kw-2">&amp;</span>str,
+<a href=#667 id=667 data-nosnippet>667</a>    reason: <span class="kw-2">&amp;</span>str,
+<a href=#668 id=668 data-nosnippet>668</a>    at: Timestamp,
+<a href=#669 id=669 data-nosnippet>669</a>) -&gt; <span class="prelude-ty">Result</span>&lt;ChangeSet, BulkError&gt; {
+<a href=#670 id=670 data-nosnippet>670</a>    <span class="kw">if </span>reason.trim().is_empty() {
+<a href=#671 id=671 data-nosnippet>671</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(BulkError::ReasonRequired);
+<a href=#672 id=672 data-nosnippet>672</a>    }
+<a href=#673 id=673 data-nosnippet>673</a>    <span class="kw">if </span>!valid_actor(actor) {
+<a href=#674 id=674 data-nosnippet>674</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(BulkError::Invalid(ChangeError::InvalidActor));
+<a href=#675 id=675 data-nosnippet>675</a>    }
+<a href=#676 id=676 data-nosnippet>676</a>    <span class="kw">for </span>loc <span class="kw">in </span>rules {
+<a href=#677 id=677 data-nosnippet>677</a>        <span class="kw">let </span>set = doc
+<a href=#678 id=678 data-nosnippet>678</a>            .rule_sets
+<a href=#679 id=679 data-nosnippet>679</a>            .iter()
+<a href=#680 id=680 data-nosnippet>680</a>            .find(|s| s.id == loc.rule_set_id)
+<a href=#681 id=681 data-nosnippet>681</a>            .ok_or(BulkError::UnknownRule(<span class="kw-2">*</span>loc))<span class="question-mark">?</span>;
+<a href=#682 id=682 data-nosnippet>682</a>        <span class="kw">let </span>rule = set
+<a href=#683 id=683 data-nosnippet>683</a>            .rules
+<a href=#684 id=684 data-nosnippet>684</a>            .iter()
+<a href=#685 id=685 data-nosnippet>685</a>            .find(|r| r.id == loc.rule_id)
+<a href=#686 id=686 data-nosnippet>686</a>            .ok_or(BulkError::UnknownRule(<span class="kw-2">*</span>loc))<span class="question-mark">?</span>;
+<a href=#687 id=687 data-nosnippet>687</a>        <span class="kw">if </span>set.read_only {
+<a href=#688 id=688 data-nosnippet>688</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(BulkError::ReadOnly(<span class="kw-2">*</span>loc));
+<a href=#689 id=689 data-nosnippet>689</a>        }
+<a href=#690 id=690 data-nosnippet>690</a>        <span class="kw">if let </span>BulkOp::Extend(t) = op {
+<a href=#691 id=691 data-nosnippet>691</a>            <span class="kw">if </span><span class="kw-2">*</span>t &lt;= at || rule.activates_at.is_some_and(|a| <span class="kw-2">*</span>t &lt;= a) {
+<a href=#692 id=692 data-nosnippet>692</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(BulkError::Invalid(ChangeError::InvalidExpiry));
+<a href=#693 id=693 data-nosnippet>693</a>            }
+<a href=#694 id=694 data-nosnippet>694</a>            <span class="kw">if </span>is_exception(rule)
+<a href=#695 id=695 data-nosnippet>695</a>                &amp;&amp; exception_limit(<span class="kw-2">&amp;</span>rule.metadata, <span class="prelude-val">Some</span>(at)).is_none_or(|l| <span class="kw-2">*</span>t &gt; l)
+<a href=#696 id=696 data-nosnippet>696</a>            {
+<a href=#697 id=697 data-nosnippet>697</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(BulkError::ExceptionTooLong(<span class="kw-2">*</span>loc));
+<a href=#698 id=698 data-nosnippet>698</a>            }
+<a href=#699 id=699 data-nosnippet>699</a>        }
+<a href=#700 id=700 data-nosnippet>700</a>        <span class="kw">if </span><span class="kw-2">*</span>op == BulkOp::Enable &amp;&amp; !rule.enabled {
+<a href=#701 id=701 data-nosnippet>701</a>            <span class="kw">let </span><span class="kw-2">mut </span>enabled = rule.clone();
+<a href=#702 id=702 data-nosnippet>702</a>            enabled.enabled = <span class="bool-val">true</span>;
+<a href=#703 id=703 data-nosnippet>703</a>            <span class="kw">let </span>codes: Vec&lt;<span class="kw">_</span>&gt; = <span class="kw">crate</span>::validate::governance_problems(doc, set, <span class="kw-2">&amp;</span>enabled)
+<a href=#704 id=704 data-nosnippet>704</a>                .into_iter()
+<a href=#705 id=705 data-nosnippet>705</a>                .map(|(code, <span class="kw">_</span>, <span class="kw">_</span>)| code)
+<a href=#706 id=706 data-nosnippet>706</a>                .collect();
+<a href=#707 id=707 data-nosnippet>707</a>            <span class="kw">if </span>!codes.is_empty() {
+<a href=#708 id=708 data-nosnippet>708</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(BulkError::Governance(<span class="kw-2">*</span>loc, codes));
+<a href=#709 id=709 data-nosnippet>709</a>            }
+<a href=#710 id=710 data-nosnippet>710</a>        }
+<a href=#711 id=711 data-nosnippet>711</a>    }
+<a href=#712 id=712 data-nosnippet>712</a>    <span class="kw">let </span><span class="kw-2">mut </span>changes = Vec::new();
+<a href=#713 id=713 data-nosnippet>713</a>    <span class="kw">let </span><span class="kw-2">mut </span>wanted: Vec&lt;RuleLocation&gt; = rules.to_vec();
+<a href=#714 id=714 data-nosnippet>714</a>    wanted.sort();
+<a href=#715 id=715 data-nosnippet>715</a>    wanted.dedup();
+<a href=#716 id=716 data-nosnippet>716</a>    <span class="kw">for </span>loc <span class="kw">in </span>wanted {
+<a href=#717 id=717 data-nosnippet>717</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(rule) = doc
+<a href=#718 id=718 data-nosnippet>718</a>            .rule_sets
+<a href=#719 id=719 data-nosnippet>719</a>            .iter_mut()
+<a href=#720 id=720 data-nosnippet>720</a>            .filter(|s| s.id == loc.rule_set_id)
+<a href=#721 id=721 data-nosnippet>721</a>            .flat_map(|s| s.rules.iter_mut())
+<a href=#722 id=722 data-nosnippet>722</a>            .find(|r| r.id == loc.rule_id)
+<a href=#723 id=723 data-nosnippet>723</a>        <span class="kw">else </span>{
+<a href=#724 id=724 data-nosnippet>724</a>            <span class="kw">continue</span>;
+<a href=#725 id=725 data-nosnippet>725</a>        };
+<a href=#726 id=726 data-nosnippet>726</a>        <span class="kw">let </span>before = (rule.enabled, rule.expires_at, rule.metadata.comment.clone());
+<a href=#727 id=727 data-nosnippet>727</a>        <span class="kw">match </span>op {
+<a href=#728 id=728 data-nosnippet>728</a>            BulkOp::Enable =&gt; rule.enabled = <span class="bool-val">true</span>,
+<a href=#729 id=729 data-nosnippet>729</a>            BulkOp::Disable =&gt; rule.enabled = <span class="bool-val">false</span>,
+<a href=#730 id=730 data-nosnippet>730</a>            BulkOp::Extend(t) =&gt; rule.expires_at = <span class="prelude-val">Some</span>(<span class="kw-2">*</span>t),
+<a href=#731 id=731 data-nosnippet>731</a>            BulkOp::Retire =&gt; {
+<a href=#732 id=732 data-nosnippet>732</a>                rule.enabled = <span class="bool-val">false</span>;
+<a href=#733 id=733 data-nosnippet>733</a>                <span class="comment">// Kept within the text limit; the full reason is in the
+<a href=#734 id=734 data-nosnippet>734</a>                // change set.
+<a href=#735 id=735 data-nosnippet>735</a>                </span><span class="kw">let </span>note = <span class="macro">format!</span>(<span class="string">"retired: {}"</span>, reason.trim());
+<a href=#736 id=736 data-nosnippet>736</a>                <span class="kw">let </span>text = <span class="kw">match </span><span class="kw-2">&amp;</span>rule.metadata.comment {
+<a href=#737 id=737 data-nosnippet>737</a>                    <span class="prelude-val">Some</span>(c) =&gt; <span class="macro">format!</span>(<span class="string">"{c}\n{note}"</span>),
+<a href=#738 id=738 data-nosnippet>738</a>                    <span class="prelude-val">None </span>=&gt; note,
+<a href=#739 id=739 data-nosnippet>739</a>                };
+<a href=#740 id=740 data-nosnippet>740</a>                rule.metadata.comment = <span class="prelude-val">Some</span>(
+<a href=#741 id=741 data-nosnippet>741</a>                    text.chars()
+<a href=#742 id=742 data-nosnippet>742</a>                        .take(<span class="kw">crate</span>::model::limits::MAX_TEXT_CHARS)
+<a href=#743 id=743 data-nosnippet>743</a>                        .collect(),
+<a href=#744 id=744 data-nosnippet>744</a>                );
+<a href=#745 id=745 data-nosnippet>745</a>            }
+<a href=#746 id=746 data-nosnippet>746</a>        }
+<a href=#747 id=747 data-nosnippet>747</a>        rule.metadata.updated_by = <span class="prelude-val">Some</span>(actor.to_owned());
+<a href=#748 id=748 data-nosnippet>748</a>        rule.metadata.updated_at = <span class="prelude-val">Some</span>(at);
+<a href=#749 id=749 data-nosnippet>749</a>        changes.push(RuleChange {
+<a href=#750 id=750 data-nosnippet>750</a>            rule: loc,
+<a href=#751 id=751 data-nosnippet>751</a>            enabled: (before.<span class="number">0</span>, rule.enabled),
+<a href=#752 id=752 data-nosnippet>752</a>            expires_at: (before.<span class="number">1</span>, rule.expires_at),
+<a href=#753 id=753 data-nosnippet>753</a>            comment: (before.<span class="number">2</span>, rule.metadata.comment.clone()),
+<a href=#754 id=754 data-nosnippet>754</a>        });
+<a href=#755 id=755 data-nosnippet>755</a>    }
+<a href=#756 id=756 data-nosnippet>756</a>    <span class="prelude-val">Ok</span>(ChangeSet {
+<a href=#757 id=757 data-nosnippet>757</a>        actor: actor.to_owned(),
+<a href=#758 id=758 data-nosnippet>758</a>        at,
+<a href=#759 id=759 data-nosnippet>759</a>        reason: reason.trim().to_owned(),
+<a href=#760 id=760 data-nosnippet>760</a>        changes,
+<a href=#761 id=761 data-nosnippet>761</a>    })
+<a href=#762 id=762 data-nosnippet>762</a>}
+<a href=#763 id=763 data-nosnippet>763</a>
+<a href=#764 id=764 data-nosnippet>764</a><span class="doccomment">/// The rules that would have matched `subject` but are inactive at
+<a href=#765 id=765 data-nosnippet>765</a>/// `clock`, with why, sorted by rule ID: what the decision trace (#41)
+<a href=#766 id=766 data-nosnippet>766</a>/// reports as "would have matched disabled rule R" or "expired rule R".
+<a href=#767 id=767 data-nosnippet>767</a>/// Not for the hot path: it compiles each inactive rule's tree.
+<a href=#768 id=768 data-nosnippet>768</a></span><span class="attr">#[must_use]
+<a href=#769 id=769 data-nosnippet>769</a></span><span class="kw">pub fn </span>inactive_matches(
+<a href=#770 id=770 data-nosnippet>770</a>    validated: <span class="kw-2">&amp;</span><span class="kw">crate</span>::validate::ValidatedPolicy,
+<a href=#771 id=771 data-nosnippet>771</a>    subject: <span class="kw-2">&amp;</span><span class="kw">crate</span>::evaluate::Subject&lt;<span class="lifetime">'_</span>&gt;,
+<a href=#772 id=772 data-nosnippet>772</a>    clock: <span class="kw-2">&amp;</span>RuleClock,
+<a href=#773 id=773 data-nosnippet>773</a>) -&gt; Vec&lt;(RuleRef, Activity)&gt; {
+<a href=#774 id=774 data-nosnippet>774</a>    <span class="kw">let </span>doc = validated.document();
+<a href=#775 id=775 data-nosnippet>775</a>    <span class="kw">let </span><span class="kw-2">mut </span>out: Vec&lt;(RuleRef, Activity)&gt; = referenced(doc)
+<a href=#776 id=776 data-nosnippet>776</a>        .flat_map(|set| set.rules.iter().map(<span class="kw">move </span>|r| (set, r)))
+<a href=#777 id=777 data-nosnippet>777</a>        .filter_map(|(set, rule)| {
+<a href=#778 id=778 data-nosnippet>778</a>            <span class="kw">let </span>why = activity(rule, clock);
+<a href=#779 id=779 data-nosnippet>779</a>            <span class="kw">if </span>why.is_active() {
+<a href=#780 id=780 data-nosnippet>780</a>                <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#781 id=781 data-nosnippet>781</a>            }
+<a href=#782 id=782 data-nosnippet>782</a>            <span class="comment">// `defer` is never evaluated, active or not.
+<a href=#783 id=783 data-nosnippet>783</a>            </span><span class="kw">if </span><span class="macro">matches!</span>(rule.action, Action::Defer {})
+<a href=#784 id=784 data-nosnippet>784</a>                || (!rule.object_types.is_empty()
+<a href=#785 id=785 data-nosnippet>785</a>                    &amp;&amp; !rule.object_types.contains(<span class="kw-2">&amp;</span>subject.object_type))
+<a href=#786 id=786 data-nosnippet>786</a>            {
+<a href=#787 id=787 data-nosnippet>787</a>                <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#788 id=788 data-nosnippet>788</a>            }
+<a href=#789 id=789 data-nosnippet>789</a>            <span class="kw">let </span>tree = <span class="kw">crate</span>::condition::CompiledMatch::compile(<span class="kw-2">&amp;</span>rule.match_).ok()<span class="question-mark">?</span>;
+<a href=#790 id=790 data-nosnippet>790</a>            <span class="kw">let </span>ctx = <span class="kw">crate</span>::ops::EvalContext {
+<a href=#791 id=791 data-nosnippet>791</a>                action: rule.action.kind(),
+<a href=#792 id=792 data-nosnippet>792</a>                variables: subject.variables,
+<a href=#793 id=793 data-nosnippet>793</a>                context: subject.context,
+<a href=#794 id=794 data-nosnippet>794</a>            };
+<a href=#795 id=795 data-nosnippet>795</a>            <span class="comment">// As the evaluator applies it: a deny's unknown handling counts.
+<a href=#796 id=796 data-nosnippet>796</a>            </span><span class="kw">let </span>(unknown_as, unparseable) = <span class="kw">match </span><span class="kw-2">&amp;</span>rule.action {
+<a href=#797 id=797 data-nosnippet>797</a>                Action::Deny(o) =&gt; (
+<a href=#798 id=798 data-nosnippet>798</a>                    o.unknown_as,
+<a href=#799 id=799 data-nosnippet>799</a>                    <span class="kw">match </span>o.on_unparseable {
+<a href=#800 id=800 data-nosnippet>800</a>                        <span class="kw">crate</span>::model::UnknownAs::Match =&gt; {
+<a href=#801 id=801 data-nosnippet>801</a>                            <span class="kw">crate</span>::condition::Unparseable::FavourMatch
+<a href=#802 id=802 data-nosnippet>802</a>                        }
+<a href=#803 id=803 data-nosnippet>803</a>                        <span class="kw">crate</span>::model::UnknownAs::NoMatch =&gt; <span class="kw">crate</span>::condition::Unparseable::Unknown,
+<a href=#804 id=804 data-nosnippet>804</a>                    },
+<a href=#805 id=805 data-nosnippet>805</a>                ),
+<a href=#806 id=806 data-nosnippet>806</a>                <span class="kw">_ </span>=&gt; (
+<a href=#807 id=807 data-nosnippet>807</a>                    <span class="kw">crate</span>::model::UnknownAs::NoMatch,
+<a href=#808 id=808 data-nosnippet>808</a>                    <span class="kw">crate</span>::condition::Unparseable::Unknown,
+<a href=#809 id=809 data-nosnippet>809</a>                ),
+<a href=#810 id=810 data-nosnippet>810</a>            };
+<a href=#811 id=811 data-nosnippet>811</a>            <span class="kw">let </span>matched = <span class="kw">match </span>tree.eval_with(subject.facts, <span class="kw-2">&amp;</span>ctx, unparseable).result {
+<a href=#812 id=812 data-nosnippet>812</a>                <span class="kw">crate</span>::ops::Tri::Match =&gt; <span class="bool-val">true</span>,
+<a href=#813 id=813 data-nosnippet>813</a>                <span class="kw">crate</span>::ops::Tri::Unknown =&gt; unknown_as == <span class="kw">crate</span>::model::UnknownAs::Match,
+<a href=#814 id=814 data-nosnippet>814</a>                <span class="kw">crate</span>::ops::Tri::NoMatch =&gt; <span class="bool-val">false</span>,
+<a href=#815 id=815 data-nosnippet>815</a>            };
+<a href=#816 id=816 data-nosnippet>816</a>            matched.then(|| (RuleRef::new(<span class="kw-2">&amp;</span>doc.policy, set, rule), why))
+<a href=#817 id=817 data-nosnippet>817</a>        })
+<a href=#818 id=818 data-nosnippet>818</a>        .collect();
+<a href=#819 id=819 data-nosnippet>819</a>    out.sort_by_key(|(r, <span class="kw">_</span>)| r.rule_id);
+<a href=#820 id=820 data-nosnippet>820</a>    out
+<a href=#821 id=821 data-nosnippet>821</a>}
+<a href=#822 id=822 data-nosnippet>822</a>
+<a href=#823 id=823 data-nosnippet>823</a><span class="kw">impl </span>PolicyDocument {
+<a href=#824 id=824 data-nosnippet>824</a>    <span class="doccomment">/// The document without its governance metadata: what decides (#40,
+<a href=#825 id=825 data-nosnippet>825</a>    /// #43). Metadata never changes a decision, so a bundle's
+<a href=#826 id=826 data-nosnippet>826</a>    /// decision-relevant hash is taken over this form, and editing a
+<a href=#827 id=827 data-nosnippet>827</a>    /// justification or a review date does not make agents re-verify
+<a href=#828 id=828 data-nosnippet>828</a>    /// their decision caches. The full content hash still covers it.
+<a href=#829 id=829 data-nosnippet>829</a>    </span><span class="attr">#[must_use]
+<a href=#830 id=830 data-nosnippet>830</a>    </span><span class="kw">pub fn </span>decision_relevant(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
+<a href=#831 id=831 data-nosnippet>831</a>        <span class="kw">let </span><span class="kw-2">mut </span>doc = <span class="self">self</span>.clone();
+<a href=#832 id=832 data-nosnippet>832</a>        doc.policy.metadata = Metadata::default();
+<a href=#833 id=833 data-nosnippet>833</a>        doc.policy.governance = <span class="kw">crate</span>::model::GovernanceSettings::default();
+<a href=#834 id=834 data-nosnippet>834</a>        <span class="kw">for </span>set <span class="kw">in </span><span class="kw-2">&amp;mut </span>doc.rule_sets {
+<a href=#835 id=835 data-nosnippet>835</a>            set.metadata = Metadata::default();
+<a href=#836 id=836 data-nosnippet>836</a>            <span class="kw">for </span>rule <span class="kw">in </span><span class="kw-2">&amp;mut </span>set.rules {
+<a href=#837 id=837 data-nosnippet>837</a>                rule.metadata = Metadata::default();
+<a href=#838 id=838 data-nosnippet>838</a>            }
+<a href=#839 id=839 data-nosnippet>839</a>        }
+<a href=#840 id=840 data-nosnippet>840</a>        doc
+<a href=#841 id=841 data-nosnippet>841</a>    }
+<a href=#842 id=842 data-nosnippet>842</a>}
+<a href=#843 id=843 data-nosnippet>843</a>
+<a href=#844 id=844 data-nosnippet>844</a><span class="doccomment">/// The managed `system_baseline` rule set, if the document holds it. Only
+<a href=#845 id=845 data-nosnippet>845</a>/// the engine adds it, after validation
+<a href=#846 id=846 data-nosnippet>846</a>/// ([`crate::validate::ValidatedPolicy::with_system_baseline`]); an
+<a href=#847 id=847 data-nosnippet>847</a>/// authored document that uses its ID is rejected, so this is never a set
+<a href=#848 id=848 data-nosnippet>848</a>/// a policy author wrote. It is the only rule set exempt from review
+<a href=#849 id=849 data-nosnippet>849</a>/// campaigns and the assistant's governance checks; `read_only` alone
+<a href=#850 id=850 data-nosnippet>850</a>/// exempts nothing.
+<a href=#851 id=851 data-nosnippet>851</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>managed_baseline(doc: <span class="kw-2">&amp;</span>PolicyDocument) -&gt; <span class="prelude-ty">Option</span>&lt;RuleSetId&gt; {
+<a href=#852 id=852 data-nosnippet>852</a>    doc.rule_sets
+<a href=#853 id=853 data-nosnippet>853</a>        .iter()
+<a href=#854 id=854 data-nosnippet>854</a>        .find(|s| <span class="kw">crate</span>::unknown::baseline::is_system_baseline(s))
+<a href=#855 id=855 data-nosnippet>855</a>        .map(|s| s.id)
+<a href=#856 id=856 data-nosnippet>856</a>}
+<a href=#857 id=857 data-nosnippet>857</a>
+<a href=#858 id=858 data-nosnippet>858</a><span class="doccomment">/// The rule sets the policy references, in its order.
+<a href=#859 id=859 data-nosnippet>859</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>referenced(doc: <span class="kw-2">&amp;</span>PolicyDocument) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span>RuleSet&gt; {
+<a href=#860 id=860 data-nosnippet>860</a>    doc.policy
+<a href=#861 id=861 data-nosnippet>861</a>        .rule_sets
+<a href=#862 id=862 data-nosnippet>862</a>        .iter()
+<a href=#863 id=863 data-nosnippet>863</a>        .filter_map(|id| doc.rule_sets.iter().find(|s| s.id == <span class="kw-2">*</span>id))
+<a href=#864 id=864 data-nosnippet>864</a>}
+<a href=#865 id=865 data-nosnippet>865</a>
+<a href=#866 id=866 data-nosnippet>866</a><span class="doccomment">/// The reference a decision uses for `rule`.
+<a href=#867 id=867 data-nosnippet>867</a></span><span class="attr">#[must_use]
+<a href=#868 id=868 data-nosnippet>868</a></span><span class="kw">pub fn </span>rule_ref(policy: <span class="kw-2">&amp;</span>Policy, set: <span class="kw-2">&amp;</span>RuleSet, rule: <span class="kw-2">&amp;</span>Rule) -&gt; RuleRef {
+<a href=#869 id=869 data-nosnippet>869</a>    RuleRef::new(policy, set, rule)
+<a href=#870 id=870 data-nosnippet>870</a>}
+<a href=#871 id=871 data-nosnippet>871</a>
+<a href=#872 id=872 data-nosnippet>872</a><span class="attr">#[cfg(test)]
+<a href=#873 id=873 data-nosnippet>873</a></span><span class="kw">mod </span>tests;
+</code></pre></div></section></main></body></html>

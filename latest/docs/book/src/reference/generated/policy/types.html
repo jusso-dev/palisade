@@ -36,10 +36,10 @@
             const path_to_root = "../../../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../../../searchindex-92677b07.js";
+            window.path_to_searchindex_js = "../../../../../../searchindex-45338655.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../../../../toc-cbfaa793.js"></script>
+        <script src="../../../../../../toc-de2a680a.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -440,6 +440,20 @@ matcher.</p>
 </tbody>
 </table>
 </div>
+<h2 id="findingseverity"><a class="header" href="#findingseverity">FindingSeverity</a></h2>
+<p>How serious a policy-assistant finding is (#40).</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>info</code></td><td>Informational.</td></tr>
+<tr><td><code>warning</code></td><td>Probably a mistake or a risk.</td></tr>
+<tr><td><code>error</code></td><td>Blocks publishing unless a tenant administrator overrides it.</td></tr>
+</tbody>
+</table>
+</div>
 <h2 id="level"><a class="header" href="#level">Level</a></h2>
 <p>How an unknown object is handled. The variants are declared from least
 to most restrictive, so <code>Ord</code> is the restrictiveness order.</p>
@@ -675,6 +689,20 @@ weakest to the strongest.</p>
 <h2 id="requesttemplateref"><a class="header" href="#requesttemplateref">RequestTemplateRef</a></h2>
 <p>The ID of an approval request template (#11).</p>
 <p>Type: <a href="types.html#uuid7"><code>Uuid7</code></a>.</p>
+<h2 id="riskrating"><a class="header" href="#riskrating">RiskRating</a></h2>
+<p>The risk an exception carries.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>low</code></td><td>Low.</td></tr>
+<tr><td><code>medium</code></td><td>Medium.</td></tr>
+<tr><td><code>high</code></td><td>High.</td></tr>
+</tbody>
+</table>
+</div>
 <h2 id="ruleid"><a class="header" href="#ruleid">RuleId</a></h2>
 <p>The stable ID of a rule. It is never reused, even after the rule is deleted.</p>
 <p>Type: <a href="types.html#uuid7"><code>Uuid7</code></a>.</p>
@@ -696,6 +724,24 @@ weakest to the strongest.</p>
 <tr><td><code>elevation</code></td><td>Elevation rules (#12).</td></tr>
 <tr><td><code>containment</code></td><td>Containment rules (#14).</td></tr>
 <tr><td><code>mixed</code></td><td>Any mix of actions.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="rulesource"><a class="header" href="#rulesource">RuleSource</a></h2>
+<p>Where a rule came from.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>manual</code></td><td>Written by an administrator.</td></tr>
+<tr><td><code>learned</code></td><td>From learning mode (#5).</td></tr>
+<tr><td><code>recommendation</code></td><td>Accepted from a recommendation (#5).</td></tr>
+<tr><td><code>catalogue</code></td><td>From the curated catalogue.</td></tr>
+<tr><td><code>import</code></td><td>Imported from another format.</td></tr>
+<tr><td><code>api</code></td><td>Created through the API (#15).</td></tr>
+<tr><td><code>approval_request</code></td><td>From an approved user request (#11).</td></tr>
 </tbody>
 </table>
 </div>
@@ -826,6 +872,9 @@ compares (#31).</p>
 </tbody>
 </table>
 </div>
+<h2 id="timestamp"><a class="header" href="#timestamp">Timestamp</a></h2>
+<p>An RFC 3339 date-time, such as <code>2026-11-25T09:30:00Z</code>. Read as UTC; fractions of a second are dropped.</p>
+<p>Type: string; format <code>date-time</code>.</p>
 <h2 id="tokenprofileref"><a class="header" href="#tokenprofileref">TokenProfileRef</a></h2>
 <p>The ID of an access token profile for elevation (#12, #150).</p>
 <p>Type: <a href="types.html#uuid7"><code>Uuid7</code></a>.</p>
@@ -869,6 +918,9 @@ compares (#31).</p>
 </tbody>
 </table>
 </div>
+<h2 id="utcdate"><a class="header" href="#utcdate">UtcDate</a></h2>
+<p>An RFC 3339 full date, such as <code>2026-11-25</code>, in UTC.</p>
+<p>Type: string; format <code>date</code>.</p>
 <h2 id="uuid7"><a class="header" href="#uuid7">Uuid7</a></h2>
 <p>A UUID version 7 in canonical lowercase form.</p>
 <p>Type: string; matches <code>^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$</code>.</p>

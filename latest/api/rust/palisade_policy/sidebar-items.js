@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["condition","context","decision","dsl","evaluate","facts","hierarchy","library","mode","model","ops","precedence","schema","scope","test_util","trace","unknown","validate"]};
+window.SIDEBAR_ITEMS = {"mod":["analysis","condition","context","decision","dsl","evaluate","facts","hierarchy","library","lifecycle","mode","model","ops","precedence","schema","scope","test_util","trace","unknown","validate"]};

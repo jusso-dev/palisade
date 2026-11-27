@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Guaranteed"],"fn":["has_path_identity","weakest_identity"]};

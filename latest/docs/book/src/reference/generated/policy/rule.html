@@ -36,10 +36,10 @@
             const path_to_root = "../../../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../../../searchindex-92677b07.js";
+            window.path_to_searchindex_js = "../../../../../../searchindex-45338655.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../../../../toc-cbfaa793.js"></script>
+        <script src="../../../../../../toc-de2a680a.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -197,16 +197,19 @@
 </thead>
 <tbody>
 <tr><td><code>action</code></td><td><a href="action.html"><code>Action</code></a></td><td>yes</td><td></td><td></td><td>1.0.0</td><td>What happens when it matches (#34).</td></tr>
+<tr><td><code>activates_at</code></td><td><a href="types.html#timestamp"><code>Timestamp</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>The rule is absent before this instant (#40).</td></tr>
 <tr><td><code>description</code></td><td>string</td><td>no</td><td></td><td>at most 4096 characters</td><td>1.0.0</td><td>Free-text description, at most 4096 characters.</td></tr>
 <tr><td><code>display_id</code></td><td>string</td><td>no</td><td></td><td>matches <code>^R-[0-9]{6,12}$</code></td><td>1.0.0</td><td>Human short ID from the tenant's sequence, <code>R-</code> and 6 to 12 digits.</td></tr>
 <tr><td><code>effects</code></td><td><a href="effects.html"><code>Effects</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>Logging, upload, notification, severity and tags (#34). Unset fields take the action's defaults.</td></tr>
 <tr><td><code>enabled</code></td><td>boolean</td><td>no</td><td><code>true</code></td><td></td><td>1.0.0</td><td>Disabled rules are kept, but never decide.</td></tr>
 <tr><td><code>enforcement_override</code></td><td><a href="types.html#enforcementoverride"><code>EnforcementOverride</code></a></td><td>no</td><td><code>"inherit"</code></td><td></td><td>1.0.0</td><td>Per-rule enforcement override (#36). Only for <code>deny</code> rules.</td></tr>
+<tr><td><code>expires_at</code></td><td><a href="types.html#timestamp"><code>Timestamp</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>The rule is absent from this instant on (#40). An expired allow never revives, even if the clock is set back (<code>crate::lifecycle</code>).</td></tr>
 <tr><td><code>id</code></td><td><a href="types.html#ruleid"><code>RuleId</code></a></td><td>yes</td><td></td><td></td><td>1.0.0</td><td>Stable ID, never reused.</td></tr>
 <tr><td><code>match</code></td><td><a href="match.html"><code>Match</code></a></td><td>yes</td><td></td><td></td><td>1.0.0</td><td>When the rule matches (#33).</td></tr>
 <tr><td><code>metadata</code></td><td><a href="metadata.html"><code>Metadata</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>Governance metadata (#40).</td></tr>
 <tr><td><code>name</code></td><td>string</td><td>yes</td><td></td><td>1 to 128 characters</td><td>1.0.0</td><td>Display name, with the same rules as a policy name.</td></tr>
 <tr><td><code>object_types</code></td><td>array of <a href="types.html#objecttype"><code>ObjectType</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>The object classes the rule applies to. Empty means every class.</td></tr>
+<tr><td><code>on_expire</code></td><td><a href="on-expire.html"><code>OnExpire</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>What happens when the rule expires (#40).</td></tr>
 <tr><td><code>order</code></td><td>integer</td><td>no</td><td></td><td>0 to 1000000; format <code>uint32</code></td><td>1.0.0</td><td>Position for the <code>first_match</code> model (#35): 0 to 1000000, lowest first. Rules of custom (not read-only) rule sets use 100001 to 999989; the other ranges are reserved for system, curated and catch-all rules.</td></tr>
 <tr><td><code>priority</code></td><td>integer</td><td>no</td><td></td><td>format <code>int32</code></td><td>1.0.0</td><td>Priority for the <code>priority</code> model (#35).</td></tr>
 <tr><td><code>scope</code></td><td><a href="scope.html"><code>Scope</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>Who, where and when the rule applies (#38). Unset means everyone, everywhere, always, within the policy's and the rule set's scopes.</td></tr>
