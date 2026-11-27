@@ -305,6 +305,23 @@ impl Body {
         Self::from_value(body.to_value()?)
     }
 
+    /// A body with a metadata digest already computed, as a delta carries
+    /// it: `document` must hold no governance metadata of its own.
+    ///
+    /// # Errors
+    ///
+    /// As [`Body::new`].
+    pub(crate) fn with_digest(
+        document: PolicyDocument,
+        libraries: Vec<InlineLibrary>,
+        source_revisions: SourceRevisions,
+        metadata_digest: Sha256Digest,
+    ) -> Result<Self, serial::Error> {
+        let mut body = Self::new(document, libraries, source_revisions)?;
+        body.metadata_digest = metadata_digest;
+        Ok(body)
+    }
+
     /// The policy, without governance metadata.
     #[must_use]
     pub const fn document(&self) -> &PolicyDocument {
@@ -558,7 +575,7 @@ fn map(entries: Vec<(Value, Value)>) -> Result<Value, serial::Error> {
 }
 
 impl Header {
-    fn to_value(self) -> Result<Value, serial::Error> {
+    pub(crate) fn to_value(self) -> Result<Value, serial::Error> {
         let (scope_key, scope_id) = match self.target.scope {
             TargetScope::Group(id) => ("group", id),
             TargetScope::Device(id) => ("device", id),
@@ -583,7 +600,7 @@ impl Header {
         map(entries)
     }
 
-    fn from_value(value: Value) -> Result<Self, BundleError> {
+    pub(crate) fn from_value(value: Value) -> Result<Self, BundleError> {
         let Value::Map(m) = value else {
             return Err(BundleError::Shape("the header is not a map"));
         };
