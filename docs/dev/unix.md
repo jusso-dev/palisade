@@ -53,6 +53,22 @@ lacks. Two exceptions: the Windows-only package and signing steps never run on L
 `server-image` steps need podman, a container runtime the image does not nest; run those on the
 host, or use `--fast`, which skips them. The Postgres step runs because the container sets `PALISADE_TEST_DATABASE_ADMIN_URL`.
 
+**Proven in CI.** The [`devcontainer.yml`](../ci.md#devcontaineryml-weekly-on-tuesday-at-0417-utc-on-demand-and-on-prs-that-change-devcontainer)
+workflow builds this image and its Postgres service from scratch on a GitHub-hosted runner and
+runs `cargo xtask ci --fast` inside it, weekly and on every PR that changes `.devcontainer/`.
+Its first green run is the evidence for #29 that `cargo xtask ci` passes in a clean
+environment. To run it yourself, start the workflow from the Actions tab (**Run workflow**), or
+do what it does:
+
+```sh
+docker compose --file .devcontainer/compose.yaml --project-name palisade-dev up --detach --build --wait
+docker compose --file .devcontainer/compose.yaml --project-name palisade-dev exec dev cargo xtask ci --fast
+docker compose --file .devcontainer/compose.yaml --project-name palisade-dev down --volumes
+```
+
+Behind a TLS-inspecting proxy the image build cannot pull or download anything until the proxy's
+CA is trusted by the container engine; never disable TLS verification to get round it.
+
 Optional: building the image with `--build-arg WITH_XWIN=1` adds `cargo-xwin`, which can check the
 `x86_64-pc-windows-msvc` target from Linux (`cargo xwin check --target x86_64-pc-windows-msvc`).
 On first use it downloads the Windows SDK and C runtime headers, under their own licence terms,
