@@ -747,7 +747,10 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   `tests/package_os.rs` checks the family names against the OS package
   identity API and the signature verdicts against the OS trust-verification
   API, on the committed fixtures and on a package and bundle that the OS
-  SDK's own packaging and signing tools build and sign during the test.
+  SDK's own packaging and signing tools build and sign during the test. It
+  also has the SDK's signing tool sign the test builder's packages in every
+  archive layout, and requires the digest that tool signs to equal this
+  crate's, tag by tag.
 
 ## Handling untrusted input
 

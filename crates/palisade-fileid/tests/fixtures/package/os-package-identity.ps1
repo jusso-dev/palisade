@@ -21,6 +21,8 @@
 #   reader    the OS packaging API's package or bundle reader
 #             (CreatePackageReader / CreateBundleReader), which validates
 #             the container, the manifest and the block map
+#   readerlog what that API wrote to its operational event log meanwhile
+#             (why it refused the package)
 #   cmdlet    Get-AuthenticodeSignature's status and message
 #
 # Exit codes: 0 done, 3 a needed OS component is not available.
@@ -187,10 +189,13 @@ foreach ($p in Get-Content -LiteralPath $Publishers -Encoding UTF8) {
     if ($p.Length -eq 0) { continue }
     $lines.Add(("PFN`t{0}`t{1}" -f $p, [PalisadePackageId]::Family('Palisade.Probe', $p)))
 }
-# Full names: x64 (9) with no resource ID, and neutral with the bundle's `~`.
-$first = (Get-Content -LiteralPath $Publishers -Encoding UTF8 | Where-Object { $_ })[0]
-$lines.Add("FULL`tx64`t{0}" -f [PalisadePackageId]::Full('Palisade.Probe', $first, 9, $null))
-$lines.Add("FULL`tbundle`t{0}" -f [PalisadePackageId]::Full('Palisade.Probe', $first, 11, '~'))
+# Full names: x64 (9) with no resource ID, and neutral with the bundle's `~`,
+# of the first publisher (if any were given).
+$first = @(Get-Content -LiteralPath $Publishers -Encoding UTF8 | Where-Object { $_ }) | Select-Object -First 1
+if ($first) {
+    $lines.Add("FULL`tx64`t{0}" -f [PalisadePackageId]::Full('Palisade.Probe', $first, 9, $null))
+    $lines.Add("FULL`tbundle`t{0}" -f [PalisadePackageId]::Full('Palisade.Probe', $first, 11, '~'))
+}
 foreach ($file in Get-ChildItem -LiteralPath $Dir -File) {
     if ($file.Extension -notin '.msix', '.msixbundle') { continue }
     $rc = [PalisadePackageId]::Verify($file.FullName)
@@ -200,7 +205,17 @@ foreach ($file in Get-ChildItem -LiteralPath $Dir -File) {
     $diag = [ordered]@{}
     try { $diag.handle = '{0:x8}' -f [PalisadePackageId]::VerifyHandle($file.FullName) } catch { $diag.handle = "error $_" }
     try { $diag.subject = [PalisadePackageId]::Subject($file.FullName) } catch { $diag.subject = "error $_" }
+    $since = Get-Date
     try { $diag.reader = [PalisadePackageId]::Reader($file.FullName, $file.Extension -eq '.msixbundle') } catch { $diag.reader = "error $_" }
+    # The packaging API logs why it refused a package (the manifest line
+    # and rule, for example) to its operational event log.
+    try {
+        # The log is found by its name's ending, which avoids spelling out
+        # the vendor prefix it carries.
+        $log = (Get-WinEvent -ListLog '*-Windows-AppxPackaging/Operational' -ErrorAction Stop | Select-Object -First 1).LogName
+        $events = Get-WinEvent -FilterHashtable @{ LogName = $log; StartTime = $since.AddSeconds(-1) } -MaxEvents 4 -ErrorAction Stop
+        $diag.readerlog = ($events | ForEach-Object { "[$($_.Id)] $($_.Message)" }) -join ' | '
+    } catch { $diag.readerlog = "none ($($_.Exception.Message))" }
     try {
         $a = Get-AuthenticodeSignature -LiteralPath $file.FullName
         $diag.cmdlet = "$($a.Status) $($a.StatusMessage)"

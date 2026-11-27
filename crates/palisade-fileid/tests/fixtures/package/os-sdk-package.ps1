@@ -26,31 +26,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
-function Find-SdkTool([string]$name) {
-    $roots = @()
-    foreach ($base in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
-        if ($base) { $roots += Join-Path $base 'Windows Kits\10\bin' }
-    }
-    $arches = @()
-    switch ($env:PROCESSOR_ARCHITECTURE) {
-        'ARM64' { $arches += 'arm64' }
-        'AMD64' { $arches += 'x64' }
-    }
-    $arches += 'x64', 'x86'
-    foreach ($root in $roots) {
-        if (-not (Test-Path -LiteralPath $root)) { continue }
-        $versions = Get-ChildItem -LiteralPath $root -Directory |
-            Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } |
-            Sort-Object { [version]$_.Name } -Descending
-        foreach ($v in $versions) {
-            foreach ($a in $arches) {
-                $p = Join-Path $v.FullName (Join-Path $a $name)
-                if (Test-Path -LiteralPath $p) { return $p }
-            }
-        }
-    }
-    return $null
-}
+. (Join-Path $PSScriptRoot 'sdk-tools.ps1')
 
 function Invoke-Tool([string]$tool, [string[]]$arguments) {
     # A native tool's stderr must not stop the script before its exit code

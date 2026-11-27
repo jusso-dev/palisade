@@ -17,7 +17,12 @@
 //! (`os-sdk-package.ps1`), then requires this crate and the OS to agree
 //! on them, intact and with one byte changed.
 //!
-//! CI runs both on its Windows runners, where the APIs and the SDK are
+//! [`the_os_signer_computes_our_digest`] has the OS SDK's signing tool sign
+//! packages this crate's test builder lays out in each archive shape, and
+//! requires the digest that tool signs to equal [`signed_digest`] tag by
+//! tag, and the OS's verdict to equal ours.
+//!
+//! CI runs them on its Windows runners, where the APIs and the SDK are
 //! present: under CI a missing component fails the test. On a developer
 //! machine without them it says so and passes.
 
@@ -32,9 +37,11 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use appx::{AppxBuilder, PUBLISHER, ZipStyle, sdk_manifest};
+use palisade_fileid::authenticode::DigestAlgorithm;
 use palisade_fileid::package::zip::Archive;
 use palisade_fileid::package::{
-    PackageIdentity, PackageVersion, full_name, parse_package, publisher_id,
+    PackageIdentity, PackageVersion, full_name, parse_package, publisher_id, signed_digest,
 };
 
 const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/package");
@@ -344,4 +351,167 @@ fn local_data(data: &[u8], name: &str) -> usize {
         })
         .unwrap_or_else(|| panic!("no local header for {}", String::from_utf8_lossy(name)));
     at + name.len() + usize::from(u16::from_le_bytes([data[at - 2], data[at - 1]]))
+}
+
+/// The tagged digest entries (`AXPC`, `AXCD`, ...) of a package signature:
+/// the indirect data's digest, found by its `APPX` prefix.
+fn signature_digest(p7x: &[u8], len: usize) -> Option<Vec<([u8; 4], Vec<u8>)>> {
+    let at = p7x.windows(8).position(|w| w == b"APPXAXPC")? + 4;
+    let mut out = Vec::new();
+    let mut rest = &p7x[at..];
+    while rest.len() >= 4 + len
+        && [b"AXPC", b"AXCD", b"AXCT", b"AXBM", b"AXCI"]
+            .iter()
+            .any(|t| rest[..4] == t[..])
+    {
+        out.push((rest[..4].try_into().unwrap(), rest[4..4 + len].to_vec()));
+        rest = &rest[4 + len..];
+    }
+    Some(out)
+}
+
+/// `[tag, digest]` pairs of [`signed_digest`].
+fn our_digest(archive: &Archive<'_>) -> Vec<([u8; 4], Vec<u8>)> {
+    signed_digest(archive, DigestAlgorithm::Sha256)
+        .map(|d| {
+            d[4..]
+                .chunks(36)
+                .map(|c| (c[..4].try_into().unwrap(), c[4..].to_vec()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn hex(v: &[u8]) -> String {
+    v.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[test]
+fn the_os_signer_computes_our_digest() {
+    // The SDK probe's files and manifest (which the OS packaging tool
+    // accepts), with the test identity, laid out by the test builder.
+    let mut b = AppxBuilder::package();
+    b.files[0].data = sdk_manifest("Palisade.TestApp", PUBLISHER, "1.2.3.4", "x64").into_bytes();
+    b.files[1].name = "tool.exe".into();
+    b.files[1].data = common::PeBuilder::default().build();
+    let layouts: Vec<(&str, Vec<u8>)> = vec![
+        ("plain.msix", b.build()),
+        (
+            "descriptors.msix",
+            b.build_with(&ZipStyle {
+                descriptors: true,
+                ..ZipStyle::default()
+            }),
+        ),
+        (
+            "zip64-extras.msix",
+            b.build_with(&ZipStyle {
+                descriptors: true,
+                zip64: true,
+                ..ZipStyle::default()
+            }),
+        ),
+        (
+            "tool-layout.msix",
+            b.build_with(&ZipStyle::packaging_tool()),
+        ),
+        ("bundle.msixbundle", AppxBuilder::bundle().build()),
+    ];
+    let dir = Scratch::new("os-sign-layouts");
+    for (name, data) in &layouts {
+        std::fs::write(dir.0.join(name), data).unwrap();
+    }
+    let subject = PathBuf::from(PUBLISHER);
+    if !powershell(
+        "os-sdk-sign.ps1",
+        &[("-Dir", &dir.0), ("-Subject", &subject)],
+    ) {
+        return;
+    }
+    let log = std::fs::read_to_string(dir.0.join("sign.txt")).unwrap();
+    let log = log.trim_start_matches('\u{feff}').to_owned();
+
+    // Every layout signed, the signer's digest beside ours, tag by tag.
+    let mut report = String::new();
+    let mut problems = 0;
+    let mut signed: Vec<(String, Vec<u8>)> = Vec::new();
+    for (name, _) in &layouts {
+        let line = log
+            .lines()
+            .find(|l| l.split('\t').nth(1) == Some(*name))
+            .unwrap_or_else(|| panic!("{name} missing from the signing log:\n{log}"));
+        if line.starts_with("REFUSED") {
+            report.push_str(&format!("{line}\n"));
+            problems += 1;
+            continue;
+        }
+        let data = std::fs::read(dir.0.join(name)).unwrap();
+        let archive = match Archive::parse(&data) {
+            Ok(a) => a,
+            Err(e) => {
+                report.push_str(&format!(
+                    "{name}: signed by the OS tool, refused here: {e}\n"
+                ));
+                problems += 1;
+                continue;
+            }
+        };
+        let theirs = archive
+            .member("AppxSignature.p7x")
+            .and_then(|m| archive.read(m).ok())
+            .and_then(|p| signature_digest(&p, 32));
+        let ours = our_digest(&archive);
+        let Some(theirs) = theirs else {
+            report.push_str(&format!(
+                "{name}: no digest found in the OS tool's signature\n"
+            ));
+            problems += 1;
+            continue;
+        };
+        let tags = |v: &[([u8; 4], Vec<u8>)]| {
+            v.iter()
+                .map(|(t, _)| String::from_utf8_lossy(t).into_owned())
+                .collect::<Vec<_>>()
+        };
+        if tags(&theirs) != tags(&ours) {
+            report.push_str(&format!(
+                "{name}: tags differ: OS {:?}, ours {:?}\n",
+                tags(&theirs),
+                tags(&ours)
+            ));
+            problems += 1;
+        }
+        for ((tag, t), (_, o)) in theirs.iter().zip(&ours) {
+            if t != o {
+                problems += 1;
+            }
+            report.push_str(&format!(
+                "{name}: {} {} OS {} ours {}\n",
+                String::from_utf8_lossy(tag),
+                if t == o { "same" } else { "DIFFERS" },
+                hex(t),
+                hex(o)
+            ));
+        }
+        signed.push(((*name).to_owned(), data));
+    }
+    // The OS's verdict on what its own signer made, beside ours.
+    if let Some(os) = ask_os(&[], &signed) {
+        report.push_str(&os.text);
+        report.push('\n');
+        for (name, data) in &signed {
+            let code = os.code(name);
+            let ours = parse_package(data).map(|id| id.signature_valid());
+            let agree = ours.as_ref().is_ok_and(|v| *v == INTACT.contains(&code));
+            if !agree {
+                problems += 1;
+            }
+            report.push_str(&format!(
+                "{name}: OS {code:#010x}, ours {ours:?}{}\n",
+                if agree { "" } else { " DISAGREE" }
+            ));
+        }
+    }
+    eprintln!("{log}\n{report}");
+    assert_eq!(problems, 0, "{log}\n{report}");
 }
