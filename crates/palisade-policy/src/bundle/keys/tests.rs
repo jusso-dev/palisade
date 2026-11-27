@@ -116,3 +116,20 @@ fn published_keys_never_change() {
         "{GOLDEN} is stale. Regenerate it with:\n  PALISADE_BLESS=1 cargo test -p palisade-policy bundle::keys"
     );
 }
+
+#[test]
+fn every_key_is_from_format_version_one_so_far() {
+    // `k` is the constructor the table uses; a key added in a later format
+    // version will need its own `since`.
+    assert!(KEYS.iter().all(|key| key.since == 1));
+    assert_eq!(
+        k(7, "x"),
+        Key {
+            id: 7,
+            name: "x",
+            since: 1
+        }
+    );
+    assert!(k(0, "x").critical());
+    assert!(!k(-1, "x").critical());
+}

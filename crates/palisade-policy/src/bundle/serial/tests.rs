@@ -191,10 +191,20 @@ fn governance_metadata_cannot_be_written() {
     };
     assert!(to_value(&doc).is_ok());
     doc.policy.metadata.ticket_ref = Some("CHG-1".to_owned());
+    // First safeguard: the field `metadata` has no key.
     assert_eq!(
         to_value(&doc),
         Err(Error::UnregisteredKey("metadata".to_owned()))
     );
+    // Second safeguard, by type: `Metadata` is refused wherever it appears,
+    // even holding only a field whose name is a key elsewhere (`tags` is a
+    // key of `effects`, `source` of a signer criterion).
+    let tagged = crate::model::Metadata {
+        tags: vec!["finance".to_owned()],
+        ..crate::model::Metadata::default()
+    };
+    assert_eq!(to_value(&tagged), Err(Error::ServerOnly("Metadata")));
+    assert_eq!(to_value(&vec![tagged]), Err(Error::ServerOnly("Metadata")));
 }
 
 #[test]
@@ -421,4 +431,186 @@ fn malformed_shapes_are_refused() {
     let unit_with_content =
         Value::Map(cbor::Map::new(vec![(to_value(&Mode::Audit).unwrap(), Value::Null)]).unwrap());
     assert!(from_value::<Mode>(unit_with_content).is_err());
+}
+
+/// Shapes the policy model does not use today but serde can produce, so a
+/// model change that starts using one encodes and reads back correctly.
+/// Variant and field names are registered keys (`allow`, `deny`, `block`,
+/// `id`, `name`, `order`).
+mod shapes {
+    use ::serde::{Deserialize, Serialize};
+
+    use super::*;
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    enum Shape {
+        Allow(u8, String),
+        Deny { id: u8, name: String },
+        Block,
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    struct Unit;
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    struct Newtype(u32);
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    struct Pair(u8, u8);
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(untagged)]
+    enum Loose {
+        Pair { id: u8, order: u8 },
+        Number(u64),
+    }
+
+    #[derive(Debug, PartialEq, Deserialize)]
+    struct Partial {
+        id: u8,
+        #[serde(skip_deserializing, default)]
+        order: u8,
+    }
+
+    #[test]
+    fn tuple_struct_unit_and_newtype_shapes_round_trip() {
+        for s in [
+            Shape::Allow(1, "a".to_owned()),
+            Shape::Deny {
+                id: 2,
+                name: "b".to_owned(),
+            },
+            Shape::Block,
+        ] {
+            assert_eq!(round_trip(&s), s);
+        }
+        let Value::Map(m) = to_value(&Shape::Allow(1, "a".to_owned())).unwrap() else {
+            panic!("a tuple variant is a one-entry map");
+        };
+        assert_eq!(
+            m.get(&Value::int(keys::id("allow").unwrap())).map(|_| ()),
+            Some(())
+        );
+        assert_eq!(round_trip(&Unit), Unit);
+        assert_eq!(to_value(&Unit).unwrap(), Value::Null);
+        assert_eq!(round_trip(&Newtype(7)), Newtype(7));
+        assert_eq!(to_value(&Newtype(7)).unwrap(), Value::Uint(7));
+        assert_eq!(round_trip(&Pair(1, 2)), Pair(1, 2));
+    }
+
+    #[test]
+    fn variants_with_unregistered_names_cannot_be_written() {
+        #[derive(Serialize)]
+        enum Novel {
+            BrandNewTuple(u8, u8),
+            BrandNewStruct { id: u8 },
+        }
+        assert_eq!(
+            to_value(&Novel::BrandNewTuple(1, 2)),
+            Err(Error::UnregisteredKey("BrandNewTuple".to_owned()))
+        );
+        assert_eq!(
+            to_value(&Novel::BrandNewStruct { id: 1 }),
+            Err(Error::UnregisteredKey("BrandNewStruct".to_owned()))
+        );
+    }
+
+    #[test]
+    fn variant_content_must_have_the_variants_shape() {
+        let deny = Value::int(keys::id("deny").unwrap());
+        let block = Value::int(keys::id("block").unwrap());
+        let one = |k: Value, v: Value| Value::Map(cbor::Map::new(vec![(k, v)]).unwrap());
+        // A struct variant whose content is not a map.
+        assert!(from_value::<Shape>(one(deny, Value::Uint(1))).is_err());
+        // A unit variant with content, and a tuple variant with none.
+        assert!(from_value::<Shape>(one(block, Value::Null)).is_err());
+        assert!(from_value::<Shape>(Value::int(keys::id("allow").unwrap())).is_err());
+    }
+
+    #[test]
+    fn buffered_enums_read_maps_with_registered_keys_by_name() {
+        // An untagged enum is buffered: its map keys arrive as IDs and are
+        // given to serde as names; a number is read as itself.
+        let v = Loose::Pair { id: 1, order: 2 };
+        assert_eq!(round_trip(&v), v);
+        assert_eq!(round_trip(&Loose::Number(9)), Loose::Number(9));
+        // In a buffered map, an unknown critical key is still refused and an
+        // unknown ignorable one skipped.
+        let Value::Map(m) = to_value(&v).unwrap() else {
+            panic!("a struct is a map")
+        };
+        let mut entries = m.into_entries();
+        entries.push((Value::int(-900), Value::Null));
+        let fine = Value::Map(cbor::Map::new(entries.clone()).unwrap());
+        assert_eq!(from_value::<Loose>(fine).unwrap(), v);
+        entries.push((Value::int(unused_critical_id()), Value::Null));
+        let bad = Value::Map(cbor::Map::new(entries).unwrap());
+        assert!(from_value::<Loose>(bad).is_err());
+    }
+
+    #[test]
+    fn ignored_fields_negative_numbers_and_bytes_read_back() {
+        // A field the reader skips is read with `deserialize_ignored_any`.
+        let id = Value::int(keys::id("id").unwrap());
+        let order = Value::int(keys::id("order").unwrap());
+        let v = Value::Map(
+            cbor::Map::new(vec![(id, Value::Uint(3)), (order, Value::Text("x".into()))]).unwrap(),
+        );
+        assert_eq!(
+            from_value::<Partial>(v).unwrap(),
+            Partial { id: 3, order: 0 }
+        );
+        // Beyond i64 a negative number reads as i128.
+        assert_eq!(
+            from_value::<i128>(Value::Nint(u64::MAX)).unwrap(),
+            -1 - i128::from(u64::MAX)
+        );
+        assert_eq!(round_trip(&-1_i128), -1);
+        assert_eq!(round_trip(&(u64::MAX as u128)), u128::from(u64::MAX));
+        // Bytes read into an owned buffer.
+        struct Buf(Vec<u8>);
+        impl<'de> Deserialize<'de> for Buf {
+            fn deserialize<D: ::serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                struct V;
+                impl ::serde::de::Visitor<'_> for V {
+                    type Value = Buf;
+                    fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                        f.write_str("bytes")
+                    }
+                    fn visit_byte_buf<E: ::serde::de::Error>(self, v: Vec<u8>) -> Result<Buf, E> {
+                        Ok(Buf(v))
+                    }
+                }
+                d.deserialize_byte_buf(V)
+            }
+        }
+        assert_eq!(
+            from_value::<Buf>(Value::Bytes(vec![1, 2])).unwrap().0,
+            [1, 2]
+        );
+    }
+
+    #[test]
+    fn single_precision_floats_are_refused_both_ways() {
+        assert_eq!(to_value(&1.5f32), Err(Error::Float));
+        assert_eq!(from_value::<f32>(Value::Uint(1)), Err(Error::Float));
+    }
+
+    #[test]
+    fn a_struct_or_newtype_given_a_scalar_is_read_as_that_scalar() {
+        // A struct or map read from something that is not a map falls back
+        // to the value's own shape, so serde reports the type mismatch.
+        assert!(from_value::<PolicySettings>(Value::Uint(1)).is_err());
+        assert!(from_value::<std::collections::BTreeMap<u8, u8>>(Value::Uint(1)).is_err());
+        assert!(from_value::<Mode>(Value::Text("enforce".to_owned())).is_err());
+    }
+
+    #[test]
+    fn serde_errors_carry_their_message() {
+        let e = <Error as ::serde::ser::Error>::custom("from a serializer");
+        assert_eq!(e, Error::Message("from a serializer".to_owned()));
+        let e = <Error as ::serde::de::Error>::custom("from a deserializer");
+        assert_eq!(e.to_string(), "from a deserializer");
+    }
 }
