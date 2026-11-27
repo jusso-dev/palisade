@@ -127,6 +127,7 @@
     - [0016. Server database, tenant isolation and tenant scope binding](../../adr/0016-server-database-and-tenant-scope.md)
     - [0017. Cryptographic algorithms, libraries and AEAD nonces](../../adr/0017-cryptographic-algorithms-and-nonces.md)
     - [0018. Fail-open versus fail-closed defaults, revised](../../adr/0018-fail-open-vs-fail-closed-defaults-revised.md)
+    - [0019. Contributor sign-off: DCO, no CLA](../../adr/0019-contributor-sign-off-dco.md)
 <!-- adr:end -->
 
 # Security
