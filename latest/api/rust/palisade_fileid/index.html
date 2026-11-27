@@ -960,8 +960,8 @@ blocking read; running it in a worker off the identity hot path is the
 caller’s job, and the agent’s worker is still to come (#4, #59, #60).</li>
 <li><code>os-trust</code> (off by default): builds <code>palisade_fileid::win</code> on Windows. It
 adds OS-backed reads and never changes what the portable code reports. It
-has no effect on other targets. The agent, and the CLI for local
-diagnostics, are its intended users; neither depends on this crate yet.</li>
+has no effect on other targets. The agent enables it on Windows (account
+names for its identity backend, #29); the CLI may, for local diagnostics.</li>
 </ul>
 <h3 id="stability"><a class="doc-anchor" href="#stability">§</a>Stability</h3>
 <p>Unstable and not published. Anything may change.</p>

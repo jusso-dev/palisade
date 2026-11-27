@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-88de3d97.js";
+            window.path_to_searchindex_js = "../searchindex-b2a2f4eb.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-de2a680a.js"></script>
@@ -214,6 +214,8 @@ and the workspace <code>[lints]</code>, and takes every dependency from <code>[w
 <p>The workspace sets <code>unsafe_code = "deny"</code> (ADR 0011 lowered it from <code>forbid</code> when the first FFI
 module, <code>palisade_fileid::win::trust</code>, landed), so any <code>unsafe</code> fails to compile unless the file
 relaxes the lint. Every crate root without an allowlisted module keeps <code>#![forbid(unsafe_code)]</code>.
+A crate with one (<code>palisade-fileid</code>, <code>palisade-agent</code>) cannot, since <code>forbid</code> cannot be relaxed,
+so each of its other modules forbids it instead.
 Only these locations may relax the lint:</p>
 <ul>
 <li><code>palisade_agent::ffi</code> and its submodules (<code>crates/palisade-agent/src/ffi.rs</code> or <code>ffi/</code>)</li>
@@ -234,6 +236,8 @@ locations above;</li>
 <code>-cli</code> or <code>xtask</code> does not start with <code>#![forbid(unsafe_code)]</code> (a <code>forbid</code> inside a nested
 module or function does not count, and neither does a tool path such as
 <code>forbid(clippy::unsafe_code)</code>);</li>
+<li>in <code>palisade-agent</code> or <code>palisade-fileid</code>, whose roots cannot forbid it, a top-level module
+outside the locations above does not start with <code>#![forbid(unsafe_code)]</code>;</li>
 <li>the workspace level is anything but <code>forbid</code> or <code>deny</code>, or the lint is set twice under both
 spellings (<code>unsafe_code</code> and <code>unsafe-code</code>);</li>
 <li>a Cargo config file in the repository (<code>.cargo/config.toml</code>, or the legacy <code>.cargo/config</code>, in

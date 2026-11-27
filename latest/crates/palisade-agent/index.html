@@ -36,7 +36,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-88de3d97.js";
+            window.path_to_searchindex_js = "../../searchindex-b2a2f4eb.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-de2a680a.js"></script>
@@ -230,13 +230,27 @@ the real implementations:</p>
 <tr><td><code>FileSystem</code></td><td><code>StdFileSystem</code></td><td>Reads, size and times on every OS, opened so other processes can keep writing and deleting. Owner SID, security descriptor, streams, file ID and USN report <code>Unsupported</code> until they are read through <code>palisade_fileid::win</code> (#54) for the file inventory (#60)</td></tr>
 <tr><td><code>Environment</code></td><td><code>StdEnvironment</code></td><td>Variables, architecture and interface addresses everywhere; host name, domain and OS version from the OS on Windows. The connection type is <code>Unknown</code> until network location (#38) defines it</td></tr>
 <tr><td><code>Registry</code></td><td><code>windows::WindowsRegistry</code></td><td>Done, on Windows</td></tr>
-<tr><td><code>IdentityProvider</code>, <code>ProcessInfo</code>, <code>SignatureVerifier</code></td><td></td><td>With the process tracker (#59), which reads tokens and resolves each image's identity</td></tr>
+<tr><td><code>IdentityProvider</code></td><td><code>windows::WindowsIdentity</code></td><td>On Windows: a process's token (user, groups with deny-only flags, session ID and kind, integrity level, elevation type and state), account names, local group members by SID, and the directory group cache (filled by the directory sync, #38)</td></tr>
+<tr><td><code>ProcessInfo</code></td><td><code>windows::WindowsProcesses</code></td><td>On Windows: process records keyed by process ID and creation time, with parent ID, image path and command line, read through one handle</td></tr>
+<tr><td><code>SignatureVerifier</code></td><td></td><td>Next, through <code>palisade_fileid</code></td></tr>
 </tbody>
 </table>
 </div>
+<p>The Windows identity and process backends fail closed
+(<a href="../../docs/adr/0018-fail-open-vs-fail-closed-defaults-revised.html">ADR 0018</a>). A token is read
+in full or not at all: if the OS refuses its user, groups, integrity level or elevation type, the
+query fails instead of returning a token with a part guessed, so a failed elevation query never
+reads as "not elevated". Only the session kind falls back: session 0 is always <code>Services</code>, whatever the protocol query says, and a non-zero session whose protocol cannot be read is <code>Unknown</code>, never <code>Console</code>. A
+group that is in a token but not enabled is reported as deny-only, like a group UAC filtered,
+since the OS does not use it to grant access. A process that has exited is <code>NotFound</code>, even
+while a handle keeps its object alive, and a process key whose creation time does not match the
+process now using its ID is <code>NotFound</code> too, so a reused process ID is never read as the process
+it replaced. A local group's members are listed only if the SID names a local group whose name
+resolves back to the same SID: the bare name the OS enumerates by must itself be a local group with that SID, so a local group that only shares a domain group's name is never listed in its place. An account name lookup that fails for any reason other than "no such account" is an error, not <code>None</code>.</p>
 <p>Each implementation passes the same contract checks as the mocks
 (<code>palisade_core::test_util::contract</code>), in <code>tests/platform.rs</code>, on every CI runner. The Windows
-registry and environment tests run on the Windows runners.</p>
+registry, environment, identity and process tests run on the Windows runners, against the
+test process itself and its token.</p>
 <h2 id="the-fake-agent"><a class="header" href="#the-fake-agent">The fake agent</a></h2>
 <p><code>palisade-agent --simulate</code>, in a build with the <code>test-util</code> feature, replays a scripted scenario
 on the mock platform and writes the agent's events to standard output, one canonical JSON event
@@ -290,11 +304,13 @@ signer = "Example OS Publisher"         # optional: the image's signature publis
 </code></pre>
 <h2 id="allowed-dependencies"><a class="header" href="#allowed-dependencies">Allowed dependencies</a></h2>
 <p><code>palisade-core</code>, <code>palisade-fileid</code>, <code>palisade-policy</code>, <code>palisade-proto</code>. Must never depend on <code>palisade-server</code> or any HTTP server or database stack. The rules are enforced by <code>cargo xtask check-deps</code>.</p>
-<p>Third-party: <code>tokio</code> (the only async runtime, ADR 0009), <code>tracing</code> and <code>tracing-subscriber</code> (logging), <code>serde</code> and <code>toml</code> (configuration), <code>if-addrs</code> (interface addresses, as in the server), and, on Windows only, <code>windows-service</code> (the safe service control manager API), <code>windows-registry</code> (safe registry reads) and <code>windows-version</code> (the running OS version). With <code>test-util</code> only: <code>palisade-proto</code> (the event schema) and <code>sha2</code> (the simulator's placeholder chain).</p>
+<p>Workspace: <code>palisade-fileid</code>, for SIDs, and on Windows with its <code>os-trust</code> feature, for account names (ADR 0003: the agent is the crate that enables it).</p>
+<p>Third-party: <code>tokio</code> (the only async runtime, ADR 0009), <code>tracing</code> and <code>tracing-subscriber</code> (logging), <code>serde</code> and <code>toml</code> (configuration), <code>if-addrs</code> (interface addresses, as in the server), and, on Windows only, <code>windows-service</code> (the safe service control manager API), <code>windows-registry</code> (safe registry reads), <code>windows-version</code> (the running OS version) and <code>windows-sys</code> (the process, token, session and local-group calls in <code>ffi</code>). With <code>test-util</code> only: <code>palisade-proto</code> (the event schema) and <code>sha2</code> (the simulator's placeholder chain).</p>
 <h2 id="unsafe-code"><a class="header" href="#unsafe-code">Unsafe code</a></h2>
-<p>None. The crate root is <code>#![forbid(unsafe_code)]</code>. The service entry point is written by hand, not with the wrapper crate's macro, which expands to <code>unsafe</code>. The registry and OS version are read through safe wrapper crates. FFI that needs <code>unsafe</code> will go in <code>palisade_agent::ffi</code> (<a href="../../docs/adr/0011-msrv-and-unsafe-code-policy.html">ADR 0011</a>).</p>
+<p>Only in <code>ffi</code> (Windows only), the one file listed in <a href="https://github.com/jusso-dev/palisade/blob/main/unsafe-allowlist.txt"><code>unsafe-allowlist.txt</code></a> (<a href="../../docs/adr/0011-msrv-and-unsafe-code-policy.html">ADR 0011</a>). It wraps the process, token, session, account and local-group calls once, each <code>unsafe</code> block with a <code>// SAFETY:</code> comment, owns every buffer it hands to the OS, closes every handle on drop, and returns raw bytes for variable-length records. The portable <code>platform::nt</code> decodes those records without <code>unsafe</code> code, checking every pointer inside a record against the record's bounds, and its tests run on every OS.</p>
+<p>The library root cannot say <code>#![forbid(unsafe_code)]</code>, because <code>forbid</code> cannot be relaxed by <code>ffi</code>, so it keeps the workspace's <code>deny</code>, and every other module, and the binary root, forbids unsafe code itself. The service entry point is written by hand, not with the wrapper crate's macro, which expands to <code>unsafe</code>. The registry and OS version are read through safe wrapper crates.</p>
 <h2 id="platform-support"><a class="header" href="#platform-support">Platform support</a></h2>
-<p>The service host is platform-independent and builds and tests on Linux, other desktop OS and Windows. <code>--console</code> and <code>--simulate</code> work everywhere. <code>--service</code> and the registry backend are Windows only; elsewhere <code>--service</code> exits with an error.</p>
+<p>The service host is platform-independent and builds and tests on Linux, other desktop OS and Windows. <code>--console</code> and <code>--simulate</code> work everywhere. <code>--service</code> and the registry, identity and process backends are Windows only; elsewhere <code>--service</code> exits with an error.</p>
 <h2 id="feature-flags"><a class="header" href="#feature-flags">Feature flags</a></h2>
 <ul>
 <li><code>test-util</code>: the fake agent (<code>--simulate</code>) and the <code>simulate</code> module, built on <code>palisade-core</code>'s platform mocks. For development builds only, never a release build (<a href="../../docs/workspace.html#feature-flags">docs/workspace.md</a>). Without it, <code>--simulate</code> exits with a message saying how to build it.</li>

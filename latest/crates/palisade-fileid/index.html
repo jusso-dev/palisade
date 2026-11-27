@@ -36,7 +36,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-88de3d97.js";
+            window.path_to_searchindex_js = "../../searchindex-b2a2f4eb.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-de2a680a.js"></script>
@@ -1149,8 +1149,8 @@ blocking read; running it in a worker off the identity hot path is the
 caller's job, and the agent's worker is still to come (#4, #59, #60).</li>
 <li><code>os-trust</code> (off by default): builds <code>palisade_fileid::win</code> on Windows. It
 adds OS-backed reads and never changes what the portable code reports. It
-has no effect on other targets. The agent, and the CLI for local
-diagnostics, are its intended users; neither depends on this crate yet.</li>
+has no effect on other targets. The agent enables it on Windows (account
+names for its identity backend, #29); the CLI may, for local diagnostics.</li>
 </ul>
 <h2 id="stability"><a class="header" href="#stability">Stability</a></h2>
 <p>Unstable and not published. Anything may change.</p>
