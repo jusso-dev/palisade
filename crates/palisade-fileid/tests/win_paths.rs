@@ -132,6 +132,9 @@ fn share(tag: &str) -> Share {
     share
 }
 
+/// No DFS lookup.
+const NO_DFS: Option<&mut DfsCache<OsDfs>> = None;
+
 /// A fake namespace `\\corp\dfs\apps` whose one link leads to `target`.
 struct FakeNamespace(NormalizedPath);
 
@@ -154,7 +157,7 @@ fn mapped_drive_short_name_and_dfs_reach_one_canonical_form() {
 
     // The long UNC path itself.
     let f = File::open(&long_unc).unwrap();
-    let forms = read_path_forms(&long_unc, &f, None);
+    let forms = read_path_forms(&long_unc, &f, NO_DFS);
     assert_eq!(forms.network_key().as_deref(), Some(expected.as_str()));
     assert!(matches!(
         forms.final_path.as_ref().unwrap().root(),
@@ -164,7 +167,7 @@ fn mapped_drive_short_name_and_dfs_reach_one_canonical_form() {
     // A short-name spelling of it.
     let short_unc = format!(r"\\localhost\{}\LONGSU~9\tool.exe", s.name);
     let f = File::open(&short_unc).unwrap();
-    let forms = read_path_forms(&short_unc, &f, None);
+    let forms = read_path_forms(&short_unc, &f, NO_DFS);
     assert!(forms.normalized.as_ref().unwrap().match_key().is_err());
     assert_eq!(forms.network_key().as_deref(), Some(expected.as_str()));
     assert_eq!(forms.lexical_key().as_deref(), Some(expected.as_str()));
@@ -174,7 +177,7 @@ fn mapped_drive_short_name_and_dfs_reach_one_canonical_form() {
     let n = normalize_win32(&mapped).unwrap();
     assert_eq!(mapped_drive_unc(&n).unwrap().match_key().unwrap(), expected);
     let f = File::open(&mapped).unwrap();
-    let ctx = read_context(&mapped, &f, None);
+    let ctx = read_context(&mapped, &f, NO_DFS);
     assert_eq!(ctx.path.network_key().as_deref(), Some(expected.as_str()));
     assert_eq!(
         ctx.path.dos_path.as_ref().unwrap().match_key().unwrap(),
@@ -189,7 +192,7 @@ fn mapped_drive_short_name_and_dfs_reach_one_canonical_form() {
     // The mapped drive and a short name together.
     let both = format!(r"{drive}:\LONGSU~9\tool.exe");
     let f = File::open(&both).unwrap();
-    let forms = read_path_forms(&both, &f, None);
+    let forms = read_path_forms(&both, &f, NO_DFS);
     assert_eq!(forms.network_key().as_deref(), Some(expected.as_str()));
 
     // A DFS namespace path whose link leads to the share (fake namespace,
@@ -201,6 +204,33 @@ fn mapped_drive_short_name_and_dfs_reach_one_canonical_form() {
         DfsOutcome::Resolved(t) => assert_eq!(t.match_key().unwrap(), expected),
         other => panic!("{other:?}"),
     }
+    // Through the public API: a file opened from the share, named by its
+    // namespace path. `read_path_forms` looks the UNC form up in the cache
+    // and `network_key` gives the target's key.
+    let f = File::open(&long_unc).unwrap();
+    let ns_text = r"\\corp\dfs\apps\Long Sub Folder\tool.exe";
+    let forms = read_path_forms(ns_text, &f, Some(&mut dfs));
+    assert!(
+        matches!(forms.dfs, Some(DfsOutcome::Resolved(_))),
+        "{forms:?}"
+    );
+    assert_eq!(forms.network_key().as_deref(), Some(expected.as_str()));
+    let ctx = read_context(ns_text, &f, Some(&mut dfs));
+    assert_eq!(ctx.path.network_key().as_deref(), Some(expected.as_str()));
+    // A namespace whose server does not answer leaves no network key.
+    let mut dead = DfsCache::new(DeadNamespace);
+    let forms = read_path_forms(ns_text, &f, Some(&mut dead));
+    assert!(forms.dfs_unresolved(), "{forms:?}");
+    assert_eq!(forms.network_key(), None);
+}
+
+/// A namespace server that always fails.
+struct DeadNamespace;
+
+impl DfsResolver for DeadNamespace {
+    fn referral(&self, _: &NormalizedPath) -> io::Result<Option<DfsReferral>> {
+        Err(io::Error::other("namespace server unreachable"))
+    }
 }
 
 #[test]
@@ -211,7 +241,7 @@ fn local_paths_have_nt_and_guid_forms_and_no_network_form() {
     // `%TEMP%` on the runners holds an 8.3 short name.
     let text = file.to_str().unwrap().to_owned();
     let f = File::open(&file).unwrap();
-    let ctx = read_context(&text, &f, None);
+    let ctx = read_context(&text, &f, NO_DFS);
     let p = &ctx.path;
     assert!(p.nt_path.is_some() && p.volume_guid_path.is_some() && p.final_path.is_some());
     assert_eq!(p.lexical_key(), p.case_folded(), "{p:?}");

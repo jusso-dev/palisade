@@ -103,12 +103,14 @@ fn final_form(file: &File, flags: u32) -> Option<NormalizedPath> {
 }
 
 /// Every form of the path of `file`, opened from `original`. See the
-/// module documentation. `dfs` resolves `dfs_target` when given.
+/// module documentation. `dfs` resolves `dfs_target` when given, and its
+/// outcome is kept in `PathForms::dfs`. Pass `None::<&mut DfsCache<OsDfs>>`
+/// for no DFS lookup.
 #[must_use]
-pub fn read_path_forms(
+pub fn read_path_forms<R: DfsResolver>(
     original: &str,
     file: &File,
-    dfs: Option<&mut DfsCache<OsDfs>>,
+    dfs: Option<&mut DfsCache<R>>,
 ) -> PathForms {
     let mut forms = PathForms::from_original(original);
     if let Ok(n) = &forms.normalized {
@@ -144,9 +146,13 @@ pub fn read_path_forms(
                 .filter(|p| matches!(p.root(), Root::Unc { .. }))
         });
         if let Some(u) = unc {
-            if let DfsOutcome::Resolved(t) = cache.resolve(&u) {
-                forms.dfs_target = Some(t);
+            // The outcome is kept whatever it is, so a timeout or failure
+            // is never mistaken for "not DFS" (see `PathForms::network_key`).
+            let outcome = cache.resolve(&u);
+            if let DfsOutcome::Resolved(t) = &outcome {
+                forms.dfs_target = Some(t.clone());
             }
+            forms.dfs = Some(outcome);
         }
     }
     forms
@@ -155,7 +161,11 @@ pub fn read_path_forms(
 /// The path forms and the volume of `file`, opened from `original`. The
 /// other attributes stay `None` for the caller to fill.
 #[must_use]
-pub fn read_context(original: &str, file: &File, dfs: Option<&mut DfsCache<OsDfs>>) -> FsContext {
+pub fn read_context<R: DfsResolver>(
+    original: &str,
+    file: &File,
+    dfs: Option<&mut DfsCache<R>>,
+) -> FsContext {
     let mut ctx = FsContext::from_path(original);
     ctx.path = read_path_forms(original, file, dfs);
     ctx.volume = Some(super::volume::read_volume_opened_as(original, file));
@@ -171,7 +181,7 @@ mod tests {
         let windir = sys::windows_directory().unwrap();
         let path = format!(r"{windir}\System32\cmd.exe");
         let file = File::open(&path).unwrap();
-        let forms = read_path_forms(&path, &file, None);
+        let forms = read_path_forms(&path, &file, None::<&mut DfsCache<OsDfs>>);
         let nt = forms.nt_path.as_ref().unwrap();
         assert!(
             matches!(nt.root(), Root::NtDevice(d) if d.to_ascii_lowercase().starts_with("harddiskvolume")),

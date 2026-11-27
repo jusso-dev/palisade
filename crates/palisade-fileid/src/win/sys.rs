@@ -578,8 +578,9 @@ unsafe fn read_pwstr(p: *const u16) -> Option<String> {
 }
 
 /// The DFS referral that covers `path` (`NetDfsGetClientInfo`, level 3):
-/// the entry path and the first active target as `\\server\share`.
-/// `Ok(None)` if `path` is not in a DFS namespace. May block on the network.
+/// the entry path and the active target as `\\server\share`. `Ok(None)` if
+/// `path` is not in a DFS namespace, and an error if no storage is marked
+/// active. May block on the network.
 pub(crate) fn dfs_client_info(path: &str) -> io::Result<Option<(String, String)>> {
     let w = wide(path)?;
     let mut buf: *mut u8 = std::ptr::null_mut();
@@ -621,12 +622,17 @@ pub(crate) fn dfs_client_info(path: &str) -> io::Result<Option<(String, String)>
             return Ok(None);
         }
         let storages: &[DFS_STORAGE_INFO] = std::slice::from_raw_parts(info.Storage, n);
-        let active = storages
+        // Only the storage the client marked active is its target. The
+        // `DFS_STORAGE_INFO` reference says "It is possible that no targets
+        // will be marked active"; another storage is then not the client's
+        // target, so the lookup is unresolved, never a guessed target.
+        let Some(s) = storages
             .iter()
             .find(|s| s.State & DFS_STORAGE_STATE_ACTIVE != 0)
-            .or_else(|| storages.first());
-        let Some(s) = active else {
-            return Ok(None);
+        else {
+            return Err(io::Error::other(
+                "DFS referral has no active target in the client cache",
+            ));
         };
         match (read_pwstr(s.ServerName), read_pwstr(s.ShareName)) {
             (Some(server), Some(share)) => Ok(Some((entry, format!(r"\\{server}\{share}")))),

@@ -11,17 +11,27 @@
 //!   lookup that times out keeps running on its own thread, so at most
 //!   [`DfsCache::max_in_flight`] such threads exist at once; past that, a
 //!   new lookup is reported as timed out without starting;
-//! - caches each referral (namespace prefix to target) for
-//!   [`DfsCache::ttl`], and each failure or "not DFS" answer per share for
-//!   [`DfsCache::negative_ttl`], so a slow or missing server is not asked
-//!   again on every file;
+//! - caches referrals for [`DfsCache::ttl`], and "not DFS", timeouts and
+//!   failures for [`DfsCache::negative_ttl`];
 //! - follows a target that is itself in a namespace up to [`MAX_HOPS`]
 //!   times.
 //!
-//! A cached referral answers for every path under its entry. DFS does not
-//! allow a link below another link in one namespace, so no deeper referral
-//! can be missed that way; a link whose target is another namespace is a
-//! further hop.
+//! What a cached answer may stand for is limited, so two spellings of one
+//! file never resolve differently because of what was asked first:
+//!
+//! - A **link** referral (`\\domain\dfs\apps`) answers for every path
+//!   under its entry: DFS does not allow a link below another link in one
+//!   namespace. A link whose target is another namespace is a further hop.
+//! - A **root** referral (`\\domain\dfs` itself) answers only for the path
+//!   that was looked up. Links live below the root, so a cached root must
+//!   not stand in for an unseen descendant, which may be under a link.
+//! - "Not DFS" is cached for the path that was looked up, never for its
+//!   share: one path outside every link says nothing about another path
+//!   on the same share. No resolver gives share-wide evidence today. So
+//!   each new file reached through a link costs one lookup of its target
+//!   path, to see that the target is final.
+//! - A timeout or failure is cached for the whole share, so a slow or dead
+//!   server is not asked again on every file.
 //!
 //! A timeout or failure is reported as such, never as "not DFS": a caller
 //! must not treat an unresolved namespace path as matching no rule.
@@ -51,6 +61,16 @@ pub struct DfsReferral {
     pub target: NormalizedPath,
 }
 
+impl DfsReferral {
+    /// Whether this is the referral of a namespace root (`\\domain\dfs`,
+    /// an entry with no folder below the share) rather than of a link.
+    /// See the module documentation for what each may be cached for.
+    #[must_use]
+    pub fn is_root(&self) -> bool {
+        self.entry.components().is_empty()
+    }
+}
+
 /// The OS lookup behind a [`DfsCache`].
 pub trait DfsResolver: Send + Sync + 'static {
     /// The referral that covers the UNC path `path`, or `Ok(None)` if it
@@ -71,12 +91,27 @@ pub enum DfsOutcome {
     Failed(String),
 }
 
-/// A cached negative answer for one share.
+/// A cached timeout or failure, for a share.
 #[derive(Debug, Clone)]
 enum Negative {
-    NotDfs,
     TimedOut,
     Failed(String),
+}
+
+/// A cached answer for exactly one looked-up path.
+#[derive(Debug, Clone)]
+enum Exact {
+    /// The namespace root's referral.
+    Root(Box<DfsReferral>),
+    /// Not in a namespace.
+    NotDfs,
+}
+
+/// A key in the eviction order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Slot {
+    Share(String),
+    Path(String),
 }
 
 /// Timed, cached DFS resolution. See the module documentation.
@@ -86,15 +121,20 @@ pub struct DfsCache<R: DfsResolver> {
     pub timeout: Duration,
     /// How long a referral is kept.
     pub ttl: Duration,
-    /// How long a "not DFS", timeout or failure is kept, per share.
+    /// How long a "not DFS" (per path), timeout or failure (per share) is
+    /// kept.
     pub negative_ttl: Duration,
     /// The most timed-out lookups left running at once.
     pub max_in_flight: usize,
-    /// The most entries kept (referrals and negatives together).
+    /// The most entries kept (of every kind together).
     pub max_entries: usize,
+    /// Link referrals, each covering every path under its entry.
     referrals: Vec<(Instant, DfsReferral)>,
+    /// Answers for exactly one path, by its folded form.
+    exact: HashMap<String, (Instant, Exact)>,
+    /// Timeouts and failures, by folded share.
     negatives: HashMap<String, (Instant, Negative)>,
-    order: VecDeque<String>,
+    order: VecDeque<Slot>,
     in_flight: Arc<AtomicUsize>,
 }
 
@@ -103,6 +143,7 @@ impl<R: DfsResolver> std::fmt::Debug for DfsCache<R> {
         f.debug_struct("DfsCache")
             .field("timeout", &self.timeout)
             .field("referrals", &self.referrals.len())
+            .field("exact", &self.exact.len())
             .field("negatives", &self.negatives.len())
             .finish_non_exhaustive()
     }
@@ -138,6 +179,7 @@ impl<R: DfsResolver> DfsCache<R> {
             max_in_flight: 4,
             max_entries: 1024,
             referrals: Vec::new(),
+            exact: HashMap::new(),
             negatives: HashMap::new(),
             order: VecDeque::new(),
             in_flight: Arc::new(AtomicUsize::new(0)),
@@ -147,6 +189,7 @@ impl<R: DfsResolver> DfsCache<R> {
     /// Drops every cached answer.
     pub fn clear(&mut self) {
         self.referrals.clear();
+        self.exact.clear();
         self.negatives.clear();
         self.order.clear();
     }
@@ -163,8 +206,8 @@ impl<R: DfsResolver> DfsCache<R> {
         for hop in 0..=MAX_HOPS {
             match self.step(&current, now) {
                 Ok(Some(next)) => current = next,
-                Ok(None) | Err(Negative::NotDfs) if hop == 0 => return DfsOutcome::NotDfs,
-                Ok(None) | Err(Negative::NotDfs) => return DfsOutcome::Resolved(current),
+                Ok(None) if hop == 0 => return DfsOutcome::NotDfs,
+                Ok(None) => return DfsOutcome::Resolved(current),
                 Err(Negative::TimedOut) => return DfsOutcome::TimedOut,
                 Err(Negative::Failed(e)) => return DfsOutcome::Failed(e),
             }
@@ -182,7 +225,8 @@ impl<R: DfsResolver> DfsCache<R> {
         let Some(share) = share_key(path) else {
             return Ok(None);
         };
-        // Fresh referrals only; the longest covering entry wins.
+        // A fresh link referral covers every path under it; the longest
+        // covering entry wins.
         self.referrals
             .retain(|(at, _)| now.saturating_duration_since(*at) < self.ttl);
         let hit = self
@@ -194,51 +238,84 @@ impl<R: DfsResolver> DfsCache<R> {
         if let Some(r) = hit {
             return rebase(path, &r);
         }
+        let key = path.case_folded();
+        if let Some((at, answer)) = self.exact.get(&key) {
+            let ttl = match answer {
+                Exact::Root(_) => self.ttl,
+                Exact::NotDfs => self.negative_ttl,
+            };
+            if now.saturating_duration_since(*at) < ttl {
+                return match answer.clone() {
+                    Exact::Root(r) => rebase(path, &r),
+                    Exact::NotDfs => Ok(None),
+                };
+            }
+        }
         if let Some((at, neg)) = self.negatives.get(&share) {
             if now.saturating_duration_since(*at) < self.negative_ttl {
-                return match neg {
-                    Negative::NotDfs => Ok(None),
-                    other => Err(other.clone()),
-                };
+                return Err(neg.clone());
             }
         }
         match self.lookup(path) {
             Ok(Some(r)) if path.starts_with(&r.entry) => {
-                self.remember(share, None);
-                self.referrals.push((now, r.clone()));
+                if r.is_root() {
+                    self.remember(
+                        Slot::Path(key),
+                        Some((now, Exact::Root(Box::new(r.clone())))),
+                        None,
+                    );
+                } else {
+                    self.referrals.push((now, r.clone()));
+                    self.remember(Slot::Path(key), None, None);
+                }
                 rebase(path, &r)
             }
             Ok(Some(_)) => {
                 let neg = Negative::Failed("DFS referral does not cover the path".into());
-                self.remember(share, Some((now, neg.clone())));
+                self.remember(Slot::Share(share), None, Some((now, neg.clone())));
                 Err(neg)
             }
             Ok(None) => {
-                self.remember(share, Some((now, Negative::NotDfs)));
+                self.remember(Slot::Path(key), Some((now, Exact::NotDfs)), None);
                 Ok(None)
             }
             Err(neg) => {
-                self.remember(share, Some((now, neg.clone())));
+                self.remember(Slot::Share(share), None, Some((now, neg.clone())));
                 Err(neg)
             }
         }
     }
 
-    /// Records a negative answer for `share` (or, with `None`, only
-    /// counts a referral), evicting the oldest entries past the bound.
-    fn remember(&mut self, share: String, negative: Option<(Instant, Negative)>) {
-        if let Some(n) = negative {
-            if self.negatives.insert(share.clone(), n).is_none() {
-                self.order.push_back(share);
-            }
+    /// Records an answer for one path or a share (or nothing, only
+    /// counting a new link referral), evicting the oldest entries past
+    /// the bound.
+    fn remember(
+        &mut self,
+        slot: Slot,
+        exact: Option<(Instant, Exact)>,
+        negative: Option<(Instant, Negative)>,
+    ) {
+        let new = match (&slot, exact, negative) {
+            (Slot::Path(k), Some(e), _) => self.exact.insert(k.clone(), e).is_none(),
+            (Slot::Share(k), _, Some(n)) => self.negatives.insert(k.clone(), n).is_none(),
+            _ => false,
+        };
+        if new {
+            self.order.push_back(slot);
         }
-        while self.negatives.len() + self.referrals.len() > self.max_entries.max(1) {
-            if let Some(old) = self.order.pop_front() {
-                self.negatives.remove(&old);
-            } else if !self.referrals.is_empty() {
-                self.referrals.remove(0);
-            } else {
-                break;
+        let len = |c: &Self| c.exact.len() + c.negatives.len() + c.referrals.len();
+        while len(self) > self.max_entries.max(1) {
+            match self.order.pop_front() {
+                Some(Slot::Path(k)) => {
+                    self.exact.remove(&k);
+                }
+                Some(Slot::Share(k)) => {
+                    self.negatives.remove(&k);
+                }
+                None if !self.referrals.is_empty() => {
+                    self.referrals.remove(0);
+                }
+                None => break,
             }
         }
     }
@@ -299,12 +376,15 @@ mod tests {
         referrals: Vec<(&'static str, &'static str)>,
         delay: Duration,
         calls: Arc<Mutex<usize>>,
+        /// Every path looked up, folded.
+        asked: Arc<Mutex<Vec<String>>>,
         fail: bool,
     }
 
     impl DfsResolver for Fake {
         fn referral(&self, path: &NormalizedPath) -> io::Result<Option<DfsReferral>> {
             *self.calls.lock().unwrap() += 1;
+            self.asked.lock().unwrap().push(path.case_folded());
             std::thread::sleep(self.delay);
             if self.fail {
                 return Err(io::Error::other("server unreachable"));
@@ -326,10 +406,20 @@ mod tests {
                 referrals,
                 delay: Duration::ZERO,
                 calls: Arc::clone(&calls),
+                asked: Arc::new(Mutex::new(Vec::new())),
                 fail: false,
             },
             calls,
         )
+    }
+
+    /// How many lookups of paths under `prefix` (folded) the fake saw.
+    fn asked_under(log: &Arc<Mutex<Vec<String>>>, prefix: &str) -> usize {
+        log.lock()
+            .unwrap()
+            .iter()
+            .filter(|p| p.starts_with(prefix))
+            .count()
     }
 
     #[test]
@@ -338,6 +428,7 @@ mod tests {
             (r"\\corp\dfs\apps", r"\\srv1\apps$"),
             (r"\\corp\dfs\tools", r"\\srv2\x64"),
         ]);
+        let log = Arc::clone(&f.asked);
         let mut c = DfsCache::new(f);
         let now = Instant::now();
         assert_eq!(
@@ -349,33 +440,112 @@ mod tests {
             c.resolve_at(&p(r"\\corp\dfs\tools\b.exe"), now),
             DfsOutcome::Resolved(p(r"\\srv2\x64\b.exe"))
         );
-        let before = *calls.lock().unwrap();
-        // Same prefix, different case: served from the cache.
+        let before = asked_under(&log, r"\\CORP\");
+        // Same prefix, different case: the namespace is not asked again.
+        // (The target path is checked once, to see that it is final.)
         assert_eq!(
             c.resolve_at(&p(r"\\CORP\DFS\APPS\Other\c.exe"), now),
             DfsOutcome::Resolved(p(r"\\srv1\apps$\Other\c.exe"))
         );
-        assert_eq!(*calls.lock().unwrap(), before);
+        assert_eq!(asked_under(&log, r"\\CORP\"), before);
         // Not DFS, and not a UNC path.
         assert_eq!(
             c.resolve_at(&p(r"\\plain\share\x.exe"), now),
             DfsOutcome::NotDfs
         );
         assert_eq!(c.resolve_at(&p(r"C:\x.exe"), now), DfsOutcome::NotDfs);
-        // The negative answer is cached per share.
+        // The negative answer is cached for that path, in any case.
         let before = *calls.lock().unwrap();
         assert_eq!(
-            c.resolve_at(&p(r"\\plain\share\y.exe"), now),
+            c.resolve_at(&p(r"\\PLAIN\SHARE\X.EXE"), now),
             DfsOutcome::NotDfs
         );
         assert_eq!(*calls.lock().unwrap(), before);
         // After the TTL, it is asked again.
         let later = now + c.negative_ttl + Duration::from_secs(1);
         assert_eq!(
-            c.resolve_at(&p(r"\\plain\share\y.exe"), later),
+            c.resolve_at(&p(r"\\plain\share\x.exe"), later),
             DfsOutcome::NotDfs
         );
         assert_eq!(*calls.lock().unwrap(), before + 1);
+    }
+
+    #[test]
+    fn a_cached_root_does_not_hide_a_child_link() {
+        // The reviewer's scenario: a root and a link below it.
+        let (f, calls) = fake(vec![
+            (r"\\corp\dfs", r"\\ns\root"),
+            (r"\\corp\dfs\apps", r"\\srv\apps"),
+        ]);
+        let log = Arc::clone(&f.asked);
+        let mut c = DfsCache::new(f);
+        let now = Instant::now();
+        assert_eq!(
+            c.resolve_at(&p(r"\\corp\dfs"), now),
+            DfsOutcome::Resolved(p(r"\\ns\root"))
+        );
+        let before = *calls.lock().unwrap();
+        // The link is looked up, not answered by the cached root.
+        assert_eq!(
+            c.resolve_at(&p(r"\\corp\dfs\apps\f"), now),
+            DfsOutcome::Resolved(p(r"\\srv\apps\f"))
+        );
+        assert!(*calls.lock().unwrap() > before);
+        // The root's own answer is still cached for the root itself.
+        let before = *calls.lock().unwrap();
+        assert_eq!(
+            c.resolve_at(&p(r"\\CORP\DFS"), now),
+            DfsOutcome::Resolved(p(r"\\ns\root"))
+        );
+        assert_eq!(*calls.lock().unwrap(), before);
+        // A folder under the root but outside every link goes to the root
+        // target, looked up for its own path.
+        assert_eq!(
+            c.resolve_at(&p(r"\\corp\dfs\docs\g"), now),
+            DfsOutcome::Resolved(p(r"\\ns\root\docs\g"))
+        );
+        // The link referral now covers its subtree without a namespace
+        // lookup.
+        let before = asked_under(&log, r"\\CORP\");
+        assert_eq!(
+            c.resolve_at(&p(r"\\corp\dfs\apps\deeper\h"), now),
+            DfsOutcome::Resolved(p(r"\\srv\apps\deeper\h"))
+        );
+        assert_eq!(asked_under(&log, r"\\CORP\"), before);
+        assert!(
+            DfsReferral {
+                entry: p(r"\\corp\dfs"),
+                target: p(r"\\ns\root")
+            }
+            .is_root()
+        );
+    }
+
+    #[test]
+    fn not_dfs_for_one_path_is_not_share_wide() {
+        // The reviewer's scenario: only `apps` is a link.
+        let (f, calls) = fake(vec![(r"\\corp\dfs\apps", r"\\srv\apps")]);
+        let log = Arc::clone(&f.asked);
+        let mut c = DfsCache::new(f);
+        let now = Instant::now();
+        assert_eq!(
+            c.resolve_at(&p(r"\\corp\dfs\other\f"), now),
+            DfsOutcome::NotDfs
+        );
+        let before = asked_under(&log, r"\\CORP\");
+        assert_eq!(
+            c.resolve_at(&p(r"\\corp\dfs\apps\f"), now),
+            DfsOutcome::Resolved(p(r"\\srv\apps\f"))
+        );
+        // The second path was looked up itself, not answered by the first.
+        assert_eq!(asked_under(&log, r"\\CORP\"), before + 1);
+        // The first path's answer is still cached for itself.
+        let before = *calls.lock().unwrap();
+        assert_eq!(
+            c.resolve_at(&p(r"\\corp\dfs\other\f"), now),
+            DfsOutcome::NotDfs
+        );
+        assert_eq!(*calls.lock().unwrap(), before);
     }
 
     #[test]
@@ -446,8 +616,9 @@ mod tests {
             let s = format!(r"\\srv{i}\share\x.exe");
             assert_eq!(c.resolve_at(&p(&s), now), DfsOutcome::NotDfs);
         }
-        assert!(c.negatives.len() + c.referrals.len() <= 3);
+        assert!(c.exact.len() + c.negatives.len() + c.referrals.len() <= 3);
+        assert_eq!(c.order.len(), c.exact.len() + c.negatives.len());
         c.clear();
-        assert!(c.negatives.is_empty());
+        assert!(c.negatives.is_empty() && c.exact.is_empty());
     }
 }

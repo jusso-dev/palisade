@@ -1283,7 +1283,9 @@ impl NormalizedPath {
     /// for `\\server\share\dir` or a DFS folder for its target share.
     ///
     /// `None` if `prefix` is not a leading part of this path
-    /// ([`Self::starts_with`]), or `onto` names a stream. The result keeps
+    /// ([`Self::starts_with`]), `onto` names a stream, or the result would
+    /// put this path's stream on a bare root (`C:\dir:ads` from `C:\dir`
+    /// onto `D:\` would be `D:\:ads`, which names no file). The result keeps
     /// this path's stream, takes `onto`'s root and notes, and is checked for
     /// length. A component of `onto` that may be a short name stays a
     /// candidate; the rest of this path keeps its own short-name state.
@@ -1296,6 +1298,9 @@ impl NormalizedPath {
         let base = onto.components.len();
         let mut components = onto.components.clone();
         components.extend(self.components.iter().skip(skip).cloned());
+        if components.is_empty() && self.stream.is_some() {
+            return None;
+        }
         let mut candidates: Vec<usize> = match &onto.short_names {
             ShortNames::Candidates(c) => c.clone(),
             ShortNames::Verified => Vec::new(),
@@ -1384,6 +1389,34 @@ mod tests {
         // The prefix must cover the path, and the new root has no stream.
         assert!(p.rebase(&n(r"Y:\"), &n(r"\\srv\share")).is_none());
         assert!(p.rebase(&n(r"Z:\"), &n(r"\\srv\share\x:s")).is_none());
+        // A stream cannot land on a bare root (the reviewer's case), but a
+        // root rebase without a stream and a stream rebase that keeps a
+        // component are fine.
+        let s = n(r"C:\dir:ads");
+        assert!(s.rebase(&n(r"C:\dir"), &n(r"D:\")).is_none());
+        assert!(s.rebase(&n(r"C:\dir"), &n(r"\\srv\share")).is_none());
+        assert_eq!(
+            s.rebase(&n(r"C:\dir"), &n(r"D:\x"))
+                .unwrap()
+                .unwrap()
+                .to_win32_string(),
+            r"D:\x:ads"
+        );
+        assert_eq!(
+            s.rebase(&n(r"C:\"), &n(r"D:\"))
+                .unwrap()
+                .unwrap()
+                .to_win32_string(),
+            r"D:\dir:ads"
+        );
+        assert_eq!(
+            n(r"C:\dir")
+                .rebase(&n(r"C:\dir"), &n(r"D:\"))
+                .unwrap()
+                .unwrap()
+                .to_win32_string(),
+            r"D:\"
+        );
         // A short name in the new root stays a candidate.
         let q = n(r"Z:\a.exe")
             .rebase(&n(r"Z:\"), &n(r"\\srv\share\LONGNA~1"))

@@ -78,6 +78,10 @@ pub struct PathForms {
     pub unc_path: Option<NormalizedPath>,
     /// The DFS target, for a path in a DFS namespace.
     pub dfs_target: Option<NormalizedPath>,
+    /// What the DFS lookup of the UNC form said. `None` if none was made.
+    /// [`Self::network_key`] reads it: a timed-out or failed lookup leaves
+    /// the file without a network key, never with the namespace's.
+    pub dfs: Option<dfs::DfsOutcome>,
     /// The final path of the opened handle, with links and junctions
     /// resolved. Decisions should use this form (threat model T-agent-13).
     pub final_path: Option<NormalizedPath>,
@@ -102,6 +106,7 @@ impl PathForms {
             long_path: None,
             unc_path: None,
             dfs_target: None,
+            dfs: None,
             final_path: None,
         };
         if let Ok(p) = normalized {
@@ -158,13 +163,30 @@ impl PathForms {
     /// otherwise the UNC form (for a UNC path, or a mapped drive the OS
     /// resolved). A mapped drive, a DFS namespace path and a short-name
     /// spelling of one file on a share all give the key of its long UNC
-    /// path. `None` for a local file, or while a short name is unexpanded.
+    /// path. `None` for a local file, while a short name is unexpanded,
+    /// and when a DFS lookup timed out or failed ([`Self::dfs_unresolved`]):
+    /// the UNC form may then be a namespace path whose target is unknown,
+    /// and its key would not match the target's rules. A caller treats such
+    /// a file as unknown, never as matching no network rule.
     #[must_use]
     pub fn network_key(&self) -> Option<String> {
+        if self.dfs_unresolved() {
+            return None;
+        }
         self.dfs_target
             .as_ref()
             .or(self.unc_path.as_ref())
             .and_then(|p| p.match_key().ok())
+    }
+
+    /// True if a DFS lookup was made and did not finish (timed out or
+    /// failed), so the path may be in a namespace whose target is unknown.
+    #[must_use]
+    pub fn dfs_unresolved(&self) -> bool {
+        matches!(
+            self.dfs,
+            Some(dfs::DfsOutcome::TimedOut | dfs::DfsOutcome::Failed(_))
+        )
     }
 
     /// [`NormalizedPath::match_key`] of [`Self::lexical`], for matching the
@@ -257,6 +279,31 @@ mod tests {
         assert!(ctx.motw.is_none());
         assert!(ctx.path.lexical().is_some());
         assert!(ctx.path.canonical().is_none());
+    }
+
+    #[test]
+    fn an_unresolved_dfs_lookup_gives_no_network_key() {
+        let ns = r"\\corp\dfs\apps\tool.exe";
+        let mut f = PathForms::from_original(ns);
+        let key = f.network_key();
+        assert_eq!(key.as_deref(), Some(r"\\CORP\DFS\APPS\TOOL.EXE"));
+        f.dfs = Some(dfs::DfsOutcome::NotDfs);
+        assert_eq!(f.network_key(), key);
+        assert!(!f.dfs_unresolved());
+        for outcome in [
+            dfs::DfsOutcome::TimedOut,
+            dfs::DfsOutcome::Failed("unreachable".into()),
+        ] {
+            f.dfs = Some(outcome);
+            assert!(f.dfs_unresolved());
+            assert_eq!(f.network_key(), None);
+            // The name itself can still be matched lexically.
+            assert!(f.lexical_key().is_some());
+        }
+        let target = normalize_win32(r"\\srv\apps\tool.exe").unwrap();
+        f.dfs = Some(dfs::DfsOutcome::Resolved(target.clone()));
+        f.dfs_target = Some(target);
+        assert_eq!(f.network_key().as_deref(), Some(r"\\SRV\APPS\TOOL.EXE"));
     }
 
     #[test]
