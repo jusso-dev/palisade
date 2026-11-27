@@ -413,13 +413,41 @@ impl GovernanceSettings {
         self == &Self::default()
     }
 
+    /// Whether governance mode is on: `require_justification`, or, when
+    /// it is unset, whether the policy has a compliance preset (`preset`).
+    #[must_use]
+    pub fn mode(&self, preset: bool) -> bool {
+        self.require_justification.unwrap_or(preset)
+    }
+
+    /// The same settings with governance mode written out when the policy
+    /// gets it from its compliance preset (`preset`), so that merging
+    /// layers ([`stricter`](Self::stricter)) keeps a mode an outer layer
+    /// gets from its preset. A mode that is off is left as written, so a
+    /// hierarchy where no layer is governed merges to the same settings as
+    /// before.
+    #[must_use]
+    pub fn resolved(&self, preset: bool) -> Self {
+        Self {
+            require_justification: if self.mode(preset) {
+                Some(true)
+            } else {
+                self.require_justification
+            },
+            ..self.clone()
+        }
+    }
+
     /// The stricter combination of `self`, the nearer layer, and `other`,
-    /// for building an effective policy (#37): governance mode is on if
-    /// either side turns it on explicitly; rules go stale and expiry
-    /// warnings start at the earlier point; counters report at the shorter
-    /// interval; every expiry notice of either side is sent; and each
-    /// finding's severity is the more serious one. A nearer layer can
-    /// therefore not relax governance that an outer layer requires.
+    /// for building an effective policy (#37). Resolve each layer first
+    /// ([`resolved`](Self::resolved)): governance mode is then on if
+    /// either side has it on, by setting or by preset. Rules go stale and
+    /// expiry warnings start at the earlier point; counters report at the
+    /// shorter interval; the nearest expiry notices of either side are
+    /// sent, at most 8; and each finding's severity is the more serious
+    /// one, a side without an entry counting as the code's default. A
+    /// nearer layer can therefore not relax governance that an outer layer
+    /// requires.
     #[must_use]
     pub fn stricter(&self, other: &Self) -> Self {
         let require_justification = match (self.require_justification, other.require_justification)
@@ -428,19 +456,26 @@ impl GovernanceSettings {
             (Some(false), _) | (_, Some(false)) => Some(false),
             (None, None) => None,
         };
+        // The notices closest to expiry are kept: the last warning before a
+        // rule stops deciding matters most.
         let mut notices: Vec<u16> = self
             .expiry_notice_days
             .iter()
             .chain(&other.expiry_notice_days)
             .copied()
             .collect();
-        notices.sort_unstable_by(|a, b| b.cmp(a));
+        notices.sort_unstable();
         notices.dedup();
         notices.truncate(limits::MAX_EXPIRY_NOTICES);
-        let mut severity = other.severity.clone();
-        for (code, s) in &self.severity {
-            let e = severity.entry(code.clone()).or_insert(*s);
-            *e = (*e).max(*s);
+        notices.reverse();
+        let mut severity = BTreeMap::new();
+        for key in self.severity.keys().chain(other.severity.keys()) {
+            let default = crate::analysis::FindingCode::from_name(key).map_or(
+                FindingSeverity::Info,
+                crate::analysis::FindingCode::default_severity,
+            );
+            let of = |m: &BTreeMap<String, FindingSeverity>| m.get(key).copied().unwrap_or(default);
+            severity.insert(key.clone(), of(&self.severity).max(of(&other.severity)));
         }
         Self {
             require_justification,
@@ -501,6 +536,56 @@ mod tests {
         ] {
             assert_eq!(Timestamp::parse(bad), None, "{bad}");
         }
+    }
+
+    /// F5: a side with no entry for a code counts as the code's default,
+    /// so merging with a layer that never mentions it cannot lower it.
+    /// Notices: the eight nearest to expiry are kept.
+    #[test]
+    fn merging_keeps_default_severities_and_the_nearest_notices() {
+        let outer = GovernanceSettings::default();
+        let mut nearer = GovernanceSettings::default();
+        // As a merged policy could hold before validation rejected it.
+        nearer
+            .severity
+            .insert("missing_justification".into(), FindingSeverity::Info);
+        let merged = nearer.stricter(&outer);
+        assert_eq!(
+            merged.severity.get("missing_justification"),
+            Some(&FindingSeverity::Error)
+        );
+        let merged = outer.stricter(&nearer);
+        assert_eq!(
+            merged.severity.get("missing_justification"),
+            Some(&FindingSeverity::Error)
+        );
+        let a = GovernanceSettings {
+            expiry_notice_days: vec![60, 30, 20, 14, 10],
+            ..GovernanceSettings::default()
+        };
+        let b = GovernanceSettings {
+            expiry_notice_days: vec![90, 7, 5, 3, 1, 0],
+            ..GovernanceSettings::default()
+        };
+        // Before the fix the farthest were kept: 90, 60, 30, 20, 14, 10, 7,
+        // 5, dropping the notices at 3, 1 and 0 days.
+        assert_eq!(
+            a.stricter(&b).expiry_notice_days,
+            vec![20, 14, 10, 7, 5, 3, 1, 0]
+        );
+        // Resolving keeps an explicit `false` without a preset.
+        let off = GovernanceSettings {
+            require_justification: Some(false),
+            ..GovernanceSettings::default()
+        };
+        assert_eq!(off.resolved(false).require_justification, Some(false));
+        assert_eq!(off.resolved(true).require_justification, Some(false));
+        assert_eq!(
+            GovernanceSettings::default()
+                .resolved(true)
+                .require_justification,
+            Some(true)
+        );
     }
 
     #[test]

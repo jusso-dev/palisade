@@ -30,7 +30,7 @@
 //!
 //! [`Evaluator`]: crate::evaluate::Evaluator
 
-use std::sync::atomic::{AtomicI64, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU64, Ordering};
 
 use std::collections::BTreeMap;
 
@@ -206,6 +206,9 @@ pub struct Counters {
     slots: Vec<Slot>,
     /// Ordinal by rule ID.
     index: BTreeMap<RuleId, usize>,
+    /// Whether a snapshot was restored. Restoring adds, so a second
+    /// restore would count the same hits twice.
+    restored: AtomicBool,
 }
 
 /// One rule's counters in a report.
@@ -255,6 +258,7 @@ impl Counters {
             policy_id,
             revision,
             index,
+            restored: AtomicBool::new(false),
             slots: rules
                 .into_iter()
                 .map(|rule| Slot {
@@ -383,8 +387,10 @@ impl Counters {
     /// Restores a snapshot (or the last report) taken before a restart, if
     /// it is of the same policy and revision and well formed: totals, last
     /// matches and sketches carry on, and its `hits_since_report` are
-    /// reported in the next report. Returns whether it was restored;
-    /// nothing changes otherwise.
+    /// reported in the next report. Counters restore **once**: restoring
+    /// adds to what is counted, so a second restore, of the same snapshot
+    /// or another, is refused. Returns whether it was restored; nothing
+    /// changes otherwise.
     pub fn restore(&self, report: &HitReport) -> bool {
         if report.policy_id != self.policy_id
             || report.revision != self.revision
@@ -392,6 +398,10 @@ impl Counters {
                 .rules
                 .iter()
                 .any(|r| !Sketch::valid(&r.sketch) || r.hits_since_report > r.hits_total)
+            || self
+                .restored
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .is_err()
         {
             return false;
         }
@@ -507,6 +517,29 @@ mod tests {
         // Another revision does not restore.
         let other = Counters::new(refs(1)[0].policy_id, 5, refs(1));
         assert!(!other.restore(&saved));
+    }
+
+    /// Minor: restoring adds, so counters restore once. A second restore
+    /// of the same snapshot (or any other) is refused and changes nothing.
+    #[test]
+    fn counters_restore_once() {
+        let c = counters(1);
+        c.hit(0, b"a", Timestamp(10));
+        let saved = c.snapshot(Timestamp(20));
+        let after = counters(1);
+        assert!(after.restore(&saved));
+        assert!(!after.restore(&saved));
+        let r = after.report(Timestamp(30));
+        assert_eq!(
+            (r.rules[0].hits_total, r.rules[0].hits_since_report),
+            (1, 1)
+        );
+        // A refused malformed restore does not use up the one restore.
+        let fresh = counters(1);
+        let mut bad = saved.clone();
+        bad.rules[0].sketch.truncate(3);
+        assert!(!fresh.restore(&bad));
+        assert!(fresh.restore(&saved));
     }
 
     #[test]

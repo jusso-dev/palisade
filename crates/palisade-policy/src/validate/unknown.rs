@@ -184,13 +184,19 @@ impl Validator {
                 s.mandatory
                     && s.kind == RuleSetKind::Blocklist
                     && referenced.contains(&s.id)
-                    && s.rules.iter().any(|r| r.enabled)
+                    // Validation has no clock, so only a rule that is in
+                    // force at every time counts: enabled, with no
+                    // activity window. One that has expired, or has not
+                    // started, is no mandatory blocklist.
+                    && s.rules
+                        .iter()
+                        .any(|r| r.enabled && r.activates_at.is_none() && r.expires_at.is_none())
             });
             if !has_mandatory {
                 self.push(
                     ErrorCode::MandatoryBlocklistRequired,
                     "/policy/rule_sets",
-                    "the `e8_ml3` preset requires a referenced mandatory blocklist with at least one enabled rule (recommended block rules and the vulnerable driver blocklist, ISM-1544, ISM-1659)",
+                    "the `e8_ml3` preset requires a referenced mandatory blocklist with at least one enabled rule with no `activates_at` or `expires_at` (recommended block rules and the vulnerable driver blocklist, ISM-1544, ISM-1659)",
                 );
             }
         }

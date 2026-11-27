@@ -1099,23 +1099,67 @@ fn principals_track_negation_and_repeats_across_criteria() {
     assert!(has(&found, FindingCode::DuplicatePrincipal, 2));
 }
 
+/// F1: `read_only` on a policy's own rule set gave it no governance at
+/// all, so the publish gate passed. Only the managed baseline the engine
+/// built is exempt.
 #[test]
-fn managed_read_only_sets_are_not_governed_or_reviewed() {
-    let d = doc(
-        serde_json::json!({"unknown": {"preset": "e8_ml2"}}),
-        vec![(
-            CURATED,
-            "baseline",
-            false,
-            true,
-            vec![rule(
-                1,
-                crit("signer.publisher", "equals", &["OS Publisher"]),
-                "allow",
-            )],
+fn read_only_does_not_exempt_a_rule_set_from_governance() {
+    let curated = (
+        CURATED,
+        "baseline",
+        false,
+        true,
+        vec![rule(
+            1,
+            crit("signer.publisher", "equals", &["OS Publisher"]),
+            "allow",
         )],
     );
+    // The reviewer's scenario: validation rejects it ...
+    let json = serde_json::json!({"schema_version": "1.0.0",
+        "policy": {"id": POLICY, "name": "Lint", "revision": 1, "mode": "enforce",
+                   "unknown": {"preset": "e8_ml2"}, "rule_sets": [CURATED]},
+        "rule_sets": [{"id": curated.0, "name": "S", "kind": curated.1, "read_only": true, "rules": curated.4}]});
+    let d = PolicyDocument::from_json(&json.to_string()).unwrap();
+    let errors = d.clone().validate().unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.code == crate::validate::ErrorCode::JustificationRequired),
+        "{errors:#?}"
+    );
+    // ... the assistant reports it, the gate blocks, and it is due for
+    // review.
     let findings = analyse(&d, &Facts::default(), NOW);
+    assert!(
+        findings
+            .iter()
+            .any(|f| f.code == FindingCode::MissingJustification),
+        "{findings:?}"
+    );
+    assert!(matches!(publish_gate(&findings, None), Gate::Blocked(_)));
+    assert_eq!(crate::lifecycle::review_due(&d, NOW.date()).len(), 1);
+}
+
+/// F1: the engine-built baseline stays exempt; a document that forges its
+/// ID gets nothing.
+#[test]
+fn only_the_engine_built_baseline_is_exempt() {
+    use crate::unknown::baseline::{SYSTEM_BASELINE_ID, SystemBaseline};
+    let base = || {
+        let json = serde_json::json!({"schema_version": "1.0.0",
+            "policy": {"id": POLICY, "name": "Lint", "revision": 1, "mode": "enforce",
+                       "unknown": {"preset": "e8_ml2"}, "rule_sets": []}});
+        PolicyDocument::from_json(&json.to_string()).unwrap()
+    };
+    let real = base()
+        .with_system_baseline(&SystemBaseline {
+            publishers: vec!["OS Publisher".into()],
+            writable_dirs: vec!["C:\\Windows\\Flagged".into()],
+        })
+        .unwrap();
+    real.clone().validate().unwrap();
+    let findings = analyse(&real, &Facts::default(), NOW);
     assert!(
         !findings.iter().any(|f| matches!(
             f.code,
@@ -1125,8 +1169,122 @@ fn managed_read_only_sets_are_not_governed_or_reviewed() {
         )),
         "{findings:?}"
     );
-    assert_eq!(publish_gate(&findings, None), Gate::Pass);
-    assert!(crate::lifecycle::review_due(&d, NOW.date()).is_empty());
+    assert!(crate::lifecycle::review_due(&real, NOW.date()).is_empty());
+    // The same ID on a set the engine did not build: a wider tree.
+    let mut forged = real.clone();
+    forged.rule_sets[0].rules[0].match_ =
+        serde_json::from_value(crit("signer.publisher", "equals", &["OS Publisher"])).unwrap();
+    let errors = forged.clone().validate().unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.code == crate::validate::ErrorCode::ReservedRuleSetId
+                && e.path == "/rule_sets/0/id"),
+        "{errors:#?}"
+    );
+    let findings = analyse(&forged, &Facts::default(), NOW);
+    assert!(
+        findings
+            .iter()
+            .any(|f| f.code == FindingCode::MissingJustification),
+        "{findings:?}"
+    );
+    // A hand-written set with the ID, even read-only and of kind baseline.
+    let json = serde_json::json!({"schema_version": "1.0.0",
+        "policy": {"id": POLICY, "name": "Lint", "revision": 1, "mode": "enforce", "rule_sets": [SYSTEM_BASELINE_ID]},
+        "rule_sets": [{"id": SYSTEM_BASELINE_ID, "name": "system_baseline", "kind": "baseline", "read_only": true,
+                       "rules": [rule(1, hash('a'), "allow")]}]});
+    let errors = PolicyDocument::from_json(&json.to_string())
+        .unwrap()
+        .validate()
+        .unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.code == crate::validate::ErrorCode::ReservedRuleSetId),
+        "{errors:#?}"
+    );
+}
+
+/// F3: approval, creation or review dates in the future are reported.
+#[test]
+fn future_dated_metadata_is_reported() {
+    let d = mixed(vec![
+        with(
+            rule(1, hash('a'), "allow"),
+            serde_json::json!({"metadata": {"created_at": t(10).to_string()}}),
+        ),
+        with(
+            rule(2, hash('b'), "allow"),
+            serde_json::json!({"metadata": {"approved_at": t(1).to_string(), "last_reviewed_at": t(2).to_string()}}),
+        ),
+        with(
+            rule(3, hash('c'), "allow"),
+            serde_json::json!({"metadata": {"created_at": NOW.to_string(), "approved_at": t(-1).to_string()}}),
+        ),
+    ]);
+    let found = analyse(&d, &Facts::default(), NOW);
+    let future: Vec<(String, &str)> = found
+        .iter()
+        .filter(|f| f.code == FindingCode::FutureDatedMetadata)
+        .map(|f| (f.rule_refs[0].rule_id.to_string(), f.message.as_str()))
+        .collect();
+    assert_eq!(future.len(), 3, "{future:?}");
+    assert!(future.iter().all(|(r, _)| *r != rule_id(3)));
+    assert!(future[0].1.contains("created_at"));
+}
+
+/// F6: a policy may raise a finding's severity, never lower it.
+#[test]
+fn a_policy_cannot_lower_a_finding_below_its_default() {
+    let mut d = mixed(vec![rule(
+        1,
+        crit("path.file_name", "equals", &["a.exe"]),
+        "allow",
+    )]);
+    d.policy.governance.require_justification = Some(true);
+    d.policy
+        .governance
+        .severity
+        .insert("missing_justification".into(), FindingSeverity::Info);
+    let errors = d.clone().validate().unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.code == crate::validate::ErrorCode::InvalidGovernance
+                && e.path == "/policy/governance/severity/missing_justification"
+                && e.message.contains("missing_justification")),
+        "{errors:#?}"
+    );
+    // Even unvalidated, the assistant keeps the default.
+    let found = analyse(&d, &Facts::default(), NOW);
+    let f = found
+        .iter()
+        .find(|f| f.code == FindingCode::MissingJustification)
+        .unwrap();
+    assert_eq!(f.severity, FindingSeverity::Error);
+    assert!(matches!(publish_gate(&found, None), Gate::Blocked(_)));
+    // Raising is accepted and applied.
+    d.policy.governance.require_justification = None;
+    d.policy.governance.severity.clear();
+    d.policy
+        .governance
+        .severity
+        .insert("weak_identity".into(), FindingSeverity::Error);
+    d.policy
+        .governance
+        .severity
+        .insert("expiring_soon".into(), FindingSeverity::Info);
+    d.clone().validate().unwrap();
+    let found = analyse(&d, &Facts::default(), NOW);
+    assert_eq!(
+        found
+            .iter()
+            .find(|f| f.code == FindingCode::WeakIdentity)
+            .unwrap()
+            .severity,
+        FindingSeverity::Error
+    );
 }
 
 #[test]

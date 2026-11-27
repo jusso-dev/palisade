@@ -151,12 +151,14 @@ fn an_expired_allow_never_revives_after_a_clock_rollback() {
     let rolled_back = RuleClock {
         now: t(-30),
         floor: t(1),
+        anchored: true,
     };
     assert_eq!(decide_at(&v, Some(rolled_back)).outcome(), Outcome::Blocked);
     // Even with the floor just at the expiry.
     let rolled_back = RuleClock {
         now: t(-30),
         floor: t(0),
+        anchored: true,
     };
     assert_eq!(decide_at(&v, Some(rolled_back)).outcome(), Outcome::Blocked);
 }
@@ -175,6 +177,7 @@ fn a_forward_clock_cannot_start_an_allow_early_or_end_a_deny_early() {
     let jumped = RuleClock {
         now: t(10),
         floor: NOW,
+        anchored: true,
     };
     assert_eq!(activity(&allow, &jumped), Activity::NotYetActive);
     assert_eq!(activity(&deny, &jumped), Activity::Active);
@@ -291,12 +294,12 @@ proptest! {
         let mut r: Rule = serde_json::from_value(rule(1, "allow", serde_json::json!({}))).unwrap();
         r.activates_at = start_t;
         r.expires_at = Some(end);
-        let clock = RuleClock { now: t(now), floor: t(floor) };
+        let clock = RuleClock { now: t(now), floor: t(floor), anchored: true };
         let inside = |x: Timestamp| start_t.is_none_or(|s| s <= x) && x < end;
         prop_assert_eq!(activity(&r, &clock).is_active(), inside(clock.now) && inside(clock.floor));
         if activity(&r, &clock) == Activity::Expired && clock.floor >= end {
             // The floor never goes back: any later reading is still expired.
-            let later = RuleClock { now: t(later_now), floor: t(floor + bump) };
+            let later = RuleClock { now: t(later_now), floor: t(floor + bump), anchored: true };
             prop_assert_eq!(activity(&r, &later), Activity::Expired);
         }
     }
@@ -963,4 +966,277 @@ fn counters_record_by_index_for_large_policies() {
     let c = e.counters();
     let last = v.document().rule_sets[0].rules[1999].id;
     assert_eq!(c.ordinal(last), Some(1999));
+}
+
+// ------------------------------------------------- review findings (#301)
+
+/// F2: an offline-started agent (no anchored time) keeps every
+/// time-bounded grant closed, whatever the wall clock says, exactly as with
+/// no clock (ADR 0018 rule 2). Timed denies stay active.
+#[test]
+fn an_offline_started_agent_keeps_timed_grants_closed() {
+    let v = valid(doc_with(
+        serde_json::json!({}),
+        vec![rule(
+            1,
+            "allow",
+            serde_json::json!({"expires_at": ts(t(0))}),
+        )],
+    ));
+    // The reviewer's scenario: the agent restarts offline after the allow
+    // expired, before its floor reached the expiry (the floor lags real
+    // time over a shutdown), and the wall clock is set back a month.
+    let offline = RuleClock::offline_started(t(-30), t(-1));
+    assert_eq!(decide_at(&v, Some(offline)).outcome(), Outcome::Blocked);
+    let allow = &v.document().rule_sets[0].rules[0];
+    assert_eq!(activity(allow, &offline), Activity::NotYetActive);
+    // Once the floor has passed the expiry, it is reported as expired.
+    assert_eq!(
+        activity(allow, &RuleClock::offline_started(t(-30), t(1))),
+        Activity::Expired
+    );
+    // An allow still inside its window does not continue offline either.
+    let open = valid(doc_with(
+        serde_json::json!({}),
+        vec![rule(
+            2,
+            "allow",
+            serde_json::json!({"activates_at": ts(t(-10)), "expires_at": ts(t(10))}),
+        )],
+    ));
+    assert_eq!(
+        decide_at(&open, Some(RuleClock::offline_started(NOW, NOW))).outcome(),
+        Outcome::Blocked
+    );
+    // Anchored, the same rule decides.
+    assert_eq!(
+        decide_at(&open, Some(RuleClock::at(NOW))).outcome(),
+        Outcome::Allowed
+    );
+    // An untimed allow is unaffected, and a timed deny stays active.
+    let untimed = valid(doc_with(
+        serde_json::json!({}),
+        vec![rule(3, "allow", serde_json::json!({}))],
+    ));
+    assert_eq!(
+        decide_at(&untimed, Some(RuleClock::offline_started(NOW, NOW))).outcome(),
+        Outcome::Allowed
+    );
+    let deny = valid(doc_with(
+        serde_json::json!({}),
+        vec![
+            rule(4, "deny", serde_json::json!({"expires_at": ts(t(10))})),
+            rule(5, "allow", serde_json::json!({})),
+        ],
+    ));
+    assert_eq!(
+        decide_at(&deny, Some(RuleClock::offline_started(NOW, NOW))).reason_code(),
+        ReasonCode::ExplicitDeny
+    );
+}
+
+proptest! {
+    /// F2: offline-started, a time-bounded permissive rule is never active,
+    /// whatever the two readings are.
+    #[test]
+    fn offline_started_permissive_rules_are_never_active(
+        start in proptest::option::of(-50i64..50),
+        len in 1i64..50,
+        now in -100i64..100,
+        floor in -100i64..100,
+        action in prop::sample::select(vec!["allow", "ignore"]),
+    ) {
+        let mut r: Rule = serde_json::from_value(rule(1, action, serde_json::json!({}))).unwrap();
+        r.activates_at = start.map(t);
+        r.expires_at = Some(t(start.unwrap_or(0) + len));
+        let clock = RuleClock::offline_started(t(now), t(floor));
+        prop_assert!(!activity(&r, &clock).is_active());
+        prop_assert!(!activity_at(&r, Some(&clock)).is_active());
+    }
+}
+
+fn exception_rule(n: u32, expires: Timestamp, metadata: serde_json::Value) -> serde_json::Value {
+    let mut m = serde_json::json!({"exception": true, "justification": "vendor tool",
+        "approved_by": "ciso", "risk_rating": "medium", "created_at": ts(NOW)});
+    for (k, v) in metadata.as_object().unwrap() {
+        m.as_object_mut().unwrap().insert(k.clone(), v.clone());
+    }
+    rule(
+        n,
+        "allow",
+        serde_json::json!({"expires_at": ts(expires), "metadata": m}),
+    )
+}
+
+fn governed(rules: Vec<serde_json::Value>) -> PolicyDocument {
+    doc_with(
+        serde_json::json!({"governance": {"require_justification": true}}),
+        rules,
+    )
+}
+
+fn error_codes(d: PolicyDocument) -> Vec<ErrorCode> {
+    d.validate()
+        .err()
+        .unwrap_or_default()
+        .iter()
+        .map(|e| e.code)
+        .collect()
+}
+
+/// F3: the 365 days count from `approved_at` only. A future-dated
+/// `created_at` or `last_reviewed_at` cannot stretch them, and governance
+/// mode needs `approved_at` on an exception.
+#[test]
+fn the_exception_year_counts_from_approval_only() {
+    // The reviewer's scenario: approved now, `created_at` written four
+    // years ahead, expiry five years ahead.
+    let stretched = governed(vec![exception_rule(
+        1,
+        t(5 * 365),
+        serde_json::json!({"approved_at": ts(NOW), "created_at": ts(t(4 * 365))}),
+    )]);
+    assert!(error_codes(stretched).contains(&ErrorCode::ExceptionIncomplete));
+    let reviewed_ahead = governed(vec![exception_rule(
+        1,
+        t(700),
+        serde_json::json!({"approved_at": ts(NOW), "last_reviewed_at": ts(t(400))}),
+    )]);
+    assert!(error_codes(reviewed_ahead).contains(&ErrorCode::ExceptionIncomplete));
+    // No `approved_at`: `created_at` alone no longer bounds it.
+    let unapproved = governed(vec![exception_rule(1, t(30), serde_json::json!({}))]);
+    let errors = unapproved.validate().unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.code == ErrorCode::ExceptionIncomplete && e.message.contains("approved_at")),
+        "{errors:#?}"
+    );
+    // Within a year of the approval, it is valid.
+    governed(vec![exception_rule(
+        1,
+        t(365),
+        serde_json::json!({"approved_at": ts(NOW)}),
+    )])
+    .validate()
+    .unwrap();
+}
+
+/// F3: attesting does not reset the year, a bulk extension is checked
+/// from `approved_at`, and only a renewal re-approves.
+#[test]
+fn attesting_does_not_extend_an_exception_and_renewal_is_bounded() {
+    let mut d = governed(vec![exception_rule(
+        1,
+        t(300),
+        serde_json::json!({"approved_at": ts(NOW)}),
+    )]);
+    d.clone().validate().unwrap();
+    let loc = RuleLocation {
+        rule_set_id: SET.parse().unwrap(),
+        rule_id: d.rule_sets[0].rules[0].id,
+    };
+    // The reviewer's scenario: attest after 300 days, then bulk-extend a
+    // year from the attestation. Before the fix the attestation reset the
+    // year, so the extension passed with an expiry 665 days after approval.
+    review(
+        &mut d.rule_sets[0].rules[0],
+        &ReviewAction::Attest,
+        "bob",
+        t(300),
+    )
+    .unwrap();
+    assert_eq!(d.rule_sets[0].rules[0].metadata.approved_at, Some(NOW));
+    assert_eq!(
+        bulk(&mut d, &[loc], &BulkOp::Extend(t(665)), "bob", "x", t(300)),
+        Err(BulkError::ExceptionTooLong(loc))
+    );
+    bulk(&mut d, &[loc], &BulkOp::Extend(t(365)), "bob", "x", t(300)).unwrap();
+    d.clone().validate().unwrap();
+    // A future-dated approval cannot stretch a bulk extension either.
+    let mut ahead = governed(vec![exception_rule(
+        1,
+        t(30),
+        serde_json::json!({"approved_at": ts(t(200))}),
+    )]);
+    assert_eq!(
+        bulk(&mut ahead, &[loc], &BulkOp::Extend(t(500)), "bob", "x", NOW),
+        Err(BulkError::ExceptionTooLong(loc))
+    );
+    // A renewal re-approves, for at most 365 days from the review.
+    let rule = &mut d.rule_sets[0].rules[0];
+    let before = rule.clone();
+    assert_eq!(
+        review(
+            rule,
+            &ReviewAction::Renew { expires_at: t(700) },
+            "auditor",
+            t(300)
+        ),
+        Err(ChangeError::ExceptionTooLong)
+    );
+    assert_eq!(*rule, before);
+    review(
+        rule,
+        &ReviewAction::Renew { expires_at: t(665) },
+        "auditor",
+        t(300),
+    )
+    .unwrap();
+    assert_eq!(rule.metadata.approved_at, Some(t(300)));
+    d.validate().unwrap();
+}
+
+/// Minor: bulk `Enable` refuses a rule that would fail governance
+/// validation, and changes nothing.
+#[test]
+fn bulk_enable_refuses_a_rule_governance_would_reject() {
+    let mut d = governed(vec![
+        rule(1, "allow", serde_json::json!({"enabled": false})),
+        rule(
+            2,
+            "allow",
+            serde_json::json!({"enabled": false, "metadata": {"justification": "x", "created_at": ts(NOW)}}),
+        ),
+    ]);
+    d.clone().validate().unwrap();
+    let set: RuleSetId = SET.parse().unwrap();
+    let locs: Vec<RuleLocation> = d.rule_sets[0]
+        .rules
+        .iter()
+        .map(|r| RuleLocation {
+            rule_set_id: set,
+            rule_id: r.id,
+        })
+        .collect();
+    let before = d.clone();
+    let err = bulk(&mut d, &locs, &BulkOp::Enable, "bob", "x", NOW).unwrap_err();
+    assert_eq!(
+        err,
+        BulkError::Governance(
+            locs[0],
+            vec![
+                ErrorCode::JustificationRequired,
+                ErrorCode::ReviewDateRequired
+            ]
+        )
+    );
+    assert!(err.to_string().contains("justification_required"));
+    assert_eq!(d, before);
+    bulk(&mut d, &locs[1..], &BulkOp::Enable, "bob", "x", NOW).unwrap();
+    d.validate().unwrap();
+}
+
+/// F1: `read_only` on a policy's own rule set exempts nothing.
+#[test]
+fn a_read_only_inline_set_is_still_governed_and_reviewed() {
+    let mut d = governed(vec![rule(1, "allow", serde_json::json!({}))]);
+    d.rule_sets[0].read_only = true;
+    let codes = error_codes(d.clone());
+    assert!(
+        codes.contains(&ErrorCode::JustificationRequired),
+        "{codes:?}"
+    );
+    assert!(codes.contains(&ErrorCode::ReviewDateRequired), "{codes:?}");
+    assert_eq!(review_due(&d, NOW.date()).len(), 1);
 }

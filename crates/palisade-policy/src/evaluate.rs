@@ -64,9 +64,9 @@
 //! A rule outside its activity window (`activates_at`, `expires_at`, #40)
 //! behaves as absent, exactly like a disabled rule
 //! ([`crate::lifecycle::activity`]). [`Evaluator::at`] sets the clock.
-//! Without one, a time-bounded rule is judged as if the time were unknown,
-//! in the closed direction: one that lets an object run, trusts it or
-//! excludes it is inactive, and any other is active. An expired rule with
+//! Without one, or while the agent is offline-started (the clock is not
+//! anchored, ADR 0018), a time-bounded rule that lets an object run,
+//! trusts it or excludes it is inactive; without one, any other is active. An expired rule with
 //! `on_expire: convert_to_audit` only annotates.
 //!
 //! `defer` rules have no opinion. They are never evaluated, so a `defer`
@@ -559,24 +559,14 @@ impl<'p> Evaluator<'p> {
     }
 
     /// Whether `rule` takes part at this evaluator's clock, and why not:
-    /// [`crate::lifecycle::activity`] at the clock. With no clock, a
+    /// [`crate::lifecycle::activity_at`] at the clock. With no clock, a
     /// time-bounded rule that lets an object run, trusts it or excludes it
-    /// is `not_yet_active`, and any other is active (the closed direction).
+    /// is `not_yet_active`, and any other is active (the closed direction);
+    /// with an unanchored clock, such a rule is inactive too.
     /// The decision trace (#41) reports inactive rules with this.
     #[must_use]
     pub fn activity_of(&self, rule: &Rule) -> crate::lifecycle::Activity {
-        use crate::lifecycle::Activity;
-        if !rule.enabled {
-            return Activity::Disabled;
-        }
-        if rule.activates_at.is_none() && rule.expires_at.is_none() {
-            return Activity::Active;
-        }
-        match &self.clock {
-            Some(clock) => crate::lifecycle::activity(rule, clock),
-            None if rule.action.kind().needs_identity() => Activity::NotYetActive,
-            None => Activity::Active,
-        }
+        crate::lifecycle::activity_at(rule, self.clock.as_ref())
     }
 
     /// Whether a compiled rule takes part at the evaluator's clock.

@@ -1373,7 +1373,7 @@ proptest! {
         state in any_state(),
         t in proptest::sample::select(ObjectType::ALL.to_vec()),
         early in any::<bool>(),
-        clock in proptest::option::of((-20i64..20, -20i64..20)),
+        clock in proptest::option::of((-20i64..20, -20i64..20, any::<bool>())),
         windows in proptest::collection::vec(proptest::option::of((-10i64..10, 1i64..10, any::<bool>())), 1..6),
     ) {
         let mut doc = doc;
@@ -1406,9 +1406,10 @@ proptest! {
         }
         let subject = Subject { object_type: t, facts: &facts, variables: &vars, context: &ctx };
         // Activity windows, judged at a random clock (or none) in both.
-        let rule_clock = clock.map(|(now, floor)| crate::lifecycle::RuleClock {
+        let rule_clock = clock.map(|(now, floor, anchored)| crate::lifecycle::RuleClock {
             now: crate::model::Timestamp(1_795_564_800 + now * 86_400),
             floor: crate::model::Timestamp(1_795_564_800 + floor * 86_400),
+            anchored,
         });
         let mut tracer = Tracer::new(&policy).unwrap();
         let mut evaluator = Evaluator::new(&policy).unwrap();
@@ -1768,7 +1769,7 @@ fn the_effective_view_shows_what_a_device_enforces() {
         session: Some(SessionKind::Audit),
         ..DeviceState::of(&p.document().policy)
     };
-    let v = effective::effective_view(&p, &state);
+    let v = effective::effective_view(&p, &state, None);
     assert_eq!(v.device_mode, Mode::Audit);
     assert_eq!(v.protection, crate::mode::ProtectionStatus::OverrideActive);
     assert_eq!(v.override_session, Some("audit"));
@@ -1783,6 +1784,71 @@ fn the_effective_view_shows_what_a_device_enforces() {
     );
     assert_eq!(v.modes.len(), ObjectType::ALL.len());
     snapshot("effective-view", &v);
+}
+
+/// Minor: the effective view judges activity windows as the evaluator
+/// does: expired and not-yet-active rules are inactive, with the reason.
+#[test]
+fn the_effective_view_shows_rules_outside_their_window_as_inactive() {
+    use crate::lifecycle::RuleClock;
+    use crate::model::Timestamp;
+    let day = |d: i64| Timestamp(1_795_564_800 + d * 86_400);
+    let hash = serde_json::json!({"criterion": {"field": "hash.sha256", "operator": "equals", "values": [sha('a')]}});
+    let rule = |n: u32, action: &str, extra: serde_json::Value| {
+        let mut r = serde_json::json!({"id": format!("01936b2e-{n:04x}-7b3d-9f21-0a1b2c3d4e61"), "name": format!("R{n}"),
+            "match": hash, "action": {"type": action}});
+        for (k, v) in extra.as_object().unwrap() {
+            r[k] = v.clone();
+        }
+        r
+    };
+    let doc = crate::model::PolicyDocument::from_json(&serde_json::json!({
+        "schema_version": "1.0.0",
+        "policy": {"id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f", "name": "P", "revision": 1, "mode": "enforce",
+                   "rule_sets": ["01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001"]},
+        "rule_sets": [{"id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001", "name": "S", "kind": "mixed", "rules": [
+            rule(1, "allow", serde_json::json!({"expires_at": day(-1).to_string()})),
+            rule(2, "allow", serde_json::json!({"activates_at": day(1).to_string()})),
+            rule(3, "deny", serde_json::json!({"expires_at": day(5).to_string()})),
+            rule(4, "allow", serde_json::json!({})),
+        ]}],
+    }).to_string()).unwrap();
+    let policy = doc.validate().unwrap();
+    let state = DeviceState::of(&policy.document().policy);
+    let reasons = |clock: Option<&RuleClock>| -> Vec<(bool, Option<&'static str>)> {
+        effective::effective_view(&policy, &state, clock)
+            .rules
+            .iter()
+            .map(|r| (r.active, r.inactive_reason))
+            .collect()
+    };
+    assert_eq!(
+        reasons(Some(&RuleClock::at(day(0)))),
+        vec![
+            (false, Some("expired")),
+            (false, Some("not_yet_active")),
+            (true, None),
+            (true, None),
+        ]
+    );
+    // Without a clock, as an evaluator without one: timed allows are
+    // inactive, a timed deny active.
+    assert_eq!(
+        reasons(None),
+        vec![
+            (false, Some("not_yet_active")),
+            (false, Some("not_yet_active")),
+            (true, None),
+            (true, None),
+        ]
+    );
+    // It agrees with the evaluator.
+    let mut evaluator = Evaluator::new(&policy).unwrap();
+    evaluator.set_clock(RuleClock::at(day(0)));
+    let view = effective::effective_view(&policy, &state, Some(&RuleClock::at(day(0))));
+    for (r, rule) in view.rules.iter().zip(&policy.document().rule_sets[0].rules) {
+        assert_eq!(r.active, evaluator.activity_of(rule).is_active());
+    }
 }
 
 #[test]
@@ -2202,7 +2268,7 @@ fn the_effective_view_marks_every_rule_inactive_on_a_disabled_device() {
         mode: Mode::Disabled,
         ..enforce(&p)
     };
-    let v = effective::effective_view(&p, &disabled);
+    let v = effective::effective_view(&p, &disabled, None);
     assert_eq!(v.device_mode, Mode::Disabled);
     assert!(v.rules.iter().all(|r| !r.active), "{:#?}", v.rules);
     let retired = v.rules.iter().find(|r| r.name == "Retired allow").unwrap();
@@ -2231,7 +2297,7 @@ fn the_effective_view_marks_every_rule_inactive_on_a_disabled_device() {
         lockdown: true,
         ..disabled
     };
-    let v = effective::effective_view(&p, &locked);
+    let v = effective::effective_view(&p, &locked, None);
     assert_eq!(v.device_mode, Mode::Enforce);
     assert!(
         v.rules
@@ -3126,6 +3192,7 @@ fn the_trace_judges_activity_at_the_evaluators_clock() {
         let clock = RuleClock {
             now: day(now),
             floor: day(floor),
+            anchored: true,
         };
         let mut tracer = Tracer::new(&policy).unwrap();
         tracer.set_clock(clock);

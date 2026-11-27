@@ -6,9 +6,11 @@
 //! an optional suggested fix. Findings are sorted, so the output is a
 //! deterministic function of the policy, the facts and the time.
 //!
-//! Every severity can be set per tenant (`policy.governance.severity`).
-//! `error` findings block publishing unless a tenant administrator
-//! overrides them with a reason ([`publish_gate`]).
+//! A policy can raise a finding's severity (`policy.governance.severity`),
+//! never lower it below the code's default: validation rejects that, and
+//! the assistant reports the higher of the two. `error` findings block
+//! publishing unless a tenant administrator overrides them with a reason
+//! ([`publish_gate`]).
 //!
 //! # Conflicts
 //!
@@ -99,11 +101,13 @@ pub enum FindingCode {
     TooManyHashRules,
     /// A regular expression near the size limit.
     RegexCost,
+    /// `approved_at`, `created_at` or `last_reviewed_at` is in the future.
+    FutureDatedMetadata,
 }
 
 impl FindingCode {
     /// Every code.
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 20] = [
         Self::WeakIdentity,
         Self::UserWritablePathAllow,
         Self::RestrictedPublisherBroad,
@@ -123,6 +127,7 @@ impl FindingCode {
         Self::ExceptionWithoutExpiry,
         Self::TooManyHashRules,
         Self::RegexCost,
+        Self::FutureDatedMetadata,
     ];
 
     /// The stable `snake_case` name.
@@ -148,10 +153,11 @@ impl FindingCode {
             Self::ExceptionWithoutExpiry => "exception_without_expiry",
             Self::TooManyHashRules => "too_many_hash_rules",
             Self::RegexCost => "regex_cost",
+            Self::FutureDatedMetadata => "future_dated_metadata",
         }
     }
 
-    /// The default severity. A tenant may set another.
+    /// The default severity. A policy may raise it, but not lower it.
     #[must_use]
     pub const fn default_severity(self) -> FindingSeverity {
         match self {
@@ -349,6 +355,7 @@ pub fn analyse_with(
         doc,
         facts,
         now,
+        exempt: crate::lifecycle::managed_baseline(doc),
         clock: RuleClock::at(now),
         options,
         out: Vec::new(),
@@ -375,6 +382,9 @@ struct Analyser<'a> {
     doc: &'a PolicyDocument,
     facts: &'a Facts,
     now: Timestamp,
+    /// The managed `system_baseline`, if the document holds the one the
+    /// engine built.
+    exempt: Option<RuleSetId>,
     clock: RuleClock,
     options: &'a Options,
     out: Vec<Finding>,
@@ -389,7 +399,10 @@ impl Analyser<'_> {
             .severity
             .get(code.as_str())
             .copied()
-            .unwrap_or_else(|| code.default_severity());
+            .map_or_else(
+                || code.default_severity(),
+                |s| s.max(code.default_severity()),
+            );
         self.out.push(Finding {
             code,
             severity,
@@ -413,11 +426,13 @@ impl Analyser<'_> {
     }
 
     fn governance(&self) -> bool {
-        self.doc
-            .policy
-            .governance
-            .require_justification
-            .unwrap_or(self.doc.policy.unknown.preset.is_some())
+        crate::validate::governance_mode(self.doc)
+    }
+
+    /// Whether the rule's set is exempt from governance and reviews: only
+    /// the managed `system_baseline` the engine built.
+    fn exempt(&self, set: &RuleSet) -> bool {
+        self.exempt == Some(set.id)
     }
 
     /// The checks of one rule on its own.
@@ -456,7 +471,7 @@ impl Analyser<'_> {
             }
             Activity::Disabled | Activity::NotYetActive => {}
         }
-        if rule.enabled && !e.set.read_only {
+        if rule.enabled && !self.exempt(e.set) {
             if let Some(due) = review_by(&rule.metadata, Some(kind)) {
                 if due < self.now.date() {
                     self.push(
@@ -538,9 +553,32 @@ impl Analyser<'_> {
         self.patterns(e);
         self.principals(e);
 
-        // Governance, as validation applies it: not to managed read-only
-        // rule sets, which carry their own provenance.
-        if self.governance() && rule.enabled && !e.set.read_only {
+        // Metadata dated in the future: a creation, approval or review that
+        // has not happened yet, which could stretch a review or an
+        // exception's year.
+        if rule.enabled {
+            let m = &rule.metadata;
+            for (field, at) in [
+                ("approved_at", m.approved_at),
+                ("created_at", m.created_at),
+                ("last_reviewed_at", m.last_reviewed_at),
+            ] {
+                if let Some(at) = at.filter(|t| *t > self.now) {
+                    self.push(
+                        FindingCode::FutureDatedMetadata,
+                        me.clone(),
+                        format!("`{field}` ({at}) is in the future"),
+                        Some(Fix::AddMetadata {
+                            fields: vec![field],
+                        }),
+                    );
+                }
+            }
+        }
+
+        // Governance, as validation applies it: not to the managed
+        // `system_baseline` the engine built.
+        if self.governance() && rule.enabled && !self.exempt(e.set) {
             let exception = is_exception(rule);
             let needs_justification = kind.permits()
                 || matches!(kind, ActionKind::TrustSource | ActionKind::Ignore)
@@ -565,9 +603,13 @@ impl Analyser<'_> {
                 let mut missing = Vec::new();
                 let start = crate::lifecycle::exception_start(&rule.metadata);
                 match (rule.expires_at, start) {
-                    (None, _) => missing.push("expires_at"),
-                    (Some(_), None) => missing.push("approved_at or created_at"),
+                    (None, None) => missing.extend(["expires_at", "approved_at"]),
+                    (None, Some(_)) => missing.push("expires_at"),
+                    (Some(_), None) => missing.push("approved_at"),
                     (Some(t), Some(start)) => {
+                        // From no later than now, so an approval dated in
+                        // the future cannot stretch the year.
+                        let start = start.min(self.now);
                         if start.plus_days(MAX_EXCEPTION_DAYS).is_none_or(|l| t > l) {
                             missing.push("expires_at (at most 365 days)");
                         }

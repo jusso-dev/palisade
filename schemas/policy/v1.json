@@ -1274,7 +1274,8 @@
               "missing_justification",
               "exception_without_expiry",
               "too_many_hash_rules",
-              "regex_cost"
+              "regex_cost",
+              "future_dated_metadata"
             ]
           },
           "type": "object"

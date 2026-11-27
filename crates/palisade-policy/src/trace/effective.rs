@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use crate::decision::RuleRef;
+use crate::lifecycle::Activity;
 use crate::mode::{self, DeviceState, ProtectionStatus, SessionKind};
 use crate::model::{ActionKind, Mode, ObjectType, PolicyId};
 use crate::validate::ValidatedPolicy;
@@ -31,13 +32,17 @@ pub struct EffectiveRule {
     pub action: ActionKind,
     /// Its stage, or `null` for `defer`.
     pub stage: Option<RuleStage>,
-    /// Whether it takes part in evaluation: it is enabled and the device
-    /// is not disabled, as [`Evaluator::evaluate_in`] decides.
+    /// Whether it takes part in evaluation: it is enabled, inside its
+    /// activity window at the view's clock, and the device is not
+    /// disabled, as [`Evaluator::evaluate_in`] decides.
     ///
     /// [`Evaluator::evaluate_in`]: crate::evaluate::Evaluator::evaluate_in
     pub active: bool,
-    /// Why not, if it does not: `disabled` (the rule is disabled) or
-    /// `device_disabled` (the device mode is `disabled`, so no rule runs).
+    /// Why not, if it does not: `disabled` (the rule is disabled),
+    /// `not_yet_active` or `expired` (outside its activity window at the
+    /// view's clock, #40), or `device_disabled` (the device mode is
+    /// `disabled`, so no rule runs). An expired rule with `on_expire:
+    /// convert_to_audit` is listed as `expired`: it only annotates.
     pub inactive_reason: Option<&'static str>,
     /// Its rule set's `mode_override`.
     pub rule_set_mode: Option<Mode>,
@@ -91,9 +96,16 @@ pub struct EffectiveView {
     pub rules: Vec<EffectiveRule>,
 }
 
-/// The effective view of a device in `state` under `policy`.
+/// The effective view of a device in `state` under `policy`, with rule
+/// activity judged at `clock` as the evaluator judges it
+/// ([`crate::lifecycle::activity_at`]; `None` is an evaluator without a
+/// clock).
 #[must_use]
-pub fn effective_view(policy: &ValidatedPolicy, state: &DeviceState) -> EffectiveView {
+pub fn effective_view(
+    policy: &ValidatedPolicy,
+    state: &DeviceState,
+    clock: Option<&crate::lifecycle::RuleClock>,
+) -> EffectiveView {
     let doc = policy.document();
     let p = &doc.policy;
     let sets: BTreeMap<_, _> = doc.rule_sets.iter().map(|s| (s.id, s)).collect();
@@ -107,14 +119,22 @@ pub fn effective_view(policy: &ValidatedPolicy, state: &DeviceState) -> Effectiv
             continue;
         };
         for rule in &set.rules {
+            let activity = crate::lifecycle::activity_at(rule, clock);
+            let window = match activity {
+                Activity::Active | Activity::Disabled => None,
+                Activity::NotYetActive => Some("not_yet_active"),
+                Activity::Expired => Some("expired"),
+            };
             rules.push(EffectiveRule {
                 rule: RuleRef::new(p, set, rule),
                 name: rule.name.clone(),
                 action: rule.action.kind(),
                 stage: RuleStage::of(set, rule),
-                active: rule.enabled && !device_disabled,
+                active: activity.is_active() && !device_disabled,
                 inactive_reason: if !rule.enabled {
                     Some("disabled")
+                } else if window.is_some() {
+                    window
                 } else if device_disabled {
                     Some("device_disabled")
                 } else {

@@ -2426,6 +2426,76 @@ fn ml3_needs_an_enabled_mandatory_rule() {
     );
 }
 
+/// Minor: validation has no clock, so a mandatory rule with an activity
+/// window does not satisfy `e8_ml3`: it may have expired or not started.
+#[test]
+fn ml3_needs_a_mandatory_rule_in_force_at_every_time() {
+    let (id, kind, m, rules) = mandatory_set();
+    let ml3 = || {
+        let mut u = preset_json(CompliancePreset::E8Ml3);
+        u["driver_boot_policy"] = "enforce".into();
+        u
+    };
+    for window in [
+        serde_json::json!({"expires_at": "2020-01-01T00:00:00Z"}),
+        serde_json::json!({"activates_at": "9000-01-01T00:00:00Z"}),
+    ] {
+        let mut timed = rules.clone();
+        for (k, v) in window.as_object().unwrap() {
+            timed[0][k] = v.clone();
+        }
+        assert_eq!(
+            codes(doc_with(ml3(), &[(id, kind, m, timed)])),
+            vec![(
+                ErrorCode::MandatoryBlocklistRequired,
+                "/policy/rule_sets".to_owned()
+            )],
+            "{window}"
+        );
+    }
+    assert_eq!(codes(doc_with(ml3(), &[(id, kind, m, rules)])), vec![]);
+}
+
+/// F1: the baseline the engine builds validates under every precedence
+/// model even after its policy's model changes in a hierarchy merge, and
+/// is recognised as generated; editing any of its content is not.
+#[test]
+fn only_an_unedited_baseline_is_recognised_as_generated() {
+    let facts = SystemBaseline {
+        publishers: vec![OS_PUBLISHER.into()],
+        writable_dirs: vec!["C:\\Windows\\Flagged".into()],
+    };
+    let d = doc(serde_json::json!({}))
+        .with_system_baseline(&facts)
+        .unwrap();
+    assert!(baseline::is_generated_baseline(&d.rule_sets[0], &d.policy));
+    // Placement is not content.
+    let mut placed = d.clone();
+    placed.rule_sets[0].band = 3;
+    placed.rule_sets[0].rules[0].enabled = false;
+    placed.rule_sets[0].rules[0].order = Some(999_999);
+    assert!(baseline::is_generated_baseline(
+        &placed.rule_sets[0],
+        &placed.policy
+    ));
+    // Content is.
+    let edits: [fn(&mut crate::model::RuleSet); 4] = [
+        |s| {
+            s.rules[0].action =
+                serde_json::from_value(serde_json::json!({"type": "ignore"})).unwrap()
+        },
+        |s| s.name = "renamed".into(),
+        |s| s.rules[0].metadata.exception = true,
+        |s| s.rules[0].expires_at = Some(crate::model::Timestamp(0)),
+    ];
+    for edit in edits {
+        let mut e = d.clone();
+        edit(&mut e.rule_sets[0]);
+        assert!(!baseline::is_generated_baseline(&e.rule_sets[0], &e.policy));
+        assert!(codes(e).contains(&(ErrorCode::ReservedRuleSetId, "/rule_sets/0/id".to_owned())));
+    }
+}
+
 #[test]
 fn justifications_are_bounded_text() {
     let v = prompt_policy(serde_json::json!({}));

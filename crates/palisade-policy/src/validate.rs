@@ -11,6 +11,7 @@ use std::fmt;
 
 mod actions;
 mod lifecycle;
+pub(crate) use lifecycle::{governance_mode, governance_problems};
 mod mode;
 mod precedence;
 mod scope;
@@ -228,7 +229,8 @@ pub enum ErrorCode {
     SignatureStatusRelaxed,
     /// `expires_at` is not after `activates_at` (#40).
     InvalidActivityWindow,
-    /// A governance setting is out of range or repeated (#40).
+    /// A governance setting is out of range or repeated, or lowers a
+    /// finding's severity below its default (#40).
     InvalidGovernance,
     /// In governance mode, a rule that needs a justification has none
     /// (#40).
@@ -236,13 +238,16 @@ pub enum ErrorCode {
     /// In governance mode, an allow or trust rule has no review date and
     /// no creation time to derive one from (#40).
     ReviewDateRequired,
-    /// In governance mode, an exception rule has no expiry, an expiry more
-    /// than 365 days after it was approved or created, no approver, or no
-    /// risk rating (#40).
+    /// In governance mode, an exception rule has no expiry, no
+    /// `approved_at`, an expiry more than 365 days after `approved_at`, no
+    /// approver, or no risk rating (#40).
     ExceptionIncomplete,
     /// `on_expire` on a rule without `expires_at`, or `convert_to_audit` on
     /// a rule of a mandatory rule set (#40).
     OnExpireNotApplicable,
+    /// A rule set uses the managed `system_baseline`'s well-known ID but is
+    /// not the baseline the engine builds (#39, #40).
+    ReservedRuleSetId,
 }
 
 impl ErrorCode {
@@ -323,6 +328,7 @@ impl ErrorCode {
             Self::ReviewDateRequired => "review_date_required",
             Self::ExceptionIncomplete => "exception_incomplete",
             Self::OnExpireNotApplicable => "on_expire_not_applicable",
+            Self::ReservedRuleSetId => "reserved_rule_set_id",
         }
     }
 

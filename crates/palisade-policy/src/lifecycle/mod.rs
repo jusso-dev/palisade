@@ -10,12 +10,23 @@
 //! ([`Evaluator::at`](crate::evaluate::Evaluator::at)). The decision trace
 //! (#41) reports it as inactive with [`Activity`]'s reason.
 //!
-//! Activity is checked against a [`RuleClock`]: the agent's trusted time
-//! `now` (anchored time, ADR 0012) and its **floor**, the lower bound on
-//! real time that the agent keeps in protected storage and never lowers.
-//! While the agent is anchored the floor is raised to `now`, so the two
-//! agree; they differ only after the clock was changed or the agent
-//! restarted offline. Each rule then fails in the closed direction:
+//! Activity is checked against a [`RuleClock`]: the agent's time `now`,
+//! its **floor** (the lower bound on real time that the agent keeps in
+//! protected storage and never lowers), and whether the agent is
+//! **anchored** (ADR 0012, ADR 0018). While the agent is anchored, `now`
+//! is anchored time and the floor is raised to it, so the two agree. An
+//! **offline-started** agent (after a restart, before its next check-in)
+//! has only the wall clock for `now`, which anyone who can change the
+//! clock controls.
+//!
+//! While the agent is offline-started, a time-bounded rule that lets an
+//! object run, trusts it or excludes it ([`ActionKind::needs_identity`]) is
+//! inactive, whatever the readings say: grants from the policy bundle do
+//! not start or continue until the next check-in (ADR 0018, rule 2). It is
+//! reported as `expired` once the floor has passed its expiry, and as
+//! `not_yet_active` otherwise. This is the same result as with no clock at
+//! all ([`activity_at`]). Every other rule, and every rule while anchored,
+//! is judged from the two readings, each in the closed direction:
 //!
 //! - A rule that lets an object run, trusts it or excludes it
 //!   ([`ActionKind::needs_identity`]) is active only while **both**
@@ -41,9 +52,12 @@
 //! a user-writable location (#31), an allow with a weak identity (file
 //! name, metadata, or SHA-1 or MD5 only), or any rule with
 //! `metadata.exception: true`. In governance mode an exception needs
-//! `expires_at` at most 365 days after it was created (or approved),
-//! `justification`, `approved_by` and `risk_rating`
-//! ([`crate::validate`], `exception_*` codes).
+//! `approved_at`, `expires_at` at most 365 days after it, `justification`,
+//! `approved_by` and `risk_rating` ([`crate::validate`], `exception_*`
+//! codes). The year counts from `approved_at` only ([`exception_start`]):
+//! only a renewal in a review ([`ReviewAction::Renew`]) moves it, so an
+//! attestation or a bulk extension never stretches an exception past a
+//! year from its approval.
 
 pub mod counters;
 
@@ -58,23 +72,45 @@ use crate::model::{
 
 pub use counters::{Counters, HitReport, RuleHits};
 
-/// The agent's view of time for rule activity (ADR 0012).
+/// The agent's view of time for rule activity (ADR 0012, ADR 0018).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct RuleClock {
-    /// The current trusted time: anchored time while the agent has it, or
-    /// the wall clock otherwise. The server and tests pass real time.
+    /// The current time: anchored time while the agent is anchored, or
+    /// the wall clock while it is offline-started. The server and tests
+    /// pass real time.
     pub now: Timestamp,
     /// The lower bound on real time the agent keeps in protected storage,
     /// which never goes backwards. Pass `now` where there is none (the
     /// server, the policy assistant).
     pub floor: Timestamp,
+    /// Whether `now` is trusted time: the agent holds anchored time, or
+    /// the caller is the server. `false` while the agent is
+    /// offline-started; time-bounded permissive rules are then inactive
+    /// (see the module documentation).
+    pub anchored: bool,
 }
 
 impl RuleClock {
-    /// A clock whose floor is `now`: for the server and for tests.
+    /// An anchored clock whose floor is `now`: for the server, the policy
+    /// assistant and tests.
     #[must_use]
     pub const fn at(now: Timestamp) -> Self {
-        Self { now, floor: now }
+        Self {
+            now,
+            floor: now,
+            anchored: true,
+        }
+    }
+
+    /// The clock of an offline-started agent: the wall clock `now` and
+    /// the stored floor.
+    #[must_use]
+    pub const fn offline_started(now: Timestamp, floor: Timestamp) -> Self {
+        Self {
+            now,
+            floor,
+            anchored: false,
+        }
     }
 
     /// The earlier of the two readings.
@@ -126,9 +162,19 @@ pub fn activity(rule: &Rule, clock: &RuleClock) -> Activity {
     if !rule.enabled {
         return Activity::Disabled;
     }
+    let permissive = rule.action.kind().needs_identity();
+    let timed = rule.activates_at.is_some() || rule.expires_at.is_some();
+    // Offline-started: no bundle grant starts or continues (ADR 0018).
+    if permissive && timed && !clock.anchored {
+        return if rule.expires_at.is_some_and(|e| e <= clock.floor) {
+            Activity::Expired
+        } else {
+            Activity::NotYetActive
+        };
+    }
     // A permissive rule needs both readings inside its window; any other
     // rule needs only one.
-    let (start, end) = if rule.action.kind().needs_identity() {
+    let (start, end) = if permissive {
         (clock.earliest(), clock.latest())
     } else {
         (clock.latest(), clock.earliest())
@@ -140,6 +186,26 @@ pub fn activity(rule: &Rule, clock: &RuleClock) -> Activity {
         return Activity::NotYetActive;
     }
     Activity::Active
+}
+
+/// Whether `rule` is active at `clock`, or with no clock at all: then a
+/// time-bounded rule that lets an object run, trusts it or excludes it is
+/// `not_yet_active`, and any other rule is active (the closed direction).
+/// The evaluator, the decision trace and the effective view all judge
+/// activity with this.
+#[must_use]
+pub fn activity_at(rule: &Rule, clock: Option<&RuleClock>) -> Activity {
+    if !rule.enabled {
+        return Activity::Disabled;
+    }
+    if rule.activates_at.is_none() && rule.expires_at.is_none() {
+        return Activity::Active;
+    }
+    match clock {
+        Some(clock) => activity(rule, clock),
+        None if rule.action.kind().needs_identity() => Activity::NotYetActive,
+        None => Activity::Active,
+    }
 }
 
 /// What the rule does in an evaluation at `clock`: its own action, an
@@ -186,15 +252,24 @@ pub fn review_by(metadata: &Metadata, kind: Option<ActionKind>) -> Option<Date> 
     })
 }
 
-/// When an exception's year starts: its last review, approval or
-/// creation, whichever is latest. A review that renews an exception
-/// re-approves it for another year.
+/// When an exception's year starts: its approval, `approved_at`. Neither
+/// `created_at` nor `last_reviewed_at` counts, so a creation date written
+/// in the future or an attestation cannot stretch it. Only a renewal in a
+/// review ([`ReviewAction::Renew`]) re-approves an exception and so moves
+/// its start.
 #[must_use]
-pub fn exception_start(m: &Metadata) -> Option<Timestamp> {
-    [m.last_reviewed_at, m.approved_at, m.created_at]
-        .into_iter()
-        .flatten()
-        .max()
+pub const fn exception_start(m: &Metadata) -> Option<Timestamp> {
+    m.approved_at
+}
+
+/// The latest expiry an exception may have: 365 days after its approval,
+/// counted from no later than `now` when a time is known, so an approval
+/// dated in the future cannot stretch it. `None` without `approved_at`.
+#[must_use]
+pub fn exception_limit(m: &Metadata, now: Option<Timestamp>) -> Option<Timestamp> {
+    let start = exception_start(m)?;
+    let start = now.map_or(start, |n| start.min(n));
+    start.plus_days(crate::model::lifecycle::limits::MAX_EXCEPTION_DAYS)
 }
 
 /// A reference to one rule in a document, for review queues and reports.
@@ -221,11 +296,13 @@ pub struct ReviewItem {
 }
 
 /// The rules a review campaign covers: enabled allow and trust rules of
-/// the policy's referenced rule sets, other than managed read-only ones,
-/// which their curator reviews.
+/// the policy's referenced rule sets, other than the managed
+/// `system_baseline` the engine builds ([`managed_baseline`]). A
+/// read-only (curated) rule set is reviewed like any other.
 fn reviewable(doc: &PolicyDocument) -> impl Iterator<Item = (&RuleSet, &Rule)> {
+    let exempt = managed_baseline(doc);
     referenced(doc)
-        .filter(|set| !set.read_only)
+        .filter(move |set| Some(set.id) != exempt)
         .flat_map(|set| set.rules.iter().map(move |r| (set, r)))
         .filter(|(_, r)| r.enabled && needs_review(r.action.kind()))
 }
@@ -298,10 +375,12 @@ pub fn review_summary(doc: &PolicyDocument, as_of: Date) -> ReviewSummary {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReviewAction {
     /// The rule is still needed as it is: the next review is a year on.
+    /// An exception's approval, and so its 365-day limit, is unchanged.
     Attest,
     /// The rule is renewed: as attest, and its expiry moves to
-    /// `expires_at`. An exception is re-approved by the reviewer for
-    /// another year from the review ([`exception_start`]).
+    /// `expires_at`. An exception is re-approved by the reviewer at the
+    /// review ([`exception_start`]), so `expires_at` must be at most 365
+    /// days after it.
     Renew {
         /// The new expiry.
         expires_at: Timestamp,
@@ -319,6 +398,8 @@ pub enum ChangeError {
     InvalidExpiry,
     /// The time is past the representable range.
     TimeOverflow,
+    /// Renewing an exception for more than 365 days.
+    ExceptionTooLong,
 }
 
 impl core::fmt::Display for ChangeError {
@@ -327,6 +408,9 @@ impl core::fmt::Display for ChangeError {
             Self::InvalidActor => "the actor must be 1 to 128 trimmed characters",
             Self::InvalidExpiry => "the new expiry must be in the future and after `activates_at`",
             Self::TimeOverflow => "the time is out of range",
+            Self::ExceptionTooLong => {
+                "an exception is renewed for at most 365 days from the review"
+            }
         })
     }
 }
@@ -345,7 +429,8 @@ fn valid_actor(actor: &str) -> bool {
 /// Applies a review action to `rule`, by `reviewer` at `now`: sets
 /// `last_reviewed_at` and `last_reviewed_by`, and `review_by` a year on.
 /// The rule stays valid: renewing an exception re-approves it, so its
-/// expiry is checked from the review.
+/// expiry is checked from the review. Attesting never moves
+/// `approved_at`.
 ///
 /// # Errors
 ///
@@ -367,6 +452,13 @@ pub fn review(
     if let ReviewAction::Renew { expires_at } = action {
         if *expires_at <= now || rule.activates_at.is_some_and(|a| *expires_at <= a) {
             return Err(ChangeError::InvalidExpiry);
+        }
+        if is_exception(rule)
+            && now
+                .plus_days(crate::model::lifecycle::limits::MAX_EXCEPTION_DAYS)
+                .is_none_or(|l| *expires_at > l)
+        {
+            return Err(ChangeError::ExceptionTooLong);
         }
     }
     rule.metadata.last_reviewed_at = Some(now);
@@ -525,6 +617,9 @@ pub enum BulkError {
     /// Extending would put an exception's expiry more than 365 days after
     /// its approval: renew it in a review instead, which re-approves it.
     ExceptionTooLong(RuleLocation),
+    /// Enabling the rule would leave the document invalid in governance
+    /// mode: it lacks the metadata these codes name.
+    Governance(RuleLocation, Vec<crate::validate::ErrorCode>),
 }
 
 impl core::fmt::Display for BulkError {
@@ -541,6 +636,15 @@ impl core::fmt::Display for BulkError {
                 "rule {} is an exception, and the new expiry is more than 365 days after its approval; renew it in a review",
                 r.rule_id
             ),
+            Self::Governance(r, codes) => {
+                let names: Vec<&str> = codes.iter().map(|c| c.as_str()).collect();
+                write!(
+                    f,
+                    "rule {} cannot be enabled in governance mode until its metadata is complete: {}",
+                    r.rule_id,
+                    names.join(", ")
+                )
+            }
         }
     }
 }
@@ -552,8 +656,9 @@ impl std::error::Error for BulkError {}
 ///
 /// # Errors
 ///
-/// Returns [`BulkError`] if there is no reason, a rule is missing, or a
-/// rule set is read-only.
+/// Returns [`BulkError`] if there is no reason, a rule is missing, a rule
+/// set is read-only, an exception would be extended past a year from its
+/// approval, or a rule to enable lacks the metadata governance mode needs.
 pub fn bulk(
     doc: &mut PolicyDocument,
     rules: &[RuleLocation],
@@ -586,12 +691,21 @@ pub fn bulk(
             if *t <= at || rule.activates_at.is_some_and(|a| *t <= a) {
                 return Err(BulkError::Invalid(ChangeError::InvalidExpiry));
             }
-            if is_exception(rule) {
-                let limit = exception_start(&rule.metadata)
-                    .and_then(|s| s.plus_days(crate::model::lifecycle::limits::MAX_EXCEPTION_DAYS));
-                if limit.is_none_or(|l| *t > l) {
-                    return Err(BulkError::ExceptionTooLong(*loc));
-                }
+            if is_exception(rule)
+                && exception_limit(&rule.metadata, Some(at)).is_none_or(|l| *t > l)
+            {
+                return Err(BulkError::ExceptionTooLong(*loc));
+            }
+        }
+        if *op == BulkOp::Enable && !rule.enabled {
+            let mut enabled = rule.clone();
+            enabled.enabled = true;
+            let codes: Vec<_> = crate::validate::governance_problems(doc, set, &enabled)
+                .into_iter()
+                .map(|(code, _, _)| code)
+                .collect();
+            if !codes.is_empty() {
+                return Err(BulkError::Governance(*loc, codes));
             }
         }
     }
@@ -725,6 +839,18 @@ impl PolicyDocument {
         }
         doc
     }
+}
+
+/// The managed `system_baseline` rule set, if the document holds the one
+/// the engine builds ([`crate::unknown::baseline::is_generated_baseline`]).
+/// It is the only rule set exempt from governance and review campaigns: a
+/// document that merely marks a rule set `read_only`, or gives it the
+/// baseline's ID, gets no exemption.
+pub(crate) fn managed_baseline(doc: &PolicyDocument) -> Option<RuleSetId> {
+    doc.rule_sets
+        .iter()
+        .find(|s| crate::unknown::baseline::is_generated_baseline(s, &doc.policy))
+        .map(|s| s.id)
 }
 
 /// The rule sets the policy references, in its order.

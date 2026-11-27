@@ -2800,6 +2800,44 @@ fn the_worst_case_composition_is_built_only_up_to_the_cap() {
     assert!((policies as usize) * 2 * (MAX_SCOPE_ENTRIES + 1) > MAX_UNKNOWN_SCOPE_VALUES);
 }
 
+/// F4: a nearer layer's explicit `require_justification: false` cannot
+/// switch off governance mode an outer layer gets from its preset.
+/// F5: a nearer layer without a severity entry for a code cannot lower an
+/// outer layer's: a missing entry is the code's default, not "no opinion".
+#[test]
+fn a_nearer_layer_cannot_switch_off_a_preset_governance_mode() {
+    let mut nodes = base_nodes();
+    set_node(&mut nodes, 1, json!({"assignments": assign(&[(50, 0)])}));
+    set_node(&mut nodes, 20, json!({"assignments": assign(&[(52, 0)])}));
+    let h = validated(&snapshot(
+        nodes,
+        vec![
+            // The outer layer is governed by its preset alone.
+            policy_with(
+                50,
+                "enforce",
+                vec![],
+                json!({"unknown": {"preset": "e8_ml2"}}),
+            ),
+            policy_with(
+                52,
+                "enforce",
+                vec![],
+                json!({"governance": {"require_justification": false, "severity": {"weak_identity": "error"}}}),
+            ),
+        ],
+        vec![],
+    ));
+    let e = effective(&h, 20);
+    let doc = e.policy().unwrap().document();
+    assert_eq!(doc.policy.governance.require_justification, Some(true));
+    assert!(crate::validate::governance_mode(doc));
+    assert_eq!(
+        doc.policy.governance.severity.get("weak_identity"),
+        Some(&crate::model::FindingSeverity::Error)
+    );
+}
+
 #[test]
 fn the_effective_governance_is_the_stricter_of_the_layers() {
     let mut nodes = base_nodes();
@@ -2818,7 +2856,7 @@ fn the_effective_governance_is_the_stricter_of_the_layers() {
                 52,
                 "enforce",
                 vec![],
-                json!({"governance": {"require_justification": false, "stale_after_days": 120, "severity": {"weak_identity": "info"}}}),
+                json!({"governance": {"require_justification": false, "stale_after_days": 120, "severity": {"weak_identity": "warning"}}}),
             ),
         ],
         vec![],
