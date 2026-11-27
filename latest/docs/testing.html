@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-45338655.js";
+            window.path_to_searchindex_js = "../searchindex-ba4f5382.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-de2a680a.js"></script>
@@ -407,7 +407,8 @@ also fails on a differing snapshot, because <code>insta</code> does not write fi
 <p>The older golden-file convention above (<code>PALISADE_BLESS=1</code>) stays for committed artefacts that are
 not snapshots of a test value: the JSON Schemas and the event registry. Snapshots of the compiled
 OS-native policy XML and of CLI output arrive with that code (#84, #15), using the same
-conventions.</p>
+conventions. <code>xtask</code> snapshots its own <code>--help</code> output (<code>xtask/src/snapshots/</code>, #29); after a
+change to the command list, run <code>cargo insta test -p xtask</code> and review.</p>
 <h2 id="fuzzing"><a class="header" href="#fuzzing">Fuzzing</a></h2>
 <p>Every parser of untrusted input has a coverage-guided fuzz target. The targets live in a
 separate cargo-fuzz workspace per crate (<code>crates/&lt;crate&gt;/fuzz/</code>), so normal builds never compile

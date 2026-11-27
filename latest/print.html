@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-45338655.js";
+            window.path_to_searchindex_js = "searchindex-ba4f5382.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-de2a680a.js"></script>
@@ -7433,7 +7433,17 @@ the pinned toolchain and needs no other tools.</p>
 </div>
 <p>Each command prints one line per violation and exits non-zero if there are
 any. Each rule set has unit tests with passing and failing fixtures:
-<code>cargo test -p xtask</code>. The workspace rules themselves are described in
+<code>cargo test -p xtask</code>.</p>
+<p><code>cargo xtask help</code> lists every command, and <code>cargo xtask &lt;command&gt; --help</code>
+(or <code>-h</code>) prints that command's entry, or for a group such as <code>docs</code> every
+command in it. The list in <code>src/help.rs</code> is the one source of both; its tests
+snapshot the list and every command's help (<code>src/snapshots/</code>, checked by the
+<code>snapshots</code> CI job) and fail if a command <code>main</code> dispatches has no entry.</p>
+<p>Commands that need an external tool check for it first through
+<code>src/tools.rs</code>, which reads the version from the tool's version command:
+a missing tool stops the command with the install line for CI's version,
+and another version is a warning. Tests run the checks against a fake
+probe for each case: present, missing and at another version. The workspace rules themselves are described in
 <a href="#workspace-rules"><code>docs/workspace.md</code></a>.</p>
 <p>More commands are planned in #29; <code>sbom</code> is filled in by #226.</p>
 <h2 id="allowed-dependencies-10"><a class="header" href="#allowed-dependencies-10">Allowed dependencies</a></h2>
@@ -13563,7 +13573,8 @@ also fails on a differing snapshot, because <code>insta</code> does not write fi
 <p>The older golden-file convention above (<code>PALISADE_BLESS=1</code>) stays for committed artefacts that are
 not snapshots of a test value: the JSON Schemas and the event registry. Snapshots of the compiled
 OS-native policy XML and of CLI output arrive with that code (#84, #15), using the same
-conventions.</p>
+conventions. <code>xtask</code> snapshots its own <code>--help</code> output (<code>xtask/src/snapshots/</code>, #29); after a
+change to the command list, run <code>cargo insta test -p xtask</code> and review.</p>
 <h2 id="fuzzing-1"><a class="header" href="#fuzzing-1">Fuzzing</a></h2>
 <p>Every parser of untrusted input has a coverage-guided fuzz target. The targets live in a
 separate cargo-fuzz workspace per crate (<code>crates/&lt;crate&gt;/fuzz/</code>), so normal builds never compile
@@ -13742,7 +13753,7 @@ type.</p>
 <tr><td><code>test</code></td><td>ubuntu-latest, macos-latest, windows-latest (x64), windows-11-arm (ARM64, native)</td><td><code>cargo nextest run --workspace --all-features --locked --profile ci</code>, then the doctests with <code>cargo test --doc</code>, then <code>cargo xtask test-summary</code> (see <a href="#test-reports">Test reports</a>)</td></tr>
 <tr><td><code>coverage</code></td><td>ubuntu-latest, windows-latest</td><td><code>cargo llvm-cov nextest --workspace --all-features --locked --profile ci --json --summary-only</code>, then <code>cargo xtask coverage-summary</code> (see <a href="#coverage-fuzzing-and-benchmarks">Coverage, fuzzing and benchmarks</a>)</td></tr>
 <tr><td><code>coverage-gate</code></td><td>ubuntu-latest</td><td>On PRs, <code>cargo xtask coverage-gate --base &lt;base&gt;</code>: <code>palisade-policy</code> line coverage at the PR's base commit and at the PR, measured in the same job; fails if it decreased (see <a href="#coverage-fuzzing-and-benchmarks">Coverage, fuzzing and benchmarks</a>)</td></tr>
-<tr><td><code>snapshots</code></td><td>ubuntu-latest</td><td><code>cargo fetch --locked</code>, then offline (<code>CARGO_NET_OFFLINE=true</code>) <code>cargo insta test --check --unreferenced reject --all-features -p palisade-policy -p palisade-proto</code>: every <code>insta</code> snapshot matches and none is unreferenced (<a href="#snapshot-tests">testing.md</a>). cargo-insta has no <code>--locked</code>, so the locked fetch and the offline run stand in for it</td></tr>
+<tr><td><code>snapshots</code></td><td>ubuntu-latest</td><td><code>cargo fetch --locked</code>, then offline (<code>CARGO_NET_OFFLINE=true</code>) <code>cargo insta test --check --unreferenced reject --all-features -p palisade-policy -p palisade-proto -p xtask</code>: every <code>insta</code> snapshot matches and none is unreferenced (<a href="#snapshot-tests">testing.md</a>). cargo-insta has no <code>--locked</code>, so the locked fetch and the offline run stand in for it</td></tr>
 <tr><td><code>fixtures</code></td><td>ubuntu-latest</td><td><code>cargo xtask check-testdata</code> (no executable file in the repository that <code>testdata/manifest.txt</code> does not allow), then <code>cargo xtask golden</code> (the generated fixture corpus matches <code>testdata/golden/fixtures.txt</code>) (<a href="#the-fixture-corpus">testing.md</a>)</td></tr>
 <tr><td><code>fuzz-locks</code></td><td>ubuntu-latest</td><td><code>cargo xtask check-fuzz-locks</code>: <code>cargo metadata --locked</code> on every <code>crates/*/fuzz/Cargo.toml</code>, so a stale fuzz lockfile fails in seconds</td></tr>
 <tr><td><code>fuzz</code></td><td>ubuntu-latest, 6 shards</td><td>After <code>fuzz-locks</code>, <code>cargo xtask fuzz --shard I/6</code> in each of 6 parallel jobs: together, every cargo-fuzz target, seeded from the test fixtures, for 60 s each, on the pinned nightly</td></tr>
@@ -14161,7 +14172,7 @@ cargo xtask deps-report            # add --base origin/main to compare
 cargo llvm-cov nextest --workspace --all-features --locked --profile ci \
   --json --summary-only --output-path target/llvm-cov-summary.json   # needs cargo-llvm-cov 0.9
 cargo fetch --locked &amp;&amp; CARGO_NET_OFFLINE=true \
-  cargo insta test --check --unreferenced reject --all-features -p palisade-policy -p palisade-proto  # cargo-insta 1.49
+  cargo insta test --check --unreferenced reject --all-features -p palisade-policy -p palisade-proto -p xtask  # cargo-insta 1.49
 cargo xtask check-fuzz-locks
 cargo xtask check-testdata
 cargo xtask fixtures               # the corpus, into target/fixtures/

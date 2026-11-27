@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-45338655.js";
+            window.path_to_searchindex_js = "../searchindex-ba4f5382.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-de2a680a.js"></script>
@@ -207,7 +207,7 @@ type.</p>
 <tr><td><code>test</code></td><td>ubuntu-latest, macos-latest, windows-latest (x64), windows-11-arm (ARM64, native)</td><td><code>cargo nextest run --workspace --all-features --locked --profile ci</code>, then the doctests with <code>cargo test --doc</code>, then <code>cargo xtask test-summary</code> (see <a href="#test-reports">Test reports</a>)</td></tr>
 <tr><td><code>coverage</code></td><td>ubuntu-latest, windows-latest</td><td><code>cargo llvm-cov nextest --workspace --all-features --locked --profile ci --json --summary-only</code>, then <code>cargo xtask coverage-summary</code> (see <a href="#coverage-fuzzing-and-benchmarks">Coverage, fuzzing and benchmarks</a>)</td></tr>
 <tr><td><code>coverage-gate</code></td><td>ubuntu-latest</td><td>On PRs, <code>cargo xtask coverage-gate --base &lt;base&gt;</code>: <code>palisade-policy</code> line coverage at the PR's base commit and at the PR, measured in the same job; fails if it decreased (see <a href="#coverage-fuzzing-and-benchmarks">Coverage, fuzzing and benchmarks</a>)</td></tr>
-<tr><td><code>snapshots</code></td><td>ubuntu-latest</td><td><code>cargo fetch --locked</code>, then offline (<code>CARGO_NET_OFFLINE=true</code>) <code>cargo insta test --check --unreferenced reject --all-features -p palisade-policy -p palisade-proto</code>: every <code>insta</code> snapshot matches and none is unreferenced (<a href="testing.html#snapshot-tests">testing.md</a>). cargo-insta has no <code>--locked</code>, so the locked fetch and the offline run stand in for it</td></tr>
+<tr><td><code>snapshots</code></td><td>ubuntu-latest</td><td><code>cargo fetch --locked</code>, then offline (<code>CARGO_NET_OFFLINE=true</code>) <code>cargo insta test --check --unreferenced reject --all-features -p palisade-policy -p palisade-proto -p xtask</code>: every <code>insta</code> snapshot matches and none is unreferenced (<a href="testing.html#snapshot-tests">testing.md</a>). cargo-insta has no <code>--locked</code>, so the locked fetch and the offline run stand in for it</td></tr>
 <tr><td><code>fixtures</code></td><td>ubuntu-latest</td><td><code>cargo xtask check-testdata</code> (no executable file in the repository that <code>testdata/manifest.txt</code> does not allow), then <code>cargo xtask golden</code> (the generated fixture corpus matches <code>testdata/golden/fixtures.txt</code>) (<a href="testing.html#the-fixture-corpus">testing.md</a>)</td></tr>
 <tr><td><code>fuzz-locks</code></td><td>ubuntu-latest</td><td><code>cargo xtask check-fuzz-locks</code>: <code>cargo metadata --locked</code> on every <code>crates/*/fuzz/Cargo.toml</code>, so a stale fuzz lockfile fails in seconds</td></tr>
 <tr><td><code>fuzz</code></td><td>ubuntu-latest, 6 shards</td><td>After <code>fuzz-locks</code>, <code>cargo xtask fuzz --shard I/6</code> in each of 6 parallel jobs: together, every cargo-fuzz target, seeded from the test fixtures, for 60 s each, on the pinned nightly</td></tr>
@@ -626,7 +626,7 @@ cargo xtask deps-report            # add --base origin/main to compare
 cargo llvm-cov nextest --workspace --all-features --locked --profile ci \
   --json --summary-only --output-path target/llvm-cov-summary.json   # needs cargo-llvm-cov 0.9
 cargo fetch --locked &amp;&amp; CARGO_NET_OFFLINE=true \
-  cargo insta test --check --unreferenced reject --all-features -p palisade-policy -p palisade-proto  # cargo-insta 1.49
+  cargo insta test --check --unreferenced reject --all-features -p palisade-policy -p palisade-proto -p xtask  # cargo-insta 1.49
 cargo xtask check-fuzz-locks
 cargo xtask check-testdata
 cargo xtask fixtures               # the corpus, into target/fixtures/

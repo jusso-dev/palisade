@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-45338655.js";
+            window.path_to_searchindex_js = "../searchindex-ba4f5382.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-de2a680a.js"></script>
@@ -225,7 +225,17 @@ the pinned toolchain and needs no other tools.</p>
 </div>
 <p>Each command prints one line per violation and exits non-zero if there are
 any. Each rule set has unit tests with passing and failing fixtures:
-<code>cargo test -p xtask</code>. The workspace rules themselves are described in
+<code>cargo test -p xtask</code>.</p>
+<p><code>cargo xtask help</code> lists every command, and <code>cargo xtask &lt;command&gt; --help</code>
+(or <code>-h</code>) prints that command's entry, or for a group such as <code>docs</code> every
+command in it. The list in <code>src/help.rs</code> is the one source of both; its tests
+snapshot the list and every command's help (<code>src/snapshots/</code>, checked by the
+<code>snapshots</code> CI job) and fail if a command <code>main</code> dispatches has no entry.</p>
+<p>Commands that need an external tool check for it first through
+<code>src/tools.rs</code>, which reads the version from the tool's version command:
+a missing tool stops the command with the install line for CI's version,
+and another version is a warning. Tests run the checks against a fake
+probe for each case: present, missing and at another version. The workspace rules themselves are described in
 <a href="../docs/workspace.html"><code>docs/workspace.md</code></a>.</p>
 <p>More commands are planned in #29; <code>sbom</code> is filled in by #226.</p>
 <h2 id="allowed-dependencies"><a class="header" href="#allowed-dependencies">Allowed dependencies</a></h2>
