@@ -126,7 +126,8 @@
       "trust_sources": [],
       "kill_running": false,
       "request": null,
-      "window_close": null
+      "window_close": null,
+      "prompt": null
     },
     "effects": {
       "log": "always",
@@ -140,6 +141,50 @@
     },
     "reason_code": "implicit_deny_unknown",
     "scope_notes": [],
+    "unknown": {
+      "resolved": "block",
+      "applied": "block",
+      "fallback": null,
+      "entries": [
+        {
+          "kind": "default",
+          "key": "default",
+          "level": "block"
+        }
+      ],
+      "locations": [],
+      "origins": [],
+      "unknown_locations": [
+        "user_profile",
+        "temp",
+        "program_files",
+        "windows",
+        "other_fixed",
+        "removable",
+        "network",
+        "optical"
+      ],
+      "unknown_origins": [
+        "internet",
+        "email_attachment",
+        "removable_copy",
+        "network_share",
+        "trusted_source",
+        "preexisting",
+        "unknown"
+      ],
+      "missing_facts": [
+        "volume_kind",
+        "windir",
+        "program_files",
+        "user_profile",
+        "app_data",
+        "local_app_data",
+        "public",
+        "temp",
+        "origin"
+      ]
+    },
     "trace_id": "41414141414141414141414141414141",
     "overridden_omitted": 0,
     "annotations_omitted": 0,

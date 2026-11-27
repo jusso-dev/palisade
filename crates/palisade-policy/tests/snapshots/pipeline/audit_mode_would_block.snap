@@ -16,7 +16,8 @@ source: crates/palisade-policy/tests/decision_snapshots.rs
     "trust_sources": [],
     "kill_running": false,
     "request": null,
-    "window_close": null
+    "window_close": null,
+    "prompt": null
   },
   "effects": {
     "log": "always",
@@ -30,5 +31,44 @@ source: crates/palisade-policy/tests/decision_snapshots.rs
   },
   "reason_code": "audit_mode_would_block",
   "scope_notes": [],
+  "unknown": {
+    "resolved": "block",
+    "applied": "block",
+    "fallback": null,
+    "entries": [
+      {
+        "kind": "default",
+        "key": "default",
+        "level": "block"
+      }
+    ],
+    "locations": [],
+    "origins": [],
+    "unknown_locations": [
+      "user_profile",
+      "temp",
+      "user_writable_other",
+      "program_files",
+      "windows",
+      "other_fixed",
+      "removable",
+      "network",
+      "optical",
+      "ads"
+    ],
+    "unknown_origins": [
+      "internet",
+      "email_attachment",
+      "removable_copy",
+      "network_share",
+      "trusted_source",
+      "preexisting",
+      "unknown"
+    ],
+    "missing_facts": [
+      "path",
+      "origin"
+    ]
+  },
   "trace_id": "07070707070707070707070707070707"
 }

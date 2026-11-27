@@ -227,12 +227,25 @@ pub fn for_each_set_ref(scope: &mut Scope, mut f: impl FnMut(&mut SetRef)) {
 }
 
 /// Every scope of a policy document, with its JSON Pointer: the policy's,
-/// each rule set assignment's, and each rule's.
+/// its unknown settings' (#39), each rule set assignment's, and each
+/// rule's.
 #[must_use]
 pub fn document_scopes(doc: &crate::model::PolicyDocument) -> Vec<(String, &Scope)> {
     let mut out = Vec::new();
     if let Some(s) = &doc.policy.scope {
         out.push(("/policy/scope".to_owned(), s));
+    }
+    let u = &doc.policy.unknown;
+    for (i, s) in u.scopes.iter().enumerate() {
+        out.push((format!("/policy/unknown/scopes/{i}"), s));
+    }
+    for (i, l) in u.scope_limits.iter().enumerate() {
+        for (j, s) in l.all_of.iter().enumerate() {
+            out.push((format!("/policy/unknown/scope_limits/{i}/all_of/{j}"), s));
+        }
+        for (j, s) in l.any_of.iter().enumerate() {
+            out.push((format!("/policy/unknown/scope_limits/{i}/any_of/{j}"), s));
+        }
     }
     for (i, a) in doc.policy.rule_set_scopes.iter().enumerate() {
         for (j, s) in a.scopes.iter().enumerate() {

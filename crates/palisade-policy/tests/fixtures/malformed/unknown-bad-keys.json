@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0.0",
+  "policy": {
+    "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+    "name": "Unknown policy",
+    "revision": 1,
+    "mode": "enforce",
+    "unknown": {
+      "default": "quarantine",
+      "by_location": {
+        "attic": "block"
+      },
+      "prompt": {
+        "timeout_secs": 5
+      }
+    }
+  }
+}

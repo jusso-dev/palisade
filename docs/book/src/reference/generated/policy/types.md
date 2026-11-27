@@ -19,6 +19,15 @@ Which allow decides among allows of different kinds.
 | `most_restrictive` | `allow_contained`, then `allow`, then `allow_elevated` (with `condition: always` before `if_required`). The default. |
 | `most_permissive` | The reverse: `allow_elevated` (`if_required` before `always`), then `allow`, then `allow_contained`. |
 
+## ApprovalScope
+
+Who a device-local approval applies to.
+
+| Value | Meaning |
+|---|---|
+| `user` | Only the user who approved it. The default. |
+| `device` | Every user of the device. |
+
 ## Combine
 
 How a scope's dimensions combine.
@@ -27,6 +36,18 @@ How a scope's dimensions combine.
 |---|---|
 | `all` | Every dimension that is set must match. The default. |
 | `any` | At least one dimension that is set must match. |
+
+## CompliancePreset
+
+A compliance preset: a named starting configuration. Changes that make
+the policy weaker than its preset raise a compliance warning (#17).
+Ordered from the least to the most demanding.
+
+| Value | Meaning |
+|---|---|
+| `e8_ml1` | Essential Eight maturity level 1: block in user profiles, temporary folders and other user-writable locations, detect elsewhere (ISM-1870). |
+| `e8_ml2` | Essential Eight maturity level 2: block in every location (ISM-1871). |
+| `e8_ml3` | Essential Eight maturity level 3: level 2, drivers blocked, and a mandatory blocklist required (ISM-1658). Drivers loaded during early boot are only audited unless `driver_boot_policy` is `enforce`; validation warns about that exemption. |
 
 ## ContainmentProfileRef
 
@@ -49,6 +70,16 @@ Whether a class of object is controlled.
 A calendar date, `YYYY-MM-DD`.
 
 Type: string; matches `^[0-9]{4}-[0-9]{2}-[0-9]{2}$`.
+
+## DriverBootPolicy
+
+How unknown drivers are handled while the device boots, before the agent
+has fully started (`boot_phase: early`).
+
+| Value | Meaning |
+|---|---|
+| `audit` | Report what would be blocked, and block nothing. The default, until the tenant enables enforcement explicitly. |
+| `enforce` | Apply the unknown-handling level. |
 
 ## ElevationAuth
 
@@ -167,6 +198,19 @@ versions, each with its facts and matcher.
 | `time.weekday` | Context (#33): the day of the week of the evaluation, as `mon` to `sun`, in the clock the policy's `time_zone_basis` names. |
 | `time.local_time` | Context (#33): the time of day of the evaluation, as `HH:MM`, in the policy's clock. |
 | `time.date` | Context (#33): the date of the evaluation, as `YYYY-MM-DD`, in the policy's clock. |
+
+## Level
+
+How an unknown object is handled. The variants are declared from least
+to most restrictive, so `Ord` is the restrictiveness order.
+
+| Value | Meaning |
+|---|---|
+| `allow` | Allowed silently. Validation warns, and Essential Eight presets do not permit it for user profiles or temporary folders. |
+| `detect` | Allowed, but logged with severity medium and flagged unhandled. |
+| `prompt` | The user is asked (#11). Not for libraries, drivers, objects that a blocklist matched, or sessions with no interactive user; those get the prompt's fallback. |
+| `restrict` | Allowed inside the `restrict_profile` containment profile (#14). Only for executables, scripts and installers. It fails closed to `block` when the containment component is not installed. |
+| `block` | Blocked. The default. |
 
 ## LibraryId
 
@@ -311,6 +355,17 @@ under every model (ADR 0004). The semantics of each model are in
 | `first_match` | Rules are ordered, and the first match decides. |
 | `priority` | The rule with the winning numeric priority decides. |
 
+## PreexistingPolicy
+
+What happens to files that were on the device when the agent was
+installed (origin `preexisting`).
+
+| Value | Meaning |
+|---|---|
+| `treat_as_unknown` | They are unknown like any other object. |
+| `local_approve` | The agent approves each one locally at install (#69). The engine then sees the approvals as rules, and treats a file without one as unknown. |
+| `baseline_only` | They run only if the approved baseline (#5) allows them: at stage 6 they are blocked, whatever the levels say. The default. |
+
 ## PriorityDirection
 
 Which `priority` number wins.
@@ -319,6 +374,28 @@ Which `priority` number wins.
 |---|---|
 | `lower_wins` | The lowest number wins. The default. |
 | `higher_wins` | The highest number wins. |
+
+## PromptOption
+
+An answer the user may give to a prompt.
+
+| Value | Meaning |
+|---|---|
+| `allow_once` | Run this once. |
+| `allow_always_local` | Run it, and approve its hash on this device (`crate::unknown::LocalApproval`). The approval is uploaded for review, and is temporary for objects from the internet, removable media or a network. |
+| `request_approval` | Do not run it, and ask an administrator to approve it (#11). |
+| `block` | Do not run it. |
+
+## Reauth
+
+What the user must do before an answer counts. Ordered from the
+weakest to the strongest.
+
+| Value | Meaning |
+|---|---|
+| `none` | Nothing more. |
+| `password` | Enter their password again. |
+| `mfa` | Complete multi-factor authentication. |
 
 ## RequestTemplateRef
 

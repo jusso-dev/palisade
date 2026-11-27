@@ -227,6 +227,21 @@
         }
       ]
     },
+    "ApprovalScope": {
+      "description": "Who a device-local approval applies to.",
+      "oneOf": [
+        {
+          "const": "user",
+          "description": "Only the user who approved it. The default.",
+          "type": "string"
+        },
+        {
+          "const": "device",
+          "description": "Every user of the device.",
+          "type": "string"
+        }
+      ]
+    },
     "ClientFilter": {
       "additionalProperties": false,
       "description": "The client connected to a remote desktop session, for per-client\nscoping on multi-session hosts. Each list that is set must match.",
@@ -288,6 +303,26 @@
         {
           "const": "any",
           "description": "At least one dimension that is set must match.",
+          "type": "string"
+        }
+      ]
+    },
+    "CompliancePreset": {
+      "description": "A compliance preset: a named starting configuration. Changes that make\nthe policy weaker than its preset raise a compliance warning (#17).\nOrdered from the least to the most demanding.",
+      "oneOf": [
+        {
+          "const": "e8_ml1",
+          "description": "Essential Eight maturity level 1: block in user profiles, temporary\nfolders and other user-writable locations, detect elsewhere\n(ISM-1870).",
+          "type": "string"
+        },
+        {
+          "const": "e8_ml2",
+          "description": "Essential Eight maturity level 2: block in every location\n(ISM-1871).",
+          "type": "string"
+        },
+        {
+          "const": "e8_ml3",
+          "description": "Essential Eight maturity level 3: level 2, drivers blocked, and a\nmandatory blocklist required (ISM-1658). Drivers loaded during early\nboot are only audited unless `driver_boot_policy` is `enforce`;\nvalidation warns about that exemption.",
           "type": "string"
         }
       ]
@@ -559,6 +594,21 @@
         "sid"
       ],
       "type": "object"
+    },
+    "DriverBootPolicy": {
+      "description": "How unknown drivers are handled while the device boots, before the agent\nhas fully started (`boot_phase: early`).",
+      "oneOf": [
+        {
+          "const": "audit",
+          "description": "Report what would be blocked, and block nothing. The default, until\nthe tenant enables enforcement explicitly.",
+          "type": "string"
+        },
+        {
+          "const": "enforce",
+          "description": "Apply the unknown-handling level.",
+          "type": "string"
+        }
+      ]
     },
     "Effects": {
       "additionalProperties": false,
@@ -1056,6 +1106,36 @@
         {
           "const": "time.date",
           "description": "Context (#33): the date of the evaluation, as `YYYY-MM-DD`, in the\npolicy's clock.",
+          "type": "string"
+        }
+      ]
+    },
+    "Level": {
+      "description": "How an unknown object is handled. The variants are declared from least\nto most restrictive, so `Ord` is the restrictiveness order.",
+      "oneOf": [
+        {
+          "const": "allow",
+          "description": "Allowed silently. Validation warns, and Essential Eight presets do\nnot permit it for user profiles or temporary folders.",
+          "type": "string"
+        },
+        {
+          "const": "detect",
+          "description": "Allowed, but logged with severity medium and flagged unhandled.",
+          "type": "string"
+        },
+        {
+          "const": "prompt",
+          "description": "The user is asked (#11). Not for libraries, drivers, objects that a\nblocklist matched, or sessions with no interactive user; those get\nthe prompt's fallback.",
+          "type": "string"
+        },
+        {
+          "const": "restrict",
+          "description": "Allowed inside the `restrict_profile` containment profile (#14).\nOnly for executables, scripts and installers. It fails closed to\n`block` when the containment component is not installed.",
+          "type": "string"
+        },
+        {
+          "const": "block",
+          "description": "Blocked. The default.",
           "type": "string"
         }
       ]
@@ -1890,6 +1970,10 @@
             "time_zone_basis": "device_local"
           },
           "description": "Typed settings. Every field has a documented default."
+        },
+        "unknown": {
+          "$ref": "#/$defs/UnknownPolicy",
+          "description": "What happens when no rule decides (#39). The default blocks every\nunknown object."
         }
       },
       "required": [
@@ -2074,6 +2158,26 @@
       },
       "type": "object"
     },
+    "PreexistingPolicy": {
+      "description": "What happens to files that were on the device when the agent was\ninstalled (origin `preexisting`).",
+      "oneOf": [
+        {
+          "const": "treat_as_unknown",
+          "description": "They are unknown like any other object.",
+          "type": "string"
+        },
+        {
+          "const": "local_approve",
+          "description": "The agent approves each one locally at install (#69). The engine\nthen sees the approvals as rules, and treats a file without one as\nunknown.",
+          "type": "string"
+        },
+        {
+          "const": "baseline_only",
+          "description": "They run only if the approved baseline (#5) allows them: at stage 6\nthey are blocked, whatever the levels say. The default.",
+          "type": "string"
+        }
+      ]
+    },
     "PrincipalRef": {
       "description": "A user or group (#38). Each is an object with one key, the kind.",
       "oneOf": [
@@ -2181,6 +2285,108 @@
         {
           "const": "higher_wins",
           "description": "The highest number wins.",
+          "type": "string"
+        }
+      ]
+    },
+    "PromptOption": {
+      "description": "An answer the user may give to a prompt.",
+      "oneOf": [
+        {
+          "const": "allow_once",
+          "description": "Run this once.",
+          "type": "string"
+        },
+        {
+          "const": "allow_always_local",
+          "description": "Run it, and approve its hash on this device\n([`crate::unknown::LocalApproval`]). The approval is uploaded for\nreview, and is temporary for objects from the internet, removable\nmedia or a network.",
+          "type": "string"
+        },
+        {
+          "const": "request_approval",
+          "description": "Do not run it, and ask an administrator to approve it (#11).",
+          "type": "string"
+        },
+        {
+          "const": "block",
+          "description": "Do not run it.",
+          "type": "string"
+        }
+      ]
+    },
+    "PromptSettings": {
+      "additionalProperties": false,
+      "description": "How the `prompt` level asks the user.",
+      "properties": {
+        "fallback": {
+          "$ref": "#/$defs/Level",
+          "default": "block",
+          "description": "The level applied when the prompt times out, when there is no\ninteractive session, and for objects that cannot be prompted for.\nAny level but `prompt`; the default is `block`."
+        },
+        "local_approval_scope": {
+          "$ref": "#/$defs/ApprovalScope",
+          "default": "user",
+          "description": "Who an `allow_always_local` approval applies to."
+        },
+        "options": {
+          "default": [
+            "allow_once",
+            "request_approval",
+            "block"
+          ],
+          "description": "The answers offered, each at most once. The default is\n`allow_once`, `request_approval` and `block`.",
+          "items": {
+            "$ref": "#/$defs/PromptOption"
+          },
+          "maxItems": 4,
+          "minItems": 1,
+          "type": "array"
+        },
+        "reauth": {
+          "$ref": "#/$defs/Reauth",
+          "default": "none",
+          "description": "What the user must do again before an answer counts."
+        },
+        "require_justification": {
+          "default": false,
+          "description": "The user must give a reason before an answer counts.",
+          "type": "boolean"
+        },
+        "temp_approval_days": {
+          "default": 14,
+          "description": "How long an `allow_always_local` approval lasts, in days, for an\nobject from the internet, removable media or a network, or of\nunknown origin: 1 to 90, default 14. Other approvals do not expire.",
+          "format": "uint16",
+          "maximum": 90,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "timeout_secs": {
+          "default": 60,
+          "description": "How long the prompt waits, in seconds: 10 to 600, default 60.",
+          "format": "uint32",
+          "maximum": 600,
+          "minimum": 10,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "Reauth": {
+      "description": "What the user must do before an answer counts. Ordered from the\nweakest to the strongest.",
+      "oneOf": [
+        {
+          "const": "none",
+          "description": "Nothing more.",
+          "type": "string"
+        },
+        {
+          "const": "password",
+          "description": "Enter their password again.",
+          "type": "string"
+        },
+        {
+          "const": "mfa",
+          "description": "Complete multi-factor authentication.",
           "type": "string"
         }
       ]
@@ -2690,6 +2896,27 @@
       },
       "type": "object"
     },
+    "ScopeLimit": {
+      "additionalProperties": false,
+      "description": "One contributing policy's limit on where its unknown settings apply, in\nan effective policy ([`UnknownPolicy::scope_limits`]). It holds when\nevery scope of `all_of` matches and, if `any_of` is not empty, one of\nits scopes matches.",
+      "properties": {
+        "all_of": {
+          "description": "The contributing policy's `policy.scope`, if it has one. At most one\nscope: the width of an entry is never more than its source policy's,\nso the authored limits apply to it unchanged.",
+          "items": {
+            "$ref": "#/$defs/Scope"
+          },
+          "type": "array"
+        },
+        "any_of": {
+          "description": "The contributing policy's `unknown.scopes`.",
+          "items": {
+            "$ref": "#/$defs/Scope"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "ScopeSubject": {
       "description": "Whose token a scope's `principals` is tested against.",
       "oneOf": [
@@ -2843,6 +3070,211 @@
           "type": "string"
         }
       ]
+    },
+    "UnknownPolicy": {
+      "additionalProperties": false,
+      "description": "The unknown-application policy (#39). Every field is optional in a\ndocument; the defaults block every unknown object.",
+      "properties": {
+        "allow_request": {
+          "default": false,
+          "description": "When an unknown object is blocked, the user may ask for approval (#11).",
+          "type": "boolean"
+        },
+        "by_location": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Level"
+          },
+          "description": "The level per location class.",
+          "propertyNames": {
+            "enum": [
+              "user_profile",
+              "temp",
+              "user_writable_other",
+              "program_files",
+              "windows",
+              "other_fixed",
+              "removable",
+              "network",
+              "optical",
+              "ads"
+            ]
+          },
+          "type": "object"
+        },
+        "by_origin": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Level"
+          },
+          "description": "The level per origin.",
+          "propertyNames": {
+            "enum": [
+              "internet",
+              "email_attachment",
+              "removable_copy",
+              "network_share",
+              "trusted_source",
+              "preexisting",
+              "unknown"
+            ]
+          },
+          "type": "object"
+        },
+        "by_type": {
+          "additionalProperties": false,
+          "description": "The level per object type. `restrict` only for executables, scripts\nand installers; `prompt` not for libraries or drivers.",
+          "properties": {
+            "com_object": {
+              "$ref": "#/$defs/Level"
+            },
+            "command": {
+              "$ref": "#/$defs/Level"
+            },
+            "compiled_html": {
+              "$ref": "#/$defs/Level"
+            },
+            "control_panel_applet": {
+              "$ref": "#/$defs/Level"
+            },
+            "driver": {
+              "$ref": "#/$defs/Level"
+            },
+            "executable": {
+              "$ref": "#/$defs/Level"
+            },
+            "html_application": {
+              "$ref": "#/$defs/Level"
+            },
+            "installer": {
+              "$ref": "#/$defs/Level"
+            },
+            "library": {
+              "$ref": "#/$defs/Level"
+            },
+            "packaged_app": {
+              "$ref": "#/$defs/Level"
+            },
+            "script.batch": {
+              "$ref": "#/$defs/Level"
+            },
+            "script.cmd": {
+              "$ref": "#/$defs/Level"
+            },
+            "script.java": {
+              "$ref": "#/$defs/Level"
+            },
+            "script.jscript": {
+              "$ref": "#/$defs/Level"
+            },
+            "script.other": {
+              "$ref": "#/$defs/Level"
+            },
+            "script.powershell": {
+              "$ref": "#/$defs/Level"
+            },
+            "script.python": {
+              "$ref": "#/$defs/Level"
+            },
+            "script.reg": {
+              "$ref": "#/$defs/Level"
+            },
+            "script.vbscript": {
+              "$ref": "#/$defs/Level"
+            },
+            "script.wsc": {
+              "$ref": "#/$defs/Level"
+            },
+            "script.wsf": {
+              "$ref": "#/$defs/Level"
+            }
+          },
+          "propertyNames": {
+            "enum": [
+              "executable",
+              "library",
+              "driver",
+              "script.powershell",
+              "script.batch",
+              "script.cmd",
+              "script.vbscript",
+              "script.jscript",
+              "script.wsf",
+              "script.wsc",
+              "script.python",
+              "script.java",
+              "script.reg",
+              "script.other",
+              "installer",
+              "compiled_html",
+              "html_application",
+              "control_panel_applet",
+              "packaged_app",
+              "command",
+              "com_object"
+            ]
+          },
+          "type": "object"
+        },
+        "default": {
+          "$ref": "#/$defs/Level",
+          "default": "block",
+          "description": "The level when no entry below applies. The default is `block`."
+        },
+        "driver_boot_policy": {
+          "$ref": "#/$defs/DriverBootPolicy",
+          "default": "audit",
+          "description": "How unknown drivers are handled during early boot."
+        },
+        "effects": {
+          "$ref": "#/$defs/Effects",
+          "description": "Logging, upload, notification, severity and tags of unknown-object\ndecisions (#34). `log` must be `always` or `sampled`: an unhandled\nobject is always reported."
+        },
+        "preexisting_policy": {
+          "$ref": "#/$defs/PreexistingPolicy",
+          "default": "baseline_only",
+          "description": "What happens to files present at install."
+        },
+        "preset": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompliancePreset"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The compliance preset this policy started from, if any."
+        },
+        "prompt": {
+          "$ref": "#/$defs/PromptSettings",
+          "description": "How the `prompt` level asks."
+        },
+        "restrict_profile": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContainmentProfileRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The containment profile of the `restrict` level (#14). Required when\nany level, or the prompt's fallback, is `restrict`."
+        },
+        "scope_limits": {
+          "description": "Effective policies only (#37): where these settings apply, one\n[`ScopeLimit`] per contributing policy, kept as that policy wrote it.\nThe settings apply to a subject when **any** entry holds; empty, the\ndefault, means no further limit. An effective policy has no\n`policy.scope`, so the hierarchy moves each contributing policy's\n`scope` and `scopes` here unexpanded\n([`UnknownPolicy::scope_limit_of`]). The size is therefore linear in\ncontributing policies, at most `MAX_CONTRIBUTING_POLICIES` (in\n`hierarchy::limits`) entries, and building an effective policy from valid policies never\nfails on it. Validation rejects it in a document it validates as\nauthored, which writes `policy.scope` and `unknown.scopes` instead.",
+          "items": {
+            "$ref": "#/$defs/ScopeLimit"
+          },
+          "type": "array"
+        },
+        "scopes": {
+          "description": "Where these settings apply, besides the policy's `scope` (#38): a\nsubject in at least one of these scopes, at most 1000. Empty, the\ndefault, means wherever the policy applies. A subject outside it is\ndecided by the built-in implicit deny ([`crate::unknown`]).",
+          "items": {
+            "$ref": "#/$defs/Scope"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
     },
     "Upload": {
       "description": "When an event is sent to the server.",

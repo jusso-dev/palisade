@@ -682,6 +682,59 @@ pub fn scope() -> impl Strategy<Value = crate::scope::Scope> {
         )
 }
 
+/// An unknown-application policy that passes validation (#39): any levels,
+/// except `restrict` and `prompt` only where the object type allows them,
+/// with a containment profile, and no preset.
+pub fn unknown_policy() -> impl Strategy<Value = super::UnknownPolicy> {
+    use super::unknown::{Level, LocationClass, OriginClass};
+    let level = || proptest::sample::select(Level::ALL.to_vec());
+    (
+        level(),
+        proptest::collection::btree_map(
+            proptest::sample::select(LocationClass::ALL.to_vec()),
+            level(),
+            0..4,
+        ),
+        proptest::collection::btree_map(
+            proptest::sample::select(OriginClass::ALL.to_vec()),
+            level(),
+            0..3,
+        ),
+        proptest::collection::btree_map(
+            proptest::sample::select(ObjectType::ALL.to_vec()),
+            level(),
+            0..3,
+        ),
+        proptest::sample::select(vec![
+            Level::Block,
+            Level::Detect,
+            Level::Restrict,
+            Level::Allow,
+        ]),
+        any::<bool>(),
+        uuid7(),
+    )
+        .prop_map(
+            |(default, by_location, by_origin, mut by_type, fallback, allow_request, profile)| {
+                by_type.retain(|t, l| {
+                    (*l != Level::Restrict || crate::unknown::restrict_valid_for(*t))
+                        && (*l != Level::Prompt || crate::unknown::prompt_valid_for(*t))
+                });
+                let mut p = super::UnknownPolicy {
+                    default,
+                    by_location,
+                    by_origin,
+                    by_type,
+                    restrict_profile: Some(super::ContainmentProfileRef(profile)),
+                    allow_request,
+                    ..super::UnknownPolicy::default()
+                };
+                p.prompt.fallback = fallback;
+                p
+            },
+        )
+}
+
 /// A document that passes [`PolicyDocument::validate`], with scopes on
 /// some rules, on the policy and on a rule set assignment (#38). The
 /// properties of [`document`] that assume every rule is a candidate do not
@@ -738,14 +791,14 @@ pub fn document() -> impl Strategy<Value = PolicyDocument> {
             model,
             mode_and_options,
         ),
-        (settings(), precedence_options()),
+        (settings(), precedence_options(), unknown_policy()),
         vec(rule_set(), 0..4),
         metadata(),
     )
         .prop_map(
             |(
                 (id, name, description, revision, precedence_model, (mode, mode_options)),
-                (settings, precedence_options),
+                (settings, precedence_options, unknown),
                 mut sets,
                 metadata,
             )| {
@@ -763,6 +816,7 @@ pub fn document() -> impl Strategy<Value = PolicyDocument> {
                         mode,
                         mode_options,
                         settings,
+                        unknown,
                         rule_sets,
                         scope: None,
                         rule_set_scopes: Vec::new(),

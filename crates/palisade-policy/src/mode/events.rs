@@ -10,7 +10,7 @@
 //! |---|---|---|---|
 //! | none (device `disabled`) | – | – | – |
 //! | `ignored` | none | none | none |
-//! | `blocked` | the rule's `log` | the rule's `log` | the rule's `log` |
+//! | `blocked`, `pending_user` | the rule's `log` | the rule's `log` | the rule's `log` |
 //! | would-block (`allowed_audit`) | – | event | event |
 //! | `allowed_override` | event | event | event |
 //! | `allowed` | the rule's `log` | summary | event |
@@ -90,7 +90,9 @@ pub fn fidelity(decision: Option<&Decision>) -> EventFidelity {
     let log = of_log(d.effects().log);
     let report = match d.outcome() {
         Outcome::Ignored => Report::None,
-        Outcome::Blocked => log,
+        // A pending prompt (#39) stands only where a block would, and its
+        // effects are a deny's, so it is reported like one.
+        Outcome::Blocked | Outcome::PendingUser => log,
         Outcome::AllowedAudit | Outcome::AllowedOverride => Report::Event,
         Outcome::Allowed => match d.mode() {
             Mode::Enforce => log,

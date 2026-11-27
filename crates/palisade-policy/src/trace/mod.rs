@@ -71,7 +71,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
-use crate::decision::{Decision, Outcome, RuleRef, TraceId};
+use crate::decision::{Decision, RuleRef, TraceId};
 use crate::evaluate::{BuildError, Evaluator, Subject};
 use crate::mode::DeviceState;
 use crate::model::{
@@ -163,11 +163,7 @@ impl LevelPolicy {
             return TraceLevel::Full;
         }
         match decision {
-            Some(d)
-                if d.outcome() == Outcome::Blocked || d.would_have_been() == Outcome::Blocked =>
-            {
-                TraceLevel::Standard
-            }
+            Some(d) if d.outcome().stops() || d.would_have_been().stops() => TraceLevel::Standard,
             _ => TraceLevel::Minimal,
         }
     }
@@ -340,7 +336,8 @@ pub enum StageName {
     Policy,
     /// 5: post-allow attribute rules (#33; not yet present).
     Attribute,
-    /// 6: the implicit deny.
+    /// 6: the unknown-application policy (#39), whose default is the
+    /// implicit deny.
     Unknown,
 }
 
@@ -691,6 +688,14 @@ impl<'p> Tracer<'p> {
             rules,
             by_id,
         })
+    }
+
+    /// The same tracer, with Palisade's own images pinned in its evaluator
+    /// (#39, [`Evaluator::with_self_images`]).
+    #[must_use]
+    pub fn with_self_images(mut self, images: Vec<crate::unknown::SelfImage>) -> Self {
+        self.evaluator = self.evaluator.with_self_images(images);
+        self
     }
 
     /// The evaluator every decision comes from.
@@ -1052,7 +1057,7 @@ impl<'p> Tracer<'p> {
         if let Some(d) = decision_ref {
             trace.mode_resolution = modes::steps(
                 self.policy,
-                subject.object_type,
+                subject,
                 decider.map(|r| (r.set, r.rule)),
                 state,
                 d,
@@ -1083,11 +1088,11 @@ impl<'p> Tracer<'p> {
             ];
         }
 
-        // A draft allow for a block or a would-block. Not for an instance
-        // limit (#38): an allow already decided, and another allow would
-        // not change what limits it.
+        // A draft allow for a block or a would-block, a prompt included.
+        // Not for an instance limit (#38): an allow already decided, and
+        // another allow would not change what limits it.
         if decision_ref.is_some_and(|d| {
-            d.would_have_been() == Outcome::Blocked
+            d.would_have_been().stops()
                 && d.reason_code() != crate::decision::ReasonCode::InstanceLimit
         }) {
             trace.allow_suggestion = suggest(subject, privacy, &matched, extras);
@@ -1377,6 +1382,10 @@ fn stages(
             RuleStage::Exclusion => StageName::Exclusion,
             _ => StageName::Policy,
         }),
+        // A pinned Palisade image is allowed right after stage 1 (#39).
+        (Some(d), None) if d.reason_code() == crate::decision::ReasonCode::SelfAllow => {
+            Some(StageName::Exclusion)
+        }
         (Some(_), None) => Some(StageName::Unknown),
     };
     let order = [

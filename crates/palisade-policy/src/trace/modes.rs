@@ -7,10 +7,13 @@
 
 use serde::Serialize;
 
+use crate::context::BootPhase;
 use crate::decision::{Decision, Outcome, ReasonCode};
+use crate::evaluate::Subject;
 use crate::mode::{self, Connectivity, DeviceState, SessionKind};
 use crate::model::{
-    Action, ControlLevel, EnforcementOverride, Mode, ObjectType, Policy, Rule, RuleSet,
+    Action, ControlLevel, DriverBootPolicy, EnforcementOverride, Mode, ObjectType, Policy, Rule,
+    RuleSet,
 };
 
 /// What one resolution step looked at.
@@ -35,6 +38,9 @@ pub enum ModeStepKind {
     RuleOverride,
     /// An active override session.
     Session,
+    /// A driver loaded during early boot, decided by the unknown-application
+    /// policy, follows `driver_boot_policy` (#39).
+    BootPhase,
     /// The effective mode.
     Effective,
     /// What the mode did to the outcome.
@@ -99,13 +105,21 @@ pub(crate) fn disabled_steps(state: &DeviceState) -> Vec<ModeStep> {
 /// the step before it agrees.
 pub(crate) fn steps(
     policy: &Policy,
-    t: ObjectType,
+    subject: &Subject<'_>,
     rule: Option<(&RuleSet, &Rule)>,
     state: &DeviceState,
     decision: &Decision,
 ) -> Vec<ModeStep> {
+    let t: ObjectType = subject.object_type;
     let mut out = Vec::new();
-    let effective = mode::resolve(policy, t, rule, state);
+    let mut effective = mode::resolve(policy, t, rule, state);
+    // As the evaluator does: an early-boot driver decided at stage 6 under
+    // `driver_boot_policy: audit` is only reported, except in lockdown.
+    let boot_audit = decision.unhandled()
+        && t == ObjectType::Driver
+        && subject.context.device.boot_phase == Some(BootPhase::Early)
+        && policy.unknown.driver_boot_policy == DriverBootPolicy::Audit
+        && !state.lockdown;
     if state.lockdown {
         out.push(step(
             ModeStepKind::Lockdown,
@@ -234,6 +248,17 @@ pub(crate) fn steps(
             }
         }
     }
+    if boot_audit {
+        let m = mode::capped(effective.mode, Mode::Audit);
+        out.push(step(
+            ModeStepKind::BootPhase,
+            m != effective.mode,
+            m,
+            "early boot; driver_boot_policy audit",
+        ));
+        effective.mode = m;
+        effective.by_session = false;
+    }
     out.push(step(
         ModeStepKind::Effective,
         true,
@@ -254,18 +279,36 @@ pub(crate) fn steps(
 }
 
 fn applied_detail(d: &Decision) -> &'static str {
+    let enforce = match d.would_have_been() {
+        Outcome::PendingUser => "would have asked the user",
+        _ => "would have blocked",
+    };
     match (d.would_have_been(), d.outcome(), d.reason_code()) {
-        (Outcome::Blocked, Outcome::AllowedAudit, _) => {
-            "would have blocked; runs because the mode does not enforce"
+        (Outcome::Blocked | Outcome::PendingUser, Outcome::AllowedAudit, _) => {
+            if enforce == "would have asked the user" {
+                "would have asked the user; runs because the mode does not enforce"
+            } else {
+                "would have blocked; runs because the mode does not enforce"
+            }
         }
-        (Outcome::Blocked, Outcome::AllowedOverride, _) => {
-            "would have blocked; runs because of the override session"
+        (Outcome::Blocked | Outcome::PendingUser, Outcome::AllowedOverride, _) => {
+            if enforce == "would have asked the user" {
+                "would have asked the user; runs because of the override session"
+            } else {
+                "would have blocked; runs because of the override session"
+            }
         }
         (Outcome::Blocked, Outcome::Blocked, ReasonCode::MandatoryDeny) => {
             "blocked; a mandatory deny is never relaxed"
         }
         (Outcome::Blocked, Outcome::Blocked, ReasonCode::ImplicitDenyUnknown) => {
             "blocked; no rule allows it, and the mode enforces"
+        }
+        (Outcome::Blocked, Outcome::Blocked, ReasonCode::RestrictUnavailable) => {
+            "blocked; it could not be contained, and the mode enforces"
+        }
+        (Outcome::PendingUser, Outcome::PendingUser, _) => {
+            "waits for the user; no rule decides it, and the mode enforces"
         }
         (Outcome::Blocked, Outcome::Blocked, _) => "blocked; the deciding rule enforces",
         _ => "the outcome is the enforce-mode outcome",

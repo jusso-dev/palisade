@@ -18,8 +18,16 @@ use crate::mode::{DeviceState, strictness};
 use crate::model::{ControlLevel, Field, ObjectType, RuleSetId};
 use palisade_core::path::VolumeMap;
 
+/// A fixed UUIDv7 for `n`. Below 0x10000 it is the same as it always was;
+/// larger `n` use the last field too, so tests can make as many IDs as they
+/// need.
 pub(crate) fn id(n: u32) -> String {
-    format!("01936b2e-{n:04x}-7b3d-9f21-0a1b2c3d4e5f")
+    let (hi, lo) = (n & 0xffff, n >> 16);
+    if lo == 0 {
+        format!("01936b2e-{hi:04x}-7b3d-9f21-0a1b2c3d4e5f")
+    } else {
+        format!("01936b2e-{hi:04x}-7b3d-9f21-{lo:012x}")
+    }
 }
 
 fn node_id(n: u32) -> NodeId {
@@ -2324,4 +2332,470 @@ fn an_effective_assignment_holds_the_policy_scope_too() {
             .len(),
         9
     );
+}
+
+#[test]
+fn the_effective_unknown_policy_is_the_strictest_of_the_layers() {
+    let mut nodes = base_nodes();
+    set_node(&mut nodes, 1, json!({"assignments": assign(&[(50, 0)])}));
+    set_node(&mut nodes, 20, json!({"assignments": assign(&[(52, 0)])}));
+    // The global policy blocks unknown objects in temporary folders and
+    // detects elsewhere; the device's policy tries to allow them in
+    // temporary folders and to detect drivers.
+    let h = validated(&snapshot(
+        nodes,
+        vec![
+            policy_with(
+                50,
+                "enforce",
+                vec![],
+                json!({"unknown": {"default": "detect", "by_location": {"temp": "block"}}}),
+            ),
+            policy_with(
+                52,
+                "enforce",
+                vec![],
+                json!({"unknown": {"default": "detect", "by_location": {"temp": "allow", "network": "block"}}}),
+            ),
+        ],
+        vec![],
+    ));
+    let e = effective(&h, 20);
+    let u = &e.policy().unwrap().document().policy.unknown;
+    assert_eq!(u.default, crate::model::Level::Detect);
+    assert_eq!(
+        u.by_location.get(&crate::model::LocationClass::Temp),
+        Some(&crate::model::Level::Block)
+    );
+    assert_eq!(
+        u.by_location.get(&crate::model::LocationClass::Network),
+        Some(&crate::model::Level::Block)
+    );
+    // A node with no policy gets the default, which blocks.
+    let none = validated(&snapshot(base_nodes(), vec![], vec![]));
+    assert!(
+        effective(&none, 20)
+            .policy()
+            .unwrap()
+            .document()
+            .policy
+            .unknown
+            .is_default()
+    );
+}
+
+#[test]
+fn within_a_layer_the_lowest_slot_gives_what_cannot_be_compared() {
+    let mut nodes = base_nodes();
+    set_node(
+        &mut nodes,
+        20,
+        json!({"assignments": assign(&[(50, 0), (51, 1)])}),
+    );
+    let profile = |n: u32| json!({"default": "detect", "restrict_profile": id(n)});
+    let h = validated(&snapshot(
+        nodes,
+        vec![
+            policy_with(50, "enforce", vec![], json!({"unknown": profile(80)})),
+            policy_with(51, "enforce", vec![], json!({"unknown": profile(81)})),
+        ],
+        vec![],
+    ));
+    let e = effective(&h, 20);
+    let u = &e.policy().unwrap().document().policy.unknown;
+    assert_eq!(u.restrict_profile.unwrap().to_string(), id(80));
+}
+
+#[test]
+fn a_policy_scope_limits_its_unknown_settings_in_the_effective_policy() {
+    use crate::context::SessionType;
+    use crate::decision::ReasonCode;
+    let console = json!({"sessions": {"types": ["console"]}});
+    let mut nodes = base_nodes();
+    set_node(&mut nodes, 11, json!({"assignments": assign(&[(50, 0)])}));
+    let h = validated(&snapshot(
+        nodes,
+        vec![policy_with(
+            50,
+            "enforce",
+            vec![],
+            json!({"scope": console, "unknown": {"default": "detect"}}),
+        )],
+        vec![],
+    ));
+    let e = effective(&h, 20);
+    let v = e.policy().unwrap();
+    let u = &v.document().policy.unknown;
+    assert!(u.scopes.is_empty());
+    assert_eq!(u.scope_limits.len(), 1);
+    assert!(u.scope_limits[0].all_of[0].sessions.is_some());
+    assert!(u.scope_limits[0].any_of.is_empty());
+    let decide = |session: SessionType| {
+        let mut ctx = EvaluationContext::new();
+        ctx.session.session_type = Some(session);
+        let facts = ObjectFacts::new().with_origin([]);
+        let vars = PathVariables::new();
+        Evaluator::new(v)
+            .unwrap()
+            .evaluate(
+                &Subject {
+                    object_type: ObjectType::Executable,
+                    facts: &facts,
+                    variables: &vars,
+                    context: &ctx,
+                },
+                TraceId([1; 16]),
+            )
+            .reason_code()
+    };
+    assert_eq!(decide(SessionType::Console), ReasonCode::UnknownDetected);
+    assert_eq!(decide(SessionType::Batch), ReasonCode::ImplicitDenyUnknown);
+    // A second, unscoped policy applies everywhere, so the merged settings
+    // do too.
+    let mut nodes = base_nodes();
+    set_node(&mut nodes, 11, json!({"assignments": assign(&[(50, 0)])}));
+    set_node(&mut nodes, 20, json!({"assignments": assign(&[(51, 0)])}));
+    let h = validated(&snapshot(
+        nodes,
+        vec![
+            policy_with(
+                50,
+                "enforce",
+                vec![],
+                json!({"scope": console, "unknown": {"default": "detect"}}),
+            ),
+            policy_with(
+                51,
+                "enforce",
+                vec![],
+                json!({"unknown": {"default": "detect"}}),
+            ),
+        ],
+        vec![],
+    ));
+    let merged = &effective(&h, 20)
+        .policy()
+        .unwrap()
+        .document()
+        .policy
+        .unknown
+        .clone();
+    assert!(merged.scopes.is_empty() && merged.scope_limits.is_empty());
+}
+
+/// The stage-6 reason code of an executable decided by `v` in a session of
+/// type `session`, with `groups` as the user's group SIDs.
+fn stage_six_reason(
+    v: &crate::validate::ValidatedPolicy,
+    session: Option<crate::context::SessionType>,
+    groups: Option<Vec<String>>,
+) -> (
+    crate::decision::ReasonCode,
+    Option<crate::unknown::FallbackReason>,
+) {
+    let mut ctx = EvaluationContext::new();
+    ctx.session.session_type = session;
+    ctx.user.groups = groups;
+    let facts = ObjectFacts::new().with_origin([]);
+    let vars = PathVariables::new();
+    let d = Evaluator::new(v).unwrap().evaluate(
+        &Subject {
+            object_type: ObjectType::Executable,
+            facts: &facts,
+            variables: &vars,
+            context: &ctx,
+        },
+        TraceId([1; 16]),
+    );
+    (d.reason_code(), d.unknown().and_then(|u| u.fallback))
+}
+
+/// The effective policy of device 20 when policy 50, with `extra`, is
+/// assigned to group 11, or `None` if the hierarchy does not validate.
+fn single_policy_effective(extra: Value) -> Option<EffectivePolicy> {
+    let mut nodes = base_nodes();
+    set_node(&mut nodes, 11, json!({"assignments": assign(&[(50, 0)])}));
+    let snap = snapshot(
+        nodes,
+        vec![policy_with(50, "enforce", vec![], extra)],
+        vec![],
+    );
+    let h = HierarchyDocument::from_json(&snap.to_string())
+        .ok()?
+        .validate()
+        .ok()?;
+    h.effective_policy_as(node_id(20), &Membership::default())
+        .ok()
+}
+
+#[test]
+fn the_effective_policy_keeps_each_policy_own_unknown_scopes() {
+    use crate::context::SessionType;
+    use crate::decision::ReasonCode;
+    // The reviewer's case: no `policy.scope`, `default: allow` limited to
+    // console sessions by `unknown.scopes`.
+    let console = json!({"sessions": {"types": ["console"]}});
+    let e = single_policy_effective(json!({"unknown": {"default": "allow", "scopes": [console]}}))
+        .unwrap();
+    let v = e.policy().unwrap();
+    assert_eq!(
+        stage_six_reason(v, Some(SessionType::Console), None).0,
+        ReasonCode::UnknownAllowed
+    );
+    assert_eq!(
+        stage_six_reason(v, Some(SessionType::Batch), None).0,
+        ReasonCode::ImplicitDenyUnknown
+    );
+    // Both set: the settings apply only where both match.
+    let console_or_rdp = json!({"sessions": {"types": ["console", "rdp"]}});
+    let e = single_policy_effective(json!({
+        "scope": console_or_rdp,
+        "unknown": {"default": "allow", "scopes": [console]},
+    }))
+    .unwrap();
+    let v = e.policy().unwrap();
+    assert_eq!(
+        stage_six_reason(v, Some(SessionType::Console), None).0,
+        ReasonCode::UnknownAllowed
+    );
+    assert_eq!(
+        stage_six_reason(v, Some(SessionType::Rdp), None).0,
+        ReasonCode::ImplicitDenyUnknown
+    );
+}
+
+/// A scope over the session type and the administrators group, the two
+/// facts the equivalence property varies, with random `negate` and
+/// `combine`.
+fn arb_unknown_scope() -> impl Strategy<Value = Value> {
+    use crate::context::SessionType;
+    (
+        prop::option::of(prop::sample::subsequence(SessionType::ALL.to_vec(), 1..3)),
+        prop::option::of(any::<bool>()),
+        any::<bool>(),
+        any::<bool>(),
+    )
+        .prop_filter_map("an empty scope", |(sessions, admins, negate, any_of)| {
+            let mut s = json!({});
+            if let Some(types) = &sessions {
+                s["sessions"] = json!({ "types": types });
+            }
+            if let Some(include) = admins {
+                let list = if include { "include" } else { "exclude" };
+                s["principals"] = json!({ list: [{"well_known": "administrators"}] });
+            }
+            if s.as_object().unwrap().is_empty() {
+                return None;
+            }
+            if negate {
+                s["negate"] = json!(true);
+            }
+            if any_of {
+                s["combine"] = json!("any");
+            }
+            Some(s)
+        })
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    /// For one policy with any combination of `policy.scope` and
+    /// `unknown.scopes` (both, either, neither), stage 6 decides exactly as
+    /// it does for the document itself, in every context.
+    #[test]
+    fn the_effective_policy_applies_unknown_settings_exactly_where_the_policy_does(
+        scope in prop::option::of(arb_unknown_scope()),
+        scopes in prop::collection::vec(arb_unknown_scope(), 0..3),
+        default in prop::sample::select(vec!["allow", "detect", "block"]),
+        contexts in prop::collection::vec(
+            (
+                prop::option::of(prop::sample::select(crate::context::SessionType::ALL.to_vec())),
+                prop::option::of(any::<bool>()),
+            ),
+            1..8,
+        ),
+    ) {
+        let mut extra = json!({"unknown": {"default": default}});
+        if let Some(s) = &scope {
+            extra["scope"] = s.clone();
+        }
+        if !scopes.is_empty() {
+            extra["unknown"]["scopes"] = json!(scopes);
+        }
+        let mut doc = json!({
+            "schema_version": "1.0.0",
+            "policy": {"id": id(50), "name": "Policy 50", "revision": 1, "mode": "enforce"},
+        });
+        for (k, v) in extra.as_object().unwrap() {
+            doc["policy"][k] = v.clone();
+        }
+        let Ok(direct) = crate::model::PolicyDocument::from_json(&doc.to_string())
+            .unwrap()
+            .validate()
+        else {
+            return Ok(());
+        };
+        let Some(e) = single_policy_effective(extra) else {
+            return Ok(());
+        };
+        let effective = e.policy().unwrap();
+        for (session, admin) in contexts {
+            let groups = admin.map(|a| {
+                let mut g = vec!["S-1-5-21-1-2-3-513".to_owned()];
+                if a {
+                    g.push("S-1-5-32-544".to_owned());
+                }
+                g
+            });
+            let want = stage_six_reason(&direct, session, groups.clone());
+            let got = stage_six_reason(effective, session, groups);
+            prop_assert_eq!(got, want, "session {:?} admin {:?}", session, admin);
+        }
+    }
+}
+
+/// Policy `n`'s document entry, with `scope` (one value) and `per`
+/// `unknown.scopes`.
+fn limited_policy(n: u32, per: usize) -> Value {
+    let device = |k: usize| {
+        format!(
+            "01936b2e-0000-7b3d-9f21-{:012x}",
+            (n as usize) * 100_000 + k
+        )
+    };
+    let scopes: Vec<Value> = (0..per)
+        .map(|k| json!({"devices": {"include": [{"device_id": device(k)}]}}))
+        .collect();
+    policy_with(
+        n,
+        "enforce",
+        vec![],
+        json!({"scope": {"sessions": {"types": ["console"]}}, "unknown": {"default": "detect", "scopes": scopes}}),
+    )
+}
+
+/// A snapshot with `policies` limited policies of `per` scopes each on
+/// group 11 (the device is in it), and `dynamic` more on a dynamic group.
+fn capped_snapshot(policies: u32, per: usize, dynamic: u32) -> Value {
+    let mut nodes = base_nodes();
+    let slots: Vec<(u32, u32)> = (0..policies).map(|k| (1000 + k, k)).collect();
+    set_node(&mut nodes, 11, json!({"assignments": assign(&slots)}));
+    let mut docs: Vec<Value> = (0..policies)
+        .map(|k| limited_policy(1000 + k, per))
+        .collect();
+    if dynamic > 0 {
+        let slots: Vec<(u32, u32)> = (0..dynamic).map(|k| (5000 + k, k)).collect();
+        nodes.push(node(
+            30,
+            "dynamic_group",
+            Some(2),
+            json!({"assignments": assign(&slots)}),
+        ));
+        docs.extend((0..dynamic).map(|k| limited_policy(5000 + k, per)));
+    }
+    snapshot(nodes, docs, vec![])
+}
+
+#[test]
+fn unknown_limits_build_up_to_the_cap_and_are_rejected_past_it() {
+    use crate::hierarchy::limits::MAX_UNKNOWN_SCOPE_VALUES;
+    // 19 policies of `scope` plus 1000 `unknown.scopes`, and one of
+    // `scope` plus 980: exactly the cap.
+    let per = 999;
+    let policies = u32::try_from(MAX_UNKNOWN_SCOPE_VALUES / (per + 1)).unwrap();
+    assert_eq!((policies as usize) * (per + 1), MAX_UNKNOWN_SCOPE_VALUES);
+    let start = std::time::Instant::now();
+    let h = validated(&capped_snapshot(policies, per, 0));
+    let e = effective(&h, 20);
+    let elapsed = start.elapsed();
+    let u = &e.policy().unwrap().document().policy.unknown;
+    assert_eq!(u.scope_limits.len(), policies as usize);
+    let total: usize = u
+        .scope_limits
+        .iter()
+        .map(crate::model::ScopeLimit::size)
+        .sum();
+    assert_eq!(total, MAX_UNKNOWN_SCOPE_VALUES);
+    // Generous: about 40 ms on a release build, far more in a debug build.
+    assert!(elapsed < std::time::Duration::from_secs(60), "{elapsed:?}");
+    // One more scope value is rejected by snapshot validation, before any
+    // effective policy is built.
+    let mut over = capped_snapshot(policies, per, 0);
+    let last = over["policies"].as_array_mut().unwrap().last_mut().unwrap();
+    last["document"]["policy"]["unknown"]["scopes"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"devices": {"include": [{"device_id": "01936b2e-0000-7b3d-9f21-ffffffffffff"}]}}));
+    let found = errors(&over);
+    let (code, path) = found
+        .iter()
+        .find(|(c, _)| c == "too_many")
+        .unwrap_or_else(|| panic!("{found:?}"));
+    assert_eq!(
+        (code.as_str(), path.as_str()),
+        ("too_many", "/nodes/4/assignments")
+    );
+    let message = HierarchyDocument::from_json(&over.to_string())
+        .unwrap()
+        .validate()
+        .unwrap_err()
+        .into_iter()
+        .find(|e| e.code == HierarchyCode::TooMany)
+        .unwrap()
+        .message;
+    assert!(
+        message.contains(&format!("up to {}", MAX_UNKNOWN_SCOPE_VALUES + 1)),
+        "{message}"
+    );
+    assert!(
+        message.contains("upper bound") && message.contains(&MAX_UNKNOWN_SCOPE_VALUES.to_string())
+    );
+    // The largest contributor first: the policy that went over.
+    assert!(
+        message.contains("Largest: policy `Policy 1019` on `Node 11` (1001)"),
+        "{message}"
+    );
+}
+
+#[test]
+fn dynamic_group_limits_count_towards_every_device_of_the_tenant() {
+    use crate::hierarchy::limits::MAX_UNKNOWN_SCOPE_VALUES;
+    // Half the cap on the device's group and half plus one on a dynamic
+    // group it is not in: still rejected, because the bound counts every
+    // dynamic group of the tenant, and the message says so.
+    let per = 999;
+    let half = u32::try_from(MAX_UNKNOWN_SCOPE_VALUES / (per + 1) / 2).unwrap();
+    let mut snap = capped_snapshot(half, per, half);
+    let last = snap["policies"].as_array_mut().unwrap().last_mut().unwrap();
+    last["document"]["policy"]["unknown"]["scopes"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"devices": {"include": [{"device_id": "01936b2e-0000-7b3d-9f21-fffffffffffe"}]}}));
+    let message = HierarchyDocument::from_json(&snap.to_string())
+        .unwrap()
+        .validate()
+        .unwrap_err()
+        .into_iter()
+        .find(|e| e.code == HierarchyCode::TooMany)
+        .unwrap()
+        .message;
+    assert!(message.contains("dynamic group: policy"), "{message}");
+    // Exactly at the cap with the dynamic group, it is valid.
+    validated(&capped_snapshot(half, per, half));
+}
+
+#[test]
+fn the_worst_case_composition_is_built_only_up_to_the_cap() {
+    // Every contributing policy at its authored maximum would be far over
+    // the cap; snapshot validation rejects it at once, without building any
+    // effective policy, so this cannot hang.
+    use crate::hierarchy::limits::{MAX_ASSIGNMENTS_PER_NODE, MAX_UNKNOWN_SCOPE_VALUES};
+    use crate::scope::limits::MAX_SCOPE_ENTRIES;
+    let policies = u32::try_from(MAX_ASSIGNMENTS_PER_NODE).unwrap();
+    let start = std::time::Instant::now();
+    let found = errors(&capped_snapshot(policies, MAX_SCOPE_ENTRIES, policies));
+    assert!(found.iter().any(|(c, _)| c == "too_many"), "{found:?}");
+    assert!(start.elapsed() < std::time::Duration::from_secs(60));
+    assert!((policies as usize) * 2 * (MAX_SCOPE_ENTRIES + 1) > MAX_UNKNOWN_SCOPE_VALUES);
 }

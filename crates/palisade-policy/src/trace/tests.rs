@@ -19,6 +19,7 @@ use super::simulate::{
 };
 use super::*;
 use crate::context::EvaluationContext;
+use crate::decision::Outcome;
 use crate::decision::ReasonCode;
 use crate::facts::{
     ObjectFacts, PathFact, PathVariables, SignatureSource, SignerFact, SignerStatus,
@@ -1368,6 +1369,7 @@ proptest! {
         facts in any_facts(),
         state in any_state(),
         t in proptest::sample::select(ObjectType::ALL.to_vec()),
+        early in any::<bool>(),
     ) {
         let mut doc = doc;
         retree(&mut doc, &picks);
@@ -1375,7 +1377,12 @@ proptest! {
         prop_assume!(policy.is_ok());
         let policy = policy.unwrap();
         let vars = PathVariables::new();
-        let ctx = EvaluationContext::new();
+        let mut ctx = EvaluationContext::new();
+        // Early boot, so a driver decided at stage 6 follows
+        // `driver_boot_policy` (#39).
+        if early {
+            ctx.device.boot_phase = Some(crate::context::BootPhase::Early);
+        }
         let subject = Subject { object_type: t, facts: &facts, variables: &vars, context: &ctx };
         let tracer = Tracer::new(&policy).unwrap();
         let tr = tracer.trace(&subject, &ObjectExtras::default(), &state, TRACE, &TraceOptions::at(TraceLevel::Full));
@@ -1409,6 +1416,8 @@ proptest! {
             // The step before `effective` reaches the same mode.
             let before = &tr.mode_resolution[tr.mode_resolution.len() - 3];
             prop_assert_eq!(before.mode, last.mode, "{:?}", tr.mode_resolution);
+            // The effective step is the mode the decision was made in.
+            prop_assert_eq!(last.mode, tr.effective_mode, "{:?}", tr.mode_resolution);
             // Exactly one stage decided, and it is the decider's.
             prop_assert_eq!(tr.stages.iter().filter(|s| s.outcome == StageOutcome::Decided).count(), 1);
         }
@@ -1466,6 +1475,7 @@ fn to_snapshot(i: usize, f: &ObjectFacts, s: &DeviceState, t: ObjectType) -> Fac
                 alias: None,
                 short_name_unresolved: p.short_name_unresolved,
                 user_writable: p.user_writable,
+                volume: None,
             }),
             signers: f.signers.as_ref().map(|v| {
                 v.iter()
@@ -2115,6 +2125,7 @@ fn object_keys_identify_one_object_across_spellings() {
             alias: None,
             short_name_unresolved: false,
             user_writable: None,
+            volume: None,
         }),
         ..SnapshotFacts::default()
     };
@@ -2351,6 +2362,7 @@ fn an_unexpanded_short_name_is_not_an_object_identity() {
             alias: None,
             short_name_unresolved: true,
             user_writable: None,
+            volume: None,
         }),
         signers: Some(vec![signer.clone()]),
         ..SnapshotFacts::default()
@@ -2803,5 +2815,164 @@ fn the_tracer_resolves_library_sets() {
     assert_eq!(
         without.decision.as_ref().unwrap().outcome(),
         Outcome::Blocked
+    );
+}
+
+#[test]
+fn early_boot_drivers_and_prompts_are_traced_as_decided() {
+    use crate::context::BootPhase;
+    use crate::model::unknown::Level;
+    let mut doc = crate::model::PolicyDocument::from_json(&serde_json::json!({
+        "schema_version": "1.0.0",
+        "policy": {"id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f", "name": "P", "revision": 1, "mode": "enforce"},
+    }).to_string()).unwrap();
+    let policy = doc.clone().validate().unwrap();
+    let vars = PathVariables::new();
+    let mut ctx = EvaluationContext::new();
+    ctx.device.boot_phase = Some(BootPhase::Early);
+    // The origin collection ran and found nothing (not a missing fact).
+    let facts = ObjectFacts::new().with_origin([]);
+    let subject = Subject {
+        object_type: ObjectType::Driver,
+        facts: &facts,
+        variables: &vars,
+        context: &ctx,
+    };
+    let state = DeviceState::of(&policy.document().policy);
+    let tracer = Tracer::new(&policy).unwrap();
+    let tr = tracer.trace(
+        &subject,
+        &ObjectExtras::default(),
+        &state,
+        TRACE,
+        &TraceOptions::at(TraceLevel::Standard),
+    );
+    assert_eq!(tr.effective_mode, Mode::Audit);
+    let kinds: Vec<ModeStepKind> = tr.mode_resolution.iter().map(|s| s.kind).collect();
+    assert!(kinds.contains(&ModeStepKind::BootPhase), "{kinds:?}");
+    // A prompt relaxed by audit mode says it would have asked.
+    doc.policy.unknown.default = Level::Prompt;
+    doc.policy.mode = Mode::Audit;
+    let policy = doc.validate().unwrap();
+    let mut ctx = EvaluationContext::new();
+    ctx.session.session_type = Some(crate::context::SessionType::Console);
+    ctx.user.is_system = Some(false);
+    let subject = Subject {
+        object_type: ObjectType::Executable,
+        facts: &facts,
+        variables: &vars,
+        context: &ctx,
+    };
+    let state = DeviceState::of(&policy.document().policy);
+    let tracer = Tracer::new(&policy).unwrap();
+    let tr = tracer.trace(
+        &subject,
+        &ObjectExtras::default(),
+        &state,
+        TRACE,
+        &TraceOptions::at(TraceLevel::Standard),
+    );
+    let applied = tr.mode_resolution.last().unwrap();
+    assert!(
+        applied.detail.starts_with("would have asked the user"),
+        "{}",
+        applied.detail
+    );
+    let doc = explain(&tr, Verbosity::Short);
+    assert_eq!(doc.summary.id, "summary-would-ask");
+}
+
+#[test]
+fn an_override_session_that_lets_a_prompt_run_names_the_session() {
+    use crate::model::unknown::Level;
+    let mut doc = crate::model::PolicyDocument::from_json(&serde_json::json!({
+        "schema_version": "1.0.0",
+        "policy": {"id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f", "name": "P", "revision": 1, "mode": "enforce"},
+    }).to_string()).unwrap();
+    doc.policy.unknown.default = Level::Prompt;
+    let policy = doc.validate().unwrap();
+    let vars = PathVariables::new();
+    let mut ctx = EvaluationContext::new();
+    ctx.session.session_type = Some(crate::context::SessionType::Console);
+    ctx.user.is_system = Some(false);
+    // The origin collection ran and found nothing (not a missing fact).
+    let facts = ObjectFacts::new().with_origin([]);
+    let subject = Subject {
+        object_type: ObjectType::Executable,
+        facts: &facts,
+        variables: &vars,
+        context: &ctx,
+    };
+    let opts = TraceOptions::at(TraceLevel::Standard);
+    let tracer = Tracer::new(&policy).unwrap();
+    let session = DeviceState {
+        session: Some(SessionKind::Audit),
+        ..DeviceState::of(&policy.document().policy)
+    };
+    let tr = tracer.trace(&subject, &ObjectExtras::default(), &session, TRACE, &opts);
+    let d = tr.decision.as_ref().unwrap();
+    assert_eq!(d.reason_code(), ReasonCode::OverrideSession);
+    assert_eq!(d.would_have_been(), Outcome::PendingUser);
+    let doc = explain(&tr, Verbosity::Short);
+    assert_eq!(doc.summary.id, "summary-override-ask");
+    let text = Catalog::english().format(&doc.summary);
+    assert!(text.contains("override session"), "{text}");
+    // Audit mode without a session keeps its summary.
+    let mut audit = policy.document().clone();
+    audit.policy.mode = Mode::Audit;
+    let audit = audit.validate().unwrap();
+    let tr = Tracer::new(&audit).unwrap().trace(
+        &subject,
+        &ObjectExtras::default(),
+        &DeviceState::of(&audit.document().policy),
+        TRACE,
+        &opts,
+    );
+    assert_eq!(
+        explain(&tr, Verbosity::Short).summary.id,
+        "summary-would-ask"
+    );
+}
+
+#[test]
+fn an_out_of_scope_unknown_decision_explains_the_policy_scope() {
+    let mut doc = crate::model::PolicyDocument::from_json(&serde_json::json!({
+        "schema_version": "1.0.0",
+        "policy": {"id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f", "name": "P", "revision": 1, "mode": "enforce",
+                   "scope": {"sessions": {"types": ["console"]}},
+                   "unknown": {"default": "detect"}},
+    }).to_string()).unwrap();
+    doc.policy.name = "P".into();
+    let policy = doc.validate().unwrap();
+    let vars = PathVariables::new();
+    let mut ctx = EvaluationContext::new();
+    ctx.session.session_type = Some(crate::context::SessionType::Batch);
+    // The origin collection ran and found nothing (not a missing fact).
+    let facts = ObjectFacts::new().with_origin([]);
+    let subject = Subject {
+        object_type: ObjectType::Executable,
+        facts: &facts,
+        variables: &vars,
+        context: &ctx,
+    };
+    let tr = Tracer::new(&policy).unwrap().trace(
+        &subject,
+        &ObjectExtras::default(),
+        &DeviceState::of(&policy.document().policy),
+        TRACE,
+        &TraceOptions::at(TraceLevel::Standard),
+    );
+    assert_eq!(
+        tr.decision.as_ref().unwrap().reason_code(),
+        ReasonCode::ImplicitDenyUnknown
+    );
+    let doc = explain(&tr, Verbosity::Normal);
+    assert_eq!(doc.summary.id, "summary-implicit");
+    assert!(
+        doc.paragraphs
+            .iter()
+            .any(|p| p.id == "unknown-out-of-scope"),
+        "{:?}",
+        doc.paragraphs
     );
 }

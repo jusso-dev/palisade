@@ -303,6 +303,7 @@ impl PolicyBuilder {
                 mode: Mode::Enforce,
                 mode_options: crate::model::ModeOptions::default(),
                 settings: crate::model::PolicySettings::default(),
+                unknown: crate::model::UnknownPolicy::default(),
                 rule_sets: Vec::new(),
                 scope: None,
                 rule_set_scopes: Vec::new(),
@@ -397,6 +398,22 @@ impl FactsBuilder {
         self.0 = self
             .0
             .with_path(PathFact::new(path, &VolumeMap::new()).with_user_writable(true));
+        self
+    }
+
+    /// The kind of volume the path is on (#39). Call after [`Self::path`]
+    /// or [`Self::user_writable_path`]; without one it panics.
+    pub fn volume(mut self, volume: crate::unknown::VolumeKind) -> Self {
+        let path = self.0.path.take().expect("set the path before its volume");
+        self.0 = self.0.with_path(path.with_volume(volume));
+        self
+    }
+
+    /// The origins the agent's origin collection found (#39). An empty list
+    /// means it ran and found nothing: origin `unknown`. Without this call
+    /// the facts have no origin fact at all, which stage 6 treats as missing.
+    pub fn origins(mut self, origins: &[crate::model::OriginClass]) -> Self {
+        self.0 = self.0.with_origin(origins.iter().copied());
         self
     }
 

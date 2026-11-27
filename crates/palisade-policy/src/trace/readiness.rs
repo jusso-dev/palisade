@@ -151,9 +151,9 @@ pub fn readiness(
             .unwrap_or_else(|| "(unknown)".to_owned());
         let e = devices.entry(device.clone()).or_default();
         e.0 += 1;
-        let would = d.as_ref().is_some_and(|d| {
-            d.outcome() == Outcome::AllowedAudit && d.would_have_been() == Outcome::Blocked
-        });
+        let would = d
+            .as_ref()
+            .is_some_and(|d| d.outcome() == Outcome::AllowedAudit && d.would_have_been().stops());
         if would {
             e.1 += 1;
             total += 1;

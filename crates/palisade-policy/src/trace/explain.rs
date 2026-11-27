@@ -150,6 +150,24 @@ pub fn explain(trace: &Trace, verbosity: Verbosity) -> ExplainDoc {
         doc.paragraphs
             .push(Message::new("overridden").arg("count", overridden.to_string()));
     }
+    if trace
+        .decision
+        .as_ref()
+        .and_then(|d| d.unknown())
+        .is_some_and(|u| u.fallback == Some(crate::unknown::FallbackReason::PolicyOutOfScope))
+    {
+        doc.paragraphs.push(Message::new("unknown-out-of-scope"));
+    }
+    if let Some(u) = trace
+        .decision
+        .as_ref()
+        .and_then(|d| d.unknown())
+        .filter(|u| u.fallback == Some(crate::unknown::FallbackReason::MissingFact))
+    {
+        let facts: Vec<&str> = u.missing_facts.iter().map(|f| f.as_str()).collect();
+        doc.paragraphs
+            .push(Message::new("unknown-missing-fact").arg("facts", facts.join(", ")));
+    }
     for u in &trace.unknown_facts {
         for e in &u.effects {
             doc.paragraphs.push(
@@ -201,7 +219,7 @@ pub fn explain(trace: &Trace, verbosity: Verbosity) -> ExplainDoc {
     let blocked = trace
         .decision
         .as_ref()
-        .is_some_and(|d| d.would_have_been() == Outcome::Blocked);
+        .is_some_and(|d| d.would_have_been().stops());
     // "Why not allowed?" lists the near misses that would have let the
     // object run: for a block or a would-block, and at `detailed` for
     // anything. Other near misses (a deny that nearly matched) are
@@ -277,8 +295,34 @@ fn summary(trace: &Trace) -> Message {
         ReasonCode::ExplicitDeny => Message::new("summary-blocked").arg("rule", rule),
         ReasonCode::MandatoryDeny => Message::new("summary-mandatory").arg("rule", rule),
         ReasonCode::ImplicitDenyUnknown => Message::new("summary-implicit").arg("object", object),
+        // The unknown-application policy (#39).
+        ReasonCode::UnknownRestricted => {
+            Message::new("summary-unknown-restricted").arg("object", object)
+        }
+        ReasonCode::UnknownPrompt if d.outcome() == Outcome::PendingUser => {
+            Message::new("summary-unknown-prompt").arg("object", object)
+        }
+        ReasonCode::UnknownPrompt => Message::new("summary-unknown-answered").arg("object", object),
+        ReasonCode::UnknownDetected => {
+            Message::new("summary-unknown-detected").arg("object", object)
+        }
+        ReasonCode::UnknownAllowed => Message::new("summary-unknown-allowed").arg("object", object),
+        ReasonCode::RestrictUnavailable => {
+            Message::new("summary-restrict-unavailable").arg("object", object)
+        }
+        ReasonCode::SelfAllow => Message::new("summary-self-allow"),
         ReasonCode::Exclusion => Message::new("summary-excluded").arg("rule", rule),
         ReasonCode::InstanceLimit => Message::new("summary-instance-limit").arg("rule", rule),
+        ReasonCode::AuditModeWouldBlock if d.would_have_been() == Outcome::PendingUser => {
+            Message::new("summary-would-ask")
+                .arg("mode", mode_name(d.mode()))
+                .arg("object", object)
+        }
+        ReasonCode::OverrideSession if d.would_have_been() == Outcome::PendingUser => {
+            Message::new("summary-override-ask")
+                .arg("mode", mode_name(d.mode()))
+                .arg("object", object)
+        }
         ReasonCode::AuditModeWouldBlock | ReasonCode::OverrideSession => {
             let id = if d.outcome() == Outcome::AllowedOverride {
                 "summary-override"
@@ -423,6 +467,7 @@ const fn mode_step_name(k: ModeStepKind) -> &'static str {
         ModeStepKind::RuleSetOverride => "rule_set_override",
         ModeStepKind::RuleOverride => "rule_override",
         ModeStepKind::Session => "session",
+        ModeStepKind::BootPhase => "boot_phase",
         ModeStepKind::Effective => "effective",
         ModeStepKind::Applied => "applied",
     }
@@ -536,6 +581,42 @@ pub const ENGLISH: &[(&str, &str)] = &[
         "Blocked: no rule allows this { $object }.",
     ),
     (
+        "summary-unknown-restricted",
+        "Allowed in containment: no rule decides this { $object }, and unknown objects here are restricted.",
+    ),
+    (
+        "summary-unknown-prompt",
+        "Waiting for you: no rule decides this { $object }, so you are asked whether it may run.",
+    ),
+    (
+        "summary-unknown-answered",
+        "Decided by the answer to a prompt: no rule decides this { $object }.",
+    ),
+    (
+        "summary-unknown-detected",
+        "Allowed and reported: no rule decides this { $object }, and unknown objects here are detected.",
+    ),
+    (
+        "summary-unknown-allowed",
+        "Allowed: no rule decides this { $object }, and unknown objects here are allowed.",
+    ),
+    (
+        "summary-restrict-unavailable",
+        "Blocked: no rule decides this { $object }, and it could not be contained on this device.",
+    ),
+    (
+        "summary-override-ask",
+        "Allowed by an override session in { $mode } mode. Without it you would be asked whether this { $object } may run.",
+    ),
+    (
+        "summary-would-ask",
+        "Allowed in { $mode } mode. In enforce mode you would be asked whether this { $object } may run.",
+    ),
+    (
+        "summary-self-allow",
+        "Allowed: this is one of Palisade's own files.",
+    ),
+    (
         "summary-excluded",
         "Excluded by rule { $rule }: not evaluated further.",
     ),
@@ -579,6 +660,14 @@ pub const ENGLISH: &[(&str, &str)] = &[
     (
         "overridden",
         "Other matching rules overridden by the deciding rule: { $count }.",
+    ),
+    (
+        "unknown-missing-fact",
+        "Some facts about where this file is or where it came from were missing ({ $facts }), so the strictest setting it could fall under applied.",
+    ),
+    (
+        "unknown-out-of-scope",
+        "The policy's scope does not cover this user, device or session, or a fact it needs is unknown, so its unknown-application settings do not apply: the built-in implicit deny decides.",
     ),
     (
         "unknown-allow",

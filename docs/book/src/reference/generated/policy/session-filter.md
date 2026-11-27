@@ -4,7 +4,7 @@
 
 Session criteria (#38).
 
-Appears at: `/policy/rule_set_scopes/scopes/sessions`, `/policy/scope/sessions`, `/rule_sets/rules/scope/sessions`.
+Appears at: `/policy/rule_set_scopes/scopes/sessions`, `/policy/scope/sessions`, `/policy/unknown/scope_limits/all_of/sessions`, `/policy/unknown/scope_limits/any_of/sessions`, `/policy/unknown/scopes/sessions`, `/rule_sets/rules/scope/sessions`.
 
 ## Fields
 

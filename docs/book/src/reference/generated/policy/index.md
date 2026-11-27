@@ -35,6 +35,7 @@ Schema: [`schemas/policy/v1.json`](https://github.com/jusso-dev/palisade/blob/ma
 - [`PolicySettings`](policy-settings.md): Settings that apply to the whole policy. Every field is optional in a document and has the default shown in the schema.
 - [`PrecedenceOptions`](precedence-options.md): Settings of the precedence models. Each is optional in a document.
 - [`PrincipalRef`](principal-ref.md): A user or group (#38). Each is an object with one key, the kind.
+- [`PromptSettings`](prompt-settings.md): How the `prompt` level asks the user.
 - [`RefList`](ref-list.md): An `include` and an `exclude` list. An empty `include` means every entry; a match in `exclude` always wins.
 - [`RefList2`](ref-list2.md): An `include` and an `exclude` list. An empty `include` means every entry; a match in `exclude` always wins.
 - [`RefList3`](ref-list3.md): An `include` and an `exclude` list. An empty `include` means every entry; a match in `exclude` always wins.
@@ -43,7 +44,9 @@ Schema: [`schemas/policy/v1.json`](https://github.com/jusso-dev/palisade/blob/ma
 - [`RuleSetScope`](rule-set-scope.md): The scopes of one rule-set assignment: every one must match for the set's rules to apply.
 - [`Schedule`](schedule.md): When a scope is active (#38).
 - [`Scope`](scope.md): Who, where and when a rule applies (#38).
+- [`ScopeLimit`](scope-limit.md): One contributing policy's limit on where its unknown settings apply, in an effective policy (`UnknownPolicy::scope_limits`). It holds when every scope of `all_of` matches and, if `any_of` is not empty, one of its scopes matches.
 - [`SessionFilter`](session-filter.md): Session criteria (#38).
+- [`UnknownPolicy`](unknown-policy.md): The unknown-application policy (#39). Every field is optional in a document; the defaults block every unknown object.
 - [`Window`](window.md): One weekly window.
 
 Enumerations and string formats: [Value types](types.md).
@@ -59,4 +62,5 @@ Each example passes this schema and full validation (`cargo test -p palisade-pol
 - [`minimal.yaml`](../../../../../examples/policies/minimal.yaml): The smallest valid policy: no rule sets, so nothing is allowed and every file is reported (audit mode) by the implicit deny.
 - [`scoped-rules.yaml`](../../../../../examples/policies/scoped-rules.yaml): Rule scoping: who, where and when a rule applies. Scopes narrow a rule; they never identify the object, which is the match tree's job, and they never widen a rule. A rule applies only when the policy's scope, its rule set's assignment scopes and its own scope all match.
 - [`staged-rollout.yaml`](../../../../../examples/policies/staged-rollout.yaml): A staged rollout (#36): the policy is in audit, so what it would block is reported but runs. Executables are already enforced, a disconnected device enforces everything, and a new blocklist is tried in monitor mode. The mandatory blocklist blocks in every mode, and one deny rule is enforced in audit too (`always_enforce`).
+- [`unknown-applications.yaml`](../../../../../examples/policies/unknown-applications.yaml): Unknown-application handling (#39), starting from the Essential Eight maturity level 1 preset: unknown objects in user profiles, temporary folders and other user-writable locations are blocked, and elsewhere they are detected.
 - [`workstation-baseline.yaml`](../../../../../examples/policies/workstation-baseline.yaml): A workstation baseline with hash, publisher and path rules (ISM-0955). The same document as tests/fixtures/valid/workstation-baseline.json.

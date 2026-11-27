@@ -745,6 +745,7 @@ impl<'a, 'h> Builder<'a, 'h> {
                 mode: mode.mode,
                 mode_options,
                 settings,
+                unknown: self.unknown(),
                 rule_sets: sets.keys().copied().collect(),
                 scope: None,
                 rule_set_scopes,
@@ -805,6 +806,25 @@ impl<'a, 'h> Builder<'a, 'h> {
     fn scope_set_versions(&mut self) {
         let mut seen: BTreeMap<LibraryId, (crate::library::Pin, String)> = BTreeMap::new();
         let mut found = Vec::new();
+        // The policies' scopes also limit their unknown settings (#39).
+        for layer in self.layers {
+            for (_, doc) in self.policies(layer) {
+                let u = &doc.policy.unknown;
+                let scopes = doc.policy.scope.iter().chain(&u.scopes).chain(
+                    u.scope_limits
+                        .iter()
+                        .flat_map(|l| l.all_of.iter().chain(&l.any_of)),
+                );
+                for scope in scopes {
+                    for (_, r, _) in crate::scope::set_refs(scope) {
+                        found.push((
+                            r,
+                            format!("/effective/policy/unknown/scope_limits ({})", doc.policy.id),
+                        ));
+                    }
+                }
+            }
+        }
         for (id, e) in &self.sets {
             let scopes = e
                 .scopes
@@ -1193,6 +1213,65 @@ impl<'a, 'h> Builder<'a, 'h> {
         ok.then_some((model, options, source))
     }
 
+    /// The unknown-application policy (#39): the strictest combination of
+    /// every assigned policy's ([`UnknownPolicy::stricter`](crate::model::UnknownPolicy::stricter)),
+    /// so no layer can make unknown objects run more freely than another
+    /// layer allows. Policies are folded from the outermost layer in, and
+    /// within a layer from the highest `slot_order` down, so where a value
+    /// cannot be compared the nearest layer's lowest slot gives it, as for
+    /// every other merge here. With no policy, the default (block).
+    ///
+    /// A policy's `scope` and its `unknown.scopes` limit where its unknown
+    /// settings apply (#38): `scope` and any of `scopes`. The effective
+    /// policy has no scope of its own, so that limit moves, unexpanded, into
+    /// one entry of `unknown.scope_limits`
+    /// ([`UnknownPolicy::scope_limit_of`](crate::model::UnknownPolicy::scope_limit_of)):
+    /// at most one entry per contributing policy.
+    /// The merged settings apply to a subject in at least one contributing
+    /// policy's limit (everyone if one has none), exactly where that
+    /// policy's own evaluation would apply its settings, and the built-in
+    /// implicit deny decides for any other. Where several limits overlap,
+    /// the merged settings are at least as strict as each policy's.
+    ///
+    /// The fold is linear in the contributing policies. Levels and settings
+    /// merge pairwise ([`UnknownPolicy::stricter_settings`](crate::model::UnknownPolicy::stricter_settings)),
+    /// which costs nothing that grows with the limits, and the limits are
+    /// collected in one pass, de-duplicated by a canonical form, so no limit
+    /// is cloned or compared more than once.
+    fn unknown(&self) -> crate::model::UnknownPolicy {
+        let mut acc: Option<crate::model::UnknownPolicy> = None;
+        let mut limits: Vec<crate::model::ScopeLimit> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut everywhere = false;
+        for layer in self.layers {
+            for (_, d) in self.policies(layer).into_iter().rev() {
+                match d
+                    .policy
+                    .unknown
+                    .scope_limit_of(d.policy.scope.as_ref(), stage_six_scope)
+                {
+                    // A policy with no limit applies everywhere, which
+                    // absorbs every other limit.
+                    None => everywhere = true,
+                    Some(l) if !everywhere => {
+                        if seen.insert(l.canonical()) {
+                            limits.push(l);
+                        }
+                    }
+                    Some(_) => {}
+                }
+                acc = Some(match acc {
+                    None => d.policy.unknown.without_limits(),
+                    Some(outer) => d.policy.unknown.stricter_settings(&outer),
+                });
+            }
+        }
+        let mut u = acc.unwrap_or_default();
+        u.scopes = Vec::new();
+        u.scope_limits = if everywhere { Vec::new() } else { limits };
+        u
+    }
+
     /// The merged settings and their provenance.
     fn settings(&mut self) -> (PolicySettings, BTreeMap<String, SettingProvenance>) {
         let default = super::validate::default_settings();
@@ -1487,6 +1566,18 @@ impl<'a, 'h> Builder<'a, 'h> {
             adjustments: Vec::new(),
         }
     }
+}
+
+/// A policy's `scope` as it limits stage 6 (#39): without the options that
+/// only act on a deciding rule (an instance limit, what happens when a
+/// window closes), which stage 6 has no use for.
+fn stage_six_scope(mut s: crate::scope::Scope) -> crate::scope::Scope {
+    s.max_instances_per_session = 0;
+    if let Some(schedule) = &mut s.schedule {
+        schedule.on_window_close = crate::scope::OnWindowClose::None;
+        schedule.grace_secs = None;
+    }
+    s
 }
 
 /// Raises everything below `floor` to it. See the module documentation.

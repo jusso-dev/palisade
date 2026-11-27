@@ -19,8 +19,12 @@
 //!    chooses among the matching `allow`, `allow_contained`,
 //!    `allow_elevated` and `deny` rules.
 //! 5. **Attribute.** Not yet: post-allow attribute rules are #33.
-//! 6. **Unknown.** If nothing decided, the implicit deny
-//!    (`implicit_deny_unknown`, #39).
+//! 6. **Unknown.** If nothing decided, the policy's unknown-application
+//!    policy decides ([`crate::unknown`], #39). Its default blocks
+//!    (`implicit_deny_unknown`), the implicit deny of ADR 0004.
+//!
+//! Between stages 1 and 2, an object that is one of Palisade's own pinned
+//! images ([`Evaluator::with_self_images`]) is allowed (`self_allow`).
 //!
 //! # Scopes
 //!
@@ -114,10 +118,12 @@ use std::sync::Arc;
 
 use crate::condition::{CompiledMatch, TreeError, Unparseable};
 use crate::context::EvaluationContext;
-use crate::decision::{Decision, Directives, Outcome, RuleRef, TraceId, TrustGrant, WindowClose};
+use crate::decision::{Decision, Directives, RuleRef, TraceId, TrustGrant, WindowClose};
 use crate::facts::{ObjectFacts, PathVariables};
 use crate::mode::{self, DeviceState};
-use crate::model::{Action, Mode, ObjectType, Policy, Rule, RuleId, RuleSet, RuleSetId, UnknownAs};
+use crate::model::{
+    Action, Mode, ObjectType, Policy, Rule, RuleId, RuleSet, RuleSetId, RuleSetKind, UnknownAs,
+};
 use crate::ops::{EvalContext, Tri};
 use crate::precedence::{Candidate, MatchSet, Precedence, Resolver, Spec, Verdict, most_specific};
 use crate::scope::compile::Env;
@@ -125,6 +131,7 @@ use crate::scope::{
     Bias, CompiledScope, NoLibrary, OnWindowClose, ScopeEvaluation, ScopeLevel, ScopeLibrary,
     ScopeNote, ScopeNotes, eval_chain,
 };
+use crate::unknown::{SelfImage, StageSix, UnknownScope};
 use crate::validate::ValidatedPolicy;
 
 /// The object being decided, and what is known about it.
@@ -189,6 +196,9 @@ struct Compiled<'p> {
     /// assignment's, then its own.
     scopes: Vec<(ScopeLevel, Arc<CompiledScope>)>,
     bias: Bias,
+    /// A rule of the managed `system_baseline` (#39): a floor that only
+    /// decides when no other stage-4 rule matched.
+    floor: bool,
 }
 
 impl Compiled<'_> {
@@ -339,6 +349,15 @@ pub struct Evaluator<'p> {
     policy: &'p Policy,
     rules: Vec<Compiled<'p>>,
     resolver: Resolver,
+    self_images: Vec<SelfImage>,
+    /// Where the policy's unknown settings apply (#38, #39).
+    unknown_scope: UnknownScope,
+}
+
+/// What one evaluation knows besides the matching rules.
+struct Inputs<'a> {
+    six: StageSix<'a>,
+    pinned: bool,
 }
 
 impl<'p> Evaluator<'p> {
@@ -429,14 +448,64 @@ impl<'p> Evaluator<'p> {
                     reference: RuleRef::new(policy, set, rule),
                     scopes,
                     bias: Bias::of(rule.action.kind()),
+                    floor: crate::unknown::baseline::is_system_baseline(set),
                 });
             }
         }
+        let unknown_scope = UnknownScope::new(
+            policy_scope,
+            policy.unknown.scopes.iter().map(compile).collect(),
+            policy
+                .unknown
+                .scope_limits
+                .iter()
+                .map(|l| {
+                    (
+                        l.all_of.iter().map(compile).collect(),
+                        l.any_of.iter().map(compile).collect(),
+                    )
+                })
+                .collect(),
+        );
         Ok(Self {
             policy,
             rules,
             resolver: Resolver::new(policy.precedence_model, &policy.precedence_options),
+            self_images: Vec::new(),
+            unknown_scope,
         })
+    }
+
+    /// The same evaluator, with Palisade's own images pinned (#39): an
+    /// object that is one of them is allowed after stage 1, whatever the
+    /// ordinary rules say ([`crate::unknown::selfpin`]).
+    #[must_use]
+    pub fn with_self_images(mut self, images: Vec<SelfImage>) -> Self {
+        self.self_images = images;
+        self
+    }
+
+    /// The inputs of stages 2 to 6 for one subject.
+    fn inputs<'a>(&'a self, subject: &Subject<'a>, matched: &[&Compiled<'p>]) -> Inputs<'a> {
+        let blocklisted = matched.iter().any(|r| {
+            r.set.kind == RuleSetKind::Blocklist
+                || matches!(r.role, Role::Mandatory | Role::Policy(Verdict::Deny))
+        });
+        Inputs {
+            six: StageSix::new(
+                &self.policy.unknown,
+                &self.unknown_scope,
+                subject.object_type,
+                subject.facts,
+                subject.variables,
+                subject.context,
+                blocklisted,
+            ),
+            pinned: self
+                .self_images
+                .iter()
+                .any(|i| i.matches(subject.object_type, subject.facts)),
+        }
     }
 
     /// The policy being evaluated.
@@ -452,7 +521,8 @@ impl<'p> Evaluator<'p> {
     #[must_use]
     pub fn evaluate(&self, subject: &Subject<'_>, trace_id: TraceId) -> Decision {
         let (matched, notes) = self.matching_with_notes(subject);
-        self.run(&matched, subject, trace_id)
+        let inputs = self.inputs(subject, &matched);
+        self.run(&matched, subject, &inputs, trace_id)
             .0
             .with_scope_notes(notes)
     }
@@ -515,20 +585,31 @@ impl<'p> Evaluator<'p> {
         trace_id: TraceId,
     ) -> Option<Decision> {
         let t = subject.object_type;
-        let (full, winner) = self.run(matched, subject, trace_id);
-        if full.outcome() != Outcome::Blocked {
-            let mode = self.mode_of(t, winner, state).mode;
-            return Some(full.in_mode(mode));
+        let inputs = self.inputs(subject, matched);
+        let (full, winner) = self.run(matched, subject, &inputs, trace_id);
+        // Only stage 6 follows `driver_boot_policy`.
+        let boot = inputs.six.boot_audit && full.unhandled();
+        if !full.outcome().stops() {
+            let mode = self.mode_of(t, winner, state, boot).mode;
+            let learning = mode == Mode::Learning && full.unhandled();
+            return Some(full.in_mode(mode).with_learning(learning));
         }
         // Layer 1: the modes, without the session.
         let base = DeviceState {
             session: None,
             ..*state
         };
-        let one = self.enforcing(subject, matched, (full.clone(), winner), &base, trace_id);
+        let one = self.enforcing(
+            subject,
+            matched,
+            (full.clone(), winner),
+            &base,
+            &inputs,
+            trace_id,
+        );
         if !one.blocks {
-            let effective = self.mode_of(t, winner, &base);
-            let learning = effective.mode == Mode::Learning && winner.is_none();
+            let effective = self.mode_of(t, winner, &base, boot);
+            let learning = effective.mode == Mode::Learning && full.unhandled();
             let directives = one.directives();
             return Some(full.relaxed(effective, directives, learning));
         }
@@ -545,6 +626,7 @@ impl<'p> Evaluator<'p> {
             &one.kept,
             (one.decision.clone(), one.winner),
             state,
+            &inputs,
             trace_id,
         );
         let mut dropped = one.dropped.clone();
@@ -552,7 +634,7 @@ impl<'p> Evaluator<'p> {
         if two.blocks {
             return Some(two.decision.with_overridden(dropped).in_mode(Mode::Enforce));
         }
-        let effective = self.mode_of(t, one.winner, state);
+        let effective = self.mode_of(t, one.winner, state, boot);
         let directives = two.directives();
         Some(
             one.decision
@@ -561,15 +643,23 @@ impl<'p> Evaluator<'p> {
         )
     }
 
-    /// The effective mode of a decision decided by `rule`, or by the
-    /// implicit deny.
+    /// The effective mode of a decision decided by `rule`, or by stage 6
+    /// when `rule` is `None`. With `boot_audit` (a driver in early boot
+    /// under `driver_boot_policy: audit`), stage 6 does not enforce, except
+    /// in lockdown.
     fn mode_of(
         &self,
         t: ObjectType,
         rule: Option<&Compiled<'_>>,
         state: &DeviceState,
+        boot_audit: bool,
     ) -> mode::EffectiveMode {
-        mode::resolve(self.policy, t, rule.map(|r| (r.set, r.rule)), state)
+        let mut m = mode::resolve(self.policy, t, rule.map(|r| (r.set, r.rule)), state);
+        if rule.is_none() && boot_audit && !state.lockdown {
+            m.mode = mode::capped(m.mode, Mode::Audit);
+            m.by_session = false;
+        }
+        m
     }
 
     /// One relaxation layer. `first` is the decision over `rules`. If it
@@ -582,12 +672,16 @@ impl<'p> Evaluator<'p> {
         rules: &[&'a Compiled<'p>],
         first: (Decision, Option<&'a Compiled<'p>>),
         state: &DeviceState,
+        inputs: &Inputs<'_>,
         trace_id: TraceId,
     ) -> Layer<'a, 'p> {
         let t = subject.object_type;
-        let enforces = |r: Option<&Compiled<'_>>| self.mode_of(t, r, state).mode == Mode::Enforce;
+        let enforces = |d: &Decision, r: Option<&Compiled<'_>>| {
+            let boot = inputs.six.boot_audit && d.unhandled();
+            self.mode_of(t, r, state, boot).mode == Mode::Enforce
+        };
         let (decision, winner) = first;
-        if decision.outcome() == Outcome::Blocked && enforces(winner) {
+        if decision.outcome().stops() && enforces(&decision, winner) {
             return Layer {
                 decision,
                 winner,
@@ -596,11 +690,12 @@ impl<'p> Evaluator<'p> {
                 blocks: true,
             };
         }
-        let (dropped, kept): (Vec<&Compiled<'p>>, Vec<&Compiled<'p>>) = rules
-            .iter()
-            .partition(|r| matches!(r.role, Role::Policy(Verdict::Deny)) && !enforces(Some(r)));
-        let (decision, winner) = self.run(&kept, subject, trace_id);
-        let blocks = decision.outcome() == Outcome::Blocked && enforces(winner);
+        let (dropped, kept): (Vec<&Compiled<'p>>, Vec<&Compiled<'p>>) =
+            rules.iter().partition(|r| {
+                matches!(r.role, Role::Policy(Verdict::Deny)) && !enforces(&decision, Some(r))
+            });
+        let (decision, winner) = self.run(&kept, subject, inputs, trace_id);
+        let blocks = decision.outcome().stops() && enforces(&decision, winner);
         Layer {
             decision,
             winner,
@@ -628,11 +723,13 @@ impl<'p> Evaluator<'p> {
     }
 
     /// Runs the stages over the rules that apply, and returns the decision
-    /// and the deciding rule (`None` for the implicit deny).
+    /// and the deciding rule (`None` when stage 6 or a pinned image
+    /// decided).
     fn run<'a>(
         &self,
         matched: &[&'a Compiled<'p>],
         subject: &Subject<'_>,
+        inputs: &Inputs<'_>,
         trace_id: TraceId,
     ) -> (Decision, Option<&'a Compiled<'p>>) {
         let mut mandatory = Vec::new();
@@ -652,8 +749,22 @@ impl<'p> Evaluator<'p> {
 
         // Stage 1, then stage 2. Every candidate of a stage does the same
         // thing, so the most specific one decides; `most_specific` does not
-        // read the verdict.
-        for stage in [&mandatory, &exclusions] {
+        // read the verdict. A pinned Palisade image is allowed between them.
+        for (n, stage) in [&mandatory, &exclusions].into_iter().enumerate() {
+            if n == 1 && inputs.pinned {
+                let overridden = exclusions
+                    .iter()
+                    .chain(policy.iter().map(|(r, _)| r))
+                    .chain(&trust)
+                    .map(|r| r.reference)
+                    .collect();
+                let d = Decision::self_allow(trace_id).with_context(
+                    overridden,
+                    annotations,
+                    Vec::new(),
+                );
+                return (d, None);
+            }
             let set = MatchSet {
                 candidates: stage.iter().map(|r| r.candidate(Verdict::Deny)).collect(),
             };
@@ -674,18 +785,28 @@ impl<'p> Evaluator<'p> {
             }
         }
 
-        // Stage 4: the precedence model.
+        // Stage 4: the precedence model. The managed `system_baseline` is a
+        // floor: its rules are decided over only when no other rule matched,
+        // so under no model does it override a tenant's rule.
+        let deciding: Vec<(&Compiled<'p>, Verdict)> = if policy.iter().any(|(r, _)| !r.floor) {
+            policy.iter().filter(|(r, _)| !r.floor).copied().collect()
+        } else {
+            policy.clone()
+        };
         let set = MatchSet {
-            candidates: policy.iter().map(|(r, v)| r.candidate(*v)).collect(),
+            candidates: deciding.iter().map(|(r, v)| r.candidate(*v)).collect(),
         };
         let Some(i) = self.resolver.resolve(&set).winner else {
-            // Stage 6: nothing decided.
+            // Stage 6: nothing decided. Trust sources only grant to an
+            // object a rule allowed, so they are overridden here.
             let overridden = trust.iter().map(|r| r.reference).collect();
-            let d =
-                Decision::implicit_deny(trace_id).with_context(overridden, annotations, Vec::new());
+            let d = inputs
+                .six
+                .decide(trace_id)
+                .with_context(overridden, annotations, Vec::new());
             return (d, None);
         };
-        let (winner, verdict) = policy[i];
+        let (winner, verdict) = deciding[i];
         let mut overridden: Vec<RuleRef> = policy
             .iter()
             .filter(|(r, _)| r.rule.id != winner.rule.id)

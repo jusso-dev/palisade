@@ -4,7 +4,7 @@
 
 An inclusive range of dates. `to` unset means the single day `from`.
 
-Appears at: `/policy/rule_set_scopes/scopes/schedule/dates`, `/policy/rule_set_scopes/scopes/schedule/except_dates`, `/policy/scope/schedule/dates`, `/policy/scope/schedule/except_dates`, `/rule_sets/rules/scope/schedule/dates`, `/rule_sets/rules/scope/schedule/except_dates`.
+Appears at: `/policy/rule_set_scopes/scopes/schedule/dates`, `/policy/rule_set_scopes/scopes/schedule/except_dates`, `/policy/scope/schedule/dates`, `/policy/scope/schedule/except_dates`, `/policy/unknown/scope_limits/all_of/schedule/dates`, `/policy/unknown/scope_limits/all_of/schedule/except_dates`, and more.
 
 ## Fields
 

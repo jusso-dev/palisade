@@ -122,6 +122,8 @@ fn validated(doc: PolicyDocument) -> ValidatedPolicy {
 
 fn facts() -> ObjectFacts {
     ObjectFacts::new()
+        // The origin collection ran and found nothing (#39).
+        .with_origin([])
         .with(Field::HashSha256, sha('a'))
         .with(Field::MetaFileVersion, "unknown build")
         .with_path(

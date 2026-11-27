@@ -19,6 +19,7 @@ pub mod mode;
 pub mod precedence;
 pub(crate) mod settings;
 mod tree;
+pub mod unknown;
 
 #[cfg(test)]
 pub(crate) mod arbitrary;
@@ -34,6 +35,10 @@ pub use palisade_core::{Mode, ObjectType, PolicyId, RuleId, RuleSetId, SchemaVer
 pub use precedence::{AllowTiebreak, PrecedenceOptions, PriorityDirection, TierTiebreak};
 pub use settings::{AdvancedValue, ControlLevel, PolicySettings, TimeZoneBasis};
 pub use tree::{Criterion, Field, FieldClass, Match, Operator, Strength};
+pub use unknown::{
+    ApprovalScope, CompliancePreset, DriverBootPolicy, Level, LocationClass, OriginClass,
+    PreexistingPolicy, PromptOption, PromptSettings, Reauth, ScopeLimit, UnknownPolicy,
+};
 
 use crate::scope::{LocationProfile, RuleSetScope, Scope};
 
@@ -110,6 +115,10 @@ pub struct Policy {
     /// Typed settings. Every field has a documented default.
     #[serde(default)]
     pub settings: PolicySettings,
+    /// What happens when no rule decides (#39). The default blocks every
+    /// unknown object.
+    #[serde(default, skip_serializing_if = "UnknownPolicy::is_default")]
+    pub unknown: UnknownPolicy,
     /// The rule sets that apply, in order, by ID.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(length(max = 1000))]

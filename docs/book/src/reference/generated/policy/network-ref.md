@@ -5,7 +5,7 @@
 A network location test (#38). Address tests match when any local
 interface address does.
 
-Appears at: `/policy/location_profiles/all`, `/policy/rule_set_scopes/scopes/network/exclude`, `/policy/rule_set_scopes/scopes/network/include`, `/policy/scope/network/exclude`, `/policy/scope/network/include`, `/rule_sets/rules/scope/network/exclude`, and more.
+Appears at: `/policy/location_profiles/all`, `/policy/rule_set_scopes/scopes/network/exclude`, `/policy/rule_set_scopes/scopes/network/include`, `/policy/scope/network/exclude`, `/policy/scope/network/include`, `/policy/unknown/scope_limits/all_of/network/exclude`, and more.
 
 ## Variants
 

@@ -18,6 +18,7 @@ pub mod scope;
 #[cfg(any(test, feature = "test-util"))]
 pub mod test_util;
 pub mod trace;
+pub mod unknown;
 pub mod validate;
 
 #[cfg(test)]

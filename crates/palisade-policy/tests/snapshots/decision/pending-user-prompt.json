@@ -1,0 +1,73 @@
+{
+  "outcome": "pending_user",
+  "would_have_been": "pending_user",
+  "action": "deny",
+  "matched_rule": null,
+  "overridden": [],
+  "annotations": [],
+  "mode": "enforce",
+  "learning_candidate": false,
+  "directives": {
+    "containment": null,
+    "elevation": null,
+    "trust_sources": [],
+    "kill_running": false,
+    "request": null,
+    "window_close": null,
+    "prompt": {
+      "options": [
+        "allow_once",
+        "allow_always_local",
+        "request_approval",
+        "block"
+      ],
+      "require_justification": true,
+      "reauth": "none",
+      "timeout_secs": 60,
+      "fallback": {
+        "level": "block",
+        "outcome": "blocked",
+        "reason_code": "implicit_deny_unknown",
+        "containment": null
+      },
+      "local_approval_scope": "user",
+      "temp_approval_days": 14,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  "effects": {
+    "log": "always",
+    "upload": "immediate",
+    "notify": "none",
+    "notification_text": null,
+    "help_url": null,
+    "severity": "medium",
+    "tags": [],
+    "suppress_duplicates_secs": 600
+  },
+  "reason_code": "unknown_prompt",
+  "scope_notes": [],
+  "unknown": {
+    "resolved": "prompt",
+    "applied": "prompt",
+    "fallback": null,
+    "entries": [
+      {
+        "kind": "default",
+        "key": "default",
+        "level": "prompt"
+      }
+    ],
+    "locations": [
+      "user_profile",
+      "temp"
+    ],
+    "origins": [
+      "internet"
+    ],
+    "unknown_locations": [],
+    "unknown_origins": [],
+    "missing_facts": []
+  },
+  "trace_id": "03030303030303030303030303030303"
+}

@@ -205,6 +205,37 @@ pub mod limits {
     pub const MAX_DYNAMIC_GROUPS: usize = 64;
     /// Most placement rules in one tenant.
     pub const MAX_PLACEMENT_RULES: usize = 1_000;
+    /// Most layers of one device's effective policy: the global node, the
+    /// tenant, at most [`MAX_GROUP_DEPTH`] groups, at most
+    /// [`MAX_DYNAMIC_GROUPS`] dynamic groups and the device, each possibly
+    /// preceded by the template it links to.
+    pub const MAX_LAYERS: usize = 2 * (1 + 1 + MAX_GROUP_DEPTH + MAX_DYNAMIC_GROUPS + 1);
+    /// Most policies that can contribute to one device's effective policy:
+    /// [`MAX_ASSIGNMENTS_PER_NODE`] on each of [`MAX_LAYERS`] layers.
+    pub const MAX_CONTRIBUTING_POLICIES: usize = MAX_LAYERS * MAX_ASSIGNMENTS_PER_NODE;
+    /// Most scope values in one effective policy's unknown-application
+    /// limits (`unknown.scope_limits`, #39): over every contributing
+    /// policy, its `scope` and its `unknown.scopes`.
+    ///
+    /// Chosen by measurement, on a release build, of building one effective
+    /// policy and serialising it (about 77 bytes per scope value):
+    ///
+    /// | Scope values | Build | Serialised |
+    /// |---|---|---|
+    /// | 10,000 | 19 ms | 772 KiB |
+    /// | 20,000 | 38 ms | 1.5 MiB |
+    /// | 50,000 | 101 ms | 3.9 MiB |
+    ///
+    /// The build is linear and fast; the size is what limits it, because
+    /// each agent receives its effective policy. Snapshot validation
+    /// rejects a hierarchy in which any device could exceed this
+    /// (`too_many` at `/nodes/<n>/assignments`), so an effective policy built
+    /// from a valid snapshot never does. The check uses an upper bound: a
+    /// node's own layers plus every dynamic group of its tenant, because
+    /// which dynamic groups a device is in is only known when its policy is
+    /// computed. It is pessimistic for tenants with many dynamic-group
+    /// policies by design.
+    pub const MAX_UNKNOWN_SCOPE_VALUES: usize = 20_000;
 }
 
 /// The stable ID of a hierarchy node.

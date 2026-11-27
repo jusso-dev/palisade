@@ -5,7 +5,7 @@
 The client connected to a remote desktop session, for per-client
 scoping on multi-session hosts. Each list that is set must match.
 
-Appears at: `/policy/rule_set_scopes/scopes/sessions/client`, `/policy/scope/sessions/client`, `/rule_sets/rules/scope/sessions/client`.
+Appears at: `/policy/rule_set_scopes/scopes/sessions/client`, `/policy/scope/sessions/client`, `/policy/unknown/scope_limits/all_of/sessions/client`, `/policy/unknown/scope_limits/any_of/sessions/client`, `/policy/unknown/scopes/sessions/client`, `/rule_sets/rules/scope/sessions/client`.
 
 ## Fields
 

@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 
 use super::limits::{
     MAX_ASSIGNMENTS_PER_NODE, MAX_GROUP_DEPTH, MAX_NODES, MAX_POLICIES, MAX_REFS_PER_NODE,
-    MAX_SUPPRESSIONS_PER_NODE,
+    MAX_SUPPRESSIONS_PER_NODE, MAX_UNKNOWN_SCOPE_VALUES,
 };
 use super::placement::{self, PlacementRule};
 use super::{
@@ -236,6 +236,7 @@ impl HierarchyDocument {
         }
         let placement = placement::check(&self.placement, &nodes, &mut errors);
 
+        errors.extend(unknown_scope_bounds(&nodes, &policies));
         if !errors.is_empty() {
             return Err(errors);
         }
@@ -297,6 +298,150 @@ impl HierarchyDocument {
             Err(errors)
         }
     }
+}
+
+/// The unknown-application limits (`unknown.scope_limits`) of any device's
+/// effective policy must stay within [`MAX_UNKNOWN_SCOPE_VALUES`] (#39).
+/// For each structural node and device, this sums an upper bound: the
+/// scope values of every policy on its own layers (the node, its
+/// ancestors, and the templates they link to), plus those of every
+/// dynamic group of its tenant and their templates, since which dynamic
+/// groups a device is in is only known when its policy is computed. A
+/// node over the cap is reported once, at the nearest node that makes the
+/// total exceed it, with the largest contributors.
+///
+/// Each node's chain total is memoised from its parent's, so the check is
+/// linear in the nodes whatever the depth (validation also has to stay
+/// fast on the over-deep chains it rejects). The largest contributors are
+/// only gathered for the few nodes it reports.
+fn unknown_scope_bounds(
+    nodes: &BTreeMap<NodeId, NodeInfo>,
+    policies: &BTreeMap<PolicyId, PolicyInfo>,
+) -> Vec<HierarchyError> {
+    // Scope values one policy contributes: its `scope` (one) and its
+    // `unknown.scopes`. A policy with no limit contributes none.
+    let size = |p: &PolicyInfo| {
+        let d = &p.document.policy;
+        usize::from(d.scope.is_some()) + d.unknown.scopes.len()
+    };
+    // What one node's own assignments, and its linked template's, add.
+    let own = |info: &NodeInfo| -> Vec<(usize, String)> {
+        let mut out = Vec::new();
+        let mut add = |n: &NodeInfo, via: &str| {
+            for a in &n.node.assignments {
+                if let Some(p) = policies.get(&a.policy) {
+                    let s = size(p);
+                    if s > 0 {
+                        out.push((
+                            s,
+                            format!(
+                                "policy `{}` on `{}`{via} ({s})",
+                                p.document.policy.name, n.node.name
+                            ),
+                        ));
+                    }
+                }
+            }
+        };
+        add(info, "");
+        if let Some(t) = info.node.template.and_then(|t| nodes.get(&t)) {
+            add(t, &format!(" (template of `{}`)", info.node.name));
+        }
+        out
+    };
+    let own_total = |info: &NodeInfo| own(info).iter().map(|(s, _)| s).sum::<usize>();
+    // Every dynamic group of each tenant could apply to its devices.
+    let mut dynamic: BTreeMap<NodeId, Vec<(usize, String)>> = BTreeMap::new();
+    for info in nodes.values() {
+        if info.node.kind == NodeKind::DynamicGroup {
+            if let Some(t) = info.tenant {
+                dynamic.entry(t).or_default().extend(
+                    own(info)
+                        .into_iter()
+                        .map(|(s, d)| (s, format!("dynamic group: {d}"))),
+                );
+            }
+        }
+    }
+    let dynamic_total = |info: &NodeInfo| {
+        info.tenant
+            .and_then(|t| dynamic.get(&t))
+            .map_or(0, |d| d.iter().map(|(s, _)| s).sum::<usize>())
+    };
+    // Chain totals, memoised: a node's is its own plus its parent's. A
+    // cycle or a missing parent (reported elsewhere) stops the walk.
+    let mut chain: BTreeMap<NodeId, usize> = BTreeMap::new();
+    for id in nodes.keys() {
+        let mut path = Vec::new();
+        let mut at = Some(*id);
+        let mut base = 0;
+        while let Some(n) = at {
+            if let Some(t) = chain.get(&n) {
+                base = *t;
+                break;
+            }
+            if path.contains(&n) || path.len() > nodes.len() {
+                break;
+            }
+            path.push(n);
+            at = nodes.get(&n).and_then(|i| i.node.parent);
+        }
+        for n in path.into_iter().rev() {
+            base += nodes.get(&n).map_or(0, own_total);
+            chain.insert(n, base);
+        }
+    }
+    let bound =
+        |info: &NodeInfo| chain.get(&info.node.id).copied().unwrap_or(0) + dynamic_total(info);
+    let mut errors = Vec::new();
+    for info in nodes.values() {
+        if !matches!(
+            info.node.kind,
+            NodeKind::Global | NodeKind::Tenant | NodeKind::Group | NodeKind::Device
+        ) {
+            continue;
+        }
+        let total = bound(info);
+        if total <= MAX_UNKNOWN_SCOPE_VALUES {
+            continue;
+        }
+        // Report at the nearest node only: one whose parent is within the
+        // cap.
+        if info
+            .node
+            .parent
+            .and_then(|p| nodes.get(&p))
+            .is_some_and(|p| bound(p) > MAX_UNKNOWN_SCOPE_VALUES)
+        {
+            continue;
+        }
+        let mut parts: Vec<(usize, String)> = Vec::new();
+        let mut at = Some(info);
+        let mut steps = 0;
+        while let Some(n) = at {
+            parts.extend(own(n));
+            steps += 1;
+            if steps > MAX_GROUP_DEPTH + 3 {
+                break;
+            }
+            at = n.node.parent.and_then(|p| nodes.get(&p));
+        }
+        if let Some(t) = info.tenant {
+            parts.extend(dynamic.get(&t).cloned().unwrap_or_default());
+        }
+        parts.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        let largest: Vec<&str> = parts.iter().take(5).map(|(_, d)| d.as_str()).collect();
+        errors.push(herr(
+            HierarchyCode::TooMany,
+            format!("{}/assignments", info.path()),
+            format!(
+                "a device at `{}` could receive up to {total} unknown-application scope values (each policy's `scope` and `unknown.scopes`, over its layers and every dynamic group of its tenant); at most {MAX_UNKNOWN_SCOPE_VALUES} are allowed. This is an upper bound, because a device's dynamic groups are only known when its policy is computed. Largest: {}. Slim or consolidate these policies, especially dynamic-group ones",
+                info.node.name,
+                largest.join("; ")
+            ),
+        ));
+    }
+    errors
 }
 
 /// Whether a structural node changes anything for the devices below it
@@ -1109,6 +1254,11 @@ fn scope_refs(
     };
     let mut scopes: Vec<&mut crate::scope::Scope> = Vec::new();
     scopes.extend(doc.policy.scope.as_mut());
+    scopes.extend(doc.policy.unknown.scopes.iter_mut());
+    for l in &mut doc.policy.unknown.scope_limits {
+        scopes.extend(l.all_of.iter_mut());
+        scopes.extend(l.any_of.iter_mut());
+    }
     for a in &mut doc.policy.rule_set_scopes {
         scopes.extend(a.scopes.iter_mut());
     }
@@ -1168,6 +1318,7 @@ fn wrap(set: RuleSet) -> PolicyDocument {
             mode: crate::model::Mode::Enforce,
             mode_options: crate::model::ModeOptions::default(),
             settings: PolicySettings::default(),
+            unknown: crate::model::UnknownPolicy::default(),
             rule_sets: vec![set.id],
             scope: None,
             rule_set_scopes: Vec::new(),
