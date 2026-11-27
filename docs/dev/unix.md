@@ -62,7 +62,7 @@ do what it does:
 
 ```sh
 docker compose --file .devcontainer/compose.yaml --project-name palisade-dev up --detach --build --wait
-docker compose --file .devcontainer/compose.yaml --project-name palisade-dev exec dev cargo xtask ci --fast
+docker compose --file .devcontainer/compose.yaml --project-name palisade-dev exec --workdir /workspaces/palisade dev cargo xtask ci --fast
 docker compose --file .devcontainer/compose.yaml --project-name palisade-dev down --volumes
 ```
 

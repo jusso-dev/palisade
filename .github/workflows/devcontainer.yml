@@ -43,9 +43,9 @@ jobs:
           $COMPOSE build dev
           $COMPOSE up --detach --wait
       - name: Fetch the locked dependencies
-        run: $COMPOSE exec -T dev cargo fetch --locked
+        run: $COMPOSE exec -T --workdir /workspaces/palisade dev cargo fetch --locked
       - name: cargo xtask ci --fast, inside the container
-        run: $COMPOSE exec -T dev cargo xtask ci --fast
+        run: $COMPOSE exec -T --workdir /workspaces/palisade dev cargo xtask ci --fast
       - name: Stop the services
         if: always()
         run: $COMPOSE down --volumes
