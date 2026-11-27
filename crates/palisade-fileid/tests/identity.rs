@@ -93,6 +93,28 @@ fn merging_refuses_another_file() {
 }
 
 #[test]
+fn merging_needs_the_same_content() {
+    // Two files of the same size and name: a classify-only record of one
+    // and a trust-only record of the other must not be joined, though
+    // neither has the hash tier's flat SHA-256.
+    let a = PeBuilder::default().build();
+    let mut b = a.clone();
+    let last = b.len() - 1;
+    b[last] ^= 0x01;
+    let classify = Tiers::only(Tier::Classify);
+    let trust = Tiers::only(Tier::Trust);
+    let mut x = identify_bytes(&a, Some("same.exe"), classify, &ctx());
+    assert!(x.content_sha256.is_some());
+    let before = x.clone();
+    let y = identify_bytes(&b, Some("same.exe"), trust, &ctx());
+    assert!(!x.merge(y, &ctx()));
+    assert_eq!(x, before);
+    // The same content in both: merged.
+    let z = identify_bytes(&a, Some("same.exe"), trust, &ctx());
+    assert!(x.merge(z, &ctx()));
+}
+
+#[test]
 fn compare_reports_rule_relevant_differences() {
     let v1 = identify_bytes(
         &tool_image((1, 2, 3, 4)),
@@ -274,6 +296,7 @@ fn serialised_form_is_stable() {
         "computed_tiers",
         "name",
         "size",
+        "content_sha256",
         "timestamps",
         "kind",
         "pe",
@@ -292,7 +315,7 @@ fn serialised_form_is_stable() {
     ] {
         assert!(keys.contains(&k), "missing {k}");
     }
-    assert_eq!(keys.len(), 23, "{keys:?}");
+    assert_eq!(keys.len(), 24, "{keys:?}");
 }
 
 #[test]
@@ -391,5 +414,100 @@ proptest! {
         image.truncate(cut.max(64).min(image.len()));
         let id = identify_bytes(&image, Some("extool.exe"), Tiers::ALL, &ctx());
         prop_assert!(serde_json::to_string(&id).is_ok());
+    }
+}
+
+/// #294 review (CodeRabbit, `compose.rs`): a file revoked by a digest in
+/// an algorithm the caller did not ask for (the flat SHA-384, or the
+/// Authenticode SHA-1) is still found revoked: every algorithm the
+/// revocation list uses is computed.
+#[test]
+fn revocation_by_any_algorithm_is_found() {
+    use palisade_fileid::authenticode::{RevocationSet, hash_pe};
+    use palisade_fileid::hash::{AlgorithmSet, Digest, HashAlgorithm};
+    use sha2::Digest as _;
+    let image = tool_image((1, 0, 0, 0));
+    let flat384 = sha2::Sha384::digest(&image);
+    let ah = hash_pe(&image, AlgorithmSet::SHA1).unwrap();
+    let auth_sha1 = ah.get(HashAlgorithm::Sha1).unwrap().clone();
+    for digest in [
+        Digest::new(HashAlgorithm::Sha384, &flat384).unwrap(),
+        auth_sha1,
+    ] {
+        let mut rev = RevocationSet::new();
+        rev.add_file_hash(digest.clone());
+        let mut c = ctx();
+        c.revocation = &rev;
+        let id = identify_bytes(&image, Some("extool.exe"), Tiers::ALL, &c);
+        let s = id.signing_state.computed().unwrap();
+        assert_eq!(s.state, SigningStateKind::Invalid, "{digest:?}: {s:?}");
+        assert_eq!(recommend(&id).level, RuleLevel::None);
+    }
+}
+
+/// #294 review (CodeRabbit, `mod.rs`): a final path one record resolved
+/// survives a merge with a record that did not, so a third record that
+/// resolved a different final path is still refused.
+#[test]
+fn merging_keeps_a_known_final_path() {
+    let image = PeBuilder::default().build();
+    let with_final = |p: Option<&str>| {
+        let mut id = identify_bytes(&image, Some(r"C:\t\a.exe"), Tiers::ALL, &ctx());
+        if let Field::Computed(info) = &mut id.fs.path {
+            info.final_path = p.map(str::to_owned);
+        }
+        id
+    };
+    let mut x = with_final(None);
+    assert!(x.merge(with_final(Some(r"C:\real\a.exe")), &ctx()));
+    assert_eq!(
+        x.fs.path.computed().unwrap().final_path.as_deref(),
+        Some(r"C:\real\a.exe")
+    );
+    let before = x.clone();
+    assert!(!x.merge(with_final(Some(r"C:\other\a.exe")), &ctx()));
+    assert_eq!(x, before);
+}
+
+/// #294 review minors: a name made wholly of lookalikes of a protected
+/// binary's name is a homoglyph (`сmd.exe` with a Cyrillic `с`, `.exe`
+/// Latin, has no Latin letter in its label to mix with); a PE with a
+/// version resource but no name leaves the name check open; and a
+/// context tier that computed nothing is not marked computed.
+#[test]
+fn review_minors_in_the_record() {
+    let mut c = ctx();
+    let list = palisade_fileid::identity::ProtectedList::defaults();
+    c.protected = &list;
+    let image = PeBuilder::default().build();
+    let id = identify_bytes(&image, Some("\u{ff43}\u{ff4d}\u{ff44}.exe"), Tiers::ALL, &c);
+    assert!(
+        id.masquerade.reasons.iter().any(|r| matches!(
+            r,
+            palisade_fileid::identity::MasqueradeReason::Homoglyph { .. }
+        )),
+        "{:?}",
+        id.masquerade
+    );
+    let tool = tool_image((1, 0, 0, 0));
+    let id = identify_bytes(&tool, None, Tiers::ALL, &ctx());
+    assert!(
+        id.masquerade.unassessed.contains(&"name_mismatch"),
+        "{:?}",
+        id.masquerade
+    );
+    assert_eq!(recommend(&id).level, RuleLevel::None);
+    // A context tier whose every field is pending or unavailable did not
+    // compute: off Windows, a file has neither a mark of the web nor a
+    // Windows path to take variables from.
+    if !cfg!(windows) {
+        let dir = std::env::temp_dir().join(format!("palisade-ctx-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("extool.exe");
+        std::fs::write(&path, &tool).unwrap();
+        let id = identify(&path, Tiers::ALL, &ctx()).unwrap();
+        assert!(!id.fs.motw.is_computed() && !id.fs.path_variables.is_computed());
+        assert!(!id.computed_tiers.contains(Tier::Context));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

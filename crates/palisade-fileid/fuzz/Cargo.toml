@@ -32,6 +32,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4.13"
 palisade-fileid = { path = "..", features = ["content-rules"] }
+serde_json = { version = "1.0.154", default-features = false, features = ["std"] }
 
 [[bin]]
 name = "pe_parse"

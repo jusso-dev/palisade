@@ -1,13 +1,14 @@
 //! Fuzzes the unified file identity record (#55): every parser of the crate
 //! runs on one input through `identify_bytes`, with the masquerade,
-//! strength and recommendation logic on top. No input may panic, and the
-//! record must serialise and respect its documented bounds.
+//! strength and recommendation logic on top. No input may panic, nothing
+//! may be trusted under an empty trust configuration, and the record must
+//! serialise.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
 use palisade_fileid::identity::{
-    ExpectedSigner, IdentityContext, ProtectedList, ProtectedVendor, Tiers, identify_bytes,
-    recommend,
+    ExpectedSigner, IdentityContext, ProtectedList, ProtectedVendor, RuleLevel,
+    SigningStateKind, Tiers, identify_bytes, recommend,
 };
 
 fuzz_target!(|data: &[u8]| {
@@ -26,13 +27,18 @@ fuzz_target!(|data: &[u8]| {
     let mut ctx = IdentityContext::untrusted(1_795_564_800);
     ctx.protected = &list;
     let id = identify_bytes(body, name, Tiers::ALL, &ctx);
-    assert!(id.masquerade.score <= 100);
     assert_eq!(id.size.computed().copied(), Some(body.len() as u64));
-    let _ = recommend(&id);
-    let _ = std::hint::black_box(serde_json_free_size(&id));
+    // Nothing is trusted under an empty trust configuration, so no input
+    // may come out trusted, or be recommended a signer rule.
+    if let Some(s) = id.signing_state.computed() {
+        assert_ne!(s.state, SigningStateKind::Trusted);
+        assert!(s.signer.is_none());
+    }
+    let rec = recommend(&id);
+    assert!(!matches!(
+        rec.level,
+        RuleLevel::Publisher | RuleLevel::PublisherProduct | RuleLevel::FilePublisher
+    ));
+    // The record always serialises.
+    serde_json::to_vec(&id).expect("the record serialises");
 });
-
-/// A cheap traversal of the record without a JSON dependency here.
-fn serde_json_free_size(id: &palisade_fileid::identity::FileIdentity) -> usize {
-    format!("{id:?}").len()
-}

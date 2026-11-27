@@ -96,22 +96,38 @@ impl FileIdentity {
     ///
     /// Returns `false`, and changes nothing, when the records are shown to
     /// describe different files or versions: a different path or name hint,
-    /// a different final path, size, last-write or creation time, or
-    /// different flat SHA-256 digests. An attribute only one record has is
-    /// not compared. Until #54 adds the file ID and change journal stamp,
+    /// a different final path, size, last-write or creation time, or a
+    /// different content digest; and when both records hold attributes
+    /// derived from the content, unless both carry the same content digest.
+    /// Otherwise an attribute only one record has is not compared. Until #54 adds the file ID and change journal stamp,
     /// that is the strongest check available; a file rewritten in place
     /// with the same size and restored times is not detected.
     pub fn merge(&mut self, other: Self, ctx: &IdentityContext<'_>) -> bool {
         fn differ<T: PartialEq>(a: Option<T>, b: Option<T>) -> bool {
             matches!((a, b), (Some(a), Some(b)) if a != b)
         }
-        let digest = |id: &Self| id.hashes.computed().and_then(|h| h.sha256.clone());
         let final_path = |id: &Self| id.fs.path.computed().and_then(|p| p.final_path.clone());
         let times = |id: &Self| id.timestamps.computed().copied();
+        // Attributes derived from the content (classify, hash, trust) are
+        // joined only when both records carry the digest of the content
+        // they read, and it is the same: two records of the same size and
+        // name may still be of different content.
+        let reads_content = |id: &Self| {
+            [Tier::Classify, Tier::Hash, Tier::Trust]
+                .iter()
+                .any(|t| id.computed_tiers.contains(*t))
+        };
+        let content_unproven = reads_content(self)
+            && reads_content(&other)
+            && match (&self.content_sha256, &other.content_sha256) {
+                (Some(a), Some(b)) => a != b,
+                _ => true,
+            };
         let disproven = self.path != other.path
             || self.name_hint != other.name_hint
             || differ(self.size.computed(), other.size.computed())
-            || differ(digest(self), digest(&other))
+            || differ(self.content_sha256.as_ref(), other.content_sha256.as_ref())
+            || content_unproven
             || differ(final_path(self), final_path(&other))
             || differ(
                 times(self).and_then(|t| t.modified),
@@ -127,6 +143,9 @@ impl FileIdentity {
         self.requested_tiers = self.requested_tiers.union(other.requested_tiers);
         self.computed_tiers = self.computed_tiers.union(other.computed_tiers);
         self.size.absorb(other.size);
+        if self.content_sha256.is_none() {
+            self.content_sha256 = other.content_sha256;
+        }
         self.timestamps.absorb(other.timestamps);
         self.kind.absorb(other.kind);
         self.pe.absorb(other.pe);

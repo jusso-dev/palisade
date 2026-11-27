@@ -13,6 +13,8 @@
 
 use serde::Serialize;
 
+use palisade_core::VerificationError;
+
 use super::record::{CatalogState, EmbeddedState, Field, FileIdentity, SigningStateKind};
 
 /// A rule level, narrowest last.
@@ -52,6 +54,15 @@ pub struct Recommendation {
 /// Masquerade scores at or above this stop any recommendation.
 pub const MASQUERADE_THRESHOLD: u8 = 50;
 
+/// Masquerade checks that, when they could not be made, stop any
+/// recommendation: each could have found a renamed or impersonating
+/// binary.
+pub const BLOCKING_UNASSESSED: [&str; 3] = [
+    "known_binary_relocated",
+    "signer_impersonation",
+    "name_mismatch",
+];
+
 /// Recommends a rule level for `id`.
 #[must_use]
 pub fn recommend(id: &FileIdentity) -> Recommendation {
@@ -70,12 +81,61 @@ pub fn recommend(id: &FileIdentity) -> Recommendation {
         return rec;
     }
 
+    // A masquerade check that could not run is not a clean result (ADR
+    // 0018): a file that may be a renamed or impersonating binary gets no
+    // allow rule until the check can be made.
+    if let Some(check) = id
+        .masquerade
+        .unassessed
+        .iter()
+        .find(|c| BLOCKING_UNASSESSED.contains(c))
+    {
+        rec.rationale.push(format!(
+            "the {check} check could not be made (see masquerade.unassessed), so no allow rule is recommended until it can"
+        ));
+        return rec;
+    }
+    // A file whose version resource claims a protected binary's name is
+    // allowed only through that binary's own trusted signer: a hash rule
+    // would allow an impostor or a copy outside its folders.
+    if let Some(original) = id.masquerade.claims_protected.as_deref() {
+        if id.trusted_signer().is_none() {
+            rec.rationale.push(format!(
+                "its OriginalFilename {original:?} names a protected binary and no trusted signer vouches for it, so no allow rule is recommended"
+            ));
+            return rec;
+        }
+    }
+
     let signing = id.signing_state.computed();
-    // A file whose signature was broken after signing, or whose hash is
-    // revoked, gets no allow rule of any kind.
+    // A file whose signature was broken after signing, or whose hash or
+    // signer is revoked, gets no allow rule of any kind; nor does a signed
+    // file whose signature failed any other validity check (expired, a
+    // weak key), which a hash rule would otherwise wave through. A valid
+    // signature whose signer policy simply does not trust (no trusted
+    // root, or no chain to one) is not a failure: such a file may get a
+    // hash rule.
     if let Some(s) = signing.filter(|s| s.state == SigningStateKind::Invalid) {
         rec.rationale.push(format!(
-            "the file is invalid ({}): it was changed after signing, or its hash is revoked, so no allow rule is recommended",
+            "the file is invalid ({}): it was changed after signing, or its hash or signer is revoked, so no allow rule is recommended",
+            s.verification_error.as_str()
+        ));
+        return rec;
+    }
+    if let Some(s) = signing.filter(|s| {
+        s.embedded != EmbeddedState::Unsigned
+            && s.embedded != EmbeddedState::NotChecked
+            && s.signer.is_none()
+            && !matches!(
+                s.verification_error,
+                VerificationError::Ok
+                    | VerificationError::NotSigned
+                    | VerificationError::UntrustedRoot
+                    | VerificationError::ChainIncomplete
+            )
+    }) {
+        rec.rationale.push(format!(
+            "its signature failed validation ({}), so no allow rule is recommended",
             s.verification_error.as_str()
         ));
         return rec;
@@ -131,7 +191,11 @@ pub fn recommend(id: &FileIdentity) -> Recommendation {
         }
         (Some(SigningStateKind::Untrusted), _) => rec.refused.push((
             RuleLevel::Publisher,
-            "the signature is valid but its signer is not trusted by policy".to_owned(),
+            if signing.is_some_and(|s| s.embedded_sha1_only) {
+                "the signature rests on SHA-1, which vouches for nothing (ADR 0008)".to_owned()
+            } else {
+                "the signature is valid but its signer is not trusted by policy".to_owned()
+            },
         )),
         (Some(SigningStateKind::Unverified), _) => rec.refused.push((
             RuleLevel::Publisher,
@@ -146,6 +210,12 @@ pub fn recommend(id: &FileIdentity) -> Recommendation {
                 }
                 Some((EmbeddedState::NotChecked, _)) => {
                     "this file type's signatures are not read yet (#52, #53)".to_owned()
+                }
+                Some((_, CatalogState::NotChecked))
+                    if id.errors.iter().any(|e| e.code == "catalog_index_truncated") =>
+                {
+                    "no embedded signature, and the catalog index is incomplete, so it may be catalog-signed"
+                        .to_owned()
                 }
                 Some((_, CatalogState::NotChecked)) => {
                     "no embedded signature, and no catalogs were given to look it up in (use --catroot)"

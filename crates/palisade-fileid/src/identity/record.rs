@@ -114,6 +114,11 @@ pub struct FileIdentity {
     pub name: NameInfo,
     /// The size in bytes (stat tier).
     pub size: Field<u64>,
+    /// The SHA-256 of the bytes the content tiers read, hex: set whenever a
+    /// tier read the whole file (classify, hash or trust), so two records
+    /// can be shown to describe the same content before they are merged.
+    /// `None` when no tier read it.
+    pub content_sha256: Option<String>,
     /// File system times (stat tier).
     pub timestamps: Field<Timestamps>,
     /// The content-based file kind (#44, classify tier).
@@ -160,6 +165,7 @@ impl FileIdentity {
             computed_tiers: Tiers::EMPTY,
             name,
             size: Field::NotRequested,
+            content_sha256: None,
             timestamps: Field::NotRequested,
             kind: Field::NotRequested,
             pe: Field::NotRequested,
@@ -678,6 +684,10 @@ pub struct SigningState {
     pub verification_error: VerificationError,
     /// The clock is before the floor (#50).
     pub clock_suspect: bool,
+    /// The embedded signature that passed every check rests on SHA-1 (its
+    /// content or signer digest), so it vouches for nothing (ADR 0008,
+    /// ADR 0017): the counterpart of [`CatalogState::ListedTrustedSha1Only`].
+    pub embedded_sha1_only: bool,
     /// The trusted signer that vouches for the file.
     pub signer: Option<TrustedSigner>,
 }
@@ -823,6 +833,10 @@ pub struct CatalogMatchSummary {
     pub matched_by: &'static str,
     /// The catalog's signer is trusted.
     pub trusted: bool,
+    /// The catalog signature's validity verdict (#50): `ok`, or why it
+    /// failed (expired, revoked and so on). `None` when it was not judged,
+    /// and then the catalog does not vouch for the file.
+    pub validity: Option<palisade_core::VerificationError>,
     /// The match rests on SHA-1 (the member digest or the catalog
     /// signature).
     pub relies_on_sha1: bool,
@@ -880,6 +894,17 @@ impl FsInfo {
     }
 
     pub(crate) fn absorb(&mut self, other: Self) {
+        // Both computed: keep this one, but a final path (or rule key) only
+        // the other record resolved is kept too, so a later record that
+        // contradicts it is still refused.
+        if let (Field::Computed(mine), Field::Computed(theirs)) = (&mut self.path, &other.path) {
+            if mine.final_path.is_none() {
+                mine.final_path.clone_from(&theirs.final_path);
+            }
+            if mine.rule_key.is_none() {
+                mine.rule_key.clone_from(&theirs.rule_key);
+            }
+        }
         self.path.absorb(other.path);
         self.file_id.absorb(other.file_id);
         self.volume.absorb(other.volume);
@@ -991,6 +1016,9 @@ pub struct Masquerade {
     pub reasons: Vec<MasqueradeReason>,
     /// Checks that could not run for want of an input, by name.
     pub unassessed: Vec<&'static str>,
+    /// The protected binary the version resource's `OriginalFilename`
+    /// names, if any, whoever signed the file.
+    pub claims_protected: Option<String>,
 }
 
 /// One finding of the masquerade assessment.

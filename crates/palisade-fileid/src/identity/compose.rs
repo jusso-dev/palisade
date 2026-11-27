@@ -8,9 +8,9 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::authenticode::{
-    AuthenticodeHashes, CertRevocation, CertSummary, ChainReport, ImageHashOptions,
-    ImageHashStatus, ImageHashes, InvalidReason, RevocationChecker, RevocationFailure,
-    RevocationSet, SignatureKind, SignatureReport, SignatureStatus,
+    AuthenticodeHashes, CertRevocation, CertSummary, ChainReport, DigestAlgorithm,
+    ImageHashOptions, ImageHashStatus, ImageHashes, InvalidReason, RevocationChecker,
+    RevocationFailure, RevocationSet, SignatureKind, SignatureReport, SignatureStatus,
     SigningState as EmbeddedSigning, TrustConfig, TrustReport, ValidityContext, ValidityPolicy,
     ValidityReport, VerificationError, VerifyOptions, evaluate_trust, evaluate_validity,
     hash_image_reader, verify_certificate_table,
@@ -18,7 +18,7 @@ use crate::authenticode::{
 use crate::catalog::{CatalogSource, CatalogStore, DigestKind, FileDigests};
 use crate::filetype::{Classification, ContentFlags, FileKind, classify, classify_bytes};
 use crate::fsctx::{KnownFolders, PathForms, path_variables_matched};
-use crate::hash::{AlgorithmSet, Digest, HashAlgorithm, HashError, HashOptions};
+use crate::hash::{AlgorithmSet, Digest, HashAlgorithm, HashError, HashOptions, MultiHasher};
 use crate::pe::version::{VersionField, VersionInfo};
 use crate::pe::{self, DataDirectoryKind, FileCharacteristics, PeFormat, PeInfo};
 
@@ -153,12 +153,14 @@ pub fn identify(
     // size.
     id.size = Field::Computed(len);
     id.timestamps = Field::Computed(timestamps(&meta));
-    id.fs.path = Field::Computed(path_info(&text, false, Some(path)));
+    // The final path is the open handle's, so it describes the file whose
+    // content is read below even if the path is replaced meanwhile.
+    id.fs.path = Field::Computed(path_info(&text, false, Some(&file)));
     id.computed_tiers.insert(Tier::Stat);
 
     let content = Content::read(&mut file, len, tiers, ctx, &mut id);
     compose(&mut id, content, tiers, ctx);
-    context_tier(&mut id, path, tiers, ctx);
+    context_tier(&mut id, &file, tiers, ctx);
     finish(&mut id, ctx);
     Ok(id)
 }
@@ -242,6 +244,7 @@ impl Content {
                     .and_then(|_| r.take(len.saturating_add(1)).read_to_end(&mut buf));
                 let failure = match read {
                     Ok(_) if u64::try_from(buf.len()).ok() == Some(len) => {
+                        id.content_sha256 = Some(sha256_hex(&buf));
                         out.bytes = Some(buf);
                         None
                     }
@@ -281,12 +284,22 @@ impl Content {
             };
         }
         if need_hashes {
+            // Every algorithm a revoked file hash is listed in, so a hash
+            // revoked by, say, its SHA-384 is found whatever the caller
+            // asked to compute; both the flat and the Authenticode digests.
+            let revoked_algs = ctx
+                .revocation
+                .file_hashes()
+                .iter()
+                .fold(AlgorithmSet::EMPTY, |set, d| {
+                    set | AlgorithmSet::from(d.algorithm())
+                });
             let options = ImageHashOptions {
                 hash: HashOptions {
-                    algorithms: ctx.flat_algorithms | AlgorithmSet::SHA256,
+                    algorithms: ctx.flat_algorithms | AlgorithmSet::SHA256 | revoked_algs,
                     ..ctx.hash_options
                 },
-                authenticode_extra: AlgorithmSet::EMPTY,
+                authenticode_extra: revoked_algs,
                 parallel: false,
             };
             let result = match &out.bytes {
@@ -297,7 +310,12 @@ impl Content {
                     .and_then(|_| hash_image_reader(&mut *r, len, &options)),
             };
             match result {
-                Ok(ImageHashStatus::Complete(h)) => out.hashes = Some(h),
+                Ok(ImageHashStatus::Complete(h)) => {
+                    if let Some(d) = h.flat.get(HashAlgorithm::Sha256) {
+                        id.content_sha256 = Some(d.to_string());
+                    }
+                    out.hashes = Some(h);
+                }
                 Ok(ImageHashStatus::TooLarge { limit }) => {
                     let msg = format!("{len} bytes is over the hash limit of {limit}");
                     id.hashes = Field::Unavailable(msg.clone());
@@ -311,6 +329,16 @@ impl Content {
         }
         out
     }
+}
+
+/// The SHA-256 of `bytes`, lowercase hex.
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut h = MultiHasher::new(AlgorithmSet::SHA256);
+    h.update(bytes);
+    h.finalize()
+        .get(HashAlgorithm::Sha256)
+        .map(ToString::to_string)
+        .unwrap_or_default()
 }
 
 /// The classify, hash and trust tiers.
@@ -441,7 +469,12 @@ fn trust_tier(
                 let chain = m.signer.and_then(|s| s.trust.chain.as_ref());
                 let signer_revoked =
                     chain.is_some_and(|c| chain_revoked(c, ctx, &mut checker, effective_now));
-                usable.push(m.trusted() && !m.relies_on_sha1() && !signer_revoked && !file_revoked);
+                // A catalog vouches only when its signer is trusted and its
+                // signature's validity (expiry, revocation of its own hash,
+                // key sizes, timestamps) was judged and passed: a catalog
+                // whose validity was never judged does not vouch (#50).
+                let validity_ok = m.usable();
+                usable.push(validity_ok && !m.relies_on_sha1() && !signer_revoked && !file_revoked);
                 matches.push(CatalogMatchSummary {
                     catalog_id: m.record.id.as_ref().map(Digest::to_string),
                     catalog_path: m.record.path.as_ref().map(|p| p.display().to_string()),
@@ -458,6 +491,7 @@ fn trust_tier(
                         DigestKind::FlatSha1 => "sha1",
                     },
                     trusted: m.trusted(),
+                    validity: m.record.validity.as_ref().map(|v| v.error),
                     relies_on_sha1: m.relies_on_sha1(),
                     signer_revoked,
                     publisher_name: m
@@ -481,7 +515,7 @@ fn trust_tier(
             if usable.iter().any(|u| *u) {
                 CatalogState::ListedTrusted
             } else if found.matches.iter().zip(&matches).any(|(m, summary)| {
-                m.trusted() && m.relies_on_sha1() && !summary.signer_revoked && !file_revoked
+                m.usable() && m.relies_on_sha1() && !summary.signer_revoked && !file_revoked
             }) {
                 CatalogState::ListedTrustedSha1Only
             } else if !found.matches.is_empty() {
@@ -504,6 +538,7 @@ fn trust_tier(
     // signature first, then the best trusted catalog that does not rely on
     // SHA-1.
     let mut signer = None;
+    let mut embedded_sha1_only = false;
     let mut summaries = Vec::new();
     let mut verification_error = if file_revoked {
         VerificationError::RevokedByHash
@@ -552,9 +587,24 @@ fn trust_tier(
                 chain: t.and_then(|t| t.chain.as_ref()).map(chain_summary),
             });
         }
-        if let (Some(p), Some(identity), false) =
-            (validity.primary, &validity.identity, file_revoked)
-        {
+        // A primary signature that rests on SHA-1 (its content digest or
+        // its signer digest) is valid, but no allow decision may rest on it
+        // (ADR 0008, ADR 0017): it is not a trusted signer, as a catalog
+        // match that relies on SHA-1 is not.
+        let sha2_primary = validity
+            .primary
+            .and_then(|p| report.signatures.get(p))
+            .is_some_and(|sig| {
+                sig.digest_alg.is_some_and(DigestAlgorithm::is_sha2)
+                    && sig.signer_digest_alg.is_some_and(DigestAlgorithm::is_sha2)
+            });
+        embedded_sha1_only = validity.primary.is_some() && !sha2_primary;
+        if let (Some(p), Some(identity), false, true) = (
+            validity.primary,
+            &validity.identity,
+            file_revoked,
+            sha2_primary,
+        ) {
             let chain = trust
                 .signers
                 .iter()
@@ -611,7 +661,19 @@ fn trust_tier(
         }
     }
 
-    let state = signing_state_kind(signer.is_some(), file_revoked, embedded, catalog);
+    // A valid embedded signature whose signer was revoked (a certificate in
+    // its chain, or its own hash) is no weaker evidence of tampering than a
+    // broken one: it is invalid, never merely untrusted.
+    let revoked = matches!(
+        verification_error,
+        VerificationError::Revoked | VerificationError::RevokedByHash
+    );
+    let state = signing_state_kind(
+        signer.is_some(),
+        file_revoked || (embedded == EmbeddedState::Valid && signer.is_none() && revoked),
+        embedded,
+        catalog,
+    );
 
     id.signing_state = Field::Computed(SigningState {
         state,
@@ -620,6 +682,7 @@ fn trust_tier(
         catalog,
         verification_error,
         clock_suspect,
+        embedded_sha1_only,
         signer,
     });
     if sigs.is_some() {
@@ -665,7 +728,12 @@ fn chain_revoked(
 
 /// The context tier: mark-of-the-web and path variables. Owner,
 /// writability, streams and reparse points are #54.
-fn context_tier(id: &mut FileIdentity, path: &Path, tiers: Tiers, ctx: &IdentityContext<'_>) {
+fn context_tier(
+    id: &mut FileIdentity,
+    file: &std::fs::File,
+    tiers: Tiers,
+    ctx: &IdentityContext<'_>,
+) {
     if !tiers.contains(Tier::Context) {
         return;
     }
@@ -677,16 +745,10 @@ fn context_tier(id: &mut FileIdentity, path: &Path, tiers: Tiers, ctx: &Identity
     id.fs.streams = pending.clone();
     id.fs.reparse = pending.clone();
     id.fs.provenance = pending;
-    // The stream is read from the final path of the opened file: the name
-    // as given may be relative, end in a dot or space, or go through a
-    // link, and the OS reader accepts only a final path.
-    let target = id
-        .fs
-        .path
-        .computed()
-        .and_then(|p| p.final_path.clone())
-        .map(std::path::PathBuf::from);
-    id.fs.motw = read_motw(target.as_deref().unwrap_or(path));
+    // The stream is read for the opened file itself: by the handle's final
+    // path, and kept only if that path still names the same file, so the
+    // record never pairs this file's content with another file's mark.
+    id.fs.motw = read_motw(file);
     if let Field::Unavailable(why) = &id.fs.motw {
         if cfg!(all(windows, feature = "os-trust")) {
             let why = why.clone();
@@ -704,19 +766,23 @@ fn context_tier(id: &mut FileIdentity, path: &Path, tiers: Tiers, ctx: &Identity
         },
         (Some(_), None) => Field::Unavailable("no path".to_owned()),
     };
-    id.computed_tiers.insert(Tier::Context);
+    // The tier counts as computed only when it computed something: with
+    // every field pending or unavailable it did not.
+    if id.fs.motw.is_computed() || id.fs.path_variables.is_computed() {
+        id.computed_tiers.insert(Tier::Context);
+    }
 }
 
 #[cfg(all(windows, feature = "os-trust"))]
-fn read_motw(path: &Path) -> Field<Option<MotwSummary>> {
-    match crate::win::fsctx::read_motw(path) {
+fn read_motw(file: &std::fs::File) -> Field<Option<MotwSummary>> {
+    match crate::win::links::read_motw_of(file) {
         Ok(m) => Field::Computed(m.as_ref().map(motw_summary)),
         Err(e) => Field::Unavailable(e.to_string()),
     }
 }
 
 #[cfg(not(all(windows, feature = "os-trust")))]
-fn read_motw(_path: &Path) -> Field<Option<MotwSummary>> {
+fn read_motw(_file: &std::fs::File) -> Field<Option<MotwSummary>> {
     if cfg!(windows) {
         Field::Unavailable("built without the os-trust feature".to_owned())
     } else {
@@ -817,10 +883,10 @@ fn timestamps(meta: &std::fs::Metadata) -> Timestamps {
     }
 }
 
-fn path_info(text: &str, claimed: bool, opened: Option<&Path>) -> PathInfo {
+fn path_info(text: &str, claimed: bool, opened: Option<&std::fs::File>) -> PathInfo {
     let mut forms = PathForms::from_original(text);
-    if let Some(p) = opened {
-        forms.final_path = final_path(p);
+    if let Some(f) = opened {
+        forms.final_path = final_path(f);
     }
     PathInfo {
         original: text.to_owned(),
@@ -841,12 +907,12 @@ fn path_info(text: &str, claimed: bool, opened: Option<&Path>) -> PathInfo {
 }
 
 #[cfg(all(windows, feature = "os-trust"))]
-fn final_path(p: &Path) -> Option<crate::fsctx::NormalizedPath> {
-    crate::win::fsctx::final_path(p).ok()
+fn final_path(f: &std::fs::File) -> Option<crate::fsctx::NormalizedPath> {
+    crate::win::links::final_path_of(f).ok()
 }
 
 #[cfg(not(all(windows, feature = "os-trust")))]
-const fn final_path(_p: &Path) -> Option<crate::fsctx::NormalizedPath> {
+const fn final_path(_f: &std::fs::File) -> Option<crate::fsctx::NormalizedPath> {
     None
 }
 
@@ -1136,7 +1202,9 @@ fn chain_summary(c: &ChainReport) -> ChainSummary {
     }
 }
 
-/// The signing verdict from its evidence. `trusted_signer` is whether a
+/// The signing verdict from its evidence. `revoked` is a revoked file hash,
+/// or a revoked signer behind a valid embedded signature. `trusted_signer`
+/// is whether a
 /// trusted signer vouches for the file: a valid embedded signature that
 /// passed every check, or a catalog match counted usable (trusted, and not
 /// relying on SHA-1). "Unsigned" needs both halves of the evidence: no
@@ -1145,13 +1213,16 @@ fn chain_summary(c: &ChainReport) -> ChainSummary {
 /// so it is unverified.
 fn signing_state_kind(
     trusted_signer: bool,
-    file_revoked: bool,
+    revoked: bool,
     embedded: EmbeddedState,
     catalog: CatalogState,
 ) -> SigningStateKind {
     if trusted_signer {
         SigningStateKind::Trusted
-    } else if file_revoked {
+    } else if revoked || embedded == EmbeddedState::Invalid {
+        // A broken embedded signature, or a revoked file or signer, is
+        // invalid whatever a catalog says: an untrusted catalog listing
+        // does not make it merely "untrusted".
         SigningStateKind::Invalid
     } else if embedded == EmbeddedState::NotChecked
         || (embedded == EmbeddedState::Unsigned && catalog == CatalogState::NotChecked)
@@ -1164,8 +1235,6 @@ fn signing_state_kind(
         )
     {
         SigningStateKind::Untrusted
-    } else if embedded == EmbeddedState::Invalid {
-        SigningStateKind::Invalid
     } else {
         SigningStateKind::Unsigned
     }
@@ -1207,6 +1276,15 @@ mod tests {
             signing_state_kind(false, false, E::Unsigned, C::NotListed),
             SigningStateKind::Unsigned
         );
+        // A broken embedded signature is invalid even when an untrusted
+        // catalog lists the file.
+        for catalog in [C::ListedUntrusted, C::ListedTrustedSha1Only, C::NotListed] {
+            assert_eq!(
+                signing_state_kind(false, false, E::Invalid, catalog),
+                SigningStateKind::Invalid,
+                "{catalog:?}"
+            );
+        }
         // A revoked hash is invalid whatever else is listed, and a trusted
         // signer is the only way to `Trusted`.
         assert_eq!(

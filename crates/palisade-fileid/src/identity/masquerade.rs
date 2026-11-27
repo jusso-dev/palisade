@@ -86,6 +86,10 @@ const CONFUSABLES: &[(char, char)] = &[
     ('\u{03a4}', 'T'),
     ('\u{03a5}', 'Y'),
     ('\u{03a7}', 'X'),
+    // Palochka, dotless i, Armenian o.
+    ('\u{04cf}', 'l'),
+    ('\u{0131}', 'i'),
+    ('\u{0585}', 'o'),
 ];
 
 /// The Latin letter `c` looks like, if it is a confusable.
@@ -142,6 +146,21 @@ pub fn assess(
     }
 
     let on_disk = id.name.file_name.as_deref();
+    // A name written wholly or partly in lookalike characters that reads
+    // as a protected binary's name (`һһ.exe` is caught only here: it has
+    // no Latin letter to mix with).
+    if let Some(name) = on_disk {
+        let reduced: String = name.chars().map(|c| confusable(c).unwrap_or(c)).collect();
+        if reduced != name && list.binaries_named(&reduced).next().is_some() {
+            if let Some(c) = name.chars().find(|c| confusable(*c).is_some()) {
+                add(MasqueradeReason::Homoglyph {
+                    component: name.to_owned(),
+                    code_point: code_point(c),
+                    looks_like: confusable(c).unwrap_or(c),
+                });
+            }
+        }
+    }
     // Code identified, or run, from a named stream hides behind the host
     // file's name.
     if let (Some(host), Some(stream)) = (on_disk, id.name.stream.as_deref()) {
@@ -193,6 +212,11 @@ pub fn assess(
     }
 
     if let Some(pe) = pe {
+        // An upload without a name cannot be compared with its version
+        // resource: the check is open, not passed.
+        if on_disk.is_none() && pe.version.is_some() {
+            m.unassessed.push("name_mismatch");
+        }
         if let (Some(name), Some(v)) = (on_disk, pe.version.as_ref()) {
             if name_mismatch(
                 name,
@@ -232,6 +256,7 @@ pub fn assess(
             if let Some(original) = v.original_file_name.as_deref() {
                 let claimed: Vec<&ProtectedBinary> = list.binaries_named(original).collect();
                 if !claimed.is_empty() {
+                    m.claims_protected = Some(original.to_owned());
                     if !trust_known {
                         m.unassessed.push("known_binary_relocated");
                     } else if let Some(binary) = claimed
@@ -451,8 +476,9 @@ fn name_mismatch(on_disk: &str, original: Option<&str>, internal: Option<&str>) 
         && [original, internal]
             .into_iter()
             .flatten()
+            .map(original_name_key)
             .filter(|n| !n.trim().is_empty())
-            .all(is_installer_name))
+            .all(|n| is_installer_name(&n)))
 }
 
 /// The case-folded name without its extension.
@@ -558,16 +584,25 @@ fn located(
         return None;
     }
     let parent_key = parent.case_folded();
-    let mut any_folder = false;
+    // Inside when any expected folder matches. Outside only when every
+    // expected folder was resolved and ruled out: one that could not be
+    // resolved (missing from the known folders, a short name) might be
+    // where the file is, so the location stays unassessed.
+    let mut all_resolved = true;
     for dir in &binary.expected_dirs {
-        for base in folders_for(folders, dir.variable) {
-            any_folder = true;
-            if expected_key(base, dir).is_some_and(|k| k == parent_key) {
-                return Some(true);
+        let bases = folders_for(folders, dir.variable);
+        if bases.is_empty() {
+            all_resolved = false;
+        }
+        for base in bases {
+            match expected_key(base, dir) {
+                Some(k) if k == parent_key => return Some(true),
+                Some(_) => {}
+                None => all_resolved = false,
             }
         }
     }
-    any_folder.then_some(false)
+    all_resolved.then_some(false)
 }
 
 fn expected_key(base: &NormalizedPath, dir: &ExpectedDir) -> Option<String> {
@@ -602,6 +637,24 @@ fn folders_for(f: &KnownFolders, v: PathVariable) -> &[NormalizedPath] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_confusables_are_known() {
+        assert_eq!(confusable('\u{04cf}'), Some('l'));
+        assert_eq!(confusable('\u{0131}'), Some('i'));
+        assert_eq!(confusable('\u{0585}'), Some('o'));
+    }
+
+    #[test]
+    fn mui_installer_names_count_as_installers() {
+        // `SETUP.EXE.MUI` names the installer `setup.exe`: an installer
+        // renamed to another installer name is not a mismatch.
+        assert!(!name_mismatch(
+            "product-setup.exe",
+            Some("SETUP.EXE.MUI"),
+            None
+        ));
+    }
 
     #[test]
     fn mui_original_names_compare_without_the_suffix() {
