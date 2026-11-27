@@ -123,6 +123,33 @@ impl Validator {
                 &profiles,
             );
         }
+        let groups = &policy.unknown.scope_groups;
+        if groups.len() > MAX_SCOPE_ENTRIES {
+            self.push(
+                ErrorCode::InvalidScope,
+                "/policy/unknown/scope_groups",
+                format!(
+                    "{} groups; at most {MAX_SCOPE_ENTRIES} are allowed",
+                    groups.len()
+                ),
+            );
+        }
+        for (i, g) in groups.iter().enumerate() {
+            let base = format!("/policy/unknown/scope_groups/{i}/all_of");
+            if g.all_of.len() > MAX_ASSIGNMENT_SCOPES {
+                self.push(
+                    ErrorCode::InvalidScope,
+                    &base,
+                    format!(
+                        "{} scopes; a group holds at most {MAX_ASSIGNMENT_SCOPES}",
+                        g.all_of.len()
+                    ),
+                );
+            }
+            for (j, scope) in g.all_of.iter().enumerate() {
+                self.scope(&format!("{base}/{j}"), scope, covered, &profiles);
+            }
+        }
         let mut seen = BTreeSet::new();
         for (i, a) in policy.rule_set_scopes.iter().enumerate() {
             let base = format!("/policy/rule_set_scopes/{i}");

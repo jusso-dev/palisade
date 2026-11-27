@@ -2885,6 +2885,8 @@ struct Ctx<'a> {
 /// What a policy applies in one context, for the merge oracle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Applied {
+    /// The level the entries resolved to.
+    resolved: Level,
     /// The level applied.
     level: Level,
     /// For a prompt: the level its timeout or a failed prompt ends in.
@@ -2935,6 +2937,7 @@ fn applied(p: &UnknownPolicy, ctx: &Ctx<'_>) -> Applied {
     let got = decide_with(&v, ctx.t, &facts, &context);
     let u = got.unknown().expect("stage 6 decides");
     Applied {
+        resolved: u.resolved,
         level: u.applied,
         on_timeout: got.directives().prompt.as_ref().map(|p| p.fallback.level),
     }
@@ -3057,15 +3060,28 @@ proptest! {
 
     /// The merged policy is never stricter than the strictest side applies
     /// in the same context, except in the cases one policy cannot
-    /// reproduce (see [`UnknownPolicy::stricter`]): the merged prompt's
-    /// fallback is one setting, a `restrict` turns to `block` where a
-    /// side's prompt falls back to `block`, and an entry only one side sets
-    /// is compared with the other side's `default`. So the bound is checked
-    /// for two policies that set the same entries.
+    /// reproduce, each listed on [`UnknownPolicy::stricter`]:
+    ///
+    /// 1. the merged prompt's fallback is one setting, so where the merged
+    ///    policy resolves to `prompt` and cannot show it, it may apply the
+    ///    strictest fallback of the sides that prompt anywhere;
+    /// 2. a `restrict` turns to `block` where a side's prompt falls back to
+    ///    `block`;
+    /// 3. an entry only one side sets is compared with the other side's
+    ///    `default`, even where another entry of that side applies to the
+    ///    object, so the merged level may reach, for some entry that
+    ///    applies, the stricter of the two sides' levels for that entry.
+    ///
+    /// Half the cases give both sides the same entries, where exception 3
+    /// cannot arise and the bound is the strict one; the rest keep each
+    /// side's own entries and allow exception 3. A side's fallback is only
+    /// counted where the merged policy resolves to `prompt` in this context,
+    /// so an unused fallback never widens the bound.
     #[test]
     fn merged_decisions_are_no_stricter_than_needed(
         a in arb_full_policy(),
         b in arb_full_policy(),
+        align in any::<bool>(),
         t in prop::sample::select(ObjectType::ALL.to_vec()),
         locations in prop::collection::btree_set(prop::sample::select(LocationClass::ALL.to_vec()), 1..3),
         origins in prop::collection::btree_set(prop::sample::select(OriginClass::ALL.to_vec()), 1..3),
@@ -3077,53 +3093,138 @@ proptest! {
             d.policy.unknown = u.clone();
             d.validate().is_ok()
         };
-        // `b` takes `a`'s keys, with its own levels.
         let mut b = b;
-        fn same_keys<K: Ord + Copy>(
-            a: &std::collections::BTreeMap<K, Level>,
-            b: &std::collections::BTreeMap<K, Level>,
-            fill: Level,
-        ) -> std::collections::BTreeMap<K, Level> {
-            a.keys().map(|k| (*k, b.get(k).copied().unwrap_or(fill))).collect()
+        if align {
+            // `b` takes `a`'s keys, with its own levels.
+            fn same_keys<K: Ord + Copy>(
+                a: &std::collections::BTreeMap<K, Level>,
+                b: &std::collections::BTreeMap<K, Level>,
+                fill: Level,
+            ) -> std::collections::BTreeMap<K, Level> {
+                a.keys().map(|k| (*k, b.get(k).copied().unwrap_or(fill))).collect()
+            }
+            b.by_location = same_keys(&a.by_location, &b.by_location, b.default);
+            b.by_origin = same_keys(&a.by_origin, &b.by_origin, b.default);
+            b.by_type = same_keys(&a.by_type, &b.by_type, b.default)
+                .into_iter()
+                .map(|(t, l)| {
+                    let ok = (l != Level::Prompt || prompt_valid_for(t))
+                        && (l != Level::Restrict || restrict_valid_for(t));
+                    (t, if ok { l } else { Level::Block })
+                })
+                .collect();
         }
-        b.by_location = same_keys(&a.by_location, &b.by_location, b.default);
-        b.by_origin = same_keys(&a.by_origin, &b.by_origin, b.default);
-        b.by_type = same_keys(&a.by_type, &b.by_type, b.default)
-            .into_iter()
-            .map(|(t, l)| {
-                let ok = (l != Level::Prompt || prompt_valid_for(t))
-                    && (l != Level::Restrict || restrict_valid_for(t));
-                (t, if ok { l } else { Level::Block })
-            })
-            .collect();
         // As in the oracle above: invalid inputs (random effects) are skipped.
         if !(validates(&a) && validates(&b)) {
             return Ok(());
         }
         let ctx = Ctx { t, locations: &locations, origins: &origins, session, containment, blocklisted: false };
-        let (la, lb) = (applied(&a, &ctx), applied(&b, &ctx));
-        let lm = applied(&a.stricter(&b), &ctx);
-        let top = la.level.max(lb.level);
-        let fallback_bound = [la, lb]
-            .iter()
-            .filter_map(|x| x.on_timeout)
-            .chain([a.prompt.fallback, b.prompt.fallback].into_iter().map(|f| if f == Level::Prompt { Level::Block } else { f }))
+        let m = a.stricter(&b);
+        let (la, lb, lm) = (applied(&a, &ctx), applied(&b, &ctx), applied(&m, &ctx));
+        let containable = containment == Some(true) && restrict_valid_for(t);
+        let uncontained = |l: Level| if l == Level::Restrict && !containable { Level::Block } else { l };
+        // Exception 1, only where the merged policy resolves to `prompt`.
+        let usable = |f: Level| if f == Level::Prompt { Level::Block } else { f };
+        let prompts = |p: &UnknownPolicy| {
+            core::iter::once(p.default)
+                .chain(p.by_location.values().copied())
+                .chain(p.by_origin.values().copied())
+                .chain(p.by_type.values().copied())
+                .any(|l| l == Level::Prompt)
+        };
+        let any_fallback = [&a, &b]
+            .into_iter()
+            .filter(|p| prompts(p))
+            .map(|p| usable(p.prompt.fallback))
             .max()
             .unwrap_or(Level::Allow)
             .max(Level::Detect);
-        // A `restrict` fallback blocks where nothing can be contained.
-        let fallback_bound = if fallback_bound == Level::Restrict
-            && (containment != Some(true) || !restrict_valid_for(t))
-        {
-            Level::Block
+        let fallback_bound = if lm.resolved == Level::Prompt { any_fallback } else { Level::Allow };
+        // Exception 3, only where the sides set different entries.
+        let keyed = if align {
+            Level::Allow
         } else {
-            fallback_bound
+            let side = |p: &UnknownPolicy, l: Option<&Level>| l.copied().unwrap_or(p.default);
+            let mut keys: Vec<Level> = Vec::new();
+            if a.by_type.contains_key(&t) || b.by_type.contains_key(&t) {
+                keys.push(side(&a, a.by_type.get(&t)).max(side(&b, b.by_type.get(&t))));
+            }
+            for c in &locations {
+                if a.by_location.contains_key(c) || b.by_location.contains_key(c) {
+                    keys.push(side(&a, a.by_location.get(c)).max(side(&b, b.by_location.get(c))));
+                }
+            }
+            for o in &origins {
+                if a.by_origin.contains_key(o) || b.by_origin.contains_key(o) {
+                    keys.push(side(&a, a.by_origin.get(o)).max(side(&b, b.by_origin.get(o))));
+                }
+            }
+            keys.into_iter().max().unwrap_or(Level::Allow)
         };
-        let restrict_raised = lm.level == Level::Block && top == Level::Restrict;
+        // A keyed `prompt` the object cannot get (a library or driver, or
+        // no prompt shown) ends in a prompting side's fallback.
+        let keyed = if keyed == Level::Prompt { any_fallback.max(Level::Prompt) } else { keyed };
+        let top = la.level.max(lb.level);
+        let bound = uncontained(top.max(fallback_bound).max(keyed));
+        // Exception 2.
+        let restrict_raised = lm.level == Level::Block && bound == Level::Restrict;
         prop_assert!(
-            lm.level <= top.max(fallback_bound) || restrict_raised,
-            "{lm:?} stricter than {la:?} and {lb:?}"
+            lm.level <= bound || restrict_raised,
+            "{lm:?} stricter than {la:?} and {lb:?} (bound {bound:?}, aligned {align})"
         );
+    }
+
+    /// The library case of the review, in the property: both sides detect a
+    /// library, so the merged policy must too. B's unused `block` fallback
+    /// does not widen the bound.
+    #[test]
+    fn an_unused_fallback_never_lets_the_merge_block_what_both_sides_detect(
+        fallback in prop::sample::select(vec![Level::Detect, Level::Allow]),
+        session in prop::option::of(prop::sample::select(SessionType::ALL.to_vec())),
+        class in prop::sample::select(LocationClass::ALL.to_vec()),
+    ) {
+        let mut a = UnknownPolicy { default: Level::Prompt, ..UnknownPolicy::default() };
+        a.prompt.fallback = fallback;
+        let b = unknown(serde_json::json!({"default": "detect", "by_type": {"library": "detect"}}));
+        let locations = BTreeSet::from([class]);
+        let origins = BTreeSet::from([OriginClass::Unknown]);
+        let ctx = Ctx { t: ObjectType::Library, locations: &locations, origins: &origins, session, containment: Some(true), blocklisted: false };
+        let (la, lb) = (applied(&a, &ctx), applied(&b, &ctx));
+        prop_assert_eq!(la.level, fallback);
+        prop_assert_eq!(lb.level, Level::Detect);
+        for m in [a.stricter(&b), b.stricter(&a)] {
+            let lm = applied(&m, &ctx);
+            prop_assert!(lm.level <= Level::Detect, "{:?}", lm);
+            prop_assert!(lm.never_weaker(la) && lm.never_weaker(lb));
+        }
+        // The previous merge blocks it, which this property rejects.
+        prop_assert_eq!(applied(&old_merge(&b, &a), &ctx).level, Level::Block);
+    }
+}
+
+#[test]
+fn a_cross_dimension_merge_blocks_what_each_side_only_detects() {
+    // The review's case, pinned as a documented exception (it fails
+    // closed): A detects executables by type, B detects `temp` by
+    // location. Each alone detects an executable in `temp`, but B's `temp`
+    // entry is compared with A's `block` default, so the merge blocks it.
+    let a = unknown(serde_json::json!({"default": "block", "by_type": {"executable": "detect"}}));
+    let b = unknown(serde_json::json!({"default": "detect", "by_location": {"temp": "detect"}}));
+    let locations = BTreeSet::from([LocationClass::Temp]);
+    let origins = BTreeSet::from([OriginClass::Unknown]);
+    let ctx = Ctx {
+        t: ObjectType::Executable,
+        locations: &locations,
+        origins: &origins,
+        session: Some(SessionType::Console),
+        containment: Some(true),
+        blocklisted: false,
+    };
+    assert_eq!(applied(&a, &ctx).level, Level::Detect);
+    assert_eq!(applied(&b, &ctx).level, Level::Detect);
+    for m in [a.stricter(&b), b.stricter(&a)] {
+        assert_eq!(m.by_location.get(&LocationClass::Temp), Some(&Level::Block));
+        assert_eq!(applied(&m, &ctx).level, Level::Block, "{m:?}");
     }
 }
 
@@ -3476,4 +3577,25 @@ fn the_example_applies_the_strictest_matching_entry() {
         let d = decide(&v, t, &object(&[class], &origins));
         assert_eq!(d.reason_code(), want, "{t} {class:?} {origin:?}");
     }
+}
+
+#[test]
+fn without_volume_facts_or_variables_a_usb_windows_folder_is_windows() {
+    // Pins what the docs say: the drive-root fallback applies on any drive
+    // when `%WINDIR%` is unset and the volume kind is unknown.
+    use LocationClass as L;
+    let p = PathFact::new("D:\\Windows\\a.exe", &VolumeMap::new()).with_user_writable(false);
+    assert_eq!(
+        classify(&p, &PathVariables::new(), None, &[]),
+        BTreeSet::from([L::Windows])
+    );
+    let windir = PathVariables::new().with(crate::facts::PathVariable::Windir, &["C:\\Windows"]);
+    assert_eq!(
+        classify(&p, &windir, None, &[]),
+        BTreeSet::from([L::OtherFixed])
+    );
+    assert_eq!(
+        classify(&p, &PathVariables::new(), Some(VolumeKind::Removable), &[]),
+        BTreeSet::from([L::Removable])
+    );
 }

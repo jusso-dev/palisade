@@ -8,14 +8,24 @@
 //! a missing ACL fact can only make an object look less safe.
 //!
 //! Volume facts are the exception: without them, a drive path is taken to
-//! be on a fixed volume, so a file on a USB drive or a disc whose volume
-//! kind is not known is `other_fixed`, not `removable` or `optical`. A
-//! policy that is stricter for `removable` or `optical` than for
-//! `other_fixed` (such as `removable: block` with `default: detect`) is
-//! only as strict as the volume facts: the agent must supply the volume
-//! kind ([`Hints::volume`]) or the location classes themselves for those
-//! entries to apply. Missing volume facts never give a protected class,
-//! because `program_files` and `windows` need a path under those folders.
+//! be on a fixed volume. A file on a USB drive or a disc whose volume kind
+//! is not known therefore loses the `removable` or `optical` class, and
+//! it is classified as if it were on a fixed disk:
+//!
+//! - it can be `program_files` or `windows`, which a known removable or
+//!   optical volume never is. With `%PROGRAMFILES%` and `%WINDIR%` set, only
+//!   a path under those folders is (so in practice only the system drive).
+//!   Without them, the drive-root fallbacks give `X:\Program Files` and
+//!   `X:\Windows` on **any** drive, including `D:\Windows\a.exe` on a USB
+//!   drive;
+//! - otherwise, it is `other_fixed`.
+//!
+//! A policy that is stricter for `removable` or `optical` than for the
+//! classes such a file gets instead (such as `removable: block` with
+//! `default: detect`) is only as strict as the volume facts: the agent must
+//! supply the volume kind ([`Hints::volume`]) or the location classes
+//! themselves for those entries to apply, and should supply the path
+//! variables so the drive-root fallbacks are not used.
 //!
 //! | Class | When |
 //! |---|---|
@@ -27,7 +37,7 @@
 //! | `user_writable_other` | the ACL facts say a non-administrator can write the file or a directory above it, or they are not known; under a directory the scanner flagged; or the path is not a drive or UNC path |
 //! | `program_files` | under `%PROGRAMFILES%`; without that variable, `X:\Program Files` or `X:\Program Files (x86)` |
 //! | `windows` | under `%WINDIR%`; without that variable, `X:\Windows` |
-//! | `other_fixed` | a drive path on a fixed (or unknown) volume in none of `user_profile`, `temp`, `program_files` and `windows` |
+//! | `other_fixed` | a drive path on a fixed (or unknown) volume in none of `user_profile`, `temp`, `program_files` and `windows`; it can come with `user_writable_other` and `ads` |
 //!
 //! `program_files` and `windows` are the protected classes, so they are
 //! never given to a file on a removable, optical or network volume, or to

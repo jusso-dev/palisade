@@ -2418,8 +2418,9 @@ fn a_policy_scope_limits_its_unknown_settings_in_the_effective_policy() {
     let e = effective(&h, 20);
     let v = e.policy().unwrap();
     let u = &v.document().policy.unknown;
-    assert_eq!(u.scopes.len(), 1);
-    assert!(u.scopes[0].sessions.is_some());
+    assert!(u.scopes.is_empty());
+    assert_eq!(u.scope_groups.len(), 1);
+    assert!(u.scope_groups[0].all_of[0].sessions.is_some());
     let decide = |session: SessionType| {
         let mut ctx = EvaluationContext::new();
         ctx.session.session_type = Some(session);
@@ -2463,14 +2464,184 @@ fn a_policy_scope_limits_its_unknown_settings_in_the_effective_policy() {
         ],
         vec![],
     ));
-    assert!(
-        effective(&h, 20)
-            .policy()
-            .unwrap()
-            .document()
-            .policy
-            .unknown
-            .scopes
-            .is_empty()
+    let merged = &effective(&h, 20)
+        .policy()
+        .unwrap()
+        .document()
+        .policy
+        .unknown
+        .clone();
+    assert!(merged.scopes.is_empty() && merged.scope_groups.is_empty());
+}
+
+/// The stage-6 reason code of an executable decided by `v` in a session of
+/// type `session`, with `groups` as the user's group SIDs.
+fn stage_six_reason(
+    v: &crate::validate::ValidatedPolicy,
+    session: Option<crate::context::SessionType>,
+    groups: Option<Vec<String>>,
+) -> (
+    crate::decision::ReasonCode,
+    Option<crate::unknown::FallbackReason>,
+) {
+    let mut ctx = EvaluationContext::new();
+    ctx.session.session_type = session;
+    ctx.user.groups = groups;
+    let facts = ObjectFacts::new();
+    let vars = PathVariables::new();
+    let d = Evaluator::new(v).unwrap().evaluate(
+        &Subject {
+            object_type: ObjectType::Executable,
+            facts: &facts,
+            variables: &vars,
+            context: &ctx,
+        },
+        TraceId([1; 16]),
     );
+    (d.reason_code(), d.unknown().and_then(|u| u.fallback))
+}
+
+/// The effective policy of device 20 when policy 50, with `extra`, is
+/// assigned to group 11, or `None` if the hierarchy does not validate.
+fn single_policy_effective(extra: Value) -> Option<EffectivePolicy> {
+    let mut nodes = base_nodes();
+    set_node(&mut nodes, 11, json!({"assignments": assign(&[(50, 0)])}));
+    let snap = snapshot(
+        nodes,
+        vec![policy_with(50, "enforce", vec![], extra)],
+        vec![],
+    );
+    let h = HierarchyDocument::from_json(&snap.to_string())
+        .ok()?
+        .validate()
+        .ok()?;
+    h.effective_policy_as(node_id(20), &Membership::default())
+        .ok()
+}
+
+#[test]
+fn the_effective_policy_keeps_a_policys_own_unknown_scopes() {
+    use crate::context::SessionType;
+    use crate::decision::ReasonCode;
+    // The reviewer's case: no `policy.scope`, `default: allow` limited to
+    // console sessions by `unknown.scopes`.
+    let console = json!({"sessions": {"types": ["console"]}});
+    let e = single_policy_effective(json!({"unknown": {"default": "allow", "scopes": [console]}}))
+        .unwrap();
+    let v = e.policy().unwrap();
+    assert_eq!(
+        stage_six_reason(v, Some(SessionType::Console), None).0,
+        ReasonCode::UnknownAllowed
+    );
+    assert_eq!(
+        stage_six_reason(v, Some(SessionType::Batch), None).0,
+        ReasonCode::ImplicitDenyUnknown
+    );
+    // Both set: the settings apply only where both match.
+    let console_or_rdp = json!({"sessions": {"types": ["console", "rdp"]}});
+    let e = single_policy_effective(json!({
+        "scope": console_or_rdp,
+        "unknown": {"default": "allow", "scopes": [console]},
+    }))
+    .unwrap();
+    let v = e.policy().unwrap();
+    assert_eq!(
+        stage_six_reason(v, Some(SessionType::Console), None).0,
+        ReasonCode::UnknownAllowed
+    );
+    assert_eq!(
+        stage_six_reason(v, Some(SessionType::Rdp), None).0,
+        ReasonCode::ImplicitDenyUnknown
+    );
+}
+
+/// A scope over the session type and the administrators group, the two
+/// facts the equivalence property varies, with random `negate` and
+/// `combine`.
+fn arb_unknown_scope() -> impl Strategy<Value = Value> {
+    use crate::context::SessionType;
+    (
+        prop::option::of(prop::sample::subsequence(SessionType::ALL.to_vec(), 1..3)),
+        prop::option::of(any::<bool>()),
+        any::<bool>(),
+        any::<bool>(),
+    )
+        .prop_filter_map("an empty scope", |(sessions, admins, negate, any_of)| {
+            let mut s = json!({});
+            if let Some(types) = &sessions {
+                s["sessions"] = json!({ "types": types });
+            }
+            if let Some(include) = admins {
+                let list = if include { "include" } else { "exclude" };
+                s["principals"] = json!({ list: [{"well_known": "administrators"}] });
+            }
+            if s.as_object().unwrap().is_empty() {
+                return None;
+            }
+            if negate {
+                s["negate"] = json!(true);
+            }
+            if any_of {
+                s["combine"] = json!("any");
+            }
+            Some(s)
+        })
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    /// For one policy with any combination of `policy.scope` and
+    /// `unknown.scopes` (both, either, neither), stage 6 decides exactly as
+    /// it does for the document itself, in every context.
+    #[test]
+    fn the_effective_policy_applies_unknown_settings_exactly_where_the_policy_does(
+        scope in prop::option::of(arb_unknown_scope()),
+        scopes in prop::collection::vec(arb_unknown_scope(), 0..3),
+        default in prop::sample::select(vec!["allow", "detect", "block"]),
+        contexts in prop::collection::vec(
+            (
+                prop::option::of(prop::sample::select(crate::context::SessionType::ALL.to_vec())),
+                prop::option::of(any::<bool>()),
+            ),
+            1..8,
+        ),
+    ) {
+        let mut extra = json!({"unknown": {"default": default}});
+        if let Some(s) = &scope {
+            extra["scope"] = s.clone();
+        }
+        if !scopes.is_empty() {
+            extra["unknown"]["scopes"] = json!(scopes);
+        }
+        let mut doc = json!({
+            "schema_version": "1.0.0",
+            "policy": {"id": id(50), "name": "Policy 50", "revision": 1, "mode": "enforce"},
+        });
+        for (k, v) in extra.as_object().unwrap() {
+            doc["policy"][k] = v.clone();
+        }
+        let Ok(direct) = crate::model::PolicyDocument::from_json(&doc.to_string())
+            .unwrap()
+            .validate()
+        else {
+            return Ok(());
+        };
+        let Some(e) = single_policy_effective(extra) else {
+            return Ok(());
+        };
+        let effective = e.policy().unwrap();
+        for (session, admin) in contexts {
+            let groups = admin.map(|a| {
+                let mut g = vec!["S-1-5-21-1-2-3-513".to_owned()];
+                if a {
+                    g.push("S-1-5-32-544".to_owned());
+                }
+                g
+            });
+            let want = stage_six_reason(&direct, session, groups.clone());
+            let got = stage_six_reason(effective, session, groups);
+            prop_assert_eq!(got, want, "session {:?} admin {:?}", session, admin);
+        }
+    }
 }

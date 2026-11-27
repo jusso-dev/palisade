@@ -455,6 +455,12 @@ impl<'p> Evaluator<'p> {
         let unknown_scope = UnknownScope::new(
             policy_scope,
             policy.unknown.scopes.iter().map(compile).collect(),
+            policy
+                .unknown
+                .scope_groups
+                .iter()
+                .map(|g| g.all_of.iter().map(compile).collect())
+                .collect(),
         );
         Ok(Self {
             policy,

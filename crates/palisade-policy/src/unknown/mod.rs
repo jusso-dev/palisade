@@ -307,25 +307,33 @@ pub struct PromptDirective {
     pub sha256: Option<String>,
 }
 
-/// Where a policy's unknown settings apply (#38): its `scope` and its
-/// `unknown.scopes`, compiled. The settings apply to a subject only when
-/// the `scope` is `Match` and, if `unknown.scopes` is not empty, one of
-/// them is `Match`. Facts are read so that the settings apply less, and an
-/// `Unknown` result counts as out of scope, so a missing fact never lets
-/// the settings allow what the built-in implicit deny would block.
+/// Where a policy's unknown settings apply (#38): its `scope`, its
+/// `unknown.scopes` and its `unknown.scope_groups`, compiled. The settings
+/// apply to a subject only when the `scope` is `Match`, one of `scopes` is
+/// `Match` (if there are any), and every scope of one group is `Match` (if
+/// there are any groups). Facts are read so that the settings apply less,
+/// and an `Unknown` result counts as out of scope, so a missing fact never
+/// lets the settings allow what the built-in implicit deny would block.
 #[derive(Debug, Default)]
 pub(crate) struct UnknownScope {
     policy: Option<Arc<CompiledScope>>,
     any_of: Vec<Arc<CompiledScope>>,
+    groups: Vec<Vec<Arc<CompiledScope>>>,
 }
 
 impl UnknownScope {
-    /// The compiled policy `scope` and `unknown.scopes`.
+    /// The compiled policy `scope`, `unknown.scopes` and
+    /// `unknown.scope_groups`.
     pub(crate) const fn new(
         policy: Option<Arc<CompiledScope>>,
         any_of: Vec<Arc<CompiledScope>>,
+        groups: Vec<Vec<Arc<CompiledScope>>>,
     ) -> Self {
-        Self { policy, any_of }
+        Self {
+            policy,
+            any_of,
+            groups,
+        }
     }
 
     /// Whether the settings apply in `context`, and what the scopes noticed.
@@ -350,6 +358,19 @@ impl UnknownScope {
                 let e = eval(s);
                 notes.extend(e.notes);
                 any = any.or(e.result);
+            }
+            result = result.and(any);
+        }
+        if !self.groups.is_empty() {
+            let mut any = Tri::NoMatch;
+            for group in &self.groups {
+                let mut all = Tri::Match;
+                for s in group {
+                    let e = eval(s);
+                    notes.extend(e.notes);
+                    all = all.and(e.result);
+                }
+                any = any.or(all);
             }
             result = result.and(any);
         }

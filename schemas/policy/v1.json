@@ -2896,6 +2896,23 @@
       },
       "type": "object"
     },
+    "ScopeGroup": {
+      "additionalProperties": false,
+      "description": "Scopes that must all match: one entry of\n[`UnknownPolicy::scope_groups`]. An empty group matches everywhere.",
+      "properties": {
+        "all_of": {
+          "description": "The scopes, all of which must match.",
+          "items": {
+            "$ref": "#/$defs/Scope"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "all_of"
+      ],
+      "type": "object"
+    },
     "ScopeSubject": {
       "description": "Whose token a scope's `principals` is tested against.",
       "oneOf": [
@@ -3238,8 +3255,15 @@
           ],
           "description": "The containment profile of the `restrict` level (#14). Required when\nany level, or the prompt's fallback, is `restrict`."
         },
+        "scope_groups": {
+          "description": "The effective form of where these settings apply, written by the\nhierarchy (#37): a subject in **every** scope of at least one group.\nEmpty, the default, means no further limit. An effective policy has\nno `policy.scope`, so each contributing policy's `scope` and\n`scopes` become groups here: `scope` and each of `scopes`, one group\nper entry ([`UnknownPolicy::scope_groups_of`]). The settings then\napply exactly where they applied in each contributing policy, never\nmore widely. At most 1000 groups of at most 8 scopes (the hierarchy\nwrites groups of 1 or 2). A policy document may carry it, so that an\neffective policy validates as any document, but is meant to write\n`scope` and `scopes` instead.",
+          "items": {
+            "$ref": "#/$defs/ScopeGroup"
+          },
+          "type": "array"
+        },
         "scopes": {
-          "description": "Where these settings apply, besides the policy's `scope` (#38): a\nsubject in at least one of these scopes, at most 1000. Empty, the\ndefault, means wherever the policy applies. An effective policy (#37)\nsets it to the scopes of the policies it was built from; a policy\ndocument normally limits itself with `policy.scope` instead. A\nsubject outside it is decided by the built-in implicit deny\n([`crate::unknown`]).",
+          "description": "Where these settings apply, besides the policy's `scope` (#38): a\nsubject in at least one of these scopes, at most 1000. Empty, the\ndefault, means wherever the policy applies. A subject outside it is\ndecided by the built-in implicit deny ([`crate::unknown`]).",
           "items": {
             "$ref": "#/$defs/Scope"
           },

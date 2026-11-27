@@ -1109,6 +1109,10 @@ fn scope_refs(
     };
     let mut scopes: Vec<&mut crate::scope::Scope> = Vec::new();
     scopes.extend(doc.policy.scope.as_mut());
+    scopes.extend(doc.policy.unknown.scopes.iter_mut());
+    for g in &mut doc.policy.unknown.scope_groups {
+        scopes.extend(g.all_of.iter_mut());
+    }
     for a in &mut doc.policy.rule_set_scopes {
         scopes.extend(a.scopes.iter_mut());
     }

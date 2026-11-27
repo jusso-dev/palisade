@@ -809,11 +809,18 @@ impl<'a, 'h> Builder<'a, 'h> {
         // The policies' scopes also limit their unknown settings (#39).
         for layer in self.layers {
             for (_, doc) in self.policies(layer) {
-                if let Some(scope) = &doc.policy.scope {
+                let u = &doc.policy.unknown;
+                let scopes = doc
+                    .policy
+                    .scope
+                    .iter()
+                    .chain(&u.scopes)
+                    .chain(u.scope_groups.iter().flat_map(|g| &g.all_of));
+                for scope in scopes {
                     for (_, r, _) in crate::scope::set_refs(scope) {
                         found.push((
                             r,
-                            format!("/effective/policy/unknown/scopes ({})", doc.policy.id),
+                            format!("/effective/policy/unknown/scope_groups ({})", doc.policy.id),
                         ));
                     }
                 }
@@ -1215,25 +1222,25 @@ impl<'a, 'h> Builder<'a, 'h> {
     /// cannot be compared the nearest layer's lowest slot gives it, as for
     /// every other merge here. With no policy, the default (block).
     ///
-    /// A policy's `scope` limits where its unknown settings apply (#38). The
-    /// effective policy has no scope of its own, so each policy's scope
-    /// moves into `unknown.scopes`: the merged settings apply to a subject
-    /// in at least one contributing policy's scope (all of them if one has
-    /// no scope), and the built-in implicit deny decides for any other.
-    /// Where several scopes overlap, the merged settings are at least as
-    /// strict as each policy's.
+    /// A policy's `scope` and its `unknown.scopes` limit where its unknown
+    /// settings apply (#38): `scope` and any of `scopes`. The effective
+    /// policy has no scope of its own, so that limit moves into
+    /// `unknown.scope_groups`, one all-of group (`scope`, one entry of
+    /// `scopes`) per entry ([`UnknownPolicy::scope_groups_of`](crate::model::UnknownPolicy::scope_groups_of)).
+    /// The merged settings apply to a subject in at least one contributing
+    /// policy's limit (everyone if one has none), exactly where that
+    /// policy's own evaluation would apply its settings, and the built-in
+    /// implicit deny decides for any other. Where several limits overlap,
+    /// the merged settings are at least as strict as each policy's.
     fn unknown(&self) -> crate::model::UnknownPolicy {
         let mut acc: Option<crate::model::UnknownPolicy> = None;
         for layer in self.layers {
             for (_, d) in self.policies(layer).into_iter().rev() {
                 let mut u = d.policy.unknown.clone();
-                u.scopes = d
-                    .policy
-                    .scope
-                    .iter()
-                    .cloned()
-                    .map(stage_six_scope)
-                    .collect();
+                u.scope_groups = u
+                    .scope_groups_of(d.policy.scope.as_ref(), stage_six_scope)
+                    .unwrap_or_default();
+                u.scopes = Vec::new();
                 acc = Some(match acc {
                     None => u,
                     Some(outer) => u.stricter(&outer),

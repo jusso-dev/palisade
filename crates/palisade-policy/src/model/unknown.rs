@@ -558,13 +558,32 @@ pub struct UnknownPolicy {
     pub driver_boot_policy: DriverBootPolicy,
     /// Where these settings apply, besides the policy's `scope` (#38): a
     /// subject in at least one of these scopes, at most 1000. Empty, the
-    /// default, means wherever the policy applies. An effective policy (#37)
-    /// sets it to the scopes of the policies it was built from; a policy
-    /// document normally limits itself with `policy.scope` instead. A
-    /// subject outside it is decided by the built-in implicit deny
-    /// ([`crate::unknown`]).
+    /// default, means wherever the policy applies. A subject outside it is
+    /// decided by the built-in implicit deny ([`crate::unknown`]).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub scopes: Vec<crate::scope::Scope>,
+    /// The effective form of where these settings apply, written by the
+    /// hierarchy (#37): a subject in **every** scope of at least one group.
+    /// Empty, the default, means no further limit. An effective policy has
+    /// no `policy.scope`, so each contributing policy's `scope` and
+    /// `scopes` become groups here: `scope` and each of `scopes`, one group
+    /// per entry ([`UnknownPolicy::scope_groups_of`]). The settings then
+    /// apply exactly where they applied in each contributing policy, never
+    /// more widely. At most 1000 groups of at most 8 scopes (the hierarchy
+    /// writes groups of 1 or 2). A policy document may carry it, so that an
+    /// effective policy validates as any document, but is meant to write
+    /// `scope` and `scopes` instead.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub scope_groups: Vec<ScopeGroup>,
+}
+
+/// Scopes that must all match: one entry of
+/// [`UnknownPolicy::scope_groups`]. An empty group matches everywhere.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScopeGroup {
+    /// The scopes, all of which must match.
+    pub all_of: Vec<crate::scope::Scope>,
 }
 
 impl Default for UnknownPolicy {
@@ -582,6 +601,7 @@ impl Default for UnknownPolicy {
             preexisting_policy: PreexistingPolicy::BaselineOnly,
             driver_boot_policy: DriverBootPolicy::Audit,
             scopes: Vec::new(),
+            scope_groups: Vec::new(),
         }
     }
 }
@@ -646,7 +666,8 @@ impl UnknownPolicy {
     /// that cannot contain is `block`.
     ///
     /// One policy cannot always reproduce the strictest of two exactly, so
-    /// where it cannot, the merged policy is the stricter. Two cases:
+    /// where it cannot, the merged policy is the stricter. Three cases, all
+    /// failing closed:
     ///
     /// - The prompt fallback is one setting for the whole policy, so it is
     ///   the strictest fallback of the sides that prompt anywhere, and at
@@ -656,6 +677,17 @@ impl UnknownPolicy {
     ///   becomes `block` unless that side's own entry there is `restrict`
     ///   or stricter: the side blocks wherever no prompt can be shown, and
     ///   a `restrict` there would let the object run.
+    /// - Entries are merged key by key: an entry only one side sets is
+    ///   compared with the other side's `default`, even for an object that
+    ///   another entry of that side decides. So when one side matches an
+    ///   object by one dimension and the other side by another, the merge
+    ///   can block what each side alone only detects. With A `{default:
+    ///   block, by_type: {executable: detect}}` and B `{default: detect,
+    ///   by_location: {temp: detect}}`, each detects an executable in
+    ///   `temp`, but the merged `temp` entry is `block` (B's `detect` against
+    ///   A's `block` default), so the merged policy blocks it. Expressing
+    ///   each side's decision exactly would need entries keyed by type,
+    ///   location and origin together.
     ///
     /// How each part merges:
     ///
@@ -672,7 +704,9 @@ impl UnknownPolicy {
     ///   user scope if either uses it, and the shorter temporary approval;
     /// - `allow_request` only if both allow it; the stricter
     ///   `preexisting_policy` and `driver_boot_policy`; the more demanding
-    ///   compliance preset; the `scopes` of both sides;
+    ///   compliance preset; where the settings apply: anywhere either side's
+    ///   `scopes` and `scope_groups` would apply them, as `scope_groups`
+    ///   (everywhere if either side has no limit);
     /// - effects: per flag, the nearer layer's value, except that the
     ///   higher severity and the more immediate upload win, and `always`
     ///   logging is kept; tags are joined.
@@ -778,6 +812,52 @@ impl UnknownPolicy {
         self.entry_levels().any(|l| l != Level::Block)
     }
 
+    /// Where these settings apply, as [`scope_groups`](Self::scope_groups),
+    /// in a policy whose `scope` is `policy_scope`: the conjunction of
+    /// `policy_scope`, any of `scopes` and any of `scope_groups`, written
+    /// as a disjunction of groups. `None` means everywhere. Each scope is
+    /// passed through `each`, which the hierarchy uses to drop options that
+    /// only act on a deciding rule.
+    #[must_use]
+    pub fn scope_groups_of(
+        &self,
+        policy_scope: Option<&crate::scope::Scope>,
+        each: impl Fn(crate::scope::Scope) -> crate::scope::Scope,
+    ) -> Option<Vec<ScopeGroup>> {
+        if policy_scope.is_none() && self.scopes.is_empty() && self.scope_groups.is_empty() {
+            return None;
+        }
+        // Distribute: P and (U1 or U2) and (G1 or G2) is the "or" of every
+        // (P, Ui, Gj).
+        let singles: Vec<Vec<crate::scope::Scope>> = if self.scopes.is_empty() {
+            vec![Vec::new()]
+        } else {
+            self.scopes.iter().map(|s| vec![s.clone()]).collect()
+        };
+        let groups: Vec<Vec<crate::scope::Scope>> = if self.scope_groups.is_empty() {
+            vec![Vec::new()]
+        } else {
+            self.scope_groups.iter().map(|g| g.all_of.clone()).collect()
+        };
+        let mut out = Vec::new();
+        for u in &singles {
+            for g in &groups {
+                let all_of: Vec<crate::scope::Scope> = policy_scope
+                    .into_iter()
+                    .cloned()
+                    .chain(u.iter().cloned())
+                    .chain(g.iter().cloned())
+                    .map(&each)
+                    .collect();
+                let group = ScopeGroup { all_of };
+                if !out.contains(&group) {
+                    out.push(group);
+                }
+            }
+        }
+        Some(out)
+    }
+
     /// `default` and every entry's level, without the prompt's fallback.
     fn entry_levels(&self) -> impl Iterator<Item = Level> + '_ {
         core::iter::once(self.default)
@@ -856,17 +936,22 @@ impl UnknownPolicy {
             } else {
                 DriverBootPolicy::Audit
             },
-            // Where either side applies; empty (everywhere) absorbs.
-            scopes: if self.scopes.is_empty() || other.scopes.is_empty() {
-                Vec::new()
-            } else {
-                let mut scopes = self.scopes.clone();
-                for s in &other.scopes {
-                    if !scopes.contains(s) {
-                        scopes.push(s.clone());
+            // Where either side applies, as groups; a side that applies
+            // everywhere absorbs the other.
+            scopes: Vec::new(),
+            scope_groups: match (
+                self.scope_groups_of(None, |s| s),
+                other.scope_groups_of(None, |s| s),
+            ) {
+                (Some(mut a), Some(b)) => {
+                    for g in b {
+                        if !a.contains(&g) {
+                            a.push(g);
+                        }
                     }
+                    a
                 }
-                scopes
+                _ => Vec::new(),
             },
         }
     }
