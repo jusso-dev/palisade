@@ -205,6 +205,10 @@ fn many_references_to_a_large_set_cost_little() {
     for n in 2..=8 {
         libs.push(fragment(n, 1, json!({"any": [r(n - 1), r(n - 1)]})));
     }
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "times the operation to check its performance bound"
+    )]
     let start = std::time::Instant::now();
     let c = Catalogue::new(libs).unwrap();
     for _ in 0..1_000 {

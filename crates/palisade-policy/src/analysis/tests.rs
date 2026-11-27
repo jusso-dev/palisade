@@ -971,6 +971,10 @@ fn analyse_scales_to_a_large_policy() {
         "policy": {"id": POLICY, "name": "Big", "revision": 1, "mode": "enforce", "rule_sets": [SET]},
         "rule_sets": [{"id": SET, "name": "S", "kind": "allowlist", "rules": rules}]});
     let d = PolicyDocument::from_json(&json.to_string()).unwrap();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "times the operation to check its performance bound"
+    )]
     let start = std::time::Instant::now();
     let f = analyse(&d, &Facts::default(), NOW);
     let took = start.elapsed();
@@ -1507,6 +1511,10 @@ fn rules_sharing_a_common_scope_do_not_explode_the_conflict_pass() {
         "policy": {"id": POLICY, "name": "Scoped", "revision": 1, "mode": "enforce", "rule_sets": [SET]},
         "rule_sets": [{"id": SET, "name": "S", "kind": "blocklist", "rules": rules}]});
     let d = PolicyDocument::from_json(&json.to_string()).unwrap();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "times the operation to check its performance bound"
+    )]
     let start = std::time::Instant::now();
     let _ = analyse(&d, &Facts::default(), NOW);
     assert!(start.elapsed() < std::time::Duration::from_secs(30));

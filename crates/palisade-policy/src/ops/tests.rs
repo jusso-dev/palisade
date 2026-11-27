@@ -967,6 +967,10 @@ fn pathological_patterns_match_in_linear_time() {
     let c = compile(Field::MetaFileDescription, Operator::Regex, &["(a+)+b"]);
     let text = "a".repeat(2048);
     let facts = text_facts(Field::MetaFileDescription, &text);
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "times the operation to check its performance bound"
+    )]
     let start = Instant::now();
     for _ in 0..100 {
         assert_eq!(eval(&c, &facts), NoMatch);
@@ -1320,6 +1324,10 @@ fn unicode_classes_compile_within_the_limit() {
     // The class is built from the parsed tree, not printed out as text and
     // parsed again, so a long run of `\w` is bounded by the size limit.
     let many = "\\w".repeat(1000);
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "times the operation to check its performance bound"
+    )]
     let start = Instant::now();
     let r = CompiledCriterion::compile(&crit(Field::MetaProductName, Operator::Regex, &[&many]));
     assert!(

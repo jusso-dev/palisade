@@ -145,6 +145,10 @@ fn eval_cases(size: Size, samples: u64) -> Vec<(Case, Histogram<u64>)> {
                 variables: &variables,
                 context: &context,
             };
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "times the operation to check its performance bound"
+            )]
             let start = Instant::now();
             let d = evaluator.evaluate_in(&subject, &state, TraceId([0; 16]));
             let t = nanos(start);
@@ -239,6 +243,10 @@ fn a_cache_hit_is_within_budget() {
             session: None,
             expires_before: None,
         };
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "times the operation to check its performance bound"
+        )]
         let start = Instant::now();
         let out = engine.evaluate(&request, &clock);
         let t = nanos(start);
@@ -261,6 +269,10 @@ fn a_cache_hit_is_within_budget() {
 fn loading_the_reference_policy_is_within_budget() {
     let b = budgets();
     let doc = reference::document(Size::Reference, PrecedenceModel::DenyWins);
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "times the operation to check its performance bound"
+    )]
     let start = Instant::now();
     let policy = doc.validate().unwrap();
     let engine = Engine::new(policy, EngineConfig::default()).unwrap();
