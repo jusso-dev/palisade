@@ -3117,7 +3117,7 @@
           "type": "array"
         },
         "min_key_bits": {
-          "description": "Every key in the signature's chain must be at least this strong, in\nRSA-equivalent bits (see [`crate::facts::SignerDetails::min_key_bits`]).",
+          "description": "Every key in the signature's chain must be at least this strong, in\nRSA-equivalent bits (see [`crate::facts::KeyFact::rsa_equivalent_bits`]).",
           "format": "uint32",
           "maximum": 16384,
           "minimum": 1,

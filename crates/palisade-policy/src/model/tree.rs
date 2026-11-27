@@ -215,7 +215,7 @@ pub struct SignerOptions {
     #[serde(default, skip_serializing_if = "core::ops::Not::not")]
     pub countersigned: bool,
     /// Every key in the signature's chain must be at least this strong, in
-    /// RSA-equivalent bits (see [`crate::facts::SignerDetails::min_key_bits`]).
+    /// RSA-equivalent bits (see [`crate::facts::KeyFact::rsa_equivalent_bits`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 1, max = MAX_KEY_BITS))]
     pub min_key_bits: Option<u32>,
