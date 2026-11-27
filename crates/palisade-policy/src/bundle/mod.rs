@@ -8,5 +8,11 @@
 //!   deterministic encoding of §4.2. The encoder writes only canonical
 //!   bytes, and the decoder accepts only canonical bytes, so decoding and
 //!   encoding again always gives the input back.
+//! - [`keys`]: the stable registry of integer keys that stand for field and
+//!   variant names, each critical or ignorable.
+//! - [`serial`]: the policy model through serde as CBOR values, with
+//!   registered keys in place of names and text in NFC.
 
 pub mod cbor;
+pub mod keys;
+pub mod serial;
