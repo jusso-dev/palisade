@@ -508,3 +508,160 @@ fn a_loaded_bundle_decides_as_the_server_with_location_profiles() {
         "the allow must not apply in quarantine"
     );
 }
+
+mod coverage {
+    //! The rest of the compile API: an effective policy as the source, the
+    //! scopes of unknown-policy limits and rule-set assignments, the
+    //! refusals, every error's message, and each kind of inlined set.
+
+    use super::*;
+    use crate::hierarchy::tests::{base_nodes, policy as h_policy, rule, set, snapshot, validated};
+
+    #[test]
+    fn an_effective_policy_compiles_with_its_own_sources() {
+        let mut nodes = base_nodes();
+        for n in &mut nodes {
+            if n["id"] == json!(crate::hierarchy::tests::id(20)) {
+                n["assignments"] =
+                    json!([{"policy": crate::hierarchy::tests::id(50), "slot_order": 0}]);
+            }
+        }
+        let h = validated(&snapshot(
+            nodes,
+            vec![h_policy(
+                50,
+                "enforce",
+                vec![set(60, "allowlist", false, vec![rule(70, "allow", 'a')])],
+            )],
+            vec![],
+        ));
+        let device = crate::hierarchy::NodeId(crate::hierarchy::tests::id(20).parse().unwrap());
+        let e = h
+            .effective_policy_as(device, &crate::hierarchy::Membership::default())
+            .unwrap();
+        let src = Source::effective(&e, h.catalogue(), Visibility::Global).unwrap();
+        let p = &e.policy().unwrap().document().policy;
+        assert_eq!(src.sources.policies, [(p.id, p.revision)]);
+        let (bundle, _) = compile(&src, header(), &BundleLimits::DEFAULT).unwrap();
+        assert_eq!(
+            bundle.body.source_revisions().policies,
+            [(p.id, p.revision)]
+        );
+    }
+
+    #[test]
+    fn sets_in_unknown_limits_and_rule_set_assignments_are_inlined_and_pinned() {
+        let mut doc = policy(json!(1)).into_document();
+        let latest: crate::scope::Scope =
+            serde_json::from_value(json!({"network": {"include": [{"network_set": {"id": NET}}]}}))
+                .unwrap();
+        doc.policy.rule_set_scopes = vec![crate::scope::RuleSetScope {
+            rule_set: doc.rule_sets[0].id,
+            scopes: vec![latest.clone()],
+        }];
+        doc.policy.unknown.scope_limits = vec![
+            serde_json::from_value(json!({"all_of": [latest.clone()], "any_of": [latest]}))
+                .unwrap(),
+        ];
+        let Ok(policy) = doc.validate() else {
+            return;
+        };
+        let cat = catalogue();
+        let (bundle, _) =
+            compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
+        let pins: Vec<Pin> = crate::scope::document_scopes(bundle.body.document())
+            .into_iter()
+            .flat_map(|(_, s)| crate::scope::set_refs(s))
+            .map(|(_, r, _)| r.pin)
+            .collect();
+        assert!(!pins.is_empty());
+        assert!(
+            pins.iter().all(|p| matches!(p, Pin::Version(_))),
+            "{pins:?}"
+        );
+    }
+
+    #[test]
+    fn mismatched_schema_versions_are_refused_and_errors_explain_themselves() {
+        let cat = catalogue();
+        let policy = policy(json!(1));
+        let newer = Header {
+            schema_version: palisade_core::SchemaVersion::new(1, 99, 0),
+            ..header()
+        };
+        let err = compile(&source(&policy, &cat), newer, &BundleLimits::DEFAULT).unwrap_err();
+        assert!(
+            matches!(&err, CompileError::Invalid(w) if w.contains("schema")),
+            "{err}"
+        );
+        let errors = [
+            CompileError::Invalid("x".to_owned()),
+            CompileError::UnresolvedSet {
+                id: LibraryId(NET.parse().unwrap()),
+                pin: Pin::Latest,
+            },
+            CompileError::Encode(serial::Error::Float),
+            CompileError::TooLarge { size: 2, limit: 1 },
+        ];
+        let texts: std::collections::BTreeSet<String> =
+            errors.iter().map(ToString::to_string).collect();
+        assert_eq!(texts.len(), errors.len());
+    }
+
+    #[test]
+    fn each_kind_of_inlined_set_resolves_only_as_its_kind() {
+        let sets = |content: SetContent, versions: &[u32]| {
+            let b = PolicyBundle::new(
+                header(),
+                crate::bundle::format::Body::new(
+                    policy(json!(1)).into_document(),
+                    versions
+                        .iter()
+                        .map(|v| InlineLibrary {
+                            id: LibraryId(NET.parse().unwrap()),
+                            resolved_version: *v,
+                            content: content.clone(),
+                        })
+                        .collect(),
+                    SourceRevisions::default(),
+                )
+                .unwrap(),
+            );
+            BundleSets::new(&b)
+        };
+        let r = |pin| SetRef {
+            id: LibraryId(NET.parse().unwrap()),
+            pin,
+        };
+        let principals = sets(
+            SetContent::PrincipalSet(vec!["S-1-5-32-544".to_owned()]),
+            &[1],
+        );
+        assert_eq!(
+            principals.principal_set(&r(Pin::Version(1))),
+            Some(vec!["S-1-5-32-544".to_owned()])
+        );
+        assert_eq!(principals.network_set(&r(Pin::Version(1))), None);
+        assert_eq!(principals.schedule_set(&r(Pin::Version(1))), None);
+        let schedule =
+            json!({"windows": [{"days": ["mon"], "start": "09:00", "end": "17:00"}]}).to_string();
+        let schedules = sets(SetContent::ScheduleSet(vec![schedule]), &[1]);
+        assert!(schedules.schedule_set(&r(Pin::Latest)).is_some());
+        assert_eq!(schedules.principal_set(&r(Pin::Latest)), None);
+        let two = sets(
+            SetContent::ScheduleSet(vec!["{}".to_owned(), "{}".to_owned()]),
+            &[1],
+        );
+        assert!(
+            two.schedule_set(&r(Pin::Version(1))).is_none(),
+            "a set holds one schedule"
+        );
+        // `latest` with two versions held is ambiguous: unresolved.
+        let both = sets(
+            SetContent::NetworkSet(vec!["10.0.0.0/8".to_owned()]),
+            &[1, 2],
+        );
+        assert_eq!(both.network_set(&r(Pin::Latest)), None);
+        assert!(both.network_set(&r(Pin::Version(2))).is_some());
+    }
+}

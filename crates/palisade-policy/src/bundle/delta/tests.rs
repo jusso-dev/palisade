@@ -245,3 +245,118 @@ fn a_schema_minor_bump_breaks_every_delta() {
     let (_, bytes) = apply(&old.to_bytes().unwrap(), &delta, &BundleLimits::DEFAULT).unwrap();
     assert_eq!(bytes, new.to_bytes().unwrap());
 }
+
+#[test]
+fn every_delta_error_explains_itself() {
+    let errors = [
+        DeltaError::WrongBase,
+        DeltaError::MissingRuleSet(crate::test_util::rule_set_id(1)),
+        DeltaError::MissingRule(crate::test_util::rule_id(1)),
+        DeltaError::ResultMismatch,
+        DeltaError::Encode(serial::Error::Float),
+        DeltaError::Decode(BundleError::NonCanonical),
+    ];
+    let texts: std::collections::BTreeSet<String> =
+        errors.iter().map(ToString::to_string).collect();
+    assert_eq!(texts.len(), errors.len());
+}
+
+#[test]
+fn library_and_source_changes_travel_as_replacements() {
+    let lib = |v| crate::bundle::format::InlineLibrary {
+        id: crate::library::LibraryId(crate::test_util::policy_id(9).0),
+        resolved_version: v,
+        content: crate::bundle::format::SetContent::NetworkSet(vec!["10.0.0.0/8".to_owned()]),
+    };
+    let make = |v: u32, version: u64| {
+        PolicyBundle::new(
+            header(version),
+            Body::new(
+                base(),
+                vec![lib(v)],
+                SourceRevisions {
+                    policies: vec![(crate::test_util::policy_id(1), u64::from(v))],
+                    libraries: Vec::new(),
+                },
+            )
+            .unwrap(),
+        )
+    };
+    let (old, new) = (make(1, 1), make(2, 2));
+    let delta = round_trip(&old, &new);
+    assert!(delta.ops.iter().any(|o| matches!(o, Op::PutLibraries(_))));
+    assert!(delta.ops.iter().any(|o| matches!(o, Op::PutSources(_))));
+}
+
+/// The delta encoding's field checks, each with the error it gives.
+#[test]
+fn malformed_deltas_are_refused_by_name() {
+    use crate::bundle::cbor::{self, Map, Value};
+    let old = bundle(base(), 1);
+    let new = bundle(base(), 2);
+    let bytes = diff(&old, &new).unwrap().to_bytes().unwrap();
+    let Value::Map(m) = cbor::decode(&bytes).unwrap() else {
+        panic!("a delta is a map")
+    };
+    let k = |n: &str| Value::int(crate::bundle::keys::id(n).unwrap());
+    let with = |key: Value, v: Value| {
+        let mut e: Vec<_> = m
+            .entries()
+            .iter()
+            .filter(|(x, _)| *x != key)
+            .cloned()
+            .collect();
+        e.push((key, v));
+        cbor::encode(&Value::Map(Map::new(e).unwrap())).unwrap()
+    };
+    let read = |b: &[u8]| BundleDelta::from_bytes(b, &BundleLimits::DEFAULT);
+    let shape = |what: &'static str| Err(DeltaError::Decode(BundleError::Shape(what)));
+    assert_eq!(
+        read(&with(k("base_bundle_hash"), Value::Bytes(vec![0; 31]))),
+        shape("a hash is not 32 bytes")
+    );
+    assert_eq!(
+        read(&with(k("base_bundle_hash"), Value::Uint(1))),
+        shape("a hash is not a byte string")
+    );
+    assert_eq!(
+        read(&cbor::encode(&Value::Array(vec![])).unwrap()),
+        shape("a delta is a map")
+    );
+    // Unknown keys follow their sign; a known key that is no delta field
+    // is refused by name.
+    let critical = i64::try_from(crate::bundle::keys::KEYS.len()).unwrap() + 900;
+    assert_eq!(
+        read(&with(Value::int(critical), Value::Null)),
+        Err(DeltaError::Decode(BundleError::UnknownCriticalKey(
+            critical
+        )))
+    );
+    assert!(read(&with(Value::int(-900), Value::Null)).is_ok());
+    assert!(matches!(
+        read(&with(k("tenant"), Value::Null)),
+        Err(DeltaError::Decode(BundleError::Body(serial::Error::Message(m)))) if m.contains("tenant")
+    ));
+    let no_ops = {
+        let e: Vec<_> = m
+            .entries()
+            .iter()
+            .filter(|(x, _)| *x != k("ops"))
+            .cloned()
+            .collect();
+        cbor::encode(&Value::Map(Map::new(e).unwrap())).unwrap()
+    };
+    assert_eq!(
+        read(&no_ops),
+        Err(DeltaError::Decode(BundleError::Missing("ops")))
+    );
+    let text_key = {
+        let mut e: Vec<_> = m.entries().to_vec();
+        e.push((Value::Text("x".into()), Value::Null));
+        cbor::encode(&Value::Map(Map::new(e).unwrap())).unwrap()
+    };
+    assert!(matches!(
+        read(&text_key),
+        Err(DeltaError::Decode(BundleError::Shape(_)))
+    ));
+}
