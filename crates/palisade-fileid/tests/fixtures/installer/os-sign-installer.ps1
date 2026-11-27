@@ -25,5 +25,6 @@ try {
         throw "signing failed: $($result.StatusMessage)"
     }
 } finally {
-    Remove-Item -LiteralPath ("Cert:\CurrentUser\My\" + $cert.Thumbprint) -ErrorAction SilentlyContinue
+    # -DeleteKey also removes the throwaway certificate's private key.
+    Remove-Item -LiteralPath ("Cert:\CurrentUser\My\" + $cert.Thumbprint) -DeleteKey -ErrorAction SilentlyContinue
 }

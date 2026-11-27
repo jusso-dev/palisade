@@ -15,6 +15,7 @@
 #   cargo +nightly fuzz run fuzz_msi_tables
 #   cargo +nightly fuzz run fuzz_tags
 #   cargo +nightly fuzz run script_sig
+#   cargo +nightly fuzz run fuzz_appx_manifest
 [package]
 name = "palisade-fileid-fuzz"
 version = "0.0.0"
@@ -118,6 +119,13 @@ bench = false
 [[bin]]
 name = "script_sig"
 path = "fuzz_targets/script_sig.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_appx_manifest"
+path = "fuzz_targets/fuzz_appx_manifest.rs"
 test = false
 doc = false
 bench = false

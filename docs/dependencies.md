@@ -108,7 +108,9 @@ runtime, logging and the Windows service crates), exempted with a note that name
 raised to `safe-to-deploy` the same way. The server's Postgres layer (#127) added 72 more (`sqlx`
 with its Postgres driver, migration support and the rustls-based TLS with the OS trust store),
 exempted with a note that names #127, and raised 31 baseline exemptions (`syn`, `url`, the
-Unicode and ICU crates and their helpers) to `safe-to-deploy` the same way. The
+Unicode and ICU crates and their helpers) to `safe-to-deploy` the same way. App package
+identity (#53) added 2 more (`miniz_oxide`, raw DEFLATE for package members, and its checksum
+crate `adler2`), exempted with a note that names #53. The
 exemptions are the backlog.
 Each one is removed when the crate is audited, or when an imported audit covers it
 (`cargo vet prune` removes exemptions that are no longer needed).

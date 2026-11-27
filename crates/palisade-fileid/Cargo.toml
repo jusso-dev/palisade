@@ -26,6 +26,8 @@ content-rules = ["dep:aho-corasick"]
 # `content-rules`.
 aho-corasick = { workspace = true, optional = true }
 md-5 = { workspace = true }
+# Raw DEFLATE for app package members (#53), into bounded buffers.
+miniz_oxide = { workspace = true }
 # The shared verification-error table (#50, #58).
 palisade-core = { workspace = true, features = ["serde"] }
 # Bounded, streaming parsing of the RT_MANIFEST resource (#45). It never

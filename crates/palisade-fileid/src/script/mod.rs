@@ -113,7 +113,7 @@ use serde::Serialize;
 
 use crate::authenticode::asn1;
 use crate::authenticode::pkcs7;
-use crate::authenticode::verify::check;
+use crate::authenticode::verify::{Expected, check};
 use crate::authenticode::{
     AuthenticodeHashes, AuthenticodeStatus, InvalidReason, ReportWarning, SignatureError,
     SignatureInfo, SignatureKind, SignatureReport, SignatureStatus, SignedMetadata, SigningState,
@@ -854,7 +854,11 @@ pub fn verify_script(data: &[u8], kind: ScriptKind, options: &ScriptOptions) -> 
     let info = SignatureInfo {
         kind: SignatureKind::Script,
         total: 1,
-        ..check(&signed, &script_digests, &options.verify)
+        ..check(
+            &signed,
+            &Expected::Digests(&script_digests),
+            &options.verify,
+        )
     };
     if info.untrusted_signer_attrs {
         report

@@ -119,7 +119,7 @@ pub mod summary;
 use std::fmt;
 
 use crate::authenticode::pkcs7::Subject;
-use crate::authenticode::verify::verify_detached;
+use crate::authenticode::verify::{Expected, verify_detached};
 use crate::authenticode::{
     AuthenticodeHashes, AuthenticodeStatus, SignatureKind, SignatureReport, SignatureStatus,
 };
@@ -1296,7 +1296,7 @@ fn read_signature(
         warnings.push(InstallerWarning::SignatureTooLarge);
         return Some(verify_detached(
             &[],
-            content,
+            &Expected::Digests(content),
             Subject::Sip(SIP_GUID_MSI),
             SignatureKind::Msi,
         ));
@@ -1304,7 +1304,7 @@ fn read_signature(
     let der = cf.stream(sig);
     let mut report = verify_detached(
         &der,
-        content,
+        &Expected::Digests(content),
         Subject::Sip(SIP_GUID_MSI),
         SignatureKind::Msi,
     );

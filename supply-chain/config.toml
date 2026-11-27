@@ -54,6 +54,11 @@ dev-criteria = "safe-to-run"
 criteria = "safe-to-run"
 dev-criteria = "safe-to-run"
 
+[[exemptions.adler2]]
+version = "2.0.1"
+criteria = "safe-to-deploy"
+notes = "#53 (app package identity): the checksum crate of miniz_oxide, used with no default features. Audit, or import an audit, before bumping."
+
 [[exemptions.ahash]]
 version = "0.8.12"
 criteria = "safe-to-run"
@@ -703,6 +708,11 @@ notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, b
 version = "0.3.18"
 criteria = "safe-to-deploy"
 notes = "Added by #126 (palisade-server process skeleton: HTTP stack, TLS, command line and interface lookup) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
+[[exemptions.miniz_oxide]]
+version = "0.8.9"
+criteria = "safe-to-deploy"
+notes = "#53 (app package identity): raw DEFLATE for MSIX/AppX members. forbid(unsafe_code), no default features. Audit, or import an audit, before bumping."
 
 [[exemptions.mio]]
 version = "1.2.5"

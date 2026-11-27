@@ -220,8 +220,9 @@ fn walk_table(
                 if let Some(entry) = report.entries.get_mut(entry_index) {
                     entry.signature = Some(index);
                 }
+                let expected = Expected::Digests(image);
                 let mut walker = Walker {
-                    image,
+                    image: &expected,
                     options,
                     report,
                     entry: entry_index,
@@ -257,9 +258,41 @@ fn walk_table(
     malformed
 }
 
+/// What a signature's signed digest is compared with.
+pub(crate) enum Expected<'r> {
+    /// The subject's digests, one per algorithm: a PE image's Authenticode
+    /// hashes, an installer package's content hashes.
+    Digests(&'r AuthenticodeHashes),
+    /// A function that builds the whole expected signed digest under an
+    /// algorithm, or `None` if it cannot: an app package's tagged digest
+    /// list (#53).
+    Blob(&'r dyn Fn(DigestAlgorithm) -> Option<Vec<u8>>),
+}
+
+impl Expected<'_> {
+    /// Whether `signed` is what the subject hashes to under `alg`; `None`
+    /// if that could not be computed.
+    fn matches(&self, alg: DigestAlgorithm, signed: &[u8]) -> Option<bool> {
+        match self {
+            Self::Digests(d) => alg
+                .hash_algorithm()
+                .and_then(|h| d.get(h))
+                .map(|d| d.as_bytes() == signed),
+            Self::Blob(f) => f(alg).map(|b| b == signed),
+        }
+    }
+
+    fn conformant(&self) -> bool {
+        match self {
+            Self::Digests(d) => d.status.is_conformant(),
+            Self::Blob(_) => true,
+        }
+    }
+}
+
 /// Parses and verifies one signature and, recursively, its nested ones.
 struct Walker<'r> {
-    image: &'r AuthenticodeHashes,
+    image: &'r Expected<'r>,
     options: &'r VerifyOptions,
     report: &'r mut SignatureReport,
     entry: usize,
@@ -346,18 +379,22 @@ impl Walker<'_> {
 /// `image_status` is `content`'s.
 pub(crate) fn verify_detached(
     der: &[u8],
-    content: &AuthenticodeHashes,
+    content: &Expected<'_>,
     subject: Subject,
     kind: SignatureKind,
 ) -> SignatureReport {
     let options = VerifyOptions::default();
+    let image_status = match content {
+        Expected::Digests(d) => d.status.clone(),
+        Expected::Blob(_) => super::AuthenticodeStatus::Conformant,
+    };
     let mut report = SignatureReport {
         entries: Vec::new(),
         signatures: Vec::new(),
         primary: None,
         signing_state: SigningState::Unsigned,
         tolerate_digest_mismatch: false,
-        image_status: content.status.clone(),
+        image_status,
         warnings: Vec::new(),
     };
     let mut walker = Walker {
@@ -421,7 +458,7 @@ fn malformed(e: super::signature::SignatureError) -> SignatureInfo {
 /// Runs every check on one parsed signature.
 pub(crate) fn check(
     sd: &SignedData<'_>,
-    image: &AuthenticodeHashes,
+    image: &Expected<'_>,
     options: &VerifyOptions,
 ) -> SignatureInfo {
     let mut warnings = Warnings(sd.warnings.0.clone());
@@ -450,10 +487,7 @@ pub(crate) fn check(
 
     // Compare the signed image digest with the file.
     let digest_match = match indirect.digest_alg {
-        Ok(alg) => alg
-            .hash_algorithm()
-            .and_then(|h| image.get(h))
-            .map(|d| d.as_bytes() == indirect.digest),
+        Ok(alg) => image.matches(alg, indirect.digest),
         Err(_) => None,
     };
 
@@ -471,7 +505,7 @@ pub(crate) fn check(
             (SignatureCheck::NotChecked, _) => {
                 SignatureStatus::BadSignature(BadSignature::SignatureInvalid)
             }
-            (SignatureCheck::Valid, Some(true)) if !image.status.is_conformant() => {
+            (SignatureCheck::Valid, Some(true)) if !image.conformant() => {
                 SignatureStatus::NonConformantImage
             }
             (SignatureCheck::Valid, Some(true)) => SignatureStatus::Valid,
