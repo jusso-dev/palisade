@@ -44,18 +44,20 @@ certifies per commit by adding a `Signed-off-by: Name <email>` trailer, usually 
    a hosted bot or third-party action that is not on the allowlist. Contributors must sign before
    their first pull request, and a relicensing right asks them to trust the maintainer with more
    than the licence grants. Fails drivers 2, 3 and 4.
-3. **DCO sign-off, checked by a script in the repository.** Each commit carries
-   `Signed-off-by:`. A short shell script (`.github/scripts/check-dco.sh`), run by a workflow
-   that uses only `actions/checkout`, checks every commit in a pull request. No service, no
-   secret, no extra rights. The DCO certifies the contributor's right to submit, which is what
-   driver 1 asks for; it does not allow relicensing, which driver 4 rules out anyway.
+3. **DCO sign-off, checked by a script in the repository.** Each commit carries `Signed-off-by:`. A
+   short shell script (`.github/scripts/check-dco.sh`), run by a workflow that uses only
+   `actions/checkout`, checks every non-merge commit in a pull request that is not exempt (see
+   Decision). No service, no secret, no extra rights. The DCO certifies the contributor's right to
+   submit, which is what driver 1 asks for; it does not allow relicensing, which driver 4 rules out
+   anyway.
 4. **DCO sign-off, checked by a hosted app or a third-party action.** Same record as option 3, but
    adds an external integration or an action outside the allowlist, and with it a supply-chain
    dependency with access to pull requests. Fails driver 3 for no gain over option 3.
 
 ## Decision
 
-Option 3. **Every commit in a pull request carries a DCO 1.1 sign-off. There is no CLA.**
+Option 3. **Every non-merge commit in a pull request carries a DCO 1.1 sign-off, except in a
+pull request the repository owner opened. There is no CLA.**
 
 - A sign-off is a `Signed-off-by: Name <email>` trailer in the commit message, with a non-empty
   name and an email that matches the commit's author email, ignoring case. `git commit -s` adds
@@ -101,8 +103,9 @@ added, and the DCO check stays a script in the repository run with allowlisted a
 
 ### Positive
 
-- Every non-merge commit on a pull request has a signed statement from its author that they may
-  submit it.
+- Every non-merge commit in a pull request that someone other than the owner opened has a signed
+  statement from its author that they may submit it. The owner's own pull requests are
+  recorded by GitHub's account history instead (see Decision).
 - Nothing to sign up for or sign in advance; `git commit -s` is enough.
 - No service, secret or third-party action to run or trust. The checker is under 100 lines
   of shell, with tests.
