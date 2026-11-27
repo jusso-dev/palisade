@@ -1,0 +1,621 @@
+# The file identity corpus (#55). See README.md for the format. Generated
+# files are built at test time by signed.rs; their digests here come from
+# generate.sh, which computes them with shasum, openssl and osslsigncode.
+
+- id: "plain-exe"
+  file: "plain.exe"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "plain"
+  description: "The default synthetic PE32+ GUI image, unsigned."
+  expected:
+    sha256: "103721b89ae55ee080004585a71558c9ceb2f36c92bf2c68671d2bb1c8428092"
+    sha1: "bafa62fb5493435dc4de3e4d65091f2e080dc0a6"
+    md5: "aae67ea258816e7be757f922a3225368"
+    authenticode_sha256: "5d876fe0b3bdd41254d4349c547926bd02e4fa093498f289e712a29027f2589f"
+    size: 1536
+    is_pe: true
+    content_kind: "pe"
+    mismatch_severity: "none"
+    pe_format: "pe32_plus"
+    is_dll: false
+    authenticode_conformant: true
+    authoritative: "authenticode_sha256"
+    signing_state: "unverified"
+    embedded: "unsigned"
+    catalog: "not_checked"
+    signatures: 0
+    masquerade_score: 0
+    masquerade_reasons: []
+    recommended_level: "authenticode_hash"
+
+- id: "plain-dll"
+  file: "plain.dll"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "dll"
+  description: "A DLL with no entry point."
+  expected:
+    sha256: "f299a8e7fc42867f999ab92248857f67e7f533c4b65921ef1ecf910c4724cb5e"
+    sha1: "5739b08dd547263b97b467084200821afda6fe45"
+    md5: "d399ceca42db4696a8cfea27a050bca4"
+    authenticode_sha256: "845c1f9adf4cf129242209654769b207da41ec3786d9fba9587c9b30402be967"
+    is_pe: true
+    content_kind: "pe"
+    is_dll: true
+    signing_state: "unverified"
+    masquerade_score: 0
+
+- id: "pe32-exe"
+  file: "x86.exe"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "pe32"
+  description: "A PE32 (x86) image with a data section."
+  expected:
+    sha256: "3895b0e90ce71218fb8102e5167c53532567f0ea26a426de007dcaae5c9aa115"
+    sha1: "e4e23329e799644a1582420f544fa7db3935882b"
+    md5: "1cbc0aa73e54325d9d41fae1ef24809d"
+    authenticode_sha256: "9a7419f2c7e253f46dcf4bec3e07126a77cd8c56f98efa080463507c01fa145a"
+    is_pe: true
+    pe_format: "pe32"
+    authenticode_conformant: true
+
+- id: "tool-exe"
+  file: "extool.exe"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "tool"
+  description: "An unsigned tool with a full version resource; its on-disk name is its OriginalFilename. Nothing is trusted and no catalog is loaded, so its signer cannot be judged."
+  expected:
+    sha256: "7642a147190fb206a0a71824b8370de9cfa4d1981a9097fc8b2579b523396a0c"
+    sha1: "a0d2a4695a1a2aaeb6b3d9538b2dab9eef34437a"
+    md5: "bfe305143ca3a1613f7ce6ed9ce0238b"
+    authenticode_sha256: "bb315a34a23b4cc8f185907f6954fc105c431ec15bf655180d25348cf58def5b"
+    original_file_name: "extool.exe"
+    file_version: "1.2.3.4"
+    product_name: "Example Suite"
+    effective_file_name: "extool.exe"
+    effective_file_name_source: "original_file_name"
+    signing_state: "unverified"
+    masquerade_score: 0
+    masquerade_reasons: []
+
+- id: "tool-v2-exe"
+  file: "extool.exe"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "tool-v2"
+  description: "Version 2.0.0.0 of the unsigned tool."
+  expected:
+    sha256: "6936abaf3fcd3fb992e1287fe7bd4cb32558b06dbb25a31f67220c8595ba776f"
+    sha1: "058bdda2087bdb7af3da70cb90d12076bd99ffad"
+    md5: "53540d6fd5977f1e0f8e0c915cefe0d4"
+    authenticode_sha256: "162a51cc3748a0f3f2e371c827e08f3f2e8515f3e4f5d99f252e02eeda59472b"
+    file_version: "2.0.0.0"
+    masquerade_score: 0
+
+- id: "tool-versioned-name"
+  file: "extool-1.2.3_x64.exe"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "tool"
+  description: "The same tool under a versioned, architecture-tagged name: a benign difference, not a rename."
+  expected:
+    masquerade_score: 0
+    masquerade_reasons: []
+
+- id: "tool-renamed"
+  file: "updater.exe"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "tool"
+  description: "The tool renamed: OriginalFilename differs from the on-disk name."
+  expected:
+    masquerade_score: 20
+    masquerade_reasons: ["name_mismatch"]
+
+- id: "tool-as-pdf"
+  file: "report.pdf"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "tool"
+  description: "PE content behind a document extension."
+  expected:
+    is_pe: true
+    content_kind: "pe"
+    mismatch_severity: "suspicious"
+    masquerade_reasons: ["extension_mismatch", "name_mismatch"]
+    masquerade_score: 50
+
+- id: "tool-double-ext"
+  file: "invoice.pdf.exe"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "tool"
+  description: "A decoy document extension before .exe."
+  expected:
+    mismatch_severity: "critical"
+    masquerade_reasons: ["double_extension", "name_mismatch"]
+    masquerade_score: 70
+
+- id: "tool-rtlo"
+  file: "C:\\Users\\alice\\Downloads\\invoice\u202Efdp.exe"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "tool"
+  description: "A right-to-left override in the name, so it renders as \"invoiceexe.pdf\"."
+  expected:
+    masquerade_reasons: ["bidi_control", "name_mismatch"]
+    masquerade_score: 80
+
+- id: "tool-homoglyph"
+  file: "C:\\Users\\alice\\Downloads\\ext\u043Eol.exe"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "tool"
+  description: "A Cyrillic o among Latin letters."
+  expected:
+    masquerade_reasons: ["homoglyph", "name_mismatch"]
+    masquerade_score: 60
+
+- id: "tool-trailing-dot"
+  file: "extool.exe."
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "tool"
+  description: "A trailing dot, which Win32 drops."
+  expected:
+    masquerade_reasons: ["trailing_dot_or_space"]
+    masquerade_score: 30
+
+- id: "powershell-unsigned-default"
+  file: "notepad.exe"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "powershell"
+  description: "A file claiming to be the PowerShell host, with nothing trusted and no catalogs: its signer cannot be judged, so only the rename is reported and the protected-binary check is unassessed."
+  expected:
+    original_file_name: "PowerShell.EXE.MUI"
+    signing_state: "unverified"
+    masquerade_reasons: ["name_mismatch"]
+    masquerade_score: 20
+
+- id: "python-as-txt"
+  file: "notes.txt"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "python"
+  description: "A Python script (by its shebang) behind a .txt name: the extension claims inert text."
+  expected:
+    is_pe: false
+    content_kind: "script:python"
+    mismatch_severity: "suspicious"
+    masquerade_score: 30
+    masquerade_reasons: ["extension_mismatch"]
+
+- id: "python-py"
+  file: "tool.py"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "python"
+  description: "The same script under its own extension."
+  expected:
+    content_kind: "script:python"
+    mismatch_severity: "none"
+    masquerade_score: 0
+
+- id: "driver-sys"
+  file: "palisade.sys"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "driver"
+  description: "A native-subsystem image importing the kernel."
+  expected:
+    sha256: "3150d1d2908b2028e67876631cb24e2cd98bc8e7336f870c7e2b8bc283766152"
+    sha1: "7b08ec1c815131dd2eda01edd3603555f2f99fba"
+    md5: "7a2603ca958fc113c9f5167e2453d434"
+    authenticode_sha256: "609a105a212ef74d4bdc1da49593e374e8cae265eb946bacdd82ce329748c3fb"
+    is_pe: true
+    is_kernel_driver: true
+    masquerade_score: 0
+
+- id: "elevated-exe"
+  file: "admintool.exe"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "elevated"
+  description: "A manifest requesting requireAdministrator."
+  expected:
+    sha256: "cf3b8e12371d6c83a443949bb75c1996530defd4fc42e44b37a02205a5effa3d"
+    sha1: "8701569b506d0780526547a6da4d5b7c6bf99af6"
+    md5: "3f0a196221cdea4debc25be99dc6eff6"
+    authenticode_sha256: "7e12efae4f89f2c439ca13cd0a09e6eaa304a9fac25cb968044dac77b19a1483"
+    requires_elevation: true
+    is_kernel_driver: false
+
+- id: "dotnet-exe"
+  file: "managed.exe"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "dotnet"
+  description: "A CLR runtime header directory: a .NET image."
+  expected:
+    sha256: "b537bfb31a4a0ad15b8e753debef8f20c845f08d89ad642d2175bdf34aa4d8b4"
+    sha1: "d8cf2e479a469967f1911df274a522bf447ccaa4"
+    md5: "d7ca14cece5af14e7940a243ab91dd75"
+    authenticode_sha256: "4cca98a18c7790b443261f0fa8d3654fac1aad6526ae5a4fcbf5ae443230f5a9"
+    is_dotnet: true
+
+- id: "overlay-exe"
+  file: "overlay.exe"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "overlay"
+  description: "Bytes after the last section (an overlay); the image still conforms."
+  expected:
+    sha256: "5f6699b4da88f05e1d2e91114ebe8787a67518d0688fb44691673f599897f7a0"
+    sha1: "96c435731c527a5e1abb9203cc21ca4aea47bc65"
+    md5: "f121f784e275c20d3407d28798fe19c7"
+    authenticode_sha256: "f9d126cb1fb8b4d321a8ac9c8f1085af8e8de02de6af8a25b69eedbce4fd4345"
+    authenticode_conformant: true
+    authoritative: "authenticode_sha256"
+
+- id: "text-file"
+  file: "readme.txt"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "text"
+  description: "A plain text file: not a PE image, and its signature format is not read yet."
+  expected:
+    sha256: "0589a0e3e45a16eb048353df6966ac1bf530708d0d1fe6ac3441272dae2ae59b"
+    sha1: "7643df14acaf8695d9492be71b753b8a7611a078"
+    md5: "41c0568f2cfb1a021d1f5b5fe88ebc4f"
+    is_pe: false
+    content_kind: "text"
+    authenticode_sha256: null
+    authoritative: "sha256"
+    signing_state: "unverified"
+    embedded: "not_checked"
+    signatures: null
+    masquerade_score: 0
+    recommended_level: "hash"
+
+- id: "script-file"
+  file: "run.ps1"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "script"
+  description: "A PowerShell script (script signatures are #52)."
+  expected:
+    sha256: "841a4fe0e83e8eb08cbed811cb1a87b471c5171ce62c1fa64cd7bddc6fea26cf"
+    sha1: "44941ef5684f199c71f4131aa62197ee8edb5800"
+    md5: "fe2c86ea7c899bd92f23491942b7a633"
+    is_pe: false
+    content_kind: "script:power_shell"
+    signing_state: "unverified"
+    embedded: "not_checked"
+
+- id: "empty-file"
+  file: "empty.exe"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "empty"
+  description: "An empty file: its digest is never an identity."
+  expected:
+    sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    sha1: "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+    md5: "d41d8cd98f00b204e9800998ecf8427e"
+    size: 0
+    empty: true
+    authoritative: "none"
+    is_pe: false
+    recommended_level: "none"
+
+- id: "truncated-pe"
+  file: "broken.exe"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "truncated"
+  description: "A PE whose headers are cut short: not parseable, so not treated as PE."
+  expected:
+    sha256: "ea2f55b3d95a276bade11d70d443396f90c228874b618a38a0544be21fa403b9"
+    sha1: "1a8e7407298345469946bf8cbdc27af70b77510b"
+    md5: "78c2ebb8d9d04ff6cf947ee57892c0aa"
+    is_pe: false
+    authoritative: "sha256"
+    masquerade_score: 0
+
+- id: "plain-catalog-signed"
+  file: "plain.exe"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "plain"
+  description: "The plain image, listed in corpus.cat by its Authenticode SHA-256: catalog-signed."
+  context: "trusted"
+  expected:
+    signing_state: "trusted"
+    embedded: "unsigned"
+    catalog: "listed_trusted"
+    signer_source: "catalog"
+    publisher: "Palisade Corpus OS Signer"
+    signer_leaf_sha1_thumbprint: "a70a47602d3a047dc8b5967a45459cbefaa24468"
+    catalog_matches: 1
+    recommended_level: "publisher"
+
+- id: "flat-member-catalog"
+  file: "member.txt"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "flat-member"
+  description: "A text file listed in corpus.cat by its flat SHA-256: catalog-signed, though its own signature format is not read yet."
+  context: "trusted"
+  expected:
+    sha256: "87245760843bf21acfcd963d9cc83bda55aeb17339dd31ec9a3875d9d862949c"
+    sha1: "062b711ffcbd00e290bb9290505d110b73f87c37"
+    md5: "99eb72ccc228bdd19300dcaf077b16e3"
+    is_pe: false
+    signing_state: "trusted"
+    embedded: "not_checked"
+    catalog: "listed_trusted"
+    signer_source: "catalog"
+    catalog_matches: 1
+
+- id: "tool-unsigned-trusted"
+  file: "extool.exe"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "tool"
+  description: "The unsigned tool with catalogs loaded: unsigned, and its CompanyName claims a protected vendor whose signer does not vouch for it."
+  context: "trusted"
+  expected:
+    signing_state: "unsigned"
+    embedded: "unsigned"
+    catalog: "not_listed"
+    masquerade_reasons: ["signer_impersonation"]
+    masquerade_score: 60
+    recommended_level: "none"
+
+- id: "powershell-impostor"
+  file: "C:\\Users\\alice\\AppData\\Local\\Temp\\powershell.exe"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "powershell"
+  description: "An unsigned file claiming to be the PowerShell host and a protected product: not signed by the expected signer."
+  context: "trusted"
+  expected:
+    signing_state: "unsigned"
+    masquerade_reasons: ["protected_name_claimed", "signer_impersonation"]
+    masquerade_score: 100
+    recommended_level: "none"
+
+- id: "signed-tool"
+  file: "signed-tool.exe"
+  source: "generated"
+  licence: "Apache-2.0 OR MIT"
+  generator: "signed.rs"
+  description: "The tool signed by the corpus vendor signer."
+  context: "trusted"
+  path_as: "extool.exe"
+  expected:
+    sha256: "db0e2ef876ba59070a9579a660a88e2ffaa6f4233ea2c4ccd56149017dad9f56"
+    sha1: "b6a5c156c7b70a7be18f50aa62bbcbb4cd562178"
+    md5: "2b1dbf2f2eabe07ae27956687ebfa3bd"
+    authenticode_sha256: "bb315a34a23b4cc8f185907f6954fc105c431ec15bf655180d25348cf58def5b"
+    signing_state: "trusted"
+    embedded: "valid"
+    catalog: "not_listed"
+    verification_error: "ok"
+    signatures: 1
+    signer_source: "embedded"
+    publisher: "Palisade Corpus Vendor"
+    signer_leaf_sha1_thumbprint: "ff4b0ee9a994e74f549ebe5394384cde0b3edc54"
+    original_file_name: "extool.exe"
+    masquerade_score: 0
+    recommended_level: "file_publisher"
+
+- id: "signed-tool-untrusted"
+  file: "signed-tool.exe"
+  source: "generated"
+  licence: "Apache-2.0 OR MIT"
+  generator: "signed.rs"
+  description: "The signed tool with nothing trusted: valid but untrusted, so its vendor claim is not backed."
+  path_as: "extool.exe"
+  expected:
+    signing_state: "untrusted"
+    embedded: "valid"
+    verification_error: "untrusted_root"
+    masquerade_reasons: ["signer_impersonation"]
+    recommended_level: "none"
+
+- id: "signed-tool-v2"
+  file: "signed-tool-v2.exe"
+  source: "generated"
+  licence: "Apache-2.0 OR MIT"
+  generator: "signed.rs"
+  description: "Version 2 of the signed tool, for compare."
+  context: "trusted"
+  path_as: "extool.exe"
+  expected:
+    sha256: "d885e676783d58bf44b869f22f6986ef08a0f9da5f71a98995a1ce20cf775b8b"
+    sha1: "e393a6179077c747eeed292e8eb1a5be45b965ef"
+    md5: "9698a54bf5ef71f85978300041d69ace"
+    authenticode_sha256: "162a51cc3748a0f3f2e371c827e08f3f2e8515f3e4f5d99f252e02eeda59472b"
+    signing_state: "trusted"
+    file_version: "2.0.0.0"
+    publisher: "Palisade Corpus Vendor"
+
+- id: "tampered-tool"
+  file: "tampered-tool.exe"
+  source: "generated"
+  licence: "Apache-2.0 OR MIT"
+  generator: "signed.rs"
+  description: "The signed tool with one code byte changed after signing."
+  context: "trusted"
+  path_as: "extool.exe"
+  expected:
+    sha256: "1e2fb7e2118b5dce990ddf2f21b6b60063eadb2282c20bd891ed5b9b7ae7713c"
+    sha1: "8807e4d4ee90e696a092de745d21d7f88fa26f20"
+    md5: "151778e814117ed84f27b2ac4c330ebb"
+    authenticode_sha256: "7a92fe13a126a4f6019056654b31be894f08c5f73f18a60439cc552290eaeb0c"
+    signing_state: "invalid"
+    embedded: "invalid"
+    verification_error: "invalid_hash"
+    masquerade_reasons: ["signer_impersonation"]
+    recommended_level: "none"
+
+- id: "rogue-signed"
+  file: "rogue-signed.exe"
+  source: "generated"
+  licence: "Apache-2.0 OR MIT"
+  generator: "signed.rs"
+  description: "The plain image signed by a self-signed certificate nothing trusts. Its Authenticode hash, which leaves the signature out, is still listed in corpus.cat, so the catalog vouches for it."
+  context: "trusted"
+  expected:
+    sha256: "03dcf766d8b28e5353cca77e2911a7b88cc1c8bca86845c37b7916e22b40fceb"
+    sha1: "c5d8683a0141c1797a755e7f80b6bcbaa754fc0e"
+    md5: "85bafd609ff2f1c36277dc684c69f2fd"
+    authenticode_sha256: "5d876fe0b3bdd41254d4349c547926bd02e4fa093498f289e712a29027f2589f"
+    signing_state: "trusted"
+    embedded: "valid"
+    signer_source: "catalog"
+    masquerade_score: 0
+
+- id: "powershell-renamed-temp"
+  file: "signed-powershell.exe"
+  source: "generated"
+  licence: "Apache-2.0 OR MIT"
+  generator: "signed.rs"
+  description: "The acceptance case of #55: the protected PowerShell host, signed by its expected (OS) signer, copied to a temp folder as notepad.exe."
+  context: "trusted"
+  path_as: "C:\\Users\\alice\\AppData\\Local\\Temp\\notepad.exe"
+  expected:
+    sha256: "a8789a82132bcd2c07cd7504f89b8ad8e1690441a63b9aefe9176dc17761f352"
+    sha1: "8892591729ed6093dc8fd48cd6c50a546f193d7c"
+    md5: "c684eab674b913ab620057e9c13ba1d6"
+    authenticode_sha256: "10d284f8fa52b246683a7f742004f12d9738d05f553d419f743b2e2ff3ab2ac6"
+    signing_state: "trusted"
+    original_file_name: "PowerShell.EXE.MUI"
+    masquerade_reasons: ["known_binary_relocated", "name_mismatch"]
+    masquerade_score: 90
+    recommended_level: "none"
+
+- id: "powershell-in-place"
+  file: "signed-powershell.exe"
+  source: "generated"
+  licence: "Apache-2.0 OR MIT"
+  generator: "signed.rs"
+  description: "The same host where it belongs: nothing suspicious."
+  context: "trusted"
+  path_as: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+  expected:
+    signing_state: "trusted"
+    masquerade_reasons: []
+    masquerade_score: 0
+
+- id: "powershell-moved"
+  file: "signed-powershell.exe"
+  source: "generated"
+  licence: "Apache-2.0 OR MIT"
+  generator: "signed.rs"
+  description: "The host under its own name, but outside its folder."
+  context: "trusted"
+  path_as: "C:\\Users\\alice\\powershell.exe"
+  expected:
+    masquerade_reasons: ["known_binary_relocated"]
+    masquerade_score: 40
+
+- id: "os-cmd"
+  file: "cmd.exe"
+  source: "os"
+  licence: "OS component: referenced by path, never copied"
+  generator: "C:\\Windows\\System32\\cmd.exe"
+  description: "An OS binary, read in place on the Windows runners. Only values every version has are checked."
+  expected:
+    is_pe: true
+    is_dll: false
+    authenticode_conformant: true
+    masquerade_score: 0
+
+- id: "os-kernel32"
+  file: "kernel32.dll"
+  source: "os"
+  licence: "OS component: referenced by path, never copied"
+  generator: "C:\\Windows\\System32\\kernel32.dll"
+  description: "An OS library, read in place on the Windows runners."
+  expected:
+    is_pe: true
+    is_dll: true
+    authenticode_conformant: true
+    masquerade_score: 0
+
+# Review regressions (#294): each must hold, or an allow rule is
+# recommended for a file nothing vouches for.
+
+- id: "driver-expired-catalog"
+  file: "palisade.sys"
+  source: "synthetic"
+  licence: "Apache-2.0 OR MIT"
+  generator: "driver"
+  description: "The driver image, listed only in expired.cat, whose signer certificate (under the trusted corpus CA) was valid in 2020 only and which carries no timestamp: the catalog has expired, so it vouches for nothing."
+  context: "trusted"
+  expected:
+    sha256: "3150d1d2908b2028e67876631cb24e2cd98bc8e7336f870c7e2b8bc283766152"
+    signing_state: "untrusted"
+    embedded: "unsigned"
+    catalog: "listed_untrusted"
+    catalog_matches: 1
+    # A hash rule, as for any unsigned file: never a publisher rule.
+    recommended_level: "authenticode_hash"
+
+- id: "sha1-signed-tool"
+  file: "sha1-signed-tool.exe"
+  source: "generated"
+  licence: "Apache-2.0 OR MIT"
+  generator: "signed.rs"
+  description: "The tool signed by the trusted corpus vendor with SHA-1 content and signer digests: a valid signature, but SHA-1 vouches for nothing (ADR 0008, ADR 0017), so it is not trusted and no publisher rule is recommended."
+  context: "trusted"
+  path_as: "extool.exe"
+  expected:
+    sha256: "4ebe79599344a87d83fbfe6f96eb7df2202496dd59652a47ed9f8e791a847185"
+    sha1: "e9de2b8eb87fe7bc6af09e6918b355bc2a88a00e"
+    md5: "1883aaa6dab04b1766df6dd595d8a41a"
+    authenticode_sha256: "bb315a34a23b4cc8f185907f6954fc105c431ec15bf655180d25348cf58def5b"
+    signing_state: "untrusted"
+    embedded: "valid"
+    signatures: 1
+    # Not trusted, so its "Example Org" company name is not backed by the
+    # vendor's signer: an impersonation, and no rule.
+    masquerade_reasons: ["signer_impersonation"]
+    recommended_level: "none"
+
+- id: "revoked-signed-tool"
+  file: "revoked-signed-tool.exe"
+  source: "generated"
+  licence: "Apache-2.0 OR MIT"
+  generator: "signed.rs"
+  description: "The tool signed by a corpus vendor certificate the corpus CRL revokes for key compromise: invalid, and no allow rule of any kind, a hash rule included."
+  context: "trusted_crl"
+  path_as: "extool.exe"
+  expected:
+    sha256: "a422708e725bfab6d869217a101b9c248555c3aaec975fbb206855897b905a37"
+    sha1: "eea3ebe53adc81ac28d423440053cab52962c53b"
+    md5: "e8b58d45dfb8bf75e24ff2ac5ab33ad2"
+    authenticode_sha256: "bb315a34a23b4cc8f185907f6954fc105c431ec15bf655180d25348cf58def5b"
+    signing_state: "invalid"
+    embedded: "valid"
+    verification_error: "revoked"
+    recommended_level: "none"
+
+- id: "powershell-in-place-nothing-trusted"
+  file: "signed-powershell.exe"
+  source: "generated"
+  licence: "Apache-2.0 OR MIT"
+  generator: "signed.rs"
+  description: "The protected PowerShell host at its own path, with nothing trusted: whether its signer is the expected one cannot be told, so the relocation and impersonation checks are unassessed and nothing is reported. Unassessed is not clean (ADR 0018), and a hash rule would allow a renamed impostor, so no allow rule is recommended."
+  context: "default"
+  path_as: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+  expected:
+    signing_state: "untrusted"
+    masquerade_score: 0
+    recommended_level: "none"

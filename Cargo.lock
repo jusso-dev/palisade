@@ -1311,6 +1311,18 @@ dependencies = [
 [[package]]
 name = "palisade-cli"
 version = "0.1.0"
+dependencies = [
+ "clap",
+ "libc",
+ "palisade-fileid",
+ "rand_core 0.10.1",
+ "ring",
+ "rsa",
+ "serde_json",
+ "sha1",
+ "sha2",
+ "yaml-rust2",
+]
 
 [[package]]
 name = "palisade-console"
@@ -1351,6 +1363,7 @@ dependencies = [
  "sha2",
  "unicode-normalization",
  "windows-sys 0.61.2",
+ "yaml-rust2",
 ]
 
 [[package]]

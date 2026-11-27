@@ -16,6 +16,7 @@
 #   cargo +nightly fuzz run fuzz_tags
 #   cargo +nightly fuzz run script_sig
 #   cargo +nightly fuzz run fuzz_appx_manifest
+#   cargo +nightly fuzz run identity_bytes
 [package]
 name = "palisade-fileid-fuzz"
 version = "0.0.0"
@@ -31,6 +32,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4.13"
 palisade-fileid = { path = "..", features = ["content-rules"] }
+serde_json = { version = "1.0.154", default-features = false, features = ["std"] }
 
 [[bin]]
 name = "pe_parse"
@@ -126,6 +128,13 @@ bench = false
 [[bin]]
 name = "fuzz_appx_manifest"
 path = "fuzz_targets/fuzz_appx_manifest.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "identity_bytes"
+path = "fuzz_targets/identity_bytes.rs"
 test = false
 doc = false
 bench = false

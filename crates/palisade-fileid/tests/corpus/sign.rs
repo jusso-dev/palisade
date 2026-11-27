@@ -11,7 +11,7 @@ use palisade_fileid::hash::{AlgorithmSet, HashAlgorithm};
 use sha2::{Digest as _, Sha256};
 
 use super::der::*;
-use super::pki::{Cert, Key, OID_SHA256};
+use super::pki::{Cert, Key, OID_SHA1, OID_SHA256};
 
 const OID_SIGNED_DATA: &str = "1.2.840.113549.1.7.2";
 const OID_SPC_INDIRECT_DATA: &str = "1.3.6.1.4.1.311.2.1.4";
@@ -47,6 +47,11 @@ fn attribute(id: &str, value: &[u8]) -> Vec<u8> {
 /// `SpcIndirectDataContent` for a PE image digest, with an optional SHA-256
 /// page hash table (raw `offset || digest` entries).
 fn indirect_data(image_digest: &[u8], page_table: Option<&[u8]>) -> Vec<u8> {
+    indirect_data_with(OID_SHA256, image_digest, page_table)
+}
+
+/// [`indirect_data`] with the image digest under `digest_oid`.
+fn indirect_data_with(digest_oid: &str, image_digest: &[u8], page_table: Option<&[u8]>) -> Vec<u8> {
     let file = match page_table {
         // SpcLink [1] moniker: SpcSerializedObject { classId, serializedData }
         // whose data is SET { SEQUENCE { pageHashesV2, SET { OCTET STRING } } }.
@@ -60,7 +65,7 @@ fn indirect_data(image_digest: &[u8], page_table: Option<&[u8]>) -> Vec<u8> {
     let pe_image_data = seq(&[&bits(&[]), &explicit(0, &file)]);
     seq(&[
         &seq(&[&oid(OID_SPC_PE_IMAGE_DATA), &pe_image_data]),
-        &seq(&[&alg(OID_SHA256), &octets(image_digest)]),
+        &seq(&[&alg(digest_oid), &octets(image_digest)]),
     ])
 }
 
@@ -88,6 +93,20 @@ pub fn signed_data(
     envelope(signer, OID_SPC_INDIRECT_DATA, &content, nested)
 }
 
+/// A PKCS#7 SignedData that signs `image_digest`, the SHA-1 Authenticode
+/// digest of a PE, with a SHA-1 signer digest throughout: what an old
+/// SHA-1-only code signer writes (ADR 0008).
+pub fn signed_data_sha1(signer: &Signer<'_>, image_digest: &[u8]) -> Vec<u8> {
+    let content = indirect_data_with(OID_SHA1, image_digest, None);
+    envelope_with(
+        signer,
+        OID_SPC_INDIRECT_DATA,
+        &content,
+        &[],
+        DigestChoice::Sha1,
+    )
+}
+
 /// The OID of a certificate trust list, a catalog's content.
 pub const OID_CTL: &str = "1.3.6.1.4.1.311.10.1";
 
@@ -98,13 +117,37 @@ pub fn signed_catalog(signer: &Signer<'_>, ctl: &[u8]) -> Vec<u8> {
 }
 
 /// SignedData over `content` (one DER SEQUENCE) of type `content_type`.
+/// The signer digest algorithm of a SignedData.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DigestChoice {
+    Sha256,
+    Sha1,
+}
+
 fn envelope(
     signer: &Signer<'_>,
     content_type: &str,
     content: &[u8],
     nested: &[Vec<u8>],
 ) -> Vec<u8> {
-    let digest = Sha256::digest(content_of(content));
+    envelope_with(signer, content_type, content, nested, DigestChoice::Sha256)
+}
+
+fn envelope_with(
+    signer: &Signer<'_>,
+    content_type: &str,
+    content: &[u8],
+    nested: &[Vec<u8>],
+    choice: DigestChoice,
+) -> Vec<u8> {
+    let digest = match choice {
+        DigestChoice::Sha256 => Sha256::digest(content_of(content)).to_vec(),
+        DigestChoice::Sha1 => <sha1::Sha1 as sha1::Digest>::digest(content_of(content)).to_vec(),
+    };
+    let digest_alg = match choice {
+        DigestChoice::Sha256 => OID_SHA256,
+        DigestChoice::Sha1 => OID_SHA1,
+    };
     // SpcSpOpusInfo { programName [0] SpcString { unicode [0] }, moreInfo [1] SpcLink { url [0] } }.
     let program: Vec<u8> = "Palisade test fixture"
         .encode_utf16()
@@ -126,7 +169,10 @@ fn envelope(
     ];
     let attr_refs: Vec<&[u8]> = attrs.iter().map(Vec::as_slice).collect();
     let signed_attrs = set(&attr_refs);
-    let signature = signer.key.sign(&signed_attrs);
+    let signature = match choice {
+        DigestChoice::Sha256 => signer.key.sign(&signed_attrs),
+        DigestChoice::Sha1 => signer.key.sign_sha1(&signed_attrs),
+    };
     // [0] IMPLICIT SET OF Attribute: the same encoding with tag A0.
     let mut implicit_attrs = signed_attrs.clone();
     implicit_attrs[0] = 0xa0;
@@ -143,7 +189,7 @@ fn envelope(
     let mut signer_info: Vec<Vec<u8>> = vec![
         int(1),
         issuer_and_serial,
-        alg(OID_SHA256),
+        alg(digest_alg),
         implicit_attrs,
         match signer.key {
             Key::Rsa(_) => alg(super::pki::OID_RSA),
@@ -163,7 +209,7 @@ fn envelope(
     certs.extend(signer.chain.iter().map(|c| c.der.as_slice()));
     let sd = seq(&[
         &int(1),
-        &set(&[&alg(OID_SHA256)]),
+        &set(&[&alg(digest_alg)]),
         &seq(&[&oid(content_type), &explicit(0, content)]),
         &tlv(0xa0, &certs.concat()),
         &set(&[&seq(&si_refs)]),

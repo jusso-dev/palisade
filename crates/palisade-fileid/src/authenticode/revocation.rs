@@ -524,6 +524,17 @@ impl RevocationSet {
         }
     }
 
+    /// A checker that answers [`Self::state_of`] for many certificates of
+    /// one file with a single budget of [`MAX_CRL_CHECKS`] CRL signature
+    /// checks, shared between the calls.
+    #[must_use]
+    pub fn checker(&self) -> RevocationChecker<'_> {
+        RevocationChecker {
+            set: self,
+            cache: CrlCache::new(),
+        }
+    }
+
     /// [`Self::state_of`], sharing CRL signature checks across calls.
     pub(crate) fn check(
         &self,
@@ -653,6 +664,22 @@ enum Issued {
     No,
     /// It might have been, but the check budget ran out.
     NotChecked,
+}
+
+/// [`RevocationSet::state_of`] over many certificates of one file, with one
+/// shared budget of CRL signature checks. From [`RevocationSet::checker`].
+#[derive(Debug)]
+pub struct RevocationChecker<'a> {
+    set: &'a RevocationSet,
+    cache: CrlCache,
+}
+
+impl RevocationChecker<'_> {
+    /// As [`RevocationSet::state_of`]. Once the shared budget is spent, a
+    /// certificate a CRL might cover is [`CertRevocation::NotChecked`].
+    pub fn state_of(&mut self, chain: &[&CertSummary], index: usize, now: i64) -> CertRevocation {
+        self.set.check(chain, index, now, &mut self.cache)
+    }
 }
 
 /// Which CRLs verify with which issuer key, so each CRL signature is

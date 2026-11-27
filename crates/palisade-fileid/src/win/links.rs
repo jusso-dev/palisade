@@ -208,6 +208,40 @@ pub fn read_details(ctx: &mut FsContext, path: &Path, file: &File) {
         .ok();
 }
 
+/// The final path of the open `file`, normalised: the path the handle
+/// names, not the one it was opened by, so it is the opened file's even if
+/// that path has since been replaced.
+pub fn final_path_of(file: &File) -> io::Result<crate::fsctx::NormalizedPath> {
+    let text = sys::final_path_by_handle(file, VOLUME_NAME_DOS)?;
+    let mut normalized = crate::fsctx::normalize_win32(&text)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    normalized.mark_long_names_verified();
+    Ok(normalized)
+}
+
+/// The mark of the web of the open `file`: its `Zone.Identifier` stream,
+/// opened by the handle's own final path and kept only if it belongs to
+/// the same file (same volume and file ID), so a path replaced after the
+/// file was opened cannot lend it another file's mark. `Ok(None)` when
+/// the file has no such stream.
+pub fn read_motw_of(file: &File) -> io::Result<Option<crate::fsctx::Motw>> {
+    let id = sys::file_id_info(file)?;
+    let final_path = sys::final_path_by_handle(file, VOLUME_NAME_DOS)?;
+    let path = Path::new(&final_path);
+    let mark = super::fsctx::read_motw(path)?;
+    // The stream was opened by name: check the file is still the one the
+    // handle has open.
+    let again = open_link_itself(path).and_then(|f| sys::file_id_info(&f))?;
+    if again.VolumeSerialNumber != id.VolumeSerialNumber
+        || again.FileId.Identifier != id.FileId.Identifier
+    {
+        return Err(io::Error::other(
+            "the file at its final path changed while its mark of the web was read",
+        ));
+    }
+    Ok(mark)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

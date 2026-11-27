@@ -396,6 +396,75 @@ pub fn scripts() -> Vec<(&'static str, &'static [u8])> {
     ]
 }
 
+/// The SHA-1 Authenticode digest of `image`, which must be a PE.
+pub fn authenticode_sha1(image: &[u8]) -> Vec<u8> {
+    palisade_fileid::authenticode::hash_pe(image, palisade_fileid::hash::AlgorithmSet::EMPTY)
+        .expect("a PE image")
+        .get(HashAlgorithm::Sha1)
+        .expect("SHA-1 is always computed")
+        .as_bytes()
+        .to_vec()
+}
+
+/// A version 2 catalog CTL listing `members`: `(SHA-256 digest, file name,
+/// is a PE)`, a PE by its Authenticode digest and anything else by its flat
+/// digest, as catalog tools write it.
+pub fn catalog_ctl_for(members: &[(Vec<u8>, &str, bool)]) -> Vec<u8> {
+    use der::*;
+    let utf16z = |t: &str| -> Vec<u8> {
+        let mut v: Vec<u8> = t.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        v.extend([0, 0]);
+        v
+    };
+    let bmp = |t: &str| {
+        tlv(
+            0x1e,
+            &t.encode_utf16()
+                .flat_map(u16::to_be_bytes)
+                .collect::<Vec<u8>>(),
+        )
+    };
+    let attr = |id: &str, value: &[u8]| seq(&[&oid(id), &set(&[value])]);
+    let name_value = |n: &str, v: &str| seq(&[&bmp(n), &int(0x1001_0001), &octets(&utf16z(v))]);
+    let entries: Vec<Vec<u8>> = members
+        .iter()
+        .map(|(digest, file, is_pe)| {
+            let data = if *is_pe {
+                let link = tlv(0xa0, &tlv(0xa2, &tlv(0x80, &[])));
+                seq(&[
+                    &oid("1.3.6.1.4.1.311.2.1.15"),
+                    &seq(&[&[0x03, 0x01, 0x00], &link]),
+                ])
+            } else {
+                seq(&[&oid("1.3.6.1.4.1.311.2.1.25"), &tlv(0xa2, &tlv(0x80, &[]))])
+            };
+            let indirect = seq(&[&data, &seq(&[&alg(pki::OID_SHA256), &octets(digest)])]);
+            let sip = if *is_pe {
+                "{C689AAB8-8E78-11D0-8C47-00C04FC295EE}"
+            } else {
+                "{DE351A42-8E59-11D0-8C47-00C04FC295EE}"
+            };
+            let info = seq(&[&bmp(sip), &int(512)]);
+            seq(&[
+                &octets(digest),
+                &set(&[
+                    &attr("1.3.6.1.4.1.311.12.2.1", &name_value("File", file)),
+                    &attr("1.3.6.1.4.1.311.2.1.4", &indirect),
+                    &attr("1.3.6.1.4.1.311.12.2.2", &info),
+                ]),
+            ])
+        })
+        .collect();
+    let refs: Vec<&[u8]> = entries.iter().map(Vec::as_slice).collect();
+    seq(&[
+        &seq(&[&oid("1.3.6.1.4.1.311.12.1.1")]),
+        &octets(&[0x50; 16]),
+        &time(SIGNING_TIME),
+        &alg("1.3.6.1.4.1.311.12.1.3"),
+        &seq(&refs),
+    ])
+}
+
 /// A version 2 catalog CTL with one PE member (`digest`, SHA-256), as
 /// catalog tools write it.
 pub fn catalog_ctl(digest: &[u8], file: &str) -> Vec<u8> {

@@ -14,7 +14,8 @@ workspace = true
 
 [features]
 # OS-backed reads on Windows (`palisade_fileid::win`, ADR 0003). Off by
-# default. The agent enables it on Windows; the CLI may, for diagnostics.
+# default. The agent enables it on Windows; the CLI turns it on for its
+# Windows builds, for diagnostics.
 os-trust = ["dep:windows-sys"]
 # Content tagging (`palisade_fileid::tags`, #44): the built-in tag set and
 # organisation pattern rules. Off by default; the agent runs it off the
@@ -75,6 +76,8 @@ rsa = { workspace = true }
 ring = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+# Reads the identity corpus manifest (`tests/fixtures/identity/manifest.yaml`, #55).
+yaml-rust2 = { workspace = true }
 
 [[bench]]
 name = "hash_and_parse"

@@ -142,5 +142,15 @@ Options:
 ## `pal`
 
 ```text
-pal 0.1.0: not implemented yet, see https://github.com/jusso-dev/palisade/issues/15
+The `pal` command-line tool for Palisade.
+
+Usage: pal <COMMAND>
+
+Commands:
+  fileid  Inspect file identities: hashes, signatures, version information and the masquerade assessment
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
 ```

@@ -2,7 +2,7 @@
 
 File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes), signature and certificate chain extraction, version-info metadata, and Windows Installer and app package identity.
 
-**Status:** early. PE header and version-resource parsing, flat hashing, the Authenticode image hash, page hashes, Authenticode signature verification, certificate chains, signer trust and signer identity, timestamps, expiry and revocation, catalog parsing, catalog signatures and the catalog member index, content-based file type detection, Windows Installer package identity and signatures, script signature blocks and signed metadata, and app package (MSIX/AppX and bundle) identity and signatures work; the rest of [#3](https://github.com/jusso-dev/palisade/issues/3) is still to come.
+**Status:** early. PE header and version-resource parsing, flat hashing, the Authenticode image hash, page hashes, Authenticode signature verification, certificate chains, signer trust and signer identity, timestamps, expiry and revocation, catalog parsing, catalog signatures and the catalog member index, content-based file type detection, Windows Installer package identity and signatures, script signature blocks and signed metadata, app package (MSIX/AppX and bundle) identity and signatures, and the unified file identity record with renamed-binary detection work; the rest of [#3](https://github.com/jusso-dev/palisade/issues/3) is still to come.
 
 ## What is here
 
@@ -605,6 +605,49 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   The pure parser runs everywhere; on Windows, `tests/installer_os.rs`
   checks the product fields, the PackageCode and the signature verdict
   against the OS installer API and the OS signature check.
+- `identity`: the unified file identity record
+  ([#55](https://github.com/jusso-dev/palisade/issues/55)).
+  `identity::identify(path, tiers, &ctx)` and
+  `identity::identify_bytes(bytes, name_hint, tiers, &ctx)` run the
+  modules above over one file and fold their outputs into one
+  `FileIdentity` (schema `fileid.v1`, serde JSON with stable `snake_case`
+  names). The file is opened once and, when it fits in memory (512 MiB by
+  default), read once, so PE metadata, digests and signatures all describe
+  the same bytes.
+  - Tiers (`Tier`, `Tiers`): T0 stat, T1 classify, T2 hash, T3 trust, T4
+    context, T5 deep. `FileIdentity::merge` folds a later tier's record
+    into an earlier one of the same content.
+  - Every group is a `Field`: `computed`, `not_requested`,
+    `not_applicable`, `unavailable` (with why) or `not_yet_supported` (with
+    the issue numbers). `kind` is the content classification of
+    `filetype` (#44). Groups other issues still deliver are in the schema
+    already: `script` (#52), `installer` and `package` (#53),
+    and the owner, writability, streams, reparse points, file ID, volume
+    and provenance (#54).
+  - `signing_state` folds the embedded signatures (#48, #49, #50) and the
+    catalog lookup (#51) into `trusted`, `untrusted`, `invalid`, `unsigned`
+    or `unverified`. It is `trusted` only for an embedded signature that
+    passed every check, or a trusted catalog match that does not rely on
+    SHA-1. It is `unsigned` only when a catalog lookup ran too; a format
+    whose signatures are not read yet is `unverified`.
+  - `hashes.authoritative` names the identity digest: the Authenticode
+    SHA-256 of a conformant image, otherwise the flat SHA-256, `none` for
+    an empty file (#47).
+  - `strengths` (`IdentityStrength`: strong, medium, weak, insecure) says
+    how far a rule can rely on each attribute, as `identity::strength`
+    documents. A path counts as user-writable until #54 reads its ACLs.
+  - `masquerade` (`identity::masquerade`) scores renamed and masquerading
+    binaries from 0 to 100: `name_mismatch` (after benign differences such
+    as versions, `_x64`, copy markers and the installer family),
+    `extension_mismatch` (executable content of any kind behind a name
+    that claims something else, from `filetype`), `known_binary_relocated` and
+    `protected_name_claimed` (against the `ProtectedList` of interpreters
+    and proxy-execution binaries, their folders and expected signer),
+    `signer_impersonation` (protected vendors), `bidi_control`,
+    `homoglyph`, `double_extension` and `trailing_dot_or_space`. A check
+    without its input is listed in `unassessed`, never read as clean.
+  - `identity::recommend` gives the rule level `pal fileid explain` prints;
+    `identity::compare` the differences `pal fileid compare` prints.
 
 - `filetype`: content-based file type detection
   ([#44](https://github.com/jusso-dev/palisade/issues/44)).
@@ -852,7 +895,9 @@ and `write_corpus_fuzz_seeds` feeds it to the PE, PKCS#7 and X.509 fuzz
 targets.
 
 Fixtures are synthetic PE images built byte by byte at test time
-(`tests/common`); no PE binaries are checked in. The signature tests use
+(`tests/common`). The identity corpus signs some of them at test time
+(`tests/fixtures/identity/signed.rs`), so no signed executable of its is
+checked in; no third-party binary is. The signature tests use
 small PKCS#7 signatures in `tests/fixtures/authenticode`, made over that
 synthetic image by osslsigncode with throwaway keys from a test-only CA, plus
 one Ed25519 test certificate and one RSA-PSS signature value. The chain tests
@@ -894,6 +939,18 @@ the tests themselves with a key generated per run. On Windows, a test
 compares the verdicts with the OS's own. No private keys and no third-party binaries are
 committed; the `generate.sh` scripts document how every file was made and
 regenerate them.
+
+The identity corpus (`tests/fixtures/identity`, #55) is a manifest of files with their
+source, licence, generator and expected values: synthetic images built by
+`tests/identity_corpus.rs`, some of them signed at test time by a corpus
+test CA with deterministic keys (with test catalogs and a CRL), and OS
+binaries referenced by path and read only on the Windows runners. Its
+digests come from tools independent of this crate (`shasum`, osslsigncode's
+`extract-data`, openssl), and its `generate.sh` checks every signature with
+osslsigncode. On Windows,
+`tests/identity_os.rs` also compares records of OS binaries with the OS's
+own tooling (file hash, signature status and signer, version resource).
+See [tests/fixtures/identity/README.md](tests/fixtures/identity/README.md).
 
 ```sh
 cargo test -p palisade-fileid
@@ -939,11 +996,14 @@ cargo +nightly fuzz run fuzz_tags -- -timeout=1 -max_total_time=60
 PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/fuzz_appx_manifest" \
   cargo test -p palisade-fileid --test package -- --ignored write_package_fuzz_seeds
 cargo +nightly fuzz run fuzz_appx_manifest -- -max_total_time=60
+PALISADE_FUZZ_SEED_DIR="$PWD/fuzz/corpus/identity_bytes" \
+  cargo test -p palisade-fileid --test identity_corpus -- --ignored write_identity_fuzz_seeds
+cargo +nightly fuzz run identity_bytes -- -dict=fuzz/pe.dict -max_total_time=60
 ```
 
 `benches/hash_and_parse.rs` (criterion) measures flat hashing, streamed
-hashing, PE parsing and the Authenticode hash over the same synthetic inputs:
-`cargo bench -p palisade-fileid`.
+hashing, PE parsing, the Authenticode hash and each identity tier over the
+same synthetic inputs: `cargo bench -p palisade-fileid`.
 
 ## Allowed dependencies
 
@@ -977,9 +1037,10 @@ for the tagger's multi-pattern search. It is already a dependency of
 workspace.
 
 Dev-dependencies: `proptest` for the property tests, `criterion` for the
-benchmarks, and `rsa` with `rand_core` for the fixture generator
-(`tests/corpus/`): throwaway RSA test-CA keys from a seeded RNG, and their
-signatures. They are never in a shipped build.
+benchmarks, `serde_json` for the serialised forms, `yaml-rust2` to read
+the identity corpus manifest, and `rsa` with `rand_core` for the fixture
+generator (`tests/corpus/`): throwaway RSA test-CA keys from a seeded RNG,
+and their signatures. They are never in a shipped build.
 
 ## Platform support
 
