@@ -430,3 +430,60 @@ proptest! {
         }
     }
 }
+
+#[test]
+fn every_error_explains_itself() {
+    for e in [
+        EncodeError::NotNfc,
+        EncodeError::TooDeep,
+        EncodeError::DuplicateKey,
+    ] {
+        assert!(!e.to_string().is_empty());
+    }
+    let kinds = [
+        DecodeErrorKind::TooLarge,
+        DecodeErrorKind::Truncated,
+        DecodeErrorKind::TrailingBytes,
+        DecodeErrorKind::NonCanonical,
+        DecodeErrorKind::Indefinite,
+        DecodeErrorKind::Reserved,
+        DecodeErrorKind::Float,
+        DecodeErrorKind::Tag,
+        DecodeErrorKind::Simple,
+        DecodeErrorKind::InvalidUtf8,
+        DecodeErrorKind::NotNfc,
+        DecodeErrorKind::DuplicateKey,
+        DecodeErrorKind::UnsortedKeys,
+        DecodeErrorKind::TooDeep,
+        DecodeErrorKind::TooManyItems,
+    ];
+    let mut seen = std::collections::BTreeSet::new();
+    for kind in kinds {
+        let text = DecodeError { offset: 9, kind }.to_string();
+        assert!(text.ends_with("(at byte 9)"), "{text}");
+        assert!(seen.insert(text), "two kinds share a message");
+    }
+}
+
+#[test]
+fn maps_report_their_size_and_give_back_their_entries() {
+    let empty = Map::default();
+    assert!(empty.is_empty());
+    assert_eq!(empty.len(), 0);
+    let m = Map::new(vec![
+        (Value::Uint(2), Value::Null),
+        (Value::Uint(1), Value::Null),
+    ])
+    .unwrap();
+    assert!(!m.is_empty());
+    assert_eq!(m.get(&Value::Uint(2)), Some(&Value::Null));
+    assert_eq!(m.get(&Value::Uint(3)), None);
+    let keys: Vec<Value> = m.into_entries().into_iter().map(|(k, _)| k).collect();
+    assert_eq!(keys, [Value::Uint(1), Value::Uint(2)]);
+    assert_eq!(Limits::default(), Limits::DEFAULT);
+    // A map key that cannot be encoded is refused when the map is built.
+    assert_eq!(
+        Map::new(vec![(text("e\u{301}"), Value::Null)]),
+        Err(EncodeError::NotNfc)
+    );
+}
