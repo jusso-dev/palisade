@@ -19,6 +19,8 @@
 //!   compares text after NFC ([`crate::ops`]), so this changes no
 //!   decision;
 //! - floating point is refused ([`Error::Float`]); the model has none;
+//! - governance metadata is refused by type ([`Error::ServerOnly`]), as
+//!   well as having no keys;
 //! - maps of data (such as `mode_by_type`) keep their own keys.
 //!
 //! When reading a struct, a key whose ID is not registered is skipped if
@@ -49,6 +51,9 @@ pub enum Error {
     Encode(EncodeError),
     /// What the type's `Serialize` or `Deserialize` reported.
     Message(String),
+    /// A type that holds server-only data, such as governance metadata,
+    /// which never goes into a bundle.
+    ServerOnly(&'static str),
 }
 
 impl fmt::Display for Error {
@@ -60,6 +65,7 @@ impl fmt::Display for Error {
             Self::Float => f.write_str("floating point is not allowed"),
             Self::Encode(e) => e.fmt(f),
             Self::Message(m) => f.write_str(m),
+            Self::ServerOnly(t) => write!(f, "`{t}` is server-only and never goes into a bundle"),
         }
     }
 }
@@ -77,6 +83,12 @@ impl de::Error for Error {
         Self::Message(msg.to_string())
     }
 }
+
+/// Structs that hold server-only data. The model leaves an empty one out,
+/// so any that reaches the serializer holds something. Refused by type, not
+/// only by field name, because their field names are not all unique to
+/// them.
+const SERVER_ONLY: &[&str] = &["Metadata"];
 
 fn key(name: &str) -> Result<Value, Error> {
     keys::id(name)
@@ -283,7 +295,10 @@ impl ser::Serializer for Serializer {
     fn serialize_map(self, _: Option<usize>) -> Result<Entries, Error> {
         Ok(Entries::new(None))
     }
-    fn serialize_struct(self, _: &'static str, _: usize) -> Result<Entries, Error> {
+    fn serialize_struct(self, name: &'static str, _: usize) -> Result<Entries, Error> {
+        if SERVER_ONLY.contains(&name) {
+            return Err(Error::ServerOnly(name));
+        }
         Ok(Entries::new(None))
     }
     fn serialize_struct_variant(

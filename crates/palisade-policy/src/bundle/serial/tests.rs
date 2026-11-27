@@ -6,10 +6,41 @@ use super::*;
 use crate::bundle::cbor::{self, Value};
 use crate::model::{Action, Mode, PolicyDocument, PolicySettings, ScriptKind};
 
-/// Governance metadata stays on the server (#43): justifications, tickets,
-/// comments and governance tags never reach a bundle, so their names have
-/// no key, and [`to_value`] refuses a document that still holds them.
-const NOT_IN_BUNDLES: [&str; 4] = ["metadata", "justification", "ticket_ref", "comment"];
+/// Governance metadata stays on the server (#43, #40): who asked, approved,
+/// created and reviewed a rule, when, its risk rating, compensating
+/// controls, justification, ticket and comments, and where it came from.
+/// None of it decides (evaluation never reads `Metadata`), and much of it
+/// names people. These names have no key, and [`to_value`] also refuses the
+/// `Metadata` struct itself ([`Error::ServerOnly`]), because some of its
+/// field names (`source`, `tags`) are keys elsewhere.
+const NOT_IN_BUNDLES: &[&str] = &[
+    "metadata",
+    "justification",
+    "ticket_ref",
+    "comment",
+    "owner",
+    "requested_by",
+    "approved_by",
+    "approved_at",
+    "created_by",
+    "created_at",
+    "updated_by",
+    "updated_at",
+    "review_by",
+    "last_reviewed_at",
+    "last_reviewed_by",
+    "risk_rating",
+    "compensating_controls",
+    "exception",
+    // `RuleSource`, only reachable as `Metadata.source`.
+    "api",
+    "approval_request",
+    "catalogue",
+    "import",
+    "learned",
+    "manual",
+    "recommendation",
+];
 
 /// Names the model writes as text rather than as a field or variant, so
 /// they need no key: a library pin of `latest`.
@@ -21,7 +52,7 @@ pub(crate) fn without_metadata(mut doc: PolicyDocument) -> PolicyDocument {
     for set in &mut doc.rule_sets {
         set.metadata = crate::model::Metadata::default();
         for rule in &mut set.rules {
-            rule.metadata = crate::model::Metadata::default();
+            rule.metadata = crate::model::RuleMetadata::default();
         }
     }
     doc
@@ -107,7 +138,7 @@ fn every_model_field_and_variant_has_a_key() {
         .collect();
     for excluded in NOT_IN_BUNDLES {
         assert!(
-            names.contains(excluded),
+            names.iter().any(|n| n == excluded),
             "`{excluded}` is no longer in the model"
         );
         assert_eq!(
@@ -331,6 +362,7 @@ fn every_error_explains_itself() {
         Error::Float,
         Error::Encode(cbor::EncodeError::NotNfc),
         Error::Message("m".to_owned()),
+        Error::ServerOnly("Metadata"),
     ];
     let texts: BTreeSet<String> = errors.iter().map(ToString::to_string).collect();
     assert_eq!(texts.len(), errors.len());
