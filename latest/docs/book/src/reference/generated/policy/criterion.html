@@ -36,10 +36,10 @@
             const path_to_root = "../../../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../../../searchindex-1527981b.js";
+            window.path_to_searchindex_js = "../../../../../../searchindex-9ca22253.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../../../../toc-4baf6b72.js"></script>
+        <script src="../../../../../../toc-cbfaa793.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -205,6 +205,7 @@ negative ones (#32): <code>not_contains [a, b]</code> means neither <code>a</cod
 <tr><td><code>match_ads</code></td><td>boolean</td><td>no</td><td></td><td></td><td>1.0.0</td><td>Only for positive tests of <code>path.full</code>: <code>true</code> lets a value that names no alternate data stream also match a stream of a file it matches, so <code>C:\\Tools\\*</code> matches <code>C:\\Tools\\a.exe:s</code> (#32). Unset means <code>false</code>: a stream is its own object.</td></tr>
 <tr><td><code>operator</code></td><td><a href="types.html#operator"><code>Operator</code></a></td><td>yes</td><td></td><td></td><td>1.0.0</td><td>How it is compared.</td></tr>
 <tr><td><code>safety_critical</code></td><td>boolean</td><td>no</td><td></td><td></td><td>1.0.0</td><td>Only in a mandatory blocklist: when the fact is unknown, this criterion counts towards the deny applying (<code>match</code>, or <code>no_match</code> under an odd number of <code>not</code> nodes), so the shipped blocklists fail closed (#32, #87). Unset means <code>false</code>.</td></tr>
+<tr><td><code>signer</code></td><td><a href="signer-options.html"><code>SignerOptions</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>Only for <code>signer.*</code> fields: which signatures take part, and what each must also satisfy (#31). The options bind to the signature the field is read from, so <code>min_key_bits</code> on a publisher test needs the publisher's own signature to have the key size. Unset means every option's default.</td></tr>
 <tr><td><code>values</code></td><td>array of string</td><td>no</td><td></td><td>at most 25 items</td><td>1.0.0</td><td>1 to 25 values. Each is at most 2048 bytes of UTF-8; the schema can only bound the length in characters, so validation checks the bytes. <code>is_true</code> and <code>is_false</code> take no values, and the key may be left out.</td></tr>
 </tbody>
 </table>

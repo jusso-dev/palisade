@@ -36,10 +36,10 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-1527981b.js";
+            window.path_to_searchindex_js = "../../searchindex-9ca22253.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../toc-4baf6b72.js"></script>
+        <script src="../../toc-cbfaa793.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -208,7 +208,8 @@
 <li><code>scope</code>: rule scoping (#38): who, where and when a rule applies. See <a href="#scopes">Scopes</a>.</li>
 <li><code>ops</code>: compiles one criterion (<code>CompiledCriterion</code>) and evaluates it against facts, giving <code>Match</code>, <code>NoMatch</code> or <code>Unknown</code> with notes for the decision trace. The module docs define the semantics: several values, negation of unknown facts, case folding and Unicode NFC, path normalisation and wildcards, alternate data streams, path variables, the path-ACL rule for allow rules, version comparison, and which signer statuses can match. Regular expressions use a linear-time engine; look-around and backreferences are rejected with a guided error. The numeric, integrity-level, date, network (<code>ip_in_cidr</code>, <code>ip_between</code>, <code>ip_wildcard</code>), set (<code>member_of</code>, <code>any_of</code>, <code>all_of</code>) and time (<code>weekday_in</code>, <code>time_between</code>, <code>date_between</code>) operators and the criterion options <code>anchored</code>, <code>match_ads</code>, <code>include_sub_ous</code> and <code>safety_critical</code> are described there too. <code>ops::net</code> parses the addresses, CIDR blocks, ranges and MAC addresses that criteria test.</li>
 </ul>
-<p>Each identity field has a strength (<code>Field::strength</code>, #31): strong for SHA-256-family and Authenticode SHA-256 hashes and the leaf thumbprint, medium for the publisher and full or directory paths, and weak for everything else. Path normalisation (<code>palisade_core::path</code>) is shared with the agent, so facts and rule values are normalised the same way.</p>
+<p>Each identity field has a strength (<code>Field::strength</code>, #31): strong for SHA-256-family and Authenticode SHA-256 hashes, the leaf thumbprint and the TBS hash, medium for the publisher and full or directory paths, and weak for everything else, including the SHA-1 thumbprints and what names a certificate authority (the issuer, the PCA, the root thumbprint and the EKUs). Path normalisation (<code>palisade_core::path</code>) is shared with the agent, so facts and rule values are normalised the same way.</p>
+<p><strong>Signer criteria</strong> (#31, <code>ops::signer</code>) match if any signature satisfies them. A criterion's <code>signer</code> options choose which signatures take part (<code>accept_status</code>, <code>allow_digest_mismatch</code>, <code>source</code>, <code>signature_index</code>) and what the same signature must also satisfy (<code>signed_after</code>, <code>countersigned</code>, <code>min_key_bits</code>, <code>disallowed_algorithms</code>); <code>component</code> picks the publisher's CN, O or full DN, and <code>position</code> the TBS hash's place in the chain. A fact a test needs that was not determined makes that signature unknown, never a match. Only <code>allow_digest_mismatch</code> lets a tampered file match, and validation warns about it, and about an allow that accepts other untrusted statuses (<code>signature_status_relaxed</code>).</p>
 <h2 id="actions-and-effects"><a class="header" href="#actions-and-effects">Actions and effects</a></h2>
 <p>An action is an object with a <code>type</code> and that action's options (#34). Each action is valid only in some rule set kinds and for some object types; validation reports a rule that breaks this table.</p>
 <div class="table-wrapper">

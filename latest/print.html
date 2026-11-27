@@ -37,10 +37,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-1527981b.js";
+            window.path_to_searchindex_js = "searchindex-9ca22253.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-4baf6b72.js"></script>
+        <script src="toc-cbfaa793.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -270,7 +270,9 @@ Specified in <a href="https://github.com/jusso-dev/palisade/issues/31">#31</a> (
 <tbody>
 <tr><td>Hash</td><td><code>hash.sha256</code>, <code>hash.sha384</code>, <code>hash.sha512</code>, <code>hash.authenticode_sha256</code></td><td>strong: names exactly one file</td></tr>
 <tr><td>Hash (compatibility)</td><td><code>hash.sha1</code>, <code>hash.md5</code>, <code>hash.authenticode_sha1</code>, page hashes</td><td>weak alone (<a href="#0008-cryptographic-algorithms-and-libraries">ADR 0008</a>)</td></tr>
-<tr><td>Publisher</td><td><code>signer.publisher</code>, <code>signer.issuer</code>, <code>signer.leaf_thumbprint</code></td><td>medium (the thumbprint is strong)</td></tr>
+<tr><td>Publisher</td><td><code>signer.publisher</code> (CN, O or full DN)</td><td>medium</td></tr>
+<tr><td>Certificate</td><td><code>signer.leaf_thumbprint</code>, <code>signer.tbs_hash</code></td><td>strong: names one certificate</td></tr>
+<tr><td>Certificate authority</td><td><code>signer.issuer</code>, <code>signer.pca</code>, <code>signer.root_thumbprint</code>, <code>signer.eku</code>, SHA-1 thumbprints</td><td>weak alone: a CA vouches for every file it signs</td></tr>
 <tr><td>Path</td><td><code>path.full</code>, <code>path.directory</code>, <code>path.file_name</code>, <code>path.extension</code></td><td>medium, and only where users cannot write</td></tr>
 <tr><td>Metadata</td><td><code>meta.original_filename</code>, <code>meta.product_name</code>, <code>meta.file_version</code>, ...</td><td>weak: easy to copy into another file</td></tr>
 </tbody>
@@ -282,7 +284,14 @@ allow "anything not named X". A path rule only allows a file in a location that 
 cannot write (ISM-1392); the engine checks the path's ACL safety at evaluation time.</p>
 <p><strong>Hash rules</strong> are the most precise and the most work: every update needs a new rule.
 <strong>Publisher rules</strong> trust what a signer signs, optionally narrowed by product name and minimum
-version (ISM-1471: use publisher <em>and</em> product names). <strong>Path rules</strong> are the easiest to write and
+version (ISM-1471: use publisher <em>and</em> product names). By default a signer
+criterion only trusts signatures that are valid, valid with an expired but timestamped
+certificate, or catalog-signed; a criterion's <code>signer</code> options can accept other statuses, require
+a timestamp after a date or a minimum key size, reject algorithms, or pick the signature's source
+and index. To block a stolen certificate, deny its <code>signer.tbs_hash</code>. That blocks one
+certificate only: the hashed data includes the serial number and the validity period, so a
+certificate reissued with the same key has a new TBS hash and needs its own rule. No criterion
+yet names a key across all the certificates that carry it. <strong>Path rules</strong> are the easiest to write and
 the easiest to get wrong.</p>
 <p>A workstation baseline with hash, publisher and path rules (ISM-0955), validated in CI:</p>
 <pre><code class="language-yaml"># yaml-language-server: $schema=https://raw.githubusercontent.com/jusso-dev/palisade/main/schemas/policy/v1.json
@@ -1394,6 +1403,7 @@ document.</p>
 <li><a href="#scope"><code>Scope</code></a>: Who, where and when a rule applies (#38).</li>
 <li><a href="#scopelimit"><code>ScopeLimit</code></a>: One contributing policy's limit on where its unknown settings apply, in an effective policy (<code>UnknownPolicy::scope_limits</code>). It holds when every scope of <code>all_of</code> matches and, if <code>any_of</code> is not empty, one of its scopes matches.</li>
 <li><a href="#sessionfilter"><code>SessionFilter</code></a>: Session criteria (#38).</li>
+<li><a href="#signeroptions"><code>SignerOptions</code></a>: The options of a signer criterion (#31).</li>
 <li><a href="#unknownpolicy"><code>UnknownPolicy</code></a>: The unknown-application policy (#39). Every field is optional in a document; the defaults block every unknown object.</li>
 <li><a href="#window"><code>Window</code></a>: One weekly window.</li>
 </ul>
@@ -1602,6 +1612,7 @@ negative ones (#32): <code>not_contains [a, b]</code> means neither <code>a</cod
 <tr><td><code>match_ads</code></td><td>boolean</td><td>no</td><td></td><td></td><td>1.0.0</td><td>Only for positive tests of <code>path.full</code>: <code>true</code> lets a value that names no alternate data stream also match a stream of a file it matches, so <code>C:\\Tools\\*</code> matches <code>C:\\Tools\\a.exe:s</code> (#32). Unset means <code>false</code>: a stream is its own object.</td></tr>
 <tr><td><code>operator</code></td><td><a href="#operator"><code>Operator</code></a></td><td>yes</td><td></td><td></td><td>1.0.0</td><td>How it is compared.</td></tr>
 <tr><td><code>safety_critical</code></td><td>boolean</td><td>no</td><td></td><td></td><td>1.0.0</td><td>Only in a mandatory blocklist: when the fact is unknown, this criterion counts towards the deny applying (<code>match</code>, or <code>no_match</code> under an odd number of <code>not</code> nodes), so the shipped blocklists fail closed (#32, #87). Unset means <code>false</code>.</td></tr>
+<tr><td><code>signer</code></td><td><a href="#signeroptions"><code>SignerOptions</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>Only for <code>signer.*</code> fields: which signatures take part, and what each must also satisfy (#31). The options bind to the signature the field is read from, so <code>min_key_bits</code> on a publisher test needs the publisher's own signature to have the key size. Unset means every option's default.</td></tr>
 <tr><td><code>values</code></td><td>array of string</td><td>no</td><td></td><td>at most 25 items</td><td>1.0.0</td><td>1 to 25 values. Each is at most 2048 bytes of UTF-8; the schema can only bound the length in characters, so validation checks the bytes. <code>is_true</code> and <code>is_false</code> take no values, and the key may be left out.</td></tr>
 </tbody>
 </table>
@@ -2504,6 +2515,40 @@ rule set assignment's, and its own).</p>
 <hr>
 <p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/book/src/reference/generated/policy/session-filter.md"><code>docs/book/src/reference/generated/policy/session-filter.md</code></a> on GitHub.</small></p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="signeroptions"><a class="header" href="#signeroptions">SignerOptions</a></h1>
+<!-- Generated by `cargo xtask docs generate` from `schemas/policy/v1.json`. Do not edit by hand. -->
+<p>The options of a signer criterion (#31).</p>
+<p>A signer criterion matches if any signature that takes part satisfies
+it. A signature takes part when its status is accepted, it comes from
+the chosen source and has the chosen index, and it meets every
+constraint here (<code>signed_after</code>, <code>countersigned</code>, <code>min_key_bits</code> and
+<code>disallowed_algorithms</code>). A constraint whose fact is unknown makes that
+signature's result unknown, never a match.</p>
+<p>Appears at: <code>/rule_sets/rules/match/all/all/criterion/signer</code>, <code>/rule_sets/rules/match/all/any/criterion/signer</code>, <code>/rule_sets/rules/match/all/not/not/criterion/signer</code>, <code>/rule_sets/rules/match/all/not/criterion/signer</code>, <code>/rule_sets/rules/match/all/criterion/signer</code>, <code>/rule_sets/rules/match/any/all/criterion/signer</code>, and more.</p>
+<h2 id="fields-26"><a class="header" href="#fields-26">Fields</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Required</th><th>Default</th><th>Constraints</th><th>Since</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>accept_status</code></td><td>array of <a href="#signerstatus"><code>SignerStatus</code></a></td><td>no</td><td></td><td>1 to 6 items</td><td>1.0.0</td><td>The signature statuses that can match. Unset means <code>valid</code>, <code>valid_expired_timestamped</code> and <code>catalog_signed</code>. <code>digest_mismatch</code> cannot be listed: see <code>allow_digest_mismatch</code>. Validation warns when a rule that lets an object run accepts any other status.</td></tr>
+<tr><td><code>allow_digest_mismatch</code></td><td>boolean</td><td>no</td><td></td><td></td><td>1.0.0</td><td>Let a signature whose signed digest does not match the file take part: the file was changed after it was signed. Validation always warns about it. Unset means <code>false</code>.</td></tr>
+<tr><td><code>component</code></td><td><a href="#subjectcomponent"><code>SubjectComponent</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>Only for <code>signer.publisher</code>: the part of the leaf subject compared. Unset means <code>cn</code>.</td></tr>
+<tr><td><code>countersigned</code></td><td>boolean</td><td>no</td><td></td><td></td><td>1.0.0</td><td>The signature must carry an RFC 3161 timestamp that verifies. Unset means <code>false</code>: no requirement.</td></tr>
+<tr><td><code>disallowed_algorithms</code></td><td>array of <a href="#digestalgorithm"><code>DigestAlgorithm</code></a></td><td>no</td><td></td><td>at most 6 items</td><td>1.0.0</td><td>The signature must use none of these digest algorithms, in the file digest, the signer information or any certificate of its chain.</td></tr>
+<tr><td><code>min_key_bits</code></td><td>integer</td><td>no</td><td></td><td>1 to 16384; format <code>uint32</code></td><td>1.0.0</td><td>Every key in the signature's chain must be at least this strong, in RSA-equivalent bits (see <code>crate::facts::KeyFact::rsa_equivalent_bits</code>).</td></tr>
+<tr><td><code>position</code></td><td><a href="#tbsposition"><code>TbsPosition</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>Only for <code>signer.tbs_hash</code>: where in the chain the certificate must be. Unset means <code>any</code>.</td></tr>
+<tr><td><code>signature_index</code></td><td>integer</td><td>no</td><td></td><td>0 to 63; format <code>uint8</code></td><td>1.0.0</td><td>Only the signature at this index, counted from 0 among the signatures of <code>source</code>: 0 is the primary embedded signature, 1 the first nested one. Unset means any signature.</td></tr>
+<tr><td><code>signed_after</code></td><td>string</td><td>no</td><td></td><td>1 to 64 characters</td><td>1.0.0</td><td>A trusted timestamp must show that the signature was made at or after this instant: an RFC 3339 time with an offset, such as <code>2024-01-01T00:00:00Z</code>. A signature with no trusted timestamp is unknown.</td></tr>
+<tr><td><code>source</code></td><td><a href="#signersource"><code>SignerSource</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>Where the signature must come from. Unset means <code>any</code>.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Unknown fields are rejected.</p>
+<hr>
+<p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/book/src/reference/generated/policy/signer-options.md"><code>docs/book/src/reference/generated/policy/signer-options.md</code></a> on GitHub.</small></p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="value-types"><a class="header" href="#value-types">Value types</a></h1>
 <!-- Generated by `cargo xtask docs generate` from `schemas/policy/v1.json`. Do not edit by hand. -->
 <p>Enumerations, identifiers and string formats used by the <a href="#palisade-policy-document">Palisade policy document</a>.</p>
@@ -2585,6 +2630,23 @@ Ordered from the least to the most demanding.</p>
 <h2 id="date"><a class="header" href="#date">Date</a></h2>
 <p>A calendar date, <code>YYYY-MM-DD</code>.</p>
 <p>Type: string; matches <code>^[0-9]{4}-[0-9]{2}-[0-9]{2}$</code>.</p>
+<h2 id="digestalgorithm"><a class="header" href="#digestalgorithm">DigestAlgorithm</a></h2>
+<p>A digest algorithm a signature uses (#31, ADR 0008).</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>md2</code></td><td>MD2.</td></tr>
+<tr><td><code>md5</code></td><td>MD5.</td></tr>
+<tr><td><code>sha1</code></td><td>SHA-1.</td></tr>
+<tr><td><code>sha256</code></td><td>SHA-256.</td></tr>
+<tr><td><code>sha384</code></td><td>SHA-384.</td></tr>
+<tr><td><code>sha512</code></td><td>SHA-512.</td></tr>
+</tbody>
+</table>
+</div>
 <h2 id="driverbootpolicy"><a class="header" href="#driverbootpolicy">DriverBootPolicy</a></h2>
 <p>How unknown drivers are handled while the device boots, before the agent
 has fully started (<code>boot_phase: early</code>).</p>
@@ -2659,10 +2721,10 @@ has fully started (<code>boot_phase: early</code>).</p>
 <h2 id="field"><a class="header" href="#field">Field</a></h2>
 <p>The identity facts a criterion can test (#31).</p>
 <p>This is the part of the #31 catalogue that has a matcher: hashes, the
-signer, the path and the version resource. The other families (signer
-constraints such as EKU and TBS hashes, packaged apps, installers,
-ownership, origin and process relationships) arrive in later minor
-versions, each with its facts and matcher.</p>
+signer and its certificates, the path and the version resource. The
+other families (packaged apps, installers, ownership, origin and process
+relationships) arrive in later minor versions, each with its facts and
+matcher.</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -2733,6 +2795,12 @@ versions, each with its facts and matcher.</p>
 <tr><td><code>time.weekday</code></td><td>Context (#33): the day of the week of the evaluation, as <code>mon</code> to <code>sun</code>, in the clock the policy's <code>time_zone_basis</code> names.</td></tr>
 <tr><td><code>time.local_time</code></td><td>Context (#33): the time of day of the evaluation, as <code>HH:MM</code>, in the policy's clock.</td></tr>
 <tr><td><code>time.date</code></td><td>Context (#33): the date of the evaluation, as <code>YYYY-MM-DD</code>, in the policy's clock.</td></tr>
+<tr><td><code>signer.leaf_thumbprint_sha1</code></td><td>The SHA-1 thumbprint of the leaf certificate. Compatibility only (ADR 0008).</td></tr>
+<tr><td><code>signer.pca</code></td><td>The subject common name of the highest certificate below the root, as the signature provides it: the PCA.</td></tr>
+<tr><td><code>signer.root_thumbprint</code></td><td>The SHA-256 thumbprint of the chain's root certificate.</td></tr>
+<tr><td><code>signer.root_thumbprint_sha1</code></td><td>The SHA-1 thumbprint of the chain's root certificate. Compatibility only (ADR 0008).</td></tr>
+<tr><td><code>signer.tbs_hash</code></td><td>The hash of a chain certificate's <code>tbsCertificate</code>, under the certificate's own signature digest (40, 64, 96 or 128 hex digits). It identifies that one certificate: the <code>tbsCertificate</code> includes the serial number and the validity period (RFC 5280), so a certificate reissued with the same key has another TBS hash, and each issue needs its own rule. No criterion yet names a key across the certificates that carry it. <code>signer.position</code> says which certificate. A 40-digit (SHA-1) value is compatibility only (ADR 0008).</td></tr>
+<tr><td><code>signer.eku</code></td><td>The extended key usages of the leaf certificate, as dotted OIDs, such as <code>1.3.6.1.5.5.7.3.3</code> (code signing). A leaf without the extension has none.</td></tr>
 </tbody>
 </table>
 </div>
@@ -3029,6 +3097,69 @@ weakest to the strongest.</p>
 </tbody>
 </table>
 </div>
+<h2 id="signersource"><a class="header" href="#signersource">SignerSource</a></h2>
+<p>Where the signatures a signer criterion looks at come from (#31).</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>embedded</code></td><td>Embedded in the file.</td></tr>
+<tr><td><code>catalog</code></td><td>A signed catalog that lists the file's hash.</td></tr>
+<tr><td><code>any</code></td><td>Either.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="signerstatus"><a class="header" href="#signerstatus">SignerStatus</a></h2>
+<p>The result of verifying one signature (#31, #48). An unsigned object
+has no <code>SignerFact</code> at all.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>valid</code></td><td>The signature and chain verify, and the certificate is in date.</td></tr>
+<tr><td><code>valid_expired_timestamped</code></td><td>The certificate has expired, but a trusted timestamp shows that the signature was made while it was valid.</td></tr>
+<tr><td><code>catalog_signed</code></td><td>The signature verifies through a signed catalog.</td></tr>
+<tr><td><code>expired</code></td><td>The certificate has expired, with no trusted timestamp.</td></tr>
+<tr><td><code>revoked</code></td><td>The certificate has been revoked.</td></tr>
+<tr><td><code>untrusted_root</code></td><td>The chain ends at a root that is not trusted.</td></tr>
+<tr><td><code>digest_mismatch</code></td><td>The file's content does not match the signed digest.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="subjectcomponent"><a class="header" href="#subjectcomponent">SubjectComponent</a></h2>
+<p>The part of the leaf certificate's subject that <code>signer.publisher</code>
+compares (#31).</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>cn</code></td><td>The common name.</td></tr>
+<tr><td><code>o</code></td><td>The organisation.</td></tr>
+<tr><td><code>full_dn</code></td><td>The whole distinguished name, as RFC 4514 writes it.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="tbsposition"><a class="header" href="#tbsposition">TbsPosition</a></h2>
+<p>Where the certificate of a <code>signer.tbs_hash</code> test must be (#31).</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>leaf</code></td><td>The leaf: the certificate that signed.</td></tr>
+<tr><td><code>intermediate</code></td><td>Any certificate between the leaf and the root.</td></tr>
+<tr><td><code>root</code></td><td>The root of the chain.</td></tr>
+<tr><td><code>any</code></td><td>Anywhere in the chain.</td></tr>
+</tbody>
+</table>
+</div>
 <h2 id="tiertiebreak"><a class="header" href="#tiertiebreak">TierTiebreak</a></h2>
 <p>Which action wins between rules of the same specificity.</p>
 <div class="table-wrapper">
@@ -3152,7 +3283,7 @@ weakest to the strongest.</p>
 <p>The unknown-application policy (#39). Every field is optional in a
 document; the defaults block every unknown object.</p>
 <p>Appears at: <code>/policy/unknown</code>.</p>
-<h2 id="fields-26"><a class="header" href="#fields-26">Fields</a></h2>
+<h2 id="fields-27"><a class="header" href="#fields-27">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3183,7 +3314,7 @@ document; the defaults block every unknown object.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/policy/v1.json`. Do not edit by hand. -->
 <p>One weekly window.</p>
 <p>Appears at: <code>/policy/rule_set_scopes/scopes/schedule/windows</code>, <code>/policy/scope/schedule/windows</code>, <code>/policy/unknown/scope_limits/all_of/schedule/windows</code>, <code>/policy/unknown/scope_limits/any_of/schedule/windows</code>, <code>/policy/unknown/scopes/schedule/windows</code>, <code>/rule_sets/rules/scope/schedule/windows</code>.</p>
-<h2 id="fields-27"><a class="header" href="#fields-27">Fields</a></h2>
+<h2 id="fields-28"><a class="header" href="#fields-28">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3207,7 +3338,7 @@ document; the defaults block every unknown object.</p>
 <p>Field order here is the serialisation order, so <code>Event::to_canonical_json</code>
 is deterministic.</p>
 <p>Schema: <a href="https://github.com/jusso-dev/palisade/blob/main/schemas/events/v1.json"><code>schemas/events/v1.json</code></a> (<code>$id</code> <code>https://github.com/jusso-dev/palisade/schemas/events/v1.json</code>), version 1.2.0. Regenerate the schema with <code>PALISADE_BLESS=1 cargo test -p palisade-proto --test events_schema</code>, then these pages with <code>cargo xtask docs generate</code>.</p>
-<h2 id="fields-28"><a class="header" href="#fields-28">Fields</a></h2>
+<h2 id="fields-29"><a class="header" href="#fields-29">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3297,7 +3428,7 @@ is deterministic.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>An account or group in a directory or on the device.</p>
 <p>Appears at: <code>/identity/group</code>, <code>/identity/member</code>.</p>
-<h2 id="fields-29"><a class="header" href="#fields-29">Fields</a></h2>
+<h2 id="fields-30"><a class="header" href="#fields-30">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3319,7 +3450,7 @@ is deterministic.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>An administrative action on the server (#132).</p>
 <p>Appears at: <code>/admin</code>.</p>
-<h2 id="fields-30"><a class="header" href="#fields-30">Fields</a></h2>
+<h2 id="fields-31"><a class="header" href="#fields-31">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3350,7 +3481,7 @@ is deterministic.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>Agent state.</p>
 <p>Appears at: <code>/agent</code>.</p>
-<h2 id="fields-31"><a class="header" href="#fields-31">Fields</a></h2>
+<h2 id="fields-32"><a class="header" href="#fields-32">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3373,7 +3504,7 @@ is deterministic.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>An approval request and its decision.</p>
 <p>Appears at: <code>/approval</code>.</p>
-<h2 id="fields-32"><a class="header" href="#fields-32">Fields</a></h2>
+<h2 id="fields-33"><a class="header" href="#fields-33">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3400,7 +3531,7 @@ is deterministic.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>A change to the OS audit policy.</p>
 <p>Appears at: <code>/audit_policy</code>.</p>
-<h2 id="fields-33"><a class="header" href="#fields-33">Fields</a></h2>
+<h2 id="fields-34"><a class="header" href="#fields-34">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3421,7 +3552,7 @@ is deterministic.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>Cache counters.</p>
 <p>Appears at: <code>/agent/cache</code>.</p>
-<h2 id="fields-34"><a class="header" href="#fields-34">Fields</a></h2>
+<h2 id="fields-35"><a class="header" href="#fields-35">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3442,7 +3573,7 @@ is deterministic.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>One change to an object.</p>
 <p>Appears at: <code>/admin/changes</code>.</p>
-<h2 id="fields-35"><a class="header" href="#fields-35">Fields</a></h2>
+<h2 id="fields-36"><a class="header" href="#fields-36">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3464,7 +3595,7 @@ is deterministic.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>A peripheral device.</p>
 <p>Appears at: <code>/device</code>.</p>
-<h2 id="fields-36"><a class="header" href="#fields-36">Fields</a></h2>
+<h2 id="fields-37"><a class="header" href="#fields-37">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3490,7 +3621,7 @@ is deterministic.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>A privilege elevation.</p>
 <p>Appears at: <code>/elevation</code>.</p>
-<h2 id="fields-37"><a class="header" href="#fields-37">Fields</a></h2>
+<h2 id="fields-38"><a class="header" href="#fields-38">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3514,7 +3645,7 @@ is deterministic.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>The file an event is about: the target of a decision.</p>
 <p>Appears at: <code>/file</code>.</p>
-<h2 id="fields-38"><a class="header" href="#fields-38">Fields</a></h2>
+<h2 id="fields-39"><a class="header" href="#fields-39">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3547,7 +3678,7 @@ is deterministic.</p>
 <p>A change to a monitored file (#183). The file as it is now is
 <code>super::Event::file</code>; this records what it was before.</p>
 <p>Appears at: <code>/fim</code>.</p>
-<h2 id="fields-39"><a class="header" href="#fields-39">Fields</a></h2>
+<h2 id="fields-40"><a class="header" href="#fields-40">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3576,7 +3707,7 @@ digest for scripts and other signable formats. SHA-1 and MD5 are for
 matching OS and imported data only, never the sole basis of a decision
 (ADR 0008).</p>
 <p>Appears at: <code>/file/hashes</code>, <code>/process/hashes</code>, <code>/process/parent/hashes</code>.</p>
-<h2 id="fields-40"><a class="header" href="#fields-40">Fields</a></h2>
+<h2 id="fields-41"><a class="header" href="#fields-41">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3599,7 +3730,7 @@ matching OS and imported data only, never the sole basis of a decision
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>The device an event is about.</p>
 <p>Appears at: <code>/host</code>.</p>
-<h2 id="fields-41"><a class="header" href="#fields-41">Fields</a></h2>
+<h2 id="fields-42"><a class="header" href="#fields-42">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3628,7 +3759,7 @@ matching OS and imported data only, never the sole basis of a decision
 <p>Identity details: logons and group membership changes. The account that
 logged on, or that made a change, is <code>super::Event::user</code>.</p>
 <p>Appears at: <code>/identity</code>.</p>
-<h2 id="fields-42"><a class="header" href="#fields-42">Fields</a></h2>
+<h2 id="fields-43"><a class="header" href="#fields-43">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3657,7 +3788,7 @@ rule-collection engines.</p>
 <p>These are the OS's own identifiers. Linking them to the Palisade policy
 and rule that produced the native policy fills <code>Event::policy</code> (#90).</p>
 <p>Appears at: <code>/native</code>.</p>
-<h2 id="fields-43"><a class="header" href="#fields-43">Fields</a></h2>
+<h2 id="fields-44"><a class="header" href="#fields-44">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3696,7 +3827,7 @@ and rule that produced the native policy fills <code>Event::policy</code> (#90).
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>A network connection or request.</p>
 <p>Appears at: <code>/network</code>.</p>
-<h2 id="fields-44"><a class="header" href="#fields-44">Fields</a></h2>
+<h2 id="fields-45"><a class="header" href="#fields-45">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3724,7 +3855,7 @@ and rule that produced the native policy fills <code>Event::policy</code> (#90).
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>Where a file came from.</p>
 <p>Appears at: <code>/process/origin</code>, <code>/process/parent/origin</code>.</p>
-<h2 id="fields-45"><a class="header" href="#fields-45">Fields</a></h2>
+<h2 id="fields-46"><a class="header" href="#fields-46">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3746,7 +3877,7 @@ and rule that produced the native policy fills <code>Event::policy</code> (#90).
 <p>A parent process. It has no parent of its own: the grandparent is
 summarised on the child.</p>
 <p>Appears at: <code>/process/parent</code>.</p>
-<h2 id="fields-46"><a class="header" href="#fields-46">Fields</a></h2>
+<h2 id="fields-47"><a class="header" href="#fields-47">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3776,7 +3907,7 @@ summarised on the child.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>The Palisade policy and rule behind a decision.</p>
 <p>Appears at: <code>/policy</code>.</p>
-<h2 id="fields-47"><a class="header" href="#fields-47">Fields</a></h2>
+<h2 id="fields-48"><a class="header" href="#fields-48">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3802,7 +3933,7 @@ summarised on the child.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>Who acted, as the server knows them.</p>
 <p>Appears at: <code>/admin/actor</code>, <code>/approval/decided_by</code>, <code>/elevation/approver</code>.</p>
-<h2 id="fields-48"><a class="header" href="#fields-48">Fields</a></h2>
+<h2 id="fields-49"><a class="header" href="#fields-49">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3825,7 +3956,7 @@ summarised on the child.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>One compliance probe and its result (#210).</p>
 <p>Appears at: <code>/probe</code>.</p>
-<h2 id="fields-49"><a class="header" href="#fields-49">Fields</a></h2>
+<h2 id="fields-50"><a class="header" href="#fields-50">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3850,7 +3981,7 @@ summarised on the child.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>A short description of a process.</p>
 <p>Appears at: <code>/process/grandparent</code>.</p>
-<h2 id="fields-50"><a class="header" href="#fields-50">Fields</a></h2>
+<h2 id="fields-51"><a class="header" href="#fields-51">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3871,7 +4002,7 @@ summarised on the child.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>The process that acted.</p>
 <p>Appears at: <code>/process</code>.</p>
-<h2 id="fields-51"><a class="header" href="#fields-51">Fields</a></h2>
+<h2 id="fields-52"><a class="header" href="#fields-52">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3904,7 +4035,7 @@ summarised on the child.</p>
 <p>Registry value data: recorded truncated, hashed, or both, never in full
 beyond the preview limit.</p>
 <p>Appears at: <code>/registry/new</code>, <code>/registry/old</code>.</p>
-<h2 id="fields-52"><a class="header" href="#fields-52">Fields</a></h2>
+<h2 id="fields-53"><a class="header" href="#fields-53">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3927,7 +4058,7 @@ beyond the preview limit.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>A registry key or value.</p>
 <p>Appears at: <code>/registry</code>.</p>
-<h2 id="fields-53"><a class="header" href="#fields-53">Fields</a></h2>
+<h2 id="fields-54"><a class="header" href="#fields-54">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3952,7 +4083,7 @@ beyond the preview limit.</p>
 <p>A restriction a script interpreter applied, or in audit mode would have
 applied, because the script is not allowed to run unrestricted.</p>
 <p>Appears at: <code>/restriction</code>.</p>
-<h2 id="fields-54"><a class="header" href="#fields-54">Fields</a></h2>
+<h2 id="fields-55"><a class="header" href="#fields-55">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3977,7 +4108,7 @@ applied, because the script is not allowed to run unrestricted.</p>
 exactly one of the two.
 A file-backed script's digests and signatures are in <code>Event::file</code>.</p>
 <p>Appears at: <code>/script</code>.</p>
-<h2 id="fields-55"><a class="header" href="#fields-55">Fields</a></h2>
+<h2 id="fields-56"><a class="header" href="#fields-56">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -4007,7 +4138,7 @@ A file-backed script's digests and signatures are in <code>Event::file</code>.</
 codes as numbers, so values the decoder tables (#90) do not know yet are
 not lost.</p>
 <p>Appears at: <code>/file/signers</code>, <code>/process/parent/signers</code>, <code>/process/signers</code>.</p>
-<h2 id="fields-56"><a class="header" href="#fields-56">Fields</a></h2>
+<h2 id="fields-57"><a class="header" href="#fields-57">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -4035,7 +4166,7 @@ not lost.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>The log an event was translated from.</p>
 <p>Appears at: <code>/source</code>.</p>
-<h2 id="fields-57"><a class="header" href="#fields-57">Fields</a></h2>
+<h2 id="fields-58"><a class="header" href="#fields-58">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -4705,7 +4836,7 @@ agent can be in. <code>EventMode::from_policy_mode</code> converts.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>The user an event is about.</p>
 <p>Appears at: <code>/user</code>.</p>
-<h2 id="fields-58"><a class="header" href="#fields-58">Fields</a></h2>
+<h2 id="fields-59"><a class="header" href="#fields-59">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -4732,7 +4863,7 @@ agent can be in. <code>EventMode::from_policy_mode</code> converts.</p>
 <!-- Generated by `cargo xtask docs generate` from `schemas/events/v1.json`. Do not edit by hand. -->
 <p>The version resource of a PE file.</p>
 <p>Appears at: <code>/file/version_info</code>, <code>/process/parent/version_info</code>, <code>/process/version_info</code>.</p>
-<h2 id="fields-59"><a class="header" href="#fields-59">Fields</a></h2>
+<h2 id="fields-60"><a class="header" href="#fields-60">Fields</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -6138,7 +6269,8 @@ diagnostics, are its intended users; neither depends on this crate yet.</li>
 <li><code>scope</code>: rule scoping (#38): who, where and when a rule applies. See <a href="#scopes">Scopes</a>.</li>
 <li><code>ops</code>: compiles one criterion (<code>CompiledCriterion</code>) and evaluates it against facts, giving <code>Match</code>, <code>NoMatch</code> or <code>Unknown</code> with notes for the decision trace. The module docs define the semantics: several values, negation of unknown facts, case folding and Unicode NFC, path normalisation and wildcards, alternate data streams, path variables, the path-ACL rule for allow rules, version comparison, and which signer statuses can match. Regular expressions use a linear-time engine; look-around and backreferences are rejected with a guided error. The numeric, integrity-level, date, network (<code>ip_in_cidr</code>, <code>ip_between</code>, <code>ip_wildcard</code>), set (<code>member_of</code>, <code>any_of</code>, <code>all_of</code>) and time (<code>weekday_in</code>, <code>time_between</code>, <code>date_between</code>) operators and the criterion options <code>anchored</code>, <code>match_ads</code>, <code>include_sub_ous</code> and <code>safety_critical</code> are described there too. <code>ops::net</code> parses the addresses, CIDR blocks, ranges and MAC addresses that criteria test.</li>
 </ul>
-<p>Each identity field has a strength (<code>Field::strength</code>, #31): strong for SHA-256-family and Authenticode SHA-256 hashes and the leaf thumbprint, medium for the publisher and full or directory paths, and weak for everything else. Path normalisation (<code>palisade_core::path</code>) is shared with the agent, so facts and rule values are normalised the same way.</p>
+<p>Each identity field has a strength (<code>Field::strength</code>, #31): strong for SHA-256-family and Authenticode SHA-256 hashes, the leaf thumbprint and the TBS hash, medium for the publisher and full or directory paths, and weak for everything else, including the SHA-1 thumbprints and what names a certificate authority (the issuer, the PCA, the root thumbprint and the EKUs). Path normalisation (<code>palisade_core::path</code>) is shared with the agent, so facts and rule values are normalised the same way.</p>
+<p><strong>Signer criteria</strong> (#31, <code>ops::signer</code>) match if any signature satisfies them. A criterion's <code>signer</code> options choose which signatures take part (<code>accept_status</code>, <code>allow_digest_mismatch</code>, <code>source</code>, <code>signature_index</code>) and what the same signature must also satisfy (<code>signed_after</code>, <code>countersigned</code>, <code>min_key_bits</code>, <code>disallowed_algorithms</code>); <code>component</code> picks the publisher's CN, O or full DN, and <code>position</code> the TBS hash's place in the chain. A fact a test needs that was not determined makes that signature unknown, never a match. Only <code>allow_digest_mismatch</code> lets a tampered file match, and validation warns about it, and about an allow that accepts other untrusted statuses (<code>signature_status_relaxed</code>).</p>
 <h2 id="actions-and-effects"><a class="header" href="#actions-and-effects">Actions and effects</a></h2>
 <p>An action is an object with a <code>type</code> and that action's options (#34). Each action is valid only in some rule set kinds and for some object types; validation reports a rule that breaks this table.</p>
 <div class="table-wrapper">

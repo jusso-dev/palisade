@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["PathVariable","SignatureSource","SignerStatus"],"struct":["ObjectFacts","PathFact","PathVariables","SignerFact"]};
+window.SIDEBAR_ITEMS = {"enum":["DigestAlgorithm","KeyKind","PathVariable","SignatureSource","SignerStatus"],"struct":["KeyFact","ObjectFacts","PathFact","PathVariables","SignerDetails","SignerFact"]};
