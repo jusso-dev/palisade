@@ -12,7 +12,7 @@
 //!   variant names, each critical or ignorable.
 //! - [`serial`]: the policy model through serde as CBOR values, with
 //!   registered keys in place of names and text in NFC.
-//! - [`format`]: the bundle itself, a header that decodes on its own and a
+//! - [`format`](mod@format): the bundle itself, a header that decodes on its own and a
 //!   body in canonical order, with the bundle hash and the decision hash.
 
 pub mod cbor;
