@@ -669,10 +669,11 @@ pub fn parse_installer(data: &[u8]) -> Result<InstallerIdentity, InstallerError>
     } else if db.strings.as_ref().is_ok_and(|p| p.lossy) {
         warnings.push(InstallerWarning::LossyStrings);
     }
-    if let Some(e) = &db.catalog_error {
-        if db.strings.is_ok() && is_database {
-            warnings.push(InstallerWarning::Table(e.clone()));
-        }
+    if let Some(e) = &db.catalog_error
+        && db.strings.is_ok()
+        && is_database
+    {
+        warnings.push(InstallerWarning::Table(e.clone()));
     }
 
     let kind = if base_kind == InstallerKind::Msi && db.has_table("ModuleSignature") {

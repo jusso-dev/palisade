@@ -740,12 +740,12 @@ pub async fn check_migration_role(conn: &mut PgConnection) -> Result<(), DbError
             "role {user} and {RUNTIME_GROUP} must not be members of each other"
         )));
     }
-    if let Some(owner) = &f.schema_owner {
-        if !f.owns_schema {
-            return Err(DbError(format!(
-                "schema {SCHEMA} is owned by {owner}, not {user}; run migrations as its owner"
-            )));
-        }
+    if let Some(owner) = &f.schema_owner
+        && !f.owns_schema
+    {
+        return Err(DbError(format!(
+            "schema {SCHEMA} is owned by {owner}, not {user}; run migrations as its owner"
+        )));
     }
     Ok(())
 }

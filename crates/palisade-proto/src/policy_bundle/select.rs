@@ -188,20 +188,20 @@ pub fn startup(input: &Startup<'_>) -> Selection {
 
     // `previous`: only if `active` failed, only verified, and only the
     // recorded fallback or a version the floor accepts.
-    if load.is_none() {
-        if let Some(e) = input.previous {
-            match check(e, input.target, EffectiveMode::ENFORCE) {
-                Ok(p) => {
-                    let v = p.meta().version;
-                    if v >= floor || Some(v) == fallback {
-                        load = Some(Load::Previous(p.meta()));
-                        findings.push(Finding::LkgLoaded);
-                    } else {
-                        reject(&mut findings, CacheFile::Previous, Rejection::Rollback);
-                    }
+    if load.is_none()
+        && let Some(e) = input.previous
+    {
+        match check(e, input.target, EffectiveMode::ENFORCE) {
+            Ok(p) => {
+                let v = p.meta().version;
+                if v >= floor || Some(v) == fallback {
+                    load = Some(Load::Previous(p.meta()));
+                    findings.push(Finding::LkgLoaded);
+                } else {
+                    reject(&mut findings, CacheFile::Previous, Rejection::Rollback);
                 }
-                Err(reason) => reject(&mut findings, CacheFile::Previous, reason),
             }
+            Err(reason) => reject(&mut findings, CacheFile::Previous, reason),
         }
     }
 

@@ -786,7 +786,7 @@ fn translation_pairs(
             }
             seen = true;
             let value = var.value(data, var.value_bytes());
-            for pair in value.chunks_exact(4) {
+            for pair in value.as_chunks::<4>().0 {
                 let (Some(language), Some(code_page)) = (u16_at(pair, 0), u16_at(pair, 2)) else {
                     break;
                 };

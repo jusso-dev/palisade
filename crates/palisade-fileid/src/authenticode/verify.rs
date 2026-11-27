@@ -524,10 +524,10 @@ pub(crate) fn check(
         None => (None, None),
     };
     let os_ci_issues = os_ci_issues(key_alg.as_ref(), key_bits, weak);
-    if let (Some(KeyAlgorithm::Rsa), Some(bits)) = (&key_alg, key_bits) {
-        if bits < 2048 {
-            warnings.push(SignatureWarning::SmallRsaKey(bits));
-        }
+    if let (Some(KeyAlgorithm::Rsa), Some(bits)) = (&key_alg, key_bits)
+        && bits < 2048
+    {
+        warnings.push(SignatureWarning::SmallRsaKey(bits));
     }
 
     let tolerated = options.tolerate_digest_mismatch && status == SignatureStatus::DigestMismatch;

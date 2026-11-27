@@ -436,10 +436,9 @@ fn supersedes(text: &str) -> Vec<u32> {
                 if i - start == 4
                     && alone
                     && (i == bytes.len() || !bytes[i].is_ascii_alphanumeric())
+                    && let Ok(n) = rest[start..i].parse()
                 {
-                    if let Ok(n) = rest[start..i].parse() {
-                        out.push(n);
-                    }
+                    out.push(n);
                 }
             } else {
                 i += 1;

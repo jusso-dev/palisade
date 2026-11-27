@@ -352,13 +352,13 @@ impl HashRanges {
         }
 
         let sections_end = check_layout(info, &mut reasons);
-        if let (Some(table), Some(end)) = (info.certificate_table, sections_end) {
-            if table.offset < end {
-                reasons.push(NonConformance::CertificateTableInsideSectionData {
-                    offset: table.offset,
-                    sections_end: end,
-                });
-            }
+        if let (Some(table), Some(end)) = (info.certificate_table, sections_end)
+            && table.offset < end
+        {
+            reasons.push(NonConformance::CertificateTableInsideSectionData {
+                offset: table.offset,
+                sections_end: end,
+            });
         }
 
         excluded.sort_by_key(|r| r.offset);

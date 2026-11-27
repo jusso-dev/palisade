@@ -90,14 +90,14 @@ impl Validator {
             }
             for (j, rule) in set.rules.iter().enumerate() {
                 let path = format!("/rule_sets/{i}/rules/{j}");
-                if let (Some(a), Some(e)) = (rule.activates_at, rule.expires_at) {
-                    if e <= a {
-                        self.push(
-                            ErrorCode::InvalidActivityWindow,
-                            &format!("{path}/expires_at"),
-                            format!("`expires_at` ({e}) must be after `activates_at` ({a})"),
-                        );
-                    }
+                if let (Some(a), Some(e)) = (rule.activates_at, rule.expires_at)
+                    && e <= a
+                {
+                    self.push(
+                        ErrorCode::InvalidActivityWindow,
+                        &format!("{path}/expires_at"),
+                        format!("`expires_at` ({e}) must be after `activates_at` ({a})"),
+                    );
                 }
                 if rule.on_expire != OnExpire::Deactivate && rule.expires_at.is_none() {
                     self.push(
@@ -112,14 +112,14 @@ impl Validator {
                         "a mandatory rule set holds only denies; an expired mandatory rule is removed, not converted",
                     );
                 }
-                if let OnExpire::DeleteAfterDays(d) = rule.on_expire {
-                    if !(1..=3650).contains(&d) {
-                        self.push(
-                            ErrorCode::OnExpireNotApplicable,
-                            &format!("{path}/on_expire/delete_after_days"),
-                            format!("{d} is outside 1..=3650"),
-                        );
-                    }
+                if let OnExpire::DeleteAfterDays(d) = rule.on_expire
+                    && !(1..=3650).contains(&d)
+                {
+                    self.push(
+                        ErrorCode::OnExpireNotApplicable,
+                        &format!("{path}/on_expire/delete_after_days"),
+                        format!("{d} is outside 1..=3650"),
+                    );
                 }
                 for (code, suffix, message) in governance_problems(doc, set, rule) {
                     self.push(code, &format!("{path}{suffix}"), message);

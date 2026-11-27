@@ -132,12 +132,6 @@ cast_possible_truncation = "warn"
 cast_possible_wrap = "warn"
 cast_sign_loss = "warn"
 checked_conversions = "warn"
-# Clippy applies these from MSRV 1.94 (let-chains, `is_multiple_of`,
-# `as_chunks`). They are allowed until the existing code is rewritten for
-# them in a follow-up under #19, after the parallel work in progress lands.
-collapsible_if = "allow"
-manual_is_multiple_of = "allow"
-chunks_exact_to_as_chunks = "allow"
 
 [profile.dev]
 overflow-checks = true

@@ -145,7 +145,7 @@ impl CorpusPki {
 fn with_signature(image: &[u8], pkcs7: &[u8]) -> Vec<u8> {
     let table = win_certificate(pkcs7);
     let mut out = image.to_vec();
-    while out.len() % 8 != 0 {
+    while !out.len().is_multiple_of(8) {
         out.push(0);
     }
     let at = u32::try_from(out.len()).unwrap();

@@ -118,7 +118,7 @@ fn put64(buf: &mut [u8], at: usize, v: u64) {
 }
 
 fn pad_to(buf: &mut Vec<u8>, to: usize) {
-    while buf.len() % to != 0 {
+    while !buf.len().is_multiple_of(to) {
         buf.push(0);
     }
 }

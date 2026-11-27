@@ -62,7 +62,7 @@ impl Read for Counting<'_> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.reads += 1;
         // Every third read is interrupted, which must be retried.
-        if self.reads % 3 == 0 {
+        if self.reads.is_multiple_of(3) {
             return Err(io::Error::from(io::ErrorKind::Interrupted));
         }
         let n = buf.len().min(self.step).min(self.data.len() - self.at);

@@ -106,7 +106,7 @@ fn bad(why: &str) -> BlockMapError {
 /// Standard base64 with padding, strict.
 fn base64(text: &str) -> Option<Vec<u8>> {
     let bytes = text.as_bytes();
-    if bytes.is_empty() || bytes.len() % 4 != 0 {
+    if bytes.is_empty() || !bytes.len().is_multiple_of(4) {
         return None;
     }
     let val = |c: u8| -> Option<u32> {
@@ -390,10 +390,10 @@ fn verify_with(
     }
     // Only then the content, one member at a time.
     for m in &archive.members {
-        if let Some(f) = listed.get(&fold(&m.part)) {
-            if !UNMAPPED.iter().any(|u| fold(u) == fold(&m.part)) {
-                check_blocks(map.hash, f, archive, m)?;
-            }
+        if let Some(f) = listed.get(&fold(&m.part))
+            && !UNMAPPED.iter().any(|u| fold(u) == fold(&m.part))
+        {
+            check_blocks(map.hash, f, archive, m)?;
         }
     }
     Ok(())

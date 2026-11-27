@@ -410,10 +410,10 @@ impl<R: Read + Seek + ?Sized> Scan<'_, R> {
         else {
             return Ok(());
         };
-        if s.matcher.matches_at(buf, at) {
-            if let Some(hit) = self.found.get_mut(string) {
-                *hit = true;
-            }
+        if s.matcher.matches_at(buf, at)
+            && let Some(hit) = self.found.get_mut(string)
+        {
+            *hit = true;
         }
         Ok(())
     }

@@ -290,13 +290,12 @@ impl super::ValidatedHierarchy {
         if trigger == PlacementTrigger::UserChange && !self.place_on_user_change(tenant) {
             return Ok(PlacementOutcome::NotEvaluated);
         }
-        if let Some(group) = current.and_then(|c| self.nodes.get(&c)) {
-            if group.tenant == Some(tenant)
-                && (group.node.allow_auto_assignment == Some(false)
-                    || group.node.builtin == Some(Builtin::Unmanaged))
-            {
-                return Ok(PlacementOutcome::Kept);
-            }
+        if let Some(group) = current.and_then(|c| self.nodes.get(&c))
+            && group.tenant == Some(tenant)
+            && (group.node.allow_auto_assignment == Some(false)
+                || group.node.builtin == Some(Builtin::Unmanaged))
+        {
+            return Ok(PlacementOutcome::Kept);
         }
         for rule in self.placement.get(&tenant).map_or(&[][..], Vec::as_slice) {
             if matches(&rule.conditions, facts) {

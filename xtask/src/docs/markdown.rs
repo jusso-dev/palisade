@@ -177,12 +177,12 @@ pub fn rewrite_links(
             (start, end)
         };
         let dest = &line[dest_start..dest_end];
-        if !dest.is_empty() {
-            if let Some(new) = f(dest)? {
-                out.push_str(&line[copied..dest_start]);
-                out.push_str(&new);
-                copied = dest_end;
-            }
+        if !dest.is_empty()
+            && let Some(new) = f(dest)?
+        {
+            out.push_str(&line[copied..dest_start]);
+            out.push_str(&new);
+            copied = dest_end;
         }
         i = dest_end.max(i + 1);
     }

@@ -603,36 +603,37 @@ pub fn test_functions(source: &str) -> Option<Vec<String>> {
         while i < tokens.len() {
             match &tokens[i] {
                 TokenTree::Punct(p) if p.as_char() == '#' => {
-                    if let Some(TokenTree::Group(g)) = tokens.get(i + 1) {
-                        if g.delimiter() == Delimiter::Bracket {
-                            // The attribute's path: idents and `::`, up to
-                            // its arguments (`(...)` or `= ...`).
-                            let path: Vec<String> = g
-                                .stream()
-                                .into_iter()
-                                .take_while(|t| match t {
-                                    TokenTree::Ident(_) => true,
-                                    TokenTree::Punct(p) => p.as_char() == ':',
-                                    _ => false,
-                                })
-                                .map(|t| t.to_string())
-                                .collect();
-                            match path.concat().as_str() {
-                                "test" | "tokio::test" => is_test = true,
-                                "ignore" => ignored = true,
-                                _ => {}
-                            }
-                            stack.push(g.stream());
-                            i += 2;
-                            continue;
+                    if let Some(TokenTree::Group(g)) = tokens.get(i + 1)
+                        && g.delimiter() == Delimiter::Bracket
+                    {
+                        // The attribute's path: idents and `::`, up to
+                        // its arguments (`(...)` or `= ...`).
+                        let path: Vec<String> = g
+                            .stream()
+                            .into_iter()
+                            .take_while(|t| match t {
+                                TokenTree::Ident(_) => true,
+                                TokenTree::Punct(p) => p.as_char() == ':',
+                                _ => false,
+                            })
+                            .map(|t| t.to_string())
+                            .collect();
+                        match path.concat().as_str() {
+                            "test" | "tokio::test" => is_test = true,
+                            "ignore" => ignored = true,
+                            _ => {}
                         }
+                        stack.push(g.stream());
+                        i += 2;
+                        continue;
                     }
                 }
                 TokenTree::Ident(ident) if ident == "fn" => {
-                    if let Some(TokenTree::Ident(name)) = tokens.get(i + 1) {
-                        if is_test && !ignored {
-                            found.push(name.to_string());
-                        }
+                    if let Some(TokenTree::Ident(name)) = tokens.get(i + 1)
+                        && is_test
+                        && !ignored
+                    {
+                        found.push(name.to_string());
                     }
                     is_test = false;
                     ignored = false;

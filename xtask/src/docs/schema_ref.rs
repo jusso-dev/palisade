@@ -447,18 +447,18 @@ fn variants(
 }
 
 fn values_list(def: &Value) -> Option<String> {
-    if let Some(options) = def.get("oneOf").and_then(Value::as_array) {
-        if options.iter().all(|o| o.get("const").is_some()) {
-            let mut out = String::from("| Value | Meaning |\n|---|---|\n");
-            for o in options {
-                out.push_str(&format!(
-                    "| `{}` | {} |\n",
-                    cell(&unquote(&o["const"])),
-                    cell(&description(o))
-                ));
-            }
-            return Some(out);
+    if let Some(options) = def.get("oneOf").and_then(Value::as_array)
+        && options.iter().all(|o| o.get("const").is_some())
+    {
+        let mut out = String::from("| Value | Meaning |\n|---|---|\n");
+        for o in options {
+            out.push_str(&format!(
+                "| `{}` | {} |\n",
+                cell(&unquote(&o["const"])),
+                cell(&description(o))
+            ));
         }
+        return Some(out);
     }
     if let Some(Value::Array(values)) = def.get("enum") {
         let list: Vec<String> = values.iter().map(|v| format!("`{}`", unquote(v))).collect();

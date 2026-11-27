@@ -414,10 +414,10 @@ fn collect_extensions(
             };
             let mut aliases = Vec::new();
             for d in e.descendants() {
-                if d.name == "ExecutionAlias" {
-                    if let Some(a) = value(d, "Alias")? {
-                        push(&mut aliases, a, "aliases")?;
-                    }
+                if d.name == "ExecutionAlias"
+                    && let Some(a) = value(d, "Alias")?
+                {
+                    push(&mut aliases, a, "aliases")?;
                 }
             }
             let ext = Extension {

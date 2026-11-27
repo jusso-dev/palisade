@@ -429,24 +429,17 @@ fn decode(data: &[u8], encoding: TextEncoding) -> String {
 }
 
 fn utf16(data: &[u8], unit: fn([u8; 2]) -> u16) -> String {
-    let units = data.chunks_exact(2).map(|c| {
-        unit([
-            c.first().copied().unwrap_or(0),
-            c.get(1).copied().unwrap_or(0),
-        ])
-    });
+    let units = data.as_chunks::<2>().0.iter().map(|c| unit(*c));
     char::decode_utf16(units)
         .map(|c| c.unwrap_or(char::REPLACEMENT_CHARACTER))
         .collect()
 }
 
 fn utf32(data: &[u8], unit: fn([u8; 4]) -> u32) -> String {
-    data.chunks_exact(4)
-        .map(|c| {
-            let mut word = [0_u8; 4];
-            word.copy_from_slice(c);
-            char::from_u32(unit(word)).unwrap_or(char::REPLACEMENT_CHARACTER)
-        })
+    data.as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| char::from_u32(unit(*c)).unwrap_or(char::REPLACEMENT_CHARACTER))
         .collect()
 }
 

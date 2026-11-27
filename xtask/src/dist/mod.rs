@@ -199,10 +199,10 @@ pub enum Request {
 }
 
 pub fn parse_args(args: &[String]) -> Result<Request, String> {
-    if let [only] = args {
-        if only == "driver" {
-            return Ok(Request::Driver);
-        }
+    if let [only] = args
+        && only == "driver"
+    {
+        return Ok(Request::Driver);
     }
     let mut target = None;
     let mut msi = false;

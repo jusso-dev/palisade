@@ -268,8 +268,8 @@ pub(crate) fn decode_hex_into(hex: &str, out: &mut [u8]) -> Option<()> {
     if digits.len() != out.len() * 2 {
         return None;
     }
-    for (byte, pair) in out.iter_mut().zip(digits.chunks_exact(2)) {
-        *byte = (nibble(pair[0])? << 4) | nibble(pair[1])?;
+    for (byte, &[hi, lo]) in out.iter_mut().zip(digits.as_chunks::<2>().0) {
+        *byte = (nibble(hi)? << 4) | nibble(lo)?;
     }
     Some(())
 }

@@ -316,7 +316,7 @@ impl<R: Read + Seek + ?Sized> Probe<'_, '_, '_, R> {
             return found;
         };
         let mut terminated = false;
-        for descriptor in table.chunks_exact(IMPORT_DESCRIPTOR_LEN) {
+        for descriptor in table.as_chunks::<IMPORT_DESCRIPTOR_LEN>().0 {
             let name_rva = u32_at(descriptor, 12).unwrap_or(0);
             let thunks = u32_at(descriptor, 16).unwrap_or(0);
             if name_rva == 0 || thunks == 0 {
@@ -359,7 +359,7 @@ impl<R: Read + Seek + ?Sized> Probe<'_, '_, '_, R> {
             return (false, false);
         };
         let (mut cpl, mut register) = (false, false);
-        for entry in names.chunks_exact(4) {
+        for entry in names.as_chunks::<4>().0 {
             // A null or unmapped name marks the result incomplete (in
             // `read_rva`). A name with no NUL in `EXPORT_NAME_LEN` bytes is
             // longer than either name looked for, so it is skipped.
@@ -399,7 +399,7 @@ impl<R: Read + Seek + ?Sized> Probe<'_, '_, '_, R> {
             self.incomplete = true;
             return false;
         };
-        for entry in entries.chunks_exact(8) {
+        for entry in entries.as_chunks::<8>().0 {
             let Some(field) = u32_at(entry, 0) else {
                 continue;
             };
@@ -517,10 +517,15 @@ fn is_typelib(string: &[u8]) -> bool {
     let Some(units) = bytes(string, 2, 2 * TYPELIB_LEN) else {
         return false;
     };
-    units.chunks_exact(2).zip(b"TYPELIB").all(|(unit, want)| {
-        u16_at(unit, 0) == Some(u16::from(*want))
-            || u16_at(unit, 0) == Some(u16::from(want.to_ascii_lowercase()))
-    })
+    units
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .zip(b"TYPELIB")
+        .all(|(unit, want)| {
+            u16_at(unit, 0) == Some(u16::from(*want))
+                || u16_at(unit, 0) == Some(u16::from(want.to_ascii_lowercase()))
+        })
 }
 
 #[cfg(test)]

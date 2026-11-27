@@ -467,8 +467,8 @@ impl Analyser<'_> {
                 Some(Fix::RemoveRule),
             ),
             Activity::Active => {
-                if let Some(e_at) = rule.expires_at {
-                    if self
+                if let Some(e_at) = rule.expires_at
+                    && self
                         .now
                         .plus_days(i64::from(g.expiring_soon_days))
                         .is_some_and(|soon| e_at <= soon)
@@ -480,20 +480,19 @@ impl Analyser<'_> {
                             None,
                         );
                     }
-                }
             }
             Activity::Disabled | Activity::NotYetActive => {}
         }
         if rule.enabled && !self.exempt(e.set) {
-            if let Some(due) = review_by(&rule.metadata, Some(kind)) {
-                if due < self.now.date() {
-                    self.push(
-                        FindingCode::ReviewOverdue,
-                        me.clone(),
-                        format!("review was due on {due}"),
-                        None,
-                    );
-                }
+            if let Some(due) = review_by(&rule.metadata, Some(kind))
+                && due < self.now.date()
+            {
+                self.push(
+                    FindingCode::ReviewOverdue,
+                    me.clone(),
+                    format!("review was due on {due}"),
+                    None,
+                );
             }
             // A trust source grants rather than decides, so its use is not
             // counted as a hit (#9 reports grants).
@@ -845,35 +844,33 @@ impl Analyser<'_> {
             {
                 continue;
             }
-            if c.operator == Operator::Wildcard {
-                if let Some(v) = c.values.iter().find(|v| is_broad_path_wildcard(v)) {
-                    self.push(
-                        FindingCode::BroadWildcard,
-                        vec![e.r()],
-                        format!("`{v}` matches almost every file"),
-                        Some(Fix::Narrow {
-                            hint: "name a specific directory",
-                        }),
-                    );
-                    return;
-                }
+            if c.operator == Operator::Wildcard
+                && let Some(v) = c.values.iter().find(|v| is_broad_path_wildcard(v))
+            {
+                self.push(
+                    FindingCode::BroadWildcard,
+                    vec![e.r()],
+                    format!("`{v}` matches almost every file"),
+                    Some(Fix::Narrow {
+                        hint: "name a specific directory",
+                    }),
+                );
+                return;
             }
             if matches!(c.operator, Operator::Wildcard | Operator::Regex)
                 && !self.facts.path_corpus.is_empty()
+                && let Some(share) = corpus_share(c, &self.facts.path_corpus)
+                && share >= u64::from(self.options.broad_corpus_percent)
             {
-                if let Some(share) = corpus_share(c, &self.facts.path_corpus) {
-                    if share >= u64::from(self.options.broad_corpus_percent) {
-                        self.push(
-                            FindingCode::BroadWildcard,
-                            vec![e.r()],
-                            format!("this pattern matches {share}% of the sample paths"),
-                            Some(Fix::Narrow {
-                                hint: "name a specific directory",
-                            }),
-                        );
-                        return;
-                    }
-                }
+                self.push(
+                    FindingCode::BroadWildcard,
+                    vec![e.r()],
+                    format!("this pattern matches {share}% of the sample paths"),
+                    Some(Fix::Narrow {
+                        hint: "name a specific directory",
+                    }),
+                );
+                return;
             }
         }
     }
@@ -906,16 +903,16 @@ impl Analyser<'_> {
             }
         }
         for (field, inc) in &include {
-            if let Some(exc) = exclude.get(field) {
-                if let Some(p) = inc.intersection(exc).next() {
-                    self.push(
-                        FindingCode::DuplicatePrincipal,
-                        vec![e.r()],
-                        format!("`{p}` is both included and excluded"),
-                        None,
-                    );
-                    return;
-                }
+            if let Some(exc) = exclude.get(field)
+                && let Some(p) = inc.intersection(exc).next()
+            {
+                self.push(
+                    FindingCode::DuplicatePrincipal,
+                    vec![e.r()],
+                    format!("`{p}` is both included and excluded"),
+                    None,
+                );
+                return;
             }
         }
     }
@@ -1123,15 +1120,15 @@ impl Analyser<'_> {
                 .filter(|c| matches!(c.field.class(), FieldClass::Hash { .. }))
                 .map(|c| c.values.len())
                 .sum();
-            if n > self.options.max_inline_hashes {
-                if let Some(first) = set.rules.first() {
-                    self.push(
+            if n > self.options.max_inline_hashes
+                && let Some(first) = set.rules.first()
+            {
+                self.push(
                         FindingCode::TooManyHashRules,
                         vec![RuleRef { rule_set_id: set.id, rule_id: first.id }],
                         format!("rule set `{}` holds {n} inline hash values; more than {} should be a hash set (#42)", set.name, self.options.max_inline_hashes),
                         None,
                     );
-                }
             }
         }
         let clock = self.clock;
@@ -1281,12 +1278,11 @@ fn always_matches(cover: &Entry<'_>, victim: &Entry<'_>) -> bool {
     if !starts || !ends || (timed && !same_direction) {
         return false;
     }
-    if let Action::Deny(o) = &v.action {
-        if o.unknown_as == crate::model::UnknownAs::Match
-            || o.on_unparseable == crate::model::UnknownAs::Match
-        {
-            return false;
-        }
+    if let Action::Deny(o) = &v.action
+        && (o.unknown_as == crate::model::UnknownAs::Match
+            || o.on_unparseable == crate::model::UnknownAs::Match)
+    {
+        return false;
     }
     let path_acl = c.action.kind().needs_identity() && !v.action.kind().needs_identity();
     if path_acl

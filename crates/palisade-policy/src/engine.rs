@@ -442,10 +442,10 @@ impl Engine {
         });
         let ttl = u64::from(policy.settings.decision_cache_ttl_secs);
         let use_cache = ttl > 0 && clock.trusted();
-        if let (Some(key), true) = (key.as_ref(), use_cache) {
-            if let Some(d) = self.cache.get(key, start) {
-                return Outcome::Decided(Some(Decided::Cached(d)));
-            }
+        if let (Some(key), true) = (key.as_ref(), use_cache)
+            && let Some(d) = self.cache.get(key, start)
+        {
+            return Outcome::Decided(Some(Decided::Cached(d)));
         }
 
         let budget = self.config.budget_micros;
@@ -459,24 +459,24 @@ impl Engine {
         ) {
             Ok(None) => Outcome::Decided(None),
             Ok(Some((decision, unknown))) => {
-                if let (Some(key), true) = (key, use_cache) {
-                    if cache::cacheable(&decision, unknown, request.state.session.is_some()) {
-                        let mut expires = start.saturating_add(ttl.min(86_400) * 1_000_000);
-                        if let Some(deadline) = request.expires_before {
-                            expires = expires.min(deadline);
-                        }
-                        // A deadline that has already passed: nothing to keep.
-                        if expires > clock.monotonic_micros() {
-                            // The caller gets the decision as made now: only a
-                            // later hit is `Cached` (#41 records the trace of a
-                            // fresh decision, and links hits back to it).
-                            self.cache.insert(
-                                key,
-                                Arc::new(decision.clone()),
-                                request.session,
-                                expires,
-                            );
-                        }
+                if let (Some(key), true) = (key, use_cache)
+                    && cache::cacheable(&decision, unknown, request.state.session.is_some())
+                {
+                    let mut expires = start.saturating_add(ttl.min(86_400) * 1_000_000);
+                    if let Some(deadline) = request.expires_before {
+                        expires = expires.min(deadline);
+                    }
+                    // A deadline that has already passed: nothing to keep.
+                    if expires > clock.monotonic_micros() {
+                        // The caller gets the decision as made now: only a
+                        // later hit is `Cached` (#41 records the trace of a
+                        // fresh decision, and links hits back to it).
+                        self.cache.insert(
+                            key,
+                            Arc::new(decision.clone()),
+                            request.session,
+                            expires,
+                        );
                     }
                 }
                 Outcome::Decided(Some(Decided::Fresh(decision)))

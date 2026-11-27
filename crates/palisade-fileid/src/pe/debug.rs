@@ -160,7 +160,9 @@ pub(super) fn parse(
         warnings.push(start, WarningKind::TooManyDebugEntries);
     }
     for (i, raw) in table
-        .chunks_exact(DEBUG_ENTRY_SIZE)
+        .as_chunks::<DEBUG_ENTRY_SIZE>()
+        .0
+        .iter()
         .take(MAX_DEBUG_ENTRIES)
         .enumerate()
     {

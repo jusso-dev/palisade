@@ -1826,11 +1826,10 @@ proptest! {
         // A changed catalog may still verify only if the change is outside
         // what is signed (the certificates, say); if it does, it signs the
         // original CTL, so it lists nothing new.
-        if let Ok(cat) = parse_catalog(&data) {
-            if cat.signature_valid() {
+        if let Ok(cat) = parse_catalog(&data)
+            && cat.signature_valid() {
                 prop_assert_eq!(&cat.ctl, &parse_catalog(&original).unwrap().ctl);
             }
-        }
         let _ = store.lookup(&FileDigests::of_bytes(&pe_member_image()));
     }
 }

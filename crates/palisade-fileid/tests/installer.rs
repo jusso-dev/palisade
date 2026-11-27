@@ -474,10 +474,10 @@ fn bad_tables_are_warnings_not_identity() {
     let mut cfb = b.cfb();
     let name = encode_name("Property", true);
     for n in &mut cfb.children {
-        if let Node::Stream { name: nm, data, .. } = n {
-            if *nm == name {
-                data.push(0);
-            }
+        if let Node::Stream { name: nm, data, .. } = n
+            && *nm == name
+        {
+            data.push(0);
         }
     }
     let id = parse_installer(&cfb.build()).unwrap();
@@ -493,10 +493,10 @@ fn bad_tables_are_warnings_not_identity() {
     let mut cfb = b.cfb();
     let pool = encode_name("_StringData", true);
     for n in &mut cfb.children {
-        if let Node::Stream { name: nm, data, .. } = n {
-            if *nm == pool {
-                data.push(b'x');
-            }
+        if let Node::Stream { name: nm, data, .. } = n
+            && *nm == pool
+        {
+            data.push(b'x');
         }
     }
     let id = parse_installer(&cfb.build()).unwrap();
@@ -878,10 +878,10 @@ fn illegal_names_trailing_data_and_oversized_tables() {
     let mut cfb = product().cfb();
     let name = encode_name("_Tables", true);
     for n in &mut cfb.children {
-        if let Node::Stream { name: nm, data, .. } = n {
-            if *nm == name {
-                data.resize(2 * 5000, 1);
-            }
+        if let Node::Stream { name: nm, data, .. } = n
+            && *nm == name
+        {
+            data.resize(2 * 5000, 1);
         }
     }
     let id = parse_installer(&cfb.build()).unwrap();
@@ -1371,10 +1371,10 @@ fn a_patch_with_a_broken_string_pool_is_reported() {
     let mut cfb = p.cfb();
     let data_name = encode_name("_StringData", true);
     for n in &mut cfb.children {
-        if let Node::Stream { name, data, .. } = n {
-            if *name == data_name {
-                data.push(b'!');
-            }
+        if let Node::Stream { name, data, .. } = n
+            && *name == data_name
+        {
+            data.push(b'!');
         }
     }
     let id = parse_installer(&cfb.build()).unwrap();

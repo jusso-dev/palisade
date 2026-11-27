@@ -288,7 +288,9 @@ pub(crate) fn unicode_string(record: Record<'_>, what: &str) -> Result<String> {
         .and_then(|t| t.get(..len))
         .ok_or_else(|| malformed(what, "the buffer is outside the record"))?;
     let units: Vec<u16> = text
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
     String::from_utf16(&units).map_err(|_| malformed(what, "not valid UTF-16"))
@@ -332,7 +334,7 @@ mod tests {
             self
         }
         fn pad(&mut self) -> &mut Self {
-            while self.bytes.len() % self.ptr != 0 {
+            while !self.bytes.len().is_multiple_of(self.ptr) {
                 self.bytes.push(0);
             }
             self

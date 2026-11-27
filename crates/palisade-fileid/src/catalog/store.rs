@@ -829,11 +829,11 @@ impl CatalogStoreBuilder {
                         .get(HashAlgorithm::Sha256)
                         .cloned()
                 });
-                if let Some(id) = &id {
-                    if !self.seen.insert((source, id.clone())) {
-                        report.duplicates = report.duplicates.saturating_add(1);
-                        return;
-                    }
+                if let Some(id) = &id
+                    && !self.seen.insert((source, id.clone()))
+                {
+                    report.duplicates = report.duplicates.saturating_add(1);
+                    return;
                 }
                 self.records.push(CatalogRecord {
                     id,

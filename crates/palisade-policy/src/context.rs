@@ -306,7 +306,8 @@ impl Date {
         if year == 0 || year > 9999 || month == 0 || month > 12 || day == 0 {
             return None;
         }
-        let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+        let leap =
+            year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
         let days = match month {
             2 if leap => 29,
             2 => 28,

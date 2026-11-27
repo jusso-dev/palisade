@@ -886,7 +886,7 @@ fn swaps_are_atomic_under_concurrent_decisions() {
     let mut i = 0u64;
     while done.load(std::sync::atomic::Ordering::Relaxed) < 8 * 100 || i < 200 {
         engine
-            .load(if i % 2 == 0 {
+            .load(if i.is_multiple_of(2) {
                 allow.clone()
             } else {
                 deny.clone()

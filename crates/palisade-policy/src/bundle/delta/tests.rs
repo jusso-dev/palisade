@@ -241,12 +241,11 @@ proptest! {
     fn apply_of_diff_reproduces_an_edit(a in arbitrary::document(), drop in 0usize..4) {
         let old = bundle(a.clone(), 1);
         let mut edited = a;
-        if let Some(set) = edited.rule_sets.first_mut() {
-            if !set.rules.is_empty() {
+        if let Some(set) = edited.rule_sets.first_mut()
+            && !set.rules.is_empty() {
                 let i = drop % set.rules.len();
                 set.rules.remove(i);
             }
-        }
         let new = bundle(edited, 2);
         let delta = diff(&old, &new).unwrap();
         let (_, bytes) = apply(&old.to_bytes().unwrap(), &delta, &BundleLimits::DEFAULT).unwrap();

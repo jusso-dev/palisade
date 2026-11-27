@@ -1090,15 +1090,15 @@ fn check_threat_coverage(root: &Path) -> Result<Vec<String>, String> {
             &components,
         ));
         let in_fuzz = fuzz_dirs.iter().any(|d| path.starts_with(d.as_str()));
-        if is_rust && !in_fuzz {
-            if let Some((_, name)) = crates
+        if is_rust
+            && !in_fuzz
+            && let Some((_, name)) = crates
                 .iter()
                 .find(|(prefix, _)| path.starts_with(prefix.as_str()))
-            {
-                let tests = threat_coverage::test_functions(&text)
-                    .ok_or_else(|| format!("{path}: cannot tokenise"))?;
-                facts.tests.entry(name.clone()).or_default().extend(tests);
-            }
+        {
+            let tests = threat_coverage::test_functions(&text)
+                .ok_or_else(|| format!("{path}: cannot tokenise"))?;
+            facts.tests.entry(name.clone()).or_default().extend(tests);
         }
     }
     facts.fuzz_targets = fuzz::PROJECTS

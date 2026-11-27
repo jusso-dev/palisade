@@ -54,10 +54,10 @@ fn check_bounds(data: &[u8], info: &PeInfo) {
             assert_eq!(off, u64::from(start) + u64::from(delta));
         }
     }
-    if let Some(res) = &info.resources {
-        if let Some(v) = &res.version_resource {
-            assert_eq!(v.name, pe::ResourceId::Id(1));
-        }
+    if let Some(res) = &info.resources
+        && let Some(v) = &res.version_resource
+    {
+        assert_eq!(v.name, pe::ResourceId::Id(1));
     }
     if let Some(overlay) = info.overlay {
         assert_eq!(overlay.offset + overlay.size, data.len() as u64);

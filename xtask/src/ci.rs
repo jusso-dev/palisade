@@ -374,18 +374,18 @@ struct Needs {
 pub fn run(root: &std::path::Path, fast: bool, rust_version: &str) -> Result<bool, String> {
     let toolchain = msrv_toolchain(rust_version);
     for s in STEPS {
-        if let Some(os) = s.only_on.filter(|os| !runs_here(Some(os))) {
-            if !(fast && s.slow) {
-                println!("ci: [{}] skipped: runs on {os} only: {}", s.job, s.command);
-            }
+        if let Some(os) = s.only_on.filter(|os| !runs_here(Some(os)))
+            && !(fast && s.slow)
+        {
+            println!("ci: [{}] skipped: runs on {os} only: {}", s.job, s.command);
         }
-        if let Some(var) = s.needs_env {
-            if std::env::var_os(var).is_none() {
-                println!(
-                    "ci: [{}] skipped: set {var} to a disposable Postgres superuser URL to run it",
-                    s.job
-                );
-            }
+        if let Some(var) = s.needs_env
+            && std::env::var_os(var).is_none()
+        {
+            println!(
+                "ci: [{}] skipped: set {var} to a disposable Postgres superuser URL to run it",
+                s.job
+            );
         }
     }
     let mut selected: Vec<Planned> = STEPS

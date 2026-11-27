@@ -151,14 +151,15 @@ pub fn assess(
     // no Latin letter to mix with).
     if let Some(name) = on_disk {
         let reduced: String = name.chars().map(|c| confusable(c).unwrap_or(c)).collect();
-        if reduced != name && list.binaries_named(&reduced).next().is_some() {
-            if let Some(c) = name.chars().find(|c| confusable(*c).is_some()) {
-                add(MasqueradeReason::Homoglyph {
-                    component: name.to_owned(),
-                    code_point: code_point(c),
-                    looks_like: confusable(c).unwrap_or(c),
-                });
-            }
+        if reduced != name
+            && list.binaries_named(&reduced).next().is_some()
+            && let Some(c) = name.chars().find(|c| confusable(*c).is_some())
+        {
+            add(MasqueradeReason::Homoglyph {
+                component: name.to_owned(),
+                code_point: code_point(c),
+                looks_like: confusable(c).unwrap_or(c),
+            });
         }
     }
     // Code identified, or run, from a named stream hides behind the host
@@ -217,18 +218,18 @@ pub fn assess(
         if on_disk.is_none() && pe.version.is_some() {
             m.unassessed.push("name_mismatch");
         }
-        if let (Some(name), Some(v)) = (on_disk, pe.version.as_ref()) {
-            if name_mismatch(
+        if let (Some(name), Some(v)) = (on_disk, pe.version.as_ref())
+            && name_mismatch(
                 name,
                 v.original_file_name.as_deref(),
                 v.internal_name.as_deref(),
-            ) {
-                add(MasqueradeReason::NameMismatch {
-                    on_disk: name.to_owned(),
-                    original_file_name: v.original_file_name.clone(),
-                    internal_name: v.internal_name.clone(),
-                });
-            }
+            )
+        {
+            add(MasqueradeReason::NameMismatch {
+                on_disk: name.to_owned(),
+                original_file_name: v.original_file_name.clone(),
+                internal_name: v.internal_name.clone(),
+            });
         }
 
         let trusted_signer = signing
@@ -536,13 +537,12 @@ fn stem_parts(name: &str) -> (String, bool) {
             .take_while(|(_, c)| c.is_ascii_digit() || *c == '.' || *c == '_')
             .last()
             .map(|(i, _)| i);
-        if let Some(i) = version_start {
-            if s.get(i..)
+        if let Some(i) = version_start
+            && s.get(i..)
                 .is_some_and(|v| v.bytes().any(|b| b.is_ascii_digit()))
-            {
-                s = s.get(..i).unwrap_or_default();
-                s = s.strip_suffix('V').unwrap_or(s);
-            }
+        {
+            s = s.get(..i).unwrap_or_default();
+            s = s.strip_suffix('V').unwrap_or(s);
         }
         for word in ["INSTALLER", "INSTALL", "SETUP"] {
             if let Some(t) = s.strip_suffix(word) {

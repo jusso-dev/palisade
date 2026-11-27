@@ -552,7 +552,7 @@ pub fn sanitized_self_relative(bytes: &[u8]) -> Result<Vec<u8>, DescriptorError>
     let owner = sd.owner.unwrap_or(well_known::NULL).to_bytes();
     let group = sd.group.or(sd.owner).unwrap_or(well_known::NULL).to_bytes();
     let pad = |v: &mut Vec<u8>| {
-        while v.len() % 4 != 0 {
+        while !v.len().is_multiple_of(4) {
             v.push(0);
         }
     };

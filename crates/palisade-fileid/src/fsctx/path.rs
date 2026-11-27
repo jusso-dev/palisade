@@ -863,12 +863,11 @@ fn finish_with(
         let name = rest.last().cloned().unwrap_or_default();
         return Err(PathError::InvalidStream(name));
     }
-    if drive_win32 {
-        if let Some(last) = rest.last() {
-            if is_reserved_device_name(last) {
-                return Err(PathError::ReservedDeviceName(last.clone()));
-            }
-        }
+    if drive_win32
+        && let Some(last) = rest.last()
+        && is_reserved_device_name(last)
+    {
+        return Err(PathError::ReservedDeviceName(last.clone()));
     }
     let candidates: Vec<usize> = rest
         .iter()

@@ -1075,12 +1075,11 @@ fn parse_impl(
     if let Some(dir) = data_directories
         .get(DataDirectoryKind::Resource.index())
         .filter(|d| directories && d.is_present())
+        && let Some(summary) = resource::walk(data, layout, *dir, &mut warnings)
     {
-        if let Some(summary) = resource::walk(data, layout, *dir, &mut warnings) {
-            version_info = version_from_resources(data, &summary, &mut warnings);
-            (manifest, manifest_id) = manifest_from_resources(data, &summary, &mut warnings);
-            resources = Some(summary);
-        }
+        version_info = version_from_resources(data, &summary, &mut warnings);
+        (manifest, manifest_id) = manifest_from_resources(data, &summary, &mut warnings);
+        resources = Some(summary);
     }
 
     let directory = |kind: DataDirectoryKind| {

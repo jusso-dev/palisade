@@ -661,12 +661,12 @@ fn hash(path: &Path, algs: &[HashKind], json_out: bool) -> Result<ExitCode, Fail
         };
         lines.push_str(&format!("{}  {shown}\n", alg.name()));
     }
-    if let Some(a) = a {
-        if !a.conformant {
-            eprintln!(
-                "pal: warning: the image does not conform to the Authenticode specification; its Authenticode and page hashes are not authoritative"
-            );
-        }
+    if let Some(a) = a
+        && !a.conformant
+    {
+        eprintln!(
+            "pal: warning: the image does not conform to the Authenticode specification; its Authenticode and page hashes are not authoritative"
+        );
     }
     if json_out {
         print(&render(&Value::Object(values), Format::Json, true));

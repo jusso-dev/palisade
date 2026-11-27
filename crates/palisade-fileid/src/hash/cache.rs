@@ -975,14 +975,14 @@ where
 {
     let file = stamps.open(path).map_err(ThroughError::Stamp)?;
     let mut key = stamps.stamp(&file).map_err(ThroughError::Stamp)?;
-    if !mode.must_recompute(&key, location) {
-        if let Ok(value) = lock(cache).get(&key, Some(path)) {
-            return Ok(Through::Done {
-                value: value.clone(),
-                source: ValueSource::Cache,
-                cache_disagreed: false,
-            });
-        }
+    if !mode.must_recompute(&key, location)
+        && let Ok(value) = lock(cache).get(&key, Some(path))
+    {
+        return Ok(Through::Done {
+            value: value.clone(),
+            source: ValueSource::Cache,
+            cache_disagreed: false,
+        });
     }
     let sha256 = |v: &CacheValue| {
         v.flat

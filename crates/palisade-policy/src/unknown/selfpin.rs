@@ -71,10 +71,10 @@ impl SelfImage {
         // The canonical forms, as validated documents hold hashes, so the
         // deny check compares like with like.
         for field in Field::ALL {
-            if matches!(field.class(), crate::model::FieldClass::Hash { .. }) {
-                if let Some(hex) = facts.get(field).and_then(normalize_hex) {
-                    facts.set(field, hex);
-                }
+            if matches!(field.class(), crate::model::FieldClass::Hash { .. })
+                && let Some(hex) = facts.get(field).and_then(normalize_hex)
+            {
+                facts.set(field, hex);
             }
         }
         for signer in facts.signers.iter_mut().flatten() {

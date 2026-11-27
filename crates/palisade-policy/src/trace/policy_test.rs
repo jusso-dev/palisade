@@ -159,12 +159,11 @@ pub fn read_tests(input: &str) -> Result<TestFile, TestFileError> {
         .get("tests")
         .and_then(serde_json::Value::as_array)
         .map(Vec::len)
+        && n > MAX_TESTS
     {
-        if n > MAX_TESTS {
-            return Err(TestFileError::Invalid(format!(
-                "{n} tests; at most {MAX_TESTS}"
-            )));
-        }
+        return Err(TestFileError::Invalid(format!(
+            "{n} tests; at most {MAX_TESTS}"
+        )));
     }
     let file: TestFile =
         serde_json::from_value(value).map_err(|e| TestFileError::Parse(e.to_string()))?;
@@ -333,14 +332,14 @@ pub fn run(policy: &ValidatedPolicy, suite: &str, file: &TestFile) -> Result<Tes
         let e = &t.expect;
         let mut failures = Vec::new();
         let got = SimOutcome::of(d.as_ref());
-        if let Some(want) = e.outcome {
-            if want != got {
-                failures.push(format!(
-                    "outcome: expected {}, got {}",
-                    name(&want),
-                    name(&got)
-                ));
-            }
+        if let Some(want) = e.outcome
+            && want != got
+        {
+            failures.push(format!(
+                "outcome: expected {}, got {}",
+                name(&want),
+                name(&got)
+            ));
         }
         if let Some(want) = e.would_have_been {
             let got = d.as_ref().map(SimOutcome::enforce_of);

@@ -100,10 +100,10 @@ impl Record {
         floor: u64,
         fallback: Option<u64>,
     ) -> Result<Self, RecordError> {
-        if let Some(f) = fallback {
-            if f == 0 || f >= floor {
-                return Err(RecordError::InvalidFallback);
-            }
+        if let Some(f) = fallback
+            && (f == 0 || f >= floor)
+        {
+            return Err(RecordError::InvalidFallback);
         }
         Ok(Self {
             target,

@@ -712,10 +712,10 @@ impl CrlCache {
         if crl.issuer.der != issuer.subject.der {
             return Issued::No;
         }
-        if let (Some(aki), Some(ski)) = (&crl.authority_key_id, &issuer.subject_key_id) {
-            if aki != ski {
-                return Issued::No;
-            }
+        if let (Some(aki), Some(ski)) = (&crl.authority_key_id, &issuer.subject_key_id)
+            && aki != ski
+        {
+            return Issued::No;
         }
         if issuer
             .key_usage

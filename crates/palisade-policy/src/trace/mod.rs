@@ -868,10 +868,10 @@ impl<'p> Tracer<'p> {
         let decision_ref = decision.as_ref();
 
         // The deciding rule's criteria.
-        if let (Some(d), Some(r)) = (trace.decisive.as_mut(), decider) {
-            if let Some(res) = self.by_id.get(&r.rule.id).and_then(|&i| result(i)) {
-                d.criteria = criteria(r, res, subject, privacy, full, None);
-            }
+        if let (Some(d), Some(r)) = (trace.decisive.as_mut(), decider)
+            && let Some(res) = self.by_id.get(&r.rule.id).and_then(|&i| result(i))
+        {
+            d.criteria = criteria(r, res, subject, privacy, full, None);
         }
 
         // Matched rules, by rule ID.

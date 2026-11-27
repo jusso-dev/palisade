@@ -60,18 +60,18 @@ pub(crate) struct Utf16Text {
 /// of `data`. An odd trailing byte is ignored. Allocates only for the units
 /// before the terminator.
 pub(crate) fn utf16_until_nul(data: &[u8]) -> Utf16Text {
-    let unit = |pair: &[u8]| match pair {
-        [lo, hi] => u16::from_le_bytes([*lo, *hi]),
-        _ => 0,
-    };
-    let pairs = data.chunks_exact(2);
+    let pairs = data.as_chunks::<2>().0;
     let available = pairs.len();
     let len = pairs
-        .clone()
-        .position(|p| unit(p) == 0)
+        .iter()
+        .position(|p| u16::from_le_bytes(*p) == 0)
         .unwrap_or(available);
     let terminated = len < available;
-    let units: Vec<u16> = pairs.take(len).map(unit).collect();
+    let units: Vec<u16> = pairs
+        .iter()
+        .take(len)
+        .map(|p| u16::from_le_bytes(*p))
+        .collect();
     Utf16Text {
         text: String::from_utf16_lossy(&units),
         consumed: len

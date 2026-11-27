@@ -846,10 +846,10 @@ fn parse_tst_info<'a>(der: &'a [u8], base: usize, warnings: &mut Warnings) -> Re
     let imprint_alg = pkcs7::parse_digest_alg(&m.read(tag::SEQUENCE)?)?;
     let hashed = m.read(tag::OCTET_STRING)?.content;
     m.finish()?;
-    if let Ok(alg) = imprint_alg {
-        if hashed.len() != alg.digest_len() {
-            return Err(TimestampError::DigestLength);
-        }
+    if let Ok(alg) = imprint_alg
+        && hashed.len() != alg.digest_len()
+    {
+        return Err(TimestampError::DigestLength);
     }
     let serial = asn1::integer_bytes(&r.read(tag::INTEGER)?)?;
     let gen_time = match r.read_any()? {

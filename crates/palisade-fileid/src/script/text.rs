@@ -77,7 +77,7 @@ impl<'a> Text<'a> {
                 if data.starts_with(&[0xff, 0xfe, 0, 0]) {
                     // A UTF-32LE byte order mark starts with the UTF-16LE one.
                     Some(TextIssue::Utf32Bom)
-                } else if self.body.len() % 2 != 0 {
+                } else if !self.body.len().is_multiple_of(2) {
                     Some(TextIssue::OddUtf16Length)
                 } else if char::decode_utf16(self.units_in(0, self.len())).any(|c| c.is_err()) {
                     Some(TextIssue::UnpairedSurrogate)
@@ -414,7 +414,7 @@ impl Sink {
 /// multiple of four, padding only at the end, and zero bits after the last
 /// encoded byte. Anything else is `None`.
 pub(super) fn decode_base64(text: &[u8]) -> Option<Vec<u8>> {
-    if text.is_empty() || text.len() % 4 != 0 {
+    if text.is_empty() || !text.len().is_multiple_of(4) {
         return None;
     }
     let value = |b: u8| -> Option<u32> {
@@ -428,10 +428,9 @@ pub(super) fn decode_base64(text: &[u8]) -> Option<Vec<u8>> {
         }))
     };
     let mut out = Vec::with_capacity(text.len() / 4 * 3);
-    let quads = text.chunks_exact(4);
+    let quads = text.as_chunks::<4>().0;
     let last = quads.len().saturating_sub(1);
-    for (i, quad) in quads.enumerate() {
-        let [a, b, c, d] = <[u8; 4]>::try_from(quad).ok()?;
+    for (i, &[a, b, c, d]) in quads.iter().enumerate() {
         let pad = match (c, d) {
             (b'=', b'=') => 2,
             (_, b'=') => 1,

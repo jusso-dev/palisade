@@ -417,10 +417,9 @@ pub fn read_snapshots(input: &str) -> Result<SnapshotFile, SnapshotError> {
         .get("snapshots")
         .and_then(serde_json::Value::as_array)
         .map(Vec::len)
+        && n > MAX_SNAPSHOTS
     {
-        if n > MAX_SNAPSHOTS {
-            return Err(SnapshotError::TooMany(n));
-        }
+        return Err(SnapshotError::TooMany(n));
     }
     let file: SnapshotFile =
         serde_json::from_value(value).map_err(|e| SnapshotError::Parse(e.to_string()))?;

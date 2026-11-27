@@ -666,31 +666,30 @@ impl Builder<'_> {
             index,
             pending,
         }) = self.stack.last_mut()
+            && key.is_none()
         {
-            if key.is_none() {
-                if entries.is_empty() && at < *location {
-                    *location = at;
-                }
-                if let Some(error) = pending.take() {
-                    return Err(error.relocate(*location));
-                }
-                check_key(&text, plain, at)?;
-                match index.entry(text.clone()) {
-                    Slot::Occupied(first) => {
-                        let first = entries.get(*first.get()).map_or(at, |e| e.key_location);
-                        return Err(YamlError::new(
-                            YamlErrorKind::DuplicateKey,
-                            format!("duplicate key `{text}`; it is first used at {first}"),
-                        )
-                        .at(at));
-                    }
-                    Slot::Vacant(slot) => {
-                        slot.insert(entries.len());
-                    }
-                }
-                *key = Some((text, at));
-                return Ok(());
+            if entries.is_empty() && at < *location {
+                *location = at;
             }
+            if let Some(error) = pending.take() {
+                return Err(error.relocate(*location));
+            }
+            check_key(&text, plain, at)?;
+            match index.entry(text.clone()) {
+                Slot::Occupied(first) => {
+                    let first = entries.get(*first.get()).map_or(at, |e| e.key_location);
+                    return Err(YamlError::new(
+                        YamlErrorKind::DuplicateKey,
+                        format!("duplicate key `{text}`; it is first used at {first}"),
+                    )
+                    .at(at));
+                }
+                Slot::Vacant(slot) => {
+                    slot.insert(entries.len());
+                }
+            }
+            *key = Some((text, at));
+            return Ok(());
         }
         let value = if plain {
             resolve_plain(&text).map_err(|e| e.at(at))?
@@ -928,10 +927,11 @@ fn is_number_like(text: &str) -> bool {
             .get(..2)
             .filter(|p| p.eq_ignore_ascii_case(prefix))
             .and_then(|_| rest.get(2..));
-        if let Some(digits) = digits {
-            if !digits.is_empty() && digits.chars().all(|c| c == '_' || c.is_digit(radix)) {
-                return true;
-            }
+        if let Some(digits) = digits
+            && !digits.is_empty()
+            && digits.chars().all(|c| c == '_' || c.is_digit(radix))
+        {
+            return true;
         }
     }
     is_sexagesimal(rest) || is_decimal_like(rest)

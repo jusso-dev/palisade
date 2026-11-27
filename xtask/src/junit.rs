@@ -131,10 +131,8 @@ fn attribute(attributes: &str, key: &str) -> Option<String> {
         let before = rest.get(..at)?;
         let after = rest.get(at + key.len()..)?;
         let boundary = before.is_empty() || before.ends_with(char::is_whitespace);
-        if boundary {
-            if let Some(value) = after.strip_prefix("=\"") {
-                return Some(unescape(value.get(..value.find('"')?)?));
-            }
+        if boundary && let Some(value) = after.strip_prefix("=\"") {
+            return Some(unescape(value.get(..value.find('"')?)?));
         }
         rest = after;
     }

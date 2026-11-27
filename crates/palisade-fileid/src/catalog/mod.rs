@@ -361,10 +361,10 @@ fn check(envelope: &pkcs7::Envelope<'_>, content: &[u8]) -> SignatureInfo {
         Some((_, cert)) => (Some(cert.key_alg.clone()), cert.key_bits),
         None => (None, None),
     };
-    if let (Some(KeyAlgorithm::Rsa), Some(bits)) = (&key_alg, key_bits) {
-        if bits < 2048 {
-            warnings.push(SignatureWarning::SmallRsaKey(bits));
-        }
+    if let (Some(KeyAlgorithm::Rsa), Some(bits)) = (&key_alg, key_bits)
+        && bits < 2048
+    {
+        warnings.push(SignatureWarning::SmallRsaKey(bits));
     }
     let os_ci_issues = os_ci_issues(key_alg.as_ref(), key_bits, weak);
     let signer_attrs = match (&status, &signer_cert) {

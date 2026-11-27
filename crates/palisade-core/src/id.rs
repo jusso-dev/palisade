@@ -58,7 +58,11 @@ impl FromStr for Uuid7 {
             };
             // 36 bytes minus 4 hyphens leaves exactly 32 digits, so this is in range.
             let byte = bytes.get_mut(nibble / 2).ok_or(ERR)?;
-            *byte |= if nibble % 2 == 0 { value << 4 } else { value };
+            *byte |= if nibble.is_multiple_of(2) {
+                value << 4
+            } else {
+                value
+            };
             nibble += 1;
         }
         Self::from_bytes(bytes).ok_or(ERR)

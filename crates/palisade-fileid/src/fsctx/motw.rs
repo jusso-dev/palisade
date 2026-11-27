@@ -200,13 +200,10 @@ impl Motw {
 fn decode(bytes: &[u8], warnings: &mut Vec<MotwWarning>) -> String {
     if let Some(rest) = bytes.strip_prefix(&[0xFF, 0xFE]) {
         let units: Vec<u16> = rest
-            .chunks_exact(2)
-            .map(|c| {
-                u16::from_le_bytes([
-                    c.first().copied().unwrap_or(0),
-                    c.get(1).copied().unwrap_or(0),
-                ])
-            })
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u16::from_le_bytes(*c))
             .collect();
         let odd = rest.len() % 2 != 0;
         let mut text = String::from_utf16_lossy(&units);
@@ -232,10 +229,11 @@ fn decode(bytes: &[u8], warnings: &mut Vec<MotwWarning>) -> String {
 
 fn parse_zone(value: &str, warnings: &mut Vec<MotwWarning>) -> Option<Zone> {
     // The stream size limit bounds the length; `parse` rejects overflow.
-    if !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()) {
-        if let Ok(n) = value.parse::<u32>() {
-            return Some(Zone::from_id(n));
-        }
+    if !value.is_empty()
+        && value.bytes().all(|b| b.is_ascii_digit())
+        && let Ok(n) = value.parse::<u32>()
+    {
+        return Some(Zone::from_id(n));
     }
     warn(
         warnings,

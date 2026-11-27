@@ -304,8 +304,7 @@ fn parse_hex_into(s: &str, out: &mut [u8]) -> Result<(), ValueError> {
     if s.len() != out.len().saturating_mul(2) {
         return Err(ERR);
     }
-    for (byte, pair) in out.iter_mut().zip(s.as_bytes().chunks_exact(2)) {
-        let &[hi, lo] = pair else { return Err(ERR) };
+    for (byte, &[hi, lo]) in out.iter_mut().zip(s.as_bytes().as_chunks::<2>().0) {
         *byte = (hex_digit(hi).ok_or(ERR)? << 4) | hex_digit(lo).ok_or(ERR)?;
     }
     Ok(())
@@ -437,7 +436,7 @@ impl FromStr for HexBytes {
 
     fn from_str(s: &str) -> Result<Self, ValueError> {
         const ERR: ValueError = ValueError("expected 1 to 64 bytes of lowercase hexadecimal");
-        if s.is_empty() || s.len() % 2 != 0 || s.len() > Self::MAX.saturating_mul(2) {
+        if s.is_empty() || !s.len().is_multiple_of(2) || s.len() > Self::MAX.saturating_mul(2) {
             return Err(ERR);
         }
         let mut bytes = vec![0u8; s.len() / 2];

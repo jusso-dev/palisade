@@ -752,10 +752,9 @@ impl KeyPlan {
                                         if let Ok(i) = self
                                             .principals
                                             .binary_search_by(|p| p.as_str().cmp(canon))
+                                            && let Some(word) = held.get_mut(i / 64)
                                         {
-                                            if let Some(word) = held.get_mut(i / 64) {
-                                                *word |= 1 << (i % 64);
-                                            }
+                                            *word |= 1 << (i % 64);
                                         }
                                     }
                                     (1u8, &*held, malformed).hash(&mut h);
