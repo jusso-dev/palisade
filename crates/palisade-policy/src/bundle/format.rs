@@ -879,7 +879,19 @@ impl PolicyBundle {
     /// revision, and the inlined libraries. The header, the source
     /// revisions and the metadata digest are left out, so a text-only
     /// edit, a new `policy_version` or a new `generated_at` keeps it. It is
-    /// the key of the decision cache (#42).
+    /// meant as the policy part of the decision cache key (#42).
+    ///
+    /// A cache keyed by it must not hand back a stored [`Decision`] as is:
+    /// a decision names the policy revision it was made under
+    /// ([`RuleRef::policy_revision`]), and rule names and display IDs, which
+    /// this hash leaves out. Re-stamp the revision (and anything else taken
+    /// from the current policy) when serving a cached decision, or key the
+    /// cache by the bundle hash instead. The engine's cache (#293) keys by
+    /// the snapshot generation today, which changes on every swap, so it is
+    /// not affected.
+    ///
+    /// [`Decision`]: crate::decision::Decision
+    /// [`RuleRef::policy_revision`]: crate::decision::RuleRef::policy_revision
     ///
     /// # Errors
     ///
