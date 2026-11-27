@@ -604,6 +604,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn mui_original_names_compare_without_the_suffix() {
+        // OS binaries whose `OriginalFilename` names their language
+        // resource file (`NOTEPAD.EXE.MUI`) are not renamed: the `.MUI`
+        // suffix comes off before the comparison, whatever its case.
+        for (disk, original) in [
+            ("notepad.exe", "NOTEPAD.EXE.MUI"),
+            ("notepad.exe", "Notepad.exe.mui"),
+            ("Notepad.EXE", "NOTEPAD.EXE.MUI"),
+            ("explorer.exe", "EXPLORER.EXE.MUI"),
+            ("shell32.dll", "SHELL32.DLL.MUI"),
+        ] {
+            assert!(
+                !name_mismatch(disk, Some(original), None),
+                "{disk} vs {original}"
+            );
+        }
+        // The suffix does not hide a rename: a copy named otherwise is still
+        // a mismatch, and only a trailing `.MUI` comes off.
+        for (disk, original) in [
+            ("calc.exe", "NOTEPAD.EXE.MUI"),
+            ("notepad.exe", "NOTEPAD.MUI.EXE"),
+            ("notepad.exe.mui", "CALC.EXE.MUI"),
+        ] {
+            assert!(
+                name_mismatch(disk, Some(original), None),
+                "{disk} vs {original}"
+            );
+        }
+    }
+
+    #[test]
     fn benign_name_differences() {
         for (disk, original) in [
             ("powershell.exe", "PowerShell.EXE"),

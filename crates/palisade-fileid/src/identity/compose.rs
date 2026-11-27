@@ -611,29 +611,7 @@ fn trust_tier(
         }
     }
 
-    // "Unsigned" needs both halves of the evidence: no embedded signature,
-    // and a catalog lookup that found nothing. Without the lookup the file
-    // may be catalog-signed, so it is unverified.
-    let state = if signer.is_some() {
-        SigningStateKind::Trusted
-    } else if file_revoked {
-        SigningStateKind::Invalid
-    } else if embedded == EmbeddedState::NotChecked
-        || (embedded == EmbeddedState::Unsigned && catalog == CatalogState::NotChecked)
-    {
-        SigningStateKind::Unverified
-    } else if embedded == EmbeddedState::Valid
-        || matches!(
-            catalog,
-            CatalogState::ListedUntrusted | CatalogState::ListedTrustedSha1Only
-        )
-    {
-        SigningStateKind::Untrusted
-    } else if embedded == EmbeddedState::Invalid {
-        SigningStateKind::Invalid
-    } else {
-        SigningStateKind::Unsigned
-    };
+    let state = signing_state_kind(signer.is_some(), file_revoked, embedded, catalog);
 
     id.signing_state = Field::Computed(SigningState {
         state,
@@ -1155,5 +1133,89 @@ fn chain_summary(c: &ChainReport) -> ChainSummary {
         anchored_to: c.anchored_to.as_ref().map(|a| a.label.clone()),
         well_known_root_id: c.well_known_root_id,
         issues: c.issues.len(),
+    }
+}
+
+/// The signing verdict from its evidence. `trusted_signer` is whether a
+/// trusted signer vouches for the file: a valid embedded signature that
+/// passed every check, or a catalog match counted usable (trusted, and not
+/// relying on SHA-1). "Unsigned" needs both halves of the evidence: no
+/// embedded signature, and a catalog lookup that found nothing. Without the
+/// lookup (no store, or an index cut short) the file may be catalog-signed,
+/// so it is unverified.
+fn signing_state_kind(
+    trusted_signer: bool,
+    file_revoked: bool,
+    embedded: EmbeddedState,
+    catalog: CatalogState,
+) -> SigningStateKind {
+    if trusted_signer {
+        SigningStateKind::Trusted
+    } else if file_revoked {
+        SigningStateKind::Invalid
+    } else if embedded == EmbeddedState::NotChecked
+        || (embedded == EmbeddedState::Unsigned && catalog == CatalogState::NotChecked)
+    {
+        SigningStateKind::Unverified
+    } else if embedded == EmbeddedState::Valid
+        || matches!(
+            catalog,
+            CatalogState::ListedUntrusted | CatalogState::ListedTrustedSha1Only
+        )
+    {
+        SigningStateKind::Untrusted
+    } else if embedded == EmbeddedState::Invalid {
+        SigningStateKind::Invalid
+    } else {
+        SigningStateKind::Unsigned
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn signing_state_never_trusts_without_a_usable_signer() {
+        use CatalogState as C;
+        use EmbeddedState as E;
+        // A catalog match that relies on SHA-1 is never trust, and never
+        // "unsigned"; a catalog index cut short is "not checked", so an
+        // unsigned file is unverified, never unsigned.
+        for embedded in [E::Unsigned, E::Valid, E::Invalid, E::NotChecked] {
+            for catalog in [
+                C::NotChecked,
+                C::NotListed,
+                C::ListedUntrusted,
+                C::ListedTrustedSha1Only,
+                C::ListedTrusted,
+            ] {
+                let k = signing_state_kind(false, false, embedded, catalog);
+                assert_ne!(k, SigningStateKind::Trusted, "{embedded:?} {catalog:?}");
+            }
+            assert_ne!(
+                signing_state_kind(false, false, embedded, C::ListedTrustedSha1Only),
+                SigningStateKind::Unsigned,
+                "{embedded:?}"
+            );
+        }
+        assert_eq!(
+            signing_state_kind(false, false, E::Unsigned, C::NotChecked),
+            SigningStateKind::Unverified
+        );
+        assert_eq!(
+            signing_state_kind(false, false, E::Unsigned, C::NotListed),
+            SigningStateKind::Unsigned
+        );
+        // A revoked hash is invalid whatever else is listed, and a trusted
+        // signer is the only way to `Trusted`.
+        assert_eq!(
+            signing_state_kind(false, true, E::Valid, C::ListedTrusted),
+            SigningStateKind::Invalid
+        );
+        assert_eq!(
+            signing_state_kind(true, false, E::Valid, C::NotListed),
+            SigningStateKind::Trusted
+        );
     }
 }
