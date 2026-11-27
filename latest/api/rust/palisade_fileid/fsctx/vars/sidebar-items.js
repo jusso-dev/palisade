@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["PathVariable"],"fn":["path_variables_matched"],"struct":["KnownFolders"]};

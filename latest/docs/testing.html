@@ -1,0 +1,616 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Testing - Palisade</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="Palisade: an educational Windows application allowlisting project">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-2459343d.css">
+        <link rel="stylesheet" href="../css/chrome-ae938929.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="../theme/palisade-1bbd7bbc.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex-3e2a1e09.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc-8cab92c4.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div class="palisade-disclaimer" role="note" aria-label="Disclaimer">
+                    <strong>Palisade is an educational, personal-development project. It is not a replacement for commercial application control products and comes with no support or warranty. Do not rely on it to protect production systems.</strong>
+                </div>
+                <nav class="palisade-versions" aria-label="Documentation version">
+                    <label for="palisade-version-select">Version</label>
+                    <select id="palisade-version-select" hidden></select>
+                </nav>
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Palisade</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+                        <a href="https://github.com/jusso-dev/palisade" title="Git repository" aria-label="Git repository">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="testing"><a class="header" href="#testing">Testing</a></h1>
+<p>How Palisade is tested, which tests run where, and the conventions new tests follow.
+<a href="../CONTRIBUTING.html#testing-expectations">CONTRIBUTING.md</a> says what a change must come with, and
+<a href="ci.html">ci.md</a> lists every CI job.</p>
+<h2 id="kinds-of-test"><a class="header" href="#kinds-of-test">Kinds of test</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Kind</th><th>Where</th><th>Runs</th></tr>
+</thead>
+<tbody>
+<tr><td>Unit tests</td><td><code>#[cfg(test)] mod tests</code> next to the code, or a <code>tests.rs</code> sibling module</td><td>Every <code>cargo test</code> / <code>cargo nextest run</code>, on every CI test runner</td></tr>
+<tr><td>Integration tests</td><td><code>crates/&lt;crate&gt;/tests/*.rs</code>, using only the crate's public API</td><td>Same</td></tr>
+<tr><td>Property tests</td><td><code>proptest</code>, in either of the above</td><td>Same</td></tr>
+<tr><td>Golden-file tests</td><td>Expected output committed next to the test, regenerated on request</td><td>Same</td></tr>
+<tr><td>Doctests</td><td>Examples in <code>///</code> comments</td><td><code>cargo test --doc</code>, because nextest does not run them</td></tr>
+<tr><td>Fuzz targets</td><td><code>crates/&lt;crate&gt;/fuzz/</code>, cargo-fuzz (libFuzzer)</td><td>60 s per target on every PR; 30 min per target weekly</td></tr>
+<tr><td>Benchmarks</td><td><code>crates/&lt;crate&gt;/benches/*.rs</code>, criterion</td><td>Built and run once in test mode on every PR; measured locally</td></tr>
+<tr><td>Coverage</td><td>Unit, integration, property and golden-file tests, instrumented (not doctests, fuzzing or benchmarks)</td><td>Every PR, on Linux and Windows x64</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="running-tests"><a class="header" href="#running-tests">Running tests</a></h2>
+<pre><code class="language-sh">cargo nextest run --workspace --all-features --locked   # the `default` profile
+cargo nextest run --workspace --all-features --locked --profile ci
+cargo test --workspace --all-features --locked --doc
+cargo test --workspace --all-features --locked           # also works, without the JUnit report
+</code></pre>
+<p><code>.config/nextest.toml</code> has two profiles:</p>
+<ul>
+<li><code>default</code>: for local runs. No retries, and a test is reported as slow after 60 s.</li>
+<li><code>ci</code>: the same, plus <code>fail-fast = false</code>, so one run reports every failure, and a JUnit report
+at <code>target/nextest/ci/junit.xml</code>. <code>cargo xtask test-summary</code> turns that report into the job
+summary (<a href="ci.html#test-reports">ci.md</a>).</li>
+</ul>
+<p>Neither profile retries. A test that passes only on a retry is flaky, and a flaky test in a
+security product hides real failures, so it is fixed rather than retried. Do not add <code>retries</code> to
+a profile or a per-test override.</p>
+<p>The <code>postgres</code> test group holds <code>palisade-server</code>'s database tests (<code>tests/postgres.rs</code>). Each
+test creates its own database and roles, so they run in parallel, at most four at a time so the
+server's connection limit never fails a test. Outside the <code>postgres</code> CI job they skip themselves,
+because <code>PALISADE_TEST_DATABASE_ADMIN_URL</code> is not set. A new test binary that needs Postgres joins
+the group by adding its <code>binary(...)</code> to the filter in <code>.config/nextest.toml</code>.</p>
+<p>The slowest tests are the 10,000-case property tests in <code>palisade-policy</code>, which take tens of
+seconds in a debug build. Set <code>PROPTEST_CASES</code> to run fewer cases locally.</p>
+<h2 id="conventions"><a class="header" href="#conventions">Conventions</a></h2>
+<h3 id="names"><a class="header" href="#names">Names</a></h3>
+<p>A test name says what is expected, as a sentence in snake case: what holds, or what happens in
+which case. For example <code>hostile_descriptors_are_errors</code>, <code>every_truncation_of_a_rich_image</code> and
+<code>huge_counts_do_not_overflow</code>. A reader of a failure should know what broke from the name alone.
+Do not prefix names with <code>test_</code>.</p>
+<h3 id="determinism"><a class="header" href="#determinism">Determinism</a></h3>
+<ul>
+<li><strong>No sleeps.</strong> A test that waits for something uses a channel, a barrier or a mock clock. A
+<code>Clock</code> trait for code that reads the time arrives with the platform abstraction (#29). Until
+then, pass times in as values.</li>
+<li><strong>No network.</strong> Unit and integration tests do not open sockets to anything outside the test,
+resolve names or download anything. Tests that need a real service, such as Postgres for the
+server (#126, #127), are marked and run only where that service is provided.</li>
+<li><strong>No dependence on the machine.</strong> Tests do not read the user's home directory, environment or
+locale, or the system clock's time zone. Temporary files go in a fresh directory under
+<code>std::env::temp_dir()</code> or the target directory, and are removed afterwards.</li>
+<li>Randomness comes only from proptest, which reports a seed for every failure.</li>
+</ul>
+<h3 id="platforms"><a class="header" href="#platforms">Platforms</a></h3>
+<ul>
+<li>Code and tests that only work on Windows are gated with <code>#[cfg(windows)]</code>, so the workspace
+builds and tests on every platform. CI runs the tests on Linux, macOS, Windows x64 and
+Windows ARM64.</li>
+<li>Tests that need administrator rights or a test VM are <code>#[ignore]</code>d, with a reason, and run in
+the VM harness (#26).</li>
+<li>Ignored tests that write files on request, such as the fuzz seed writers below, say so in
+their <code>#[ignore = "..."]</code> reason.</li>
+</ul>
+<h3 id="fixtures"><a class="header" href="#fixtures">Fixtures</a></h3>
+<ul>
+<li>Fixtures are synthetic and built at test time where possible. <code>palisade-fileid</code> builds its PE
+images byte by byte (<code>crates/palisade-fileid/tests/common</code>), so no binaries are committed.</li>
+<li>Small committed fixtures (policy documents, PKCS#7 signatures) live in the crate's
+<code>tests/fixtures/</code>, each set with a note, or a script, that says how it was made.</li>
+<li>Never commit malware, antivirus test strings or third-party signed binaries
+(<a href="responsible-use.html">responsible-use.md</a>). The one exception is the content tagger's
+built-in rule for the standard anti-malware test file (#44): its rule and test fixture
+hold the string as hex only, assembled in memory at test time and never written to disk,
+and <code>source_files_do_not_carry_the_test_string</code> (<code>crates/palisade-fileid/tests/tags.rs</code>)
+fails if the string appears verbatim in the crate's sources.
+<code>cargo xtask check-testdata</code> (the <code>fixtures</code> CI job) fails if any file in the repository starts
+like an executable (<code>MZ</code>) and its SHA-256 is not in <code>testdata/manifest.txt</code> with a reason.
+Generated fixtures are never committed, so that list is normally empty, and a dropped-in PE,
+anywhere, fails the check.</li>
+</ul>
+<h3 id="the-fixture-corpus"><a class="header" href="#the-fixture-corpus">The fixture corpus</a></h3>
+<p><code>palisade-fileid</code> builds a whole corpus from Rust at test time, on any OS, in
+<code>crates/palisade-fileid/tests/corpus/</code>:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Kind</th><th>Fixtures</th></tr>
+</thead>
+<tbody>
+<tr><td>PE</td><td>PE32+ x64 and ARM64, PE32 x86, each as an <code>.exe</code> and a <code>.dll</code>, with a version resource (original file name, product, company, file version)</td></tr>
+<tr><td>Test PKI</td><td>A root CA, an intermediate and RSA-3072 leaves; an ECDSA P-256 leaf; expired, revoked-in-CRL, wrong-EKU (TLS server only) and self-signed leaves; a CRL</td></tr>
+<tr><td>Signed PE</td><td>Embedded Authenticode, dual signed (nested), tampered after signing, a truncated certificate table, a page-hash-bearing signature, and one per bad leaf above</td></tr>
+<tr><td>Catalog</td><td>A signed catalog (<code>.cat</code>) and the unsigned PE it lists by SHA-256 Authenticode digest (catalog-signed)</td></tr>
+<tr><td>Malformed</td><td>Zero length, <code>MZ</code> only, truncated headers, overlapping sections, <code>NumberOfSections</code> 0xffff, a recursive resource directory, <code>SizeOfImage</code> near 4 GiB</td></tr>
+<tr><td>Script</td><td><code>.ps1</code>, <code>.bat</code>, <code>.cmd</code>, <code>.vbs</code>, <code>.js</code>, <code>.wsf</code>, <code>.hta</code>, each only printing <code>PALISADE-FIXTURE</code></td></tr>
+</tbody>
+</table>
+</div>
+<ul>
+<li><strong>Signing is pure Rust</strong> (<code>tests/corpus/sign.rs</code>): PKCS#7 SignedData over
+<code>SpcIndirectDataContent</code> (or a catalog's trust list), as code signers write it, so no OS
+signing tools are needed.</li>
+<li><strong>Deterministic.</strong> The RSA test keys come from an RNG seeded by the key's name, and the
+signing time is fixed, so every run on every OS makes the same bytes. The one exception is the
+ECDSA fixture, whose signature is random by nature.</li>
+<li><strong>Checked by the crate itself.</strong> <code>tests/fixture_corpus.rs</code> parses every fixture and asserts
+the property it was built to have: machine, format and version info; signatures that verify
+and chain to the test root (and the nested one); the tampered fixture a digest mismatch; the
+wrong-EKU leaf refused because code signing is not permitted, the self-signed one because it
+reaches no anchor; the CRL listing the revoked leaf; the page hash table matching; malformed
+inputs never panicking. This runs in the <code>test</code> job on every OS.</li>
+<li><strong>On disk:</strong> <code>cargo xtask fixtures</code> writes the corpus and a <code>MANIFEST</code> to <code>target/fixtures/</code>.</li>
+<li><strong>Golden hashes:</strong> <code>cargo xtask golden</code> rebuilds the corpus and compares every fixture's
+SHA-256 with <code>testdata/golden/fixtures.txt</code>; <code>cargo xtask golden --update</code> rewrites it. A
+changed hash is a changed fixture, reviewed in the PR. Provenance:
+<code>testdata/golden/README.md</code>.</li>
+<li><strong>Fuzz seeds:</strong> <code>write_corpus_fuzz_seeds</code> adds the corpus to the seed corpora of the PE,
+PKCS#7 and X.509 fuzz targets.</li>
+</ul>
+<p>Not in the corpus: MSI/MSP/MST fixtures, which arrive with installer identity (#53; its
+compound-file builder is on <code>main</code> since #279), and CHM and CPL fixtures, which arrive with compiled HTML
+and control panel item enforcement (#98, M2).</p>
+<ul>
+<li>
+<p><strong>Builders.</strong> Policy tests in other crates build their inputs with <code>palisade-policy</code>'s
+<code>test-util</code> feature (<code>palisade_policy::test_util</code>) rather than hand-written JSON:</p>
+<pre><code class="language-toml">[dev-dependencies]
+palisade-policy = { workspace = true, features = ["test-util"] }
+</code></pre>
+<pre><code class="language-rust ignore">let policy = PolicyBuilder::new()
+    .rule_set(RuleSetBuilder::allowlist(1).rule(RuleBuilder::allow(1, hash('a'))))
+    .validate();
+let decision = subject(&amp;facts().sha256('a')).decide(&amp;policy);</code></pre>
+</li>
+</ul>
+<h3 id="unwrap-in-tests"><a class="header" href="#unwrap-in-tests">Unwrap in tests</a></h3>
+<p><code>clippy.toml</code> allows <code>unwrap</code> and <code>expect</code> inside <code>#[test]</code> functions. Helpers outside them need
+<code>#![allow(clippy::unwrap_used)]</code> at the top of the test file, with a comment that says why.</p>
+<h2 id="property-tests"><a class="header" href="#property-tests">Property tests</a></h2>
+<p>Property tests use <a href="https://docs.rs/proptest"><code>proptest</code></a>. Use them for invariants that must hold
+for every input: parsers never panic and respect their limits, serialisation round-trips, and
+matching agrees with a simpler reference.</p>
+<ul>
+<li>Failing cases are saved and replayed first on every run, so a fixed bug stays fixed: for unit
+tests in <code>proptest-regressions/</code> next to the crate's sources, and for integration tests in
+<code>tests/&lt;name&gt;.proptest-regressions</code>. Commit those files.</li>
+<li>Check that a property can fail: plant a bug (an off-by-one at a bound, say), run it, and
+revert. <code>tests/version_properties.rs</code> in <code>palisade-policy</code> says which bugs it was checked
+against.</li>
+<li>Prefer mutating valid inputs (flip, truncate, overwrite) over purely random bytes: they reach
+much deeper into a parser.</li>
+<li>The default case count is 256. Expensive properties set a smaller count with
+<code>ProptestConfig::with_cases</code>; important cheap ones set a larger one.</li>
+</ul>
+<h2 id="golden-file-tests"><a class="header" href="#golden-file-tests">Golden-file tests</a></h2>
+<p>A golden-file test compares generated output with a committed file. The convention is the one
+<code>palisade-policy</code>'s JSON Schema test uses (<code>crates/palisade-policy/tests/schema.rs</code>):</p>
+<ul>
+<li>The test fails with a message that says how to regenerate the file.</li>
+<li>Setting <code>PALISADE_BLESS=1</code> makes the test rewrite the file instead of failing:
+<code>PALISADE_BLESS=1 cargo test -p palisade-policy --test schema</code>.</li>
+<li>A change to a golden file is reviewed in the PR like code. The diff shows what changed in the
+output.</li>
+</ul>
+<h2 id="snapshot-tests"><a class="header" href="#snapshot-tests">Snapshot tests</a></h2>
+<p>Structured output that people and other systems rely on is checked with
+<a href="https://insta.rs"><code>insta</code></a> snapshots: the test serialises the value, and <code>insta</code> compares it with
+a reviewed <code>.snap</code> file next to the test.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Crate</th><th>Test</th><th>What is snapshotted</th></tr>
+</thead>
+<tbody>
+<tr><td><code>palisade-policy</code></td><td><code>tests/decision_snapshots.rs</code></td><td>Whole-pipeline decisions (outcome, deciding rule, overridden rules, annotations, directives, effects, reason code), for policies built with <code>test_util</code></td></tr>
+<tr><td><code>palisade-proto</code></td><td><code>tests/event_snapshots.rs</code></td><td>Event JSON: the canonical bytes, and a readable pretty-printed copy</td></tr>
+</tbody>
+</table>
+</div>
+<p>Conventions:</p>
+<ul>
+<li>
+<p><strong>One directory per test file</strong>, set with <code>Settings::set_snapshot_path</code> (for example
+<code>tests/snapshots/pipeline/</code>), and <strong>named snapshots</strong> (<code>assert_json_snapshot!("name", value)</code>), so
+file names say what they hold and do not depend on test function names.</p>
+</li>
+<li>
+<p><strong>Deterministic input.</strong> Fixed IDs (the <code>test_util</code> builders make them), fixed times, fixed trace
+IDs. Never snapshot a random or time-dependent value; redact it or set it.</p>
+</li>
+<li>
+<p><strong><code>.gitattributes</code> with <code>* -text</code></strong> in each snapshot directory, so Windows checkouts keep LF and
+the byte comparison holds on every runner.</p>
+</li>
+<li>
+<p><strong>Review like code.</strong> A snapshot diff in a PR is a change to output. After a deliberate change:</p>
+<pre><code class="language-sh">cargo insta test -p palisade-policy --all-features   # writes .snap.new files for changes
+cargo insta review                                   # accept or reject each one
+</code></pre>
+<p><code>INSTA_UPDATE=always cargo test ...</code> writes them directly; read the diff before committing.</p>
+</li>
+<li>
+<p><strong>CI</strong> (the <code>snapshots</code> job) runs <code>cargo insta test --check --unreferenced reject</code>, offline
+after <code>cargo fetch --locked</code>: it fails if any snapshot differs, is missing, or is no longer
+referenced by a test. The normal <code>test</code> job
+also fails on a differing snapshot, because <code>insta</code> does not write files when <code>CI</code> is set.</p>
+</li>
+</ul>
+<p>The older golden-file convention above (<code>PALISADE_BLESS=1</code>) stays for committed artefacts that are
+not snapshots of a test value: the JSON Schemas and the event registry. Snapshots of the compiled
+OS-native policy XML and of CLI output arrive with that code (#84, #15), using the same
+conventions.</p>
+<h2 id="fuzzing"><a class="header" href="#fuzzing">Fuzzing</a></h2>
+<p>Every parser of untrusted input has a coverage-guided fuzz target. The targets live in a
+separate cargo-fuzz workspace per crate (<code>crates/&lt;crate&gt;/fuzz/</code>), so normal builds never compile
+them, and only they need a nightly toolchain. There are three projects:</p>
+<ul>
+<li><code>crates/palisade-fileid/fuzz</code>, with thirteen targets: <code>pe_parse</code>, <code>version_info_parse</code>,
+<code>authenticode_ranges</code>, <code>authenticode_pkcs7</code>, <code>fsctx_parse</code>, <code>x509_chain</code>, <code>timestamp_crl</code>,
+<code>fuzz_ctl</code>, <code>fuzz_classify</code>, <code>fuzz_msi_tables</code>, <code>legacy_parse</code>, <code>fuzz_tags</code> and <code>script_sig</code>.
+The project builds <code>palisade-fileid</code> with its <code>content-rules</code> feature, for <code>fuzz_tags</code>.</li>
+<li><code>crates/palisade-proto/fuzz</code>, with one target: <code>trust_set_decode</code>.</li>
+<li><code>crates/palisade-policy/fuzz</code>, with three targets: <code>fuzz_policy_json</code> (the strict JSON reader,
+validation and the evaluator build), <code>fuzz_policy_yaml</code> (the YAML reader) and
+<code>fuzz_wildcard_regex_compile</code> (compiling and matching wildcards, regular expressions and text
+values).</li>
+</ul>
+<p>Target names are unique across projects, so <code>--target</code> names one without its project. Each fuzz
+workspace has its own committed <code>Cargo.lock</code>. Dependabot keeps it up to date, cargo-deny checks it against the root <code>deny.toml</code> on every PR and daily, and
+<code>cargo xtask audit</code> runs cargo-audit over it. cargo-vet covers only the root workspace, so a
+fuzz-only dependency is reviewed in its PR instead
+(<a href="dependencies.html">dependencies.md</a>). The fuzz crates are never shipped.</p>
+<p>One command builds every target of every project, seeds its corpus from the synthetic test fixtures, and runs it:</p>
+<pre><code class="language-sh">rustup toolchain install nightly-2026-11-20 --profile minimal
+cargo install --locked cargo-fuzz@0.13.2
+cargo xtask fuzz                         # 60 s per target, as on a PR
+cargo xtask fuzz --seconds 1800 --target pe_parse
+</code></pre>
+<p>The nightly is pinned by date in <code>xtask/src/fuzz.rs</code>, so a new nightly cannot break CI. The
+lockfile is checked with <code>cargo fetch --locked</code> on that nightly, and the build and runs are then
+offline, so they cannot download anything or re-resolve the lockfile. The
+corpus and any findings go to <code>target/fuzz-smoke/&lt;target&gt;/</code>. Each target runs with a 10 s limit
+per input and a 2 GiB memory limit, so hangs and runaway allocation count as findings too.</p>
+<ul>
+<li><strong>On every PR</strong>, the <code>fuzz</code> job in <code>ci.yml</code> runs <code>cargo xtask fuzz</code>.</li>
+<li><strong>Every week</strong>, <code>fuzz.yml</code> runs each target for 30 minutes, as one job per target. If any
+fails, it opens an <code>area:security</code> issue, or comments on the open one.</li>
+</ul>
+<p>A finding fails the job. The job summary lists each target's result and, for each failing input
+up to 64 KiB, the input itself as base64 with the command that reproduces it. That stands in for
+an artefact upload, which would need an action outside the allowlist (<a href="ci.html">ci.md</a>). To fix a
+finding:</p>
+<ol>
+<li>Reproduce it locally with the command from the job summary.</li>
+<li>Fix the parser.</li>
+<li>Add the input as a regression test in the crate's normal tests, so it runs on every platform
+on every PR, not only under the fuzzer.</li>
+</ol>
+<p><code>xtask/src/fuzz.rs</code> lists every fuzz project and target. Its tests fail if a target is missing
+from the list, from a project's <code>Cargo.toml</code> or from <code>fuzz.yml</code>'s matrix, if two projects use the
+same target name, if a <code>crates/*/fuzz</code> project is not listed, or if a project has no committed
+lockfile. To add a target:</p>
+<ol>
+<li>Add the target to <code>fuzz_targets/</code> and as a <code>[[bin]]</code> in the project's <code>Cargo.toml</code>.</li>
+<li>Add it to <code>PROJECTS</code> in <code>xtask/src/fuzz.rs</code>, with its dictionary and the ignored tests that
+write its seed inputs (they read the output directory from <code>PALISADE_FUZZ_SEED_DIR</code>).</li>
+<li>Add it to the matrix in <code>.github/workflows/fuzz.yml</code>.</li>
+</ol>
+<p>For a new crate's fuzz project, also add it to <code>PROJECTS</code> with the package whose tests write its
+seeds, commit its <code>Cargo.lock</code> (and keep <code>Cargo.lock</code> out of its <code>.gitignore</code>), add it to
+<code>.github/dependabot.yml</code>, and add its cargo-deny step to the <code>deps</code> job in <code>ci.yml</code>, to
+<code>audit.yml</code> and to <code>xtask/src/ci.rs</code>. The tests in <code>xtask/src/fuzz.rs</code> fail
+until all of these are in place. A seed writer that writes nothing fails the run, because libtest
+passes when <code>--exact</code> matches no test.</p>
+<h2 id="coverage"><a class="header" href="#coverage">Coverage</a></h2>
+<p>The <code>coverage</code> job in <code>ci.yml</code> runs the nextest suite under
+<a href="https://github.com/taiki-e/cargo-llvm-cov">cargo-llvm-cov</a>, on ubuntu-latest and windows-latest.
+<code>cargo xtask coverage-summary</code> then writes a table to the job summary page: line, function and
+region coverage for each crate, and the total. The instrumentation needs <code>llvm-tools-preview</code>,
+which <code>rust-toolchain.toml</code> installs.</p>
+<p>Coverage is reported, not enforced, with one exception. The initial targets are 80% line
+coverage for <code>palisade-policy</code> and <code>palisade-fileid</code> (#25). A crate below its target gets a
+warning annotation on the run, and the job still passes.</p>
+<p>The exception: <strong><code>palisade-policy</code> line coverage must not decrease.</strong> On every pull request the
+<code>coverage-gate</code> job measures the crate's own tests at the base commit and at the PR, in the same
+job, and fails if the share of covered lines went down. New code needs tests in the same PR; new
+code at the same ratio passes. <code>PROPTEST_RNG_SEED</code> is fixed for both runs, so property tests
+generate the same cases and the number is reproducible. To check before pushing:</p>
+<pre><code class="language-sh">cargo xtask coverage-gate --base origin/main
+</code></pre>
+<p>The full line-by-line report is not uploaded as an artefact, because that needs an action
+outside the CI allowlist (<a href="ci.html#runner-and-action-policy">ci.md</a>); generate it locally with
+<code>cargo llvm-cov report --html</code> (below). For the same reason the table goes to the job summary,
+not a PR comment, which would also need a write token on pull requests.</p>
+<p>To see the report locally:</p>
+<pre><code class="language-sh">cargo install --locked cargo-llvm-cov@0.9.2
+cargo llvm-cov nextest --workspace --all-features --locked --profile ci \
+  --json --summary-only --output-path target/llvm-cov-summary.json
+cargo xtask coverage-summary local target/llvm-cov-summary.json
+cargo llvm-cov report --html --open      # line-by-line, from the same run
+</code></pre>
+<h2 id="benchmarks"><a class="header" href="#benchmarks">Benchmarks</a></h2>
+<p>Benchmarks use <a href="https://docs.rs/criterion">criterion</a>, in <code>crates/&lt;crate&gt;/benches/</code>:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Crate</th><th>Bench</th><th>What it measures</th></tr>
+</thead>
+<tbody>
+<tr><td><code>palisade-policy</code></td><td><code>criterion_eval</code></td><td>One compiled criterion against an object's facts: hash, 25-value text, path wildcard, regex and version range</td></tr>
+<tr><td><code>palisade-fileid</code></td><td><code>hash_and_parse</code></td><td>Flat hashing of 1 MiB with each algorithm set, streamed hashing, PE parsing (full and metadata-only) and the Authenticode hash</td></tr>
+</tbody>
+</table>
+</div>
+<p>Run them locally, on a quiet machine:</p>
+<pre><code class="language-sh">cargo bench -p palisade-policy --bench criterion_eval
+cargo bench -p palisade-fileid --bench hash_and_parse
+cargo bench -p palisade-policy --bench criterion_eval -- --save-baseline before   # then, after a change:
+cargo bench -p palisade-policy --bench criterion_eval -- --baseline before
+</code></pre>
+<p>The <code>bench</code> job in CI builds every bench and runs each benchmark once in test mode
+(<code>cargo test --bench &lt;name&gt;</code>). That catches benches that no longer build or that panic, but it
+measures nothing. Shared hosted runners vary too much from run to run for their timings to be
+compared. A test in <code>xtask/src/ci.rs</code> fails if a <code>benches/*.rs</code> file is missing from the job.</p>
+<p>criterion 0.7 was chosen because later releases needed a newer Rust than the MSRV of the time
+(1.85), and the <code>msrv</code> job builds every target, including benches. The MSRV is now 1.94
+(<a href="workspace.html#toolchain-and-msrv">workspace.md</a>); moving to a newer criterion is a separate
+change. Its plotting and parallel features are off.</p>
+<h3 id="regression-gate"><a class="header" href="#regression-gate">Regression gate</a></h3>
+<p><code>.github/workflows/bench.yml</code> runs <code>cargo xtask bench-compare --base &lt;commit&gt;</code> weekly (<code>main</code>
+against <code>main</code> a week earlier) and on demand for any branch. It measures every bench at the base
+commit and at the head, in one job on one runner, twice each, alternating (base, head, base,
+head), keeps each side's faster median, and compares them. A benchmark <strong>regresses</strong> when its
+median is more than 10% slower <strong>and</strong> the 95% confidence intervals of the two medians do not
+overlap. The table is in the job summary.</p>
+<p>How it copes with noise on shared hosted runners, which vary by tens of percent between runs and
+machines:</p>
+<ul>
+<li><strong>Same job, back to back.</strong> A stored baseline from another run would not be comparable, so the
+base is measured again every time.</li>
+<li><strong>Iteration counts.</strong> criterion runs many iterations per sample and 100 samples per benchmark,
+which gives the confidence intervals.</li>
+<li><strong>Alternating rounds, best of two.</strong> Noise on a shared machine almost only ever slows a run
+down, and alternating means a slow patch hits both sides alike.</li>
+<li><strong>Two conditions.</strong> Over the threshold <em>and</em> outside the noise.</li>
+</ul>
+<p>Small changes still show up as noise, so treat a regression as a prompt to measure locally, where
+a quiet machine gives sharper numbers:</p>
+<pre><code class="language-sh">cargo xtask bench-compare --base origin/main    # the same comparison, locally
+</code></pre>
+<p>The gate was checked by slowing one benchmark (<code>hash_1mib/sha256</code>) by 20% on purpose. The
+comparison measured it at +19.7%, reported it as regressed and failed, and reported the other
+eleven benchmarks within ±5% as unchanged.</p>
+<p>Benchmarks over whole policies (100 to 100k rules), the decision cache and bundle loading, and
+the absolute performance budget of evaluation, arrive with the code they measure (#42, #43).
+The gate covers them as soon as they are added, because it runs every <code>crates/*/benches/*.rs</code>.
+The 100 MB and 1 GB file hashing runs stay local and on demand.</p>
+<hr>
+<p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/testing.md"><code>docs/testing.md</code></a> on GitHub.</small></p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../docs/dev/unix.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../docs/ci.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../docs/dev/unix.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../docs/ci.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-c2a407aa.js"></script>
+
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-a0b12cfe.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../theme/palisade-c327a96e.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Action","ActionKind","ElevationAuth","ElevationCondition","TrustMode","UnknownAs"],"mod":["limits"],"struct":["ContainmentDirective","ContainmentProfileRef","DenyOptions","ElevationDirective","RequestTemplateRef","TokenProfileRef","TrustSourceDirective"]};

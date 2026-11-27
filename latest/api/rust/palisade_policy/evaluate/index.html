@@ -1,0 +1,99 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="The evaluation pipeline: from one object to one `Decision` (#35, ADR 0004)."><title>palisade_policy::evaluate - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="palisade_policy" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module evaluate</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../palisade_policy/index.html">palisade_<wbr>policy</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module evaluate</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#scopes" title="Scopes">Scopes</a></li><li><a href="#overridden-rules" title="Overridden rules">Overridden rules</a></li><li><a href="#unknown-facts" title="Unknown facts">Unknown facts</a></li><li><a href="#modes" title="Modes">Modes</a></li><li><a href="#determinism" title="Determinism">Determinism</a></li></ul><h3><a href="#structs">Module Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="../index.html">In crate palisade_<wbr>policy</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">palisade_policy</a></div><h1>Module <span>evaluate</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../src/palisade_policy/evaluate.rs.html#1-763">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>The evaluation pipeline: from one object to one <a href="../decision/struct.Decision.html" title="struct palisade_policy::decision::Decision"><code>Decision</code></a> (#35,
+ADR 0004).</p>
+<p>An <a href="struct.Evaluator.html" title="struct palisade_policy::evaluate::Evaluator"><code>Evaluator</code></a> is built once from a <a href="../validate/struct.ValidatedPolicy.html" title="struct palisade_policy::validate::ValidatedPolicy"><code>ValidatedPolicy</code></a>. It compiles
+the match tree of every enabled rule in the rule sets the policy
+references. <a href="struct.Evaluator.html#method.evaluate" title="method palisade_policy::evaluate::Evaluator::evaluate"><code>Evaluator::evaluate</code></a> then evaluates every rule that
+applies to the object’s type and runs the stages below, in this fixed
+order, whatever the precedence model. Each stage either decides or
+passes to the next.</p>
+<ol>
+<li><strong>Mandatory deny.</strong> Rules in a <code>mandatory</code> blocklist. If one
+matches, the object is blocked (<code>mandatory_deny</code>). No allow, trust
+source, elevation or exclusion can change that, under any model.</li>
+<li><strong>Exclusion.</strong> <code>ignore</code> rules. If one matches, the object is
+<code>ignored</code>.</li>
+<li><strong>Override session.</strong> An active session (#9) lowers the effective
+mode of stages 4 and 6 (<a href="../mode/index.html" title="mod palisade_policy::mode"><code>crate::mode</code></a>). It never affects stage 1.</li>
+<li><strong>Policy.</strong> The policy’s precedence model (<a href="../precedence/index.html" title="mod palisade_policy::precedence"><code>crate::precedence</code></a>)
+chooses among the matching <code>allow</code>, <code>allow_contained</code>,
+<code>allow_elevated</code> and <code>deny</code> rules.</li>
+<li><strong>Attribute.</strong> Not yet: post-allow attribute rules are #33.</li>
+<li><strong>Unknown.</strong> If nothing decided, the implicit deny
+(<code>implicit_deny_unknown</code>, #39).</li>
+</ol>
+<h2 id="scopes"><a class="doc-anchor" href="#scopes">§</a>Scopes</h2>
+<p>A rule is a candidate only if it is in scope (#38, <a href="../scope/index.html" title="mod palisade_policy::scope"><code>crate::scope</code></a>):
+its own <code>scope</code>, the scopes of its rule set’s assignment and the
+policy’s <code>scope</code> are evaluated first, and a rule applies when the <code>AND</code>
+of those scopes and its match tree is <code>Match</code> (or <code>Unknown</code>, for a deny
+with <code>unknown_as: match</code>). A rule that is out of scope behaves as if it
+were absent in every stage: it never decides and is not listed as
+overridden. The scope notes of every rule whose tree was not <code>NoMatch</code>
+(in scope or not) are in <a href="../decision/struct.Decision.html#method.scope_notes" title="method palisade_policy::decision::Decision::scope_notes"><code>Decision::scope_notes</code></a>.</p>
+<p>Two scope settings act on the deciding rule:</p>
+<ul>
+<li><strong>Instance limit.</strong> If an allow that decides has a scope with
+<code>max_instances_per_session</code> and the session already runs that many
+instances (or the count is unknown), the object is blocked with
+<code>instance_limit</code>, naming the allow. A mode that relaxes the block
+runs the object with the allow’s directives.</li>
+<li><strong>Window close.</strong> If the object is allowed and a scope on the way to
+the deciding rule has a schedule with <code>on_window_close</code>, the decision
+carries a <a href="../decision/struct.WindowClose.html" title="struct palisade_policy::decision::WindowClose"><code>WindowClose</code></a> directive with the instant the schedule
+closes.</li>
+</ul>
+<p>Two kinds of rule never decide:</p>
+<ul>
+<li><code>audit</code> rules that match are listed in <a href="../decision/struct.Decision.html#method.annotations" title="method palisade_policy::decision::Decision::annotations"><code>Decision::annotations</code></a>,
+whichever stage decides.</li>
+<li><code>trust_source</code> rules that match add their grant to
+<a href="../decision/struct.Directives.html#structfield.trust_sources" title="field palisade_policy::decision::Directives::trust_sources"><code>Directives::trust_sources</code></a>,
+but only when the object is allowed. A trust source never lets an
+object run by itself (#114). When the object is blocked or ignored,
+they are listed as overridden instead.</li>
+</ul>
+<p><code>defer</code> rules have no opinion. They are never evaluated, so a <code>defer</code>
+that matches makes <code>first_match</code> continue with the next rule.</p>
+<p>When several mandatory denies match, or several exclusions, the one
+with the most specific identity decides, then the one with the lowest
+rule ID.</p>
+<h2 id="overridden-rules"><a class="doc-anchor" href="#overridden-rules">§</a>Overridden rules</h2>
+<p><a href="../decision/struct.Decision.html#method.overridden" title="method palisade_policy::decision::Decision::overridden"><code>Decision::overridden</code></a> lists every other rule that matched and would
+have decided, or attached a grant, if the deciding rule had not: the
+other candidates of the deciding stage (including those with the same
+outcome), every candidate of the later stages, and every <code>trust_source</code>
+rule when the object is not allowed.</p>
+<h2 id="unknown-facts"><a class="doc-anchor" href="#unknown-facts">§</a>Unknown facts</h2>
+<p>A rule applies only when its match tree is <code>Match</code> (<a href="../condition/index.html" title="mod palisade_policy::condition"><code>crate::condition</code></a>),
+so an unknown fact never allows, trusts or excludes. A <code>deny</code> rule
+decides how it treats an unknown result with two options:</p>
+<ul>
+<li><code>unknown_as: match</code> makes it apply when its tree is <code>Unknown</code>, so it
+blocks unless the precedence model prefers an allow. The default,
+<code>no_match</code>, means an unknown fact does not block.</li>
+<li><code>on_unparseable: match</code> makes each criterion whose version fact is not
+a version count towards the deny applying
+(<a href="../condition/enum.Unparseable.html#variant.FavourMatch" title="variant palisade_policy::condition::Unparseable::FavourMatch"><code>Unparseable::FavourMatch</code></a>). The default leaves it <code>Unknown</code>.</li>
+</ul>
+<p>A file the agent could not parse has no facts, so no rule can allow it,
+and unless a deny fails closed it gets the implicit deny (ADR 0012).</p>
+<p>Mandatory denies follow the same options. They default to <code>no_match</code>
+like any other deny; making the criteria of the shipped blocklists
+<code>safety_critical</code>, which defaults them to <code>match</code>, is #32 and #87.</p>
+<h2 id="modes"><a class="doc-anchor" href="#modes">§</a>Modes</h2>
+<p><a href="struct.Evaluator.html#method.evaluate" title="method palisade_policy::evaluate::Evaluator::evaluate"><code>Evaluator::evaluate</code></a> computes the enforce-mode decision, before
+anything relaxes it: its <a href="../decision/struct.Decision.html#method.mode" title="method palisade_policy::decision::Decision::mode"><code>Decision::mode</code></a> is always <code>enforce</code>.
+<a href="struct.Evaluator.html#method.evaluate_in" title="method palisade_policy::evaluate::Evaluator::evaluate_in"><code>Evaluator::evaluate_in</code></a> applies the effective mode of the device
+(<a href="../mode/index.html" title="mod palisade_policy::mode"><code>crate::mode</code></a>): the policy’s <code>mode</code>, the modes per object type, each
+rule set’s <code>mode_override</code>, each rule’s <code>enforcement_override</code>, the
+per-class control levels, connectivity, override sessions and
+emergency lockdown. It keeps the enforce-mode outcome in
+<a href="../decision/struct.Decision.html#method.would_have_been" title="method palisade_policy::decision::Decision::would_have_been"><code>Decision::would_have_been</code></a>.</p>
+<h2 id="determinism"><a class="doc-anchor" href="#determinism">§</a>Determinism</h2>
+<p>Evaluation is a pure function of the policy and the object. Every
+stage chooses by keys that end with the unique rule ID, and the lists in
+a decision are sorted by rule ID, so the decision does not depend on
+the order of rule sets in the policy or of rules in a rule set. Only
+<code>first_match</code> and <code>priority</code> depend on rules’ <code>order</code> and <code>priority</code>.</p>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.BuildError.html" title="struct palisade_policy::evaluate::BuildError">Build<wbr>Error</a></dt><dd>A rule’s tree did not compile. Validation compiles every tree, so this
+cannot happen for a validated policy; the error says which rule it was.</dd><dt><a class="struct" href="struct.Evaluator.html" title="struct palisade_policy::evaluate::Evaluator">Evaluator</a></dt><dd>Evaluates objects against one validated policy.</dd><dt><a class="struct" href="struct.Subject.html" title="struct palisade_policy::evaluate::Subject">Subject</a></dt><dd>The object being decided, and what is known about it.</dd></dl></section></div></main></body></html>

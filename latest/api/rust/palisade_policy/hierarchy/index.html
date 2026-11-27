@@ -1,0 +1,143 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="The group hierarchy, inheritance and the effective policy of a device (#37)."><title>palisade_policy::hierarchy - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="palisade_policy" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module hierarchy</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../palisade_policy/index.html">palisade_<wbr>policy</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module hierarchy</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#levels" title="Levels">Levels</a></li><li><a href="#layers" title="Layers">Layers</a></li><li><a href="#rules-are-additive" title="Rules are additive">Rules are additive</a></li><li><a href="#settings-are-override-by-nearest" title="Settings are override-by-nearest">Settings are override-by-nearest</a></li><li><a href="#modes" title="Modes">Modes</a></li><li><a href="#precedence-models" title="Precedence models">Precedence models</a></li><li><a href="#first-match-bands" title="First-match bands">First-match bands</a></li><li><a href="#templates" title="Templates">Templates</a></li><li><a href="#explaining" title="Explaining">Explaining</a></li><li><a href="#placement" title="Placement">Placement</a></li></ul><h3><a href="#reexports">Module Items</a></h3><ul class="block"><li><a href="#reexports" title="Re-exports">Re-exports</a></li><li><a href="#modules" title="Modules">Modules</a></li><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="../index.html">In crate palisade_<wbr>policy</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">palisade_policy</a></div><h1>Module <span>hierarchy</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../src/palisade_policy/hierarchy.rs.html#1-621">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>The group hierarchy, inheritance and the effective policy of a device
+(#37).</p>
+<p>A <a href="struct.HierarchyDocument.html" title="struct palisade_policy::hierarchy::HierarchyDocument"><code>HierarchyDocument</code></a> is one snapshot of an installation’s scopes:
+the tree of nodes, the policies assigned to them, the reusable
+<a href="../library/index.html" title="mod palisade_policy::library">libraries</a> and the automatic placement rules. It is an
+immutable value. <a href="struct.HierarchyDocument.html#method.validate" title="method palisade_policy::hierarchy::HierarchyDocument::validate"><code>HierarchyDocument::validate</code></a> checks it once and
+returns a <a href="struct.ValidatedHierarchy.html" title="struct palisade_policy::hierarchy::ValidatedHierarchy"><code>ValidatedHierarchy</code></a>, from which
+<a href="struct.ValidatedHierarchy.html#method.effective_policy" title="method palisade_policy::hierarchy::ValidatedHierarchy::effective_policy"><code>ValidatedHierarchy::effective_policy</code></a> computes the one effective
+policy of a device. That is a pure function of the snapshot, the
+libraries at their resolved versions, and the device’s membership of
+dynamic groups. The same inputs always give the same policy and the same
+content hash, whatever order the snapshot lists anything in.</p>
+<p>The server stores the snapshot, computes and caches effective policies
+(#10, #127, #128, #129), and ships them in the bundle (#43). The agent
+only ever sees the flattened result.</p>
+<h2 id="levels"><a class="doc-anchor" href="#levels">§</a>Levels</h2><div class="table"><table><thead><tr><th>Kind</th><th>Parent</th><th>Notes</th></tr></thead><tbody>
+<tr><td><code>global</code></td><td>none</td><td>Exactly one: installation-wide defaults (“global defaults”), visible only to installation administrators.</td></tr>
+<tr><td><code>tenant</code></td><td>the global node</td><td></td></tr>
+<tr><td><code>group</code></td><td>a tenant or a group</td><td>Nested at most <a href="limits/constant.MAX_GROUP_DEPTH.html" title="constant palisade_policy::hierarchy::limits::MAX_GROUP_DEPTH"><code>limits::MAX_GROUP_DEPTH</code></a> deep below the tenant.</td></tr>
+<tr><td><code>device</code></td><td>a group</td><td>A device has exactly one primary group: its parent.</td></tr>
+<tr><td><code>dynamic_group</code></td><td>a tenant</td><td>Assignment only, not hierarchy: a device’s membership is an input (<a href="struct.Membership.html" title="struct palisade_policy::hierarchy::Membership"><code>Membership</code></a>), computed from tags by #38 and #10.</td></tr>
+<tr><td><code>template</code></td><td>the global node or a tenant</td><td>Not in the tree. A node may link to one (see <a href="#templates">Templates</a>).</td></tr>
+</tbody></table>
+</div>
+<p>Each tenant has the built-in groups <code>unassigned</code> (exactly one: new and
+unmapped devices; its mode is <code>audit</code> unless it sets one), and at most
+one each of <code>unmanaged</code> (removed from management: the effective policy
+is <a href="effective/enum.Management.html#variant.Unmanaged" title="variant palisade_policy::hierarchy::effective::Management::Unmanaged"><code>Management::Unmanaged</code></a>, and the agent goes to <code>disabled</code> with
+tamper protection released) and <code>staging</code> (hidden: no device can be in
+it, and placement cannot target it; it is for dry runs with
+<a href="struct.ValidatedHierarchy.html#method.effective_policy_as" title="method palisade_policy::hierarchy::ValidatedHierarchy::effective_policy_as"><code>ValidatedHierarchy::effective_policy_as</code></a>). Built-in groups sit
+directly below their tenant and have no child groups. Every reference to
+a node is checked, and a parent cycle is rejected with its path
+(<code>node_cycle</code>).</p>
+<h2 id="layers"><a class="doc-anchor" href="#layers">§</a>Layers</h2>
+<p>A device’s effective policy is built from layers, from the outermost to
+the nearest: the global node, its tenant, its groups from the tenant
+down, its dynamic groups (the highest <code>rank</code> first, so the lowest rank is
+nearest), and the device. A node that links to a template is preceded by
+the template’s layer at the same position. Within one node, policies are
+applied by <code>slot_order</code>: the lowest slot wins a conflict.</p>
+<h2 id="rules-are-additive"><a class="doc-anchor" href="#rules-are-additive">§</a>Rules are additive</h2>
+<p>A node contributes the rule sets of every policy assigned to it, the
+rule set libraries it assigns (<code>rule_sets</code>), and every rule set library
+in each of its <code>categories</code>, including ones added later. The effective
+rule list is the union over all layers. Each rule keeps its provenance:
+the nodes that contributed it and how (<a href="effective/struct.RuleProvenance.html" title="struct palisade_policy::hierarchy::effective::RuleProvenance"><code>RuleProvenance</code></a>). A rule set
+that two layers contribute is included once. Two different rule sets
+with one ID, including two versions of one library, are rejected
+(<code>rule_set_conflict</code>, <code>library_version_conflict</code>), so a child cannot
+pin an older version of an inherited blocklist.</p>
+<p>A child cannot delete an inherited rule. It can:</p>
+<ul>
+<li><strong>suppress</strong> it locally, with <code>suppress_inherited: [rule_id]</code>, if the
+rule set allows it: <code>allow_child_suppress</code>, which defaults to <code>true</code>
+for allowlists and baselines and to <code>false</code> for every other kind, so
+blocklists cannot be suppressed unless they say so. <strong>A mandatory rule
+set can never be suppressed</strong>, whatever it says (ADR 0004, #125). A
+suppressed rule stays in the effective policy, disabled, and its
+provenance says which node suppressed it. A suppression only applies
+to a rule that every contributing layer is above the suppressing node;
+if the node or a nearer layer also contributes the rule set, the rule
+stays active and is reported as reasserted; or</li>
+<li><strong>shadow</strong> it with a rule of its own that wins under the precedence
+model. Mandatory denies are evaluated before every model, so nothing
+shadows them.</li>
+</ul>
+<h2 id="settings-are-override-by-nearest"><a class="doc-anchor" href="#settings-are-override-by-nearest">§</a>Settings are override-by-nearest</h2>
+<p>Each top-level key of <a href="../model/struct.PolicySettings.html" title="struct palisade_policy::model::PolicySettings"><code>PolicySettings</code></a>
+is one setting. A layer sets a key through its node’s <code>settings</code> map, or
+through an assigned policy whose value for the key differs from the
+default; to set a key back to its default below a node that changed it,
+use the node’s <code>settings</code>. A node’s own <code>settings</code> beat the policies
+assigned to it. The nearest layer that sets a key wins. A key in a
+node’s <code>locked_settings</code> keeps the value it has at that node (after the
+node’s own layers) for every layer below; a later attempt to change it is
+ignored and reported (<code>blocked_by_lock</code>). Settings added to the model
+later are inherited the same way, with no change here.</p>
+<p>The mode options are merged the same way, per key:
+<code>mode_by_type.&lt;type&gt;</code>, <code>mode_disconnected</code> and <code>disconnected_after_secs</code>.
+<code>locked_settings</code> may lock them too, as <code>mode_options.mode_disconnected</code>,
+<code>mode_options.disconnected_after_secs</code> and <code>mode_options.mode_by_type</code>
+(every type at once).
+A <code>mode_disconnected</code> that is not at least as strict as the effective
+mode is dropped, because unset means the effective mode itself.</p>
+<h2 id="modes"><a class="doc-anchor" href="#modes">§</a>Modes</h2>
+<p>Each layer’s mode is its node’s <code>mode</code>, or else the mode of its
+policies, merged by <code>mode_merge</code>: <code>closest</code> (the default) takes the
+policy with the lowest slot, <code>strictest</code> the strictest (#36). The
+built-in <code>unassigned</code> group is <code>audit</code> unless it sets a mode. Across
+layers, <code>closest</code> takes the nearest layer’s mode and <code>strictest</code> the
+strictest of all. With no mode anywhere the device is in <code>audit</code>
+(ADR 0012).</p>
+<p>A node with <code>lock_mode: true</code> fixes a <strong>floor</strong>: the mode in force at
+that node. Nothing in the effective policy may then decide in a weaker
+mode: a weaker effective mode, <code>mode_by_type</code> entry or rule set
+<code>mode_override</code> is raised to the floor, a control level that would cap
+below it is raised (an <code>enforce</code> floor needs <code>enforce</code>, an <code>audit</code> or
+<code>learning</code> floor at least <code>audit</code>), and with an <code>enforce</code> floor
+<code>never_enforce</code> rules become <code>inherit</code>. A lock applies to the whole
+effective policy, including what the locking node assigns itself. Every
+change is listed in <a href="effective/struct.ModeProvenance.html#structfield.adjustments" title="field palisade_policy::hierarchy::effective::ModeProvenance::adjustments"><code>ModeProvenance::adjustments</code></a>. Raising is always
+allowed below a lock.</p>
+<h2 id="precedence-models"><a class="doc-anchor" href="#precedence-models">§</a>Precedence models</h2>
+<p>The model is chosen by the nearest of the global node and the tenant
+that sets <code>precedence</code>; a group may set it only if its tenant’s
+<code>tenant_options.allow_group_precedence</code> is <code>true</code>
+(<code>precedence_not_allowed</code>). With no node choosing, the model of the
+highest-ranked policy (nearest layer, lowest slot) applies. Every policy
+in the effective policy must use exactly that model and its options, or
+the effective policy is rejected (<code>precedence_conflict</code>), so one
+effective policy never mixes models.</p>
+<h2 id="first-match-bands"><a class="doc-anchor" href="#first-match-bands">§</a>First-match bands</h2>
+<p>Under <code>first_match</code>, rules are ordered by level before their <code>order</code>:
+every rule set carries the band of the first layer that contributed it
+(<a href="../model/struct.RuleSet.html#structfield.band" title="field palisade_policy::model::RuleSet::band"><code>RuleSet::band</code></a>). <code>level_order: top_down</code> (the default) puts the global node first, then the tenant, the
+groups from the tenant down, the dynamic groups and the device, so a
+local administrator cannot pre-empt global policy; <code>bottom_up</code> reverses
+that; <code>flat</code> puts every rule set in band 0, so only <code>order</code> counts.
+Mandatory denies and exclusions are decided before the model in every
+case, and the implicit deny after it.</p>
+<h2 id="templates"><a class="doc-anchor" href="#templates">§</a>Templates</h2>
+<p>A node may be created from a template in two ways. A <strong>one-time copy</strong>
+(<a href="struct.ValidatedHierarchy.html#method.copy_from_template" title="method palisade_policy::hierarchy::ValidatedHierarchy::copy_from_template"><code>ValidatedHierarchy::copy_from_template</code></a>) copies the template’s
+assignments, rule sets, categories, settings, mode and suppressions into
+a new node, with no link afterwards. A <strong>linked</strong> node sets <code>template</code>:
+the template’s layer is applied at the node’s position, just before the
+node’s own, on every computation, so later changes to the template take
+effect. A template cannot link to another template.</p>
+<h2 id="explaining"><a class="doc-anchor" href="#explaining">§</a>Explaining</h2>
+<p><a href="effective/struct.EffectivePolicy.html#method.rule" title="method palisade_policy::hierarchy::effective::EffectivePolicy::rule"><code>EffectivePolicy::rule</code></a> and <a href="effective/struct.EffectivePolicy.html#method.setting" title="method palisade_policy::hierarchy::effective::EffectivePolicy::setting"><code>EffectivePolicy::setting</code></a> return, for
+a rule or a setting, every node that contributed it, how, and whether it
+was suppressed, reasserted, overridden or blocked by a lock (for #41).</p>
+<h2 id="placement"><a class="doc-anchor" href="#placement">§</a>Placement</h2>
+<p>Each tenant has an ordered list of placement rules (<code>placement</code>), see
+<a href="placement/index.html" title="mod palisade_policy::hierarchy::placement"><code>placement</code></a>.</p>
+</div></details><h2 id="reexports" class="section-header">Re-exports<a href="#reexports" class="anchor">§</a></h2><dl class="item-table reexports"><dt id="reexport.Contribution"><code>pub use effective::<a class="struct" href="effective/struct.Contribution.html" title="struct palisade_policy::hierarchy::effective::Contribution">Contribution</a>;</code></dt><dt id="reexport.EffectivePolicy"><code>pub use effective::<a class="struct" href="effective/struct.EffectivePolicy.html" title="struct palisade_policy::hierarchy::effective::EffectivePolicy">EffectivePolicy</a>;</code></dt><dt id="reexport.Management"><code>pub use effective::<a class="enum" href="effective/enum.Management.html" title="enum palisade_policy::hierarchy::effective::Management">Management</a>;</code></dt><dt id="reexport.ModeAdjustment"><code>pub use effective::<a class="struct" href="effective/struct.ModeAdjustment.html" title="struct palisade_policy::hierarchy::effective::ModeAdjustment">ModeAdjustment</a>;</code></dt><dt id="reexport.ModeProvenance"><code>pub use effective::<a class="struct" href="effective/struct.ModeProvenance.html" title="struct palisade_policy::hierarchy::effective::ModeProvenance">ModeProvenance</a>;</code></dt><dt id="reexport.PrecedenceSource"><code>pub use effective::<a class="enum" href="effective/enum.PrecedenceSource.html" title="enum palisade_policy::hierarchy::effective::PrecedenceSource">PrecedenceSource</a>;</code></dt><dt id="reexport.RuleProvenance"><code>pub use effective::<a class="struct" href="effective/struct.RuleProvenance.html" title="struct palisade_policy::hierarchy::effective::RuleProvenance">RuleProvenance</a>;</code></dt><dt id="reexport.RuleStatus"><code>pub use effective::<a class="enum" href="effective/enum.RuleStatus.html" title="enum palisade_policy::hierarchy::effective::RuleStatus">RuleStatus</a>;</code></dt><dt id="reexport.SettingProvenance"><code>pub use effective::<a class="struct" href="effective/struct.SettingProvenance.html" title="struct palisade_policy::hierarchy::effective::SettingProvenance">SettingProvenance</a>;</code></dt><dt id="reexport.SettingStep"><code>pub use effective::<a class="struct" href="effective/struct.SettingStep.html" title="struct palisade_policy::hierarchy::effective::SettingStep">SettingStep</a>;</code></dt><dt id="reexport.StepOutcome"><code>pub use effective::<a class="enum" href="effective/enum.StepOutcome.html" title="enum palisade_policy::hierarchy::effective::StepOutcome">StepOutcome</a>;</code></dt><dt id="reexport.Via"><code>pub use effective::<a class="enum" href="effective/enum.Via.html" title="enum palisade_policy::hierarchy::effective::Via">Via</a>;</code></dt><dt id="reexport.PlacementConditions"><code>pub use placement::<a class="struct" href="placement/struct.PlacementConditions.html" title="struct palisade_policy::hierarchy::placement::PlacementConditions">PlacementConditions</a>;</code></dt><dt id="reexport.PlacementFacts"><code>pub use placement::<a class="struct" href="placement/struct.PlacementFacts.html" title="struct palisade_policy::hierarchy::placement::PlacementFacts">PlacementFacts</a>;</code></dt><dt id="reexport.PlacementOutcome"><code>pub use placement::<a class="enum" href="placement/enum.PlacementOutcome.html" title="enum palisade_policy::hierarchy::placement::PlacementOutcome">PlacementOutcome</a>;</code></dt><dt id="reexport.PlacementRule"><code>pub use placement::<a class="struct" href="placement/struct.PlacementRule.html" title="struct palisade_policy::hierarchy::placement::PlacementRule">PlacementRule</a>;</code></dt><dt id="reexport.PlacementTrigger"><code>pub use placement::<a class="enum" href="placement/enum.PlacementTrigger.html" title="enum palisade_policy::hierarchy::placement::PlacementTrigger">PlacementTrigger</a>;</code></dt></dl><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="effective/index.html" title="mod palisade_policy::hierarchy::effective">effective</a></dt><dd>Computing the effective policy of a device (#37). The semantics are in
+the <a href="index.html" title="mod palisade_policy::hierarchy">module documentation</a>.</dd><dt><a class="mod" href="limits/index.html" title="mod palisade_policy::hierarchy::limits">limits</a></dt><dd>Hard limits on a hierarchy snapshot.</dd><dt><a class="mod" href="placement/index.html" title="mod palisade_policy::hierarchy::placement">placement</a></dt><dd>Automatic placement: which group a device belongs in (#37).</dd></dl><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.Assignment.html" title="struct palisade_policy::hierarchy::Assignment">Assignment</a></dt><dd>A policy assigned to a node.</dd><dt><a class="struct" href="struct.HierarchyDocument.html" title="struct palisade_policy::hierarchy::HierarchyDocument">Hierarchy<wbr>Document</a></dt><dd>One snapshot of the hierarchy.</dd><dt><a class="struct" href="struct.HierarchyError.html" title="struct palisade_policy::hierarchy::HierarchyError">Hierarchy<wbr>Error</a></dt><dd>One hierarchy finding: a code, the JSON Pointer of the offending value
+in the snapshot (or, for the effective policy, under <code>/effective</code>), and a
+message.</dd><dt><a class="struct" href="struct.Membership.html" title="struct palisade_policy::hierarchy::Membership">Membership</a></dt><dd>A device’s membership of dynamic groups: an input, computed from tags
+and other facts by #38 and #10.</dd><dt><a class="struct" href="struct.Node.html" title="struct palisade_policy::hierarchy::Node">Node</a></dt><dd>One node of the hierarchy.</dd><dt><a class="struct" href="struct.NodeId.html" title="struct palisade_policy::hierarchy::NodeId">NodeId</a></dt><dd>The stable ID of a hierarchy node.</dd><dt><a class="struct" href="struct.PolicyEntry.html" title="struct palisade_policy::hierarchy::PolicyEntry">Policy<wbr>Entry</a></dt><dd>A policy and who it belongs to.</dd><dt><a class="struct" href="struct.PrecedenceSetting.html" title="struct palisade_policy::hierarchy::PrecedenceSetting">Precedence<wbr>Setting</a></dt><dd>A precedence model chosen by a node.</dd><dt><a class="struct" href="struct.TenantOptions.html" title="struct palisade_policy::hierarchy::TenantOptions">Tenant<wbr>Options</a></dt><dd>A tenant’s options. Each unset option takes the global node’s, then the
+default.</dd><dt><a class="struct" href="struct.ValidatedHierarchy.html" title="struct palisade_policy::hierarchy::ValidatedHierarchy">Validated<wbr>Hierarchy</a></dt><dd>A hierarchy snapshot that passed validation. It can only be built by
+<a href="struct.HierarchyDocument.html#method.validate" title="method palisade_policy::hierarchy::HierarchyDocument::validate"><code>HierarchyDocument::validate</code></a>.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.Builtin.html" title="enum palisade_policy::hierarchy::Builtin">Builtin</a></dt><dd>The built-in groups of a tenant.</dd><dt><a class="enum" href="enum.HierarchyCode.html" title="enum palisade_policy::hierarchy::HierarchyCode">Hierarchy<wbr>Code</a></dt><dd>The stable code of a hierarchy finding.</dd><dt><a class="enum" href="enum.LevelOrder.html" title="enum palisade_policy::hierarchy::LevelOrder">Level<wbr>Order</a></dt><dd>How <code>first_match</code> orders the levels.</dd><dt><a class="enum" href="enum.ModeMerge.html" title="enum palisade_policy::hierarchy::ModeMerge">Mode<wbr>Merge</a></dt><dd>How the modes of several policies combine.</dd><dt><a class="enum" href="enum.NodeKind.html" title="enum palisade_policy::hierarchy::NodeKind">Node<wbr>Kind</a></dt><dd>What a node is.</dd></dl></section></div></main></body></html>

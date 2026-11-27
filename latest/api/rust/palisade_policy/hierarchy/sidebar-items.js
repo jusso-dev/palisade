@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Builtin","HierarchyCode","LevelOrder","ModeMerge","NodeKind"],"mod":["effective","limits","placement"],"struct":["Assignment","HierarchyDocument","HierarchyError","Membership","Node","NodeId","PolicyEntry","PrecedenceSetting","TenantOptions","ValidatedHierarchy"]};

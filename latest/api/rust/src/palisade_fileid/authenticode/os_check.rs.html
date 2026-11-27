@@ -1,0 +1,752 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `crates/palisade-fileid/src/authenticode/os_check.rs`."><title>os_check.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="palisade_fileid" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">palisade_fileid/authenticode/</div>os_check.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Comparing this crate's signature results with the OS trust-verification
+<a href=#2 id=2 data-nosnippet>2</a>//! API (#48).
+<a href=#3 id=3 data-nosnippet>3</a>//!
+<a href=#4 id=4 data-nosnippet>4</a>//! The Windows backend (`palisade_fileid::win::trust`, behind the `os-trust`
+<a href=#5 id=5 data-nosnippet>5</a>//! feature) asks the OS to verify a file's embedded signatures, one call
+<a href=#6 id=6 data-nosnippet>6</a>//! per signature, and records each result code as an [`OsSignatureResult`].
+<a href=#7 id=7 data-nosnippet>7</a>//! [`cross_check`] then pairs every OS result with the signature in a
+<a href=#8 id=8 data-nosnippet>8</a>//! [`SignatureReport`] that the OS looked at, and records whether the two
+<a href=#9 id=9 data-nosnippet>9</a>//! agree. Everything here is pure, so it is tested on every OS.
+<a href=#10 id=10 data-nosnippet>10</a>//!
+<a href=#11 id=11 data-nosnippet>11</a>//! # Never an override
+<a href=#12 id=12 data-nosnippet>12</a>//!
+<a href=#13 id=13 data-nosnippet>13</a>//! The comparison is a **diagnostic**. [`cross_check`] takes the report by
+<a href=#14 id=14 data-nosnippet>14</a>//! shared reference and returns a separate [`CrossCheck`]; nothing in this
+<a href=#15 id=15 data-nosnippet>15</a>//! crate reads a [`CrossCheck`] to change a verdict. Policy decides from the
+<a href=#16 id=16 data-nosnippet>16</a>//! Rust result, and a disagreement is something to log and investigate.
+<a href=#17 id=17 data-nosnippet>17</a>//!
+<a href=#18 id=18 data-nosnippet>18</a>//! # What is compared
+<a href=#19 id=19 data-nosnippet>19</a>//!
+<a href=#20 id=20 data-nosnippet>20</a>//! [`SignatureStatus::Valid`] means the signature is cryptographically
+<a href=#21 id=21 data-nosnippet>21</a>//! sound and signs this file. It does not mean the signer is trusted. The
+<a href=#22 id=22 data-nosnippet>22</a>//! OS result folds chain trust in, so an OS result is reduced to the same
+<a href=#23 id=23 data-nosnippet>23</a>//! question before comparing ([`OsVerdict`]):
+<a href=#24 id=24 data-nosnippet>24</a>//!
+<a href=#25 id=25 data-nosnippet>25</a>//! - success, or a certificate chain or policy failure that the OS reports
+<a href=#26 id=26 data-nosnippet>26</a>//!   only after the file digest and the signature have verified (an
+<a href=#27 id=27 data-nosnippet>27</a>//!   untrusted root, an expired or revoked certificate, a wrong usage), is
+<a href=#28 id=28 data-nosnippet>28</a>//!   **accepted**: the signature is intact;
+<a href=#29 id=29 data-nosnippet>29</a>//! - a digest or signature failure, a missing signer certificate, an
+<a href=#30 id=30 data-nosnippet>30</a>//!   unknown algorithm or a malformed message or certificate is
+<a href=#31 id=31 data-nosnippet>31</a>//!   **rejected**, and "no signature" is its own verdict;
+<a href=#32 id=32 data-nosnippet>32</a>//! - any other code is **unclassified**, and its comparison is
+<a href=#33 id=33 data-nosnippet>33</a>//!   [`Outcome::NotComparable`]. That is not an agreement:
+<a href=#34 id=34 data-nosnippet>34</a>//!   [`CrossCheck::agrees`] is false while any comparison is not
+<a href=#35 id=35 data-nosnippet>35</a>//!   comparable, and [`CrossCheck::not_comparable`] lists them.
+<a href=#36 id=36 data-nosnippet>36</a>//!
+<a href=#37 id=37 data-nosnippet>37</a>//! The OS reads only the first embedded signature (index 0) and the
+<a href=#38 id=38 data-nosnippet>38</a>//! signatures nested directly in it (indexes 1 and up, its "secondary"
+<a href=#39 id=39 data-nosnippet>39</a>//! signatures). Signatures in a later certificate table entry, or nested
+<a href=#40 id=40 data-nosnippet>40</a>//! more deeply, are not compared.
+<a href=#41 id=41 data-nosnippet>41</a>//!
+<a href=#42 id=42 data-nosnippet>42</a>//! This crate is stricter than the OS in places, by design: an image whose
+<a href=#43 id=43 data-nosnippet>43</a>//! layout departs from the Authenticode specification is
+<a href=#44 id=44 data-nosnippet>44</a>//! [`SignatureStatus::NonConformantImage`], and MD5 and MD2 are never
+<a href=#45 id=45 data-nosnippet>45</a>//! valid. Those show up as [`Outcome::OsAcceptsRustRejects`]. The opposite,
+<a href=#46 id=46 data-nosnippet>46</a>//! [`Outcome::RustAcceptsOsRejects`], is the one that could hide a
+<a href=#47 id=47 data-nosnippet>47</a>//! verification bug, and [`CrossCheck::rust_accepts_os_rejects`] picks it
+<a href=#48 id=48 data-nosnippet>48</a>//! out.
+<a href=#49 id=49 data-nosnippet>49</a>
+<a href=#50 id=50 data-nosnippet>50</a></span><span class="attr">#![forbid(unsafe_code)]
+<a href=#51 id=51 data-nosnippet>51</a>
+<a href=#52 id=52 data-nosnippet>52</a></span><span class="kw">use </span><span class="kw">super</span>::signature::{
+<a href=#53 id=53 data-nosnippet>53</a>    InvalidReason, SignatureKind, SignatureReport, SignatureStatus, SigningState,
+<a href=#54 id=54 data-nosnippet>54</a>};
+<a href=#55 id=55 data-nosnippet>55</a>
+<a href=#56 id=56 data-nosnippet>56</a><span class="doccomment">/// The most signatures the OS backend asks about for one file: the primary
+<a href=#57 id=57 data-nosnippet>57</a>/// and up to this many minus one secondary signatures. The same bound as
+<a href=#58 id=58 data-nosnippet>58</a>/// [`super::MAX_SIGNATURES`].
+<a href=#59 id=59 data-nosnippet>59</a></span><span class="kw">pub const </span>MAX_OS_SIGNATURES: u32 = <span class="number">32</span>;
+<a href=#60 id=60 data-nosnippet>60</a>
+<a href=#61 id=61 data-nosnippet>61</a><span class="doccomment">/// OS result codes ([`OsSignatureResult::code`]) that [`classify`] knows.
+<a href=#62 id=62 data-nosnippet>62</a>/// Each is the 32-bit `HRESULT` the OS trust API returns, as unsigned bits.
+<a href=#63 id=63 data-nosnippet>63</a></span><span class="kw">pub mod </span>code {
+<a href=#64 id=64 data-nosnippet>64</a>    <span class="doccomment">/// Success: the signature verified and its chain is trusted.
+<a href=#65 id=65 data-nosnippet>65</a>    </span><span class="kw">pub const </span>S_OK: u32 = <span class="number">0</span>;
+<a href=#66 id=66 data-nosnippet>66</a>    <span class="doccomment">/// `TRUST_E_NOSIGNATURE`: no signature was found.
+<a href=#67 id=67 data-nosnippet>67</a>    </span><span class="kw">pub const </span>TRUST_E_NOSIGNATURE: u32 = <span class="number">0x800B_0100</span>;
+<a href=#68 id=68 data-nosnippet>68</a>    <span class="doccomment">/// `TRUST_E_BAD_DIGEST`: the file's digest does not match the one the
+<a href=#69 id=69 data-nosnippet>69</a>    /// signature signs.
+<a href=#70 id=70 data-nosnippet>70</a>    </span><span class="kw">pub const </span>TRUST_E_BAD_DIGEST: u32 = <span class="number">0x8009_6010</span>;
+<a href=#71 id=71 data-nosnippet>71</a>    <span class="doccomment">/// `TRUST_E_NO_SIGNER_CERT`: the signer certificate is missing.
+<a href=#72 id=72 data-nosnippet>72</a>    </span><span class="kw">pub const </span>TRUST_E_NO_SIGNER_CERT: u32 = <span class="number">0x8009_6002</span>;
+<a href=#73 id=73 data-nosnippet>73</a>    <span class="doccomment">/// `TRUST_E_MALFORMED_SIGNATURE`: the signature is malformed.
+<a href=#74 id=74 data-nosnippet>74</a>    </span><span class="kw">pub const </span>TRUST_E_MALFORMED_SIGNATURE: u32 = <span class="number">0x8009_6011</span>;
+<a href=#75 id=75 data-nosnippet>75</a>    <span class="doccomment">/// `CRYPT_E_HASH_VALUE`: the `messageDigest` attribute does not match.
+<a href=#76 id=76 data-nosnippet>76</a>    </span><span class="kw">pub const </span>CRYPT_E_HASH_VALUE: u32 = <span class="number">0x8009_1007</span>;
+<a href=#77 id=77 data-nosnippet>77</a>    <span class="doccomment">/// `NTE_BAD_SIGNATURE`: the signature value does not verify.
+<a href=#78 id=78 data-nosnippet>78</a>    </span><span class="kw">pub const </span>NTE_BAD_SIGNATURE: u32 = <span class="number">0x8009_0006</span>;
+<a href=#79 id=79 data-nosnippet>79</a>    <span class="doccomment">/// `CRYPT_E_BAD_MSG`: the message cannot be decoded.
+<a href=#80 id=80 data-nosnippet>80</a>    </span><span class="kw">pub const </span>CRYPT_E_BAD_MSG: u32 = <span class="number">0x8009_200D</span>;
+<a href=#81 id=81 data-nosnippet>81</a>    <span class="doccomment">/// `CRYPT_E_BAD_ENCODE`.
+<a href=#82 id=82 data-nosnippet>82</a>    </span><span class="kw">pub const </span>CRYPT_E_BAD_ENCODE: u32 = <span class="number">0x8009_2002</span>;
+<a href=#83 id=83 data-nosnippet>83</a>    <span class="doccomment">/// `CRYPT_E_UNKNOWN_ALGO`.
+<a href=#84 id=84 data-nosnippet>84</a>    </span><span class="kw">pub const </span>CRYPT_E_UNKNOWN_ALGO: u32 = <span class="number">0x8009_1002</span>;
+<a href=#85 id=85 data-nosnippet>85</a>    <span class="doccomment">/// `CRYPT_E_INVALID_MSG_TYPE`.
+<a href=#86 id=86 data-nosnippet>86</a>    </span><span class="kw">pub const </span>CRYPT_E_INVALID_MSG_TYPE: u32 = <span class="number">0x8009_1004</span>;
+<a href=#87 id=87 data-nosnippet>87</a>    <span class="doccomment">/// `CRYPT_E_UNEXPECTED_ENCODING`.
+<a href=#88 id=88 data-nosnippet>88</a>    </span><span class="kw">pub const </span>CRYPT_E_UNEXPECTED_ENCODING: u32 = <span class="number">0x8009_1005</span>;
+<a href=#89 id=89 data-nosnippet>89</a>    <span class="doccomment">/// `CRYPT_E_AUTH_ATTR_MISSING`.
+<a href=#90 id=90 data-nosnippet>90</a>    </span><span class="kw">pub const </span>CRYPT_E_AUTH_ATTR_MISSING: u32 = <span class="number">0x8009_1006</span>;
+<a href=#91 id=91 data-nosnippet>91</a>    <span class="doccomment">/// `CRYPT_E_SIGNER_NOT_FOUND`.
+<a href=#92 id=92 data-nosnippet>92</a>    </span><span class="kw">pub const </span>CRYPT_E_SIGNER_NOT_FOUND: u32 = <span class="number">0x8009_100E</span>;
+<a href=#93 id=93 data-nosnippet>93</a>    <span class="doccomment">/// `CRYPT_E_ATTRIBUTES_MISSING`.
+<a href=#94 id=94 data-nosnippet>94</a>    </span><span class="kw">pub const </span>CRYPT_E_ATTRIBUTES_MISSING: u32 = <span class="number">0x8009_100F</span>;
+<a href=#95 id=95 data-nosnippet>95</a>    <span class="doccomment">/// `CRYPT_E_UNEXPECTED_MSG_TYPE`.
+<a href=#96 id=96 data-nosnippet>96</a>    </span><span class="kw">pub const </span>CRYPT_E_UNEXPECTED_MSG_TYPE: u32 = <span class="number">0x8009_200A</span>;
+<a href=#97 id=97 data-nosnippet>97</a>    <span class="doccomment">/// `CRYPT_E_NO_SIGNER`.
+<a href=#98 id=98 data-nosnippet>98</a>    </span><span class="kw">pub const </span>CRYPT_E_NO_SIGNER: u32 = <span class="number">0x8009_200E</span>;
+<a href=#99 id=99 data-nosnippet>99</a>    <span class="doccomment">/// `NTE_BAD_DATA`.
+<a href=#100 id=100 data-nosnippet>100</a>    </span><span class="kw">pub const </span>NTE_BAD_DATA: u32 = <span class="number">0x8009_0005</span>;
+<a href=#101 id=101 data-nosnippet>101</a>    <span class="doccomment">/// `NTE_BAD_ALGID`.
+<a href=#102 id=102 data-nosnippet>102</a>    </span><span class="kw">pub const </span>NTE_BAD_ALGID: u32 = <span class="number">0x8009_0008</span>;
+<a href=#103 id=103 data-nosnippet>103</a>    <span class="doccomment">/// `NTE_BAD_PUBLIC_KEY`.
+<a href=#104 id=104 data-nosnippet>104</a>    </span><span class="kw">pub const </span>NTE_BAD_PUBLIC_KEY: u32 = <span class="number">0x8009_0015</span>;
+<a href=#105 id=105 data-nosnippet>105</a>    <span class="doccomment">/// `CERT_E_MALFORMED`: a certificate cannot be decoded.
+<a href=#106 id=106 data-nosnippet>106</a>    </span><span class="kw">pub const </span>CERT_E_MALFORMED: u32 = <span class="number">0x800B_0108</span>;
+<a href=#107 id=107 data-nosnippet>107</a>    <span class="doccomment">/// `DIGSIG_E_ENCODE`.
+<a href=#108 id=108 data-nosnippet>108</a>    </span><span class="kw">pub const </span>DIGSIG_E_ENCODE: u32 = <span class="number">0x800B_0005</span>;
+<a href=#109 id=109 data-nosnippet>109</a>    <span class="doccomment">/// `DIGSIG_E_DECODE`.
+<a href=#110 id=110 data-nosnippet>110</a>    </span><span class="kw">pub const </span>DIGSIG_E_DECODE: u32 = <span class="number">0x800B_0006</span>;
+<a href=#111 id=111 data-nosnippet>111</a>    <span class="doccomment">/// `DIGSIG_E_EXTENSIBILITY`.
+<a href=#112 id=112 data-nosnippet>112</a>    </span><span class="kw">pub const </span>DIGSIG_E_EXTENSIBILITY: u32 = <span class="number">0x800B_0007</span>;
+<a href=#113 id=113 data-nosnippet>113</a>    <span class="doccomment">/// `DIGSIG_E_CRYPTO`.
+<a href=#114 id=114 data-nosnippet>114</a>    </span><span class="kw">pub const </span>DIGSIG_E_CRYPTO: u32 = <span class="number">0x800B_0008</span>;
+<a href=#115 id=115 data-nosnippet>115</a>    <span class="doccomment">/// The first `CRYPT_E_ASN1_*` code: ASN.1 decoding errors.
+<a href=#116 id=116 data-nosnippet>116</a>    </span><span class="kw">pub const </span>CRYPT_E_ASN1_FIRST: u32 = <span class="number">0x8009_3100</span>;
+<a href=#117 id=117 data-nosnippet>117</a>    <span class="doccomment">/// The last `CRYPT_E_ASN1_*` code (`CRYPT_E_ASN1_EXTENDED` and
+<a href=#118 id=118 data-nosnippet>118</a>    /// `CRYPT_E_ASN1_NOEOD` are `0x8009_3201` and `0x8009_3202`).
+<a href=#119 id=119 data-nosnippet>119</a>    </span><span class="kw">pub const </span>CRYPT_E_ASN1_LAST: u32 = <span class="number">0x8009_32FF</span>;
+<a href=#120 id=120 data-nosnippet>120</a>    <span class="doccomment">/// `TRUST_E_TIME_STAMP`: a timestamp could not be verified.
+<a href=#121 id=121 data-nosnippet>121</a>    </span><span class="kw">pub const </span>TRUST_E_TIME_STAMP: u32 = <span class="number">0x8009_6005</span>;
+<a href=#122 id=122 data-nosnippet>122</a>    <span class="doccomment">/// `TRUST_E_COUNTER_SIGNER`: a countersignature is invalid.
+<a href=#123 id=123 data-nosnippet>123</a>    </span><span class="kw">pub const </span>TRUST_E_COUNTER_SIGNER: u32 = <span class="number">0x8009_6003</span>;
+<a href=#124 id=124 data-nosnippet>124</a>    <span class="doccomment">/// `CERT_E_EXPIRED`.
+<a href=#125 id=125 data-nosnippet>125</a>    </span><span class="kw">pub const </span>CERT_E_EXPIRED: u32 = <span class="number">0x800B_0101</span>;
+<a href=#126 id=126 data-nosnippet>126</a>    <span class="doccomment">/// `CERT_E_VALIDITYPERIODNESTING`.
+<a href=#127 id=127 data-nosnippet>127</a>    </span><span class="kw">pub const </span>CERT_E_VALIDITYPERIODNESTING: u32 = <span class="number">0x800B_0102</span>;
+<a href=#128 id=128 data-nosnippet>128</a>    <span class="doccomment">/// `CERT_E_PURPOSE`.
+<a href=#129 id=129 data-nosnippet>129</a>    </span><span class="kw">pub const </span>CERT_E_PURPOSE: u32 = <span class="number">0x800B_0106</span>;
+<a href=#130 id=130 data-nosnippet>130</a>    <span class="doccomment">/// `CERT_E_UNTRUSTEDROOT`: the chain ends in an untrusted root.
+<a href=#131 id=131 data-nosnippet>131</a>    </span><span class="kw">pub const </span>CERT_E_UNTRUSTEDROOT: u32 = <span class="number">0x800B_0109</span>;
+<a href=#132 id=132 data-nosnippet>132</a>    <span class="doccomment">/// `CERT_E_CHAINING`: no chain could be built to a root.
+<a href=#133 id=133 data-nosnippet>133</a>    </span><span class="kw">pub const </span>CERT_E_CHAINING: u32 = <span class="number">0x800B_010A</span>;
+<a href=#134 id=134 data-nosnippet>134</a>    <span class="doccomment">/// `CERT_E_REVOKED`.
+<a href=#135 id=135 data-nosnippet>135</a>    </span><span class="kw">pub const </span>CERT_E_REVOKED: u32 = <span class="number">0x800B_010C</span>;
+<a href=#136 id=136 data-nosnippet>136</a>    <span class="doccomment">/// `CERT_E_UNTRUSTEDTESTROOT`.
+<a href=#137 id=137 data-nosnippet>137</a>    </span><span class="kw">pub const </span>CERT_E_UNTRUSTEDTESTROOT: u32 = <span class="number">0x800B_010D</span>;
+<a href=#138 id=138 data-nosnippet>138</a>    <span class="doccomment">/// `CERT_E_REVOCATION_FAILURE`.
+<a href=#139 id=139 data-nosnippet>139</a>    </span><span class="kw">pub const </span>CERT_E_REVOCATION_FAILURE: u32 = <span class="number">0x800B_010E</span>;
+<a href=#140 id=140 data-nosnippet>140</a>    <span class="doccomment">/// `CERT_E_WRONG_USAGE`.
+<a href=#141 id=141 data-nosnippet>141</a>    </span><span class="kw">pub const </span>CERT_E_WRONG_USAGE: u32 = <span class="number">0x800B_0110</span>;
+<a href=#142 id=142 data-nosnippet>142</a>    <span class="doccomment">/// `TRUST_E_EXPLICIT_DISTRUST`.
+<a href=#143 id=143 data-nosnippet>143</a>    </span><span class="kw">pub const </span>TRUST_E_EXPLICIT_DISTRUST: u32 = <span class="number">0x800B_0111</span>;
+<a href=#144 id=144 data-nosnippet>144</a>    <span class="doccomment">/// `CERT_E_UNTRUSTEDCA`.
+<a href=#145 id=145 data-nosnippet>145</a>    </span><span class="kw">pub const </span>CERT_E_UNTRUSTEDCA: u32 = <span class="number">0x800B_0112</span>;
+<a href=#146 id=146 data-nosnippet>146</a>    <span class="doccomment">/// `TRUST_E_CERT_SIGNATURE`: a certificate's signature in the chain does
+<a href=#147 id=147 data-nosnippet>147</a>    /// not verify.
+<a href=#148 id=148 data-nosnippet>148</a>    </span><span class="kw">pub const </span>TRUST_E_CERT_SIGNATURE: u32 = <span class="number">0x8009_6004</span>;
+<a href=#149 id=149 data-nosnippet>149</a>    <span class="doccomment">/// `TRUST_E_BASIC_CONSTRAINTS`.
+<a href=#150 id=150 data-nosnippet>150</a>    </span><span class="kw">pub const </span>TRUST_E_BASIC_CONSTRAINTS: u32 = <span class="number">0x8009_6019</span>;
+<a href=#151 id=151 data-nosnippet>151</a>    <span class="doccomment">/// `CRYPT_E_REVOKED`.
+<a href=#152 id=152 data-nosnippet>152</a>    </span><span class="kw">pub const </span>CRYPT_E_REVOKED: u32 = <span class="number">0x8009_2010</span>;
+<a href=#153 id=153 data-nosnippet>153</a>    <span class="doccomment">/// `CRYPT_E_NO_REVOCATION_CHECK`.
+<a href=#154 id=154 data-nosnippet>154</a>    </span><span class="kw">pub const </span>CRYPT_E_NO_REVOCATION_CHECK: u32 = <span class="number">0x8009_2012</span>;
+<a href=#155 id=155 data-nosnippet>155</a>    <span class="doccomment">/// `CRYPT_E_REVOCATION_OFFLINE`.
+<a href=#156 id=156 data-nosnippet>156</a>    </span><span class="kw">pub const </span>CRYPT_E_REVOCATION_OFFLINE: u32 = <span class="number">0x8009_2013</span>;
+<a href=#157 id=157 data-nosnippet>157</a>}
+<a href=#158 id=158 data-nosnippet>158</a>
+<a href=#159 id=159 data-nosnippet>159</a><span class="doccomment">/// What an OS result code says about the signature itself.
+<a href=#160 id=160 data-nosnippet>160</a></span><span class="attr">#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+<a href=#161 id=161 data-nosnippet>161</a></span><span class="kw">pub enum </span>OsVerdict {
+<a href=#162 id=162 data-nosnippet>162</a>    <span class="doccomment">/// The signature verified and the OS trusts its chain.
+<a href=#163 id=163 data-nosnippet>163</a>    </span>Trusted,
+<a href=#164 id=164 data-nosnippet>164</a>    <span class="doccomment">/// The signature verified, but the OS does not trust its certificate
+<a href=#165 id=165 data-nosnippet>165</a>    /// chain, rejected it on policy (an untrusted root, an expired or
+<a href=#166 id=166 data-nosnippet>166</a>    /// revoked certificate, a wrong usage), or could not verify its
+<a href=#167 id=167 data-nosnippet>167</a>    /// timestamp. The OS checks the file digest and the signature before
+<a href=#168 id=168 data-nosnippet>168</a>    /// the chain and the countersignatures, and reports their failures
+<a href=#169 id=169 data-nosnippet>169</a>    /// first, so the signature itself is intact. ([`super::SignatureStatus`]
+<a href=#170 id=170 data-nosnippet>170</a>    /// does not cover chains or timestamps either.)
+<a href=#171 id=171 data-nosnippet>171</a>    </span>ChainNotTrusted,
+<a href=#172 id=172 data-nosnippet>172</a>    <span class="doccomment">/// The file digest, the `messageDigest` attribute or the signature
+<a href=#173 id=173 data-nosnippet>173</a>    /// value does not verify, the signer certificate is missing, an
+<a href=#174 id=174 data-nosnippet>174</a>    /// algorithm is unknown, or the message or a certificate is malformed.
+<a href=#175 id=175 data-nosnippet>175</a>    </span>Broken,
+<a href=#176 id=176 data-nosnippet>176</a>    <span class="doccomment">/// The OS found no signature.
+<a href=#177 id=177 data-nosnippet>177</a>    </span>NoSignature,
+<a href=#178 id=178 data-nosnippet>178</a>    <span class="doccomment">/// A code this module does not classify.
+<a href=#179 id=179 data-nosnippet>179</a>    </span>Unclassified,
+<a href=#180 id=180 data-nosnippet>180</a>}
+<a href=#181 id=181 data-nosnippet>181</a>
+<a href=#182 id=182 data-nosnippet>182</a><span class="kw">impl </span>OsVerdict {
+<a href=#183 id=183 data-nosnippet>183</a>    <span class="doccomment">/// Whether the OS found the signature intact (`Some(true)`), not intact
+<a href=#184 id=184 data-nosnippet>184</a>    /// or absent (`Some(false)`), or the code says neither (`None`).
+<a href=#185 id=185 data-nosnippet>185</a>    </span><span class="attr">#[must_use]
+<a href=#186 id=186 data-nosnippet>186</a>    </span><span class="kw">pub const fn </span>accepts(<span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;bool&gt; {
+<a href=#187 id=187 data-nosnippet>187</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#188 id=188 data-nosnippet>188</a>            <span class="self">Self</span>::Trusted | <span class="self">Self</span>::ChainNotTrusted =&gt; <span class="prelude-val">Some</span>(<span class="bool-val">true</span>),
+<a href=#189 id=189 data-nosnippet>189</a>            <span class="self">Self</span>::Broken | <span class="self">Self</span>::NoSignature =&gt; <span class="prelude-val">Some</span>(<span class="bool-val">false</span>),
+<a href=#190 id=190 data-nosnippet>190</a>            <span class="self">Self</span>::Unclassified =&gt; <span class="prelude-val">None</span>,
+<a href=#191 id=191 data-nosnippet>191</a>        }
+<a href=#192 id=192 data-nosnippet>192</a>    }
+<a href=#193 id=193 data-nosnippet>193</a>}
+<a href=#194 id=194 data-nosnippet>194</a>
+<a href=#195 id=195 data-nosnippet>195</a><span class="doccomment">/// Classifies an OS trust-verification result code.
+<a href=#196 id=196 data-nosnippet>196</a></span><span class="attr">#[must_use]
+<a href=#197 id=197 data-nosnippet>197</a></span><span class="kw">pub const fn </span>classify(code: u32) -&gt; OsVerdict {
+<a href=#198 id=198 data-nosnippet>198</a>    <span class="kw">match </span>code {
+<a href=#199 id=199 data-nosnippet>199</a>        code::S_OK =&gt; OsVerdict::Trusted,
+<a href=#200 id=200 data-nosnippet>200</a>        code::TRUST_E_NOSIGNATURE =&gt; OsVerdict::NoSignature,
+<a href=#201 id=201 data-nosnippet>201</a>        code::TRUST_E_BAD_DIGEST
+<a href=#202 id=202 data-nosnippet>202</a>        | code::TRUST_E_NO_SIGNER_CERT
+<a href=#203 id=203 data-nosnippet>203</a>        | code::TRUST_E_MALFORMED_SIGNATURE
+<a href=#204 id=204 data-nosnippet>204</a>        | code::CRYPT_E_HASH_VALUE
+<a href=#205 id=205 data-nosnippet>205</a>        | code::NTE_BAD_SIGNATURE
+<a href=#206 id=206 data-nosnippet>206</a>        | code::CRYPT_E_BAD_MSG
+<a href=#207 id=207 data-nosnippet>207</a>        | code::CRYPT_E_BAD_ENCODE
+<a href=#208 id=208 data-nosnippet>208</a>        | code::CRYPT_E_UNKNOWN_ALGO
+<a href=#209 id=209 data-nosnippet>209</a>        | code::CRYPT_E_INVALID_MSG_TYPE
+<a href=#210 id=210 data-nosnippet>210</a>        | code::CRYPT_E_UNEXPECTED_ENCODING
+<a href=#211 id=211 data-nosnippet>211</a>        | code::CRYPT_E_AUTH_ATTR_MISSING
+<a href=#212 id=212 data-nosnippet>212</a>        | code::CRYPT_E_SIGNER_NOT_FOUND
+<a href=#213 id=213 data-nosnippet>213</a>        | code::CRYPT_E_ATTRIBUTES_MISSING
+<a href=#214 id=214 data-nosnippet>214</a>        | code::CRYPT_E_UNEXPECTED_MSG_TYPE
+<a href=#215 id=215 data-nosnippet>215</a>        | code::CRYPT_E_NO_SIGNER
+<a href=#216 id=216 data-nosnippet>216</a>        | code::NTE_BAD_DATA
+<a href=#217 id=217 data-nosnippet>217</a>        | code::NTE_BAD_ALGID
+<a href=#218 id=218 data-nosnippet>218</a>        | code::NTE_BAD_PUBLIC_KEY
+<a href=#219 id=219 data-nosnippet>219</a>        | code::CERT_E_MALFORMED
+<a href=#220 id=220 data-nosnippet>220</a>        | code::DIGSIG_E_ENCODE
+<a href=#221 id=221 data-nosnippet>221</a>        | code::DIGSIG_E_DECODE
+<a href=#222 id=222 data-nosnippet>222</a>        | code::DIGSIG_E_EXTENSIBILITY
+<a href=#223 id=223 data-nosnippet>223</a>        | code::DIGSIG_E_CRYPTO
+<a href=#224 id=224 data-nosnippet>224</a>        | code::CRYPT_E_ASN1_FIRST..=code::CRYPT_E_ASN1_LAST =&gt; OsVerdict::Broken,
+<a href=#225 id=225 data-nosnippet>225</a>        code::CERT_E_EXPIRED
+<a href=#226 id=226 data-nosnippet>226</a>        | code::CERT_E_VALIDITYPERIODNESTING
+<a href=#227 id=227 data-nosnippet>227</a>        | code::CERT_E_PURPOSE
+<a href=#228 id=228 data-nosnippet>228</a>        | code::CERT_E_UNTRUSTEDROOT
+<a href=#229 id=229 data-nosnippet>229</a>        | code::CERT_E_CHAINING
+<a href=#230 id=230 data-nosnippet>230</a>        | code::CERT_E_REVOKED
+<a href=#231 id=231 data-nosnippet>231</a>        | code::CERT_E_UNTRUSTEDTESTROOT
+<a href=#232 id=232 data-nosnippet>232</a>        | code::CERT_E_REVOCATION_FAILURE
+<a href=#233 id=233 data-nosnippet>233</a>        | code::CERT_E_WRONG_USAGE
+<a href=#234 id=234 data-nosnippet>234</a>        | code::TRUST_E_EXPLICIT_DISTRUST
+<a href=#235 id=235 data-nosnippet>235</a>        | code::CERT_E_UNTRUSTEDCA
+<a href=#236 id=236 data-nosnippet>236</a>        | code::TRUST_E_CERT_SIGNATURE
+<a href=#237 id=237 data-nosnippet>237</a>        | code::TRUST_E_BASIC_CONSTRAINTS
+<a href=#238 id=238 data-nosnippet>238</a>        | code::CRYPT_E_REVOKED
+<a href=#239 id=239 data-nosnippet>239</a>        | code::CRYPT_E_NO_REVOCATION_CHECK
+<a href=#240 id=240 data-nosnippet>240</a>        | code::CRYPT_E_REVOCATION_OFFLINE
+<a href=#241 id=241 data-nosnippet>241</a>        | code::TRUST_E_TIME_STAMP
+<a href=#242 id=242 data-nosnippet>242</a>        | code::TRUST_E_COUNTER_SIGNER =&gt; OsVerdict::ChainNotTrusted,
+<a href=#243 id=243 data-nosnippet>243</a>        <span class="kw">_ </span>=&gt; OsVerdict::Unclassified,
+<a href=#244 id=244 data-nosnippet>244</a>    }
+<a href=#245 id=245 data-nosnippet>245</a>}
+<a href=#246 id=246 data-nosnippet>246</a>
+<a href=#247 id=247 data-nosnippet>247</a><span class="doccomment">/// The OS result for one signature.
+<a href=#248 id=248 data-nosnippet>248</a></span><span class="attr">#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+<a href=#249 id=249 data-nosnippet>249</a></span><span class="kw">pub struct </span>OsSignatureResult {
+<a href=#250 id=250 data-nosnippet>250</a>    <span class="doccomment">/// The OS signature index: 0 for the primary signature, 1 and up for
+<a href=#251 id=251 data-nosnippet>251</a>    /// the signatures nested directly in it.
+<a href=#252 id=252 data-nosnippet>252</a>    </span><span class="kw">pub </span>index: u32,
+<a href=#253 id=253 data-nosnippet>253</a>    <span class="doccomment">/// The result code, as the unsigned bits of the `HRESULT`.
+<a href=#254 id=254 data-nosnippet>254</a>    </span><span class="kw">pub </span>code: u32,
+<a href=#255 id=255 data-nosnippet>255</a>}
+<a href=#256 id=256 data-nosnippet>256</a>
+<a href=#257 id=257 data-nosnippet>257</a><span class="kw">impl </span>OsSignatureResult {
+<a href=#258 id=258 data-nosnippet>258</a>    <span class="doccomment">/// [`classify`] of [`Self::code`].
+<a href=#259 id=259 data-nosnippet>259</a>    </span><span class="attr">#[must_use]
+<a href=#260 id=260 data-nosnippet>260</a>    </span><span class="kw">pub const fn </span>verdict(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; OsVerdict {
+<a href=#261 id=261 data-nosnippet>261</a>        classify(<span class="self">self</span>.code)
+<a href=#262 id=262 data-nosnippet>262</a>    }
+<a href=#263 id=263 data-nosnippet>263</a>}
+<a href=#264 id=264 data-nosnippet>264</a>
+<a href=#265 id=265 data-nosnippet>265</a><span class="doccomment">/// What the OS reported for one file.
+<a href=#266 id=266 data-nosnippet>266</a></span><span class="attr">#[derive(Debug, Clone, PartialEq, Eq, Default)]
+<a href=#267 id=267 data-nosnippet>267</a></span><span class="kw">pub struct </span>OsTrustResult {
+<a href=#268 id=268 data-nosnippet>268</a>    <span class="doccomment">/// One result per signature the OS was asked about, by index. Index 0
+<a href=#269 id=269 data-nosnippet>269</a>    /// is always present when the OS was asked at all.
+<a href=#270 id=270 data-nosnippet>270</a>    </span><span class="kw">pub </span>signatures: Vec&lt;OsSignatureResult&gt;,
+<a href=#271 id=271 data-nosnippet>271</a>    <span class="doccomment">/// How many secondary (nested) signatures the OS said the primary has.
+<a href=#272 id=272 data-nosnippet>272</a>    </span><span class="kw">pub </span>secondary_count: u32,
+<a href=#273 id=273 data-nosnippet>273</a>    <span class="doccomment">/// The OS reported more secondary signatures than
+<a href=#274 id=274 data-nosnippet>274</a>    /// [`MAX_OS_SIGNATURES`] allows, so the rest were not asked about.
+<a href=#275 id=275 data-nosnippet>275</a>    </span><span class="kw">pub </span>truncated: bool,
+<a href=#276 id=276 data-nosnippet>276</a>}
+<a href=#277 id=277 data-nosnippet>277</a>
+<a href=#278 id=278 data-nosnippet>278</a><span class="doccomment">/// How one OS result compares with the Rust result for the same signature.
+<a href=#279 id=279 data-nosnippet>279</a></span><span class="attr">#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+<a href=#280 id=280 data-nosnippet>280</a></span><span class="kw">pub enum </span>Outcome {
+<a href=#281 id=281 data-nosnippet>281</a>    <span class="doccomment">/// Both accept the signature, or both reject it, or both find none:
+<a href=#282 id=282 data-nosnippet>282</a>    /// an unsigned file, or (at index 0) a certificate table this crate
+<a href=#283 id=283 data-nosnippet>283</a>    /// could not read and the OS rejected.
+<a href=#284 id=284 data-nosnippet>284</a>    </span>Agree,
+<a href=#285 id=285 data-nosnippet>285</a>    <span class="doccomment">/// The OS finds the signature intact and this crate does not: expected
+<a href=#286 id=286 data-nosnippet>286</a>    /// for the stricter checks described in the module documentation, and
+<a href=#287 id=287 data-nosnippet>287</a>    /// otherwise worth investigating.
+<a href=#288 id=288 data-nosnippet>288</a>    </span>OsAcceptsRustRejects,
+<a href=#289 id=289 data-nosnippet>289</a>    <span class="doccomment">/// This crate finds the signature valid and the OS does not. This could
+<a href=#290 id=290 data-nosnippet>290</a>    /// hide a verification bug.
+<a href=#291 id=291 data-nosnippet>291</a>    </span>RustAcceptsOsRejects,
+<a href=#292 id=292 data-nosnippet>292</a>    <span class="doccomment">/// The OS reported a signature (intact or broken) that has no
+<a href=#293 id=293 data-nosnippet>293</a>    /// counterpart in the report.
+<a href=#294 id=294 data-nosnippet>294</a>    </span>OnlyOs,
+<a href=#295 id=295 data-nosnippet>295</a>    <span class="doccomment">/// The report has a signature the OS should have seen, at an index the
+<a href=#296 id=296 data-nosnippet>296</a>    /// OS did not report.
+<a href=#297 id=297 data-nosnippet>297</a>    </span>OnlyRust,
+<a href=#298 id=298 data-nosnippet>298</a>    <span class="doccomment">/// The OS code is unclassified, so nothing can be said. This is not an
+<a href=#299 id=299 data-nosnippet>299</a>    /// agreement; see [`CrossCheck::not_comparable`].
+<a href=#300 id=300 data-nosnippet>300</a>    </span>NotComparable,
+<a href=#301 id=301 data-nosnippet>301</a>}
+<a href=#302 id=302 data-nosnippet>302</a>
+<a href=#303 id=303 data-nosnippet>303</a><span class="doccomment">/// One compared pair.
+<a href=#304 id=304 data-nosnippet>304</a></span><span class="attr">#[derive(Debug, Clone, PartialEq, Eq)]
+<a href=#305 id=305 data-nosnippet>305</a></span><span class="kw">pub struct </span>Comparison {
+<a href=#306 id=306 data-nosnippet>306</a>    <span class="doccomment">/// The OS signature index.
+<a href=#307 id=307 data-nosnippet>307</a>    </span><span class="kw">pub </span>os_index: u32,
+<a href=#308 id=308 data-nosnippet>308</a>    <span class="doccomment">/// The index of the matching signature in
+<a href=#309 id=309 data-nosnippet>309</a>    /// [`SignatureReport::signatures`], if there is one.
+<a href=#310 id=310 data-nosnippet>310</a>    </span><span class="kw">pub </span>signature: <span class="prelude-ty">Option</span>&lt;usize&gt;,
+<a href=#311 id=311 data-nosnippet>311</a>    <span class="doccomment">/// The Rust status of that signature.
+<a href=#312 id=312 data-nosnippet>312</a>    </span><span class="kw">pub </span>rust_status: <span class="prelude-ty">Option</span>&lt;SignatureStatus&gt;,
+<a href=#313 id=313 data-nosnippet>313</a>    <span class="doccomment">/// The OS result, if the OS reported this index.
+<a href=#314 id=314 data-nosnippet>314</a>    </span><span class="kw">pub </span>os: <span class="prelude-ty">Option</span>&lt;OsSignatureResult&gt;,
+<a href=#315 id=315 data-nosnippet>315</a>    <span class="doccomment">/// The outcome.
+<a href=#316 id=316 data-nosnippet>316</a>    </span><span class="kw">pub </span>outcome: Outcome,
+<a href=#317 id=317 data-nosnippet>317</a>}
+<a href=#318 id=318 data-nosnippet>318</a>
+<a href=#319 id=319 data-nosnippet>319</a><span class="doccomment">/// The result of [`cross_check`]. It is a diagnostic only; see the module
+<a href=#320 id=320 data-nosnippet>320</a>/// documentation.
+<a href=#321 id=321 data-nosnippet>321</a></span><span class="attr">#[derive(Debug, Clone, PartialEq, Eq, Default)]
+<a href=#322 id=322 data-nosnippet>322</a></span><span class="kw">pub struct </span>CrossCheck {
+<a href=#323 id=323 data-nosnippet>323</a>    <span class="doccomment">/// One entry per OS signature index that either side has, in index
+<a href=#324 id=324 data-nosnippet>324</a>    /// order.
+<a href=#325 id=325 data-nosnippet>325</a>    </span><span class="kw">pub </span>comparisons: Vec&lt;Comparison&gt;,
+<a href=#326 id=326 data-nosnippet>326</a>    <span class="doccomment">/// The number of secondary signatures in the report (signatures nested
+<a href=#327 id=327 data-nosnippet>327</a>    /// directly in the primary), to compare with
+<a href=#328 id=328 data-nosnippet>328</a>    /// [`OsTrustResult::secondary_count`].
+<a href=#329 id=329 data-nosnippet>329</a>    </span><span class="kw">pub </span>rust_secondary_count: usize,
+<a href=#330 id=330 data-nosnippet>330</a>    <span class="doccomment">/// The OS and the report disagree on how many secondary signatures
+<a href=#331 id=331 data-nosnippet>331</a>    /// there are.
+<a href=#332 id=332 data-nosnippet>332</a>    </span><span class="kw">pub </span>secondary_count_differs: bool,
+<a href=#333 id=333 data-nosnippet>333</a>}
+<a href=#334 id=334 data-nosnippet>334</a>
+<a href=#335 id=335 data-nosnippet>335</a><span class="kw">impl </span>CrossCheck {
+<a href=#336 id=336 data-nosnippet>336</a>    <span class="doccomment">/// Whether every comparison is [`Outcome::Agree`] and the secondary
+<a href=#337 id=337 data-nosnippet>337</a>    /// counts match. A comparison that is [`Outcome::NotComparable`] makes
+<a href=#338 id=338 data-nosnippet>338</a>    /// this false: an OS code nobody classified is not evidence of
+<a href=#339 id=339 data-nosnippet>339</a>    /// agreement.
+<a href=#340 id=340 data-nosnippet>340</a>    </span><span class="attr">#[must_use]
+<a href=#341 id=341 data-nosnippet>341</a>    </span><span class="kw">pub fn </span>agrees(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+<a href=#342 id=342 data-nosnippet>342</a>        !<span class="self">self</span>.secondary_count_differs
+<a href=#343 id=343 data-nosnippet>343</a>            &amp;&amp; <span class="self">self</span>.comparisons.iter().all(|c| c.outcome == Outcome::Agree)
+<a href=#344 id=344 data-nosnippet>344</a>    }
+<a href=#345 id=345 data-nosnippet>345</a>
+<a href=#346 id=346 data-nosnippet>346</a>    <span class="doccomment">/// The comparisons where the two sides reach different answers. Those
+<a href=#347 id=347 data-nosnippet>347</a>    /// that cannot be compared are in [`Self::not_comparable`] instead.
+<a href=#348 id=348 data-nosnippet>348</a>    </span><span class="kw">pub fn </span>disagreements(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span>Comparison&gt; {
+<a href=#349 id=349 data-nosnippet>349</a>        <span class="self">self</span>.comparisons
+<a href=#350 id=350 data-nosnippet>350</a>            .iter()
+<a href=#351 id=351 data-nosnippet>351</a>            .filter(|c| !<span class="macro">matches!</span>(c.outcome, Outcome::Agree | Outcome::NotComparable))
+<a href=#352 id=352 data-nosnippet>352</a>    }
+<a href=#353 id=353 data-nosnippet>353</a>
+<a href=#354 id=354 data-nosnippet>354</a>    <span class="doccomment">/// The comparisons whose OS code is unclassified.
+<a href=#355 id=355 data-nosnippet>355</a>    </span><span class="kw">pub fn </span>not_comparable(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span>Comparison&gt; {
+<a href=#356 id=356 data-nosnippet>356</a>        <span class="self">self</span>.comparisons
+<a href=#357 id=357 data-nosnippet>357</a>            .iter()
+<a href=#358 id=358 data-nosnippet>358</a>            .filter(|c| c.outcome == Outcome::NotComparable)
+<a href=#359 id=359 data-nosnippet>359</a>    }
+<a href=#360 id=360 data-nosnippet>360</a>
+<a href=#361 id=361 data-nosnippet>361</a>    <span class="doccomment">/// The comparisons where this crate accepts a signature the OS rejects.
+<a href=#362 id=362 data-nosnippet>362</a>    </span><span class="kw">pub fn </span>rust_accepts_os_rejects(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span>Comparison&gt; {
+<a href=#363 id=363 data-nosnippet>363</a>        <span class="self">self</span>.comparisons
+<a href=#364 id=364 data-nosnippet>364</a>            .iter()
+<a href=#365 id=365 data-nosnippet>365</a>            .filter(|c| c.outcome == Outcome::RustAcceptsOsRejects)
+<a href=#366 id=366 data-nosnippet>366</a>    }
+<a href=#367 id=367 data-nosnippet>367</a>}
+<a href=#368 id=368 data-nosnippet>368</a>
+<a href=#369 id=369 data-nosnippet>369</a><span class="doccomment">/// The signatures of `report` the OS reads, by OS index: the first
+<a href=#370 id=370 data-nosnippet>370</a>/// embedded signature, then the signatures nested directly in it, in
+<a href=#371 id=371 data-nosnippet>371</a>/// order.
+<a href=#372 id=372 data-nosnippet>372</a></span><span class="kw">fn </span>os_view(report: <span class="kw-2">&amp;</span>SignatureReport) -&gt; Vec&lt;usize&gt; {
+<a href=#373 id=373 data-nosnippet>373</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(primary) = report
+<a href=#374 id=374 data-nosnippet>374</a>        .signatures
+<a href=#375 id=375 data-nosnippet>375</a>        .iter()
+<a href=#376 id=376 data-nosnippet>376</a>        .position(|s| s.kind == SignatureKind::Embedded)
+<a href=#377 id=377 data-nosnippet>377</a>    <span class="kw">else </span>{
+<a href=#378 id=378 data-nosnippet>378</a>        <span class="kw">return </span>Vec::new();
+<a href=#379 id=379 data-nosnippet>379</a>    };
+<a href=#380 id=380 data-nosnippet>380</a>    <span class="kw">let </span><span class="kw-2">mut </span>view = <span class="macro">vec!</span>[primary];
+<a href=#381 id=381 data-nosnippet>381</a>    view.extend(
+<a href=#382 id=382 data-nosnippet>382</a>        report
+<a href=#383 id=383 data-nosnippet>383</a>            .signatures
+<a href=#384 id=384 data-nosnippet>384</a>            .iter()
+<a href=#385 id=385 data-nosnippet>385</a>            .enumerate()
+<a href=#386 id=386 data-nosnippet>386</a>            .filter(|(<span class="kw">_</span>, s)| s.kind == SignatureKind::Nested &amp;&amp; s.parent == <span class="prelude-val">Some</span>(primary))
+<a href=#387 id=387 data-nosnippet>387</a>            .map(|(i, <span class="kw">_</span>)| i),
+<a href=#388 id=388 data-nosnippet>388</a>    );
+<a href=#389 id=389 data-nosnippet>389</a>    view
+<a href=#390 id=390 data-nosnippet>390</a>}
+<a href=#391 id=391 data-nosnippet>391</a>
+<a href=#392 id=392 data-nosnippet>392</a><span class="doccomment">/// Whether this crate found the certificate table unreadable, with no
+<a href=#393 id=393 data-nosnippet>393</a>/// signature in it read.
+<a href=#394 id=394 data-nosnippet>394</a></span><span class="kw">fn </span>table_unreadable(report: <span class="kw-2">&amp;</span>SignatureReport) -&gt; bool {
+<a href=#395 id=395 data-nosnippet>395</a>    <span class="macro">matches!</span>(
+<a href=#396 id=396 data-nosnippet>396</a>        report.signing_state,
+<a href=#397 id=397 data-nosnippet>397</a>        SigningState::Invalid(InvalidReason::CertificateTable(<span class="kw">_</span>))
+<a href=#398 id=398 data-nosnippet>398</a>    )
+<a href=#399 id=399 data-nosnippet>399</a>}
+<a href=#400 id=400 data-nosnippet>400</a>
+<a href=#401 id=401 data-nosnippet>401</a><span class="doccomment">/// Compares the OS results for a file with the report this crate produced
+<a href=#402 id=402 data-nosnippet>402</a>/// for the same file. The report is not changed.
+<a href=#403 id=403 data-nosnippet>403</a>///
+<a href=#404 id=404 data-nosnippet>404</a>/// OS indexes 0 to [`MAX_OS_SIGNATURES`] minus one are compared; a result
+<a href=#405 id=405 data-nosnippet>405</a>/// at a larger index (which the Windows backend never asks for) is
+<a href=#406 id=406 data-nosnippet>406</a>/// ignored, so a crafted result cannot make the loop long.
+<a href=#407 id=407 data-nosnippet>407</a></span><span class="attr">#[must_use]
+<a href=#408 id=408 data-nosnippet>408</a></span><span class="kw">pub fn </span>cross_check(report: <span class="kw-2">&amp;</span>SignatureReport, os: <span class="kw-2">&amp;</span>OsTrustResult) -&gt; CrossCheck {
+<a href=#409 id=409 data-nosnippet>409</a>    <span class="kw">let </span>view = os_view(report);
+<a href=#410 id=410 data-nosnippet>410</a>    <span class="kw">let </span>rust_secondary_count = view.len().saturating_sub(<span class="number">1</span>);
+<a href=#411 id=411 data-nosnippet>411</a>    <span class="kw">let </span><span class="kw-2">mut </span>out = CrossCheck {
+<a href=#412 id=412 data-nosnippet>412</a>        comparisons: Vec::new(),
+<a href=#413 id=413 data-nosnippet>413</a>        rust_secondary_count,
+<a href=#414 id=414 data-nosnippet>414</a>        secondary_count_differs: <span class="bool-val">false</span>,
+<a href=#415 id=415 data-nosnippet>415</a>    };
+<a href=#416 id=416 data-nosnippet>416</a>    <span class="kw">let </span>os_primary = os.signatures.iter().find(|r| r.index == <span class="number">0</span>);
+<a href=#417 id=417 data-nosnippet>417</a>    <span class="comment">// The OS reports "no signature" at index 0 for an unsigned file. Its
+<a href=#418 id=418 data-nosnippet>418</a>    // secondary count is then meaningless.
+<a href=#419 id=419 data-nosnippet>419</a>    </span><span class="kw">let </span>os_unsigned = os_primary.is_some_and(|r| r.verdict() == OsVerdict::NoSignature);
+<a href=#420 id=420 data-nosnippet>420</a>    out.secondary_count_differs = !os_unsigned
+<a href=#421 id=421 data-nosnippet>421</a>        &amp;&amp; !os.truncated
+<a href=#422 id=422 data-nosnippet>422</a>        &amp;&amp; usize::try_from(os.secondary_count).ok() != <span class="prelude-val">Some</span>(rust_secondary_count);
+<a href=#423 id=423 data-nosnippet>423</a>
+<a href=#424 id=424 data-nosnippet>424</a>    <span class="kw">let </span>os_max = os.signatures.iter().map(|r| r.index).max();
+<a href=#425 id=425 data-nosnippet>425</a>    <span class="kw">let </span>rust_max = u32::try_from(view.len())
+<a href=#426 id=426 data-nosnippet>426</a>        .ok()
+<a href=#427 id=427 data-nosnippet>427</a>        .and_then(|n| n.checked_sub(<span class="number">1</span>));
+<a href=#428 id=428 data-nosnippet>428</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(last) = os_max.max(rust_max) <span class="kw">else </span>{
+<a href=#429 id=429 data-nosnippet>429</a>        <span class="kw">return </span>out;
+<a href=#430 id=430 data-nosnippet>430</a>    };
+<a href=#431 id=431 data-nosnippet>431</a>    <span class="kw">for </span>os_index <span class="kw">in </span><span class="number">0</span>..=last.min(MAX_OS_SIGNATURES - <span class="number">1</span>) {
+<a href=#432 id=432 data-nosnippet>432</a>        <span class="kw">let </span>os_result = os.signatures.iter().find(|r| r.index == os_index).copied();
+<a href=#433 id=433 data-nosnippet>433</a>        <span class="kw">let </span>signature = usize::try_from(os_index)
+<a href=#434 id=434 data-nosnippet>434</a>            .ok()
+<a href=#435 id=435 data-nosnippet>435</a>            .and_then(|i| view.get(i))
+<a href=#436 id=436 data-nosnippet>436</a>            .copied();
+<a href=#437 id=437 data-nosnippet>437</a>        <span class="kw">let </span>rust_status = signature
+<a href=#438 id=438 data-nosnippet>438</a>            .and_then(|i| report.signatures.get(i))
+<a href=#439 id=439 data-nosnippet>439</a>            .map(|s| s.status.clone());
+<a href=#440 id=440 data-nosnippet>440</a>        <span class="kw">let </span>outcome = <span class="kw">match </span>(<span class="kw-2">&amp;</span>rust_status, os_result) {
+<a href=#441 id=441 data-nosnippet>441</a>            (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>) =&gt; <span class="kw">continue</span>,
+<a href=#442 id=442 data-nosnippet>442</a>            (<span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="prelude-val">None</span>) =&gt; Outcome::OnlyRust,
+<a href=#443 id=443 data-nosnippet>443</a>            (<span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(r)) =&gt; <span class="kw">match </span>r.verdict() {
+<a href=#444 id=444 data-nosnippet>444</a>                <span class="comment">// Neither side has a signature here.
+<a href=#445 id=445 data-nosnippet>445</a>                </span>OsVerdict::NoSignature =&gt; Outcome::Agree,
+<a href=#446 id=446 data-nosnippet>446</a>                <span class="comment">// The OS found and rejected a signature this crate did not
+<a href=#447 id=447 data-nosnippet>447</a>                // read. Only at index 0, and only when this crate also
+<a href=#448 id=448 data-nosnippet>448</a>                // rejected the certificate table, do the two agree.
+<a href=#449 id=449 data-nosnippet>449</a>                </span>OsVerdict::Broken <span class="kw">if </span>os_index == <span class="number">0 </span>&amp;&amp; table_unreadable(report) =&gt; Outcome::Agree,
+<a href=#450 id=450 data-nosnippet>450</a>                OsVerdict::Broken | OsVerdict::Trusted | OsVerdict::ChainNotTrusted =&gt; {
+<a href=#451 id=451 data-nosnippet>451</a>                    Outcome::OnlyOs
+<a href=#452 id=452 data-nosnippet>452</a>                }
+<a href=#453 id=453 data-nosnippet>453</a>                OsVerdict::Unclassified =&gt; Outcome::NotComparable,
+<a href=#454 id=454 data-nosnippet>454</a>            },
+<a href=#455 id=455 data-nosnippet>455</a>            (<span class="prelude-val">Some</span>(status), <span class="prelude-val">Some</span>(r)) =&gt; <span class="kw">match </span>r.verdict().accepts() {
+<a href=#456 id=456 data-nosnippet>456</a>                <span class="prelude-val">None </span>=&gt; Outcome::NotComparable,
+<a href=#457 id=457 data-nosnippet>457</a>                <span class="prelude-val">Some</span>(os_ok) =&gt; <span class="kw">match </span>(status.is_valid(), os_ok) {
+<a href=#458 id=458 data-nosnippet>458</a>                    (<span class="bool-val">true</span>, <span class="bool-val">true</span>) | (<span class="bool-val">false</span>, <span class="bool-val">false</span>) =&gt; Outcome::Agree,
+<a href=#459 id=459 data-nosnippet>459</a>                    (<span class="bool-val">false</span>, <span class="bool-val">true</span>) =&gt; Outcome::OsAcceptsRustRejects,
+<a href=#460 id=460 data-nosnippet>460</a>                    (<span class="bool-val">true</span>, <span class="bool-val">false</span>) =&gt; Outcome::RustAcceptsOsRejects,
+<a href=#461 id=461 data-nosnippet>461</a>                },
+<a href=#462 id=462 data-nosnippet>462</a>            },
+<a href=#463 id=463 data-nosnippet>463</a>        };
+<a href=#464 id=464 data-nosnippet>464</a>        out.comparisons.push(Comparison {
+<a href=#465 id=465 data-nosnippet>465</a>            os_index,
+<a href=#466 id=466 data-nosnippet>466</a>            signature,
+<a href=#467 id=467 data-nosnippet>467</a>            rust_status,
+<a href=#468 id=468 data-nosnippet>468</a>            os: os_result,
+<a href=#469 id=469 data-nosnippet>469</a>            outcome,
+<a href=#470 id=470 data-nosnippet>470</a>        });
+<a href=#471 id=471 data-nosnippet>471</a>    }
+<a href=#472 id=472 data-nosnippet>472</a>    out
+<a href=#473 id=473 data-nosnippet>473</a>}
+<a href=#474 id=474 data-nosnippet>474</a>
+<a href=#475 id=475 data-nosnippet>475</a><span class="attr">#[cfg(test)]
+<a href=#476 id=476 data-nosnippet>476</a></span><span class="kw">mod </span>tests {
+<a href=#477 id=477 data-nosnippet>477</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#478 id=478 data-nosnippet>478</a>    <span class="kw">use </span><span class="kw">crate</span>::authenticode::{
+<a href=#479 id=479 data-nosnippet>479</a>        AuthenticodeStatus, BadSignature, DigestAlgorithm, SignatureCheck, SignatureInfo,
+<a href=#480 id=480 data-nosnippet>480</a>        SigningState,
+<a href=#481 id=481 data-nosnippet>481</a>    };
+<a href=#482 id=482 data-nosnippet>482</a>
+<a href=#483 id=483 data-nosnippet>483</a>    <span class="kw">fn </span>sig(kind: SignatureKind, parent: <span class="prelude-ty">Option</span>&lt;usize&gt;, status: SignatureStatus) -&gt; SignatureInfo {
+<a href=#484 id=484 data-nosnippet>484</a>        SignatureInfo {
+<a href=#485 id=485 data-nosnippet>485</a>            index: <span class="number">0</span>,
+<a href=#486 id=486 data-nosnippet>486</a>            total: <span class="number">0</span>,
+<a href=#487 id=487 data-nosnippet>487</a>            kind,
+<a href=#488 id=488 data-nosnippet>488</a>            entry: <span class="number">0</span>,
+<a href=#489 id=489 data-nosnippet>489</a>            parent,
+<a href=#490 id=490 data-nosnippet>490</a>            depth: u8::from(parent.is_some()),
+<a href=#491 id=491 data-nosnippet>491</a>            digest_alg: <span class="prelude-val">None</span>,
+<a href=#492 id=492 data-nosnippet>492</a>            signed_image_digest: <span class="prelude-val">None</span>,
+<a href=#493 id=493 data-nosnippet>493</a>            signer_digest_alg: <span class="prelude-val">None</span>,
+<a href=#494 id=494 data-nosnippet>494</a>            sig_alg: <span class="prelude-val">None</span>,
+<a href=#495 id=495 data-nosnippet>495</a>            key_alg: <span class="prelude-val">None</span>,
+<a href=#496 id=496 data-nosnippet>496</a>            key_bits: <span class="prelude-val">None</span>,
+<a href=#497 id=497 data-nosnippet>497</a>            digest_match: <span class="prelude-val">None</span>,
+<a href=#498 id=498 data-nosnippet>498</a>            signature_valid: SignatureCheck::NotChecked,
+<a href=#499 id=499 data-nosnippet>499</a>            status,
+<a href=#500 id=500 data-nosnippet>500</a>            signer: <span class="prelude-val">None</span>,
+<a href=#501 id=501 data-nosnippet>501</a>            untrusted_signer_attrs: <span class="bool-val">false</span>,
+<a href=#502 id=502 data-nosnippet>502</a>            signer_id: <span class="prelude-val">None</span>,
+<a href=#503 id=503 data-nosnippet>503</a>            certs_in_blob: Vec::new(),
+<a href=#504 id=504 data-nosnippet>504</a>            pe_image_flags: <span class="prelude-val">None</span>,
+<a href=#505 id=505 data-nosnippet>505</a>            page_hashes: <span class="prelude-val">None</span>,
+<a href=#506 id=506 data-nosnippet>506</a>            timestamp_tokens: Vec::new(),
+<a href=#507 id=507 data-nosnippet>507</a>            signature_value: Vec::new(),
+<a href=#508 id=508 data-nosnippet>508</a>            os_ci_issues: Vec::new(),
+<a href=#509 id=509 data-nosnippet>509</a>            warnings: Vec::new(),
+<a href=#510 id=510 data-nosnippet>510</a>        }
+<a href=#511 id=511 data-nosnippet>511</a>    }
+<a href=#512 id=512 data-nosnippet>512</a>
+<a href=#513 id=513 data-nosnippet>513</a>    <span class="kw">fn </span>report(signatures: Vec&lt;SignatureInfo&gt;) -&gt; SignatureReport {
+<a href=#514 id=514 data-nosnippet>514</a>        SignatureReport {
+<a href=#515 id=515 data-nosnippet>515</a>            entries: Vec::new(),
+<a href=#516 id=516 data-nosnippet>516</a>            signatures,
+<a href=#517 id=517 data-nosnippet>517</a>            primary: <span class="prelude-val">None</span>,
+<a href=#518 id=518 data-nosnippet>518</a>            signing_state: SigningState::Unsigned,
+<a href=#519 id=519 data-nosnippet>519</a>            tolerate_digest_mismatch: <span class="bool-val">false</span>,
+<a href=#520 id=520 data-nosnippet>520</a>            image_status: AuthenticodeStatus::Conformant,
+<a href=#521 id=521 data-nosnippet>521</a>            warnings: Vec::new(),
+<a href=#522 id=522 data-nosnippet>522</a>        }
+<a href=#523 id=523 data-nosnippet>523</a>    }
+<a href=#524 id=524 data-nosnippet>524</a>
+<a href=#525 id=525 data-nosnippet>525</a>    <span class="kw">fn </span>os(codes: <span class="kw-2">&amp;</span>[u32], secondary_count: u32) -&gt; OsTrustResult {
+<a href=#526 id=526 data-nosnippet>526</a>        OsTrustResult {
+<a href=#527 id=527 data-nosnippet>527</a>            signatures: codes
+<a href=#528 id=528 data-nosnippet>528</a>                .iter()
+<a href=#529 id=529 data-nosnippet>529</a>                .zip(<span class="number">0</span>..)
+<a href=#530 id=530 data-nosnippet>530</a>                .map(|(<span class="kw-2">&amp;</span>code, index)| OsSignatureResult { index, code })
+<a href=#531 id=531 data-nosnippet>531</a>                .collect(),
+<a href=#532 id=532 data-nosnippet>532</a>            secondary_count,
+<a href=#533 id=533 data-nosnippet>533</a>            truncated: <span class="bool-val">false</span>,
+<a href=#534 id=534 data-nosnippet>534</a>        }
+<a href=#535 id=535 data-nosnippet>535</a>    }
+<a href=#536 id=536 data-nosnippet>536</a>
+<a href=#537 id=537 data-nosnippet>537</a>    <span class="kw">fn </span>outcomes(check: <span class="kw-2">&amp;</span>CrossCheck) -&gt; Vec&lt;Outcome&gt; {
+<a href=#538 id=538 data-nosnippet>538</a>        check.comparisons.iter().map(|c| c.outcome).collect()
+<a href=#539 id=539 data-nosnippet>539</a>    }
+<a href=#540 id=540 data-nosnippet>540</a>
+<a href=#541 id=541 data-nosnippet>541</a>    <span class="attr">#[test]
+<a href=#542 id=542 data-nosnippet>542</a>    </span><span class="kw">fn </span>classification() {
+<a href=#543 id=543 data-nosnippet>543</a>        <span class="macro">assert_eq!</span>(classify(code::S_OK), OsVerdict::Trusted);
+<a href=#544 id=544 data-nosnippet>544</a>        <span class="macro">assert_eq!</span>(
+<a href=#545 id=545 data-nosnippet>545</a>            classify(code::CERT_E_UNTRUSTEDROOT),
+<a href=#546 id=546 data-nosnippet>546</a>            OsVerdict::ChainNotTrusted
+<a href=#547 id=547 data-nosnippet>547</a>        );
+<a href=#548 id=548 data-nosnippet>548</a>        <span class="macro">assert_eq!</span>(classify(code::CERT_E_EXPIRED), OsVerdict::ChainNotTrusted);
+<a href=#549 id=549 data-nosnippet>549</a>        <span class="macro">assert_eq!</span>(classify(code::TRUST_E_BAD_DIGEST), OsVerdict::Broken);
+<a href=#550 id=550 data-nosnippet>550</a>        <span class="macro">assert_eq!</span>(classify(code::NTE_BAD_SIGNATURE), OsVerdict::Broken);
+<a href=#551 id=551 data-nosnippet>551</a>        <span class="macro">assert_eq!</span>(classify(<span class="number">0x8009_3102</span>), OsVerdict::Broken);
+<a href=#552 id=552 data-nosnippet>552</a>        <span class="macro">assert_eq!</span>(classify(code::TRUST_E_NOSIGNATURE), OsVerdict::NoSignature);
+<a href=#553 id=553 data-nosnippet>553</a>        <span class="macro">assert_eq!</span>(
+<a href=#554 id=554 data-nosnippet>554</a>            classify(<span class="number">0x8009_3201</span>),
+<a href=#555 id=555 data-nosnippet>555</a>            OsVerdict::Broken,
+<a href=#556 id=556 data-nosnippet>556</a>            <span class="string">"CRYPT_E_ASN1_EXTENDED"
+<a href=#557 id=557 data-nosnippet>557</a>        </span>);
+<a href=#558 id=558 data-nosnippet>558</a>        <span class="macro">assert_eq!</span>(
+<a href=#559 id=559 data-nosnippet>559</a>            classify(<span class="number">0x8009_3202</span>),
+<a href=#560 id=560 data-nosnippet>560</a>            OsVerdict::Broken,
+<a href=#561 id=561 data-nosnippet>561</a>            <span class="string">"CRYPT_E_ASN1_NOEOD"
+<a href=#562 id=562 data-nosnippet>562</a>        </span>);
+<a href=#563 id=563 data-nosnippet>563</a>        <span class="macro">assert_eq!</span>(classify(code::CERT_E_MALFORMED), OsVerdict::Broken);
+<a href=#564 id=564 data-nosnippet>564</a>        <span class="macro">assert_eq!</span>(classify(code::NTE_BAD_ALGID), OsVerdict::Broken);
+<a href=#565 id=565 data-nosnippet>565</a>        <span class="macro">assert_eq!</span>(classify(code::CRYPT_E_NO_SIGNER), OsVerdict::Broken);
+<a href=#566 id=566 data-nosnippet>566</a>        <span class="macro">assert_eq!</span>(classify(code::DIGSIG_E_CRYPTO), OsVerdict::Broken);
+<a href=#567 id=567 data-nosnippet>567</a>        <span class="macro">assert_eq!</span>(
+<a href=#568 id=568 data-nosnippet>568</a>            classify(code::TRUST_E_TIME_STAMP),
+<a href=#569 id=569 data-nosnippet>569</a>            OsVerdict::ChainNotTrusted
+<a href=#570 id=570 data-nosnippet>570</a>        );
+<a href=#571 id=571 data-nosnippet>571</a>        <span class="comment">// E_FAIL, TRUST_E_SUBJECT_NOT_TRUSTED, TRUST_E_SUBJECT_FORM_UNKNOWN
+<a href=#572 id=572 data-nosnippet>572</a>        // and CRYPT_E_FILE_ERROR say nothing about the signature.
+<a href=#573 id=573 data-nosnippet>573</a>        </span><span class="kw">for </span>unknown <span class="kw">in </span>[<span class="number">0x8000_4005</span>, <span class="number">0x800B_0004</span>, <span class="number">0x800B_0003</span>, <span class="number">0x8009_2003</span>] {
+<a href=#574 id=574 data-nosnippet>574</a>            <span class="macro">assert_eq!</span>(classify(unknown), OsVerdict::Unclassified, <span class="string">"{unknown:#x}"</span>);
+<a href=#575 id=575 data-nosnippet>575</a>        }
+<a href=#576 id=576 data-nosnippet>576</a>        <span class="macro">assert_eq!</span>(OsVerdict::Trusted.accepts(), <span class="prelude-val">Some</span>(<span class="bool-val">true</span>));
+<a href=#577 id=577 data-nosnippet>577</a>        <span class="macro">assert_eq!</span>(OsVerdict::ChainNotTrusted.accepts(), <span class="prelude-val">Some</span>(<span class="bool-val">true</span>));
+<a href=#578 id=578 data-nosnippet>578</a>        <span class="macro">assert_eq!</span>(OsVerdict::Broken.accepts(), <span class="prelude-val">Some</span>(<span class="bool-val">false</span>));
+<a href=#579 id=579 data-nosnippet>579</a>        <span class="macro">assert_eq!</span>(OsVerdict::NoSignature.accepts(), <span class="prelude-val">Some</span>(<span class="bool-val">false</span>));
+<a href=#580 id=580 data-nosnippet>580</a>        <span class="macro">assert_eq!</span>(OsVerdict::Unclassified.accepts(), <span class="prelude-val">None</span>);
+<a href=#581 id=581 data-nosnippet>581</a>    }
+<a href=#582 id=582 data-nosnippet>582</a>
+<a href=#583 id=583 data-nosnippet>583</a>    <span class="attr">#[test]
+<a href=#584 id=584 data-nosnippet>584</a>    </span><span class="kw">fn </span>unsigned_file_agrees() {
+<a href=#585 id=585 data-nosnippet>585</a>        <span class="kw">let </span>r = report(Vec::new());
+<a href=#586 id=586 data-nosnippet>586</a>        <span class="kw">let </span>check = cross_check(<span class="kw-2">&amp;</span>r, <span class="kw-2">&amp;</span>os(<span class="kw-2">&amp;</span>[code::TRUST_E_NOSIGNATURE], <span class="number">0</span>));
+<a href=#587 id=587 data-nosnippet>587</a>        <span class="macro">assert_eq!</span>(outcomes(<span class="kw-2">&amp;</span>check), [Outcome::Agree]);
+<a href=#588 id=588 data-nosnippet>588</a>        <span class="macro">assert!</span>(check.agrees());
+<a href=#589 id=589 data-nosnippet>589</a>        <span class="comment">// The OS sees a signature the report does not have.
+<a href=#590 id=590 data-nosnippet>590</a>        </span><span class="kw">let </span>check = cross_check(<span class="kw-2">&amp;</span>r, <span class="kw-2">&amp;</span>os(<span class="kw-2">&amp;</span>[code::CERT_E_UNTRUSTEDROOT], <span class="number">0</span>));
+<a href=#591 id=591 data-nosnippet>591</a>        <span class="macro">assert_eq!</span>(outcomes(<span class="kw-2">&amp;</span>check), [Outcome::OnlyOs]);
+<a href=#592 id=592 data-nosnippet>592</a>        <span class="macro">assert!</span>(!check.agrees());
+<a href=#593 id=593 data-nosnippet>593</a>        <span class="comment">// Nothing asked, nothing compared.
+<a href=#594 id=594 data-nosnippet>594</a>        </span><span class="kw">let </span>check = cross_check(<span class="kw-2">&amp;</span>r, <span class="kw-2">&amp;</span>OsTrustResult::default());
+<a href=#595 id=595 data-nosnippet>595</a>        <span class="macro">assert!</span>(check.comparisons.is_empty());
+<a href=#596 id=596 data-nosnippet>596</a>        <span class="macro">assert!</span>(check.agrees());
+<a href=#597 id=597 data-nosnippet>597</a>    }
+<a href=#598 id=598 data-nosnippet>598</a>
+<a href=#599 id=599 data-nosnippet>599</a>    <span class="attr">#[test]
+<a href=#600 id=600 data-nosnippet>600</a>    </span><span class="kw">fn </span>dual_signed_agreement_and_disagreements() {
+<a href=#601 id=601 data-nosnippet>601</a>        <span class="kw">let </span>r = report(<span class="macro">vec!</span>[
+<a href=#602 id=602 data-nosnippet>602</a>            sig(SignatureKind::Embedded, <span class="prelude-val">None</span>, SignatureStatus::Valid),
+<a href=#603 id=603 data-nosnippet>603</a>            sig(SignatureKind::Nested, <span class="prelude-val">Some</span>(<span class="number">0</span>), SignatureStatus::Valid),
+<a href=#604 id=604 data-nosnippet>604</a>        ]);
+<a href=#605 id=605 data-nosnippet>605</a>        <span class="kw">let </span>check = cross_check(
+<a href=#606 id=606 data-nosnippet>606</a>            <span class="kw-2">&amp;</span>r,
+<a href=#607 id=607 data-nosnippet>607</a>            <span class="kw-2">&amp;</span>os(<span class="kw-2">&amp;</span>[code::CERT_E_UNTRUSTEDROOT, code::CERT_E_UNTRUSTEDROOT], <span class="number">1</span>),
+<a href=#608 id=608 data-nosnippet>608</a>        );
+<a href=#609 id=609 data-nosnippet>609</a>        <span class="macro">assert_eq!</span>(outcomes(<span class="kw-2">&amp;</span>check), [Outcome::Agree, Outcome::Agree]);
+<a href=#610 id=610 data-nosnippet>610</a>        <span class="macro">assert_eq!</span>(check.comparisons[<span class="number">1</span>].signature, <span class="prelude-val">Some</span>(<span class="number">1</span>));
+<a href=#611 id=611 data-nosnippet>611</a>        <span class="macro">assert!</span>(check.agrees());
+<a href=#612 id=612 data-nosnippet>612</a>
+<a href=#613 id=613 data-nosnippet>613</a>        <span class="comment">// The OS says the nested one is broken: a dangerous disagreement.
+<a href=#614 id=614 data-nosnippet>614</a>        </span><span class="kw">let </span>check = cross_check(<span class="kw-2">&amp;</span>r, <span class="kw-2">&amp;</span>os(<span class="kw-2">&amp;</span>[code::S_OK, code::TRUST_E_BAD_DIGEST], <span class="number">1</span>));
+<a href=#615 id=615 data-nosnippet>615</a>        <span class="macro">assert_eq!</span>(
+<a href=#616 id=616 data-nosnippet>616</a>            outcomes(<span class="kw-2">&amp;</span>check),
+<a href=#617 id=617 data-nosnippet>617</a>            [Outcome::Agree, Outcome::RustAcceptsOsRejects]
+<a href=#618 id=618 data-nosnippet>618</a>        );
+<a href=#619 id=619 data-nosnippet>619</a>        <span class="macro">assert_eq!</span>(check.rust_accepts_os_rejects().count(), <span class="number">1</span>);
+<a href=#620 id=620 data-nosnippet>620</a>        <span class="macro">assert!</span>(!check.agrees());
+<a href=#621 id=621 data-nosnippet>621</a>
+<a href=#622 id=622 data-nosnippet>622</a>        <span class="comment">// The OS counts no secondary signature.
+<a href=#623 id=623 data-nosnippet>623</a>        </span><span class="kw">let </span>check = cross_check(<span class="kw-2">&amp;</span>r, <span class="kw-2">&amp;</span>os(<span class="kw-2">&amp;</span>[code::S_OK], <span class="number">0</span>));
+<a href=#624 id=624 data-nosnippet>624</a>        <span class="macro">assert!</span>(check.secondary_count_differs);
+<a href=#625 id=625 data-nosnippet>625</a>        <span class="macro">assert_eq!</span>(outcomes(<span class="kw-2">&amp;</span>check), [Outcome::Agree, Outcome::OnlyRust]);
+<a href=#626 id=626 data-nosnippet>626</a>    }
+<a href=#627 id=627 data-nosnippet>627</a>
+<a href=#628 id=628 data-nosnippet>628</a>    <span class="attr">#[test]
+<a href=#629 id=629 data-nosnippet>629</a>    </span><span class="kw">fn </span>rust_stricter_and_unclassified() {
+<a href=#630 id=630 data-nosnippet>630</a>        <span class="kw">let </span>r = report(<span class="macro">vec!</span>[sig(
+<a href=#631 id=631 data-nosnippet>631</a>            SignatureKind::Embedded,
+<a href=#632 id=632 data-nosnippet>632</a>            <span class="prelude-val">None</span>,
+<a href=#633 id=633 data-nosnippet>633</a>            SignatureStatus::NonConformantImage,
+<a href=#634 id=634 data-nosnippet>634</a>        )]);
+<a href=#635 id=635 data-nosnippet>635</a>        <span class="kw">let </span>check = cross_check(<span class="kw-2">&amp;</span>r, <span class="kw-2">&amp;</span>os(<span class="kw-2">&amp;</span>[code::S_OK], <span class="number">0</span>));
+<a href=#636 id=636 data-nosnippet>636</a>        <span class="macro">assert_eq!</span>(outcomes(<span class="kw-2">&amp;</span>check), [Outcome::OsAcceptsRustRejects]);
+<a href=#637 id=637 data-nosnippet>637</a>        <span class="macro">assert_eq!</span>(check.disagreements().count(), <span class="number">1</span>);
+<a href=#638 id=638 data-nosnippet>638</a>        <span class="macro">assert_eq!</span>(check.rust_accepts_os_rejects().count(), <span class="number">0</span>);
+<a href=#639 id=639 data-nosnippet>639</a>
+<a href=#640 id=640 data-nosnippet>640</a>        <span class="kw">let </span>r = report(<span class="macro">vec!</span>[sig(
+<a href=#641 id=641 data-nosnippet>641</a>            SignatureKind::Embedded,
+<a href=#642 id=642 data-nosnippet>642</a>            <span class="prelude-val">None</span>,
+<a href=#643 id=643 data-nosnippet>643</a>            SignatureStatus::BadSignature(BadSignature::SignatureInvalid),
+<a href=#644 id=644 data-nosnippet>644</a>        )]);
+<a href=#645 id=645 data-nosnippet>645</a>        <span class="kw">let </span>check = cross_check(<span class="kw-2">&amp;</span>r, <span class="kw-2">&amp;</span>os(<span class="kw-2">&amp;</span>[code::NTE_BAD_SIGNATURE], <span class="number">0</span>));
+<a href=#646 id=646 data-nosnippet>646</a>        <span class="macro">assert_eq!</span>(outcomes(<span class="kw-2">&amp;</span>check), [Outcome::Agree]);
+<a href=#647 id=647 data-nosnippet>647</a>        <span class="kw">let </span>check = cross_check(<span class="kw-2">&amp;</span>r, <span class="kw-2">&amp;</span>os(<span class="kw-2">&amp;</span>[<span class="number">0x8000_4005</span>], <span class="number">0</span>));
+<a href=#648 id=648 data-nosnippet>648</a>        <span class="macro">assert_eq!</span>(outcomes(<span class="kw-2">&amp;</span>check), [Outcome::NotComparable]);
+<a href=#649 id=649 data-nosnippet>649</a>        <span class="comment">// Not comparable is not agreement, and not a disagreement either.
+<a href=#650 id=650 data-nosnippet>650</a>        </span><span class="macro">assert!</span>(!check.agrees());
+<a href=#651 id=651 data-nosnippet>651</a>        <span class="macro">assert_eq!</span>(check.disagreements().count(), <span class="number">0</span>);
+<a href=#652 id=652 data-nosnippet>652</a>        <span class="macro">assert_eq!</span>(check.not_comparable().count(), <span class="number">1</span>);
+<a href=#653 id=653 data-nosnippet>653</a>
+<a href=#654 id=654 data-nosnippet>654</a>        <span class="kw">let </span>r = report(<span class="macro">vec!</span>[sig(
+<a href=#655 id=655 data-nosnippet>655</a>            SignatureKind::Embedded,
+<a href=#656 id=656 data-nosnippet>656</a>            <span class="prelude-val">None</span>,
+<a href=#657 id=657 data-nosnippet>657</a>            SignatureStatus::WeakAlgorithm(DigestAlgorithm::Md5),
+<a href=#658 id=658 data-nosnippet>658</a>        )]);
+<a href=#659 id=659 data-nosnippet>659</a>        <span class="kw">let </span>check = cross_check(<span class="kw-2">&amp;</span>r, <span class="kw-2">&amp;</span>os(<span class="kw-2">&amp;</span>[code::TRUST_E_BAD_DIGEST], <span class="number">0</span>));
+<a href=#660 id=660 data-nosnippet>660</a>        <span class="macro">assert_eq!</span>(outcomes(<span class="kw-2">&amp;</span>check), [Outcome::Agree]);
+<a href=#661 id=661 data-nosnippet>661</a>    }
+<a href=#662 id=662 data-nosnippet>662</a>
+<a href=#663 id=663 data-nosnippet>663</a>    <span class="attr">#[test]
+<a href=#664 id=664 data-nosnippet>664</a>    </span><span class="kw">fn </span>a_signature_only_the_os_found_is_never_an_agreement() {
+<a href=#665 id=665 data-nosnippet>665</a>        <span class="comment">// This crate saw no table; the OS found and rejected a signature.
+<a href=#666 id=666 data-nosnippet>666</a>        </span><span class="kw">let </span>r = report(Vec::new());
+<a href=#667 id=667 data-nosnippet>667</a>        <span class="kw">let </span>check = cross_check(<span class="kw-2">&amp;</span>r, <span class="kw-2">&amp;</span>os(<span class="kw-2">&amp;</span>[code::TRUST_E_BAD_DIGEST], <span class="number">0</span>));
+<a href=#668 id=668 data-nosnippet>668</a>        <span class="macro">assert_eq!</span>(outcomes(<span class="kw-2">&amp;</span>check), [Outcome::OnlyOs]);
+<a href=#669 id=669 data-nosnippet>669</a>        <span class="macro">assert!</span>(!check.agrees());
+<a href=#670 id=670 data-nosnippet>670</a>        <span class="comment">// This crate found the table unreadable, and the OS rejected it.
+<a href=#671 id=671 data-nosnippet>671</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>unreadable = report(Vec::new());
+<a href=#672 id=672 data-nosnippet>672</a>        unreadable.signing_state = SigningState::Invalid(InvalidReason::CertificateTable(
+<a href=#673 id=673 data-nosnippet>673</a>            <span class="kw">crate</span>::authenticode::CertificateTableError::Malformed { offset: <span class="number">0 </span>},
+<a href=#674 id=674 data-nosnippet>674</a>        ));
+<a href=#675 id=675 data-nosnippet>675</a>        <span class="kw">let </span>check = cross_check(<span class="kw-2">&amp;</span>unreadable, <span class="kw-2">&amp;</span>os(<span class="kw-2">&amp;</span>[code::TRUST_E_BAD_DIGEST], <span class="number">0</span>));
+<a href=#676 id=676 data-nosnippet>676</a>        <span class="macro">assert_eq!</span>(outcomes(<span class="kw-2">&amp;</span>check), [Outcome::Agree]);
+<a href=#677 id=677 data-nosnippet>677</a>        <span class="comment">// The OS found and rejected a nested signature this crate missed.
+<a href=#678 id=678 data-nosnippet>678</a>        </span><span class="kw">let </span>r = report(<span class="macro">vec!</span>[sig(
+<a href=#679 id=679 data-nosnippet>679</a>            SignatureKind::Embedded,
+<a href=#680 id=680 data-nosnippet>680</a>            <span class="prelude-val">None</span>,
+<a href=#681 id=681 data-nosnippet>681</a>            SignatureStatus::Malformed(<span class="kw">crate</span>::authenticode::SignatureError::NotSignedData(
+<a href=#682 id=682 data-nosnippet>682</a>                <span class="kw">crate</span>::authenticode::ObjectId::from_der(<span class="kw-2">&amp;</span>[<span class="number">1</span>]),
+<a href=#683 id=683 data-nosnippet>683</a>            )),
+<a href=#684 id=684 data-nosnippet>684</a>        )]);
+<a href=#685 id=685 data-nosnippet>685</a>        <span class="kw">let </span>check = cross_check(
+<a href=#686 id=686 data-nosnippet>686</a>            <span class="kw-2">&amp;</span>r,
+<a href=#687 id=687 data-nosnippet>687</a>            <span class="kw-2">&amp;</span>os(<span class="kw-2">&amp;</span>[code::TRUST_E_BAD_DIGEST, code::NTE_BAD_SIGNATURE], <span class="number">1</span>),
+<a href=#688 id=688 data-nosnippet>688</a>        );
+<a href=#689 id=689 data-nosnippet>689</a>        <span class="macro">assert_eq!</span>(outcomes(<span class="kw-2">&amp;</span>check), [Outcome::Agree, Outcome::OnlyOs]);
+<a href=#690 id=690 data-nosnippet>690</a>        <span class="macro">assert!</span>(check.secondary_count_differs);
+<a href=#691 id=691 data-nosnippet>691</a>        <span class="comment">// The same with the OS count truncated: still not an agreement.
+<a href=#692 id=692 data-nosnippet>692</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>truncated = os(<span class="kw-2">&amp;</span>[code::TRUST_E_BAD_DIGEST, code::NTE_BAD_SIGNATURE], <span class="number">40</span>);
+<a href=#693 id=693 data-nosnippet>693</a>        truncated.truncated = <span class="bool-val">true</span>;
+<a href=#694 id=694 data-nosnippet>694</a>        <span class="kw">let </span>check = cross_check(<span class="kw-2">&amp;</span>r, <span class="kw-2">&amp;</span>truncated);
+<a href=#695 id=695 data-nosnippet>695</a>        <span class="macro">assert!</span>(!check.secondary_count_differs);
+<a href=#696 id=696 data-nosnippet>696</a>        <span class="macro">assert!</span>(!check.agrees());
+<a href=#697 id=697 data-nosnippet>697</a>    }
+<a href=#698 id=698 data-nosnippet>698</a>
+<a href=#699 id=699 data-nosnippet>699</a>    <span class="attr">#[test]
+<a href=#700 id=700 data-nosnippet>700</a>    </span><span class="kw">fn </span>only_the_signatures_the_os_reads_are_compared() {
+<a href=#701 id=701 data-nosnippet>701</a>        <span class="comment">// A second table entry and a doubly nested signature are invisible
+<a href=#702 id=702 data-nosnippet>702</a>        // to the OS; the secondary count covers only direct children.
+<a href=#703 id=703 data-nosnippet>703</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>second = sig(SignatureKind::Embedded, <span class="prelude-val">None</span>, SignatureStatus::Valid);
+<a href=#704 id=704 data-nosnippet>704</a>        second.entry = <span class="number">1</span>;
+<a href=#705 id=705 data-nosnippet>705</a>        <span class="kw">let </span>r = report(<span class="macro">vec!</span>[
+<a href=#706 id=706 data-nosnippet>706</a>            sig(SignatureKind::Embedded, <span class="prelude-val">None</span>, SignatureStatus::Valid),
+<a href=#707 id=707 data-nosnippet>707</a>            sig(SignatureKind::Nested, <span class="prelude-val">Some</span>(<span class="number">0</span>), SignatureStatus::Valid),
+<a href=#708 id=708 data-nosnippet>708</a>            sig(SignatureKind::Nested, <span class="prelude-val">Some</span>(<span class="number">1</span>), SignatureStatus::Valid),
+<a href=#709 id=709 data-nosnippet>709</a>            second,
+<a href=#710 id=710 data-nosnippet>710</a>        ]);
+<a href=#711 id=711 data-nosnippet>711</a>        <span class="kw">let </span>check = cross_check(<span class="kw-2">&amp;</span>r, <span class="kw-2">&amp;</span>os(<span class="kw-2">&amp;</span>[code::S_OK, code::S_OK], <span class="number">1</span>));
+<a href=#712 id=712 data-nosnippet>712</a>        <span class="macro">assert_eq!</span>(check.rust_secondary_count, <span class="number">1</span>);
+<a href=#713 id=713 data-nosnippet>713</a>        <span class="macro">assert!</span>(!check.secondary_count_differs);
+<a href=#714 id=714 data-nosnippet>714</a>        <span class="macro">assert_eq!</span>(outcomes(<span class="kw-2">&amp;</span>check), [Outcome::Agree, Outcome::Agree]);
+<a href=#715 id=715 data-nosnippet>715</a>        <span class="macro">assert!</span>(check.agrees());
+<a href=#716 id=716 data-nosnippet>716</a>    }
+<a href=#717 id=717 data-nosnippet>717</a>
+<a href=#718 id=718 data-nosnippet>718</a>    <span class="attr">#[test]
+<a href=#719 id=719 data-nosnippet>719</a>    </span><span class="kw">fn </span>truncated_os_results_do_not_flag_the_count() {
+<a href=#720 id=720 data-nosnippet>720</a>        <span class="kw">let </span>r = report(<span class="macro">vec!</span>[sig(
+<a href=#721 id=721 data-nosnippet>721</a>            SignatureKind::Embedded,
+<a href=#722 id=722 data-nosnippet>722</a>            <span class="prelude-val">None</span>,
+<a href=#723 id=723 data-nosnippet>723</a>            SignatureStatus::Valid,
+<a href=#724 id=724 data-nosnippet>724</a>        )]);
+<a href=#725 id=725 data-nosnippet>725</a>        <span class="kw">let </span><span class="kw-2">mut </span>result = os(<span class="kw-2">&amp;</span>[code::S_OK], <span class="number">100</span>);
+<a href=#726 id=726 data-nosnippet>726</a>        result.truncated = <span class="bool-val">true</span>;
+<a href=#727 id=727 data-nosnippet>727</a>        <span class="kw">let </span>check = cross_check(<span class="kw-2">&amp;</span>r, <span class="kw-2">&amp;</span>result);
+<a href=#728 id=728 data-nosnippet>728</a>        <span class="macro">assert!</span>(!check.secondary_count_differs);
+<a href=#729 id=729 data-nosnippet>729</a>        <span class="comment">// A huge OS index is never iterated past the bound.
+<a href=#730 id=730 data-nosnippet>730</a>        </span><span class="kw">let </span>result = OsTrustResult {
+<a href=#731 id=731 data-nosnippet>731</a>            signatures: <span class="macro">vec!</span>[
+<a href=#732 id=732 data-nosnippet>732</a>                OsSignatureResult {
+<a href=#733 id=733 data-nosnippet>733</a>                    index: <span class="number">0</span>,
+<a href=#734 id=734 data-nosnippet>734</a>                    code: code::S_OK,
+<a href=#735 id=735 data-nosnippet>735</a>                },
+<a href=#736 id=736 data-nosnippet>736</a>                OsSignatureResult {
+<a href=#737 id=737 data-nosnippet>737</a>                    index: u32::MAX,
+<a href=#738 id=738 data-nosnippet>738</a>                    code: code::S_OK,
+<a href=#739 id=739 data-nosnippet>739</a>                },
+<a href=#740 id=740 data-nosnippet>740</a>            ],
+<a href=#741 id=741 data-nosnippet>741</a>            secondary_count: <span class="number">0</span>,
+<a href=#742 id=742 data-nosnippet>742</a>            truncated: <span class="bool-val">false</span>,
+<a href=#743 id=743 data-nosnippet>743</a>        };
+<a href=#744 id=744 data-nosnippet>744</a>        <span class="kw">let </span>check = cross_check(<span class="kw-2">&amp;</span>r, <span class="kw-2">&amp;</span>result);
+<a href=#745 id=745 data-nosnippet>745</a>        <span class="macro">assert_eq!</span>(
+<a href=#746 id=746 data-nosnippet>746</a>            check.comparisons.len(),
+<a href=#747 id=747 data-nosnippet>747</a>            <span class="number">1</span>,
+<a href=#748 id=748 data-nosnippet>748</a>            <span class="string">"indexes past the bound are not compared"
+<a href=#749 id=749 data-nosnippet>749</a>        </span>);
+<a href=#750 id=750 data-nosnippet>750</a>    }
+<a href=#751 id=751 data-nosnippet>751</a>}
+</code></pre></div></section></main></body></html>

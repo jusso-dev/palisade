@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_DEPTH","MAX_ELEMENTS","MAX_MANIFEST_SIZE","MAX_SUPPORTED_OS","MAX_VALUE_LEN"],"enum":["ElevationReason","ExecutionLevel","ManifestError"],"fn":["parse_manifest","requires_elevation"],"struct":["AssemblyIdentity","Elevation","Manifest"]};

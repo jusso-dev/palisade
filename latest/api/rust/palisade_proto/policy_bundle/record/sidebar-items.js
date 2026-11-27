@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FORMAT_VERSION","SEALED_LEN","SEALED_LEN_WITH_FALLBACK"],"enum":["CopyState","RecordError"],"struct":["Record","RecordCopies","RecordKey"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_MOTW_WARNINGS","MAX_ZONE_IDENTIFIER_BYTES"],"enum":["MotwWarning","Zone"],"fn":["parse_zone_identifier"],"struct":["Motw"]};

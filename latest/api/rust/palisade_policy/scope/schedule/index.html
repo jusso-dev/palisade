@@ -1,0 +1,33 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Schedules: when a scope is active (#38)."><title>palisade_policy::scope::schedule - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="palisade_policy" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module schedule</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../palisade_policy/index.html">palisade_<wbr>policy</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module schedule</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#windows" title="Windows">Windows</a></li><li><a href="#dates" title="Dates">Dates</a></li></ul><h3><a href="#structs">Module Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="../index.html">In palisade_<wbr>policy::<wbr>scope</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">palisade_policy</a>::<wbr><a href="../index.html">scope</a></div><h1>Module <span>schedule</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/palisade_policy/scope/schedule.rs.html#1-384">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Schedules: when a scope is active (#38).</p>
+<p>A <a href="struct.CompiledSchedule.html" title="struct palisade_policy::scope::schedule::CompiledSchedule"><code>CompiledSchedule</code></a> is evaluated at an instant (seconds since the
+Unix epoch, from the agent’s trusted time) in one time zone, chosen by
+the schedule’s <code>timezone_basis</code>:</p>
+<ul>
+<li><code>utc</code>: Coordinated Universal Time.</li>
+<li><code>device_local</code>: the device’s zone (<a href="../facts/struct.ScopeFacts.html#structfield.device_time_zone" title="field palisade_policy::scope::facts::ScopeFacts::device_time_zone"><code>ScopeFacts::device_time_zone</code></a>).</li>
+<li><code>user_local</code>: the session user’s zone
+(<a href="../facts/struct.ScopeFacts.html#structfield.session_time_zone" title="field palisade_policy::scope::facts::ScopeFacts::session_time_zone"><code>ScopeFacts::session_time_zone</code></a>) if the agent could read it, and
+otherwise the device’s, with the note <code>timezone_fallback</code>.</li>
+</ul>
+<p>Zones are IANA names, resolved with the time zone database bundled
+into the binary, so evaluation never reads the system.</p>
+<h2 id="windows"><a class="doc-anchor" href="#windows">§</a>Windows</h2>
+<p>A window on day <code>D</code> from <code>start</code> to <code>end</code> is active from the instant
+that is <code>start</code> on <code>D</code> to the instant that is <code>end</code> on <code>D</code> (or on the
+next day, if <code>end</code> is not after <code>start</code>), including the first and
+excluding the second. <code>24:00</code> is midnight at the end of the day. A
+window with <code>duration_mins</code> lasts that many minutes of elapsed time from
+its start, whatever the clocks do.</p>
+<p>Local times are turned into instants with the “compatible” rule of the
+ECMAScript Temporal proposal: a time that occurs twice, when clocks go
+back, is its first occurrence; a time that is skipped, when clocks go
+forward, is moved forward by the length of the gap (02:30 on a day that
+jumps from 02:00 to 03:00 is 03:30). So a window <code>01:00</code>–<code>03:00</code> on the
+day clocks go back lasts three hours of elapsed time, and on the day
+they go forward one hour.</p>
+<h2 id="dates"><a class="doc-anchor" href="#dates">§</a>Dates</h2>
+<p><code>dates</code> and <code>except_dates</code> test the local date of the instant being
+decided, not the day a window started on. With <code>dates</code>, the schedule is
+only active on those dates; on an <code>except_dates</code> date it is never
+active.</p>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.CompiledSchedule.html" title="struct palisade_policy::scope::schedule::CompiledSchedule">Compiled<wbr>Schedule</a></dt><dd>A schedule ready to evaluate.</dd></dl></section></div></main></body></html>

@@ -1,0 +1,424 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>0017. Cryptographic algorithms, libraries and AEAD nonces - Palisade</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="Palisade: an educational Windows application allowlisting project">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../../css/general-2459343d.css">
+        <link rel="stylesheet" href="../../css/chrome-ae938929.css">
+        <link rel="stylesheet" href="../../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="../../theme/palisade-1bbd7bbc.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../../searchindex-3e2a1e09.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../../toc-8cab92c4.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div class="palisade-disclaimer" role="note" aria-label="Disclaimer">
+                    <strong>Palisade is an educational, personal-development project. It is not a replacement for commercial application control products and comes with no support or warranty. Do not rely on it to protect production systems.</strong>
+                </div>
+                <nav class="palisade-versions" aria-label="Documentation version">
+                    <label for="palisade-version-select">Version</label>
+                    <select id="palisade-version-select" hidden></select>
+                </nav>
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Palisade</h1>
+
+                    <div class="right-buttons">
+                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+                        <a href="https://github.com/jusso-dev/palisade" title="Git repository" aria-label="Git repository">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="0017-cryptographic-algorithms-libraries-and-aead-nonces"><a class="header" href="#0017-cryptographic-algorithms-libraries-and-aead-nonces">0017. Cryptographic algorithms, libraries and AEAD nonces</a></h1>
+<ul>
+<li>Status: accepted</li>
+<li>Date: 2026-11-23</li>
+<li>Deciders: Palisade maintainer</li>
+</ul>
+<h2 id="context"><a class="header" href="#context">Context</a></h2>
+<p>This ADR supersedes <a href="0008-cryptographic-algorithms.html">ADR 0008</a>. The algorithms and libraries
+are unchanged. It corrects one wrong statement and adds the rule that replaces it. ADR 0008 said
+that <code>ring</code> handles AEAD nonce generation inside the library. It does not. <code>ring</code>'s AEAD API
+takes a nonce, or a caller-supplied nonce sequence, for every seal operation. Reusing a nonce
+under the same AES-GCM key reveals the XOR of the two plaintexts and lets an attacker forge
+authentication tags for that key. So Palisade's own code must keep nonces unique under each key,
+including across agent restarts and reboots. With random nonces that is a probability bound, not
+an absolute guarantee, and this ADR states the bound.</p>
+<p>Palisade uses cryptography in five places:</p>
+<ol>
+<li><strong>File identity</strong>: hashes that rules match on (#3, #46, #47).</li>
+<li><strong>Palisade's own signatures</strong>: policy bundles (#225), server commands (#62) and trust-set
+updates (#224).</li>
+<li><strong>OS-defined signatures</strong>: Authenticode on Palisade's releases (#24, #226) and signed OS-native
+code integrity policies (#85). Their formats are fixed by the OS.</li>
+<li><strong>Transport</strong>: mutual TLS between agent, relays and server (#223).</li>
+<li><strong>At rest and short secrets</strong>: the encrypted policy cache (#225), the driver boot cache MAC
+(#113) and offline override codes (#222).</li>
+</ol>
+<p>The project aims to align with the Australian Government ISM cryptography guidance (ASD-approved
+algorithms), which favours ECDSA with P-384, RSA of at least 3072 bits, SHA-2 and AES-GCM.
+Issue #20's summary suggests Ed25519 for bundle signing, while #225 specifies ECDSA P-384 as the
+default with Ed25519 as an option, and #61 mentions Ed25519 or P-256. This ADR settles that.</p>
+<h2 id="decision-drivers"><a class="header" href="#decision-drivers">Decision drivers</a></h2>
+<ol>
+<li>Collision-resistant identities: no allow decision may rest on a broken hash.</li>
+<li>Alignment with ASD-approved algorithms, since Essential Eight and the ISM frame the project.</li>
+<li>Exact compatibility with what the OS computes and requires (#3, #6).</li>
+<li>Algorithm agility, so a key or algorithm can be rotated without a format break (#224).</li>
+<li>A small number of well-reviewed libraries, with builds for x64 and ARM64 Windows and Linux.</li>
+<li>A path to a FIPS-validated module later, without a rewrite.</li>
+</ol>
+<h2 id="considered-options"><a class="header" href="#considered-options">Considered options</a></h2>
+<p>Bundle and command signatures:</p>
+<ol>
+<li><strong>Ed25519 only.</strong> Fast, deterministic, small keys, hard to misuse. Not on the ASD-approved
+list, so an ISM-aligned deployment could not use it.</li>
+<li><strong>ECDSA P-384 with SHA-384 only.</strong> ASD-approved. Slower, and it needs a careful library
+because naive ECDSA nonce handling is dangerous.</li>
+<li><strong>Algorithm-agile envelope supporting both, with ECDSA P-384 as the default.</strong> Each signature
+names its key ID and algorithm. The agent accepts only algorithms in its trust set.</li>
+</ol>
+<p>Libraries:</p>
+<ol>
+<li><strong><code>ring</code></strong> for signatures, AEAD and HMAC, and as the rustls crypto provider. Small API surface
+designed against misuse. The caller supplies every AEAD nonce, so nonce uniqueness is
+Palisade's job, not the library's. Builds with only a C
+compiler (no CMake or separate assembler). No FIPS-validated build.</li>
+<li><strong>A FIPS-capable rustls provider.</strong> Offers a validated mode, but needs a heavier native build
+(CMake, and extra build tools for the validated mode) on Windows runners. Validated mode is not needed yet.</li>
+<li><strong>Pure-Rust RustCrypto crates for everything.</strong> No C or assembly, but no single provider for
+rustls, and a wider set of crates to review.</li>
+</ol>
+<h2 id="decision"><a class="header" href="#decision">Decision</a></h2>
+<p><strong>Hashing (file identity)</strong></p>
+<ul>
+<li><strong>SHA-256 is the primary identity.</strong> Every stored or exchanged file identity carries it.</li>
+<li>SHA-1 and MD5 are <strong>compatibility-only</strong>: they are computed so Palisade can match what the OS
+and imported policies use, and to join with OS events. They are never the sole basis of an
+allow. Policy validation (#40) rejects an <em>allow</em> rule whose only identity is SHA-1 or MD5.
+A <em>deny</em> rule may use them, because a collision there can only cause an extra block.</li>
+<li>The OS-native compiler emits whatever hash forms the target OS build requires (#81). That can
+include SHA-1 Authenticode values <em>alongside</em> SHA-256, never instead of it.</li>
+<li>SHA-384 and SHA-512 are optional extras (#46).</li>
+<li>Implementation: the RustCrypto <code>sha2</code> crate (with <code>sha1</code> and <code>md-5</code> for compatibility hashes),
+because they are pure Rust, <code>no_std</code> capable and support streaming. The single-pass multi-hash
+design is in #46.</li>
+</ul>
+<p><strong>Palisade-native signatures</strong> (bundles, commands, trust-set updates)</p>
+<ul>
+<li>Option 3: an algorithm-agile envelope (<code>{kid, alg, sig}</code> entries, #225).</li>
+<li>Algorithms: <code>ecdsa-p384-sha384</code> (<strong>default</strong>) and <code>ed25519</code> (opt-in per tenant). Nothing else.
+The agent accepts only algorithms listed in its trust set, and the trust set is itself signed
+(#224).</li>
+<li>Every signature covers a domain-separation prefix plus the canonical bytes (#43, #225), so a
+signature for one purpose cannot be replayed as another.</li>
+</ul>
+<p><strong>OS-defined signatures</strong></p>
+<ul>
+<li>Authenticode on releases and signed OS-native policies use <strong>RSA 3072-bit or larger with
+SHA-256</strong>, and RFC 3161 timestamps for releases. The OS fixes these formats, and Palisade
+only chooses the key size and digest.</li>
+</ul>
+<p><strong>Transport</strong></p>
+<ul>
+<li><strong>TLS through <code>rustls</code></strong>, TLS 1.3 preferred and TLS 1.2 allowed only with the restricted
+AEAD cipher suites in #223. Certificate verification is never disabled, in any build.</li>
+</ul>
+<p><strong>Symmetric</strong></p>
+<ul>
+<li>AES-256-GCM for data at rest (#225). HMAC-SHA-256 for MACs (the driver boot cache, #113) and
+for one-time override codes (#222).</li>
+<li><strong>AES-GCM nonces are the <code>crypto</code> module's responsibility.</strong> <code>ring</code> takes the nonce from the
+caller, so the <code>crypto</code> module keeps the chance that any 96-bit nonce repeats under one key at
+or below <strong>2^-33</strong>, including across restarts, reboots and crashes. Two random draws can
+collide, so this is a bound, not a guarantee. With <code>q</code> seals under one key the chance of any
+repeat is at most about <code>q^2 / 2^97</code>, which is 2^-33 at the 2^32 seal limit. That is the
+limit NIST SP 800-38D sets for random 96-bit nonces:
+<ul>
+<li>It generates each nonce from the OS cryptographically secure random number generator and
+never accepts a nonce from call sites. The seal API takes no nonce parameter.</li>
+<li>Each data key seals at most 2^32 messages, which is what keeps the bound above. The module
+counts seals per key and rotates the data key before the limit. The persisted count must
+never be below the number of seals actually made: the module may reserve a block of K seals
+by persisting <code>count + K</code> before using them, so a high-rate store (such as an encrypted
+event queue) does not need a synchronous write per record. A crash wastes at most the rest of
+the block. On load, an unknown or missing count is treated as "rotate now".</li>
+<li>No counter-based nonce scheme is used, because a counter restored from an older copy of
+protected storage would repeat nonces.</li>
+<li>A known-answer test and a test that seals many records and checks for repeated nonces run
+on every platform (#225).</li>
+</ul>
+</li>
+</ul>
+<p><strong>Libraries</strong></p>
+<ul>
+<li><strong><code>ring</code></strong> provides signatures, AES-GCM, HMAC and the rustls crypto provider. It replaces the
+wider candidate crate list in #225. Access goes through a thin <code>crypto</code> module, so call sites
+never use <code>ring</code> directly. This covers user-mode crates only. <code>ring</code> cannot link into the
+<code>no_std</code> kernel driver, so <code>palisade-driver</code> verifies the boot cache MAC with the kernel's own
+cryptography API or <code>no_std</code> RustCrypto crates (<code>hmac</code>, <code>sha2</code>). That choice is made in #113,
+using the same algorithm (HMAC-SHA-256) and the same test vectors.</li>
+<li><strong>FIPS (future work).</strong> A FIPS-validated provider can be swapped in later through rustls's
+provider interface and the same <code>crypto</code> module. Adopting one needs a superseding ADR, which must
+also decide whether file-identity hashing (done by <code>sha2</code>, outside the provider) is in FIPS
+scope. Palisade makes no FIPS claim until then (#18 lists certification as out of scope).</li>
+</ul>
+<h2 id="consequences"><a class="header" href="#consequences">Consequences</a></h2>
+<h3 id="positive"><a class="header" href="#positive">Positive</a></h3>
+<ul>
+<li>No allow decision rests on SHA-1 or MD5.</li>
+<li>ISM-aligned defaults, with Ed25519 available where alignment is not needed.</li>
+<li>Algorithm agility means key and algorithm rotation are data changes, not format changes.</li>
+<li>One provider for TLS and signatures keeps the reviewed crypto surface small.</li>
+<li>Nonce handling lives in one module, so no call site can choose or reuse a nonce.</li>
+</ul>
+<h3 id="negative"><a class="header" href="#negative">Negative</a></h3>
+<ul>
+<li>P-384 verification is slower than Ed25519. Bundles are verified on activation and every
+15 minutes (#225), not per decision, so the cost is acceptable.</li>
+<li>Two signature algorithms means two sets of known-answer test vectors on every platform (#225).</li>
+<li>Imported policies (#15) whose allow rules carry only a SHA-1 or MD5 hash cannot be imported
+as-is. The importer must resolve them to SHA-256 from inventory or a supplied file, or report
+them as rejected.</li>
+<li><code>ring</code> has no FIPS-validated mode, so a FIPS deployment needs the future provider swap.</li>
+<li>The <code>crypto</code> module must persist a per-key seal count and rotate data keys, which adds state
+to protected storage (#220, #225).</li>
+</ul>
+<h2 id="security-impact"><a class="header" href="#security-impact">Security impact</a></h2>
+<p>This ADR sets the strength of every trust decision Palisade makes. Banning weak hashes as the
+sole basis of allow rules closes collision-based bypasses in Palisade's own evaluation, where an
+attacker builds a malicious file with the same SHA-1 or MD5 as an allowed one. The native layer
+is limited by what the target OS build checks: where an older build only matches SHA-1
+Authenticode values, the compile report (#81) flags the rule so the weakness is visible. Algorithm lists in a signed trust set prevent
+algorithm downgrade, and domain separation prevents cross-protocol signature reuse. Keeping
+verification always on in TLS means a misconfigured proxy fails closed rather than silently
+exposing traffic. AES-GCM fails badly on nonce reuse: two records sealed with the same key and
+nonce leak the XOR of their plaintexts and allow forged tags under that key. Random nonces from
+the OS generator, a per-key seal limit of 2^32 with rotation, and no caller-supplied nonces keep
+the probability of any repeat under one key at or below 2^-33, including after a restart or a
+restored backup of protected storage. A deterministic counter could make repeats impossible in
+principle, but restoring an old counter would repeat nonces in practice, so it is not used.
+A flaw in <code>ring</code> would affect TLS and signatures at once, so it is tracked
+under the supply-chain advisory scan (#23).</p>
+<h2 id="links"><a class="header" href="#links">Links</a></h2>
+<ul>
+<li>Supersedes: 0008</li>
+<li>Issues #20, #3, #43, #46, #47, #62, #81, #85, #113, #222, #223, #224, #225, #226. Epic #18.</li>
+</ul>
+<hr>
+<p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/adr/0017-cryptographic-algorithms-and-nonces.md"><code>docs/adr/0017-cryptographic-algorithms-and-nonces.md</code></a> on GitHub.</small></p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../../docs/adr/0016-server-database-and-tenant-scope.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../../docs/adr/0018-fail-open-vs-fail-closed-defaults-revised.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../../docs/adr/0016-server-database-and-tenant-scope.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../../docs/adr/0018-fail-open-vs-fail-closed-defaults-revised.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../../mark-09e88c2c.min.js"></script>
+        <script src="../../searcher-c2a407aa.js"></script>
+
+        <script src="../../clipboard-1626706a.min.js"></script>
+        <script src="../../highlight-abc7f01d.js"></script>
+        <script src="../../book-a0b12cfe.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../../theme/palisade-c327a96e.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

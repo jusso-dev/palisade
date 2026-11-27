@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_CATEGORY_PART_CHARS"],"enum":["ErrorCode","Severity"],"mod":["order_ranges"],"struct":["ValidatedPolicy","ValidationError"]};

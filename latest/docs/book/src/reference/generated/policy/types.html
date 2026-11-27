@@ -1,0 +1,783 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Value types - Palisade</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="Palisade: an educational Windows application allowlisting project">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../../../../../../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../../../../../../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../../../../../../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../../../../../../css/general-2459343d.css">
+        <link rel="stylesheet" href="../../../../../../css/chrome-ae938929.css">
+        <link rel="stylesheet" href="../../../../../../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../../../../../../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../../../../../../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../../../../../../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../../../../../../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="../../../../../../theme/palisade-1bbd7bbc.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../../../../../../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../../../../../../searchindex-3e2a1e09.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../../../../../../toc-8cab92c4.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../../../../../../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div class="palisade-disclaimer" role="note" aria-label="Disclaimer">
+                    <strong>Palisade is an educational, personal-development project. It is not a replacement for commercial application control products and comes with no support or warranty. Do not rely on it to protect production systems.</strong>
+                </div>
+                <nav class="palisade-versions" aria-label="Documentation version">
+                    <label for="palisade-version-select">Version</label>
+                    <select id="palisade-version-select" hidden></select>
+                </nav>
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Palisade</h1>
+
+                    <div class="right-buttons">
+                        <a href="../../../../../../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+                        <a href="https://github.com/jusso-dev/palisade" title="Git repository" aria-label="Git repository">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="value-types"><a class="header" href="#value-types">Value types</a></h1>
+<!-- Generated by `cargo xtask docs generate` from `schemas/policy/v1.json`. Do not edit by hand. -->
+<p>Enumerations, identifiers and string formats used by the <a href="index.html">Palisade policy document</a>.</p>
+<h2 id="advancedvalue"><a class="header" href="#advancedvalue">AdvancedValue</a></h2>
+<p>A scalar value in <code>advanced</code>.</p>
+<p>Type: boolean or integer or string.</p>
+<h2 id="allowtiebreak"><a class="header" href="#allowtiebreak">AllowTiebreak</a></h2>
+<p>Which allow decides among allows of different kinds.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>most_restrictive</code></td><td><code>allow_contained</code>, then <code>allow</code>, then <code>allow_elevated</code> (with <code>condition: always</code> before <code>if_required</code>). The default.</td></tr>
+<tr><td><code>most_permissive</code></td><td>The reverse: <code>allow_elevated</code> (<code>if_required</code> before <code>always</code>), then <code>allow</code>, then <code>allow_contained</code>.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="combine"><a class="header" href="#combine">Combine</a></h2>
+<p>How a scope's dimensions combine.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>all</code></td><td>Every dimension that is set must match. The default.</td></tr>
+<tr><td><code>any</code></td><td>At least one dimension that is set must match.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="containmentprofileref"><a class="header" href="#containmentprofileref">ContainmentProfileRef</a></h2>
+<p>The ID of a containment profile (#14, #173).</p>
+<p>Type: <a href="types.html#uuid7"><code>Uuid7</code></a>.</p>
+<h2 id="controllevel"><a class="header" href="#controllevel">ControlLevel</a></h2>
+<p>Whether a class of object is controlled.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>off</code></td><td>Not evaluated.</td></tr>
+<tr><td><code>audit</code></td><td>Evaluated, and would-block decisions are reported only.</td></tr>
+<tr><td><code>enforce</code></td><td>Evaluated and enforced.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="date"><a class="header" href="#date">Date</a></h2>
+<p>A calendar date, <code>YYYY-MM-DD</code>.</p>
+<p>Type: string; matches <code>^[0-9]{4}-[0-9]{2}-[0-9]{2}$</code>.</p>
+<h2 id="elevationauth"><a class="header" href="#elevationauth">ElevationAuth</a></h2>
+<p>The confirmation an <code>allow_elevated</code> action asks for.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>none</code></td><td>No confirmation. The default.</td></tr>
+<tr><td><code>reauth</code></td><td>The user authenticates again.</td></tr>
+<tr><td><code>mfa</code></td><td>The user completes a multi-factor challenge.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="elevationcondition"><a class="header" href="#elevationcondition">ElevationCondition</a></h2>
+<p>When an <code>allow_elevated</code> action elevates.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>always</code></td><td>Every time the object runs.</td></tr>
+<tr><td><code>if_required</code></td><td>Only when the object asks for administrator rights.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="enforcementoverride"><a class="header" href="#enforcementoverride">EnforcementOverride</a></h2>
+<p>How one rule relates to the policy mode (#36).</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>inherit</code></td><td>Follow the effective mode. The default.</td></tr>
+<tr><td><code>always_enforce</code></td><td>Enforce this rule even in audit or learning mode.</td></tr>
+<tr><td><code>never_enforce</code></td><td>Never enforce this rule: it only reports what it would block.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="eventseverity"><a class="header" href="#eventseverity">EventSeverity</a></h2>
+<p>How serious an event is (#16).</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>info</code></td><td>Informational.</td></tr>
+<tr><td><code>low</code></td><td>Low.</td></tr>
+<tr><td><code>medium</code></td><td>Medium.</td></tr>
+<tr><td><code>high</code></td><td>High.</td></tr>
+<tr><td><code>critical</code></td><td>Critical.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="field"><a class="header" href="#field">Field</a></h2>
+<p>The identity facts a criterion can test (#31).</p>
+<p>This is the part of the #31 catalogue that has a matcher: hashes, the
+signer, the path and the version resource. The other families (signer
+constraints such as EKU and TBS hashes, packaged apps, installers,
+ownership, origin and process relationships) arrive in later minor
+versions, each with its facts and matcher.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>hash.sha256</code></td><td>SHA-256 of the whole file. The primary identity (ADR 0008).</td></tr>
+<tr><td><code>hash.sha384</code></td><td>SHA-384 of the whole file.</td></tr>
+<tr><td><code>hash.sha512</code></td><td>SHA-512 of the whole file.</td></tr>
+<tr><td><code>hash.authenticode_sha256</code></td><td>SHA-256 Authenticode image hash: the PE image without its checksum, security directory entry and certificate table.</td></tr>
+<tr><td><code>hash.authenticode_sha1</code></td><td>SHA-1 Authenticode image hash. Compatibility only (ADR 0008).</td></tr>
+<tr><td><code>hash.page_sha256</code></td><td>SHA-256 hash of the first page of the image, for OS-native policy formats. It covers only that page, so it is a weak identity alone.</td></tr>
+<tr><td><code>hash.page_sha1</code></td><td>SHA-1 hash of the first page of the image. Compatibility only (ADR 0008).</td></tr>
+<tr><td><code>hash.msi_fuzzy_sha256</code></td><td>SHA-256 of an installer package with its timestamps left out, so rebuilds of the same content share one value (#3).</td></tr>
+<tr><td><code>hash.sha1</code></td><td>SHA-1 of the whole file. Compatibility only (ADR 0008).</td></tr>
+<tr><td><code>hash.md5</code></td><td>MD5 of the whole file. Compatibility only (ADR 0008).</td></tr>
+<tr><td><code>signer.publisher</code></td><td>The leaf signer's subject common name.</td></tr>
+<tr><td><code>signer.issuer</code></td><td>The common name of the leaf certificate's issuer.</td></tr>
+<tr><td><code>signer.leaf_thumbprint</code></td><td>The SHA-256 thumbprint of the leaf certificate.</td></tr>
+<tr><td><code>path.full</code></td><td>The normalised full path.</td></tr>
+<tr><td><code>path.directory</code></td><td>The parent directory.</td></tr>
+<tr><td><code>path.file_name</code></td><td>The on-disk file name.</td></tr>
+<tr><td><code>path.extension</code></td><td>The file extension, without its leading dot.</td></tr>
+<tr><td><code>meta.original_filename</code></td><td>The original file name from the version resource.</td></tr>
+<tr><td><code>meta.internal_name</code></td><td>The internal name from the version resource.</td></tr>
+<tr><td><code>meta.file_description</code></td><td>The file description from the version resource.</td></tr>
+<tr><td><code>meta.product_name</code></td><td>The product name from the version resource.</td></tr>
+<tr><td><code>meta.company_name</code></td><td>The company name from the version resource.</td></tr>
+<tr><td><code>meta.file_version</code></td><td>The file version from the version resource.</td></tr>
+<tr><td><code>meta.product_version</code></td><td>The product version from the version resource.</td></tr>
+<tr><td><code>user.sid</code></td><td>Context (#33): the SID of the user the process runs as.</td></tr>
+<tr><td><code>user.name</code></td><td>Context (#33): the user's account name, as <code>DOMAIN\user</code> or as a user principal name (<code>user@example.org</code>). Either form can match. Regular expressions are not allowed: match principals by SID where you can (#32).</td></tr>
+<tr><td><code>user.groups</code></td><td>Context (#33): the groups in the user's token, as SIDs, and the user's cloud-directory groups, as object IDs.</td></tr>
+<tr><td><code>user.primary_group</code></td><td>Context (#33): the SID of the user's primary group.</td></tr>
+<tr><td><code>user.is_admin</code></td><td>Context (#33): the token holds the local Administrators group, enabled or filtered by UAC.</td></tr>
+<tr><td><code>user.is_elevated</code></td><td>Context (#33): the token is elevated.</td></tr>
+<tr><td><code>user.is_service_account</code></td><td>Context (#33): the user is a service account.</td></tr>
+<tr><td><code>user.is_system</code></td><td>Context (#33): the user is the local system account.</td></tr>
+<tr><td><code>device.hostname</code></td><td>Context (#33): the device's host name.</td></tr>
+<tr><td><code>device.fqdn</code></td><td>Context (#33): the device's fully qualified domain name.</td></tr>
+<tr><td><code>device.domain</code></td><td>Context (#33): the DNS name of the device's domain.</td></tr>
+<tr><td><code>device.netbios</code></td><td>Context (#33): the device's NetBIOS name.</td></tr>
+<tr><td><code>device.ad_site</code></td><td>Context (#33): the directory site the device is in.</td></tr>
+<tr><td><code>device.groups</code></td><td>Context (#33): the device's computer groups, as SIDs, and its cloud-directory device groups, as object IDs.</td></tr>
+<tr><td><code>device.tags</code></td><td>Context (#33): the Palisade tags assigned to the device.</td></tr>
+<tr><td><code>device.os_version</code></td><td>Context (#33): the operating system version.</td></tr>
+<tr><td><code>device.os_edition</code></td><td>Context (#33): the operating system edition.</td></tr>
+<tr><td><code>device.arch</code></td><td>Context (#33): the processor architecture, such as <code>x64</code> or <code>arm64</code>.</td></tr>
+<tr><td><code>device.is_server</code></td><td>Context (#33): the device runs a server edition.</td></tr>
+<tr><td><code>device.is_domain_controller</code></td><td>Context (#33): the device is a domain controller.</td></tr>
+<tr><td><code>device.is_laptop</code></td><td>Context (#33): the device is a laptop.</td></tr>
+<tr><td><code>device.is_vdi</code></td><td>Context (#33): the device is a virtual desktop.</td></tr>
+<tr><td><code>device.is_terminal_server</code></td><td>Context (#33): the device is a multi-session terminal server.</td></tr>
+<tr><td><code>session.type</code></td><td>Context (#33): how the session was started: <code>console</code>, <code>rdp</code>, <code>remote_shell</code>, <code>service</code>, <code>batch</code> or <code>network</code>.</td></tr>
+<tr><td><code>session.client_hostname</code></td><td>Context (#33): the host name of the client connected to the session, on a multi-session host.</td></tr>
+<tr><td><code>session.is_remote</code></td><td>Context (#33): the session is remote.</td></tr>
+<tr><td><code>user.integrity_level</code></td><td>Context (#33): the integrity level of the process token: <code>untrusted</code>, <code>low</code>, <code>medium</code>, <code>medium_plus</code>, <code>high</code>, <code>system</code> or <code>protected</code>. Ordered, so <code>ge</code> and <code>le</code> compare levels.</td></tr>
+<tr><td><code>user.ou</code></td><td>Context (#33): the organisational unit of the user's directory object, as a distinguished name such as <code>OU=Finance,DC=corp,DC=example</code>. With <code>include_sub_ous</code>, units below it match too.</td></tr>
+<tr><td><code>device.ou</code></td><td>Context (#33): the organisational unit of the device's directory object, as for <code>user.ou</code>.</td></tr>
+<tr><td><code>device.os_build</code></td><td>Context (#33): the operating system build number, such as <code>22631</code>.</td></tr>
+<tr><td><code>session.id</code></td><td>Context (#33): the session ID.</td></tr>
+<tr><td><code>session.client_ip</code></td><td>Context (#33): the IP address of the client connected to the session, on a multi-session host.</td></tr>
+<tr><td><code>net.ip</code></td><td>Context (#33): every local interface address. A network test (<code>ip_in_cidr</code>, <code>ip_between</code>, <code>ip_wildcard</code>) matches if any address does; a set test holds the addresses as a set, so <code>all_of</code> needs every listed address to be present.</td></tr>
+<tr><td><code>net.mac</code></td><td>Context (#33): every local interface MAC address.</td></tr>
+<tr><td><code>net.dns_suffix</code></td><td>Context (#33): every connection-specific DNS suffix.</td></tr>
+<tr><td><code>net.connected_to_server</code></td><td>Context (#33): the device can reach its server now.</td></tr>
+<tr><td><code>net.location</code></td><td>Context (#33, #38): the names of the network locations the device is in, such as <code>corporate</code>, <code>remote</code> or <code>offline</code>.</td></tr>
+<tr><td><code>time.weekday</code></td><td>Context (#33): the day of the week of the evaluation, as <code>mon</code> to <code>sun</code>, in the clock the policy's <code>time_zone_basis</code> names.</td></tr>
+<tr><td><code>time.local_time</code></td><td>Context (#33): the time of day of the evaluation, as <code>HH:MM</code>, in the policy's clock.</td></tr>
+<tr><td><code>time.date</code></td><td>Context (#33): the date of the evaluation, as <code>YYYY-MM-DD</code>, in the policy's clock.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="libraryid"><a class="header" href="#libraryid">LibraryId</a></h2>
+<p>A UUID version 7 in canonical lowercase form.</p>
+<p>Type: string; matches <code>^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$</code>.</p>
+<h2 id="loglevel"><a class="header" href="#loglevel">LogLevel</a></h2>
+<p>Whether a decision produces a local event.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>always</code></td><td>Every decision produces an event.</td></tr>
+<tr><td><code>summary</code></td><td>Decisions are aggregated into periodic summaries per device, user, object and rule. The default for allow rules.</td></tr>
+<tr><td><code>sampled</code></td><td>A sample of decisions produces events.</td></tr>
+<tr><td><code>never</code></td><td>No event.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="mode"><a class="header" href="#mode">Mode</a></h2>
+<p>How a policy's decisions take effect (#36).</p>
+<p>The variants are declared from weakest to strongest, so the derived
+ordering ranks them. The "strictest" merge in #36 treats <code>learning</code> and
+<code>audit</code> as equally strong; that rule belongs to the merge code, not to this
+ordering.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>disabled</code></td><td>The engine is not consulted. The device is reported as unprotected.</td></tr>
+<tr><td><code>monitor</code></td><td>Evaluate fully, allow everything, and report would-block decisions.</td></tr>
+<tr><td><code>audit</code></td><td>Like <code>monitor</code>, with a full event for every decision.</td></tr>
+<tr><td><code>learning</code></td><td>Audit, and report every would-block object as a learning candidate.</td></tr>
+<tr><td><code>enforce</code></td><td>Decisions take effect: blocked means blocked.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="notify"><a class="header" href="#notify">Notify</a></h2>
+<p>Whether the user is shown a notification (#11).</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>none</code></td><td>No notification.</td></tr>
+<tr><td><code>default</code></td><td>The policy's default notification.</td></tr>
+<tr><td><code>custom</code></td><td>The rule's <code>notification_text</code>.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="objecttype"><a class="header" href="#objecttype">ObjectType</a></h2>
+<p>The class of object being evaluated. Scripts are <code>script.&lt;kind&gt;</code>.</p>
+<p>Values: <code>executable</code>, <code>library</code>, <code>driver</code>, <code>script.powershell</code>, <code>script.batch</code>, <code>script.cmd</code>, <code>script.vbscript</code>, <code>script.jscript</code>, <code>script.wsf</code>, <code>script.wsc</code>, <code>script.python</code>, <code>script.java</code>, <code>script.reg</code>, <code>script.other</code>, <code>installer</code>, <code>compiled_html</code>, <code>html_application</code>, <code>control_panel_applet</code>, <code>packaged_app</code>, <code>command</code>, <code>com_object</code>.</p>
+<h2 id="onwindowclose"><a class="header" href="#onwindowclose">OnWindowClose</a></h2>
+<p>What happens to processes a scheduled allow let run, when its schedule
+closes. The engine sends a directive; the agent and the tray act on it
+(#4, #11).</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>none</code></td><td>Nothing: they keep running. The default.</td></tr>
+<tr><td><code>warn</code></td><td>Warn the user.</td></tr>
+<tr><td><code>warn_then_terminate</code></td><td>Warn the user, then terminate them after the grace period.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="operator"><a class="header" href="#operator">Operator</a></h2>
+<p>How a criterion compares the fact with its values (#32). Positive
+operators match if any value matches; negative operators (<code>not_*</code>)
+match if no value does, and never match a fact that is unknown.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>equals</code></td><td>Equal to any value.</td></tr>
+<tr><td><code>not_equals</code></td><td>Equal to none of the values.</td></tr>
+<tr><td><code>starts_with</code></td><td>Starts with any value. On paths, the value must end at a component boundary: <code>C:\Tools</code> does not match <code>C:\ToolsX</code>.</td></tr>
+<tr><td><code>ends_with</code></td><td>Ends with any value.</td></tr>
+<tr><td><code>contains</code></td><td>Contains any value.</td></tr>
+<tr><td><code>not_contains</code></td><td>Contains none of the values.</td></tr>
+<tr><td><code>wildcard</code></td><td>Matches any wildcard pattern.</td></tr>
+<tr><td><code>not_wildcard</code></td><td>Matches none of the wildcard patterns.</td></tr>
+<tr><td><code>regex</code></td><td>Matches any regular expression. Anchored at both ends, and run by a linear-time engine without look-around or backreferences.</td></tr>
+<tr><td><code>not_regex</code></td><td>Matches none of the regular expressions.</td></tr>
+<tr><td><code>version_eq</code></td><td>Version equal to any value.</td></tr>
+<tr><td><code>version_gt</code></td><td>Version greater than the value.</td></tr>
+<tr><td><code>version_ge</code></td><td>Version greater than or equal to the value.</td></tr>
+<tr><td><code>version_lt</code></td><td>Version less than the value.</td></tr>
+<tr><td><code>version_le</code></td><td>Version less than or equal to the value.</td></tr>
+<tr><td><code>version_between</code></td><td>Version within <code>[min, max]</code>, both inclusive. Takes exactly two values, the minimum first.</td></tr>
+<tr><td><code>member_of</code></td><td>The set holds any of the values (#33).</td></tr>
+<tr><td><code>not_member_of</code></td><td>The set holds none of the values (#33).</td></tr>
+<tr><td><code>is_true</code></td><td>The fact is true. Takes no values (#33).</td></tr>
+<tr><td><code>is_false</code></td><td>The fact is false. Takes no values (#33). On an unknown fact it is unknown, like every other test.</td></tr>
+<tr><td><code>eq</code></td><td>Number, level or date equal to any value (#32).</td></tr>
+<tr><td><code>ne</code></td><td>Number, level or date equal to none of the values (#32).</td></tr>
+<tr><td><code>gt</code></td><td>Greater than the value (#32).</td></tr>
+<tr><td><code>ge</code></td><td>Greater than or equal to the value (#32).</td></tr>
+<tr><td><code>lt</code></td><td>Less than the value (#32).</td></tr>
+<tr><td><code>le</code></td><td>Less than or equal to the value (#32).</td></tr>
+<tr><td><code>between</code></td><td>Within <code>[min, max]</code>, both inclusive. Takes exactly two values, the minimum first (#32).</td></tr>
+<tr><td><code>ip_in_cidr</code></td><td>The address is in any of the CIDR blocks, such as <code>10.0.0.0/8</code> or <code>2001:db8::/32</code> (#32). On a set of addresses, any address may be.</td></tr>
+<tr><td><code>ip_between</code></td><td>The address is in any of the ranges, written <code>first-last</code> or, for IPv4, <code>a.b.c.first-last</code> (#32).</td></tr>
+<tr><td><code>ip_wildcard</code></td><td>The IPv4 address matches any whole-octet pattern, such as <code>10.*.*.*</code> (#32).</td></tr>
+<tr><td><code>any_of</code></td><td>The set holds at least one of the values (#32). The same test as <code>member_of</code>.</td></tr>
+<tr><td><code>all_of</code></td><td>The set holds every one of the values (#32).</td></tr>
+<tr><td><code>weekday_in</code></td><td>The day of the week is any of the values, <code>mon</code> to <code>sun</code> (#32).</td></tr>
+<tr><td><code>time_between</code></td><td>The time of day is within <code>[start, end)</code>, both <code>HH:MM</code>. A window whose end is before its start wraps midnight: <code>22:00</code> to <code>06:00</code> (#32).</td></tr>
+<tr><td><code>date_between</code></td><td>The date is within <code>[from, to]</code>, both <code>YYYY-MM-DD</code> and inclusive (#32).</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="os"><a class="header" href="#os">Os</a></h2>
+<p>The operating system a rule set targets. Other systems are reserved and
+will be added in a minor version.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>windows</code></td><td>Windows.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="pin"><a class="header" href="#pin">Pin</a></h2>
+<p><code>latest</code> (the newest version) or one version number.</p>
+<p>Type: constant or integer.</p>
+<h2 id="policyid"><a class="header" href="#policyid">PolicyId</a></h2>
+<p>The stable ID of a policy.</p>
+<p>Type: <a href="types.html#uuid7"><code>Uuid7</code></a>.</p>
+<h2 id="precedencemodel"><a class="header" href="#precedencemodel">PrecedenceModel</a></h2>
+<p>How the matching rules of the ordinary rule sets are combined (#35).</p>
+<p>The mandatory-deny tier and the implicit deny for unmatched files apply
+under every model (ADR 0004). The semantics of each model are in
+<code>crate::precedence</code>.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>deny_wins</code></td><td>Any matching deny blocks; otherwise any matching allow allows. The default.</td></tr>
+<tr><td><code>allow_wins</code></td><td>Any matching allow allows. Not recommended for Essential Eight.</td></tr>
+<tr><td><code>specificity</code></td><td>The rule with the most specific identity wins.</td></tr>
+<tr><td><code>first_match</code></td><td>Rules are ordered, and the first match decides.</td></tr>
+<tr><td><code>priority</code></td><td>The rule with the winning numeric priority decides.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="prioritydirection"><a class="header" href="#prioritydirection">PriorityDirection</a></h2>
+<p>Which <code>priority</code> number wins.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>lower_wins</code></td><td>The lowest number wins. The default.</td></tr>
+<tr><td><code>higher_wins</code></td><td>The highest number wins.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="requesttemplateref"><a class="header" href="#requesttemplateref">RequestTemplateRef</a></h2>
+<p>The ID of an approval request template (#11).</p>
+<p>Type: <a href="types.html#uuid7"><code>Uuid7</code></a>.</p>
+<h2 id="ruleid"><a class="header" href="#ruleid">RuleId</a></h2>
+<p>The stable ID of a rule. It is never reused, even after the rule is deleted.</p>
+<p>Type: <a href="types.html#uuid7"><code>Uuid7</code></a>.</p>
+<h2 id="rulesetid"><a class="header" href="#rulesetid">RuleSetId</a></h2>
+<p>The stable ID of a rule set.</p>
+<p>Type: <a href="types.html#uuid7"><code>Uuid7</code></a>.</p>
+<h2 id="rulesetkind"><a class="header" href="#rulesetkind">RuleSetKind</a></h2>
+<p>The purpose of a rule set.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>allowlist</code></td><td>Rules that allow.</td></tr>
+<tr><td><code>blocklist</code></td><td>Rules that deny.</td></tr>
+<tr><td><code>baseline</code></td><td>A baseline of what was present at a point in time.</td></tr>
+<tr><td><code>trust</code></td><td>Trusted sources (#9).</td></tr>
+<tr><td><code>elevation</code></td><td>Elevation rules (#12).</td></tr>
+<tr><td><code>containment</code></td><td>Containment rules (#14).</td></tr>
+<tr><td><code>mixed</code></td><td>Any mix of actions.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="schemaversion"><a class="header" href="#schemaversion">SchemaVersion</a></h2>
+<p>A semantic version MAJOR.MINOR.PATCH, without pre-release or build suffixes.</p>
+<p>Type: string; matches <code>^(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)\.(0\|[1-9][0-9]*)$</code>.</p>
+<h2 id="scopesubject"><a class="header" href="#scopesubject">ScopeSubject</a></h2>
+<p>Whose token a scope's <code>principals</code> is tested against.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>process_user</code></td><td>The user the process runs as. The default.</td></tr>
+<tr><td><code>session_user</code></td><td>The user logged on to the process's session, for example to scope a service running as SYSTEM on behalf of the interactive user.</td></tr>
+<tr><td><code>parent_process_user</code></td><td>The user the parent process runs as.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="sessiontype"><a class="header" href="#sessiontype">SessionType</a></h2>
+<p>How a session was started.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>console</code></td><td>The physical console.</td></tr>
+<tr><td><code>rdp</code></td><td>A remote desktop session.</td></tr>
+<tr><td><code>remote_shell</code></td><td>A remote shell, such as a remote PowerShell session.</td></tr>
+<tr><td><code>service</code></td><td>A service.</td></tr>
+<tr><td><code>batch</code></td><td>A batch job, such as a scheduled task.</td></tr>
+<tr><td><code>network</code></td><td>A network logon.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="tiertiebreak"><a class="header" href="#tiertiebreak">TierTiebreak</a></h2>
+<p>Which action wins between rules of the same specificity.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>deny</code></td><td>A deny beats an allow. The default.</td></tr>
+<tr><td><code>allow</code></td><td>An allow beats a deny.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="timeofday"><a class="header" href="#timeofday">TimeOfDay</a></h2>
+<p>A wall-clock time, <code>HH:MM</code>, from 00:00 to 24:00.</p>
+<p>Type: string; matches <code>^(([01][0-9]\|2[0-3]):[0-5][0-9]\|24:00)$</code>.</p>
+<h2 id="timezonebasis"><a class="header" href="#timezonebasis">TimeZoneBasis</a></h2>
+<p>The clock that schedules are interpreted in.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>device_local</code></td><td>The device's local time zone.</td></tr>
+<tr><td><code>utc</code></td><td>Coordinated Universal Time.</td></tr>
+<tr><td><code>user_local</code></td><td>The time zone of the session's user, if the agent can read it, and otherwise the device's (#38).</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="tokenprofileref"><a class="header" href="#tokenprofileref">TokenProfileRef</a></h2>
+<p>The ID of an access token profile for elevation (#12, #150).</p>
+<p>Type: <a href="types.html#uuid7"><code>Uuid7</code></a>.</p>
+<h2 id="trustmode"><a class="header" href="#trustmode">TrustMode</a></h2>
+<p>How far trust from a <code>trust_source</code> action reaches (#114).</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>direct</code></td><td>Only files the designated process writes itself.</td></tr>
+<tr><td><code>chained</code></td><td>Files the designated process and all its descendants write.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="unknownas"><a class="header" href="#unknownas">UnknownAs</a></h2>
+<p>How a deny rule treats a result it cannot decide (#32, #35).</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>no_match</code></td><td>The rule does not apply. The default.</td></tr>
+<tr><td><code>match</code></td><td>The rule applies, so the deny blocks.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="upload"><a class="header" href="#upload">Upload</a></h2>
+<p>When an event is sent to the server.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>immediate</code></td><td>As soon as possible.</td></tr>
+<tr><td><code>batched</code></td><td>With the next batch.</td></tr>
+<tr><td><code>local_only</code></td><td>Never: kept in the local log only.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="uuid7"><a class="header" href="#uuid7">Uuid7</a></h2>
+<p>A UUID version 7 in canonical lowercase form.</p>
+<p>Type: string; matches <code>^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$</code>.</p>
+<h2 id="weekday"><a class="header" href="#weekday">Weekday</a></h2>
+<p>A day of the week.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>mon</code></td><td>Monday.</td></tr>
+<tr><td><code>tue</code></td><td>Tuesday.</td></tr>
+<tr><td><code>wed</code></td><td>Wednesday.</td></tr>
+<tr><td><code>thu</code></td><td>Thursday.</td></tr>
+<tr><td><code>fri</code></td><td>Friday.</td></tr>
+<tr><td><code>sat</code></td><td>Saturday.</td></tr>
+<tr><td><code>sun</code></td><td>Sunday.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="wellknown"><a class="header" href="#wellknown">WellKnown</a></h2>
+<p>A well-known account or group, with a fixed SID.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>everyone</code></td><td><code>S-1-1-0</code>.</td></tr>
+<tr><td><code>authenticated_users</code></td><td><code>S-1-5-11</code>.</td></tr>
+<tr><td><code>administrators</code></td><td>The local Administrators group, <code>S-1-5-32-544</code>.</td></tr>
+<tr><td><code>users</code></td><td>The local Users group, <code>S-1-5-32-545</code>.</td></tr>
+<tr><td><code>system</code></td><td>The local system account, <code>S-1-5-18</code>.</td></tr>
+<tr><td><code>local_service</code></td><td><code>S-1-5-19</code>.</td></tr>
+<tr><td><code>network_service</code></td><td><code>S-1-5-20</code>.</td></tr>
+<tr><td><code>interactive</code></td><td>Interactive logons, <code>S-1-5-4</code>.</td></tr>
+<tr><td><code>remote_desktop_users</code></td><td><code>S-1-5-32-555</code>.</td></tr>
+<tr><td><code>domain_controllers</code></td><td>Any domain's Domain Controllers group (relative ID 516), or the Enterprise Domain Controllers group, <code>S-1-5-9</code>.</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/book/src/reference/generated/policy/types.md"><code>docs/book/src/reference/generated/policy/types.md</code></a> on GitHub.</small></p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../../../../../../docs/book/src/reference/generated/policy/session-filter.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../../../../../../docs/book/src/reference/generated/policy/window.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../../../../../../docs/book/src/reference/generated/policy/session-filter.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../../../../../../docs/book/src/reference/generated/policy/window.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../../../../../../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../../../../../../mark-09e88c2c.min.js"></script>
+        <script src="../../../../../../searcher-c2a407aa.js"></script>
+
+        <script src="../../../../../../clipboard-1626706a.min.js"></script>
+        <script src="../../../../../../highlight-abc7f01d.js"></script>
+        <script src="../../../../../../book-a0b12cfe.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../../../../../../theme/palisade-c327a96e.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

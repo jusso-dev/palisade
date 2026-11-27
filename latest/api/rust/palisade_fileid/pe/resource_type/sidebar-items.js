@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["GROUP_ICON","ICON","MANIFEST","VERSION"]};

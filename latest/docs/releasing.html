@@ -1,0 +1,562 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Releasing - Palisade</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="Palisade: an educational Windows application allowlisting project">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-2459343d.css">
+        <link rel="stylesheet" href="../css/chrome-ae938929.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="../theme/palisade-1bbd7bbc.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex-3e2a1e09.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc-8cab92c4.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div class="palisade-disclaimer" role="note" aria-label="Disclaimer">
+                    <strong>Palisade is an educational, personal-development project. It is not a replacement for commercial application control products and comes with no support or warranty. Do not rely on it to protect production systems.</strong>
+                </div>
+                <nav class="palisade-versions" aria-label="Documentation version">
+                    <label for="palisade-version-select">Version</label>
+                    <select id="palisade-version-select" hidden></select>
+                </nav>
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Palisade</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+                        <a href="https://github.com/jusso-dev/palisade" title="Git repository" aria-label="Git repository">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="releasing"><a class="header" href="#releasing">Releasing</a></h1>
+<p>How a Palisade release is cut, signed, checked and published (#24). Everything runs on
+GitHub-hosted runners, from <code>.github/workflows/release.yml</code>, with the steps in
+<code>cargo xtask release</code> and <code>cargo xtask sign</code>. Building the artefacts themselves is described in
+<a href="packaging.html">packaging.md</a>.</p>
+<p><strong>Until the maintainer has done the one-time setup in <a href="#code-signing">Code signing</a>, pushing a
+release tag fails at its first job.</strong> A release never produces unsigned packages. Pull requests
+and <code>main</code> produce unsigned builds only, clearly marked as such: the <code>package</code> job's packages and
+the <a href="ci.html#main-snapshot"><code>main-snapshot</code></a> pre-release.</p>
+<h2 id="versioning"><a class="header" href="#versioning">Versioning</a></h2>
+<ul>
+<li>SemVer for the whole workspace, one version for every binary: <code>workspace.package.version</code> in
+the root <code>Cargo.toml</code>.</li>
+<li>Pre-releases are <code>-alpha.N</code>, <code>-beta.N</code> and <code>-rc.N</code>, and are published as GitHub pre-releases.</li>
+<li>Tags are <code>vX.Y.Z</code> or <code>vX.Y.Z-rc.N</code> (and so on), <strong>annotated and signed</strong> with SSH or GPG
+(<code>git tag -s</code>). <code>cargo xtask release check-tag</code> refuses a lightweight or unsigned tag, a name
+that is not a release version, and a tag whose commit's <code>Cargo.toml</code> has another version. In
+the release workflow it then verifies the signature cryptographically with <code>git tag -v</code>
+against the maintainer keys committed in <code>packaging/sign/allowed_tag_signers</code> (SSH, in
+<code>allowed_signers</code> format) and <code>packaging/sign/tag-signers.asc</code> (GPG), and fails if neither
+file is there.</li>
+</ul>
+<h2 id="the-pipeline"><a class="header" href="#the-pipeline">The pipeline</a></h2>
+<p>A pushed <code>v*</code> tag runs these jobs. Files move between jobs through a <strong>draft</strong> GitHub Release,
+because only three actions are allowed and none of them carries artefacts between jobs
+(<a href="ci.html#runner-and-action-policy">ci.md</a>). Nobody sees a draft but maintainers, and it is
+published only after <code>verify</code> passes.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Job</th><th>Runner</th><th>Secrets</th><th>What it does</th></tr>
+</thead>
+<tbody>
+<tr><td><code>check-tag</code></td><td>ubuntu-latest</td><td>none</td><td>Checks the tag (above) and that <code>CHANGELOG.md</code> has its section, fails unless signing is configured, creates the draft</td></tr>
+<tr><td><code>build</code></td><td>windows-latest (x64), windows-11-arm (ARM64)</td><td>none</td><td><code>cargo xtask dist --locked</code> release builds, natively; uploads the unsigned executables, the symbols archive and the size report, warning about binaries more than 10% larger than in the previous release</td></tr>
+<tr><td><code>server</code></td><td>ubuntu-latest</td><td>none</td><td>The Linux server binary</td></tr>
+<tr><td><code>sign</code></td><td>windows-latest</td><td><code>release-signing</code> environment</td><td>After a reviewer approves: signs every executable, builds each architecture's package from the <strong>signed</strong> executables (<code>dist --from</code>, which first checks they are this version's), signs each package, writes <code>SHA256SUMS</code> over the final files and signs it; replaces the unsigned files in the draft</td></tr>
+<tr><td><code>verify</code></td><td>windows-latest (x64), windows-11-arm (ARM64)</td><td>none</td><td>Checks <code>SHA256SUMS</code>, then each architecture's package, on its own architecture's runner, and every executable <strong>inside</strong> it (unpacked with an administrative install) with the OS signing tool's default policy, every signature, SHA-256, and an RFC 3161 timestamp. Any unsigned, invalid or untimestamped file fails the release</td></tr>
+<tr><td><code>provenance</code></td><td>ubuntu-latest</td><td>none</td><td>The hook for the SBOM, build provenance and signed update manifest (#18, #226); see <a href="#provenance">Provenance</a></td></tr>
+<tr><td><code>publish</code></td><td>ubuntu-latest</td><td>none</td><td>The <code>CHANGELOG.md</code> section as release notes, the pre-release flag for <code>-alpha</code>, <code>-beta</code> and <code>-rc</code>, and publishes the draft</td></tr>
+</tbody>
+</table>
+</div>
+<p>Only <code>check-tag</code>, <code>build</code>, <code>server</code>, <code>sign</code> and <code>publish</code> can write to releases
+(<code>contents: write</code>), only <code>sign</code> sees a secret, and nothing in this workflow uses a cache. A
+test in <code>xtask/src/release/mod.rs</code> keeps these rules: secrets only in the environment job,
+pull requests run only the dry run, releases are always timestamped, and publishing needs
+<code>verify</code>.</p>
+<p>A release contains:</p>
+<ul>
+<li><code>Palisade-&lt;version&gt;-x64.msi</code> and <code>Palisade-&lt;version&gt;-arm64.msi</code>, signed, with signed
+executables inside;</li>
+<li><code>palisade-&lt;version&gt;-x64-symbols.zip</code> and <code>palisade-&lt;version&gt;-arm64-symbols.zip</code>;</li>
+<li><code>palisade-server-&lt;version&gt;-linux-x64</code>;</li>
+<li><code>sizes-x64.json</code>, <code>sizes-arm64.json</code> and <code>sizes-linux-x64.json</code>, for the next release's size
+comparison;</li>
+<li><code>SHA256SUMS</code> and <code>SHA256SUMS.sig</code>.</li>
+</ul>
+<h3 id="dry-run-on-pull-requests"><a class="header" href="#dry-run-on-pull-requests">Dry run on pull requests</a></h3>
+<p>A pull request that changes <code>release.yml</code>, <code>xtask/src/dist/</code>, <code>xtask/src/release/</code> or
+<code>packaging/</code> runs the <code>dry-run</code> job instead: the same build, signed with a throwaway test CA
+created on the runner, packaged, signed again, every signature verified (timestamps aside, as
+there is no timestamp server in a test), and the checksums written and checked. It has no
+secrets, no environment, no write access and uploads nothing.</p>
+<p>In addition, CI's <code>sign-test</code> job (<a href="ci.html">ci.md</a>) runs on every pull request: the test-CA build
+and verification, the <code>pfx</code> signer with a throwaway PFX whose password is a canary that must not
+appear in the output, and a signed package of unsigned executables, which <code>release verify</code> must
+reject.</p>
+<h2 id="code-signing"><a class="header" href="#code-signing">Code signing</a></h2>
+<p>Signing is pluggable (<code>cargo xtask sign --signer &lt;kind&gt;</code>, <code>xtask/src/release/sign.rs</code>). Every
+signer signs PE files and packages in place with a SHA-256 file digest and an RFC 3161 timestamp,
+and verifies them.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Signer</th><th>Used by</th><th>Key material</th></tr>
+</thead>
+<tbody>
+<tr><td><code>none</code></td><td>Pull request and <code>main</code> builds</td><td>None: logs what it would sign</td></tr>
+<tr><td><code>test-ca</code></td><td>CI tests and the release dry run</td><td>A throwaway root CA and leaf made on the runner and deleted; its signatures are trusted only where its root was installed</td></tr>
+<tr><td><code>pfx</code></td><td>Releases</td><td>A PKCS#12 file with its password, from the <code>release-signing</code> environment</td></tr>
+<tr><td><code>cloud-hsm</code></td><td>Releases</td><td>A remote signing service, through a command template; the key never leaves the service</td></tr>
+</tbody>
+</table>
+</div>
+<p>There is no publicly trusted code-signing certificate yet. That is the one step only the
+maintainer can do; everything else is in place.</p>
+<h3 id="what-the-maintainer-sets-up"><a class="header" href="#what-the-maintainer-sets-up">What the maintainer sets up</a></h3>
+<ol>
+<li>
+<p><strong>A code-signing certificate.</strong> Either:</p>
+<ul>
+<li>an <strong>Authenticode code-signing certificate</strong> (the "code signing" extended key usage,
+1.3.6.1.5.5.7.3.3) from a publicly trusted certificate authority, with its private key, as
+a password-protected PKCS#12 (<code>.pfx</code>) file, for the <code>pfx</code> signer. Current CA rules require
+such keys to be generated and kept on hardware, so a PFX export is often only possible
+for an internal enterprise CA; or</li>
+<li>a <strong>remote signing service or HSM</strong> that signs files through a command-line client, for
+the <code>cloud-hsm</code> signer.</li>
+</ul>
+<p>An educational project may not have either. Without a publicly trusted certificate, the OS
+download-reputation check warns when the package is downloaded. That is an accepted
+limitation; it does not change what <code>verify</code> checks.</p>
+</li>
+<li>
+<p><strong>The <code>release-signing</code> environment</strong> (Settings → Environments → New environment):</p>
+<ul>
+<li><strong>Required reviewers</strong>: the maintainer (and any co-maintainer). Prevent self-review if
+there is more than one.</li>
+<li><strong>Wait timer</strong>: for example 5 minutes, so a mistaken tag can be cancelled.</li>
+<li><strong>Deployment branches and tags</strong>: <em>Selected branches and tags</em>, with the tag rule <code>v*</code>
+only. No branch can deploy to it.</li>
+</ul>
+<p>With <code>gh</code>:</p>
+<pre><code class="language-sh">gh api -X PUT repos/jusso-dev/palisade/environments/release-signing --input - &lt;&lt;'EOF'
+{
+  "wait_timer": 5,
+  "prevent_self_review": false,
+  "reviewers": [{ "type": "User", "id": &lt;maintainer user id&gt; }],
+  "deployment_branch_policy": { "protected_branches": false, "custom_branch_policies": true }
+}
+EOF
+gh api -X POST repos/jusso-dev/palisade/environments/release-signing/deployment-branch-policies \
+  -f name='v*' -f type=tag
+</code></pre>
+</li>
+<li>
+<p><strong>Environment secrets</strong> (in <code>release-signing</code>, never repository secrets):</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Secret</th><th>Signer</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td><code>PALISADE_SIGN_PFX_BASE64</code></td><td><code>pfx</code></td><td>The <code>.pfx</code> file, base64-encoded (<code>base64 -w0 signing.pfx</code>)</td></tr>
+<tr><td><code>PALISADE_SIGN_PFX_PASSWORD</code></td><td><code>pfx</code></td><td>Its password</td></tr>
+<tr><td><code>PALISADE_SIGN_COMMAND</code></td><td><code>cloud-hsm</code></td><td>The client command that signs one file in place, with <code>{file}</code> where the path goes, for example <code>remote-sign --profile palisade --digest sha256 --timestamp {file}</code>. It is split on spaces and run without a shell. The client reads its own credentials from further environment secrets, which the maintainer adds to the <code>sign</code> job's <code>env</code></td></tr>
+<tr><td><code>RELEASE_CHECKSUM_KEY</code></td><td>all</td><td>The Ed25519 SSH private key that signs <code>SHA256SUMS</code> (<a href="#checksum-signing-key">below</a>)</td></tr>
+</tbody>
+</table>
+</div>
+</li>
+<li>
+<p><strong>Repository variables</strong> (Settings → Variables; not secret):</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variable</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td><code>RELEASE_SIGNER</code></td><td><code>pfx</code> or <code>cloud-hsm</code>. Until it is set, <code>check-tag</code> fails every release tag with "Signing not configured"</td></tr>
+<tr><td><code>RELEASE_TSA_URLS</code></td><td>One or more RFC 3161 timestamp server URLs, separated by spaces, tried in order. Use the certificate authority's own server first</td></tr>
+<tr><td><code>RELEASE_PROVENANCE</code></td><td>Leave unset until #226 lands (<a href="#provenance">Provenance</a>)</td></tr>
+</tbody>
+</table>
+</div>
+</li>
+<li>
+<p><strong>Protect <code>v*</code> tags</strong> with a tag ruleset, so only the maintainer can create, move or delete
+release tags:</p>
+<pre><code class="language-sh">gh api -X POST repos/jusso-dev/palisade/rulesets --input - &lt;&lt;'EOF'
+{
+  "name": "release tags",
+  "target": "tag",
+  "enforcement": "active",
+  "conditions": { "ref_name": { "include": ["refs/tags/v*"], "exclude": [] } },
+  "rules": [{ "type": "creation" }, { "type": "update" }, { "type": "deletion" }, { "type": "required_signatures" }],
+  "bypass_actors": [{ "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always" }]
+}
+EOF
+</code></pre>
+<p>This stops anyone but the maintainer creating, moving or deleting a <code>v*</code> tag. It does not
+check tag signatures (the signatures rule covers commits, and the maintainer bypasses
+creation); the release workflow does that against the committed keys (below).</p>
+</li>
+<li>
+<p><strong>Commit the keys that may sign release tags and checksums</strong>, in a pull request:</p>
+<ul>
+<li><code>packaging/sign/allowed_tag_signers</code>: one line per SSH key that may sign tags,
+<code>&lt;email&gt; namespaces="git" &lt;public key&gt;</code> (<code>git config gpg.ssh.allowedSignersFile</code> format); or
+<code>packaging/sign/tag-signers.asc</code>: the armoured public GPG keys that may sign tags.</li>
+<li><code>packaging/sign/release-checksum.pub</code>: the public half of <code>RELEASE_CHECKSUM_KEY</code>
+(<a href="#checksum-signing-key">below</a>). <code>verify</code> checks <code>SHA256SUMS.sig</code> against it and fails if
+it is missing.</li>
+</ul>
+</li>
+</ol>
+<h3 id="how-secrets-are-handled"><a class="header" href="#how-secrets-are-handled">How secrets are handled</a></h3>
+<ul>
+<li>They exist only in the <code>release-signing</code> environment, which only <code>v*</code> tags can use and a
+reviewer must approve. Pull request workflows never see them (<code>pull_request</code> runs get no
+secrets from environments they cannot deploy to, and this one has a tag-only policy).</li>
+<li>They are passed to <code>cargo xtask sign</code> in the environment, never on a command line. The PFX is
+written to a temporary folder only the job's user can read, imported into that user's
+certificate store for one signature, then removed from the store and deleted in a <code>finally</code>
+block, whatever happens. The signing tool only ever gets the certificate thumbprint.</li>
+<li><code>cargo xtask sign</code> replaces any secret value in the signing tool's output with <code>***</code> before
+printing it, on top of GitHub's own masking of secrets. No signing step uses <code>set -x</code>.</li>
+<li>The checksum key is written to a mode-600 file under the runner's temporary folder and
+removed by a <code>trap</code> on exit. A final <code>always()</code> step removes the signing work folders.</li>
+<li>The <code>sign-test</code> job proves this with a canary: it signs with a throwaway PFX whose password is
+a random value, and fails if that value, or the PFX, appears in the output.</li>
+</ul>
+<h3 id="key-rotation"><a class="header" href="#key-rotation">Key rotation</a></h3>
+<ol>
+<li>Obtain the new certificate (or service key) before the old one expires.</li>
+<li>Replace the environment secrets. Releases signed with the old certificate stay valid: every
+signature is timestamped, so it outlives the certificate.</li>
+<li>If a key may have been exposed, revoke the certificate with the CA first, then rotate, then
+follow <a href="#yanking">Yanking</a> for any release signed after the possible exposure.</li>
+<li>Rotate <code>RELEASE_CHECKSUM_KEY</code> the same way and publish the new public key in this file.
+Pinning the publisher certificate in the agent, and dual-signing during rollover, are #226;
+key management as a whole is #18.</li>
+</ol>
+<h3 id="checksum-signing-key"><a class="header" href="#checksum-signing-key">Checksum signing key</a></h3>
+<p><code>SHA256SUMS.sig</code> is an SSH signature (<code>ssh-keygen -Y sign</code>, namespace <code>palisade-release</code>) made
+with an Ed25519 key held as <code>RELEASE_CHECKSUM_KEY</code>. Create it once:</p>
+<pre><code class="language-sh">ssh-keygen -t ed25519 -N '' -C 'palisade-release' -f palisade-release
+# Secret: the contents of palisade-release.
+# Public key: commit palisade-release.pub as packaging/sign/release-checksum.pub.
+</code></pre>
+<p>To check a download, here <code>Palisade-0.2.0-x64.msi</code>: the signature first, and only then that
+exact file's line in the checksums, compared as a literal name (<code>grep .</code> fails if the file is
+not listed).</p>
+<pre><code class="language-sh">file=Palisade-0.2.0-x64.msi
+echo "palisade-release $(cat release-checksum.pub)" &gt; allowed_signers
+ssh-keygen -Y verify -f allowed_signers -I palisade-release -n palisade-release \
+  -s SHA256SUMS.sig &lt; SHA256SUMS \
+  &amp;&amp; FILE="$file" awk 'substr($0, 65, 2) == "  " &amp;&amp; substr($0, 67) == ENVIRON["FILE"]' SHA256SUMS \
+     | grep . | sha256sum --check --strict - \
+  &amp;&amp; echo "$file is verified"
+</code></pre>
+<p>Install it only if the last line prints. <code>release-checksum.pub</code> is
+<code>packaging/sign/release-checksum.pub</code> in the repository, once the maintainer has committed it.</p>
+<h2 id="release-checklist"><a class="header" href="#release-checklist">Release checklist</a></h2>
+<h3 id="pre-flight"><a class="header" href="#pre-flight">Pre-flight</a></h3>
+<ol>
+<li>
+<p><code>main</code> is green, and nothing is waiting that must be in the release.</p>
+</li>
+<li>
+<p>Check open security advisories (Security → Advisories). A fix under embargo is released as
+in <a href="#security-fixes">Security fixes</a>, not as an ordinary release.</p>
+</li>
+<li>
+<p>Prepare the release on a branch:</p>
+<pre><code class="language-sh">git switch -c release/v0.2.0 origin/main
+RELEASE_DATE=2026-12-01 cargo xtask release prepare 0.2.0
+</code></pre>
+<p>This sets <code>workspace.package.version</code>, updates <code>Cargo.lock</code> and each fuzz workspace's lock
+file to match (the release builds with <code>--locked</code>), and adds a <code>CHANGELOG.md</code> section generated from the
+Conventional Commit titles merged since the last release tag, under Breaking, Security,
+Features, Fixes, Docs and Internal. Edit the wording if needed, commit every changed file, then
+open a pull request
+titled <code>chore(release): 0.2.0</code> and merge it once CI passes.</p>
+</li>
+<li>
+<p>Tag the merge commit and push the tag:</p>
+<pre><code class="language-sh">git switch main &amp;&amp; git pull
+git tag -s v0.2.0 -m "Palisade 0.2.0"
+git push origin v0.2.0
+</code></pre>
+</li>
+<li>
+<p>Approve the <code>sign</code> job when it asks (Actions → the run → Review deployments), after checking
+the run is for the tag you pushed.</p>
+</li>
+</ol>
+<h3 id="security-fixes"><a class="header" href="#security-fixes">Security fixes</a></h3>
+<p>Under the <a href="../SECURITY.html#coordinated-disclosure">coordinated disclosure</a> process, a fix is
+prepared in the advisory's private fork, merged and released at the agreed time. Keep the
+changelog entry vague (<code>security: fix a policy bypass</code>) until the advisory is published, then
+publish the advisory, which links the release, the same day. Do not tag before the fix is ready
+to ship: tags are public.</p>
+<h3 id="post-release-verification"><a class="header" href="#post-release-verification">Post-release verification</a></h3>
+<ol>
+<li>Download the release files and check the checksums and their signature as in
+<a href="#checksum-signing-key">Checksum signing key</a>.</li>
+<li>On a Windows machine, check a package: <code>Get-AuthenticodeSignature Palisade-0.2.0-x64.msi</code>.
+It should be valid and timestamped.</li>
+<li>Install it on a test machine or VM, silently, and check the service runs
+(<a href="packaging.html#properties">packaging.md</a>). The VM harness automates this (#26).</li>
+<li>Check the release is marked as a pre-release exactly when its version has <code>-alpha</code>, <code>-beta</code>
+or <code>-rc</code>.</li>
+</ol>
+<h2 id="yanking"><a class="header" href="#yanking">Yanking</a></h2>
+<p>A published release is never deleted or replaced: someone may already have it, and a deleted
+release cannot be audited. To withdraw one:</p>
+<ol>
+<li>Edit the release: put <code>**Withdrawn: &lt;reason&gt;. Use &lt;version&gt; instead.**</code> at the top of its
+notes, and mark it as a pre-release so it is no longer <em>latest</em>.</li>
+<li>Publish a security advisory if the reason is a vulnerability.</li>
+<li>Release the fixed version as usual.</li>
+<li>The update channel's signed metadata (#18, #226) stops offering the withdrawn version.
+Until that exists, the release notes are the notice.</li>
+</ol>
+<p>The tag stays. A tag that was pushed but whose release failed before publishing leaves only a
+draft. Delete the draft, fix the problem, then release a new patch version rather than moving
+the tag: run <code>cargo xtask release prepare &lt;next version&gt;</code>, merge that pull request, and tag its
+merge commit as in the <a href="#release-checklist">checklist</a>. <code>check-tag</code> refuses a tag whose
+<code>Cargo.toml</code> still has the old version.</p>
+<h2 id="provenance"><a class="header" href="#provenance">Provenance</a></h2>
+<p>The <code>provenance</code> job is the slot for the SBOM, build provenance attestation and signed update
+manifest (#18, #226). It runs <code>cargo xtask release provenance</code>, which does nothing while the
+<code>RELEASE_PROVENANCE</code> variable is unset. Once #226 adds <code>cargo xtask sbom</code>, set the variable to
+<code>on</code>: from then on the job runs it and fails the release if it is missing or fails, so a release
+can never silently ship without provenance again.</p>
+<h2 id="not-covered-here"><a class="header" href="#not-covered-here">Not covered here</a></h2>
+<ul>
+<li>Publishing the SBOM, provenance and the signed update manifest: #226 (hook above).</li>
+<li>Signing the server's container image: #18.</li>
+<li>Installing a release on clean VMs as part of the release: #26.</li>
+<li>Driver catalog signing: #8.</li>
+</ul>
+<hr>
+<p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/releasing.md"><code>docs/releasing.md</code></a> on GitHub.</small></p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../docs/packaging.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../docs/dependencies.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../docs/packaging.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../docs/dependencies.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-c2a407aa.js"></script>
+
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-a0b12cfe.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../theme/palisade-c327a96e.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

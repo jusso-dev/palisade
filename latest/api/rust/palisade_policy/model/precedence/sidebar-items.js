@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["AllowTiebreak","PriorityDirection","TierTiebreak"],"struct":["PrecedenceOptions"]};

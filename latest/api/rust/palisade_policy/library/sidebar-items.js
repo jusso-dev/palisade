@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ApplicationSource","LibraryCode","LibraryContent","LibraryKind","Pin","Realm","Visibility"],"fn":["refs_in"],"mod":["limits"],"struct":["Actor","Catalogue","Derivation","HashSetIndex","Library","LibraryError","LibraryId","LibraryRef"],"type":["Version"]};

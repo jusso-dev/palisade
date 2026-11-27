@@ -1,0 +1,513 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Repository settings - Palisade</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="Palisade: an educational Windows application allowlisting project">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-2459343d.css">
+        <link rel="stylesheet" href="../css/chrome-ae938929.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="../theme/palisade-1bbd7bbc.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex-3e2a1e09.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc-8cab92c4.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div class="palisade-disclaimer" role="note" aria-label="Disclaimer">
+                    <strong>Palisade is an educational, personal-development project. It is not a replacement for commercial application control products and comes with no support or warranty. Do not rely on it to protect production systems.</strong>
+                </div>
+                <nav class="palisade-versions" aria-label="Documentation version">
+                    <label for="palisade-version-select">Version</label>
+                    <select id="palisade-version-select" hidden></select>
+                </nav>
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Palisade</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+                        <a href="https://github.com/jusso-dev/palisade" title="Git repository" aria-label="Git repository">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="repository-settings"><a class="header" href="#repository-settings">Repository settings</a></h1>
+<p>Some of Palisade's security depends on GitHub repository settings, not on files in the
+repository. This page lists every setting the project relies on, why it matters, and how to apply
+it. Only a repository administrator can change these, so they are documented here and reviewed
+like code. When a setting changes, update this page in the same change.</p>
+<p>The <code>gh api</code> commands below use the GitHub REST API. Run them as a repository administrator. The
+same settings are also available under <strong>Settings</strong> in the web UI.</p>
+<h2 id="summary"><a class="header" href="#summary">Summary</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Setting</th><th>Required value</th><th>Why</th></tr>
+</thead>
+<tbody>
+<tr><td>Private vulnerability reporting</td><td>On</td><td>The only private channel in <a href="../SECURITY.html">SECURITY.md</a></td></tr>
+<tr><td>Secret scanning</td><td>On</td><td>Catches leaked credentials in commits</td></tr>
+<tr><td>Push protection</td><td>On</td><td>Blocks pushes that contain a detected secret</td></tr>
+<tr><td>Dependabot alerts</td><td>On</td><td>Warns about vulnerable dependencies between scheduled audits</td></tr>
+<tr><td>Dependabot security updates</td><td>On</td><td>Opens fix PRs for those alerts (<a href="ci.html#dependabot-githubdependabotyml">docs/ci.md</a>)</td></tr>
+<tr><td>Allowed actions</td><td>Selected: the allowlist in <code>xtask/src/workflows.rs</code> only, pinned to a full SHA</td><td>A second layer behind <code>cargo xtask check-workflows</code></td></tr>
+<tr><td>Default <code>GITHUB_TOKEN</code> permissions</td><td>Read</td><td>Least privilege; jobs ask for more themselves</td></tr>
+<tr><td>Actions can approve pull requests</td><td>Off</td><td>A workflow must never approve its own change</td></tr>
+<tr><td>Fork pull request workflows</td><td>Need approval for first-time contributors</td><td>Stops drive-by workflow runs from new accounts</td></tr>
+<tr><td><code>main</code> ruleset</td><td>Pull requests only, required checks, linear history, no force pushes or deletion</td><td>See <a href="#branch-protection-for-main">Branch protection</a></td></tr>
+<tr><td>Merge methods</td><td>Squash only, commit title from the PR title</td><td>The PR title is the changelog entry (<a href="../CONTRIBUTING.html#conventional-commits">CONTRIBUTING.md</a>)</td></tr>
+<tr><td>Discussions</td><td>On, with a Q&amp;A category</td><td>The support channel in <a href="../SUPPORT.html">SUPPORT.md</a></td></tr>
+<tr><td>Labels and milestones</td><td>Exactly the lists in <code>.github/labels.yml</code> and <code>.github/milestones.yml</code></td><td>Synced by <code>labels.yml</code>; see <a href="#labels-and-milestones">Labels and milestones</a></td></tr>
+<tr><td><code>DCO</code> check</td><td>Runs on every pull request; not yet required</td><td>See <a href="#dco-check">DCO check</a></td></tr>
+<tr><td>GitHub Pages</td><td>Deploy from the <code>gh-pages</code> branch, root folder</td><td>Serves the documentation site; see <a href="#github-pages">GitHub Pages</a></td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="code-security"><a class="header" href="#code-security">Code security</a></h2>
+<pre><code class="language-sh"># Private vulnerability reporting.
+gh api -X PUT repos/jusso-dev/palisade/private-vulnerability-reporting
+
+# Dependabot alerts, then Dependabot security updates (alerts must be on first).
+gh api -X PUT repos/jusso-dev/palisade/vulnerability-alerts
+gh api -X PUT repos/jusso-dev/palisade/automated-security-fixes
+
+# Secret scanning and push protection.
+gh api -X PATCH repos/jusso-dev/palisade --input - &lt;&lt;'EOF'
+{
+  "security_and_analysis": {
+    "secret_scanning": { "status": "enabled" },
+    "secret_scanning_push_protection": { "status": "enabled" }
+  }
+}
+EOF
+</code></pre>
+<p>To check them:</p>
+<pre><code class="language-sh">gh api repos/jusso-dev/palisade/private-vulnerability-reporting   # {"enabled":true}
+gh api repos/jusso-dev/palisade/vulnerability-alerts               # HTTP 204 when on, 404 when off
+gh api repos/jusso-dev/palisade -q .security_and_analysis
+</code></pre>
+<p>After enabling private vulnerability reporting, file a test report from a second account through
+the <a href="https://github.com/jusso-dev/palisade/security/advisories/new">private reporting form</a>, check
+that it arrives as a draft advisory, then close it.</p>
+<h2 id="github-actions"><a class="header" href="#github-actions">GitHub Actions</a></h2>
+<p>CI policy is enforced in two places: <code>cargo xtask check-workflows</code> checks the workflow files on
+every pull request (<a href="ci.html#runner-and-action-policy">docs/ci.md</a>), and these settings stop GitHub
+from running anything outside the same allowlist, even if a workflow file got past the check.</p>
+<pre><code class="language-sh"># Only selected actions, and only when pinned to a full commit SHA.
+gh api -X PUT repos/jusso-dev/palisade/actions/permissions \
+  -F enabled=true -f allowed_actions=selected -F sha_pinning_required=true
+
+# The allowlist. Keep it identical to ALLOWED_ACTIONS in xtask/src/workflows.rs.
+gh api -X PUT repos/jusso-dev/palisade/actions/permissions/selected-actions --input - &lt;&lt;'EOF'
+{
+  "github_owned_allowed": false,
+  "verified_allowed": false,
+  "patterns_allowed": [
+    "actions/checkout@*",
+    "Swatinem/rust-cache@*",
+    "taiki-e/install-action@*"
+  ]
+}
+EOF
+
+# Read-only GITHUB_TOKEN by default, and workflows may not approve pull requests.
+gh api -X PUT repos/jusso-dev/palisade/actions/permissions/workflow \
+  -f default_workflow_permissions=read -F can_approve_pull_request_reviews=false
+
+# Fork pull requests from first-time contributors wait for approval before workflows run.
+gh api -X PUT repos/jusso-dev/palisade/actions/permissions/fork-pr-contributor-approval \
+  -f approval_policy=first_time_contributors
+</code></pre>
+<p>To check them:</p>
+<pre><code class="language-sh">gh api repos/jusso-dev/palisade/actions/permissions                   # allowed_actions "selected", sha_pinning_required true
+gh api repos/jusso-dev/palisade/actions/permissions/selected-actions
+gh api repos/jusso-dev/palisade/actions/permissions/workflow          # "read", false
+gh api repos/jusso-dev/palisade/actions/permissions/fork-pr-contributor-approval
+</code></pre>
+<p>When an action is added to <code>ALLOWED_ACTIONS</code>, add it to <code>patterns_allowed</code> too, or its workflow
+will not run.</p>
+<p>Dependabot's own update jobs run as GitHub-managed workflows that bypass these Actions policies, so
+the allowlist does not stop Dependabot from opening pull requests.</p>
+<p>Runners are not a setting: every job runs on a GitHub-hosted runner, and the runner-guard check
+rejects anything else. Self-hosted runners must never be registered for this repository, and
+cloud-managed build services are never used (<a href="ci.html">docs/ci.md</a>).</p>
+<h2 id="github-pages"><a class="header" href="#github-pages">GitHub Pages</a></h2>
+<p>The documentation site is published by <code>.github/workflows/pages.yml</code>, which pushes the built site to
+the <code>gh-pages</code> branch (<a href="ci.html#publishing">docs/ci.md</a>). The Pages deployment actions are not on
+the action allowlist, so Pages serves that branch directly. This is a one-time setting, made after
+the first run of <code>pages.yml</code> has created the branch:</p>
+<pre><code class="language-sh"># Serve the gh-pages branch, root folder.
+gh api -X POST repos/jusso-dev/palisade/pages \
+  -f build_type=legacy -f 'source[branch]=gh-pages' -f 'source[path]=/'
+</code></pre>
+<p>Or in the web UI: <strong>Settings → Pages → Build and deployment → Source: Deploy from a branch</strong>,
+branch <code>gh-pages</code>, folder <code>/ (root)</code>. Then check it:</p>
+<pre><code class="language-sh">gh api repos/jusso-dev/palisade/pages    # "build_type": "legacy", source gh-pages and /
+</code></pre>
+<p>The site is then at <a href="https://jusso-dev.github.io/palisade/">https://jusso-dev.github.io/palisade/</a>, which redirects to <code>latest/</code>. The
+first deployment needs this setting before Pages serves anything: after making it, rerun
+<code>pages.yml</code> once (<strong>Actions → Pages → Run workflow</strong> on <code>main</code>).</p>
+<p>A push made with a workflow's <code>GITHUB_TOKEN</code> does not start a Pages build, so <code>pages.yml</code>'s push
+alone would update <code>gh-pages</code> but not the site. After each push it therefore requests the build
+itself (<code>POST repos/jusso-dev/palisade/pages/builds</code>), with the same token and only the job's
+<code>pages: write</code> permission, even when the site is unchanged, so rerunning <code>pages.yml</code> also
+retries a build request that failed. No personal token or deployment action is needed. A push to
+<code>gh-pages</code> made by hand, by someone with admin rights, still starts a build as usual.</p>
+<p>Serving a branch still runs GitHub's own <code>pages-build-deployment</code> workflow. If the Actions
+allowlist above stops that workflow, its run shows a startup failure naming the blocked action,
+and the site is not updated. The fix widens the allowlist, so it is a maintainer decision: add the
+action it names to <code>patterns_allowed</code>, or allow actions created by GitHub, and record the change
+on this page. <code>pages.yml</code> itself needs neither.</p>
+<h2 id="branch-protection-for-main"><a class="header" href="#branch-protection-for-main">Branch protection for <code>main</code></a></h2>
+<p><code>main</code> is protected by a repository ruleset named <code>main</code>. It:</p>
+<ul>
+<li>requires a pull request for every change, so nothing is pushed to <code>main</code> directly;</li>
+<li>allows squash merges only;</li>
+<li>requires two status checks to pass on the latest commit:
+<ul>
+<li><code>ci-ok</code>, which passes only when every job in <code>ci.yml</code> passed (<a href="ci.html">docs/ci.md</a>);</li>
+<li><code>PR title</code>, the Conventional Commits check on the pull request title (<code>pr-title.yml</code>);</li>
+</ul>
+</li>
+<li>requires review threads to be resolved before merging;</li>
+<li>requires linear history, and blocks force pushes and deletion of <code>main</code>.</li>
+</ul>
+<p>Both checks are pinned to the GitHub Actions app (<code>integration_id</code> 15368), so a status with the
+same name posted by anything else does not count.</p>
+<p><strong>Required approvals are 0 while Palisade has one maintainer.</strong> GitHub does not let a pull
+request author approve their own pull request, so requiring an approval would block every change
+the maintainer makes. Pull requests from anyone else are still reviewed, because only the
+maintainer can merge, and <a href="https://github.com/jusso-dev/palisade/blob/main/.github/CODEOWNERS">CODEOWNERS</a> requests the maintainer's review on
+every pull request. When a second maintainer joins, set <code>required_approving_review_count</code> to 1 and
+<code>require_code_owner_review</code> to true.</p>
+<p>Signed commits are recommended but not required.</p>
+<pre><code class="language-sh">gh api -X POST repos/jusso-dev/palisade/rulesets --input - &lt;&lt;'EOF'
+{
+  "name": "main",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    { "type": "required_linear_history" },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "allowed_merge_methods": ["squash"],
+        "required_approving_review_count": 0,
+        "require_code_owner_review": false,
+        "dismiss_stale_reviews_on_push": true,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": true
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "required_status_checks": [
+          { "context": "ci-ok", "integration_id": 15368 },
+          { "context": "PR title", "integration_id": 15368 }
+        ]
+      }
+    }
+  ]
+}
+EOF
+</code></pre>
+<p><code>strict_required_status_checks_policy</code> is <code>false</code>, so a pull request does not have to be updated
+with the latest <code>main</code> before it merges. That keeps a single maintainer's queue moving. The cost
+is that a branch can merge without rerunning checks that changed on <code>main</code> since it was last
+tested. <code>main</code> runs the full CI again after every merge, so a failure shows up there at once.</p>
+<p>To check the ruleset, and to change it later, list it with <code>gh api repos/jusso-dev/palisade/rulesets</code>, then update
+it with <code>gh api -X PUT repos/jusso-dev/palisade/rulesets/&lt;id&gt; --input &lt;file&gt;</code>.</p>
+<h2 id="merging-and-general-settings"><a class="header" href="#merging-and-general-settings">Merging and general settings</a></h2>
+<pre><code class="language-sh">gh api -X PATCH repos/jusso-dev/palisade --input - &lt;&lt;'EOF'
+{
+  "allow_squash_merge": true,
+  "allow_merge_commit": false,
+  "allow_rebase_merge": false,
+  "squash_merge_commit_title": "PR_TITLE",
+  "squash_merge_commit_message": "PR_BODY",
+  "delete_branch_on_merge": true,
+  "has_issues": true,
+  "has_discussions": true
+}
+EOF
+</code></pre>
+<p>To check them:</p>
+<pre><code class="language-sh">gh api repos/jusso-dev/palisade \
+  -q '{allow_squash_merge, allow_merge_commit, allow_rebase_merge, squash_merge_commit_title, delete_branch_on_merge, has_discussions}'
+</code></pre>
+<p><code>squash_merge_commit_title</code> must be <code>PR_TITLE</code>. The default uses the commit title instead when a
+pull request has a single commit, which would bypass the PR title check.</p>
+<h2 id="labels-and-milestones"><a class="header" href="#labels-and-milestones">Labels and milestones</a></h2>
+<p>The label set and the milestone titles live in two files, so they are reviewed like code:</p>
+<ul>
+<li><a href="https://github.com/jusso-dev/palisade/blob/main/.github/labels.yml"><code>.github/labels.yml</code></a>: every label, with its colour and description;</li>
+<li><a href="https://github.com/jusso-dev/palisade/blob/main/.github/milestones.yml"><code>.github/milestones.yml</code></a>: the seven milestones, <code>M0 Foundations</code> to
+<code>M6 Compliance &amp; Advanced</code>, with their exact titles and descriptions.</li>
+</ul>
+<p>The <code>Label sync</code> workflow (<code>.github/workflows/labels.yml</code>) runs
+<a href="https://github.com/jusso-dev/palisade/blob/main/.github/scripts/sync-labels.sh"><code>.github/scripts/sync-labels.sh</code></a>:</p>
+<ul>
+<li>On a pull request that touches either file, the issue templates, <code>dependabot.yml</code> or the script,
+it runs the script's tests and validates the files. Validation also fails if an issue template
+or Dependabot applies a label that is not listed, because the sync would delete it.</li>
+<li>On a push to <code>main</code> it applies the files. Missing labels are created, colours and descriptions
+are updated, and <strong>labels that are not listed are deleted</strong>, which removes them from every
+issue. Missing milestones are created and their descriptions updated. An open milestone that is
+not listed is reported and the run fails, but it is never deleted or closed; close it by hand,
+or add it to the file. Closed milestones that are not listed are ignored.</li>
+<li>Run it by hand from the Actions tab for a dry run that prints every change and writes nothing.
+Tick <code>apply</code> to make the changes. Changes are only ever applied from <code>main</code>; a manual run on any
+other branch is always a dry run.</li>
+</ul>
+<p>Only the sync job has a write scope, <code>issues: write</code>, which covers labels and milestones, plus
+<code>contents: read</code> for the checkout. It never runs on a pull request.</p>
+<p>To dry-run locally, with the GitHub CLI signed in to an account that can read the repository:</p>
+<pre><code class="language-sh">bash .github/scripts/sync-labels.sh --validate
+bash .github/scripts/sync-labels.sh --check --repo jusso-dev/palisade   # exit 1 means drift; nothing is written
+bash .github/scripts/sync-labels.test.sh
+</code></pre>
+<p>Review the <code>DELETE</code> lines before the first apply. The first sync removes the default labels that
+GitHub creates with a repository (<code>bug</code>, <code>documentation</code>, <code>duplicate</code>, <code>enhancement</code>, <code>invalid</code>,
+<code>question</code>, <code>wontfix</code>) and <code>accessibility</code>, none of which is in the list. The issue templates
+apply <code>needs-triage</code> instead, and Dependabot applies <code>area:security</code> or <code>area:infra</code>.</p>
+<h2 id="dco-check"><a class="header" href="#dco-check">DCO check</a></h2>
+<p>The <code>DCO</code> workflow (<code>.github/workflows/dco.yml</code>) runs
+<a href="https://github.com/jusso-dev/palisade/blob/main/.github/scripts/check-dco.sh"><code>.github/scripts/check-dco.sh</code></a> on every pull request. It fails
+if any non-merge commit lacks a <code>Signed-off-by:</code> trailer whose email matches the commit author
+(<a href="../CONTRIBUTING.html#sign-off">CONTRIBUTING.md</a>). It needs no token scope beyond <code>contents: read</code>.
+Dependabot's pull requests pass it with the bot's own sign-off (<a href="ci.html#dcoyml-pull-requests">docs/ci.md</a>).
+Pull requests opened by the repository owner pass without sign-off
+(<a href="../CONTRIBUTING.html#sign-off">CONTRIBUTING.md</a>). The exemption follows GitHub's <code>author_association</code>, which
+is <code>OWNER</code> only on a repository owned by a personal account. Transferring the repository to another
+personal account moves the exemption to that account. Transferring it to an organisation ends it, because
+organisation owners and members are reported as <code>MEMBER</code>, so the check then applies to everyone (it fails
+closed).</p>
+<p>The check is <strong>informational</strong>: the <code>main</code> ruleset does not require it yet. Requiring sign-off is
+decided by an ADR under <a href="https://github.com/jusso-dev/palisade/issues/28">#28</a>. Once that ADR is
+accepted, add the check to the ruleset's required status checks:</p>
+<pre><code class="language-json">{ "context": "DCO", "integration_id": 15368 }
+</code></pre>
+<p>in the <code>required_status_checks</code> list of the ruleset in
+<a href="#branch-protection-for-main">Branch protection</a>, then update the ruleset with
+<code>gh api -X PUT repos/jusso-dev/palisade/rulesets/&lt;id&gt; --input &lt;file&gt;</code>, and update the summary
+table above.</p>
+<hr>
+<p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/repo-settings.md"><code>docs/repo-settings.md</code></a> on GitHub.</small></p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../docs/dependencies.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../CODE_OF_CONDUCT.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../docs/dependencies.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../CODE_OF_CONDUCT.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-c2a407aa.js"></script>
+
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-a0b12cfe.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../theme/palisade-c327a96e.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

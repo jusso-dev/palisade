@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_BLOCKING_THREADS","DEFAULT_WORKER_CAP","MAX_BLOCKING_THREADS","MAX_CONFIG_BYTES","MAX_WORKER_THREADS"],"enum":["ConfigErrorKind","FailMode","LogLevel","SafeModeBehaviour"],"fn":["default_path","install_path","load"],"struct":["AgentConfig","ConfigError","LoadedConfig","RuntimeConfig"]};

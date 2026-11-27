@@ -1,0 +1,95 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Path normalisation: one canonical form for every way of naming a file."><title>palisade_fileid::fsctx::path - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="palisade_fileid" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module path</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../palisade_fileid/index.html">palisade_<wbr>fileid</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module path</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#what-win32-normalisation-does" title="What Win32 normalisation does">What Win32 normalisation does</a></li><li><a href="#streams" title="Streams">Streams</a></li><li><a href="#case" title="Case">Case</a></li><li><a href="#83-short-names" title="8.3 short names">8.3 short names</a></li><li><a href="#a-string-is-a-name-not-an-object" title="A string is a name, not an object">A string is a name, not an object</a></li></ul><h3><a href="#structs">Module Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#constants" title="Constants">Constants</a></li><li><a href="#traits" title="Traits">Traits</a></li><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="../index.html">In palisade_<wbr>fileid::<wbr>fsctx</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">palisade_fileid</a>::<wbr><a href="../index.html">fsctx</a></div><h1>Module <span>path</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/palisade_fileid/fsctx/path.rs.html#1-1869">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Path normalisation: one canonical form for every way of naming a file.</p>
+<p>A file on Windows can be named in many ways (threat model T-engine-04,
+AT-04): <code>C:\Dir\File.exe</code>, <code>c:/dir/file.exe.</code>, <code>\\?\C:\Dir\File.exe</code>,
+<code>\\.\C:\Dir\..\Dir\File.exe</code>, <code>\??\C:\Dir\File.exe</code>,
+<code>\\?\GLOBALROOT\Device\HarddiskVolume3\Dir\File.exe</code>,
+<code>C:\Dir\File.exe::$DATA</code>, <code>C:\DIR~1\FILE.EXE</code> and so on. Path rules must
+see one form, so a file cannot dodge a rule, or match another rule, by
+being named differently.</p>
+<p><a href="fn.normalize_win32.html" title="fn palisade_fileid::fsctx::path::normalize_win32"><code>normalize_win32</code></a> takes a path as a Win32 API receives it, and
+<a href="fn.normalize_nt.html" title="fn palisade_fileid::fsctx::path::normalize_nt"><code>normalize_nt</code></a> takes an NT object path as the kernel reports it
+(<code>\Device\HarddiskVolume3\...</code>). Both return a <a href="struct.NormalizedPath.html" title="struct palisade_fileid::fsctx::path::NormalizedPath"><code>NormalizedPath</code></a>: a
+<a href="enum.Root.html" title="enum palisade_fileid::fsctx::path::Root"><code>Root</code></a> (drive, UNC share, volume GUID, NT device or other DOS device),
+the components, and an optional named stream. Nothing here touches the
+file system or depends on the host OS.</p>
+<h2 id="what-win32-normalisation-does"><a class="doc-anchor" href="#what-win32-normalisation-does">§</a>What Win32 normalisation does</h2>
+<p>Unless a path starts exactly with <code>\\?\</code> or <code>\??\</code>, the Win32 layer
+rewrites it before the kernel sees it, and so does this module:</p>
+<ul>
+<li><code>/</code> becomes <code>\</code>, and runs of separators collapse to one;</li>
+<li><code>.</code> components are removed, and <code>..</code> removes the previous component,
+but never the drive (<code>C:\</code>) or the UNC server and share. In a <code>\\.\</code>
+device path nothing is protected, so <code>..</code> can remove the device itself;</li>
+<li>a component followed by a separator loses one trailing <code>.</code>. One that
+ends with two or more dots is rejected, because sources disagree on how
+many the Win32 layer removes;</li>
+<li>unless the path ends with a separator, the last component loses all
+trailing dots and spaces (<code>file.exe. .</code> is <code>file.exe</code>);</li>
+<li>a reserved DOS device name (<code>CON</code>, <code>NUL</code>, <code>COM1</code>, <code>LPT1</code>, <code>CONIN$</code> and
+so on, with any extension) as the last component of a drive path names
+a device, not a file. Windows versions disagree about this, so such a
+path is rejected (<a href="enum.PathError.html#variant.ReservedDeviceName" title="variant palisade_fileid::fsctx::path::PathError::ReservedDeviceName"><code>PathError::ReservedDeviceName</code></a>).</li>
+</ul>
+<p>A path that starts exactly with <code>\\?\</code> or <code>\??\</code> skips all of that and
+is taken literally: <code>\\?\C:\Dir\file.exe.</code> names a file whose name really
+ends with a dot, a different file from <code>C:\Dir\file.exe</code>. Literal <code>.</code> and
+<code>..</code> components, and empty ones, cannot name a file, so they are rejected.</p>
+<p>Relative and drive-relative paths (<code>dir\file</code>, <code>\dir\file</code>, <code>C:file</code>)
+depend on per-process state, so they are rejected
+(<a href="enum.PathError.html#variant.NotFullyQualified" title="variant palisade_fileid::fsctx::path::PathError::NotFullyQualified"><code>PathError::NotFullyQualified</code></a>).</p>
+<h2 id="streams"><a class="doc-anchor" href="#streams">§</a>Streams</h2>
+<p><code>file.txt:evil.exe</code> names the stream <code>evil.exe</code> of <code>file.txt</code>, and the
+stream is part of the normalised path (<a href="struct.NormalizedPath.html#method.stream" title="method palisade_fileid::fsctx::path::NormalizedPath::stream"><code>NormalizedPath::stream</code></a>), so a
+rule for <code>file.txt</code> does not match it. <code>file::$DATA</code> is the file itself
+and normalises to <code>file</code>. <code>dir::$INDEX_ALLOCATION</code> and
+<code>dir:$I30:$INDEX_ALLOCATION</code> are the directory itself, anywhere in the
+path, and normalise to <code>dir</code>. Both rewrites are recorded in
+<a href="struct.PathNotes.html" title="struct palisade_fileid::fsctx::path::PathNotes"><code>PathNotes</code></a>.</p>
+<h2 id="case"><a class="doc-anchor" href="#case">§</a>Case</h2>
+<p>NTFS compares names by upper-casing each UTF-16 code unit with the
+volume’s upcase table. <a href="struct.NormalizedPath.html#method.case_folded" title="method palisade_fileid::fsctx::path::NormalizedPath::case_folded"><code>NormalizedPath::case_folded</code></a> does the same with
+Unicode simple upper-case mappings, limited to mappings that keep one
+UTF-16 code unit (so <code>ß</code> stays <code>ß</code>, as on NTFS). The volume’s own table
+can differ for some non-ASCII letters; it is authoritative and reading it
+is left to the OS backend (#54). Unicode normalisation (NFC/NFD) is not
+applied, because NTFS does not apply it either: the two forms are two
+different files.</p>
+<p>A directory can be marked case-sensitive, and then two names that differ
+only in case are two entries. The folded key and
+<a href="struct.NormalizedPath.html#method.starts_with" title="method palisade_fileid::fsctx::path::NormalizedPath::starts_with"><code>NormalizedPath::starts_with</code></a> cannot see that flag, so they treat such
+names as one. Reading the flag needs the OS and is left to the OS
+backend (#54).</p>
+<h2 id="83-short-names"><a class="doc-anchor" href="#83-short-names">§</a>8.3 short names</h2>
+<p>A short name such as <code>PROGRA~1</code> names the same entry as its long name,
+so a rule must never be matched against it (AT-04.5). A component that
+could be a generated short name (8.3 shape with a <code>~</code>) is recorded as a
+candidate, and <a href="struct.NormalizedPath.html#method.match_key" title="method palisade_fileid::fsctx::path::NormalizedPath::match_key"><code>NormalizedPath::match_key</code></a> refuses to produce a key
+until every candidate has been expanded through a <a href="trait.ShortNameResolver.html" title="trait palisade_fileid::fsctx::path::ShortNameResolver"><code>ShortNameResolver</code></a>,
+which is the OS hook. A long name can legitimately contain <code>~</code>; the
+resolver then returns it unchanged. Paths from the OS’s normalised final
+path (<code>GetFinalPathNameByHandleW</code>) contain only long names.</p>
+<p>Short names that an administrator sets by hand need not contain <code>~</code>;
+that is an administrator action and out of scope.</p>
+<h2 id="a-string-is-a-name-not-an-object"><a class="doc-anchor" href="#a-string-is-a-name-not-an-object">§</a>A string is a name, not an object</h2>
+<p>A drive letter is looked up in the DOS device map of the logon session
+that opens the path, and a standard user can add their own (<code>subst</code>,
+<code>DefineDosDevice</code>). Junctions, symbolic links, mount points and hard links
+give one file more names. So a normalised string says what a path <em>says</em>,
+not which file it opens. Decisions about a file use the final path of the
+opened handle, normalised here (threat model T-agent-13, AT-04.2, AT-04.3).
+Mapping NT device names, volume GUIDs and drive letters to one volume
+identity, and mapped drives and DFS paths to their targets, needs the OS
+and is left to the OS backend (#54).</p>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.NormalizedPath.html" title="struct palisade_fileid::fsctx::path::NormalizedPath">Normalized<wbr>Path</a></dt><dd>A normalised path. See the module documentation.</dd><dt><a class="struct" href="struct.PathNotes.html" title="struct palisade_fileid::fsctx::path::PathNotes">Path<wbr>Notes</a></dt><dd>Facts about how a path was written that its canonical form drops.</dd><dt><a class="struct" href="struct.Stream.html" title="struct palisade_fileid::fsctx::path::Stream">Stream</a></dt><dd>A named stream, or a stream of a type other than the default data stream.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.PathError.html" title="enum palisade_fileid::fsctx::path::PathError">Path<wbr>Error</a></dt><dd>Why a path could not be normalised. A caller that cannot normalise a
+path must not treat it as “matches no rule”; it falls back to the final
+path of the opened handle, or treats the file as unknown.</dd><dt><a class="enum" href="enum.Prefix.html" title="enum palisade_fileid::fsctx::path::Prefix">Prefix</a></dt><dd>How a path was written.</dd><dt><a class="enum" href="enum.Root.html" title="enum palisade_fileid::fsctx::path::Root">Root</a></dt><dd>What a path is rooted at.</dd></dl><h2 id="constants" class="section-header">Constants<a href="#constants" class="anchor">§</a></h2><dl class="item-table"><dt><a class="constant" href="constant.LEGACY_MAX_PATH.html" title="constant palisade_fileid::fsctx::path::LEGACY_MAX_PATH">LEGACY_<wbr>MAX_<wbr>PATH</a></dt><dd>The classic <code>MAX_PATH</code> limit, minus the terminator. Longer paths are
+supported; <a href="struct.NormalizedPath.html#method.is_long" title="method palisade_fileid::fsctx::path::NormalizedPath::is_long"><code>NormalizedPath::is_long</code></a> reports them.</dd><dt><a class="constant" href="constant.MAX_PATH_UNITS.html" title="constant palisade_fileid::fsctx::path::MAX_PATH_UNITS">MAX_<wbr>PATH_<wbr>UNITS</a></dt><dd>The longest path accepted, in UTF-16 code units: the most a
+<code>UNICODE_STRING</code> can hold.</dd></dl><h2 id="traits" class="section-header">Traits<a href="#traits" class="anchor">§</a></h2><dl class="item-table"><dt><a class="trait" href="trait.ShortNameResolver.html" title="trait palisade_fileid::fsctx::path::ShortNameResolver">Short<wbr>Name<wbr>Resolver</a></dt><dd>The OS hook that expands 8.3 short names.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.fold_case.html" title="fn palisade_fileid::fsctx::path::fold_case">fold_<wbr>case</a></dt><dd>Upper-cases a name the way NTFS compares names: each character maps to
+its simple upper-case form only when that is a single character of the
+same UTF-16 length. See the module documentation.</dd><dt><a class="fn" href="fn.is_short_name_candidate.html" title="fn palisade_fileid::fsctx::path::is_short_name_candidate">is_<wbr>short_<wbr>name_<wbr>candidate</a></dt><dd>True if a component could be an NTFS-generated 8.3 short name: an 8.3
+shape (a base of 1 to 8 characters, an optional extension of up to 3)
+with a <code>~</code> in the base.</dd><dt><a class="fn" href="fn.normalize_nt.html" title="fn palisade_fileid::fsctx::path::normalize_nt">normalize_<wbr>nt</a></dt><dd>Normalises an NT object path, as the kernel reports image paths:
+<code>\Device\HarddiskVolume3\...</code>, <code>\Device\Mup\server\share\...</code>, or
+<code>\??\C:\...</code> (also spelt <code>\GLOBAL??\</code> and <code>\DosDevices\</code>). Components
+are taken literally, as the kernel does.</dd><dt><a class="fn" href="fn.normalize_win32.html" title="fn palisade_fileid::fsctx::path::normalize_win32">normalize_<wbr>win32</a></dt><dd>Normalises a path the way the Win32 layer does before opening it. See
+the module documentation.</dd></dl></section></div></main></body></html>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CODE_PAGE_UNICODE","LANG_EN_US","MAX_STRINGS_PER_TABLE","MAX_STRING_TABLES","MAX_TRANSLATIONS"],"enum":["LanguageSelection","VersionField","VersionIssueKind"],"fn":["parse_version_info"],"struct":["EffectiveFileName","FileVersionQuad","FixedFileInfo","StringTable","Translation","VersionInfo","VersionInfoIssue"]};

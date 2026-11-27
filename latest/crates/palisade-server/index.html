@@ -1,0 +1,559 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>palisade-server - Palisade</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="Palisade: an educational Windows application allowlisting project">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../../css/general-2459343d.css">
+        <link rel="stylesheet" href="../../css/chrome-ae938929.css">
+        <link rel="stylesheet" href="../../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="../../theme/palisade-1bbd7bbc.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../../searchindex-3e2a1e09.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../../toc-8cab92c4.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div class="palisade-disclaimer" role="note" aria-label="Disclaimer">
+                    <strong>Palisade is an educational, personal-development project. It is not a replacement for commercial application control products and comes with no support or warranty. Do not rely on it to protect production systems.</strong>
+                </div>
+                <nav class="palisade-versions" aria-label="Documentation version">
+                    <label for="palisade-version-select">Version</label>
+                    <select id="palisade-version-select" hidden></select>
+                </nav>
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Palisade</h1>
+
+                    <div class="right-buttons">
+                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+                        <a href="https://github.com/jusso-dev/palisade" title="Git repository" aria-label="Git repository">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="palisade-server"><a class="header" href="#palisade-server">palisade-server</a></h1>
+<p>The central management server: policy distribution, approvals, inventory and event storage.</p>
+<p><strong>Status:</strong> process skeleton with a database foundation. The binary starts, loads and validates
+its configuration, serves TLS on separate admin, agent and metrics listeners, answers liveness and
+readiness probes, and shuts down gracefully. It connects to Postgres, applies its embedded
+migrations, and isolates tenants with row-level security (see <a href="#database">Database</a>). It has no
+agent or API functionality yet. Work is tracked in
+<a href="https://github.com/jusso-dev/palisade/issues/126">#126</a> and
+<a href="https://github.com/jusso-dev/palisade/issues/127">#127</a> (epic
+<a href="https://github.com/jusso-dev/palisade/issues/10">#10</a>).</p>
+<h2 id="commands"><a class="header" href="#commands">Commands</a></h2>
+<pre><code class="language-text">palisade-server serve         --config &lt;PATH&gt;   # run until SIGTERM or Ctrl-C
+palisade-server check-config  --config &lt;PATH&gt;   # validate, then print the effective config
+palisade-server migrate up      --config &lt;PATH&gt; # apply pending migrations, then verify
+palisade-server migrate status  --config &lt;PATH&gt; # applied vs embedded migrations, as JSON
+palisade-server migrate verify  --config &lt;PATH&gt; # checksums and row-level security checks
+palisade-server version
+</code></pre>
+<p><code>--config</code> can also come from <code>PALISADE_CONFIG</code>. Exit codes: <code>0</code> success (including a
+completed shutdown), <code>1</code> runtime failure, <code>2</code> invalid configuration or command line. <code>migrate status</code> exits <code>3</code> when migrations are pending.</p>
+<p><code>check-config</code> runs every check <code>serve</code> runs before it binds a socket: the TOML and environment
+overrides, value ranges, the certificate chain and private key, the agent CA bundle, the TLS
+policy, the database password files and CA file, the refused <code>PG*</code> variables (see
+<a href="#database">Database</a>), and that each <code>public_url</code> host is a subject alternative name (DNS or IP) of the server
+certificate. It reports every problem at once, prints placement warnings (see
+<a href="#overlay-deployments">Overlay deployments</a>), and prints the effective configuration as JSON
+with secret files shown by path only.</p>
+<h2 id="configuration"><a class="header" href="#configuration">Configuration</a></h2>
+<p>A TOML file; <a href="https://github.com/jusso-dev/palisade/blob/main/crates/palisade-server/config/server.example.toml"><code>config/server.example.toml</code></a> documents every key.
+Unknown keys are errors. Relative paths resolve against the directory of the file.</p>
+<p>Every key can be overridden by an environment variable: <code>PALISADE_</code> plus the key path in upper
+case, with <code>__</code> (two underscores) between levels. For example <code>PALISADE_LISTEN__ADMIN__PORT=9443</code>
+or <code>PALISADE_TLS__KEY_FILE=/run/secrets/server.key</code>. Unknown <code>PALISADE_*</code> variables are reported
+as warnings and ignored, so variables meant for other Palisade components do not stop the server.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Default</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td><code>deployment.profile</code></td><td><code>standard</code></td><td><code>standard</code> or <code>overlay</code></td></tr>
+<tr><td><code>tls.cert_file</code></td><td>required</td><td>PEM chain, leaf first</td></tr>
+<tr><td><code>tls.key_file</code></td><td>required</td><td>PEM key (PKCS#8, PKCS#1 or SEC1). A secret file, see below</td></tr>
+<tr><td><code>tls.min_version</code></td><td><code>1.2</code></td><td><code>1.2</code> or <code>1.3</code>. TLS 1.3 is always preferred</td></tr>
+<tr><td><code>tls.profile</code></td><td><code>default</code></td><td><code>default</code> or <code>asd-strict</code>, see <a href="#tls">TLS</a></td></tr>
+<tr><td><code>listen.&lt;name&gt;.bind</code></td><td>required (<code>127.0.0.1</code> for metrics)</td><td>An IP address, or a network interface name</td></tr>
+<tr><td><code>listen.&lt;name&gt;.port</code></td><td>required (<code>9464</code> for metrics)</td><td></td></tr>
+<tr><td><code>listen.&lt;name&gt;.public_url</code></td><td>none</td><td><code>https</code> URL clients use; checked against the certificate. Not on metrics</td></tr>
+<tr><td><code>listen.&lt;name&gt;.body_limit_bytes</code></td><td>admin 16 MiB, agent 8 MiB, metrics 64 KiB</td><td>Up to 1 GiB</td></tr>
+<tr><td><code>listen.&lt;name&gt;.request_timeout_secs</code></td><td><code>30</code></td><td>1 to 3600</td></tr>
+<tr><td><code>listen.&lt;name&gt;.max_connections</code></td><td>admin and agent 4096, metrics 64</td><td></td></tr>
+<tr><td><code>listen.agent.client_ca_file</code></td><td>required</td><td>CA bundle that agent client certificates must chain to</td></tr>
+<tr><td><code>shutdown.grace_secs</code></td><td><code>30</code></td><td>Up to 3600</td></tr>
+<tr><td><code>log.level</code></td><td><code>info</code></td><td><code>error</code>, <code>warn</code>, <code>info</code>, <code>debug</code>, <code>trace</code></td></tr>
+<tr><td><code>database.host</code></td><td>required if <code>[database]</code> is present</td><td>Host name or IP address</td></tr>
+<tr><td><code>database.port</code></td><td><code>5432</code></td><td></td></tr>
+<tr><td><code>database.name</code></td><td>required</td><td>Database name</td></tr>
+<tr><td><code>database.user</code></td><td>required</td><td>The <strong>runtime</strong> role. Must not own the schema or bypass RLS</td></tr>
+<tr><td><code>database.password_file</code></td><td>required</td><td>A secret file holding the runtime role's password</td></tr>
+<tr><td><code>database.tls</code></td><td><code>verify-full</code></td><td><code>verify-full</code>, <code>verify-ca</code>, <code>require</code> or <code>disable</code>. The last two warn</td></tr>
+<tr><td><code>database.ca_file</code></td><td>none</td><td>Extra trusted CA certificates (PEM). Only with <code>verify-*</code></td></tr>
+<tr><td><code>database.max_connections</code></td><td><code>16</code></td><td>Runtime pool size, 1 to 1000</td></tr>
+<tr><td><code>database.connect_timeout_secs</code></td><td><code>5</code></td><td>1 to 300</td></tr>
+<tr><td><code>database.auto_migrate</code></td><td>on if <code>[database.migration]</code> is set</td><td>Apply pending migrations at start</td></tr>
+<tr><td><code>database.migration.user</code></td><td>none</td><td>The <strong>migration</strong> role, which owns the schema</td></tr>
+<tr><td><code>database.migration.password_file</code></td><td>none</td><td>A secret file holding its password</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>&lt;name&gt;</code> is <code>admin</code> (console, REST API, SSO callbacks), <code>agent</code> (agent traffic) or <code>metrics</code>
+(probes with full detail, and later the metrics exposition). <code>admin</code> and <code>agent</code> are required.
+<code>metrics</code> is optional; it is enabled by its section or by any <code>PALISADE_LISTEN__METRICS__*</code>
+variable. Two listeners may not share a port on the same address (or on a wildcard of the same
+address family); serving every surface on one port with path routing is not supported yet.</p>
+<h3 id="secret-files"><a class="header" href="#secret-files">Secret files</a></h3>
+<p>Secrets are only ever given as file paths, never as values, so the configuration file, the
+environment, <code>check-config</code> output and the logs never contain them. The secrets are <code>tls.key_file</code>
+and the database password files. It must be a regular file of at most 64 KiB, and on Unix it must not grant any
+access to the group or others (<code>chmod 600</code> or stricter); otherwise the server refuses to start.
+The database password files (<code>database.password_file</code>, <code>database.migration.password_file</code>) follow
+the same rules, with a limit of 4 KiB; a trailing newline is not part of the password.
+Its contents are held in zeroising buffers while loading, and error messages name the path and
+the problem, never any content. Windows ACL checks, a redaction layer for log fields, and other
+secret kinds are part of <a href="https://github.com/jusso-dev/palisade/issues/227">#227</a>.</p>
+<h2 id="tls"><a class="header" href="#tls">TLS</a></h2>
+<p>Every listener is TLS only; there is no plaintext listener and no option to add one. TLS is
+provided by <code>rustls</code> with the <code>ring</code> provider
+(<a href="../../docs/adr/0008-cryptographic-algorithms.html">ADR 0008</a>), cut down to an explicit
+allowlist so a future default change in <code>rustls</code> cannot widen it:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Profile</th><th>TLS 1.3 suites</th><th>TLS 1.2 suites</th><th>Key exchange</th></tr>
+</thead>
+<tbody>
+<tr><td><code>default</code></td><td>AES-256-GCM-SHA384, AES-128-GCM-SHA256</td><td>ECDHE-ECDSA and ECDHE-RSA with AES-256-GCM-SHA384 or AES-128-GCM-SHA256</td><td>X25519, P-256, P-384</td></tr>
+<tr><td><code>asd-strict</code></td><td>AES-256-GCM-SHA384</td><td>ECDHE-ECDSA and ECDHE-RSA with AES-256-GCM-SHA384</td><td>P-384</td></tr>
+</tbody>
+</table>
+</div>
+<p>ChaCha20-Poly1305 is excluded. TLS 1.0 and 1.1 are not implemented by <code>rustls</code>. TLS 1.2 requires
+the extended master secret extension, and the server's suite order is used. ALPN offers <code>h2</code> and
+<code>http/1.1</code>.</p>
+<p>The agent listener requires a client certificate that chains to <code>listen.agent.client_ca_file</code>;
+a handshake without one fails. Matching the certificate to an enrolled device and checking
+revocation is enrolment work (<a href="https://github.com/jusso-dev/palisade/issues/223">#223</a>).</p>
+<p>The certificate and key are read once at start. Hot reload is part of
+<a href="https://github.com/jusso-dev/palisade/issues/224">#224</a>.</p>
+<h2 id="listeners-and-binding"><a class="header" href="#listeners-and-binding">Listeners and binding</a></h2>
+<p><code>bind</code> takes an IP address (<code>127.0.0.1</code>, <code>100.64.0.7</code>, <code>::1</code>, <code>[fd7a::7]</code>, or <code>0.0.0.0</code> / <code>::</code>
+for every interface) or the name of a network interface (for example <code>overlay0</code>; on Windows the
+interface's friendly name). An interface binds every address it has. IPv6 sockets are always
+IPv6-only, so <code>::</code> never silently covers IPv4 too.</p>
+<p>Each listener has a supervisor that keeps it bound:</p>
+<ul>
+<li>An address that cannot be bound yet (an interface that is not up, an address not assigned yet,
+a port in use) is retried with exponential backoff from 1 s to 30 s. Readiness reports
+<code>listener_unbound:&lt;name&gt;</code> until every address is bound. This covers an overlay interface that
+comes up after the server at boot.</li>
+<li>A named interface is re-resolved every 5 s. New addresses are bound; addresses that vanish stop
+accepting.</li>
+</ul>
+<p>Connections: the TLS handshake must finish within 10 s. The protocol follows ALPN: a connection
+that negotiated <code>h2</code> is served as HTTP/2 only, and any other (including one with no ALPN) as
+HTTP/1.1 only, so a client cannot switch protocols by sending another preface. The first request
+must arrive within 30 s of the handshake, whatever the protocol, and each later HTTP/1.1 request
+head within 30 s of the previous response; otherwise the connection is closed, so an idle or
+stalled client cannot hold a connection slot. HTTP/1.1 request heads are limited to 64 KiB.
+HTTP/2 allows 128 concurrent streams and 64 KiB of headers per request, with keep-alive pings.
+A listener serves at most <code>max_connections</code> connections; a connection is accepted before it takes
+a slot, so a socket with no clients never holds one, and while every slot is taken further
+clients wait in the TCP backlog.</p>
+<h2 id="http-stack"><a class="header" href="#http-stack">HTTP stack</a></h2>
+<p>Every listener's router runs inside this middleware stack (outermost first):</p>
+<ol>
+<li><strong>Request ID.</strong> A client-supplied <code>Palisade-Request-Id</code> of 1 to 64 characters from
+<code>A-Z a-z 0-9 . _ : -</code> is kept; anything else is replaced by 128 random bits in hex. The ID is
+echoed on every response.</li>
+<li><strong>Errors as problem details.</strong> Every 4xx and 5xx response is an RFC 9457
+<code>application/problem+json</code> document with <code>type</code>
+(<code>https://palisade.dev/problems/&lt;slug&gt;</code>), <code>title</code>, <code>status</code>, <code>detail</code>, <code>instance</code>
+(<code>urn:palisade:request:&lt;id&gt;</code>) and <code>request_id</code>. Error bodies from inside the stack are
+replaced, so they cannot leak internals; only the <code>Allow</code>, <code>Retry-After</code> and
+<code>WWW-Authenticate</code> headers are kept. A 5xx <code>detail</code> tells the client to re-read before
+retrying a change. Errors that hyper produces before a request reaches the router (a malformed
+request line, oversized headers) are hyper's own minimal responses.</li>
+<li><strong>Trace.</strong> One span per request with <code>request_id</code>, <code>listener</code>, <code>method</code>, the matched route
+template (never the raw path or query) and <code>peer</code>, and one log line per response with
+<code>status</code> and <code>latency_ms</code>.</li>
+<li><strong>Panic guard.</strong> A panicking handler becomes a 500 problem. The panic message goes to the log.</li>
+<li><strong>Timeout.</strong> A handler still running after <code>request_timeout_secs</code> is cancelled with a 503
+problem.</li>
+<li><strong>Body limit.</strong> A body over <code>body_limit_bytes</code> gets a 413 problem, whether the size is
+declared in <code>Content-Length</code> or discovered while streaming.</li>
+</ol>
+<p>Every response also carries <code>X-Content-Type-Options: nosniff</code>.</p>
+<h2 id="probes"><a class="header" href="#probes">Probes</a></h2>
+<p>Every listener serves:</p>
+<ul>
+<li><code>GET /healthz</code>: liveness. <code>200 {"status":"alive"}</code> while the process can serve requests.</li>
+<li><code>GET /readyz</code>: readiness. <code>200</code> when every listener is bound on every wanted address and the
+server is not shutting down; otherwise a <code>503</code> problem (<code>type</code> ending <code>not-ready</code>). On the
+admin and agent listeners the body carries only the overall status. On the metrics listener
+(loopback by default) it also lists the indicators:</li>
+</ul>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Indicator</th><th>Meaning</th><th>Readiness</th></tr>
+</thead>
+<tbody>
+<tr><td><code>listener_unbound:&lt;name&gt;</code></td><td>An address of the listener is not bound yet</td><td>503</td></tr>
+<tr><td><code>public_exposure:&lt;name&gt;</code></td><td><code>deployment.profile = "overlay"</code> and the listener is reachable on a public address</td><td>200, status <code>degraded</code></td></tr>
+<tr><td><code>shutting_down</code></td><td>Shutdown has started</td><td>503</td></tr>
+<tr><td><code>database_down</code></td><td><code>[database]</code> is configured and the runtime role cannot reach it (also before the first check)</td><td>503</td></tr>
+<tr><td><code>database_schema:&lt;verdict&gt;</code></td><td>The schema is <code>behind</code> (pending migrations), <code>newer</code> than this binary, or <code>damaged</code></td><td>503</td></tr>
+<tr><td><code>database_role_unsafe</code></td><td>The runtime role, or any role it is a member of, is a superuser, has <code>BYPASSRLS</code>, or owns or can create objects in the schema; or it is not in <code>palisade_runtime</code></td><td>503</td></tr>
+</tbody>
+</table>
+</div>
+<p>The database is checked every 5 seconds. Job-runner readiness joins this list with #126.</p>
+<h2 id="database"><a class="header" href="#database">Database</a></h2>
+<p>Postgres 16 or later, through <code>sqlx</code> (<a href="../../docs/adr/0006-server-database.html">ADR 0006</a>).
+Without a <code>[database]</code> section the server runs without one, as before, and logs a warning.</p>
+<p><strong>Roles.</strong> Two logins, never the same role:</p>
+<ul>
+<li>The <strong>migration role</strong> owns the database, the <code>palisade</code> schema and every table. Only
+<code>migrate up</code> and <code>auto_migrate</code> use it.</li>
+<li>The <strong>runtime role</strong> serves every request. It owns nothing, is <code>NOSUPERUSER NOBYPASSRLS</code>, and
+gets its table privileges through the <code>palisade_runtime</code> group role, which the migrations
+grant to. These properties are checked through role membership too, because a role can
+<code>SET ROLE</code> to any role it is a member of: no role the runtime login can reach may be a
+superuser, have <code>BYPASSRLS</code>, or own the schema or any table, function or type in it (an owner
+of <code>palisade.current_tenant_ids()</code> could replace it). <code>serve</code> refuses to start, and readiness
+reports <code>database_role_unsafe</code>, if any check fails.</li>
+</ul>
+<p><a href="https://github.com/jusso-dev/palisade/blob/main/crates/palisade-server/sql/bootstrap.sql"><code>sql/bootstrap.sql</code></a> creates the three roles and the database; run it once as
+a database administrator with <code>psql</code> (the file shows the command), then set the two passwords
+with <code>\password</code>. <code>palisade-server</code> never needs a superuser.</p>
+<p><strong>Migrations.</strong> Forward-only numbered SQL files in <a href="https://github.com/jusso-dev/palisade/tree/main/crates/palisade-server/migrations"><code>migrations/</code></a>, embedded in the
+binary with <code>sqlx::migrate!</code>. Each runs in a transaction, as the migration role. Before anything
+is created, <code>migrate up</code> checks that role: not a superuser, not linked to <code>palisade_runtime</code> by
+membership in either direction, and the owner of the <code>palisade</code> schema once it exists. A run as
+the wrong role changes nothing. The history
+lives in <code>palisade._sqlx_migrations</code> with a SHA-384 checksum per file, so an edited migration is a
+hard error. At start, <code>serve</code> refuses a database whose schema is newer than the binary, and with
+<code>auto_migrate</code> applies pending migrations first; otherwise it starts not ready until someone runs
+<code>migrate up</code>. <code>serve</code> also refuses a damaged schema. <code>migrate verify</code> also checks the structure that ADR 0006 requires: every table with
+a <code>tenant_id</code> column (and the tenant table) has row-level security enabled and forced and has a
+policy and <code>tenant_id uuid NOT NULL</code>, every foreign key between tenant-owned tables includes
+<code>tenant_id</code>, and no role a <code>palisade_runtime</code> login can act as owns anything in the schema or is
+a superuser or <code>BYPASSRLS</code>. New migrations must stay forward-only and avoid long table rewrites
+(expand/contract).</p>
+<p><strong>Tables so far.</strong> <code>tenant</code> (a tree with one <code>root</code>, <code>organisation</code> and <code>template</code> kinds, a
+<code>settings</code> object) and <code>computer_group</code> (a tree per tenant). Each has <code>created_at</code>, <code>updated_at</code>
+and <code>revision</code>, maintained by a trigger: inserts start at revision 1 and every update adds 1, so
+a client can use the revision for optimistic concurrency (#185). A row's <code>id</code> and <code>tenant_id</code>
+never change. The rest of the schema arrives with the issues that use it.</p>
+<p><strong>Tenant isolation.</strong> Every tenant-owned table has <code>tenant_id uuid NOT NULL</code>, <code>FORCE ROW LEVEL SECURITY</code> (the policies apply to the table owner too), and a policy
+<code>tenant_id = ANY (palisade.current_tenant_ids())</code>, for reads and writes. The function reads the
+<code>palisade.tenant_ids</code> setting; when it is unset or empty, no rows match. The only way the server
+code runs a tenant-scoped query is <code>Database::tenant_tx(scope)</code>, which begins a transaction and
+sets the scope with <code>set_config(..., true)</code>, the function form of <code>SET LOCAL</code>. The scope ends with
+the transaction, so a pooled connection never carries it to the next request. Foreign keys
+between tenant-owned tables include <code>tenant_id</code>, so a row can never reference another tenant's
+row.</p>
+<p><strong>What row-level security does and does not protect.</strong> It stops a bug in a handler (a missing
+<code>WHERE</code>, a wrong ID) from reading or changing another tenant's rows: the database filters every
+query, whatever the code asks. The runtime role cannot turn it off: it does not own the tables, so
+it cannot <code>DISABLE</code> or <code>NO FORCE</code> row-level security or change the policies, and with
+<code>row_security = off</code> a filtered query fails rather than returning everything. It does <strong>not</strong>
+protect against a compromised server process. That process holds the runtime role and chooses
+the scope itself, so it can ask for any tenant (threat model AC-08). The integration tests
+demonstrate both sides.</p>
+<p><strong>Environment.</strong> The Postgres client library reads some <code>PG*</code> environment variables. The server
+refuses to start, and <code>migrate</code> refuses to run, while <code>PGPASSWORD</code>, <code>PGPASSFILE</code>, <code>PGOPTIONS</code>,
+<code>PGSSLKEY</code>, <code>PGSSLCERT</code>, <code>PGSSLMODE</code>, <code>PGSSLROOTCERT</code> or <code>PGHOSTADDR</code> is set, because these would
+override the configuration (a password outside a <code>*_file</code>, or a session setting such as
+<code>row_security</code>).</p>
+<p><strong>Queries.</strong> Fixed SQL strings with typed bind parameters only. Compile-time-checked queries
+(<code>query!</code>) need a live database or committed offline metadata; they are not used yet, and adopting
+them, with a lint against string-built SQL, is part of #229.</p>
+<h2 id="overlay-deployments"><a class="header" href="#overlay-deployments">Overlay deployments</a></h2>
+<p>For a fleet reachable only through a private overlay network
+(<a href="https://github.com/jusso-dev/palisade/issues/239">#239</a>), bind the admin and agent listeners
+to the overlay interface or address, keep metrics on loopback, and set
+<code>deployment.profile = "overlay"</code>:</p>
+<pre><code class="language-toml">[deployment]
+profile = "overlay"
+
+[listen.admin]
+bind = "overlay0"              # or the overlay address, e.g. "100.64.0.7"
+port = 8443
+public_url = "https://palisade-server.overlay.example:8443"
+
+[listen.agent]
+bind = "overlay0"
+port = 8444
+public_url = "https://palisade-server.overlay.example:8444"
+client_ca_file = "tls/agent-ca.crt"
+
+[listen.metrics]
+bind = "127.0.0.1"
+</code></pre>
+<p>Under the overlay profile, <code>check-config</code> and <code>serve</code> warn when a listener binds every interface,
+is reachable on a public address, or (for metrics) is not on loopback. While the server runs,
+public reachability is also reported as <code>public_exposure:&lt;name&gt;</code> in readiness. "Public" means
+anything outside loopback, RFC 1918, the RFC 6598 shared space <code>100.64.0.0/10</code>, link-local,
+IPv6 unique-local <code>fc00::/7</code>, and the documentation, benchmarking and reserved ranges.</p>
+<p>The certificate must name every <code>public_url</code> host (the overlay DNS name or overlay IP) as a SAN;
+<code>check-config</code> fails otherwise. The overlay is transport only: TLS and client certificates stay
+mandatory over it.</p>
+<h2 id="logs"><a class="header" href="#logs">Logs</a></h2>
+<p><code>serve</code> writes one JSON object per line to standard error: <code>timestamp</code>, <code>level</code>, <code>target</code>,
+<code>fields</code> (including <code>message</code>), <code>span</code> (the current span) and <code>spans</code> (every enclosing span, so
+the request span's fields stay on the line when a handler opens a child span). The level comes
+from <code>log.level</code>. No secret value is passed to the logger: the configuration holds only secret
+paths, and the secret reader's errors never contain file contents. Tenant and principal fields
+join the request span with the API work.</p>
+<h2 id="shutdown"><a class="header" href="#shutdown">Shutdown</a></h2>
+<p>On SIGTERM or SIGINT (Ctrl-C), or on Windows Ctrl-C, Ctrl-Break and the console close, logoff
+and shutdown events (the handlers are registered before any socket is bound, so an early signal is
+never lost): readiness fails, every listener stops accepting, and open connections are asked to
+finish their in-flight requests and close (HTTP/1.1 after the current response, HTTP/2 with
+GOAWAY). If any remain after <code>shutdown.grace_secs</code>, they are dropped. The process exits <code>0</code>
+either way. A second signal during the drain exits <code>1</code> immediately.</p>
+<h2 id="not-here-yet"><a class="header" href="#not-here-yet">Not here yet</a></h2>
+<p>Tracked in <a href="https://github.com/jusso-dev/palisade/issues/126">#126</a> unless noted:
+<code>create-admin</code>, <code>backup</code> and <code>restore</code> subcommands (also
+<a href="https://github.com/jusso-dev/palisade/issues/138">#138</a>); <code>/version</code> with git SHA and schema
+version; single-port mode; compression, CORS, rate-limit, auth and tenant layers;
+the metrics exposition and OTLP; runtime log-level changes; clock-skew health; the job runner
+and scheduler; relay role. Elsewhere: the rest of the schema, secrets at rest, soft delete, retention and
+partitioning (<a href="https://github.com/jusso-dev/palisade/issues/127">#127</a> and the issues that own
+each table), the audit log (<a href="https://github.com/jusso-dev/palisade/issues/132">#132</a>), enrolment and device certificate
+checks (<a href="https://github.com/jusso-dev/palisade/issues/223">#223</a>), agent RPCs
+(<a href="https://github.com/jusso-dev/palisade/issues/62">#62</a>), REST conventions
+(<a href="https://github.com/jusso-dev/palisade/issues/185">#185</a>), certificate hot reload
+(<a href="https://github.com/jusso-dev/palisade/issues/224">#224</a>), secrets hardening
+(<a href="https://github.com/jusso-dev/palisade/issues/227">#227</a>), server hardening
+(<a href="https://github.com/jusso-dev/palisade/issues/229">#229</a>).</p>
+<h2 id="allowed-dependencies"><a class="header" href="#allowed-dependencies">Allowed dependencies</a></h2>
+<p><code>palisade-core</code>, <code>palisade-fileid</code>, <code>palisade-policy</code>, <code>palisade-proto</code>. The rules are enforced by
+<code>cargo xtask check-deps</code>. None are used yet.</p>
+<h2 id="platform-support"><a class="header" href="#platform-support">Platform support</a></h2>
+<p>All platforms. Secret-file permission checks apply on Unix; SIGTERM handling is Unix-only, with
+the console events above on Windows.</p>
+<h2 id="feature-flags"><a class="header" href="#feature-flags">Feature flags</a></h2>
+<p>None yet.</p>
+<h2 id="stability"><a class="header" href="#stability">Stability</a></h2>
+<p>Unstable and not published. Anything may change.</p>
+<hr>
+<p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/crates/palisade-server/README.md"><code>crates/palisade-server/README.md</code></a> on GitHub.</small></p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../../crates/palisade-agent/index.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../../crates/palisade-cli/index.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../../crates/palisade-agent/index.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../../crates/palisade-cli/index.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../../mark-09e88c2c.min.js"></script>
+        <script src="../../searcher-c2a407aa.js"></script>
+
+        <script src="../../clipboard-1626706a.min.js"></script>
+        <script src="../../highlight-abc7f01d.js"></script>
+        <script src="../../book-a0b12cfe.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../../theme/palisade-c327a96e.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

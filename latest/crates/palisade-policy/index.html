@@ -1,0 +1,499 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>palisade-policy - Palisade</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="Palisade: an educational Windows application allowlisting project">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../../css/general-2459343d.css">
+        <link rel="stylesheet" href="../../css/chrome-ae938929.css">
+        <link rel="stylesheet" href="../../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="../../theme/palisade-1bbd7bbc.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../../searchindex-3e2a1e09.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../../toc-8cab92c4.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div class="palisade-disclaimer" role="note" aria-label="Disclaimer">
+                    <strong>Palisade is an educational, personal-development project. It is not a replacement for commercial application control products and comes with no support or warranty. Do not rely on it to protect production systems.</strong>
+                </div>
+                <nav class="palisade-versions" aria-label="Documentation version">
+                    <label for="palisade-version-select">Version</label>
+                    <select id="palisade-version-select" hidden></select>
+                </nav>
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Palisade</h1>
+
+                    <div class="right-buttons">
+                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+                        <a href="https://github.com/jusso-dev/palisade" title="Git repository" aria-label="Git repository">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="palisade-policy"><a class="header" href="#palisade-policy">palisade-policy</a></h1>
+<p>The policy model, conditions, precedence and evaluation, with a decision trace. Evaluation is pure and deterministic: no network or filesystem access.</p>
+<p><strong>Status:</strong> the policy object model, its JSON Schema and validation are in place (#30), with a YAML front end (#190). Single criteria can be matched against an object's facts (#31, #32), and whole match trees can be evaluated, with context criteria for the user, device, session, network and time (#33). Rule actions, effect flags and the typed <code>Decision</code> are defined (#34). The evaluation pipeline and the five precedence models turn the matching rules into one decision (#35). Enforcement modes, their resolution per decision and the mode state machine are in place (#36). The group hierarchy, inheritance, reusable libraries and the effective policy of a device are in place (#37). Rules, rule-set assignments and policies can be scoped by user, group, device, network location, session and time (#38). Every decision can be traced, explained and simulated (#41). Indexing is still to come (#42). Work is tracked in <a href="https://github.com/jusso-dev/palisade/issues/2">#2</a>.</p>
+<h2 id="modules"><a class="header" href="#modules">Modules</a></h2>
+<ul>
+<li><code>model</code>: the canonical policy object model. A <code>PolicyDocument</code> holds one <code>Policy</code> and the <code>RuleSet</code>s it references by ID. Each rule has a match tree (<code>all</code> / <code>any</code> / <code>not</code> / <code>criterion</code>) and an action. Strict serde: unknown fields are rejected, and enums are <code>snake_case</code> strings.</li>
+<li><code>schema</code>: generates the JSON Schema (draft 2020-12) from the model. The generated schema is committed at <a href="https://github.com/jusso-dev/palisade/blob/main/schemas/policy/v1.json"><code>schemas/policy/v1.json</code></a>.</li>
+<li><code>dsl</code>: reads and writes policy documents as YAML. The YAML form has the same fields as the JSON form, and the same JSON Schema validates both. Reading is strict and safe on untrusted input: YAML 1.2 only, no anchors, aliases, tags or merge keys, no duplicate keys or unknown fields, no scalar that YAML 1.1 and 1.2 type differently (such as <code>no</code> or <code>010</code>), and limits on size, depth, node count and parser lookahead. JSON input is read by a streaming JSON reader that builds the same tree under the same rules. Errors and warnings carry a line and column. Examples are in <a href="https://github.com/jusso-dev/palisade/tree/main/docs/examples/policies"><code>docs/examples/policies/</code></a>.</li>
+<li><code>validate</code>: <code>PolicyDocument::validate</code> reports every finding in one pass. Each finding has a stable code, a severity and the JSON Pointer of the field. It normalises hash values to lowercase hex, compiles every criterion, checks each rule's <code>order</code> and <code>priority</code> against the precedence model, and flags rules that can match without a positive identity criterion (naming the criteria on one such path through the tree), rules that match on negations or context alone, allow rules whose only identity is weak, and unsupported regular expressions. A document that passes becomes a <code>ValidatedPolicy</code>.</li>
+<li><code>decision</code>: the typed <code>Decision</code> every consumer gets: outcome, the enforce-mode outcome (<code>would_have_been</code>), the deciding action and rule (<code>RuleRef</code>), <code>audit</code> annotations, the mode, directives, effects with defaults applied, a reason code and a trace ID. Its JSON form is stable and snapshot-tested. <code>Decision::from_rule</code> builds the enforce-mode decision of one deciding rule, and <code>Decision::implicit_deny</code> the decision when none decides. The pipeline adds the rules the deciding rule overrode, the <code>audit</code> annotations and the trust-source grants (#35), then applies the effective mode (#36): <code>would_have_been</code> keeps the enforce-mode outcome, and <code>learning_candidate</code> marks an object to learn.</li>
+<li><code>evaluate</code>: the evaluation pipeline (#35). An <code>Evaluator</code> compiles a validated policy once, and <code>Evaluator::evaluate</code> decides one object in fixed stages: the mandatory deny tier, exclusions (<code>ignore</code>), the policy's precedence model, then the implicit deny. See <a href="#precedence">Precedence</a>. <code>Evaluator::evaluate_in</code> then applies the device's modes; see <a href="#modes">Modes</a>.</li>
+<li><code>mode</code>: enforcement modes (#36). <code>mode::resolve</code> gives the effective mode of one decision from the policy, the object type, the deciding rule and the device state (<code>DeviceState</code>: base mode, connectivity, override session, lockdown); <code>ProtectionStatus</code> reports a device's protection; <code>mode::machine</code> is the state machine of legal mode changes, with time boxes that revert on a monotonic and a wall clock.</li>
+<li><code>library</code>: reusable libraries (#37): rule sets, application definitions, match fragments, and hash, publisher, path, principal, device, network and schedule sets, and message templates. A <code>ref</code> node in a match tree names one by ID and pin (<code>latest</code> or a version). <code>Catalogue</code> checks every library version, resolves references and rejects reference cycles, naming the path. <code>Catalogue::expand</code> replaces each reference with its tree. Libraries are global (read-only to tenants) or one tenant's, have an owner, and can be duplicated into an editable copy that records <code>derived_from</code>.</li>
+<li><code>hierarchy</code>: the scope hierarchy (#37): global, tenant, nested groups (at most 8 deep), devices, dynamic groups and templates, with the built-in <code>unassigned</code>, <code>unmanaged</code> and <code>staging</code> groups. <code>HierarchyDocument::validate</code> checks a snapshot, and <code>ValidatedHierarchy::effective_policy</code> computes one device's effective policy: a pure function of the snapshot, the libraries at their resolved versions and the device's dynamic groups, with per-rule and per-setting provenance and a content hash. <code>place</code> runs the automatic placement rules. See <a href="#hierarchy">Hierarchy</a>.</li>
+<li><code>trace</code>: the decision trace, explanations and the policy simulator (#41). See <a href="#trace-explain-and-simulate">Trace, explain and simulate</a>.</li>
+<li><code>precedence</code>: the five precedence models, each a pure function from the matching rules to one winner (<code>Precedence::resolve</code>), and the specificity tiers that <code>specificity</code> ranks by.</li>
+<li><code>facts</code>: the facts about one object that criteria test (<code>ObjectFacts</code>): hashes, version-resource strings, the normalised path with its ACL safety, and the signatures with their verification status. Path variables (<code>%PROGRAMFILES%</code> and so on) are supplied per evaluation. Facts are computed elsewhere (#3, #4); this crate only reads them.</li>
+<li><code>context</code>: the user, device, session, network and time of one evaluation (<code>EvaluationContext</code>), which context criteria test: SIDs, group and tag sets, account names, host and domain names, directory units, the OS version and build, the token's integrity level, yes-or-no facts such as <code>user.is_admin</code>, the session type, ID and client address, local addresses, DNS suffixes and network locations, and the weekday, time and date in the policy's clock. As with object facts, the agent collects them (#4); a fact that was not collected is unknown.</li>
+<li><code>condition</code>: compiles a rule's match tree (<code>CompiledMatch</code>) into an arena of compiled criteria and evaluates it with Kleene three-valued logic. <code>all</code> stops at the first <code>NoMatch</code> and <code>any</code> at the first <code>Match</code>, and the order of children never changes the result. Only <code>Match</code> makes a rule match, and <code>Unknown</code> counts as no match for every action. An allow rule therefore cannot allow on an unknown fact (it fails closed), but a deny rule does not block on one either. That is the default (<code>no_match</code>) that #32 sets for deny rules; a deny's <code>unknown_as</code> and <code>on_unparseable</code> options change it (see <a href="#unknown-facts">Unknown facts</a>).</li>
+<li><code>scope</code>: rule scoping (#38): who, where and when a rule applies. See <a href="#scopes">Scopes</a>.</li>
+<li><code>ops</code>: compiles one criterion (<code>CompiledCriterion</code>) and evaluates it against facts, giving <code>Match</code>, <code>NoMatch</code> or <code>Unknown</code> with notes for the decision trace. The module docs define the semantics: several values, negation of unknown facts, case folding and Unicode NFC, path normalisation and wildcards, alternate data streams, path variables, the path-ACL rule for allow rules, version comparison, and which signer statuses can match. Regular expressions use a linear-time engine; look-around and backreferences are rejected with a guided error. The numeric, integrity-level, date, network (<code>ip_in_cidr</code>, <code>ip_between</code>, <code>ip_wildcard</code>), set (<code>member_of</code>, <code>any_of</code>, <code>all_of</code>) and time (<code>weekday_in</code>, <code>time_between</code>, <code>date_between</code>) operators and the criterion options <code>anchored</code>, <code>match_ads</code>, <code>include_sub_ous</code> and <code>safety_critical</code> are described there too. <code>ops::net</code> parses the addresses, CIDR blocks, ranges and MAC addresses that criteria test.</li>
+</ul>
+<p>Each identity field has a strength (<code>Field::strength</code>, #31): strong for SHA-256-family and Authenticode SHA-256 hashes and the leaf thumbprint, medium for the publisher and full or directory paths, and weak for everything else. Path normalisation (<code>palisade_core::path</code>) is shared with the agent, so facts and rule values are normalised the same way.</p>
+<h2 id="actions-and-effects"><a class="header" href="#actions-and-effects">Actions and effects</a></h2>
+<p>An action is an object with a <code>type</code> and that action's options (#34). Each action is valid only in some rule set kinds and for some object types; validation reports a rule that breaks this table.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Action</th><th>Options</th><th>Decides?</th><th>Rule set kinds</th><th>Object types</th></tr>
+</thead>
+<tbody>
+<tr><td><code>allow</code></td><td>none</td><td>yes: allowed</td><td>allowlist, baseline, mixed</td><td>all</td></tr>
+<tr><td><code>deny</code></td><td><code>kill_running</code>, <code>allow_request</code>, <code>request_template</code>, <code>unknown_as</code>, <code>on_unparseable</code></td><td>yes: blocked</td><td>blocklist, mixed</td><td>all; <code>kill_running</code> not for driver or library</td></tr>
+<tr><td><code>audit</code></td><td>none</td><td>no: an annotation</td><td>all</td><td>all</td></tr>
+<tr><td><code>allow_contained</code></td><td><code>profile_id</code> (#14)</td><td>yes: allowed</td><td>allowlist, containment, mixed</td><td>not driver or library</td></tr>
+<tr><td><code>allow_elevated</code></td><td><code>token_profile</code>, <code>condition</code> (<code>always</code>, <code>if_required</code>), <code>reason_prompt</code>, <code>auth</code> (<code>none</code>, <code>reauth</code>, <code>mfa</code>) (#12)</td><td>yes: allowed</td><td>elevation, mixed</td><td>executable, installer, script, control panel applet</td></tr>
+<tr><td><code>trust_source</code></td><td><code>mode</code> (<code>direct</code>, <code>chained</code>), <code>scope_paths</code>, <code>tag_output</code> (#9, #114)</td><td>no: adds a directive</td><td>trust, mixed</td><td>executable, installer</td></tr>
+<tr><td><code>ignore</code></td><td>none</td><td>yes: ignored, nothing logged</td><td>mixed</td><td>not executable or driver</td></tr>
+<tr><td><code>defer</code></td><td>none</td><td>no: no opinion</td><td>all</td><td>all</td></tr>
+</tbody>
+</table>
+</div>
+<p>An empty <code>object_types</code> list means every type, so a restricted action must list its types. <code>ignore</code> is for performance exclusions only: validation always warns (<code>exclusion_needs_permission</code>), and the server only accepts it from an administrator with the <code>admin.exclusions</code> permission (#10). Whether a path is user-writable is only known when a rule is evaluated (#54), so <code>ignore</code> never applies to executables or drivers. Every action that lets an object run, trusts it or excludes it needs a positive identity on every branch of its match tree, and only trusts a path users cannot write, as <code>allow</code> does. The engine passes the containment, elevation and trust-source directives through; their meaning belongs to the epics named.</p>
+<p>Every rule may have an <code>effects</code> block. Each flag is optional; an unset flag takes the action's default:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Action</th><th><code>log</code></th><th><code>upload</code></th><th><code>notify</code></th><th><code>severity</code></th><th><code>suppress_duplicates_secs</code></th></tr>
+</thead>
+<tbody>
+<tr><td><code>allow</code>, <code>allow_contained</code></td><td><code>summary</code></td><td><code>batched</code></td><td><code>none</code></td><td><code>info</code></td><td>86400</td></tr>
+<tr><td><code>allow_elevated</code></td><td><code>always</code></td><td><code>immediate</code></td><td><code>none</code></td><td><code>info</code></td><td>600</td></tr>
+<tr><td><code>deny</code></td><td><code>always</code></td><td><code>immediate</code></td><td><code>default</code></td><td><code>medium</code></td><td>600</td></tr>
+<tr><td><code>audit</code></td><td><code>always</code></td><td><code>immediate</code></td><td><code>none</code></td><td><code>low</code></td><td>600</td></tr>
+<tr><td><code>trust_source</code></td><td><code>always</code></td><td><code>batched</code></td><td><code>none</code></td><td><code>info</code></td><td>600</td></tr>
+</tbody>
+</table>
+</div>
+<p>The de-duplication default follows the effective <code>log</code>: 86400 for <code>summary</code>, 0 for <code>never</code>, and 600 otherwise. <code>deny</code>, <code>audit</code>, <code>allow_elevated</code> and <code>trust_source</code> need an event per decision, so <code>log: never</code> and <code>log: summary</code> are errors on them. <code>notify: custom</code> needs a <code>notification_text</code> of at most 2048 characters with the placeholders <code>{file}</code>, <code>{publisher}</code>, <code>{rule}</code>, <code>{user}</code> and <code>{hash}</code> (<code>{{</code> and <code>}}</code> are literal braces). <code>help_url</code> must be an <code>https</code> URL whose host is a DNS name or a bracketed IPv6 address, with an optional port from 1 to 65535, no user information, and none of the characters RFC 3986 never allows (including <code>\</code>, which browsers read as <code>/</code>). A <code>reason_prompt</code> is one trimmed line of at most 256 characters. A <code>trust_source</code> scope path is a drive, UNC or known path variable (<code>%PROGRAMFILES%</code> and the others in <code>facts::PathVariable</code>) path; <code>%</code> is not allowed elsewhere in it, and paths must be unique when compared as the engine compares paths (without case or a trailing <code>\</code>). <code>tags</code> follow the metadata tag rules. <code>ignore</code> and <code>defer</code> make no decision, so they take no <code>effects</code>. A deny with <code>allow_request</code> needs a notification, cannot be mandatory, and may name a <code>request_template</code>. See <a href="https://github.com/jusso-dev/palisade/blob/main/docs/examples/policies/actions-and-effects.yaml"><code>docs/examples/policies/actions-and-effects.yaml</code></a>.</p>
+<h2 id="precedence"><a class="header" href="#precedence">Precedence</a></h2>
+<p>A file often matches several rules. <code>Evaluator::evaluate</code> decides it in fixed stages, whatever the model (#35, ADR 0004):</p>
+<ol>
+<li><strong>Mandatory deny.</strong> A matching rule of a <code>mandatory</code> blocklist blocks (<code>mandatory_deny</code>). No allow, elevation, trust source or exclusion changes that, under any model.</li>
+<li><strong>Exclusion.</strong> A matching <code>ignore</code> rule makes the object <code>ignored</code>.</li>
+<li><strong>Policy.</strong> The policy's <code>precedence_model</code> chooses among the matching <code>allow</code>, <code>allow_contained</code>, <code>allow_elevated</code> and <code>deny</code> rules.</li>
+<li><strong>Unknown.</strong> If nothing decided, the implicit deny (<code>implicit_deny_unknown</code>, #39).</li>
+</ol>
+<p>An override session (#9) lowers the mode of stages 3 and 4 (see <a href="#modes">Modes</a>); post-allow attribute rules (#33) are the stage still to come between them. The result is the enforce-mode decision; <code>Evaluator::evaluate_in</code> applies the modes on top of it. <code>audit</code> rules never decide: every one that matches is an annotation. <code>trust_source</code> rules never let an object run: their grants are attached only to an allowed object. <code>defer</code> rules have no opinion. When several mandatory denies or exclusions match, the most specific decides.</p>
+<p>The decision names the deciding rule (<code>matched_rule</code>) and <strong>every rule it overrode</strong> (<code>overridden</code>): the other candidates of the deciding stage, every candidate of the later stages, and the trust sources of an object that is not allowed.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Model</th><th>Decides</th><th>Options</th></tr>
+</thead>
+<tbody>
+<tr><td><code>deny_wins</code> (default)</td><td>any matching deny, otherwise an allow</td><td><code>allow_tiebreak</code></td></tr>
+<tr><td><code>allow_wins</code></td><td>any matching allow, otherwise a deny. Validation warns: not recommended for Essential Eight.</td><td><code>allow_tiebreak</code>, <code>granularity_tiebreak</code></td></tr>
+<tr><td><code>specificity</code></td><td>the most specific rule; between equally specific rules, a deny</td><td><code>allow_tiebreak</code>, <code>same_tier_tiebreak</code></td></tr>
+<tr><td><code>first_match</code></td><td>the lowest <code>order</code>; ties go to the newer rule</td><td><code>curated_first</code></td></tr>
+<tr><td><code>priority</code></td><td>the lowest <code>priority</code>; ties go to deny, <code>allow_contained</code>, <code>allow</code>, <code>allow_elevated</code> (<code>always</code>, then <code>if_required</code>)</td><td><code>priority_direction</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Options live in <code>policy.precedence_options</code>; one the model does not use is a warning (<code>precedence_option_unused</code>).</p>
+<ul>
+<li><code>allow_tiebreak</code>: when several allows could decide, <code>most_restrictive</code> (the default) prefers <code>allow_contained</code>, then <code>allow</code>, then <code>allow_elevated</code>; <code>most_permissive</code> reverses that.</li>
+<li><code>granularity_tiebreak</code> (<code>allow_wins</code>): within one rule set, only the most specific matching rules take part, so a denied file in an allowed folder stays denied.</li>
+<li><code>same_tier_tiebreak</code> (<code>specificity</code>): <code>deny</code> (the default) or <code>allow</code>.</li>
+<li><code>curated_first</code> (<code>first_match</code>, on by default): rules of read-only rule sets come before every custom rule.</li>
+<li><code>priority_direction</code> (<code>priority</code>): <code>lower_wins</code> (the default) or <code>higher_wins</code>.</li>
+</ul>
+<p><strong>Specificity tiers</strong>, from a rule's strongest identity that every match must satisfy (<code>all</code> takes its strongest child, <code>any</code> its weakest, <code>not</code> and context criteria identify nothing): 1 hash, 2 signer with file name and version, 3 signer with product name, 4 signer (publisher or certificate thumbprint), 5 full path (<code>path.full</code> equals), 6 directory (deeper first), 7 metadata, certificate issuer, or nothing.</p>
+<p><strong>Order and priority.</strong> Under <code>first_match</code>, every rule that allows or denies needs an <code>order</code> (<code>order_required</code>). Rules of custom rule sets use 100001 to 999989 (<code>order_reserved</code>). 0 to 99 is for system rules, 100 to 100000 for curated rule sets, and 999990 to 1000000 for defaults and catch-alls. Under <code>priority</code>, every such rule needs a <code>priority</code> (<code>priority_required</code>). Two rules with different actions at one priority are a warning (<code>duplicate_priority</code>). A newer rule is one with a higher rule ID, because rule IDs are UUIDv7s, which start with their creation time.</p>
+<p><strong>Determinism.</strong> Every choice ends with the unique rule ID, and the lists in a decision are sorted by rule ID. So a decision never depends on the order of rule sets or rules in a document, under any model. Only <code>first_match</code> and <code>priority</code> depend on <code>order</code> and <code>priority</code>, by design.</p>
+<h3 id="unknown-facts"><a class="header" href="#unknown-facts">Unknown facts</a></h3>
+<p>A rule applies only when its tree is <code>Match</code>, so an unknown fact never allows, trusts or excludes. A deny chooses how it treats what it cannot decide:</p>
+<ul>
+<li><code>unknown_as: match</code> makes the deny apply when its tree is <code>Unknown</code>, so it blocks unless the model prefers an allow. The default, <code>no_match</code>, means an unknown fact does not block.</li>
+<li><code>on_unparseable: match</code> makes each criterion whose version fact is not a version count towards the deny applying (as <code>Match</code>, or <code>NoMatch</code> under an odd number of <code>not</code> nodes). The rest of the tree must still match. The default leaves the criterion <code>Unknown</code>.</li>
+</ul>
+<p>Mandatory denies use the same options and defaults. Making the shipped blocklists fail closed by default (<code>safety_critical</code>) belongs to #32 and #87.</p>
+<h2 id="modes"><a class="header" href="#modes">Modes</a></h2>
+<p><code>policy.mode</code> sets how a policy's decisions take effect (#36):</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Mode</th><th>Decision</th></tr>
+</thead>
+<tbody>
+<tr><td><code>disabled</code></td><td>Only a device can be disabled (see the state machine below). The engine is not consulted: <code>evaluate_in</code> returns <code>None</code>, and not even a mandatory deny applies.</td></tr>
+<tr><td><code>monitor</code></td><td>Evaluated fully. A would-block runs as <code>allowed_audit</code>, with <code>would_have_been: blocked</code>.</td></tr>
+<tr><td><code>audit</code></td><td>As <code>monitor</code>; the agent sends a full event for every decision rather than would-blocks and summaries (#16).</td></tr>
+<tr><td><code>learning</code></td><td>As <code>audit</code>. An object that only the implicit deny would block is a <code>learning_candidate</code> (#5). An object a deny rule would block is never one.</td></tr>
+<tr><td><code>enforce</code></td><td>Blocked means blocked.</td></tr>
+</tbody>
+</table>
+</div>
+<p>A relaxed block keeps the deciding rule and its effects, so the would-block event is still logged, but notifies nobody and carries no <code>kill_running</code> or <code>request</code>. <strong>A mandatory deny blocks in every mode and every override session</strong> (#125: the blocklist always wins); only a disabled device skips it. A relaxed deny never lets through what an enforcing rule blocks: the matching rules are decided again without the denies that do not enforce, and if an enforcing deny or the implicit deny then blocks, the object is blocked. If an allow decides instead, the object runs with that allow's containment, elevation and grants. An override session is applied as a second layer, after the modes: only what the modes still block can become <code>allowed_override</code>, and the decision names the enforcing rule the session bypassed.</p>
+<p><strong>Where modes are set</strong>, resolved for each decision by <code>mode::resolve</code>:</p>
+<ol>
+<li><strong>Lockdown</strong> (<code>DeviceState::lockdown</code>, from the bundle) forces <code>enforce</code> over everything below, including a disabled device. Clearing it restores every prior mode.</li>
+<li><strong>Device mode</strong>: the policy's <code>mode</code>, or the mode the state machine moved the device to. <code>disabled</code> stops here.</li>
+<li><strong>Mandatory deny</strong>: always <code>enforce</code>.</li>
+<li><strong>Disconnected</strong>: <code>policy.mode_options.mode_disconnected</code>, if stricter, while the device has not checked in for <code>disconnected_after_secs</code> (default 3 check-in intervals). It must be at least as strict as <code>mode</code> (<code>mode_disconnected_weaker</code>).</li>
+<li><strong>Object type</strong>: <code>mode_options.mode_by_type</code> (for example <code>script.powershell: audit</code>). The control levels in <code>settings</code> then cap it: <code>audit</code> at <code>audit</code>, <code>off</code> at <code>monitor</code>.</li>
+<li><strong>Rule set</strong>: a non-mandatory blocklist's <code>mode_override</code> replaces it (<code>mode_override_not_allowed</code> elsewhere).</li>
+<li><strong>Rule</strong>: on a deny, <code>enforcement_override: always_enforce</code> makes it <code>enforce</code>; <code>never_enforce</code> caps it at <code>audit</code>. Other actions cannot set it (<code>enforcement_override_not_deny</code>).</li>
+<li><strong>Override session</strong> (#9): caps it at <code>audit</code> (<code>allowed_override</code>), except for an <code>always_enforce</code> rule unless the session is <code>full_bypass</code>.</li>
+</ol>
+<p><code>disabled</code> is rejected for a policy, an object type and a rule set (<code>mode_not_allowed</code>). Strictness ranks <code>enforce</code> above <code>learning</code> and <code>audit</code>, above <code>monitor</code>, above <code>disabled</code>.</p>
+<p><strong>Protection status</strong> (<code>ProtectionStatus::of</code>): <code>lockdown</code>, <code>disabled</code>, <code>override_active</code>, then <code>protected_enforce</code> if every Essential Eight object type is enforced, <code>protected_partial</code> if the device mode is <code>enforce</code> but some type is not, and otherwise <code>audit</code>, <code>learning</code> or <code>monitor</code>.</p>
+<p><strong>State machine</strong> (<code>mode::machine::ModeMachine</code>). Legal changes: <code>disabled</code> to any mode; <code>monitor</code> to <code>audit</code>, <code>learning</code>, <code>enforce</code> or <code>disabled</code>; <code>audit</code> to <code>learning</code>, <code>enforce</code>, <code>monitor</code> or <code>disabled</code>; <code>learning</code> to <code>audit</code>, <code>enforce</code> or <code>disabled</code>; <code>enforce</code> to any other mode, time-boxed. Leaving <code>enforce</code> for a weaker mode, and entering <code>disabled</code>, needs a reason, a ticket where the tenant requires one, and an expiry at most 30 days ahead; only <code>enforce</code> to <code>audit</code> may be permanent, with the elevated permission. A time box ends when the wall clock reaches the expiry <strong>or</strong> the monotonic clock has run for its length, so setting the clock back cannot extend it; the device then returns to the mode it left, offline too. Observing the end is final: <code>current</code> and <code>tick</code> both close the box and store the rollback target, so a later read with the clock set back never brings the weaker mode back, and the read that observes it returns the expiry record. Each change gives a <code>ModeChanged</code> record for the <code>mode_changed</code> event (#16). Time comes from the caller (<code>Clock</code>, <code>Now</code>).</p>
+<p><strong>Readiness gate.</strong> When the readiness check (<code>trace::readiness</code>, below) says <code>ack_required</code>, the caller sets <code>Governance::readiness_ack_required</code>, and a requested move to <code>enforce</code> is rejected (<code>ReadinessAckRequired</code>) unless it carries <code>readiness_ack</code>; the record then has <code>readiness_acked</code>. Returning to <code>enforce</code> from a time box that left it, and the revert when a box ends, are never held back.</p>
+<p><strong>Event fidelity</strong> (<code>mode::events::fidelity</code>). Which decisions a mode reports; the agent emits them (#16). A disabled device reports nothing. <code>ignore</code> is never reported. A block keeps its rule's <code>log</code>. A would-block and an override-session allow are always an event. An allowed object follows its rule's <code>log</code> in <code>enforce</code>, is only summarised in <code>monitor</code> (nothing for <code>log: never</code>), and is a full event in <code>audit</code> and <code>learning</code>. A learning candidate's event carries the object's full facts (#5).</p>
+<h2 id="hierarchy"><a class="header" href="#hierarchy">Hierarchy</a></h2>
+<p>A device's effective policy is built from layers, outermost first: the global node, its tenant, its groups from the tenant down, its dynamic groups (highest <code>rank</code> first), and the device. A node linked to a template has the template's layer just before its own. On one node, policies apply by <code>slot_order</code>, and the lowest slot wins a conflict. The module docs of <code>hierarchy</code> have the full semantics. In short:</p>
+<ul>
+<li><strong>Rules are additive.</strong> The effective rule list is the union of every layer's rule sets: those of assigned policies, of assigned rule set libraries (<code>rule_sets</code>, with a pin) and of every rule set library in an assigned category, including ones added later. Each rule keeps its provenance (<code>EffectivePolicy::rule</code>). A rule set two layers contribute is included once. Two different rule sets with one ID, or two versions of one library, are rejected.</li>
+<li><strong>Removal.</strong> A child cannot delete an inherited rule. It can suppress one (<code>suppress_inherited</code>) when the rule set allows it: <code>allow_child_suppress</code> defaults to <code>true</code> for allowlists and baselines and to <code>false</code> for every other kind. A mandatory rule set can never be suppressed (<code>suppress_not_allowed</code>), so the #125 rule that the blocklist always wins holds below every node. A suppressed rule stays in the effective policy, disabled, and its provenance names the node. A child can also shadow a rule with one that wins under the precedence model. Nothing shadows a mandatory deny, because it is decided before every model.</li>
+<li><strong>Settings</strong> are override-by-nearest, per top-level key of <code>settings</code> and per mode option. A node's own <code>settings</code> beat its policies. A key in <code>locked_settings</code> keeps its value for every layer below, and a later attempt is reported as <code>blocked_by_lock</code>. <code>locked_settings</code> can also lock <code>mode_options.mode_disconnected</code>, <code>mode_options.disconnected_after_secs</code> and <code>mode_options.mode_by_type</code>.</li>
+<li><strong>Modes.</strong> Each layer's mode is the node's <code>mode</code>, or its policies' modes merged by <code>mode_merge</code>: <code>closest</code> (the default) or <code>strictest</code>. The built-in <code>unassigned</code> group audits unless it sets a mode, and so does a device with no mode anywhere. <code>lock_mode: true</code> sets a floor at the mode in force at that node. A weaker effective mode, type mode or rule set <code>mode_override</code> is raised to the floor, and so is a control level that would cap below it. With an <code>enforce</code> floor, <code>never_enforce</code> rules become <code>inherit</code>. Every change is listed in <code>ModeProvenance::adjustments</code>.</li>
+<li><strong>Precedence.</strong> The model is chosen by the global node or the tenant, or by a group if its tenant allows it (<code>precedence_not_allowed</code>). With no node choosing, the highest-ranked policy's model applies. Every policy in one effective policy must use that model (<code>precedence_conflict</code>).</li>
+<li><strong>First match across levels.</strong> Each rule set carries the band of the first layer that contributed it (<code>RuleSet::band</code>). The hierarchy sets the band and replaces any value a policy gives. <code>level_order: top_down</code> (the default) puts global rules first, then the tenant, the groups from the tenant down, the dynamic groups and the device. <code>bottom_up</code> reverses that order, and <code>flat</code> ignores levels.</li>
+<li><strong>Determinism.</strong> The content hash is the SHA-256 of the effective policy's canonical JSON (sorted keys, revision left out) with the resolved library versions. It never depends on the order of anything in the snapshot (property-tested).</li>
+<li><strong>Placement.</strong> Each tenant's placement rules are first-match on directory OU, directory group, hostname wildcard, CIDR, tags and OS, and end with an implicit catch-all to <code>unassigned</code> that cannot be removed. A group can opt out of placement as a source and as a target (<code>allow_auto_assignment: false</code>). Placement runs on first contact and on reconnect, and on a user change only if the tenant sets <code>place_on_user_change</code>.</li>
+</ul>
+<h2 id="trace-explain-and-simulate"><a class="header" href="#trace-explain-and-simulate">Trace, explain and simulate</a></h2>
+<p><strong>Trace.</strong> <code>trace::Tracer::trace(subject, extras, state, trace_id, options)</code> decides one object with <code>Evaluator::evaluate_in</code> and returns a <code>Trace</code>, a bounded, structured record of that evaluation. The trace embeds the evaluator's decision unchanged and takes the set of matched rules from the evaluator. It then explains each rule by evaluating its criteria one by one, with the same compiled criteria and the same three-valued logic, without stopping early. Property tests check, over random policies, facts and device states, that the trace and the evaluator agree.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Contents</th><th>Level</th></tr>
+</thead>
+<tbody>
+<tr><td><code>trace_schema_version</code></td><td><code>1.0.0</code></td><td>all</td></tr>
+<tr><td><code>trace_id</code>, <code>policy_id</code>, <code>policy_revision</code>, <code>bundle_hash</code></td><td>identity; <code>bundle_hash</code> is supplied by the caller (#43)</td><td>all</td></tr>
+<tr><td><code>effective_mode</code>, <code>decisive</code>, <code>decision</code></td><td>the mode, the deciding rule, and the decision exactly as the evaluator made it</td><td>all</td></tr>
+<tr><td><code>mode_resolution[]</code></td><td>each step of #36 that applied (lockdown, device mode, mandatory deny, disconnected, type mode, control level, rule set and rule overrides, session), the effective mode and what it did to the outcome</td><td>standard</td></tr>
+<tr><td><code>precedence_model</code>, <code>stages[]</code></td><td>each pipeline stage: <code>decided</code>, <code>passed</code> or <code>skipped</code>, with its candidate count and, with a clock (<code>trace_timed</code>), its duration</td><td>standard</td></tr>
+<tr><td><code>matched[]</code></td><td>every rule that matched: stage, action, specificity tier, <code>order</code>, <code>priority</code>, and its role (<code>decided</code>, <code>overridden</code>, <code>annotation</code>, <code>granted</code>)</td><td>standard</td></tr>
+<tr><td><code>decisive.criteria[]</code></td><td>the deciding rule's criteria, each with its tri-state result, the result it needed (<code>no_match</code> under <code>not</code>), and its notes</td><td>standard</td></tr>
+<tr><td><code>inactive_matches[]</code></td><td>disabled rules that would have matched</td><td>standard</td></tr>
+<tr><td><code>scope_rejections[]</code></td><td>rules whose match tree matched but whose scopes (#38) took them out: the rule, the level (<code>policy</code>, <code>rule_set</code>, <code>rule</code>) and, when one decided alone, the dimension</td><td>standard</td></tr>
+<tr><td><code>unknown_facts[]</code></td><td>each missing or untrusted fact, why, and its effect on the rules it left unknown (an allow did not apply, a deny did not apply, a deny failed closed)</td><td>standard</td></tr>
+<tr><td><code>warnings[]</code></td><td><code>path_acl_unsafe</code>, <code>short_name_unresolved</code>, <code>signature_relaxed</code> (#256), <code>scope_stale</code> and <code>clock_untrusted</code> from scopes (#38), and <code>condition_timeout</code> and <code>user_controlled_context</code> once their sources exist (#33)</td><td>standard</td></tr>
+<tr><td><code>inheritance[]</code></td><td>the deciding rule's provenance: policy, rule set, rule. The group steps that <code>hierarchy::EffectivePolicy</code> records (#37) are a follow-up under #41</td><td>standard</td></tr>
+<tr><td><code>allow_suggestion</code></td><td>for a block or a would-block, a draft allow rule from the strongest identity available (hash, then publisher with product and version, then publisher, then a path users cannot write), with caveats if a mandatory or ordinary deny also matched. The engine never applies it: it is handed to approvals and recommendations (#5, #11)</td><td>standard</td></tr>
+<tr><td><code>near_misses[]</code></td><td>rules whose identity anchor matched but which did not apply, ranked by matched criteria (at most 10), each with its failing criteria: pointer, field, operator, expected and observed values</td><td>full</td></tr>
+<tr><td><code>facts_used[]</code></td><td>every fact the evaluated criteria read</td><td>full</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>trace::LevelPolicy</code> chooses the level an agent records: <code>minimal</code> for an object that runs, <code>standard</code> for a block or a would-block, and <code>full</code> with the device's debug flag or during a diagnostic session (<code>DIAGNOSTIC_SESSION_SECS</code>, 30 minutes). The simulator always traces at <code>full</code>. A <code>minimal</code> trace is built from the decision alone, with no further evaluation.</p>
+<p><strong>Bounds.</strong> Every list has a limit (<code>trace::limits</code>), and the entries left out are counted (<code>omitted</code>, <code>*_omitted</code>). Values are cut to 128 characters, and at most 4 values of one fact are written. The decision's own lists (<code>overridden</code>, <code>annotations</code>, <code>trust_sources</code>) are cut to 10 in the trace's JSON, with <code>*_omitted</code> counts. A test builds the largest trace the limits allow and checks that it stays within <code>MAX_TRACE_BYTES</code> (1 MiB).</p>
+<p><strong>Privacy</strong> (#18). Facts are written as <code>trace::Privacy</code> allows, when the trace is built. By default, object facts and paths are written and the user, device and session are withheld. A withheld value becomes its field plus, if a key is set, an HMAC-SHA-256 digest, so two traces can be compared without revealing the value. Every value written first passes the <code>Redactor</code>, whose linear-time patterns replace each match with <code>[redacted]</code>. Command-line facts (#7) will pass the same redactor.</p>
+<p><strong>Explain.</strong> <code>trace::explain(trace, verbosity)</code> gives an <code>ExplainDoc</code>: a summary, a reason a person can act on (such as a group membership), paragraphs, "why not allowed?" from the near misses, "what would allow this?" from the draft, and a table of the matching rules. <code>render_text</code> (CLI), <code>render_markdown</code> (console; policy text is escaped) and <code>render_tray</code> (one sentence, such as "Blocked by rule 'Block script hosts for standard users' (R-000004). This is because you are not in S-1-5-21-…-1100."; groups are named as the rule names them, until directory names arrive with #4) write it. The messages are templates in a <code>Catalog</code> (English built in). A translation is a file in a subset of the Fluent syntax (<code>id = text</code>, with <code>{ $name }</code> placeholders), and a message it lacks falls back to English.</p>
+<p><strong>Simulate.</strong> <code>trace::simulate::Simulator</code> replays recorded facts against the current policy and a <code>Candidate</code>: a draft document, a <code>ChangeSet</code> (add, replace, remove, enable or disable rules, or change the mode), or a mode change such as <code>audit</code> to <code>enforce</code>. Facts come as a <code>SnapshotFile</code> (<code>facts_schema_version</code> 1.0.0, YAML or JSON). Events, test files and inventory exports all use this format. A snapshot of another major version, or of a newer minor version, is rejected rather than guessed at. A fact a snapshot lacks is unknown, as on the agent. <code>run</code> reports the summary (newly blocked, newly allowed, changed attribution, changed outcome, unchanged), the changed events, and aggregates by device, user, rule and object. <code>events</code> gives every event's decision under both policies. Every decision comes from <code>Evaluator::evaluate_in</code>, the agent's function. Events are evaluated in parallel and sorted by event ID, so the result does not depend on the thread count. <code>cross_check</code> compares recorded agent decisions with the simulator's.</p>
+<p><strong>Readiness</strong> (#36). <code>trace::readiness::readiness</code> counts the would-block events per device in a window of <code>days</code> days, marks devices with at most <code>max_would_block</code> as ready, lists the objects with the most would-blocks with a draft rule for each, and gives the gate: "N would-block events across M devices in the last D days", with <code>ack_required</code> when N is above the threshold.</p>
+<p><strong>Policy-as-code tests.</strong> <code>trace::policy_test</code> reads a <code>tests:</code> file (<code>given</code> facts, <code>expect</code> an outcome, enforce-mode outcome, reason code, mode or deciding rule) and runs it through the simulator. The report has <code>exit_code</code> (non-zero on failure) and <code>junit()</code>. The examples in <a href="https://github.com/jusso-dev/palisade/tree/main/docs/examples/simulation"><code>docs/examples/simulation/</code></a> run in CI (<code>tests/simulation.rs</code>). The <code>pal policy test</code> command is #15.</p>
+<p><strong>Effective view.</strong> <code>trace::effective::effective_view(policy, state)</code> lists what a device enforces: every rule with its provenance and whether it is active (a disabled rule, or every rule on a disabled device, is not), the settings with their source, the mode of every object type, the session, lockdown and the protection status.</p>
+<h2 id="scopes"><a class="header" href="#scopes">Scopes</a></h2>
+<p>A <code>scope</code> narrows a rule to some users and groups, devices, network locations, sessions and times (#38). It can be set on a rule, on a rule set's assignment (<code>policy.rule_set_scopes</code>, which covers every rule of the set) and on the policy (<code>policy.scope</code>). Scopes <strong>intersect</strong> down that chain: a rule applies only when its match tree matches and every scope on the way to it matches. A rule out of scope behaves as if it were absent. It never decides, it is not listed as overridden, and a scheduled deny outside its windows does not deny. Scopes are evaluated before the match tree. They never count towards a rule's identity anchor or its specificity, so the precedence model chooses among the rules in scope exactly as before. See <a href="https://github.com/jusso-dev/palisade/blob/main/docs/examples/policies/scoped-rules.yaml"><code>docs/examples/policies/scoped-rules.yaml</code></a>.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>principals</code></td><td><code>include</code> and <code>exclude</code> lists of <code>sid</code>, <code>well_known</code> (<code>everyone</code>, <code>authenticated_users</code>, <code>administrators</code>, <code>users</code>, <code>system</code>, <code>local_service</code>, <code>network_service</code>, <code>interactive</code>, <code>remote_desktop_users</code>, <code>domain_controllers</code>), <code>local_group</code> (by name, resolved on the device, without case), <code>directory_group</code> (SID and display name), <code>cloud_group</code> (tenant and object ID), <code>user_pattern</code> (a <code>DOMAIN\user</code> wildcard) and <code>principal_set</code> (#37)</td></tr>
+<tr><td><code>devices</code></td><td><code>device_id</code>, <code>hostname_pattern</code>, <code>device_set</code> (#37), <code>directory_computer_group</code>, <code>cloud_device_group</code> (tenant and object ID, tested against the device's cached cloud groups with the same staleness rule as users'), <code>ou</code> (with <code>include_sub_ous</code>) and <code>tag</code></td></tr>
+<tr><td><code>network</code></td><td><code>cidr</code>, <code>range</code>, <code>dns_suffix</code>, <code>gateway_mac</code>, <code>server_reachable</code>, <code>location_profile</code> (a named profile in <code>policy.location_profiles</code>) and <code>network_set</code> (#37). An address test matches when any local interface address does.</td></tr>
+<tr><td><code>sessions</code></td><td><code>types</code> (<code>console</code>, <code>rdp</code>, <code>remote_shell</code>, <code>service</code>, <code>batch</code>, <code>network</code>) and, on multi-session hosts, the connecting <code>client</code>: <code>hostname</code> wildcards, <code>ip</code> blocks or ranges, and <code>device_sets</code></td></tr>
+<tr><td><code>schedule</code> / <code>schedule_set</code></td><td>when the scope is active (below)</td></tr>
+<tr><td><code>combine</code></td><td><code>all</code> (the default): every dimension that is set must match; <code>any</code>: one must</td></tr>
+<tr><td><code>negate</code></td><td>apply when the scope does <strong>not</strong> match</td></tr>
+<tr><td><code>subject</code></td><td>whose token <code>principals</code> tests: <code>process_user</code> (the default), <code>session_user</code> or <code>parent_process_user</code></td></tr>
+<tr><td><code>max_instances_per_session</code></td><td>allows only: block the object, with <code>instance_limit</code>, once this many instances already run in the session. <code>0</code> (the default) means no limit. An unknown count blocks. A mode that relaxes the block runs the object with the allow's containment, elevation, grants and window close.</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Rules of evaluation.</strong> An empty scope matches everything, and an empty <code>include</code> means everyone or everything. A match in <code>exclude</code> always beats <code>include</code>. Each list holds at most 1000 entries; larger lists belong in a library set (#37). A scope evaluates to match, no match or unknown, with the three-valued logic of match trees, and <code>unknown</code> follows the rule's action: an allow, trust source or exclusion never applies on it (it fails closed), and a deny applies only with <code>unknown_as: match</code>. Every note is collected in the decision's <code>scope_notes</code>: <code>fact_missing</code>, <code>fact_malformed</code>, <code>scope_stale</code>, <code>clock_untrusted</code>, <code>deny_only_group</code>, <code>set_unresolved</code>, <code>timezone_fallback</code> and <code>instance_limit</code>.</p>
+<p><strong>Group membership</strong> is tested against the subject's token: its group SIDs, which already hold nested directory groups and local groups, kept sorted so that a test is a binary search. Cloud-directory groups are not in the token. The agent caches them on the device with <code>cached_at</code>, and a cached membership older than <code>settings.group_cache_max_age_secs</code> (default 86400, range 3600 to 86400), from the future, or read with an untrusted clock is unknown (<code>scope_stale</code>). A deny-only SID in a filtered administrator token (UAC) is read both as membership and as none, and a rule takes the reading that makes it apply less if it lets an object run, and more if it denies or audits (<code>deny_only_group</code>). So a non-elevated administrator never gets an administrators-only allow, and is never let off a deny that excludes administrators. Absence from a token is proven only when its user SID and groups were both collected and are well formed, because the user SID is not among the groups. A SID set or cloud-group cache with a malformed entry cannot prove absence either (<code>fact_malformed</code>).</p>
+<p>Membership in token groups changes only when a new token is created, at the next logon. Removing a user from a group may therefore need them to log off before scopes see it. Cached cloud groups refresh on the configured interval, or on a manual refresh command (#4).</p>
+<p><strong>Name patterns</strong> (<code>user_pattern</code>) match the account name, which is easier to spoof than a SID. Validation only accepts one where a match makes the rules it covers apply less if they let an object run, or more if they deny (<code>user_pattern_not_allowed</code>). That rules them out of allow includes. Audit rules may use them anywhere.</p>
+<p><strong>Schedules.</strong> <code>timezone_basis</code> is <code>device_local</code>, <code>utc</code> or <code>user_local</code>, defaulting to <code>settings.time_zone_basis</code>. <code>user_local</code> uses the session user's time zone if the agent could read it, and otherwise the device's (<code>timezone_fallback</code>). Zones are IANA names, read from the time zone database bundled into the binary. <code>windows</code> are <code>{days, start, end | duration_mins}</code>. A window starts on one of its days at <code>start</code>, includes its start and excludes its end, and may wrap midnight (<code>22:00</code> to <code>06:00</code>). <code>dates</code> limit the schedule to absolute date ranges and <code>except_dates</code> remove days such as holidays. Both test the local date of the instant decided. Across daylight-saving changes, a local time that occurs twice means its first occurrence, and a skipped one moves forward by the gap. This is the "compatible" rule of the ECMAScript Temporal proposal. A scheduled rule outside its windows is absent. If the agent's trusted time is missing or its integrity is flagged (#18), or the zone is unknown, scheduled allows go inactive and scheduled denies stay active (<code>clock_untrusted</code>). On an allow, in a scope with <code>combine: all</code> and no <code>negate</code>, so that the rule stops applying when the schedule closes, <code>on_window_close</code> (<code>none</code>, <code>warn</code>, <code>warn_then_terminate</code>, with <code>grace_secs</code>, default 300) gives the decision a <code>window_close</code> directive with the instant the schedule closes, for the agent and tray to act on (#4, #11). A schedule that is not well formed, such as an unvalidated library schedule, reads as an untrusted clock does (<code>fact_malformed</code>).</p>
+<p><strong>Network location.</strong> <code>policy.location_profiles</code> names locations such as <code>corporate</code> (<code>dns_suffix: corp.example.org</code> and <code>server_reachable: true</code>). The agent evaluates them with <code>scope::CompiledProfiles</code> on every network change and heartbeat (60 seconds by default). <code>scope::LocationTracker</code> keeps the previous location until a new one has been stable for 5 seconds, and scopes test the result with <code>location_profile</code>.</p>
+<p><strong>Library sets.</strong> <code>principal_set</code>, <code>device_set</code>, <code>network_set</code>, <code>schedule_set</code> and client <code>device_sets</code> refer to library sets by <code>{id, pin}</code>, where <code>pin</code> is <code>latest</code> (the default) or a version number. Hierarchy validation checks each one like a tree reference, pins it to the version it resolves to, and counts it for in-use checks, so a new version of a set changes an effective policy's content hash. A schedule set holds one schedule, written as JSON. <code>Evaluator::with_library</code>, <code>trace::Tracer::with_library</code> and <code>Simulator::with_library</code> resolve principal, network and schedule sets through a <code>scope::ScopeLibrary</code> (#37 provides one: <code>ResolvedLibraries</code>). A set it cannot resolve is unknown (<code>set_unresolved</code>). Device-set membership is worked out by the server and arrives as a fact.</p>
+<h2 id="schema-versioning"><a class="header" href="#schema-versioning">Schema versioning</a></h2>
+<p>Documents carry <code>schema_version</code> (semver). A reader accepts the same major version and any minor version. A minor version adds optional fields; a major version is a breaking change and gets a new schema file. <code>PolicyDocument::from_json</code> checks the version before reading the rest of the document.</p>
+<p>The test <code>committed_schema_is_current</code> fails when the committed schema is stale. After changing the model, regenerate the schema:</p>
+<pre><code class="language-sh">PALISADE_BLESS=1 cargo test -p palisade-policy --test schema
+</code></pre>
+<h2 id="editor-support"><a class="header" href="#editor-support">Editor support</a></h2>
+<p>Policy files can name the schema in their first line, as the examples and <code>dsl::to_string</code> do:</p>
+<pre><code class="language-yaml"># yaml-language-server: $schema=https://raw.githubusercontent.com/jusso-dev/palisade/main/schemas/policy/v1.json
+</code></pre>
+<p>An editor that uses the YAML language server then completes field names and enum values and shows each field's description. To check it by hand: open <code>docs/examples/policies/minimal.yaml</code> in such an editor, start a new line under <code>policy:</code> and request completions (the list includes <code>precedence_model</code> and <code>settings</code>), then change <code>mode: audit</code> to <code>mode: strict</code> (it is underlined as not one of the allowed values). To use a local copy of the schema instead, change the URL to a relative path, for example <code>$schema=../../../schemas/policy/v1.json</code>.</p>
+<h2 id="tests"><a class="header" href="#tests">Tests</a></h2>
+<ul>
+<li>Unit tests per type for defaults, limits and every validation code.</li>
+<li>Property tests over random valid documents (<code>model::arbitrary</code>): they validate, they match the JSON Schema, and they round-trip through JSON losslessly (10,000 cases; set <code>PROPTEST_CASES</code> to change).</li>
+<li>YAML: property tests that random valid documents round-trip through YAML losslessly and byte-for-byte, and read the same as JSON (10,000 cases); unit tests for every strictness rule; and <code>tests/yaml.rs</code>, which checks the examples against the committed schema, reads every JSON fixture as YAML, and checks the codes, pointers and line:column of the fixtures in <code>tests/fixtures/yaml/</code>.</li>
+<li>Actions: unit tests of the reader (options are checked as they are read, and an option of another action is an error at its key), the full validity matrix written out as a table, and each validation code. <code>Decision</code> JSON is compared with committed snapshots in <code>tests/snapshots/decision/</code>; after a deliberate change, regenerate them with <code>PALISADE_BLESS=1 cargo test -p palisade-policy decision::</code>.</li>
+<li><code>tests/decision_snapshots.rs</code> (needs <code>test-util</code>): whole-pipeline decisions for policies built with <code>test_util</code>, compared with reviewed <code>insta</code> snapshots in <code>tests/snapshots/pipeline/</code>. Review a change with <code>cargo insta review</code> (docs/testing.md#snapshot-tests).</li>
+<li><code>tests/version_properties.rs</code>: every version operator, and <code>version_between</code> with both bounds, agree with a reference that compares versions as one integer, with values drawn next to each other to find off-by-one bugs. A planted exclusive maximum, and <code>version_ge</code> as <code>&gt;</code>, each failed it at once.</li>
+<li>Modes: an exhaustive table test checks <code>mode::resolve</code> against an independent statement of the rules for every combination of device mode, connectivity, offline mode, type mode, control level, deciding rule, rule set override, rule override, session and lockdown (202,500 cases). Unit tests cover each mode's effect on a decision. Property tests check, over random policies and device states, that a mode only relaxes a block, <code>would_have_been</code> is the enforce-mode outcome, and a matching mandatory deny always blocks; and, over random histories of requests, ticks, clock changes and restarts, that no mode change outside the legal table happens and no weaker mode outlives its time box.</li>
+<li>Benchmarks: <code>benches/criterion_eval.rs</code> (criterion) measures matching one compiled criterion against facts, for each kind of operator, and <code>benches/simulate.rs</code> measures simulated decisions per second and the cost of a trace at each level: <code>cargo bench -p palisade-policy</code>.</li>
+<li>Trace: snapshot tests in <code>tests/snapshots/trace/</code> pin the trace JSON and the text, Markdown and tray explanations for an allow, a deny, a mandatory deny, a near miss, unknown facts, an inactive rule, an unsafe path, a would-block and an override session, plus the simulation, readiness, effective-view and JUnit outputs. Regenerate them with <code>PALISADE_BLESS=1 cargo test -p palisade-policy trace::</code>. Property tests check that the trace agrees with the evaluator, and that the simulator reproduces the evaluator's decisions on any thread count.</li>
+<li>Precedence: unit tests pin each model's choice, and property tests check that every model's winner does not depend on the order of the matching rules, that under <code>deny_wins</code> a deny always beats an allow, and, over random valid policies, that a matching mandatory deny always blocks and that shuffling rule sets and rules never changes a decision. <code>tests/precedence/*.yaml</code> is a conformance suite: each file gives rule sets, an object and the expected decision (outcome, deciding rule, overridden rules, annotations and grants) under all five models.</li>
+<li>Hierarchy: unit tests for every rule above and every hierarchy and library code. They cover parent and reference cycles (named in the error), pins, visibility, in-use checks, templates, placement and ownership. Property tests over random group trees, policies, locks and suppressions check four things. First, shuffling the snapshot never changes the content hash. Second, no suppression removes an inherited mandatory deny or a default blocklist rule. Every refused suppression is one of those, and a mandatory deny still blocks. Third, nothing in the effective policy is weaker than a <code>lock_mode</code> floor. Fourth, computing twice gives the same policy. <code>tests/hierarchy/*.yaml</code> is a fixture suite. Each file gives a snapshot, a device and the expected decisions. Its effective policy and explain output (the provenance of every rule and setting, and the mode with its floor) are compared with <code>tests/snapshots/hierarchy/</code>. Regenerate them with <code>PALISADE_BLESS=1 cargo test -p palisade-policy --test hierarchy</code>.</li>
+<li>Scopes: table tests for every dimension's include and exclude lists, <code>combine</code> and <code>negate</code>, filtered administrator tokens, stale and unknown group caches, connecting clients, the location debounce and the instance limit, and end-to-end pipeline tests. Schedule tests cover midnight wrap, daylight-saving changes in Sydney and New York, half-hour and 45-minute offsets (Adelaide, Kolkata, Kathmandu, Lord Howe), holidays and all three time-zone bases. They are checked against a reference that finds local times by scanning instants rather than through the time library. Property tests check that an <code>exclude</code> holding every <code>include</code> entry never matches, that adding a scope to a chain never raises its result (a scope only narrows a rule), that <code>negate</code> is three-valued negation, that a deny-only group takes the reading that makes an allow apply less and a deny apply more, that a scoped rule decides only where the unscoped rule would, and that <code>closes_at</code> is the first inactive instant.</li>
+<li>Fixtures in <code>tests/fixtures/</code>: <code>valid/</code> documents pass the schema and validation; <code>invalid/</code> documents pass the schema but fail validation with the codes and paths in their <code>.expected</code> files; <code>malformed/</code> documents are rejected by the schema at the paths in their <code>.expected</code> files.</li>
+</ul>
+<h2 id="allowed-dependencies"><a class="header" href="#allowed-dependencies">Allowed dependencies</a></h2>
+<p><code>palisade-core</code>, <code>palisade-fileid</code>. Must never depend on an async runtime, an HTTP client or Windows API bindings. The rules are enforced by <code>cargo xtask check-deps</code>.</p>
+<h2 id="platform-support"><a class="header" href="#platform-support">Platform support</a></h2>
+<p>All platforms. This crate uses <code>std</code>. Only <code>palisade-core</code> has to build without it.</p>
+<h2 id="dependencies"><a class="header" href="#dependencies">Dependencies</a></h2>
+<ul>
+<li><code>regex-automata</code> and <code>regex-syntax</code>: the engine and parser behind the <code>regex</code> crate, for linear-time regular expressions with RE2 semantics, also used to compile wildcards (#32). Patterns are parsed once and built from the parse tree with only the linear-time engines enabled. <code>regex-syntax</code> also recognises look-around and backreferences, so the error can explain the alternative. Both are already in the lock file through <code>boon</code>.</li>
+<li><code>unicode-normalization</code>: NFC normalisation before strings are compared (#32).</li>
+<li><code>sha2</code> and <code>hmac</code>: the SHA-256 content hash of an effective policy (#37), deterministic trace IDs from event IDs in the simulator, and keyed digests of facts a trace withholds (#41). Both are from the same family as the hashes in <code>palisade-fileid</code>, and are already in the lock file.</li>
+<li><code>jiff</code>: civil dates and times, IANA time zones and daylight-saving arithmetic for schedules (#38), with the time zone database bundled into the binary (<code>tzdb-bundle-always</code>, no other default features), so evaluation never reads the system. It replaced <code>chrono</code> and <code>chrono-tz</code>, which <code>cargo deny</code> reports unmaintained.</li>
+<li>Dev-dependencies: <code>boon</code> checks documents against the JSON Schema, <code>proptest</code> drives the property tests, <code>criterion</code> runs the benchmarks, and <code>insta</code> compares the decision snapshots.</li>
+</ul>
+<h2 id="feature-flags"><a class="header" href="#feature-flags">Feature flags</a></h2>
+<ul>
+<li><code>test-util</code>: builders for tests, in <code>palisade_policy::test_util</code>: policies, rule sets and rules (<code>PolicyBuilder</code>, <code>RuleSetBuilder</code>, <code>RuleBuilder</code>), match trees (<code>hash</code>, <code>publisher</code>, <code>under</code>, <code>all</code>, <code>any</code>, <code>not</code>), object facts (<code>facts()</code>), evaluation contexts (<code>context()</code>) and a <code>subject(..).decide(&amp;policy)</code> shortcut. Off by default. Only <code>[dev-dependencies]</code> may turn it on (<code>cargo xtask check-manifests</code>), so it never reaches a release build. This crate's own unit tests always have it.</li>
+</ul>
+<h2 id="stability"><a class="header" href="#stability">Stability</a></h2>
+<p>Unstable and not published. Anything may change, until the first schema version is published.</p>
+<hr>
+<p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/crates/palisade-policy/README.md"><code>crates/palisade-policy/README.md</code></a> on GitHub.</small></p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../../crates/palisade-fileid/index.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../../crates/palisade-proto/index.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../../crates/palisade-fileid/index.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../../crates/palisade-proto/index.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../../mark-09e88c2c.min.js"></script>
+        <script src="../../searcher-c2a407aa.js"></script>
+
+        <script src="../../clipboard-1626706a.min.js"></script>
+        <script src="../../highlight-abc7f01d.js"></script>
+        <script src="../../book-a0b12cfe.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../../theme/palisade-c327a96e.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

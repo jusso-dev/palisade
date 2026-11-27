@@ -1,0 +1,445 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>0012. Fail-open versus fail-closed defaults - Palisade</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="Palisade: an educational Windows application allowlisting project">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../../css/general-2459343d.css">
+        <link rel="stylesheet" href="../../css/chrome-ae938929.css">
+        <link rel="stylesheet" href="../../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="../../theme/palisade-1bbd7bbc.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../../searchindex-3e2a1e09.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../../toc-8cab92c4.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div class="palisade-disclaimer" role="note" aria-label="Disclaimer">
+                    <strong>Palisade is an educational, personal-development project. It is not a replacement for commercial application control products and comes with no support or warranty. Do not rely on it to protect production systems.</strong>
+                </div>
+                <nav class="palisade-versions" aria-label="Documentation version">
+                    <label for="palisade-version-select">Version</label>
+                    <select id="palisade-version-select" hidden></select>
+                </nav>
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Palisade</h1>
+
+                    <div class="right-buttons">
+                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+                        <a href="https://github.com/jusso-dev/palisade" title="Git repository" aria-label="Git repository">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="0012-fail-open-versus-fail-closed-defaults"><a class="header" href="#0012-fail-open-versus-fail-closed-defaults">0012. Fail-open versus fail-closed defaults</a></h1>
+<ul>
+<li>Status: superseded by 0018</li>
+<li>Date: 2026-11-23</li>
+<li>Deciders: Palisade maintainer</li>
+</ul>
+<h2 id="context"><a class="header" href="#context">Context</a></h2>
+<p>Every enforcement component can fail. When one does, Palisade either <strong>fails open</strong> (allows,
+keeping the machine usable) or <strong>fails closed</strong> (blocks, keeping the control effective). A
+control that an attacker can switch off by crashing a process or corrupting a file is not a
+control (ISM-0846). A control that bricks machines when a cache file is damaged will be removed
+by the people it protects. The child issues make choices for individual cases (#56, #61, #113,
+#220, #225), and two of them pull in different directions:</p>
+<ul>
+<li>#61 says that if both cached policies are corrupt, the agent runs built-in safe defaults in
+audit mode.</li>
+<li>#225 says the agent loads a built-in emergency policy that blocks everything except OS-signed
+binaries and Palisade itself, and must not fail open.</li>
+</ul>
+<p>#19 also defers the release profile's <code>panic</code> strategy for the agent to this ADR, and #56 wants
+to restart a panicked subsystem without restarting the whole service.</p>
+<p>This ADR sets one rule for these cases. It relies on <a href="0002-enforcement-strategy.html">ADR 0002</a>:
+the OS-native policy is enforced by the kernel and does not depend on the Palisade agent
+process.</p>
+<h2 id="decision-drivers"><a class="header" href="#decision-drivers">Decision drivers</a></h2>
+<ol>
+<li>Nothing an unprivileged attacker can cause (a crash, a corrupt file, a clock change) may widen
+what is allowed.</li>
+<li>A recoverable failure must not make the machine unbootable or unmanageable.</li>
+<li>Failure is visible: every degraded state raises an event and shows in health.</li>
+<li>Behaviour must be predictable and testable on the VM harness (#26, #230).</li>
+</ol>
+<h2 id="considered-options"><a class="header" href="#considered-options">Considered options</a></h2>
+<ol>
+<li><strong>Fail open everywhere.</strong> Maximum availability, but any crash is a bypass.</li>
+<li><strong>Fail closed everywhere,</strong> including the driver layer and first install. Maximum security,
+but a driver fault or a bad first deploy blocks everything, including recovery tools.</li>
+<li><strong>Fail closed for anything that holds or once held policy, fail open only where another
+enforcing layer still covers the gap, and say which case is which.</strong> This is the option
+detailed below.</li>
+</ol>
+<h2 id="decision"><a class="header" href="#decision">Decision</a></h2>
+<p>Option 3. Case by case:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Failure</th><th>Behaviour</th><th>Why</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Agent process crash or hang</strong></td><td>The OS-native policy keeps enforcing, because the kernel holds it. The SCM restarts the service after 5 s, and the watchdog repairs it (#56, #220).</td><td>Stopping the agent removes reporting, not enforcement.</td></tr>
+<tr><td><strong>Panic while parsing one file</strong></td><td>The agent is built with <code>panic = "unwind"</code>. Each file parse runs inside its own <code>catch_unwind</code> boundary. A panic there marks that file's identity as unparseable, raises a <code>fileid.parse_panic</code> event (rate-limited, with the file's hash if one was computed), and the subsystem carries on with the next file. Any decision the agent itself makes treats an unparseable file as an unknown file (implicit deny in enforce mode, #39). Per-file panics do <strong>not</strong> count towards the subsystem circuit breaker below.</td><td>With <code>abort</code>, one crafted file that triggers a parser panic would crash the whole agent on every scan, blinding it in a loop. Counting per-file panics towards the breaker would let a standard user disable a subsystem by dropping three crafted files. Treating the file as unknown keeps the decision closed.</td></tr>
+<tr><td><strong>Panic in a subsystem outside a per-file boundary</strong></td><td>The subsystem task is wrapped with <code>catch_unwind</code> and restarted (#56). After 3 such panics in 10 minutes the subsystem is marked <code>Failed</code> and a critical health alert is raised. If the failed subsystem is the one that answers driver verdict requests, the driver sees the agent as disconnected, and the driver row below applies. Aborts that unwinding cannot catch (stack overflow, out of memory) fall back to the first row (agent process crash).</td><td>A real bug, not a crafted input, is the likely cause, so it is surfaced loudly. The native layer keeps enforcing whatever the subsystem state.</td></tr>
+<tr><td><strong>New bundle (<code>pending</code>) fails verification or activation</strong></td><td>Keep <code>active</code>. Report <code>PolicyRejected(reason)</code> (#61).</td><td>Nothing was rolled back: the device stays on the policy it already had.</td></tr>
+<tr><td><strong>Active bundle (N) corrupt or fails verification at load</strong></td><td>Load <code>previous</code> (N-1) if it verifies, as #225 specifies. This is a <strong>bounded, one-step exception to anti-rollback</strong>: the anti-rollback record keeps N, so only bundles at N or above are accepted from the server. The agent raises a critical <code>policy.lkg_loaded</code> tamper event at once (not only when both bundles fail) and starts a rapid check-in to fetch a fresh bundle.</td><td>Availability: disk corruption must not lock a machine down when a verified, previously approved policy exists. N-1 may be weaker than N (for example, if N added a deny), so this is recorded as an accepted risk below.</td></tr>
+<tr><td><strong>Active and previous bundles both fail, after a policy was ever accepted</strong></td><td>Load the built-in <strong>emergency policy</strong> from #225 in enforce mode: allow OS-signed binaries and Palisade itself, block the rest. Raise a critical event.</td><td>Corruption after enrolment is a possible attack, so it must not relax anything.</td></tr>
+<tr><td><strong>No policy yet (first install, before the first bundle)</strong></td><td>Run the built-in safe defaults from #61: audit mode, with the mandatory blocklists (#87) enforced if the agent ships them. Report <code>PolicyMissing</code>.</td><td>Nothing has been approved yet, so there is nothing to protect by locking down. Blocking everything at install time would make deployment fail.</td></tr>
+<tr><td><strong>Policy stale or past <code>expires_at</code></strong></td><td>Keep enforcing the current policy. Report <code>PolicyStale</code>. Never relax automatically (#61, #225).</td><td>Staleness is not evidence that the policy is wrong.</td></tr>
+<tr><td><strong>Driver absent, disconnected, timed out or version-mismatched</strong></td><td>Follow <code>driver_failure_mode</code> (#113). Default <code>fail_safe</code> (pass-through with audit) for early rollout rings; <code>fail_secure</code> recommended once stable. The native layer keeps enforcing either way.</td><td>The driver only adds restrictions on top of the native policy (ADR 0002), so failing it open loses the extra rules but keeps the baseline.</td></tr>
+<tr><td><strong>Clock skew, rollback or forward jump</strong></td><td>Time-bounded grants (exceptions, override codes, maintenance windows, tokens) follow the rules in "Time rules" below.</td><td>By default only offline override codes and tokens consult the wall clock, so changing it cannot start, extend or revive a scheduled grant. The remaining gaps are listed as accepted risks.</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Time rules.</strong> The <em>wall clock</em> can be changed by an administrator or a spoofed time source, so
+by default only one decision uses it: redeeming an offline override code on an offline-started
+agent (rule 3). The <em>monotonic clock</em> only counts forwards while the agent
+runs. From these the agent keeps two values:</p>
+<ul>
+<li><strong>Anchored time</strong>: the server time from an authenticated check-in reply (mTLS with server
+pinning, <a href="0005-agent-server-protocol.html">ADR 0005</a>), advanced by the monotonic clock. It is
+valid until the agent process stops or the machine resumes from a sleep that the monotonic
+clock did not count. The agent is <strong>anchored</strong> while it holds a valid anchored time, and
+<strong>offline-started</strong> otherwise (after a restart or such a resume, before its next check-in).</li>
+<li><strong>The floor</strong>: a lower bound on real time in protected storage (#220). On load it is advanced
+only by the monotonic time elapsed since the load, never by boot uptime, so a service restart
+within one boot is not counted twice. While anchored it is raised to anchored time. It is
+written every minute and at shutdown, in every state, and a write never lowers it. It does
+not count time spent powered off, so it lags real time after a shutdown.</li>
+</ul>
+<p>For a scheduled grant with start <code>s</code> and end <code>e</code> (an exception or maintenance window from the
+policy bundle):</p>
+<ol>
+<li>
+<p><strong>Anchored.</strong> The grant is active when <code>s &lt;= anchored time &lt; e</code> and <code>e &gt; floor</code>. The wall
+clock plays no part, so changing it cannot start, extend, end or revive a grant.</p>
+</li>
+<li>
+<p><strong>Offline-started, default.</strong> Grants from the policy bundle do not start or continue. A
+grant that was active when the agent stopped stays closed until the next check-in. This is
+the closed direction: scheduled work waits for the device to check in. For offline
+maintenance, an administrator uses an override code (rule 3) instead.</p>
+</li>
+<li>
+<p><strong>Offline override codes and unlock tokens</strong> (#222). A code or token is accepted only if it is authenticated by its
+secret, its ID is not in the redeemed-code list, its end is after the floor, and its validity
+window contains anchored time (when anchored) or the wall clock (when offline-started). The
+override session it opens is timed on the monotonic clock, not by <code>s</code> and <code>e</code>. Its remaining duration is kept in
+protected storage and only ever decreases, so restarts and reboots cannot lengthen it. Entries
+in the redeemed-code list are kept until the code's end is at or before the floor; after that,
+the floor check alone rejects the code.</p>
+</li>
+<li>
+<p><strong>Opt-in offline scheduling.</strong> A group may set <code>offline_scheduled_grants = allow</code>. Then, while
+offline-started, rule 1 applies with <em>session time</em> in place of anchored time. An <em>offline
+session</em> starts each time the agent becomes offline-started: at agent start, and on resume
+from an uncounted sleep. Session time is the wall clock recorded when the offline session
+started, plus the monotonic time since, so wall-clock changes during the session do not move
+it. Session time is discarded when the agent becomes anchored. The console marks groups using
+this option.</p>
+</li>
+<li>
+<p><strong>Skew.</strong> <code>tamper.clock.skew</code> is raised, depending on the state:</p>
+<ul>
+<li>while anchored: when the wall clock differs from anchored time by more than 5 minutes;</li>
+<li>when an offline session starts: when the wall clock is more than 60 s behind the floor;</li>
+<li>during an offline session: when the wall clock drifts from session time by more than 60 s
+backwards or 5 minutes forwards, measured cumulatively, so small steps add up.</li>
+</ul>
+<p>The alert sets a skew latch in protected storage. Only an authenticated check-in clears it,
+and the offline-session checks stop once the agent is anchored, so a corrected clock does not
+re-set the latch. While the latch is set, rule 4 is off and rule 2 applies.</p>
+</li>
+</ol>
+<p>#220 implements these rules as one pure function of (wall clock, monotonic clock, stored state),
+with a property-test table covering anchored, offline-started, service restart, uncounted sleep,
+offline reboot, rollback, forward jump and slow drift.</p>
+<p><strong>Accepted risk.</strong> With the default rules, the wall clock only matters for offline override
+codes on an offline-started agent. Someone who can change the clock (administrator rights, or a
+spoofed time source) can redeem a genuine, unredeemed code outside its intended window: later,
+by setting the clock back, or earlier, by setting it forward. Each code still works only once,
+only while its end is after the floor, and only for its own monotonic-timed duration. They
+cannot forge a code or reuse a redeemed one. The same applies to unlock tokens.</p>
+<p>With <code>offline_scheduled_grants = allow</code>, someone who sets the clock while the agent is not running (with physical access, administrator rights, or a spoofed time source at boot) can,
+until the next check-in, start a scheduled grant early or use a grant whose end the floor has not
+reached. An authenticated check-in ends this: from then on rule 1 uses server time, and a clock
+that is still wrong raises <code>tamper.clock.skew</code>. Check-in cannot always <em>detect</em> that it happened.
+If the clock is put back right before the device reconnects, a grant used inside the time the
+device was powered off looks the same as a legitimate offline run. The uploaded events still show
+the grant was used offline, which is why the console marks groups with this option.</p>
+<p><strong>"A policy was ever accepted".</strong> The device is treated as having had a policy if the
+anti-rollback record (#225) shows a version above zero, or an <code>active</code> or <code>previous</code> cache file
+exists. An unverified <code>pending</code> file does not count, so an interrupted first download leaves the
+device on the first-install path. Deleting the record alone does not unlock the first-install
+path. The mismatch between record copies raises <code>tamper.policy.rollback_suspected</code> (#225).</p>
+<h2 id="consequences"><a class="header" href="#consequences">Consequences</a></h2>
+<h3 id="positive"><a class="header" href="#positive">Positive</a></h3>
+<ul>
+<li>One rule covers almost every case: if Palisade has ever enforced a policy, failures keep it
+enforced or make it stricter. The bounded exceptions are listed in Security impact.</li>
+<li>The <code>#61</code> and <code>#225</code> behaviours are reconciled. Each applies to a different, testable state.</li>
+<li>A crafted file cannot use a parser panic to stop the agent reporting or to trip a subsystem
+circuit breaker.</li>
+</ul>
+<h3 id="negative"><a class="header" href="#negative">Negative</a></h3>
+<ul>
+<li><code>panic = "unwind"</code> makes binaries slightly larger than <code>abort</code>, and code must be unwind-safe at
+subsystem boundaries. Because Cargo applies <code>panic</code> to a whole profile, the release profile uses
+<code>unwind</code> for every binary. The no_std driver crate is built separately (#8)
+and sets its own panic strategy.</li>
+<li>The driver's default <code>fail_safe</code> leaves driver-only rules unenforced while the driver is down.
+The endpoint reports those rules as "not enforced" (#113), so it is not counted as effective for
+them.</li>
+<li>A device whose caches are both corrupted after enrolment becomes very restrictive until it gets a
+new bundle. Users will notice, which is intended.</li>
+<li>By default, scheduled maintenance windows and exceptions do not run on a device that has
+restarted and cannot check in. Offline maintenance needs an override code.</li>
+<li>The time rules need protected storage for the floor, the redeemed-code list, the override
+session budget and the skew latch.</li>
+</ul>
+<h2 id="security-impact"><a class="header" href="#security-impact">Security impact</a></h2>
+<p>This ADR decides whether crashing, corrupting or confusing Palisade is a bypass. With these
+defaults it is not: the kernel-enforced native layer survives agent failure, losing both cached
+bundles leads to the stricter emergency policy, a stale policy keeps enforcing, crafted files
+cannot disable a subsystem, and by default a clock change cannot start, extend or revive a scheduled grant.
+There are four deliberate, bounded weak points:</p>
+<ol>
+<li>the first-install audit window (built-in mandatory blocklists still enforce, and it ends at the
+first verified bundle);</li>
+<li>the one-step N-1 fallback when <code>active</code> is corrupt (it raises a critical tamper event at once,
+it never goes further back than N-1, and the agent re-fetches N or later straight away). Only
+SYSTEM can write the cache directory (#220), so an attacker who can trigger this already has
+stronger options;</li>
+<li>the driver's default <code>fail_safe</code> (the native layer still enforces, and it is configurable to
+<code>fail_secure</code>); and</li>
+<li>the clock risks in "Accepted risk" above: using an unredeemed override code or token outside its window,
+and, only for groups that opt in to offline scheduling, starting or stretching scheduled
+grants until the next check-in.</li>
+</ol>
+<p>All four are listed in the threat model as accepted risks (#219) and are exercised by the bypass
+regression suite (#230).</p>
+<h2 id="links"><a class="header" href="#links">Links</a></h2>
+<ul>
+<li>Issues #20, #19 (release profile), #39, #56, #61, #87, #113, #219, #220, #222, #225, #226, #230.</li>
+<li><a href="0002-enforcement-strategy.html">ADR 0002</a> (enforcement layers),
+<a href="0005-agent-server-protocol.html">ADR 0005</a> (authenticated server time),
+<a href="0007-agent-local-store.html">ADR 0007</a> (cache files).</li>
+<li>Superseded by <a href="0018-fail-open-vs-fail-closed-defaults-revised.html">ADR 0018</a>.</li>
+</ul>
+<hr>
+<p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/adr/0012-fail-open-vs-fail-closed-defaults.md"><code>docs/adr/0012-fail-open-vs-fail-closed-defaults.md</code></a> on GitHub.</small></p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../../docs/adr/0011-msrv-and-unsafe-code-policy.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../../docs/adr/0013-protected-process-light-feasibility.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../../docs/adr/0011-msrv-and-unsafe-code-policy.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../../docs/adr/0013-protected-process-light-feasibility.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../../mark-09e88c2c.min.js"></script>
+        <script src="../../searcher-c2a407aa.js"></script>
+
+        <script src="../../clipboard-1626706a.min.js"></script>
+        <script src="../../highlight-abc7f01d.js"></script>
+        <script src="../../book-a0b12cfe.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../../theme/palisade-c327a96e.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

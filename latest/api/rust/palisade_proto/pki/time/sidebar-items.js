@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["TimeError"],"struct":["FixedClock","SkewTolerance","SystemClock","Validity"],"trait":["Clock"]};

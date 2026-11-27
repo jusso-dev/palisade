@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_SPKI_LEN"],"enum":["KeyAlgorithm","KeyBackend","KeyError","KeyPurpose","KeyStatus","KeyType","SignatureAlgorithm"],"fn":["spki_sha256"],"struct":["CertificateBinding","KeyRecord","Kid","PublicKey"]};

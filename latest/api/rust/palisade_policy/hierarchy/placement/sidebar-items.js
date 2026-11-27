@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_CONDITION_VALUES"],"enum":["PlacementOutcome","PlacementTrigger"],"fn":["matches"],"struct":["PlacementConditions","PlacementFacts","PlacementRule"]};

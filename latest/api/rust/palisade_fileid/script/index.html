@@ -1,0 +1,109 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Script signature blocks (#52): the embedded Authenticode signatures of PowerShell, VBScript, JScript and Windows Script Files, and the signed metadata attributes that give such files version-like identity."><title>palisade_fileid::script - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="palisade_fileid" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module script</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../palisade_fileid/index.html">palisade_<wbr>fileid</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module script</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#the-digest" title="The digest">The digest</a></li><li><a href="#failing-conservative" title="Failing conservative">Failing conservative</a></li><li><a href="#not-done-here-yet" title="Not done here yet">Not done here yet</a></li></ul><h3><a href="#structs">Module Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#constants" title="Constants">Constants</a></li><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="../index.html">In crate palisade_<wbr>fileid</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">palisade_fileid</a></div><h1>Module <span>script</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../src/palisade_fileid/script/mod.rs.html#1-1103">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Script signature blocks (#52): the embedded Authenticode signatures of
+PowerShell, VBScript, JScript and Windows Script Files, and the signed
+metadata attributes that give such files version-like identity.</p>
+<p>A signed script carries its PKCS#7 SignedData as base64 in comment lines
+at the end of the text (for a Windows Script File, in a <code>&lt;signature&gt;</code>
+element before the last <code>&lt;/job&gt;</code>). The SignedData is the same
+Authenticode structure a PE file carries, except that its indirect data
+is <code>SPC_SIPINFO</code> (1.3.6.1.4.1.311.2.1.30), naming the subject interface
+package (SIP) that hashed the text, and its digest is that package’s
+digest of the script.</p>
+<ul>
+<li><a href="fn.verify_script.html" title="fn palisade_fileid::script::verify_script"><code>verify_script</code></a> finds and checks the block, computes the digest the
+way the OS package does, and verifies the signature with the same
+machinery as PE signatures (#48): the strict DER reader, the
+SignedData decoder, the signer certificate lookup, the <code>messageDigest</code>
+check and the signature over the authenticated attributes. The result
+is a <a href="struct.ScriptReport.html" title="struct palisade_fileid::script::ScriptReport"><code>ScriptReport</code></a>, whose <a href="struct.ScriptReport.html#structfield.signatures" title="field palisade_fileid::script::ScriptReport::signatures"><code>ScriptReport::signatures</code></a> holds at most
+one <a href="../authenticode/enum.SignatureKind.html#variant.Script" title="variant palisade_fileid::authenticode::SignatureKind::Script"><code>SignatureKind::Script</code></a> signature that
+<a href="../authenticode/fn.evaluate_trust.html" title="fn palisade_fileid::authenticode::evaluate_trust"><code>crate::authenticode::evaluate_trust</code></a> and
+<a href="../authenticode/fn.evaluate_validity.html" title="fn palisade_fileid::authenticode::evaluate_validity"><code>crate::authenticode::evaluate_validity</code></a> take like any other.</li>
+<li><a href="fn.evaluate_script_trust.html" title="fn palisade_fileid::script::evaluate_script_trust"><code>evaluate_script_trust</code></a> decides trust under a
+<a href="enum.ScriptAnchorPolicy.html" title="enum palisade_fileid::script::ScriptAnchorPolicy"><code>ScriptAnchorPolicy</code></a>: the OS requires a script’s root to be in the
+machine root store, unlike a PE file’s.</li>
+<li><a href="../authenticode/struct.SignedMetadata.html" title="struct palisade_fileid::authenticode::SignedMetadata"><code>crate::authenticode::SignedMetadata</code></a> holds the signed metadata
+attributes (1.3.6.1.4.1.311.2.7.1 to .10). They are read from every
+signature, PE ones included, into
+<a href="../authenticode/struct.SignerAttributes.html#structfield.signed_metadata" title="field palisade_fileid::authenticode::SignerAttributes::signed_metadata"><code>crate::authenticode::SignerAttributes::signed_metadata</code></a>.</li>
+</ul>
+<h2 id="the-digest"><a class="doc-anchor" href="#the-digest">§</a>The digest</h2>
+<p>Both kinds of package hash the script as UTF-16LE text, without the
+signature block and the line break before it:</p>
+<div class="table"><table><thead><tr><th>Package</th><th>Formats</th><th>Byte order mark</th><th>Appended</th></tr></thead><tbody>
+<tr><td>PowerShell</td><td><code>.ps1 .psm1 .psd1</code>, <code>.ps1xml .psc1 .cdxml</code>, <code>.mof</code></td><td>hashed, as U+FEFF</td><td>nothing</td></tr>
+<tr><td>Windows Script Host</td><td><code>.vbs</code>, <code>.js</code>, <code>.wsf</code></td><td>not hashed</td><td>the block’s position, in UTF-16 units of the hashed text, as a 32-bit little-endian integer</td></tr>
+</tbody></table>
+</div>
+<p>For <code>.wsf</code>, the text after the block (the closing <code>&lt;/job&gt;</code>) is hashed
+too. The text is decoded by its byte order mark: UTF-8, UTF-16LE or
+UTF-16BE (the PowerShell package does not sign UTF-16BE). Line endings
+(CRLF, LF or a lone CR) are hashed as they are: an LF file and a CRLF
+file have different digests. These rules are checked against scripts
+signed by OS tooling in every format, encoding and line-ending
+combination, against signed scripts the OS ships, and on Windows CI
+against the OS’s own verdict on every fixture (<code>tests/script.rs</code>).</p>
+<p>One case has no defined digest: UTF-8 text with a character outside
+ASCII in a script host format. The OS’s own signer signs it, and the
+OS’s own verifier then reports a hash mismatch, so no rule both agree
+on exists. Such text is <a href="enum.TextIssue.html#variant.NonAsciiUtf8" title="variant palisade_fileid::script::TextIssue::NonAsciiUtf8"><code>TextIssue::NonAsciiUtf8</code></a>, never valid. UTF-8
+text that is all ASCII, and UTF-16 text, are read as above.</p>
+<h2 id="failing-conservative"><a class="doc-anchor" href="#failing-conservative">§</a>Failing conservative</h2>
+<p>A script’s signature is untrusted input, and interpreters read text in
+more ways than one. So anything ambiguous, truncated or lossy fails the
+check, and never makes a file look signed:</p>
+<ul>
+<li><strong>Text without a byte order mark</strong> is decoded by the OS from a guess,
+falling back to the machine’s code page, so its digest depends on the
+machine. It is read only when it is ASCII without NUL, which every
+candidate decodes the same way; otherwise <a href="enum.TextIssue.html" title="enum palisade_fileid::script::TextIssue"><code>TextIssue</code></a>.</li>
+<li>Invalid UTF-8 after a UTF-8 byte order mark, unpaired surrogates or an
+odd length in UTF-16 text, a UTF-32 byte order mark, UTF-16BE
+PowerShell text, and non-ASCII UTF-8 script host text are
+<a href="enum.TextIssue.html" title="enum palisade_fileid::script::TextIssue"><code>TextIssue</code></a>s too.</li>
+<li>The block must be exactly as signers write it: one begin line and one
+end line, each a whole line; a CRLF before the begin line; every line
+ending in CRLF; every data line the format’s comment prefix, strict
+base64 and the comment suffix; and nothing after the end line except,
+for <code>.wsf</code>, the rest of the file, which must hold a <code>&lt;/job&gt;</code> (the
+block sits inside a job). Anything else is a <a href="enum.BlockError.html" title="enum palisade_fileid::script::BlockError"><code>BlockError</code></a>.
+The exact marker text anywhere else in the file, even inside a string,
+is one too (<a href="enum.BlockError.html#variant.MultipleBlocks" title="variant palisade_fileid::script::BlockError::MultipleBlocks"><code>BlockError::MultipleBlocks</code></a>), because another reader
+could take it for the block. Marker text that differs from the
+format’s in case or spacing is not marker text, so such a file is
+unsigned.</li>
+<li>The base64 must decode to exactly one DER SignedData whose <code>SpcSipInfo</code>
+names the format’s package. Nested signatures are checked as DER but
+not verified (<a href="enum.ScriptWarning.html#variant.NestedSignaturesIgnored" title="variant palisade_fileid::script::ScriptWarning::NestedSignaturesIgnored"><code>ScriptWarning::NestedSignaturesIgnored</code></a>).</li>
+<li>Encoded scripts (<code>.vbe</code>, <code>.jse</code>) are not read at all: they are
+unsigned, with <a href="enum.ScriptWarning.html#variant.UnsupportedEncoding" title="variant palisade_fileid::script::ScriptWarning::UnsupportedEncoding"><code>ScriptWarning::UnsupportedEncoding</code></a>.</li>
+<li>Files over <a href="struct.ScriptOptions.html#structfield.max_size" title="field palisade_fileid::script::ScriptOptions::max_size"><code>ScriptOptions::max_size</code></a> are not read:
+<a href="enum.ScriptSigningState.html#variant.TooLargeForSignatureCheck" title="variant palisade_fileid::script::ScriptSigningState::TooLargeForSignatureCheck"><code>ScriptSigningState::TooLargeForSignatureCheck</code></a>.</li>
+</ul>
+<h2 id="not-done-here-yet"><a class="doc-anchor" href="#not-done-here-yet">§</a>Not done here yet</h2>
+<ul>
+<li>Reading the OS machine root store, and the OS trust-verification
+cross-check, need the Windows API (<code>os-trust</code>, #48 and #95). The
+caller supplies the root store as a <a href="../authenticode/struct.TrustConfig.html" title="struct palisade_fileid::authenticode::TrustConfig"><code>TrustConfig</code></a>.</li>
+<li>Catalog-signed scripts: <a href="struct.ScriptReport.html#method.catalog_digests" title="method palisade_fileid::script::ScriptReport::catalog_digests"><code>ScriptReport::catalog_digests</code></a> is the hook
+for a <a href="../catalog/struct.CatalogStore.html" title="struct palisade_fileid::catalog::CatalogStore"><code>crate::catalog::CatalogStore</code></a> lookup; matching against
+catalogs made by OS tooling, and folding a match into the file’s
+signing state, are #51 and #55.</li>
+<li>Feeding the signed metadata into the unified file identity record is
+#55; interpreter enforcement is #92 to #95.</li>
+</ul>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.BlockLocation.html" title="struct palisade_fileid::script::BlockLocation">Block<wbr>Location</a></dt><dd>Where the signature block is: the CRLF before its begin line through
+the line break after its end line.</dd><dt><a class="struct" href="struct.ScriptOptions.html" title="struct palisade_fileid::script::ScriptOptions">Script<wbr>Options</a></dt><dd>Options for <a href="fn.verify_script.html" title="fn palisade_fileid::script::verify_script"><code>verify_script</code></a>.</dd><dt><a class="struct" href="struct.ScriptReport.html" title="struct palisade_fileid::script::ScriptReport">Script<wbr>Report</a></dt><dd>A script’s signature, checked.</dd><dt><a class="struct" href="struct.ScriptTrust.html" title="struct palisade_fileid::script::ScriptTrust">Script<wbr>Trust</a></dt><dd>The trust verdict on a script’s signature.</dd><dt><a class="struct" href="struct.ScriptTrustAnchors.html" title="struct palisade_fileid::script::ScriptTrustAnchors">Script<wbr>Trust<wbr>Anchors</a></dt><dd>The anchor sets a script’s chain can be built against.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.BlockError.html" title="enum palisade_fileid::script::BlockError">Block<wbr>Error</a></dt><dd>Why a signature block is not well formed.</dd><dt><a class="enum" href="enum.ScriptAnchorPolicy.html" title="enum palisade_fileid::script::ScriptAnchorPolicy">Script<wbr>Anchor<wbr>Policy</a></dt><dd>Which trust anchors a script’s chain may end in.</dd><dt><a class="enum" href="enum.ScriptAnchorSource.html" title="enum palisade_fileid::script::ScriptAnchorSource">Script<wbr>Anchor<wbr>Source</a></dt><dd>The anchor set a trusted script chain ended in.</dd><dt><a class="enum" href="enum.ScriptInvalidReason.html" title="enum palisade_fileid::script::ScriptInvalidReason">Script<wbr>Invalid<wbr>Reason</a></dt><dd>Why a signed script is not validly signed.</dd><dt><a class="enum" href="enum.ScriptKind.html" title="enum palisade_fileid::script::ScriptKind">Script<wbr>Kind</a></dt><dd>A script format, by the subject interface package that signs it.</dd><dt><a class="enum" href="enum.ScriptSigningState.html" title="enum palisade_fileid::script::ScriptSigningState">Script<wbr>Signing<wbr>State</a></dt><dd>A script’s signing state.</dd><dt><a class="enum" href="enum.ScriptWarning.html" title="enum palisade_fileid::script::ScriptWarning">Script<wbr>Warning</a></dt><dd>Something unusual about a script that does not change its state.</dd><dt><a class="enum" href="enum.TextEncoding.html" title="enum palisade_fileid::script::TextEncoding">Text<wbr>Encoding</a></dt><dd>How a script’s text is encoded, by its byte order mark.</dd><dt><a class="enum" href="enum.TextIssue.html" title="enum palisade_fileid::script::TextIssue">Text<wbr>Issue</a></dt><dd>Why a script’s text cannot be decoded without ambiguity. A script with
+one of these can be unsigned, but never validly signed.</dd></dl><h2 id="constants" class="section-header">Constants<a href="#constants" class="anchor">§</a></h2><dl class="item-table"><dt><a class="constant" href="constant.DEFAULT_MAX_SCRIPT_SIZE.html" title="constant palisade_fileid::script::DEFAULT_MAX_SCRIPT_SIZE">DEFAULT_<wbr>MAX_<wbr>SCRIPT_<wbr>SIZE</a></dt><dd>The default largest script whose signature is checked: 32 MiB.</dd><dt><a class="constant" href="constant.MAX_SIGNATURE_SIZE.html" title="constant palisade_fileid::script::MAX_SIGNATURE_SIZE">MAX_<wbr>SIGNATURE_<wbr>SIZE</a></dt><dd>The largest signature, in bytes, a block may decode to: the same 16 MiB
+limit as a PE certificate table.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.evaluate_script_trust.html" title="fn palisade_fileid::script::evaluate_script_trust">evaluate_<wbr>script_<wbr>trust</a></dt><dd>Builds the chain of <code>report</code>’s signature against the anchor sets
+<code>policy</code> allows, and decides whether its signer is trusted. Only a
+<a href="enum.ScriptSigningState.html#variant.Valid" title="variant palisade_fileid::script::ScriptSigningState::Valid"><code>ScriptSigningState::Valid</code></a> script is ever trusted; check
+<a href="struct.ScriptReport.html#structfield.signing_state" title="field palisade_fileid::script::ScriptReport::signing_state"><code>ScriptReport::signing_state</code></a> for why another is not, since its
+<a href="struct.ScriptReport.html#structfield.signatures" title="field palisade_fileid::script::ScriptReport::signatures"><code>ScriptReport::signatures</code></a> holds no signature when the block itself
+could not be read (its state is then
+<a href="../authenticode/enum.InvalidReason.html#variant.ScriptSignatureBlock" title="variant palisade_fileid::authenticode::InvalidReason::ScriptSignatureBlock"><code>crate::authenticode::InvalidReason::ScriptSignatureBlock</code></a>). Expiry,
+timestamps and revocation are
+<a href="../authenticode/fn.evaluate_validity.html" title="fn palisade_fileid::authenticode::evaluate_validity"><code>crate::authenticode::evaluate_validity</code></a>, with
+<a href="struct.ScriptReport.html#structfield.signatures" title="field palisade_fileid::script::ScriptReport::signatures"><code>ScriptReport::signatures</code></a> and <a href="struct.ScriptTrust.html#structfield.trust" title="field palisade_fileid::script::ScriptTrust::trust"><code>ScriptTrust::trust</code></a>.</dd><dt><a class="fn" href="fn.verify_script.html" title="fn palisade_fileid::script::verify_script">verify_<wbr>script</a></dt><dd>Reads the script <code>data</code> as <code>kind</code> and checks its signature block.</dd><dt><a class="fn" href="fn.verify_script_file.html" title="fn palisade_fileid::script::verify_script_file">verify_<wbr>script_<wbr>file</a></dt><dd>Reads the script at <code>path</code> as <code>kind</code>, within <a href="struct.ScriptOptions.html#structfield.max_size" title="field palisade_fileid::script::ScriptOptions::max_size"><code>ScriptOptions::max_size</code></a>
+(a larger file is not read), and checks its signature block. Fails with
+<a href="https://doc.rust-lang.org/1.100.0/core/io/error/enum.ErrorKind.html#variant.InvalidInput" title="variant core::io::error::ErrorKind::InvalidInput"><code>std::io::ErrorKind::InvalidInput</code></a> for anything but a regular file,
+without blocking on a FIFO. An encoded script is not read at all.</dd></dl></section></div></main></body></html>

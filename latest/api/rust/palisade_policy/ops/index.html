@@ -1,0 +1,195 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Matching one criterion against the facts about one object (#31, #32)."><title>palisade_policy::ops - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="palisade_policy" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module ops</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../palisade_policy/index.html">palisade_<wbr>policy</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module ops</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#three-valued-results" title="Three-valued results">Three-valued results</a></li><li><a href="#several-values" title="Several values">Several values</a></li><li><a href="#comparing-text" title="Comparing text">Comparing text</a></li><li><a href="#paths" title="Paths">Paths</a></li><li><a href="#regular-expressions" title="Regular expressions">Regular expressions</a></li><li><a href="#versions" title="Versions">Versions</a></li><li><a href="#signers" title="Signers">Signers</a></li><li><a href="#context" title="Context">Context</a><ul><li><a href="#numbers-levels-and-dates" title="Numbers, levels and dates">Numbers, levels and dates</a></li><li><a href="#addresses" title="Addresses">Addresses</a></li><li><a href="#sets" title="Sets">Sets</a></li><li><a href="#directory-units" title="Directory units">Directory units</a></li><li><a href="#time" title="Time">Time</a></li><li><a href="#failing-closed-in-mandatory-blocklists" title="Failing closed in mandatory blocklists">Failing closed in mandatory blocklists</a></li></ul></li></ul><h3><a href="#modules">Module Items</a></h3><ul class="block"><li><a href="#modules" title="Modules">Modules</a></li><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#constants" title="Constants">Constants</a></li><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="../index.html">In crate palisade_<wbr>policy</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">palisade_policy</a></div><h1>Module <span>ops</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../src/palisade_policy/ops.rs.html#1-1902">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Matching one criterion against the facts about one object (#31, #32).</p>
+<p>A <a href="../model/struct.Criterion.html" title="struct palisade_policy::model::Criterion"><code>Criterion</code></a> is compiled once, when the policy is loaded, into a
+<a href="struct.CompiledCriterion.html" title="struct palisade_policy::ops::CompiledCriterion"><code>CompiledCriterion</code></a>: regular expressions and wildcards become
+automata, and literal values are normalised and case-folded. Matching
+then does no compilation and runs in time linear in the fact’s length.</p>
+<h2 id="three-valued-results"><a class="doc-anchor" href="#three-valued-results">§</a>Three-valued results</h2>
+<p>Every evaluation gives a <a href="enum.Tri.html" title="enum palisade_policy::ops::Tri"><code>Tri</code></a>: <code>Match</code>, <code>NoMatch</code>, or <code>Unknown</code> when a
+fact the criterion needs is missing or cannot be trusted. A negative
+operator is the Kleene negation of its positive form, so a negated test
+of an unknown fact is <code>Unknown</code>, never <code>Match</code>: “does not contain X” is
+not satisfied by a value nobody computed. A whole tree combines these
+results with the same logic, and a rule only matches on <code>Match</code>
+(<a href="../condition/index.html" title="mod palisade_policy::condition"><code>crate::condition</code></a>), so <code>Unknown</code> never allows.</p>
+<h2 id="several-values"><a class="doc-anchor" href="#several-values">§</a>Several values</h2>
+<p>A positive operator matches if <strong>any</strong> value matches. A negative
+operator matches if <strong>no</strong> value matches: <code>not_contains [a, b]</code> means
+the fact contains neither <code>a</code> nor <code>b</code>.</p>
+<h2 id="comparing-text"><a class="doc-anchor" href="#comparing-text">§</a>Comparing text</h2>
+<p>Strings are compared after Unicode NFC normalisation, so composed and
+decomposed spellings of one name are equal. Unless the criterion sets
+<code>case_sensitive: true</code>, both sides are then folded with the Unicode
+simple upper-case mapping: one character to one character, with no
+locale rules, so the result does not depend on the machine’s language.
+This is how NTFS compares names: <code>i</code>, <code>I</code> and the dotless <code>ı</code> are equal
+everywhere, and the dotted capital <code>İ</code> is distinct from all three. A
+character whose upper case is several characters, such as <code>ß</code>, is left
+as it is. Hash values are compared as hex digits in either case.</p>
+<h2 id="paths"><a class="doc-anchor" href="#paths">§</a>Paths</h2>
+<p>Path facts and path values pass through the same lexical normalisation
+(<a href="../../palisade_core/path/index.html" title="mod palisade_core::path"><code>palisade_core::path</code></a>). A path criterion evaluates to <code>Unknown</code> when
+the path is missing, is not a drive or UNC path, or contains a short
+(8.3) name the agent could not expand. A mapped network drive matches in
+both its drive form and its UNC form (<a href="../facts/struct.PathFact.html#structfield.alias" title="field palisade_policy::facts::PathFact::alias"><code>PathFact::alias</code></a>).</p>
+<p>On <code>path.full</code> and <code>path.directory</code>:</p>
+<ul>
+<li><code>starts_with</code> ends at a component boundary: <code>C:\Tools</code> matches
+<code>C:\Tools\a.exe</code> but not <code>C:\ToolsX\a.exe</code>.</li>
+<li>A value may start with a path variable, such as <code>%PROGRAMFILES%\App</code>,
+for <code>equals</code>, <code>starts_with</code> and <code>wildcard</code> and their negations. The
+variable is expanded for this evaluation (<a href="../facts/struct.PathVariables.html" title="struct palisade_policy::facts::PathVariables"><code>PathVariables</code></a>); a
+variable with no value makes the criterion <code>Unknown</code>.</li>
+<li>In wildcards, <code>*</code> matches any run of characters within one component
+(as a whole component it needs at least one character, so <code>C:\*</code>
+does not match the bare root <code>C:\</code>),
+<code>?</code> exactly one character other than <code>\</code>, and <code>**</code> any run of
+characters across components. As a whole component (<code>\**\</code>, a
+trailing <code>\**</code> or a leading <code>**\</code>), <code>**</code> matches zero or more whole
+components, so <code>C:\a\**</code> matches <code>C:\a</code> itself and everything below
+it, and <code>C:\a\**\b.exe</code> matches <code>C:\a\b.exe</code>. <code>[*]</code> and <code>[?]</code> match
+a literal <code>*</code> or <code>?</code>. A value written with <code>/</code> is read with <code>\</code>.</li>
+<li>An alternate data stream is its own object. On <code>path.full</code>, a value
+that does not name a stream never matches one, and a value that names
+a stream only matches streams: <code>C:\x\*</code> does not match
+<code>C:\x\a.txt:payload</code>, <code>C:\x\*:*</code> does, and <code>**:**</code> matches no plain
+file. A value names a stream when its last component has a <code>:</code> that is
+not a drive letter’s. <code>match_ads: true</code>, on a positive test of
+<code>path.full</code>, lets a value that names no stream also match the streams
+of a file it matches; a negative test cannot take it, so a stream never
+escapes a rule written for its file. A regular expression is never
+tested against a stream’s own name, so by default it never matches a
+stream; with <code>match_ads: true</code> it is tested against the file that holds
+the stream, and matches the stream if it matches that file. <code>path.directory</code>, <code>path.file_name</code> and
+<code>path.extension</code> describe the file that holds the stream.</li>
+</ul>
+<p>On every other string field, <code>*</code> and <code>**</code> match any run of characters,
+and <code>?</code> matches one.</p>
+<p><strong>Path identity is only trusted where users cannot write.</strong> In a rule
+that lets an object run, trusts it or excludes it (an allow, and the
+other actions with <a href="../model/action/enum.ActionKind.html#method.needs_identity" title="method palisade_policy::model::action::ActionKind::needs_identity"><code>ActionKind::needs_identity</code></a>, #34), a positive
+<code>path.*</code> test that would match evaluates to <code>Unknown</code>,
+with the note <a href="enum.Note.html#variant.PathAclUnsafe" title="variant palisade_policy::ops::Note::PathAclUnsafe"><code>Note::PathAclUnsafe</code></a>, unless the facts show that no
+non-administrative principal can write the file or a directory above it.
+<code>Unknown</code> rather than <code>NoMatch</code>, so that the test also fails closed under
+negation.</p>
+<h2 id="regular-expressions"><a class="doc-anchor" href="#regular-expressions">§</a>Regular expressions</h2>
+<p><code>regex</code> and <code>not_regex</code> use a linear-time engine with RE2 semantics (a
+lazy DFA with a PikeVM fallback; no backtracking).
+Patterns are anchored at both ends and are case-insensitive unless
+<code>case_sensitive: true</code>. Case-insensitive matching uses the engine’s
+Unicode simple case folding, which differs from the folding above for a
+few characters (the dotless <code>ı</code> does not match <code>i</code> or <code>I</code>). On path
+fields the fact is the normalised path, so write <code>\\</code> for each
+separator. These constructs are not supported and are rejected when the
+policy is validated:</p>
+<ul>
+<li>look-around: <code>(?=…)</code>, <code>(?!…)</code>, <code>(?&lt;=…)</code>, <code>(?&lt;!…)</code>. Write the negative
+part as a second criterion with <code>not_regex</code>, in an <code>all</code> with the first.</li>
+<li>backreferences: <code>\1</code>, <code>\k&lt;name&gt;</code>.</li>
+<li>patterns whose compiled form exceeds <a href="constant.REGEX_SIZE_LIMIT.html" title="constant palisade_policy::ops::REGEX_SIZE_LIMIT"><code>REGEX_SIZE_LIMIT</code></a>.</li>
+</ul>
+<p>Path variables are not expanded inside regular expressions.</p>
+<p><code>anchored: false</code> lets a pattern match anywhere in the fact instead of
+the whole fact (<code>Suite [0-9]+</code> then matches <code>Example Suite 12 (x64)</code>).
+Only <code>regex</code> and <code>not_regex</code> take it.</p>
+<h2 id="versions"><a class="doc-anchor" href="#versions">§</a>Versions</h2>
+<p>A version is up to four dot-separated numbers, each at most 65535, with
+missing parts read as zero: <code>10.0</code> equals <code>10.0.0.0</code>. Facts may also
+separate the numbers with commas (<code>10, 0, 19041, 1</code>). A fact with a
+non-numeric suffix (<code>10.0.19041.1 (release)</code>) is compared without it,
+with the note <a href="enum.Note.html#variant.VersionSuffixStripped" title="variant palisade_policy::ops::Note::VersionSuffixStripped"><code>Note::VersionSuffixStripped</code></a>. A fact that is not a
+version at all is <code>Unknown</code>, with <a href="enum.Note.html#variant.VersionUnparseable" title="variant palisade_policy::ops::Note::VersionUnparseable"><code>Note::VersionUnparseable</code></a>, so it
+never satisfies a version test in either direction. The bounds mean the
+same in allow and deny rules: <code>version_between [min, max]</code> includes both.
+On version fields, <code>equals</code> and <code>not_equals</code> compare versions too.</p>
+<h2 id="signers"><a class="doc-anchor" href="#signers">§</a>Signers</h2>
+<p>A signer criterion looks at every signature on the object and matches
+if any of them matches. Only signatures whose status is valid, valid
+with an expired but timestamped certificate, or catalog-signed take
+part: a revoked, untrusted, expired or digest-mismatched signature never
+vouches for an object, and an unsigned object matches no signer.</p>
+<h2 id="context"><a class="doc-anchor" href="#context">§</a>Context</h2>
+<p>Context criteria (#33) test the user, device and session in
+<a href="struct.EvalContext.html#structfield.context" title="field palisade_policy::ops::EvalContext::context"><code>EvalContext::context</code></a> rather than the object. They follow the same
+rules: a fact that was not collected is <code>Unknown</code>, and so is its
+negation.</p>
+<ul>
+<li>SIDs (<code>user.sid</code>, <code>user.primary_group</code>) are compared in canonical
+form: <code>s-1-5-32-544</code> equals <code>S-1-5-32-544</code>, and leading zeros are
+ignored. A SID fact that is not a SID is <code>Unknown</code>, with
+<a href="enum.Note.html#variant.FactMalformed" title="variant palisade_policy::ops::Note::FactMalformed"><code>Note::FactMalformed</code></a>.</li>
+<li>Sets (<code>user.groups</code>, <code>device.groups</code>, <code>device.tags</code>) take <code>member_of</code>
+and <code>not_member_of</code>: <code>member_of</code> matches if the set holds any value,
+<code>not_member_of</code> if it holds none. Group members are SIDs or
+cloud-directory object IDs (GUIDs, in any case); a member of the fact
+that is neither is unknown, with <a href="enum.Note.html#variant.FactMalformed" title="variant palisade_policy::ops::Note::FactMalformed"><code>Note::FactMalformed</code></a>, so it never
+lets <code>not_member_of</code> match. Tags are text, and case-insensitive unless
+<code>case_sensitive: true</code>.</li>
+<li><code>user.name</code> is tested against both the account name (<code>DOMAIN\user</code>)
+and the user principal name, and matches if either does. A form that
+was not collected counts as <code>Unknown</code>, so a negative test only matches
+when both forms are known. Regular expressions are not allowed on it
+(#32); match principals by SID where you can.</li>
+<li>Yes-or-no facts take <code>is_true</code> and <code>is_false</code>, with no values.</li>
+<li><code>session.type</code> takes <code>equals</code> and <code>not_equals</code> with the names
+<code>console</code>, <code>rdp</code>, <code>remote_shell</code>, <code>service</code>, <code>batch</code> and <code>network</code>.</li>
+<li>The other device and session facts are text or versions, compared as
+above.</li>
+</ul>
+<h3 id="numbers-levels-and-dates"><a class="doc-anchor" href="#numbers-levels-and-dates">§</a>Numbers, levels and dates</h3>
+<p><code>eq</code>, <code>ne</code>, <code>gt</code>, <code>ge</code>, <code>lt</code>, <code>le</code> and <code>between</code> compare whole numbers
+(<code>device.os_build</code>, <code>session.id</code>), integrity levels (<code>user.integrity_level</code>,
+ordered <code>untrusted</code> &lt; <code>low</code> &lt; <code>medium</code> &lt; <code>medium_plus</code> &lt; <code>high</code> &lt;
+<code>system</code> &lt; <code>protected</code>) and dates (<code>time.date</code>, <code>YYYY-MM-DD</code>, which also
+takes <code>date_between</code>). <code>between</code> and <code>date_between</code> take a minimum and a
+maximum and include both. Numbers are decimal with no sign, at most
+2^64 - 1.</p>
+<h3 id="addresses"><a class="doc-anchor" href="#addresses">§</a>Addresses</h3>
+<p><code>session.client_ip</code> is one address and <code>net.ip</code> the set of local
+addresses; a test of the set matches if any address matches.
+<code>ip_in_cidr</code> takes CIDR blocks (<code>10.0.0.0/8</code>, <code>2001:db8::/32</code>, whose
+address must be the first of the block), <code>ip_between</code> takes ranges
+(<code>192.168.1.10-192.168.1.20</code>, or <code>192.168.1.10-20</code>), and <code>ip_wildcard</code>
+takes IPv4 octet patterns (<code>10.*.*.*</code>). <code>equals</code> compares addresses, and
+the set operators test members of <code>net.ip</code>. An IPv4 address written in
+IPv6 form (<code>::ffff:10.0.0.1</code>) is the IPv4 address. <a href="net/index.html" title="mod palisade_policy::ops::net"><code>net</code></a> parses all of
+these, and scopes (#38) use it too. <code>net.mac</code> holds MAC addresses
+(<code>aa:bb:cc:01:02:03</code>, <code>AA-BB-CC-01-02-03</code> or <code>aabbcc010203</code>).</p>
+<h3 id="sets"><a class="doc-anchor" href="#sets">§</a>Sets</h3>
+<p><code>member_of</code> and <code>any_of</code> match if the set holds any value, <code>all_of</code> if it
+holds every value, and <code>not_member_of</code> if it holds none. A member of a
+principal set that is neither a SID nor an object ID makes a value it
+might be unknown, so it never lets <code>not_member_of</code> match or <code>all_of</code> fail.
+<code>net.ip</code> is a set of addresses: a set test (<code>member_of</code>, <code>any_of</code>,
+<code>all_of</code>, <code>not_member_of</code>) compares the listed addresses with it, so
+<code>all_of</code> needs every one present, while a network test (<code>ip_in_cidr</code>,
+<code>ip_between</code>, <code>ip_wildcard</code>) matches if any local address does.
+<code>net.dns_suffix</code> and <code>net.location</code> are sets of names, compared like tags.</p>
+<h3 id="directory-units"><a class="doc-anchor" href="#directory-units">§</a>Directory units</h3>
+<p><code>user.ou</code> and <code>device.ou</code> read the distinguished name of the user’s or
+device’s directory object and test the unit it is in: the name without
+its first component. Names are compared component by component, without
+case or spaces around <code>=</code> and <code>,</code>, after decoding the escapes of RFC 4514
+(<code>\,</code> and <code>\2C</code> are the same comma). A name with an escape RFC 4514
+does not define cannot be compared: as a rule value it is invalid, and as
+a fact it is unknown. <code>include_sub_ous: true</code> also matches units below
+the named one.</p>
+<h3 id="time"><a class="doc-anchor" href="#time">§</a>Time</h3>
+<p>The agent supplies the weekday, time of day and date in the clock the
+policy’s <code>time_zone_basis</code> names, from its trusted clock, and leaves them
+out when the clock cannot be trusted, so every time test is then unknown
+and an allow that depends on the time fails closed (#18). <code>weekday_in</code>
+takes <code>mon</code> to <code>sun</code>. <code>time_between [start, end]</code> (<code>HH:MM</code>) includes the
+start and excludes the end, and wraps midnight when the end is before
+the start (<code>22:00</code>, <code>06:00</code>); an empty window is rejected.</p>
+<h3 id="failing-closed-in-mandatory-blocklists"><a class="doc-anchor" href="#failing-closed-in-mandatory-blocklists">§</a>Failing closed in mandatory blocklists</h3>
+<p>A criterion in a mandatory blocklist may be <code>safety_critical: true</code>. When
+it is unknown, it counts towards the deny applying, so a shipped
+blocklist blocks an object whose facts are missing instead of letting it
+through (<a href="../condition/struct.CompiledMatch.html#method.eval_mandatory" title="method palisade_policy::condition::CompiledMatch::eval_mandatory"><code>crate::condition::CompiledMatch::eval_mandatory</code></a>, #87).
+Validation rejects the option anywhere else.</p>
+</div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="net/index.html" title="mod palisade_policy::ops::net">net</a></dt><dd>IP addresses, address ranges, octet wildcards and MAC addresses (#32).</dd></dl><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.CompileError.html" title="struct palisade_policy::ops::CompileError">Compile<wbr>Error</a></dt><dd>Why a criterion could not be compiled.</dd><dt><a class="struct" href="struct.CompiledCriterion.html" title="struct palisade_policy::ops::CompiledCriterion">Compiled<wbr>Criterion</a></dt><dd>A criterion ready to be matched. Build one with
+<a href="struct.CompiledCriterion.html#method.compile" title="associated function palisade_policy::ops::CompiledCriterion::compile"><code>CompiledCriterion::compile</code></a>.</dd><dt><a class="struct" href="struct.EvalContext.html" title="struct palisade_policy::ops::EvalContext">Eval<wbr>Context</a></dt><dd>What an evaluation needs besides the object’s facts.</dd><dt><a class="struct" href="struct.Evaluation.html" title="struct palisade_policy::ops::Evaluation">Evaluation</a></dt><dd>The result of evaluating one criterion.</dd><dt><a class="struct" href="struct.Notes.html" title="struct palisade_policy::ops::Notes">Notes</a></dt><dd>A set of <a href="enum.Note.html" title="enum palisade_policy::ops::Note"><code>Note</code></a>s.</dd><dt><a class="struct" href="struct.Version.html" title="struct palisade_policy::ops::Version">Version</a></dt><dd>A version: four 16-bit parts, compared part by part.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.CompileErrorKind.html" title="enum palisade_policy::ops::CompileErrorKind">Compile<wbr>Error<wbr>Kind</a></dt><dd>What is wrong with a criterion that could not be compiled.</dd><dt><a class="enum" href="enum.Note.html" title="enum palisade_policy::ops::Note">Note</a></dt><dd>Something an evaluation noticed, for the decision trace (#41).</dd><dt><a class="enum" href="enum.Tri.html" title="enum palisade_policy::ops::Tri">Tri</a></dt><dd>A three-valued result, with Kleene logic.</dd></dl><h2 id="constants" class="section-header">Constants<a href="#constants" class="anchor">§</a></h2><dl class="item-table"><dt><a class="constant" href="constant.MAX_REGEXES_PER_POLICY.html" title="constant palisade_policy::ops::MAX_REGEXES_PER_POLICY">MAX_<wbr>REGEXES_<wbr>PER_<wbr>POLICY</a></dt><dd>The most regular expression values in one policy.</dd><dt><a class="constant" href="constant.REGEX_SIZE_LIMIT.html" title="constant palisade_policy::ops::REGEX_SIZE_LIMIT">REGEX_<wbr>SIZE_<wbr>LIMIT</a></dt><dd>The most memory a compiled regular expression or wildcard may use, in
+bytes. Larger patterns are rejected when the policy is validated.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.fold.html" title="fn palisade_policy::ops::fold">fold</a></dt><dd>NFC-normalises <code>s</code>, then folds it with the simple upper-case mapping
+unless <code>case_sensitive</code>.</dd><dt><a class="fn" href="fn.normalize_hex.html" title="fn palisade_policy::ops::normalize_hex">normalize_<wbr>hex</a></dt><dd>The canonical form of a hash value: without a <code>0x</code> prefix, in lowercase.
+<code>None</code> if the rest is not hexadecimal.</dd></dl></section></div></main></body></html>

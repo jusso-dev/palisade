@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_TIME_BOX_SECS"],"enum":["Cause","TransitionError"],"fn":["is_legal","needs_time_box"],"struct":["Governance","ModeChanged","ModeMachine","Now","Request","TimeBox"],"trait":["Clock"]};

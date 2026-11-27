@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["effective_view"],"struct":["EffectiveRule","EffectiveSetting","EffectiveView","TypeMode"]};

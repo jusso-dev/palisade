@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_PATTERN_BYTES","MAX_REDACTION_PATTERNS","MAX_VALUES","MAX_VALUE_CHARS","REDACTED"],"struct":["Observed","Privacy","RedactionError","Redactor"]};

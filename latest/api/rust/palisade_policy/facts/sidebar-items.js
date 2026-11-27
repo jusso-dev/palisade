@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["PathVariable","SignatureSource","SignerStatus"],"struct":["ObjectFacts","PathFact","PathVariables","SignerFact"]};

@@ -1,0 +1,120 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Windows Installer packages (#53): `.msi` databases, `.msp` patches, `.mst` transforms and `.msm` merge modules."><title>palisade_fileid::installer - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="palisade_fileid" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module installer</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../palisade_fileid/index.html">palisade_<wbr>fileid</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module installer</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#layers" title="Layers">Layers</a></li><li><a href="#package-kind" title="Package kind">Package kind</a></li><li><a href="#the-signature" title="The signature">The signature</a></li><li><a href="#fail-conservative" title="Fail conservative">Fail conservative</a></li><li><a href="#the-normalised-hash" title="The normalised hash">The normalised hash</a></li><li><a href="#limits" title="Limits">Limits</a></li></ul><h3><a href="#modules">Module Items</a></h3><ul class="block"><li><a href="#modules" title="Modules">Modules</a></li><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#constants" title="Constants">Constants</a></li><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="../index.html">In crate palisade_<wbr>fileid</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">palisade_fileid</a></div><h1>Module <span>installer</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../src/palisade_fileid/installer/mod.rs.html#1-1568">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Windows Installer packages (#53): <code>.msi</code> databases, <code>.msp</code> patches,
+<code>.mst</code> transforms and <code>.msm</code> merge modules.</p>
+<p><a href="fn.parse_installer.html" title="fn palisade_fileid::installer::parse_installer"><code>parse_installer</code></a> reads a package from memory and returns an
+<a href="struct.InstallerIdentity.html" title="struct palisade_fileid::installer::InstallerIdentity"><code>InstallerIdentity</code></a>: what kind of package it is, the product identity
+from the <code>Property</code> table and the summary information, the patch or
+transform targets, an inventory of embedded executable content, the
+package’s Authenticode signature, checked against its content, and a
+normalised SHA-256 that stays the same across copies of a package whose
+only differences are timestamps.</p>
+<h2 id="layers"><a class="doc-anchor" href="#layers">§</a>Layers</h2>
+<ul>
+<li><code>cfb</code>: a bounded compound-file reader. Every sector belongs to at
+most one chain, every directory entry is reached at most once, and any
+inconsistency is an error.</li>
+<li><code>database</code>: stream-name decoding, the string pool and the tables.</li>
+<li><code>summary</code>: the summary information property set.</li>
+<li>this module: identity, signature and hashes.</li>
+</ul>
+<h2 id="package-kind"><a class="doc-anchor" href="#package-kind">§</a>Package kind</h2>
+<p>The root storage’s CLSID says what a package is:
+<code>000C1084-0000-0000-C000-000000000046</code> for an installer database (an
+<code>.msi</code>, or an <code>.msm</code> when it has a <code>ModuleSignature</code> table),
+<code>000C1086-…</code> for a patch and <code>000C1082-…</code> for a transform. A file whose
+root has any other CLSID is <a href="enum.InstallerError.html#variant.NotInstaller" title="variant palisade_fileid::installer::InstallerError::NotInstaller"><code>InstallerError::NotInstaller</code></a>.</p>
+<h2 id="the-signature"><a class="doc-anchor" href="#the-signature">§</a>The signature</h2>
+<p>An installer package is signed by an Authenticode SignedData in the
+root stream <code>\u{5}DigitalSignature</code>. Its indirect data is
+<code>SPC_SIPINFO</code> (1.3.6.1.4.1.311.2.1.30) naming the installer subject
+type, <code>000C10F1-0000-0000-C000-000000000046</code>, and its digest is the
+<strong>content hash</strong>, computed like this (<a href="fn.content_digests.html" title="fn palisade_fileid::installer::content_digests"><code>content_digests</code></a>):</p>
+<ol>
+<li>Start at the root storage.</li>
+<li>Sort the storage’s children by name: compare the UTF-16LE bytes of
+the names up to the shorter length; when one is a prefix of the
+other, the longer name sorts first.</li>
+<li>For each child in that order: in the root, skip the
+<code>\u{5}DigitalSignature</code> stream, and hash the content of the
+<code>\u{5}MsiDigitalSignatureEx</code> stream only through step 5; hash a
+stream’s bytes; recurse into a storage (a storage with one of those
+names included).</li>
+<li>After the children, hash the storage’s 16-byte CLSID.</li>
+<li>When the package has <code>\u{5}MsiDigitalSignatureEx</code>, the hash includes
+that stream’s bytes at its sorted place, and the stream must equal
+the <strong>metadata hash</strong>: the same walk over names, sizes, CLSIDs, state
+bits and times instead of content (see <a href="fn.metadata_digest.html" title="fn palisade_fileid::installer::metadata_digest"><code>metadata_digest</code></a>).</li>
+</ol>
+<p><a href="../authenticode/enum.SignatureKind.html#variant.Msi" title="variant palisade_fileid::authenticode::SignatureKind::Msi"><code>SignatureKind::Msi</code></a> signatures go through the same SignedData
+decoder, signer certificate lookup, <code>messageDigest</code> and signature checks
+as PE signatures, nested signatures included. Their report then feeds
+<a href="../authenticode/fn.evaluate_trust.html" title="fn palisade_fileid::authenticode::evaluate_trust"><code>crate::authenticode::evaluate_trust</code></a> and
+<a href="../authenticode/fn.evaluate_validity.html" title="fn palisade_fileid::authenticode::evaluate_validity"><code>crate::authenticode::evaluate_validity</code></a> unchanged.</p>
+<h2 id="fail-conservative"><a class="doc-anchor" href="#fail-conservative">§</a>Fail conservative</h2>
+<p>A package is reported signed only when its container parses without
+any inconsistency. A compound file this reader rejects is an error, not
+an unsigned package. A signature stream that does not decode is
+<a href="../authenticode/enum.SignatureStatus.html#variant.Malformed" title="variant palisade_fileid::authenticode::SignatureStatus::Malformed"><code>SignatureStatus::Malformed</code></a>; an <code>MsiDigitalSignatureEx</code> that does not
+match is a digest mismatch; a content hash that does not match is
+<a href="../authenticode/enum.SignatureStatus.html#variant.DigestMismatch" title="variant palisade_fileid::authenticode::SignatureStatus::DigestMismatch"><code>SignatureStatus::DigestMismatch</code></a>. None of those is ever valid.</p>
+<h2 id="the-normalised-hash"><a class="doc-anchor" href="#the-normalised-hash">§</a>The normalised hash</h2>
+<p><a href="struct.InstallerIdentity.html#structfield.normalised_sha256" title="field palisade_fileid::installer::InstallerIdentity::normalised_sha256"><code>InstallerIdentity::normalised_sha256</code></a> is a <strong>Palisade-specific</strong>
+identity, not one the OS computes. It is SHA-256 over:</p>
+<ol>
+<li>the ASCII bytes <code>palisade-msi-normalised-v1\0</code>;</li>
+<li>the root CLSID (16 bytes);</li>
+<li>for every stream except <code>\u{5}DigitalSignature</code>,
+<code>\u{5}MsiDigitalSignatureEx</code> and <code>\u{5}SummaryInformation</code> (and
+<code>\u{5}DocumentSummaryInformation</code>), in the order of a depth-first walk
+that visits each storage’s children sorted by their UTF-16 names
+(code unit order): the path (storage names and the stream name, each
+UTF-16LE, joined by U+002F), as a u32 LE byte length and the bytes;
+then the content, as a u64 LE length and the bytes; storages add
+their path and CLSID the same way, tagged <code>S</code> where streams are
+tagged <code>F</code>;</li>
+<li>the summary information without its four FILETIME properties (edit
+time, last printed, created, last saved), in the canonical encoding
+of <code>summary::canonical_without_times</code>, tagged <code>I</code> and preceded by
+its u64 LE length; or, if the stream is present but cannot be
+parsed, its raw bytes, tagged <code>R</code> the same way; or the tag <code>N</code> if
+the package has none.</li>
+</ol>
+<p>Names compare case-insensitively when deciding what to leave out, as
+the format compares them, and only <strong>streams</strong> with those names are
+left out: a storage with one of them is hashed like any other. Path
+components are never empty and cannot contain <code>/</code>, which the compound
+file reader rejects in names, so a path has one reading.</p>
+<p>Directory-entry times, the signature streams and sector layout never
+enter it, so two copies of a package that differ only in when they
+were built, saved or signed hash the same. It is identity of <strong>medium</strong>
+strength (<a href="enum.NormalisedHashStrength.html#variant.Medium" title="variant palisade_fileid::installer::NormalisedHashStrength::Medium"><code>NormalisedHashStrength::Medium</code></a>): it ignores bytes that
+the flat hash covers, and it is not a signature.</p>
+<h2 id="limits"><a class="doc-anchor" href="#limits">§</a>Limits</h2>
+<p><a href="constant.MAX_INSTALLER_SIZE.html" title="constant palisade_fileid::installer::MAX_INSTALLER_SIZE"><code>MAX_INSTALLER_SIZE</code></a>, <a href="constant.MAX_SIGNATURE_SIZE.html" title="constant palisade_fileid::installer::MAX_SIGNATURE_SIZE"><code>MAX_SIGNATURE_SIZE</code></a>, <a href="constant.MAX_SUMMARY_SIZE.html" title="constant palisade_fileid::installer::MAX_SUMMARY_SIZE"><code>MAX_SUMMARY_SIZE</code></a>,
+the CFB limits (<a href="cfb/constant.MAX_DIRECTORY_ENTRIES.html" title="constant palisade_fileid::installer::cfb::MAX_DIRECTORY_ENTRIES"><code>cfb::MAX_DIRECTORY_ENTRIES</code></a>,
+<a href="cfb/constant.MAX_STORAGE_DEPTH.html" title="constant palisade_fileid::installer::cfb::MAX_STORAGE_DEPTH"><code>cfb::MAX_STORAGE_DEPTH</code></a>) and the table limits
+(<a href="database/constant.MAX_STRINGS.html" title="constant palisade_fileid::installer::database::MAX_STRINGS"><code>database::MAX_STRINGS</code></a>, <a href="database/constant.MAX_TABLES.html" title="constant palisade_fileid::installer::database::MAX_TABLES"><code>database::MAX_TABLES</code></a>,
+<a href="database/constant.MAX_TABLE_ROWS.html" title="constant palisade_fileid::installer::database::MAX_TABLE_ROWS"><code>database::MAX_TABLE_ROWS</code></a>; row limits are checked from a table’s
+stream size before its rows are allocated) bound the work and
+memory any input can cause. The <code>fuzz_msi_tables</code> target fuzzes the
+whole path.</p>
+</div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="cfb/index.html" title="mod palisade_fileid::installer::cfb">cfb</a></dt><dd>A bounded reader for compound files (MS-CFB, “structured storage”), the
+container Windows Installer packages use.</dd><dt><a class="mod" href="database/index.html" title="mod palisade_fileid::installer::database">database</a></dt><dd>The Windows Installer database inside a compound file: stream names,
+the string pool and the tables.</dd><dt><a class="mod" href="source_flags/index.html" title="mod palisade_fileid::installer::source_flags">source_<wbr>flags</a></dt><dd>Source image flags (summary word count).</dd><dt><a class="mod" href="summary/index.html" title="mod palisade_fileid::installer::summary">summary</a></dt><dd>The summary information stream (<code>\u{5}SummaryInformation</code>): an OLE
+property set with one section, <code>FMTID_SummaryInformation</code>.</dd><dt><a class="mod" href="transform_validation/index.html" title="mod palisade_fileid::installer::transform_validation">transform_<wbr>validation</a></dt><dd>Transform validation flags (the upper 16 bits of the summary character
+count).</dd></dl><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.BinaryEntry.html" title="struct palisade_fileid::installer::BinaryEntry">Binary<wbr>Entry</a></dt><dd>One <code>Binary</code> table row: a named stream of embedded data.</dd><dt><a class="struct" href="struct.CustomAction.html" title="struct palisade_fileid::installer::CustomAction">Custom<wbr>Action</a></dt><dd>One <code>CustomAction</code> row.</dd><dt><a class="struct" href="struct.EmbeddedCabinet.html" title="struct palisade_fileid::installer::EmbeddedCabinet">Embedded<wbr>Cabinet</a></dt><dd>One <code>Media</code> row with an embedded cabinet (<code>#name</code>).</dd><dt><a class="struct" href="struct.EmbeddedContent.html" title="struct palisade_fileid::installer::EmbeddedContent">Embedded<wbr>Content</a></dt><dd>Executable content carried inside the package (informational, for
+#7 and #8).</dd><dt><a class="struct" href="struct.GuidText.html" title="struct palisade_fileid::installer::GuidText">Guid<wbr>Text</a></dt><dd>A GUID property, as written, and whether it is a well-formed
+<code>{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}</code>.</dd><dt><a class="struct" href="struct.InstallerIdentity.html" title="struct palisade_fileid::installer::InstallerIdentity">Installer<wbr>Identity</a></dt><dd>The identity of an installer package.</dd><dt><a class="struct" href="struct.PatchInfo.html" title="struct palisade_fileid::installer::PatchInfo">Patch<wbr>Info</a></dt><dd>What a patch targets.</dd><dt><a class="struct" href="struct.Properties.html" title="struct palisade_fileid::installer::Properties">Properties</a></dt><dd>The <code>Property</code> table rows this crate reads.</dd><dt><a class="struct" href="struct.SummaryFields.html" title="struct palisade_fileid::installer::SummaryFields">Summary<wbr>Fields</a></dt><dd>The summary information fields.</dd><dt><a class="struct" href="struct.TransformInfo.html" title="struct palisade_fileid::installer::TransformInfo">Transform<wbr>Info</a></dt><dd>What a transform applies to.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.CustomActionKind.html" title="enum palisade_fileid::installer::CustomActionKind">Custom<wbr>Action<wbr>Kind</a></dt><dd>What a custom action runs, from the low bits of its type.</dd><dt><a class="enum" href="enum.InstallerError.html" title="enum palisade_fileid::installer::InstallerError">Installer<wbr>Error</a></dt><dd>Why a file could not be read as an installer package at all.</dd><dt><a class="enum" href="enum.InstallerKind.html" title="enum palisade_fileid::installer::InstallerKind">Installer<wbr>Kind</a></dt><dd>What kind of package a file is.</dd><dt><a class="enum" href="enum.InstallerWarning.html" title="enum palisade_fileid::installer::InstallerWarning">Installer<wbr>Warning</a></dt><dd>Something that could not be read, or looks wrong, in a package that
+otherwise parsed.</dd><dt><a class="enum" href="enum.NormalisedHashStrength.html" title="enum palisade_fileid::installer::NormalisedHashStrength">Normalised<wbr>Hash<wbr>Strength</a></dt><dd>How firmly the normalised hash identifies a package.</dd></dl><h2 id="constants" class="section-header">Constants<a href="#constants" class="anchor">§</a></h2><dl class="item-table"><dt><a class="constant" href="constant.CLSID_DATABASE.html" title="constant palisade_fileid::installer::CLSID_DATABASE">CLSID_<wbr>DATABASE</a></dt><dd><code>000C1084-0000-0000-C000-000000000046</code>: an installer database.</dd><dt><a class="constant" href="constant.CLSID_PATCH.html" title="constant palisade_fileid::installer::CLSID_PATCH">CLSID_<wbr>PATCH</a></dt><dd><code>000C1086-0000-0000-C000-000000000046</code>: a patch.</dd><dt><a class="constant" href="constant.CLSID_TRANSFORM.html" title="constant palisade_fileid::installer::CLSID_TRANSFORM">CLSID_<wbr>TRANSFORM</a></dt><dd><code>000C1082-0000-0000-C000-000000000046</code>: a transform.</dd><dt><a class="constant" href="constant.MAX_INSTALLER_SIZE.html" title="constant palisade_fileid::installer::MAX_INSTALLER_SIZE">MAX_<wbr>INSTALLER_<wbr>SIZE</a></dt><dd>The largest package read: 1 GiB.</dd><dt><a class="constant" href="constant.MAX_INVENTORY_ROWS.html" title="constant palisade_fileid::installer::MAX_INVENTORY_ROWS">MAX_<wbr>INVENTORY_<wbr>ROWS</a></dt><dd>The most rows listed from each inventory table (<code>Binary</code>,
+<code>CustomAction</code>, <code>Media</code>, <code>MsiPatchMetadata</code>).</dd><dt><a class="constant" href="constant.MAX_SIGNATURE_SIZE.html" title="constant palisade_fileid::installer::MAX_SIGNATURE_SIZE">MAX_<wbr>SIGNATURE_<wbr>SIZE</a></dt><dd>The largest <code>\u{5}DigitalSignature</code> stream read: 16 MiB, the PE
+certificate table limit.</dd><dt><a class="constant" href="constant.MAX_SUMMARY_SIZE.html" title="constant palisade_fileid::installer::MAX_SUMMARY_SIZE">MAX_<wbr>SUMMARY_<wbr>SIZE</a></dt><dd>The largest summary information stream parsed: 1 MiB.</dd><dt><a class="constant" href="constant.SIP_GUID_MSI.html" title="constant palisade_fileid::installer::SIP_GUID_MSI">SIP_<wbr>GUID_<wbr>MSI</a></dt><dd><code>000C10F1-0000-0000-C000-000000000046</code>: the installer subject type in a
+signature’s <code>SPC_SIPINFO</code>.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.content_digests.html" title="fn palisade_fileid::installer::content_digests">content_<wbr>digests</a></dt><dd>The package’s content digests (SHA-256, SHA-1, SHA-384 and SHA-512):
+what its signature signs (see the module documentation).</dd><dt><a class="fn" href="fn.custom_action_kind.html" title="fn palisade_fileid::installer::custom_action_kind">custom_<wbr>action_<wbr>kind</a></dt><dd>The kind from the low three bits of a custom action type. A type whose
+low bits name a DLL, EXE or script runs code; the source bits say from
+where. Type 7 (a nested install) and 3 (text data) are “other”.</dd><dt><a class="fn" href="fn.metadata_digest.html" title="fn palisade_fileid::installer::metadata_digest">metadata_<wbr>digest</a></dt><dd>The metadata hash that <code>\u{5}MsiDigitalSignatureEx</code> must hold, under
+<code>alg</code>: a walk like the content hash, but over each entry’s name (except
+the root’s), its CLSID (storages) or the low 4 bytes of its size
+(streams), its state bits and, except for the root, its creation and
+modification times. Storages are entered where they sort, without the
+trailing CLSID of the content hash.</dd><dt><a class="fn" href="fn.parse_installer.html" title="fn palisade_fileid::installer::parse_installer">parse_<wbr>installer</a></dt><dd>Parses an installer package.</dd><dt><a class="fn" href="fn.parse_product_version.html" title="fn palisade_fileid::installer::parse_product_version">parse_<wbr>product_<wbr>version</a></dt><dd><code>ProductVersion</code> is <code>major.minor.build</code> with an optional fourth field:
+major and minor at most 255, build at most 65535. Anything else is not
+a valid product version.</dd></dl></section></div></main></body></html>

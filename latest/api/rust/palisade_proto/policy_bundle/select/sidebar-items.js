@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["CacheFile","Finding","Load","PendingOutcome"],"fn":["pending","startup"],"struct":["Activation","Selection","Startup","Suspicion"]};

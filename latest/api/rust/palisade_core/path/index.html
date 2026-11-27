@@ -1,0 +1,41 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Lexical normalisation of Windows paths (#32)."><title>palisade_core::path - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="palisade_core" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module path</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../palisade_core/index.html">palisade_<wbr>core</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module path</a></h2><h3><a href="#structs">Module Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="../index.html">In crate palisade_<wbr>core</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">palisade_core</a></div><h1>Module <span>path</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../src/palisade_core/path.rs.html#1-576">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Lexical normalisation of Windows paths (#32).</p>
+<p>Facts and rule patterns both pass through <a href="fn.normalize.html" title="fn palisade_core::path::normalize"><code>normalize</code></a>, so two
+spellings of one path compare equal. The rules, in order:</p>
+<ol>
+<li><code>/</code> becomes <code>\</code>.</li>
+<li>The <code>\\?\</code>, <code>\??\</code> and <code>\\.\</code> prefixes are removed. <code>\\?\UNC\server\share</code>
+becomes <code>\\server\share</code>, and <code>\\?\GLOBALROOT\Device\...</code> becomes
+<code>\Device\...</code>.</li>
+<li>An NT device path (<code>\Device\HarddiskVolume3\x</code>) becomes a drive path
+when a <a href="struct.VolumeMap.html" title="struct palisade_core::path::VolumeMap"><code>VolumeMap</code></a> entry names its device. The device name must end
+at a separator, so <code>\Device\HarddiskVolume33</code> never matches an entry
+for <code>\Device\HarddiskVolume3</code>. An unmapped device path keeps
+<a href="enum.PathKind.html#variant.Device" title="variant palisade_core::path::PathKind::Device"><code>PathKind::Device</code></a>.</li>
+<li>Repeated separators collapse, and a leading run of two or more
+becomes the two that start a UNC path. A trailing separator is
+removed, except after a drive root (<code>C:\</code>).</li>
+<li>In an absolute path, <code>.</code> components are removed, and <code>..</code> removes
+the component before it. <code>..</code> never climbs above the root (<code>C:\..\x</code>
+is <code>C:\x</code>), and never removes the server or share of a UNC path.
+Relative paths keep <code>.</code> and <code>..</code>.</li>
+<li>NTFS stream-type suffixes that name the object itself are removed:
+<code>::$DATA</code> (and <code>:name:$DATA</code> becomes <code>:name</code>) on the last component,
+and <code>::$INDEX_ALLOCATION</code> or <code>:$I30:$INDEX_ALLOCATION</code> on any
+component. A chain of them (<code>a::$INDEX_ALLOCATION::$DATA</code>) is
+removed whole. These spellings are the same object on disk, so
+leaving them would let a file escape a path rule. Removing them never
+turns a relative path into an absolute one: a <code>.</code> component is kept
+in front when the rest would read as a drive, device or NT prefix.</li>
+<li>The drive letter is upper-cased. Nothing else changes case: case
+folding is part of comparison, not of normalisation.</li>
+</ol>
+<p>Trailing dots and spaces are kept, because the file system keeps them
+for names created through the <code>\\?\</code> prefix: <code>a.exe.</code> is not <code>a.exe</code>.
+A named stream (<code>file.txt:payload</code>) is kept, and <a href="struct.NormalizedPath.html#method.stream" title="method palisade_core::path::NormalizedPath::stream"><code>NormalizedPath::stream</code></a>
+reports it. Short (8.3) names are not expanded here: that needs the file
+system, and the agent supplies the long path (#4).</p>
+<p>Normalisation is idempotent: normalising a normalised path gives the same
+path.</p>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.NormalizedPath.html" title="struct palisade_core::path::NormalizedPath">Normalized<wbr>Path</a></dt><dd>A lexically normalised path. Build one with <a href="fn.normalize.html" title="fn palisade_core::path::normalize"><code>normalize</code></a>.</dd><dt><a class="struct" href="struct.VolumeMap.html" title="struct palisade_core::path::VolumeMap">Volume<wbr>Map</a></dt><dd>Maps NT device names to drive letters, such as <code>\Device\HarddiskVolume3</code>
+to <code>C:</code>. The agent builds it from the volume list (#4).</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.PathKind.html" title="enum palisade_core::path::PathKind">Path<wbr>Kind</a></dt><dd>What a normalised path is rooted at.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.normalize.html" title="fn palisade_core::path::normalize">normalize</a></dt><dd>Normalises <code>raw</code> without a volume map. See the <a href="index.html" title="mod palisade_core::path">module docs</a>.</dd><dt><a class="fn" href="fn.normalize_with.html" title="fn palisade_core::path::normalize_with">normalize_<wbr>with</a></dt><dd>Normalises <code>raw</code>, resolving NT device paths through <code>volumes</code>. See the
+<a href="index.html" title="mod palisade_core::path">module docs</a>.</dd></dl></section></div></main></body></html>

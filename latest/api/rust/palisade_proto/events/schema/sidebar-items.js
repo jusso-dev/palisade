@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SCHEMA_ID"],"fn":["generate","generate_pretty"]};

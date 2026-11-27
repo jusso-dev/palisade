@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["USAGE"],"enum":["CliError","Mode"],"fn":["parse"],"struct":["Args"]};

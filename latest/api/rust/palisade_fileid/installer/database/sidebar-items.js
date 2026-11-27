@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_COLUMNS","MAX_COLUMN_ROWS","MAX_STRINGS","MAX_TABLES","MAX_TABLE_ROWS"],"enum":["TableError"],"fn":["decode_stream_name","encode_stream_name"]};

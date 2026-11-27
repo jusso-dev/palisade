@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Management","PrecedenceSource","RuleStatus","StepOutcome","Via"],"fn":["suppressible"],"struct":["Contribution","EffectivePolicy","ModeAdjustment","ModeProvenance","RuleProvenance","SettingProvenance","SettingStep"]};

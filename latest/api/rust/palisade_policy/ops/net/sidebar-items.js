@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["canonical","parse_ip","parse_mac"],"struct":["IpRange","IpWildcard"]};

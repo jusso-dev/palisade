@@ -1,0 +1,81 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="The signed trust-set manifest and the agent’s acceptance rule."><title>palisade_proto::pki::trust_set - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="palisade_proto" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module trust_set</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../palisade_proto/index.html">palisade_<wbr>proto</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module trust_<wbr>set</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#acceptance-rule" title="Acceptance rule">Acceptance rule</a></li><li><a href="#canonical-encoding" title="Canonical encoding">Canonical encoding</a></li></ul><h3><a href="#structs">Module Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#constants" title="Constants">Constants</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="../index.html">In palisade_<wbr>proto::<wbr>pki</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">palisade_proto</a>::<wbr><a href="../index.html">pki</a></div><h1>Module <span>trust_<wbr>set</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/palisade_proto/pki/trust_set.rs.html#1-1175">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>The signed trust-set manifest and the agent’s acceptance rule.</p>
+<p>A trust set tells an agent which keys it trusts: the keys that may sign
+the next trust set, the server CA public-key pins, the policy-signing and
+unlock-token keys, the signature algorithms it accepts, and a pointer to
+the update-signing root metadata (#226). It is signed by the offline root
+or by a trust-set key that an earlier trust set endorsed.</p>
+<h2 id="acceptance-rule"><a class="doc-anchor" href="#acceptance-rule">§</a>Acceptance rule</h2>
+<p><a href="struct.TrustAnchor.html#method.accept" title="method palisade_proto::pki::trust_set::TrustAnchor::accept"><code>TrustAnchor::accept</code></a> takes a new signed trust set only if all of these
+hold (threats: T-signer-06, T-ca-01):</p>
+<ol>
+<li>The envelope and manifest decode under the strict rules below.</li>
+<li>At least one signature verifies under a key the agent <strong>already</strong>
+trusts: the pinned root, or a <code>root-ca</code> or <code>trust-set</code> key in the
+<em>current</em> trust set. A key listed only in the new set never counts,
+so a set cannot endorse itself.</li>
+<li>A current-set key only counts if its validity window contains <code>now</code>,
+allowing for clock skew. The pinned root has no window: it is trusted
+until the device is re-enrolled (R-11).</li>
+<li>Every signature by a key the agent knows (the pinned root or a current
+trust key) must name that key’s own algorithm, an algorithm the
+current set accepts, and must verify, whether or not the key is inside
+its validity window. A bad or mislabelled signature from a known key is
+tampering, not noise, and rejects the whole set. Signatures from
+unknown keys are ignored, which lets a set carry signatures for agents
+on different trust versions during a rotation.</li>
+<li><code>trust_version</code> is strictly greater than the current one, so an
+older or replayed set is refused (rollback), and at most
+<a href="constant.MAX_VERSION_STEP.html" title="constant palisade_proto::pki::trust_set::MAX_VERSION_STEP"><code>MAX_VERSION_STEP</code></a> greater. Without the cap, a stolen trust-set key
+could publish version <code>u64::MAX</code> and no later set, not even one signed
+by the root, could ever be newer (fast-forward). The cap applies to
+root-signed sets too, so recovering agents that a stolen key moved
+far ahead of the rest may need intermediate sets.</li>
+<li><code>issued_at</code> is not earlier than the current set’s, and not later than
+<code>now</code> plus the skew tolerance.</li>
+</ol>
+<p><code>now</code> must be trusted time on the agent (#220). Storing the accepted set
+and the last two versions in the protected data directory is also #220.</p>
+<h2 id="canonical-encoding"><a class="doc-anchor" href="#canonical-encoding">§</a>Canonical encoding</h2>
+<p>The signed payload is a fixed-layout binary encoding with one valid
+encoding per trust set. The decoder enforces that: every list is sorted
+strictly ascending (so duplicates are refused), every count and length is
+bounded, every code is known, and no bytes may follow the last field.
+<code>encode(decode(bytes)) == bytes</code> for every accepted input.</p>
+<p>All integers are big-endian. Timestamps are signed 64-bit microseconds
+since 1970-01-01T00:00:00Z, within years 0001 to 9999.</p>
+<div class="example-wrap"><pre class="language-text"><code>payload    = version:u8 (= 1)
+             trust_version:u64 (&gt;= 1)
+             issued_at:i64
+             n_algs:u8 (1..=2)   alg:u8 * n_algs          ascending
+             n_trust:u8 (1..=64) key * n_trust            ascending kid
+             n_pins:u8 (0..=64)  sha256:[u8;32] * n_pins  ascending
+             n_policy:u8 (0..=64) key * n_policy          ascending kid
+             n_unlock:u8 (0..=64) key * n_unlock          ascending kid
+             update_root:u8 (0 | 1)
+               [version:u64 sha256:[u8;32]]               if update_root = 1
+key        = purpose:u8 status:u8 alg:u8
+             not_before:i64 not_after:i64
+             spki_len:u8 spki:[u8; spki_len]
+
+envelope   = version:u8 (= 1)
+             payload_len:u32 (1..=65536) payload
+             n_sigs:u8 (1..=8) sig * n_sigs               ascending kid
+sig        = kid:[u8;16] alg:u8 bytes:[u8; length fixed by alg]</code></pre></div>
+<p>Codes are <a href="../key/enum.KeyPurpose.html#method.code" title="method palisade_proto::pki::key::KeyPurpose::code"><code>KeyPurpose::code</code></a>, <a href="../key/enum.KeyStatus.html#method.code" title="method palisade_proto::pki::key::KeyStatus::code"><code>KeyStatus::code</code></a> and
+<a href="../key/enum.SignatureAlgorithm.html#method.code" title="method palisade_proto::pki::key::SignatureAlgorithm::code"><code>SignatureAlgorithm::code</code></a>. A key ID appears at most once across all
+three key lists, so no key serves two purposes. Each list holds only its
+own purposes: <code>root-ca</code> or <code>trust-set</code>, then <code>policy-signing</code>, then
+<code>unlock-token</code>. Listed keys are <code>active</code> or <code>retiring</code>: a retired or
+compromised key is revoked by leaving it out of the next trust set.</p>
+<p>The issue suggests reusing the policy bundle’s canonical CBOR (#225).
+That encoder does not exist yet. This format is versioned, so a later
+version can move to it without breaking agents on version 1.</p>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.SignedTrustSet.html" title="struct palisade_proto::pki::trust_set::SignedTrustSet">Signed<wbr>Trust<wbr>Set</a></dt><dd>A trust set with its signatures: the unit delivered to agents.</dd><dt><a class="struct" href="struct.TrustAnchor.html" title="struct palisade_proto::pki::trust_set::TrustAnchor">Trust<wbr>Anchor</a></dt><dd>What an agent trusts: the root pinned at enrolment, and the trust set it
+last accepted.</dd><dt><a class="struct" href="struct.TrustSet.html" title="struct palisade_proto::pki::trust_set::TrustSet">Trust<wbr>Set</a></dt><dd>A trust-set manifest. The constructors check every rule the decoder
+checks, so every value has exactly one encoding, except that a set
+without trust keys is refused by <a href="struct.TrustSet.html#method.encode" title="method palisade_proto::pki::trust_set::TrustSet::encode"><code>Self::encode</code></a> and by
+<a href="struct.TrustAnchor.html#method.with_current" title="associated function palisade_proto::pki::trust_set::TrustAnchor::with_current"><code>TrustAnchor::with_current</code></a>.</dd><dt><a class="struct" href="struct.TrustedKey.html" title="struct palisade_proto::pki::trust_set::TrustedKey">Trusted<wbr>Key</a></dt><dd>A key listed in a trust set.</dd><dt><a class="struct" href="struct.UpdateRootPointer.html" title="struct palisade_proto::pki::trust_set::UpdateRootPointer">Update<wbr>Root<wbr>Pointer</a></dt><dd>Where the agent finds the update-signing root metadata (#226): its
+version and SHA-256. The metadata format itself belongs to #226.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.DecodeError.html" title="enum palisade_proto::pki::trust_set::DecodeError">Decode<wbr>Error</a></dt><dd>Bytes are not a canonical trust set or envelope.</dd><dt><a class="enum" href="enum.Rejection.html" title="enum palisade_proto::pki::trust_set::Rejection">Rejection</a></dt><dd>Why an agent refused a trust set.</dd><dt><a class="enum" href="enum.TrustSetError.html" title="enum palisade_proto::pki::trust_set::TrustSetError">Trust<wbr>SetError</a></dt><dd>A trust set could not be built.</dd><dt><a class="enum" href="enum.VerifyError.html" title="enum palisade_proto::pki::trust_set::VerifyError">Verify<wbr>Error</a></dt><dd>A signature check against a trust set failed.</dd></dl><h2 id="constants" class="section-header">Constants<a href="#constants" class="anchor">§</a></h2><dl class="item-table"><dt><a class="constant" href="constant.FORMAT_VERSION.html" title="constant palisade_proto::pki::trust_set::FORMAT_VERSION">FORMAT_<wbr>VERSION</a></dt><dd>The payload and envelope format version this module reads and writes.</dd><dt><a class="constant" href="constant.MAX_ENVELOPE_LEN.html" title="constant palisade_proto::pki::trust_set::MAX_ENVELOPE_LEN">MAX_<wbr>ENVELOPE_<wbr>LEN</a></dt><dd>Largest envelope accepted, in bytes: the largest payload, its header
+and the most signatures.</dd><dt><a class="constant" href="constant.MAX_KEYS.html" title="constant palisade_proto::pki::trust_set::MAX_KEYS">MAX_<wbr>KEYS</a></dt><dd>Most keys in each key list.</dd><dt><a class="constant" href="constant.MAX_PAYLOAD_LEN.html" title="constant palisade_proto::pki::trust_set::MAX_PAYLOAD_LEN">MAX_<wbr>PAYLOAD_<wbr>LEN</a></dt><dd>Largest payload accepted, in bytes. A manifest with every list full is about 29 KiB.</dd><dt><a class="constant" href="constant.MAX_PINS.html" title="constant palisade_proto::pki::trust_set::MAX_PINS">MAX_<wbr>PINS</a></dt><dd>Most server CA pins.</dd><dt><a class="constant" href="constant.MAX_SIGNATURES.html" title="constant palisade_proto::pki::trust_set::MAX_SIGNATURES">MAX_<wbr>SIGNATURES</a></dt><dd>Most signatures on one trust set.</dd><dt><a class="constant" href="constant.MAX_VERSION_STEP.html" title="constant palisade_proto::pki::trust_set::MAX_VERSION_STEP">MAX_<wbr>VERSION_<wbr>STEP</a></dt><dd>The most <code>trust_version</code> may grow in one accepted update. Servers
+increment it by one per publication, so an agent can miss up to a million
+publications and still catch up in one step.</dd></dl></section></div></main></body></html>

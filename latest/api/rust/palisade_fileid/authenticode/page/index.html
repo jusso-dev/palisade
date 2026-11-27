@@ -1,0 +1,67 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Authenticode page hashes (#47)."><title>palisade_fileid::authenticode::page - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="palisade_fileid" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module page</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../palisade_fileid/index.html">palisade_<wbr>fileid</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module page</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#how-the-table-is-built" title="How the table is built">How the table is built</a></li><li><a href="#when-there-is-no-table" title="When there is no table">When there is no table</a></li><li><a href="#checking-a-signed-table" title="Checking a signed table">Checking a signed table</a></li><li><a href="#the-code-integrity-page-hash-rule-value" title="The code integrity “page hash” rule value">The code integrity “page hash” rule value</a></li><li><a href="#memory" title="Memory">Memory</a></li></ul><h3><a href="#structs">Module Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#constants" title="Constants">Constants</a></li><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="../index.html">In palisade_<wbr>fileid::<wbr>authenticode</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">palisade_fileid</a>::<wbr><a href="../index.html">authenticode</a></div><h1>Module <span>page</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/palisade_fileid/authenticode/page.rs.html#1-693">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Authenticode page hashes (#47).</p>
+<p>A signer can put a table of page hashes in an Authenticode signature
+(an <code>SpcSerializedObject</code> in the signed <code>SpcPeImageData</code>: version 1 for
+SHA-1, version 2 for SHA-256). The OS can then check each page of the
+file as it maps it, instead of hashing the whole image first. This module
+builds that table from a file, checks a signed table against a file, and
+gives the single “page hash” value OS policy hash rules use.</p>
+<h2 id="how-the-table-is-built"><a class="doc-anchor" href="#how-the-table-is-built">§</a>How the table is built</h2>
+<p>Pages are 4 KiB (<a href="constant.PAGE_SIZE.html" title="constant palisade_fileid::authenticode::page::PAGE_SIZE"><code>PAGE_SIZE</code></a>). Each entry is a page’s file offset (a
+little-endian <code>u32</code>) and the digest of its bytes, zero-padded to 4 KiB:</p>
+<ol>
+<li><strong>The header page</strong>, at offset 0: the bytes from 0 to <code>SizeOfHeaders</code>,
+minus the <code>CheckSum</code> field and the certificate table entry (the two
+header fields the image hash leaves out too), then zeros up to 4 KiB.
+The 12 excluded bytes are dropped, not zeroed, so 4,084 bytes are
+hashed.</li>
+<li><strong>Section pages</strong>: for each section with raw data, in section table
+order (which must also be file order), one entry every 4 KiB from
+<code>PointerToRawData</code> to <code>PointerToRawData + SizeOfRawData</code>. A section’s
+last page stops at its end and is zero-padded.</li>
+<li><strong>A final entry</strong> at the end of the last section’s data (or at
+<code>SizeOfHeaders</code> when no section has raw data), with an all-zero
+digest.</li>
+</ol>
+<p>The tests check this against page hash tables that an open-source
+signer made over synthetic images (<code>tests/fixtures/page_hash</code>).</p>
+<h2 id="when-there-is-no-table"><a class="doc-anchor" href="#when-there-is-no-table">§</a>When there is no table</h2>
+<p>A page table says where each page’s bytes are, so it is only built for
+an image whose layout conforms to the Authenticode specification (see
+<a href="../hash/index.html" title="mod palisade_fileid::authenticode::hash"><code>super::hash</code></a>) and whose headers fit in one page. Anything else is a
+<a href="enum.PageHashError.html" title="enum palisade_fileid::authenticode::page::PageHashError"><code>PageHashError</code></a>, never a best-effort table: a guessed table would make
+rules that silently never match.</p>
+<h2 id="checking-a-signed-table"><a class="doc-anchor" href="#checking-a-signed-table">§</a>Checking a signed table</h2>
+<p><a href="fn.verify_page_hashes.html" title="fn palisade_fileid::authenticode::page::verify_page_hashes"><code>verify_page_hashes</code></a> compares a signature’s table with the file and
+reports the first entry that does not match. A signed table is only as
+trustworthy as the signature that carries it, so
+<a href="fn.verify_signature_page_hashes.html" title="fn palisade_fileid::authenticode::page::verify_signature_page_hashes"><code>verify_signature_page_hashes</code></a> checks only tables from signatures that
+verify cryptographically. That includes signatures whose image digest no
+longer matches the file: the page check then names the first page that
+changed.</p>
+<h2 id="the-code-integrity-page-hash-rule-value"><a class="doc-anchor" href="#the-code-integrity-page-hash-rule-value">§</a>The code integrity “page hash” rule value</h2>
+<p>For each file, OS policy tooling emits two single-value “page hash”
+rules (SHA-1 and SHA-256) next to the two Authenticode hash rules. By
+the current documentation the value is the digest of the file’s first
+page as code integrity lays it out: the header page above.
+<a href="struct.PageHashTables.html#method.page_sha1" title="method palisade_fileid::authenticode::page::PageHashTables::page_sha1"><code>PageHashTables::page_sha1</code></a> and <a href="struct.PageHashTables.html#method.page_sha256" title="method palisade_fileid::authenticode::page::PageHashTables::page_sha256"><code>PageHashTables::page_sha256</code></a> return
+it. Like the Authenticode digest it is the same for user-mode and
+kernel-mode rules (<a href="../hash/enum.HashScenario.html" title="enum palisade_fileid::authenticode::hash::HashScenario"><code>super::HashScenario</code></a>).</p>
+<p>The construction is not fully documented, so it is checked against the
+OS tooling itself: on Windows, <code>tests/os_policy_tooling.rs</code> runs the OS
+policy cmdlets over synthetic images through the committed script
+<code>tests/fixtures/page_hash/os-policy-hashes.ps1</code>, and compares every
+Authenticode and page hash rule they emit with this crate’s values. CI
+runs it on its Windows runners.</p>
+<h2 id="memory"><a class="doc-anchor" href="#memory">§</a>Memory</h2>
+<p>A table holds 24 (SHA-1) or 36 (SHA-256) bytes per 4 KiB page of section
+data, under 1% of the image size.</p>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.PageHashMismatch.html" title="struct palisade_fileid::authenticode::page::PageHashMismatch">Page<wbr>Hash<wbr>Mismatch</a></dt><dd>The first entry where a signed page hash table and the file disagree.</dd><dt><a class="struct" href="struct.PageHashTables.html" title="struct palisade_fileid::authenticode::page::PageHashTables">Page<wbr>Hash<wbr>Tables</a></dt><dd>The page hash tables of one image, for the algorithms asked for.</dd><dt><a class="struct" href="struct.PageHasher.html" title="struct palisade_fileid::authenticode::page::PageHasher">Page<wbr>Hasher</a></dt><dd>Streams an image through its <a href="struct.PageLayout.html" title="struct palisade_fileid::authenticode::page::PageLayout"><code>PageLayout</code></a> in one pass and builds its
+page hash tables.</dd><dt><a class="struct" href="struct.PageLayout.html" title="struct palisade_fileid::authenticode::page::PageLayout">Page<wbr>Layout</a></dt><dd>Where each page of an image is, built once from the parse with
+<a href="struct.PageLayout.html#method.from_pe" title="associated function palisade_fileid::authenticode::page::PageLayout::from_pe"><code>PageLayout::from_pe</code></a>.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.PageHashCheck.html" title="enum palisade_fileid::authenticode::page::PageHashCheck">Page<wbr>Hash<wbr>Check</a></dt><dd>The result of checking a signed page hash table against a file.</dd><dt><a class="enum" href="enum.PageHashError.html" title="enum palisade_fileid::authenticode::page::PageHashError">Page<wbr>Hash<wbr>Error</a></dt><dd>Why there is no page hash table for an image.</dd><dt><a class="enum" href="enum.PageMismatchKind.html" title="enum palisade_fileid::authenticode::page::PageMismatchKind">Page<wbr>Mismatch<wbr>Kind</a></dt><dd>How a page hash entry differs from the file.</dd></dl><h2 id="constants" class="section-header">Constants<a href="#constants" class="anchor">§</a></h2><dl class="item-table"><dt><a class="constant" href="constant.PAGE_SIZE.html" title="constant palisade_fileid::authenticode::page::PAGE_SIZE">PAGE_<wbr>SIZE</a></dt><dd>The page size page hash tables use: 4 KiB.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.page_hash_table.html" title="fn palisade_fileid::authenticode::page::page_hash_table">page_<wbr>hash_<wbr>table</a></dt><dd>The page hash table of <code>data</code> for one algorithm (SHA-1 or SHA-256): the
+issue’s <code>page_hash_table(alg)</code>. Read the entries with
+<a href="../struct.PageHashes.html#method.entries" title="method palisade_fileid::authenticode::PageHashes::entries"><code>PageHashes::entries</code></a>.</dd><dt><a class="fn" href="fn.page_hash_tables.html" title="fn palisade_fileid::authenticode::page::page_hash_tables">page_<wbr>hash_<wbr>tables</a></dt><dd>The SHA-1 and SHA-256 page hash tables of <code>data</code>, the image <code>info</code> was
+parsed from. Fails if the image has no page hash table (see
+<a href="struct.PageLayout.html#method.from_pe" title="associated function palisade_fileid::authenticode::page::PageLayout::from_pe"><code>PageLayout::from_pe</code></a>) or <code>data</code> is not the length <code>info</code> was parsed
+from.</dd><dt><a class="fn" href="fn.verify_page_hashes.html" title="fn palisade_fileid::authenticode::page::verify_page_hashes">verify_<wbr>page_<wbr>hashes</a></dt><dd>Checks the signed page hash table <code>signed</code> against <code>data</code>, the image
+<code>info</code> was parsed from, and reports the first entry that does not match.</dd><dt><a class="fn" href="fn.verify_signature_page_hashes.html" title="fn palisade_fileid::authenticode::page::verify_signature_page_hashes">verify_<wbr>signature_<wbr>page_<wbr>hashes</a></dt><dd>Checks the page hashes of <code>signature</code> against <code>data</code>, the image <code>info</code>
+was parsed from: the issue’s on-demand <code>verify_page_hashes()</code>.</dd></dl></section></div></main></body></html>

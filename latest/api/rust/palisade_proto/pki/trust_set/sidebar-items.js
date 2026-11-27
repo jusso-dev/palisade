@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FORMAT_VERSION","MAX_ENVELOPE_LEN","MAX_KEYS","MAX_PAYLOAD_LEN","MAX_PINS","MAX_SIGNATURES","MAX_VERSION_STEP"],"enum":["DecodeError","Rejection","TrustSetError","VerifyError"],"struct":["SignedTrustSet","TrustAnchor","TrustSet","TrustedKey","UpdateRootPointer"]};

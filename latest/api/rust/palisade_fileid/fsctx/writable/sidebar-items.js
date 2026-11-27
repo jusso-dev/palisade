@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_CACHE_ENTRIES"],"fn":["assess_ancestors","descriptor_hash","enumerate_user_writable_dirs"],"struct":["AncestorRead","AssessOptions","EnumerateOptions","Listing","ReadDescriptor","WritabilityCache","WritableDir","WritableDirs"],"trait":["DirectorySource"],"type":["DescriptorHash"]};

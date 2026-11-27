@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["LegacyError","LegacyFormat","LegacyWarning","NameKind","TargetOs"],"fn":["parse"],"struct":["LegacyInfo","LegacyName"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["host_addrs","is_public","reachable_on","resolve"],"struct":["HostAddr"]};

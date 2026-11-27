@@ -1,0 +1,122 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Content tagging (#44, feature `content-rules`)."><title>palisade_fileid::tags - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="palisade_fileid" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module tags</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../palisade_fileid/index.html">palisade_<wbr>fileid</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module tags</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#a-pattern-language-not-a-rule-engine" title="A pattern language, not a rule engine">A pattern language, not a rule engine</a></li><li><a href="#never-a-stall-never-an-error" title="Never a stall, never an error">Never a stall, never an error</a></li><li><a href="#rule-sets-in-policy" title="Rule sets in policy">Rule sets in policy</a></li></ul><h3><a href="#structs">Module Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#constants" title="Constants">Constants</a></li><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="../index.html">In crate palisade_<wbr>fileid</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">palisade_fileid</a></div><h1>Module <span>tags</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../src/palisade_fileid/tags/mod.rs.html#1-306">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Content tagging (#44, feature <code>content-rules</code>).</p>
+<p><a href="fn.scan.html" title="fn palisade_fileid::tags::scan"><code>scan</code></a> looks for byte patterns in a file and attaches string tags such
+as <code>installer:scripted-setup</code> or <code>archive:embedded-pe</code>. Tags come from
+two rule sets:</p>
+<ul>
+<li><strong>The built-in set</strong> (<a href="constant.BUILTIN_TAGS.html" title="constant palisade_fileid::tags::BUILTIN_TAGS"><code>BUILTIN_TAGS</code></a>), which is read-only. It
+recognises common installer engines, self-extracting archives,
+embedded executables and archives, compiled scripts and the standard
+anti-malware test file. Its tags cannot be redefined.</li>
+<li><strong>The organisation’s rules</strong> (<a href="struct.RuleSetSource.html" title="struct palisade_fileid::tags::RuleSetSource"><code>RuleSetSource</code></a>), carried in policy.
+A rule is a list of masked byte patterns (hex with nibble wildcards,
+text or wide text), each with a location (anywhere, at an offset, in a
+range, in a PE image’s appended data or in the file’s tail), and a
+condition (any, all, or at least N of them).</li>
+</ul>
+<h2 id="a-pattern-language-not-a-rule-engine"><a class="doc-anchor" href="#a-pattern-language-not-a-rule-engine">§</a>A pattern language, not a rule engine</h2>
+<p>The rules are deliberately less expressive than a general pattern rule
+language: no regular expressions, no gaps of variable length, no loops,
+no arithmetic over the file and no modules. Every pattern has a fixed
+length of at most <a href="constant.MAX_PATTERN_LEN.html" title="constant palisade_fileid::tags::MAX_PATTERN_LEN"><code>MAX_PATTERN_LEN</code></a> bytes, so checking it costs at
+most that many comparisons. Patterns that are not at a fixed offset are
+found through their longest exact run of bytes (an “atom”, at least
+<a href="constant.MIN_ATOM_LEN.html" title="constant palisade_fileid::tags::MIN_ATOM_LEN"><code>MIN_ATOM_LEN</code></a> bytes) with one multi-pattern automaton
+(<code>aho-corasick</code>), in a single linear pass. So a scan’s cost is linear in
+the bytes scanned plus the candidate checks, and both are capped by
+<a href="struct.ScanLimits.html" title="struct palisade_fileid::tags::ScanLimits"><code>ScanLimits</code></a>.</p>
+<p>The rule format can be targeted by a front end for a general rule
+syntax later. A YARA-syntax front end through the <code>yara-x</code> crate was
+considered and not adopted: every release from 1.22 needs a newer Rust
+than the workspace’s minimum (1.94), and the last one that builds on
+1.94 brings in a WebAssembly compiler and about 110 more crates, with 37
+build scripts (one generating code at build time), and takes the
+workspace from 8 to 22 crates in more than one version, over the limit
+of 10 (docs/dependencies.md).</p>
+<h2 id="never-a-stall-never-an-error"><a class="doc-anchor" href="#never-a-stall-never-an-error">§</a>Never a stall, never an error</h2>
+<p>Tagging must not hold up identity, so a scan has a hard budget:</p>
+<ul>
+<li>Files larger than <a href="struct.ScanLimits.html#structfield.max_file_size" title="field palisade_fileid::tags::ScanLimits::max_file_size"><code>ScanLimits::max_file_size</code></a> (32 MiB by default)
+are scanned in part: the first <code>max_file_size</code> bytes and the last
+<a href="constant.TAIL_SCAN_LEN.html" title="constant palisade_fileid::tags::TAIL_SCAN_LEN"><code>TAIL_SCAN_LEN</code></a>. The report then has <a href="constant.CONTENT_SCAN_PARTIAL.html" title="constant palisade_fileid::tags::CONTENT_SCAN_PARTIAL"><code>CONTENT_SCAN_PARTIAL</code></a>.</li>
+<li>Scanning stops once <a href="struct.ScanLimits.html#structfield.max_scan_bytes" title="field palisade_fileid::tags::ScanLimits::max_scan_bytes"><code>ScanLimits::max_scan_bytes</code></a> bytes have been
+read, <a href="struct.ScanLimits.html#structfield.max_match_steps" title="field palisade_fileid::tags::ScanLimits::max_match_steps"><code>ScanLimits::max_match_steps</code></a> pattern comparisons have been
+made, or <a href="struct.ScanLimits.html#structfield.timeout" title="field palisade_fileid::tags::ScanLimits::timeout"><code>ScanLimits::timeout</code></a> (2 s by default) has passed. The
+report then has <a href="constant.CONTENT_SCAN_TIMEOUT.html" title="constant palisade_fileid::tags::CONTENT_SCAN_TIMEOUT"><code>CONTENT_SCAN_TIMEOUT</code></a>.</li>
+<li>A read error, or a file that ends before the length its reader
+reported (truncated while being scanned), ends the scan with
+<a href="constant.CONTENT_SCAN_ERROR.html" title="constant palisade_fileid::tags::CONTENT_SCAN_ERROR"><code>CONTENT_SCAN_ERROR</code></a>. Bytes that did arrive in a chunk are scanned
+first. A short read of the start-of-file filter or the PE headers
+stops at once, because what they decide could not be established.</li>
+<li>A rule’s <code>unless_start</code> filter is checked before anything else, and a
+filter that could not be checked counts as matched, so a budget or a
+size limit can never let a filtered rule through.</li>
+</ul>
+<p>None of these is an error: <a href="fn.scan.html" title="fn palisade_fileid::tags::scan"><code>scan</code></a> always returns a <a href="struct.TagReport.html" title="struct palisade_fileid::tags::TagReport"><code>TagReport</code></a>.
+Tags found before the scan stopped are kept, because each is positive
+evidence on its own. A missing tag is never evidence of absence when
+the report has a status tag. Callers should treat such a file as not
+fully inspected and fail conservative: a rule that requires a tag
+should not be satisfied by its absence.</p>
+<p>The scan runs in the calling thread and is cooperative: the time limit
+is checked before every read, between chunks, every few thousand
+candidate checks, on each retry of an interrupted read and after the
+last chunk, but it cannot interrupt a <code>read</code> or <code>seek</code> that blocks. A
+scan of a reader that blocks can therefore outlast <code>timeout</code>. Running
+it off the identity hot path, in a separate worker that can be
+abandoned, is the caller’s job. That worker is not part of this crate
+and is not built yet: the agent’s file pipeline (#4, #59, #60) will
+provide it, with its scheduling, queueing and cancellation.</p>
+<p>The file is read more than once: the start-of-file filters and the PE
+headers are read first, then the file is read again in chunks. A file
+rewritten at the same length between those reads can be judged on a mix
+of its two versions (a filter decided on the first, strings on the
+second), and the scan still reports <a href="enum.ScanStatus.html#variant.Complete" title="variant palisade_fileid::tags::ScanStatus::Complete"><code>ScanStatus::Complete</code></a>. Callers
+that need one consistent view should scan a snapshot, or a file they
+hold open with writes denied, as the agent does for hashing.</p>
+<h2 id="rule-sets-in-policy"><a class="doc-anchor" href="#rule-sets-in-policy">§</a>Rule sets in policy</h2>
+<p>A <a href="struct.RuleSetSource.html" title="struct palisade_fileid::tags::RuleSetSource"><code>RuleSetSource</code></a> is plain data (<code>serde</code>). It has a version, and
+<a href="struct.ContentRules.html#method.rules_digest" title="method palisade_fileid::tags::ContentRules::rules_digest"><code>ContentRules::rules_digest</code></a> is a SHA-256 over a canonical encoding of
+it, so the policy bundle (#43) can record exactly which rules were in
+force. The encoding covers the version and every rule as written, with
+only the pattern bytes normalised (hex case and spacing); see
+<a href="struct.ContentRules.html#method.rules_digest" title="method palisade_fileid::tags::ContentRules::rules_digest"><code>ContentRules::rules_digest</code></a> for what equal digests mean. The rule set has no signature of its own: it is part of the
+policy bundle, whose signature (#225) covers it.</p>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.ContentRules.html" title="struct palisade_fileid::tags::ContentRules">Content<wbr>Rules</a></dt><dd>The built-in rules and, optionally, the organisation’s, compiled.</dd><dt><a class="struct" href="struct.RuleError.html" title="struct palisade_fileid::tags::RuleError">Rule<wbr>Error</a></dt><dd>Why a rule set was rejected.</dd><dt><a class="struct" href="struct.RuleSetSource.html" title="struct palisade_fileid::tags::RuleSetSource">Rule<wbr>SetSource</a></dt><dd>A versioned set of organisation rules.</dd><dt><a class="struct" href="struct.RuleSource.html" title="struct palisade_fileid::tags::RuleSource">Rule<wbr>Source</a></dt><dd>One rule: when its condition holds, the file gets its tag.</dd><dt><a class="struct" href="struct.ScanLimits.html" title="struct palisade_fileid::tags::ScanLimits">Scan<wbr>Limits</a></dt><dd>The per-file budget of a scan.</dd><dt><a class="struct" href="struct.StringSource.html" title="struct palisade_fileid::tags::StringSource">String<wbr>Source</a></dt><dd>A pattern and where it may be found.</dd><dt><a class="struct" href="struct.TagReport.html" title="struct palisade_fileid::tags::TagReport">TagReport</a></dt><dd>The result of <a href="fn.scan.html" title="fn palisade_fileid::tags::scan"><code>scan</code></a>.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.Condition.html" title="enum palisade_fileid::tags::Condition">Condition</a></dt><dd>How many of a rule’s strings must be found.</dd><dt><a class="enum" href="enum.Location.html" title="enum palisade_fileid::tags::Location">Location</a></dt><dd>Where a string’s first byte may be, as a file offset.</dd><dt><a class="enum" href="enum.PatternSource.html" title="enum palisade_fileid::tags::PatternSource">Pattern<wbr>Source</a></dt><dd>What a string matches. Every pattern has a fixed length of at most
+<a href="constant.MAX_PATTERN_LEN.html" title="constant palisade_fileid::tags::MAX_PATTERN_LEN"><code>MAX_PATTERN_LEN</code></a> bytes.</dd><dt><a class="enum" href="enum.RuleErrorKind.html" title="enum palisade_fileid::tags::RuleErrorKind">Rule<wbr>Error<wbr>Kind</a></dt><dd>What is wrong with a rule.</dd><dt><a class="enum" href="enum.ScanStatus.html" title="enum palisade_fileid::tags::ScanStatus">Scan<wbr>Status</a></dt><dd>How a scan ended.</dd></dl><h2 id="constants" class="section-header">Constants<a href="#constants" class="anchor">§</a></h2><dl class="item-table"><dt><a class="constant" href="constant.ARCHIVE_EMBEDDED_ARCHIVE.html" title="constant palisade_fileid::tags::ARCHIVE_EMBEDDED_ARCHIVE">ARCHIVE_<wbr>EMBEDDED_<wbr>ARCHIVE</a></dt><dd>A cabinet, 7z, RAR (4 or 5) or ZIP local header signature after the
+start of a file that does not itself start with a ZIP local file header
+(<code>PK\x03\x04</code>; a ZIP archive has a local header for every entry). A
+file that merely starts with <code>PK</code> is not excluded.</dd><dt><a class="constant" href="constant.ARCHIVE_EMBEDDED_PE.html" title="constant palisade_fileid::tags::ARCHIVE_EMBEDDED_PE">ARCHIVE_<wbr>EMBEDDED_<wbr>PE</a></dt><dd>A PE image after the start of any file: <code>MZ</code>, then an <code>e_lfanew</code> of
+<code>0x40</code> to <code>0x400</code> that points at <code>PE\0\0</code>. Droppers, installers,
+archives stored without compression and some documents carry one.</dd><dt><a class="constant" href="constant.ARCHIVE_SELF_EXTRACTING_7Z.html" title="constant palisade_fileid::tags::ARCHIVE_SELF_EXTRACTING_7Z">ARCHIVE_<wbr>SELF_<wbr>EXTRACTING_<wbr>7Z</a></dt><dd>A 7z signature in a PE image’s appended data.</dd><dt><a class="constant" href="constant.ARCHIVE_SELF_EXTRACTING_CAB.html" title="constant palisade_fileid::tags::ARCHIVE_SELF_EXTRACTING_CAB">ARCHIVE_<wbr>SELF_<wbr>EXTRACTING_<wbr>CAB</a></dt><dd>A PE image that carries a cabinet (<code>MSCF</code> and a zero reserved field)
+after its start, as self-extracting cabinet packages do (often in a
+data resource).</dd><dt><a class="constant" href="constant.ARCHIVE_SELF_EXTRACTING_ZIP.html" title="constant palisade_fileid::tags::ARCHIVE_SELF_EXTRACTING_ZIP">ARCHIVE_<wbr>SELF_<wbr>EXTRACTING_<wbr>ZIP</a></dt><dd>A ZIP local file header in a PE image’s appended data.</dd><dt><a class="constant" href="constant.BUILTIN_TAGS.html" title="constant palisade_fileid::tags::BUILTIN_TAGS">BUILTIN_<wbr>TAGS</a></dt><dd>Every built-in tag, in the order the rules are checked and reported.</dd><dt><a class="constant" href="constant.BUILTIN_VERSION.html" title="constant palisade_fileid::tags::BUILTIN_VERSION">BUILTIN_<wbr>VERSION</a></dt><dd>The version of the built-in rules. It is bumped whenever a change could
+tag some file differently, so cached results can be thrown away.</dd><dt><a class="constant" href="constant.CONTENT_SCAN_ERROR.html" title="constant palisade_fileid::tags::CONTENT_SCAN_ERROR">CONTENT_<wbr>SCAN_<wbr>ERROR</a></dt><dd>The reader failed, or the file ended early.</dd><dt><a class="constant" href="constant.CONTENT_SCAN_PARTIAL.html" title="constant palisade_fileid::tags::CONTENT_SCAN_PARTIAL">CONTENT_<wbr>SCAN_<wbr>PARTIAL</a></dt><dd>The file is over <a href="struct.ScanLimits.html#structfield.max_file_size" title="field palisade_fileid::tags::ScanLimits::max_file_size"><code>ScanLimits::max_file_size</code></a>, so only its start and
+its tail were scanned.</dd><dt><a class="constant" href="constant.CONTENT_SCAN_TIMEOUT.html" title="constant palisade_fileid::tags::CONTENT_SCAN_TIMEOUT">CONTENT_<wbr>SCAN_<wbr>TIMEOUT</a></dt><dd>The scan stopped at a limit of <a href="struct.ScanLimits.html" title="struct palisade_fileid::tags::ScanLimits"><code>ScanLimits</code></a> other than the file size.</dd><dt><a class="constant" href="constant.INSTALLER_BUNDLE_BOOTSTRAPPER.html" title="constant palisade_fileid::tags::INSTALLER_BUNDLE_BOOTSTRAPPER">INSTALLER_<wbr>BUNDLE_<wbr>BOOTSTRAPPER</a></dt><dd>A bundle bootstrapper that chains installer packages: a PE image with
+the bootstrapper’s 8-byte section name anywhere a section table can be,
+and the bootstrapper’s section header (magic <code>0x00F14300</code>, version 2)
+anywhere in the file. The two are found independently: the rule does
+not resolve the named section or check that the header is at its raw
+data, so it is a two-marker heuristic.</dd><dt><a class="constant" href="constant.INSTALLER_MSI_WRAPPER.html" title="constant palisade_fileid::tags::INSTALLER_MSI_WRAPPER">INSTALLER_<wbr>MSI_<wbr>WRAPPER</a></dt><dd>A PE image that may carry a Windows Installer database: a compound file
+header after the start of the file, and the installer database root
+CLSID anywhere in it. The two are found independently: the rule does
+not check that the CLSID is the root entry of that compound file, so a
+PE that holds some other compound file and the same 16 bytes elsewhere
+is tagged too. Installer wrappers and bootstrappers that unpack and run
+an MSI look like this.</dd><dt><a class="constant" href="constant.INSTALLER_SCRIPTED_SETUP.html" title="constant palisade_fileid::tags::INSTALLER_SCRIPTED_SETUP">INSTALLER_<wbr>SCRIPTED_<wbr>SETUP</a></dt><dd>A PE image whose appended data holds the first header of a widely used
+script-driven installer system: a flags word, the signature
+<code>0xDEADBEEF</code> and the system’s 12-byte marker.</dd><dt><a class="constant" href="constant.INSTALLER_SETUP_LOADER.html" title="constant palisade_fileid::tags::INSTALLER_SETUP_LOADER">INSTALLER_<wbr>SETUP_<wbr>LOADER</a></dt><dd>A PE image with a setup loader offset table (a 12-byte ID, then a
+version number below 16; the known versions are 1 and 2), as a widely
+used Pascal-scripted setup system’s loader stores in a data resource to
+find its compressed setup program and data.</dd><dt><a class="constant" href="constant.INSTALLER_SETUP_STREAM.html" title="constant palisade_fileid::tags::INSTALLER_SETUP_STREAM">INSTALLER_<wbr>SETUP_<wbr>STREAM</a></dt><dd>A commercial setup-authoring engine’s setup stream: its plain or
+stream-format signature (each a 13-byte name and a NUL) in a PE
+image’s appended data.</dd><dt><a class="constant" href="constant.MAX_PATTERN_LEN.html" title="constant palisade_fileid::tags::MAX_PATTERN_LEN">MAX_<wbr>PATTERN_<wbr>LEN</a></dt><dd>The longest pattern, in bytes.</dd><dt><a class="constant" href="constant.MAX_RULES.html" title="constant palisade_fileid::tags::MAX_RULES">MAX_<wbr>RULES</a></dt><dd>At most this many organisation rules.</dd><dt><a class="constant" href="constant.MAX_STRINGS.html" title="constant palisade_fileid::tags::MAX_STRINGS">MAX_<wbr>STRINGS</a></dt><dd>At most this many strings over all organisation rules.</dd><dt><a class="constant" href="constant.MAX_STRINGS_PER_RULE.html" title="constant palisade_fileid::tags::MAX_STRINGS_PER_RULE">MAX_<wbr>STRINGS_<wbr>PER_<wbr>RULE</a></dt><dd>At most this many strings in one rule.</dd><dt><a class="constant" href="constant.MAX_TAG_LEN.html" title="constant palisade_fileid::tags::MAX_TAG_LEN">MAX_<wbr>TAG_<wbr>LEN</a></dt><dd>The longest tag, in bytes.</dd><dt><a class="constant" href="constant.MIN_ATOM_LEN.html" title="constant palisade_fileid::tags::MIN_ATOM_LEN">MIN_<wbr>ATOM_<wbr>LEN</a></dt><dd>The shortest run of exact bytes a pattern needs, unless it is at a fixed
+offset.</dd><dt><a class="constant" href="constant.SCRIPT_COMPILED_AUTOMATION.html" title="constant palisade_fileid::tags::SCRIPT_COMPILED_AUTOMATION">SCRIPT_<wbr>COMPILED_<wbr>AUTOMATION</a></dt><dd>A script compiled into an executable by a desktop automation
+language’s script-to-executable compiler: its 16-byte script marker,
+in the appended data or a data resource of a PE image.</dd><dt><a class="constant" href="constant.SCRIPT_FROZEN_PYTHON.html" title="constant palisade_fileid::tags::SCRIPT_FROZEN_PYTHON">SCRIPT_<wbr>FROZEN_<wbr>PYTHON</a></dt><dd>A frozen Python application: the 8-byte archive cookie that a widely
+used freezer appends to its bootloader, in the appended data of a PE
+image or in the last 64 KiB of any file.</dd><dt><a class="constant" href="constant.TAIL_SCAN_LEN.html" title="constant palisade_fileid::tags::TAIL_SCAN_LEN">TAIL_<wbr>SCAN_<wbr>LEN</a></dt><dd>The largest <a href="enum.Location.html#variant.Tail" title="variant palisade_fileid::tags::Location::Tail"><code>Location::Tail</code></a>, and how much of the end of a file over
+<a href="struct.ScanLimits.html#structfield.max_file_size" title="field palisade_fileid::tags::ScanLimits::max_file_size"><code>ScanLimits::max_file_size</code></a> is scanned.</dd><dt><a class="constant" href="constant.TEST_MALWARE_TEST_FILE.html" title="constant palisade_fileid::tags::TEST_MALWARE_TEST_FILE">TEST_<wbr>MALWARE_<wbr>TEST_<wbr>FILE</a></dt><dd>The industry-standard anti-malware test file: its 68-byte string at the
+start of a file of at most 128 bytes. It is harmless, and detection
+products treat it as a test detection.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.scan.html" title="fn palisade_fileid::tags::scan">scan</a></dt><dd>Scans a file for content tags. Never fails and never exceeds <code>limits</code>;
+see the <a href="index.html" title="mod palisade_fileid::tags">module documentation</a>. The reader is left at an
+unspecified position.</dd><dt><a class="fn" href="fn.scan_bytes.html" title="fn palisade_fileid::tags::scan_bytes">scan_<wbr>bytes</a></dt><dd><a href="fn.scan.html" title="fn palisade_fileid::tags::scan"><code>scan</code></a> over bytes held in memory.</dd></dl></section></div></main></body></html>

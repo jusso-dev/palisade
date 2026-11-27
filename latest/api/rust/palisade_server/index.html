@@ -1,0 +1,292 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="palisade-server"><title>palisade_server - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="palisade_server" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate palisade_server</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../palisade_server/index.html">palisade_<wbr>server</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#palisade-server" title="palisade-server">palisade-server</a><ul><li><a href="#commands" title="Commands">Commands</a></li><li><a href="#configuration" title="Configuration">Configuration</a></li><li><a href="#tls" title="TLS">TLS</a></li><li><a href="#listeners-and-binding" title="Listeners and binding">Listeners and binding</a></li><li><a href="#http-stack" title="HTTP stack">HTTP stack</a></li><li><a href="#probes" title="Probes">Probes</a></li><li><a href="#database" title="Database">Database</a></li><li><a href="#overlay-deployments" title="Overlay deployments">Overlay deployments</a></li><li><a href="#logs" title="Logs">Logs</a></li><li><a href="#shutdown" title="Shutdown">Shutdown</a></li><li><a href="#not-here-yet" title="Not here yet">Not here yet</a></li><li><a href="#allowed-dependencies" title="Allowed dependencies">Allowed dependencies</a></li><li><a href="#platform-support" title="Platform support">Platform support</a></li><li><a href="#feature-flags" title="Feature flags">Feature flags</a></li><li><a href="#stability" title="Stability">Stability</a></li></ul></li></ul><h3><a href="#modules">Crate Items</a></h3><ul class="block"><li><a href="#modules" title="Modules">Modules</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>palisade_<wbr>server</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/palisade_server/lib.rs.html#1-14">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="palisade-server"><a class="doc-anchor" href="#palisade-server">§</a>palisade-server</h2>
+<p>The central management server: policy distribution, approvals, inventory and event storage.</p>
+<p><strong>Status:</strong> process skeleton with a database foundation. The binary starts, loads and validates
+its configuration, serves TLS on separate admin, agent and metrics listeners, answers liveness and
+readiness probes, and shuts down gracefully. It connects to Postgres, applies its embedded
+migrations, and isolates tenants with row-level security (see <a href="#database">Database</a>). It has no
+agent or API functionality yet. Work is tracked in
+<a href="https://github.com/jusso-dev/palisade/issues/126">#126</a> and
+<a href="https://github.com/jusso-dev/palisade/issues/127">#127</a> (epic
+<a href="https://github.com/jusso-dev/palisade/issues/10">#10</a>).</p>
+<h3 id="commands"><a class="doc-anchor" href="#commands">§</a>Commands</h3><div class="example-wrap"><pre class="language-text"><code>palisade-server serve         --config &lt;PATH&gt;   # run until SIGTERM or Ctrl-C
+palisade-server check-config  --config &lt;PATH&gt;   # validate, then print the effective config
+palisade-server migrate up      --config &lt;PATH&gt; # apply pending migrations, then verify
+palisade-server migrate status  --config &lt;PATH&gt; # applied vs embedded migrations, as JSON
+palisade-server migrate verify  --config &lt;PATH&gt; # checksums and row-level security checks
+palisade-server version</code></pre></div>
+<p><code>--config</code> can also come from <code>PALISADE_CONFIG</code>. Exit codes: <code>0</code> success (including a
+completed shutdown), <code>1</code> runtime failure, <code>2</code> invalid configuration or command line. <code>migrate status</code> exits <code>3</code> when migrations are pending.</p>
+<p><code>check-config</code> runs every check <code>serve</code> runs before it binds a socket: the TOML and environment
+overrides, value ranges, the certificate chain and private key, the agent CA bundle, the TLS
+policy, the database password files and CA file, the refused <code>PG*</code> variables (see
+<a href="#database">Database</a>), and that each <code>public_url</code> host is a subject alternative name (DNS or IP) of the server
+certificate. It reports every problem at once, prints placement warnings (see
+<a href="#overlay-deployments">Overlay deployments</a>), and prints the effective configuration as JSON
+with secret files shown by path only.</p>
+<h3 id="configuration"><a class="doc-anchor" href="#configuration">§</a>Configuration</h3>
+<p>A TOML file; <a href="config/server.example.toml"><code>config/server.example.toml</code></a> documents every key.
+Unknown keys are errors. Relative paths resolve against the directory of the file.</p>
+<p>Every key can be overridden by an environment variable: <code>PALISADE_</code> plus the key path in upper
+case, with <code>__</code> (two underscores) between levels. For example <code>PALISADE_LISTEN__ADMIN__PORT=9443</code>
+or <code>PALISADE_TLS__KEY_FILE=/run/secrets/server.key</code>. Unknown <code>PALISADE_*</code> variables are reported
+as warnings and ignored, so variables meant for other Palisade components do not stop the server.</p>
+<div class="table"><table><thead><tr><th>Key</th><th>Default</th><th>Notes</th></tr></thead><tbody>
+<tr><td><code>deployment.profile</code></td><td><code>standard</code></td><td><code>standard</code> or <code>overlay</code></td></tr>
+<tr><td><code>tls.cert_file</code></td><td>required</td><td>PEM chain, leaf first</td></tr>
+<tr><td><code>tls.key_file</code></td><td>required</td><td>PEM key (PKCS#8, PKCS#1 or SEC1). A secret file, see below</td></tr>
+<tr><td><code>tls.min_version</code></td><td><code>1.2</code></td><td><code>1.2</code> or <code>1.3</code>. TLS 1.3 is always preferred</td></tr>
+<tr><td><code>tls.profile</code></td><td><code>default</code></td><td><code>default</code> or <code>asd-strict</code>, see <a href="#tls">TLS</a></td></tr>
+<tr><td><code>listen.&lt;name&gt;.bind</code></td><td>required (<code>127.0.0.1</code> for metrics)</td><td>An IP address, or a network interface name</td></tr>
+<tr><td><code>listen.&lt;name&gt;.port</code></td><td>required (<code>9464</code> for metrics)</td><td></td></tr>
+<tr><td><code>listen.&lt;name&gt;.public_url</code></td><td>none</td><td><code>https</code> URL clients use; checked against the certificate. Not on metrics</td></tr>
+<tr><td><code>listen.&lt;name&gt;.body_limit_bytes</code></td><td>admin 16 MiB, agent 8 MiB, metrics 64 KiB</td><td>Up to 1 GiB</td></tr>
+<tr><td><code>listen.&lt;name&gt;.request_timeout_secs</code></td><td><code>30</code></td><td>1 to 3600</td></tr>
+<tr><td><code>listen.&lt;name&gt;.max_connections</code></td><td>admin and agent 4096, metrics 64</td><td></td></tr>
+<tr><td><code>listen.agent.client_ca_file</code></td><td>required</td><td>CA bundle that agent client certificates must chain to</td></tr>
+<tr><td><code>shutdown.grace_secs</code></td><td><code>30</code></td><td>Up to 3600</td></tr>
+<tr><td><code>log.level</code></td><td><code>info</code></td><td><code>error</code>, <code>warn</code>, <code>info</code>, <code>debug</code>, <code>trace</code></td></tr>
+<tr><td><code>database.host</code></td><td>required if <code>[database]</code> is present</td><td>Host name or IP address</td></tr>
+<tr><td><code>database.port</code></td><td><code>5432</code></td><td></td></tr>
+<tr><td><code>database.name</code></td><td>required</td><td>Database name</td></tr>
+<tr><td><code>database.user</code></td><td>required</td><td>The <strong>runtime</strong> role. Must not own the schema or bypass RLS</td></tr>
+<tr><td><code>database.password_file</code></td><td>required</td><td>A secret file holding the runtime role’s password</td></tr>
+<tr><td><code>database.tls</code></td><td><code>verify-full</code></td><td><code>verify-full</code>, <code>verify-ca</code>, <code>require</code> or <code>disable</code>. The last two warn</td></tr>
+<tr><td><code>database.ca_file</code></td><td>none</td><td>Extra trusted CA certificates (PEM). Only with <code>verify-*</code></td></tr>
+<tr><td><code>database.max_connections</code></td><td><code>16</code></td><td>Runtime pool size, 1 to 1000</td></tr>
+<tr><td><code>database.connect_timeout_secs</code></td><td><code>5</code></td><td>1 to 300</td></tr>
+<tr><td><code>database.auto_migrate</code></td><td>on if <code>[database.migration]</code> is set</td><td>Apply pending migrations at start</td></tr>
+<tr><td><code>database.migration.user</code></td><td>none</td><td>The <strong>migration</strong> role, which owns the schema</td></tr>
+<tr><td><code>database.migration.password_file</code></td><td>none</td><td>A secret file holding its password</td></tr>
+</tbody></table>
+</div>
+<p><code>&lt;name&gt;</code> is <code>admin</code> (console, REST API, SSO callbacks), <code>agent</code> (agent traffic) or <code>metrics</code>
+(probes with full detail, and later the metrics exposition). <code>admin</code> and <code>agent</code> are required.
+<code>metrics</code> is optional; it is enabled by its section or by any <code>PALISADE_LISTEN__METRICS__*</code>
+variable. Two listeners may not share a port on the same address (or on a wildcard of the same
+address family); serving every surface on one port with path routing is not supported yet.</p>
+<h4 id="secret-files"><a class="doc-anchor" href="#secret-files">§</a>Secret files</h4>
+<p>Secrets are only ever given as file paths, never as values, so the configuration file, the
+environment, <code>check-config</code> output and the logs never contain them. The secrets are <code>tls.key_file</code>
+and the database password files. It must be a regular file of at most 64 KiB, and on Unix it must not grant any
+access to the group or others (<code>chmod 600</code> or stricter); otherwise the server refuses to start.
+The database password files (<code>database.password_file</code>, <code>database.migration.password_file</code>) follow
+the same rules, with a limit of 4 KiB; a trailing newline is not part of the password.
+Its contents are held in zeroising buffers while loading, and error messages name the path and
+the problem, never any content. Windows ACL checks, a redaction layer for log fields, and other
+secret kinds are part of <a href="https://github.com/jusso-dev/palisade/issues/227">#227</a>.</p>
+<h3 id="tls"><a class="doc-anchor" href="#tls">§</a>TLS</h3>
+<p>Every listener is TLS only; there is no plaintext listener and no option to add one. TLS is
+provided by <code>rustls</code> with the <code>ring</code> provider
+(<a href="../../docs/adr/0008-cryptographic-algorithms.md">ADR 0008</a>), cut down to an explicit
+allowlist so a future default change in <code>rustls</code> cannot widen it:</p>
+<div class="table"><table><thead><tr><th>Profile</th><th>TLS 1.3 suites</th><th>TLS 1.2 suites</th><th>Key exchange</th></tr></thead><tbody>
+<tr><td><code>default</code></td><td>AES-256-GCM-SHA384, AES-128-GCM-SHA256</td><td>ECDHE-ECDSA and ECDHE-RSA with AES-256-GCM-SHA384 or AES-128-GCM-SHA256</td><td>X25519, P-256, P-384</td></tr>
+<tr><td><code>asd-strict</code></td><td>AES-256-GCM-SHA384</td><td>ECDHE-ECDSA and ECDHE-RSA with AES-256-GCM-SHA384</td><td>P-384</td></tr>
+</tbody></table>
+</div>
+<p>ChaCha20-Poly1305 is excluded. TLS 1.0 and 1.1 are not implemented by <code>rustls</code>. TLS 1.2 requires
+the extended master secret extension, and the server’s suite order is used. ALPN offers <code>h2</code> and
+<code>http/1.1</code>.</p>
+<p>The agent listener requires a client certificate that chains to <code>listen.agent.client_ca_file</code>;
+a handshake without one fails. Matching the certificate to an enrolled device and checking
+revocation is enrolment work (<a href="https://github.com/jusso-dev/palisade/issues/223">#223</a>).</p>
+<p>The certificate and key are read once at start. Hot reload is part of
+<a href="https://github.com/jusso-dev/palisade/issues/224">#224</a>.</p>
+<h3 id="listeners-and-binding"><a class="doc-anchor" href="#listeners-and-binding">§</a>Listeners and binding</h3>
+<p><code>bind</code> takes an IP address (<code>127.0.0.1</code>, <code>100.64.0.7</code>, <code>::1</code>, <code>[fd7a::7]</code>, or <code>0.0.0.0</code> / <code>::</code>
+for every interface) or the name of a network interface (for example <code>overlay0</code>; on Windows the
+interface’s friendly name). An interface binds every address it has. IPv6 sockets are always
+IPv6-only, so <code>::</code> never silently covers IPv4 too.</p>
+<p>Each listener has a supervisor that keeps it bound:</p>
+<ul>
+<li>An address that cannot be bound yet (an interface that is not up, an address not assigned yet,
+a port in use) is retried with exponential backoff from 1 s to 30 s. Readiness reports
+<code>listener_unbound:&lt;name&gt;</code> until every address is bound. This covers an overlay interface that
+comes up after the server at boot.</li>
+<li>A named interface is re-resolved every 5 s. New addresses are bound; addresses that vanish stop
+accepting.</li>
+</ul>
+<p>Connections: the TLS handshake must finish within 10 s. The protocol follows ALPN: a connection
+that negotiated <code>h2</code> is served as HTTP/2 only, and any other (including one with no ALPN) as
+HTTP/1.1 only, so a client cannot switch protocols by sending another preface. The first request
+must arrive within 30 s of the handshake, whatever the protocol, and each later HTTP/1.1 request
+head within 30 s of the previous response; otherwise the connection is closed, so an idle or
+stalled client cannot hold a connection slot. HTTP/1.1 request heads are limited to 64 KiB.
+HTTP/2 allows 128 concurrent streams and 64 KiB of headers per request, with keep-alive pings.
+A listener serves at most <code>max_connections</code> connections; a connection is accepted before it takes
+a slot, so a socket with no clients never holds one, and while every slot is taken further
+clients wait in the TCP backlog.</p>
+<h3 id="http-stack"><a class="doc-anchor" href="#http-stack">§</a>HTTP stack</h3>
+<p>Every listener’s router runs inside this middleware stack (outermost first):</p>
+<ol>
+<li><strong>Request ID.</strong> A client-supplied <code>Palisade-Request-Id</code> of 1 to 64 characters from
+<code>A-Z a-z 0-9 . _ : -</code> is kept; anything else is replaced by 128 random bits in hex. The ID is
+echoed on every response.</li>
+<li><strong>Errors as problem details.</strong> Every 4xx and 5xx response is an RFC 9457
+<code>application/problem+json</code> document with <code>type</code>
+(<code>https://palisade.dev/problems/&lt;slug&gt;</code>), <code>title</code>, <code>status</code>, <code>detail</code>, <code>instance</code>
+(<code>urn:palisade:request:&lt;id&gt;</code>) and <code>request_id</code>. Error bodies from inside the stack are
+replaced, so they cannot leak internals; only the <code>Allow</code>, <code>Retry-After</code> and
+<code>WWW-Authenticate</code> headers are kept. A 5xx <code>detail</code> tells the client to re-read before
+retrying a change. Errors that hyper produces before a request reaches the router (a malformed
+request line, oversized headers) are hyper’s own minimal responses.</li>
+<li><strong>Trace.</strong> One span per request with <code>request_id</code>, <code>listener</code>, <code>method</code>, the matched route
+template (never the raw path or query) and <code>peer</code>, and one log line per response with
+<code>status</code> and <code>latency_ms</code>.</li>
+<li><strong>Panic guard.</strong> A panicking handler becomes a 500 problem. The panic message goes to the log.</li>
+<li><strong>Timeout.</strong> A handler still running after <code>request_timeout_secs</code> is cancelled with a 503
+problem.</li>
+<li><strong>Body limit.</strong> A body over <code>body_limit_bytes</code> gets a 413 problem, whether the size is
+declared in <code>Content-Length</code> or discovered while streaming.</li>
+</ol>
+<p>Every response also carries <code>X-Content-Type-Options: nosniff</code>.</p>
+<h3 id="probes"><a class="doc-anchor" href="#probes">§</a>Probes</h3>
+<p>Every listener serves:</p>
+<ul>
+<li><code>GET /healthz</code>: liveness. <code>200 {"status":"alive"}</code> while the process can serve requests.</li>
+<li><code>GET /readyz</code>: readiness. <code>200</code> when every listener is bound on every wanted address and the
+server is not shutting down; otherwise a <code>503</code> problem (<code>type</code> ending <code>not-ready</code>). On the
+admin and agent listeners the body carries only the overall status. On the metrics listener
+(loopback by default) it also lists the indicators:</li>
+</ul>
+<div class="table"><table><thead><tr><th>Indicator</th><th>Meaning</th><th>Readiness</th></tr></thead><tbody>
+<tr><td><code>listener_unbound:&lt;name&gt;</code></td><td>An address of the listener is not bound yet</td><td>503</td></tr>
+<tr><td><code>public_exposure:&lt;name&gt;</code></td><td><code>deployment.profile = "overlay"</code> and the listener is reachable on a public address</td><td>200, status <code>degraded</code></td></tr>
+<tr><td><code>shutting_down</code></td><td>Shutdown has started</td><td>503</td></tr>
+<tr><td><code>database_down</code></td><td><code>[database]</code> is configured and the runtime role cannot reach it (also before the first check)</td><td>503</td></tr>
+<tr><td><code>database_schema:&lt;verdict&gt;</code></td><td>The schema is <code>behind</code> (pending migrations), <code>newer</code> than this binary, or <code>damaged</code></td><td>503</td></tr>
+<tr><td><code>database_role_unsafe</code></td><td>The runtime role, or any role it is a member of, is a superuser, has <code>BYPASSRLS</code>, or owns or can create objects in the schema; or it is not in <code>palisade_runtime</code></td><td>503</td></tr>
+</tbody></table>
+</div>
+<p>The database is checked every 5 seconds. Job-runner readiness joins this list with #126.</p>
+<h3 id="database"><a class="doc-anchor" href="#database">§</a>Database</h3>
+<p>Postgres 16 or later, through <code>sqlx</code> (<a href="../../docs/adr/0006-server-database.md">ADR 0006</a>).
+Without a <code>[database]</code> section the server runs without one, as before, and logs a warning.</p>
+<p><strong>Roles.</strong> Two logins, never the same role:</p>
+<ul>
+<li>The <strong>migration role</strong> owns the database, the <code>palisade</code> schema and every table. Only
+<code>migrate up</code> and <code>auto_migrate</code> use it.</li>
+<li>The <strong>runtime role</strong> serves every request. It owns nothing, is <code>NOSUPERUSER NOBYPASSRLS</code>, and
+gets its table privileges through the <code>palisade_runtime</code> group role, which the migrations
+grant to. These properties are checked through role membership too, because a role can
+<code>SET ROLE</code> to any role it is a member of: no role the runtime login can reach may be a
+superuser, have <code>BYPASSRLS</code>, or own the schema or any table, function or type in it (an owner
+of <code>palisade.current_tenant_ids()</code> could replace it). <code>serve</code> refuses to start, and readiness
+reports <code>database_role_unsafe</code>, if any check fails.</li>
+</ul>
+<p><a href="sql/bootstrap.sql"><code>sql/bootstrap.sql</code></a> creates the three roles and the database; run it once as
+a database administrator with <code>psql</code> (the file shows the command), then set the two passwords
+with <code>\password</code>. <code>palisade-server</code> never needs a superuser.</p>
+<p><strong>Migrations.</strong> Forward-only numbered SQL files in <a href="migrations/"><code>migrations/</code></a>, embedded in the
+binary with <code>sqlx::migrate!</code>. Each runs in a transaction, as the migration role. Before anything
+is created, <code>migrate up</code> checks that role: not a superuser, not linked to <code>palisade_runtime</code> by
+membership in either direction, and the owner of the <code>palisade</code> schema once it exists. A run as
+the wrong role changes nothing. The history
+lives in <code>palisade._sqlx_migrations</code> with a SHA-384 checksum per file, so an edited migration is a
+hard error. At start, <code>serve</code> refuses a database whose schema is newer than the binary, and with
+<code>auto_migrate</code> applies pending migrations first; otherwise it starts not ready until someone runs
+<code>migrate up</code>. <code>serve</code> also refuses a damaged schema. <code>migrate verify</code> also checks the structure that ADR 0006 requires: every table with
+a <code>tenant_id</code> column (and the tenant table) has row-level security enabled and forced and has a
+policy and <code>tenant_id uuid NOT NULL</code>, every foreign key between tenant-owned tables includes
+<code>tenant_id</code>, and no role a <code>palisade_runtime</code> login can act as owns anything in the schema or is
+a superuser or <code>BYPASSRLS</code>. New migrations must stay forward-only and avoid long table rewrites
+(expand/contract).</p>
+<p><strong>Tables so far.</strong> <code>tenant</code> (a tree with one <code>root</code>, <code>organisation</code> and <code>template</code> kinds, a
+<code>settings</code> object) and <code>computer_group</code> (a tree per tenant). Each has <code>created_at</code>, <code>updated_at</code>
+and <code>revision</code>, maintained by a trigger: inserts start at revision 1 and every update adds 1, so
+a client can use the revision for optimistic concurrency (#185). A row’s <code>id</code> and <code>tenant_id</code>
+never change. The rest of the schema arrives with the issues that use it.</p>
+<p><strong>Tenant isolation.</strong> Every tenant-owned table has <code>tenant_id uuid NOT NULL</code>, <code>FORCE ROW LEVEL SECURITY</code> (the policies apply to the table owner too), and a policy
+<code>tenant_id = ANY (palisade.current_tenant_ids())</code>, for reads and writes. The function reads the
+<code>palisade.tenant_ids</code> setting; when it is unset or empty, no rows match. The only way the server
+code runs a tenant-scoped query is <code>Database::tenant_tx(scope)</code>, which begins a transaction and
+sets the scope with <code>set_config(..., true)</code>, the function form of <code>SET LOCAL</code>. The scope ends with
+the transaction, so a pooled connection never carries it to the next request. Foreign keys
+between tenant-owned tables include <code>tenant_id</code>, so a row can never reference another tenant’s
+row.</p>
+<p><strong>What row-level security does and does not protect.</strong> It stops a bug in a handler (a missing
+<code>WHERE</code>, a wrong ID) from reading or changing another tenant’s rows: the database filters every
+query, whatever the code asks. The runtime role cannot turn it off: it does not own the tables, so
+it cannot <code>DISABLE</code> or <code>NO FORCE</code> row-level security or change the policies, and with
+<code>row_security = off</code> a filtered query fails rather than returning everything. It does <strong>not</strong>
+protect against a compromised server process. That process holds the runtime role and chooses
+the scope itself, so it can ask for any tenant (threat model AC-08). The integration tests
+demonstrate both sides.</p>
+<p><strong>Environment.</strong> The Postgres client library reads some <code>PG*</code> environment variables. The server
+refuses to start, and <code>migrate</code> refuses to run, while <code>PGPASSWORD</code>, <code>PGPASSFILE</code>, <code>PGOPTIONS</code>,
+<code>PGSSLKEY</code>, <code>PGSSLCERT</code>, <code>PGSSLMODE</code>, <code>PGSSLROOTCERT</code> or <code>PGHOSTADDR</code> is set, because these would
+override the configuration (a password outside a <code>*_file</code>, or a session setting such as
+<code>row_security</code>).</p>
+<p><strong>Queries.</strong> Fixed SQL strings with typed bind parameters only. Compile-time-checked queries
+(<code>query!</code>) need a live database or committed offline metadata; they are not used yet, and adopting
+them, with a lint against string-built SQL, is part of #229.</p>
+<h3 id="overlay-deployments"><a class="doc-anchor" href="#overlay-deployments">§</a>Overlay deployments</h3>
+<p>For a fleet reachable only through a private overlay network
+(<a href="https://github.com/jusso-dev/palisade/issues/239">#239</a>), bind the admin and agent listeners
+to the overlay interface or address, keep metrics on loopback, and set
+<code>deployment.profile = "overlay"</code>:</p>
+<div class="example-wrap"><pre class="language-toml"><code>[deployment]
+profile = &quot;overlay&quot;
+
+[listen.admin]
+bind = &quot;overlay0&quot;              # or the overlay address, e.g. &quot;100.64.0.7&quot;
+port = 8443
+public_url = &quot;https://palisade-server.overlay.example:8443&quot;
+
+[listen.agent]
+bind = &quot;overlay0&quot;
+port = 8444
+public_url = &quot;https://palisade-server.overlay.example:8444&quot;
+client_ca_file = &quot;tls/agent-ca.crt&quot;
+
+[listen.metrics]
+bind = &quot;127.0.0.1&quot;</code></pre></div>
+<p>Under the overlay profile, <code>check-config</code> and <code>serve</code> warn when a listener binds every interface,
+is reachable on a public address, or (for metrics) is not on loopback. While the server runs,
+public reachability is also reported as <code>public_exposure:&lt;name&gt;</code> in readiness. “Public” means
+anything outside loopback, RFC 1918, the RFC 6598 shared space <code>100.64.0.0/10</code>, link-local,
+IPv6 unique-local <code>fc00::/7</code>, and the documentation, benchmarking and reserved ranges.</p>
+<p>The certificate must name every <code>public_url</code> host (the overlay DNS name or overlay IP) as a SAN;
+<code>check-config</code> fails otherwise. The overlay is transport only: TLS and client certificates stay
+mandatory over it.</p>
+<h3 id="logs"><a class="doc-anchor" href="#logs">§</a>Logs</h3>
+<p><code>serve</code> writes one JSON object per line to standard error: <code>timestamp</code>, <code>level</code>, <code>target</code>,
+<code>fields</code> (including <code>message</code>), <code>span</code> (the current span) and <code>spans</code> (every enclosing span, so
+the request span’s fields stay on the line when a handler opens a child span). The level comes
+from <code>log.level</code>. No secret value is passed to the logger: the configuration holds only secret
+paths, and the secret reader’s errors never contain file contents. Tenant and principal fields
+join the request span with the API work.</p>
+<h3 id="shutdown"><a class="doc-anchor" href="#shutdown">§</a>Shutdown</h3>
+<p>On SIGTERM or SIGINT (Ctrl-C), or on Windows Ctrl-C, Ctrl-Break and the console close, logoff
+and shutdown events (the handlers are registered before any socket is bound, so an early signal is
+never lost): readiness fails, every listener stops accepting, and open connections are asked to
+finish their in-flight requests and close (HTTP/1.1 after the current response, HTTP/2 with
+GOAWAY). If any remain after <code>shutdown.grace_secs</code>, they are dropped. The process exits <code>0</code>
+either way. A second signal during the drain exits <code>1</code> immediately.</p>
+<h3 id="not-here-yet"><a class="doc-anchor" href="#not-here-yet">§</a>Not here yet</h3>
+<p>Tracked in <a href="https://github.com/jusso-dev/palisade/issues/126">#126</a> unless noted:
+<code>create-admin</code>, <code>backup</code> and <code>restore</code> subcommands (also
+<a href="https://github.com/jusso-dev/palisade/issues/138">#138</a>); <code>/version</code> with git SHA and schema
+version; single-port mode; compression, CORS, rate-limit, auth and tenant layers;
+the metrics exposition and OTLP; runtime log-level changes; clock-skew health; the job runner
+and scheduler; relay role. Elsewhere: the rest of the schema, secrets at rest, soft delete, retention and
+partitioning (<a href="https://github.com/jusso-dev/palisade/issues/127">#127</a> and the issues that own
+each table), the audit log (<a href="https://github.com/jusso-dev/palisade/issues/132">#132</a>), enrolment and device certificate
+checks (<a href="https://github.com/jusso-dev/palisade/issues/223">#223</a>), agent RPCs
+(<a href="https://github.com/jusso-dev/palisade/issues/62">#62</a>), REST conventions
+(<a href="https://github.com/jusso-dev/palisade/issues/185">#185</a>), certificate hot reload
+(<a href="https://github.com/jusso-dev/palisade/issues/224">#224</a>), secrets hardening
+(<a href="https://github.com/jusso-dev/palisade/issues/227">#227</a>), server hardening
+(<a href="https://github.com/jusso-dev/palisade/issues/229">#229</a>).</p>
+<h3 id="allowed-dependencies"><a class="doc-anchor" href="#allowed-dependencies">§</a>Allowed dependencies</h3>
+<p><code>palisade-core</code>, <code>palisade-fileid</code>, <code>palisade-policy</code>, <code>palisade-proto</code>. The rules are enforced by
+<code>cargo xtask check-deps</code>. None are used yet.</p>
+<h3 id="platform-support"><a class="doc-anchor" href="#platform-support">§</a>Platform support</h3>
+<p>All platforms. Secret-file permission checks apply on Unix; SIGTERM handling is Unix-only, with
+the console events above on Windows.</p>
+<h3 id="feature-flags"><a class="doc-anchor" href="#feature-flags">§</a>Feature flags</h3>
+<p>None yet.</p>
+<h3 id="stability"><a class="doc-anchor" href="#stability">§</a>Stability</h3>
+<p>Unstable and not published. Anything may change.</p>
+</div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="cli/index.html" title="mod palisade_server::cli">cli</a></dt><dd>The <code>palisade-server</code> command line.</dd><dt><a class="mod" href="config/index.html" title="mod palisade_server::config">config</a></dt><dd>Server configuration.</dd><dt><a class="mod" href="db/index.html" title="mod palisade_server::db">db</a></dt><dd>The Postgres layer: connection pools, embedded migrations, the
+schema-version check and the per-transaction tenant scope.</dd><dt><a class="mod" href="health/index.html" title="mod palisade_server::health">health</a></dt><dd>Process health, as reported by the liveness and readiness probes.</dd><dt><a class="mod" href="http/index.html" title="mod palisade_server::http">http</a></dt><dd>The axum router and the tower middleware stack for one listener.</dd><dt><a class="mod" href="net/index.html" title="mod palisade_server::net">net</a></dt><dd>Bind address resolution and network placement checks.</dd><dt><a class="mod" href="problem/index.html" title="mod palisade_server::problem">problem</a></dt><dd>RFC 9457 problem details (<code>application/problem+json</code>).</dd><dt><a class="mod" href="secret/index.html" title="mod palisade_server::secret">secret</a></dt><dd>Reading secret files.</dd><dt><a class="mod" href="server/index.html" title="mod palisade_server::server">server</a></dt><dd>The running server: listener supervision, connections and shutdown.</dd><dt><a class="mod" href="telemetry/index.html" title="mod palisade_server::telemetry">telemetry</a></dt><dd>Structured logging.</dd><dt><a class="mod" href="tls/index.html" title="mod palisade_server::tls">tls</a></dt><dd>TLS for every listener.</dd></dl><script type="text/json" id="notable-traits-data">{"<Arc<S> as Service<Request>>::Future":"<h3>Notable traits for <code><a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;R&gt;</code></h3><pre><code><div class=\"where\">impl&lt;R&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;R&gt;<div class=\"where\">where\n    R: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a> + IoHandle + ?<a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/marker/trait.Sized.html\" title=\"trait core::marker::Sized\">Sized</a>,\n    <a class=\"primitive\" href=\"https://doc.rust-lang.org/1.100.0/std/primitive.reference.html\">&amp;'a R</a>: for&lt;'a&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a>,</div></div><div class=\"where\">impl&lt;W&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;W&gt;<div class=\"where\">where\n    W: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a> + IoHandle + ?<a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/marker/trait.Sized.html\" title=\"trait core::marker::Sized\">Sized</a>,\n    <a class=\"primitive\" href=\"https://doc.rust-lang.org/1.100.0/std/primitive.reference.html\">&amp;'a W</a>: for&lt;'a&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a>,</div></div>","<Arc<T> as ValueParserFactory>::Parser":"<h3>Notable traits for <code><a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;R&gt;</code></h3><pre><code><div class=\"where\">impl&lt;R&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;R&gt;<div class=\"where\">where\n    R: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a> + IoHandle + ?<a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/marker/trait.Sized.html\" title=\"trait core::marker::Sized\">Sized</a>,\n    <a class=\"primitive\" href=\"https://doc.rust-lang.org/1.100.0/std/primitive.reference.html\">&amp;'a R</a>: for&lt;'a&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a>,</div></div><div class=\"where\">impl&lt;W&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;W&gt;<div class=\"where\">where\n    W: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a> + IoHandle + ?<a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/marker/trait.Sized.html\" title=\"trait core::marker::Sized\">Sized</a>,\n    <a class=\"primitive\" href=\"https://doc.rust-lang.org/1.100.0/std/primitive.reference.html\">&amp;'a W</a>: for&lt;'a&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a>,</div></div>","<Arc<W> as MakeWriter<'a>>::Writer":"<h3>Notable traits for <code><a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;R&gt;</code></h3><pre><code><div class=\"where\">impl&lt;R&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;R&gt;<div class=\"where\">where\n    R: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a> + IoHandle + ?<a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/marker/trait.Sized.html\" title=\"trait core::marker::Sized\">Sized</a>,\n    <a class=\"primitive\" href=\"https://doc.rust-lang.org/1.100.0/std/primitive.reference.html\">&amp;'a R</a>: for&lt;'a&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a>,</div></div><div class=\"where\">impl&lt;W&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;W&gt;<div class=\"where\">where\n    W: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a> + IoHandle + ?<a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/marker/trait.Sized.html\" title=\"trait core::marker::Sized\">Sized</a>,\n    <a class=\"primitive\" href=\"https://doc.rust-lang.org/1.100.0/std/primitive.reference.html\">&amp;'a W</a>: for&lt;'a&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a>,</div></div>","Arc<B>":"<h3>Notable traits for <code><a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;R&gt;</code></h3><pre><code><div class=\"where\">impl&lt;R&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;R&gt;<div class=\"where\">where\n    R: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a> + IoHandle + ?<a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/marker/trait.Sized.html\" title=\"trait core::marker::Sized\">Sized</a>,\n    <a class=\"primitive\" href=\"https://doc.rust-lang.org/1.100.0/std/primitive.reference.html\">&amp;'a R</a>: for&lt;'a&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a>,</div></div><div class=\"where\">impl&lt;W&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;W&gt;<div class=\"where\">where\n    W: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a> + IoHandle + ?<a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/marker/trait.Sized.html\" title=\"trait core::marker::Sized\">Sized</a>,\n    <a class=\"primitive\" href=\"https://doc.rust-lang.org/1.100.0/std/primitive.reference.html\">&amp;'a W</a>: for&lt;'a&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a>,</div></div>","Arc<MaybeUninit<T>, A>":"<h3>Notable traits for <code><a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;R&gt;</code></h3><pre><code><div class=\"where\">impl&lt;R&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;R&gt;<div class=\"where\">where\n    R: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a> + IoHandle + ?<a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/marker/trait.Sized.html\" title=\"trait core::marker::Sized\">Sized</a>,\n    <a class=\"primitive\" href=\"https://doc.rust-lang.org/1.100.0/std/primitive.reference.html\">&amp;'a R</a>: for&lt;'a&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a>,</div></div><div class=\"where\">impl&lt;W&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;W&gt;<div class=\"where\">where\n    W: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a> + IoHandle + ?<a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/marker/trait.Sized.html\" title=\"trait core::marker::Sized\">Sized</a>,\n    <a class=\"primitive\" href=\"https://doc.rust-lang.org/1.100.0/std/primitive.reference.html\">&amp;'a W</a>: for&lt;'a&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a>,</div></div>","Arc<MaybeUninit<T>>":"<h3>Notable traits for <code><a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;R&gt;</code></h3><pre><code><div class=\"where\">impl&lt;R&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;R&gt;<div class=\"where\">where\n    R: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a> + IoHandle + ?<a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/marker/trait.Sized.html\" title=\"trait core::marker::Sized\">Sized</a>,\n    <a class=\"primitive\" href=\"https://doc.rust-lang.org/1.100.0/std/primitive.reference.html\">&amp;'a R</a>: for&lt;'a&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a>,</div></div><div class=\"where\">impl&lt;W&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;W&gt;<div class=\"where\">where\n    W: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a> + IoHandle + ?<a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/marker/trait.Sized.html\" title=\"trait core::marker::Sized\">Sized</a>,\n    <a class=\"primitive\" href=\"https://doc.rust-lang.org/1.100.0/std/primitive.reference.html\">&amp;'a W</a>: for&lt;'a&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a>,</div></div>","Arc<T, A>":"<h3>Notable traits for <code><a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;R&gt;</code></h3><pre><code><div class=\"where\">impl&lt;R&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;R&gt;<div class=\"where\">where\n    R: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a> + IoHandle + ?<a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/marker/trait.Sized.html\" title=\"trait core::marker::Sized\">Sized</a>,\n    <a class=\"primitive\" href=\"https://doc.rust-lang.org/1.100.0/std/primitive.reference.html\">&amp;'a R</a>: for&lt;'a&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a>,</div></div><div class=\"where\">impl&lt;W&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;W&gt;<div class=\"where\">where\n    W: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a> + IoHandle + ?<a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/marker/trait.Sized.html\" title=\"trait core::marker::Sized\">Sized</a>,\n    <a class=\"primitive\" href=\"https://doc.rust-lang.org/1.100.0/std/primitive.reference.html\">&amp;'a W</a>: for&lt;'a&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a>,</div></div>","Arc<T>":"<h3>Notable traits for <code><a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;R&gt;</code></h3><pre><code><div class=\"where\">impl&lt;R&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;R&gt;<div class=\"where\">where\n    R: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a> + IoHandle + ?<a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/marker/trait.Sized.html\" title=\"trait core::marker::Sized\">Sized</a>,\n    <a class=\"primitive\" href=\"https://doc.rust-lang.org/1.100.0/std/primitive.reference.html\">&amp;'a R</a>: for&lt;'a&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a>,</div></div><div class=\"where\">impl&lt;W&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;W&gt;<div class=\"where\">where\n    W: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a> + IoHandle + ?<a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/marker/trait.Sized.html\" title=\"trait core::marker::Sized\">Sized</a>,\n    <a class=\"primitive\" href=\"https://doc.rust-lang.org/1.100.0/std/primitive.reference.html\">&amp;'a W</a>: for&lt;'a&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a>,</div></div>","Arc<U, A>":"<h3>Notable traits for <code><a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;R&gt;</code></h3><pre><code><div class=\"where\">impl&lt;R&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;R&gt;<div class=\"where\">where\n    R: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a> + IoHandle + ?<a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/marker/trait.Sized.html\" title=\"trait core::marker::Sized\">Sized</a>,\n    <a class=\"primitive\" href=\"https://doc.rust-lang.org/1.100.0/std/primitive.reference.html\">&amp;'a R</a>: for&lt;'a&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a>,</div></div><div class=\"where\">impl&lt;W&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;W&gt;<div class=\"where\">where\n    W: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a> + IoHandle + ?<a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/marker/trait.Sized.html\" title=\"trait core::marker::Sized\">Sized</a>,\n    <a class=\"primitive\" href=\"https://doc.rust-lang.org/1.100.0/std/primitive.reference.html\">&amp;'a W</a>: for&lt;'a&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/io/write/trait.Write.html\" title=\"trait core::io::write::Write\">Write</a>,</div></div>","Bytes<Self>":"<h3>Notable traits for <code><a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/util/struct.Bytes.html\" title=\"struct alloc::io::util::Bytes\">Bytes</a>&lt;R&gt;</code></h3><pre><code><div class=\"where\">impl&lt;R&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/iter/traits/iterator/trait.Iterator.html\" title=\"trait core::iter::traits::iterator::Iterator\">Iterator</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/util/struct.Bytes.html\" title=\"struct alloc::io::util::Bytes\">Bytes</a>&lt;R&gt;<div class=\"where\">where\n    R: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a>,</div></div><div class=\"where\">    type <a href=\"https://doc.rust-lang.org/1.100.0/core/iter/traits/iterator/trait.Iterator.html#associatedtype.Item\" class=\"associatedtype\">Item</a> = <a class=\"enum\" href=\"https://doc.rust-lang.org/1.100.0/core/result/enum.Result.html\" title=\"enum core::result::Result\">Result</a>&lt;<a class=\"primitive\" href=\"https://doc.rust-lang.org/1.100.0/std/primitive.u8.html\">u8</a>, <a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/core/io/error/struct.Error.html\" title=\"struct core::io::error::Error\">Error</a>&gt;;</div>","Chain<Self, R>":"<h3>Notable traits for <code><a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/core/io/util/struct.Chain.html\" title=\"struct core::io::util::Chain\">Chain</a>&lt;T, U&gt;</code></h3><pre><code><div class=\"where\">impl&lt;T, U&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/core/io/util/struct.Chain.html\" title=\"struct core::io::util::Chain\">Chain</a>&lt;T, U&gt;<div class=\"where\">where\n    T: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a>,\n    U: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a>,</div></div>","Take<Self>":"<h3>Notable traits for <code><a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/core/io/util/struct.Take.html\" title=\"struct core::io::util::Take\">Take</a>&lt;T&gt;</code></h3><pre><code><div class=\"where\">impl&lt;T&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/1.100.0/core/io/util/struct.Take.html\" title=\"struct core::io::util::Take\">Take</a>&lt;T&gt;<div class=\"where\">where\n    T: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/alloc/io/read/trait.Read.html\" title=\"trait alloc::io::read::Read\">Read</a>,</div></div>"}</script></section></div></main></body></html>

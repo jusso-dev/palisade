@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_PROPERTIES","MAX_STRING_LEN"],"enum":["PropertyValue","SummaryError"],"struct":["SummaryInfo"]};

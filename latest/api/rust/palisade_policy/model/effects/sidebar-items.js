@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["EventSeverity","LogLevel","Notify","Upload"],"mod":["limits"],"struct":["Effects","ResolvedEffects"]};

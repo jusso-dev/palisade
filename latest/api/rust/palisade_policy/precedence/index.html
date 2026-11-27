@@ -1,0 +1,62 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Precedence models: choosing one rule from the rules that match (#35, ADR 0004)."><title>palisade_policy::precedence - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="palisade_policy" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module precedence</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../palisade_policy/index.html">palisade_<wbr>policy</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module precedence</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#the-models" title="The models">The models</a></li><li><a href="#ties-between-candidates-of-the-same-kind" title="Ties between candidates of the same kind">Ties between candidates of the same kind</a></li></ul><h3><a href="#structs">Module Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#traits" title="Traits">Traits</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="../index.html">In crate palisade_<wbr>policy</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">palisade_policy</a></div><h1>Module <span>precedence</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../src/palisade_policy/precedence.rs.html#1-728">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Precedence models: choosing one rule from the rules that match (#35,
+ADR 0004).</p>
+<p>A policy names one <a href="../model/enum.PrecedenceModel.html" title="enum palisade_policy::model::PrecedenceModel"><code>PrecedenceModel</code></a> and its <a href="../model/precedence/struct.PrecedenceOptions.html" title="struct palisade_policy::model::precedence::PrecedenceOptions"><code>PrecedenceOptions</code></a>.
+The model only decides among the ordinary rules of stage 4 of the
+pipeline in <a href="../evaluate/index.html" title="mod palisade_policy::evaluate"><code>crate::evaluate</code></a>: the rules that <code>allow</code>, <code>allow_contained</code>,
+<code>allow_elevated</code> or <code>deny</code> outside a mandatory rule set. The mandatory
+deny tier and exclusions are decided before it, under every model, and
+the implicit deny after it.</p>
+<p>Each model is a <a href="trait.Precedence.html" title="trait palisade_policy::precedence::Precedence"><code>Precedence</code></a> implementation: a pure function from a
+<a href="struct.MatchSet.html" title="struct palisade_policy::precedence::MatchSet"><code>MatchSet</code></a> to a <a href="struct.Resolution.html" title="struct palisade_policy::precedence::Resolution"><code>Resolution</code></a>. It reads nothing but the candidates’
+metadata, so it is deterministic. Every key ends with the rule ID, which
+is unique, so no two candidates ever compare equal, and the winner never
+depends on the order of the match set. The rule-order models
+(<code>first_match</code>, <code>priority</code>) depend on <code>order</code> and <code>priority</code> by design,
+but not on where a rule or rule set sits in a list.</p>
+<h2 id="the-models"><a class="doc-anchor" href="#the-models">§</a>The models</h2>
+<ul>
+<li><strong><code>deny_wins</code></strong> (the default): if any candidate denies, a deny decides;
+otherwise an allow does.</li>
+<li><strong><code>allow_wins</code></strong>: if any candidate allows, an allow decides; otherwise
+a deny does. With <code>granularity_tiebreak</code>, the candidates of each rule
+set are first narrowed to that set’s most specific ones, so a denied
+file inside an allowed folder of the same set stays denied. Validation
+warns that <code>allow_wins</code> is not recommended for Essential Eight.</li>
+<li><strong><code>specificity</code></strong>: the candidate with the most specific identity
+(<a href="struct.Spec.html" title="struct palisade_policy::precedence::Spec"><code>Spec</code></a>) decides. Between equally specific candidates, a deny beats
+an allow unless <code>same_tier_tiebreak: allow</code>.</li>
+<li><strong><code>first_match</code></strong>: candidates are sorted by <code>order</code>, lowest first. Ties
+go to the newer rule, which is the higher rule ID because rule IDs are
+UUIDv7, whose leading bits are the creation time; IDs created in the
+same millisecond fall back to the rest of the ID. With <code>curated_first</code>
+(the default), rules of read-only (curated) rule sets come before
+every custom rule. In an effective policy built from a hierarchy
+(#37), each rule set carries the band of the level that assigned it,
+and a lower band comes before everything else, so the levels are
+evaluated in their configured order. <code>defer</code>, <code>audit</code> and <code>trust_source</code> rules are never
+candidates, so a matching <code>defer</code> falls through to the next rule.</li>
+<li><strong><code>priority</code></strong>: the lowest <code>priority</code> number decides
+(<code>priority_direction: higher_wins</code> reverses this). Between equal
+priorities: <code>deny</code>, then <code>allow_contained</code>, <code>allow</code>, <code>allow_elevated</code>
+with <code>condition: always</code>, and <code>allow_elevated</code> with <code>if_required</code>
+last.</li>
+</ul>
+<p>A rule the model needs a position or priority for, but that has none,
+sorts after every rule that has one. Validation rejects such rules
+(<code>order_required</code>, <code>priority_required</code>).</p>
+<h2 id="ties-between-candidates-of-the-same-kind"><a class="doc-anchor" href="#ties-between-candidates-of-the-same-kind">§</a>Ties between candidates of the same kind</h2>
+<p>In <code>deny_wins</code>, <code>allow_wins</code> and <code>specificity</code>, several allows can
+qualify. <code>allow_tiebreak</code> picks among them: <code>most_restrictive</code> (the
+default) prefers <code>allow_contained</code>, then <code>allow</code>, then <code>allow_elevated</code>
+with <code>always</code>, then with <code>if_required</code>; <code>most_permissive</code> is the
+reverse. Several denies, or allows of the same kind, are then ranked by
+specificity, and finally by the lowest rule ID, the oldest rule. That
+decides which rule’s directives and effects (notification, severity,
+<code>kill_running</code>) the decision carries; every other candidate is listed as
+overridden.</p>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.AllowWins.html" title="struct palisade_policy::precedence::AllowWins">Allow<wbr>Wins</a></dt><dd><code>allow_wins</code>.</dd><dt><a class="struct" href="struct.Candidate.html" title="struct palisade_policy::precedence::Candidate">Candidate</a></dt><dd>One matching rule the model may choose, with the metadata it reads.</dd><dt><a class="struct" href="struct.DenyWins.html" title="struct palisade_policy::precedence::DenyWins">Deny<wbr>Wins</a></dt><dd><code>deny_wins</code>.</dd><dt><a class="struct" href="struct.FirstMatch.html" title="struct palisade_policy::precedence::FirstMatch">First<wbr>Match</a></dt><dd><code>first_match</code>.</dd><dt><a class="struct" href="struct.MatchSet.html" title="struct palisade_policy::precedence::MatchSet">Match<wbr>Set</a></dt><dd>The candidates of one evaluation, in any order.</dd><dt><a class="struct" href="struct.Priority.html" title="struct palisade_policy::precedence::Priority">Priority</a></dt><dd><code>priority</code>.</dd><dt><a class="struct" href="struct.Resolution.html" title="struct palisade_policy::precedence::Resolution">Resolution</a></dt><dd>What a model chose.</dd><dt><a class="struct" href="struct.Spec.html" title="struct palisade_policy::precedence::Spec">Spec</a></dt><dd>A rule’s specificity: its tier and, in tier 6, the depth of its
+directory. Ordered from the most specific to the least: a lower tier
+first, then a deeper directory.</dd><dt><a class="struct" href="struct.Specificity.html" title="struct palisade_policy::precedence::Specificity">Specificity</a></dt><dd><code>specificity</code>.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.Resolver.html" title="enum palisade_policy::precedence::Resolver">Resolver</a></dt><dd>The model a policy selects, with its options.</dd><dt><a class="enum" href="enum.Tier.html" title="enum palisade_policy::precedence::Tier">Tier</a></dt><dd>How specifically a rule identifies an object, for the <code>specificity</code>
+model and for ranking equal candidates in the others. Declared from the
+most specific to the least, so the smaller tier is the more specific.</dd><dt><a class="enum" href="enum.Verdict.html" title="enum palisade_policy::precedence::Verdict">Verdict</a></dt><dd>The action of a stage-4 candidate.</dd></dl><h2 id="traits" class="section-header">Traits<a href="#traits" class="anchor">§</a></h2><dl class="item-table"><dt><a class="trait" href="trait.Precedence.html" title="trait palisade_policy::precedence::Precedence">Precedence</a></dt><dd>A precedence model. <code>resolve</code> must be a pure function of the match set’s
+candidates, and its winner must not depend on their order.</dd></dl></section></div></main></body></html>

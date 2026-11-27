@@ -1,0 +1,63 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="The Authenticode PE image hash (#47)."><title>palisade_fileid::authenticode::hash - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="palisade_fileid" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module hash</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../palisade_fileid/index.html">palisade_<wbr>fileid</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module hash</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#how-the-bytes-are-chosen" title="How the bytes are chosen">How the bytes are chosen</a></li><li><a href="#what-the-hash-does-not-cover" title="What the hash does not cover">What the hash does not cover</a></li><li><a href="#padding" title="Padding">Padding</a></li><li><a href="#algorithms" title="Algorithms">Algorithms</a></li><li><a href="#page-hashes-and-files-on-disk" title="Page hashes and files on disk">Page hashes and files on disk</a></li></ul><h3><a href="#structs">Module Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="../index.html">In palisade_<wbr>fileid::<wbr>authenticode</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">palisade_fileid</a>::<wbr><a href="../index.html">authenticode</a></div><h1>Module <span>hash</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/palisade_fileid/authenticode/hash.rs.html#1-734">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>The Authenticode PE image hash (#47).</p>
+<p>The Authenticode hash identifies a PE image independently of its embedded
+signature. It covers every byte of the file except three regions:</p>
+<ol>
+<li>the 4-byte <code>CheckSum</code> field of the optional header;</li>
+<li>the 8-byte certificate table (security) entry in the data directories;</li>
+<li>the certificate table itself, located by that entry.</li>
+</ol>
+<p>So the hash stays the same when a file is signed, re-signed or has its
+signature stripped, and any other byte change changes it.</p>
+<h2 id="how-the-bytes-are-chosen"><a class="doc-anchor" href="#how-the-bytes-are-chosen">§</a>How the bytes are chosen</h2>
+<p><a href="struct.HashRanges.html#method.from_pe" title="associated function palisade_fileid::authenticode::hash::HashRanges::from_pe"><code>HashRanges::from_pe</code></a> turns a <a href="../../pe/struct.PeInfo.html" title="struct palisade_fileid::pe::PeInfo"><code>PeInfo</code></a> from <a href="../../pe/fn.parse.html" title="fn palisade_fileid::pe::parse"><code>crate::pe::parse</code></a> into
+the list of file ranges to hash: the whole file in file order, minus the
+three regions above. It reuses the parser’s certificate table location,
+so a table the parser rejected is never excluded. <a href="struct.RangeHasher.html" title="struct palisade_fileid::authenticode::hash::RangeHasher"><code>RangeHasher</code></a> then
+streams the file through those ranges in a single pass.</p>
+<p>The Authenticode specification describes the hash section by section:
+the headers up to <code>SizeOfHeaders</code>, then each section’s raw data sorted by
+<code>PointerToRawData</code> (skipping sections with no raw data), then any data
+after the last section up to the certificate table. For a conformant
+image, where the sections follow the headers and each other with no gaps
+or overlaps and the certificate table is the last thing in the file, that
+is exactly “every byte before the certificate table, in file order, minus
+the two header fields”. <a href="struct.HashRanges.html#method.from_pe" title="associated function palisade_fileid::authenticode::hash::HashRanges::from_pe"><code>HashRanges::from_pe</code></a> checks that layout and
+reports any departure as <a href="enum.AuthenticodeStatus.html#variant.NonConformant" title="variant palisade_fileid::authenticode::hash::AuthenticodeStatus::NonConformant"><code>AuthenticodeStatus::NonConformant</code></a>.</p>
+<p>For a non-conformant image the specification’s steps either read bytes
+twice, skip bytes, or read past the end of the file, and implementations
+disagree. The digest returned is then a best effort that still covers
+every byte outside the three regions. The OS treats such files by their
+flat hash, so policy must too (#55).</p>
+<h2 id="what-the-hash-does-not-cover"><a class="doc-anchor" href="#what-the-hash-does-not-cover">§</a>What the hash does not cover</h2>
+<p>Because the certificate table is excluded, bytes stored inside it can be
+changed without changing the Authenticode hash. Signature verification
+(<a href="../fn.verify_pe.html" title="fn palisade_fileid::authenticode::verify_pe"><code>super::verify_pe</code></a>, #48) checks the <code>WIN_CERTIFICATE</code> entries and flags
+hidden data between and after them; anything else in the table is not
+part of the file’s identity. Rules that must cover every byte use the
+flat hash.</p>
+<h2 id="padding"><a class="doc-anchor" href="#padding">§</a>Padding</h2>
+<p>A signer pads an image with zero bytes to a multiple of 8 before it
+appends the certificate table, because the table must start on an 8-byte
+boundary. Those padding bytes are part of the signed file and are hashed.
+When an image has <strong>no</strong> certificate table and its length is not a
+multiple of 8, the hash therefore includes the same zero padding (1 to 7
+bytes) after the last byte, so the digest equals the one the image will
+have once signed. One consequence: an unsigned image and the same image
+with those zero bytes actually appended have the same Authenticode digest.
+Their flat hashes differ.</p>
+<h2 id="algorithms"><a class="doc-anchor" href="#algorithms">§</a>Algorithms</h2>
+<p><a href="fn.authenticode_hashes.html" title="fn palisade_fileid::authenticode::hash::authenticode_hashes"><code>authenticode_hashes</code></a> always computes SHA-256 and SHA-1, and any other
+algorithm in the set it is given. SHA-1 (and MD5) are <strong>not collision
+resistant</strong> and exist only to match older signatures and OS policy
+rules; they must never be the sole basis of an allow decision (ADR 0008).</p>
+<h2 id="page-hashes-and-files-on-disk"><a class="doc-anchor" href="#page-hashes-and-files-on-disk">§</a>Page hashes and files on disk</h2>
+<p><a href="fn.authenticode_hashes.html" title="fn palisade_fileid::authenticode::hash::authenticode_hashes"><code>authenticode_hashes</code></a> also builds the page hash tables
+(<a href="../page/index.html" title="mod palisade_fileid::authenticode::page"><code>super::page</code></a>) in the same pass. <a href="struct.RangeHasher.html" title="struct palisade_fileid::authenticode::hash::RangeHasher"><code>RangeHasher</code></a> takes a file’s bytes
+in order, so a reader can feed one buffer to it, to a
+<a href="../page/struct.PageHasher.html" title="struct palisade_fileid::authenticode::page::PageHasher"><code>super::PageHasher</code></a> and to the flat-hash <a href="../../hash/struct.MultiHasher.html" title="struct palisade_fileid::hash::MultiHasher"><code>MultiHasher</code></a> at once;
+<a href="../fn.hash_image_file.html" title="fn palisade_fileid::authenticode::hash_image_file"><code>super::hash_image_file</code></a> does that for a file on disk, in one
+sequential read.</p>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.AuthenticodeHashes.html" title="struct palisade_fileid::authenticode::hash::AuthenticodeHashes">Authenticode<wbr>Hashes</a></dt><dd>The Authenticode hashes of one image.</dd><dt><a class="struct" href="struct.HashRanges.html" title="struct palisade_fileid::authenticode::hash::HashRanges">Hash<wbr>Ranges</a></dt><dd>The byte ranges of one image that the Authenticode hash covers, built
+once from the parse with <a href="struct.HashRanges.html#method.from_pe" title="associated function palisade_fileid::authenticode::hash::HashRanges::from_pe"><code>HashRanges::from_pe</code></a>.</dd><dt><a class="struct" href="struct.RangeHasher.html" title="struct palisade_fileid::authenticode::hash::RangeHasher">Range<wbr>Hasher</a></dt><dd>Streams an image through its <a href="struct.HashRanges.html" title="struct palisade_fileid::authenticode::hash::HashRanges"><code>HashRanges</code></a>, in one pass.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.AuthenticodeError.html" title="enum palisade_fileid::authenticode::hash::AuthenticodeError">Authenticode<wbr>Error</a></dt><dd>Why an Authenticode hash could not be computed.</dd><dt><a class="enum" href="enum.AuthenticodeStatus.html" title="enum palisade_fileid::authenticode::hash::AuthenticodeStatus">Authenticode<wbr>Status</a></dt><dd>Whether an image’s layout is one the Authenticode specification
+describes, so that the digest is the one every implementation computes.</dd><dt><a class="enum" href="enum.HashScenario.html" title="enum palisade_fileid::authenticode::hash::HashScenario">Hash<wbr>Scenario</a></dt><dd>The load context an OS policy hash rule applies to.</dd><dt><a class="enum" href="enum.NonConformance.html" title="enum palisade_fileid::authenticode::hash::NonConformance">NonConformance</a></dt><dd>One way an image’s layout departs from the Authenticode specification.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.authenticode_hashes.html" title="fn palisade_fileid::authenticode::hash::authenticode_hashes">authenticode_<wbr>hashes</a></dt><dd>The Authenticode hashes of <code>data</code>, the image <code>info</code> was parsed from.</dd><dt><a class="fn" href="fn.hash_pe.html" title="fn palisade_fileid::authenticode::hash::hash_pe">hash_pe</a></dt><dd>Parses <code>data</code> as a PE image and returns its Authenticode hashes, as
+<a href="fn.authenticode_hashes.html" title="fn palisade_fileid::authenticode::hash::authenticode_hashes"><code>authenticode_hashes</code></a> does, or <code>None</code> if it is not a PE image.</dd></dl></section></div></main></body></html>

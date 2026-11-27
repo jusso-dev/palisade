@@ -1,0 +1,511 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Packaging - Palisade</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="Palisade: an educational Windows application allowlisting project">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-2459343d.css">
+        <link rel="stylesheet" href="../css/chrome-ae938929.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="../theme/palisade-1bbd7bbc.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex-3e2a1e09.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc-8cab92c4.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div class="palisade-disclaimer" role="note" aria-label="Disclaimer">
+                    <strong>Palisade is an educational, personal-development project. It is not a replacement for commercial application control products and comes with no support or warranty. Do not rely on it to protect production systems.</strong>
+                </div>
+                <nav class="palisade-versions" aria-label="Documentation version">
+                    <label for="palisade-version-select">Version</label>
+                    <select id="palisade-version-select" hidden></select>
+                </nav>
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Palisade</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+                        <a href="https://github.com/jusso-dev/palisade" title="Git repository" aria-label="Git repository">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="packaging"><a class="header" href="#packaging">Packaging</a></h1>
+<p>How Palisade's release binaries, Windows Installer packages, symbols and server image are built
+(#22). Everything here runs on GitHub-hosted runners or on a developer machine with the same
+command: <code>cargo xtask dist</code>. Signing and publishing releases is the release pipeline (#24).</p>
+<h2 id="artefacts"><a class="header" href="#artefacts">Artefacts</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Artefact</th><th>Built on</th><th>Contents</th></tr>
+</thead>
+<tbody>
+<tr><td><code>Palisade-&lt;version&gt;-x64.msi</code></td><td><code>windows-latest</code></td><td><code>palisade-agent.exe</code>, <code>palisade-tray.exe</code>, <code>pal.exe</code> for x64</td></tr>
+<tr><td><code>Palisade-&lt;version&gt;-arm64.msi</code></td><td><code>windows-11-arm</code></td><td>The same, built natively for ARM64</td></tr>
+<tr><td><code>Palisade-&lt;version&gt;-&lt;arch&gt;.msi.sha256</code></td><td>with each package</td><td>Its SHA-256, in <code>sha256sum</code> format</td></tr>
+<tr><td><code>palisade-&lt;version&gt;-&lt;arch&gt;-symbols.zip</code></td><td>with each package</td><td>The PDBs, in symbol-server layout</td></tr>
+<tr><td><code>palisade-server</code></td><td><code>ubuntu-latest</code></td><td>The server for <code>x86_64-unknown-linux-gnu</code></td></tr>
+<tr><td><code>palisade-server</code> OCI image</td><td><code>ubuntu-latest</code></td><td>That binary on a minimal base (<a href="#server-image">Server image</a>)</td></tr>
+<tr><td><code>sizes-&lt;arch&gt;.json</code></td><td>with each build</td><td>The size of every file above, for size tracking</td></tr>
+</tbody>
+</table>
+</div>
+<p>The ARM64 package is built and tested natively on the ARM64 runner, with an ARM64 notifier, so
+it never relies on x64 emulation.</p>
+<h2 id="building-locally"><a class="header" href="#building-locally">Building locally</a></h2>
+<pre><code class="language-sh"># On Windows x64 or ARM64: binaries, symbols, and with --msi the package.
+cargo xtask dist --msi
+# On Linux x64: the server binary.
+cargo xtask dist
+# Then the image (podman or any OCI builder):
+podman build -f packaging/server/Containerfile -t palisade-server:dev target/dist/linux-x64-0.1.0
+</code></pre>
+<p><code>--target &lt;triple&gt;</code> picks the target explicitly (<code>x86_64-pc-windows-msvc</code>,
+<code>aarch64-pc-windows-msvc</code> or <code>x86_64-unknown-linux-gnu</code>). Windows targets build on Windows and
+the server on Linux, each with the platform's own linker. Output goes to
+<code>target/dist/&lt;arch&gt;-&lt;version&gt;/</code>, or to <code>--out &lt;dir&gt;</code>. <code>--sign &lt;signer&gt;</code> signs every executable
+before it is packaged, then the package, with any <code>cargo xtask sign</code> signer (<code>none</code> only logs);
+see <a href="releasing.html#code-signing">releasing.md</a>. <code>--from &lt;dir&gt;</code> packages executables built and
+signed elsewhere, after checking they are this version's; the release pipeline uses it. <code>--bump-patch</code> builds as the next patch version, which CI uses to test upgrades.
+<code>--compare-sizes &lt;sizes.json&gt;</code> warns about every binary that grew by more than 10% against an
+earlier build's size report. Everything <code>dist</code> builds and downloads goes under Cargo's target
+directory, wherever <code>CARGO_TARGET_DIR</code> or <code>build.target-dir</code> puts it.</p>
+<p>A Windows build needs the MSVC build tools and, for <code>--msi</code>, the .NET runtime. <code>dist</code> downloads
+the WiX toolset itself (see <a href="#wix">WiX</a>). Nothing else is installed.</p>
+<h2 id="what-dist-does"><a class="header" href="#what-dist-does">What <code>dist</code> does</a></h2>
+<p>For each Windows executable it:</p>
+<ol>
+<li>writes the version resource and the application manifest straight to a compiled resource
+file (<code>.res</code>), with no resource compiler and no build script (<code>xtask/src/dist/res.rs</code>);</li>
+<li>builds it with <code>cargo rustc --release --locked</code>, adding the static C runtime
+(<code>+crt-static</code>), <code>--remap-path-prefix</code> for the workspace and Cargo home, and the linker
+options <code>/Brepro</code> (reproducible timestamps), <code>/PDBALTPATH:%_PDB%</code> (only the PDB's file name is
+recorded), <code>/MANIFEST:NO</code> and the <code>.res</code> file;</li>
+<li>checks the result and fails the build if anything is off: the PE machine type matches the
+target (<code>0x8664</code> or <code>0xAA64</code>), there is a PDB record holding a file name and no path, a
+reproducible-build marker, no C runtime DLL is imported, and the version resource and manifest are byte for byte the ones
+step 1 wrote;</li>
+<li>copies the PDB into the symbols archive.</li>
+</ol>
+<p>Then, with <code>--msi</code>, it builds the package from those executables and validates it.</p>
+<h3 id="version-stamping"><a class="header" href="#version-stamping">Version stamping</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td><code>FileVersion</code></td><td><code>MAJOR.MINOR.PATCH.0</code> from <code>workspace.package.version</code></td></tr>
+<tr><td><code>ProductVersion</code></td><td>The SemVer and the commit: <code>0.1.0+g1a2b3c4d5e6f</code> (<code>.dirty</code> for uncommitted changes)</td></tr>
+<tr><td><code>CompanyName</code></td><td><code>Palisade Project</code></td></tr>
+<tr><td><code>ProductName</code></td><td><code>Palisade</code></td></tr>
+<tr><td><code>OriginalFilename</code>, <code>InternalName</code></td><td>The file name, with and without <code>.exe</code></td></tr>
+<tr><td><code>FileDescription</code></td><td>Per binary</td></tr>
+<tr><td><code>LegalCopyright</code></td><td>The dual licence</td></tr>
+<tr><td>Pre-release flag</td><td>Set for <code>-alpha</code>, <code>-beta</code> and <code>-rc</code> versions</td></tr>
+</tbody>
+</table>
+</div>
+<p>The package's <code>ProductVersion</code> is <code>MAJOR.MINOR.PATCH</code>: Windows Installer compares only three
+numeric parts, and the first two must be at most 255.</p>
+<h3 id="application-manifest"><a class="header" href="#application-manifest">Application manifest</a></h3>
+<p>Every executable has the same embedded manifest: <code>requestedExecutionLevel</code> <code>asInvoker</code>,
+<code>longPathAware</code>, and <code>supportedOS</code> for Windows 10 and 11. The service gets its rights from its
+service account, not from elevation, and the notifier and CLI never ask for elevation.</p>
+<p>The manifest schema only works with the operating system's fixed XML namespaces, which contain
+the OS vendor's name. They, and the autostart registry path, are kept in one file,
+<code>xtask/src/dist/os_ids.rs</code>, as <a href="NAMING.html">NAMING.md</a> allows for identifiers the OS requires.</p>
+<h3 id="c-runtime"><a class="header" href="#c-runtime">C runtime</a></h3>
+<p>The Windows executables link the C runtime statically, so no VC++ redistributable is needed. The
+choice is documented per target in <code>.cargo/config.toml</code>. That file may only define aliases
+(ADR 0011), so <code>dist</code> passes the flags with <code>--config</code> for the one target it builds; a plain
+<code>cargo build</code> is unaffected. The server uses the default dynamic glibc, which its image provides.</p>
+<h3 id="symbols"><a class="header" href="#symbols">Symbols</a></h3>
+<p>The release profile writes split debug info (PDBs). The PDBs are never packaged. They go to
+<code>palisade-&lt;version&gt;-&lt;arch&gt;-symbols.zip</code> in the symbol-server layout,
+<code>&lt;name&gt;.pdb/&lt;GUID&gt;&lt;age&gt;/&lt;name&gt;.pdb</code>, where <code>&lt;GUID&gt;</code> is the 32 hex digits of the CodeView
+signature and <code>&lt;age&gt;</code> its age in hex, read from each executable. Unzipped into a symbol store
+directory, it serves debuggers as is.</p>
+<h3 id="reproducibility"><a class="header" href="#reproducibility">Reproducibility</a></h3>
+<p>The linker runs with <code>/Brepro</code>, so the COFF timestamp is a hash of the output rather than a
+time, and <code>--remap-path-prefix</code> keeps local paths out of the binaries and PDBs. The symbols
+archive uses one fixed timestamp, <code>SOURCE_DATE_EPOCH</code> or the commit time of <code>HEAD</code>.</p>
+<p>To compare two builds of one commit:</p>
+<pre><code class="language-sh">cargo xtask dist --msi --out a
+cargo clean
+cargo xtask dist --msi --out b
+fc /b a\palisade-0.1.0-x64\pal.exe b\palisade-0.1.0-x64\pal.exe
+</code></pre>
+<p>The executables are expected to match; CI does not compare two builds yet. The packages are not: each build gets a new product code
+(see below), and the package database records its build time. Exact reproducibility of the
+package is a stretch goal.</p>
+<h2 id="installer-package"><a class="header" href="#installer-package">Installer package</a></h2>
+<p>The package is built from <code>packaging/wix/</code> with WiX and uses only standard Windows Installer 5
+tables: no WiX extension and no custom action code. The custom actions set properties, and one
+runs the operating system's service-control tool, <code>sc.exe</code>, to set the service's recovery
+actions: the installer's own failure-actions table opens the service without the right a restart
+action needs and fails with access denied. It runs deferred, as SYSTEM, right after the service
+is installed.</p>
+<ul>
+<li><strong>Per machine only.</strong> Files go to <code>%ProgramFiles%\Palisade\</code>.</li>
+<li><strong>Upgrades.</strong> One upgrade code per architecture (<code>xtask/src/dist/msi.rs</code>) and a new product
+code every build. Installing a newer package replaces the older one in place, inside the same
+transaction, so a failed upgrade rolls back to the old version; installing an older one is
+refused with a message. Packages of the same version replace each other, so
+snapshot builds of <code>main</code> can be installed in turn. The service is stopped before files change
+and started again afterwards.</li>
+<li><strong>Service.</strong> <code>PalisadeAgent</code> ("Palisade Agent"), started automatically with a delayed start,
+as LocalSystem, with the command line <code>palisade-agent.exe --service</code>. Recovery restarts it
+after 0, 5 and 30 seconds, and the failure count resets after a day. Its service SID type is
+unrestricted. Splitting privileges is evaluated in #18.</li>
+<li><strong>Data.</strong> <code>%ProgramData%\Palisade\</code> with <code>policy</code>, <code>queue</code> and <code>logs</code> below it. Each of the
+four folders gets the same protected DACL and SYSTEM as owner, not only by inheritance: SYSTEM
+and Administrators have full control and nobody else has access, even if a user created one of
+the folders before the install (CI tests that case).
+Hardening is extended in #18. The agent's own files there are not the package's, so upgrades,
+repairs and removal leave them alone.</li>
+<li><strong>Settings.</strong> The properties below, except the two hidden ones, are written to
+<code>HKLM\SOFTWARE\Palisade\Agent</code>, readable by SYSTEM and Administrators only, for the agent's
+enrolment bootstrap (#57). An upgrade or repair keeps their earlier values unless they are given
+again. The earlier values are read in the elevated part of the install only: the user-interface
+part of an interactive install runs unelevated and cannot read the key.</li>
+<li><strong>Notifier.</strong> <code>palisade-tray.exe</code> is started in every user's session at sign-in, from the
+per-machine Run key, unless <code>NO_TRAY=1</code>. The conditional parts (this entry, <code>ADD_TO_PATH</code> and
+each stored setting) are re-evaluated on a repair or reinstall, so
+<code>msiexec /i &lt;package&gt; REINSTALL=ALL REINSTALLMODE=amus NO_TRAY=1</code> removes the entry, and
+<code>NO_TRAY=0</code> puts it back.</li>
+<li><strong>CLI.</strong> <code>pal.exe</code> is installed next to the agent. <code>ADD_TO_PATH=1</code> adds the folder to the
+system <code>PATH</code>.</li>
+<li><strong>Logging.</strong> Windows Installer records every install, upgrade and removal in the Windows
+Application log (source <code>MsiInstaller</code>). <code>msiexec /l*v &lt;file&gt;</code> writes a full log.</li>
+<li><strong>Licence dialog.</strong> An interactive first install shows the educational-project notice and the
+licence; a silent install (<code>/qn</code>) shows nothing. The dialogs are written out in
+<code>packaging/wix/UI.wxs</code> instead of using a WiX UI extension, whose print button needs a native
+custom action.</li>
+</ul>
+<h3 id="properties"><a class="header" href="#properties">Properties</a></h3>
+<p>All are optional. <code>SERVER_URL</code> must start with <code>https://</code>, and <code>MODE</code> must be one of the values
+below; otherwise the install, or a repair or reinstall that passes them, is refused before
+anything changes. Removal never checks them, so a damaged stored value cannot block it.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Property</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>SERVER_URL</code></td><td>HTTPS base URL of the management server</td></tr>
+<tr><td><code>ENROLL_TOKEN</code></td><td>Enrolment token. Hidden: never written to installer logs or the registry; taken over by enrolment (#57)</td></tr>
+<tr><td><code>GROUP_KEY</code></td><td>Policy group to join at enrolment</td></tr>
+<tr><td><code>PROXY</code></td><td>Proxy for agent traffic</td></tr>
+<tr><td><code>MODE</code></td><td>Initial mode: <code>audit</code> (default), <code>monitor</code>, <code>learning</code>, <code>enforce</code> or <code>disabled</code></td></tr>
+<tr><td><code>NO_TRAY</code></td><td><code>1</code>: do not start the notifier at sign-in</td></tr>
+<tr><td><code>SKIP_ENROLL</code></td><td><code>1</code>: offline install, no server</td></tr>
+<tr><td><code>ALLOW_UNINSTALL</code></td><td>Uninstall authorisation, for uninstall protection (#18). Hidden like the token</td></tr>
+<tr><td><code>ADD_TO_PATH</code></td><td><code>1</code>: add the install folder (and <code>pal.exe</code>) to the system <code>PATH</code></td></tr>
+</tbody>
+</table>
+</div>
+<pre><code class="language-bat">msiexec /i Palisade-0.1.0-arm64.msi /qn SERVER_URL=https://palisade.example ENROLL_TOKEN=... GROUP_KEY=lab
+msiexec /i Palisade-0.1.0-x64.msi /qn SKIP_ENROLL=1 MODE=audit
+msiexec /x Palisade-0.1.0-x64.msi /qn
+</code></pre>
+<p><code>ENROLL_TOKEN</code> and <code>ALLOW_UNINSTALL</code> are hidden properties (<code>MsiHiddenProperties</code>), so the
+installer does not log their values. The package also never writes either one anywhere: a
+verbose log records every registry value and command line the installer writes, hidden property
+or not. Taking the token over into the agent's protected store at install (machine-scoped data
+protection) is part of enrolment, #57; until then the property is accepted and validated for
+logging only, and <code>SKIP_ENROLL=1</code> installs are unaffected. CI checks that a random token is in
+none of the verbose logs. One exception is outside the package's control: when the machine's
+installer logging policy is set to its most verbose debug level, Windows Installer writes
+command-line properties to the log regardless.</p>
+<h2 id="tests-in-ci"><a class="header" href="#tests-in-ci">Tests in CI</a></h2>
+<p>The <code>package</code> job in <code>ci.yml</code> runs on <code>windows-latest</code> and <code>windows-11-arm</code>. It builds the
+package twice, the second time with <code>--bump-patch</code>, and runs <code>packaging/wix/smoke-test.ps1</code> on
+the runner, which:</p>
+<ul>
+<li>checks the package tables: shared upgrade code, distinct product codes, both hidden
+properties, no PDBs, three files, no custom action code, that the only custom actions set
+properties, stop with an error, or run the <code>sc.exe</code> recovery command, that the unelevated
+user-interface sequence never reads the settings key or defaults <code>MODE</code>, and that the old
+version is removed inside the install transaction;</li>
+<li>refuses an unknown <code>MODE</code> and a plain-HTTP <code>SERVER_URL</code>;</li>
+<li>installs silently with every property set, then checks the service (state, start type,
+delayed start, account, command line, recovery actions, SID type), every binary's version
+resource and machine type, that the agent runs natively, the <code>%ProgramData%\Palisade</code> and
+settings-key ACLs, the stored settings (and that the token is not among them), the notifier
+entry, and the verbose log for the token;</li>
+<li>upgrades and checks that agent state in <code>%ProgramData%\Palisade</code> and the settings survive and
+the service runs the new binaries;</li>
+<li>tries a downgrade and checks it is refused and changes nothing;</li>
+<li>deletes a binary, repairs, and checks it is back;</li>
+<li>uninstalls and checks the service, files, settings and autostart entry are gone;</li>
+<li>plants a data folder with a permissive, non-inheriting ACL, as a standard user could, then
+installs offline with <code>SKIP_ENROLL</code>, <code>NO_TRAY</code>, <code>ADD_TO_PATH</code> and <code>MODE=enforce</code> and checks the
+planted folder's ACL was replaced; upgrades it; repairs it with the basic user interface and
+checks the settings and <code>MODE</code> are kept; damages the stored <code>MODE</code> and checks it can still be
+removed. Windows Installer runs the user-interface sequence only with reduced or full UI, which
+need a person, so that sequence is checked through the package tables above;</li>
+<li>checks the Application log has the install and removal events.</li>
+</ul>
+<p><code>wix msi validate</code> runs the standard ICE suite on every package; any ICE error fails the build.
+Three warnings are expected and left in place: ICE61, because same-version packages replace each
+other on purpose (snapshot builds); WiX's note that the installer's service configuration table
+is documented as unreliable, which the smoke test checks directly on every run; and WiX's note
+that the property search is suppressed in the user-interface sequence, which is intended (see
+Settings above).
+<code>cargo xtask ci</code> on Windows builds both packages but does not run the smoke test, which installs
+a service on the machine.</p>
+<h3 id="snapshot-builds"><a class="header" href="#snapshot-builds">Snapshot builds</a></h3>
+<p>Every push to <code>main</code> whose CI passed publishes its unsigned packages and their checksums to the
+rolling <code>main-snapshot</code> pre-release. See <a href="ci.html#main-snapshot">ci.md</a>.</p>
+<h2 id="binary-size"><a class="header" href="#binary-size">Binary size</a></h2>
+<p>Each build writes <code>sizes-&lt;arch&gt;.json</code>. <code>dist --compare-sizes &lt;file&gt;</code> prints a warning annotation
+for every executable or server binary more than 10% larger than in that file. The release
+pipeline (#24) compares each release with the previous one.</p>
+<h2 id="server-image"><a class="header" href="#server-image">Server image</a></h2>
+<p><code>packaging/server/Containerfile</code> copies the server binary onto a minimal base image that has
+glibc, the C++ runtime and CA certificates and no shell or package manager, pinned by digest.
+It runs as an unprivileged user and starts <code>palisade-server serve --config /etc/palisade/server.toml</code>; the configuration and TLS files are mounted in (see
+<a href="../crates/palisade-server/index.html">the server README</a>). The <code>server-image</code> job builds it with
+the runner's preinstalled podman and runs <code>palisade-server version</code> in it. Image signing is #18.</p>
+<h2 id="wix"><a class="header" href="#wix">WiX</a></h2>
+<p>WiX 5.0.2 is pinned in <code>xtask/src/dist/msi.rs</code>. <code>dist</code> downloads the package from the NuGet
+registry into <code>target/wix/</code>, checks its SHA-256 before anything in it runs, and runs it with the
+.NET runtime preinstalled on the hosted Windows images. No WiX installation and no
+<code>dotnet tool install</code> is needed.</p>
+<p>WiX 5 is the last major version under its plain open-source licence (MS-RL). Version 6 and
+later require each user to accept an additional maintenance-fee licence agreement before use,
+and CI must not accept a licence agreement on the maintainer's behalf. Moving to a later
+version is the maintainer's decision.</p>
+<h2 id="kernel-driver"><a class="header" href="#kernel-driver">Kernel driver</a></h2>
+<p>The optional kernel driver (#8) is not implemented yet. When it is, its package will be built
+on a developer machine with the Windows Driver Kit, with <code>cargo xtask dist driver</code>, and its
+files signed with a test certificate. It is <strong>local-only</strong>: the Driver Kit is not part of every
+hosted image and installing it exceeds job limits, and no other runner type is ever used
+(<a href="ci.html">ci.md</a>). Until then, <code>cargo xtask dist driver</code> explains this and fails.</p>
+<h2 id="not-covered-here"><a class="header" href="#not-covered-here">Not covered here</a></h2>
+<ul>
+<li>Signing binaries and packages, and publishing releases: <a href="releasing.html">releasing.md</a>.</li>
+<li>Testing on clean x64 and ARM64 virtual machines, including the notifier in a real user
+session: the VM harness (#26).</li>
+<li>Image signing, uninstall protection and further ACL hardening: #18.</li>
+<li>Enrolment itself, including storing <code>ENROLL_TOKEN</code> protected for the agent, <code>CONFIGFILE</code>, tags,
+relays and the other installer properties of the full installer: #57.</li>
+</ul>
+<hr>
+<p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/packaging.md"><code>docs/packaging.md</code></a> on GitHub.</small></p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../docs/ci.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../docs/releasing.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../docs/ci.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../docs/releasing.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-c2a407aa.js"></script>
+
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-a0b12cfe.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../theme/palisade-c327a96e.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

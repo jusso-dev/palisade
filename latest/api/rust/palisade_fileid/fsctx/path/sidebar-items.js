@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["LEGACY_MAX_PATH","MAX_PATH_UNITS"],"enum":["PathError","Prefix","Root"],"fn":["fold_case","is_short_name_candidate","normalize_nt","normalize_win32"],"struct":["NormalizedPath","PathNotes","Stream"],"trait":["ShortNameResolver"]};

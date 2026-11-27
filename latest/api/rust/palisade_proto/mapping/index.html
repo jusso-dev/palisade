@@ -1,0 +1,80 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Data-driven mapping of OS-native log records to canonical events (#196)."><title>palisade_proto::mapping - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="palisade_proto" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module mapping</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../palisade_proto/index.html">palisade_<wbr>proto</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module mapping</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#file-format" title="File format">File format</a></li><li><a href="#checks-when-a-file-is-loaded" title="Checks when a file is loaded">Checks when a file is loaded</a></li></ul><h3><a href="#structs">Module Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#constants" title="Constants">Constants</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="../index.html">In crate palisade_<wbr>proto</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">palisade_proto</a></div><h1>Module <span>mapping</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../src/palisade_proto/mapping/mod.rs.html#1-1408">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Data-driven mapping of OS-native log records to canonical events (#196).</p>
+<p>A mapping file says, for one source log, which canonical <a href="../events/enum.EventType.html" title="enum palisade_proto::events::EventType"><code>EventType</code></a> each
+source event ID becomes, with which <code>action</code>, <code>outcome</code> and <code>mode</code>, and
+which source field fills which canonical field. The shipped files are in
+<code>crates/palisade-proto/mappings/</code> and load with <a href="struct.MappingSet.html#method.builtin" title="associated function palisade_proto::mapping::MappingSet::builtin"><code>MappingSet::builtin</code></a>.</p>
+<p>The input is a decoded <a href="struct.Record.html" title="struct palisade_proto::mapping::Record"><code>Record</code></a>: the source event ID, the record’s system
+values, and its event data as a flat map from field name to text. Decoding
+raw log records into that form, and grouping a decision record with its
+per-signature records by correlation activity ID, belong to the collector
+(#58, #90). This module only translates.</p>
+<h2 id="file-format"><a class="doc-anchor" href="#file-format">§</a>File format</h2><div class="example-wrap"><pre class="language-yaml"><code>schema_version: 1.1.0          # the event schema version it targets
+source: os_security            # a `source.kind`, or `third_party:&lt;format&gt;`
+absent_values: [&quot;-&quot;]           # optional: source values that mean &quot;none&quot;
+value_maps:                    # optional: named value tables
+  logon_type:
+    &quot;2&quot;: interactive
+entries:
+  - source_event_id: 3077
+    when:                      # optional: the entry applies only if this holds
+      field: SISigningScenario
+      equals: [&quot;0&quot;]            # or `ends_with: [&quot;.sys&quot;]`; case-insensitive
+    canonical_type: driver.decision
+    action: load
+    outcome: blocked
+    mode: enforce              # optional
+    severity: 7                # optional; default from the registry
+    description: The OS code integrity policy blocked a kernel driver.
+    field_map:                 # source field: canonical JSON Pointer (or a list)
+      FileName: /file/path
+      LogonType:               # or a spec:
+        to: /user/logon_type   #   the target (or a list)
+        values: logon_type     #   optional: translate through a table
+        split: &quot;,&quot;             #   for set targets: the separator
+    set:                       # optional: constants, as text read like a source value
+      /script/kind: powershell
+    signatures:                # optional: correlated per-signature records
+      source_event_id: 3089
+      count_field: TotalSignatureCount
+      index_field: Signature
+      field_map:
+        PublisherName: publisher</code></pre></div>
+<p>A <code>when</code> may also be <code>present: true</code>, which holds when the field has a
+value. Entries for the same source event ID are tried in file order, and
+the first whose <code>when</code> holds is used. Only the last entry for an ID may
+omit <code>when</code>, and it is then the fallback.</p>
+<p>A source value that is empty or listed in <code>absent_values</code> counts as
+absent: it fills nothing and matches no <code>when</code>. A value that a table does
+not list, or that does not fit its target, is dropped and reported in
+<a href="struct.Mapped.html#structfield.dropped" title="field palisade_proto::mapping::Mapped::dropped"><code>Mapped::dropped</code></a>; the event is still produced without it.</p>
+<h2 id="checks-when-a-file-is-loaded"><a class="doc-anchor" href="#checks-when-a-file-is-loaded">§</a>Checks when a file is loaded</h2>
+<p><a href="struct.MappingSet.html#method.from_yaml" title="associated function palisade_proto::mapping::MappingSet::from_yaml"><code>MappingSet::from_yaml</code></a> rejects a file, with the entry and field named,
+when:</p>
+<ul>
+<li>it is not strict YAML, has unknown keys, or targets another schema
+major version or a newer minor version;</li>
+<li>a <code>canonical_type</code> is not registered, or is newer than the file’s
+<code>schema_version</code>;</li>
+<li>a target is not a writable canonical field (the table in <code>targets.rs</code>); this is how a
+mapping that references a field that does not exist fails CI;</li>
+<li>a target, or the source kind, is newer than the file’s
+<code>schema_version</code>;</li>
+<li>a value table is empty, too long, unused, or maps a value to one its
+target cannot hold; a constant is not a value its target can hold;</li>
+<li><code>split</code> is used without a set target, or a set target without <code>split</code>;</li>
+<li>an entry fills <code>file.signers</code> both directly and from signature records;</li>
+<li>an entry cannot fill a field set its type requires from its
+<code>field_map</code> (signer records do not count: an unsigned file has none);</li>
+<li>a <code>*.decision</code> entry maps none of the subject fields or none of the
+object-name fields that <a href="../events/struct.Event.html#method.ism_0585_gaps" title="method palisade_proto::events::Event::ism_0585_gaps"><code>Event::ism_0585_gaps</code></a> accepts (ISM-0585);</li>
+<li>a <code>third_party</code> file joins a set that already translates another
+format, or a file maps a source event ID another file in the set maps;</li>
+<li>a <code>when</code> has an empty or repeated value, or a value that an earlier
+entry for the same event ID and field already matches (so the entry
+could never apply to it), or an entry follows the fallback.</li>
+</ul>
+<p>Every shipped file is loaded by the tests, so these checks run in CI.</p>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.Dropped.html" title="struct palisade_proto::mapping::Dropped">Dropped</a></dt><dd>A source field that was present but could not be used. The event is still
+produced without it.</dd><dt><a class="struct" href="struct.Envelope.html" title="struct palisade_proto::mapping::Envelope">Envelope</a></dt><dd>The envelope values that the producing agent owns. A source log never
+supplies these.</dd><dt><a class="struct" href="struct.LoadError.html" title="struct palisade_proto::mapping::LoadError">Load<wbr>Error</a></dt><dd>A mapping file was rejected.</dd><dt><a class="struct" href="struct.Mapped.html" title="struct palisade_proto::mapping::Mapped">Mapped</a></dt><dd>A mapped event, with any source fields that had to be dropped.</dd><dt><a class="struct" href="struct.MappingSet.html" title="struct palisade_proto::mapping::MappingSet">Mapping<wbr>Set</a></dt><dd>A loaded, checked set of mappings.</dd><dt><a class="struct" href="struct.Record.html" title="struct palisade_proto::mapping::Record">Record</a></dt><dd>One decoded source log record.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.MapError.html" title="enum palisade_proto::mapping::MapError">MapError</a></dt><dd>A record could not be mapped.</dd></dl><h2 id="constants" class="section-header">Constants<a href="#constants" class="anchor">§</a></h2><dl class="item-table"><dt><a class="constant" href="constant.BUILTIN.html" title="constant palisade_proto::mapping::BUILTIN">BUILTIN</a></dt><dd>The shipped mapping files, by name.</dd><dt><a class="constant" href="constant.MAX_ABSENT_VALUES.html" title="constant palisade_proto::mapping::MAX_ABSENT_VALUES">MAX_<wbr>ABSENT_<wbr>VALUES</a></dt><dd>Most <code>absent_values</code> in one file.</dd><dt><a class="constant" href="constant.MAX_ENTRIES.html" title="constant palisade_proto::mapping::MAX_ENTRIES">MAX_<wbr>ENTRIES</a></dt><dd>Most entries in one mapping file.</dd><dt><a class="constant" href="constant.MAX_RECORD_FIELDS.html" title="constant palisade_proto::mapping::MAX_RECORD_FIELDS">MAX_<wbr>RECORD_<wbr>FIELDS</a></dt><dd>Most fields in one record.</dd><dt><a class="constant" href="constant.MAX_VALUE_MAP_ENTRIES.html" title="constant palisade_proto::mapping::MAX_VALUE_MAP_ENTRIES">MAX_<wbr>VALUE_<wbr>MAP_<wbr>ENTRIES</a></dt><dd>Most entries in one value table.</dd><dt><a class="constant" href="constant.THIRD_PARTY.html" title="constant palisade_proto::mapping::THIRD_PARTY">THIRD_<wbr>PARTY</a></dt><dd>The generic third-party import formats, by format name: the format, the
+file name and the file. See <a href="struct.MappingSet.html#method.third_party" title="associated function palisade_proto::mapping::MappingSet::third_party"><code>MappingSet::third_party</code></a>.</dd></dl></section></div></main></body></html>

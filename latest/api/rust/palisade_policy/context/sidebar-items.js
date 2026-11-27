@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["IntegrityLevel","SessionType","Weekday"],"fn":["normalize_object_id","normalize_principal","normalize_sid","parse_time_of_day"],"struct":["Date","DeviceContext","EvaluationContext","NetworkContext","SessionContext","TimeContext","UserContext"]};

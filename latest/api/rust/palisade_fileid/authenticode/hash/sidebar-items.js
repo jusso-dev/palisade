@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["AuthenticodeError","AuthenticodeStatus","HashScenario","NonConformance"],"fn":["authenticode_hashes","hash_pe"],"struct":["AuthenticodeHashes","HashRanges","RangeHasher"]};

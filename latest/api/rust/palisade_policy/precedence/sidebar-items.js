@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Resolver","Tier","Verdict"],"struct":["AllowWins","Candidate","DenyWins","FirstMatch","MatchSet","Priority","Resolution","Spec","Specificity"],"trait":["Precedence"]};

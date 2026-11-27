@@ -1,0 +1,81 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Security descriptors, ownership and the writability decision."><title>palisade_fileid::fsctx::acl - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="palisade_fileid" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module acl</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../palisade_fileid/index.html">palisade_<wbr>fileid</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module acl</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#how-the-evaluation-works" title="How the evaluation works">How the evaluation works</a></li><li><a href="#conservative-by-construction" title="Conservative by construction">Conservative by construction</a></li><li><a href="#owner-based-trust-needs-the-dacl-too" title="Owner-based trust needs the DACL too">Owner-based trust needs the DACL too</a></li></ul><h3><a href="#modules">Module Items</a></h3><ul class="block"><li><a href="#modules" title="Modules">Modules</a></li><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#constants" title="Constants">Constants</a></li><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="../index.html">In palisade_<wbr>fileid::<wbr>fsctx</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">palisade_fileid</a>::<wbr><a href="../index.html">fsctx</a></div><h1>Module <span>acl</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/palisade_fileid/fsctx/acl.rs.html#1-2177">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Security descriptors, ownership and the writability decision.</p>
+<p>The OS layer reads a file’s security descriptor (owner and DACL) as the
+self-relative bytes <code>GetSecurityInfo</code> / <code>GetFileSecurityW</code> return, and
+<a href="struct.SecurityDescriptor.html#method.from_self_relative" title="associated function palisade_fileid::fsctx::acl::SecurityDescriptor::from_self_relative"><code>SecurityDescriptor::from_self_relative</code></a> turns them into an abstract
+model. Everything after that is pure and runs on every OS:</p>
+<ul>
+<li><a href="fn.evaluate.html" title="fn palisade_fileid::fsctx::acl::evaluate"><code>evaluate</code></a> works out which write-type rights any <strong>non-administrator</strong>
+principal may hold on one object;</li>
+<li><a href="fn.assess_path.html" title="fn palisade_fileid::fsctx::acl::assess_path"><code>assess_path</code></a> does that for a file and every ancestor folder up to the
+volume root and produces a <a href="struct.Writability.html" title="struct palisade_fileid::fsctx::acl::Writability"><code>Writability</code></a> summary;</li>
+<li><a href="struct.OwnerInfo.html" title="struct palisade_fileid::fsctx::acl::OwnerInfo"><code>OwnerInfo</code></a> classifies the owner SID.</li>
+</ul>
+<h2 id="how-the-evaluation-works"><a class="doc-anchor" href="#how-the-evaluation-works">§</a>How the evaluation works</h2>
+<p>The DACL is walked <strong>in stored order</strong>, as the OS access check does (a
+non-canonical order is evaluated as stored and also reported). For a
+token, each applicable ACE whose SID is in the token either grants the
+bits not already denied, or denies the bits not already granted. ACEs
+marked inherit-only apply only to future children and are skipped;
+inherited ACEs are already materialised in the DACL and count like any
+other.</p>
+<p>The tokens evaluated are:</p>
+<ul>
+<li>one per distinct non-administrator SID named by an applicable allow ACE,
+holding that SID plus <code>Everyone</code>. This over-approximates every real
+non-administrator token that holds <code>Everyone</code>: take the first allow ACE
+that grants a right to a real token. No deny ACE before it applied to
+the real token, so none applied to the smaller token of that ACE’s SID
+either, and that token is granted the right too. An anonymous token
+lacks <code>Everyone</code> by default and may hold <code>ANONYMOUS LOGON</code> and
+<code>NETWORK</code>, so <code>ANONYMOUS LOGON</code> is evaluated alone, and <code>NETWORK</code> both
+alone and with <code>Everyone</code>. A deny for <code>Everyone</code> is then not assumed
+to stop either;</li>
+<li>the object’s owner, if it is not an administrator, with the owner’s
+implicit <code>READ_CONTROL</code> and <code>WRITE_DAC</code> (which a deny ACE cannot
+remove), unless the DACL has an unconditional <code>OWNER RIGHTS</code>
+allow ACE, which then replaces them. A descriptor with no owner is
+treated as an unknown, possibly non-administrator owner;</li>
+<li>a synthetic standard user (by default <code>Everyone</code>, <code>Authenticated Users</code>,
+<code>BUILTIN\Users</code>, <code>INTERACTIVE</code> and <code>LOCAL</code>), reported on its own.</li>
+</ul>
+<h2 id="conservative-by-construction"><a class="doc-anchor" href="#conservative-by-construction">§</a>Conservative by construction</h2>
+<p>When the model cannot tell, it reports the right as possibly held:</p>
+<ul>
+<li><strong>Conditional (callback) allow ACEs</strong> and <strong>object allow ACEs</strong> may
+apply; their rights are reported, and also listed as <code>uncertain</code>.
+Conditional and object <strong>deny</strong> ACEs are assumed not to apply when
+working out what may be held. They are assumed to apply when working
+out what is held for certain, so a right that such a deny may remove
+is <code>uncertain</code>, not certain.</li>
+<li><strong>Generic rights</strong> (<code>GENERIC_WRITE</code>, <code>GENERIC_ALL</code>) in an allow ACE are
+mapped to the file rights they stand for. The OS access check does not
+map generic bits stored in an ACE, so such an ACE may in fact grant
+nothing; mapping it can only over-report, and a right that only a
+generic bit grants is <code>uncertain</code>. In a deny ACE they are not mapped,
+so they deny nothing, as in the OS.</li>
+<li><strong>ACE types the model does not know</strong> grant every right, as uncertain,
+to an unknown principal.</li>
+<li><strong>A NULL or absent DACL</strong> grants everyone everything.</li>
+<li><strong>An object whose descriptor could not be read</strong> counts as writable.</li>
+<li><strong>Mandatory integrity labels</strong> (in the SACL) are ignored. A label can
+only take rights away, so ignoring it only over-reports.</li>
+</ul>
+<p>The Windows access-check API (<code>AuthzAccessCheck</code> with a synthetic token)
+is the authoritative method on Windows, with this evaluator as the
+fallback and cross-check: <code>palisade_fileid::win::access::cross_check_writability</code>
+compares the two on any descriptor (with the <code>os-trust</code> feature).</p>
+<h2 id="owner-based-trust-needs-the-dacl-too"><a class="doc-anchor" href="#owner-based-trust-needs-the-dacl-too">§</a>Owner-based trust needs the DACL too</h2>
+<p>NTFS keeps a file’s owner when its content is overwritten in place; the
+owner only changes when a new file is created. So an administrator owner
+says nothing about the content if a non-administrator can write to the
+file (threat model T-engine-11, AT-19.5b). <a href="struct.Writability.html#structfield.owner_trust_blockers" title="field palisade_fileid::fsctx::acl::Writability::owner_trust_blockers"><code>Writability::owner_trust_blockers</code></a>
+reports the rights (write, append, delete, <code>WRITE_DAC</code>, <code>WRITE_OWNER</code>)
+that must be absent before owner-based trust (#117) may rely on the owner.
+This module only provides the attributes; the trust decision is #9’s.</p>
+</div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="ace_flags/index.html" title="mod palisade_fileid::fsctx::acl::ace_flags">ace_<wbr>flags</a></dt><dd>ACE header flags (<code>AceFlags</code>).</dd><dt><a class="mod" href="control/index.html" title="mod palisade_fileid::fsctx::acl::control">control</a></dt><dd><code>SECURITY_DESCRIPTOR_CONTROL</code> bits used here.</dd><dt><a class="mod" href="mask/index.html" title="mod palisade_fileid::fsctx::acl::mask">mask</a></dt><dd>Access-mask bits used here (<code>winnt.h</code> values).</dd></dl><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.Ace.html" title="struct palisade_fileid::fsctx::acl::Ace">Ace</a></dt><dd>One access control entry.</dd><dt><a class="struct" href="struct.AdminSids.html" title="struct palisade_fileid::fsctx::acl::AdminSids">Admin<wbr>Sids</a></dt><dd>The SIDs treated as administrators: rights they hold do not make an
+object “user-writable”.</dd><dt><a class="struct" href="struct.Ancestor.html" title="struct palisade_fileid::fsctx::acl::Ancestor">Ancestor</a></dt><dd>One ancestor folder of the object being assessed.</dd><dt><a class="struct" href="struct.EvaluationOptions.html" title="struct palisade_fileid::fsctx::acl::EvaluationOptions">Evaluation<wbr>Options</a></dt><dd>Settings for <a href="fn.evaluate.html" title="fn palisade_fileid::fsctx::acl::evaluate"><code>evaluate</code></a> and <a href="fn.assess_path.html" title="fn palisade_fileid::fsctx::acl::assess_path"><code>assess_path</code></a>.</dd><dt><a class="struct" href="struct.ObjectWritability.html" title="struct palisade_fileid::fsctx::acl::ObjectWritability">Object<wbr>Writability</a></dt><dd>The result of <a href="fn.evaluate.html" title="fn palisade_fileid::fsctx::acl::evaluate"><code>evaluate</code></a> for one object.</dd><dt><a class="struct" href="struct.OwnerInfo.html" title="struct palisade_fileid::fsctx::acl::OwnerInfo">Owner<wbr>Info</a></dt><dd>The owner attributes of a file.</dd><dt><a class="struct" href="struct.PrincipalRights.html" title="struct palisade_fileid::fsctx::acl::PrincipalRights">Principal<wbr>Rights</a></dt><dd>The rights one non-administrator principal may hold on one object.</dd><dt><a class="struct" href="struct.SecurityDescriptor.html" title="struct palisade_fileid::fsctx::acl::SecurityDescriptor">Security<wbr>Descriptor</a></dt><dd>The parts of a security descriptor the writability check uses.</dd><dt><a class="struct" href="struct.Writability.html" title="struct palisade_fileid::fsctx::acl::Writability">Writability</a></dt><dd>Writability of a file (or folder) and of every folder above it.</dd><dt><a class="struct" href="struct.WriteRights.html" title="struct palisade_fileid::fsctx::acl::WriteRights">Write<wbr>Rights</a></dt><dd>A set of write-type rights, as an access mask restricted to
+<a href="struct.WriteRights.html#associatedconstant.ALL" title="associated constant palisade_fileid::fsctx::acl::WriteRights::ALL"><code>WriteRights::ALL</code></a>.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.AceKind.html" title="enum palisade_fileid::fsctx::acl::AceKind">AceKind</a></dt><dd>What an ACE does, as far as this model is concerned.</dd><dt><a class="enum" href="enum.DescriptorError.html" title="enum palisade_fileid::fsctx::acl::DescriptorError">Descriptor<wbr>Error</a></dt><dd>Why a security descriptor could not be parsed.</dd><dt><a class="enum" href="enum.ObjectKind.html" title="enum palisade_fileid::fsctx::acl::ObjectKind">Object<wbr>Kind</a></dt><dd>Whether an object is a file or a directory. Some bits mean different
+things on each, and <code>FILE_DELETE_CHILD</code> only matters on a directory.</dd><dt><a class="enum" href="enum.OwnerTrustClass.html" title="enum palisade_fileid::fsctx::acl::OwnerTrustClass">Owner<wbr>Trust<wbr>Class</a></dt><dd>How far the owner SID can be trusted. The trust decision itself is #9’s.</dd><dt><a class="enum" href="enum.Principal.html" title="enum palisade_fileid::fsctx::acl::Principal">Principal</a></dt><dd>Who holds a right.</dd></dl><h2 id="constants" class="section-header">Constants<a href="#constants" class="anchor">§</a></h2><dl class="item-table"><dt><a class="constant" href="constant.MAX_DESCRIPTOR_BYTES.html" title="constant palisade_fileid::fsctx::acl::MAX_DESCRIPTOR_BYTES">MAX_<wbr>DESCRIPTOR_<wbr>BYTES</a></dt><dd>The largest security descriptor accepted. The OS caps a self-relative
+descriptor well below this; the limit bounds work on hostile input.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.assess_path.html" title="fn palisade_fileid::fsctx::acl::assess_path">assess_<wbr>path</a></dt><dd>Assesses an object and its ancestors.</dd><dt><a class="fn" href="fn.evaluate.html" title="fn palisade_fileid::fsctx::acl::evaluate">evaluate</a></dt><dd>Works out which write-type rights any non-administrator principal may
+hold on one object. See the module documentation for the method.</dd><dt><a class="fn" href="fn.sanitized_self_relative.html" title="fn palisade_fileid::fsctx::acl::sanitized_self_relative">sanitized_<wbr>self_<wbr>relative</a></dt><dd>Rebuilds a self-relative descriptor from the owner, group and DACL of
+<code>bytes</code>, for handing to an OS API that takes no length.</dd></dl></section></div></main></body></html>

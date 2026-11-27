@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_SUB_AUTHORITIES"],"enum":["SidError"],"mod":["well_known"],"struct":["Sid"]};

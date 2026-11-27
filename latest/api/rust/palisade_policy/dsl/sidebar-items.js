@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SCHEMA_HEADER"],"enum":["YamlErrorKind"],"fn":["from_str","from_str_all","from_str_with_limits","to_json_value","to_string"],"struct":["Limits","Located","LocatedPolicy","Location","SourceMap","WriteError","YamlDocument","YamlError"]};

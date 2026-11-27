@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BUILTIN","MAX_ABSENT_VALUES","MAX_ENTRIES","MAX_RECORD_FIELDS","MAX_VALUE_MAP_ENTRIES","THIRD_PARTY"],"enum":["MapError"],"struct":["Dropped","Envelope","LoadError","Mapped","MappingSet","Record"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_DIRECTORY_ENTRIES","MAX_STORAGE_DEPTH"],"enum":["CfbError"],"struct":["CompoundFile","Entry"]};

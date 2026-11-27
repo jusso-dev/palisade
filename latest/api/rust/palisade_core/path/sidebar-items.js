@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["PathKind"],"fn":["normalize","normalize_with"],"struct":["NormalizedPath","VolumeMap"]};
