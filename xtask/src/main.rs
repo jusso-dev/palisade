@@ -252,6 +252,7 @@ fn coverage_gate(base: &str) -> ExitCode {
     let root = workspace_root();
     let work = root.join("target").join("coverage-gate");
     let result = (|| -> Result<(String, Option<String>), String> {
+        tools::require_installed("coverage-gate", coverage_gate::TOOLS)?;
         println!(
             "coverage-gate: measuring {} at the working tree",
             coverage_gate::CRATE
@@ -292,6 +293,7 @@ fn bench_compare(base: &str) -> ExitCode {
     let root = workspace_root();
     let work = bench_compare::work_dir(&root);
     let result = (|| -> Result<(String, Vec<String>), String> {
+        tools::require_installed("bench-compare", bench_compare::TOOLS)?;
         // Alternate base and head runs while the base worktree exists.
         let (base_results, head) = report::base_metadata(&root, base, |dir| {
             let (mut base_best, mut head_best) = Default::default();
@@ -382,6 +384,7 @@ fn run_sign(args: &[String]) -> ExitCode {
     use release::sign;
     let result = (|| -> Result<usize, String> {
         let args = sign::parse_args(args)?;
+        tools::require_installed("sign", &sign::tools(args.kind, args.verify_only))?;
         let root = workspace_root();
         let mut config = sign::Config::from_process(args.kind, &root);
         if args.no_timestamp {

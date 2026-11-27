@@ -45,7 +45,12 @@ snapshot the list and every command's help (`src/snapshots/`, checked by the
 Commands that need an external tool check for it first through
 `src/tools.rs`, which reads the version from the tool's version command:
 a missing tool stops the command with the install line for CI's version,
-and another version is a warning. Tests run the checks against a fake
+and another version is a warning. `ci` and `docs build` check every tool
+their steps run; `coverage-gate` checks git, cargo-llvm-cov and
+cargo-nextest; `bench-compare` git; `dist --msi` the .NET runtime that runs
+WiX; and `sign` (and `dist --sign`) PowerShell 7 for the signing script,
+except for the `none` dry run. Each fails with every missing tool named
+before it builds or runs anything. Tests run the checks against a fake
 probe for each case: present, missing and at another version. The workspace rules themselves are described in
 [`docs/workspace.md`](../docs/workspace.md).
 

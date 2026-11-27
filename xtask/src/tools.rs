@@ -116,6 +116,114 @@ pub fn problem(
     }
 }
 
+/// An external tool: the command that proves it is installed, the version
+/// CI uses (when its version command prints one to compare), and how to
+/// install that version. Commands that need a tool check it with
+/// [`require`] before doing anything else.
+#[derive(Debug, Clone, Copy)]
+pub struct Tool {
+    pub check: &'static [&'static str],
+    pub version: Option<&'static str>,
+    pub install: &'static str,
+}
+
+impl Tool {
+    /// The name the user knows the tool by: its version command up to the
+    /// first flag (`cargo llvm-cov`, `dotnet`, `pwsh`).
+    pub fn name(&self) -> String {
+        self.check
+            .iter()
+            .take_while(|w| !w.starts_with('-'))
+            .copied()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn command(&self) -> Vec<String> {
+        self.check.iter().map(|w| (*w).to_owned()).collect()
+    }
+}
+
+pub const NEXTEST: Tool = Tool {
+    check: &["cargo", "nextest", "--version"],
+    version: Some("0.9.152"),
+    install: "cargo install --locked cargo-nextest@0.9.152",
+};
+pub const LLVM_COV: Tool = Tool {
+    check: &["cargo", "llvm-cov", "--version"],
+    version: Some("0.9.2"),
+    install: "cargo install --locked cargo-llvm-cov@0.9.2",
+};
+/// Taken from the hosted Windows images in CI, so not pinned.
+pub const DOTNET: Tool = Tool {
+    check: &["dotnet", "--list-runtimes"],
+    version: None,
+    install: "install the .NET runtime (CI uses the one on the hosted Windows images); WiX itself is fetched and checked by `cargo xtask dist`",
+};
+/// PowerShell 7, which runs the signing script (`packaging/sign.ps1`).
+/// Taken from the hosted Windows images in CI, so not pinned.
+pub const PWSH: Tool = Tool {
+    check: &[
+        "pwsh",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "$PSVersionTable.PSVersion.ToString()",
+    ],
+    version: None,
+    install: "install PowerShell 7 (CI uses the one on the hosted Windows images); see docs/releasing.md#code-signing",
+};
+/// Git, which the base-commit comparisons use to make a temporary worktree.
+pub const GIT: Tool = Tool {
+    check: &["git", "--version"],
+    version: None,
+    install: "install git (CI uses the one on the hosted images)",
+};
+
+/// Checks every tool in `tools` with `probe`. `Err` names every missing
+/// one with how to install it, for `command`; otherwise each tool at
+/// another version than CI's gives a warning line. Each tool is checked
+/// once.
+pub fn require(
+    command: &str,
+    tools: &[Tool],
+    probe: &mut dyn Probe,
+) -> Result<Vec<String>, String> {
+    let (mut missing, mut warnings) = (Vec::new(), Vec::new());
+    let mut seen: Vec<&[&str]> = Vec::new();
+    for tool in tools {
+        if seen.contains(&tool.check) {
+            continue;
+        }
+        seen.push(tool.check);
+        let status = check(probe, &tool.command(), tool.version);
+        if let Some(line) = problem(&tool.name(), tool.version, tool.install, &status) {
+            if status == Status::Missing {
+                missing.push(format!("  {line}"));
+            } else {
+                warnings.push(line);
+            }
+        }
+    }
+    if missing.is_empty() {
+        Ok(warnings)
+    } else {
+        Err(format!(
+            "{command} needs tools that are missing:\n{}",
+            missing.join("\n")
+        ))
+    }
+}
+
+/// [`require`] with the real tools, printing any version warnings under
+/// `command`'s name.
+pub fn require_installed(command: &str, tools: &[Tool]) -> Result<(), String> {
+    for warning in require(command, tools, &mut ProcessProbe)? {
+        println!("{command}: warning: {warning}");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
@@ -261,6 +369,43 @@ pub mod tests {
                 ""
             ]
         );
+    }
+
+    #[test]
+    fn required_tools_are_all_checked_once_and_reported_together() {
+        let mut probe = FakeProbe::with(&[
+            ("cargo llvm-cov --version", Some("cargo-llvm-cov 0.9.2\n")),
+            (
+                "cargo nextest --version",
+                Some("cargo-nextest 0.9.100 (x 2026-01-01)\n"),
+            ),
+        ]);
+        // Present, another version (a warning), and a duplicate checked once.
+        assert_eq!(
+            require("coverage-gate", &[LLVM_COV, NEXTEST, LLVM_COV], &mut probe),
+            Ok(vec![
+                "cargo nextest 0.9.152 is needed, found `cargo-nextest 0.9.100 (x 2026-01-01)`: cargo install --locked cargo-nextest@0.9.152".to_owned()
+            ])
+        );
+        assert_eq!(
+            probe.asked,
+            ["cargo llvm-cov --version", "cargo nextest --version"]
+        );
+        // Every missing tool in one error, with how to install it.
+        let mut probe = FakeProbe::default();
+        assert_eq!(
+            require("sign", &[PWSH, GIT], &mut probe).unwrap_err(),
+            "sign needs tools that are missing:\n  pwsh is not installed: install PowerShell 7 (CI uses the one on the hosted Windows images); see docs/releasing.md#code-signing\n  git is not installed: install git (CI uses the one on the hosted images)"
+        );
+        assert_eq!(require("x", &[], &mut probe), Ok(Vec::new()));
+    }
+
+    #[test]
+    fn tool_names_drop_the_version_flags() {
+        assert_eq!(LLVM_COV.name(), "cargo llvm-cov");
+        assert_eq!(DOTNET.name(), "dotnet");
+        assert_eq!(GIT.name(), "git");
+        assert_eq!(PWSH.name(), "pwsh");
     }
 
     #[test]

@@ -130,6 +130,14 @@ pub fn llvm_cov_args(output: &Path) -> Vec<std::ffi::OsString> {
     args
 }
 
+/// The tools the gate runs: git for the base worktree, and cargo-llvm-cov
+/// over cargo-nextest for the measurement.
+pub const TOOLS: &[crate::tools::Tool] = &[
+    crate::tools::GIT,
+    crate::tools::LLVM_COV,
+    crate::tools::NEXTEST,
+];
+
 /// Runs the measurement in `dir` and returns the crate's line count.
 /// `target_dir` keeps the base build apart from the head build.
 pub fn measure(dir: &Path, target_dir: &Path) -> Result<Count, String> {
@@ -156,6 +164,25 @@ pub fn measure(dir: &Path, target_dir: &Path) -> Result<Count, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_gate_requires_git_llvm_cov_and_nextest() {
+        let names: Vec<String> = TOOLS.iter().map(crate::tools::Tool::name).collect();
+        assert_eq!(names, ["git", "cargo llvm-cov", "cargo nextest"]);
+        // The pins are CI's.
+        assert_eq!(TOOLS[1].version, Some("0.9.2"));
+        let mut probe = crate::tools::tests::FakeProbe::with(&[
+            ("git --version", Some("git version 2.47.0\n")),
+            (
+                "cargo nextest --version",
+                Some("cargo-nextest 0.9.152 (x 2026-11-13)\n"),
+            ),
+        ]);
+        assert_eq!(
+            crate::tools::require("coverage-gate", TOOLS, &mut probe).unwrap_err(),
+            "coverage-gate needs tools that are missing:\n  cargo llvm-cov 0.9.2 is not installed: cargo install --locked cargo-llvm-cov@0.9.2"
+        );
+    }
 
     fn c(covered: u64, count: u64) -> Count {
         Count { covered, count }

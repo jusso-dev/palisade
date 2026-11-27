@@ -315,6 +315,20 @@ pub fn target_dir(root: &Path) -> Result<PathBuf, String> {
 }
 
 /// Runs `cargo xtask dist`. Returns the files written.
+/// The tools `args` needs beyond the Rust toolchain: the .NET runtime for
+/// `--msi`, and what the signer runs for `--sign` (signing only, no
+/// verify-only run).
+pub fn tools(args: &Args) -> Vec<crate::tools::Tool> {
+    let mut out = Vec::new();
+    if args.msi {
+        out.extend_from_slice(msi::TOOLS);
+    }
+    if let Some(signer) = args.sign {
+        out.extend(crate::release::sign::tools(signer, false));
+    }
+    out
+}
+
 pub fn run(root: &Path, args: &Args) -> Result<Vec<PathBuf>, String> {
     // Packaging prebuilt executables links nothing, so any Windows
     // machine can package for either architecture.
@@ -329,6 +343,8 @@ pub fn run(root: &Path, args: &Args) -> Result<Vec<PathBuf>, String> {
             }
         ));
     }
+    // Before the release build, which takes minutes.
+    crate::tools::require_installed("dist", &tools(args))?;
     let target_dir = target_dir(root)?;
     let manifest: toml::Table = read(&root.join("Cargo.toml"))?
         .parse()
@@ -885,6 +901,35 @@ mod tests {
 
     fn args(list: &[&str]) -> Result<Request, String> {
         parse_args(&list.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn each_option_requires_its_tools() {
+        // `--msi` and `--sign` are Windows-only options.
+        let win = ["--target", "x86_64-pc-windows-msvc"];
+        let names = |extra: &[&str]| -> Vec<String> {
+            let list: Vec<&str> = win.iter().chain(extra).copied().collect();
+            let Ok(Request::Build(a)) = args(&list) else {
+                panic!("{list:?}")
+            };
+            tools(&a).iter().map(crate::tools::Tool::name).collect()
+        };
+        assert!(names(&[]).is_empty());
+        assert_eq!(names(&["--msi"]), ["dotnet"]);
+        assert_eq!(names(&["--msi", "--sign", "test-ca"]), ["dotnet", "pwsh"]);
+        assert_eq!(names(&["--sign", "pfx"]), ["pwsh"]);
+        assert!(names(&["--sign", "none"]).is_empty());
+        // Missing, the build stops before it starts, naming what to install.
+        let Ok(Request::Build(a)) = args(&[win[0], win[1], "--msi"]) else {
+            panic!()
+        };
+        let err = crate::tools::require(
+            "dist",
+            &tools(&a),
+            &mut crate::tools::tests::FakeProbe::default(),
+        )
+        .unwrap_err();
+        assert!(err.starts_with("dist needs tools that are missing:\n  dotnet is not installed: install the .NET runtime"), "{err}");
     }
 
     #[test]
