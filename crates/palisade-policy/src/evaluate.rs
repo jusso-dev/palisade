@@ -452,10 +452,12 @@ impl<'p> Evaluator<'p> {
                     _ => (UnknownAs::NoMatch, Unparseable::Unknown),
                 };
                 let timed = rule.activates_at.is_some() || rule.expires_at.is_some();
+                // A native `audit` rule gets a twin too: it stops at expiry
+                // like any rule, and its twin carries on, so it annotates
+                // exactly once before and after.
                 let converts = rule.expires_at.is_some()
                     && rule.on_expire == crate::model::OnExpire::ConvertToAudit
-                    && !set.mandatory
-                    && role != Role::Annotation;
+                    && !set.mandatory;
                 let mut scopes = chain.clone();
                 if let Some(s) = &rule.scope {
                     scopes.push((ScopeLevel::Rule, compile(s)));
@@ -594,9 +596,15 @@ impl<'p> Evaluator<'p> {
 
     /// The inputs of stages 2 to 6 for one subject.
     fn inputs<'a>(&'a self, subject: &Subject<'a>, matched: &[&Compiled<'p>]) -> Inputs<'a> {
+        // An object is blocklisted when a rule that denies it matched, or a
+        // native `audit` entry of a blocklist set (a blocklist's watch
+        // entry: the user is not asked to allow it, #39). The `audit` twin
+        // of an expired rule never counts: an expired rule only annotates.
+        // `ignore` is valid only in `mixed` sets and never denies.
         let blocklisted = matched.iter().any(|r| {
-            r.set.kind == RuleSetKind::Blocklist
-                || matches!(r.role, Role::Mandatory | Role::Policy(Verdict::Deny))
+            !r.twin
+                && (matches!(r.role, Role::Mandatory | Role::Policy(Verdict::Deny))
+                    || (r.role == Role::Annotation && r.set.kind == RuleSetKind::Blocklist))
         });
         Inputs {
             six: StageSix::new(

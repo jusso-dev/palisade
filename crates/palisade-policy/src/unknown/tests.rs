@@ -4559,3 +4559,39 @@ fn simulator_candidates_keep_the_engines_baseline() {
         .unwrap();
     assert_eq!(resolved.document().rule_sets, current.document().rule_sets);
 }
+
+/// evaluate.rs:488: only a denying rule (or a blocklist's own `audit`
+/// entry) makes an object blocklisted. The `audit` twin of an expired
+/// deny does not turn a prompt into the block fallback.
+#[test]
+fn an_expired_deny_does_not_make_an_object_blocklisted() {
+    let deny = serde_json::json!({
+        "id": rule_id(1), "name": "D",
+        "match": {"criterion": {"field": "hash.sha256", "operator": "equals", "values": [sha('a')]}},
+        "action": {"type": "deny", "unknown_as": "no_match"},
+        "expires_at": "2026-01-01T00:00:00Z", "on_expire": "convert_to_audit",
+    });
+    let v = valid(doc_with(
+        serde_json::json!({"default": "prompt", "prompt": {"fallback": "block"}}),
+        &[(SET, "blocklist", false, vec![deny])],
+    ));
+    let e = Evaluator::new(&v)
+        .unwrap()
+        .at(crate::lifecycle::RuleClock::at(crate::model::Timestamp(
+            1_795_564_800,
+        )));
+    let facts = object(&[LocationClass::Temp], &[]).with(crate::model::Field::HashSha256, sha('a'));
+    let variables = PathVariables::new();
+    let context = interactive_context();
+    let subject = Subject {
+        object_type: ObjectType::Executable,
+        facts: &facts,
+        variables: &variables,
+        context: &context,
+    };
+    let d = e
+        .evaluate_in(&subject, &DeviceState::of(&v.document().policy), TRACE)
+        .unwrap();
+    assert_eq!(d.annotations().len(), 1);
+    assert_eq!(d.outcome(), Outcome::PendingUser, "{d:#?}");
+}

@@ -444,6 +444,19 @@ impl Analyser<'_> {
 
         // Lifecycle.
         match activity(rule, &self.clock) {
+            // An expired `convert_to_audit` rule still records matches:
+            // removing it would lose that audit trail, so it is reported
+            // without a fix.
+            Activity::Expired if rule.on_expire == crate::model::OnExpire::ConvertToAudit => self
+                .push(
+                    FindingCode::ExpiredRulePresent,
+                    me.clone(),
+                    format!(
+                        "expired at {}; it no longer decides, but still audits its matches (`on_expire: convert_to_audit`)",
+                        rule.expires_at.map_or_else(String::new, |t| t.to_string())
+                    ),
+                    None,
+                ),
             Activity::Expired => self.push(
                 FindingCode::ExpiredRulePresent,
                 me.clone(),
@@ -692,21 +705,44 @@ impl Analyser<'_> {
         if self.facts.restricted_publishers.is_empty() {
             return None;
         }
-        let restricted: Vec<String> = self
+        // Each restricted publisher as a validly signed object's facts, so
+        // a publisher criterion is tested as the evaluator tests it: with
+        // its operator and options (`starts_with "Example"` names
+        // `Example Ltd`), not by comparing values. A result the bare
+        // signer cannot settle (a signer option it has no fact for) could
+        // match, so it counts.
+        let objects: Vec<(&String, crate::facts::ObjectFacts)> = self
             .facts
             .restricted_publishers
             .iter()
-            .map(|p| crate::ops::fold(p, false))
+            .map(|p| {
+                let mut signer = crate::facts::SignerFact::new(
+                    crate::facts::SignerStatus::Valid,
+                    crate::facts::SignatureSource::Embedded,
+                );
+                signer.publisher = Some(p.clone());
+                (
+                    p,
+                    crate::facts::ObjectFacts::new().with_signers(vec![signer]),
+                )
+            })
             .collect();
+        let variables = crate::facts::PathVariables::new();
+        let context = crate::context::EvaluationContext::new();
+        let ctx = crate::ops::EvalContext {
+            action: ActionKind::Allow,
+            variables: &variables,
+            context: &context,
+        };
         let named = |c: &Criterion| {
-            (c.field == Field::SignerPublisher && c.operator.is_positive())
-                .then(|| {
-                    c.values
-                        .iter()
-                        .find(|v| restricted.contains(&crate::ops::fold(v, false)))
-                        .cloned()
-                })
-                .flatten()
+            if c.field != Field::SignerPublisher || !c.operator.is_positive() {
+                return None;
+            }
+            let compiled = crate::ops::CompiledCriterion::compile(c).ok()?;
+            objects
+                .iter()
+                .find(|(_, facts)| compiled.eval(facts, &ctx).result != crate::ops::Tri::NoMatch)
+                .map(|(p, _)| (*p).clone())
         };
         let narrows = |c: &Criterion| {
             matches!(
@@ -958,17 +994,10 @@ impl Analyser<'_> {
         let mut reported: BTreeSet<(FindingCode, usize)> = BTreeSet::new();
         let mut budget = self.options.max_pair_checks;
         for (i, e) in entries.iter().enumerate() {
-            let mut others: Vec<usize> = Vec::new();
-            for k in victim_keys(&e.rule.match_) {
-                others.extend(covers_by_key.get(&k).into_iter().flatten());
-                if others.len() > MAX_CANDIDATES {
-                    break;
-                }
-            }
-            others.extend(broad.iter().take(MAX_CANDIDATES));
-            others.sort_unstable();
-            others.dedup();
-            others.truncate(MAX_CANDIDATES);
+            let Some(others) = candidates(&e.rule.match_, &covers_by_key, &broad, &mut budget)
+            else {
+                return;
+            };
             for j in others {
                 if j == i {
                     continue;
@@ -1120,13 +1149,34 @@ impl Analyser<'_> {
         if vulnerable.is_empty() {
             return;
         }
+        // Each deny is filed under the publisher and product names it
+        // requires: an allow can only overlap a deny that shares one
+        // ([`overlap`]), so it is compared only with those, and each pair
+        // costs one unit of the pair budget.
+        let mut by_key: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+        for (n, (_, r)) in vulnerable.iter().enumerate() {
+            for k in identity_name_keys(&r.match_) {
+                by_key.entry(k).or_default().push(n);
+            }
+        }
+        let mut budget = self.options.max_pair_checks;
         for set in &referenced {
             for rule in set
                 .rules
                 .iter()
                 .filter(|r| activity(r, &clock).is_active() && r.action.kind().permits())
             {
-                for (vset, vrule) in &vulnerable {
+                let candidates: BTreeSet<usize> = identity_name_keys(&rule.match_)
+                    .iter()
+                    .filter_map(|k| by_key.get(k))
+                    .flatten()
+                    .copied()
+                    .collect();
+                for (vset, vrule) in candidates.into_iter().map(|n| vulnerable[n]) {
+                    if budget == 0 {
+                        return;
+                    }
+                    budget -= 1;
                     let types_meet = rule.object_types.is_empty()
                         || vrule.object_types.is_empty()
                         || rule
@@ -1153,6 +1203,34 @@ impl Analyser<'_> {
 
 /// The most covers one rule is compared with.
 const MAX_CANDIDATES: usize = 512;
+
+/// The covers a victim with `tree` is compared with: at most
+/// [`MAX_CANDIDATES`] distinct rules, collected in key order and stopping
+/// as soon as the cap is reached, so a huge bucket (one publisher shared
+/// by thousands of rules) is never copied. Each index entry looked at
+/// costs one unit of `budget`; `None` once it runs out.
+fn candidates(
+    tree: &Match,
+    covers_by_key: &BTreeMap<String, Vec<usize>>,
+    broad: &[usize],
+    budget: &mut usize,
+) -> Option<BTreeSet<usize>> {
+    let mut others: BTreeSet<usize> = BTreeSet::new();
+    for bucket in victim_keys(tree)
+        .iter()
+        .filter_map(|k| covers_by_key.get(k).map(Vec::as_slice))
+        .chain(core::iter::once(broad))
+    {
+        for &j in bucket {
+            if others.len() >= MAX_CANDIDATES {
+                return Some(others);
+            }
+            *budget = budget.checked_sub(1)?;
+            others.insert(j);
+        }
+    }
+    Some(others)
+}
 
 /// The model's `snake_case` name.
 fn model_name(model: PrecedenceModel) -> &'static str {
@@ -1310,7 +1388,10 @@ fn normalized(tree: &Match) -> Match {
                     _ => v.clone(),
                 })
                 .collect();
-            if !matches!(c.operator, Operator::VersionBetween) {
+            // Two-value operators are positional (`time_between 22:00
+            // 06:00` wraps past midnight; `06:00 22:00` does not), so their
+            // order is kept. Every other operator's values are a set.
+            if c.operator.value_count() != (2, 2) {
                 c.values.sort();
                 c.values.dedup();
             }
@@ -1477,6 +1558,11 @@ fn overlap(allow: &Match, deny: &Match) -> Option<String> {
             return None;
         }
     }
+    // The deny must say which versions are vulnerable: a deny with no
+    // version test is not a vulnerable-version entry, and the allow alone
+    // is no evidence. Every field either side constrains must overlap, so
+    // a file-version overlap with disjoint product versions is none.
+    let mut evidence = None;
     for field in [Field::MetaFileVersion, Field::MetaProductVersion] {
         let a = versions(&ra, field);
         let d = versions(&rd, field);
@@ -1484,24 +1570,43 @@ fn overlap(allow: &Match, deny: &Match) -> Option<String> {
             continue;
         }
         let full = vec![(0u64, u64::MAX)];
+        let constrained_by_deny = d.is_some();
         let a = a.unwrap_or_else(|| full.clone());
         let d = d.unwrap_or(full);
-        for (allow_lo, allow_hi) in &a {
-            for (deny_lo, deny_hi) in &d {
+        let shared = a.iter().find_map(|(allow_lo, allow_hi)| {
+            d.iter().find_map(|(deny_lo, deny_hi)| {
                 let lo = (*allow_lo).max(*deny_lo);
                 let hi = (*allow_hi).min(*deny_hi);
-                if lo <= hi {
-                    return Some(format!("{} to {}", show(lo), show(hi)));
-                }
-            }
+                (lo <= hi).then_some((lo, hi))
+            })
+        });
+        let (lo, hi) = shared?;
+        if constrained_by_deny && evidence.is_none() {
+            evidence = Some(format!("{} to {}", show(lo), show(hi)));
         }
-        return None;
     }
-    None
+    evidence
+}
+
+/// The publisher and product names a tree requires, as index keys: an
+/// allow and a deny can only overlap in [`overlap`] if they share one.
+fn identity_name_keys(tree: &Match) -> Vec<String> {
+    let mut out: Vec<String> = identity::required_all(tree)
+        .into_iter()
+        .filter(|c| {
+            c.operator == Operator::Equals
+                && matches!(c.field, Field::SignerPublisher | Field::MetaProductName)
+        })
+        .flat_map(|c| c.values.iter().map(|v| key(c.field, v)))
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// The versions on `field` that every match of the criteria allows, as
-/// closed intervals; `None` if no criterion constrains the field.
+/// closed intervals (empty when none can match); `None` if no criterion
+/// constrains the field.
 fn versions(cs: &[&Criterion], field: Field) -> Option<Vec<(u64, u64)>> {
     let mut out: Option<Vec<(u64, u64)>> = None;
     for c in cs.iter().filter(|c| c.field == field) {
@@ -1535,7 +1640,9 @@ fn show(n: u64) -> String {
 }
 
 /// The versions one criterion allows, as closed intervals: a union over
-/// its values. `None` if it is not a version test this reads.
+/// its values, empty when no version can match (`version_lt 0.0.0.0`,
+/// `version_gt` the largest version, or a reversed `version_between`).
+/// `None` if it is not a version test this reads.
 fn version_ranges(c: &Criterion) -> Option<Vec<(u64, u64)>> {
     let v = |s: &String| crate::ops::Version::parse_strict(s).map(as_u64);
     let one = |i: usize| c.values.get(i).and_then(v);
@@ -1546,10 +1653,21 @@ fn version_ranges(c: &Criterion) -> Option<Vec<(u64, u64)>> {
             .map(|s| v(s).map(|x| (x, x)))
             .collect::<Option<Vec<_>>>()?,
         Operator::VersionGe => vec![(one(0)?, u64::MAX)],
-        Operator::VersionGt => vec![(one(0)?.checked_add(1)?, u64::MAX)],
+        Operator::VersionGt => one(0)?
+            .checked_add(1)
+            .map(|lo| (lo, u64::MAX))
+            .into_iter()
+            .collect(),
         Operator::VersionLe => vec![(0, one(0)?)],
-        Operator::VersionLt => vec![(0, one(0)?.checked_sub(1)?)],
-        Operator::VersionBetween => vec![(one(0)?, one(1)?)],
+        Operator::VersionLt => one(0)?
+            .checked_sub(1)
+            .map(|hi| (0, hi))
+            .into_iter()
+            .collect(),
+        Operator::VersionBetween => {
+            let (lo, hi) = (one(0)?, one(1)?);
+            if lo <= hi { vec![(lo, hi)] } else { Vec::new() }
+        }
         _ => return None,
     })
 }

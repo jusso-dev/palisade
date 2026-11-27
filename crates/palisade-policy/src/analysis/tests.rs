@@ -183,6 +183,48 @@ fn restricted_publisher_broad() {
     assert!(!has(&found, FindingCode::RestrictedPublisherBroad, 4));
 }
 
+/// CodeRabbit (analysis/mod.rs:706): a restricted publisher is named by
+/// any operator that matches it, not only by an equal value.
+#[test]
+fn restricted_publishers_are_matched_with_the_criterion_operator() {
+    let facts = Facts {
+        restricted_publishers: vec!["Example Ltd".into()],
+        ..Facts::default()
+    };
+    let found = lint(
+        &mixed(vec![
+            rule(
+                1,
+                crit("signer.publisher", "starts_with", &["Example"]),
+                "allow",
+            ),
+            rule(
+                2,
+                crit("signer.publisher", "wildcard", &["*ample*"]),
+                "allow",
+            ),
+            rule(
+                3,
+                crit("signer.publisher", "starts_with", &["Other"]),
+                "allow",
+            ),
+            rule(
+                4,
+                crit("signer.publisher", "equals", &["example ltd"]),
+                "allow",
+            ),
+        ]),
+        &facts,
+    );
+    for n in [1, 2, 4] {
+        assert!(
+            has(&found, FindingCode::RestrictedPublisherBroad, n),
+            "{n}: {found:?}"
+        );
+    }
+    assert!(!has(&found, FindingCode::RestrictedPublisherBroad, 3));
+}
+
 #[test]
 fn broad_wildcard() {
     let with_pub = |w: &str| serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]), crit("path.full", "wildcard", &[w])]});
@@ -1478,4 +1520,203 @@ fn rules_sharing_a_common_scope_do_not_explode_the_conflict_pass() {
             .iter()
             .all(|f| f.code != FindingCode::Shadowed)
     );
+}
+
+// --------------------------------------------- CodeRabbit review (#301)
+
+fn ver(field: &str, op: &str, values: &[&str]) -> serde_json::Value {
+    serde_json::json!({"criterion": {"field": field, "operator": op, "values": values}})
+}
+
+fn vuln_doc(deny: serde_json::Value, allow: serde_json::Value) -> PolicyDocument {
+    doc(
+        serde_json::json!({}),
+        vec![
+            (
+                CURATED,
+                "blocklist",
+                false,
+                true,
+                vec![rule(1, deny, "deny")],
+            ),
+            (SET, "mixed", false, false, vec![rule(2, allow, "allow")]),
+        ],
+    )
+}
+
+/// analysis/mod.rs:454: an expired `convert_to_audit` rule still audits,
+/// so it is not offered for removal.
+#[test]
+fn an_expired_rule_that_converts_to_audit_is_not_offered_for_removal() {
+    let d = mixed(vec![
+        with(
+            rule(1, hash('a'), "deny"),
+            serde_json::json!({"expires_at": t(-1).to_string(), "on_expire": "convert_to_audit"}),
+        ),
+        with(
+            rule(2, hash('b'), "deny"),
+            serde_json::json!({"expires_at": t(-1).to_string()}),
+        ),
+    ]);
+    let found = analyse(&d, &Facts::default(), NOW);
+    let expired = |n: u32| {
+        found
+            .iter()
+            .find(|f| {
+                f.code == FindingCode::ExpiredRulePresent
+                    && f.rule_refs[0].rule_id.to_string() == rule_id(n)
+            })
+            .unwrap()
+    };
+    assert_eq!(expired(1).fix, None);
+    assert!(expired(1).message.contains("still audits"));
+    assert_eq!(expired(2).fix, Some(Fix::RemoveRule));
+}
+
+/// analysis/mod.rs:963: one shared bucket far larger than the cap is
+/// read only up to the cap, and every entry read costs budget.
+#[test]
+fn candidate_collection_is_capped_and_budgeted() {
+    let bucket: Vec<usize> = (0..100_000).collect();
+    let index = BTreeMap::from([(key(Field::SignerPublisher, "Example Ltd"), bucket)]);
+    let tree: Match =
+        serde_json::from_value(crit("signer.publisher", "equals", &["Example Ltd"])).unwrap();
+    let mut budget = 1_000_000;
+    let got = candidates(&tree, &index, &[], &mut budget).unwrap();
+    assert_eq!(got.len(), MAX_CANDIDATES);
+    // Deterministic: the first entries in index order.
+    assert_eq!(got.iter().next_back(), Some(&(MAX_CANDIDATES - 1)));
+    assert_eq!(1_000_000 - budget, MAX_CANDIDATES);
+    // A budget smaller than the cap ends the pass.
+    let mut small = 10;
+    assert_eq!(candidates(&tree, &index, &[], &mut small), None);
+}
+
+/// analysis/mod.rs:1129: the vulnerable-version pass is indexed and
+/// budgeted: with no pair budget it compares nothing, and an allow for
+/// another publisher is never compared at all.
+#[test]
+fn the_vulnerable_version_pass_is_indexed_and_budgeted() {
+    let deny = serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]), ver("meta.file_version", "version_lt", &["2.0"])]});
+    let allow = serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]), ver("meta.file_version", "version_ge", &["1.0"])]});
+    let d = vuln_doc(deny, allow);
+    assert!(has(
+        &lint(&d, &Facts::default()),
+        FindingCode::VulnerableVersionAllowed,
+        2
+    ));
+    let none = Options {
+        max_pair_checks: 0,
+        ..Options::default()
+    };
+    assert!(
+        !analyse_with(&d, &Facts::default(), NOW, &none)
+            .iter()
+            .any(|f| f.code == FindingCode::VulnerableVersionAllowed)
+    );
+    // Not indexed together: a different publisher.
+    assert!(
+        identity_name_keys(&d.rule_sets[0].rules[0].match_)
+            .iter()
+            .all(|k| !identity_name_keys(
+                &serde_json::from_value(crit("signer.publisher", "equals", &["Other Ltd"]))
+                    .unwrap()
+            )
+            .contains(k))
+    );
+}
+
+/// analysis/mod.rs:1313: `time_between` is positional: 22:00 to 06:00
+/// (overnight) is not 06:00 to 22:00 (daytime), so they are no duplicate.
+#[test]
+fn positional_operators_keep_their_order_for_duplicates() {
+    let at = |a: &str, b: &str| serde_json::json!({"all": [hash('a'), ver("time.local_time", "time_between", &[a, b])]});
+    let found = lint(
+        &mixed(vec![
+            rule(1, at("22:00", "06:00"), "allow"),
+            rule(2, at("06:00", "22:00"), "allow"),
+        ]),
+        &Facts::default(),
+    );
+    assert!(none_of(&found, FindingCode::DuplicateRule), "{found:?}");
+    // The same window twice still is.
+    let found = lint(
+        &mixed(vec![
+            rule(1, at("22:00", "06:00"), "allow"),
+            rule(2, at("22:00", "06:00"), "allow"),
+        ]),
+        &Facts::default(),
+    );
+    assert!(has(&found, FindingCode::DuplicateRule, 2), "{found:?}");
+}
+
+/// analysis/mod.rs:1488: a blocklist deny with no version test is not
+/// vulnerable-version evidence.
+#[test]
+fn a_deny_without_versions_is_no_vulnerable_version_entry() {
+    let deny = crit("signer.publisher", "equals", &["Example Ltd"]);
+    let allow = serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]), ver("meta.file_version", "version_ge", &["1.0"])]});
+    let found = lint(&vuln_doc(deny, allow), &Facts::default());
+    assert!(
+        !has(&found, FindingCode::VulnerableVersionAllowed, 2),
+        "{found:?}"
+    );
+}
+
+/// analysis/mod.rs:1495: every field either side constrains must overlap.
+#[test]
+fn disjoint_product_versions_are_no_overlap() {
+    let deny = serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]),
+        ver("meta.file_version", "version_lt", &["2.0"]), ver("meta.product_version", "version_lt", &["5.0"])]});
+    let allow = serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]),
+        ver("meta.file_version", "version_ge", &["1.0"]), ver("meta.product_version", "version_ge", &["5.0"])]});
+    let found = lint(&vuln_doc(deny, allow), &Facts::default());
+    assert!(
+        !has(&found, FindingCode::VulnerableVersionAllowed, 2),
+        "{found:?}"
+    );
+}
+
+/// analysis/mod.rs:1551: a version test no version can pass is an empty
+/// range, not "unconstrained".
+#[test]
+fn an_impossible_version_test_is_an_empty_range() {
+    let c = |op: &str, v: &[&str]| -> Criterion {
+        serde_json::from_value(
+            serde_json::json!({"field": "meta.file_version", "operator": op, "values": v}),
+        )
+        .unwrap()
+    };
+    assert_eq!(version_ranges(&c("version_lt", &["0.0.0.0"])), Some(vec![]));
+    assert_eq!(
+        version_ranges(&c("version_gt", &["65535.65535.65535.65535"])),
+        Some(vec![])
+    );
+    let deny = serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]), ver("meta.file_version", "version_lt", &["0.0.0.0"])]});
+    let allow = serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]), ver("meta.file_version", "version_ge", &["1.0"])]});
+    let found = lint(&vuln_doc(deny, allow), &Facts::default());
+    assert!(
+        !has(&found, FindingCode::VulnerableVersionAllowed, 2),
+        "{found:?}"
+    );
+}
+
+/// analysis/subsume.rs:117: signer options make a criterion narrower, so a
+/// publisher deny with `min_key_bits` does not shadow an allow without it.
+#[test]
+fn signer_options_are_compared_in_proofs() {
+    let strict = serde_json::json!({"criterion": {"field": "signer.publisher", "operator": "equals",
+        "values": ["Example Ltd"], "signer": {"min_key_bits": 4096}}});
+    let found = lint(
+        &mixed(vec![
+            rule(1, strict, "deny"),
+            rule(
+                2,
+                serde_json::json!({"all": [crit("signer.publisher", "equals", &["Example Ltd"]), hash('a')]}),
+                "allow",
+            ),
+        ]),
+        &Facts::default(),
+    );
+    assert!(!has(&found, FindingCode::Shadowed, 2), "{found:?}");
 }

@@ -115,6 +115,14 @@ pub fn criterion_covers(a: &Criterion, b: &Criterion) -> bool {
     if widens(b).iter().zip(widens(a)).any(|(&wb, wa)| wb && !wa) {
         return false;
     }
+    // Signer options (#31) restrict which signatures take part and what
+    // each must satisfy (`min_key_bits`, `accept_status`, the signature's
+    // source and index, ...). They are not compared by strength, so a
+    // proof needs them equal: otherwise `a` could reject a signature `b`
+    // accepts, and a rule reported as covered would still decide.
+    if a.signer != b.signer {
+        return false;
+    }
     let class = a.field.class();
     if matches!(class, FieldClass::Version) {
         if let (Some(ra), Some(rb)) = (range(a), range(b)) {

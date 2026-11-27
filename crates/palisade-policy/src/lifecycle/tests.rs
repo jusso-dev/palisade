@@ -1240,3 +1240,61 @@ fn a_read_only_inline_set_is_still_governed_and_reviewed() {
     assert!(codes.contains(&ErrorCode::ReviewDateRequired), "{codes:?}");
     assert_eq!(review_due(&d, NOW.date()).len(), 1);
 }
+
+// --------------------------------------------- CodeRabbit review (#301)
+
+/// evaluate.rs:458: a native `audit` rule with `convert_to_audit` keeps
+/// annotating after it expires, exactly once.
+#[test]
+fn a_native_audit_rule_that_converts_annotates_once_after_expiry() {
+    let v = valid(doc_with(
+        serde_json::json!({}),
+        vec![
+            rule(
+                1,
+                "audit",
+                serde_json::json!({"expires_at": ts(t(0)), "on_expire": "convert_to_audit"}),
+            ),
+            rule(2, "allow", serde_json::json!({})),
+        ],
+    ));
+    for at in [t(-1), t(1)] {
+        let d = decide_at(&v, Some(RuleClock::at(at)));
+        assert_eq!(d.outcome(), Outcome::Allowed);
+        assert_eq!(d.annotations().len(), 1, "at {at}");
+        assert_eq!(d.annotations()[0].rule_id.to_string(), rule_id(1));
+    }
+}
+
+/// lifecycle/counters.rs:413: restoring from the last report does not send
+/// its hits again; restoring from a snapshot still sends the pending ones.
+#[test]
+fn restoring_a_report_does_not_resend_it() {
+    let v = valid(doc_with(
+        serde_json::json!({}),
+        vec![rule(1, "allow", serde_json::json!({}))],
+    ));
+    let e = Evaluator::new(&v).unwrap();
+    let c = e.counters();
+    let d = decide_at(&v, None);
+    c.record(&d, b"x", NOW);
+    c.record(&d, b"y", NOW);
+    let sent = c.report(t(1));
+    assert_eq!(sent.rules[0].hits_since_report, 2);
+    assert!(!sent.snapshot);
+    let after = e.counters();
+    assert!(after.restore(&sent));
+    let next = after.report(t(2));
+    assert_eq!(next.rules[0].hits_total, 2);
+    assert_eq!(next.rules[0].hits_since_report, 0);
+    // A snapshot taken before reporting keeps its pending hit.
+    let c = e.counters();
+    c.record(&d, b"z", NOW);
+    let snap = c.snapshot(t(1));
+    assert!(snap.snapshot);
+    let json = serde_json::to_string(&snap).unwrap();
+    let snap: HitReport = serde_json::from_str(&json).unwrap();
+    let after = e.counters();
+    assert!(after.restore(&snap));
+    assert_eq!(after.report(t(2)).rules[0].hits_since_report, 1);
+}

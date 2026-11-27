@@ -241,6 +241,11 @@ pub struct HitReport {
     pub revision: u64,
     /// When the report was taken.
     pub at: Timestamp,
+    /// Whether this is a restart snapshot ([`Counters::snapshot`]), whose
+    /// `hits_since_report` were not yet reported, rather than a report
+    /// ([`Counters::report`]), whose were. Written only when `true`.
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub snapshot: bool,
     /// Every rule with at least one hit, by rule ID.
     pub rules: Vec<RuleHits>,
 }
@@ -371,6 +376,7 @@ impl Counters {
             policy_id: self.policy_id,
             revision: self.revision,
             at,
+            snapshot: !advance,
             rules,
         }
     }
@@ -387,7 +393,10 @@ impl Counters {
     /// Restores a snapshot (or the last report) taken before a restart, if
     /// it is of the same policy and revision and well formed: totals, last
     /// matches and sketches carry on, and its `hits_since_report` are
-    /// reported in the next report. Counters restore **once**: restoring
+    /// reported in the next report. Restoring from a report instead
+    /// ([`report`](Self::report), `snapshot: false`) carries the totals on
+    /// with nothing pending, since that report was sent. Counters restore
+    /// **once**: restoring
     /// adds to what is counted, so a second restore, of the same snapshot
     /// or another, is refused. Returns whether it was restored; nothing
     /// changes otherwise.
@@ -408,9 +417,17 @@ impl Counters {
         for r in &report.rules {
             if let Some(slot) = self.ordinal(r.rule_id).and_then(|i| self.slots.get(i)) {
                 slot.total.fetch_add(r.hits_total, Ordering::Relaxed);
-                // Only what was reported counts as reported.
+                // Only what was reported counts as reported: a snapshot's
+                // `hits_since_report` are still pending, while a report's
+                // were sent with it, so restoring from the last report
+                // does not send them again.
+                let pending = if report.snapshot {
+                    r.hits_since_report
+                } else {
+                    0
+                };
                 slot.reported
-                    .fetch_add(r.hits_total - r.hits_since_report, Ordering::Relaxed);
+                    .fetch_add(r.hits_total - pending, Ordering::Relaxed);
                 if let Some(t) = r.last_matched_at {
                     slot.last_matched.fetch_max(t.0, Ordering::Relaxed);
                 }
