@@ -1315,7 +1315,11 @@ dependencies = [
  "clap",
  "libc",
  "palisade-fileid",
+ "rand_core 0.10.1",
+ "ring",
+ "rsa",
  "serde_json",
+ "sha1",
  "sha2",
  "yaml-rust2",
 ]

@@ -8,6 +8,7 @@
     "hash",
     "trust"
   ],
+  "content_sha256": "db0e2ef876ba59070a9579a660a88e2ffaa6f4233ea2c4ccd56149017dad9f56",
   "derived": {
     "effective_file_name": {
       "source": "original_file_name",
@@ -70,7 +71,7 @@
       },
       "authoritative": "authenticode_sha256",
       "empty": false,
-      "md5": "4b2da4a6ef9ba12f864dfadbe9e294a9",
+      "md5": "2b1dbf2f2eabe07ae27956687ebfa3bd",
       "msi_normalised_sha256": {
         "status": "not_yet_supported",
         "value": {
@@ -87,11 +88,11 @@
           ]
         }
       },
-      "sha1": "6cf259f0248cb94adf0c831a78bd0ce54751ed85",
-      "sha256": "adf84c7e7bb63026cfacb5447b8b09fdd0a422d31a9c630905e8b52ce3980017",
-      "sha384": "7ec102c47d190ae513a9237f449923437cbaad711e4eec332bba0a2adedea76042db326ed6e33f035e47ac641ba9ab36",
-      "sha512": "cc7b791494eaf1a46decfec5d0aacd5da06ec6e5f3de06cd04aec8eb1a1312438ed54c10de70d0dcbae2a814d3e3ee6d1f664214c26c05868cd043b1ba3dcb56",
-      "size": 5016
+      "sha1": "b6a5c156c7b70a7be18f50aa62bbcbb4cd562178",
+      "sha256": "db0e2ef876ba59070a9579a660a88e2ffaa6f4233ea2c4ccd56149017dad9f56",
+      "sha384": "60bf3268db00e7c2a77e6745bdd8f7882f21c0d6c36a8fa5aa59f7caa01ffaaa13dead685fc4b13abddc23abf18c9a45",
+      "sha512": "e323700de013613c964d3d88952769778dfef4af7a9442dd9c64ea64d7d303d274a5589a84934535763f5ffd377883daabecbca34c2f2bb4e91859b01f263171",
+      "size": 5040
     }
   },
   "installer": {
@@ -117,6 +118,7 @@
   },
   "library_version": "<scrubbed>",
   "masquerade": {
+    "claims_protected": null,
     "reasons": [],
     "score": 0,
     "unassessed": []
@@ -138,8 +140,8 @@
         "EXECUTABLE_IMAGE",
         "LARGE_ADDRESS_AWARE"
       ],
-      "checksum_stored": 16847,
-      "checksum_valid": true,
+      "checksum_stored": 0,
+      "checksum_valid": false,
       "coff_timestamp": 1610612736,
       "dll_characteristics": [
         "HIGH_ENTROPY_VA",
@@ -222,34 +224,34 @@
           "anchored_to": "ca.der",
           "issues": 0,
           "leaf": {
-            "issuer": "O=Palisade Tests, CN=Palisade Corpus Root",
+            "issuer": "CN=Palisade Corpus Root, O=Palisade Tests",
             "not_after": 2524608000,
             "not_before": 1577836800,
-            "serial": "62d0a8c850ac79c20178ff094ce3a091d6abc866",
-            "sha1_thumbprint": "8c67a28662534589e56293f6e43e0e713f271c4c",
-            "sha256_thumbprint": "a09b1dc691a741fc78a01779f1d853ac614ffc63e3bb89cabe1d655a399edded",
-            "subject": "O=Palisade Tests, CN=Palisade Corpus Vendor",
-            "tbs_hash": "abd20a80caeb576109efce4b5c06272241946b1fb7e6365443fb13ade86f68e6",
+            "serial": "0c02",
+            "sha1_thumbprint": "ff4b0ee9a994e74f549ebe5394384cde0b3edc54",
+            "sha256_thumbprint": "f6ddfbe0d97b4b5a6f50d2c6bb9e6feb08924fd4c7959cbc9c9519edd3619e21",
+            "subject": "CN=Palisade Corpus Vendor, O=Palisade Tests",
+            "tbs_hash": "206ac037f443e26e8acaa9797b49b5d28aaec351eac99b7998d54eae5c6b6664",
             "tbs_hash_alg": "sha256",
-            "tbs_hash_sha256": "abd20a80caeb576109efce4b5c06272241946b1fb7e6365443fb13ade86f68e6"
+            "tbs_hash_sha256": "206ac037f443e26e8acaa9797b49b5d28aaec351eac99b7998d54eae5c6b6664"
           },
           "length": 2,
           "pca": null,
           "root": {
-            "issuer": "O=Palisade Tests, CN=Palisade Corpus Root",
+            "issuer": "CN=Palisade Corpus Root, O=Palisade Tests",
             "not_after": 2524608000,
             "not_before": 1577836800,
-            "serial": "5d92e85a1c32dc1cb57815c13fa42fabab989f39",
-            "sha1_thumbprint": "3e3bfb445486104cd7c43af34821bb67ede8ca96",
-            "sha256_thumbprint": "1ec693c334bfecca92b173e6ec00b773d48cb471ba27b006f3b282886d6a97ab",
-            "subject": "O=Palisade Tests, CN=Palisade Corpus Root",
-            "tbs_hash": "f9dc0e33a0ddaa59f07693027bb1bd55f5f1e9c706f1d0f7d45145c9c10ef42c",
+            "serial": "0c01",
+            "sha1_thumbprint": "53229d090f602ea6888350c3ac4e4b37b65a8e0a",
+            "sha256_thumbprint": "2659856bca8620f7a798410c916031cdce2d6f0e164afb014daaaebc053e8611",
+            "subject": "CN=Palisade Corpus Root, O=Palisade Tests",
+            "tbs_hash": "c19758c0ea720e5a71bbb3edf648ee45157007f52569df36aaa6a2a4c85ad3bd",
             "tbs_hash_alg": "sha256",
-            "tbs_hash_sha256": "f9dc0e33a0ddaa59f07693027bb1bd55f5f1e9c706f1d0f7d45145c9c10ef42c"
+            "tbs_hash_sha256": "c19758c0ea720e5a71bbb3edf648ee45157007f52569df36aaa6a2a4c85ad3bd"
           },
           "well_known_root_id": null
         },
-        "claimed_signing_time": 1700000000,
+        "claimed_signing_time": 1767225600,
         "depth": 0,
         "digest_alg": "sha256",
         "digest_match": true,
@@ -258,10 +260,10 @@
         "key_alg": "rsa",
         "key_bits": 2048,
         "kind": "embedded",
-        "more_info_url": null,
+        "more_info_url": "https://example.test/fixture",
         "os_ci_compatible": true,
         "parent": null,
-        "program_name": "Palisade corpus",
+        "program_name": "Palisade test fixture",
         "sig_alg": {
           "rsa_pkcs1": "sha256"
         },
@@ -283,36 +285,37 @@
       "clock_suspect": false,
       "embedded": "valid",
       "embedded_invalid_reason": null,
+      "embedded_sha1_only": false,
       "signer": {
         "anchored_to": "ca.der",
         "catalog_match": null,
         "leaf": {
-          "issuer": "O=Palisade Tests, CN=Palisade Corpus Root",
+          "issuer": "CN=Palisade Corpus Root, O=Palisade Tests",
           "not_after": 2524608000,
           "not_before": 1577836800,
-          "serial": "62d0a8c850ac79c20178ff094ce3a091d6abc866",
-          "sha1_thumbprint": "8c67a28662534589e56293f6e43e0e713f271c4c",
-          "sha256_thumbprint": "a09b1dc691a741fc78a01779f1d853ac614ffc63e3bb89cabe1d655a399edded",
-          "subject": "O=Palisade Tests, CN=Palisade Corpus Vendor",
-          "tbs_hash": "abd20a80caeb576109efce4b5c06272241946b1fb7e6365443fb13ade86f68e6",
+          "serial": "0c02",
+          "sha1_thumbprint": "ff4b0ee9a994e74f549ebe5394384cde0b3edc54",
+          "sha256_thumbprint": "f6ddfbe0d97b4b5a6f50d2c6bb9e6feb08924fd4c7959cbc9c9519edd3619e21",
+          "subject": "CN=Palisade Corpus Vendor, O=Palisade Tests",
+          "tbs_hash": "206ac037f443e26e8acaa9797b49b5d28aaec351eac99b7998d54eae5c6b6664",
           "tbs_hash_alg": "sha256",
-          "tbs_hash_sha256": "abd20a80caeb576109efce4b5c06272241946b1fb7e6365443fb13ade86f68e6"
+          "tbs_hash_sha256": "206ac037f443e26e8acaa9797b49b5d28aaec351eac99b7998d54eae5c6b6664"
         },
         "pca": null,
         "product_name": "Example Suite",
-        "publisher_dn": "O=Palisade Tests, CN=Palisade Corpus Vendor",
+        "publisher_dn": "CN=Palisade Corpus Vendor, O=Palisade Tests",
         "publisher_name": "Palisade Corpus Vendor",
         "root": {
-          "issuer": "O=Palisade Tests, CN=Palisade Corpus Root",
+          "issuer": "CN=Palisade Corpus Root, O=Palisade Tests",
           "not_after": 2524608000,
           "not_before": 1577836800,
-          "serial": "5d92e85a1c32dc1cb57815c13fa42fabab989f39",
-          "sha1_thumbprint": "3e3bfb445486104cd7c43af34821bb67ede8ca96",
-          "sha256_thumbprint": "1ec693c334bfecca92b173e6ec00b773d48cb471ba27b006f3b282886d6a97ab",
-          "subject": "O=Palisade Tests, CN=Palisade Corpus Root",
-          "tbs_hash": "f9dc0e33a0ddaa59f07693027bb1bd55f5f1e9c706f1d0f7d45145c9c10ef42c",
+          "serial": "0c01",
+          "sha1_thumbprint": "53229d090f602ea6888350c3ac4e4b37b65a8e0a",
+          "sha256_thumbprint": "2659856bca8620f7a798410c916031cdce2d6f0e164afb014daaaebc053e8611",
+          "subject": "CN=Palisade Corpus Root, O=Palisade Tests",
+          "tbs_hash": "c19758c0ea720e5a71bbb3edf648ee45157007f52569df36aaa6a2a4c85ad3bd",
           "tbs_hash_alg": "sha256",
-          "tbs_hash_sha256": "f9dc0e33a0ddaa59f07693027bb1bd55f5f1e9c706f1d0f7d45145c9c10ef42c"
+          "tbs_hash_sha256": "c19758c0ea720e5a71bbb3edf648ee45157007f52569df36aaa6a2a4c85ad3bd"
         },
         "signature": 0,
         "source": "embedded",
@@ -324,7 +327,7 @@
   },
   "size": {
     "status": "computed",
-    "value": 5016
+    "value": 5040
   },
   "strengths": [
     {

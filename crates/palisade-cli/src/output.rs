@@ -48,10 +48,34 @@ pub fn render(value: &Value, format: Format, many: bool) -> String {
 
 /// Whether `c` must never reach a terminal raw.
 fn unsafe_char(c: char) -> bool {
+    // Controls (Cc), and the format characters (Cf), line and paragraph
+    // separators (Zl, Zp) that change how text looks without being seen:
+    // bidi controls, zero-width characters, the soft hyphen, the byte
+    // order mark, invisible operators and tag characters.
     c.is_control()
         || matches!(
             c,
-            '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
+            '\u{00ad}'
+                | '\u{0600}'..='\u{0605}'
+                | '\u{061c}'
+                | '\u{06dd}'
+                | '\u{070f}'
+                | '\u{0890}'..='\u{0891}'
+                | '\u{08e2}'
+                | '\u{180e}'
+                | '\u{200b}'..='\u{200f}'
+                | '\u{2028}'..='\u{202e}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{206f}'
+                | '\u{feff}'
+                | '\u{fff9}'..='\u{fffb}'
+                | '\u{110bd}'
+                | '\u{110cd}'
+                | '\u{13430}'..='\u{1343f}'
+                | '\u{1bca0}'..='\u{1bca3}'
+                | '\u{1d173}'..='\u{1d17a}'
+                | '\u{e0001}'
+                | '\u{e0020}'..='\u{e007f}'
         )
 }
 
@@ -223,6 +247,27 @@ pub fn escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invisible_characters_are_escaped() {
+        for c in [
+            '\u{00ad}',
+            '\u{200b}',
+            '\u{200d}',
+            '\u{2028}',
+            '\u{2029}',
+            '\u{2060}',
+            '\u{feff}',
+            '\u{e0041}',
+            '\u{202e}',
+            '\u{1b}',
+            '\u{9b}',
+        ] {
+            let text = format!("a{c}b");
+            assert!(!escape(&text).contains(c), "{:x}", u32::from(c));
+        }
+        assert_eq!(escape("plain café.exe"), "plain café.exe");
+    }
 
     #[test]
     fn table_unwraps_fields() {

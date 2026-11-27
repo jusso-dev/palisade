@@ -27,6 +27,12 @@ libc = { workspace = true }
 palisade-fileid = { workspace = true, features = ["os-trust"] }
 
 [dev-dependencies]
+# Builds the identity corpus of `palisade-fileid` at test time (its test CA
+# keys and signatures; `tests/fileid.rs`).
+rand_core = { workspace = true }
+ring = { workspace = true }
+rsa = { workspace = true }
+sha1 = { workspace = true }
 sha2 = { workspace = true }
 # Parses `--yaml` output back in the tests.
 yaml-rust2 = { workspace = true }

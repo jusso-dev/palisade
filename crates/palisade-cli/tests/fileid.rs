@@ -1,5 +1,6 @@
 //! End-to-end tests of `pal fileid`, run against the built binary and the
-//! committed identity corpus of `palisade-fileid` (#55).
+//! identity corpus of `palisade-fileid` (#55), which is built at test time
+//! (nothing signed is committed) and written once to a temporary folder.
 //!
 //! `snapshots/` holds golden output. Regenerate it with:
 //!   `PALISADE_BLESS=1 cargo test -p palisade-cli --test fileid`
@@ -7,20 +8,44 @@
 // Test code: a failure should fail loudly.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+// The identity corpus's builders, shared with `palisade-fileid`'s own
+// corpus test so both see the same bytes.
+#[path = "../../palisade-fileid/tests/common/mod.rs"]
+mod common;
+#[path = "../../palisade-fileid/tests/corpus/mod.rs"]
+mod corpus;
+#[path = "../../palisade-fileid/tests/fixtures/identity/signed.rs"]
+mod signed;
+#[path = "../../palisade-fileid/tests/fixtures/identity/synthetic.rs"]
+mod synthetic;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::OnceLock;
 
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
 const BIN: &str = env!("CARGO_BIN_EXE_pal");
-const CORPUS: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../palisade-fileid/tests/fixtures/identity/files"
-);
+
+/// The generated identity corpus files, written once per test process.
+fn corpus_dir() -> &'static Path {
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    DIR.get_or_init(|| {
+        let dir = std::env::temp_dir().join(format!("pal-fileid-corpus-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, bytes) in signed::generated(&synthetic::corpus_files()) {
+            std::fs::write(dir.join(name), bytes).unwrap();
+        }
+        dir
+    })
+}
 
 fn corpus(name: &str) -> PathBuf {
-    Path::new(CORPUS).join(name)
+    let path = corpus_dir().join(name);
+    assert!(path.is_file(), "no generated corpus file {name}");
+    path
 }
 
 fn run(args: &[&str]) -> Output {
@@ -565,4 +590,151 @@ fn certs_reports_unreadable_input() {
 fn file_alias() {
     let o = run(&["file", "hash", corpus("signed-tool.exe").to_str().unwrap()]);
     assert!(o.status.success());
+}
+
+/// #294 review: a record with errors is printed, but `inspect` fails, so
+/// a script never reads a partial record as complete. A sparse file over
+/// the in-memory limit makes the classify tier record `too_large`.
+#[test]
+fn inspect_fails_when_the_record_has_errors() {
+    let dir = tempdir("inspect-errors");
+    let big = dir.join("big.bin");
+    let f = std::fs::File::create(&big).unwrap();
+    f.set_len(palisade_fileid::identity::MAX_IN_MEMORY + 1)
+        .unwrap();
+    drop(f);
+    let o = run(&[
+        "fileid",
+        "inspect",
+        big.to_str().unwrap(),
+        "--tiers",
+        "t1",
+        "--json",
+    ]);
+    assert_eq!(
+        o.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
+    assert_eq!(v["errors"][0]["code"], "too_large");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// #294 review: an empty `--catroot` is a usage error, not a store that
+/// lists nothing (which would read as "not catalog-signed").
+#[test]
+fn empty_catroot_fails() {
+    let dir = tempdir("catroot-empty");
+    let file = corpus("signed-tool.exe");
+    let o = run(&[
+        "fileid",
+        "inspect",
+        file.to_str().unwrap(),
+        "--catroot",
+        dir.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        o.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// #294 review: a catalog signed by a certificate that has expired, with no
+/// timestamp, vouches for nothing through `--catroot` either: the CLI
+/// judges every catalog signature's validity.
+#[test]
+fn an_expired_catalog_vouches_for_nothing() {
+    let dir = tempdir("catroot-expired");
+    std::fs::copy(corpus("expired.cat"), dir.join("expired.cat")).unwrap();
+    let driver = dir.join("palisade.sys");
+    std::fs::write(&driver, &synthetic::corpus_files()["driver"]).unwrap();
+    let o = run(&[
+        "fileid",
+        "explain",
+        driver.to_str().unwrap(),
+        "--json",
+        "--anchor",
+        &anchor(),
+        "--catroot",
+        dir.to_str().unwrap(),
+    ]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
+    let level = v["recommendation"]["level"].as_str().unwrap();
+    assert!(
+        !["publisher", "publisher_product", "file_publisher"].contains(&level),
+        "{v}"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// #294 review: `certs` checks its input before making the output folder,
+/// so a mistyped path leaves nothing behind.
+#[test]
+fn certs_makes_no_folder_for_a_missing_input() {
+    let dir = tempdir("certs-nomkdir");
+    let out = dir.join("out");
+    let o = run(&[
+        "fileid",
+        "certs",
+        "/nonexistent/palisade/x.exe",
+        "--out",
+        out.to_str().unwrap(),
+    ]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(!out.exists());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// #294 review: output that cannot be written (a full disk) fails the run;
+/// only a closed pipe is ignored.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_failed_write_fails_the_run() {
+    let full = std::fs::OpenOptions::new()
+        .write(true)
+        .open("/dev/full")
+        .unwrap();
+    let o = Command::new(BIN)
+        .args([
+            "fileid",
+            "inspect",
+            corpus("signed-tool.exe").to_str().unwrap(),
+            "--tiers",
+            "t0",
+        ])
+        .stdout(full)
+        .output()
+        .unwrap();
+    assert_eq!(o.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("writing the output failed"));
+}
+
+/// A closed pipe is not a failure.
+#[cfg(unix)]
+#[test]
+fn a_closed_pipe_is_not_a_failure() {
+    let mut child = Command::new(BIN)
+        .args([
+            "fileid",
+            "inspect",
+            corpus_dir().to_str().unwrap(),
+            "--json",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    drop(child.stdout.take());
+    let o = child.wait_with_output().unwrap();
+    assert!(
+        !String::from_utf8_lossy(&o.stderr).contains("writing the output failed"),
+        "{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
 }

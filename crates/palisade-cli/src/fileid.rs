@@ -11,7 +11,9 @@ use palisade_fileid::authenticode::{
     CertSelection, Extraction, MAX_EXTRACT_INPUT, RevocationSet, TrustConfig, ValidityPolicy,
     extract_certificates,
 };
-use palisade_fileid::catalog::{CatalogSource, CatalogStore, CatalogStoreBuilder, StoreLimits};
+use palisade_fileid::catalog::{
+    CatalogSource, CatalogStore, CatalogStoreBuilder, StoreLimits, ValidityOptions,
+};
 use palisade_fileid::fsctx::{KnownFolders, NormalizedPath, normalize_win32};
 use palisade_fileid::hash::{AlgorithmSet, HashOptions};
 use palisade_fileid::identity::{
@@ -23,6 +25,9 @@ use crate::output::{Format, escape, render};
 
 /// How deep `--recursive` goes.
 const MAX_DEPTH: usize = 64;
+/// The most directory entries one walk lists; past it the walk stops with an
+/// error, so a huge tree cannot exhaust memory.
+const MAX_ENTRIES: usize = 1_000_000;
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
@@ -230,6 +235,7 @@ pub fn run(command: Command) -> ExitCode {
         Command::Explain { path, json, trust } => explain(&path, json, &trust),
     };
     match result {
+        Ok(_) if OUTPUT_FAILED.load(std::sync::atomic::Ordering::Relaxed) => ExitCode::FAILURE,
         Ok(code) => code,
         // Messages hold paths and file-derived text: escaped here, once.
         Err(Failure::Usage(msg)) => {
@@ -287,8 +293,18 @@ impl Trust {
         let catalogs = match &args.catroot {
             None => None,
             Some(dir) => {
+                // Validity is judged for every catalog signature (expiry,
+                // revocation, key sizes, timestamps): a catalog whose
+                // validity was not judged never vouches for a file.
                 let mut b = CatalogStoreBuilder::new(StoreLimits::default())
-                    .trust(CatalogSource::System, code.clone());
+                    .trust(CatalogSource::System, code.clone())
+                    .validity(ValidityOptions {
+                        policy: ValidityPolicy::default(),
+                        revocation: RevocationSet::new(),
+                        tsa_trust: code.clone(),
+                        now: now(),
+                        clock_floor: None,
+                    });
                 if !fs::metadata(dir).is_ok_and(|m| m.is_dir()) {
                     return Err(Failure::Usage(format!(
                         "--catroot {}: not a readable directory",
@@ -306,6 +322,14 @@ impl Trust {
                 if bad > 0 {
                     return Err(Failure::Runtime(format!(
                         "--catroot {}: {bad} catalog file(s) could not be loaded or verified",
+                        dir.display()
+                    )));
+                }
+                // An empty catalog root proves nothing: "not listed" would
+                // read as a lookup that found nothing.
+                if report.valid == 0 {
+                    return Err(Failure::Usage(format!(
+                        "--catroot {}: no catalog files were found there",
                         dir.display()
                     )));
                 }
@@ -463,13 +487,22 @@ fn inspect(
         let id = identify(path, tiers, &ctx)
             .map_err(|e| Failure::Runtime(format!("{}: {e}", path.display())))?;
         print(&render(&to_value(&id), format, false));
-        return Ok(ExitCode::SUCCESS);
+        // A record with errors is printed in full, but the run did not
+        // compute everything that was asked.
+        return Ok(if id.errors.is_empty() {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        });
     }
     let mut failed = false;
     for file in walk(path, recursive) {
         match file {
             Ok(file) => match identify(&file, tiers, &ctx) {
-                Ok(id) => print(&render(&to_value(&id), format, true)),
+                Ok(id) => {
+                    failed |= !id.errors.is_empty();
+                    print(&render(&to_value(&id), format, true));
+                }
                 Err(e) => {
                     failed = true;
                     report_failure(&file, &e.to_string(), format);
@@ -505,10 +538,23 @@ fn to_value(id: &FileIdentity) -> Value {
     serde_json::to_value(id).unwrap_or(Value::Null)
 }
 
+/// Set when writing to standard output failed for any reason other than a
+/// closed pipe; [`run`] then fails, so truncated output never exits 0.
+static OUTPUT_FAILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn print(text: &str) {
     let mut out = io::stdout().lock();
-    // A closed pipe (`| head`) ends the output; there is nothing to report.
-    let _ = out.write_all(text.as_bytes());
+    match out.write_all(text.as_bytes()).and_then(|()| out.flush()) {
+        Ok(()) => {}
+        // A closed pipe (`| head`) ends the output; there is nothing to
+        // report.
+        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {}
+        Err(e) => {
+            if !OUTPUT_FAILED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("pal: writing the output failed: {}", escape(&e.to_string()));
+            }
+        }
+    }
 }
 
 /// The regular files under `dir`, in name order. Symbolic links and other
@@ -533,6 +579,15 @@ fn walk(dir: &Path, recursive: bool) -> Vec<Result<PathBuf, (PathBuf, io::Error)
             (Err(_), Err(_)) => std::cmp::Ordering::Equal,
         });
         let mut subdirs = Vec::new();
+        if out.len().saturating_add(entries.len()) > MAX_ENTRIES {
+            out.push(Err((
+                d,
+                io::Error::other(format!(
+                    "more than {MAX_ENTRIES} entries; the walk stops here"
+                )),
+            )));
+            return out;
+        }
         for entry in entries {
             let p = match entry {
                 Ok(p) => p,
@@ -632,10 +687,11 @@ fn hash(path: &Path, algs: &[HashKind], json_out: bool) -> Result<ExitCode, Fail
 // certs
 
 fn certs(path: &Path, which: Which, out: &Path, pem: bool) -> Result<ExitCode, Failure> {
-    fs::create_dir_all(out)
-        .map_err(|e| Failure::Runtime(format!("cannot create {}: {e}", out.display())))?;
+    // The input first, so a mistyped path leaves no empty output directory.
     let meta = fs::metadata(path)
         .map_err(|e| Failure::Runtime(format!("cannot read {}: {e}", path.display())))?;
+    fs::create_dir_all(out)
+        .map_err(|e| Failure::Runtime(format!("cannot create {}: {e}", out.display())))?;
     let mut failed = false;
     let files: Vec<PathBuf> = if meta.is_dir() {
         walk(path, false)
