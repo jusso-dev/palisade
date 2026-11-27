@@ -242,6 +242,50 @@ fn push_text(top: &mut Element, piece: &str, budget: &mut usize) -> Result<(), X
     Ok(())
 }
 
+/// Checks an XML declaration: `version` (1.0, which is all this parser
+/// reads), then optionally `encoding` (UTF-8, the only one accepted) and
+/// `standalone` (`yes` or `no`), in that order, and nothing else.
+fn check_decl(d: &quick_xml::events::BytesDecl<'_>) -> Result<(), XmlError> {
+    let bad = || XmlError("an XML declaration that is not version 1.0 in UTF-8".into());
+    // `version` must come first; the accessor checks that.
+    if d.version().map_err(|_| bad())?.as_ref() != b"1.0" {
+        return Err(bad());
+    }
+    if let Some(e) = d.encoding() {
+        if !e.map_err(|_| bad())?.eq_ignore_ascii_case(b"utf-8") {
+            return Err(bad());
+        }
+    }
+    if let Some(sa) = d.standalone() {
+        if !matches!(sa.map_err(|_| bad())?.as_ref(), b"yes" | b"no") {
+            return Err(bad());
+        }
+    }
+    // Nothing else, and in order: the names, as written, must be a prefix
+    // of `version encoding standalone` with optional ones left out.
+    let raw: &[u8] = d;
+    let text = std::str::from_utf8(raw).map_err(|_| bad())?;
+    let mut names = Vec::new();
+    let mut rest = text.strip_prefix("xml").unwrap_or(text);
+    while let Some(eq) = rest.find('=') {
+        names.push(rest[..eq].trim().to_owned());
+        let after = rest[eq + 1..].trim_start();
+        let quote = after.chars().next().ok_or_else(bad)?;
+        let close = after[1..].find(quote).ok_or_else(bad)?;
+        rest = &after[close + 2..];
+    }
+    let order = ["version", "encoding", "standalone"];
+    let mut last = None;
+    for n in &names {
+        let pos = order.iter().position(|o| o == n).ok_or_else(bad)?;
+        if last.is_some_and(|l| pos <= l) {
+            return Err(bad());
+        }
+        last = Some(pos);
+    }
+    Ok(())
+}
+
 /// Parses `data` into its root element.
 pub fn parse(data: &[u8]) -> Result<Element, XmlError> {
     if data.len() > MAX_INPUT {
@@ -266,8 +310,11 @@ pub fn parse(data: &[u8]) -> Result<Element, XmlError> {
         let event = reader.read_event().or_else(|e| err(e.to_string()))?;
         // An XML declaration is allowed once, as the very first thing in
         // the document (after an optional byte order mark).
-        if matches!(event, Event::Decl(_)) && !first {
-            return err("an XML declaration that is not at the start");
+        if let Event::Decl(ref d) = event {
+            if !first {
+                return err("an XML declaration that is not at the start");
+            }
+            check_decl(d)?;
         }
         first = false;
         match event {
@@ -365,8 +412,22 @@ mod tests {
             b"<?xml version=\"1.0\"?><?xml version=\"1.0\"?><a/>",
             b"<!-- c --><?xml version=\"1.0\"?><a/>",
             b" <?xml version=\"1.0\"?><a/>",
+            // Content: version 1.0 first, then UTF-8 and standalone only.
+            b"<?xml?><a/>",
+            b"<?xml encoding=\"UTF-8\"?><a/>",
+            b"<?xml version=\"1.1\"?><a/>",
+            b"<?xml version=\"1.0\" encoding=\"UTF-16\"?><a/>",
+            b"<?xml version=\"1.0\" standalone=\"maybe\"?><a/>",
+            b"<?xml version=\"1.0\" standalone=\"yes\" encoding=\"UTF-8\"?><a/>",
+            b"<?xml version=\"1.0\" foo=\"bar\"?><a/>",
         ] {
             assert!(parse(bad).is_err(), "{}", String::from_utf8_lossy(bad));
+        }
+        for ok in [
+            &b"<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"no\"?><a/>"[..],
+            b"<?xml version='1.0' encoding='UTF-8'?><a/>",
+        ] {
+            assert!(parse(ok).is_ok(), "{}", String::from_utf8_lossy(ok));
         }
     }
 

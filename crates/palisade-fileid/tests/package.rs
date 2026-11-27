@@ -902,6 +902,23 @@ fn check_generated_packages() {
             id.signature.as_ref().map(|s| &s.issue)
         );
     }
+    // Each must-refuse fixture for the reason the tests rely on, not merely
+    // invalid.
+    for (name, issue) in [
+        ("app-desc.msix", Some(PackageSignatureIssue::NotZip64)),
+        ("app-classic.msix", Some(PackageSignatureIssue::NotZip64)),
+    ] {
+        let id = parse_package(&read(name)).unwrap();
+        assert_eq!(id.signature.unwrap().issue, issue, "{name}");
+    }
+    let id = parse_package(&read("other-publisher.msix")).unwrap();
+    assert!(
+        matches!(
+            id.signature.unwrap().issue,
+            Some(PackageSignatureIssue::PublisherMismatch { .. })
+        ),
+        "other-publisher.msix"
+    );
     assert_eq!(read("app.msix"), AppxBuilder::package().build());
     assert_eq!(read("bundle.msixbundle"), AppxBuilder::bundle().build());
 }
@@ -1459,8 +1476,10 @@ fn bundle_payloads_are_checked_against_the_bundle_manifest() {
     assert!(verify_bundle(&block_map_of(&la), &la, &payloads).is_err());
 
     // Through parse_package: a signed bundle with one payload byte changed
-    // fails the signature, and with the bundle manifest's offset changed
-    // (block map and digest left alone) fails too.
+    // fails the signature (the payload bytes are covered by the local
+    // records). The offset and size checks above call `verify_bundle`
+    // directly; a signed bundle whose manifest gives a wrong offset would
+    // need a signer here (deferred, see the PR).
     let signed = fixture("bundle-signed.msixbundle");
     assert!(parse_package(&signed).unwrap().signature_valid());
     let sa = Archive::parse(&signed).unwrap();
@@ -1581,15 +1600,17 @@ fn each_block_size_must_cover_its_block() {
 
 #[test]
 fn manifest_booleans_and_bundle_defaults_follow_the_schemas() {
-    // `xs:boolean`: `true` and `1` are true; `false`, `0`, other case and
-    // absence are false.
+    // `xs:boolean`: `true` and `1` are true; `false` and `0` (and
+    // absence) are false; surrounding whitespace is ignored.
     for (value, want) in [
         ("true", true),
         ("1", true),
         ("false", false),
         ("0", false),
-        ("TRUE", false),
         (" 1 ", true),
+        // Not an `xs:boolean` value at all (the schema rejects it): read as
+        // false, the safe reading for an invalid flag.
+        ("TRUE", false),
     ] {
         let mut b = AppxBuilder::package();
         b.files[0].data = String::from_utf8(b.files[0].data.clone())
@@ -1643,4 +1664,209 @@ fn the_block_map_counts_local_extra_fields() {
         v[..v.find('"').unwrap()].parse::<u64>().unwrap()
     };
     assert_eq!(lfh(&map), lfh(&plain) + 4);
+}
+
+#[test]
+fn a_block_size_cut_mid_block_is_refused() {
+    // A member whose first 64 KiB block is written as two stored blocks,
+    // the second of which runs on into the next 64 KiB block: block sizes
+    // that cut it 64 KiB of output in, where its data happens to read
+    // `00 00 ff ff` (the bytes of a full flush), end in the middle of a
+    // DEFLATE block. The decoder must confirm each cut is a block boundary;
+    // the bytes alone do not.
+    fn stored(data: &[u8]) -> Vec<u8> {
+        let len = data.len() as u16;
+        let mut v = vec![0];
+        v.extend_from_slice(&len.to_le_bytes());
+        v.extend_from_slice(&(!len).to_le_bytes());
+        v.extend_from_slice(data);
+        v
+    }
+    let head = vec![b'x'; 65530];
+    // The rest of block 1 (6 bytes, ending in the flush's bytes), then
+    // block 2 (34 bytes), in one stored block.
+    let tail: Vec<u8> = b"yy\x00\x00\xff\xff".to_vec();
+    let rest = vec![b'z'; 34];
+    let content = [head.clone(), tail.clone(), rest.clone()].concat();
+    let mut raw = stored(&head);
+    raw.extend(stored(&[tail.as_slice(), &rest].concat()));
+    raw.extend_from_slice(&[0, 0, 0, 0xff, 0xff, 0x03, 0x00]);
+    let cut = (5 + head.len() + 5 + tail.len()) as u64;
+    assert_eq!(&raw[cut as usize - 4..cut as usize], &[0, 0, 0xff, 0xff]);
+    let sizes = [cut, raw.len() as u64 - 2 - cut];
+
+    let mut b = AppxBuilder::package();
+    let big = b
+        .files
+        .iter()
+        .position(|f| f.name == "assets/big.bin")
+        .unwrap();
+    b.files[big].data = content;
+    let data = b.build_with(&ZipStyle {
+        raw_deflate: Some(("assets/big.bin".into(), raw)),
+        ..ZipStyle::packaging_tool()
+    });
+    let a = Archive::parse(&data).unwrap();
+    // The member itself reads: it is valid DEFLATE with the right content.
+    a.read(a.member("assets/big.bin").unwrap()).unwrap();
+    let map_xml =
+        String::from_utf8(a.read(a.member("AppxBlockMap.xml").unwrap()).unwrap()).unwrap();
+    let xml = with_block_sizes(&map_xml, "assets\\big.bin", &sizes);
+    let map = palisade_fileid::package::blockmap::parse(xml.as_bytes()).unwrap();
+    assert!(matches!(
+        palisade_fileid::package::blockmap::verify(&map, &a),
+        Err(BlockMapError::Size(_))
+    ));
+}
+
+#[test]
+fn zip64_data_needs_version_4_5() {
+    // An entry whose central record carries ZIP64 sizes needs ZIP version
+    // 4.5 in its local header, data descriptor or not.
+    let zip64_only = ZipStyle {
+        zip64: true,
+        ..ZipStyle::default()
+    };
+    let ok = AppxBuilder::package().build_with(&zip64_only);
+    let a = Archive::parse(&ok).unwrap();
+    assert!(a.members.iter().all(|m| m.has_zip64_extra));
+    let old = AppxBuilder::package().build_with(&ZipStyle {
+        version_mismatch: true,
+        ..zip64_only
+    });
+    assert!(matches!(
+        Archive::parse(&old),
+        Err(ZipError::LocalHeader(_))
+    ));
+}
+
+#[test]
+fn manifest_values_are_required_or_refused() {
+    use palisade_fileid::package::manifest::ns::{APPX_2010, APPX_2013};
+    let bundle_with = |from: &str, to: &str| {
+        let mut b = AppxBuilder::bundle();
+        let at = b
+            .files
+            .iter()
+            .position(|f| f.name == BUNDLE_MANIFEST)
+            .unwrap();
+        let text = String::from_utf8(b.files[at].data.clone()).unwrap();
+        assert!(text.contains(from), "{from}");
+        b.files[at].data = text.replacen(from, to, 1).into_bytes();
+        parse_package(&b.build())
+    };
+    // A bundle member without FileName, or with a malformed or missing
+    // Version, is a manifest error, not dropped or versionless.
+    for (from, to) in [
+        ("FileName=\"app_x64.msix\" ", ""),
+        (
+            "Version=\"2.0.0.0\" Architecture",
+            "Version=\"1.2.3.65536\" Architecture",
+        ),
+        ("Version=\"2.0.0.0\" Architecture", "Architecture"),
+    ] {
+        assert!(
+            matches!(bundle_with(from, to), Err(PackageError::Manifest(_))),
+            "{to}"
+        );
+    }
+    // An omitted Architecture is `neutral`, the bundle schema's default.
+    let id = bundle_with(" Architecture=\"x64\"", "").unwrap();
+    assert_eq!(id.members[0].arch, "neutral");
+    assert_eq!(id.members[0].version, Some(PackageVersion(2, 0, 0, 0)));
+
+    // A property over the value limit is refused, not dropped.
+    let mut b = AppxBuilder::package();
+    b.files[0].data = String::from_utf8(b.files[0].data.clone())
+        .unwrap()
+        .replace(
+            "<DisplayName>Palisade Test App</DisplayName>",
+            &format!("<DisplayName>{}</DisplayName>", "x".repeat(4097)),
+        )
+        .into_bytes();
+    assert!(matches!(
+        parse_package(&b.build()),
+        Err(PackageError::Manifest(_))
+    ));
+
+    // `Extensions` from another namespace adds no extensions.
+    let mut b = AppxBuilder::package();
+    b.files[0].data = String::from_utf8(b.files[0].data.clone())
+        .unwrap()
+        .replace(
+            "</Applications>",
+            "</Applications><z:Extensions xmlns:z=\"urn:z\"><uap3:Extension Category=\"windows.appExecutionAlias\" Executable=\"evil.exe\" EntryPoint=\"Windows.FullTrustApplication\"/></z:Extensions>",
+        )
+        .into_bytes();
+    let id = parse_package(&b.build()).unwrap();
+    assert!(
+        id.extensions
+            .iter()
+            .all(|e| e.executable.as_deref() != Some("evil.exe"))
+    );
+    assert_eq!(id.extensions.len(), 2);
+
+    // A 2013 (Windows 8.1 extension) namespace is not a package root; a
+    // 2010 root still is.
+    for (ns, ok) in [(APPX_2013, false), (APPX_2010, true)] {
+        let mut b = AppxBuilder::package();
+        b.files[0].data = format!(
+            r#"<?xml version="1.0" encoding="utf-8"?><Package xmlns="{ns}"><Identity Name="Palisade.Old" Publisher="{PUBLISHER}" Version="1.0.0.0"/><Properties><DisplayName>Old</DisplayName><PublisherDisplayName>P</PublisherDisplayName><Logo>logo.png</Logo></Properties></Package>"#
+        )
+        .into_bytes();
+        assert_eq!(parse_package(&b.build()).is_ok(), ok, "{ns}");
+    }
+}
+
+#[test]
+fn block_maps_need_files_and_sha2() {
+    use palisade_fileid::authenticode::DigestAlgorithm;
+    use palisade_fileid::package::blockmap::{parse, verify};
+    let empty = format!(
+        "<BlockMap xmlns=\"{BLOCK_MAP}\" HashMethod=\"http://www.w3.org/2001/04/xmlenc#sha256\"/>"
+    );
+    assert!(matches!(
+        parse(empty.as_bytes()),
+        Err(BlockMapError::Malformed(_))
+    ));
+    // A zero-byte file with no blocks is still a block map.
+    let one = format!(
+        "<BlockMap xmlns=\"{BLOCK_MAP}\" HashMethod=\"http://www.w3.org/2001/04/xmlenc#sha256\"><File Name=\"a.txt\" Size=\"0\" LfhSize=\"35\"/></BlockMap>"
+    );
+    parse(one.as_bytes()).unwrap();
+    // A map built with a non-SHA-2 method is refused by the verifier too.
+    let data = AppxBuilder::package().build();
+    let a = Archive::parse(&data).unwrap();
+    let mut map = block_map_of(&a);
+    verify(&map, &a).unwrap();
+    map.hash = DigestAlgorithm::Sha1;
+    assert_eq!(verify(&map, &a), Err(BlockMapError::HashMethod));
+}
+
+#[test]
+fn bundle_offsets_follow_the_layout() {
+    // A bundle built in a layout with 16-byte descriptors gets offsets for
+    // that layout, so its payloads verify.
+    let style = ZipStyle {
+        narrow_descriptors: true,
+        ..ZipStyle::packaging_tool()
+    };
+    let data = AppxBuilder::bundle_for(&style).build_with(&style);
+    let a = Archive::parse(&data).unwrap();
+    let id = parse_package(&data).unwrap();
+    let payloads: Vec<_> = id
+        .members
+        .iter()
+        .map(|m| palisade_fileid::package::blockmap::Payload {
+            file_name: &m.file_name,
+            offset: m.offset,
+            size: m.size,
+        })
+        .collect();
+    palisade_fileid::package::blockmap::verify_bundle(&block_map_of(&a), &a, &payloads).unwrap();
+    // And a publisher with characters XML escapes survives the round trip.
+    let publisher = "CN=A & B \"Q\" <C>, O=Palisade Tests";
+    let mut b = AppxBuilder::package();
+    b.files[0].data = manifest("Palisade.TestApp", publisher, "1.2.3.4", "x64").into_bytes();
+    assert_eq!(parse_package(&b.build()).unwrap().publisher_dn, publisher);
 }

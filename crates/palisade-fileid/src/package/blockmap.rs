@@ -226,6 +226,11 @@ pub fn parse(data: &[u8]) -> Result<BlockMap, BlockMapError> {
             block_sizes,
         });
     }
+    // The schema requires at least one `File`: every package lists its
+    // manifest, every bundle its bundle manifest.
+    if files.is_empty() {
+        return Err(bad("no files"));
+    }
     Ok(BlockMap { hash, files })
 }
 
@@ -271,6 +276,14 @@ fn verify_with(
     archive: &Archive<'_>,
     payloads: Option<&[Payload<'_>]>,
 ) -> Result<(), BlockMapError> {
+    // Only the block map's own hash methods (SHA-256, SHA-384, SHA-512), for
+    // a map built by a caller as for one `parse` read.
+    if !matches!(
+        map.hash,
+        DigestAlgorithm::Sha256 | DigestAlgorithm::Sha384 | DigestAlgorithm::Sha512
+    ) {
+        return Err(BlockMapError::HashMethod);
+    }
     // A bundle's payloads, by folded part name; each once.
     let mut by_part: BTreeMap<String, Payload<'_>> = BTreeMap::new();
     for p in payloads.unwrap_or_default() {
@@ -438,45 +451,60 @@ fn check_blocks(
 }
 
 /// A deflated file's block sizes, block by block: block `i`'s compressed
-/// bytes (its `Size`, from where block `i - 1` ended) must be a complete
-/// DEFLATE segment, ended by the full flush the OS packaging tool writes
-/// after every block (an empty stored block, `00 00 ff ff`), that inflates
-/// to exactly its uncompressed block (64 KiB, or the rest of the file for
-/// the last). Only the sum is not enough: sizes that add up but cut the
-/// stream elsewhere describe blocks that do not exist. What follows the
-/// last block is the empty final block (`03 00`) or nothing, when the last
-/// size counts it; `verify_with` has checked the sum allows exactly that.
-/// Each block's content is hashed separately, in [`check_blocks`].
+/// bytes (its `Size`, from where block `i - 1` ended) must be a run of
+/// whole DEFLATE blocks, ended by the full flush the OS packaging tool
+/// writes after every block (an empty stored block, `00 00 ff ff`), that
+/// inflates to exactly its uncompressed block (64 KiB, or the rest of the
+/// file for the last). Only the sum is not enough: sizes that add up but
+/// cut the stream elsewhere describe blocks that do not exist.
+///
+/// Where a segment ends is confirmed by the decoder, not by its last
+/// bytes: the segment is inflated on its own with the empty final block
+/// (`03 00`) appended, and must end the stream exactly there. A final
+/// block header is only read at a block boundary, so a segment cut in the
+/// middle of a block (whatever bytes it happens to end with) does not end
+/// the stream there. What follows the last block is the empty final block
+/// or nothing, when the last size counts it; `verify_with` has checked the
+/// sum allows exactly that. Each block's content is hashed separately, in
+/// [`check_blocks`].
 fn check_block_sizes(
     f: &MappedFile,
     archive: &Archive<'_>,
     m: &Member,
 ) -> Result<(), BlockMapError> {
+    const FINAL: [u8; 2] = [0x03, 0x00];
+    const FLUSH: [u8; 4] = [0x00, 0x00, 0xff, 0xff];
     let bad = || BlockMapError::Size(f.name.clone());
     let raw = archive.raw_data(m);
     let mut at = 0_usize;
     let mut left = m.size;
     let count = f.block_sizes.len();
+    let mut segment_buf = Vec::new();
     for (i, size) in f.block_sizes.iter().enumerate() {
         let size = size.and_then(|s| usize::try_from(s).ok()).ok_or_else(bad)?;
         let end = at.checked_add(size).ok_or_else(bad)?;
         let segment = raw.get(at..end).ok_or_else(bad)?;
         let want = left.min(BLOCK);
-        let last = i + 1 == count;
-        // The last block may also carry the empty final block.
-        let (body, closes) = if last && segment.ends_with(&[0x03, 0x00]) && end == raw.len() {
-            let body = segment.get(..segment.len() - 2).ok_or_else(bad)?;
-            (body, true)
+        // The last block may also carry the empty final block itself.
+        let closes = i + 1 == count && end == raw.len() && segment.ends_with(&FINAL);
+        let body = if closes {
+            segment.get(..segment.len() - FINAL.len()).ok_or_else(bad)?
         } else {
-            (segment, false)
+            segment
         };
-        if !body.ends_with(&[0x00, 0x00, 0xff, 0xff]) && !(closes && body.is_empty()) {
+        // Every block the tool writes ends on its full flush.
+        if !body.ends_with(&FLUSH) {
             return Err(bad());
         }
+        segment_buf.clear();
+        segment_buf.extend_from_slice(body);
+        segment_buf.extend_from_slice(&FINAL);
         let mut out = 0_u64;
-        let ended =
-            super::zip::inflate_raw(body, want, |c| out = out.saturating_add(c.len() as u64));
-        if ended != Some(super::zip::Inflated::Open) || out != want {
+        super::zip::inflate_raw(&segment_buf, want, |c| {
+            out = out.saturating_add(c.len() as u64);
+        })
+        .ok_or_else(bad)?;
+        if out != want {
             return Err(bad());
         }
         left -= want;

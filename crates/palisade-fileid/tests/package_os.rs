@@ -56,11 +56,25 @@ const INTACT: [u32; 3] = [0, 0x800b_0109, 0x800b_010a];
 struct Scratch(PathBuf);
 
 impl Scratch {
+    /// A new, empty directory of its own. Tests run in parallel and call
+    /// this more than once each, so the name has the process ID and a
+    /// per-process counter, and is claimed with `create_dir`, which fails
+    /// rather than reuse a directory another call made; a name already
+    /// taken (a stale directory from an earlier run with the same process
+    /// ID) is skipped, never deleted.
     fn new(tag: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("palisade-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        Self(dir)
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        loop {
+            let n = NEXT.fetch_add(1, Ordering::Relaxed);
+            let dir =
+                std::env::temp_dir().join(format!("palisade-{tag}-{}-{n}", std::process::id()));
+            match std::fs::create_dir(&dir) {
+                Ok(()) => return Self(dir),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(e) => panic!("{}: {e}", dir.display()),
+            }
+        }
     }
 }
 
@@ -114,6 +128,8 @@ struct OsAnswers {
     pfn: Vec<(String, String)>,
     full: Vec<(String, String)>,
     sig: BTreeMap<String, u32>,
+    /// `DIAG` lines: (file, route, result).
+    diag: Vec<(String, String, String)>,
 }
 
 impl OsAnswers {
@@ -159,7 +175,12 @@ fn ask_os(publishers: &[&str], files: &[(String, Vec<u8>)]) -> Option<OsAnswers>
                     u32::from_str_radix(&value, 16).unwrap_or_else(|_| panic!("bad line {line:?}"));
                 answers.sig.insert(key, code);
             }
-            "DIAG" => {}
+            "DIAG" => {
+                let (route, result) = value.split_once('=').unwrap_or((&value, ""));
+                answers
+                    .diag
+                    .push((key.clone(), route.to_owned(), result.to_owned()));
+            }
             _ => panic!("bad line {line:?}"),
         }
     }
@@ -225,18 +246,25 @@ fn identity_and_signatures_match_the_os() {
             "publisher {publisher:?}"
         );
     }
-    assert_eq!(os.full.len(), 2, "{text}");
+    // Exactly one `x64` row and one `bundle` row, each with its own full
+    // name.
     let pid = publisher_id(publishers[0]);
     let v = PackageVersion(1, 2, 3, 4);
-    for (key, value) in &os.full {
-        let want = match key.as_str() {
-            "x64" => full_name("Palisade.Probe", v, "x64", "", &pid),
-            // A bundle: neutral, resource ID `~`, as parse_package reports
-            // for bundles.
-            _ => full_name("Palisade.Probe", v, "", "~", &pid),
-        };
-        assert_eq!(value, &want, "{key}");
-    }
+    let mut full: Vec<(&str, &str)> = os
+        .full
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    full.sort_unstable();
+    let x64 = full_name("Palisade.Probe", v, "x64", "", &pid);
+    // A bundle: neutral, resource ID `~`, as parse_package reports for
+    // bundles.
+    let bundle = full_name("Palisade.Probe", v, "", "~", &pid);
+    assert_eq!(
+        full,
+        [("bundle", bundle.as_str()), ("x64", x64.as_str())],
+        "{text}"
+    );
     // Each fixture has an expected verdict, and both sides must give it:
     // agreeing that a package meant to be intact is broken proves nothing.
     // Whether this API also compares the signer with the manifest's
@@ -429,10 +457,12 @@ fn the_os_signer_computes_our_digest() {
             b.build_with(&ZipStyle::packaging_tool()),
         ),
         ("bundle.msixbundle", AppxBuilder::bundle().build()),
-        // The plain layout with a manifest the OS manifest validator
+        // The plain layout with a manifest the OS packaging API's validator
         // refuses (an extension `Executable` without `EntryPoint`, as the
-        // fixtures had before), to tell a refused manifest from a refused
-        // signature.
+        // fixtures had before). The package signature does not depend on
+        // the manifest's schema: the OS trust check calls it intact, and
+        // so does this crate. The packaging API's refusal is asserted
+        // below, from the OS's `reader` diagnostic.
         ("plain-bad-manifest.msix", {
             let mut bad = b.clone();
             bad.files[0].data = sdk_manifest_with_bare_extension(&bad.files[0].data);
@@ -548,6 +578,20 @@ fn the_os_signer_computes_our_digest() {
     if let Some(os) = ask_os(&[], &signed) {
         report.push_str(&os.text);
         report.push('\n');
+        // The OS packaging API refuses the bad manifest (as validation
+        // error 0x80080204), though its signature is intact: what that
+        // file shows is that the signature verdict does not depend on it.
+        let reader = os
+            .diag
+            .iter()
+            .find(|(f, route, _)| f == "plain-bad-manifest.msix" && route == "reader")
+            .map(|(_, _, r)| r.clone());
+        if reader.as_deref() != Some("80080204") {
+            problems += 1;
+            report.push_str(&format!(
+                "plain-bad-manifest.msix: OS packaging reader {reader:?}, expected 80080204 WRONG\n"
+            ));
+        }
         for (name, data) in &signed {
             let code = os.code(name);
             let ours = parse_package(data).map(|id| id.signature_valid());

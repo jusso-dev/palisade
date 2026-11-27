@@ -157,6 +157,7 @@ pub struct AppxBuilder {
 }
 
 pub fn manifest(name: &str, publisher: &str, version: &str, arch: &str) -> String {
+    let publisher = &xml_attr(publisher);
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="{FOUNDATION}"
@@ -200,10 +201,19 @@ pub fn manifest(name: &str, publisher: &str, version: &str, arch: &str) -> Strin
     )
 }
 
+/// `value` escaped for a double-quoted XML attribute.
+pub fn xml_attr(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('"', "&quot;")
+}
+
 /// A minimal desktop app manifest for the OS SDK's packaging tool, which
 /// validates manifests against its schema: one full-trust application with
 /// its visual elements and logos (`logo.png`), and no extensions.
 pub fn sdk_manifest(name: &str, publisher: &str, version: &str, arch: &str) -> String {
+    let publisher = &xml_attr(publisher);
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="{FOUNDATION}"
@@ -237,6 +247,7 @@ pub const BUNDLE_MANIFEST: &str = "AppxMetadata/AppxBundleManifest.xml";
 
 /// The manifest of a resource package for `language`.
 pub fn resource_manifest(name: &str, publisher: &str, version: &str, language: &str) -> String {
+    let publisher = &xml_attr(publisher);
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="{FOUNDATION}">
@@ -324,6 +335,12 @@ impl AppxBuilder {
     /// payloads first and stored, then the manifest. The offsets are those
     /// of [`Self::build`] (the packaging tool's layout).
     pub fn bundle() -> Self {
+        Self::bundle_for(&ZipStyle::packaging_tool())
+    }
+
+    /// [`Self::bundle`] with the bundle manifest's offsets for an archive
+    /// written in `style` (build it with `build_with(style)`).
+    pub fn bundle_for(style: &ZipStyle) -> Self {
         let payloads = [
             File {
                 name: "app_x64.msix".into(),
@@ -336,14 +353,16 @@ impl AppxBuilder {
                 deflate: false,
             },
         ];
-        // Each payload's data offset in the packaging tool's layout: a
-        // local header, the data, then a 24-byte data descriptor.
+        // Each payload's data offset in the layout it is written in: a
+        // local header, the data, then its data descriptor if any.
+        let descriptor = style.descriptor_len();
         let mut at = 0;
         let mut place = Vec::new();
-        for p in &payloads {
-            let data = at + Self::local_header_len(&p.name);
+        for (i, p) in payloads.iter().enumerate() {
+            let extra = if i == 0 { style.local_extra.len() } else { 0 };
+            let data = at + Self::local_header_len(&p.name) + extra;
             place.push((data, p.data.len()));
-            at = data + p.data.len() + 24;
+            at = data + p.data.len() + descriptor;
         }
         let ((x64_at, x64_len), (en_at, en_len)) = (place[0], place[1]);
         let bundle_manifest = format!(
@@ -530,6 +549,10 @@ pub struct ZipStyle {
     /// Deflated members end on their last full flush, without the empty
     /// final block (for negative tests).
     pub no_final_block: bool,
+    /// Raw DEFLATE data written for the named member in place of the
+    /// builder's own (for negative tests; it must inflate to the member's
+    /// data).
+    pub raw_deflate: Option<(String, Vec<u8>)>,
     /// Data descriptors with 4-byte sizes even in a ZIP64 archive, as the
     /// OS signing tool rewrites them (with ZIP version 2.0).
     pub narrow_descriptors: bool,
@@ -541,6 +564,19 @@ pub struct ZipStyle {
 }
 
 impl ZipStyle {
+    /// The length of the data descriptor after each member: none, 16
+    /// bytes (4-byte sizes) or 24 (8-byte sizes), as `write_zip_with`
+    /// writes it.
+    pub fn descriptor_len(&self) -> usize {
+        if !self.descriptors {
+            0
+        } else if (self.zip64 && !self.narrow_descriptors) || self.wide_descriptors {
+            24
+        } else {
+            16
+        }
+    }
+
     /// The layout the OS packaging tool writes: a data descriptor with
     /// 8-byte sizes after every member, ZIP64 end records whose classic
     /// record holds the `0xffff` and `0xffffffff` markers (disk numbers
@@ -574,6 +610,12 @@ pub fn write_zip_with(files: &[File], style: &ZipStyle) -> Vec<u8> {
             &[]
         };
         let (method, mut body) = AppxBuilder::compressed(f);
+        if let Some((name, raw)) = &style.raw_deflate {
+            if *name == f.name {
+                assert_eq!(method, 8, "{name} is not deflated");
+                body = raw.clone();
+            }
+        }
         if method == 8 && style.no_final_block {
             body.truncate(body.len() - 2);
         }
@@ -586,7 +628,10 @@ pub fn write_zip_with(files: &[File], style: &ZipStyle) -> Vec<u8> {
         // version (for negative tests).
         let wide = style.descriptors
             && ((style.zip64 && !style.narrow_descriptors) || style.wide_descriptors);
-        let version: u16 = if wide != style.version_mismatch {
+        // ZIP64 data (8-byte descriptor sizes, or a ZIP64 extra field)
+        // needs version 4.5.
+        let needs_45 = wide || (style.zip64 && !style.plain_entries && !style.descriptors);
+        let version: u16 = if needs_45 != style.version_mismatch {
             45
         } else {
             20

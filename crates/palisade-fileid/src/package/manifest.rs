@@ -20,8 +20,10 @@ pub mod ns {
         APPX_2010, APPX_2013, BUNDLE_2013, BUNDLE_2016, DESKTOP, FOUNDATION, RESCAP, UAP, UAP3,
     };
 
-    /// The namespaces whose `Package` element is a package manifest.
-    pub const PACKAGE: [&str; 3] = [FOUNDATION, APPX_2010, APPX_2013];
+    /// The namespaces whose `Package` element is a package manifest. The
+    /// Windows 8.1 schema (`APPX_2013`) only adds extension vocabulary to
+    /// a 2010 `Package`; it defines no `Package` root of its own.
+    pub const PACKAGE: [&str; 2] = [FOUNDATION, APPX_2010];
     /// The namespaces whose `Bundle` element is a bundle manifest.
     pub const BUNDLE: [&str; 1] = [BUNDLE_2013];
     /// Namespaces whose `Bundle` children may also come from.
@@ -50,6 +52,9 @@ pub enum ManifestError {
     TooMany(&'static str),
     /// A section that may appear once appears more than once.
     Duplicate(&'static str),
+    /// A value outside the identity is missing, malformed or over
+    /// [`MAX_VALUE`]: the element and attribute (or property) named.
+    Value(&'static str),
 }
 
 impl fmt::Display for ManifestError {
@@ -61,6 +66,7 @@ impl fmt::Display for ManifestError {
             Self::Attribute(a) => write!(f, "Identity@{a} is missing or invalid"),
             Self::TooMany(what) => write!(f, "more than {MAX_ITEMS} {what}"),
             Self::Duplicate(what) => write!(f, "{what} appears more than once"),
+            Self::Value(what) => write!(f, "{what} is missing, malformed or too long"),
         }
     }
 }
@@ -183,9 +189,11 @@ impl PackageManifest {
 pub struct BundleMember {
     /// `Type`: `application` or `resource` (the default when omitted).
     pub kind: String,
-    /// `Version`.
+    /// `Version` (required: a member without a valid one is a manifest
+    /// error, so this is always `Some`).
     pub version: Option<PackageVersion>,
-    /// `Architecture`, lowercased.
+    /// `Architecture`, lowercased; `neutral` when omitted, the bundle
+    /// schema's default.
     pub arch: String,
     /// `ResourceId`.
     pub resource_id: String,
@@ -318,9 +326,13 @@ pub fn parse_package_manifest(data: &[u8]) -> Result<PackageManifest, ManifestEr
     let props = section(&root, &foundation, "Properties")?;
     let text = |name: &'static str| -> Result<Option<String>, ManifestError> {
         let Some(p) = props else { return Ok(None) };
-        Ok(section(p, &foundation, name)?
-            .map(|e| e.text.trim().to_owned())
-            .filter(|t| !t.is_empty() && t.len() <= MAX_VALUE))
+        let Some(t) = section(p, &foundation, name)?.map(|e| e.text.trim().to_owned()) else {
+            return Ok(None);
+        };
+        if t.len() > MAX_VALUE {
+            return Err(ManifestError::Value(name));
+        }
+        Ok(Some(t).filter(|t| !t.is_empty()))
     };
     let flag = |name: &'static str| -> Result<bool, ManifestError> {
         // `xs:boolean`: `true` or `1` (lower case only); anything else,
@@ -347,10 +359,10 @@ pub fn parse_package_manifest(data: &[u8]) -> Result<PackageManifest, ManifestEr
             };
             let app_id = a.id.clone();
             push(&mut out.applications, a, "applications")?;
-            collect_extensions(app, app_id.as_deref(), &mut out.extensions)?;
+            collect_extensions(app, &root.ns, app_id.as_deref(), &mut out.extensions)?;
         }
     }
-    collect_extensions(&root, None, &mut out.extensions)?;
+    collect_extensions(&root, &root.ns, None, &mut out.extensions)?;
     if let Some(caps) = section(&root, &foundation, "Capabilities")? {
         for c in &caps.children {
             if let Some(name) = value(c, "Name")? {
@@ -381,13 +393,21 @@ pub fn parse_package_manifest(data: &[u8]) -> Result<PackageManifest, ManifestEr
     Ok(out)
 }
 
-/// Every `Extension` directly under an `Extensions` child of `parent`.
+/// Every `Extension` directly under an `Extensions` child of `parent` in
+/// the manifest's own namespace `foundation` (an `Extensions` from another
+/// namespace is not the package schema's, and adds nothing). The
+/// `Extension` elements themselves may come from any extension vocabulary.
 fn collect_extensions(
     parent: &Element,
+    foundation: &str,
     app: Option<&str>,
     out: &mut Vec<Extension>,
 ) -> Result<(), ManifestError> {
-    for exts in parent.children.iter().filter(|c| c.name == "Extensions") {
+    for exts in parent
+        .children
+        .iter()
+        .filter(|c| c.name == "Extensions" && &*c.ns == foundation)
+    {
         for e in exts.children.iter().filter(|c| c.name == "Extension") {
             let Some(category) = value(e, "Category")? else {
                 continue;
@@ -423,9 +443,13 @@ pub fn parse_bundle_manifest(data: &[u8]) -> Result<BundleManifest, ManifestErro
     let mut members = Vec::new();
     if let Some(packages) = section(&root, &ns::BUNDLE_ANY, "Packages")? {
         for p in packages.children_named(&ns::BUNDLE_ANY, "Package") {
-            let Some(file_name) = value(p, "FileName")? else {
-                continue;
-            };
+            // `FileName` and `Version` are required (the bundle schema).
+            let file_name =
+                value(p, "FileName")?.ok_or(ManifestError::Value("Package@FileName"))?;
+            let version = value(p, "Version")?
+                .as_deref()
+                .and_then(PackageVersion::parse)
+                .ok_or(ManifestError::Value("Package@Version"))?;
             let num = |n: &'static str| -> Result<Option<u64>, ManifestError> {
                 value(p, n)?
                     .map(|v| v.parse::<u64>().map_err(|_| ManifestError::Attribute(n)))
@@ -434,11 +458,10 @@ pub fn parse_bundle_manifest(data: &[u8]) -> Result<BundleManifest, ManifestErro
             let m = BundleMember {
                 // The bundle schema's default for an omitted `Type`.
                 kind: value(p, "Type")?.unwrap_or_else(|| "resource".into()),
-                version: value(p, "Version")?
-                    .as_deref()
-                    .and_then(PackageVersion::parse),
+                version: Some(version),
+                // The bundle schema's default for an omitted `Architecture`.
                 arch: value(p, "Architecture")?
-                    .unwrap_or_default()
+                    .unwrap_or_else(|| "neutral".into())
                     .to_ascii_lowercase(),
                 resource_id: value(p, "ResourceId")?.unwrap_or_default(),
                 file_name,

@@ -40,7 +40,10 @@
 //!   markers call for (none with a data descriptor);
 //! - method 0 (stored, sizes equal) or 8 (deflate); no encryption, no
 //!   patch data, no strong encryption flags;
-//! - every member's data inflates to exactly its declared size and CRC.
+//! - every member's data inflates to exactly its declared size and CRC:
+//!   checked when it is read ([`Archive::read`], [`Archive::stream`]), not
+//!   when the archive is opened, so opening an archive does not vouch for
+//!   members nobody reads (the package signature check reads them all).
 //!
 //! Member reads are bounded by [`MAX_MEMBER_SIZE`], and the whole archive
 //! by [`MAX_ENTRIES`]. Inflation is streamed in fixed chunks with a size
@@ -511,6 +514,11 @@ impl<'a> Archive<'a> {
         if !extra.is_empty() && flags & FLAG_DESCRIPTOR != 0 {
             return Err(bad());
         }
+        // ZIP64 data in either header needs ZIP version 4.5, with a data
+        // descriptor or without.
+        if (m.has_zip64_extra || !extra.is_empty()) && version < 45 {
+            return Err(bad());
+        }
         // Flags must agree except for bits that only describe the central
         // record (none that matter here): compare the meaningful ones,
         // including every bit the central entry is refused for, so a bit
@@ -548,9 +556,6 @@ impl<'a> Archive<'a> {
             // field needs version 4.5; one with an earlier version is
             // refused rather than read at either width.
             let wide = version >= 45;
-            if m.has_zip64_extra && !wide {
-                return Err(bad());
-            }
             let (dc, du, n) = if wide {
                 (
                     u64_at(data, p + 4).ok_or_else(bad)?,
@@ -588,8 +593,9 @@ impl<'a> Archive<'a> {
     /// under that comparison, so there is at most one.
     #[must_use]
     pub fn member(&self, name: &str) -> Option<&Member> {
-        let want = fold(name);
-        self.members.iter().find(|m| fold(&m.part) == want)
+        self.members
+            .iter()
+            .find(|m| m.part.eq_ignore_ascii_case(name))
     }
 
     /// The raw bytes of `[from, to)` in the file.
@@ -635,17 +641,14 @@ impl<'a> Archive<'a> {
             total = raw.len() as u64;
             sink(raw);
         } else {
-            let end = inflate_raw(raw, m.size, |chunk| {
+            // The deflate stream must end, and use all of the compressed
+            // data.
+            inflate_raw(raw, m.size, |chunk| {
                 crc = crc32(chunk, crc);
                 total = total.saturating_add(chunk.len() as u64);
                 sink(chunk);
             })
             .ok_or_else(corrupt)?;
-            // The deflate stream must end, and use all of the compressed
-            // data.
-            if end != Inflated::StreamEnd {
-                return Err(corrupt());
-            }
         }
         if total != m.size || crc != m.crc32 {
             return Err(corrupt());
@@ -663,21 +666,12 @@ impl<'a> Archive<'a> {
     }
 }
 
-/// How [`inflate_raw`] finished, having used all of its input.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Inflated {
-    /// The final block ended.
-    StreamEnd,
-    /// The input ended on a block boundary with no final block yet (a
-    /// segment of a stream that a full flush ended).
-    Open,
-}
-
-/// Inflates raw DEFLATE `input`, feeding the output to `sink` in chunks
-/// and stopping with `None` once it passes `max` bytes. Returns how it
-/// ended, or `None` if the data is invalid, has bytes after the final
-/// block, or stops in the middle of a block.
-pub(crate) fn inflate_raw(input: &[u8], max: u64, mut sink: impl FnMut(&[u8])) -> Option<Inflated> {
+/// Inflates raw DEFLATE `input`, which must be one whole stream: its final
+/// block ends exactly at the end of the input. Feeds the output to `sink`
+/// in chunks and stops with `None` once it passes `max` bytes. `None` if
+/// the data is invalid, stops before the final block, or has bytes after
+/// it.
+pub(crate) fn inflate_raw(input: &[u8], max: u64, mut sink: impl FnMut(&[u8])) -> Option<()> {
     use miniz_oxide::inflate::stream::{InflateState, inflate};
     use miniz_oxide::{DataFormat, MZError, MZFlush, MZStatus};
     let mut state = InflateState::new_boxed(DataFormat::Raw);
@@ -687,7 +681,7 @@ pub(crate) fn inflate_raw(input: &[u8], max: u64, mut sink: impl FnMut(&[u8])) -
     // Streamed into a fixed buffer. `Finish` would ask for the whole output
     // at once, so `None` is used and progress is required on every call: a
     // call that neither reads nor writes means the data is truncated or
-    // invalid, or (with no input left) that it stopped between blocks.
+    // invalid.
     loop {
         let r = inflate(&mut state, input, &mut buf, MZFlush::None);
         input = input.get(r.bytes_consumed..).unwrap_or_default();
@@ -698,16 +692,9 @@ pub(crate) fn inflate_raw(input: &[u8], max: u64, mut sink: impl FnMut(&[u8])) -
         }
         sink(chunk);
         match r.status {
-            Ok(MZStatus::StreamEnd) => {
-                return input.is_empty().then_some(Inflated::StreamEnd);
-            }
+            Ok(MZStatus::StreamEnd) => return input.is_empty().then_some(()),
             Ok(MZStatus::Ok) | Err(MZError::Buf) if r.bytes_written > 0 || r.bytes_consumed > 0 => {
             }
-            // No input left and no progress: the input stopped before a
-            // final block. That is a clean stop only after a full flush,
-            // whose empty stored block `00 00 ff ff` ends on a byte and on a
-            // block boundary; the caller checks the input ends with it.
-            Err(MZError::Buf) if input.is_empty() => return Some(Inflated::Open),
             _ => return None,
         }
     }

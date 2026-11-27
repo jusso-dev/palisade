@@ -373,12 +373,10 @@ pub fn signed_digest(archive: &Archive<'_>, alg: DigestAlgorithm) -> Option<Vec<
     // AXCD: the central directory without the signature, then end records
     // for it. Local records keep their offsets (the signature is last).
     let cd_offset: u64 = signed.last().map_or(0, |m| m.end_offset);
-    let mut cd: Vec<u8> = Vec::new();
-    for m in &signed {
-        cd.extend_from_slice(archive.central_bytes(m));
-    }
+    let cd_size = signed.iter().try_fold(0_u64, |n, m| {
+        n.checked_add(u64::try_from(archive.central_bytes(m).len()).ok()?)
+    })?;
     let count = u64::try_from(signed.len()).ok()?;
-    let cd_size = u64::try_from(cd.len()).ok()?;
     let mut tail = Vec::new();
     if archive.zip64 {
         tail.extend_from_slice(&0x0606_4b50_u32.to_le_bytes());
@@ -435,7 +433,9 @@ pub fn signed_digest(archive: &Archive<'_>, alg: DigestAlgorithm) -> Option<Vec<
     tail.extend_from_slice(&n32(field32(16), cd_offset)?.to_le_bytes());
     tail.extend_from_slice(&0_u16.to_le_bytes());
     let axcd = one(&mut |hasher| {
-        hasher.update(&cd);
+        for m in &signed {
+            hasher.update(archive.central_bytes(m));
+        }
         hasher.update(&tail);
     })?;
     let axct = member_hash(CONTENT_TYPES)?;
