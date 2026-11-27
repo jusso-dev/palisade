@@ -805,6 +805,7 @@ fn objects() -> Vec<ObjectFacts> {
                             publisher: Some(p.into()),
                             issuer: None,
                             leaf_thumbprint_sha256: None,
+                            details: Default::default(),
                         }]),
                 );
             }
