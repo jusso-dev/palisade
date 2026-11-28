@@ -17,6 +17,10 @@ pub const COMPATIBILITY_V1: &str = "urn:schemas-microsoft-com:compatibility.v1";
 /// `application/windowsSettings/longPathAware`.
 pub const WINDOWS_SETTINGS_2016: &str = "http://schemas.microsoft.com/SMI/2016/WindowsSettings";
 
+/// The key under `HKLM` whose `InstallationType` value is `Server Core` on a
+/// server installed without the desktop shell (#68).
+pub const OS_VERSION_KEY: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion";
+
 /// The per-machine `Run` key under `HKLM`: every user's session starts the
 /// programs listed here at sign-in.
 pub const RUN_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";

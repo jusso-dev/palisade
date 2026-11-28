@@ -36,6 +36,13 @@ fn main() -> ExitCode {
         }
         Mode::Simulate => simulate(&args),
         Mode::StashToken => stash(&args),
+        #[cfg(windows)]
+        Mode::SealImage => palisade_agent::image::run_seal(),
+        #[cfg(not(windows))]
+        Mode::SealImage => {
+            eprintln!("palisade-agent: --seal-image is only available on Windows");
+            ExitCode::FAILURE
+        }
     }
 }
 
