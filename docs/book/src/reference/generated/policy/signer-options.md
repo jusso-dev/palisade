@@ -11,7 +11,7 @@ constraint here (`signed_after`, `countersigned`, `min_key_bits` and
 `disallowed_algorithms`). A constraint whose fact is unknown makes that
 signature's result unknown, never a match.
 
-Appears at: `/rule_sets/rules/match/all/all/criterion/signer`, `/rule_sets/rules/match/all/any/criterion/signer`, `/rule_sets/rules/match/all/not/not/criterion/signer`, `/rule_sets/rules/match/all/not/criterion/signer`, `/rule_sets/rules/match/all/criterion/signer`, `/rule_sets/rules/match/any/all/criterion/signer`, and more.
+Appears at: `/rule_sets/rules/match/all/all/criterion/signer`, `/rule_sets/rules/match/all/any/criterion/signer`, `/rule_sets/rules/match/all/not/criterion/signer`, `/rule_sets/rules/match/all/criterion/signer`, `/rule_sets/rules/match/any/all/criterion/signer`, `/rule_sets/rules/match/any/any/criterion/signer`, and more.
 
 ## Fields
 

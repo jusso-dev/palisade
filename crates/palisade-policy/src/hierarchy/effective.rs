@@ -649,6 +649,14 @@ impl<'a, 'h> Builder<'a, 'h> {
         let (mut mode_options, mode_prov) = self.mode_options();
         let mut mode = self.mode();
         let location_profiles = self.location_profiles();
+        // Every catch-all that lets objects run was confirmed by the policy
+        // that holds it, which validated on its own (#329), so the
+        // effective policy carries the confirmation if any policy gave it.
+        let confirm_permit_all = self
+            .layers
+            .iter()
+            .flat_map(|l| self.policies(l))
+            .find_map(|(_, d)| d.policy.confirm_permit_all.clone());
         self.scope_set_versions();
         if !self.errors.is_empty() {
             return Err(self.errors);
@@ -752,6 +760,7 @@ impl<'a, 'h> Builder<'a, 'h> {
                 scope: None,
                 rule_set_scopes,
                 location_profiles,
+                confirm_permit_all,
                 metadata: Metadata::default(),
             },
             rule_sets: sets.into_values().collect(),

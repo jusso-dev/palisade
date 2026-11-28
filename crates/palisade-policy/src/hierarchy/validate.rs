@@ -1307,6 +1307,7 @@ fn wrap(set: RuleSet) -> PolicyDocument {
             scope: None,
             rule_set_scopes: Vec::new(),
             location_profiles: Vec::new(),
+            confirm_permit_all: None,
             metadata: crate::model::Metadata::default(),
         },
         rule_sets: vec![set],

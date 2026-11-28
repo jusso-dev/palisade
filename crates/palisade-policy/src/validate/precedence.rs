@@ -59,16 +59,22 @@ impl Validator {
                     && !set.read_only
                     && !set.mandatory
                     && let Some(order) = rule.order.filter(|o| {
-                        !order_ranges::CUSTOM.contains(o) && o <= order_ranges::CATCH_ALL.end()
+                        !order_ranges::CUSTOM.contains(o)
+                            // A catch-all may also use the catch-all range
+                            // (#329).
+                            && !(rule.catch_all && order_ranges::CATCH_ALL.contains(o))
+                            && o <= order_ranges::CATCH_ALL.end()
                     })
                 {
                     self.push(
                         ErrorCode::OrderReserved,
                         &format!("{path}/order"),
                         format!(
-                            "order {order} is reserved; rules of custom rule sets use {} to {}",
+                            "order {order} is reserved; rules of custom rule sets use {} to {}, and catch-all rules also {} to {}",
                             order_ranges::CUSTOM.start(),
-                            order_ranges::CUSTOM.end()
+                            order_ranges::CUSTOM.end(),
+                            order_ranges::CATCH_ALL.start(),
+                            order_ranges::CATCH_ALL.end()
                         ),
                     );
                 }

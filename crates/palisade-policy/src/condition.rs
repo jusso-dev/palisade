@@ -211,7 +211,11 @@ impl CompiledMatch {
                 } else {
                     "any"
                 };
-                if items.is_empty() {
+                // An empty `all` at the root matches every object: the match
+                // of a `catch_all` rule. Validation rejects it on any other
+                // rule (#329); below the root it is always an error.
+                let catch_all_root = pointer.is_empty() && matches!(node, Match::All(_));
+                if items.is_empty() && !catch_all_root {
                     errors.push(TreeError::EmptyGroup {
                         pointer: format!("{pointer}/{key}"),
                     });

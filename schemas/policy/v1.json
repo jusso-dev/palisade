@@ -1470,7 +1470,7 @@
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "Matches when every child matches. Needs at least one child.",
+          "description": "Matches when every child matches. Needs at least one child, except\nas the whole match of a `catch_all` rule, where an empty `all`\nmatches every object (#329).",
           "properties": {
             "all": {
               "items": {
@@ -2300,6 +2300,15 @@
       "additionalProperties": false,
       "description": "The decision part of a policy: which rule sets apply, and how.",
       "properties": {
+        "confirm_permit_all": {
+          "description": "The confirmation a catch-all rule that lets objects run needs\n(#35, #329): exactly [`CONFIRM_PERMIT_ALL`]. Without it, such a rule\nis rejected (`permit_all_unconfirmed`).",
+          "maxLength": 128,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "description": {
           "description": "Free-text description, at most 4096 characters.",
           "maxLength": 4096,
@@ -2915,6 +2924,40 @@
     },
     "Rule": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "else": {
+            "properties": {
+              "match": {
+                "not": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "all": {
+                      "maxItems": 0,
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "all"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "if": {
+            "properties": {
+              "catch_all": {
+                "const": true
+              }
+            },
+            "required": [
+              "catch_all"
+            ]
+          },
+          "then": true
+        }
+      ],
       "description": "One rule: a match tree and the action taken when it matches.",
       "properties": {
         "action": {
@@ -2931,6 +2974,10 @@
             }
           ],
           "description": "The rule is absent before this instant (#40)."
+        },
+        "catch_all": {
+          "description": "A catch-all rule (#33, #35, #329): the default of its rule set, which\ndecides only when no other rule of stage 4 matched, under every\nprecedence model. It is the only rule that may have no identity\nanchor, and the only one whose `match` may be an empty `all`, which\nmatches every object. At most one per rule set; its name starts\nwith `Default` or contains `Catch-all`; it allows, denies or audits;\nand it is never in a mandatory rule set. Unset means `false`.",
+          "type": "boolean"
         },
         "description": {
           "description": "Free-text description, at most 4096 characters.",
@@ -2978,8 +3025,25 @@
           "description": "Stable ID, never reused."
         },
         "match": {
-          "$ref": "#/$defs/Match",
-          "description": "When the rule matches (#33)."
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Match",
+              "description": "When the rule matches (#33)."
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "all": {
+                  "maxItems": 0,
+                  "type": "array"
+                }
+              },
+              "required": [
+                "all"
+              ],
+              "type": "object"
+            }
+          ]
         },
         "metadata": {
           "$ref": "#/$defs/Metadata",

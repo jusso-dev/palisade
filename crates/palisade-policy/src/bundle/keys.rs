@@ -563,6 +563,8 @@ pub const KEYS: &[Key] = &[
     k(512, "msi.manufacturer"),
     k(513, "msi.product_version"),
     k(514, "msi.package_code"),
+    k(515, "catch_all"),
+    k(516, "confirm_permit_all"),
     k(-1, "description"),
     k(-2, "hidden"),
     k(-3, "category_path"),

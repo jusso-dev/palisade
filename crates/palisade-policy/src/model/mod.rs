@@ -149,10 +149,20 @@ pub struct Policy {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(length(max = 64))]
     pub location_profiles: Vec<LocationProfile>,
+    /// The confirmation a catch-all rule that lets objects run needs
+    /// (#35, #329): exactly [`CONFIRM_PERMIT_ALL`]. Without it, such a rule
+    /// is rejected (`permit_all_unconfirmed`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(min = 1, max = 128))]
+    pub confirm_permit_all: Option<String>,
     /// Governance metadata (#40).
     #[serde(default, skip_serializing_if = "Metadata::is_empty")]
     pub metadata: Metadata,
 }
+
+/// The text `confirm_permit_all` must hold for a catch-all rule that lets
+/// objects run (#35).
+pub const CONFIRM_PERMIT_ALL: &str = "I UNDERSTAND";
 
 /// How the matching rules of the ordinary rule sets are combined (#35).
 ///
@@ -273,6 +283,7 @@ pub enum Os {
 /// One rule: a match tree and the action taken when it matches.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(transform = empty_match_only_for_catch_all)]
 pub struct Rule {
     /// Stable ID, never reused.
     pub id: RuleId,
@@ -307,6 +318,15 @@ pub struct Rule {
     /// When the rule matches (#33).
     #[serde(rename = "match")]
     pub match_: Match,
+    /// A catch-all rule (#33, #35, #329): the default of its rule set, which
+    /// decides only when no other rule of stage 4 matched, under every
+    /// precedence model. It is the only rule that may have no identity
+    /// anchor, and the only one whose `match` may be an empty `all`, which
+    /// matches every object. At most one per rule set; its name starts
+    /// with `Default` or contains `Catch-all`; it allows, denies or audits;
+    /// and it is never in a mandatory rule set. Unset means `false`.
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub catch_all: bool,
     /// What happens when it matches (#34).
     pub action: Action,
     /// Logging, upload, notification, severity and tags (#34). Unset
@@ -339,6 +359,44 @@ pub struct Rule {
 
 const fn default_true() -> bool {
     true
+}
+
+/// Adds to the generated schema of [`Rule`] what the derive cannot say: a
+/// `catch_all` rule's `match` may also be an empty `all`, which matches
+/// every object (#329). Everywhere else a group needs a child.
+fn empty_match_only_for_catch_all(schema: &mut schemars::Schema) {
+    let empty_all = serde_json::json!({
+        "type": "object",
+        "properties": { "all": { "type": "array", "maxItems": 0 } },
+        "required": ["all"],
+        "additionalProperties": false
+    });
+    if let Some(serde_json::Value::Object(properties)) = schema.get_mut("properties")
+        && let Some(tree) = properties.remove("match")
+    {
+        properties.insert(
+            "match".to_owned(),
+            serde_json::json!({ "anyOf": [tree, empty_all.clone()] }),
+        );
+    }
+    let rule = serde_json::json!({
+        "if": {
+            "properties": { "catch_all": { "const": true } },
+            "required": ["catch_all"]
+        },
+        "then": true,
+        "else": { "properties": { "match": { "not": empty_all } } }
+    });
+    schema.insert("allOf".to_owned(), serde_json::Value::Array(vec![rule]));
+}
+
+impl Rule {
+    /// Whether the rule's name marks it as a catch-all: it starts with
+    /// `Default` or contains `Catch-all` (#33).
+    #[must_use]
+    pub fn has_catch_all_name(&self) -> bool {
+        self.name.starts_with("Default") || self.name.contains("Catch-all")
+    }
 }
 
 /// serde's `skip_serializing_if` passes a reference.
