@@ -813,6 +813,16 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   also has the SDK's signing tool sign the test builder's packages in every
   archive layout, and requires the digest that tool signs to equal this
   crate's, tag by tag.
+  `package::installed` models installed packages (identity checked for
+  consistency, install folder as a final path, signature kind, framework,
+  bundle, resource and stub flags, users, applications), maps an
+  executable's final path to the one package whose folder holds it
+  (`owner_of`: owned, not owned, or ambiguous), and resolves an app
+  execution alias only when its family, app user model ID, application
+  and target executable all check out against an installed package
+  (`resolve_alias`). `win::packages` fills it for one family and the
+  current user from the OS app-model API and the installed manifest,
+  kept only when the manifest gives the full name the OS reported.
 
 ## Handling untrusted input
 

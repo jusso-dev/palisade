@@ -940,6 +940,142 @@ impl Drop for View {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Installed packages (#333).
+
+/// `ERROR_INSUFFICIENT_BUFFER`.
+const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
+/// The most packages one family query returns.
+const MAX_FAMILY_PACKAGES: u32 = 256;
+
+/// `FindPackagesByPackageFamily` for the current user: the full name and
+/// `PACKAGE_PROPERTY_*` flags of each package of `family` that matches
+/// `filters`. Empty when none is installed.
+pub(crate) fn packages_by_family(family: &str, filters: u32) -> io::Result<Vec<(String, u32)>> {
+    use windows_sys::Win32::Storage::Packaging::Appx::FindPackagesByPackageFamily;
+    let w = wide(family)?;
+    let mut count = 0_u32;
+    let mut len = 0_u32;
+    // SAFETY: the sizing call: `w` is a live NUL-terminated string the call
+    // reads; `count` and `len` are live locals it writes; the three output
+    // arrays are null with zero sizes, which the call documents as the way
+    // to ask for the sizes.
+    let rc = unsafe {
+        FindPackagesByPackageFamily(
+            w.as_ptr(),
+            filters,
+            &raw mut count,
+            std::ptr::null_mut(),
+            &raw mut len,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    match rc {
+        0 if count == 0 => return Ok(Vec::new()),
+        0 | ERROR_INSUFFICIENT_BUFFER => {}
+        e => return Err(io::Error::from_raw_os_error(i32::try_from(e).unwrap_or(-1))),
+    }
+    let len_units = usize::try_from(len).unwrap_or(usize::MAX);
+    if count > MAX_FAMILY_PACKAGES || len_units > MAX_QUERY_BYTES / 2 {
+        return Err(io::Error::other("too many packages in the family"));
+    }
+    let n = usize::try_from(count).unwrap_or(0);
+    let mut names: Vec<windows_sys::core::PWSTR> = vec![std::ptr::null_mut(); n];
+    let mut buffer = vec![0_u16; len_units];
+    let mut props = vec![0_u32; n];
+    let (mut count2, mut len2) = (count, len);
+    // SAFETY: `names` and `props` hold `count` entries and `buffer` `len`
+    // UTF-16 units, the sizes passed in `count2` and `len2`; all are live,
+    // writable and outlive the call. The OS fills `names` with pointers
+    // into `buffer`, which are only read below after a bounds check.
+    let rc = unsafe {
+        FindPackagesByPackageFamily(
+            w.as_ptr(),
+            filters,
+            &raw mut count2,
+            names.as_mut_ptr(),
+            &raw mut len2,
+            buffer.as_mut_ptr(),
+            props.as_mut_ptr(),
+        )
+    };
+    if rc != 0 {
+        return Err(io::Error::from_raw_os_error(
+            i32::try_from(rc).unwrap_or(-1),
+        ));
+    }
+    let got = usize::try_from(count2).unwrap_or(0).min(n);
+    let base = buffer.as_ptr() as usize;
+    let mut out = Vec::with_capacity(got);
+    for (p, flags) in names.iter().zip(&props).take(got) {
+        // Each pointer must fall inside `buffer`, on a unit boundary; the
+        // string is read from the buffer itself, up to its NUL.
+        let at = (*p as usize)
+            .checked_sub(base)
+            .filter(|off| off % 2 == 0)
+            .map(|off| off / 2)
+            .filter(|&i| i < buffer.len())
+            .ok_or_else(|| io::Error::other("package name outside the buffer"))?;
+        let tail = buffer.get(at..).unwrap_or_default();
+        let end = tail.iter().position(|&u| u == 0).unwrap_or(tail.len());
+        let name = String::from_utf16(tail.get(..end).unwrap_or_default())
+            .map_err(|_| io::Error::other("package name is not valid UTF-16"))?;
+        out.push((name, *flags));
+    }
+    Ok(out)
+}
+
+/// `GetPackagePathByFullName`: the install folder of the package
+/// `full_name`, for the current user.
+pub(crate) fn package_path(full_name: &str) -> io::Result<String> {
+    use windows_sys::Win32::Storage::Packaging::Appx::GetPackagePathByFullName;
+    let w = wide(full_name)?;
+    let mut len = 0_u32;
+    // SAFETY: the sizing call: `w` is a live NUL-terminated string; `len`
+    // is a live local; the output buffer is null with a zero length.
+    let rc = unsafe { GetPackagePathByFullName(w.as_ptr(), &raw mut len, std::ptr::null_mut()) };
+    if rc != ERROR_INSUFFICIENT_BUFFER && rc != 0 {
+        return Err(io::Error::from_raw_os_error(
+            i32::try_from(rc).unwrap_or(-1),
+        ));
+    }
+    let units = usize::try_from(len).unwrap_or(usize::MAX);
+    if units == 0 || units > MAX_QUERY_BYTES / 2 {
+        return Err(io::Error::other("package path length out of range"));
+    }
+    let mut buf = vec![0_u16; units];
+    let mut len2 = len;
+    // SAFETY: `buf` holds `len` writable units, the size passed in `len2`,
+    // and outlives the call.
+    let rc = unsafe { GetPackagePathByFullName(w.as_ptr(), &raw mut len2, buf.as_mut_ptr()) };
+    if rc != 0 {
+        return Err(io::Error::from_raw_os_error(
+            i32::try_from(rc).unwrap_or(-1),
+        ));
+    }
+    let end = buf.iter().position(|&u| u == 0).unwrap_or(buf.len());
+    String::from_utf16(buf.get(..end).unwrap_or_default())
+        .map_err(|_| io::Error::other("package path is not valid UTF-16"))
+}
+
+/// `GetStagedPackageOrigin`: how the staged package `full_name` was signed
+/// (`PackageOrigin_*`).
+pub(crate) fn package_origin(full_name: &str) -> io::Result<i32> {
+    use windows_sys::Win32::Storage::Packaging::Appx::GetStagedPackageOrigin;
+    let w = wide(full_name)?;
+    let mut origin = 0_i32;
+    // SAFETY: `w` is a live NUL-terminated string the call reads; `origin`
+    // is a live local it writes.
+    let rc = unsafe { GetStagedPackageOrigin(w.as_ptr(), &raw mut origin) };
+    if rc != 0 {
+        return Err(io::Error::from_raw_os_error(
+            i32::try_from(rc).unwrap_or(-1),
+        ));
+    }
+    Ok(origin)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

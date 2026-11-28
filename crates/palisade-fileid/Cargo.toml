@@ -57,6 +57,7 @@ windows-sys = { workspace = true, optional = true, features = [
     "Win32_Security_WinTrust",
     "Win32_Storage_DistributedFileSystem",
     "Win32_Storage_FileSystem",
+    "Win32_Storage_Packaging_Appx",
     "Win32_System_IO",
     "Win32_System_Ioctl",
     "Win32_System_Memory",
