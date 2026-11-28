@@ -600,6 +600,9 @@ impl FactsSnapshot {
             // the OS build or the session ID (#33): a criterion on one is
             // unknown in a replay.
             time: crate::context::TimeContext::default(),
+            // Nor probed facts (#329): an `env.*`, `reg.*` or `fs.*`
+            // criterion is unknown in a replay.
+            probes: crate::context::Probes::default(),
         };
         Ok(Inputs {
             facts,

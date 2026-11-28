@@ -65,17 +65,7 @@ fn pair() -> impl Strategy<Value = (Quad, Quad)> {
 }
 
 fn eval(operator: Operator, values: &[String], fact: Quad, action: ActionKind) -> Tri {
-    let criterion = Criterion {
-        field: Field::MetaFileVersion,
-        operator,
-        values: values.to_vec(),
-        case_sensitive: None,
-        anchored: None,
-        match_ads: None,
-        include_sub_ous: None,
-        safety_critical: false,
-        signer: None,
-    };
+    let criterion = Criterion::new(Field::MetaFileVersion, operator, values.iter().cloned());
     let compiled = CompiledCriterion::compile(&criterion).unwrap();
     let facts = ObjectFacts::new().with(Field::MetaFileVersion, text(fact));
     let variables = PathVariables::new();

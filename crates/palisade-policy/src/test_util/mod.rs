@@ -89,17 +89,7 @@ pub fn sha256_of(digit: char) -> String {
 /// One criterion.
 #[must_use]
 pub fn criterion(field: Field, operator: Operator, values: &[&str]) -> Match {
-    Match::Criterion(Criterion {
-        field,
-        operator,
-        values: values.iter().map(|v| (*v).to_owned()).collect(),
-        case_sensitive: None,
-        anchored: None,
-        match_ads: None,
-        include_sub_ous: None,
-        safety_critical: false,
-        signer: None,
-    })
+    Match::Criterion(Criterion::new(field, operator, values.iter().copied()))
 }
 
 /// `hash.sha256 equals` [`sha256_of`]`(digit)`.

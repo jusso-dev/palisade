@@ -112,6 +112,32 @@ fn full() -> EvaluationContext {
             minute_of_day: Some(9 * 60 + 30),
             date: Date::new(2026, 11, 25),
         },
+        probes: crate::context::Probes::default()
+            .with(
+                Field::EnvVar,
+                "BUILD",
+                None,
+                crate::context::Probe::Text("x".to_owned()),
+            )
+            .with(
+                Field::RegKey,
+                "HKLM\\Software\\X",
+                None,
+                crate::context::Probe::Present,
+            )
+            .with(
+                Field::RegValue,
+                "HKLM\\Software\\X",
+                None,
+                crate::context::Probe::Number(1),
+            )
+            .with(Field::FsFile, "C:\\x", None, crate::context::Probe::Absent)
+            .with(
+                Field::FsFolder,
+                "C:\\x",
+                None,
+                crate::context::Probe::Present,
+            ),
         ..EvaluationContext::default()
     }
 }
@@ -119,6 +145,23 @@ fn full() -> EvaluationContext {
 /// A valid criterion for each context field, with an operator that takes
 /// values where the field has any.
 fn sample(field: Field) -> Criterion {
+    let target = match field {
+        Field::EnvVar => "BUILD",
+        Field::RegKey | Field::RegValue => "HKLM\\Software\\X",
+        Field::FsFile | Field::FsFolder => "C:\\x",
+        _ => "",
+    };
+    if field.is_probe() {
+        let (operator, values): (Operator, &[&str]) = if field.class() == FieldClass::Presence {
+            (Operator::Exists, &[])
+        } else {
+            (Operator::Equals, &["x"])
+        };
+        return Criterion {
+            target: Some(target.to_owned()),
+            ..crit(field, operator, values)
+        };
+    }
     match field.class() {
         FieldClass::Sid => crit(field, Operator::Equals, &[ADMINS]),
         FieldClass::PrincipalSet => crit(field, Operator::MemberOf, &[ADMINS]),
@@ -147,6 +190,7 @@ fn negated(c: &Criterion) -> Option<Criterion> {
         Operator::MemberOf => Operator::NotMemberOf,
         Operator::IsTrue => Operator::IsFalse,
         Operator::Ge => Operator::Ne,
+        Operator::Exists => Operator::NotExists,
         _ => return None,
     };
     Some(Criterion {
@@ -159,7 +203,7 @@ fn negated(c: &Criterion) -> Option<Criterion> {
 fn every_context_field_is_unknown_when_not_collected() {
     let empty = EvaluationContext::new();
     let fields: Vec<Field> = Field::ALL.into_iter().filter(|f| f.is_context()).collect();
-    assert_eq!(fields.len(), 40);
+    assert_eq!(fields.len(), 45);
     for field in fields {
         let c = sample(field);
         for c in std::iter::once(c.clone()).chain(negated(&c)) {
@@ -599,6 +643,13 @@ fn context_compatibility_table() {
                 FieldClass::Version => {
                     op.is_version() || matches!(op, Operator::Equals | Operator::NotEquals)
                 }
+                // Probed facts (#329).
+                FieldClass::Presence => matches!(op, Operator::Exists | Operator::NotExists),
+                FieldClass::ProbeValue => {
+                    op.is_text()
+                        || op.is_ordered()
+                        || matches!(op, Operator::Exists | Operator::NotExists)
+                }
                 other => panic!("{field:?} has identity class {other:?}"),
             };
             assert_eq!(op.applies_to(class), expected, "{field:?} {op:?}");
@@ -620,6 +671,8 @@ fn context_compatibility_table() {
                     op,
                     Operator::IsTrue
                         | Operator::IsFalse
+                        | Operator::Exists
+                        | Operator::NotExists
                         | Operator::WeekdayIn
                         | Operator::TimeBetween
                         | Operator::DateBetween

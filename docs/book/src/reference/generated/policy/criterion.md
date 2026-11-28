@@ -22,6 +22,8 @@ Appears at: `/rule_sets/rules/match/all/all/not/criterion`, `/rule_sets/rules/ma
 | `operator` | [`Operator`](types.md#operator) | yes |  |  | 1.0.0 | How it is compared. |
 | `safety_critical` | boolean | no |  |  | 1.0.0 | Only in a mandatory blocklist: when the fact is unknown, this criterion counts towards the deny applying (`match`, or `no_match` under an odd number of `not` nodes), so the shipped blocklists fail closed (#32, #87). Unset means `false`. |
 | `signer` | [`SignerOptions`](signer-options.md) | no |  |  | 1.0.0 | Only for `signer.*` fields: which signatures take part, and what each must also satisfy (#31). The options bind to the signature the field is read from, so `min_key_bits` on a publisher test needs the publisher's own signature to have the key size. Unset means every option's default. |
+| `target` | string | no |  | 1 to 2048 characters | 1.0.0 | Only for `env.*`, `reg.*` and `fs.*` fields, which need it: what the criterion probes (#329). An environment variable's name; a registry key, starting with its hive (`HKLM`, `HKCU`, `HKU` or `HKCR`, or the long names); or a drive or UNC path, with no wildcard or stream. |
+| `value_name` | string | no |  | 1 to 2048 characters | 1.0.0 | Only for `reg.value`: the name of the value. Unset means the key's default value. |
 | `values` | array of string | no |  | at most 25 items | 1.0.0 | 1 to 25 values. Each is at most 2048 bytes of UTF-8; the schema can only bound the length in characters, so validation checks the bytes. `is_true` and `is_false` take no values, and the key may be left out. |
 
 Unknown fields are rejected.

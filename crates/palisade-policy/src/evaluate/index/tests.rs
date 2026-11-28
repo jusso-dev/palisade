@@ -64,7 +64,8 @@ fn pool_value(field: Field, k: usize) -> String {
         FieldClass::TagSet => ["a", "b", "c"][k % 3].into(),
         FieldClass::SessionType => ["console", "rdp", "service"][k % 3].into(),
         FieldClass::PrincipalName => [r"DOM\user", r"DOM\admin", r"X\y"][k % 3].into(),
-        FieldClass::Bool => String::new(),
+        FieldClass::Bool | FieldClass::Presence => String::new(),
+        FieldClass::ProbeValue => ["1", "2", "3"][k % 3].into(),
         // The classes of #32's numeric, network, set and time operators,
         // in ascending order, so `between` bounds drawn in order are valid.
         FieldClass::Number => ["19045", "22000", "22631"][k % 3].into(),
@@ -167,6 +168,19 @@ fn pool_criterion() -> impl Strategy<Value = Criterion> {
                 }
             }
             let mut c = Criterion::new(field, operator, values);
+            if field.is_probe() {
+                c.target = Some(
+                    if field == Field::EnvVar {
+                        "X"
+                    } else {
+                        r"HKLM\Software\X"
+                    }
+                    .to_owned(),
+                );
+                if matches!(field, Field::FsFile | Field::FsFolder) {
+                    c.target = Some(r"C:\X".to_owned());
+                }
+            }
             // A TBS-hash test at each position, or the default (`any`): only
             // `leaf` is indexed (#42).
             if field == Field::SignerTbsHash && position < 4 {

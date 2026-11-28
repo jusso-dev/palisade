@@ -123,6 +123,11 @@ pub fn criterion_covers(a: &Criterion, b: &Criterion) -> bool {
     if a.signer != b.signer {
         return false;
     }
+    // A probed field (#329) tests what its target names: two targets are
+    // two facts.
+    if a.target != b.target || a.value_name != b.value_name {
+        return false;
+    }
     let class = a.field.class();
     if matches!(class, FieldClass::Version)
         && let (Some(ra), Some(rb)) = (range(a), range(b))

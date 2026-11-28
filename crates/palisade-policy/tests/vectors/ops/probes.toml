@@ -1,0 +1,167 @@
+# Environment, registry and file-system criteria (#329). The agent probes
+# the criterion's `target`; `probe` says what it found. Without `probe` it
+# did not look, and every test, negations included, is unknown.
+
+[[case]]
+name = "exists on a key that is there"
+criterion = { field = "reg.key", operator = "exists", target = 'HKLM\Software\Vendor' }
+probe = "present"
+expect = "match"
+
+[[case]]
+name = "exists on a key that is not there"
+criterion = { field = "reg.key", operator = "exists", target = 'HKLM\Software\Vendor' }
+probe = "absent"
+expect = "no_match"
+
+[[case]]
+name = "not_exists on a key that is not there"
+criterion = { field = "reg.key", operator = "not_exists", target = 'HKLM\Software\Vendor' }
+probe = "absent"
+expect = "match"
+
+[[case]]
+name = "exists when the agent did not look"
+criterion = { field = "reg.key", operator = "exists", target = 'HKLM\Software\Vendor' }
+expect = "unknown"
+
+[[case]]
+name = "not_exists when the agent did not look: the negation of unknown is unknown"
+criterion = { field = "fs.file", operator = "not_exists", target = 'C:\Tools\kill.flag' }
+expect = "unknown"
+
+[[case]]
+name = "a file that exists"
+criterion = { field = "fs.file", operator = "exists", target = 'c:/tools/KILL.flag' }
+probe = "present"
+expect = "match"
+
+[[case]]
+name = "a folder that does not exist"
+criterion = { field = "fs.folder", operator = "not_exists", target = '\\server\share\drop' }
+probe = "absent"
+expect = "match"
+
+[[case]]
+name = "an environment variable equals, without case"
+criterion = { field = "env.var", operator = "equals", target = "build_mode", values = ["Release"] }
+probe = "RELEASE"
+expect = "match"
+
+[[case]]
+name = "an environment variable that is not set equals nothing"
+criterion = { field = "env.var", operator = "equals", target = "BUILD_MODE", values = ["release"] }
+probe = "absent"
+expect = "no_match"
+
+[[case]]
+name = "not_equals on a variable that is not set"
+criterion = { field = "env.var", operator = "not_equals", target = "BUILD_MODE", values = ["release"] }
+probe = "absent"
+expect = "match"
+
+[[case]]
+name = "an environment variable contains"
+criterion = { field = "env.var", operator = "contains", target = "PSModulePath", values = ['\Temp\'] }
+probe = 'C:\Users\a\AppData\Local\Temp\mods'
+expect = "match"
+
+[[case]]
+name = "not_contains when the agent did not look"
+criterion = { field = "env.var", operator = "not_contains", target = "PSModulePath", values = ["temp"] }
+expect = "unknown"
+
+[[case]]
+name = "a DWORD compared as a number"
+criterion = { field = "reg.value", operator = "ge", target = 'HKLM\Software\Policies\X', value_name = "Level", values = ["2"] }
+probe = 3
+expect = "match"
+
+[[case]]
+name = "a DWORD between"
+criterion = { field = "reg.value", operator = "between", target = 'HKLM\Software\Policies\X', value_name = "Level", values = ["4", "9"] }
+probe = 3
+expect = "no_match"
+
+[[case]]
+name = "a DWORD equals as text"
+criterion = { field = "reg.value", operator = "equals", target = 'HKLM\Software\Policies\X', value_name = "Level", values = ["3"] }
+probe = 3
+expect = "match"
+
+[[case]]
+name = "a number test on text that is a number"
+criterion = { field = "reg.value", operator = "eq", target = 'HKLM\Software\X', values = ["7"] }
+probe = "7"
+expect = "match"
+
+[[case]]
+name = "a number test on text that is not a number is unknown"
+criterion = { field = "reg.value", operator = "eq", target = 'HKLM\Software\X', values = ["7"] }
+probe = "seven"
+expect = "unknown"
+
+[[case]]
+name = "a number test on a value that is not there"
+criterion = { field = "reg.value", operator = "ne", target = 'HKLM\Software\X', values = ["7"] }
+probe = "absent"
+expect = "match"
+
+[[case]]
+name = "a binary value cannot be compared"
+criterion = { field = "reg.value", operator = "equals", target = 'HKLM\Software\X', values = ["7"] }
+probe = "other"
+expect = "unknown"
+
+[[case]]
+name = "a binary value exists"
+criterion = { field = "reg.value", operator = "exists", target = 'HKLM\Software\X' }
+probe = "other"
+expect = "match"
+
+[[case]]
+name = "a text value matches a wildcard"
+criterion = { field = "reg.value", operator = "wildcard", target = 'HKCU\Software\X', value_name = "Path", values = ['*\temp\*'] }
+probe = 'C:\Users\a\Temp\x'
+expect = "match"
+
+[[case]]
+name = "a key has no value to compare"
+criterion = { field = "reg.value", operator = "equals", target = 'HKLM\Software\X', values = ["x"] }
+probe = "present"
+expect = "unknown"
+
+[[case]]
+name = "a probed field needs a target"
+criterion = { field = "reg.key", operator = "exists" }
+error = "invalid_value"
+
+[[case]]
+name = "a target must be valid"
+criterion = { field = "reg.key", operator = "exists", target = 'Software\X' }
+error = "invalid_value"
+
+[[case]]
+name = "exists takes no values"
+criterion = { field = "fs.file", operator = "exists", target = 'C:\x', values = ["y"] }
+error = "value_count"
+
+[[case]]
+name = "a key takes only exists and not_exists"
+criterion = { field = "reg.key", operator = "equals", target = 'HKLM\X', values = ["y"] }
+error = "operator_field_mismatch"
+
+[[case]]
+name = "target only on probed fields"
+criterion = { field = "user.sid", operator = "equals", target = "X", values = ["S-1-5-18"] }
+error = "option_not_applicable"
+
+[[case]]
+name = "value_name only on reg.value"
+criterion = { field = "reg.key", operator = "exists", target = 'HKLM\X', value_name = "y" }
+error = "option_not_applicable"
+
+[[case]]
+name = "exists only on probed fields"
+criterion = { field = "user.sid", operator = "exists" }
+error = "operator_field_mismatch"

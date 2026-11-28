@@ -370,7 +370,9 @@
               "operator": {
                 "enum": [
                   "is_true",
-                  "is_false"
+                  "is_false",
+                  "exists",
+                  "not_exists"
                 ]
               }
             },
@@ -439,6 +441,24 @@
             }
           ],
           "description": "Only for `signer.*` fields: which signatures take part, and what\neach must also satisfy (#31). The options bind to the signature the\nfield is read from, so `min_key_bits` on a publisher test needs the\npublisher's own signature to have the key size. Unset means every\noption's default."
+        },
+        "target": {
+          "description": "Only for `env.*`, `reg.*` and `fs.*` fields, which need it: what the\ncriterion probes (#329). An environment variable's name; a registry\nkey, starting with its hive (`HKLM`, `HKCU`, `HKU` or `HKCR`, or\nthe long names); or a drive or UNC path, with no wildcard or stream.",
+          "maxLength": 2048,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value_name": {
+          "description": "Only for `reg.value`: the name of the value. Unset means the key's\ndefault value.",
+          "maxLength": 2048,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "values": {
           "description": "1 to 25 values. Each is at most 2048 bytes of UTF-8; the schema can\nonly bound the length in characters, so validation checks the bytes.\n`is_true` and `is_false` take no values, and the key may be left out.",
@@ -1292,6 +1312,31 @@
         {
           "const": "meta.extension_type",
           "description": "What the file's name claims it is, from its extension (#30, #328):\none of the [`Self::MetaDetectedType`] names, or `none` (no\nextension), `inert` (a document or media extension) or `other`. A\nPE renamed to `.pdf` has `meta.detected_type` `pe` and\n`meta.extension_type` `inert`.",
+          "type": "string"
+        },
+        {
+          "const": "env.var",
+          "description": "Context (#329): the value of the environment variable `target` in\nthe process's environment block. User-controlled: a user sets their\nown environment, so it can only narrow a rule.",
+          "type": "string"
+        },
+        {
+          "const": "reg.key",
+          "description": "Context (#329): whether the registry key `target` exists, such as\n`HKLM\\\\Software\\\\Vendor\\\\App`. Keys under `HKCU`, `HKU` and\n`HKCR` are user-controlled.",
+          "type": "string"
+        },
+        {
+          "const": "reg.value",
+          "description": "Context (#329): the registry value `value_name` (unset: the key's\ndefault value) of the key `target`. A `REG_DWORD` or `REG_QWORD` is\na number, which `eq` to `between` compare; text is compared as\ntext. Values under `HKCU`, `HKU` and `HKCR` are user-controlled.",
+          "type": "string"
+        },
+        {
+          "const": "fs.file",
+          "description": "Context (#329): whether the file `target` exists. User-controlled:\nwhether a user can create or remove a file depends on where it is,\nwhich a policy cannot see, so every file-system test is treated as\none a user may control (ADR 0018).",
+          "type": "string"
+        },
+        {
+          "const": "fs.folder",
+          "description": "Context (#329): whether the folder `target` exists. User-controlled,\nas `fs.file`.",
           "type": "string"
         }
       ]
@@ -2292,6 +2337,16 @@
         {
           "const": "date_between",
           "description": "The date is within `[from, to]`, both `YYYY-MM-DD` and inclusive\n(#32).",
+          "type": "string"
+        },
+        {
+          "const": "exists",
+          "description": "What the criterion's `target` names exists (#329). Takes no values.",
+          "type": "string"
+        },
+        {
+          "const": "not_exists",
+          "description": "What the criterion's `target` names does not exist (#329). Takes no\nvalues. Unknown when the agent did not look, like every negation.",
           "type": "string"
         }
       ]

@@ -14,10 +14,10 @@
 //! and converts the time facts from its trusted clock (#18) into the clock
 //! the policy's `time_zone_basis` names; nothing here reads the host clock.
 //! When the clock cannot be trusted it leaves the time facts out, so every time criterion is unknown: an allow
-//! that depends on the time fails closed. Facts that cost a lookup at
-//! decision time (registry, files, environment blocks), their cost classes
-//! and caching are later parts of #33. The facts only scopes read
-//! ([`ScopeFacts`]) are part of rule scoping (#38).
+//! that depends on the time fails closed. Facts the policy probes at a
+//! named target (environment variables, the registry, files and folders)
+//! are in [`probe`] (#329). The facts only scopes read ([`ScopeFacts`]) are
+//! part of rule scoping (#38).
 
 use std::net::IpAddr;
 
@@ -26,6 +26,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::Field;
 use crate::scope::ScopeFacts;
+
+pub mod probe;
+pub use probe::{Probe, ProbeTarget, Probes, probe_targets};
 
 /// Everything context criteria can test, for one evaluation.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -44,6 +47,10 @@ pub struct EvaluationContext {
     pub scope: ScopeFacts,
     /// The time of the evaluation, for time criteria (#33).
     pub time: TimeContext,
+    /// What the agent found at the environment variables, registry keys and
+    /// values, files and folders the policy probes (#329,
+    /// [`probe_targets`]).
+    pub probes: Probes,
 }
 
 /// The user the process runs as, from its token and the directory.
@@ -500,6 +507,7 @@ impl EvaluationContext {
             minute_of_day: None,
             date: None,
         },
+        probes: Probes::EMPTY,
     };
 
     /// No facts at all: every context criterion evaluates to unknown.

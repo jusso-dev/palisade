@@ -8,7 +8,7 @@ use std::fs;
 use std::path::Path;
 
 use palisade_core::path::VolumeMap;
-use palisade_policy::context::{Date, EvaluationContext, IntegrityLevel, Weekday};
+use palisade_policy::context::{Date, EvaluationContext, IntegrityLevel, Probe, Weekday};
 use palisade_policy::facts::{ObjectFacts, PathFact, PathVariables};
 use palisade_policy::model::{ActionKind, Criterion};
 use palisade_policy::ops::net::{parse_ip, parse_mac};
@@ -120,7 +120,28 @@ fn run_case(file: &str, case: &toml::Table) {
         Some("allow") => ActionKind::Allow,
         Some(other) => panic!("{label}: unknown action `{other}`"),
     };
-    let ctx = context(case.get("context"));
+    let mut ctx = context(case.get("context"));
+    // What the agent found at the criterion's target (#329): `absent`,
+    // `present`, `other` (a value of another type), a string or a number.
+    if let Some(probe) = case.get("probe") {
+        let found = match probe {
+            toml::Value::String(t) if t == "absent" => Probe::Absent,
+            toml::Value::String(t) if t == "present" => Probe::Present,
+            toml::Value::String(t) if t == "other" => Probe::Other,
+            toml::Value::String(t) => Probe::Text(t.clone()),
+            toml::Value::Integer(n) => Probe::Number(u64::try_from(*n).unwrap()),
+            other => panic!("{label}: unknown probe {other:?}"),
+        };
+        assert!(
+            ctx.probes.insert(
+                criterion.field,
+                criterion.target.as_deref().unwrap(),
+                criterion.value_name.as_deref(),
+                found
+            ),
+            "{label}: the probe was not recorded"
+        );
+    }
     let variables = PathVariables::new();
     let result = compiled
         .eval(

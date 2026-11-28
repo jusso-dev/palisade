@@ -9,7 +9,7 @@ const SET: &str = "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60";
 const MANDATORY: &str = "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e70";
 
 /// A rule with ID `n`: a hash deny unless `extra` changes it.
-fn rule(n: u32, extra: Value) -> Value {
+pub(super) fn rule(n: u32, extra: Value) -> Value {
     let mut r = json!({
         "id": format!("01936b2e-8c4a-7b3d-9f21-0a1b2c3d{n:04x}"),
         "name": format!("Rule {n}"),
@@ -41,7 +41,7 @@ fn catch_all(n: u32, name: &str, action: Value) -> Value {
 
 /// A policy with `policy` fields merged in, one mixed rule set of `rules`
 /// and a mandatory blocklist of `mandatory`.
-fn doc(policy: Value, rules: Vec<Value>, mandatory: Vec<Value>) -> PolicyDocument {
+pub(super) fn doc(policy: Value, rules: Vec<Value>, mandatory: Vec<Value>) -> PolicyDocument {
     let mut p = json!({
         "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
         "name": "Catch-all",
@@ -63,7 +63,7 @@ fn doc(policy: Value, rules: Vec<Value>, mandatory: Vec<Value>) -> PolicyDocumen
     PolicyDocument::from_json(&json.to_string()).unwrap()
 }
 
-fn findings(doc: PolicyDocument) -> Vec<(ErrorCode, Severity, String)> {
+pub(super) fn findings(doc: PolicyDocument) -> Vec<(ErrorCode, Severity, String)> {
     let all: Vec<ValidationError> = match doc.validate() {
         Ok(v) => v.warnings().to_vec(),
         Err(e) => e,
@@ -73,7 +73,7 @@ fn findings(doc: PolicyDocument) -> Vec<(ErrorCode, Severity, String)> {
         .collect()
 }
 
-fn error(code: ErrorCode, path: &str) -> (ErrorCode, Severity, String) {
+pub(super) fn error(code: ErrorCode, path: &str) -> (ErrorCode, Severity, String) {
     (code, Severity::Error, path.to_owned())
 }
 

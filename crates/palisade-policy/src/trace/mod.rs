@@ -1076,6 +1076,15 @@ impl<'p> Tracer<'p> {
                         .or_default()
                         .insert(r.reference.rule_id, r.reference);
                 }
+                // A criterion on context a user controls (#329) that was
+                // evaluated: whatever it found, a user could change it.
+                if lr.effective != Tri::Unknown
+                    && crate::context::probe::is_user_controlled(leaf.criterion)
+                {
+                    warn.entry(WarningCode::UserControlledContext)
+                        .or_default()
+                        .insert(r.reference.rule_id, r.reference);
+                }
                 if lr.notes.contains(Note::ShortNameUnresolved) {
                     warn.entry(WarningCode::ShortNameUnresolved)
                         .or_default()

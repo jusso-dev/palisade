@@ -3286,3 +3286,47 @@ fn the_trace_judges_activity_at_the_evaluators_clock() {
     // explicitly denied, and the implicit deny all occur.
     assert_eq!(seen.len(), 3, "{seen:?}");
 }
+
+#[test]
+fn user_controlled_context_is_marked_only_when_it_was_read() {
+    // An allow of hash `a` unless a kill-switch file exists (#329).
+    let file = serde_json::json!({"criterion": {"field": "fs.file", "operator": "not_exists", "target": "C:\\Tools\\stop.flag"}});
+    let p = validated(policy_doc(
+        "enforce",
+        vec![(
+            1,
+            "mixed",
+            false,
+            vec![rule(
+                1,
+                "Tool unless stopped",
+                serde_json::json!({"all": [crit("hash.sha256", "equals", &[&sha('a')]), file]}),
+                serde_json::json!({"type": "allow"}),
+            )],
+        )],
+    ));
+    let mut o = object('a', "Example Ltd", "Other", "C:\\Apps\\x.exe", Some(false));
+    // Not probed: unknown, the allow does not apply, and nothing was read.
+    let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Full);
+    assert!(t.decisive.is_none());
+    assert!(
+        !t.warnings
+            .iter()
+            .any(|w| w.code == WarningCode::UserControlledContext)
+    );
+    // Probed: the allow applies, and the trace marks what a user could change.
+    o.context.probes.insert(
+        Field::FsFile,
+        "C:\\Tools\\stop.flag",
+        None,
+        crate::context::Probe::Absent,
+    );
+    let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Full);
+    assert_eq!(t.decisive.as_ref().unwrap().name, "Tool unless stopped");
+    let w = t
+        .warnings
+        .iter()
+        .find(|w| w.code == WarningCode::UserControlledContext)
+        .unwrap();
+    assert_eq!(w.rules[0].display_id.unwrap().to_string(), "R-000001");
+}
