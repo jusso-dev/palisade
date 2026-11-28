@@ -553,6 +553,11 @@ fn settings() -> impl Strategy<Value = PolicySettings> {
                 time_zone_basis: tz,
                 group_cache_max_age_secs: cache_age,
                 max_ancestor_depth: depth,
+                // Generated trees use the fixed maximums; tighter limits
+                // are tested on their own.
+                max_criteria_per_rule: super::settings::ranges::CRITERIA_PER_RULE_MAX,
+                max_tree_depth: super::settings::ranges::TREE_DEPTH_MAX,
+                max_values_per_criterion: super::settings::ranges::VALUES_PER_CRITERION_MAX,
                 // Unknown keys are only valid with the opt-in.
                 allow_unknown_advanced: !advanced.is_empty(),
                 advanced,

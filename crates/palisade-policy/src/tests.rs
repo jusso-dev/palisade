@@ -1425,3 +1425,64 @@ fn unindexed_rules_are_a_warning_above_500() {
     assert_eq!(ErrorCode::UnindexedRules.severity(), Severity::Warning);
     assert_eq!(ErrorCode::UnindexedRules.as_str(), "unindexed_rules");
 }
+
+#[test]
+fn a_policy_can_tighten_the_tree_limits_but_not_raise_them() {
+    let hash = |c: char| serde_json::json!({"criterion": {"field": "hash.sha256", "operator": "equals", "values": [c.to_string().repeat(64)]}});
+    let doc = |settings: serde_json::Value, tree: serde_json::Value| {
+        let tree: Match = serde_json::from_value(tree).unwrap();
+        let mut d = with_rule(tree, Action::deny());
+        d.policy.settings = serde_json::from_value(settings).unwrap();
+        d
+    };
+    let codes = |d: PolicyDocument| -> Vec<(ErrorCode, String)> {
+        d.validate()
+            .err()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|e| (e.code, e.path))
+            .collect()
+    };
+    let at = |code, path: &str| (code, path.to_owned());
+    let three = serde_json::json!({"all": [hash('a'), {"any": [hash('b'), hash('c')]}]});
+    // Within the defaults.
+    assert_eq!(codes(doc(serde_json::json!({}), three.clone())), []);
+    // Tighter: two criteria, depth 1, two values.
+    assert_eq!(
+        codes(doc(
+            serde_json::json!({"max_criteria_per_rule": 2, "max_tree_depth": 2}),
+            three.clone()
+        )),
+        [
+            at(ErrorCode::TreeTooDeep, "/rule_sets/0/rules/0/match"),
+            at(ErrorCode::TooManyCriteria, "/rule_sets/0/rules/0/match"),
+        ]
+    );
+    let values = serde_json::json!({"criterion": {"field": "hash.sha256", "operator": "equals", "values": ["a".repeat(64), "b".repeat(64), "c".repeat(64)]}});
+    assert_eq!(
+        codes(doc(
+            serde_json::json!({"max_values_per_criterion": 2}),
+            values
+        )),
+        [at(
+            ErrorCode::InvalidValueCount,
+            "/rule_sets/0/rules/0/match/criterion/values"
+        )]
+    );
+    // Never above the fixed maximums, and never zero.
+    for (key, value) in [
+        ("max_criteria_per_rule", 33),
+        ("max_tree_depth", 9),
+        ("max_values_per_criterion", 26),
+        ("max_tree_depth", 0),
+    ] {
+        assert_eq!(
+            codes(doc(serde_json::json!({ key: value }), hash('a'))),
+            [at(
+                ErrorCode::SettingOutOfRange,
+                &format!("/policy/settings/{key}")
+            )],
+            "{key} {value}"
+        );
+    }
+}
