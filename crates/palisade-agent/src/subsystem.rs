@@ -196,3 +196,16 @@ pub(crate) async fn wait_stop(stop: &mut watch::Receiver<Option<Instant>>) -> In
         Err(_) => Instant::now(),
     }
 }
+
+/// A context for running one subsystem in a test, and a function that asks
+/// it to stop.
+#[cfg(test)]
+pub(crate) fn test_context(name: &'static str) -> (SubsystemContext, impl FnOnce()) {
+    let (ready, _) = watch::channel(false);
+    let (stop_tx, stop_rx) = watch::channel(None);
+    let (events, _) = broadcast::channel(4);
+    let ctx = SubsystemContext::new(name, ready, stop_rx, events);
+    (ctx, move || {
+        stop_tx.send_replace(Some(Instant::now()));
+    })
+}

@@ -154,12 +154,29 @@ and the [agent README](../../crates/palisade-agent/README.md#the-fake-agent) doc
 cargo run -q -p palisade-agent --features test-util -- --simulate | jq -c '{seq, event_type, outcome}'
 ```
 
-The fake agent cannot send its events to a server yet: the server has no agent endpoints, and
-devices cannot enrol. Both come with server communication
-([#62](https://github.com/jusso-dev/palisade/issues/62)), enrolment
-([#223](https://github.com/jusso-dev/palisade/issues/223)) and the server's agent endpoints
-([#126](https://github.com/jusso-dev/palisade/issues/126)). The simulator will then post the
-same events. Until then, pipe its output into whatever you are building.
+The fake agent cannot send its events to a server yet: event upload comes with the event pipeline
+([#63](https://github.com/jusso-dev/palisade/issues/63)) and
+[#334](https://github.com/jusso-dev/palisade/issues/334). Until then, pipe its output into
+whatever you are building.
+
+An agent can already enrol with a development server and check in. Start the server, which prints a
+registration code and the CA pin:
+
+```sh
+cargo run -p palisade-server -- dev-server /tmp/palisade-dev
+```
+
+Then run the agent in the foreground with those values:
+
+```sh
+PALISADE_SERVER=https://localhost:8443 PALISADE_CA_PIN=sha256/<hex> PALISADE_REGCODE=<code> \
+    cargo run -p palisade-agent -- --console
+```
+
+The agent authenticates the server by the pin, enrols over TLS, then checks in over mTLS on port
+8444 every minute. Nothing persists on either side: the server keeps devices in memory, and on
+Unix the agent seals its identity with a process-only key. See the server README (Enrolment and
+check-in) and the agent README (Server communication).
 
 `--simulate` only exists in builds with the `test-util` feature, which release builds never turn
 on ([workspace.md](../workspace.md#feature-flags)). A normal build rejects it.
