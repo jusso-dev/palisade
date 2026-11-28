@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-ed538ce1.js";
+            window.path_to_searchindex_js = "searchindex-6c7c0191.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-de2a680a.js"></script>
@@ -6187,9 +6187,10 @@ into an earlier one of the same content.</li>
 <code>not_applicable</code>, <code>unavailable</code> (with why) or <code>not_yet_supported</code> (with
 the issue numbers). <code>kind</code> is the content classification of
 <code>filetype</code> (#44). The deep tier fills <code>script</code> (#52), <code>installer</code> and
-<code>package</code> (#53), chosen by content, never by name. Groups other issues
-still deliver are in the schema already: the owner, writability,
-streams, reparse points, file ID, volume and provenance (#54).</li>
+<code>package</code> (#53), chosen by content, never by name. The context tier
+reads the file ID, volume, owner, writability, streams and reparse
+point from the Windows file system (<code>os-trust</code>, #54); elsewhere they
+are <code>unavailable</code>. The provenance tag is still <code>not_yet_supported</code>.</li>
 <li><code>signing_state</code> folds the embedded signatures (#48, #49, #50) of PE
 images, scripts, installers and packages, and the catalog lookup (#51),
 into <code>trusted</code>, <code>untrusted</code>, <code>invalid</code>, <code>unsigned</code> or <code>unverified</code>. It
@@ -6207,7 +6208,9 @@ SHA-256 of a conformant image, otherwise the flat SHA-256, <code>none</code> for
 an empty file (#47).</li>
 <li><code>strengths</code> (<code>IdentityStrength</code>: strong, medium, weak, insecure) says
 how far a rule can rely on each attribute, as <code>identity::strength</code>
-documents. A path counts as user-writable until #54 reads its ACLs.</li>
+documents. A path is Medium only when the access check proved that no
+non-administrator can write it or any folder above it; unknown counts
+as user-writable. A path rule is never recommended.</li>
 <li><code>masquerade</code> (<code>identity::masquerade</code>) scores renamed and masquerading
 binaries from 0 to 100: <code>name_mismatch</code> (after benign differences such
 as versions, <code>_x64</code>, copy markers and the installer family),
@@ -7578,6 +7581,10 @@ TBS hash; protected binaries such as interpreters are expected to chain
 to one. <code>--catroot</code> loads every <code>*.cat</code> under a directory (such as the OS
 catalog root) and looks files up in it. Revocation is not fetched
 (offline).</li>
+<li><code>inspect --include-ads</code> also identifies each alternate data stream that
+is not a well-known benign one, as its own record (<code>file:stream</code>). The
+streams are listed from the Windows file system; where they cannot be,
+the run fails rather than report none.</li>
 <li><code>hash</code> prints only the selected digests. <code>msi-normalised</code> (an
 installer's timestamp-free hash) and <code>script-normalised</code> (a script's text
 without its signature block, byte order mark and line-ending

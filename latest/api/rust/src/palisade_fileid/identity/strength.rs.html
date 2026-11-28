@@ -7,8 +7,8 @@
 <a href=#7 id=7 data-nosnippet>7</a>//! | Class | Attributes |
 <a href=#8 id=8 data-nosnippet>8</a>//! |---|---|
 <a href=#9 id=9 data-nosnippet>9</a>//! | Strong | flat SHA-256 (and SHA-384, SHA-512); Authenticode SHA-256 of a conformant image; the chain identity (thumbprints, TBS hashes) of a trusted signer |
-<a href=#10 id=10 data-nosnippet>10</a>//! | Medium | a trusted publisher, alone or with product, file name and version; `OriginalFilename` under a trusted signature; the SHA-256 page hash value; the normalised MSI hash; the package family name of a package whose valid signature a trusted signer made; a path that is not user-writable |
-<a href=#11 id=11 data-nosnippet>11</a>//! | Weak | `CompanyName`, `ProductName`, `FileDescription` and `InternalName`; `OriginalFilename` on a file no trusted signer covers; an untrusted signer; the file name; the normalised script hash; the package family name of a package no trusted signer binds; an installer's product and upgrade codes and `Manufacturer`; a user-writable path, or one whose writability is unknown |
+<a href=#10 id=10 data-nosnippet>10</a>//! | Medium | a trusted publisher, alone or with product, file name and version; `OriginalFilename` under a trusted signature; the SHA-256 page hash value; the normalised MSI hash; the package family name of a package whose valid signature a trusted signer made; a path on a local fixed disk that is not user-writable |
+<a href=#11 id=11 data-nosnippet>11</a>//! | Weak | `CompanyName`, `ProductName`, `FileDescription` and `InternalName`; `OriginalFilename` on a file no trusted signer covers; an untrusted signer; the file name; the normalised script hash; the package family name of a package no trusted signer binds; an installer's product and upgrade codes and `Manufacturer`; a user-writable path, one whose writability is unknown, or one on a network, removable or unknown volume |
 <a href=#12 id=12 data-nosnippet>12</a>//! | Insecure | SHA-1 and MD5 digests of any kind; the digest of an empty file; the Authenticode digest of a non-conformant image; a catalog match that relies on SHA-1 |
 <a href=#13 id=13 data-nosnippet>13</a>//!
 <a href=#14 id=14 data-nosnippet>14</a>//! An attribute that is not in the record has no entry.
@@ -285,17 +285,40 @@
 <a href=#285 id=285 data-nosnippet>285</a>        ));
 <a href=#286 id=286 data-nosnippet>286</a>    }
 <a href=#287 id=287 data-nosnippet>287</a>    <span class="kw">if </span>id.fs.path.computed().is_some_and(|p| !p.claimed) {
-<a href=#288 id=288 data-nosnippet>288</a>        <span class="comment">// Writability is #54. Until it is read, every path counts as
-<a href=#289 id=289 data-nosnippet>289</a>        // user-writable, which is the conservative reading.
-<a href=#290 id=290 data-nosnippet>290</a>        </span>out.push(<span class="kw">match </span>id.fs.user_writable.computed() {
-<a href=#291 id=291 data-nosnippet>291</a>            <span class="prelude-val">Some</span>(never) =&gt; <span class="kw">match </span><span class="kw-2">*</span>never {},
-<a href=#292 id=292 data-nosnippet>292</a>            <span class="prelude-val">None </span>=&gt; entry(
-<a href=#293 id=293 data-nosnippet>293</a>                <span class="string">"path"</span>,
-<a href=#294 id=294 data-nosnippet>294</a>                Weak,
-<a href=#295 id=295 data-nosnippet>295</a>                <span class="string">"its writability by non-administrators is not known, so it is treated as user-writable"</span>,
-<a href=#296 id=296 data-nosnippet>296</a>            ),
-<a href=#297 id=297 data-nosnippet>297</a>        });
-<a href=#298 id=298 data-nosnippet>298</a>    }
-<a href=#299 id=299 data-nosnippet>299</a>    out
-<a href=#300 id=300 data-nosnippet>300</a>}
+<a href=#288 id=288 data-nosnippet>288</a>        <span class="comment">// Medium only when the access check proved that no
+<a href=#289 id=289 data-nosnippet>289</a>        // non-administrator can write the file or any folder above it on
+<a href=#290 id=290 data-nosnippet>290</a>        // its real or lexical chain. Unknown counts as user-writable.
+<a href=#291 id=291 data-nosnippet>291</a>        // The ACL is only worth something on a local fixed disk: a network
+<a href=#292 id=292 data-nosnippet>292</a>        // share's server, or whoever holds a removable disk, decides what
+<a href=#293 id=293 data-nosnippet>293</a>        // its folders hold whatever they say.
+<a href=#294 id=294 data-nosnippet>294</a>        </span><span class="kw">let </span>local = id
+<a href=#295 id=295 data-nosnippet>295</a>            .fs
+<a href=#296 id=296 data-nosnippet>296</a>            .volume
+<a href=#297 id=297 data-nosnippet>297</a>            .computed()
+<a href=#298 id=298 data-nosnippet>298</a>            .is_some_and(|v| <span class="macro">matches!</span>(v.location.as_str(), <span class="string">"os_volume" </span>| <span class="string">"other_fixed"</span>));
+<a href=#299 id=299 data-nosnippet>299</a>        out.push(<span class="kw">match </span>id.fs.user_writable.computed() {
+<a href=#300 id=300 data-nosnippet>300</a>            <span class="prelude-val">Some</span>(w) <span class="kw">if </span>!w.path_user_writable &amp;&amp; !w.change_perms_by_non_admin &amp;&amp; !local =&gt; entry(
+<a href=#301 id=301 data-nosnippet>301</a>                <span class="string">"path"</span>,
+<a href=#302 id=302 data-nosnippet>302</a>                Weak,
+<a href=#303 id=303 data-nosnippet>303</a>                <span class="string">"the volume is not a local fixed disk (or its kind is not known), so its permissions do not protect the path"</span>,
+<a href=#304 id=304 data-nosnippet>304</a>            ),
+<a href=#305 id=305 data-nosnippet>305</a>            <span class="prelude-val">Some</span>(w) <span class="kw">if </span>!w.path_user_writable &amp;&amp; !w.change_perms_by_non_admin =&gt; entry(
+<a href=#306 id=306 data-nosnippet>306</a>                <span class="string">"path"</span>,
+<a href=#307 id=307 data-nosnippet>307</a>                Medium,
+<a href=#308 id=308 data-nosnippet>308</a>                <span class="string">"neither the file nor any folder above it is writable by non-administrators"</span>,
+<a href=#309 id=309 data-nosnippet>309</a>            ),
+<a href=#310 id=310 data-nosnippet>310</a>            <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; entry(
+<a href=#311 id=311 data-nosnippet>311</a>                <span class="string">"path"</span>,
+<a href=#312 id=312 data-nosnippet>312</a>                Weak,
+<a href=#313 id=313 data-nosnippet>313</a>                <span class="string">"the file or a folder above it is writable by non-administrators"</span>,
+<a href=#314 id=314 data-nosnippet>314</a>            ),
+<a href=#315 id=315 data-nosnippet>315</a>            <span class="prelude-val">None </span>=&gt; entry(
+<a href=#316 id=316 data-nosnippet>316</a>                <span class="string">"path"</span>,
+<a href=#317 id=317 data-nosnippet>317</a>                Weak,
+<a href=#318 id=318 data-nosnippet>318</a>                <span class="string">"its writability by non-administrators is not known, so it is treated as user-writable"</span>,
+<a href=#319 id=319 data-nosnippet>319</a>            ),
+<a href=#320 id=320 data-nosnippet>320</a>        });
+<a href=#321 id=321 data-nosnippet>321</a>    }
+<a href=#322 id=322 data-nosnippet>322</a>    out
+<a href=#323 id=323 data-nosnippet>323</a>}
 </code></pre></div></section></main></body></html>
