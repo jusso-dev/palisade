@@ -251,10 +251,10 @@
 <a href=#251 id=251 data-nosnippet>251</a>                };
 <a href=#252 id=252 data-nosnippet>252</a>            }
 <a href=#253 id=253 data-nosnippet>253</a>        }
-<a href=#254 id=254 data-nosnippet>254</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>((at, neg)) = <span class="self">self</span>.negatives.get(<span class="kw-2">&amp;</span>share) {
-<a href=#255 id=255 data-nosnippet>255</a>            <span class="kw">if </span>now.saturating_duration_since(<span class="kw-2">*</span>at) &lt; <span class="self">self</span>.negative_ttl {
-<a href=#256 id=256 data-nosnippet>256</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(neg.clone());
-<a href=#257 id=257 data-nosnippet>257</a>            }
+<a href=#254 id=254 data-nosnippet>254</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>((at, neg)) = <span class="self">self</span>.negatives.get(<span class="kw-2">&amp;</span>share)
+<a href=#255 id=255 data-nosnippet>255</a>            &amp;&amp; now.saturating_duration_since(<span class="kw-2">*</span>at) &lt; <span class="self">self</span>.negative_ttl
+<a href=#256 id=256 data-nosnippet>256</a>        {
+<a href=#257 id=257 data-nosnippet>257</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(neg.clone());
 <a href=#258 id=258 data-nosnippet>258</a>        }
 <a href=#259 id=259 data-nosnippet>259</a>        <span class="kw">match </span><span class="self">self</span>.lookup(path) {
 <a href=#260 id=260 data-nosnippet>260</a>            <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(r)) <span class="kw">if </span>path.starts_with(<span class="kw-2">&amp;</span>r.entry) =&gt; {

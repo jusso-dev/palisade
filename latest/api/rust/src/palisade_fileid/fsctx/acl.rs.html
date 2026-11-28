@@ -552,7 +552,7 @@
 <a href=#552 id=552 data-nosnippet>552</a>    <span class="kw">let </span>owner = sd.owner.unwrap_or(well_known::NULL).to_bytes();
 <a href=#553 id=553 data-nosnippet>553</a>    <span class="kw">let </span>group = sd.group.or(sd.owner).unwrap_or(well_known::NULL).to_bytes();
 <a href=#554 id=554 data-nosnippet>554</a>    <span class="kw">let </span>pad = |v: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;| {
-<a href=#555 id=555 data-nosnippet>555</a>        <span class="kw">while </span>v.len() % <span class="number">4 </span>!= <span class="number">0 </span>{
+<a href=#555 id=555 data-nosnippet>555</a>        <span class="kw">while </span>!v.len().is_multiple_of(<span class="number">4</span>) {
 <a href=#556 id=556 data-nosnippet>556</a>            v.push(<span class="number">0</span>);
 <a href=#557 id=557 data-nosnippet>557</a>        }
 <a href=#558 id=558 data-nosnippet>558</a>    };

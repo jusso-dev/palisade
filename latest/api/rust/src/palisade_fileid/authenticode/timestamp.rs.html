@@ -846,10 +846,10 @@
 <a href=#846 id=846 data-nosnippet>846</a>    <span class="kw">let </span>imprint_alg = pkcs7::parse_digest_alg(<span class="kw-2">&amp;</span>m.read(tag::SEQUENCE)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
 <a href=#847 id=847 data-nosnippet>847</a>    <span class="kw">let </span>hashed = m.read(tag::OCTET_STRING)<span class="question-mark">?</span>.content;
 <a href=#848 id=848 data-nosnippet>848</a>    m.finish()<span class="question-mark">?</span>;
-<a href=#849 id=849 data-nosnippet>849</a>    <span class="kw">if let </span><span class="prelude-val">Ok</span>(alg) = imprint_alg {
-<a href=#850 id=850 data-nosnippet>850</a>        <span class="kw">if </span>hashed.len() != alg.digest_len() {
-<a href=#851 id=851 data-nosnippet>851</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(TimestampError::DigestLength);
-<a href=#852 id=852 data-nosnippet>852</a>        }
+<a href=#849 id=849 data-nosnippet>849</a>    <span class="kw">if let </span><span class="prelude-val">Ok</span>(alg) = imprint_alg
+<a href=#850 id=850 data-nosnippet>850</a>        &amp;&amp; hashed.len() != alg.digest_len()
+<a href=#851 id=851 data-nosnippet>851</a>    {
+<a href=#852 id=852 data-nosnippet>852</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(TimestampError::DigestLength);
 <a href=#853 id=853 data-nosnippet>853</a>    }
 <a href=#854 id=854 data-nosnippet>854</a>    <span class="kw">let </span>serial = asn1::integer_bytes(<span class="kw-2">&amp;</span>r.read(tag::INTEGER)<span class="question-mark">?</span>)<span class="question-mark">?</span>;
 <a href=#855 id=855 data-nosnippet>855</a>    <span class="kw">let </span>gen_time = <span class="kw">match </span>r.read_any()<span class="question-mark">? </span>{

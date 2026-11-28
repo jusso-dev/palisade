@@ -1308,11 +1308,11 @@
 <a href=#1308 id=1308 data-nosnippet>1308</a>                    .map(Vec::as_slice)
 <a href=#1309 id=1309 data-nosnippet>1309</a>                    .unwrap_or_default()
 <a href=#1310 id=1310 data-nosnippet>1310</a>                {
-<a href=#1311 id=1311 data-nosnippet>1311</a>                    <span class="kw">if let </span><span class="prelude-val">Some</span>(s) = seen.get_mut(i) {
-<a href=#1312 id=1312 data-nosnippet>1312</a>                        <span class="kw">if </span>!<span class="kw-2">*</span>s {
-<a href=#1313 id=1313 data-nosnippet>1313</a>                            <span class="kw-2">*</span>s = <span class="bool-val">true</span>;
-<a href=#1314 id=1314 data-nosnippet>1314</a>                            next.push(i);
-<a href=#1315 id=1315 data-nosnippet>1315</a>                        }
+<a href=#1311 id=1311 data-nosnippet>1311</a>                    <span class="kw">if let </span><span class="prelude-val">Some</span>(s) = seen.get_mut(i)
+<a href=#1312 id=1312 data-nosnippet>1312</a>                        &amp;&amp; !<span class="kw-2">*</span>s
+<a href=#1313 id=1313 data-nosnippet>1313</a>                    {
+<a href=#1314 id=1314 data-nosnippet>1314</a>                        <span class="kw-2">*</span>s = <span class="bool-val">true</span>;
+<a href=#1315 id=1315 data-nosnippet>1315</a>                        next.push(i);
 <a href=#1316 id=1316 data-nosnippet>1316</a>                    }
 <a href=#1317 id=1317 data-nosnippet>1317</a>                }
 <a href=#1318 id=1318 data-nosnippet>1318</a>            }
@@ -1474,132 +1474,131 @@
 <a href=#1474 id=1474 data-nosnippet>1474</a>            .enumerate()
 <a href=#1475 id=1475 data-nosnippet>1475</a>            .max_by_key(|(<span class="kw">_</span>, p)| key(p))
 <a href=#1476 id=1476 data-nosnippet>1476</a>            .map(|(i, p)| (i, key(p)));
-<a href=#1477 id=1477 data-nosnippet>1477</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>((i, worst_key)) = worst {
-<a href=#1478 id=1478 data-nosnippet>1478</a>            <span class="kw">if </span>key(path) &lt; worst_key {
-<a href=#1479 id=1479 data-nosnippet>1479</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(slot) = <span class="self">self</span>.paths.get_mut(i) {
-<a href=#1480 id=1480 data-nosnippet>1480</a>                    <span class="kw-2">*</span>slot = path.to_vec();
-<a href=#1481 id=1481 data-nosnippet>1481</a>                }
-<a href=#1482 id=1482 data-nosnippet>1482</a>            }
-<a href=#1483 id=1483 data-nosnippet>1483</a>        }
-<a href=#1484 id=1484 data-nosnippet>1484</a>    }
-<a href=#1485 id=1485 data-nosnippet>1485</a>
-<a href=#1486 id=1486 data-nosnippet>1486</a>    <span class="kw">fn </span>extend(<span class="kw-2">&amp;mut </span><span class="self">self</span>, path: <span class="kw-2">&amp;mut </span>Vec&lt;usize&gt;, budget: <span class="kw-2">&amp;mut </span>Budget) {
-<a href=#1487 id=1487 data-nosnippet>1487</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>top) = path.last() <span class="kw">else </span>{
-<a href=#1488 id=1488 data-nosnippet>1488</a>            <span class="kw">return</span>;
-<a href=#1489 id=1489 data-nosnippet>1489</a>        };
-<a href=#1490 id=1490 data-nosnippet>1490</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(node) = <span class="self">self</span>.pool.get(top) <span class="kw">else </span>{
-<a href=#1491 id=1491 data-nosnippet>1491</a>            <span class="kw">return</span>;
-<a href=#1492 id=1492 data-nosnippet>1492</a>        };
-<a href=#1493 id=1493 data-nosnippet>1493</a>        <span class="kw">let </span>stop = <span class="kw">match </span><span class="self">self</span>.mode {
-<a href=#1494 id=1494 data-nosnippet>1494</a>            Mode::Trusted =&gt; node.anchor.is_some(),
-<a href=#1495 id=1495 data-nosnippet>1495</a>            Mode::Untrusted =&gt; node.cert.is_self_signed,
-<a href=#1496 id=1496 data-nosnippet>1496</a>        };
-<a href=#1497 id=1497 data-nosnippet>1497</a>        <span class="kw">if </span>stop {
-<a href=#1498 id=1498 data-nosnippet>1498</a>            <span class="self">self</span>.record(path);
-<a href=#1499 id=1499 data-nosnippet>1499</a>            <span class="kw">return</span>;
-<a href=#1500 id=1500 data-nosnippet>1500</a>        }
-<a href=#1501 id=1501 data-nosnippet>1501</a>        <span class="kw">let </span>trusted_only = <span class="self">self</span>.mode == Mode::Trusted;
-<a href=#1502 id=1502 data-nosnippet>1502</a>        <span class="kw">let </span>candidates: Vec&lt;usize&gt; = <span class="self">self
-<a href=#1503 id=1503 data-nosnippet>1503</a>            </span>.by_subject
-<a href=#1504 id=1504 data-nosnippet>1504</a>            .get(node.cert.issuer.der.as_slice())
-<a href=#1505 id=1505 data-nosnippet>1505</a>            .map(|v| {
-<a href=#1506 id=1506 data-nosnippet>1506</a>                v.iter()
-<a href=#1507 id=1507 data-nosnippet>1507</a>                    .copied()
-<a href=#1508 id=1508 data-nosnippet>1508</a>                    <span class="comment">// A self-issued certificate names itself as issuer; it
-<a href=#1509 id=1509 data-nosnippet>1509</a>                    // is not its own issuer candidate.
-<a href=#1510 id=1510 data-nosnippet>1510</a>                    </span>.filter(|c| <span class="kw-2">*</span>c != top &amp;&amp; <span class="kw-2">*</span>c &lt; <span class="self">self</span>.limit)
-<a href=#1511 id=1511 data-nosnippet>1511</a>                    .filter(|c| !trusted_only || <span class="self">self</span>.trusted.get(<span class="kw-2">*</span>c).copied().unwrap_or(<span class="bool-val">false</span>))
-<a href=#1512 id=1512 data-nosnippet>1512</a>                    .collect()
-<a href=#1513 id=1513 data-nosnippet>1513</a>            })
-<a href=#1514 id=1514 data-nosnippet>1514</a>            .unwrap_or_default();
-<a href=#1515 id=1515 data-nosnippet>1515</a>        <span class="kw">let </span><span class="kw-2">mut </span>extended = <span class="bool-val">false</span>;
-<a href=#1516 id=1516 data-nosnippet>1516</a>        <span class="kw">for </span>issuer <span class="kw">in </span>candidates {
-<a href=#1517 id=1517 data-nosnippet>1517</a>            <span class="kw">if </span><span class="self">self</span>.steps &gt;= MAX_SEARCH_STEPS {
-<a href=#1518 id=1518 data-nosnippet>1518</a>                budget.exhausted = <span class="bool-val">true</span>;
-<a href=#1519 id=1519 data-nosnippet>1519</a>                <span class="kw">break</span>;
-<a href=#1520 id=1520 data-nosnippet>1520</a>            }
-<a href=#1521 id=1521 data-nosnippet>1521</a>            <span class="self">self</span>.steps += <span class="number">1</span>;
-<a href=#1522 id=1522 data-nosnippet>1522</a>            <span class="kw">if </span>path.contains(<span class="kw-2">&amp;</span>issuer) {
-<a href=#1523 id=1523 data-nosnippet>1523</a>                <span class="self">self</span>.issues.push(ChainIssue::Loop { cert: issuer });
-<a href=#1524 id=1524 data-nosnippet>1524</a>                <span class="kw">continue</span>;
-<a href=#1525 id=1525 data-nosnippet>1525</a>            }
-<a href=#1526 id=1526 data-nosnippet>1526</a>            <span class="kw">if </span>path.len() &gt;= MAX_CHAIN_LENGTH {
-<a href=#1527 id=1527 data-nosnippet>1527</a>                <span class="comment">// The path is recorded as it is, incomplete.
-<a href=#1528 id=1528 data-nosnippet>1528</a>                </span><span class="self">self</span>.issues.push(ChainIssue::TooLong);
-<a href=#1529 id=1529 data-nosnippet>1529</a>                <span class="kw">continue</span>;
-<a href=#1530 id=1530 data-nosnippet>1530</a>            }
-<a href=#1531 id=1531 data-nosnippet>1531</a>            <span class="kw">if </span>!<span class="self">self</span>.link(path, issuer, budget) {
-<a href=#1532 id=1532 data-nosnippet>1532</a>                <span class="kw">continue</span>;
-<a href=#1533 id=1533 data-nosnippet>1533</a>            }
-<a href=#1534 id=1534 data-nosnippet>1534</a>            extended = <span class="bool-val">true</span>;
-<a href=#1535 id=1535 data-nosnippet>1535</a>            path.push(issuer);
-<a href=#1536 id=1536 data-nosnippet>1536</a>            <span class="self">self</span>.extend(path, budget);
-<a href=#1537 id=1537 data-nosnippet>1537</a>            path.pop();
-<a href=#1538 id=1538 data-nosnippet>1538</a>        }
-<a href=#1539 id=1539 data-nosnippet>1539</a>        <span class="kw">if </span>!extended {
-<a href=#1540 id=1540 data-nosnippet>1540</a>            <span class="self">self</span>.record(path);
-<a href=#1541 id=1541 data-nosnippet>1541</a>        }
-<a href=#1542 id=1542 data-nosnippet>1542</a>    }
-<a href=#1543 id=1543 data-nosnippet>1543</a>
-<a href=#1544 id=1544 data-nosnippet>1544</a>    <span class="doccomment">/// Whether `issuer` issued the top of `path`, with every constraint
-<a href=#1545 id=1545 data-nosnippet>1545</a>    /// that applies to it. Anchors are held to the same CA, key usage and
-<a href=#1546 id=1546 data-nosnippet>1546</a>    /// path length rules when they issue a certificate. A trusted search
-<a href=#1547 id=1547 data-nosnippet>1547</a>    /// makes no new signature checks: it uses only links
-<a href=#1548 id=1548 data-nosnippet>1548</a>    /// [`Self::mark_trusted`] verified.
-<a href=#1549 id=1549 data-nosnippet>1549</a>    </span><span class="kw">fn </span>link(<span class="kw-2">&amp;mut </span><span class="self">self</span>, path: <span class="kw-2">&amp;</span>[usize], issuer: usize, budget: <span class="kw-2">&amp;mut </span>Budget) -&gt; bool {
-<a href=#1550 id=1550 data-nosnippet>1550</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>child) = path.last() <span class="kw">else </span>{
-<a href=#1551 id=1551 data-nosnippet>1551</a>            <span class="kw">return </span><span class="bool-val">false</span>;
-<a href=#1552 id=1552 data-nosnippet>1552</a>        };
-<a href=#1553 id=1553 data-nosnippet>1553</a>        <span class="kw">if </span>!<span class="self">self</span>.key_ids_agree(child, issuer) {
-<a href=#1554 id=1554 data-nosnippet>1554</a>            <span class="kw">return </span><span class="bool-val">false</span>;
-<a href=#1555 id=1555 data-nosnippet>1555</a>        }
-<a href=#1556 id=1556 data-nosnippet>1556</a>        <span class="kw">if </span><span class="self">self</span>.may_issue(issuer) == MayIssue::No {
-<a href=#1557 id=1557 data-nosnippet>1557</a>            <span class="kw">return </span><span class="bool-val">false</span>;
-<a href=#1558 id=1558 data-nosnippet>1558</a>        }
-<a href=#1559 id=1559 data-nosnippet>1559</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(max) = <span class="self">self
-<a href=#1560 id=1560 data-nosnippet>1560</a>            </span>.pool
-<a href=#1561 id=1561 data-nosnippet>1561</a>            .get(issuer)
-<a href=#1562 id=1562 data-nosnippet>1562</a>            .and_then(|n| n.cert.basic_constraints)
-<a href=#1563 id=1563 data-nosnippet>1563</a>            .and_then(|b| b.path_len)
-<a href=#1564 id=1564 data-nosnippet>1564</a>        {
-<a href=#1565 id=1565 data-nosnippet>1565</a>            <span class="comment">// Non-self-issued intermediates below this issuer (the leaf
-<a href=#1566 id=1566 data-nosnippet>1566</a>            // does not count).
-<a href=#1567 id=1567 data-nosnippet>1567</a>            </span><span class="kw">let </span>below = path
-<a href=#1568 id=1568 data-nosnippet>1568</a>                .iter()
-<a href=#1569 id=1569 data-nosnippet>1569</a>                .skip(<span class="number">1</span>)
-<a href=#1570 id=1570 data-nosnippet>1570</a>                .filter_map(|p| <span class="self">self</span>.pool.get(<span class="kw-2">*</span>p))
-<a href=#1571 id=1571 data-nosnippet>1571</a>                .filter(|n| n.cert.subject.der != n.cert.issuer.der)
-<a href=#1572 id=1572 data-nosnippet>1572</a>                .count();
-<a href=#1573 id=1573 data-nosnippet>1573</a>            <span class="kw">let </span>exempt = <span class="self">self</span>.relax &amp;&amp; <span class="self">self</span>.pool.get(issuer).is_some_and(|n| n.bc_exempt);
-<a href=#1574 id=1574 data-nosnippet>1574</a>            <span class="kw">if </span>u32::try_from(below).unwrap_or(u32::MAX) &gt; max &amp;&amp; !exempt {
-<a href=#1575 id=1575 data-nosnippet>1575</a>                <span class="self">self</span>.issues.push(ChainIssue::PathLengthExceeded { issuer });
-<a href=#1576 id=1576 data-nosnippet>1576</a>                <span class="kw">return </span><span class="bool-val">false</span>;
-<a href=#1577 id=1577 data-nosnippet>1577</a>            }
-<a href=#1578 id=1578 data-nosnippet>1578</a>        }
-<a href=#1579 id=1579 data-nosnippet>1579</a>        <span class="kw">match </span><span class="self">self</span>.mode {
-<a href=#1580 id=1580 data-nosnippet>1580</a>            Mode::Trusted =&gt; {
-<a href=#1581 id=1581 data-nosnippet>1581</a>                <span class="kw">let </span><span class="prelude-val">Some</span>(i) = <span class="self">self</span>.pool.get(issuer) <span class="kw">else </span>{
-<a href=#1582 id=1582 data-nosnippet>1582</a>                    <span class="kw">return </span><span class="bool-val">false</span>;
-<a href=#1583 id=1583 data-nosnippet>1583</a>                };
-<a href=#1584 id=1584 data-nosnippet>1584</a>                <span class="self">self</span>.verified
-<a href=#1585 id=1585 data-nosnippet>1585</a>                    .get(<span class="kw-2">&amp;</span>(child, i.cert.spki_sha256.as_str()))
-<a href=#1586 id=1586 data-nosnippet>1586</a>                    .copied()
-<a href=#1587 id=1587 data-nosnippet>1587</a>                    .unwrap_or(<span class="bool-val">false</span>)
-<a href=#1588 id=1588 data-nosnippet>1588</a>            }
-<a href=#1589 id=1589 data-nosnippet>1589</a>            Mode::Untrusted =&gt; <span class="self">self</span>.check(child, issuer, budget),
-<a href=#1590 id=1590 data-nosnippet>1590</a>        }
-<a href=#1591 id=1591 data-nosnippet>1591</a>    }
-<a href=#1592 id=1592 data-nosnippet>1592</a>}
-<a href=#1593 id=1593 data-nosnippet>1593</a>
-<a href=#1594 id=1594 data-nosnippet>1594</a><span class="doccomment">/// Verifies `child`'s signature with `issuer`'s key. Weak digests (MD2,
-<a href=#1595 id=1595 data-nosnippet>1595</a>/// MD5) are never accepted.
-<a href=#1596 id=1596 data-nosnippet>1596</a></span><span class="kw">fn </span>verify_link(child: <span class="kw-2">&amp;</span>CertSummary, issuer: <span class="kw-2">&amp;</span>CertSummary) -&gt; Verified {
-<a href=#1597 id=1597 data-nosnippet>1597</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(d) = x509::signature_digest(<span class="kw-2">&amp;</span>child.sig_alg).filter(|d| d.is_broken()) {
-<a href=#1598 id=1598 data-nosnippet>1598</a>        <span class="kw">return </span>Verified::Unsupported(Unsupported::WeakAlgorithm(d));
-<a href=#1599 id=1599 data-nosnippet>1599</a>    }
-<a href=#1600 id=1600 data-nosnippet>1600</a>    <span class="kw">let </span>(<span class="prelude-val">Ok</span>(c), <span class="prelude-val">Ok</span>(i)) = (x509::split(<span class="kw-2">&amp;</span>child.der), x509::split(<span class="kw-2">&amp;</span>issuer.der)) <span class="kw">else </span>{
-<a href=#1601 id=1601 data-nosnippet>1601</a>        <span class="kw">return </span>Verified::Invalid;
-<a href=#1602 id=1602 data-nosnippet>1602</a>    };
-<a href=#1603 id=1603 data-nosnippet>1603</a>    x509::check_signed_by(<span class="kw-2">&amp;</span>c, <span class="kw-2">&amp;</span>child.sig_alg, <span class="kw-2">&amp;</span>i, <span class="kw-2">&amp;</span>issuer.public_key_alg)
-<a href=#1604 id=1604 data-nosnippet>1604</a>}
+<a href=#1477 id=1477 data-nosnippet>1477</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>((i, worst_key)) = worst
+<a href=#1478 id=1478 data-nosnippet>1478</a>            &amp;&amp; key(path) &lt; worst_key
+<a href=#1479 id=1479 data-nosnippet>1479</a>            &amp;&amp; <span class="kw">let </span><span class="prelude-val">Some</span>(slot) = <span class="self">self</span>.paths.get_mut(i)
+<a href=#1480 id=1480 data-nosnippet>1480</a>        {
+<a href=#1481 id=1481 data-nosnippet>1481</a>            <span class="kw-2">*</span>slot = path.to_vec();
+<a href=#1482 id=1482 data-nosnippet>1482</a>        }
+<a href=#1483 id=1483 data-nosnippet>1483</a>    }
+<a href=#1484 id=1484 data-nosnippet>1484</a>
+<a href=#1485 id=1485 data-nosnippet>1485</a>    <span class="kw">fn </span>extend(<span class="kw-2">&amp;mut </span><span class="self">self</span>, path: <span class="kw-2">&amp;mut </span>Vec&lt;usize&gt;, budget: <span class="kw-2">&amp;mut </span>Budget) {
+<a href=#1486 id=1486 data-nosnippet>1486</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>top) = path.last() <span class="kw">else </span>{
+<a href=#1487 id=1487 data-nosnippet>1487</a>            <span class="kw">return</span>;
+<a href=#1488 id=1488 data-nosnippet>1488</a>        };
+<a href=#1489 id=1489 data-nosnippet>1489</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(node) = <span class="self">self</span>.pool.get(top) <span class="kw">else </span>{
+<a href=#1490 id=1490 data-nosnippet>1490</a>            <span class="kw">return</span>;
+<a href=#1491 id=1491 data-nosnippet>1491</a>        };
+<a href=#1492 id=1492 data-nosnippet>1492</a>        <span class="kw">let </span>stop = <span class="kw">match </span><span class="self">self</span>.mode {
+<a href=#1493 id=1493 data-nosnippet>1493</a>            Mode::Trusted =&gt; node.anchor.is_some(),
+<a href=#1494 id=1494 data-nosnippet>1494</a>            Mode::Untrusted =&gt; node.cert.is_self_signed,
+<a href=#1495 id=1495 data-nosnippet>1495</a>        };
+<a href=#1496 id=1496 data-nosnippet>1496</a>        <span class="kw">if </span>stop {
+<a href=#1497 id=1497 data-nosnippet>1497</a>            <span class="self">self</span>.record(path);
+<a href=#1498 id=1498 data-nosnippet>1498</a>            <span class="kw">return</span>;
+<a href=#1499 id=1499 data-nosnippet>1499</a>        }
+<a href=#1500 id=1500 data-nosnippet>1500</a>        <span class="kw">let </span>trusted_only = <span class="self">self</span>.mode == Mode::Trusted;
+<a href=#1501 id=1501 data-nosnippet>1501</a>        <span class="kw">let </span>candidates: Vec&lt;usize&gt; = <span class="self">self
+<a href=#1502 id=1502 data-nosnippet>1502</a>            </span>.by_subject
+<a href=#1503 id=1503 data-nosnippet>1503</a>            .get(node.cert.issuer.der.as_slice())
+<a href=#1504 id=1504 data-nosnippet>1504</a>            .map(|v| {
+<a href=#1505 id=1505 data-nosnippet>1505</a>                v.iter()
+<a href=#1506 id=1506 data-nosnippet>1506</a>                    .copied()
+<a href=#1507 id=1507 data-nosnippet>1507</a>                    <span class="comment">// A self-issued certificate names itself as issuer; it
+<a href=#1508 id=1508 data-nosnippet>1508</a>                    // is not its own issuer candidate.
+<a href=#1509 id=1509 data-nosnippet>1509</a>                    </span>.filter(|c| <span class="kw-2">*</span>c != top &amp;&amp; <span class="kw-2">*</span>c &lt; <span class="self">self</span>.limit)
+<a href=#1510 id=1510 data-nosnippet>1510</a>                    .filter(|c| !trusted_only || <span class="self">self</span>.trusted.get(<span class="kw-2">*</span>c).copied().unwrap_or(<span class="bool-val">false</span>))
+<a href=#1511 id=1511 data-nosnippet>1511</a>                    .collect()
+<a href=#1512 id=1512 data-nosnippet>1512</a>            })
+<a href=#1513 id=1513 data-nosnippet>1513</a>            .unwrap_or_default();
+<a href=#1514 id=1514 data-nosnippet>1514</a>        <span class="kw">let </span><span class="kw-2">mut </span>extended = <span class="bool-val">false</span>;
+<a href=#1515 id=1515 data-nosnippet>1515</a>        <span class="kw">for </span>issuer <span class="kw">in </span>candidates {
+<a href=#1516 id=1516 data-nosnippet>1516</a>            <span class="kw">if </span><span class="self">self</span>.steps &gt;= MAX_SEARCH_STEPS {
+<a href=#1517 id=1517 data-nosnippet>1517</a>                budget.exhausted = <span class="bool-val">true</span>;
+<a href=#1518 id=1518 data-nosnippet>1518</a>                <span class="kw">break</span>;
+<a href=#1519 id=1519 data-nosnippet>1519</a>            }
+<a href=#1520 id=1520 data-nosnippet>1520</a>            <span class="self">self</span>.steps += <span class="number">1</span>;
+<a href=#1521 id=1521 data-nosnippet>1521</a>            <span class="kw">if </span>path.contains(<span class="kw-2">&amp;</span>issuer) {
+<a href=#1522 id=1522 data-nosnippet>1522</a>                <span class="self">self</span>.issues.push(ChainIssue::Loop { cert: issuer });
+<a href=#1523 id=1523 data-nosnippet>1523</a>                <span class="kw">continue</span>;
+<a href=#1524 id=1524 data-nosnippet>1524</a>            }
+<a href=#1525 id=1525 data-nosnippet>1525</a>            <span class="kw">if </span>path.len() &gt;= MAX_CHAIN_LENGTH {
+<a href=#1526 id=1526 data-nosnippet>1526</a>                <span class="comment">// The path is recorded as it is, incomplete.
+<a href=#1527 id=1527 data-nosnippet>1527</a>                </span><span class="self">self</span>.issues.push(ChainIssue::TooLong);
+<a href=#1528 id=1528 data-nosnippet>1528</a>                <span class="kw">continue</span>;
+<a href=#1529 id=1529 data-nosnippet>1529</a>            }
+<a href=#1530 id=1530 data-nosnippet>1530</a>            <span class="kw">if </span>!<span class="self">self</span>.link(path, issuer, budget) {
+<a href=#1531 id=1531 data-nosnippet>1531</a>                <span class="kw">continue</span>;
+<a href=#1532 id=1532 data-nosnippet>1532</a>            }
+<a href=#1533 id=1533 data-nosnippet>1533</a>            extended = <span class="bool-val">true</span>;
+<a href=#1534 id=1534 data-nosnippet>1534</a>            path.push(issuer);
+<a href=#1535 id=1535 data-nosnippet>1535</a>            <span class="self">self</span>.extend(path, budget);
+<a href=#1536 id=1536 data-nosnippet>1536</a>            path.pop();
+<a href=#1537 id=1537 data-nosnippet>1537</a>        }
+<a href=#1538 id=1538 data-nosnippet>1538</a>        <span class="kw">if </span>!extended {
+<a href=#1539 id=1539 data-nosnippet>1539</a>            <span class="self">self</span>.record(path);
+<a href=#1540 id=1540 data-nosnippet>1540</a>        }
+<a href=#1541 id=1541 data-nosnippet>1541</a>    }
+<a href=#1542 id=1542 data-nosnippet>1542</a>
+<a href=#1543 id=1543 data-nosnippet>1543</a>    <span class="doccomment">/// Whether `issuer` issued the top of `path`, with every constraint
+<a href=#1544 id=1544 data-nosnippet>1544</a>    /// that applies to it. Anchors are held to the same CA, key usage and
+<a href=#1545 id=1545 data-nosnippet>1545</a>    /// path length rules when they issue a certificate. A trusted search
+<a href=#1546 id=1546 data-nosnippet>1546</a>    /// makes no new signature checks: it uses only links
+<a href=#1547 id=1547 data-nosnippet>1547</a>    /// [`Self::mark_trusted`] verified.
+<a href=#1548 id=1548 data-nosnippet>1548</a>    </span><span class="kw">fn </span>link(<span class="kw-2">&amp;mut </span><span class="self">self</span>, path: <span class="kw-2">&amp;</span>[usize], issuer: usize, budget: <span class="kw-2">&amp;mut </span>Budget) -&gt; bool {
+<a href=#1549 id=1549 data-nosnippet>1549</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>child) = path.last() <span class="kw">else </span>{
+<a href=#1550 id=1550 data-nosnippet>1550</a>            <span class="kw">return </span><span class="bool-val">false</span>;
+<a href=#1551 id=1551 data-nosnippet>1551</a>        };
+<a href=#1552 id=1552 data-nosnippet>1552</a>        <span class="kw">if </span>!<span class="self">self</span>.key_ids_agree(child, issuer) {
+<a href=#1553 id=1553 data-nosnippet>1553</a>            <span class="kw">return </span><span class="bool-val">false</span>;
+<a href=#1554 id=1554 data-nosnippet>1554</a>        }
+<a href=#1555 id=1555 data-nosnippet>1555</a>        <span class="kw">if </span><span class="self">self</span>.may_issue(issuer) == MayIssue::No {
+<a href=#1556 id=1556 data-nosnippet>1556</a>            <span class="kw">return </span><span class="bool-val">false</span>;
+<a href=#1557 id=1557 data-nosnippet>1557</a>        }
+<a href=#1558 id=1558 data-nosnippet>1558</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(max) = <span class="self">self
+<a href=#1559 id=1559 data-nosnippet>1559</a>            </span>.pool
+<a href=#1560 id=1560 data-nosnippet>1560</a>            .get(issuer)
+<a href=#1561 id=1561 data-nosnippet>1561</a>            .and_then(|n| n.cert.basic_constraints)
+<a href=#1562 id=1562 data-nosnippet>1562</a>            .and_then(|b| b.path_len)
+<a href=#1563 id=1563 data-nosnippet>1563</a>        {
+<a href=#1564 id=1564 data-nosnippet>1564</a>            <span class="comment">// Non-self-issued intermediates below this issuer (the leaf
+<a href=#1565 id=1565 data-nosnippet>1565</a>            // does not count).
+<a href=#1566 id=1566 data-nosnippet>1566</a>            </span><span class="kw">let </span>below = path
+<a href=#1567 id=1567 data-nosnippet>1567</a>                .iter()
+<a href=#1568 id=1568 data-nosnippet>1568</a>                .skip(<span class="number">1</span>)
+<a href=#1569 id=1569 data-nosnippet>1569</a>                .filter_map(|p| <span class="self">self</span>.pool.get(<span class="kw-2">*</span>p))
+<a href=#1570 id=1570 data-nosnippet>1570</a>                .filter(|n| n.cert.subject.der != n.cert.issuer.der)
+<a href=#1571 id=1571 data-nosnippet>1571</a>                .count();
+<a href=#1572 id=1572 data-nosnippet>1572</a>            <span class="kw">let </span>exempt = <span class="self">self</span>.relax &amp;&amp; <span class="self">self</span>.pool.get(issuer).is_some_and(|n| n.bc_exempt);
+<a href=#1573 id=1573 data-nosnippet>1573</a>            <span class="kw">if </span>u32::try_from(below).unwrap_or(u32::MAX) &gt; max &amp;&amp; !exempt {
+<a href=#1574 id=1574 data-nosnippet>1574</a>                <span class="self">self</span>.issues.push(ChainIssue::PathLengthExceeded { issuer });
+<a href=#1575 id=1575 data-nosnippet>1575</a>                <span class="kw">return </span><span class="bool-val">false</span>;
+<a href=#1576 id=1576 data-nosnippet>1576</a>            }
+<a href=#1577 id=1577 data-nosnippet>1577</a>        }
+<a href=#1578 id=1578 data-nosnippet>1578</a>        <span class="kw">match </span><span class="self">self</span>.mode {
+<a href=#1579 id=1579 data-nosnippet>1579</a>            Mode::Trusted =&gt; {
+<a href=#1580 id=1580 data-nosnippet>1580</a>                <span class="kw">let </span><span class="prelude-val">Some</span>(i) = <span class="self">self</span>.pool.get(issuer) <span class="kw">else </span>{
+<a href=#1581 id=1581 data-nosnippet>1581</a>                    <span class="kw">return </span><span class="bool-val">false</span>;
+<a href=#1582 id=1582 data-nosnippet>1582</a>                };
+<a href=#1583 id=1583 data-nosnippet>1583</a>                <span class="self">self</span>.verified
+<a href=#1584 id=1584 data-nosnippet>1584</a>                    .get(<span class="kw-2">&amp;</span>(child, i.cert.spki_sha256.as_str()))
+<a href=#1585 id=1585 data-nosnippet>1585</a>                    .copied()
+<a href=#1586 id=1586 data-nosnippet>1586</a>                    .unwrap_or(<span class="bool-val">false</span>)
+<a href=#1587 id=1587 data-nosnippet>1587</a>            }
+<a href=#1588 id=1588 data-nosnippet>1588</a>            Mode::Untrusted =&gt; <span class="self">self</span>.check(child, issuer, budget),
+<a href=#1589 id=1589 data-nosnippet>1589</a>        }
+<a href=#1590 id=1590 data-nosnippet>1590</a>    }
+<a href=#1591 id=1591 data-nosnippet>1591</a>}
+<a href=#1592 id=1592 data-nosnippet>1592</a>
+<a href=#1593 id=1593 data-nosnippet>1593</a><span class="doccomment">/// Verifies `child`'s signature with `issuer`'s key. Weak digests (MD2,
+<a href=#1594 id=1594 data-nosnippet>1594</a>/// MD5) are never accepted.
+<a href=#1595 id=1595 data-nosnippet>1595</a></span><span class="kw">fn </span>verify_link(child: <span class="kw-2">&amp;</span>CertSummary, issuer: <span class="kw-2">&amp;</span>CertSummary) -&gt; Verified {
+<a href=#1596 id=1596 data-nosnippet>1596</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(d) = x509::signature_digest(<span class="kw-2">&amp;</span>child.sig_alg).filter(|d| d.is_broken()) {
+<a href=#1597 id=1597 data-nosnippet>1597</a>        <span class="kw">return </span>Verified::Unsupported(Unsupported::WeakAlgorithm(d));
+<a href=#1598 id=1598 data-nosnippet>1598</a>    }
+<a href=#1599 id=1599 data-nosnippet>1599</a>    <span class="kw">let </span>(<span class="prelude-val">Ok</span>(c), <span class="prelude-val">Ok</span>(i)) = (x509::split(<span class="kw-2">&amp;</span>child.der), x509::split(<span class="kw-2">&amp;</span>issuer.der)) <span class="kw">else </span>{
+<a href=#1600 id=1600 data-nosnippet>1600</a>        <span class="kw">return </span>Verified::Invalid;
+<a href=#1601 id=1601 data-nosnippet>1601</a>    };
+<a href=#1602 id=1602 data-nosnippet>1602</a>    x509::check_signed_by(<span class="kw-2">&amp;</span>c, <span class="kw-2">&amp;</span>child.sig_alg, <span class="kw-2">&amp;</span>i, <span class="kw-2">&amp;</span>issuer.public_key_alg)
+<a href=#1603 id=1603 data-nosnippet>1603</a>}
 </code></pre></div></section></main></body></html>

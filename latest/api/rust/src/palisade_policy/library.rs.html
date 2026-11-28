@@ -840,18 +840,18 @@
 <a href=#840 id=840 data-nosnippet>840</a>                <span class="kw">continue</span>;
 <a href=#841 id=841 data-nosnippet>841</a>            }
 <a href=#842 id=842 data-nosnippet>842</a>            <span class="kw">let </span>versions = by_id.entry(lib.id).or_default();
-<a href=#843 id=843 data-nosnippet>843</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(first) = versions.values().next() {
-<a href=#844 id=844 data-nosnippet>844</a>                <span class="kw">if </span>first.content.kind() != lib.content.kind() || first.realm != lib.realm {
-<a href=#845 id=845 data-nosnippet>845</a>                    errors.push(err(
-<a href=#846 id=846 data-nosnippet>846</a>                        LibraryCode::KindChanged,
-<a href=#847 id=847 data-nosnippet>847</a>                        <span class="macro">format!</span>(<span class="string">"{base}/content"</span>),
-<a href=#848 id=848 data-nosnippet>848</a>                        <span class="macro">format!</span>(
-<a href=#849 id=849 data-nosnippet>849</a>                            <span class="string">"every version of library {} must have the same kind and realm as {}"</span>,
-<a href=#850 id=850 data-nosnippet>850</a>                            lib.id,
-<a href=#851 id=851 data-nosnippet>851</a>                            first.label()
-<a href=#852 id=852 data-nosnippet>852</a>                        ),
-<a href=#853 id=853 data-nosnippet>853</a>                    ));
-<a href=#854 id=854 data-nosnippet>854</a>                }
+<a href=#843 id=843 data-nosnippet>843</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(first) = versions.values().next()
+<a href=#844 id=844 data-nosnippet>844</a>                &amp;&amp; (first.content.kind() != lib.content.kind() || first.realm != lib.realm)
+<a href=#845 id=845 data-nosnippet>845</a>            {
+<a href=#846 id=846 data-nosnippet>846</a>                errors.push(err(
+<a href=#847 id=847 data-nosnippet>847</a>                    LibraryCode::KindChanged,
+<a href=#848 id=848 data-nosnippet>848</a>                    <span class="macro">format!</span>(<span class="string">"{base}/content"</span>),
+<a href=#849 id=849 data-nosnippet>849</a>                    <span class="macro">format!</span>(
+<a href=#850 id=850 data-nosnippet>850</a>                        <span class="string">"every version of library {} must have the same kind and realm as {}"</span>,
+<a href=#851 id=851 data-nosnippet>851</a>                        lib.id,
+<a href=#852 id=852 data-nosnippet>852</a>                        first.label()
+<a href=#853 id=853 data-nosnippet>853</a>                    ),
+<a href=#854 id=854 data-nosnippet>854</a>                ));
 <a href=#855 id=855 data-nosnippet>855</a>            }
 <a href=#856 id=856 data-nosnippet>856</a>            <span class="kw">if </span>versions.contains_key(<span class="kw-2">&amp;</span>lib.version) {
 <a href=#857 id=857 data-nosnippet>857</a>                errors.push(err(
@@ -1374,14 +1374,14 @@
 <a href=#1374 id=1374 data-nosnippet>1374</a>            problem,
 <a href=#1375 id=1375 data-nosnippet>1375</a>        ));
 <a href=#1376 id=1376 data-nosnippet>1376</a>    }
-<a href=#1377 id=1377 data-nosnippet>1377</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(owner) = <span class="kw-2">&amp;</span>lib.owner {
-<a href=#1378 id=1378 data-nosnippet>1378</a>        <span class="kw">if </span><span class="kw">crate</span>::context::normalize_principal(owner).is_none() {
-<a href=#1379 id=1379 data-nosnippet>1379</a>            errors.push(err(
-<a href=#1380 id=1380 data-nosnippet>1380</a>                LibraryCode::InvalidOwner,
-<a href=#1381 id=1381 data-nosnippet>1381</a>                <span class="macro">format!</span>(<span class="string">"{base}/owner"</span>),
-<a href=#1382 id=1382 data-nosnippet>1382</a>                <span class="string">"the owner is a SID or a directory object ID"</span>,
-<a href=#1383 id=1383 data-nosnippet>1383</a>            ));
-<a href=#1384 id=1384 data-nosnippet>1384</a>        }
+<a href=#1377 id=1377 data-nosnippet>1377</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(owner) = <span class="kw-2">&amp;</span>lib.owner
+<a href=#1378 id=1378 data-nosnippet>1378</a>        &amp;&amp; <span class="kw">crate</span>::context::normalize_principal(owner).is_none()
+<a href=#1379 id=1379 data-nosnippet>1379</a>    {
+<a href=#1380 id=1380 data-nosnippet>1380</a>        errors.push(err(
+<a href=#1381 id=1381 data-nosnippet>1381</a>            LibraryCode::InvalidOwner,
+<a href=#1382 id=1382 data-nosnippet>1382</a>            <span class="macro">format!</span>(<span class="string">"{base}/owner"</span>),
+<a href=#1383 id=1383 data-nosnippet>1383</a>            <span class="string">"the owner is a SID or a directory object ID"</span>,
+<a href=#1384 id=1384 data-nosnippet>1384</a>        ));
 <a href=#1385 id=1385 data-nosnippet>1385</a>    }
 <a href=#1386 id=1386 data-nosnippet>1386</a>    <span class="kw">if </span>lib.derived_from.is_some_and(|d| d.version == <span class="number">0</span>) {
 <a href=#1387 id=1387 data-nosnippet>1387</a>        errors.push(err(

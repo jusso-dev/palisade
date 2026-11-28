@@ -675,13 +675,13 @@
 <a href=#675 id=675 data-nosnippet>675</a>                ));
 <a href=#676 id=676 data-nosnippet>676</a>            }
 <a href=#677 id=677 data-nosnippet>677</a>        }
-<a href=#678 id=678 data-nosnippet>678</a>        <span class="kw">if let </span>(<span class="prelude-val">Some</span>(have), <span class="prelude-val">Some</span>(new)) = (<span class="kw-2">&amp;</span><span class="self">self</span>.format, <span class="kw-2">&amp;</span>doc.source.format) {
-<a href=#679 id=679 data-nosnippet>679</a>            <span class="kw">if </span>have != new {
-<a href=#680 id=680 data-nosnippet>680</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(err(
-<a href=#681 id=681 data-nosnippet>681</a>                    <span class="string">"source"</span>.to_owned(),
-<a href=#682 id=682 data-nosnippet>682</a>                    <span class="macro">format!</span>(<span class="string">"the set already translates `third_party:{have}`"</span>),
-<a href=#683 id=683 data-nosnippet>683</a>                ));
-<a href=#684 id=684 data-nosnippet>684</a>            }
+<a href=#678 id=678 data-nosnippet>678</a>        <span class="kw">if let </span>(<span class="prelude-val">Some</span>(have), <span class="prelude-val">Some</span>(new)) = (<span class="kw-2">&amp;</span><span class="self">self</span>.format, <span class="kw-2">&amp;</span>doc.source.format)
+<a href=#679 id=679 data-nosnippet>679</a>            &amp;&amp; have != new
+<a href=#680 id=680 data-nosnippet>680</a>        {
+<a href=#681 id=681 data-nosnippet>681</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(err(
+<a href=#682 id=682 data-nosnippet>682</a>                <span class="string">"source"</span>.to_owned(),
+<a href=#683 id=683 data-nosnippet>683</a>                <span class="macro">format!</span>(<span class="string">"the set already translates `third_party:{have}`"</span>),
+<a href=#684 id=684 data-nosnippet>684</a>            ));
 <a href=#685 id=685 data-nosnippet>685</a>        }
 <a href=#686 id=686 data-nosnippet>686</a>        <span class="kw">let </span>ctx = FileContext {
 <a href=#687 id=687 data-nosnippet>687</a>            version,

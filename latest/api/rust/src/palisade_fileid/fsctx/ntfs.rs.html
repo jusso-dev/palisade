@@ -175,319 +175,316 @@
 <a href=#175 id=175 data-nosnippet>175</a>            .and_then(|end| rec.get(STREAM_HEADER..end))
 <a href=#176 id=176 data-nosnippet>176</a>            .ok_or(RecordError::Truncated { offset })<span class="question-mark">?</span>;
 <a href=#177 id=177 data-nosnippet>177</a>        <span class="kw">let </span>units: Vec&lt;u16&gt; = raw
-<a href=#178 id=178 data-nosnippet>178</a>            .chunks_exact(<span class="number">2</span>)
-<a href=#179 id=179 data-nosnippet>179</a>            .map(|c| {
-<a href=#180 id=180 data-nosnippet>180</a>                u16::from_le_bytes([
-<a href=#181 id=181 data-nosnippet>181</a>                    c.first().copied().unwrap_or(<span class="number">0</span>),
-<a href=#182 id=182 data-nosnippet>182</a>                    c.get(<span class="number">1</span>).copied().unwrap_or(<span class="number">0</span>),
-<a href=#183 id=183 data-nosnippet>183</a>                ])
-<a href=#184 id=184 data-nosnippet>184</a>            })
-<a href=#185 id=185 data-nosnippet>185</a>            .collect();
-<a href=#186 id=186 data-nosnippet>186</a>        <span class="kw">let </span>full = String::from_utf16(<span class="kw-2">&amp;</span>units).map_err(|<span class="kw">_</span>| RecordError::BadStreamName { offset })<span class="question-mark">?</span>;
-<a href=#187 id=187 data-nosnippet>187</a>        <span class="comment">// `:name:type`, where the default stream is `::$DATA`.
-<a href=#188 id=188 data-nosnippet>188</a>        // A name or type holding a separator or NUL could change the path a
-<a href=#189 id=189 data-nosnippet>189</a>        // caller builds from it, so it is malformed.
-<a href=#190 id=190 data-nosnippet>190</a>        </span><span class="kw">let </span>plain = |t: <span class="kw-2">&amp;</span>str| !t.contains([<span class="string">'\\'</span>, <span class="string">'/'</span>, <span class="string">'\0'</span>, <span class="string">':'</span>]);
-<a href=#191 id=191 data-nosnippet>191</a>        <span class="kw">let </span>(name, kind) = full
-<a href=#192 id=192 data-nosnippet>192</a>            .strip_prefix(<span class="string">':'</span>)
-<a href=#193 id=193 data-nosnippet>193</a>            .and_then(|rest| rest.rsplit_once(<span class="string">':'</span>))
-<a href=#194 id=194 data-nosnippet>194</a>            .filter(|(name, kind)| {
-<a href=#195 id=195 data-nosnippet>195</a>                !kind.is_empty()
-<a href=#196 id=196 data-nosnippet>196</a>                    &amp;&amp; plain(name)
-<a href=#197 id=197 data-nosnippet>197</a>                    &amp;&amp; plain(kind)
-<a href=#198 id=198 data-nosnippet>198</a>                    &amp;&amp; name.encode_utf16().count() &lt;= MAX_STREAM_NAME_UNITS
-<a href=#199 id=199 data-nosnippet>199</a>                    &amp;&amp; kind.encode_utf16().count() &lt;= MAX_STREAM_TYPE_UNITS
-<a href=#200 id=200 data-nosnippet>200</a>            })
-<a href=#201 id=201 data-nosnippet>201</a>            .ok_or(RecordError::BadStreamName { offset })<span class="question-mark">?</span>;
-<a href=#202 id=202 data-nosnippet>202</a>        list.streams.push(StreamEntry {
-<a href=#203 id=203 data-nosnippet>203</a>            name: name.to_owned(),
-<a href=#204 id=204 data-nosnippet>204</a>            kind: kind.to_owned(),
-<a href=#205 id=205 data-nosnippet>205</a>            size: u64::try_from(size).unwrap_or(<span class="number">0</span>),
-<a href=#206 id=206 data-nosnippet>206</a>            allocation_size: u64::try_from(alloc).unwrap_or(<span class="number">0</span>),
-<a href=#207 id=207 data-nosnippet>207</a>        });
-<a href=#208 id=208 data-nosnippet>208</a>        <span class="kw">if </span>next == <span class="number">0 </span>{
-<a href=#209 id=209 data-nosnippet>209</a>            <span class="kw">break</span>;
-<a href=#210 id=210 data-nosnippet>210</a>        }
-<a href=#211 id=211 data-nosnippet>211</a>        <span class="kw">let </span>next = usize::try_from(next).map_err(|<span class="kw">_</span>| RecordError::BadNextOffset { offset })<span class="question-mark">?</span>;
-<a href=#212 id=212 data-nosnippet>212</a>        <span class="kw">if </span>next &lt; STREAM_HEADER.saturating_add(name_len) {
-<a href=#213 id=213 data-nosnippet>213</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(RecordError::BadNextOffset { offset });
-<a href=#214 id=214 data-nosnippet>214</a>        }
-<a href=#215 id=215 data-nosnippet>215</a>        offset = offset
-<a href=#216 id=216 data-nosnippet>216</a>            .checked_add(next)
-<a href=#217 id=217 data-nosnippet>217</a>            .ok_or(RecordError::BadNextOffset { offset })<span class="question-mark">?</span>;
-<a href=#218 id=218 data-nosnippet>218</a>    }
-<a href=#219 id=219 data-nosnippet>219</a>    <span class="prelude-val">Ok</span>(list)
-<a href=#220 id=220 data-nosnippet>220</a>}
-<a href=#221 id=221 data-nosnippet>221</a>
-<a href=#222 id=222 data-nosnippet>222</a><span class="doccomment">/// The change-journal facts in a file's USN record.
-<a href=#223 id=223 data-nosnippet>223</a></span><span class="attr">#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-<a href=#224 id=224 data-nosnippet>224</a></span><span class="kw">pub struct </span>UsnFacts {
-<a href=#225 id=225 data-nosnippet>225</a>    <span class="doccomment">/// The record version (2 or 3).
-<a href=#226 id=226 data-nosnippet>226</a>    </span><span class="kw">pub </span>major_version: u16,
-<a href=#227 id=227 data-nosnippet>227</a>    <span class="doccomment">/// The file's last update sequence number.
-<a href=#228 id=228 data-nosnippet>228</a>    </span><span class="kw">pub </span>usn: i64,
-<a href=#229 id=229 data-nosnippet>229</a>    <span class="doccomment">/// The 128-bit file reference number as the record gives it. Version 2
-<a href=#230 id=230 data-nosnippet>230</a>    /// records carry 64 bits, zero-extended here.
-<a href=#231 id=231 data-nosnippet>231</a>    </span><span class="kw">pub </span>file_reference: [u8; <span class="number">16</span>],
-<a href=#232 id=232 data-nosnippet>232</a>}
-<a href=#233 id=233 data-nosnippet>233</a>
-<a href=#234 id=234 data-nosnippet>234</a><span class="doccomment">/// Parses the `USN_RECORD_V2` or `USN_RECORD_V3` that
-<a href=#235 id=235 data-nosnippet>235</a>/// `FSCTL_READ_FILE_USN_DATA` returns.
-<a href=#236 id=236 data-nosnippet>236</a></span><span class="kw">pub fn </span>parse_usn_record(bytes: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;UsnFacts, RecordError&gt; {
-<a href=#237 id=237 data-nosnippet>237</a>    <span class="kw">let </span>truncated = RecordError::Truncated { offset: <span class="number">0 </span>};
-<a href=#238 id=238 data-nosnippet>238</a>    <span class="kw">let </span>length = u32_at(bytes, <span class="number">0</span>).ok_or(truncated)<span class="question-mark">?</span>;
-<a href=#239 id=239 data-nosnippet>239</a>    <span class="kw">let </span>major = u16_at(bytes, <span class="number">4</span>).ok_or(truncated)<span class="question-mark">?</span>;
-<a href=#240 id=240 data-nosnippet>240</a>    <span class="kw">let </span>length = usize::try_from(length).map_err(|<span class="kw">_</span>| truncated)<span class="question-mark">?</span>;
-<a href=#241 id=241 data-nosnippet>241</a>    <span class="kw">let </span>record = bytes.get(..length).ok_or(truncated)<span class="question-mark">?</span>;
-<a href=#242 id=242 data-nosnippet>242</a>    <span class="kw">let </span><span class="kw-2">mut </span>file_reference = [<span class="number">0_u8</span>; <span class="number">16</span>];
-<a href=#243 id=243 data-nosnippet>243</a>    <span class="kw">let </span>usn = <span class="kw">match </span>major {
-<a href=#244 id=244 data-nosnippet>244</a>        <span class="number">2 </span>=&gt; {
-<a href=#245 id=245 data-nosnippet>245</a>            <span class="comment">// RecordLength, versions, FileReferenceNumber (8),
-<a href=#246 id=246 data-nosnippet>246</a>            // ParentFileReferenceNumber (8), then Usn.
-<a href=#247 id=247 data-nosnippet>247</a>            </span><span class="kw">let </span>id = record.get(<span class="number">8</span>..<span class="number">16</span>).ok_or(truncated)<span class="question-mark">?</span>;
-<a href=#248 id=248 data-nosnippet>248</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(dst) = file_reference.get_mut(..<span class="number">8</span>) {
-<a href=#249 id=249 data-nosnippet>249</a>                dst.copy_from_slice(id);
-<a href=#250 id=250 data-nosnippet>250</a>            }
-<a href=#251 id=251 data-nosnippet>251</a>            i64_at(record, <span class="number">24</span>).ok_or(truncated)<span class="question-mark">?
-<a href=#252 id=252 data-nosnippet>252</a>        </span>}
-<a href=#253 id=253 data-nosnippet>253</a>        <span class="number">3 </span>=&gt; {
-<a href=#254 id=254 data-nosnippet>254</a>            <span class="comment">// As version 2, with 16-byte reference numbers.
-<a href=#255 id=255 data-nosnippet>255</a>            </span><span class="kw">let </span>id = record.get(<span class="number">8</span>..<span class="number">24</span>).ok_or(truncated)<span class="question-mark">?</span>;
-<a href=#256 id=256 data-nosnippet>256</a>            file_reference.copy_from_slice(id);
-<a href=#257 id=257 data-nosnippet>257</a>            i64_at(record, <span class="number">40</span>).ok_or(truncated)<span class="question-mark">?
-<a href=#258 id=258 data-nosnippet>258</a>        </span>}
-<a href=#259 id=259 data-nosnippet>259</a>        other =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(RecordError::UnsupportedVersion(other)),
-<a href=#260 id=260 data-nosnippet>260</a>    };
-<a href=#261 id=261 data-nosnippet>261</a>    <span class="prelude-val">Ok</span>(UsnFacts {
-<a href=#262 id=262 data-nosnippet>262</a>        major_version: major,
-<a href=#263 id=263 data-nosnippet>263</a>        usn,
-<a href=#264 id=264 data-nosnippet>264</a>        file_reference,
-<a href=#265 id=265 data-nosnippet>265</a>    })
-<a href=#266 id=266 data-nosnippet>266</a>}
-<a href=#267 id=267 data-nosnippet>267</a>
-<a href=#268 id=268 data-nosnippet>268</a><span class="attr">#[cfg(test)]
-<a href=#269 id=269 data-nosnippet>269</a></span><span class="kw">mod </span>tests {
-<a href=#270 id=270 data-nosnippet>270</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
-<a href=#271 id=271 data-nosnippet>271</a>
-<a href=#272 id=272 data-nosnippet>272</a>    <span class="kw">fn </span>stream_record(next: u32, name: <span class="kw-2">&amp;</span>str, size: i64) -&gt; Vec&lt;u8&gt; {
-<a href=#273 id=273 data-nosnippet>273</a>        <span class="kw">let </span>units: Vec&lt;u16&gt; = name.encode_utf16().collect();
-<a href=#274 id=274 data-nosnippet>274</a>        <span class="kw">let </span><span class="kw-2">mut </span>out = Vec::new();
-<a href=#275 id=275 data-nosnippet>275</a>        out.extend_from_slice(<span class="kw-2">&amp;</span>next.to_le_bytes());
-<a href=#276 id=276 data-nosnippet>276</a>        out.extend_from_slice(<span class="kw-2">&amp;</span>u32::try_from(units.len() * <span class="number">2</span>).unwrap().to_le_bytes());
-<a href=#277 id=277 data-nosnippet>277</a>        out.extend_from_slice(<span class="kw-2">&amp;</span>size.to_le_bytes());
-<a href=#278 id=278 data-nosnippet>278</a>        out.extend_from_slice(<span class="kw-2">&amp;</span>(size + <span class="number">7</span>).to_le_bytes());
-<a href=#279 id=279 data-nosnippet>279</a>        <span class="kw">for </span>u <span class="kw">in </span>units {
-<a href=#280 id=280 data-nosnippet>280</a>            out.extend_from_slice(<span class="kw-2">&amp;</span>u.to_le_bytes());
-<a href=#281 id=281 data-nosnippet>281</a>        }
-<a href=#282 id=282 data-nosnippet>282</a>        out
-<a href=#283 id=283 data-nosnippet>283</a>    }
-<a href=#284 id=284 data-nosnippet>284</a>
-<a href=#285 id=285 data-nosnippet>285</a>    <span class="doccomment">/// Two records with the first's `NextEntryOffset` set, padded to 8 bytes
-<a href=#286 id=286 data-nosnippet>286</a>    /// as the OS does.
-<a href=#287 id=287 data-nosnippet>287</a>    </span><span class="kw">fn </span>two(a: <span class="kw-2">&amp;</span>str, b: <span class="kw-2">&amp;</span>str) -&gt; Vec&lt;u8&gt; {
-<a href=#288 id=288 data-nosnippet>288</a>        <span class="kw">let </span><span class="kw-2">mut </span>first = stream_record(<span class="number">0</span>, a, <span class="number">10</span>);
-<a href=#289 id=289 data-nosnippet>289</a>        <span class="kw">while </span>first.len() % <span class="number">8 </span>!= <span class="number">0 </span>{
-<a href=#290 id=290 data-nosnippet>290</a>            first.push(<span class="number">0</span>);
-<a href=#291 id=291 data-nosnippet>291</a>        }
-<a href=#292 id=292 data-nosnippet>292</a>        <span class="kw">let </span>next = u32::try_from(first.len()).unwrap();
-<a href=#293 id=293 data-nosnippet>293</a>        first[..<span class="number">4</span>].copy_from_slice(<span class="kw-2">&amp;</span>next.to_le_bytes());
-<a href=#294 id=294 data-nosnippet>294</a>        first.extend(stream_record(<span class="number">0</span>, b, <span class="number">3</span>));
-<a href=#295 id=295 data-nosnippet>295</a>        first
-<a href=#296 id=296 data-nosnippet>296</a>    }
-<a href=#297 id=297 data-nosnippet>297</a>
-<a href=#298 id=298 data-nosnippet>298</a>    <span class="attr">#[test]
-<a href=#299 id=299 data-nosnippet>299</a>    </span><span class="kw">fn </span>streams() {
-<a href=#300 id=300 data-nosnippet>300</a>        <span class="macro">assert_eq!</span>(parse_stream_info(<span class="kw-2">&amp;</span>[]).unwrap(), StreamList::default());
-<a href=#301 id=301 data-nosnippet>301</a>        <span class="kw">let </span>list = parse_stream_info(<span class="kw-2">&amp;</span>two(<span class="string">"::$DATA"</span>, <span class="string">":Zone.Identifier:$DATA"</span>)).unwrap();
-<a href=#302 id=302 data-nosnippet>302</a>        <span class="macro">assert_eq!</span>(list.streams.len(), <span class="number">2</span>);
-<a href=#303 id=303 data-nosnippet>303</a>        <span class="macro">assert!</span>(list.streams[<span class="number">0</span>].is_default());
-<a href=#304 id=304 data-nosnippet>304</a>        <span class="macro">assert_eq!</span>(list.streams[<span class="number">0</span>].size, <span class="number">10</span>);
-<a href=#305 id=305 data-nosnippet>305</a>        <span class="macro">assert_eq!</span>(list.streams[<span class="number">0</span>].allocation_size, <span class="number">17</span>);
-<a href=#306 id=306 data-nosnippet>306</a>        <span class="macro">assert_eq!</span>(list.streams[<span class="number">1</span>].name, <span class="string">"Zone.Identifier"</span>);
-<a href=#307 id=307 data-nosnippet>307</a>        <span class="macro">assert_eq!</span>(list.streams[<span class="number">1</span>].kind, <span class="string">"$DATA"</span>);
-<a href=#308 id=308 data-nosnippet>308</a>        <span class="macro">assert_eq!</span>(
-<a href=#309 id=309 data-nosnippet>309</a>            list.alternate()
-<a href=#310 id=310 data-nosnippet>310</a>                .map(|s| s.name.as_str())
-<a href=#311 id=311 data-nosnippet>311</a>                .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;(),
-<a href=#312 id=312 data-nosnippet>312</a>            [<span class="string">"Zone.Identifier"</span>]
-<a href=#313 id=313 data-nosnippet>313</a>        );
-<a href=#314 id=314 data-nosnippet>314</a>        <span class="macro">assert!</span>(!list.truncated);
-<a href=#315 id=315 data-nosnippet>315</a>        <span class="comment">// Unnamed or non-data streams are neither default nor alternate.
-<a href=#316 id=316 data-nosnippet>316</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>odd = stream_record(<span class="number">0</span>, <span class="string">"::$INDEX_ALLOCATION"</span>, <span class="number">0</span>);
-<a href=#317 id=317 data-nosnippet>317</a>        <span class="kw">while </span>odd.len() % <span class="number">8 </span>!= <span class="number">0 </span>{
-<a href=#318 id=318 data-nosnippet>318</a>            odd.push(<span class="number">0</span>);
-<a href=#319 id=319 data-nosnippet>319</a>        }
-<a href=#320 id=320 data-nosnippet>320</a>        <span class="kw">let </span>next = u32::try_from(odd.len()).unwrap();
-<a href=#321 id=321 data-nosnippet>321</a>        odd[..<span class="number">4</span>].copy_from_slice(<span class="kw-2">&amp;</span>next.to_le_bytes());
-<a href=#322 id=322 data-nosnippet>322</a>        <span class="kw">let </span><span class="kw-2">mut </span>tail = stream_record(<span class="number">0</span>, <span class="string">":$EFS:$LOGGED_UTILITY_STREAM"</span>, <span class="number">0</span>);
-<a href=#323 id=323 data-nosnippet>323</a>        <span class="kw">while </span>tail.len() % <span class="number">8 </span>!= <span class="number">0 </span>{
-<a href=#324 id=324 data-nosnippet>324</a>            tail.push(<span class="number">0</span>);
-<a href=#325 id=325 data-nosnippet>325</a>        }
-<a href=#326 id=326 data-nosnippet>326</a>        <span class="kw">let </span>next2 = u32::try_from(tail.len()).unwrap();
-<a href=#327 id=327 data-nosnippet>327</a>        tail[..<span class="number">4</span>].copy_from_slice(<span class="kw-2">&amp;</span>next2.to_le_bytes());
-<a href=#328 id=328 data-nosnippet>328</a>        odd.extend(tail);
-<a href=#329 id=329 data-nosnippet>329</a>        odd.extend(stream_record(<span class="number">0</span>, <span class="string">":lower:$data"</span>, <span class="number">1</span>));
-<a href=#330 id=330 data-nosnippet>330</a>        <span class="kw">let </span>list = parse_stream_info(<span class="kw-2">&amp;</span>odd).unwrap();
-<a href=#331 id=331 data-nosnippet>331</a>        <span class="macro">assert_eq!</span>(list.streams.len(), <span class="number">3</span>);
-<a href=#332 id=332 data-nosnippet>332</a>        <span class="macro">assert!</span>(!list.streams[<span class="number">0</span>].is_default());
-<a href=#333 id=333 data-nosnippet>333</a>        <span class="macro">assert_eq!</span>(
-<a href=#334 id=334 data-nosnippet>334</a>            list.alternate()
-<a href=#335 id=335 data-nosnippet>335</a>                .map(|s| s.name.as_str())
-<a href=#336 id=336 data-nosnippet>336</a>                .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;(),
-<a href=#337 id=337 data-nosnippet>337</a>            [<span class="string">"lower"</span>],
-<a href=#338 id=338 data-nosnippet>338</a>            <span class="string">"a lower-case `$data` type is still data"
-<a href=#339 id=339 data-nosnippet>339</a>        </span>);
-<a href=#340 id=340 data-nosnippet>340</a>    }
-<a href=#341 id=341 data-nosnippet>341</a>
-<a href=#342 id=342 data-nosnippet>342</a>    <span class="attr">#[test]
-<a href=#343 id=343 data-nosnippet>343</a>    </span><span class="kw">fn </span>malformed_streams_are_errors() {
-<a href=#344 id=344 data-nosnippet>344</a>        <span class="comment">// Truncated header and name.
-<a href=#345 id=345 data-nosnippet>345</a>        </span><span class="macro">assert!</span>(<span class="macro">matches!</span>(
-<a href=#346 id=346 data-nosnippet>346</a>            parse_stream_info(<span class="kw-2">&amp;</span>[<span class="number">0</span>; <span class="number">10</span>]),
-<a href=#347 id=347 data-nosnippet>347</a>            <span class="prelude-val">Err</span>(RecordError::Truncated { .. })
-<a href=#348 id=348 data-nosnippet>348</a>        ));
-<a href=#349 id=349 data-nosnippet>349</a>        <span class="kw">let </span><span class="kw-2">mut </span>rec = stream_record(<span class="number">0</span>, <span class="string">"::$DATA"</span>, <span class="number">1</span>);
-<a href=#350 id=350 data-nosnippet>350</a>        rec.truncate(rec.len() - <span class="number">2</span>);
-<a href=#351 id=351 data-nosnippet>351</a>        <span class="macro">assert!</span>(<span class="macro">matches!</span>(
-<a href=#352 id=352 data-nosnippet>352</a>            parse_stream_info(<span class="kw-2">&amp;</span>rec),
-<a href=#353 id=353 data-nosnippet>353</a>            <span class="prelude-val">Err</span>(RecordError::Truncated { .. })
-<a href=#354 id=354 data-nosnippet>354</a>        ));
-<a href=#355 id=355 data-nosnippet>355</a>        <span class="comment">// Names that are not `:name:type`.
-<a href=#356 id=356 data-nosnippet>356</a>        </span><span class="kw">for </span>bad <span class="kw">in </span>[<span class="string">"Zone"</span>, <span class="string">":Zone"</span>, <span class="string">":a:b:$DATA"</span>, <span class="string">":Zone:"</span>] {
-<a href=#357 id=357 data-nosnippet>357</a>            <span class="macro">assert!</span>(
-<a href=#358 id=358 data-nosnippet>358</a>                <span class="macro">matches!</span>(
-<a href=#359 id=359 data-nosnippet>359</a>                    parse_stream_info(<span class="kw-2">&amp;</span>stream_record(<span class="number">0</span>, bad, <span class="number">1</span>)),
-<a href=#360 id=360 data-nosnippet>360</a>                    <span class="prelude-val">Err</span>(RecordError::BadStreamName { .. })
-<a href=#361 id=361 data-nosnippet>361</a>                ),
-<a href=#362 id=362 data-nosnippet>362</a>                <span class="string">"{bad}"
-<a href=#363 id=363 data-nosnippet>363</a>            </span>);
-<a href=#364 id=364 data-nosnippet>364</a>        }
-<a href=#365 id=365 data-nosnippet>365</a>        <span class="comment">// Separators and NUL in the name or type.
-<a href=#366 id=366 data-nosnippet>366</a>        </span><span class="kw">for </span>bad <span class="kw">in </span>[<span class="string">":a\\..\\b:$DATA"</span>, <span class="string">":a/b:$DATA"</span>, <span class="string">":a\0:$DATA"</span>, <span class="string">":a:$DA/TA"</span>] {
-<a href=#367 id=367 data-nosnippet>367</a>            <span class="macro">assert!</span>(
-<a href=#368 id=368 data-nosnippet>368</a>                <span class="macro">matches!</span>(
-<a href=#369 id=369 data-nosnippet>369</a>                    parse_stream_info(<span class="kw-2">&amp;</span>stream_record(<span class="number">0</span>, bad, <span class="number">1</span>)),
-<a href=#370 id=370 data-nosnippet>370</a>                    <span class="prelude-val">Err</span>(RecordError::BadStreamName { .. })
-<a href=#371 id=371 data-nosnippet>371</a>                ),
-<a href=#372 id=372 data-nosnippet>372</a>                <span class="string">"{bad:?}"
-<a href=#373 id=373 data-nosnippet>373</a>            </span>);
-<a href=#374 id=374 data-nosnippet>374</a>        }
-<a href=#375 id=375 data-nosnippet>375</a>        <span class="comment">// A 255-unit name with the longest OS type is fine; 256 is not.
-<a href=#376 id=376 data-nosnippet>376</a>        </span><span class="kw">let </span>max = <span class="macro">format!</span>(<span class="string">":{}:$LOGGED_UTILITY_STREAM"</span>, <span class="string">"n"</span>.repeat(<span class="number">255</span>));
-<a href=#377 id=377 data-nosnippet>377</a>        <span class="macro">assert_eq!</span>(
-<a href=#378 id=378 data-nosnippet>378</a>            parse_stream_info(<span class="kw-2">&amp;</span>stream_record(<span class="number">0</span>, <span class="kw-2">&amp;</span>max, <span class="number">1</span>))
-<a href=#379 id=379 data-nosnippet>379</a>                .unwrap()
-<a href=#380 id=380 data-nosnippet>380</a>                .streams[<span class="number">0</span>]
-<a href=#381 id=381 data-nosnippet>381</a>                .kind,
-<a href=#382 id=382 data-nosnippet>382</a>            <span class="string">"$LOGGED_UTILITY_STREAM"
-<a href=#383 id=383 data-nosnippet>383</a>        </span>);
-<a href=#384 id=384 data-nosnippet>384</a>        <span class="kw">let </span>over = <span class="macro">format!</span>(<span class="string">":{}:x"</span>, <span class="string">"n"</span>.repeat(<span class="number">256</span>));
-<a href=#385 id=385 data-nosnippet>385</a>        <span class="macro">assert!</span>(<span class="macro">matches!</span>(
-<a href=#386 id=386 data-nosnippet>386</a>            parse_stream_info(<span class="kw-2">&amp;</span>stream_record(<span class="number">0</span>, <span class="kw-2">&amp;</span>over, <span class="number">1</span>)),
-<a href=#387 id=387 data-nosnippet>387</a>            <span class="prelude-val">Err</span>(RecordError::BadStreamName { .. })
-<a href=#388 id=388 data-nosnippet>388</a>        ));
-<a href=#389 id=389 data-nosnippet>389</a>        <span class="comment">// An odd name length, and one longer than NTFS allows.
-<a href=#390 id=390 data-nosnippet>390</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>odd = stream_record(<span class="number">0</span>, <span class="string">"::$DATA"</span>, <span class="number">1</span>);
-<a href=#391 id=391 data-nosnippet>391</a>        odd[<span class="number">4</span>] = <span class="number">3</span>;
-<a href=#392 id=392 data-nosnippet>392</a>        <span class="macro">assert!</span>(<span class="macro">matches!</span>(
-<a href=#393 id=393 data-nosnippet>393</a>            parse_stream_info(<span class="kw-2">&amp;</span>odd),
-<a href=#394 id=394 data-nosnippet>394</a>            <span class="prelude-val">Err</span>(RecordError::BadStreamName { .. })
-<a href=#395 id=395 data-nosnippet>395</a>        ));
-<a href=#396 id=396 data-nosnippet>396</a>        <span class="kw">let </span>long = <span class="macro">format!</span>(<span class="string">":{}:$DATA"</span>, <span class="string">"a"</span>.repeat(<span class="number">300</span>));
-<a href=#397 id=397 data-nosnippet>397</a>        <span class="macro">assert!</span>(<span class="macro">matches!</span>(
-<a href=#398 id=398 data-nosnippet>398</a>            parse_stream_info(<span class="kw-2">&amp;</span>stream_record(<span class="number">0</span>, <span class="kw-2">&amp;</span>long, <span class="number">1</span>)),
-<a href=#399 id=399 data-nosnippet>399</a>            <span class="prelude-val">Err</span>(RecordError::BadStreamName { .. })
-<a href=#400 id=400 data-nosnippet>400</a>        ));
-<a href=#401 id=401 data-nosnippet>401</a>        <span class="comment">// Unpaired surrogate.
-<a href=#402 id=402 data-nosnippet>402</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>surrogate = stream_record(<span class="number">0</span>, <span class="string">"::$DATA"</span>, <span class="number">1</span>);
-<a href=#403 id=403 data-nosnippet>403</a>        surrogate[<span class="number">24</span>] = <span class="number">0x00</span>;
-<a href=#404 id=404 data-nosnippet>404</a>        surrogate[<span class="number">25</span>] = <span class="number">0xd8</span>;
-<a href=#405 id=405 data-nosnippet>405</a>        <span class="macro">assert!</span>(<span class="macro">matches!</span>(
-<a href=#406 id=406 data-nosnippet>406</a>            parse_stream_info(<span class="kw-2">&amp;</span>surrogate),
-<a href=#407 id=407 data-nosnippet>407</a>            <span class="prelude-val">Err</span>(RecordError::BadStreamName { .. })
-<a href=#408 id=408 data-nosnippet>408</a>        ));
-<a href=#409 id=409 data-nosnippet>409</a>        <span class="comment">// A next offset inside the header, which would loop, or inside the
-<a href=#410 id=410 data-nosnippet>410</a>        // record's own name, which would overlap.
-<a href=#411 id=411 data-nosnippet>411</a>        </span><span class="kw">for </span>next <span class="kw">in </span>[<span class="number">8</span>, <span class="number">24</span>, <span class="number">24 </span>+ <span class="number">12</span>] {
-<a href=#412 id=412 data-nosnippet>412</a>            <span class="kw">let </span>rec = stream_record(next, <span class="string">"::$DATA"</span>, <span class="number">1</span>);
-<a href=#413 id=413 data-nosnippet>413</a>            <span class="macro">assert!</span>(
-<a href=#414 id=414 data-nosnippet>414</a>                <span class="macro">matches!</span>(
-<a href=#415 id=415 data-nosnippet>415</a>                    parse_stream_info(<span class="kw-2">&amp;</span>rec),
-<a href=#416 id=416 data-nosnippet>416</a>                    <span class="prelude-val">Err</span>(RecordError::BadNextOffset { .. })
-<a href=#417 id=417 data-nosnippet>417</a>                ),
-<a href=#418 id=418 data-nosnippet>418</a>                <span class="string">"{next}"
-<a href=#419 id=419 data-nosnippet>419</a>            </span>);
-<a href=#420 id=420 data-nosnippet>420</a>        }
-<a href=#421 id=421 data-nosnippet>421</a>        <span class="comment">// A next offset past the end.
-<a href=#422 id=422 data-nosnippet>422</a>        </span><span class="kw">let </span>rec = stream_record(<span class="number">4096</span>, <span class="string">"::$DATA"</span>, <span class="number">1</span>);
-<a href=#423 id=423 data-nosnippet>423</a>        <span class="macro">assert!</span>(<span class="macro">matches!</span>(
-<a href=#424 id=424 data-nosnippet>424</a>            parse_stream_info(<span class="kw-2">&amp;</span>rec),
-<a href=#425 id=425 data-nosnippet>425</a>            <span class="prelude-val">Err</span>(RecordError::Truncated { .. })
-<a href=#426 id=426 data-nosnippet>426</a>        ));
-<a href=#427 id=427 data-nosnippet>427</a>        <span class="comment">// A negative size reads as zero, never wraps.
-<a href=#428 id=428 data-nosnippet>428</a>        </span><span class="kw">let </span>list = parse_stream_info(<span class="kw-2">&amp;</span>stream_record(<span class="number">0</span>, <span class="string">"::$DATA"</span>, -<span class="number">5</span>)).unwrap();
-<a href=#429 id=429 data-nosnippet>429</a>        <span class="macro">assert_eq!</span>(list.streams[<span class="number">0</span>].size, <span class="number">0</span>);
-<a href=#430 id=430 data-nosnippet>430</a>    }
-<a href=#431 id=431 data-nosnippet>431</a>
-<a href=#432 id=432 data-nosnippet>432</a>    <span class="attr">#[test]
-<a href=#433 id=433 data-nosnippet>433</a>    </span><span class="kw">fn </span>stream_count_is_bounded() {
-<a href=#434 id=434 data-nosnippet>434</a>        <span class="kw">let </span><span class="kw-2">mut </span>one = stream_record(<span class="number">0</span>, <span class="string">":s:$DATA"</span>, <span class="number">1</span>);
-<a href=#435 id=435 data-nosnippet>435</a>        <span class="kw">while </span>one.len() % <span class="number">8 </span>!= <span class="number">0 </span>{
-<a href=#436 id=436 data-nosnippet>436</a>            one.push(<span class="number">0</span>);
-<a href=#437 id=437 data-nosnippet>437</a>        }
-<a href=#438 id=438 data-nosnippet>438</a>        <span class="kw">let </span>step = u32::try_from(one.len()).unwrap();
-<a href=#439 id=439 data-nosnippet>439</a>        one[..<span class="number">4</span>].copy_from_slice(<span class="kw-2">&amp;</span>step.to_le_bytes());
-<a href=#440 id=440 data-nosnippet>440</a>        <span class="kw">let </span><span class="kw-2">mut </span>all = Vec::new();
-<a href=#441 id=441 data-nosnippet>441</a>        <span class="kw">for _ in </span><span class="number">0</span>..MAX_STREAMS + <span class="number">5 </span>{
-<a href=#442 id=442 data-nosnippet>442</a>            all.extend_from_slice(<span class="kw-2">&amp;</span>one);
-<a href=#443 id=443 data-nosnippet>443</a>        }
-<a href=#444 id=444 data-nosnippet>444</a>        <span class="kw">let </span>list = parse_stream_info(<span class="kw-2">&amp;</span>all).unwrap();
-<a href=#445 id=445 data-nosnippet>445</a>        <span class="macro">assert_eq!</span>(list.streams.len(), MAX_STREAMS);
-<a href=#446 id=446 data-nosnippet>446</a>        <span class="macro">assert!</span>(list.truncated);
-<a href=#447 id=447 data-nosnippet>447</a>    }
-<a href=#448 id=448 data-nosnippet>448</a>
-<a href=#449 id=449 data-nosnippet>449</a>    <span class="kw">fn </span>usn_v2(usn: i64) -&gt; Vec&lt;u8&gt; {
-<a href=#450 id=450 data-nosnippet>450</a>        <span class="kw">let </span><span class="kw-2">mut </span>r = <span class="macro">vec!</span>[<span class="number">0_u8</span>; <span class="number">64</span>];
-<a href=#451 id=451 data-nosnippet>451</a>        r[..<span class="number">4</span>].copy_from_slice(<span class="kw-2">&amp;</span><span class="number">64_u32</span>.to_le_bytes());
-<a href=#452 id=452 data-nosnippet>452</a>        r[<span class="number">4</span>..<span class="number">6</span>].copy_from_slice(<span class="kw-2">&amp;</span><span class="number">2_u16</span>.to_le_bytes());
-<a href=#453 id=453 data-nosnippet>453</a>        r[<span class="number">8</span>..<span class="number">16</span>].copy_from_slice(<span class="kw-2">&amp;</span><span class="number">0x1122_3344_5566_7788_u64</span>.to_le_bytes());
-<a href=#454 id=454 data-nosnippet>454</a>        r[<span class="number">24</span>..<span class="number">32</span>].copy_from_slice(<span class="kw-2">&amp;</span>usn.to_le_bytes());
-<a href=#455 id=455 data-nosnippet>455</a>        r
-<a href=#456 id=456 data-nosnippet>456</a>    }
-<a href=#457 id=457 data-nosnippet>457</a>
-<a href=#458 id=458 data-nosnippet>458</a>    <span class="attr">#[test]
-<a href=#459 id=459 data-nosnippet>459</a>    </span><span class="kw">fn </span>usn_records() {
-<a href=#460 id=460 data-nosnippet>460</a>        <span class="kw">let </span>f = parse_usn_record(<span class="kw-2">&amp;</span>usn_v2(<span class="number">12345</span>)).unwrap();
-<a href=#461 id=461 data-nosnippet>461</a>        <span class="macro">assert_eq!</span>((f.major_version, f.usn), (<span class="number">2</span>, <span class="number">12345</span>));
-<a href=#462 id=462 data-nosnippet>462</a>        <span class="macro">assert_eq!</span>(
-<a href=#463 id=463 data-nosnippet>463</a>            f.file_reference[..<span class="number">8</span>],
-<a href=#464 id=464 data-nosnippet>464</a>            <span class="number">0x1122_3344_5566_7788_u64</span>.to_le_bytes()
-<a href=#465 id=465 data-nosnippet>465</a>        );
-<a href=#466 id=466 data-nosnippet>466</a>        <span class="macro">assert_eq!</span>(f.file_reference[<span class="number">8</span>..], [<span class="number">0</span>; <span class="number">8</span>]);
-<a href=#467 id=467 data-nosnippet>467</a>
-<a href=#468 id=468 data-nosnippet>468</a>        <span class="kw">let </span><span class="kw-2">mut </span>v3 = <span class="macro">vec!</span>[<span class="number">0_u8</span>; <span class="number">80</span>];
-<a href=#469 id=469 data-nosnippet>469</a>        v3[..<span class="number">4</span>].copy_from_slice(<span class="kw-2">&amp;</span><span class="number">80_u32</span>.to_le_bytes());
-<a href=#470 id=470 data-nosnippet>470</a>        v3[<span class="number">4</span>..<span class="number">6</span>].copy_from_slice(<span class="kw-2">&amp;</span><span class="number">3_u16</span>.to_le_bytes());
-<a href=#471 id=471 data-nosnippet>471</a>        v3[<span class="number">8</span>..<span class="number">24</span>].copy_from_slice(<span class="kw-2">&amp;</span>[<span class="number">9</span>; <span class="number">16</span>]);
-<a href=#472 id=472 data-nosnippet>472</a>        v3[<span class="number">40</span>..<span class="number">48</span>].copy_from_slice(<span class="kw-2">&amp;</span><span class="number">77_i64</span>.to_le_bytes());
-<a href=#473 id=473 data-nosnippet>473</a>        <span class="kw">let </span>f = parse_usn_record(<span class="kw-2">&amp;</span>v3).unwrap();
-<a href=#474 id=474 data-nosnippet>474</a>        <span class="macro">assert_eq!</span>((f.major_version, f.usn, f.file_reference), (<span class="number">3</span>, <span class="number">77</span>, [<span class="number">9</span>; <span class="number">16</span>]));
-<a href=#475 id=475 data-nosnippet>475</a>
-<a href=#476 id=476 data-nosnippet>476</a>        <span class="comment">// Version 4 has no USN in this place; other versions are refused.
-<a href=#477 id=477 data-nosnippet>477</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>v4 = usn_v2(<span class="number">1</span>);
-<a href=#478 id=478 data-nosnippet>478</a>        v4[<span class="number">4</span>..<span class="number">6</span>].copy_from_slice(<span class="kw-2">&amp;</span><span class="number">4_u16</span>.to_le_bytes());
-<a href=#479 id=479 data-nosnippet>479</a>        <span class="macro">assert_eq!</span>(
-<a href=#480 id=480 data-nosnippet>480</a>            parse_usn_record(<span class="kw-2">&amp;</span>v4),
-<a href=#481 id=481 data-nosnippet>481</a>            <span class="prelude-val">Err</span>(RecordError::UnsupportedVersion(<span class="number">4</span>))
-<a href=#482 id=482 data-nosnippet>482</a>        );
-<a href=#483 id=483 data-nosnippet>483</a>        <span class="comment">// RecordLength past the buffer, or too short for the USN.
-<a href=#484 id=484 data-nosnippet>484</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>long = usn_v2(<span class="number">1</span>);
-<a href=#485 id=485 data-nosnippet>485</a>        long[..<span class="number">4</span>].copy_from_slice(<span class="kw-2">&amp;</span><span class="number">1000_u32</span>.to_le_bytes());
-<a href=#486 id=486 data-nosnippet>486</a>        <span class="macro">assert!</span>(parse_usn_record(<span class="kw-2">&amp;</span>long).is_err());
-<a href=#487 id=487 data-nosnippet>487</a>        <span class="kw">let </span><span class="kw-2">mut </span>short = usn_v2(<span class="number">1</span>);
-<a href=#488 id=488 data-nosnippet>488</a>        short[..<span class="number">4</span>].copy_from_slice(<span class="kw-2">&amp;</span><span class="number">20_u32</span>.to_le_bytes());
-<a href=#489 id=489 data-nosnippet>489</a>        <span class="macro">assert!</span>(parse_usn_record(<span class="kw-2">&amp;</span>short).is_err());
-<a href=#490 id=490 data-nosnippet>490</a>        <span class="macro">assert!</span>(parse_usn_record(<span class="kw-2">&amp;</span>[]).is_err());
-<a href=#491 id=491 data-nosnippet>491</a>    }
-<a href=#492 id=492 data-nosnippet>492</a>}
+<a href=#178 id=178 data-nosnippet>178</a>            .as_chunks::&lt;<span class="number">2</span>&gt;()
+<a href=#179 id=179 data-nosnippet>179</a>            .<span class="number">0
+<a href=#180 id=180 data-nosnippet>180</a>            </span>.iter()
+<a href=#181 id=181 data-nosnippet>181</a>            .map(|c| u16::from_le_bytes(<span class="kw-2">*</span>c))
+<a href=#182 id=182 data-nosnippet>182</a>            .collect();
+<a href=#183 id=183 data-nosnippet>183</a>        <span class="kw">let </span>full = String::from_utf16(<span class="kw-2">&amp;</span>units).map_err(|<span class="kw">_</span>| RecordError::BadStreamName { offset })<span class="question-mark">?</span>;
+<a href=#184 id=184 data-nosnippet>184</a>        <span class="comment">// `:name:type`, where the default stream is `::$DATA`.
+<a href=#185 id=185 data-nosnippet>185</a>        // A name or type holding a separator or NUL could change the path a
+<a href=#186 id=186 data-nosnippet>186</a>        // caller builds from it, so it is malformed.
+<a href=#187 id=187 data-nosnippet>187</a>        </span><span class="kw">let </span>plain = |t: <span class="kw-2">&amp;</span>str| !t.contains([<span class="string">'\\'</span>, <span class="string">'/'</span>, <span class="string">'\0'</span>, <span class="string">':'</span>]);
+<a href=#188 id=188 data-nosnippet>188</a>        <span class="kw">let </span>(name, kind) = full
+<a href=#189 id=189 data-nosnippet>189</a>            .strip_prefix(<span class="string">':'</span>)
+<a href=#190 id=190 data-nosnippet>190</a>            .and_then(|rest| rest.rsplit_once(<span class="string">':'</span>))
+<a href=#191 id=191 data-nosnippet>191</a>            .filter(|(name, kind)| {
+<a href=#192 id=192 data-nosnippet>192</a>                !kind.is_empty()
+<a href=#193 id=193 data-nosnippet>193</a>                    &amp;&amp; plain(name)
+<a href=#194 id=194 data-nosnippet>194</a>                    &amp;&amp; plain(kind)
+<a href=#195 id=195 data-nosnippet>195</a>                    &amp;&amp; name.encode_utf16().count() &lt;= MAX_STREAM_NAME_UNITS
+<a href=#196 id=196 data-nosnippet>196</a>                    &amp;&amp; kind.encode_utf16().count() &lt;= MAX_STREAM_TYPE_UNITS
+<a href=#197 id=197 data-nosnippet>197</a>            })
+<a href=#198 id=198 data-nosnippet>198</a>            .ok_or(RecordError::BadStreamName { offset })<span class="question-mark">?</span>;
+<a href=#199 id=199 data-nosnippet>199</a>        list.streams.push(StreamEntry {
+<a href=#200 id=200 data-nosnippet>200</a>            name: name.to_owned(),
+<a href=#201 id=201 data-nosnippet>201</a>            kind: kind.to_owned(),
+<a href=#202 id=202 data-nosnippet>202</a>            size: u64::try_from(size).unwrap_or(<span class="number">0</span>),
+<a href=#203 id=203 data-nosnippet>203</a>            allocation_size: u64::try_from(alloc).unwrap_or(<span class="number">0</span>),
+<a href=#204 id=204 data-nosnippet>204</a>        });
+<a href=#205 id=205 data-nosnippet>205</a>        <span class="kw">if </span>next == <span class="number">0 </span>{
+<a href=#206 id=206 data-nosnippet>206</a>            <span class="kw">break</span>;
+<a href=#207 id=207 data-nosnippet>207</a>        }
+<a href=#208 id=208 data-nosnippet>208</a>        <span class="kw">let </span>next = usize::try_from(next).map_err(|<span class="kw">_</span>| RecordError::BadNextOffset { offset })<span class="question-mark">?</span>;
+<a href=#209 id=209 data-nosnippet>209</a>        <span class="kw">if </span>next &lt; STREAM_HEADER.saturating_add(name_len) {
+<a href=#210 id=210 data-nosnippet>210</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(RecordError::BadNextOffset { offset });
+<a href=#211 id=211 data-nosnippet>211</a>        }
+<a href=#212 id=212 data-nosnippet>212</a>        offset = offset
+<a href=#213 id=213 data-nosnippet>213</a>            .checked_add(next)
+<a href=#214 id=214 data-nosnippet>214</a>            .ok_or(RecordError::BadNextOffset { offset })<span class="question-mark">?</span>;
+<a href=#215 id=215 data-nosnippet>215</a>    }
+<a href=#216 id=216 data-nosnippet>216</a>    <span class="prelude-val">Ok</span>(list)
+<a href=#217 id=217 data-nosnippet>217</a>}
+<a href=#218 id=218 data-nosnippet>218</a>
+<a href=#219 id=219 data-nosnippet>219</a><span class="doccomment">/// The change-journal facts in a file's USN record.
+<a href=#220 id=220 data-nosnippet>220</a></span><span class="attr">#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+<a href=#221 id=221 data-nosnippet>221</a></span><span class="kw">pub struct </span>UsnFacts {
+<a href=#222 id=222 data-nosnippet>222</a>    <span class="doccomment">/// The record version (2 or 3).
+<a href=#223 id=223 data-nosnippet>223</a>    </span><span class="kw">pub </span>major_version: u16,
+<a href=#224 id=224 data-nosnippet>224</a>    <span class="doccomment">/// The file's last update sequence number.
+<a href=#225 id=225 data-nosnippet>225</a>    </span><span class="kw">pub </span>usn: i64,
+<a href=#226 id=226 data-nosnippet>226</a>    <span class="doccomment">/// The 128-bit file reference number as the record gives it. Version 2
+<a href=#227 id=227 data-nosnippet>227</a>    /// records carry 64 bits, zero-extended here.
+<a href=#228 id=228 data-nosnippet>228</a>    </span><span class="kw">pub </span>file_reference: [u8; <span class="number">16</span>],
+<a href=#229 id=229 data-nosnippet>229</a>}
+<a href=#230 id=230 data-nosnippet>230</a>
+<a href=#231 id=231 data-nosnippet>231</a><span class="doccomment">/// Parses the `USN_RECORD_V2` or `USN_RECORD_V3` that
+<a href=#232 id=232 data-nosnippet>232</a>/// `FSCTL_READ_FILE_USN_DATA` returns.
+<a href=#233 id=233 data-nosnippet>233</a></span><span class="kw">pub fn </span>parse_usn_record(bytes: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;UsnFacts, RecordError&gt; {
+<a href=#234 id=234 data-nosnippet>234</a>    <span class="kw">let </span>truncated = RecordError::Truncated { offset: <span class="number">0 </span>};
+<a href=#235 id=235 data-nosnippet>235</a>    <span class="kw">let </span>length = u32_at(bytes, <span class="number">0</span>).ok_or(truncated)<span class="question-mark">?</span>;
+<a href=#236 id=236 data-nosnippet>236</a>    <span class="kw">let </span>major = u16_at(bytes, <span class="number">4</span>).ok_or(truncated)<span class="question-mark">?</span>;
+<a href=#237 id=237 data-nosnippet>237</a>    <span class="kw">let </span>length = usize::try_from(length).map_err(|<span class="kw">_</span>| truncated)<span class="question-mark">?</span>;
+<a href=#238 id=238 data-nosnippet>238</a>    <span class="kw">let </span>record = bytes.get(..length).ok_or(truncated)<span class="question-mark">?</span>;
+<a href=#239 id=239 data-nosnippet>239</a>    <span class="kw">let </span><span class="kw-2">mut </span>file_reference = [<span class="number">0_u8</span>; <span class="number">16</span>];
+<a href=#240 id=240 data-nosnippet>240</a>    <span class="kw">let </span>usn = <span class="kw">match </span>major {
+<a href=#241 id=241 data-nosnippet>241</a>        <span class="number">2 </span>=&gt; {
+<a href=#242 id=242 data-nosnippet>242</a>            <span class="comment">// RecordLength, versions, FileReferenceNumber (8),
+<a href=#243 id=243 data-nosnippet>243</a>            // ParentFileReferenceNumber (8), then Usn.
+<a href=#244 id=244 data-nosnippet>244</a>            </span><span class="kw">let </span>id = record.get(<span class="number">8</span>..<span class="number">16</span>).ok_or(truncated)<span class="question-mark">?</span>;
+<a href=#245 id=245 data-nosnippet>245</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(dst) = file_reference.get_mut(..<span class="number">8</span>) {
+<a href=#246 id=246 data-nosnippet>246</a>                dst.copy_from_slice(id);
+<a href=#247 id=247 data-nosnippet>247</a>            }
+<a href=#248 id=248 data-nosnippet>248</a>            i64_at(record, <span class="number">24</span>).ok_or(truncated)<span class="question-mark">?
+<a href=#249 id=249 data-nosnippet>249</a>        </span>}
+<a href=#250 id=250 data-nosnippet>250</a>        <span class="number">3 </span>=&gt; {
+<a href=#251 id=251 data-nosnippet>251</a>            <span class="comment">// As version 2, with 16-byte reference numbers.
+<a href=#252 id=252 data-nosnippet>252</a>            </span><span class="kw">let </span>id = record.get(<span class="number">8</span>..<span class="number">24</span>).ok_or(truncated)<span class="question-mark">?</span>;
+<a href=#253 id=253 data-nosnippet>253</a>            file_reference.copy_from_slice(id);
+<a href=#254 id=254 data-nosnippet>254</a>            i64_at(record, <span class="number">40</span>).ok_or(truncated)<span class="question-mark">?
+<a href=#255 id=255 data-nosnippet>255</a>        </span>}
+<a href=#256 id=256 data-nosnippet>256</a>        other =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(RecordError::UnsupportedVersion(other)),
+<a href=#257 id=257 data-nosnippet>257</a>    };
+<a href=#258 id=258 data-nosnippet>258</a>    <span class="prelude-val">Ok</span>(UsnFacts {
+<a href=#259 id=259 data-nosnippet>259</a>        major_version: major,
+<a href=#260 id=260 data-nosnippet>260</a>        usn,
+<a href=#261 id=261 data-nosnippet>261</a>        file_reference,
+<a href=#262 id=262 data-nosnippet>262</a>    })
+<a href=#263 id=263 data-nosnippet>263</a>}
+<a href=#264 id=264 data-nosnippet>264</a>
+<a href=#265 id=265 data-nosnippet>265</a><span class="attr">#[cfg(test)]
+<a href=#266 id=266 data-nosnippet>266</a></span><span class="kw">mod </span>tests {
+<a href=#267 id=267 data-nosnippet>267</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#268 id=268 data-nosnippet>268</a>
+<a href=#269 id=269 data-nosnippet>269</a>    <span class="kw">fn </span>stream_record(next: u32, name: <span class="kw-2">&amp;</span>str, size: i64) -&gt; Vec&lt;u8&gt; {
+<a href=#270 id=270 data-nosnippet>270</a>        <span class="kw">let </span>units: Vec&lt;u16&gt; = name.encode_utf16().collect();
+<a href=#271 id=271 data-nosnippet>271</a>        <span class="kw">let </span><span class="kw-2">mut </span>out = Vec::new();
+<a href=#272 id=272 data-nosnippet>272</a>        out.extend_from_slice(<span class="kw-2">&amp;</span>next.to_le_bytes());
+<a href=#273 id=273 data-nosnippet>273</a>        out.extend_from_slice(<span class="kw-2">&amp;</span>u32::try_from(units.len() * <span class="number">2</span>).unwrap().to_le_bytes());
+<a href=#274 id=274 data-nosnippet>274</a>        out.extend_from_slice(<span class="kw-2">&amp;</span>size.to_le_bytes());
+<a href=#275 id=275 data-nosnippet>275</a>        out.extend_from_slice(<span class="kw-2">&amp;</span>(size + <span class="number">7</span>).to_le_bytes());
+<a href=#276 id=276 data-nosnippet>276</a>        <span class="kw">for </span>u <span class="kw">in </span>units {
+<a href=#277 id=277 data-nosnippet>277</a>            out.extend_from_slice(<span class="kw-2">&amp;</span>u.to_le_bytes());
+<a href=#278 id=278 data-nosnippet>278</a>        }
+<a href=#279 id=279 data-nosnippet>279</a>        out
+<a href=#280 id=280 data-nosnippet>280</a>    }
+<a href=#281 id=281 data-nosnippet>281</a>
+<a href=#282 id=282 data-nosnippet>282</a>    <span class="doccomment">/// Two records with the first's `NextEntryOffset` set, padded to 8 bytes
+<a href=#283 id=283 data-nosnippet>283</a>    /// as the OS does.
+<a href=#284 id=284 data-nosnippet>284</a>    </span><span class="kw">fn </span>two(a: <span class="kw-2">&amp;</span>str, b: <span class="kw-2">&amp;</span>str) -&gt; Vec&lt;u8&gt; {
+<a href=#285 id=285 data-nosnippet>285</a>        <span class="kw">let </span><span class="kw-2">mut </span>first = stream_record(<span class="number">0</span>, a, <span class="number">10</span>);
+<a href=#286 id=286 data-nosnippet>286</a>        <span class="kw">while </span>!first.len().is_multiple_of(<span class="number">8</span>) {
+<a href=#287 id=287 data-nosnippet>287</a>            first.push(<span class="number">0</span>);
+<a href=#288 id=288 data-nosnippet>288</a>        }
+<a href=#289 id=289 data-nosnippet>289</a>        <span class="kw">let </span>next = u32::try_from(first.len()).unwrap();
+<a href=#290 id=290 data-nosnippet>290</a>        first[..<span class="number">4</span>].copy_from_slice(<span class="kw-2">&amp;</span>next.to_le_bytes());
+<a href=#291 id=291 data-nosnippet>291</a>        first.extend(stream_record(<span class="number">0</span>, b, <span class="number">3</span>));
+<a href=#292 id=292 data-nosnippet>292</a>        first
+<a href=#293 id=293 data-nosnippet>293</a>    }
+<a href=#294 id=294 data-nosnippet>294</a>
+<a href=#295 id=295 data-nosnippet>295</a>    <span class="attr">#[test]
+<a href=#296 id=296 data-nosnippet>296</a>    </span><span class="kw">fn </span>streams() {
+<a href=#297 id=297 data-nosnippet>297</a>        <span class="macro">assert_eq!</span>(parse_stream_info(<span class="kw-2">&amp;</span>[]).unwrap(), StreamList::default());
+<a href=#298 id=298 data-nosnippet>298</a>        <span class="kw">let </span>list = parse_stream_info(<span class="kw-2">&amp;</span>two(<span class="string">"::$DATA"</span>, <span class="string">":Zone.Identifier:$DATA"</span>)).unwrap();
+<a href=#299 id=299 data-nosnippet>299</a>        <span class="macro">assert_eq!</span>(list.streams.len(), <span class="number">2</span>);
+<a href=#300 id=300 data-nosnippet>300</a>        <span class="macro">assert!</span>(list.streams[<span class="number">0</span>].is_default());
+<a href=#301 id=301 data-nosnippet>301</a>        <span class="macro">assert_eq!</span>(list.streams[<span class="number">0</span>].size, <span class="number">10</span>);
+<a href=#302 id=302 data-nosnippet>302</a>        <span class="macro">assert_eq!</span>(list.streams[<span class="number">0</span>].allocation_size, <span class="number">17</span>);
+<a href=#303 id=303 data-nosnippet>303</a>        <span class="macro">assert_eq!</span>(list.streams[<span class="number">1</span>].name, <span class="string">"Zone.Identifier"</span>);
+<a href=#304 id=304 data-nosnippet>304</a>        <span class="macro">assert_eq!</span>(list.streams[<span class="number">1</span>].kind, <span class="string">"$DATA"</span>);
+<a href=#305 id=305 data-nosnippet>305</a>        <span class="macro">assert_eq!</span>(
+<a href=#306 id=306 data-nosnippet>306</a>            list.alternate()
+<a href=#307 id=307 data-nosnippet>307</a>                .map(|s| s.name.as_str())
+<a href=#308 id=308 data-nosnippet>308</a>                .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;(),
+<a href=#309 id=309 data-nosnippet>309</a>            [<span class="string">"Zone.Identifier"</span>]
+<a href=#310 id=310 data-nosnippet>310</a>        );
+<a href=#311 id=311 data-nosnippet>311</a>        <span class="macro">assert!</span>(!list.truncated);
+<a href=#312 id=312 data-nosnippet>312</a>        <span class="comment">// Unnamed or non-data streams are neither default nor alternate.
+<a href=#313 id=313 data-nosnippet>313</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>odd = stream_record(<span class="number">0</span>, <span class="string">"::$INDEX_ALLOCATION"</span>, <span class="number">0</span>);
+<a href=#314 id=314 data-nosnippet>314</a>        <span class="kw">while </span>!odd.len().is_multiple_of(<span class="number">8</span>) {
+<a href=#315 id=315 data-nosnippet>315</a>            odd.push(<span class="number">0</span>);
+<a href=#316 id=316 data-nosnippet>316</a>        }
+<a href=#317 id=317 data-nosnippet>317</a>        <span class="kw">let </span>next = u32::try_from(odd.len()).unwrap();
+<a href=#318 id=318 data-nosnippet>318</a>        odd[..<span class="number">4</span>].copy_from_slice(<span class="kw-2">&amp;</span>next.to_le_bytes());
+<a href=#319 id=319 data-nosnippet>319</a>        <span class="kw">let </span><span class="kw-2">mut </span>tail = stream_record(<span class="number">0</span>, <span class="string">":$EFS:$LOGGED_UTILITY_STREAM"</span>, <span class="number">0</span>);
+<a href=#320 id=320 data-nosnippet>320</a>        <span class="kw">while </span>!tail.len().is_multiple_of(<span class="number">8</span>) {
+<a href=#321 id=321 data-nosnippet>321</a>            tail.push(<span class="number">0</span>);
+<a href=#322 id=322 data-nosnippet>322</a>        }
+<a href=#323 id=323 data-nosnippet>323</a>        <span class="kw">let </span>next2 = u32::try_from(tail.len()).unwrap();
+<a href=#324 id=324 data-nosnippet>324</a>        tail[..<span class="number">4</span>].copy_from_slice(<span class="kw-2">&amp;</span>next2.to_le_bytes());
+<a href=#325 id=325 data-nosnippet>325</a>        odd.extend(tail);
+<a href=#326 id=326 data-nosnippet>326</a>        odd.extend(stream_record(<span class="number">0</span>, <span class="string">":lower:$data"</span>, <span class="number">1</span>));
+<a href=#327 id=327 data-nosnippet>327</a>        <span class="kw">let </span>list = parse_stream_info(<span class="kw-2">&amp;</span>odd).unwrap();
+<a href=#328 id=328 data-nosnippet>328</a>        <span class="macro">assert_eq!</span>(list.streams.len(), <span class="number">3</span>);
+<a href=#329 id=329 data-nosnippet>329</a>        <span class="macro">assert!</span>(!list.streams[<span class="number">0</span>].is_default());
+<a href=#330 id=330 data-nosnippet>330</a>        <span class="macro">assert_eq!</span>(
+<a href=#331 id=331 data-nosnippet>331</a>            list.alternate()
+<a href=#332 id=332 data-nosnippet>332</a>                .map(|s| s.name.as_str())
+<a href=#333 id=333 data-nosnippet>333</a>                .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;(),
+<a href=#334 id=334 data-nosnippet>334</a>            [<span class="string">"lower"</span>],
+<a href=#335 id=335 data-nosnippet>335</a>            <span class="string">"a lower-case `$data` type is still data"
+<a href=#336 id=336 data-nosnippet>336</a>        </span>);
+<a href=#337 id=337 data-nosnippet>337</a>    }
+<a href=#338 id=338 data-nosnippet>338</a>
+<a href=#339 id=339 data-nosnippet>339</a>    <span class="attr">#[test]
+<a href=#340 id=340 data-nosnippet>340</a>    </span><span class="kw">fn </span>malformed_streams_are_errors() {
+<a href=#341 id=341 data-nosnippet>341</a>        <span class="comment">// Truncated header and name.
+<a href=#342 id=342 data-nosnippet>342</a>        </span><span class="macro">assert!</span>(<span class="macro">matches!</span>(
+<a href=#343 id=343 data-nosnippet>343</a>            parse_stream_info(<span class="kw-2">&amp;</span>[<span class="number">0</span>; <span class="number">10</span>]),
+<a href=#344 id=344 data-nosnippet>344</a>            <span class="prelude-val">Err</span>(RecordError::Truncated { .. })
+<a href=#345 id=345 data-nosnippet>345</a>        ));
+<a href=#346 id=346 data-nosnippet>346</a>        <span class="kw">let </span><span class="kw-2">mut </span>rec = stream_record(<span class="number">0</span>, <span class="string">"::$DATA"</span>, <span class="number">1</span>);
+<a href=#347 id=347 data-nosnippet>347</a>        rec.truncate(rec.len() - <span class="number">2</span>);
+<a href=#348 id=348 data-nosnippet>348</a>        <span class="macro">assert!</span>(<span class="macro">matches!</span>(
+<a href=#349 id=349 data-nosnippet>349</a>            parse_stream_info(<span class="kw-2">&amp;</span>rec),
+<a href=#350 id=350 data-nosnippet>350</a>            <span class="prelude-val">Err</span>(RecordError::Truncated { .. })
+<a href=#351 id=351 data-nosnippet>351</a>        ));
+<a href=#352 id=352 data-nosnippet>352</a>        <span class="comment">// Names that are not `:name:type`.
+<a href=#353 id=353 data-nosnippet>353</a>        </span><span class="kw">for </span>bad <span class="kw">in </span>[<span class="string">"Zone"</span>, <span class="string">":Zone"</span>, <span class="string">":a:b:$DATA"</span>, <span class="string">":Zone:"</span>] {
+<a href=#354 id=354 data-nosnippet>354</a>            <span class="macro">assert!</span>(
+<a href=#355 id=355 data-nosnippet>355</a>                <span class="macro">matches!</span>(
+<a href=#356 id=356 data-nosnippet>356</a>                    parse_stream_info(<span class="kw-2">&amp;</span>stream_record(<span class="number">0</span>, bad, <span class="number">1</span>)),
+<a href=#357 id=357 data-nosnippet>357</a>                    <span class="prelude-val">Err</span>(RecordError::BadStreamName { .. })
+<a href=#358 id=358 data-nosnippet>358</a>                ),
+<a href=#359 id=359 data-nosnippet>359</a>                <span class="string">"{bad}"
+<a href=#360 id=360 data-nosnippet>360</a>            </span>);
+<a href=#361 id=361 data-nosnippet>361</a>        }
+<a href=#362 id=362 data-nosnippet>362</a>        <span class="comment">// Separators and NUL in the name or type.
+<a href=#363 id=363 data-nosnippet>363</a>        </span><span class="kw">for </span>bad <span class="kw">in </span>[<span class="string">":a\\..\\b:$DATA"</span>, <span class="string">":a/b:$DATA"</span>, <span class="string">":a\0:$DATA"</span>, <span class="string">":a:$DA/TA"</span>] {
+<a href=#364 id=364 data-nosnippet>364</a>            <span class="macro">assert!</span>(
+<a href=#365 id=365 data-nosnippet>365</a>                <span class="macro">matches!</span>(
+<a href=#366 id=366 data-nosnippet>366</a>                    parse_stream_info(<span class="kw-2">&amp;</span>stream_record(<span class="number">0</span>, bad, <span class="number">1</span>)),
+<a href=#367 id=367 data-nosnippet>367</a>                    <span class="prelude-val">Err</span>(RecordError::BadStreamName { .. })
+<a href=#368 id=368 data-nosnippet>368</a>                ),
+<a href=#369 id=369 data-nosnippet>369</a>                <span class="string">"{bad:?}"
+<a href=#370 id=370 data-nosnippet>370</a>            </span>);
+<a href=#371 id=371 data-nosnippet>371</a>        }
+<a href=#372 id=372 data-nosnippet>372</a>        <span class="comment">// A 255-unit name with the longest OS type is fine; 256 is not.
+<a href=#373 id=373 data-nosnippet>373</a>        </span><span class="kw">let </span>max = <span class="macro">format!</span>(<span class="string">":{}:$LOGGED_UTILITY_STREAM"</span>, <span class="string">"n"</span>.repeat(<span class="number">255</span>));
+<a href=#374 id=374 data-nosnippet>374</a>        <span class="macro">assert_eq!</span>(
+<a href=#375 id=375 data-nosnippet>375</a>            parse_stream_info(<span class="kw-2">&amp;</span>stream_record(<span class="number">0</span>, <span class="kw-2">&amp;</span>max, <span class="number">1</span>))
+<a href=#376 id=376 data-nosnippet>376</a>                .unwrap()
+<a href=#377 id=377 data-nosnippet>377</a>                .streams[<span class="number">0</span>]
+<a href=#378 id=378 data-nosnippet>378</a>                .kind,
+<a href=#379 id=379 data-nosnippet>379</a>            <span class="string">"$LOGGED_UTILITY_STREAM"
+<a href=#380 id=380 data-nosnippet>380</a>        </span>);
+<a href=#381 id=381 data-nosnippet>381</a>        <span class="kw">let </span>over = <span class="macro">format!</span>(<span class="string">":{}:x"</span>, <span class="string">"n"</span>.repeat(<span class="number">256</span>));
+<a href=#382 id=382 data-nosnippet>382</a>        <span class="macro">assert!</span>(<span class="macro">matches!</span>(
+<a href=#383 id=383 data-nosnippet>383</a>            parse_stream_info(<span class="kw-2">&amp;</span>stream_record(<span class="number">0</span>, <span class="kw-2">&amp;</span>over, <span class="number">1</span>)),
+<a href=#384 id=384 data-nosnippet>384</a>            <span class="prelude-val">Err</span>(RecordError::BadStreamName { .. })
+<a href=#385 id=385 data-nosnippet>385</a>        ));
+<a href=#386 id=386 data-nosnippet>386</a>        <span class="comment">// An odd name length, and one longer than NTFS allows.
+<a href=#387 id=387 data-nosnippet>387</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>odd = stream_record(<span class="number">0</span>, <span class="string">"::$DATA"</span>, <span class="number">1</span>);
+<a href=#388 id=388 data-nosnippet>388</a>        odd[<span class="number">4</span>] = <span class="number">3</span>;
+<a href=#389 id=389 data-nosnippet>389</a>        <span class="macro">assert!</span>(<span class="macro">matches!</span>(
+<a href=#390 id=390 data-nosnippet>390</a>            parse_stream_info(<span class="kw-2">&amp;</span>odd),
+<a href=#391 id=391 data-nosnippet>391</a>            <span class="prelude-val">Err</span>(RecordError::BadStreamName { .. })
+<a href=#392 id=392 data-nosnippet>392</a>        ));
+<a href=#393 id=393 data-nosnippet>393</a>        <span class="kw">let </span>long = <span class="macro">format!</span>(<span class="string">":{}:$DATA"</span>, <span class="string">"a"</span>.repeat(<span class="number">300</span>));
+<a href=#394 id=394 data-nosnippet>394</a>        <span class="macro">assert!</span>(<span class="macro">matches!</span>(
+<a href=#395 id=395 data-nosnippet>395</a>            parse_stream_info(<span class="kw-2">&amp;</span>stream_record(<span class="number">0</span>, <span class="kw-2">&amp;</span>long, <span class="number">1</span>)),
+<a href=#396 id=396 data-nosnippet>396</a>            <span class="prelude-val">Err</span>(RecordError::BadStreamName { .. })
+<a href=#397 id=397 data-nosnippet>397</a>        ));
+<a href=#398 id=398 data-nosnippet>398</a>        <span class="comment">// Unpaired surrogate.
+<a href=#399 id=399 data-nosnippet>399</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>surrogate = stream_record(<span class="number">0</span>, <span class="string">"::$DATA"</span>, <span class="number">1</span>);
+<a href=#400 id=400 data-nosnippet>400</a>        surrogate[<span class="number">24</span>] = <span class="number">0x00</span>;
+<a href=#401 id=401 data-nosnippet>401</a>        surrogate[<span class="number">25</span>] = <span class="number">0xd8</span>;
+<a href=#402 id=402 data-nosnippet>402</a>        <span class="macro">assert!</span>(<span class="macro">matches!</span>(
+<a href=#403 id=403 data-nosnippet>403</a>            parse_stream_info(<span class="kw-2">&amp;</span>surrogate),
+<a href=#404 id=404 data-nosnippet>404</a>            <span class="prelude-val">Err</span>(RecordError::BadStreamName { .. })
+<a href=#405 id=405 data-nosnippet>405</a>        ));
+<a href=#406 id=406 data-nosnippet>406</a>        <span class="comment">// A next offset inside the header, which would loop, or inside the
+<a href=#407 id=407 data-nosnippet>407</a>        // record's own name, which would overlap.
+<a href=#408 id=408 data-nosnippet>408</a>        </span><span class="kw">for </span>next <span class="kw">in </span>[<span class="number">8</span>, <span class="number">24</span>, <span class="number">24 </span>+ <span class="number">12</span>] {
+<a href=#409 id=409 data-nosnippet>409</a>            <span class="kw">let </span>rec = stream_record(next, <span class="string">"::$DATA"</span>, <span class="number">1</span>);
+<a href=#410 id=410 data-nosnippet>410</a>            <span class="macro">assert!</span>(
+<a href=#411 id=411 data-nosnippet>411</a>                <span class="macro">matches!</span>(
+<a href=#412 id=412 data-nosnippet>412</a>                    parse_stream_info(<span class="kw-2">&amp;</span>rec),
+<a href=#413 id=413 data-nosnippet>413</a>                    <span class="prelude-val">Err</span>(RecordError::BadNextOffset { .. })
+<a href=#414 id=414 data-nosnippet>414</a>                ),
+<a href=#415 id=415 data-nosnippet>415</a>                <span class="string">"{next}"
+<a href=#416 id=416 data-nosnippet>416</a>            </span>);
+<a href=#417 id=417 data-nosnippet>417</a>        }
+<a href=#418 id=418 data-nosnippet>418</a>        <span class="comment">// A next offset past the end.
+<a href=#419 id=419 data-nosnippet>419</a>        </span><span class="kw">let </span>rec = stream_record(<span class="number">4096</span>, <span class="string">"::$DATA"</span>, <span class="number">1</span>);
+<a href=#420 id=420 data-nosnippet>420</a>        <span class="macro">assert!</span>(<span class="macro">matches!</span>(
+<a href=#421 id=421 data-nosnippet>421</a>            parse_stream_info(<span class="kw-2">&amp;</span>rec),
+<a href=#422 id=422 data-nosnippet>422</a>            <span class="prelude-val">Err</span>(RecordError::Truncated { .. })
+<a href=#423 id=423 data-nosnippet>423</a>        ));
+<a href=#424 id=424 data-nosnippet>424</a>        <span class="comment">// A negative size reads as zero, never wraps.
+<a href=#425 id=425 data-nosnippet>425</a>        </span><span class="kw">let </span>list = parse_stream_info(<span class="kw-2">&amp;</span>stream_record(<span class="number">0</span>, <span class="string">"::$DATA"</span>, -<span class="number">5</span>)).unwrap();
+<a href=#426 id=426 data-nosnippet>426</a>        <span class="macro">assert_eq!</span>(list.streams[<span class="number">0</span>].size, <span class="number">0</span>);
+<a href=#427 id=427 data-nosnippet>427</a>    }
+<a href=#428 id=428 data-nosnippet>428</a>
+<a href=#429 id=429 data-nosnippet>429</a>    <span class="attr">#[test]
+<a href=#430 id=430 data-nosnippet>430</a>    </span><span class="kw">fn </span>stream_count_is_bounded() {
+<a href=#431 id=431 data-nosnippet>431</a>        <span class="kw">let </span><span class="kw-2">mut </span>one = stream_record(<span class="number">0</span>, <span class="string">":s:$DATA"</span>, <span class="number">1</span>);
+<a href=#432 id=432 data-nosnippet>432</a>        <span class="kw">while </span>!one.len().is_multiple_of(<span class="number">8</span>) {
+<a href=#433 id=433 data-nosnippet>433</a>            one.push(<span class="number">0</span>);
+<a href=#434 id=434 data-nosnippet>434</a>        }
+<a href=#435 id=435 data-nosnippet>435</a>        <span class="kw">let </span>step = u32::try_from(one.len()).unwrap();
+<a href=#436 id=436 data-nosnippet>436</a>        one[..<span class="number">4</span>].copy_from_slice(<span class="kw-2">&amp;</span>step.to_le_bytes());
+<a href=#437 id=437 data-nosnippet>437</a>        <span class="kw">let </span><span class="kw-2">mut </span>all = Vec::new();
+<a href=#438 id=438 data-nosnippet>438</a>        <span class="kw">for _ in </span><span class="number">0</span>..MAX_STREAMS + <span class="number">5 </span>{
+<a href=#439 id=439 data-nosnippet>439</a>            all.extend_from_slice(<span class="kw-2">&amp;</span>one);
+<a href=#440 id=440 data-nosnippet>440</a>        }
+<a href=#441 id=441 data-nosnippet>441</a>        <span class="kw">let </span>list = parse_stream_info(<span class="kw-2">&amp;</span>all).unwrap();
+<a href=#442 id=442 data-nosnippet>442</a>        <span class="macro">assert_eq!</span>(list.streams.len(), MAX_STREAMS);
+<a href=#443 id=443 data-nosnippet>443</a>        <span class="macro">assert!</span>(list.truncated);
+<a href=#444 id=444 data-nosnippet>444</a>    }
+<a href=#445 id=445 data-nosnippet>445</a>
+<a href=#446 id=446 data-nosnippet>446</a>    <span class="kw">fn </span>usn_v2(usn: i64) -&gt; Vec&lt;u8&gt; {
+<a href=#447 id=447 data-nosnippet>447</a>        <span class="kw">let </span><span class="kw-2">mut </span>r = <span class="macro">vec!</span>[<span class="number">0_u8</span>; <span class="number">64</span>];
+<a href=#448 id=448 data-nosnippet>448</a>        r[..<span class="number">4</span>].copy_from_slice(<span class="kw-2">&amp;</span><span class="number">64_u32</span>.to_le_bytes());
+<a href=#449 id=449 data-nosnippet>449</a>        r[<span class="number">4</span>..<span class="number">6</span>].copy_from_slice(<span class="kw-2">&amp;</span><span class="number">2_u16</span>.to_le_bytes());
+<a href=#450 id=450 data-nosnippet>450</a>        r[<span class="number">8</span>..<span class="number">16</span>].copy_from_slice(<span class="kw-2">&amp;</span><span class="number">0x1122_3344_5566_7788_u64</span>.to_le_bytes());
+<a href=#451 id=451 data-nosnippet>451</a>        r[<span class="number">24</span>..<span class="number">32</span>].copy_from_slice(<span class="kw-2">&amp;</span>usn.to_le_bytes());
+<a href=#452 id=452 data-nosnippet>452</a>        r
+<a href=#453 id=453 data-nosnippet>453</a>    }
+<a href=#454 id=454 data-nosnippet>454</a>
+<a href=#455 id=455 data-nosnippet>455</a>    <span class="attr">#[test]
+<a href=#456 id=456 data-nosnippet>456</a>    </span><span class="kw">fn </span>usn_records() {
+<a href=#457 id=457 data-nosnippet>457</a>        <span class="kw">let </span>f = parse_usn_record(<span class="kw-2">&amp;</span>usn_v2(<span class="number">12345</span>)).unwrap();
+<a href=#458 id=458 data-nosnippet>458</a>        <span class="macro">assert_eq!</span>((f.major_version, f.usn), (<span class="number">2</span>, <span class="number">12345</span>));
+<a href=#459 id=459 data-nosnippet>459</a>        <span class="macro">assert_eq!</span>(
+<a href=#460 id=460 data-nosnippet>460</a>            f.file_reference[..<span class="number">8</span>],
+<a href=#461 id=461 data-nosnippet>461</a>            <span class="number">0x1122_3344_5566_7788_u64</span>.to_le_bytes()
+<a href=#462 id=462 data-nosnippet>462</a>        );
+<a href=#463 id=463 data-nosnippet>463</a>        <span class="macro">assert_eq!</span>(f.file_reference[<span class="number">8</span>..], [<span class="number">0</span>; <span class="number">8</span>]);
+<a href=#464 id=464 data-nosnippet>464</a>
+<a href=#465 id=465 data-nosnippet>465</a>        <span class="kw">let </span><span class="kw-2">mut </span>v3 = <span class="macro">vec!</span>[<span class="number">0_u8</span>; <span class="number">80</span>];
+<a href=#466 id=466 data-nosnippet>466</a>        v3[..<span class="number">4</span>].copy_from_slice(<span class="kw-2">&amp;</span><span class="number">80_u32</span>.to_le_bytes());
+<a href=#467 id=467 data-nosnippet>467</a>        v3[<span class="number">4</span>..<span class="number">6</span>].copy_from_slice(<span class="kw-2">&amp;</span><span class="number">3_u16</span>.to_le_bytes());
+<a href=#468 id=468 data-nosnippet>468</a>        v3[<span class="number">8</span>..<span class="number">24</span>].copy_from_slice(<span class="kw-2">&amp;</span>[<span class="number">9</span>; <span class="number">16</span>]);
+<a href=#469 id=469 data-nosnippet>469</a>        v3[<span class="number">40</span>..<span class="number">48</span>].copy_from_slice(<span class="kw-2">&amp;</span><span class="number">77_i64</span>.to_le_bytes());
+<a href=#470 id=470 data-nosnippet>470</a>        <span class="kw">let </span>f = parse_usn_record(<span class="kw-2">&amp;</span>v3).unwrap();
+<a href=#471 id=471 data-nosnippet>471</a>        <span class="macro">assert_eq!</span>((f.major_version, f.usn, f.file_reference), (<span class="number">3</span>, <span class="number">77</span>, [<span class="number">9</span>; <span class="number">16</span>]));
+<a href=#472 id=472 data-nosnippet>472</a>
+<a href=#473 id=473 data-nosnippet>473</a>        <span class="comment">// Version 4 has no USN in this place; other versions are refused.
+<a href=#474 id=474 data-nosnippet>474</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>v4 = usn_v2(<span class="number">1</span>);
+<a href=#475 id=475 data-nosnippet>475</a>        v4[<span class="number">4</span>..<span class="number">6</span>].copy_from_slice(<span class="kw-2">&amp;</span><span class="number">4_u16</span>.to_le_bytes());
+<a href=#476 id=476 data-nosnippet>476</a>        <span class="macro">assert_eq!</span>(
+<a href=#477 id=477 data-nosnippet>477</a>            parse_usn_record(<span class="kw-2">&amp;</span>v4),
+<a href=#478 id=478 data-nosnippet>478</a>            <span class="prelude-val">Err</span>(RecordError::UnsupportedVersion(<span class="number">4</span>))
+<a href=#479 id=479 data-nosnippet>479</a>        );
+<a href=#480 id=480 data-nosnippet>480</a>        <span class="comment">// RecordLength past the buffer, or too short for the USN.
+<a href=#481 id=481 data-nosnippet>481</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>long = usn_v2(<span class="number">1</span>);
+<a href=#482 id=482 data-nosnippet>482</a>        long[..<span class="number">4</span>].copy_from_slice(<span class="kw-2">&amp;</span><span class="number">1000_u32</span>.to_le_bytes());
+<a href=#483 id=483 data-nosnippet>483</a>        <span class="macro">assert!</span>(parse_usn_record(<span class="kw-2">&amp;</span>long).is_err());
+<a href=#484 id=484 data-nosnippet>484</a>        <span class="kw">let </span><span class="kw-2">mut </span>short = usn_v2(<span class="number">1</span>);
+<a href=#485 id=485 data-nosnippet>485</a>        short[..<span class="number">4</span>].copy_from_slice(<span class="kw-2">&amp;</span><span class="number">20_u32</span>.to_le_bytes());
+<a href=#486 id=486 data-nosnippet>486</a>        <span class="macro">assert!</span>(parse_usn_record(<span class="kw-2">&amp;</span>short).is_err());
+<a href=#487 id=487 data-nosnippet>487</a>        <span class="macro">assert!</span>(parse_usn_record(<span class="kw-2">&amp;</span>[]).is_err());
+<a href=#488 id=488 data-nosnippet>488</a>    }
+<a href=#489 id=489 data-nosnippet>489</a>}
 </code></pre></div></section></main></body></html>

@@ -612,7 +612,7 @@
 <a href=#612 id=612 data-nosnippet>612</a>    <span class="comment">// A table parsed from a signature is always whole entries, but the
 <a href=#613 id=613 data-nosnippet>613</a>    // fields are public: trailing bytes must not be silently ignored.
 <a href=#614 id=614 data-nosnippet>614</a>    </span><span class="kw">let </span>record = OFFSET_SIZE.saturating_add(signed.algorithm.digest_len());
-<a href=#615 id=615 data-nosnippet>615</a>    <span class="kw">if </span>signed.table.len() % record != <span class="number">0 </span>{
+<a href=#615 id=615 data-nosnippet>615</a>    <span class="kw">if </span>!signed.table.len().is_multiple_of(record) {
 <a href=#616 id=616 data-nosnippet>616</a>        <span class="kw">return </span>PageHashCheck::Unavailable(PageHashError::MalformedTable {
 <a href=#617 id=617 data-nosnippet>617</a>            len: signed.table.len(),
 <a href=#618 id=618 data-nosnippet>618</a>        });

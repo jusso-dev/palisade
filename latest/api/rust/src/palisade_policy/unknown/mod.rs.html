@@ -1170,81 +1170,80 @@
 <a href=#1170 id=1170 data-nosnippet>1170</a>        .map(str::trim)
 <a href=#1171 id=1171 data-nosnippet>1171</a>        .filter(|j| !j.is_empty())
 <a href=#1172 id=1172 data-nosnippet>1172</a>        .map(str::to_owned);
-<a href=#1173 id=1173 data-nosnippet>1173</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(j) = <span class="kw-2">&amp;</span>justification {
-<a href=#1174 id=1174 data-nosnippet>1174</a>        <span class="kw">if </span>j.chars().count() &gt; <span class="kw">crate</span>::model::limits::MAX_TEXT_CHARS
+<a href=#1173 id=1173 data-nosnippet>1173</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(j) = <span class="kw-2">&amp;</span>justification
+<a href=#1174 id=1174 data-nosnippet>1174</a>        &amp;&amp; (j.chars().count() &gt; <span class="kw">crate</span>::model::limits::MAX_TEXT_CHARS
 <a href=#1175 id=1175 data-nosnippet>1175</a>            || j.chars().any(|c| {
 <a href=#1176 id=1176 data-nosnippet>1176</a>                (c.is_control() &amp;&amp; !<span class="macro">matches!</span>(c, <span class="string">'\t' </span>| <span class="string">'\n' </span>| <span class="string">'\r'</span>))
 <a href=#1177 id=1177 data-nosnippet>1177</a>                    || <span class="kw">crate</span>::validate::is_bidi_control(c)
-<a href=#1178 id=1178 data-nosnippet>1178</a>            })
-<a href=#1179 id=1179 data-nosnippet>1179</a>        {
-<a href=#1180 id=1180 data-nosnippet>1180</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(AnswerError::InvalidJustification);
-<a href=#1181 id=1181 data-nosnippet>1181</a>        }
-<a href=#1182 id=1182 data-nosnippet>1182</a>    }
-<a href=#1183 id=1183 data-nosnippet>1183</a>    <span class="kw">if </span>prompt.require_justification
-<a href=#1184 id=1184 data-nosnippet>1184</a>        &amp;&amp; justification.is_none()
-<a href=#1185 id=1185 data-nosnippet>1185</a>        &amp;&amp; <span class="macro">matches!</span>(
-<a href=#1186 id=1186 data-nosnippet>1186</a>            option,
-<a href=#1187 id=1187 data-nosnippet>1187</a>            PromptOption::AllowOnce
-<a href=#1188 id=1188 data-nosnippet>1188</a>                | PromptOption::AllowAlwaysLocal
-<a href=#1189 id=1189 data-nosnippet>1189</a>                | PromptOption::RequestApproval
-<a href=#1190 id=1190 data-nosnippet>1190</a>        )
-<a href=#1191 id=1191 data-nosnippet>1191</a>    {
-<a href=#1192 id=1192 data-nosnippet>1192</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(AnswerError::JustificationRequired);
-<a href=#1193 id=1193 data-nosnippet>1193</a>    }
-<a href=#1194 id=1194 data-nosnippet>1194</a>    <span class="kw">if </span>prompt.reauth != Reauth::None &amp;&amp; !reauthenticated &amp;&amp; <span class="kw-2">*</span>option != PromptOption::Block {
-<a href=#1195 id=1195 data-nosnippet>1195</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(AnswerError::ReauthRequired);
-<a href=#1196 id=1196 data-nosnippet>1196</a>    }
-<a href=#1197 id=1197 data-nosnippet>1197</a>    <span class="kw">let </span>allowed = |approval| AnswerResult {
-<a href=#1198 id=1198 data-nosnippet>1198</a>        outcome: Outcome::Allowed,
-<a href=#1199 id=1199 data-nosnippet>1199</a>        reason_code: ReasonCode::UnknownPrompt,
-<a href=#1200 id=1200 data-nosnippet>1200</a>        containment: <span class="prelude-val">None</span>,
-<a href=#1201 id=1201 data-nosnippet>1201</a>        approval,
-<a href=#1202 id=1202 data-nosnippet>1202</a>        request_approval: <span class="bool-val">false</span>,
-<a href=#1203 id=1203 data-nosnippet>1203</a>    };
-<a href=#1204 id=1204 data-nosnippet>1204</a>    <span class="kw">let </span>blocked = |request_approval| AnswerResult {
-<a href=#1205 id=1205 data-nosnippet>1205</a>        outcome: Outcome::Blocked,
-<a href=#1206 id=1206 data-nosnippet>1206</a>        reason_code: ReasonCode::UnknownPrompt,
-<a href=#1207 id=1207 data-nosnippet>1207</a>        containment: <span class="prelude-val">None</span>,
-<a href=#1208 id=1208 data-nosnippet>1208</a>        approval: <span class="prelude-val">None</span>,
-<a href=#1209 id=1209 data-nosnippet>1209</a>        request_approval,
-<a href=#1210 id=1210 data-nosnippet>1210</a>    };
-<a href=#1211 id=1211 data-nosnippet>1211</a>    <span class="prelude-val">Ok</span>(<span class="kw">match </span>option {
-<a href=#1212 id=1212 data-nosnippet>1212</a>        PromptOption::AllowOnce =&gt; allowed(<span class="prelude-val">None</span>),
-<a href=#1213 id=1213 data-nosnippet>1213</a>        PromptOption::Block =&gt; blocked(<span class="bool-val">false</span>),
-<a href=#1214 id=1214 data-nosnippet>1214</a>        PromptOption::RequestApproval =&gt; blocked(<span class="bool-val">true</span>),
-<a href=#1215 id=1215 data-nosnippet>1215</a>        PromptOption::AllowAlwaysLocal =&gt; {
-<a href=#1216 id=1216 data-nosnippet>1216</a>            <span class="comment">// Only offered when the hash is known.
-<a href=#1217 id=1217 data-nosnippet>1217</a>            </span><span class="kw">let </span>sha256 = prompt.sha256.clone().ok_or(AnswerError::NotOffered)<span class="question-mark">?</span>;
-<a href=#1218 id=1218 data-nosnippet>1218</a>            <span class="kw">let </span>user_sid = <span class="kw">match </span>prompt.local_approval_scope {
-<a href=#1219 id=1219 data-nosnippet>1219</a>                ApprovalScope::Device =&gt; <span class="prelude-val">None</span>,
-<a href=#1220 id=1220 data-nosnippet>1220</a>                ApprovalScope::User =&gt; <span class="prelude-val">Some</span>(
-<a href=#1221 id=1221 data-nosnippet>1221</a>                    user_sid
-<a href=#1222 id=1222 data-nosnippet>1222</a>                        .and_then(<span class="kw">crate</span>::context::normalize_sid)
-<a href=#1223 id=1223 data-nosnippet>1223</a>                        .ok_or(AnswerError::UserUnknown)<span class="question-mark">?</span>,
-<a href=#1224 id=1224 data-nosnippet>1224</a>                ),
-<a href=#1225 id=1225 data-nosnippet>1225</a>            };
-<a href=#1226 id=1226 data-nosnippet>1226</a>            <span class="kw">let </span>expires_at = <span class="kw">match </span>prompt.temp_approval_days {
-<a href=#1227 id=1227 data-nosnippet>1227</a>                <span class="prelude-val">None </span>=&gt; <span class="prelude-val">None</span>,
-<a href=#1228 id=1228 data-nosnippet>1228</a>                <span class="prelude-val">Some</span>(days) =&gt; <span class="prelude-val">Some</span>(
-<a href=#1229 id=1229 data-nosnippet>1229</a>                    now.checked_add(i64::from(days) * <span class="number">86_400</span>)
-<a href=#1230 id=1230 data-nosnippet>1230</a>                        .ok_or(AnswerError::TimeOverflow)<span class="question-mark">?</span>,
-<a href=#1231 id=1231 data-nosnippet>1231</a>                ),
-<a href=#1232 id=1232 data-nosnippet>1232</a>            };
-<a href=#1233 id=1233 data-nosnippet>1233</a>            allowed(<span class="prelude-val">Some</span>(LocalApproval {
-<a href=#1234 id=1234 data-nosnippet>1234</a>                sha256,
-<a href=#1235 id=1235 data-nosnippet>1235</a>                scope: prompt.local_approval_scope,
-<a href=#1236 id=1236 data-nosnippet>1236</a>                user_sid,
-<a href=#1237 id=1237 data-nosnippet>1237</a>                approved_at: now,
-<a href=#1238 id=1238 data-nosnippet>1238</a>                expires_at,
-<a href=#1239 id=1239 data-nosnippet>1239</a>                justification,
-<a href=#1240 id=1240 data-nosnippet>1240</a>                upload_for_review: <span class="bool-val">true</span>,
-<a href=#1241 id=1241 data-nosnippet>1241</a>            }))
-<a href=#1242 id=1242 data-nosnippet>1242</a>        }
-<a href=#1243 id=1243 data-nosnippet>1243</a>    })
-<a href=#1244 id=1244 data-nosnippet>1244</a>}
-<a href=#1245 id=1245 data-nosnippet>1245</a>
-<a href=#1246 id=1246 data-nosnippet>1246</a><span class="attr">#[cfg(test)]
-<a href=#1247 id=1247 data-nosnippet>1247</a></span><span class="kw">mod </span>previous_classifier;
-<a href=#1248 id=1248 data-nosnippet>1248</a><span class="attr">#[cfg(test)]
-<a href=#1249 id=1249 data-nosnippet>1249</a></span><span class="kw">mod </span>tests;
+<a href=#1178 id=1178 data-nosnippet>1178</a>            }))
+<a href=#1179 id=1179 data-nosnippet>1179</a>    {
+<a href=#1180 id=1180 data-nosnippet>1180</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(AnswerError::InvalidJustification);
+<a href=#1181 id=1181 data-nosnippet>1181</a>    }
+<a href=#1182 id=1182 data-nosnippet>1182</a>    <span class="kw">if </span>prompt.require_justification
+<a href=#1183 id=1183 data-nosnippet>1183</a>        &amp;&amp; justification.is_none()
+<a href=#1184 id=1184 data-nosnippet>1184</a>        &amp;&amp; <span class="macro">matches!</span>(
+<a href=#1185 id=1185 data-nosnippet>1185</a>            option,
+<a href=#1186 id=1186 data-nosnippet>1186</a>            PromptOption::AllowOnce
+<a href=#1187 id=1187 data-nosnippet>1187</a>                | PromptOption::AllowAlwaysLocal
+<a href=#1188 id=1188 data-nosnippet>1188</a>                | PromptOption::RequestApproval
+<a href=#1189 id=1189 data-nosnippet>1189</a>        )
+<a href=#1190 id=1190 data-nosnippet>1190</a>    {
+<a href=#1191 id=1191 data-nosnippet>1191</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(AnswerError::JustificationRequired);
+<a href=#1192 id=1192 data-nosnippet>1192</a>    }
+<a href=#1193 id=1193 data-nosnippet>1193</a>    <span class="kw">if </span>prompt.reauth != Reauth::None &amp;&amp; !reauthenticated &amp;&amp; <span class="kw-2">*</span>option != PromptOption::Block {
+<a href=#1194 id=1194 data-nosnippet>1194</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(AnswerError::ReauthRequired);
+<a href=#1195 id=1195 data-nosnippet>1195</a>    }
+<a href=#1196 id=1196 data-nosnippet>1196</a>    <span class="kw">let </span>allowed = |approval| AnswerResult {
+<a href=#1197 id=1197 data-nosnippet>1197</a>        outcome: Outcome::Allowed,
+<a href=#1198 id=1198 data-nosnippet>1198</a>        reason_code: ReasonCode::UnknownPrompt,
+<a href=#1199 id=1199 data-nosnippet>1199</a>        containment: <span class="prelude-val">None</span>,
+<a href=#1200 id=1200 data-nosnippet>1200</a>        approval,
+<a href=#1201 id=1201 data-nosnippet>1201</a>        request_approval: <span class="bool-val">false</span>,
+<a href=#1202 id=1202 data-nosnippet>1202</a>    };
+<a href=#1203 id=1203 data-nosnippet>1203</a>    <span class="kw">let </span>blocked = |request_approval| AnswerResult {
+<a href=#1204 id=1204 data-nosnippet>1204</a>        outcome: Outcome::Blocked,
+<a href=#1205 id=1205 data-nosnippet>1205</a>        reason_code: ReasonCode::UnknownPrompt,
+<a href=#1206 id=1206 data-nosnippet>1206</a>        containment: <span class="prelude-val">None</span>,
+<a href=#1207 id=1207 data-nosnippet>1207</a>        approval: <span class="prelude-val">None</span>,
+<a href=#1208 id=1208 data-nosnippet>1208</a>        request_approval,
+<a href=#1209 id=1209 data-nosnippet>1209</a>    };
+<a href=#1210 id=1210 data-nosnippet>1210</a>    <span class="prelude-val">Ok</span>(<span class="kw">match </span>option {
+<a href=#1211 id=1211 data-nosnippet>1211</a>        PromptOption::AllowOnce =&gt; allowed(<span class="prelude-val">None</span>),
+<a href=#1212 id=1212 data-nosnippet>1212</a>        PromptOption::Block =&gt; blocked(<span class="bool-val">false</span>),
+<a href=#1213 id=1213 data-nosnippet>1213</a>        PromptOption::RequestApproval =&gt; blocked(<span class="bool-val">true</span>),
+<a href=#1214 id=1214 data-nosnippet>1214</a>        PromptOption::AllowAlwaysLocal =&gt; {
+<a href=#1215 id=1215 data-nosnippet>1215</a>            <span class="comment">// Only offered when the hash is known.
+<a href=#1216 id=1216 data-nosnippet>1216</a>            </span><span class="kw">let </span>sha256 = prompt.sha256.clone().ok_or(AnswerError::NotOffered)<span class="question-mark">?</span>;
+<a href=#1217 id=1217 data-nosnippet>1217</a>            <span class="kw">let </span>user_sid = <span class="kw">match </span>prompt.local_approval_scope {
+<a href=#1218 id=1218 data-nosnippet>1218</a>                ApprovalScope::Device =&gt; <span class="prelude-val">None</span>,
+<a href=#1219 id=1219 data-nosnippet>1219</a>                ApprovalScope::User =&gt; <span class="prelude-val">Some</span>(
+<a href=#1220 id=1220 data-nosnippet>1220</a>                    user_sid
+<a href=#1221 id=1221 data-nosnippet>1221</a>                        .and_then(<span class="kw">crate</span>::context::normalize_sid)
+<a href=#1222 id=1222 data-nosnippet>1222</a>                        .ok_or(AnswerError::UserUnknown)<span class="question-mark">?</span>,
+<a href=#1223 id=1223 data-nosnippet>1223</a>                ),
+<a href=#1224 id=1224 data-nosnippet>1224</a>            };
+<a href=#1225 id=1225 data-nosnippet>1225</a>            <span class="kw">let </span>expires_at = <span class="kw">match </span>prompt.temp_approval_days {
+<a href=#1226 id=1226 data-nosnippet>1226</a>                <span class="prelude-val">None </span>=&gt; <span class="prelude-val">None</span>,
+<a href=#1227 id=1227 data-nosnippet>1227</a>                <span class="prelude-val">Some</span>(days) =&gt; <span class="prelude-val">Some</span>(
+<a href=#1228 id=1228 data-nosnippet>1228</a>                    now.checked_add(i64::from(days) * <span class="number">86_400</span>)
+<a href=#1229 id=1229 data-nosnippet>1229</a>                        .ok_or(AnswerError::TimeOverflow)<span class="question-mark">?</span>,
+<a href=#1230 id=1230 data-nosnippet>1230</a>                ),
+<a href=#1231 id=1231 data-nosnippet>1231</a>            };
+<a href=#1232 id=1232 data-nosnippet>1232</a>            allowed(<span class="prelude-val">Some</span>(LocalApproval {
+<a href=#1233 id=1233 data-nosnippet>1233</a>                sha256,
+<a href=#1234 id=1234 data-nosnippet>1234</a>                scope: prompt.local_approval_scope,
+<a href=#1235 id=1235 data-nosnippet>1235</a>                user_sid,
+<a href=#1236 id=1236 data-nosnippet>1236</a>                approved_at: now,
+<a href=#1237 id=1237 data-nosnippet>1237</a>                expires_at,
+<a href=#1238 id=1238 data-nosnippet>1238</a>                justification,
+<a href=#1239 id=1239 data-nosnippet>1239</a>                upload_for_review: <span class="bool-val">true</span>,
+<a href=#1240 id=1240 data-nosnippet>1240</a>            }))
+<a href=#1241 id=1241 data-nosnippet>1241</a>        }
+<a href=#1242 id=1242 data-nosnippet>1242</a>    })
+<a href=#1243 id=1243 data-nosnippet>1243</a>}
+<a href=#1244 id=1244 data-nosnippet>1244</a>
+<a href=#1245 id=1245 data-nosnippet>1245</a><span class="attr">#[cfg(test)]
+<a href=#1246 id=1246 data-nosnippet>1246</a></span><span class="kw">mod </span>previous_classifier;
+<a href=#1247 id=1247 data-nosnippet>1247</a><span class="attr">#[cfg(test)]
+<a href=#1248 id=1248 data-nosnippet>1248</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

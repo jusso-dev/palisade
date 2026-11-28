@@ -949,140 +949,141 @@
 <a href=#949 id=949 data-nosnippet>949</a>/// warning.
 <a href=#950 id=950 data-nosnippet>950</a></span><span class="kw">fn </span>utf16le_text(bytes: <span class="kw-2">&amp;</span>[u8], warnings: <span class="kw-2">&amp;mut </span>Warnings) -&gt; String {
 <a href=#951 id=951 data-nosnippet>951</a>    <span class="kw">let </span>end = bytes
-<a href=#952 id=952 data-nosnippet>952</a>        .chunks_exact(<span class="number">2</span>)
-<a href=#953 id=953 data-nosnippet>953</a>        .position(|pair| pair == [<span class="number">0</span>, <span class="number">0</span>])
-<a href=#954 id=954 data-nosnippet>954</a>        .map_or(bytes.len(), |units| units.saturating_mul(<span class="number">2</span>));
-<a href=#955 id=955 data-nosnippet>955</a>    <span class="kw">let </span>body = bytes.get(..end).unwrap_or_default();
-<a href=#956 id=956 data-nosnippet>956</a>    <span class="kw">let </span><span class="kw-2">mut </span>truncated = body.len() &gt; MAX_VALUE_BYTES;
-<a href=#957 id=957 data-nosnippet>957</a>    <span class="kw">let </span>body = body.get(..MAX_VALUE_BYTES).unwrap_or(body);
-<a href=#958 id=958 data-nosnippet>958</a>    <span class="kw">let </span><span class="kw-2">mut </span>units: Vec&lt;u16&gt; = body
-<a href=#959 id=959 data-nosnippet>959</a>        .chunks_exact(<span class="number">2</span>)
-<a href=#960 id=960 data-nosnippet>960</a>        .map(|pair| <span class="kw">match </span>pair {
-<a href=#961 id=961 data-nosnippet>961</a>            [lo, hi] =&gt; u16::from_le_bytes([<span class="kw-2">*</span>lo, <span class="kw-2">*</span>hi]),
-<a href=#962 id=962 data-nosnippet>962</a>            <span class="kw">_ </span>=&gt; <span class="number">0</span>,
-<a href=#963 id=963 data-nosnippet>963</a>        })
-<a href=#964 id=964 data-nosnippet>964</a>        .collect();
-<a href=#965 id=965 data-nosnippet>965</a>    <span class="comment">// A cut at the byte limit can split a surrogate pair: drop its first
-<a href=#966 id=966 data-nosnippet>966</a>    // half rather than report the text as ill-formed.
-<a href=#967 id=967 data-nosnippet>967</a>    </span><span class="kw">if </span>truncated &amp;&amp; units.last().is_some_and(|u| (<span class="number">0xd800</span>..<span class="number">0xdc00</span>).contains(u)) {
-<a href=#968 id=968 data-nosnippet>968</a>        units.pop();
-<a href=#969 id=969 data-nosnippet>969</a>    }
-<a href=#970 id=970 data-nosnippet>970</a>    <span class="kw">let </span><span class="kw-2">mut </span>text = String::new();
-<a href=#971 id=971 data-nosnippet>971</a>    <span class="kw">let </span><span class="kw-2">mut </span>lossy = <span class="bool-val">false</span>;
-<a href=#972 id=972 data-nosnippet>972</a>    <span class="kw">for </span>(count, c) <span class="kw">in </span>char::decode_utf16(units).enumerate() {
-<a href=#973 id=973 data-nosnippet>973</a>        <span class="kw">if </span>count &gt;= asn1::MAX_TEXT_CHARS {
-<a href=#974 id=974 data-nosnippet>974</a>            truncated = <span class="bool-val">true</span>;
-<a href=#975 id=975 data-nosnippet>975</a>            <span class="kw">break</span>;
-<a href=#976 id=976 data-nosnippet>976</a>        }
-<a href=#977 id=977 data-nosnippet>977</a>        text.push(c.unwrap_or_else(|<span class="kw">_</span>| {
-<a href=#978 id=978 data-nosnippet>978</a>            lossy = <span class="bool-val">true</span>;
-<a href=#979 id=979 data-nosnippet>979</a>            char::REPLACEMENT_CHARACTER
-<a href=#980 id=980 data-nosnippet>980</a>        }));
-<a href=#981 id=981 data-nosnippet>981</a>    }
-<a href=#982 id=982 data-nosnippet>982</a>    <span class="kw">if </span>!truncated &amp;&amp; body.len() % <span class="number">2 </span>== <span class="number">1 </span>{
-<a href=#983 id=983 data-nosnippet>983</a>        lossy = <span class="bool-val">true</span>;
-<a href=#984 id=984 data-nosnippet>984</a>        text.push(char::REPLACEMENT_CHARACTER);
-<a href=#985 id=985 data-nosnippet>985</a>    }
-<a href=#986 id=986 data-nosnippet>986</a>    <span class="kw">if </span>lossy {
-<a href=#987 id=987 data-nosnippet>987</a>        warnings.push(CtlWarning::LossyText);
-<a href=#988 id=988 data-nosnippet>988</a>    }
-<a href=#989 id=989 data-nosnippet>989</a>    <span class="kw">if </span>truncated {
-<a href=#990 id=990 data-nosnippet>990</a>        warnings.push(CtlWarning::Truncated);
-<a href=#991 id=991 data-nosnippet>991</a>    }
-<a href=#992 id=992 data-nosnippet>992</a>    text
-<a href=#993 id=993 data-nosnippet>993</a>}
-<a href=#994 id=994 data-nosnippet>994</a>
-<a href=#995 id=995 data-nosnippet>995</a><span class="doccomment">/// Whether `tag` is the uppercase hex of `digest` (lowercase is accepted
-<a href=#996 id=996 data-nosnippet>996</a>/// too: the OS compares tags case-insensitively).
-<a href=#997 id=997 data-nosnippet>997</a></span><span class="kw">fn </span>tag_is_hex_of(tag: <span class="kw-2">&amp;</span>str, digest: <span class="kw-2">&amp;</span>[u8]) -&gt; bool {
-<a href=#998 id=998 data-nosnippet>998</a>    <span class="kw">const </span>DIGITS: <span class="kw-2">&amp;</span>[u8; <span class="number">16</span>] = <span class="string">b"0123456789ABCDEF"</span>;
-<a href=#999 id=999 data-nosnippet>999</a>    <span class="kw">let </span>bytes = tag.as_bytes();
-<a href=#1000 id=1000 data-nosnippet>1000</a>    <span class="kw">if </span>bytes.len() != digest.len().saturating_mul(<span class="number">2</span>) {
-<a href=#1001 id=1001 data-nosnippet>1001</a>        <span class="kw">return </span><span class="bool-val">false</span>;
-<a href=#1002 id=1002 data-nosnippet>1002</a>    }
-<a href=#1003 id=1003 data-nosnippet>1003</a>    digest.iter().zip(bytes.chunks_exact(<span class="number">2</span>)).all(|(b, pair)| {
-<a href=#1004 id=1004 data-nosnippet>1004</a>        <span class="kw">let </span>hi = DIGITS.get(usize::from(b &gt;&gt; <span class="number">4</span>)).copied();
-<a href=#1005 id=1005 data-nosnippet>1005</a>        <span class="kw">let </span>lo = DIGITS.get(usize::from(b &amp; <span class="number">0x0f</span>)).copied();
-<a href=#1006 id=1006 data-nosnippet>1006</a>        <span class="kw">match </span>pair {
-<a href=#1007 id=1007 data-nosnippet>1007</a>            [h, l] =&gt; <span class="prelude-val">Some</span>(h.to_ascii_uppercase()) == hi &amp;&amp; <span class="prelude-val">Some</span>(l.to_ascii_uppercase()) == lo,
-<a href=#1008 id=1008 data-nosnippet>1008</a>            <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
-<a href=#1009 id=1009 data-nosnippet>1009</a>        }
-<a href=#1010 id=1010 data-nosnippet>1010</a>    })
-<a href=#1011 id=1011 data-nosnippet>1011</a>}
-<a href=#1012 id=1012 data-nosnippet>1012</a>
-<a href=#1013 id=1013 data-nosnippet>1013</a><span class="attr">#[cfg(test)]
-<a href=#1014 id=1014 data-nosnippet>1014</a></span><span class="kw">mod </span>tests {
-<a href=#1015 id=1015 data-nosnippet>1015</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
-<a href=#1016 id=1016 data-nosnippet>1016</a>
-<a href=#1017 id=1017 data-nosnippet>1017</a>    <span class="kw">fn </span>text(bytes: <span class="kw-2">&amp;</span>[u8]) -&gt; (String, Vec&lt;CtlWarning&gt;) {
-<a href=#1018 id=1018 data-nosnippet>1018</a>        <span class="kw">let </span><span class="kw-2">mut </span>w = Warnings::default();
-<a href=#1019 id=1019 data-nosnippet>1019</a>        <span class="kw">let </span>t = utf16le_text(bytes, <span class="kw-2">&amp;mut </span>w);
-<a href=#1020 id=1020 data-nosnippet>1020</a>        (t, w.<span class="number">0</span>)
-<a href=#1021 id=1021 data-nosnippet>1021</a>    }
-<a href=#1022 id=1022 data-nosnippet>1022</a>
-<a href=#1023 id=1023 data-nosnippet>1023</a>    <span class="kw">fn </span>le(s: <span class="kw-2">&amp;</span>str) -&gt; Vec&lt;u8&gt; {
-<a href=#1024 id=1024 data-nosnippet>1024</a>        s.encode_utf16().flat_map(u16::to_le_bytes).collect()
-<a href=#1025 id=1025 data-nosnippet>1025</a>    }
-<a href=#1026 id=1026 data-nosnippet>1026</a>
-<a href=#1027 id=1027 data-nosnippet>1027</a>    <span class="attr">#[test]
-<a href=#1028 id=1028 data-nosnippet>1028</a>    </span><span class="kw">fn </span>utf16le_stops_at_nul() {
-<a href=#1029 id=1029 data-nosnippet>1029</a>        <span class="kw">let </span><span class="kw-2">mut </span>b = le(<span class="string">"AB"</span>);
-<a href=#1030 id=1030 data-nosnippet>1030</a>        b.extend([<span class="number">0</span>, <span class="number">0</span>]);
-<a href=#1031 id=1031 data-nosnippet>1031</a>        b.extend(le(<span class="string">"CD"</span>));
-<a href=#1032 id=1032 data-nosnippet>1032</a>        <span class="macro">assert_eq!</span>(text(<span class="kw-2">&amp;</span>b), (<span class="string">"AB"</span>.to_owned(), <span class="macro">vec!</span>[]));
-<a href=#1033 id=1033 data-nosnippet>1033</a>        <span class="macro">assert_eq!</span>(text(<span class="kw-2">&amp;</span>le(<span class="string">"x"</span>)), (<span class="string">"x"</span>.to_owned(), <span class="macro">vec!</span>[]));
-<a href=#1034 id=1034 data-nosnippet>1034</a>        <span class="macro">assert_eq!</span>(text(<span class="kw-2">&amp;</span>[]), (String::new(), <span class="macro">vec!</span>[]));
-<a href=#1035 id=1035 data-nosnippet>1035</a>    }
-<a href=#1036 id=1036 data-nosnippet>1036</a>
-<a href=#1037 id=1037 data-nosnippet>1037</a>    <span class="attr">#[test]
-<a href=#1038 id=1038 data-nosnippet>1038</a>    </span><span class="kw">fn </span>utf16le_odd_and_surrogates_are_lossy() {
-<a href=#1039 id=1039 data-nosnippet>1039</a>        <span class="kw">let </span>(t, w) = text(<span class="kw-2">&amp;</span>[<span class="string">b'A'</span>, <span class="number">0</span>, <span class="string">b'B'</span>]);
-<a href=#1040 id=1040 data-nosnippet>1040</a>        <span class="macro">assert_eq!</span>(t, <span class="string">"A\u{fffd}"</span>);
-<a href=#1041 id=1041 data-nosnippet>1041</a>        <span class="macro">assert_eq!</span>(w, [CtlWarning::LossyText]);
-<a href=#1042 id=1042 data-nosnippet>1042</a>        <span class="kw">let </span>(t, w) = text(<span class="kw-2">&amp;</span>[<span class="number">0x00</span>, <span class="number">0xd8</span>, <span class="string">b'A'</span>, <span class="number">0</span>]);
-<a href=#1043 id=1043 data-nosnippet>1043</a>        <span class="macro">assert_eq!</span>(t, <span class="string">"\u{fffd}A"</span>);
-<a href=#1044 id=1044 data-nosnippet>1044</a>        <span class="macro">assert_eq!</span>(w, [CtlWarning::LossyText]);
-<a href=#1045 id=1045 data-nosnippet>1045</a>        <span class="comment">// A real pair decodes.
-<a href=#1046 id=1046 data-nosnippet>1046</a>        </span><span class="macro">assert_eq!</span>(text(<span class="kw-2">&amp;</span>le(<span class="string">"\u{1f600}"</span>)).<span class="number">0</span>, <span class="string">"\u{1f600}"</span>);
-<a href=#1047 id=1047 data-nosnippet>1047</a>    }
-<a href=#1048 id=1048 data-nosnippet>1048</a>
-<a href=#1049 id=1049 data-nosnippet>1049</a>    <span class="attr">#[test]
-<a href=#1050 id=1050 data-nosnippet>1050</a>    </span><span class="kw">fn </span>utf16le_is_bounded() {
-<a href=#1051 id=1051 data-nosnippet>1051</a>        <span class="kw">let </span>long = le(<span class="kw-2">&amp;</span><span class="string">"a"</span>.repeat(asn1::MAX_TEXT_CHARS + <span class="number">10</span>));
-<a href=#1052 id=1052 data-nosnippet>1052</a>        <span class="kw">let </span>(t, w) = text(<span class="kw-2">&amp;</span>long);
-<a href=#1053 id=1053 data-nosnippet>1053</a>        <span class="macro">assert_eq!</span>(t.chars().count(), asn1::MAX_TEXT_CHARS);
-<a href=#1054 id=1054 data-nosnippet>1054</a>        <span class="macro">assert_eq!</span>(w, [CtlWarning::Truncated]);
-<a href=#1055 id=1055 data-nosnippet>1055</a>        <span class="comment">// Exactly at the limit, NUL-terminated: not truncated.
-<a href=#1056 id=1056 data-nosnippet>1056</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>exact = le(<span class="kw-2">&amp;</span><span class="string">"a"</span>.repeat(asn1::MAX_TEXT_CHARS));
-<a href=#1057 id=1057 data-nosnippet>1057</a>        exact.extend([<span class="number">0</span>, <span class="number">0</span>]);
-<a href=#1058 id=1058 data-nosnippet>1058</a>        <span class="kw">let </span>(t, w) = text(<span class="kw-2">&amp;</span>exact);
-<a href=#1059 id=1059 data-nosnippet>1059</a>        <span class="macro">assert_eq!</span>(t.len(), asn1::MAX_TEXT_CHARS);
-<a href=#1060 id=1060 data-nosnippet>1060</a>        <span class="macro">assert_eq!</span>(w, []);
-<a href=#1061 id=1061 data-nosnippet>1061</a>    }
-<a href=#1062 id=1062 data-nosnippet>1062</a>
-<a href=#1063 id=1063 data-nosnippet>1063</a>    <span class="attr">#[test]
-<a href=#1064 id=1064 data-nosnippet>1064</a>    </span><span class="kw">fn </span>tag_hex_comparison() {
-<a href=#1065 id=1065 data-nosnippet>1065</a>        <span class="macro">assert!</span>(tag_is_hex_of(<span class="string">"0AFF"</span>, <span class="kw-2">&amp;</span>[<span class="number">0x0a</span>, <span class="number">0xff</span>]));
-<a href=#1066 id=1066 data-nosnippet>1066</a>        <span class="macro">assert!</span>(tag_is_hex_of(<span class="string">"0aff"</span>, <span class="kw-2">&amp;</span>[<span class="number">0x0a</span>, <span class="number">0xff</span>]));
-<a href=#1067 id=1067 data-nosnippet>1067</a>        <span class="macro">assert!</span>(!tag_is_hex_of(<span class="string">"0AFE"</span>, <span class="kw-2">&amp;</span>[<span class="number">0x0a</span>, <span class="number">0xff</span>]));
-<a href=#1068 id=1068 data-nosnippet>1068</a>        <span class="macro">assert!</span>(!tag_is_hex_of(<span class="string">"0AF"</span>, <span class="kw-2">&amp;</span>[<span class="number">0x0a</span>, <span class="number">0xff</span>]));
-<a href=#1069 id=1069 data-nosnippet>1069</a>        <span class="macro">assert!</span>(!tag_is_hex_of(<span class="string">"\u{e9}\u{e9}"</span>, <span class="kw-2">&amp;</span>[<span class="number">0x0a</span>]));
-<a href=#1070 id=1070 data-nosnippet>1070</a>    }
-<a href=#1071 id=1071 data-nosnippet>1071</a>
-<a href=#1072 id=1072 data-nosnippet>1072</a>    <span class="attr">#[test]
-<a href=#1073 id=1073 data-nosnippet>1073</a>    </span><span class="kw">fn </span>known_oids_encode_their_dotted_form() {
-<a href=#1074 id=1074 data-nosnippet>1074</a>        <span class="kw">let </span>check = |der: <span class="kw-2">&amp;</span>[u8], dotted: <span class="kw-2">&amp;</span>str| {
-<a href=#1075 id=1075 data-nosnippet>1075</a>            <span class="macro">assert_eq!</span>(ObjectId::from_der(der).to_string(), dotted);
-<a href=#1076 id=1076 data-nosnippet>1076</a>        };
-<a href=#1077 id=1077 data-nosnippet>1077</a>        check(oid::CTL, <span class="string">"1.3.6.1.4.1.311.10.1"</span>);
-<a href=#1078 id=1078 data-nosnippet>1078</a>        check(oid::CATALOG_LIST, <span class="string">"1.3.6.1.4.1.311.12.1.1"</span>);
-<a href=#1079 id=1079 data-nosnippet>1079</a>        check(oid::CATALOG_LIST_MEMBER, <span class="string">"1.3.6.1.4.1.311.12.1.2"</span>);
-<a href=#1080 id=1080 data-nosnippet>1080</a>        check(oid::CATALOG_LIST_MEMBER2, <span class="string">"1.3.6.1.4.1.311.12.1.3"</span>);
-<a href=#1081 id=1081 data-nosnippet>1081</a>        check(oid::SPC_INDIRECT_DATA, <span class="string">"1.3.6.1.4.1.311.2.1.4"</span>);
-<a href=#1082 id=1082 data-nosnippet>1082</a>        check(oid::SPC_PE_IMAGE_DATA, <span class="string">"1.3.6.1.4.1.311.2.1.15"</span>);
-<a href=#1083 id=1083 data-nosnippet>1083</a>        check(oid::CAT_NAMEVALUE, <span class="string">"1.3.6.1.4.1.311.12.2.1"</span>);
-<a href=#1084 id=1084 data-nosnippet>1084</a>        check(oid::CAT_MEMBERINFO, <span class="string">"1.3.6.1.4.1.311.12.2.2"</span>);
-<a href=#1085 id=1085 data-nosnippet>1085</a>        check(oid::CAT_MEMBERINFO2, <span class="string">"1.3.6.1.4.1.311.12.2.3"</span>);
-<a href=#1086 id=1086 data-nosnippet>1086</a>    }
-<a href=#1087 id=1087 data-nosnippet>1087</a>}
+<a href=#952 id=952 data-nosnippet>952</a>        .as_chunks::&lt;<span class="number">2</span>&gt;()
+<a href=#953 id=953 data-nosnippet>953</a>        .<span class="number">0
+<a href=#954 id=954 data-nosnippet>954</a>        </span>.iter()
+<a href=#955 id=955 data-nosnippet>955</a>        .position(|pair| pair == <span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">0</span>])
+<a href=#956 id=956 data-nosnippet>956</a>        .map_or(bytes.len(), |units| units.saturating_mul(<span class="number">2</span>));
+<a href=#957 id=957 data-nosnippet>957</a>    <span class="kw">let </span>body = bytes.get(..end).unwrap_or_default();
+<a href=#958 id=958 data-nosnippet>958</a>    <span class="kw">let </span><span class="kw-2">mut </span>truncated = body.len() &gt; MAX_VALUE_BYTES;
+<a href=#959 id=959 data-nosnippet>959</a>    <span class="kw">let </span>body = body.get(..MAX_VALUE_BYTES).unwrap_or(body);
+<a href=#960 id=960 data-nosnippet>960</a>    <span class="kw">let </span><span class="kw-2">mut </span>units: Vec&lt;u16&gt; = body
+<a href=#961 id=961 data-nosnippet>961</a>        .as_chunks::&lt;<span class="number">2</span>&gt;()
+<a href=#962 id=962 data-nosnippet>962</a>        .<span class="number">0
+<a href=#963 id=963 data-nosnippet>963</a>        </span>.iter()
+<a href=#964 id=964 data-nosnippet>964</a>        .map(|pair| u16::from_le_bytes(<span class="kw-2">*</span>pair))
+<a href=#965 id=965 data-nosnippet>965</a>        .collect();
+<a href=#966 id=966 data-nosnippet>966</a>    <span class="comment">// A cut at the byte limit can split a surrogate pair: drop its first
+<a href=#967 id=967 data-nosnippet>967</a>    // half rather than report the text as ill-formed.
+<a href=#968 id=968 data-nosnippet>968</a>    </span><span class="kw">if </span>truncated &amp;&amp; units.last().is_some_and(|u| (<span class="number">0xd800</span>..<span class="number">0xdc00</span>).contains(u)) {
+<a href=#969 id=969 data-nosnippet>969</a>        units.pop();
+<a href=#970 id=970 data-nosnippet>970</a>    }
+<a href=#971 id=971 data-nosnippet>971</a>    <span class="kw">let </span><span class="kw-2">mut </span>text = String::new();
+<a href=#972 id=972 data-nosnippet>972</a>    <span class="kw">let </span><span class="kw-2">mut </span>lossy = <span class="bool-val">false</span>;
+<a href=#973 id=973 data-nosnippet>973</a>    <span class="kw">for </span>(count, c) <span class="kw">in </span>char::decode_utf16(units).enumerate() {
+<a href=#974 id=974 data-nosnippet>974</a>        <span class="kw">if </span>count &gt;= asn1::MAX_TEXT_CHARS {
+<a href=#975 id=975 data-nosnippet>975</a>            truncated = <span class="bool-val">true</span>;
+<a href=#976 id=976 data-nosnippet>976</a>            <span class="kw">break</span>;
+<a href=#977 id=977 data-nosnippet>977</a>        }
+<a href=#978 id=978 data-nosnippet>978</a>        text.push(c.unwrap_or_else(|<span class="kw">_</span>| {
+<a href=#979 id=979 data-nosnippet>979</a>            lossy = <span class="bool-val">true</span>;
+<a href=#980 id=980 data-nosnippet>980</a>            char::REPLACEMENT_CHARACTER
+<a href=#981 id=981 data-nosnippet>981</a>        }));
+<a href=#982 id=982 data-nosnippet>982</a>    }
+<a href=#983 id=983 data-nosnippet>983</a>    <span class="kw">if </span>!truncated &amp;&amp; body.len() % <span class="number">2 </span>== <span class="number">1 </span>{
+<a href=#984 id=984 data-nosnippet>984</a>        lossy = <span class="bool-val">true</span>;
+<a href=#985 id=985 data-nosnippet>985</a>        text.push(char::REPLACEMENT_CHARACTER);
+<a href=#986 id=986 data-nosnippet>986</a>    }
+<a href=#987 id=987 data-nosnippet>987</a>    <span class="kw">if </span>lossy {
+<a href=#988 id=988 data-nosnippet>988</a>        warnings.push(CtlWarning::LossyText);
+<a href=#989 id=989 data-nosnippet>989</a>    }
+<a href=#990 id=990 data-nosnippet>990</a>    <span class="kw">if </span>truncated {
+<a href=#991 id=991 data-nosnippet>991</a>        warnings.push(CtlWarning::Truncated);
+<a href=#992 id=992 data-nosnippet>992</a>    }
+<a href=#993 id=993 data-nosnippet>993</a>    text
+<a href=#994 id=994 data-nosnippet>994</a>}
+<a href=#995 id=995 data-nosnippet>995</a>
+<a href=#996 id=996 data-nosnippet>996</a><span class="doccomment">/// Whether `tag` is the uppercase hex of `digest` (lowercase is accepted
+<a href=#997 id=997 data-nosnippet>997</a>/// too: the OS compares tags case-insensitively).
+<a href=#998 id=998 data-nosnippet>998</a></span><span class="kw">fn </span>tag_is_hex_of(tag: <span class="kw-2">&amp;</span>str, digest: <span class="kw-2">&amp;</span>[u8]) -&gt; bool {
+<a href=#999 id=999 data-nosnippet>999</a>    <span class="kw">const </span>DIGITS: <span class="kw-2">&amp;</span>[u8; <span class="number">16</span>] = <span class="string">b"0123456789ABCDEF"</span>;
+<a href=#1000 id=1000 data-nosnippet>1000</a>    <span class="kw">let </span>bytes = tag.as_bytes();
+<a href=#1001 id=1001 data-nosnippet>1001</a>    <span class="kw">if </span>bytes.len() != digest.len().saturating_mul(<span class="number">2</span>) {
+<a href=#1002 id=1002 data-nosnippet>1002</a>        <span class="kw">return </span><span class="bool-val">false</span>;
+<a href=#1003 id=1003 data-nosnippet>1003</a>    }
+<a href=#1004 id=1004 data-nosnippet>1004</a>    digest
+<a href=#1005 id=1005 data-nosnippet>1005</a>        .iter()
+<a href=#1006 id=1006 data-nosnippet>1006</a>        .zip(bytes.as_chunks::&lt;<span class="number">2</span>&gt;().<span class="number">0</span>)
+<a href=#1007 id=1007 data-nosnippet>1007</a>        .all(|(b, [h, l])| {
+<a href=#1008 id=1008 data-nosnippet>1008</a>            <span class="kw">let </span>hi = DIGITS.get(usize::from(b &gt;&gt; <span class="number">4</span>)).copied();
+<a href=#1009 id=1009 data-nosnippet>1009</a>            <span class="kw">let </span>lo = DIGITS.get(usize::from(b &amp; <span class="number">0x0f</span>)).copied();
+<a href=#1010 id=1010 data-nosnippet>1010</a>            <span class="prelude-val">Some</span>(h.to_ascii_uppercase()) == hi &amp;&amp; <span class="prelude-val">Some</span>(l.to_ascii_uppercase()) == lo
+<a href=#1011 id=1011 data-nosnippet>1011</a>        })
+<a href=#1012 id=1012 data-nosnippet>1012</a>}
+<a href=#1013 id=1013 data-nosnippet>1013</a>
+<a href=#1014 id=1014 data-nosnippet>1014</a><span class="attr">#[cfg(test)]
+<a href=#1015 id=1015 data-nosnippet>1015</a></span><span class="kw">mod </span>tests {
+<a href=#1016 id=1016 data-nosnippet>1016</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#1017 id=1017 data-nosnippet>1017</a>
+<a href=#1018 id=1018 data-nosnippet>1018</a>    <span class="kw">fn </span>text(bytes: <span class="kw-2">&amp;</span>[u8]) -&gt; (String, Vec&lt;CtlWarning&gt;) {
+<a href=#1019 id=1019 data-nosnippet>1019</a>        <span class="kw">let </span><span class="kw-2">mut </span>w = Warnings::default();
+<a href=#1020 id=1020 data-nosnippet>1020</a>        <span class="kw">let </span>t = utf16le_text(bytes, <span class="kw-2">&amp;mut </span>w);
+<a href=#1021 id=1021 data-nosnippet>1021</a>        (t, w.<span class="number">0</span>)
+<a href=#1022 id=1022 data-nosnippet>1022</a>    }
+<a href=#1023 id=1023 data-nosnippet>1023</a>
+<a href=#1024 id=1024 data-nosnippet>1024</a>    <span class="kw">fn </span>le(s: <span class="kw-2">&amp;</span>str) -&gt; Vec&lt;u8&gt; {
+<a href=#1025 id=1025 data-nosnippet>1025</a>        s.encode_utf16().flat_map(u16::to_le_bytes).collect()
+<a href=#1026 id=1026 data-nosnippet>1026</a>    }
+<a href=#1027 id=1027 data-nosnippet>1027</a>
+<a href=#1028 id=1028 data-nosnippet>1028</a>    <span class="attr">#[test]
+<a href=#1029 id=1029 data-nosnippet>1029</a>    </span><span class="kw">fn </span>utf16le_stops_at_nul() {
+<a href=#1030 id=1030 data-nosnippet>1030</a>        <span class="kw">let </span><span class="kw-2">mut </span>b = le(<span class="string">"AB"</span>);
+<a href=#1031 id=1031 data-nosnippet>1031</a>        b.extend([<span class="number">0</span>, <span class="number">0</span>]);
+<a href=#1032 id=1032 data-nosnippet>1032</a>        b.extend(le(<span class="string">"CD"</span>));
+<a href=#1033 id=1033 data-nosnippet>1033</a>        <span class="macro">assert_eq!</span>(text(<span class="kw-2">&amp;</span>b), (<span class="string">"AB"</span>.to_owned(), <span class="macro">vec!</span>[]));
+<a href=#1034 id=1034 data-nosnippet>1034</a>        <span class="macro">assert_eq!</span>(text(<span class="kw-2">&amp;</span>le(<span class="string">"x"</span>)), (<span class="string">"x"</span>.to_owned(), <span class="macro">vec!</span>[]));
+<a href=#1035 id=1035 data-nosnippet>1035</a>        <span class="macro">assert_eq!</span>(text(<span class="kw-2">&amp;</span>[]), (String::new(), <span class="macro">vec!</span>[]));
+<a href=#1036 id=1036 data-nosnippet>1036</a>    }
+<a href=#1037 id=1037 data-nosnippet>1037</a>
+<a href=#1038 id=1038 data-nosnippet>1038</a>    <span class="attr">#[test]
+<a href=#1039 id=1039 data-nosnippet>1039</a>    </span><span class="kw">fn </span>utf16le_odd_and_surrogates_are_lossy() {
+<a href=#1040 id=1040 data-nosnippet>1040</a>        <span class="kw">let </span>(t, w) = text(<span class="kw-2">&amp;</span>[<span class="string">b'A'</span>, <span class="number">0</span>, <span class="string">b'B'</span>]);
+<a href=#1041 id=1041 data-nosnippet>1041</a>        <span class="macro">assert_eq!</span>(t, <span class="string">"A\u{fffd}"</span>);
+<a href=#1042 id=1042 data-nosnippet>1042</a>        <span class="macro">assert_eq!</span>(w, [CtlWarning::LossyText]);
+<a href=#1043 id=1043 data-nosnippet>1043</a>        <span class="kw">let </span>(t, w) = text(<span class="kw-2">&amp;</span>[<span class="number">0x00</span>, <span class="number">0xd8</span>, <span class="string">b'A'</span>, <span class="number">0</span>]);
+<a href=#1044 id=1044 data-nosnippet>1044</a>        <span class="macro">assert_eq!</span>(t, <span class="string">"\u{fffd}A"</span>);
+<a href=#1045 id=1045 data-nosnippet>1045</a>        <span class="macro">assert_eq!</span>(w, [CtlWarning::LossyText]);
+<a href=#1046 id=1046 data-nosnippet>1046</a>        <span class="comment">// A real pair decodes.
+<a href=#1047 id=1047 data-nosnippet>1047</a>        </span><span class="macro">assert_eq!</span>(text(<span class="kw-2">&amp;</span>le(<span class="string">"\u{1f600}"</span>)).<span class="number">0</span>, <span class="string">"\u{1f600}"</span>);
+<a href=#1048 id=1048 data-nosnippet>1048</a>    }
+<a href=#1049 id=1049 data-nosnippet>1049</a>
+<a href=#1050 id=1050 data-nosnippet>1050</a>    <span class="attr">#[test]
+<a href=#1051 id=1051 data-nosnippet>1051</a>    </span><span class="kw">fn </span>utf16le_is_bounded() {
+<a href=#1052 id=1052 data-nosnippet>1052</a>        <span class="kw">let </span>long = le(<span class="kw-2">&amp;</span><span class="string">"a"</span>.repeat(asn1::MAX_TEXT_CHARS + <span class="number">10</span>));
+<a href=#1053 id=1053 data-nosnippet>1053</a>        <span class="kw">let </span>(t, w) = text(<span class="kw-2">&amp;</span>long);
+<a href=#1054 id=1054 data-nosnippet>1054</a>        <span class="macro">assert_eq!</span>(t.chars().count(), asn1::MAX_TEXT_CHARS);
+<a href=#1055 id=1055 data-nosnippet>1055</a>        <span class="macro">assert_eq!</span>(w, [CtlWarning::Truncated]);
+<a href=#1056 id=1056 data-nosnippet>1056</a>        <span class="comment">// Exactly at the limit, NUL-terminated: not truncated.
+<a href=#1057 id=1057 data-nosnippet>1057</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>exact = le(<span class="kw-2">&amp;</span><span class="string">"a"</span>.repeat(asn1::MAX_TEXT_CHARS));
+<a href=#1058 id=1058 data-nosnippet>1058</a>        exact.extend([<span class="number">0</span>, <span class="number">0</span>]);
+<a href=#1059 id=1059 data-nosnippet>1059</a>        <span class="kw">let </span>(t, w) = text(<span class="kw-2">&amp;</span>exact);
+<a href=#1060 id=1060 data-nosnippet>1060</a>        <span class="macro">assert_eq!</span>(t.len(), asn1::MAX_TEXT_CHARS);
+<a href=#1061 id=1061 data-nosnippet>1061</a>        <span class="macro">assert_eq!</span>(w, []);
+<a href=#1062 id=1062 data-nosnippet>1062</a>    }
+<a href=#1063 id=1063 data-nosnippet>1063</a>
+<a href=#1064 id=1064 data-nosnippet>1064</a>    <span class="attr">#[test]
+<a href=#1065 id=1065 data-nosnippet>1065</a>    </span><span class="kw">fn </span>tag_hex_comparison() {
+<a href=#1066 id=1066 data-nosnippet>1066</a>        <span class="macro">assert!</span>(tag_is_hex_of(<span class="string">"0AFF"</span>, <span class="kw-2">&amp;</span>[<span class="number">0x0a</span>, <span class="number">0xff</span>]));
+<a href=#1067 id=1067 data-nosnippet>1067</a>        <span class="macro">assert!</span>(tag_is_hex_of(<span class="string">"0aff"</span>, <span class="kw-2">&amp;</span>[<span class="number">0x0a</span>, <span class="number">0xff</span>]));
+<a href=#1068 id=1068 data-nosnippet>1068</a>        <span class="macro">assert!</span>(!tag_is_hex_of(<span class="string">"0AFE"</span>, <span class="kw-2">&amp;</span>[<span class="number">0x0a</span>, <span class="number">0xff</span>]));
+<a href=#1069 id=1069 data-nosnippet>1069</a>        <span class="macro">assert!</span>(!tag_is_hex_of(<span class="string">"0AF"</span>, <span class="kw-2">&amp;</span>[<span class="number">0x0a</span>, <span class="number">0xff</span>]));
+<a href=#1070 id=1070 data-nosnippet>1070</a>        <span class="macro">assert!</span>(!tag_is_hex_of(<span class="string">"\u{e9}\u{e9}"</span>, <span class="kw-2">&amp;</span>[<span class="number">0x0a</span>]));
+<a href=#1071 id=1071 data-nosnippet>1071</a>    }
+<a href=#1072 id=1072 data-nosnippet>1072</a>
+<a href=#1073 id=1073 data-nosnippet>1073</a>    <span class="attr">#[test]
+<a href=#1074 id=1074 data-nosnippet>1074</a>    </span><span class="kw">fn </span>known_oids_encode_their_dotted_form() {
+<a href=#1075 id=1075 data-nosnippet>1075</a>        <span class="kw">let </span>check = |der: <span class="kw-2">&amp;</span>[u8], dotted: <span class="kw-2">&amp;</span>str| {
+<a href=#1076 id=1076 data-nosnippet>1076</a>            <span class="macro">assert_eq!</span>(ObjectId::from_der(der).to_string(), dotted);
+<a href=#1077 id=1077 data-nosnippet>1077</a>        };
+<a href=#1078 id=1078 data-nosnippet>1078</a>        check(oid::CTL, <span class="string">"1.3.6.1.4.1.311.10.1"</span>);
+<a href=#1079 id=1079 data-nosnippet>1079</a>        check(oid::CATALOG_LIST, <span class="string">"1.3.6.1.4.1.311.12.1.1"</span>);
+<a href=#1080 id=1080 data-nosnippet>1080</a>        check(oid::CATALOG_LIST_MEMBER, <span class="string">"1.3.6.1.4.1.311.12.1.2"</span>);
+<a href=#1081 id=1081 data-nosnippet>1081</a>        check(oid::CATALOG_LIST_MEMBER2, <span class="string">"1.3.6.1.4.1.311.12.1.3"</span>);
+<a href=#1082 id=1082 data-nosnippet>1082</a>        check(oid::SPC_INDIRECT_DATA, <span class="string">"1.3.6.1.4.1.311.2.1.4"</span>);
+<a href=#1083 id=1083 data-nosnippet>1083</a>        check(oid::SPC_PE_IMAGE_DATA, <span class="string">"1.3.6.1.4.1.311.2.1.15"</span>);
+<a href=#1084 id=1084 data-nosnippet>1084</a>        check(oid::CAT_NAMEVALUE, <span class="string">"1.3.6.1.4.1.311.12.2.1"</span>);
+<a href=#1085 id=1085 data-nosnippet>1085</a>        check(oid::CAT_MEMBERINFO, <span class="string">"1.3.6.1.4.1.311.12.2.2"</span>);
+<a href=#1086 id=1086 data-nosnippet>1086</a>        check(oid::CAT_MEMBERINFO2, <span class="string">"1.3.6.1.4.1.311.12.2.3"</span>);
+<a href=#1087 id=1087 data-nosnippet>1087</a>    }
+<a href=#1088 id=1088 data-nosnippet>1088</a>}
 </code></pre></div></section></main></body></html>

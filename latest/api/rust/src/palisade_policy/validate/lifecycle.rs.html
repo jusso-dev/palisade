@@ -90,14 +90,14 @@
 <a href=#90 id=90 data-nosnippet>90</a>            }
 <a href=#91 id=91 data-nosnippet>91</a>            <span class="kw">for </span>(j, rule) <span class="kw">in </span>set.rules.iter().enumerate() {
 <a href=#92 id=92 data-nosnippet>92</a>                <span class="kw">let </span>path = <span class="macro">format!</span>(<span class="string">"/rule_sets/{i}/rules/{j}"</span>);
-<a href=#93 id=93 data-nosnippet>93</a>                <span class="kw">if let </span>(<span class="prelude-val">Some</span>(a), <span class="prelude-val">Some</span>(e)) = (rule.activates_at, rule.expires_at) {
-<a href=#94 id=94 data-nosnippet>94</a>                    <span class="kw">if </span>e &lt;= a {
-<a href=#95 id=95 data-nosnippet>95</a>                        <span class="self">self</span>.push(
-<a href=#96 id=96 data-nosnippet>96</a>                            ErrorCode::InvalidActivityWindow,
-<a href=#97 id=97 data-nosnippet>97</a>                            <span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">"{path}/expires_at"</span>),
-<a href=#98 id=98 data-nosnippet>98</a>                            <span class="macro">format!</span>(<span class="string">"`expires_at` ({e}) must be after `activates_at` ({a})"</span>),
-<a href=#99 id=99 data-nosnippet>99</a>                        );
-<a href=#100 id=100 data-nosnippet>100</a>                    }
+<a href=#93 id=93 data-nosnippet>93</a>                <span class="kw">if let </span>(<span class="prelude-val">Some</span>(a), <span class="prelude-val">Some</span>(e)) = (rule.activates_at, rule.expires_at)
+<a href=#94 id=94 data-nosnippet>94</a>                    &amp;&amp; e &lt;= a
+<a href=#95 id=95 data-nosnippet>95</a>                {
+<a href=#96 id=96 data-nosnippet>96</a>                    <span class="self">self</span>.push(
+<a href=#97 id=97 data-nosnippet>97</a>                        ErrorCode::InvalidActivityWindow,
+<a href=#98 id=98 data-nosnippet>98</a>                        <span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">"{path}/expires_at"</span>),
+<a href=#99 id=99 data-nosnippet>99</a>                        <span class="macro">format!</span>(<span class="string">"`expires_at` ({e}) must be after `activates_at` ({a})"</span>),
+<a href=#100 id=100 data-nosnippet>100</a>                    );
 <a href=#101 id=101 data-nosnippet>101</a>                }
 <a href=#102 id=102 data-nosnippet>102</a>                <span class="kw">if </span>rule.on_expire != OnExpire::Deactivate &amp;&amp; rule.expires_at.is_none() {
 <a href=#103 id=103 data-nosnippet>103</a>                    <span class="self">self</span>.push(
@@ -112,14 +112,14 @@
 <a href=#112 id=112 data-nosnippet>112</a>                        <span class="string">"a mandatory rule set holds only denies; an expired mandatory rule is removed, not converted"</span>,
 <a href=#113 id=113 data-nosnippet>113</a>                    );
 <a href=#114 id=114 data-nosnippet>114</a>                }
-<a href=#115 id=115 data-nosnippet>115</a>                <span class="kw">if let </span>OnExpire::DeleteAfterDays(d) = rule.on_expire {
-<a href=#116 id=116 data-nosnippet>116</a>                    <span class="kw">if </span>!(<span class="number">1</span>..=<span class="number">3650</span>).contains(<span class="kw-2">&amp;</span>d) {
-<a href=#117 id=117 data-nosnippet>117</a>                        <span class="self">self</span>.push(
-<a href=#118 id=118 data-nosnippet>118</a>                            ErrorCode::OnExpireNotApplicable,
-<a href=#119 id=119 data-nosnippet>119</a>                            <span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">"{path}/on_expire/delete_after_days"</span>),
-<a href=#120 id=120 data-nosnippet>120</a>                            <span class="macro">format!</span>(<span class="string">"{d} is outside 1..=3650"</span>),
-<a href=#121 id=121 data-nosnippet>121</a>                        );
-<a href=#122 id=122 data-nosnippet>122</a>                    }
+<a href=#115 id=115 data-nosnippet>115</a>                <span class="kw">if let </span>OnExpire::DeleteAfterDays(d) = rule.on_expire
+<a href=#116 id=116 data-nosnippet>116</a>                    &amp;&amp; !(<span class="number">1</span>..=<span class="number">3650</span>).contains(<span class="kw-2">&amp;</span>d)
+<a href=#117 id=117 data-nosnippet>117</a>                {
+<a href=#118 id=118 data-nosnippet>118</a>                    <span class="self">self</span>.push(
+<a href=#119 id=119 data-nosnippet>119</a>                        ErrorCode::OnExpireNotApplicable,
+<a href=#120 id=120 data-nosnippet>120</a>                        <span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">"{path}/on_expire/delete_after_days"</span>),
+<a href=#121 id=121 data-nosnippet>121</a>                        <span class="macro">format!</span>(<span class="string">"{d} is outside 1..=3650"</span>),
+<a href=#122 id=122 data-nosnippet>122</a>                    );
 <a href=#123 id=123 data-nosnippet>123</a>                }
 <a href=#124 id=124 data-nosnippet>124</a>                <span class="kw">for </span>(code, suffix, message) <span class="kw">in </span>governance_problems(doc, set, rule) {
 <a href=#125 id=125 data-nosnippet>125</a>                    <span class="self">self</span>.push(code, <span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">"{path}{suffix}"</span>), message);

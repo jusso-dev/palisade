@@ -316,7 +316,7 @@
 <a href=#316 id=316 data-nosnippet>316</a>            <span class="kw">return </span>found;
 <a href=#317 id=317 data-nosnippet>317</a>        };
 <a href=#318 id=318 data-nosnippet>318</a>        <span class="kw">let </span><span class="kw-2">mut </span>terminated = <span class="bool-val">false</span>;
-<a href=#319 id=319 data-nosnippet>319</a>        <span class="kw">for </span>descriptor <span class="kw">in </span>table.chunks_exact(IMPORT_DESCRIPTOR_LEN) {
+<a href=#319 id=319 data-nosnippet>319</a>        <span class="kw">for </span>descriptor <span class="kw">in </span>table.as_chunks::&lt;IMPORT_DESCRIPTOR_LEN&gt;().<span class="number">0 </span>{
 <a href=#320 id=320 data-nosnippet>320</a>            <span class="kw">let </span>name_rva = u32_at(descriptor, <span class="number">12</span>).unwrap_or(<span class="number">0</span>);
 <a href=#321 id=321 data-nosnippet>321</a>            <span class="kw">let </span>thunks = u32_at(descriptor, <span class="number">16</span>).unwrap_or(<span class="number">0</span>);
 <a href=#322 id=322 data-nosnippet>322</a>            <span class="kw">if </span>name_rva == <span class="number">0 </span>|| thunks == <span class="number">0 </span>{
@@ -359,7 +359,7 @@
 <a href=#359 id=359 data-nosnippet>359</a>            <span class="kw">return </span>(<span class="bool-val">false</span>, <span class="bool-val">false</span>);
 <a href=#360 id=360 data-nosnippet>360</a>        };
 <a href=#361 id=361 data-nosnippet>361</a>        <span class="kw">let </span>(<span class="kw-2">mut </span>cpl, <span class="kw-2">mut </span>register) = (<span class="bool-val">false</span>, <span class="bool-val">false</span>);
-<a href=#362 id=362 data-nosnippet>362</a>        <span class="kw">for </span>entry <span class="kw">in </span>names.chunks_exact(<span class="number">4</span>) {
+<a href=#362 id=362 data-nosnippet>362</a>        <span class="kw">for </span>entry <span class="kw">in </span>names.as_chunks::&lt;<span class="number">4</span>&gt;().<span class="number">0 </span>{
 <a href=#363 id=363 data-nosnippet>363</a>            <span class="comment">// A null or unmapped name marks the result incomplete (in
 <a href=#364 id=364 data-nosnippet>364</a>            // `read_rva`). A name with no NUL in `EXPORT_NAME_LEN` bytes is
 <a href=#365 id=365 data-nosnippet>365</a>            // longer than either name looked for, so it is skipped.
@@ -399,7 +399,7 @@
 <a href=#399 id=399 data-nosnippet>399</a>            <span class="self">self</span>.incomplete = <span class="bool-val">true</span>;
 <a href=#400 id=400 data-nosnippet>400</a>            <span class="kw">return </span><span class="bool-val">false</span>;
 <a href=#401 id=401 data-nosnippet>401</a>        };
-<a href=#402 id=402 data-nosnippet>402</a>        <span class="kw">for </span>entry <span class="kw">in </span>entries.chunks_exact(<span class="number">8</span>) {
+<a href=#402 id=402 data-nosnippet>402</a>        <span class="kw">for </span>entry <span class="kw">in </span>entries.as_chunks::&lt;<span class="number">8</span>&gt;().<span class="number">0 </span>{
 <a href=#403 id=403 data-nosnippet>403</a>            <span class="kw">let </span><span class="prelude-val">Some</span>(field) = u32_at(entry, <span class="number">0</span>) <span class="kw">else </span>{
 <a href=#404 id=404 data-nosnippet>404</a>                <span class="kw">continue</span>;
 <a href=#405 id=405 data-nosnippet>405</a>            };
@@ -517,40 +517,45 @@
 <a href=#517 id=517 data-nosnippet>517</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(units) = bytes(string, <span class="number">2</span>, <span class="number">2 </span>* TYPELIB_LEN) <span class="kw">else </span>{
 <a href=#518 id=518 data-nosnippet>518</a>        <span class="kw">return </span><span class="bool-val">false</span>;
 <a href=#519 id=519 data-nosnippet>519</a>    };
-<a href=#520 id=520 data-nosnippet>520</a>    units.chunks_exact(<span class="number">2</span>).zip(<span class="string">b"TYPELIB"</span>).all(|(unit, want)| {
-<a href=#521 id=521 data-nosnippet>521</a>        u16_at(unit, <span class="number">0</span>) == <span class="prelude-val">Some</span>(u16::from(<span class="kw-2">*</span>want))
-<a href=#522 id=522 data-nosnippet>522</a>            || u16_at(unit, <span class="number">0</span>) == <span class="prelude-val">Some</span>(u16::from(want.to_ascii_lowercase()))
-<a href=#523 id=523 data-nosnippet>523</a>    })
-<a href=#524 id=524 data-nosnippet>524</a>}
-<a href=#525 id=525 data-nosnippet>525</a>
-<a href=#526 id=526 data-nosnippet>526</a><span class="attr">#[cfg(test)]
-<a href=#527 id=527 data-nosnippet>527</a>#[allow(clippy::cast_possible_truncation)]
-<a href=#528 id=528 data-nosnippet>528</a></span><span class="kw">mod </span>tests {
-<a href=#529 id=529 data-nosnippet>529</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#520 id=520 data-nosnippet>520</a>    units
+<a href=#521 id=521 data-nosnippet>521</a>        .as_chunks::&lt;<span class="number">2</span>&gt;()
+<a href=#522 id=522 data-nosnippet>522</a>        .<span class="number">0
+<a href=#523 id=523 data-nosnippet>523</a>        </span>.iter()
+<a href=#524 id=524 data-nosnippet>524</a>        .zip(<span class="string">b"TYPELIB"</span>)
+<a href=#525 id=525 data-nosnippet>525</a>        .all(|(unit, want)| {
+<a href=#526 id=526 data-nosnippet>526</a>            u16_at(unit, <span class="number">0</span>) == <span class="prelude-val">Some</span>(u16::from(<span class="kw-2">*</span>want))
+<a href=#527 id=527 data-nosnippet>527</a>                || u16_at(unit, <span class="number">0</span>) == <span class="prelude-val">Some</span>(u16::from(want.to_ascii_lowercase()))
+<a href=#528 id=528 data-nosnippet>528</a>        })
+<a href=#529 id=529 data-nosnippet>529</a>}
 <a href=#530 id=530 data-nosnippet>530</a>
-<a href=#531 id=531 data-nosnippet>531</a>    <span class="attr">#[test]
-<a href=#532 id=532 data-nosnippet>532</a>    </span><span class="kw">fn </span>kernel_modules() {
-<a href=#533 id=533 data-nosnippet>533</a>        <span class="comment">// A long user-mode name is not cut to look like a `.sys`.
-<a href=#534 id=534 data-nosnippet>534</a>        </span><span class="macro">assert!</span>(!is_kernel_module(<span class="string">b"very-long-name-something.sys.dll"</span>));
-<a href=#535 id=535 data-nosnippet>535</a>        <span class="macro">assert!</span>(is_kernel_module(<span class="string">b"ntoskrnl.exe"</span>));
-<a href=#536 id=536 data-nosnippet>536</a>        <span class="macro">assert!</span>(is_kernel_module(<span class="string">b"hal.dll"</span>));
-<a href=#537 id=537 data-nosnippet>537</a>        <span class="macro">assert!</span>(is_kernel_module(<span class="string">b"wdf01000.sys"</span>));
-<a href=#538 id=538 data-nosnippet>538</a>        <span class="macro">assert!</span>(!is_kernel_module(<span class="string">b".sys"</span>));
-<a href=#539 id=539 data-nosnippet>539</a>        <span class="macro">assert!</span>(!is_kernel_module(<span class="string">b"kernel32.dll"</span>));
-<a href=#540 id=540 data-nosnippet>540</a>    }
-<a href=#541 id=541 data-nosnippet>541</a>
-<a href=#542 id=542 data-nosnippet>542</a>    <span class="attr">#[test]
-<a href=#543 id=543 data-nosnippet>543</a>    </span><span class="kw">fn </span>typelib_names() {
-<a href=#544 id=544 data-nosnippet>544</a>        <span class="kw">let </span>encode = |s: <span class="kw-2">&amp;</span>str| {
-<a href=#545 id=545 data-nosnippet>545</a>            <span class="kw">let </span><span class="kw-2">mut </span>out = (s.len() <span class="kw">as </span>u16).to_le_bytes().to_vec();
-<a href=#546 id=546 data-nosnippet>546</a>            out.extend(s.encode_utf16().flat_map(u16::to_le_bytes));
-<a href=#547 id=547 data-nosnippet>547</a>            out
-<a href=#548 id=548 data-nosnippet>548</a>        };
-<a href=#549 id=549 data-nosnippet>549</a>        <span class="macro">assert!</span>(is_typelib(<span class="kw-2">&amp;</span>encode(<span class="string">"TYPELIB"</span>)));
-<a href=#550 id=550 data-nosnippet>550</a>        <span class="macro">assert!</span>(is_typelib(<span class="kw-2">&amp;</span>encode(<span class="string">"TypeLib"</span>)));
-<a href=#551 id=551 data-nosnippet>551</a>        <span class="macro">assert!</span>(!is_typelib(<span class="kw-2">&amp;</span>encode(<span class="string">"TYPELIX"</span>)));
-<a href=#552 id=552 data-nosnippet>552</a>        <span class="macro">assert!</span>(!is_typelib(<span class="kw-2">&amp;</span>encode(<span class="string">"TYPELIBS"</span>)));
-<a href=#553 id=553 data-nosnippet>553</a>        <span class="macro">assert!</span>(!is_typelib(<span class="kw-2">&amp;</span>encode(<span class="string">"TYPELIB"</span>)[..<span class="number">10</span>]));
-<a href=#554 id=554 data-nosnippet>554</a>    }
-<a href=#555 id=555 data-nosnippet>555</a>}
+<a href=#531 id=531 data-nosnippet>531</a><span class="attr">#[cfg(test)]
+<a href=#532 id=532 data-nosnippet>532</a>#[allow(clippy::cast_possible_truncation)]
+<a href=#533 id=533 data-nosnippet>533</a></span><span class="kw">mod </span>tests {
+<a href=#534 id=534 data-nosnippet>534</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#535 id=535 data-nosnippet>535</a>
+<a href=#536 id=536 data-nosnippet>536</a>    <span class="attr">#[test]
+<a href=#537 id=537 data-nosnippet>537</a>    </span><span class="kw">fn </span>kernel_modules() {
+<a href=#538 id=538 data-nosnippet>538</a>        <span class="comment">// A long user-mode name is not cut to look like a `.sys`.
+<a href=#539 id=539 data-nosnippet>539</a>        </span><span class="macro">assert!</span>(!is_kernel_module(<span class="string">b"very-long-name-something.sys.dll"</span>));
+<a href=#540 id=540 data-nosnippet>540</a>        <span class="macro">assert!</span>(is_kernel_module(<span class="string">b"ntoskrnl.exe"</span>));
+<a href=#541 id=541 data-nosnippet>541</a>        <span class="macro">assert!</span>(is_kernel_module(<span class="string">b"hal.dll"</span>));
+<a href=#542 id=542 data-nosnippet>542</a>        <span class="macro">assert!</span>(is_kernel_module(<span class="string">b"wdf01000.sys"</span>));
+<a href=#543 id=543 data-nosnippet>543</a>        <span class="macro">assert!</span>(!is_kernel_module(<span class="string">b".sys"</span>));
+<a href=#544 id=544 data-nosnippet>544</a>        <span class="macro">assert!</span>(!is_kernel_module(<span class="string">b"kernel32.dll"</span>));
+<a href=#545 id=545 data-nosnippet>545</a>    }
+<a href=#546 id=546 data-nosnippet>546</a>
+<a href=#547 id=547 data-nosnippet>547</a>    <span class="attr">#[test]
+<a href=#548 id=548 data-nosnippet>548</a>    </span><span class="kw">fn </span>typelib_names() {
+<a href=#549 id=549 data-nosnippet>549</a>        <span class="kw">let </span>encode = |s: <span class="kw-2">&amp;</span>str| {
+<a href=#550 id=550 data-nosnippet>550</a>            <span class="kw">let </span><span class="kw-2">mut </span>out = (s.len() <span class="kw">as </span>u16).to_le_bytes().to_vec();
+<a href=#551 id=551 data-nosnippet>551</a>            out.extend(s.encode_utf16().flat_map(u16::to_le_bytes));
+<a href=#552 id=552 data-nosnippet>552</a>            out
+<a href=#553 id=553 data-nosnippet>553</a>        };
+<a href=#554 id=554 data-nosnippet>554</a>        <span class="macro">assert!</span>(is_typelib(<span class="kw-2">&amp;</span>encode(<span class="string">"TYPELIB"</span>)));
+<a href=#555 id=555 data-nosnippet>555</a>        <span class="macro">assert!</span>(is_typelib(<span class="kw-2">&amp;</span>encode(<span class="string">"TypeLib"</span>)));
+<a href=#556 id=556 data-nosnippet>556</a>        <span class="macro">assert!</span>(!is_typelib(<span class="kw-2">&amp;</span>encode(<span class="string">"TYPELIX"</span>)));
+<a href=#557 id=557 data-nosnippet>557</a>        <span class="macro">assert!</span>(!is_typelib(<span class="kw-2">&amp;</span>encode(<span class="string">"TYPELIBS"</span>)));
+<a href=#558 id=558 data-nosnippet>558</a>        <span class="macro">assert!</span>(!is_typelib(<span class="kw-2">&amp;</span>encode(<span class="string">"TYPELIB"</span>)[..<span class="number">10</span>]));
+<a href=#559 id=559 data-nosnippet>559</a>    }
+<a href=#560 id=560 data-nosnippet>560</a>}
 </code></pre></div></section></main></body></html>

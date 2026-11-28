@@ -228,7 +228,7 @@
 <a href=#228 id=228 data-nosnippet>228</a>
 <a href=#229 id=229 data-nosnippet>229</a><span class="kw">impl </span>StringPool {
 <a href=#230 id=230 data-nosnippet>230</a>    <span class="kw">fn </span>parse(pool: <span class="kw-2">&amp;</span>[u8], data: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, TableError&gt; {
-<a href=#231 id=231 data-nosnippet>231</a>        <span class="kw">if </span>pool.len() % <span class="number">4 </span>!= <span class="number">0 </span>{
+<a href=#231 id=231 data-nosnippet>231</a>        <span class="kw">if </span>!pool.len().is_multiple_of(<span class="number">4</span>) {
 <a href=#232 id=232 data-nosnippet>232</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(TableError::StringPool(<span class="string">"pool length"</span>));
 <a href=#233 id=233 data-nosnippet>233</a>        }
 <a href=#234 id=234 data-nosnippet>234</a>        <span class="kw">let </span>word = |i: usize| -&gt; u32 {
@@ -648,7 +648,7 @@
 <a href=#648 id=648 data-nosnippet>648</a>        </span><span class="kw">let </span>entry = <span class="self">self</span>.stream_entry(table, <span class="bool-val">true</span>);
 <a href=#649 id=649 data-nosnippet>649</a>        <span class="kw">let </span>len = entry.map_or(<span class="number">0</span>, |e| e.size);
 <a href=#650 id=650 data-nosnippet>650</a>        <span class="kw">let </span>row_size_u64 = u64::try_from(row_size).unwrap_or(u64::MAX);
-<a href=#651 id=651 data-nosnippet>651</a>        <span class="kw">if </span>row_size == <span class="number">0 </span>|| len % row_size_u64 != <span class="number">0 </span>{
+<a href=#651 id=651 data-nosnippet>651</a>        <span class="kw">if </span>row_size == <span class="number">0 </span>|| !len.is_multiple_of(row_size_u64) {
 <a href=#652 id=652 data-nosnippet>652</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(TableError::RowSize {
 <a href=#653 id=653 data-nosnippet>653</a>                table: table.to_owned(),
 <a href=#654 id=654 data-nosnippet>654</a>            });

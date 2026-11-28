@@ -524,10 +524,10 @@
 <a href=#524 id=524 data-nosnippet>524</a>        <span class="prelude-val">None </span>=&gt; (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>),
 <a href=#525 id=525 data-nosnippet>525</a>    };
 <a href=#526 id=526 data-nosnippet>526</a>    <span class="kw">let </span>os_ci_issues = os_ci_issues(key_alg.as_ref(), key_bits, weak);
-<a href=#527 id=527 data-nosnippet>527</a>    <span class="kw">if let </span>(<span class="prelude-val">Some</span>(KeyAlgorithm::Rsa), <span class="prelude-val">Some</span>(bits)) = (<span class="kw-2">&amp;</span>key_alg, key_bits) {
-<a href=#528 id=528 data-nosnippet>528</a>        <span class="kw">if </span>bits &lt; <span class="number">2048 </span>{
-<a href=#529 id=529 data-nosnippet>529</a>            warnings.push(SignatureWarning::SmallRsaKey(bits));
-<a href=#530 id=530 data-nosnippet>530</a>        }
+<a href=#527 id=527 data-nosnippet>527</a>    <span class="kw">if let </span>(<span class="prelude-val">Some</span>(KeyAlgorithm::Rsa), <span class="prelude-val">Some</span>(bits)) = (<span class="kw-2">&amp;</span>key_alg, key_bits)
+<a href=#528 id=528 data-nosnippet>528</a>        &amp;&amp; bits &lt; <span class="number">2048
+<a href=#529 id=529 data-nosnippet>529</a>    </span>{
+<a href=#530 id=530 data-nosnippet>530</a>        warnings.push(SignatureWarning::SmallRsaKey(bits));
 <a href=#531 id=531 data-nosnippet>531</a>    }
 <a href=#532 id=532 data-nosnippet>532</a>
 <a href=#533 id=533 data-nosnippet>533</a>    <span class="kw">let </span>tolerated = options.tolerate_digest_mismatch &amp;&amp; status == SignatureStatus::DigestMismatch;

@@ -2109,10 +2109,10 @@
 <a href=#2109 id=2109 data-nosnippet>2109</a>        <span class="kw">if </span><span class="self">self</span>.min_version() &gt; <span class="self">self</span>.schema_version {
 <a href=#2110 id=2110 data-nosnippet>2110</a>            fail(EventErrorCode::NewerThanVersion, <span class="string">"/schema_version"</span>);
 <a href=#2111 id=2111 data-nosnippet>2111</a>        }
-<a href=#2112 id=2112 data-nosnippet>2112</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(source) = <span class="kw-2">&amp;</span><span class="self">self</span>.source {
-<a href=#2113 id=2113 data-nosnippet>2113</a>            <span class="kw">if </span>(source.kind == SourceKind::ThirdParty) != source.format.is_some() {
-<a href=#2114 id=2114 data-nosnippet>2114</a>                fail(EventErrorCode::SourceFormat, <span class="string">"/source/format"</span>);
-<a href=#2115 id=2115 data-nosnippet>2115</a>            }
+<a href=#2112 id=2112 data-nosnippet>2112</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(source) = <span class="kw-2">&amp;</span><span class="self">self</span>.source
+<a href=#2113 id=2113 data-nosnippet>2113</a>            &amp;&amp; (source.kind == SourceKind::ThirdParty) != source.format.is_some()
+<a href=#2114 id=2114 data-nosnippet>2114</a>        {
+<a href=#2115 id=2115 data-nosnippet>2115</a>            fail(EventErrorCode::SourceFormat, <span class="string">"/source/format"</span>);
 <a href=#2116 id=2116 data-nosnippet>2116</a>        }
 <a href=#2117 id=2117 data-nosnippet>2117</a>        <span class="kw">if </span><span class="self">self
 <a href=#2118 id=2118 data-nosnippet>2118</a>            </span>.network

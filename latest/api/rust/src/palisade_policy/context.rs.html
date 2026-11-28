@@ -306,414 +306,415 @@
 <a href=#306 id=306 data-nosnippet>306</a>        <span class="kw">if </span>year == <span class="number">0 </span>|| year &gt; <span class="number">9999 </span>|| month == <span class="number">0 </span>|| month &gt; <span class="number">12 </span>|| day == <span class="number">0 </span>{
 <a href=#307 id=307 data-nosnippet>307</a>            <span class="kw">return </span><span class="prelude-val">None</span>;
 <a href=#308 id=308 data-nosnippet>308</a>        }
-<a href=#309 id=309 data-nosnippet>309</a>        <span class="kw">let </span>leap = year % <span class="number">4 </span>== <span class="number">0 </span>&amp;&amp; (year % <span class="number">100 </span>!= <span class="number">0 </span>|| year % <span class="number">400 </span>== <span class="number">0</span>);
-<a href=#310 id=310 data-nosnippet>310</a>        <span class="kw">let </span>days = <span class="kw">match </span>month {
-<a href=#311 id=311 data-nosnippet>311</a>            <span class="number">2 </span><span class="kw">if </span>leap =&gt; <span class="number">29</span>,
-<a href=#312 id=312 data-nosnippet>312</a>            <span class="number">2 </span>=&gt; <span class="number">28</span>,
-<a href=#313 id=313 data-nosnippet>313</a>            <span class="number">4 </span>| <span class="number">6 </span>| <span class="number">9 </span>| <span class="number">11 </span>=&gt; <span class="number">30</span>,
-<a href=#314 id=314 data-nosnippet>314</a>            <span class="kw">_ </span>=&gt; <span class="number">31</span>,
-<a href=#315 id=315 data-nosnippet>315</a>        };
-<a href=#316 id=316 data-nosnippet>316</a>        <span class="kw">if </span>day &gt; days {
-<a href=#317 id=317 data-nosnippet>317</a>            <span class="prelude-val">None
-<a href=#318 id=318 data-nosnippet>318</a>        </span>} <span class="kw">else </span>{
-<a href=#319 id=319 data-nosnippet>319</a>            <span class="prelude-val">Some</span>(<span class="self">Self </span>{ year, month, day })
-<a href=#320 id=320 data-nosnippet>320</a>        }
-<a href=#321 id=321 data-nosnippet>321</a>    }
-<a href=#322 id=322 data-nosnippet>322</a>
-<a href=#323 id=323 data-nosnippet>323</a>    <span class="doccomment">/// Reads `YYYY-MM-DD`, with exactly four, two and two digits.
-<a href=#324 id=324 data-nosnippet>324</a>    </span><span class="attr">#[must_use]
-<a href=#325 id=325 data-nosnippet>325</a>    </span><span class="kw">pub fn </span>parse(s: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt; {
-<a href=#326 id=326 data-nosnippet>326</a>        <span class="kw">let </span>b = s.as_bytes();
-<a href=#327 id=327 data-nosnippet>327</a>        <span class="kw">if </span>b.len() != <span class="number">10 </span>|| b[<span class="number">4</span>] != <span class="string">b'-' </span>|| b[<span class="number">7</span>] != <span class="string">b'-' </span>{
-<a href=#328 id=328 data-nosnippet>328</a>            <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#329 id=329 data-nosnippet>329</a>        }
-<a href=#330 id=330 data-nosnippet>330</a>        <span class="kw">let </span>digits = |r: core::ops::Range&lt;usize&gt;| -&gt; <span class="prelude-ty">Option</span>&lt;u16&gt; {
-<a href=#331 id=331 data-nosnippet>331</a>            <span class="kw">let </span>part = <span class="kw-2">&amp;</span>s[r];
-<a href=#332 id=332 data-nosnippet>332</a>            <span class="kw">if </span>!part.bytes().all(|c| c.is_ascii_digit()) {
-<a href=#333 id=333 data-nosnippet>333</a>                <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#334 id=334 data-nosnippet>334</a>            }
-<a href=#335 id=335 data-nosnippet>335</a>            part.parse().ok()
-<a href=#336 id=336 data-nosnippet>336</a>        };
-<a href=#337 id=337 data-nosnippet>337</a>        <span class="kw">let </span>year = digits(<span class="number">0</span>..<span class="number">4</span>)<span class="question-mark">?</span>;
-<a href=#338 id=338 data-nosnippet>338</a>        <span class="kw">let </span>month = u8::try_from(digits(<span class="number">5</span>..<span class="number">7</span>)<span class="question-mark">?</span>).ok()<span class="question-mark">?</span>;
-<a href=#339 id=339 data-nosnippet>339</a>        <span class="kw">let </span>day = u8::try_from(digits(<span class="number">8</span>..<span class="number">10</span>)<span class="question-mark">?</span>).ok()<span class="question-mark">?</span>;
-<a href=#340 id=340 data-nosnippet>340</a>        <span class="self">Self</span>::new(year, month, day)
-<a href=#341 id=341 data-nosnippet>341</a>    }
-<a href=#342 id=342 data-nosnippet>342</a>}
-<a href=#343 id=343 data-nosnippet>343</a>
-<a href=#344 id=344 data-nosnippet>344</a><span class="kw">impl </span>core::fmt::Display <span class="kw">for </span>Date {
-<a href=#345 id=345 data-nosnippet>345</a>    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>core::fmt::Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; core::fmt::Result {
-<a href=#346 id=346 data-nosnippet>346</a>        <span class="macro">write!</span>(f, <span class="string">"{:04}-{:02}-{:02}"</span>, <span class="self">self</span>.year, <span class="self">self</span>.month, <span class="self">self</span>.day)
-<a href=#347 id=347 data-nosnippet>347</a>    }
-<a href=#348 id=348 data-nosnippet>348</a>}
-<a href=#349 id=349 data-nosnippet>349</a>
-<a href=#350 id=350 data-nosnippet>350</a><span class="doccomment">/// Reads a time of day, `HH:MM` with a 24-hour clock, as minutes since
-<a href=#351 id=351 data-nosnippet>351</a>/// midnight.
-<a href=#352 id=352 data-nosnippet>352</a></span><span class="attr">#[must_use]
-<a href=#353 id=353 data-nosnippet>353</a></span><span class="kw">pub fn </span>parse_time_of_day(s: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;u16&gt; {
-<a href=#354 id=354 data-nosnippet>354</a>    <span class="kw">let </span>b = s.as_bytes();
-<a href=#355 id=355 data-nosnippet>355</a>    <span class="kw">if </span>b.len() != <span class="number">5 </span>|| b[<span class="number">2</span>] != <span class="string">b':' </span>|| !b[..<span class="number">2</span>].iter().chain(<span class="kw-2">&amp;</span>b[<span class="number">3</span>..]).all(u8::is_ascii_digit) {
-<a href=#356 id=356 data-nosnippet>356</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#357 id=357 data-nosnippet>357</a>    }
-<a href=#358 id=358 data-nosnippet>358</a>    <span class="kw">let </span>hours: u16 = s[..<span class="number">2</span>].parse().ok()<span class="question-mark">?</span>;
-<a href=#359 id=359 data-nosnippet>359</a>    <span class="kw">let </span>minutes: u16 = s[<span class="number">3</span>..].parse().ok()<span class="question-mark">?</span>;
-<a href=#360 id=360 data-nosnippet>360</a>    (hours &lt; <span class="number">24 </span>&amp;&amp; minutes &lt; <span class="number">60</span>).then_some(hours * <span class="number">60 </span>+ minutes)
-<a href=#361 id=361 data-nosnippet>361</a>}
-<a href=#362 id=362 data-nosnippet>362</a>
-<a href=#363 id=363 data-nosnippet>363</a><span class="doccomment">/// How a session was started.
-<a href=#364 id=364 data-nosnippet>364</a></span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-<a href=#365 id=365 data-nosnippet>365</a>#[serde(rename_all = <span class="string">"snake_case"</span>)]
-<a href=#366 id=366 data-nosnippet>366</a></span><span class="kw">pub enum </span>SessionType {
-<a href=#367 id=367 data-nosnippet>367</a>    <span class="doccomment">/// The physical console.
-<a href=#368 id=368 data-nosnippet>368</a>    </span>Console,
-<a href=#369 id=369 data-nosnippet>369</a>    <span class="doccomment">/// A remote desktop session.
-<a href=#370 id=370 data-nosnippet>370</a>    </span>Rdp,
-<a href=#371 id=371 data-nosnippet>371</a>    <span class="doccomment">/// A remote shell, such as a remote PowerShell session.
-<a href=#372 id=372 data-nosnippet>372</a>    </span>RemoteShell,
-<a href=#373 id=373 data-nosnippet>373</a>    <span class="doccomment">/// A service.
-<a href=#374 id=374 data-nosnippet>374</a>    </span>Service,
-<a href=#375 id=375 data-nosnippet>375</a>    <span class="doccomment">/// A batch job, such as a scheduled task.
-<a href=#376 id=376 data-nosnippet>376</a>    </span>Batch,
-<a href=#377 id=377 data-nosnippet>377</a>    <span class="doccomment">/// A network logon.
-<a href=#378 id=378 data-nosnippet>378</a>    </span>Network,
-<a href=#379 id=379 data-nosnippet>379</a>}
-<a href=#380 id=380 data-nosnippet>380</a>
-<a href=#381 id=381 data-nosnippet>381</a><span class="kw">impl </span>SessionType {
-<a href=#382 id=382 data-nosnippet>382</a>    <span class="doccomment">/// Every session type.
-<a href=#383 id=383 data-nosnippet>383</a>    </span><span class="kw">pub const </span>ALL: [<span class="self">Self</span>; <span class="number">6</span>] = [
-<a href=#384 id=384 data-nosnippet>384</a>        <span class="self">Self</span>::Console,
-<a href=#385 id=385 data-nosnippet>385</a>        <span class="self">Self</span>::Rdp,
-<a href=#386 id=386 data-nosnippet>386</a>        <span class="self">Self</span>::RemoteShell,
-<a href=#387 id=387 data-nosnippet>387</a>        <span class="self">Self</span>::Service,
-<a href=#388 id=388 data-nosnippet>388</a>        <span class="self">Self</span>::Batch,
-<a href=#389 id=389 data-nosnippet>389</a>        <span class="self">Self</span>::Network,
-<a href=#390 id=390 data-nosnippet>390</a>    ];
-<a href=#391 id=391 data-nosnippet>391</a>
-<a href=#392 id=392 data-nosnippet>392</a>    <span class="doccomment">/// The name a criterion value uses.
-<a href=#393 id=393 data-nosnippet>393</a>    </span><span class="attr">#[must_use]
-<a href=#394 id=394 data-nosnippet>394</a>    </span><span class="kw">pub const fn </span>as_str(<span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str {
-<a href=#395 id=395 data-nosnippet>395</a>        <span class="kw">match </span><span class="self">self </span>{
-<a href=#396 id=396 data-nosnippet>396</a>            <span class="self">Self</span>::Console =&gt; <span class="string">"console"</span>,
-<a href=#397 id=397 data-nosnippet>397</a>            <span class="self">Self</span>::Rdp =&gt; <span class="string">"rdp"</span>,
-<a href=#398 id=398 data-nosnippet>398</a>            <span class="self">Self</span>::RemoteShell =&gt; <span class="string">"remote_shell"</span>,
-<a href=#399 id=399 data-nosnippet>399</a>            <span class="self">Self</span>::Service =&gt; <span class="string">"service"</span>,
-<a href=#400 id=400 data-nosnippet>400</a>            <span class="self">Self</span>::Batch =&gt; <span class="string">"batch"</span>,
-<a href=#401 id=401 data-nosnippet>401</a>            <span class="self">Self</span>::Network =&gt; <span class="string">"network"</span>,
-<a href=#402 id=402 data-nosnippet>402</a>        }
-<a href=#403 id=403 data-nosnippet>403</a>    }
-<a href=#404 id=404 data-nosnippet>404</a>
-<a href=#405 id=405 data-nosnippet>405</a>    <span class="doccomment">/// The session type with this name, exactly as [`Self::as_str`] writes it.
-<a href=#406 id=406 data-nosnippet>406</a>    </span><span class="attr">#[must_use]
-<a href=#407 id=407 data-nosnippet>407</a>    </span><span class="kw">pub fn </span>from_name(name: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt; {
-<a href=#408 id=408 data-nosnippet>408</a>        <span class="self">Self</span>::ALL.into_iter().find(|t| t.as_str() == name)
-<a href=#409 id=409 data-nosnippet>409</a>    }
-<a href=#410 id=410 data-nosnippet>410</a>}
-<a href=#411 id=411 data-nosnippet>411</a>
-<a href=#412 id=412 data-nosnippet>412</a><span class="doccomment">/// A context fact, as a criterion reads it.
-<a href=#413 id=413 data-nosnippet>413</a></span><span class="attr">#[derive(Clone, Copy, Debug)]
-<a href=#414 id=414 data-nosnippet>414</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>ContextFact&lt;<span class="lifetime">'a</span>&gt; {
-<a href=#415 id=415 data-nosnippet>415</a>    <span class="doccomment">/// One string.
-<a href=#416 id=416 data-nosnippet>416</a>    </span>Text(<span class="kw-2">&amp;</span><span class="lifetime">'a </span>str),
-<a href=#417 id=417 data-nosnippet>417</a>    <span class="doccomment">/// The account name and the user principal name, whichever are known.
-<a href=#418 id=418 data-nosnippet>418</a>    </span>Names(<span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>str&gt;, <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>str&gt;),
-<a href=#419 id=419 data-nosnippet>419</a>    <span class="doccomment">/// A set of strings.
-<a href=#420 id=420 data-nosnippet>420</a>    </span>Set(<span class="kw-2">&amp;</span><span class="lifetime">'a </span>[String]),
-<a href=#421 id=421 data-nosnippet>421</a>    <span class="doccomment">/// A yes-or-no fact.
-<a href=#422 id=422 data-nosnippet>422</a>    </span>Bool(bool),
-<a href=#423 id=423 data-nosnippet>423</a>    <span class="doccomment">/// A session type.
-<a href=#424 id=424 data-nosnippet>424</a>    </span>Session(SessionType),
-<a href=#425 id=425 data-nosnippet>425</a>    <span class="doccomment">/// A whole number.
-<a href=#426 id=426 data-nosnippet>426</a>    </span>Number(u64),
-<a href=#427 id=427 data-nosnippet>427</a>    <span class="doccomment">/// An integrity level.
-<a href=#428 id=428 data-nosnippet>428</a>    </span>Level(IntegrityLevel),
-<a href=#429 id=429 data-nosnippet>429</a>    <span class="doccomment">/// One IP address.
-<a href=#430 id=430 data-nosnippet>430</a>    </span>Ip(IpAddr),
-<a href=#431 id=431 data-nosnippet>431</a>    <span class="doccomment">/// A set of IP addresses.
-<a href=#432 id=432 data-nosnippet>432</a>    </span>Ips(<span class="kw-2">&amp;</span><span class="lifetime">'a </span>[IpAddr]),
-<a href=#433 id=433 data-nosnippet>433</a>    <span class="doccomment">/// A set of MAC addresses.
-<a href=#434 id=434 data-nosnippet>434</a>    </span>Macs(<span class="kw-2">&amp;</span><span class="lifetime">'a </span>[[u8; <span class="number">6</span>]]),
-<a href=#435 id=435 data-nosnippet>435</a>    <span class="doccomment">/// A day of the week.
-<a href=#436 id=436 data-nosnippet>436</a>    </span>Weekday(Weekday),
-<a href=#437 id=437 data-nosnippet>437</a>    <span class="doccomment">/// Minutes since midnight.
-<a href=#438 id=438 data-nosnippet>438</a>    </span>Minute(u16),
-<a href=#439 id=439 data-nosnippet>439</a>    <span class="doccomment">/// A date.
-<a href=#440 id=440 data-nosnippet>440</a>    </span>Date(Date),
-<a href=#441 id=441 data-nosnippet>441</a>}
-<a href=#442 id=442 data-nosnippet>442</a>
-<a href=#443 id=443 data-nosnippet>443</a><span class="kw">impl </span>EvaluationContext {
-<a href=#444 id=444 data-nosnippet>444</a>    <span class="doccomment">/// No facts at all, as a constant: every context criterion evaluates
-<a href=#445 id=445 data-nosnippet>445</a>    /// to unknown.
-<a href=#446 id=446 data-nosnippet>446</a>    </span><span class="kw">pub const </span>EMPTY: <span class="self">Self </span>= <span class="self">Self </span>{
-<a href=#447 id=447 data-nosnippet>447</a>        user: UserContext {
-<a href=#448 id=448 data-nosnippet>448</a>            sid: <span class="prelude-val">None</span>,
-<a href=#449 id=449 data-nosnippet>449</a>            account_name: <span class="prelude-val">None</span>,
-<a href=#450 id=450 data-nosnippet>450</a>            upn: <span class="prelude-val">None</span>,
-<a href=#451 id=451 data-nosnippet>451</a>            groups: <span class="prelude-val">None</span>,
-<a href=#452 id=452 data-nosnippet>452</a>            primary_group: <span class="prelude-val">None</span>,
-<a href=#453 id=453 data-nosnippet>453</a>            is_admin: <span class="prelude-val">None</span>,
-<a href=#454 id=454 data-nosnippet>454</a>            is_elevated: <span class="prelude-val">None</span>,
-<a href=#455 id=455 data-nosnippet>455</a>            is_service_account: <span class="prelude-val">None</span>,
-<a href=#456 id=456 data-nosnippet>456</a>            is_system: <span class="prelude-val">None</span>,
-<a href=#457 id=457 data-nosnippet>457</a>            integrity_level: <span class="prelude-val">None</span>,
-<a href=#458 id=458 data-nosnippet>458</a>            dn: <span class="prelude-val">None</span>,
-<a href=#459 id=459 data-nosnippet>459</a>        },
-<a href=#460 id=460 data-nosnippet>460</a>        device: DeviceContext {
-<a href=#461 id=461 data-nosnippet>461</a>            hostname: <span class="prelude-val">None</span>,
-<a href=#462 id=462 data-nosnippet>462</a>            fqdn: <span class="prelude-val">None</span>,
-<a href=#463 id=463 data-nosnippet>463</a>            domain: <span class="prelude-val">None</span>,
-<a href=#464 id=464 data-nosnippet>464</a>            netbios: <span class="prelude-val">None</span>,
-<a href=#465 id=465 data-nosnippet>465</a>            ad_site: <span class="prelude-val">None</span>,
-<a href=#466 id=466 data-nosnippet>466</a>            groups: <span class="prelude-val">None</span>,
-<a href=#467 id=467 data-nosnippet>467</a>            tags: <span class="prelude-val">None</span>,
-<a href=#468 id=468 data-nosnippet>468</a>            os_version: <span class="prelude-val">None</span>,
-<a href=#469 id=469 data-nosnippet>469</a>            os_edition: <span class="prelude-val">None</span>,
-<a href=#470 id=470 data-nosnippet>470</a>            arch: <span class="prelude-val">None</span>,
-<a href=#471 id=471 data-nosnippet>471</a>            is_server: <span class="prelude-val">None</span>,
-<a href=#472 id=472 data-nosnippet>472</a>            is_domain_controller: <span class="prelude-val">None</span>,
-<a href=#473 id=473 data-nosnippet>473</a>            is_laptop: <span class="prelude-val">None</span>,
-<a href=#474 id=474 data-nosnippet>474</a>            is_vdi: <span class="prelude-val">None</span>,
-<a href=#475 id=475 data-nosnippet>475</a>            is_terminal_server: <span class="prelude-val">None</span>,
-<a href=#476 id=476 data-nosnippet>476</a>            os_build: <span class="prelude-val">None</span>,
-<a href=#477 id=477 data-nosnippet>477</a>            dn: <span class="prelude-val">None</span>,
-<a href=#478 id=478 data-nosnippet>478</a>            boot_phase: <span class="prelude-val">None</span>,
-<a href=#479 id=479 data-nosnippet>479</a>            containment_available: <span class="prelude-val">None</span>,
-<a href=#480 id=480 data-nosnippet>480</a>        },
-<a href=#481 id=481 data-nosnippet>481</a>        session: SessionContext {
-<a href=#482 id=482 data-nosnippet>482</a>            session_type: <span class="prelude-val">None</span>,
-<a href=#483 id=483 data-nosnippet>483</a>            client_hostname: <span class="prelude-val">None</span>,
-<a href=#484 id=484 data-nosnippet>484</a>            is_remote: <span class="prelude-val">None</span>,
-<a href=#485 id=485 data-nosnippet>485</a>            id: <span class="prelude-val">None</span>,
-<a href=#486 id=486 data-nosnippet>486</a>            client_ip: <span class="prelude-val">None</span>,
-<a href=#487 id=487 data-nosnippet>487</a>        },
-<a href=#488 id=488 data-nosnippet>488</a>        network: NetworkContext {
-<a href=#489 id=489 data-nosnippet>489</a>            addresses: <span class="prelude-val">None</span>,
-<a href=#490 id=490 data-nosnippet>490</a>            macs: <span class="prelude-val">None</span>,
-<a href=#491 id=491 data-nosnippet>491</a>            dns_suffixes: <span class="prelude-val">None</span>,
-<a href=#492 id=492 data-nosnippet>492</a>            gateway_macs: <span class="prelude-val">None</span>,
-<a href=#493 id=493 data-nosnippet>493</a>            server_reachable: <span class="prelude-val">None</span>,
-<a href=#494 id=494 data-nosnippet>494</a>            locations: <span class="prelude-val">None</span>,
-<a href=#495 id=495 data-nosnippet>495</a>        },
-<a href=#496 id=496 data-nosnippet>496</a>        scope: ScopeFacts::EMPTY,
-<a href=#497 id=497 data-nosnippet>497</a>        time: TimeContext {
-<a href=#498 id=498 data-nosnippet>498</a>            weekday: <span class="prelude-val">None</span>,
-<a href=#499 id=499 data-nosnippet>499</a>            minute_of_day: <span class="prelude-val">None</span>,
-<a href=#500 id=500 data-nosnippet>500</a>            date: <span class="prelude-val">None</span>,
-<a href=#501 id=501 data-nosnippet>501</a>        },
-<a href=#502 id=502 data-nosnippet>502</a>    };
-<a href=#503 id=503 data-nosnippet>503</a>
-<a href=#504 id=504 data-nosnippet>504</a>    <span class="doccomment">/// No facts at all: every context criterion evaluates to unknown.
-<a href=#505 id=505 data-nosnippet>505</a>    </span><span class="attr">#[must_use]
-<a href=#506 id=506 data-nosnippet>506</a>    </span><span class="kw">pub fn </span>new() -&gt; <span class="self">Self </span>{
-<a href=#507 id=507 data-nosnippet>507</a>        <span class="self">Self</span>::default()
-<a href=#508 id=508 data-nosnippet>508</a>    }
-<a href=#509 id=509 data-nosnippet>509</a>
-<a href=#510 id=510 data-nosnippet>510</a>    <span class="doccomment">/// The fact a context field tests, or `None` if it was not collected or
-<a href=#511 id=511 data-nosnippet>511</a>    /// `field` is not a context field.
-<a href=#512 id=512 data-nosnippet>512</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>fact(<span class="kw-2">&amp;</span><span class="self">self</span>, field: Field) -&gt; <span class="prelude-ty">Option</span>&lt;ContextFact&lt;<span class="lifetime">'_</span>&gt;&gt; {
-<a href=#513 id=513 data-nosnippet>513</a>        <span class="kw">fn </span>text(v: <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;String&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;ContextFact&lt;<span class="lifetime">'_</span>&gt;&gt; {
-<a href=#514 id=514 data-nosnippet>514</a>            v.as_deref().map(ContextFact::Text)
-<a href=#515 id=515 data-nosnippet>515</a>        }
-<a href=#516 id=516 data-nosnippet>516</a>        <span class="kw">fn </span>set(v: <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;Vec&lt;String&gt;&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;ContextFact&lt;<span class="lifetime">'_</span>&gt;&gt; {
-<a href=#517 id=517 data-nosnippet>517</a>            v.as_deref().map(ContextFact::Set)
-<a href=#518 id=518 data-nosnippet>518</a>        }
-<a href=#519 id=519 data-nosnippet>519</a>        <span class="kw">fn </span>flag(v: <span class="prelude-ty">Option</span>&lt;bool&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;ContextFact&lt;<span class="lifetime">'static</span>&gt;&gt; {
-<a href=#520 id=520 data-nosnippet>520</a>            v.map(ContextFact::Bool)
-<a href=#521 id=521 data-nosnippet>521</a>        }
-<a href=#522 id=522 data-nosnippet>522</a>        <span class="kw">let </span>(u, d, s, n, t) = (
-<a href=#523 id=523 data-nosnippet>523</a>            <span class="kw-2">&amp;</span><span class="self">self</span>.user,
-<a href=#524 id=524 data-nosnippet>524</a>            <span class="kw-2">&amp;</span><span class="self">self</span>.device,
-<a href=#525 id=525 data-nosnippet>525</a>            <span class="kw-2">&amp;</span><span class="self">self</span>.session,
-<a href=#526 id=526 data-nosnippet>526</a>            <span class="kw-2">&amp;</span><span class="self">self</span>.network,
-<a href=#527 id=527 data-nosnippet>527</a>            <span class="kw-2">&amp;</span><span class="self">self</span>.time,
-<a href=#528 id=528 data-nosnippet>528</a>        );
-<a href=#529 id=529 data-nosnippet>529</a>        <span class="kw">match </span>field {
-<a href=#530 id=530 data-nosnippet>530</a>            Field::UserSid =&gt; text(<span class="kw-2">&amp;</span>u.sid),
-<a href=#531 id=531 data-nosnippet>531</a>            Field::UserName =&gt; <span class="kw">match </span>(u.account_name.as_deref(), u.upn.as_deref()) {
-<a href=#532 id=532 data-nosnippet>532</a>                (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>) =&gt; <span class="prelude-val">None</span>,
-<a href=#533 id=533 data-nosnippet>533</a>                (account, upn) =&gt; <span class="prelude-val">Some</span>(ContextFact::Names(account, upn)),
-<a href=#534 id=534 data-nosnippet>534</a>            },
-<a href=#535 id=535 data-nosnippet>535</a>            Field::UserGroups =&gt; set(<span class="kw-2">&amp;</span>u.groups),
-<a href=#536 id=536 data-nosnippet>536</a>            Field::UserPrimaryGroup =&gt; text(<span class="kw-2">&amp;</span>u.primary_group),
-<a href=#537 id=537 data-nosnippet>537</a>            Field::UserIsAdmin =&gt; flag(u.is_admin),
-<a href=#538 id=538 data-nosnippet>538</a>            Field::UserIsElevated =&gt; flag(u.is_elevated),
-<a href=#539 id=539 data-nosnippet>539</a>            Field::UserIsServiceAccount =&gt; flag(u.is_service_account),
-<a href=#540 id=540 data-nosnippet>540</a>            Field::UserIsSystem =&gt; flag(u.is_system),
-<a href=#541 id=541 data-nosnippet>541</a>            Field::DeviceHostname =&gt; text(<span class="kw-2">&amp;</span>d.hostname),
-<a href=#542 id=542 data-nosnippet>542</a>            Field::DeviceFqdn =&gt; text(<span class="kw-2">&amp;</span>d.fqdn),
-<a href=#543 id=543 data-nosnippet>543</a>            Field::DeviceDomain =&gt; text(<span class="kw-2">&amp;</span>d.domain),
-<a href=#544 id=544 data-nosnippet>544</a>            Field::DeviceNetbios =&gt; text(<span class="kw-2">&amp;</span>d.netbios),
-<a href=#545 id=545 data-nosnippet>545</a>            Field::DeviceAdSite =&gt; text(<span class="kw-2">&amp;</span>d.ad_site),
-<a href=#546 id=546 data-nosnippet>546</a>            Field::DeviceGroups =&gt; set(<span class="kw-2">&amp;</span>d.groups),
-<a href=#547 id=547 data-nosnippet>547</a>            Field::DeviceTags =&gt; set(<span class="kw-2">&amp;</span>d.tags),
-<a href=#548 id=548 data-nosnippet>548</a>            Field::DeviceOsVersion =&gt; text(<span class="kw-2">&amp;</span>d.os_version),
-<a href=#549 id=549 data-nosnippet>549</a>            Field::DeviceOsEdition =&gt; text(<span class="kw-2">&amp;</span>d.os_edition),
-<a href=#550 id=550 data-nosnippet>550</a>            Field::DeviceArch =&gt; text(<span class="kw-2">&amp;</span>d.arch),
-<a href=#551 id=551 data-nosnippet>551</a>            Field::DeviceIsServer =&gt; flag(d.is_server),
-<a href=#552 id=552 data-nosnippet>552</a>            Field::DeviceIsDomainController =&gt; flag(d.is_domain_controller),
-<a href=#553 id=553 data-nosnippet>553</a>            Field::DeviceIsLaptop =&gt; flag(d.is_laptop),
-<a href=#554 id=554 data-nosnippet>554</a>            Field::DeviceIsVdi =&gt; flag(d.is_vdi),
-<a href=#555 id=555 data-nosnippet>555</a>            Field::DeviceIsTerminalServer =&gt; flag(d.is_terminal_server),
-<a href=#556 id=556 data-nosnippet>556</a>            Field::SessionType =&gt; s.session_type.map(ContextFact::Session),
-<a href=#557 id=557 data-nosnippet>557</a>            Field::SessionClientHostname =&gt; text(<span class="kw-2">&amp;</span>s.client_hostname),
-<a href=#558 id=558 data-nosnippet>558</a>            Field::SessionIsRemote =&gt; flag(s.is_remote),
-<a href=#559 id=559 data-nosnippet>559</a>            Field::UserIntegrityLevel =&gt; u.integrity_level.map(ContextFact::Level),
-<a href=#560 id=560 data-nosnippet>560</a>            Field::UserOu =&gt; text(<span class="kw-2">&amp;</span>u.dn),
-<a href=#561 id=561 data-nosnippet>561</a>            Field::DeviceOu =&gt; text(<span class="kw-2">&amp;</span>d.dn),
-<a href=#562 id=562 data-nosnippet>562</a>            Field::DeviceOsBuild =&gt; d.os_build.map(|v| ContextFact::Number(v.into())),
-<a href=#563 id=563 data-nosnippet>563</a>            Field::SessionId =&gt; s.id.map(|v| ContextFact::Number(v.into())),
-<a href=#564 id=564 data-nosnippet>564</a>            Field::SessionClientIp =&gt; s.client_ip.map(ContextFact::Ip),
-<a href=#565 id=565 data-nosnippet>565</a>            Field::NetIp =&gt; n.addresses.as_deref().map(ContextFact::Ips),
-<a href=#566 id=566 data-nosnippet>566</a>            Field::NetMac =&gt; n.macs.as_deref().map(ContextFact::Macs),
-<a href=#567 id=567 data-nosnippet>567</a>            Field::NetDnsSuffix =&gt; set(<span class="kw-2">&amp;</span>n.dns_suffixes),
-<a href=#568 id=568 data-nosnippet>568</a>            Field::NetConnectedToServer =&gt; flag(n.server_reachable),
-<a href=#569 id=569 data-nosnippet>569</a>            Field::NetLocation =&gt; set(<span class="kw-2">&amp;</span>n.locations),
-<a href=#570 id=570 data-nosnippet>570</a>            Field::TimeWeekday =&gt; t.weekday.map(ContextFact::Weekday),
-<a href=#571 id=571 data-nosnippet>571</a>            <span class="comment">// A minute past the end of the day is not a time of day.
-<a href=#572 id=572 data-nosnippet>572</a>            </span>Field::TimeLocalTime =&gt; t
-<a href=#573 id=573 data-nosnippet>573</a>                .minute_of_day
-<a href=#574 id=574 data-nosnippet>574</a>                .filter(|m| <span class="kw-2">*</span>m &lt; <span class="number">24 </span>* <span class="number">60</span>)
-<a href=#575 id=575 data-nosnippet>575</a>                .map(ContextFact::Minute),
-<a href=#576 id=576 data-nosnippet>576</a>            Field::TimeDate =&gt; t.date.map(ContextFact::Date),
-<a href=#577 id=577 data-nosnippet>577</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
-<a href=#578 id=578 data-nosnippet>578</a>        }
-<a href=#579 id=579 data-nosnippet>579</a>    }
-<a href=#580 id=580 data-nosnippet>580</a>}
-<a href=#581 id=581 data-nosnippet>581</a>
-<a href=#582 id=582 data-nosnippet>582</a><span class="doccomment">/// The canonical form of a SID (MS-DTYP 2.4.2.1): `S-1-`, the identifier
-<a href=#583 id=583 data-nosnippet>583</a>/// authority, then 1 to 15 decimal sub-authorities without leading zeros.
-<a href=#584 id=584 data-nosnippet>584</a>/// The authority is written in decimal when it is below 2^32, and otherwise
-<a href=#585 id=585 data-nosnippet>585</a>/// as `0x` and 12 lowercase hex digits, as Windows writes it. On input it
-<a href=#586 id=586 data-nosnippet>586</a>/// may be written either way, in any case, and decimal numbers may have
-<a href=#587 id=587 data-nosnippet>587</a>/// leading zeros. The result is itself canonical: normalising it again
-<a href=#588 id=588 data-nosnippet>588</a>/// gives the same text. `None` if `s` is not a SID.
-<a href=#589 id=589 data-nosnippet>589</a></span><span class="attr">#[must_use]
-<a href=#590 id=590 data-nosnippet>590</a></span><span class="kw">pub fn </span>normalize_sid(s: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
-<a href=#591 id=591 data-nosnippet>591</a>    <span class="kw">let </span><span class="kw-2">mut </span>out = String::new();
-<a href=#592 id=592 data-nosnippet>592</a>    normalize_sid_into(s, <span class="kw-2">&amp;mut </span>out).then_some(out)
-<a href=#593 id=593 data-nosnippet>593</a>}
-<a href=#594 id=594 data-nosnippet>594</a>
-<a href=#595 id=595 data-nosnippet>595</a><span class="doccomment">/// Writes the canonical form of the SID `s` to `out`, after clearing it,
-<a href=#596 id=596 data-nosnippet>596</a>/// and returns whether `s` is a SID. Allocates only to grow `out`.
-<a href=#597 id=597 data-nosnippet>597</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>normalize_sid_into(s: <span class="kw-2">&amp;</span>str, out: <span class="kw-2">&amp;mut </span>String) -&gt; bool {
-<a href=#598 id=598 data-nosnippet>598</a>    <span class="kw">use </span>core::fmt::Write <span class="kw">as _</span>;
-<a href=#599 id=599 data-nosnippet>599</a>    out.clear();
-<a href=#600 id=600 data-nosnippet>600</a>    parse_sid(s, out, <span class="kw-2">&amp;mut </span>|out, v| {
-<a href=#601 id=601 data-nosnippet>601</a>        <span class="kw">let _ </span>= <span class="macro">write!</span>(out, <span class="string">"{v}"</span>);
-<a href=#602 id=602 data-nosnippet>602</a>    })
-<a href=#603 id=603 data-nosnippet>603</a>    .is_some()
-<a href=#604 id=604 data-nosnippet>604</a>}
-<a href=#605 id=605 data-nosnippet>605</a>
-<a href=#606 id=606 data-nosnippet>606</a><span class="doccomment">/// Parses a SID, writing its canonical form to `out` with `num` writing
-<a href=#607 id=607 data-nosnippet>607</a>/// each decimal number.
-<a href=#608 id=608 data-nosnippet>608</a></span><span class="kw">fn </span>parse_sid(s: <span class="kw-2">&amp;</span>str, out: <span class="kw-2">&amp;mut </span>String, num: <span class="kw-2">&amp;mut </span><span class="kw">dyn </span>FnMut(<span class="kw-2">&amp;mut </span>String, u64)) -&gt; <span class="prelude-ty">Option</span>&lt;()&gt; {
-<a href=#609 id=609 data-nosnippet>609</a>    <span class="kw">use </span>core::fmt::Write <span class="kw">as _</span>;
-<a href=#610 id=610 data-nosnippet>610</a>    <span class="kw">let </span><span class="kw-2">mut </span>parts = s.split(<span class="string">'-'</span>);
-<a href=#611 id=611 data-nosnippet>611</a>    <span class="kw">if </span>!parts.next()<span class="question-mark">?</span>.eq_ignore_ascii_case(<span class="string">"s"</span>) || parts.next()<span class="question-mark">? </span>!= <span class="string">"1" </span>{
-<a href=#612 id=612 data-nosnippet>612</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#613 id=613 data-nosnippet>613</a>    }
-<a href=#614 id=614 data-nosnippet>614</a>    <span class="kw">let </span>authority = parts.next()<span class="question-mark">?</span>;
-<a href=#615 id=615 data-nosnippet>615</a>    <span class="kw">let </span>authority: u64 = <span class="kw">if let </span><span class="prelude-val">Some</span>(hex) = authority
-<a href=#616 id=616 data-nosnippet>616</a>        .strip_prefix(<span class="string">"0x"</span>)
-<a href=#617 id=617 data-nosnippet>617</a>        .or_else(|| authority.strip_prefix(<span class="string">"0X"</span>))
-<a href=#618 id=618 data-nosnippet>618</a>    {
-<a href=#619 id=619 data-nosnippet>619</a>        <span class="kw">if </span>hex.len() != <span class="number">12 </span>|| !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-<a href=#620 id=620 data-nosnippet>620</a>            <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#621 id=621 data-nosnippet>621</a>        }
-<a href=#622 id=622 data-nosnippet>622</a>        u64::from_str_radix(hex, <span class="number">16</span>).ok()<span class="question-mark">?
-<a href=#623 id=623 data-nosnippet>623</a>    </span>} <span class="kw">else </span>{
-<a href=#624 id=624 data-nosnippet>624</a>        <span class="kw">let </span>value = decimal(authority)<span class="question-mark">?</span>;
-<a href=#625 id=625 data-nosnippet>625</a>        <span class="kw">if </span>value &gt;= <span class="number">1 </span>&lt;&lt; <span class="number">32 </span>{
-<a href=#626 id=626 data-nosnippet>626</a>            <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#627 id=627 data-nosnippet>627</a>        }
-<a href=#628 id=628 data-nosnippet>628</a>        value
-<a href=#629 id=629 data-nosnippet>629</a>    };
-<a href=#630 id=630 data-nosnippet>630</a>    out.push_str(<span class="string">"S-1-"</span>);
-<a href=#631 id=631 data-nosnippet>631</a>    <span class="kw">if </span>authority &lt; <span class="number">1 </span>&lt;&lt; <span class="number">32 </span>{
-<a href=#632 id=632 data-nosnippet>632</a>        num(out, authority);
-<a href=#633 id=633 data-nosnippet>633</a>    } <span class="kw">else </span>{
-<a href=#634 id=634 data-nosnippet>634</a>        <span class="kw">let _ </span>= <span class="macro">write!</span>(out, <span class="string">"0x{authority:012x}"</span>);
-<a href=#635 id=635 data-nosnippet>635</a>    }
-<a href=#636 id=636 data-nosnippet>636</a>    <span class="kw">let </span><span class="kw-2">mut </span>count = <span class="number">0usize</span>;
-<a href=#637 id=637 data-nosnippet>637</a>    <span class="kw">for </span>part <span class="kw">in </span>parts {
-<a href=#638 id=638 data-nosnippet>638</a>        <span class="kw">let </span>value = u32::try_from(decimal(part)<span class="question-mark">?</span>).ok()<span class="question-mark">?</span>;
-<a href=#639 id=639 data-nosnippet>639</a>        count += <span class="number">1</span>;
-<a href=#640 id=640 data-nosnippet>640</a>        <span class="kw">if </span>count &gt; <span class="number">15 </span>{
-<a href=#641 id=641 data-nosnippet>641</a>            <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#642 id=642 data-nosnippet>642</a>        }
-<a href=#643 id=643 data-nosnippet>643</a>        out.push(<span class="string">'-'</span>);
-<a href=#644 id=644 data-nosnippet>644</a>        num(out, u64::from(value));
-<a href=#645 id=645 data-nosnippet>645</a>    }
-<a href=#646 id=646 data-nosnippet>646</a>    (count &gt; <span class="number">0</span>).then_some(())
-<a href=#647 id=647 data-nosnippet>647</a>}
-<a href=#648 id=648 data-nosnippet>648</a>
-<a href=#649 id=649 data-nosnippet>649</a><span class="doccomment">/// A decimal number with no sign: one or more digits, of which at most 10
-<a href=#650 id=650 data-nosnippet>650</a>/// are significant. Leading zeros are ignored.
-<a href=#651 id=651 data-nosnippet>651</a></span><span class="kw">fn </span>decimal(s: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;u64&gt; {
-<a href=#652 id=652 data-nosnippet>652</a>    <span class="kw">if </span>s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
-<a href=#653 id=653 data-nosnippet>653</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#654 id=654 data-nosnippet>654</a>    }
-<a href=#655 id=655 data-nosnippet>655</a>    <span class="kw">let </span>significant = s.trim_start_matches(<span class="string">'0'</span>);
-<a href=#656 id=656 data-nosnippet>656</a>    <span class="kw">if </span>significant.is_empty() {
-<a href=#657 id=657 data-nosnippet>657</a>        <span class="kw">return </span><span class="prelude-val">Some</span>(<span class="number">0</span>);
-<a href=#658 id=658 data-nosnippet>658</a>    }
-<a href=#659 id=659 data-nosnippet>659</a>    <span class="kw">if </span>significant.len() &gt; <span class="number">10 </span>{
-<a href=#660 id=660 data-nosnippet>660</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#661 id=661 data-nosnippet>661</a>    }
-<a href=#662 id=662 data-nosnippet>662</a>    significant.parse().ok()
-<a href=#663 id=663 data-nosnippet>663</a>}
-<a href=#664 id=664 data-nosnippet>664</a>
-<a href=#665 id=665 data-nosnippet>665</a><span class="doccomment">/// The canonical form of a cloud-directory object ID: a GUID in the
-<a href=#666 id=666 data-nosnippet>666</a>/// `8-4-4-4-12` hex form, lowercase. `None` if `s` is not one.
-<a href=#667 id=667 data-nosnippet>667</a></span><span class="attr">#[must_use]
-<a href=#668 id=668 data-nosnippet>668</a></span><span class="kw">pub fn </span>normalize_object_id(s: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
-<a href=#669 id=669 data-nosnippet>669</a>    <span class="kw">if </span>s.len() != <span class="number">36 </span>{
-<a href=#670 id=670 data-nosnippet>670</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#671 id=671 data-nosnippet>671</a>    }
-<a href=#672 id=672 data-nosnippet>672</a>    <span class="kw">let </span>groups: Vec&lt;<span class="kw-2">&amp;</span>str&gt; = s.split(<span class="string">'-'</span>).collect();
-<a href=#673 id=673 data-nosnippet>673</a>    <span class="kw">let </span>lengths = [<span class="number">8</span>, <span class="number">4</span>, <span class="number">4</span>, <span class="number">4</span>, <span class="number">12</span>];
-<a href=#674 id=674 data-nosnippet>674</a>    <span class="kw">let </span>ok = groups.len() == lengths.len()
-<a href=#675 id=675 data-nosnippet>675</a>        &amp;&amp; groups
-<a href=#676 id=676 data-nosnippet>676</a>            .iter()
-<a href=#677 id=677 data-nosnippet>677</a>            .zip(lengths)
-<a href=#678 id=678 data-nosnippet>678</a>            .all(|(g, n)| g.len() == n &amp;&amp; g.bytes().all(|b| b.is_ascii_hexdigit()));
-<a href=#679 id=679 data-nosnippet>679</a>    ok.then(|| s.to_ascii_lowercase())
-<a href=#680 id=680 data-nosnippet>680</a>}
-<a href=#681 id=681 data-nosnippet>681</a>
-<a href=#682 id=682 data-nosnippet>682</a><span class="doccomment">/// The canonical form of a member of a principal set: a SID or an object ID.
-<a href=#683 id=683 data-nosnippet>683</a></span><span class="attr">#[must_use]
-<a href=#684 id=684 data-nosnippet>684</a></span><span class="kw">pub fn </span>normalize_principal(s: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
-<a href=#685 id=685 data-nosnippet>685</a>    normalize_sid(s).or_else(|| normalize_object_id(s))
-<a href=#686 id=686 data-nosnippet>686</a>}
-<a href=#687 id=687 data-nosnippet>687</a>
-<a href=#688 id=688 data-nosnippet>688</a><span class="doccomment">/// Writes the canonical form of the principal `s` to `out`, after clearing
-<a href=#689 id=689 data-nosnippet>689</a>/// it, and returns whether `s` is a SID or an object ID. Allocates only to
-<a href=#690 id=690 data-nosnippet>690</a>/// grow `out`.
-<a href=#691 id=691 data-nosnippet>691</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>normalize_principal_into(s: <span class="kw-2">&amp;</span>str, out: <span class="kw-2">&amp;mut </span>String) -&gt; bool {
-<a href=#692 id=692 data-nosnippet>692</a>    <span class="kw">if </span>normalize_sid_into(s, out) {
-<a href=#693 id=693 data-nosnippet>693</a>        <span class="kw">return </span><span class="bool-val">true</span>;
-<a href=#694 id=694 data-nosnippet>694</a>    }
-<a href=#695 id=695 data-nosnippet>695</a>    out.clear();
-<a href=#696 id=696 data-nosnippet>696</a>    <span class="kw">if </span>is_object_id(s) {
-<a href=#697 id=697 data-nosnippet>697</a>        out.extend(s.chars().map(|c| c.to_ascii_lowercase()));
-<a href=#698 id=698 data-nosnippet>698</a>        <span class="bool-val">true
-<a href=#699 id=699 data-nosnippet>699</a>    </span>} <span class="kw">else </span>{
-<a href=#700 id=700 data-nosnippet>700</a>        <span class="bool-val">false
-<a href=#701 id=701 data-nosnippet>701</a>    </span>}
-<a href=#702 id=702 data-nosnippet>702</a>}
-<a href=#703 id=703 data-nosnippet>703</a>
-<a href=#704 id=704 data-nosnippet>704</a><span class="doccomment">/// Whether `s` is an object ID in the `8-4-4-4-12` hex form.
-<a href=#705 id=705 data-nosnippet>705</a></span><span class="kw">fn </span>is_object_id(s: <span class="kw-2">&amp;</span>str) -&gt; bool {
-<a href=#706 id=706 data-nosnippet>706</a>    <span class="kw">let </span>b = s.as_bytes();
-<a href=#707 id=707 data-nosnippet>707</a>    b.len() == <span class="number">36
-<a href=#708 id=708 data-nosnippet>708</a>        </span>&amp;&amp; b.iter().enumerate().all(|(i, c)| {
-<a href=#709 id=709 data-nosnippet>709</a>            <span class="kw">if </span><span class="macro">matches!</span>(i, <span class="number">8 </span>| <span class="number">13 </span>| <span class="number">18 </span>| <span class="number">23</span>) {
-<a href=#710 id=710 data-nosnippet>710</a>                <span class="kw-2">*</span>c == <span class="string">b'-'
-<a href=#711 id=711 data-nosnippet>711</a>            </span>} <span class="kw">else </span>{
-<a href=#712 id=712 data-nosnippet>712</a>                c.is_ascii_hexdigit()
-<a href=#713 id=713 data-nosnippet>713</a>            }
-<a href=#714 id=714 data-nosnippet>714</a>        })
-<a href=#715 id=715 data-nosnippet>715</a>}
-<a href=#716 id=716 data-nosnippet>716</a>
-<a href=#717 id=717 data-nosnippet>717</a><span class="attr">#[cfg(test)]
-<a href=#718 id=718 data-nosnippet>718</a></span><span class="kw">mod </span>tests;
+<a href=#309 id=309 data-nosnippet>309</a>        <span class="kw">let </span>leap =
+<a href=#310 id=310 data-nosnippet>310</a>            year.is_multiple_of(<span class="number">4</span>) &amp;&amp; (!year.is_multiple_of(<span class="number">100</span>) || year.is_multiple_of(<span class="number">400</span>));
+<a href=#311 id=311 data-nosnippet>311</a>        <span class="kw">let </span>days = <span class="kw">match </span>month {
+<a href=#312 id=312 data-nosnippet>312</a>            <span class="number">2 </span><span class="kw">if </span>leap =&gt; <span class="number">29</span>,
+<a href=#313 id=313 data-nosnippet>313</a>            <span class="number">2 </span>=&gt; <span class="number">28</span>,
+<a href=#314 id=314 data-nosnippet>314</a>            <span class="number">4 </span>| <span class="number">6 </span>| <span class="number">9 </span>| <span class="number">11 </span>=&gt; <span class="number">30</span>,
+<a href=#315 id=315 data-nosnippet>315</a>            <span class="kw">_ </span>=&gt; <span class="number">31</span>,
+<a href=#316 id=316 data-nosnippet>316</a>        };
+<a href=#317 id=317 data-nosnippet>317</a>        <span class="kw">if </span>day &gt; days {
+<a href=#318 id=318 data-nosnippet>318</a>            <span class="prelude-val">None
+<a href=#319 id=319 data-nosnippet>319</a>        </span>} <span class="kw">else </span>{
+<a href=#320 id=320 data-nosnippet>320</a>            <span class="prelude-val">Some</span>(<span class="self">Self </span>{ year, month, day })
+<a href=#321 id=321 data-nosnippet>321</a>        }
+<a href=#322 id=322 data-nosnippet>322</a>    }
+<a href=#323 id=323 data-nosnippet>323</a>
+<a href=#324 id=324 data-nosnippet>324</a>    <span class="doccomment">/// Reads `YYYY-MM-DD`, with exactly four, two and two digits.
+<a href=#325 id=325 data-nosnippet>325</a>    </span><span class="attr">#[must_use]
+<a href=#326 id=326 data-nosnippet>326</a>    </span><span class="kw">pub fn </span>parse(s: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt; {
+<a href=#327 id=327 data-nosnippet>327</a>        <span class="kw">let </span>b = s.as_bytes();
+<a href=#328 id=328 data-nosnippet>328</a>        <span class="kw">if </span>b.len() != <span class="number">10 </span>|| b[<span class="number">4</span>] != <span class="string">b'-' </span>|| b[<span class="number">7</span>] != <span class="string">b'-' </span>{
+<a href=#329 id=329 data-nosnippet>329</a>            <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#330 id=330 data-nosnippet>330</a>        }
+<a href=#331 id=331 data-nosnippet>331</a>        <span class="kw">let </span>digits = |r: core::ops::Range&lt;usize&gt;| -&gt; <span class="prelude-ty">Option</span>&lt;u16&gt; {
+<a href=#332 id=332 data-nosnippet>332</a>            <span class="kw">let </span>part = <span class="kw-2">&amp;</span>s[r];
+<a href=#333 id=333 data-nosnippet>333</a>            <span class="kw">if </span>!part.bytes().all(|c| c.is_ascii_digit()) {
+<a href=#334 id=334 data-nosnippet>334</a>                <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#335 id=335 data-nosnippet>335</a>            }
+<a href=#336 id=336 data-nosnippet>336</a>            part.parse().ok()
+<a href=#337 id=337 data-nosnippet>337</a>        };
+<a href=#338 id=338 data-nosnippet>338</a>        <span class="kw">let </span>year = digits(<span class="number">0</span>..<span class="number">4</span>)<span class="question-mark">?</span>;
+<a href=#339 id=339 data-nosnippet>339</a>        <span class="kw">let </span>month = u8::try_from(digits(<span class="number">5</span>..<span class="number">7</span>)<span class="question-mark">?</span>).ok()<span class="question-mark">?</span>;
+<a href=#340 id=340 data-nosnippet>340</a>        <span class="kw">let </span>day = u8::try_from(digits(<span class="number">8</span>..<span class="number">10</span>)<span class="question-mark">?</span>).ok()<span class="question-mark">?</span>;
+<a href=#341 id=341 data-nosnippet>341</a>        <span class="self">Self</span>::new(year, month, day)
+<a href=#342 id=342 data-nosnippet>342</a>    }
+<a href=#343 id=343 data-nosnippet>343</a>}
+<a href=#344 id=344 data-nosnippet>344</a>
+<a href=#345 id=345 data-nosnippet>345</a><span class="kw">impl </span>core::fmt::Display <span class="kw">for </span>Date {
+<a href=#346 id=346 data-nosnippet>346</a>    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>core::fmt::Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; core::fmt::Result {
+<a href=#347 id=347 data-nosnippet>347</a>        <span class="macro">write!</span>(f, <span class="string">"{:04}-{:02}-{:02}"</span>, <span class="self">self</span>.year, <span class="self">self</span>.month, <span class="self">self</span>.day)
+<a href=#348 id=348 data-nosnippet>348</a>    }
+<a href=#349 id=349 data-nosnippet>349</a>}
+<a href=#350 id=350 data-nosnippet>350</a>
+<a href=#351 id=351 data-nosnippet>351</a><span class="doccomment">/// Reads a time of day, `HH:MM` with a 24-hour clock, as minutes since
+<a href=#352 id=352 data-nosnippet>352</a>/// midnight.
+<a href=#353 id=353 data-nosnippet>353</a></span><span class="attr">#[must_use]
+<a href=#354 id=354 data-nosnippet>354</a></span><span class="kw">pub fn </span>parse_time_of_day(s: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;u16&gt; {
+<a href=#355 id=355 data-nosnippet>355</a>    <span class="kw">let </span>b = s.as_bytes();
+<a href=#356 id=356 data-nosnippet>356</a>    <span class="kw">if </span>b.len() != <span class="number">5 </span>|| b[<span class="number">2</span>] != <span class="string">b':' </span>|| !b[..<span class="number">2</span>].iter().chain(<span class="kw-2">&amp;</span>b[<span class="number">3</span>..]).all(u8::is_ascii_digit) {
+<a href=#357 id=357 data-nosnippet>357</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#358 id=358 data-nosnippet>358</a>    }
+<a href=#359 id=359 data-nosnippet>359</a>    <span class="kw">let </span>hours: u16 = s[..<span class="number">2</span>].parse().ok()<span class="question-mark">?</span>;
+<a href=#360 id=360 data-nosnippet>360</a>    <span class="kw">let </span>minutes: u16 = s[<span class="number">3</span>..].parse().ok()<span class="question-mark">?</span>;
+<a href=#361 id=361 data-nosnippet>361</a>    (hours &lt; <span class="number">24 </span>&amp;&amp; minutes &lt; <span class="number">60</span>).then_some(hours * <span class="number">60 </span>+ minutes)
+<a href=#362 id=362 data-nosnippet>362</a>}
+<a href=#363 id=363 data-nosnippet>363</a>
+<a href=#364 id=364 data-nosnippet>364</a><span class="doccomment">/// How a session was started.
+<a href=#365 id=365 data-nosnippet>365</a></span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+<a href=#366 id=366 data-nosnippet>366</a>#[serde(rename_all = <span class="string">"snake_case"</span>)]
+<a href=#367 id=367 data-nosnippet>367</a></span><span class="kw">pub enum </span>SessionType {
+<a href=#368 id=368 data-nosnippet>368</a>    <span class="doccomment">/// The physical console.
+<a href=#369 id=369 data-nosnippet>369</a>    </span>Console,
+<a href=#370 id=370 data-nosnippet>370</a>    <span class="doccomment">/// A remote desktop session.
+<a href=#371 id=371 data-nosnippet>371</a>    </span>Rdp,
+<a href=#372 id=372 data-nosnippet>372</a>    <span class="doccomment">/// A remote shell, such as a remote PowerShell session.
+<a href=#373 id=373 data-nosnippet>373</a>    </span>RemoteShell,
+<a href=#374 id=374 data-nosnippet>374</a>    <span class="doccomment">/// A service.
+<a href=#375 id=375 data-nosnippet>375</a>    </span>Service,
+<a href=#376 id=376 data-nosnippet>376</a>    <span class="doccomment">/// A batch job, such as a scheduled task.
+<a href=#377 id=377 data-nosnippet>377</a>    </span>Batch,
+<a href=#378 id=378 data-nosnippet>378</a>    <span class="doccomment">/// A network logon.
+<a href=#379 id=379 data-nosnippet>379</a>    </span>Network,
+<a href=#380 id=380 data-nosnippet>380</a>}
+<a href=#381 id=381 data-nosnippet>381</a>
+<a href=#382 id=382 data-nosnippet>382</a><span class="kw">impl </span>SessionType {
+<a href=#383 id=383 data-nosnippet>383</a>    <span class="doccomment">/// Every session type.
+<a href=#384 id=384 data-nosnippet>384</a>    </span><span class="kw">pub const </span>ALL: [<span class="self">Self</span>; <span class="number">6</span>] = [
+<a href=#385 id=385 data-nosnippet>385</a>        <span class="self">Self</span>::Console,
+<a href=#386 id=386 data-nosnippet>386</a>        <span class="self">Self</span>::Rdp,
+<a href=#387 id=387 data-nosnippet>387</a>        <span class="self">Self</span>::RemoteShell,
+<a href=#388 id=388 data-nosnippet>388</a>        <span class="self">Self</span>::Service,
+<a href=#389 id=389 data-nosnippet>389</a>        <span class="self">Self</span>::Batch,
+<a href=#390 id=390 data-nosnippet>390</a>        <span class="self">Self</span>::Network,
+<a href=#391 id=391 data-nosnippet>391</a>    ];
+<a href=#392 id=392 data-nosnippet>392</a>
+<a href=#393 id=393 data-nosnippet>393</a>    <span class="doccomment">/// The name a criterion value uses.
+<a href=#394 id=394 data-nosnippet>394</a>    </span><span class="attr">#[must_use]
+<a href=#395 id=395 data-nosnippet>395</a>    </span><span class="kw">pub const fn </span>as_str(<span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str {
+<a href=#396 id=396 data-nosnippet>396</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#397 id=397 data-nosnippet>397</a>            <span class="self">Self</span>::Console =&gt; <span class="string">"console"</span>,
+<a href=#398 id=398 data-nosnippet>398</a>            <span class="self">Self</span>::Rdp =&gt; <span class="string">"rdp"</span>,
+<a href=#399 id=399 data-nosnippet>399</a>            <span class="self">Self</span>::RemoteShell =&gt; <span class="string">"remote_shell"</span>,
+<a href=#400 id=400 data-nosnippet>400</a>            <span class="self">Self</span>::Service =&gt; <span class="string">"service"</span>,
+<a href=#401 id=401 data-nosnippet>401</a>            <span class="self">Self</span>::Batch =&gt; <span class="string">"batch"</span>,
+<a href=#402 id=402 data-nosnippet>402</a>            <span class="self">Self</span>::Network =&gt; <span class="string">"network"</span>,
+<a href=#403 id=403 data-nosnippet>403</a>        }
+<a href=#404 id=404 data-nosnippet>404</a>    }
+<a href=#405 id=405 data-nosnippet>405</a>
+<a href=#406 id=406 data-nosnippet>406</a>    <span class="doccomment">/// The session type with this name, exactly as [`Self::as_str`] writes it.
+<a href=#407 id=407 data-nosnippet>407</a>    </span><span class="attr">#[must_use]
+<a href=#408 id=408 data-nosnippet>408</a>    </span><span class="kw">pub fn </span>from_name(name: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt; {
+<a href=#409 id=409 data-nosnippet>409</a>        <span class="self">Self</span>::ALL.into_iter().find(|t| t.as_str() == name)
+<a href=#410 id=410 data-nosnippet>410</a>    }
+<a href=#411 id=411 data-nosnippet>411</a>}
+<a href=#412 id=412 data-nosnippet>412</a>
+<a href=#413 id=413 data-nosnippet>413</a><span class="doccomment">/// A context fact, as a criterion reads it.
+<a href=#414 id=414 data-nosnippet>414</a></span><span class="attr">#[derive(Clone, Copy, Debug)]
+<a href=#415 id=415 data-nosnippet>415</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>ContextFact&lt;<span class="lifetime">'a</span>&gt; {
+<a href=#416 id=416 data-nosnippet>416</a>    <span class="doccomment">/// One string.
+<a href=#417 id=417 data-nosnippet>417</a>    </span>Text(<span class="kw-2">&amp;</span><span class="lifetime">'a </span>str),
+<a href=#418 id=418 data-nosnippet>418</a>    <span class="doccomment">/// The account name and the user principal name, whichever are known.
+<a href=#419 id=419 data-nosnippet>419</a>    </span>Names(<span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>str&gt;, <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>str&gt;),
+<a href=#420 id=420 data-nosnippet>420</a>    <span class="doccomment">/// A set of strings.
+<a href=#421 id=421 data-nosnippet>421</a>    </span>Set(<span class="kw-2">&amp;</span><span class="lifetime">'a </span>[String]),
+<a href=#422 id=422 data-nosnippet>422</a>    <span class="doccomment">/// A yes-or-no fact.
+<a href=#423 id=423 data-nosnippet>423</a>    </span>Bool(bool),
+<a href=#424 id=424 data-nosnippet>424</a>    <span class="doccomment">/// A session type.
+<a href=#425 id=425 data-nosnippet>425</a>    </span>Session(SessionType),
+<a href=#426 id=426 data-nosnippet>426</a>    <span class="doccomment">/// A whole number.
+<a href=#427 id=427 data-nosnippet>427</a>    </span>Number(u64),
+<a href=#428 id=428 data-nosnippet>428</a>    <span class="doccomment">/// An integrity level.
+<a href=#429 id=429 data-nosnippet>429</a>    </span>Level(IntegrityLevel),
+<a href=#430 id=430 data-nosnippet>430</a>    <span class="doccomment">/// One IP address.
+<a href=#431 id=431 data-nosnippet>431</a>    </span>Ip(IpAddr),
+<a href=#432 id=432 data-nosnippet>432</a>    <span class="doccomment">/// A set of IP addresses.
+<a href=#433 id=433 data-nosnippet>433</a>    </span>Ips(<span class="kw-2">&amp;</span><span class="lifetime">'a </span>[IpAddr]),
+<a href=#434 id=434 data-nosnippet>434</a>    <span class="doccomment">/// A set of MAC addresses.
+<a href=#435 id=435 data-nosnippet>435</a>    </span>Macs(<span class="kw-2">&amp;</span><span class="lifetime">'a </span>[[u8; <span class="number">6</span>]]),
+<a href=#436 id=436 data-nosnippet>436</a>    <span class="doccomment">/// A day of the week.
+<a href=#437 id=437 data-nosnippet>437</a>    </span>Weekday(Weekday),
+<a href=#438 id=438 data-nosnippet>438</a>    <span class="doccomment">/// Minutes since midnight.
+<a href=#439 id=439 data-nosnippet>439</a>    </span>Minute(u16),
+<a href=#440 id=440 data-nosnippet>440</a>    <span class="doccomment">/// A date.
+<a href=#441 id=441 data-nosnippet>441</a>    </span>Date(Date),
+<a href=#442 id=442 data-nosnippet>442</a>}
+<a href=#443 id=443 data-nosnippet>443</a>
+<a href=#444 id=444 data-nosnippet>444</a><span class="kw">impl </span>EvaluationContext {
+<a href=#445 id=445 data-nosnippet>445</a>    <span class="doccomment">/// No facts at all, as a constant: every context criterion evaluates
+<a href=#446 id=446 data-nosnippet>446</a>    /// to unknown.
+<a href=#447 id=447 data-nosnippet>447</a>    </span><span class="kw">pub const </span>EMPTY: <span class="self">Self </span>= <span class="self">Self </span>{
+<a href=#448 id=448 data-nosnippet>448</a>        user: UserContext {
+<a href=#449 id=449 data-nosnippet>449</a>            sid: <span class="prelude-val">None</span>,
+<a href=#450 id=450 data-nosnippet>450</a>            account_name: <span class="prelude-val">None</span>,
+<a href=#451 id=451 data-nosnippet>451</a>            upn: <span class="prelude-val">None</span>,
+<a href=#452 id=452 data-nosnippet>452</a>            groups: <span class="prelude-val">None</span>,
+<a href=#453 id=453 data-nosnippet>453</a>            primary_group: <span class="prelude-val">None</span>,
+<a href=#454 id=454 data-nosnippet>454</a>            is_admin: <span class="prelude-val">None</span>,
+<a href=#455 id=455 data-nosnippet>455</a>            is_elevated: <span class="prelude-val">None</span>,
+<a href=#456 id=456 data-nosnippet>456</a>            is_service_account: <span class="prelude-val">None</span>,
+<a href=#457 id=457 data-nosnippet>457</a>            is_system: <span class="prelude-val">None</span>,
+<a href=#458 id=458 data-nosnippet>458</a>            integrity_level: <span class="prelude-val">None</span>,
+<a href=#459 id=459 data-nosnippet>459</a>            dn: <span class="prelude-val">None</span>,
+<a href=#460 id=460 data-nosnippet>460</a>        },
+<a href=#461 id=461 data-nosnippet>461</a>        device: DeviceContext {
+<a href=#462 id=462 data-nosnippet>462</a>            hostname: <span class="prelude-val">None</span>,
+<a href=#463 id=463 data-nosnippet>463</a>            fqdn: <span class="prelude-val">None</span>,
+<a href=#464 id=464 data-nosnippet>464</a>            domain: <span class="prelude-val">None</span>,
+<a href=#465 id=465 data-nosnippet>465</a>            netbios: <span class="prelude-val">None</span>,
+<a href=#466 id=466 data-nosnippet>466</a>            ad_site: <span class="prelude-val">None</span>,
+<a href=#467 id=467 data-nosnippet>467</a>            groups: <span class="prelude-val">None</span>,
+<a href=#468 id=468 data-nosnippet>468</a>            tags: <span class="prelude-val">None</span>,
+<a href=#469 id=469 data-nosnippet>469</a>            os_version: <span class="prelude-val">None</span>,
+<a href=#470 id=470 data-nosnippet>470</a>            os_edition: <span class="prelude-val">None</span>,
+<a href=#471 id=471 data-nosnippet>471</a>            arch: <span class="prelude-val">None</span>,
+<a href=#472 id=472 data-nosnippet>472</a>            is_server: <span class="prelude-val">None</span>,
+<a href=#473 id=473 data-nosnippet>473</a>            is_domain_controller: <span class="prelude-val">None</span>,
+<a href=#474 id=474 data-nosnippet>474</a>            is_laptop: <span class="prelude-val">None</span>,
+<a href=#475 id=475 data-nosnippet>475</a>            is_vdi: <span class="prelude-val">None</span>,
+<a href=#476 id=476 data-nosnippet>476</a>            is_terminal_server: <span class="prelude-val">None</span>,
+<a href=#477 id=477 data-nosnippet>477</a>            os_build: <span class="prelude-val">None</span>,
+<a href=#478 id=478 data-nosnippet>478</a>            dn: <span class="prelude-val">None</span>,
+<a href=#479 id=479 data-nosnippet>479</a>            boot_phase: <span class="prelude-val">None</span>,
+<a href=#480 id=480 data-nosnippet>480</a>            containment_available: <span class="prelude-val">None</span>,
+<a href=#481 id=481 data-nosnippet>481</a>        },
+<a href=#482 id=482 data-nosnippet>482</a>        session: SessionContext {
+<a href=#483 id=483 data-nosnippet>483</a>            session_type: <span class="prelude-val">None</span>,
+<a href=#484 id=484 data-nosnippet>484</a>            client_hostname: <span class="prelude-val">None</span>,
+<a href=#485 id=485 data-nosnippet>485</a>            is_remote: <span class="prelude-val">None</span>,
+<a href=#486 id=486 data-nosnippet>486</a>            id: <span class="prelude-val">None</span>,
+<a href=#487 id=487 data-nosnippet>487</a>            client_ip: <span class="prelude-val">None</span>,
+<a href=#488 id=488 data-nosnippet>488</a>        },
+<a href=#489 id=489 data-nosnippet>489</a>        network: NetworkContext {
+<a href=#490 id=490 data-nosnippet>490</a>            addresses: <span class="prelude-val">None</span>,
+<a href=#491 id=491 data-nosnippet>491</a>            macs: <span class="prelude-val">None</span>,
+<a href=#492 id=492 data-nosnippet>492</a>            dns_suffixes: <span class="prelude-val">None</span>,
+<a href=#493 id=493 data-nosnippet>493</a>            gateway_macs: <span class="prelude-val">None</span>,
+<a href=#494 id=494 data-nosnippet>494</a>            server_reachable: <span class="prelude-val">None</span>,
+<a href=#495 id=495 data-nosnippet>495</a>            locations: <span class="prelude-val">None</span>,
+<a href=#496 id=496 data-nosnippet>496</a>        },
+<a href=#497 id=497 data-nosnippet>497</a>        scope: ScopeFacts::EMPTY,
+<a href=#498 id=498 data-nosnippet>498</a>        time: TimeContext {
+<a href=#499 id=499 data-nosnippet>499</a>            weekday: <span class="prelude-val">None</span>,
+<a href=#500 id=500 data-nosnippet>500</a>            minute_of_day: <span class="prelude-val">None</span>,
+<a href=#501 id=501 data-nosnippet>501</a>            date: <span class="prelude-val">None</span>,
+<a href=#502 id=502 data-nosnippet>502</a>        },
+<a href=#503 id=503 data-nosnippet>503</a>    };
+<a href=#504 id=504 data-nosnippet>504</a>
+<a href=#505 id=505 data-nosnippet>505</a>    <span class="doccomment">/// No facts at all: every context criterion evaluates to unknown.
+<a href=#506 id=506 data-nosnippet>506</a>    </span><span class="attr">#[must_use]
+<a href=#507 id=507 data-nosnippet>507</a>    </span><span class="kw">pub fn </span>new() -&gt; <span class="self">Self </span>{
+<a href=#508 id=508 data-nosnippet>508</a>        <span class="self">Self</span>::default()
+<a href=#509 id=509 data-nosnippet>509</a>    }
+<a href=#510 id=510 data-nosnippet>510</a>
+<a href=#511 id=511 data-nosnippet>511</a>    <span class="doccomment">/// The fact a context field tests, or `None` if it was not collected or
+<a href=#512 id=512 data-nosnippet>512</a>    /// `field` is not a context field.
+<a href=#513 id=513 data-nosnippet>513</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>fact(<span class="kw-2">&amp;</span><span class="self">self</span>, field: Field) -&gt; <span class="prelude-ty">Option</span>&lt;ContextFact&lt;<span class="lifetime">'_</span>&gt;&gt; {
+<a href=#514 id=514 data-nosnippet>514</a>        <span class="kw">fn </span>text(v: <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;String&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;ContextFact&lt;<span class="lifetime">'_</span>&gt;&gt; {
+<a href=#515 id=515 data-nosnippet>515</a>            v.as_deref().map(ContextFact::Text)
+<a href=#516 id=516 data-nosnippet>516</a>        }
+<a href=#517 id=517 data-nosnippet>517</a>        <span class="kw">fn </span>set(v: <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;Vec&lt;String&gt;&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;ContextFact&lt;<span class="lifetime">'_</span>&gt;&gt; {
+<a href=#518 id=518 data-nosnippet>518</a>            v.as_deref().map(ContextFact::Set)
+<a href=#519 id=519 data-nosnippet>519</a>        }
+<a href=#520 id=520 data-nosnippet>520</a>        <span class="kw">fn </span>flag(v: <span class="prelude-ty">Option</span>&lt;bool&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;ContextFact&lt;<span class="lifetime">'static</span>&gt;&gt; {
+<a href=#521 id=521 data-nosnippet>521</a>            v.map(ContextFact::Bool)
+<a href=#522 id=522 data-nosnippet>522</a>        }
+<a href=#523 id=523 data-nosnippet>523</a>        <span class="kw">let </span>(u, d, s, n, t) = (
+<a href=#524 id=524 data-nosnippet>524</a>            <span class="kw-2">&amp;</span><span class="self">self</span>.user,
+<a href=#525 id=525 data-nosnippet>525</a>            <span class="kw-2">&amp;</span><span class="self">self</span>.device,
+<a href=#526 id=526 data-nosnippet>526</a>            <span class="kw-2">&amp;</span><span class="self">self</span>.session,
+<a href=#527 id=527 data-nosnippet>527</a>            <span class="kw-2">&amp;</span><span class="self">self</span>.network,
+<a href=#528 id=528 data-nosnippet>528</a>            <span class="kw-2">&amp;</span><span class="self">self</span>.time,
+<a href=#529 id=529 data-nosnippet>529</a>        );
+<a href=#530 id=530 data-nosnippet>530</a>        <span class="kw">match </span>field {
+<a href=#531 id=531 data-nosnippet>531</a>            Field::UserSid =&gt; text(<span class="kw-2">&amp;</span>u.sid),
+<a href=#532 id=532 data-nosnippet>532</a>            Field::UserName =&gt; <span class="kw">match </span>(u.account_name.as_deref(), u.upn.as_deref()) {
+<a href=#533 id=533 data-nosnippet>533</a>                (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>) =&gt; <span class="prelude-val">None</span>,
+<a href=#534 id=534 data-nosnippet>534</a>                (account, upn) =&gt; <span class="prelude-val">Some</span>(ContextFact::Names(account, upn)),
+<a href=#535 id=535 data-nosnippet>535</a>            },
+<a href=#536 id=536 data-nosnippet>536</a>            Field::UserGroups =&gt; set(<span class="kw-2">&amp;</span>u.groups),
+<a href=#537 id=537 data-nosnippet>537</a>            Field::UserPrimaryGroup =&gt; text(<span class="kw-2">&amp;</span>u.primary_group),
+<a href=#538 id=538 data-nosnippet>538</a>            Field::UserIsAdmin =&gt; flag(u.is_admin),
+<a href=#539 id=539 data-nosnippet>539</a>            Field::UserIsElevated =&gt; flag(u.is_elevated),
+<a href=#540 id=540 data-nosnippet>540</a>            Field::UserIsServiceAccount =&gt; flag(u.is_service_account),
+<a href=#541 id=541 data-nosnippet>541</a>            Field::UserIsSystem =&gt; flag(u.is_system),
+<a href=#542 id=542 data-nosnippet>542</a>            Field::DeviceHostname =&gt; text(<span class="kw-2">&amp;</span>d.hostname),
+<a href=#543 id=543 data-nosnippet>543</a>            Field::DeviceFqdn =&gt; text(<span class="kw-2">&amp;</span>d.fqdn),
+<a href=#544 id=544 data-nosnippet>544</a>            Field::DeviceDomain =&gt; text(<span class="kw-2">&amp;</span>d.domain),
+<a href=#545 id=545 data-nosnippet>545</a>            Field::DeviceNetbios =&gt; text(<span class="kw-2">&amp;</span>d.netbios),
+<a href=#546 id=546 data-nosnippet>546</a>            Field::DeviceAdSite =&gt; text(<span class="kw-2">&amp;</span>d.ad_site),
+<a href=#547 id=547 data-nosnippet>547</a>            Field::DeviceGroups =&gt; set(<span class="kw-2">&amp;</span>d.groups),
+<a href=#548 id=548 data-nosnippet>548</a>            Field::DeviceTags =&gt; set(<span class="kw-2">&amp;</span>d.tags),
+<a href=#549 id=549 data-nosnippet>549</a>            Field::DeviceOsVersion =&gt; text(<span class="kw-2">&amp;</span>d.os_version),
+<a href=#550 id=550 data-nosnippet>550</a>            Field::DeviceOsEdition =&gt; text(<span class="kw-2">&amp;</span>d.os_edition),
+<a href=#551 id=551 data-nosnippet>551</a>            Field::DeviceArch =&gt; text(<span class="kw-2">&amp;</span>d.arch),
+<a href=#552 id=552 data-nosnippet>552</a>            Field::DeviceIsServer =&gt; flag(d.is_server),
+<a href=#553 id=553 data-nosnippet>553</a>            Field::DeviceIsDomainController =&gt; flag(d.is_domain_controller),
+<a href=#554 id=554 data-nosnippet>554</a>            Field::DeviceIsLaptop =&gt; flag(d.is_laptop),
+<a href=#555 id=555 data-nosnippet>555</a>            Field::DeviceIsVdi =&gt; flag(d.is_vdi),
+<a href=#556 id=556 data-nosnippet>556</a>            Field::DeviceIsTerminalServer =&gt; flag(d.is_terminal_server),
+<a href=#557 id=557 data-nosnippet>557</a>            Field::SessionType =&gt; s.session_type.map(ContextFact::Session),
+<a href=#558 id=558 data-nosnippet>558</a>            Field::SessionClientHostname =&gt; text(<span class="kw-2">&amp;</span>s.client_hostname),
+<a href=#559 id=559 data-nosnippet>559</a>            Field::SessionIsRemote =&gt; flag(s.is_remote),
+<a href=#560 id=560 data-nosnippet>560</a>            Field::UserIntegrityLevel =&gt; u.integrity_level.map(ContextFact::Level),
+<a href=#561 id=561 data-nosnippet>561</a>            Field::UserOu =&gt; text(<span class="kw-2">&amp;</span>u.dn),
+<a href=#562 id=562 data-nosnippet>562</a>            Field::DeviceOu =&gt; text(<span class="kw-2">&amp;</span>d.dn),
+<a href=#563 id=563 data-nosnippet>563</a>            Field::DeviceOsBuild =&gt; d.os_build.map(|v| ContextFact::Number(v.into())),
+<a href=#564 id=564 data-nosnippet>564</a>            Field::SessionId =&gt; s.id.map(|v| ContextFact::Number(v.into())),
+<a href=#565 id=565 data-nosnippet>565</a>            Field::SessionClientIp =&gt; s.client_ip.map(ContextFact::Ip),
+<a href=#566 id=566 data-nosnippet>566</a>            Field::NetIp =&gt; n.addresses.as_deref().map(ContextFact::Ips),
+<a href=#567 id=567 data-nosnippet>567</a>            Field::NetMac =&gt; n.macs.as_deref().map(ContextFact::Macs),
+<a href=#568 id=568 data-nosnippet>568</a>            Field::NetDnsSuffix =&gt; set(<span class="kw-2">&amp;</span>n.dns_suffixes),
+<a href=#569 id=569 data-nosnippet>569</a>            Field::NetConnectedToServer =&gt; flag(n.server_reachable),
+<a href=#570 id=570 data-nosnippet>570</a>            Field::NetLocation =&gt; set(<span class="kw-2">&amp;</span>n.locations),
+<a href=#571 id=571 data-nosnippet>571</a>            Field::TimeWeekday =&gt; t.weekday.map(ContextFact::Weekday),
+<a href=#572 id=572 data-nosnippet>572</a>            <span class="comment">// A minute past the end of the day is not a time of day.
+<a href=#573 id=573 data-nosnippet>573</a>            </span>Field::TimeLocalTime =&gt; t
+<a href=#574 id=574 data-nosnippet>574</a>                .minute_of_day
+<a href=#575 id=575 data-nosnippet>575</a>                .filter(|m| <span class="kw-2">*</span>m &lt; <span class="number">24 </span>* <span class="number">60</span>)
+<a href=#576 id=576 data-nosnippet>576</a>                .map(ContextFact::Minute),
+<a href=#577 id=577 data-nosnippet>577</a>            Field::TimeDate =&gt; t.date.map(ContextFact::Date),
+<a href=#578 id=578 data-nosnippet>578</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+<a href=#579 id=579 data-nosnippet>579</a>        }
+<a href=#580 id=580 data-nosnippet>580</a>    }
+<a href=#581 id=581 data-nosnippet>581</a>}
+<a href=#582 id=582 data-nosnippet>582</a>
+<a href=#583 id=583 data-nosnippet>583</a><span class="doccomment">/// The canonical form of a SID (MS-DTYP 2.4.2.1): `S-1-`, the identifier
+<a href=#584 id=584 data-nosnippet>584</a>/// authority, then 1 to 15 decimal sub-authorities without leading zeros.
+<a href=#585 id=585 data-nosnippet>585</a>/// The authority is written in decimal when it is below 2^32, and otherwise
+<a href=#586 id=586 data-nosnippet>586</a>/// as `0x` and 12 lowercase hex digits, as Windows writes it. On input it
+<a href=#587 id=587 data-nosnippet>587</a>/// may be written either way, in any case, and decimal numbers may have
+<a href=#588 id=588 data-nosnippet>588</a>/// leading zeros. The result is itself canonical: normalising it again
+<a href=#589 id=589 data-nosnippet>589</a>/// gives the same text. `None` if `s` is not a SID.
+<a href=#590 id=590 data-nosnippet>590</a></span><span class="attr">#[must_use]
+<a href=#591 id=591 data-nosnippet>591</a></span><span class="kw">pub fn </span>normalize_sid(s: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
+<a href=#592 id=592 data-nosnippet>592</a>    <span class="kw">let </span><span class="kw-2">mut </span>out = String::new();
+<a href=#593 id=593 data-nosnippet>593</a>    normalize_sid_into(s, <span class="kw-2">&amp;mut </span>out).then_some(out)
+<a href=#594 id=594 data-nosnippet>594</a>}
+<a href=#595 id=595 data-nosnippet>595</a>
+<a href=#596 id=596 data-nosnippet>596</a><span class="doccomment">/// Writes the canonical form of the SID `s` to `out`, after clearing it,
+<a href=#597 id=597 data-nosnippet>597</a>/// and returns whether `s` is a SID. Allocates only to grow `out`.
+<a href=#598 id=598 data-nosnippet>598</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>normalize_sid_into(s: <span class="kw-2">&amp;</span>str, out: <span class="kw-2">&amp;mut </span>String) -&gt; bool {
+<a href=#599 id=599 data-nosnippet>599</a>    <span class="kw">use </span>core::fmt::Write <span class="kw">as _</span>;
+<a href=#600 id=600 data-nosnippet>600</a>    out.clear();
+<a href=#601 id=601 data-nosnippet>601</a>    parse_sid(s, out, <span class="kw-2">&amp;mut </span>|out, v| {
+<a href=#602 id=602 data-nosnippet>602</a>        <span class="kw">let _ </span>= <span class="macro">write!</span>(out, <span class="string">"{v}"</span>);
+<a href=#603 id=603 data-nosnippet>603</a>    })
+<a href=#604 id=604 data-nosnippet>604</a>    .is_some()
+<a href=#605 id=605 data-nosnippet>605</a>}
+<a href=#606 id=606 data-nosnippet>606</a>
+<a href=#607 id=607 data-nosnippet>607</a><span class="doccomment">/// Parses a SID, writing its canonical form to `out` with `num` writing
+<a href=#608 id=608 data-nosnippet>608</a>/// each decimal number.
+<a href=#609 id=609 data-nosnippet>609</a></span><span class="kw">fn </span>parse_sid(s: <span class="kw-2">&amp;</span>str, out: <span class="kw-2">&amp;mut </span>String, num: <span class="kw-2">&amp;mut </span><span class="kw">dyn </span>FnMut(<span class="kw-2">&amp;mut </span>String, u64)) -&gt; <span class="prelude-ty">Option</span>&lt;()&gt; {
+<a href=#610 id=610 data-nosnippet>610</a>    <span class="kw">use </span>core::fmt::Write <span class="kw">as _</span>;
+<a href=#611 id=611 data-nosnippet>611</a>    <span class="kw">let </span><span class="kw-2">mut </span>parts = s.split(<span class="string">'-'</span>);
+<a href=#612 id=612 data-nosnippet>612</a>    <span class="kw">if </span>!parts.next()<span class="question-mark">?</span>.eq_ignore_ascii_case(<span class="string">"s"</span>) || parts.next()<span class="question-mark">? </span>!= <span class="string">"1" </span>{
+<a href=#613 id=613 data-nosnippet>613</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#614 id=614 data-nosnippet>614</a>    }
+<a href=#615 id=615 data-nosnippet>615</a>    <span class="kw">let </span>authority = parts.next()<span class="question-mark">?</span>;
+<a href=#616 id=616 data-nosnippet>616</a>    <span class="kw">let </span>authority: u64 = <span class="kw">if let </span><span class="prelude-val">Some</span>(hex) = authority
+<a href=#617 id=617 data-nosnippet>617</a>        .strip_prefix(<span class="string">"0x"</span>)
+<a href=#618 id=618 data-nosnippet>618</a>        .or_else(|| authority.strip_prefix(<span class="string">"0X"</span>))
+<a href=#619 id=619 data-nosnippet>619</a>    {
+<a href=#620 id=620 data-nosnippet>620</a>        <span class="kw">if </span>hex.len() != <span class="number">12 </span>|| !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+<a href=#621 id=621 data-nosnippet>621</a>            <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#622 id=622 data-nosnippet>622</a>        }
+<a href=#623 id=623 data-nosnippet>623</a>        u64::from_str_radix(hex, <span class="number">16</span>).ok()<span class="question-mark">?
+<a href=#624 id=624 data-nosnippet>624</a>    </span>} <span class="kw">else </span>{
+<a href=#625 id=625 data-nosnippet>625</a>        <span class="kw">let </span>value = decimal(authority)<span class="question-mark">?</span>;
+<a href=#626 id=626 data-nosnippet>626</a>        <span class="kw">if </span>value &gt;= <span class="number">1 </span>&lt;&lt; <span class="number">32 </span>{
+<a href=#627 id=627 data-nosnippet>627</a>            <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#628 id=628 data-nosnippet>628</a>        }
+<a href=#629 id=629 data-nosnippet>629</a>        value
+<a href=#630 id=630 data-nosnippet>630</a>    };
+<a href=#631 id=631 data-nosnippet>631</a>    out.push_str(<span class="string">"S-1-"</span>);
+<a href=#632 id=632 data-nosnippet>632</a>    <span class="kw">if </span>authority &lt; <span class="number">1 </span>&lt;&lt; <span class="number">32 </span>{
+<a href=#633 id=633 data-nosnippet>633</a>        num(out, authority);
+<a href=#634 id=634 data-nosnippet>634</a>    } <span class="kw">else </span>{
+<a href=#635 id=635 data-nosnippet>635</a>        <span class="kw">let _ </span>= <span class="macro">write!</span>(out, <span class="string">"0x{authority:012x}"</span>);
+<a href=#636 id=636 data-nosnippet>636</a>    }
+<a href=#637 id=637 data-nosnippet>637</a>    <span class="kw">let </span><span class="kw-2">mut </span>count = <span class="number">0usize</span>;
+<a href=#638 id=638 data-nosnippet>638</a>    <span class="kw">for </span>part <span class="kw">in </span>parts {
+<a href=#639 id=639 data-nosnippet>639</a>        <span class="kw">let </span>value = u32::try_from(decimal(part)<span class="question-mark">?</span>).ok()<span class="question-mark">?</span>;
+<a href=#640 id=640 data-nosnippet>640</a>        count += <span class="number">1</span>;
+<a href=#641 id=641 data-nosnippet>641</a>        <span class="kw">if </span>count &gt; <span class="number">15 </span>{
+<a href=#642 id=642 data-nosnippet>642</a>            <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#643 id=643 data-nosnippet>643</a>        }
+<a href=#644 id=644 data-nosnippet>644</a>        out.push(<span class="string">'-'</span>);
+<a href=#645 id=645 data-nosnippet>645</a>        num(out, u64::from(value));
+<a href=#646 id=646 data-nosnippet>646</a>    }
+<a href=#647 id=647 data-nosnippet>647</a>    (count &gt; <span class="number">0</span>).then_some(())
+<a href=#648 id=648 data-nosnippet>648</a>}
+<a href=#649 id=649 data-nosnippet>649</a>
+<a href=#650 id=650 data-nosnippet>650</a><span class="doccomment">/// A decimal number with no sign: one or more digits, of which at most 10
+<a href=#651 id=651 data-nosnippet>651</a>/// are significant. Leading zeros are ignored.
+<a href=#652 id=652 data-nosnippet>652</a></span><span class="kw">fn </span>decimal(s: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;u64&gt; {
+<a href=#653 id=653 data-nosnippet>653</a>    <span class="kw">if </span>s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
+<a href=#654 id=654 data-nosnippet>654</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#655 id=655 data-nosnippet>655</a>    }
+<a href=#656 id=656 data-nosnippet>656</a>    <span class="kw">let </span>significant = s.trim_start_matches(<span class="string">'0'</span>);
+<a href=#657 id=657 data-nosnippet>657</a>    <span class="kw">if </span>significant.is_empty() {
+<a href=#658 id=658 data-nosnippet>658</a>        <span class="kw">return </span><span class="prelude-val">Some</span>(<span class="number">0</span>);
+<a href=#659 id=659 data-nosnippet>659</a>    }
+<a href=#660 id=660 data-nosnippet>660</a>    <span class="kw">if </span>significant.len() &gt; <span class="number">10 </span>{
+<a href=#661 id=661 data-nosnippet>661</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#662 id=662 data-nosnippet>662</a>    }
+<a href=#663 id=663 data-nosnippet>663</a>    significant.parse().ok()
+<a href=#664 id=664 data-nosnippet>664</a>}
+<a href=#665 id=665 data-nosnippet>665</a>
+<a href=#666 id=666 data-nosnippet>666</a><span class="doccomment">/// The canonical form of a cloud-directory object ID: a GUID in the
+<a href=#667 id=667 data-nosnippet>667</a>/// `8-4-4-4-12` hex form, lowercase. `None` if `s` is not one.
+<a href=#668 id=668 data-nosnippet>668</a></span><span class="attr">#[must_use]
+<a href=#669 id=669 data-nosnippet>669</a></span><span class="kw">pub fn </span>normalize_object_id(s: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
+<a href=#670 id=670 data-nosnippet>670</a>    <span class="kw">if </span>s.len() != <span class="number">36 </span>{
+<a href=#671 id=671 data-nosnippet>671</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#672 id=672 data-nosnippet>672</a>    }
+<a href=#673 id=673 data-nosnippet>673</a>    <span class="kw">let </span>groups: Vec&lt;<span class="kw-2">&amp;</span>str&gt; = s.split(<span class="string">'-'</span>).collect();
+<a href=#674 id=674 data-nosnippet>674</a>    <span class="kw">let </span>lengths = [<span class="number">8</span>, <span class="number">4</span>, <span class="number">4</span>, <span class="number">4</span>, <span class="number">12</span>];
+<a href=#675 id=675 data-nosnippet>675</a>    <span class="kw">let </span>ok = groups.len() == lengths.len()
+<a href=#676 id=676 data-nosnippet>676</a>        &amp;&amp; groups
+<a href=#677 id=677 data-nosnippet>677</a>            .iter()
+<a href=#678 id=678 data-nosnippet>678</a>            .zip(lengths)
+<a href=#679 id=679 data-nosnippet>679</a>            .all(|(g, n)| g.len() == n &amp;&amp; g.bytes().all(|b| b.is_ascii_hexdigit()));
+<a href=#680 id=680 data-nosnippet>680</a>    ok.then(|| s.to_ascii_lowercase())
+<a href=#681 id=681 data-nosnippet>681</a>}
+<a href=#682 id=682 data-nosnippet>682</a>
+<a href=#683 id=683 data-nosnippet>683</a><span class="doccomment">/// The canonical form of a member of a principal set: a SID or an object ID.
+<a href=#684 id=684 data-nosnippet>684</a></span><span class="attr">#[must_use]
+<a href=#685 id=685 data-nosnippet>685</a></span><span class="kw">pub fn </span>normalize_principal(s: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
+<a href=#686 id=686 data-nosnippet>686</a>    normalize_sid(s).or_else(|| normalize_object_id(s))
+<a href=#687 id=687 data-nosnippet>687</a>}
+<a href=#688 id=688 data-nosnippet>688</a>
+<a href=#689 id=689 data-nosnippet>689</a><span class="doccomment">/// Writes the canonical form of the principal `s` to `out`, after clearing
+<a href=#690 id=690 data-nosnippet>690</a>/// it, and returns whether `s` is a SID or an object ID. Allocates only to
+<a href=#691 id=691 data-nosnippet>691</a>/// grow `out`.
+<a href=#692 id=692 data-nosnippet>692</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>normalize_principal_into(s: <span class="kw-2">&amp;</span>str, out: <span class="kw-2">&amp;mut </span>String) -&gt; bool {
+<a href=#693 id=693 data-nosnippet>693</a>    <span class="kw">if </span>normalize_sid_into(s, out) {
+<a href=#694 id=694 data-nosnippet>694</a>        <span class="kw">return </span><span class="bool-val">true</span>;
+<a href=#695 id=695 data-nosnippet>695</a>    }
+<a href=#696 id=696 data-nosnippet>696</a>    out.clear();
+<a href=#697 id=697 data-nosnippet>697</a>    <span class="kw">if </span>is_object_id(s) {
+<a href=#698 id=698 data-nosnippet>698</a>        out.extend(s.chars().map(|c| c.to_ascii_lowercase()));
+<a href=#699 id=699 data-nosnippet>699</a>        <span class="bool-val">true
+<a href=#700 id=700 data-nosnippet>700</a>    </span>} <span class="kw">else </span>{
+<a href=#701 id=701 data-nosnippet>701</a>        <span class="bool-val">false
+<a href=#702 id=702 data-nosnippet>702</a>    </span>}
+<a href=#703 id=703 data-nosnippet>703</a>}
+<a href=#704 id=704 data-nosnippet>704</a>
+<a href=#705 id=705 data-nosnippet>705</a><span class="doccomment">/// Whether `s` is an object ID in the `8-4-4-4-12` hex form.
+<a href=#706 id=706 data-nosnippet>706</a></span><span class="kw">fn </span>is_object_id(s: <span class="kw-2">&amp;</span>str) -&gt; bool {
+<a href=#707 id=707 data-nosnippet>707</a>    <span class="kw">let </span>b = s.as_bytes();
+<a href=#708 id=708 data-nosnippet>708</a>    b.len() == <span class="number">36
+<a href=#709 id=709 data-nosnippet>709</a>        </span>&amp;&amp; b.iter().enumerate().all(|(i, c)| {
+<a href=#710 id=710 data-nosnippet>710</a>            <span class="kw">if </span><span class="macro">matches!</span>(i, <span class="number">8 </span>| <span class="number">13 </span>| <span class="number">18 </span>| <span class="number">23</span>) {
+<a href=#711 id=711 data-nosnippet>711</a>                <span class="kw-2">*</span>c == <span class="string">b'-'
+<a href=#712 id=712 data-nosnippet>712</a>            </span>} <span class="kw">else </span>{
+<a href=#713 id=713 data-nosnippet>713</a>                c.is_ascii_hexdigit()
+<a href=#714 id=714 data-nosnippet>714</a>            }
+<a href=#715 id=715 data-nosnippet>715</a>        })
+<a href=#716 id=716 data-nosnippet>716</a>}
+<a href=#717 id=717 data-nosnippet>717</a>
+<a href=#718 id=718 data-nosnippet>718</a><span class="attr">#[cfg(test)]
+<a href=#719 id=719 data-nosnippet>719</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

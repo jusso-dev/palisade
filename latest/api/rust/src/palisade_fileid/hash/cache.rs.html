@@ -975,14 +975,14 @@
 <a href=#975 id=975 data-nosnippet>975</a>{
 <a href=#976 id=976 data-nosnippet>976</a>    <span class="kw">let </span>file = stamps.open(path).map_err(ThroughError::Stamp)<span class="question-mark">?</span>;
 <a href=#977 id=977 data-nosnippet>977</a>    <span class="kw">let </span><span class="kw-2">mut </span>key = stamps.stamp(<span class="kw-2">&amp;</span>file).map_err(ThroughError::Stamp)<span class="question-mark">?</span>;
-<a href=#978 id=978 data-nosnippet>978</a>    <span class="kw">if </span>!mode.must_recompute(<span class="kw-2">&amp;</span>key, location) {
-<a href=#979 id=979 data-nosnippet>979</a>        <span class="kw">if let </span><span class="prelude-val">Ok</span>(value) = lock(cache).get(<span class="kw-2">&amp;</span>key, <span class="prelude-val">Some</span>(path)) {
-<a href=#980 id=980 data-nosnippet>980</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(Through::Done {
-<a href=#981 id=981 data-nosnippet>981</a>                value: value.clone(),
-<a href=#982 id=982 data-nosnippet>982</a>                source: ValueSource::Cache,
-<a href=#983 id=983 data-nosnippet>983</a>                cache_disagreed: <span class="bool-val">false</span>,
-<a href=#984 id=984 data-nosnippet>984</a>            });
-<a href=#985 id=985 data-nosnippet>985</a>        }
+<a href=#978 id=978 data-nosnippet>978</a>    <span class="kw">if </span>!mode.must_recompute(<span class="kw-2">&amp;</span>key, location)
+<a href=#979 id=979 data-nosnippet>979</a>        &amp;&amp; <span class="kw">let </span><span class="prelude-val">Ok</span>(value) = lock(cache).get(<span class="kw-2">&amp;</span>key, <span class="prelude-val">Some</span>(path))
+<a href=#980 id=980 data-nosnippet>980</a>    {
+<a href=#981 id=981 data-nosnippet>981</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(Through::Done {
+<a href=#982 id=982 data-nosnippet>982</a>            value: value.clone(),
+<a href=#983 id=983 data-nosnippet>983</a>            source: ValueSource::Cache,
+<a href=#984 id=984 data-nosnippet>984</a>            cache_disagreed: <span class="bool-val">false</span>,
+<a href=#985 id=985 data-nosnippet>985</a>        });
 <a href=#986 id=986 data-nosnippet>986</a>    }
 <a href=#987 id=987 data-nosnippet>987</a>    <span class="kw">let </span>sha256 = |v: <span class="kw-2">&amp;</span>CacheValue| {
 <a href=#988 id=988 data-nosnippet>988</a>        v.flat

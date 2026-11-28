@@ -740,12 +740,12 @@
 <a href=#740 id=740 data-nosnippet>740</a>            <span class="string">"role {user} and {RUNTIME_GROUP} must not be members of each other"
 <a href=#741 id=741 data-nosnippet>741</a>        </span>)));
 <a href=#742 id=742 data-nosnippet>742</a>    }
-<a href=#743 id=743 data-nosnippet>743</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(owner) = <span class="kw-2">&amp;</span>f.schema_owner {
-<a href=#744 id=744 data-nosnippet>744</a>        <span class="kw">if </span>!f.owns_schema {
-<a href=#745 id=745 data-nosnippet>745</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(DbError(<span class="macro">format!</span>(
-<a href=#746 id=746 data-nosnippet>746</a>                <span class="string">"schema {SCHEMA} is owned by {owner}, not {user}; run migrations as its owner"
-<a href=#747 id=747 data-nosnippet>747</a>            </span>)));
-<a href=#748 id=748 data-nosnippet>748</a>        }
+<a href=#743 id=743 data-nosnippet>743</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(owner) = <span class="kw-2">&amp;</span>f.schema_owner
+<a href=#744 id=744 data-nosnippet>744</a>        &amp;&amp; !f.owns_schema
+<a href=#745 id=745 data-nosnippet>745</a>    {
+<a href=#746 id=746 data-nosnippet>746</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(DbError(<span class="macro">format!</span>(
+<a href=#747 id=747 data-nosnippet>747</a>            <span class="string">"schema {SCHEMA} is owned by {owner}, not {user}; run migrations as its owner"
+<a href=#748 id=748 data-nosnippet>748</a>        </span>)));
 <a href=#749 id=749 data-nosnippet>749</a>    }
 <a href=#750 id=750 data-nosnippet>750</a>    <span class="prelude-val">Ok</span>(())
 <a href=#751 id=751 data-nosnippet>751</a>}

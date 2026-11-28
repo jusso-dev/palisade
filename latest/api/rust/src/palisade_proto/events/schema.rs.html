@@ -55,10 +55,10 @@
 <a href=#55 id=55 data-nosnippet>55</a>    object.insert(<span class="string">"allOf"</span>.to_owned(), Value::Array(cross_field_rules()));
 <a href=#56 id=56 data-nosnippet>56</a>    <span class="comment">// A reader accepts its own major and minor versions up to its own, so
 <a href=#57 id=57 data-nosnippet>57</a>    // the schema does too.
-<a href=#58 id=58 data-nosnippet>58</a>    </span><span class="kw">if let </span><span class="prelude-val">Some</span>(Value::Object(props)) = object.get_mut(<span class="string">"properties"</span>) {
-<a href=#59 id=59 data-nosnippet>59</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(Value::Object(version)) = props.get_mut(<span class="string">"schema_version"</span>) {
-<a href=#60 id=60 data-nosnippet>60</a>            version.insert(<span class="string">"pattern"</span>.to_owned(), readable_versions().into());
-<a href=#61 id=61 data-nosnippet>61</a>        }
+<a href=#58 id=58 data-nosnippet>58</a>    </span><span class="kw">if let </span><span class="prelude-val">Some</span>(Value::Object(props)) = object.get_mut(<span class="string">"properties"</span>)
+<a href=#59 id=59 data-nosnippet>59</a>        &amp;&amp; <span class="kw">let </span><span class="prelude-val">Some</span>(Value::Object(version)) = props.get_mut(<span class="string">"schema_version"</span>)
+<a href=#60 id=60 data-nosnippet>60</a>    {
+<a href=#61 id=61 data-nosnippet>61</a>        version.insert(<span class="string">"pattern"</span>.to_owned(), readable_versions().into());
 <a href=#62 id=62 data-nosnippet>62</a>    }
 <a href=#63 id=63 data-nosnippet>63</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(Value::Object(defs)) = object.get_mut(<span class="string">"$defs"</span>) {
 <a href=#64 id=64 data-nosnippet>64</a>        <span class="kw">for </span>(name, def) <span class="kw">in </span>rule_defs() {

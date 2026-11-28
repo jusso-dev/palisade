@@ -98,13 +98,13 @@
 <a href=#98 id=98 data-nosnippet>98</a>    <span class="comment">// A file whose version resource claims a protected binary's name is
 <a href=#99 id=99 data-nosnippet>99</a>    // allowed only through that binary's own trusted signer: a hash rule
 <a href=#100 id=100 data-nosnippet>100</a>    // would allow an impostor or a copy outside its folders.
-<a href=#101 id=101 data-nosnippet>101</a>    </span><span class="kw">if let </span><span class="prelude-val">Some</span>(original) = id.masquerade.claims_protected.as_deref() {
-<a href=#102 id=102 data-nosnippet>102</a>        <span class="kw">if </span>id.trusted_signer().is_none() {
-<a href=#103 id=103 data-nosnippet>103</a>            rec.rationale.push(<span class="macro">format!</span>(
-<a href=#104 id=104 data-nosnippet>104</a>                <span class="string">"its OriginalFilename {original:?} names a protected binary and no trusted signer vouches for it, so no allow rule is recommended"
-<a href=#105 id=105 data-nosnippet>105</a>            </span>));
-<a href=#106 id=106 data-nosnippet>106</a>            <span class="kw">return </span>rec;
-<a href=#107 id=107 data-nosnippet>107</a>        }
+<a href=#101 id=101 data-nosnippet>101</a>    </span><span class="kw">if let </span><span class="prelude-val">Some</span>(original) = id.masquerade.claims_protected.as_deref()
+<a href=#102 id=102 data-nosnippet>102</a>        &amp;&amp; id.trusted_signer().is_none()
+<a href=#103 id=103 data-nosnippet>103</a>    {
+<a href=#104 id=104 data-nosnippet>104</a>        rec.rationale.push(<span class="macro">format!</span>(
+<a href=#105 id=105 data-nosnippet>105</a>                <span class="string">"its OriginalFilename {original:?} names a protected binary and no trusted signer vouches for it, so no allow rule is recommended"
+<a href=#106 id=106 data-nosnippet>106</a>            </span>));
+<a href=#107 id=107 data-nosnippet>107</a>        <span class="kw">return </span>rec;
 <a href=#108 id=108 data-nosnippet>108</a>    }
 <a href=#109 id=109 data-nosnippet>109</a>
 <a href=#110 id=110 data-nosnippet>110</a>    <span class="kw">let </span>signing = id.signing_state.computed();

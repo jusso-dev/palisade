@@ -871,10 +871,10 @@
 <a href=#871 id=871 data-nosnippet>871</a>                offered: offered.trust_version,
 <a href=#872 id=872 data-nosnippet>872</a>            });
 <a href=#873 id=873 data-nosnippet>873</a>        }
-<a href=#874 id=874 data-nosnippet>874</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(current) = <span class="kw-2">&amp;</span><span class="self">self</span>.current {
-<a href=#875 id=875 data-nosnippet>875</a>            <span class="kw">if </span>offered.issued_at &lt; current.issued_at {
-<a href=#876 id=876 data-nosnippet>876</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(Rejection::IssuedBeforeCurrent);
-<a href=#877 id=877 data-nosnippet>877</a>            }
+<a href=#874 id=874 data-nosnippet>874</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(current) = <span class="kw-2">&amp;</span><span class="self">self</span>.current
+<a href=#875 id=875 data-nosnippet>875</a>            &amp;&amp; offered.issued_at &lt; current.issued_at
+<a href=#876 id=876 data-nosnippet>876</a>        {
+<a href=#877 id=877 data-nosnippet>877</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(Rejection::IssuedBeforeCurrent);
 <a href=#878 id=878 data-nosnippet>878</a>        }
 <a href=#879 id=879 data-nosnippet>879</a>        <span class="kw">if </span>!Validity::not_in_future(offered.issued_at, now, <span class="self">self</span>.skew) {
 <a href=#880 id=880 data-nosnippet>880</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(Rejection::IssuedInFuture);

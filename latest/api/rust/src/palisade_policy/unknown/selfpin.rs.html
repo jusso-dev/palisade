@@ -71,10 +71,10 @@
 <a href=#71 id=71 data-nosnippet>71</a>        <span class="comment">// The canonical forms, as validated documents hold hashes, so the
 <a href=#72 id=72 data-nosnippet>72</a>        // deny check compares like with like.
 <a href=#73 id=73 data-nosnippet>73</a>        </span><span class="kw">for </span>field <span class="kw">in </span>Field::ALL {
-<a href=#74 id=74 data-nosnippet>74</a>            <span class="kw">if </span><span class="macro">matches!</span>(field.class(), <span class="kw">crate</span>::model::FieldClass::Hash { .. }) {
-<a href=#75 id=75 data-nosnippet>75</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(hex) = facts.get(field).and_then(normalize_hex) {
-<a href=#76 id=76 data-nosnippet>76</a>                    facts.set(field, hex);
-<a href=#77 id=77 data-nosnippet>77</a>                }
+<a href=#74 id=74 data-nosnippet>74</a>            <span class="kw">if </span><span class="macro">matches!</span>(field.class(), <span class="kw">crate</span>::model::FieldClass::Hash { .. })
+<a href=#75 id=75 data-nosnippet>75</a>                &amp;&amp; <span class="kw">let </span><span class="prelude-val">Some</span>(hex) = facts.get(field).and_then(normalize_hex)
+<a href=#76 id=76 data-nosnippet>76</a>            {
+<a href=#77 id=77 data-nosnippet>77</a>                facts.set(field, hex);
 <a href=#78 id=78 data-nosnippet>78</a>            }
 <a href=#79 id=79 data-nosnippet>79</a>        }
 <a href=#80 id=80 data-nosnippet>80</a>        <span class="kw">for </span>signer <span class="kw">in </span>facts.signers.iter_mut().flatten() {

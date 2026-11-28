@@ -627,37 +627,37 @@
 <a href=#627 id=627 data-nosnippet>627</a>            });
 <a href=#628 id=628 data-nosnippet>628</a>        }
 <a href=#629 id=629 data-nosnippet>629</a>    }
-<a href=#630 id=630 data-nosnippet>630</a>    <span class="kw">if </span>signer.is_none() {
-<a href=#631 id=631 data-nosnippet>631</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(found) = <span class="kw-2">&amp;</span>found {
-<a href=#632 id=632 data-nosnippet>632</a>            <span class="kw">let </span>best = found
-<a href=#633 id=633 data-nosnippet>633</a>                .matches
-<a href=#634 id=634 data-nosnippet>634</a>                .iter()
-<a href=#635 id=635 data-nosnippet>635</a>                .enumerate()
-<a href=#636 id=636 data-nosnippet>636</a>                .find(|(i, <span class="kw">_</span>)| usable.get(<span class="kw-2">*</span>i).copied().unwrap_or(<span class="bool-val">false</span>));
-<a href=#637 id=637 data-nosnippet>637</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>((i, m)) = best {
-<a href=#638 id=638 data-nosnippet>638</a>                <span class="kw">let </span>chain = m.signer.and_then(|s| s.trust.chain.as_ref());
-<a href=#639 id=639 data-nosnippet>639</a>                <span class="kw">let </span>identity = m.signer.and_then(|s| s.identity.as_ref());
-<a href=#640 id=640 data-nosnippet>640</a>                signer = <span class="prelude-val">Some</span>(TrustedSigner {
-<a href=#641 id=641 data-nosnippet>641</a>                    source: TrustSource::Catalog,
-<a href=#642 id=642 data-nosnippet>642</a>                    signature: <span class="prelude-val">None</span>,
-<a href=#643 id=643 data-nosnippet>643</a>                    catalog_match: <span class="prelude-val">Some</span>(i),
-<a href=#644 id=644 data-nosnippet>644</a>                    publisher_name: identity
-<a href=#645 id=645 data-nosnippet>645</a>                        .and_then(|i| i.publisher_name.as_ref())
-<a href=#646 id=646 data-nosnippet>646</a>                        .map(|n| n.value.clone()),
-<a href=#647 id=647 data-nosnippet>647</a>                    publisher_dn: identity.and_then(|i| i.publisher_dn.clone()),
-<a href=#648 id=648 data-nosnippet>648</a>                    product_name: version
-<a href=#649 id=649 data-nosnippet>649</a>                        .and_then(|v| v.get(VersionField::ProductName))
-<a href=#650 id=650 data-nosnippet>650</a>                        .filter(|p| !p.trim().is_empty())
-<a href=#651 id=651 data-nosnippet>651</a>                        .map(str::to_owned),
-<a href=#652 id=652 data-nosnippet>652</a>                    leaf: chain.and_then(ChainReport::leaf_cert).map(cert_brief),
-<a href=#653 id=653 data-nosnippet>653</a>                    pca: chain.and_then(ChainReport::pca_cert).map(cert_brief),
-<a href=#654 id=654 data-nosnippet>654</a>                    root: chain.and_then(full_root).map(cert_brief),
-<a href=#655 id=655 data-nosnippet>655</a>                    well_known_root_id: chain.and_then(|c| c.well_known_root_id),
-<a href=#656 id=656 data-nosnippet>656</a>                    anchored_to: chain
-<a href=#657 id=657 data-nosnippet>657</a>                        .and_then(|c| c.anchored_to.as_ref())
-<a href=#658 id=658 data-nosnippet>658</a>                        .map(|a| a.label.clone()),
-<a href=#659 id=659 data-nosnippet>659</a>                });
-<a href=#660 id=660 data-nosnippet>660</a>            }
+<a href=#630 id=630 data-nosnippet>630</a>    <span class="kw">if </span>signer.is_none()
+<a href=#631 id=631 data-nosnippet>631</a>        &amp;&amp; <span class="kw">let </span><span class="prelude-val">Some</span>(found) = <span class="kw-2">&amp;</span>found
+<a href=#632 id=632 data-nosnippet>632</a>    {
+<a href=#633 id=633 data-nosnippet>633</a>        <span class="kw">let </span>best = found
+<a href=#634 id=634 data-nosnippet>634</a>            .matches
+<a href=#635 id=635 data-nosnippet>635</a>            .iter()
+<a href=#636 id=636 data-nosnippet>636</a>            .enumerate()
+<a href=#637 id=637 data-nosnippet>637</a>            .find(|(i, <span class="kw">_</span>)| usable.get(<span class="kw-2">*</span>i).copied().unwrap_or(<span class="bool-val">false</span>));
+<a href=#638 id=638 data-nosnippet>638</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>((i, m)) = best {
+<a href=#639 id=639 data-nosnippet>639</a>            <span class="kw">let </span>chain = m.signer.and_then(|s| s.trust.chain.as_ref());
+<a href=#640 id=640 data-nosnippet>640</a>            <span class="kw">let </span>identity = m.signer.and_then(|s| s.identity.as_ref());
+<a href=#641 id=641 data-nosnippet>641</a>            signer = <span class="prelude-val">Some</span>(TrustedSigner {
+<a href=#642 id=642 data-nosnippet>642</a>                source: TrustSource::Catalog,
+<a href=#643 id=643 data-nosnippet>643</a>                signature: <span class="prelude-val">None</span>,
+<a href=#644 id=644 data-nosnippet>644</a>                catalog_match: <span class="prelude-val">Some</span>(i),
+<a href=#645 id=645 data-nosnippet>645</a>                publisher_name: identity
+<a href=#646 id=646 data-nosnippet>646</a>                    .and_then(|i| i.publisher_name.as_ref())
+<a href=#647 id=647 data-nosnippet>647</a>                    .map(|n| n.value.clone()),
+<a href=#648 id=648 data-nosnippet>648</a>                publisher_dn: identity.and_then(|i| i.publisher_dn.clone()),
+<a href=#649 id=649 data-nosnippet>649</a>                product_name: version
+<a href=#650 id=650 data-nosnippet>650</a>                    .and_then(|v| v.get(VersionField::ProductName))
+<a href=#651 id=651 data-nosnippet>651</a>                    .filter(|p| !p.trim().is_empty())
+<a href=#652 id=652 data-nosnippet>652</a>                    .map(str::to_owned),
+<a href=#653 id=653 data-nosnippet>653</a>                leaf: chain.and_then(ChainReport::leaf_cert).map(cert_brief),
+<a href=#654 id=654 data-nosnippet>654</a>                pca: chain.and_then(ChainReport::pca_cert).map(cert_brief),
+<a href=#655 id=655 data-nosnippet>655</a>                root: chain.and_then(full_root).map(cert_brief),
+<a href=#656 id=656 data-nosnippet>656</a>                well_known_root_id: chain.and_then(|c| c.well_known_root_id),
+<a href=#657 id=657 data-nosnippet>657</a>                anchored_to: chain
+<a href=#658 id=658 data-nosnippet>658</a>                    .and_then(|c| c.anchored_to.as_ref())
+<a href=#659 id=659 data-nosnippet>659</a>                    .map(|a| a.label.clone()),
+<a href=#660 id=660 data-nosnippet>660</a>            });
 <a href=#661 id=661 data-nosnippet>661</a>        }
 <a href=#662 id=662 data-nosnippet>662</a>    }
 <a href=#663 id=663 data-nosnippet>663</a>
@@ -749,11 +749,11 @@
 <a href=#749 id=749 data-nosnippet>749</a>    // path, and kept only if that path still names the same file, so the
 <a href=#750 id=750 data-nosnippet>750</a>    // record never pairs this file's content with another file's mark.
 <a href=#751 id=751 data-nosnippet>751</a>    </span>id.fs.motw = read_motw(file);
-<a href=#752 id=752 data-nosnippet>752</a>    <span class="kw">if let </span>Field::Unavailable(why) = <span class="kw-2">&amp;</span>id.fs.motw {
-<a href=#753 id=753 data-nosnippet>753</a>        <span class="kw">if </span><span class="macro">cfg!</span>(all(windows, feature = <span class="string">"os-trust"</span>)) {
-<a href=#754 id=754 data-nosnippet>754</a>            <span class="kw">let </span>why = why.clone();
-<a href=#755 id=755 data-nosnippet>755</a>            id.error(Tier::Context, <span class="string">"motw_unreadable"</span>, why);
-<a href=#756 id=756 data-nosnippet>756</a>        }
+<a href=#752 id=752 data-nosnippet>752</a>    <span class="kw">if let </span>Field::Unavailable(why) = <span class="kw-2">&amp;</span>id.fs.motw
+<a href=#753 id=753 data-nosnippet>753</a>        &amp;&amp; <span class="macro">cfg!</span>(all(windows, feature = <span class="string">"os-trust"</span>))
+<a href=#754 id=754 data-nosnippet>754</a>    {
+<a href=#755 id=755 data-nosnippet>755</a>        <span class="kw">let </span>why = why.clone();
+<a href=#756 id=756 data-nosnippet>756</a>        id.error(Tier::Context, <span class="string">"motw_unreadable"</span>, why);
 <a href=#757 id=757 data-nosnippet>757</a>    }
 <a href=#758 id=758 data-nosnippet>758</a>    id.fs.path_variables = <span class="kw">match </span>(ctx.known_folders, id.fs.path.computed()) {
 <a href=#759 id=759 data-nosnippet>759</a>        (<span class="prelude-val">None</span>, <span class="kw">_</span>) =&gt; Field::Unavailable(<span class="string">"no known folders in the context"</span>.to_owned()),

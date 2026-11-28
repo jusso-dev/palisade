@@ -994,10 +994,10 @@
 <a href=#994 id=994 data-nosnippet>994</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(names) = r.read_optional(tag::context_cons(<span class="number">1</span>))<span class="question-mark">? </span>{
 <a href=#995 id=995 data-nosnippet>995</a>                asn1::validate(<span class="kw-2">&amp;</span>names)<span class="question-mark">?</span>;
 <a href=#996 id=996 data-nosnippet>996</a>            }
-<a href=#997 id=997 data-nosnippet>997</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(serial) = r.read_optional(tag::context_prim(<span class="number">2</span>))<span class="question-mark">? </span>{
-<a href=#998 id=998 data-nosnippet>998</a>                <span class="kw">if </span>serial.content.is_empty() {
-<a href=#999 id=999 data-nosnippet>999</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(serial.error(Asn1ErrorKind::InvalidValue).into());
-<a href=#1000 id=1000 data-nosnippet>1000</a>                }
+<a href=#997 id=997 data-nosnippet>997</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(serial) = r.read_optional(tag::context_prim(<span class="number">2</span>))<span class="question-mark">?
+<a href=#998 id=998 data-nosnippet>998</a>                </span>&amp;&amp; serial.content.is_empty()
+<a href=#999 id=999 data-nosnippet>999</a>            {
+<a href=#1000 id=1000 data-nosnippet>1000</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(serial.error(Asn1ErrorKind::InvalidValue).into());
 <a href=#1001 id=1001 data-nosnippet>1001</a>            }
 <a href=#1002 id=1002 data-nosnippet>1002</a>            r.finish()<span class="question-mark">?</span>;
 <a href=#1003 id=1003 data-nosnippet>1003</a>        }

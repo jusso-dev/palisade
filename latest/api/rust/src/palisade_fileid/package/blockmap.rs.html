@@ -106,7 +106,7 @@
 <a href=#106 id=106 data-nosnippet>106</a><span class="doccomment">/// Standard base64 with padding, strict.
 <a href=#107 id=107 data-nosnippet>107</a></span><span class="kw">fn </span>base64(text: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;u8&gt;&gt; {
 <a href=#108 id=108 data-nosnippet>108</a>    <span class="kw">let </span>bytes = text.as_bytes();
-<a href=#109 id=109 data-nosnippet>109</a>    <span class="kw">if </span>bytes.is_empty() || bytes.len() % <span class="number">4 </span>!= <span class="number">0 </span>{
+<a href=#109 id=109 data-nosnippet>109</a>    <span class="kw">if </span>bytes.is_empty() || !bytes.len().is_multiple_of(<span class="number">4</span>) {
 <a href=#110 id=110 data-nosnippet>110</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
 <a href=#111 id=111 data-nosnippet>111</a>    }
 <a href=#112 id=112 data-nosnippet>112</a>    <span class="kw">let </span>val = |c: u8| -&gt; <span class="prelude-ty">Option</span>&lt;u32&gt; {
@@ -390,10 +390,10 @@
 <a href=#390 id=390 data-nosnippet>390</a>    }
 <a href=#391 id=391 data-nosnippet>391</a>    <span class="comment">// Only then the content, one member at a time.
 <a href=#392 id=392 data-nosnippet>392</a>    </span><span class="kw">for </span>m <span class="kw">in </span><span class="kw-2">&amp;</span>archive.members {
-<a href=#393 id=393 data-nosnippet>393</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(f) = listed.get(<span class="kw-2">&amp;</span>fold(<span class="kw-2">&amp;</span>m.part)) {
-<a href=#394 id=394 data-nosnippet>394</a>            <span class="kw">if </span>!UNMAPPED.iter().any(|u| fold(u) == fold(<span class="kw-2">&amp;</span>m.part)) {
-<a href=#395 id=395 data-nosnippet>395</a>                check_blocks(map.hash, f, archive, m)<span class="question-mark">?</span>;
-<a href=#396 id=396 data-nosnippet>396</a>            }
+<a href=#393 id=393 data-nosnippet>393</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(f) = listed.get(<span class="kw-2">&amp;</span>fold(<span class="kw-2">&amp;</span>m.part))
+<a href=#394 id=394 data-nosnippet>394</a>            &amp;&amp; !UNMAPPED.iter().any(|u| fold(u) == fold(<span class="kw-2">&amp;</span>m.part))
+<a href=#395 id=395 data-nosnippet>395</a>        {
+<a href=#396 id=396 data-nosnippet>396</a>            check_blocks(map.hash, f, archive, m)<span class="question-mark">?</span>;
 <a href=#397 id=397 data-nosnippet>397</a>        }
 <a href=#398 id=398 data-nosnippet>398</a>    }
 <a href=#399 id=399 data-nosnippet>399</a>    <span class="prelude-val">Ok</span>(())

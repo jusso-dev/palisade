@@ -188,20 +188,20 @@
 <a href=#188 id=188 data-nosnippet>188</a>
 <a href=#189 id=189 data-nosnippet>189</a>    <span class="comment">// `previous`: only if `active` failed, only verified, and only the
 <a href=#190 id=190 data-nosnippet>190</a>    // recorded fallback or a version the floor accepts.
-<a href=#191 id=191 data-nosnippet>191</a>    </span><span class="kw">if </span>load.is_none() {
-<a href=#192 id=192 data-nosnippet>192</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(e) = input.previous {
-<a href=#193 id=193 data-nosnippet>193</a>            <span class="kw">match </span>check(e, input.target, EffectiveMode::ENFORCE) {
-<a href=#194 id=194 data-nosnippet>194</a>                <span class="prelude-val">Ok</span>(p) =&gt; {
-<a href=#195 id=195 data-nosnippet>195</a>                    <span class="kw">let </span>v = p.meta().version;
-<a href=#196 id=196 data-nosnippet>196</a>                    <span class="kw">if </span>v &gt;= floor || <span class="prelude-val">Some</span>(v) == fallback {
-<a href=#197 id=197 data-nosnippet>197</a>                        load = <span class="prelude-val">Some</span>(Load::Previous(p.meta()));
-<a href=#198 id=198 data-nosnippet>198</a>                        findings.push(Finding::LkgLoaded);
-<a href=#199 id=199 data-nosnippet>199</a>                    } <span class="kw">else </span>{
-<a href=#200 id=200 data-nosnippet>200</a>                        reject(<span class="kw-2">&amp;mut </span>findings, CacheFile::Previous, Rejection::Rollback);
-<a href=#201 id=201 data-nosnippet>201</a>                    }
+<a href=#191 id=191 data-nosnippet>191</a>    </span><span class="kw">if </span>load.is_none()
+<a href=#192 id=192 data-nosnippet>192</a>        &amp;&amp; <span class="kw">let </span><span class="prelude-val">Some</span>(e) = input.previous
+<a href=#193 id=193 data-nosnippet>193</a>    {
+<a href=#194 id=194 data-nosnippet>194</a>        <span class="kw">match </span>check(e, input.target, EffectiveMode::ENFORCE) {
+<a href=#195 id=195 data-nosnippet>195</a>            <span class="prelude-val">Ok</span>(p) =&gt; {
+<a href=#196 id=196 data-nosnippet>196</a>                <span class="kw">let </span>v = p.meta().version;
+<a href=#197 id=197 data-nosnippet>197</a>                <span class="kw">if </span>v &gt;= floor || <span class="prelude-val">Some</span>(v) == fallback {
+<a href=#198 id=198 data-nosnippet>198</a>                    load = <span class="prelude-val">Some</span>(Load::Previous(p.meta()));
+<a href=#199 id=199 data-nosnippet>199</a>                    findings.push(Finding::LkgLoaded);
+<a href=#200 id=200 data-nosnippet>200</a>                } <span class="kw">else </span>{
+<a href=#201 id=201 data-nosnippet>201</a>                    reject(<span class="kw-2">&amp;mut </span>findings, CacheFile::Previous, Rejection::Rollback);
 <a href=#202 id=202 data-nosnippet>202</a>                }
-<a href=#203 id=203 data-nosnippet>203</a>                <span class="prelude-val">Err</span>(reason) =&gt; reject(<span class="kw-2">&amp;mut </span>findings, CacheFile::Previous, reason),
-<a href=#204 id=204 data-nosnippet>204</a>            }
+<a href=#203 id=203 data-nosnippet>203</a>            }
+<a href=#204 id=204 data-nosnippet>204</a>            <span class="prelude-val">Err</span>(reason) =&gt; reject(<span class="kw-2">&amp;mut </span>findings, CacheFile::Previous, reason),
 <a href=#205 id=205 data-nosnippet>205</a>        }
 <a href=#206 id=206 data-nosnippet>206</a>    }
 <a href=#207 id=207 data-nosnippet>207</a>

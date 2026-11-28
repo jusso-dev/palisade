@@ -786,7 +786,7 @@
 <a href=#786 id=786 data-nosnippet>786</a>            }
 <a href=#787 id=787 data-nosnippet>787</a>            seen = <span class="bool-val">true</span>;
 <a href=#788 id=788 data-nosnippet>788</a>            <span class="kw">let </span>value = var.value(data, var.value_bytes());
-<a href=#789 id=789 data-nosnippet>789</a>            <span class="kw">for </span>pair <span class="kw">in </span>value.chunks_exact(<span class="number">4</span>) {
+<a href=#789 id=789 data-nosnippet>789</a>            <span class="kw">for </span>pair <span class="kw">in </span>value.as_chunks::&lt;<span class="number">4</span>&gt;().<span class="number">0 </span>{
 <a href=#790 id=790 data-nosnippet>790</a>                <span class="kw">let </span>(<span class="prelude-val">Some</span>(language), <span class="prelude-val">Some</span>(code_page)) = (u16_at(pair, <span class="number">0</span>), u16_at(pair, <span class="number">2</span>)) <span class="kw">else </span>{
 <a href=#791 id=791 data-nosnippet>791</a>                    <span class="kw">break</span>;
 <a href=#792 id=792 data-nosnippet>792</a>                };

@@ -211,14 +211,14 @@
 <a href=#211 id=211 data-nosnippet>211</a>            .map(|n| n.node.id)
 <a href=#212 id=212 data-nosnippet>212</a>            .collect();
 <a href=#213 id=213 data-nosnippet>213</a>        <span class="kw">for </span>(i, lib) <span class="kw">in </span><span class="self">self</span>.libraries.iter().enumerate() {
-<a href=#214 id=214 data-nosnippet>214</a>            <span class="kw">if let </span>Realm::Tenant(t) = lib.realm {
-<a href=#215 id=215 data-nosnippet>215</a>                <span class="kw">if </span>!tenants.contains(<span class="kw-2">&amp;</span>t) {
-<a href=#216 id=216 data-nosnippet>216</a>                    errors.push(herr(
-<a href=#217 id=217 data-nosnippet>217</a>                        HierarchyCode::UnknownNode,
-<a href=#218 id=218 data-nosnippet>218</a>                        <span class="macro">format!</span>(<span class="string">"/libraries/{i}/realm"</span>),
-<a href=#219 id=219 data-nosnippet>219</a>                        <span class="macro">format!</span>(<span class="string">"tenant {t} does not exist"</span>),
-<a href=#220 id=220 data-nosnippet>220</a>                    ));
-<a href=#221 id=221 data-nosnippet>221</a>                }
+<a href=#214 id=214 data-nosnippet>214</a>            <span class="kw">if let </span>Realm::Tenant(t) = lib.realm
+<a href=#215 id=215 data-nosnippet>215</a>                &amp;&amp; !tenants.contains(<span class="kw-2">&amp;</span>t)
+<a href=#216 id=216 data-nosnippet>216</a>            {
+<a href=#217 id=217 data-nosnippet>217</a>                errors.push(herr(
+<a href=#218 id=218 data-nosnippet>218</a>                    HierarchyCode::UnknownNode,
+<a href=#219 id=219 data-nosnippet>219</a>                    <span class="macro">format!</span>(<span class="string">"/libraries/{i}/realm"</span>),
+<a href=#220 id=220 data-nosnippet>220</a>                    <span class="macro">format!</span>(<span class="string">"tenant {t} does not exist"</span>),
+<a href=#221 id=221 data-nosnippet>221</a>                ));
 <a href=#222 id=222 data-nosnippet>222</a>            }
 <a href=#223 id=223 data-nosnippet>223</a>        }
 <a href=#224 id=224 data-nosnippet>224</a>
@@ -353,14 +353,14 @@
 <a href=#353 id=353 data-nosnippet>353</a>    <span class="comment">// Every dynamic group of each tenant could apply to its devices.
 <a href=#354 id=354 data-nosnippet>354</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>dynamic: BTreeMap&lt;NodeId, Vec&lt;(usize, String)&gt;&gt; = BTreeMap::new();
 <a href=#355 id=355 data-nosnippet>355</a>    <span class="kw">for </span>info <span class="kw">in </span>nodes.values() {
-<a href=#356 id=356 data-nosnippet>356</a>        <span class="kw">if </span>info.node.kind == NodeKind::DynamicGroup {
-<a href=#357 id=357 data-nosnippet>357</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(t) = info.tenant {
-<a href=#358 id=358 data-nosnippet>358</a>                dynamic.entry(t).or_default().extend(
-<a href=#359 id=359 data-nosnippet>359</a>                    own(info)
-<a href=#360 id=360 data-nosnippet>360</a>                        .into_iter()
-<a href=#361 id=361 data-nosnippet>361</a>                        .map(|(s, d)| (s, <span class="macro">format!</span>(<span class="string">"dynamic group: {d}"</span>))),
-<a href=#362 id=362 data-nosnippet>362</a>                );
-<a href=#363 id=363 data-nosnippet>363</a>            }
+<a href=#356 id=356 data-nosnippet>356</a>        <span class="kw">if </span>info.node.kind == NodeKind::DynamicGroup
+<a href=#357 id=357 data-nosnippet>357</a>            &amp;&amp; <span class="kw">let </span><span class="prelude-val">Some</span>(t) = info.tenant
+<a href=#358 id=358 data-nosnippet>358</a>        {
+<a href=#359 id=359 data-nosnippet>359</a>            dynamic.entry(t).or_default().extend(
+<a href=#360 id=360 data-nosnippet>360</a>                own(info)
+<a href=#361 id=361 data-nosnippet>361</a>                    .into_iter()
+<a href=#362 id=362 data-nosnippet>362</a>                    .map(|(s, d)| (s, <span class="macro">format!</span>(<span class="string">"dynamic group: {d}"</span>))),
+<a href=#363 id=363 data-nosnippet>363</a>            );
 <a href=#364 id=364 data-nosnippet>364</a>        }
 <a href=#365 id=365 data-nosnippet>365</a>    }
 <a href=#366 id=366 data-nosnippet>366</a>    <span class="kw">let </span>dynamic_total = |info: <span class="kw-2">&amp;</span>NodeInfo| {
@@ -1038,14 +1038,14 @@
 <a href=#1038 id=1038 data-nosnippet>1038</a>            ));
 <a href=#1039 id=1039 data-nosnippet>1039</a>            <span class="kw">continue</span>;
 <a href=#1040 id=1040 data-nosnippet>1040</a>        }
-<a href=#1041 id=1041 data-nosnippet>1041</a>        <span class="kw">if let </span>Realm::Tenant(t) = entry.realm {
-<a href=#1042 id=1042 data-nosnippet>1042</a>            <span class="kw">if </span>!tenants.contains(<span class="kw-2">&amp;</span>t) {
-<a href=#1043 id=1043 data-nosnippet>1043</a>                errors.push(herr(
-<a href=#1044 id=1044 data-nosnippet>1044</a>                    HierarchyCode::UnknownNode,
-<a href=#1045 id=1045 data-nosnippet>1045</a>                    <span class="macro">format!</span>(<span class="string">"{base}/realm"</span>),
-<a href=#1046 id=1046 data-nosnippet>1046</a>                    <span class="macro">format!</span>(<span class="string">"tenant {t} does not exist"</span>),
-<a href=#1047 id=1047 data-nosnippet>1047</a>                ));
-<a href=#1048 id=1048 data-nosnippet>1048</a>            }
+<a href=#1041 id=1041 data-nosnippet>1041</a>        <span class="kw">if let </span>Realm::Tenant(t) = entry.realm
+<a href=#1042 id=1042 data-nosnippet>1042</a>            &amp;&amp; !tenants.contains(<span class="kw-2">&amp;</span>t)
+<a href=#1043 id=1043 data-nosnippet>1043</a>        {
+<a href=#1044 id=1044 data-nosnippet>1044</a>            errors.push(herr(
+<a href=#1045 id=1045 data-nosnippet>1045</a>                HierarchyCode::UnknownNode,
+<a href=#1046 id=1046 data-nosnippet>1046</a>                <span class="macro">format!</span>(<span class="string">"{base}/realm"</span>),
+<a href=#1047 id=1047 data-nosnippet>1047</a>                <span class="macro">format!</span>(<span class="string">"tenant {t} does not exist"</span>),
+<a href=#1048 id=1048 data-nosnippet>1048</a>            ));
 <a href=#1049 id=1049 data-nosnippet>1049</a>        }
 <a href=#1050 id=1050 data-nosnippet>1050</a>        <span class="kw">let </span>from = <span class="kw">match </span>entry.realm {
 <a href=#1051 id=1051 data-nosnippet>1051</a>            Realm::Global =&gt; Visibility::Global,

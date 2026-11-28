@@ -664,14 +664,14 @@
 <a href=#664 id=664 data-nosnippet>664</a>                <span class="self">self</span>.name(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">"{base}/version"</span>), version);
 <a href=#665 id=665 data-nosnippet>665</a>            }
 <a href=#666 id=666 data-nosnippet>666</a>            <span class="self">self</span>.metadata(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">"{base}/metadata"</span>), <span class="kw-2">&amp;</span>set.metadata);
-<a href=#667 id=667 data-nosnippet>667</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(category) = <span class="kw-2">&amp;</span>set.category_path {
-<a href=#668 id=668 data-nosnippet>668</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(problem) = category_problem(category) {
-<a href=#669 id=669 data-nosnippet>669</a>                    <span class="self">self</span>.push(
-<a href=#670 id=670 data-nosnippet>670</a>                        ErrorCode::InvalidCategory,
-<a href=#671 id=671 data-nosnippet>671</a>                        <span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">"{base}/category_path"</span>),
-<a href=#672 id=672 data-nosnippet>672</a>                        problem,
-<a href=#673 id=673 data-nosnippet>673</a>                    );
-<a href=#674 id=674 data-nosnippet>674</a>                }
+<a href=#667 id=667 data-nosnippet>667</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(category) = <span class="kw-2">&amp;</span>set.category_path
+<a href=#668 id=668 data-nosnippet>668</a>                &amp;&amp; <span class="kw">let </span><span class="prelude-val">Some</span>(problem) = category_problem(category)
+<a href=#669 id=669 data-nosnippet>669</a>            {
+<a href=#670 id=670 data-nosnippet>670</a>                <span class="self">self</span>.push(
+<a href=#671 id=671 data-nosnippet>671</a>                    ErrorCode::InvalidCategory,
+<a href=#672 id=672 data-nosnippet>672</a>                    <span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">"{base}/category_path"</span>),
+<a href=#673 id=673 data-nosnippet>673</a>                    problem,
+<a href=#674 id=674 data-nosnippet>674</a>                );
 <a href=#675 id=675 data-nosnippet>675</a>            }
 <a href=#676 id=676 data-nosnippet>676</a>            <span class="kw">if </span>set.mandatory &amp;&amp; set.allow_child_suppress == <span class="prelude-val">Some</span>(<span class="bool-val">true</span>) {
 <a href=#677 id=677 data-nosnippet>677</a>                <span class="self">self</span>.push(
@@ -1122,16 +1122,16 @@
 <a href=#1122 id=1122 data-nosnippet>1122</a>                    <span class="macro">format!</span>(<span class="string">"`{key}` is not a known advanced setting"</span>),
 <a href=#1123 id=1123 data-nosnippet>1123</a>                );
 <a href=#1124 id=1124 data-nosnippet>1124</a>            }
-<a href=#1125 id=1125 data-nosnippet>1125</a>            <span class="kw">if let </span><span class="kw">crate</span>::model::AdvancedValue::Text(text) = value {
-<a href=#1126 id=1126 data-nosnippet>1126</a>                <span class="kw">if </span>text.len() &gt; MAX_VALUE_BYTES || text.chars().any(char::is_control) {
-<a href=#1127 id=1127 data-nosnippet>1127</a>                    <span class="self">self</span>.push(
-<a href=#1128 id=1128 data-nosnippet>1128</a>                        ErrorCode::InvalidValue,
-<a href=#1129 id=1129 data-nosnippet>1129</a>                        <span class="kw-2">&amp;</span>path,
-<a href=#1130 id=1130 data-nosnippet>1130</a>                        <span class="macro">format!</span>(
-<a href=#1131 id=1131 data-nosnippet>1131</a>                            <span class="string">"advanced text values are at most {MAX_VALUE_BYTES} bytes with no control characters"
-<a href=#1132 id=1132 data-nosnippet>1132</a>                        </span>),
-<a href=#1133 id=1133 data-nosnippet>1133</a>                    );
-<a href=#1134 id=1134 data-nosnippet>1134</a>                }
+<a href=#1125 id=1125 data-nosnippet>1125</a>            <span class="kw">if let </span><span class="kw">crate</span>::model::AdvancedValue::Text(text) = value
+<a href=#1126 id=1126 data-nosnippet>1126</a>                &amp;&amp; (text.len() &gt; MAX_VALUE_BYTES || text.chars().any(char::is_control))
+<a href=#1127 id=1127 data-nosnippet>1127</a>            {
+<a href=#1128 id=1128 data-nosnippet>1128</a>                <span class="self">self</span>.push(
+<a href=#1129 id=1129 data-nosnippet>1129</a>                        ErrorCode::InvalidValue,
+<a href=#1130 id=1130 data-nosnippet>1130</a>                        <span class="kw-2">&amp;</span>path,
+<a href=#1131 id=1131 data-nosnippet>1131</a>                        <span class="macro">format!</span>(
+<a href=#1132 id=1132 data-nosnippet>1132</a>                            <span class="string">"advanced text values are at most {MAX_VALUE_BYTES} bytes with no control characters"
+<a href=#1133 id=1133 data-nosnippet>1133</a>                        </span>),
+<a href=#1134 id=1134 data-nosnippet>1134</a>                    );
 <a href=#1135 id=1135 data-nosnippet>1135</a>            }
 <a href=#1136 id=1136 data-nosnippet>1136</a>        }
 <a href=#1137 id=1137 data-nosnippet>1137</a>    }
@@ -1426,10 +1426,10 @@
 <a href=#1426 id=1426 data-nosnippet>1426</a>    <span class="kw">let </span><span class="kw-2">mut </span>count = <span class="number">0usize</span>;
 <a href=#1427 id=1427 data-nosnippet>1427</a>    <span class="kw">let </span><span class="kw-2">mut </span>stack = <span class="macro">vec!</span>[tree];
 <a href=#1428 id=1428 data-nosnippet>1428</a>    <span class="kw">while let </span><span class="prelude-val">Some</span>(node) = stack.pop() {
-<a href=#1429 id=1429 data-nosnippet>1429</a>        <span class="kw">if let </span>Match::Criterion(c) = node {
-<a href=#1430 id=1430 data-nosnippet>1430</a>            <span class="kw">if </span>c.operator.is_regex() {
-<a href=#1431 id=1431 data-nosnippet>1431</a>                count = count.saturating_add(c.values.len());
-<a href=#1432 id=1432 data-nosnippet>1432</a>            }
+<a href=#1429 id=1429 data-nosnippet>1429</a>        <span class="kw">if let </span>Match::Criterion(c) = node
+<a href=#1430 id=1430 data-nosnippet>1430</a>            &amp;&amp; c.operator.is_regex()
+<a href=#1431 id=1431 data-nosnippet>1431</a>        {
+<a href=#1432 id=1432 data-nosnippet>1432</a>            count = count.saturating_add(c.values.len());
 <a href=#1433 id=1433 data-nosnippet>1433</a>        }
 <a href=#1434 id=1434 data-nosnippet>1434</a>        stack.extend(node.children());
 <a href=#1435 id=1435 data-nosnippet>1435</a>    }

@@ -1075,461 +1075,460 @@
 <a href=#1075 id=1075 data-nosnippet>1075</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(dir) = data_directories
 <a href=#1076 id=1076 data-nosnippet>1076</a>        .get(DataDirectoryKind::Resource.index())
 <a href=#1077 id=1077 data-nosnippet>1077</a>        .filter(|d| directories &amp;&amp; d.is_present())
-<a href=#1078 id=1078 data-nosnippet>1078</a>    {
-<a href=#1079 id=1079 data-nosnippet>1079</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(summary) = resource::walk(data, layout, <span class="kw-2">*</span>dir, <span class="kw-2">&amp;mut </span>warnings) {
-<a href=#1080 id=1080 data-nosnippet>1080</a>            version_info = version_from_resources(data, <span class="kw-2">&amp;</span>summary, <span class="kw-2">&amp;mut </span>warnings);
-<a href=#1081 id=1081 data-nosnippet>1081</a>            (manifest, manifest_id) = manifest_from_resources(data, <span class="kw-2">&amp;</span>summary, <span class="kw-2">&amp;mut </span>warnings);
-<a href=#1082 id=1082 data-nosnippet>1082</a>            resources = <span class="prelude-val">Some</span>(summary);
-<a href=#1083 id=1083 data-nosnippet>1083</a>        }
-<a href=#1084 id=1084 data-nosnippet>1084</a>    }
-<a href=#1085 id=1085 data-nosnippet>1085</a>
-<a href=#1086 id=1086 data-nosnippet>1086</a>    <span class="kw">let </span>directory = |kind: DataDirectoryKind| {
-<a href=#1087 id=1087 data-nosnippet>1087</a>        data_directories
-<a href=#1088 id=1088 data-nosnippet>1088</a>            .get(kind.index())
-<a href=#1089 id=1089 data-nosnippet>1089</a>            .copied()
-<a href=#1090 id=1090 data-nosnippet>1090</a>            .filter(|d| directories &amp;&amp; d.is_present())
-<a href=#1091 id=1091 data-nosnippet>1091</a>    };
-<a href=#1092 id=1092 data-nosnippet>1092</a>    <span class="kw">let </span>imports = directory(DataDirectoryKind::Import)
-<a href=#1093 id=1093 data-nosnippet>1093</a>        .and_then(|d| imports::parse_imports(data, layout, d, optional.format, <span class="kw-2">&amp;mut </span>warnings));
-<a href=#1094 id=1094 data-nosnippet>1094</a>    <span class="kw">let </span>exports = directory(DataDirectoryKind::Export)
-<a href=#1095 id=1095 data-nosnippet>1095</a>        .and_then(|d| imports::parse_exports(data, layout, d, <span class="kw-2">&amp;mut </span>warnings));
-<a href=#1096 id=1096 data-nosnippet>1096</a>    <span class="comment">// Without the import table the verdict would be a guess, so a prefix
-<a href=#1097 id=1097 data-nosnippet>1097</a>    // parse leaves it at its default rather than report a partial one.
-<a href=#1098 id=1098 data-nosnippet>1098</a>    </span><span class="kw">let </span>driver = <span class="kw">if </span>directories {
-<a href=#1099 id=1099 data-nosnippet>1099</a>        driver::classify(
-<a href=#1100 id=1100 data-nosnippet>1100</a>            optional.subsystem,
-<a href=#1101 id=1101 data-nosnippet>1101</a>            coff.characteristics,
-<a href=#1102 id=1102 data-nosnippet>1102</a>            <span class="kw-2">&amp;</span>sections,
-<a href=#1103 id=1103 data-nosnippet>1103</a>            imports.as_ref(),
-<a href=#1104 id=1104 data-nosnippet>1104</a>        )
-<a href=#1105 id=1105 data-nosnippet>1105</a>    } <span class="kw">else </span>{
-<a href=#1106 id=1106 data-nosnippet>1106</a>        DriverClass::default()
-<a href=#1107 id=1107 data-nosnippet>1107</a>    };
-<a href=#1108 id=1108 data-nosnippet>1108</a>
-<a href=#1109 id=1109 data-nosnippet>1109</a>    <span class="prelude-val">Ok</span>(PeInfo {
-<a href=#1110 id=1110 data-nosnippet>1110</a>        file_size: file_len,
-<a href=#1111 id=1111 data-nosnippet>1111</a>        e_lfanew,
-<a href=#1112 id=1112 data-nosnippet>1112</a>        coff,
-<a href=#1113 id=1113 data-nosnippet>1113</a>        optional,
-<a href=#1114 id=1114 data-nosnippet>1114</a>        data_directories,
-<a href=#1115 id=1115 data-nosnippet>1115</a>        sections,
-<a href=#1116 id=1116 data-nosnippet>1116</a>        checksum,
-<a href=#1117 id=1117 data-nosnippet>1117</a>        certificate_table,
-<a href=#1118 id=1118 data-nosnippet>1118</a>        certificate_table_issue,
-<a href=#1119 id=1119 data-nosnippet>1119</a>        overlay,
-<a href=#1120 id=1120 data-nosnippet>1120</a>        debug,
-<a href=#1121 id=1121 data-nosnippet>1121</a>        resources,
-<a href=#1122 id=1122 data-nosnippet>1122</a>        version_info,
-<a href=#1123 id=1123 data-nosnippet>1123</a>        imports,
-<a href=#1124 id=1124 data-nosnippet>1124</a>        exports,
-<a href=#1125 id=1125 data-nosnippet>1125</a>        manifest,
-<a href=#1126 id=1126 data-nosnippet>1126</a>        manifest_id,
-<a href=#1127 id=1127 data-nosnippet>1127</a>        driver,
-<a href=#1128 id=1128 data-nosnippet>1128</a>        parse_warnings: warnings.list,
-<a href=#1129 id=1129 data-nosnippet>1129</a>        parse_warnings_truncated: warnings.truncated,
-<a href=#1130 id=1130 data-nosnippet>1130</a>    })
-<a href=#1131 id=1131 data-nosnippet>1131</a>}
-<a href=#1132 id=1132 data-nosnippet>1132</a>
-<a href=#1133 id=1133 data-nosnippet>1133</a><span class="kw">fn </span>parse_coff(data: <span class="kw-2">&amp;</span>[u8], offset: usize) -&gt; <span class="prelude-ty">Result</span>&lt;CoffHeader, PeError&gt; {
-<a href=#1134 id=1134 data-nosnippet>1134</a>    <span class="kw">let </span>header = bytes(data, offset, COFF_HEADER_SIZE)
-<a href=#1135 id=1135 data-nosnippet>1135</a>        .ok_or_else(|| fatal(offset, PeErrorKind::TruncatedCoffHeader))<span class="question-mark">?</span>;
-<a href=#1136 id=1136 data-nosnippet>1136</a>    <span class="kw">let </span>field16 = |at| u16_at(header, at).unwrap_or(<span class="number">0</span>);
-<a href=#1137 id=1137 data-nosnippet>1137</a>    <span class="kw">let </span>field32 = |at| u32_at(header, at).unwrap_or(<span class="number">0</span>);
-<a href=#1138 id=1138 data-nosnippet>1138</a>    <span class="prelude-val">Ok</span>(CoffHeader {
-<a href=#1139 id=1139 data-nosnippet>1139</a>        offset: to_u64(offset),
-<a href=#1140 id=1140 data-nosnippet>1140</a>        machine: Machine::from_raw(field16(<span class="number">0</span>)),
-<a href=#1141 id=1141 data-nosnippet>1141</a>        number_of_sections: field16(<span class="number">2</span>),
-<a href=#1142 id=1142 data-nosnippet>1142</a>        time_date_stamp: field32(<span class="number">4</span>),
-<a href=#1143 id=1143 data-nosnippet>1143</a>        pointer_to_symbol_table: field32(<span class="number">8</span>),
-<a href=#1144 id=1144 data-nosnippet>1144</a>        number_of_symbols: field32(<span class="number">12</span>),
-<a href=#1145 id=1145 data-nosnippet>1145</a>        size_of_optional_header: field16(<span class="number">16</span>),
-<a href=#1146 id=1146 data-nosnippet>1146</a>        characteristics: FileCharacteristics(field16(<span class="number">18</span>)),
-<a href=#1147 id=1147 data-nosnippet>1147</a>    })
-<a href=#1148 id=1148 data-nosnippet>1148</a>}
-<a href=#1149 id=1149 data-nosnippet>1149</a>
-<a href=#1150 id=1150 data-nosnippet>1150</a><span class="doccomment">/// Parses the fixed optional header fields. Returns the header and the file
-<a href=#1151 id=1151 data-nosnippet>1151</a>/// offset of the first data directory entry.
-<a href=#1152 id=1152 data-nosnippet>1152</a></span><span class="kw">fn </span>parse_optional(
-<a href=#1153 id=1153 data-nosnippet>1153</a>    data: <span class="kw-2">&amp;</span>[u8],
-<a href=#1154 id=1154 data-nosnippet>1154</a>    offset: usize,
-<a href=#1155 id=1155 data-nosnippet>1155</a>    declared_size: u16,
-<a href=#1156 id=1156 data-nosnippet>1156</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(OptionalHeader, usize), PeError&gt; {
-<a href=#1157 id=1157 data-nosnippet>1157</a>    <span class="kw">let </span>magic =
-<a href=#1158 id=1158 data-nosnippet>1158</a>        u16_at(data, offset).ok_or_else(|| fatal(offset, PeErrorKind::TruncatedOptionalHeader))<span class="question-mark">?</span>;
-<a href=#1159 id=1159 data-nosnippet>1159</a>    <span class="kw">let </span>(format, fixed_len) = <span class="kw">match </span>magic {
-<a href=#1160 id=1160 data-nosnippet>1160</a>        <span class="number">0x10b </span>=&gt; (PeFormat::Pe32, <span class="number">96_usize</span>),
-<a href=#1161 id=1161 data-nosnippet>1161</a>        <span class="number">0x20b </span>=&gt; (PeFormat::Pe32Plus, <span class="number">112_usize</span>),
-<a href=#1162 id=1162 data-nosnippet>1162</a>        other =&gt; {
-<a href=#1163 id=1163 data-nosnippet>1163</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(fatal(
-<a href=#1164 id=1164 data-nosnippet>1164</a>                offset,
-<a href=#1165 id=1165 data-nosnippet>1165</a>                PeErrorKind::UnknownOptionalHeaderMagic(other),
-<a href=#1166 id=1166 data-nosnippet>1166</a>            ));
-<a href=#1167 id=1167 data-nosnippet>1167</a>        }
-<a href=#1168 id=1168 data-nosnippet>1168</a>    };
-<a href=#1169 id=1169 data-nosnippet>1169</a>    <span class="kw">if </span>usize::from(declared_size) &lt; fixed_len {
-<a href=#1170 id=1170 data-nosnippet>1170</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(fatal(
-<a href=#1171 id=1171 data-nosnippet>1171</a>            offset,
-<a href=#1172 id=1172 data-nosnippet>1172</a>            PeErrorKind::OptionalHeaderTooSmall(declared_size),
-<a href=#1173 id=1173 data-nosnippet>1173</a>        ));
-<a href=#1174 id=1174 data-nosnippet>1174</a>    }
-<a href=#1175 id=1175 data-nosnippet>1175</a>    <span class="kw">let </span>h = bytes(data, offset, fixed_len)
-<a href=#1176 id=1176 data-nosnippet>1176</a>        .ok_or_else(|| fatal(offset, PeErrorKind::TruncatedOptionalHeader))<span class="question-mark">?</span>;
-<a href=#1177 id=1177 data-nosnippet>1177</a>    <span class="comment">// `h` holds exactly `fixed_len` bytes, so these reads cannot miss; the
-<a href=#1178 id=1178 data-nosnippet>1178</a>    // zero fallbacks only satisfy the type checker.
-<a href=#1179 id=1179 data-nosnippet>1179</a>    </span><span class="kw">let </span>f8 = |at| u8_at(h, at).unwrap_or(<span class="number">0</span>);
-<a href=#1180 id=1180 data-nosnippet>1180</a>    <span class="kw">let </span>f16 = |at| u16_at(h, at).unwrap_or(<span class="number">0</span>);
-<a href=#1181 id=1181 data-nosnippet>1181</a>    <span class="kw">let </span>f32 = |at| u32_at(h, at).unwrap_or(<span class="number">0</span>);
-<a href=#1182 id=1182 data-nosnippet>1182</a>    <span class="kw">let </span>f64 = |at| u64_at(h, at).unwrap_or(<span class="number">0</span>);
-<a href=#1183 id=1183 data-nosnippet>1183</a>    <span class="kw">let </span>pe32 = format == PeFormat::Pe32;
-<a href=#1184 id=1184 data-nosnippet>1184</a>    <span class="kw">let </span>wide = |at32: usize, at64: usize| {
-<a href=#1185 id=1185 data-nosnippet>1185</a>        <span class="kw">if </span>pe32 {
-<a href=#1186 id=1186 data-nosnippet>1186</a>            u64::from(f32(at32))
-<a href=#1187 id=1187 data-nosnippet>1187</a>        } <span class="kw">else </span>{
-<a href=#1188 id=1188 data-nosnippet>1188</a>            f64(at64)
-<a href=#1189 id=1189 data-nosnippet>1189</a>        }
-<a href=#1190 id=1190 data-nosnippet>1190</a>    };
-<a href=#1191 id=1191 data-nosnippet>1191</a>    <span class="kw">let </span>header = OptionalHeader {
-<a href=#1192 id=1192 data-nosnippet>1192</a>        offset: to_u64(offset),
-<a href=#1193 id=1193 data-nosnippet>1193</a>        format,
-<a href=#1194 id=1194 data-nosnippet>1194</a>        linker_version: (f8(<span class="number">2</span>), f8(<span class="number">3</span>)),
-<a href=#1195 id=1195 data-nosnippet>1195</a>        size_of_code: f32(<span class="number">4</span>),
-<a href=#1196 id=1196 data-nosnippet>1196</a>        size_of_initialized_data: f32(<span class="number">8</span>),
-<a href=#1197 id=1197 data-nosnippet>1197</a>        size_of_uninitialized_data: f32(<span class="number">12</span>),
-<a href=#1198 id=1198 data-nosnippet>1198</a>        entry_point: f32(<span class="number">16</span>),
-<a href=#1199 id=1199 data-nosnippet>1199</a>        base_of_code: f32(<span class="number">20</span>),
-<a href=#1200 id=1200 data-nosnippet>1200</a>        image_base: wide(<span class="number">28</span>, <span class="number">24</span>),
-<a href=#1201 id=1201 data-nosnippet>1201</a>        section_alignment: f32(<span class="number">32</span>),
-<a href=#1202 id=1202 data-nosnippet>1202</a>        file_alignment: f32(<span class="number">36</span>),
-<a href=#1203 id=1203 data-nosnippet>1203</a>        os_version: (f16(<span class="number">40</span>), f16(<span class="number">42</span>)),
-<a href=#1204 id=1204 data-nosnippet>1204</a>        image_version: (f16(<span class="number">44</span>), f16(<span class="number">46</span>)),
-<a href=#1205 id=1205 data-nosnippet>1205</a>        subsystem_version: (f16(<span class="number">48</span>), f16(<span class="number">50</span>)),
-<a href=#1206 id=1206 data-nosnippet>1206</a>        win32_version_value: f32(<span class="number">52</span>),
-<a href=#1207 id=1207 data-nosnippet>1207</a>        size_of_image: f32(<span class="number">56</span>),
-<a href=#1208 id=1208 data-nosnippet>1208</a>        size_of_headers: f32(<span class="number">60</span>),
-<a href=#1209 id=1209 data-nosnippet>1209</a>        checksum: f32(<span class="number">64</span>),
-<a href=#1210 id=1210 data-nosnippet>1210</a>        checksum_offset: to_u64(offset.saturating_add(<span class="number">64</span>)),
-<a href=#1211 id=1211 data-nosnippet>1211</a>        subsystem: Subsystem::from_raw(f16(<span class="number">68</span>)),
-<a href=#1212 id=1212 data-nosnippet>1212</a>        dll_characteristics: DllCharacteristics(f16(<span class="number">70</span>)),
-<a href=#1213 id=1213 data-nosnippet>1213</a>        size_of_stack_reserve: wide(<span class="number">72</span>, <span class="number">72</span>),
-<a href=#1214 id=1214 data-nosnippet>1214</a>        size_of_stack_commit: wide(<span class="number">76</span>, <span class="number">80</span>),
-<a href=#1215 id=1215 data-nosnippet>1215</a>        size_of_heap_reserve: wide(<span class="number">80</span>, <span class="number">88</span>),
-<a href=#1216 id=1216 data-nosnippet>1216</a>        size_of_heap_commit: wide(<span class="number">84</span>, <span class="number">96</span>),
-<a href=#1217 id=1217 data-nosnippet>1217</a>        loader_flags: f32(<span class="kw">if </span>pe32 { <span class="number">88 </span>} <span class="kw">else </span>{ <span class="number">104 </span>}),
-<a href=#1218 id=1218 data-nosnippet>1218</a>        number_of_rva_and_sizes: f32(<span class="kw">if </span>pe32 { <span class="number">92 </span>} <span class="kw">else </span>{ <span class="number">108 </span>}),
-<a href=#1219 id=1219 data-nosnippet>1219</a>    };
-<a href=#1220 id=1220 data-nosnippet>1220</a>    <span class="prelude-val">Ok</span>((header, offset.saturating_add(fixed_len)))
-<a href=#1221 id=1221 data-nosnippet>1221</a>}
-<a href=#1222 id=1222 data-nosnippet>1222</a>
-<a href=#1223 id=1223 data-nosnippet>1223</a><span class="kw">fn </span>parse_data_directories(
-<a href=#1224 id=1224 data-nosnippet>1224</a>    data: <span class="kw-2">&amp;</span>[u8],
-<a href=#1225 id=1225 data-nosnippet>1225</a>    start: usize,
-<a href=#1226 id=1226 data-nosnippet>1226</a>    opt_end: usize,
-<a href=#1227 id=1227 data-nosnippet>1227</a>    declared: u32,
-<a href=#1228 id=1228 data-nosnippet>1228</a>    warnings: <span class="kw-2">&amp;mut </span>Warnings,
-<a href=#1229 id=1229 data-nosnippet>1229</a>) -&gt; Vec&lt;DataDirectory&gt; {
-<a href=#1230 id=1230 data-nosnippet>1230</a>    <span class="kw">let </span>wanted = <span class="kw">if </span>declared &gt; <span class="number">16 </span>{
-<a href=#1231 id=1231 data-nosnippet>1231</a>        warnings.push(start, WarningKind::TooManyDataDirectories(declared));
-<a href=#1232 id=1232 data-nosnippet>1232</a>        DATA_DIRECTORY_COUNT
-<a href=#1233 id=1233 data-nosnippet>1233</a>    } <span class="kw">else </span>{
-<a href=#1234 id=1234 data-nosnippet>1234</a>        to_usize(declared).unwrap_or(DATA_DIRECTORY_COUNT)
-<a href=#1235 id=1235 data-nosnippet>1235</a>    };
-<a href=#1236 id=1236 data-nosnippet>1236</a>    <span class="kw">let </span><span class="kw-2">mut </span>dirs = Vec::with_capacity(wanted);
-<a href=#1237 id=1237 data-nosnippet>1237</a>    <span class="kw">for </span>(i, kind) <span class="kw">in </span>DataDirectoryKind::ALL.iter().take(wanted).enumerate() {
-<a href=#1238 id=1238 data-nosnippet>1238</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(at) = i.checked_mul(<span class="number">8</span>).and_then(|o| o.checked_add(start)) <span class="kw">else </span>{
-<a href=#1239 id=1239 data-nosnippet>1239</a>            <span class="kw">break</span>;
-<a href=#1240 id=1240 data-nosnippet>1240</a>        };
-<a href=#1241 id=1241 data-nosnippet>1241</a>        <span class="kw">let </span>in_header = at.checked_add(<span class="number">8</span>).is_some_and(|end| end &lt;= opt_end);
-<a href=#1242 id=1242 data-nosnippet>1242</a>        <span class="kw">let </span>(<span class="prelude-val">Some</span>(virtual_address), <span class="prelude-val">Some</span>(size)) = (u32_at(data, at), u32_at(data, at + <span class="number">4</span>)) <span class="kw">else </span>{
-<a href=#1243 id=1243 data-nosnippet>1243</a>            <span class="kw">break</span>;
-<a href=#1244 id=1244 data-nosnippet>1244</a>        };
-<a href=#1245 id=1245 data-nosnippet>1245</a>        <span class="kw">if </span>!in_header {
-<a href=#1246 id=1246 data-nosnippet>1246</a>            <span class="kw">break</span>;
-<a href=#1247 id=1247 data-nosnippet>1247</a>        }
-<a href=#1248 id=1248 data-nosnippet>1248</a>        dirs.push(DataDirectory {
-<a href=#1249 id=1249 data-nosnippet>1249</a>            kind: <span class="kw-2">*</span>kind,
-<a href=#1250 id=1250 data-nosnippet>1250</a>            virtual_address,
-<a href=#1251 id=1251 data-nosnippet>1251</a>            size,
-<a href=#1252 id=1252 data-nosnippet>1252</a>            entry_offset: to_u64(at),
-<a href=#1253 id=1253 data-nosnippet>1253</a>        });
-<a href=#1254 id=1254 data-nosnippet>1254</a>    }
-<a href=#1255 id=1255 data-nosnippet>1255</a>    <span class="kw">if </span>dirs.len() &lt; wanted {
-<a href=#1256 id=1256 data-nosnippet>1256</a>        warnings.push(
-<a href=#1257 id=1257 data-nosnippet>1257</a>            start,
-<a href=#1258 id=1258 data-nosnippet>1258</a>            WarningKind::DataDirectoriesTruncated {
-<a href=#1259 id=1259 data-nosnippet>1259</a>                declared: u32::try_from(wanted).unwrap_or(u32::MAX),
-<a href=#1260 id=1260 data-nosnippet>1260</a>                parsed: u32::try_from(dirs.len()).unwrap_or(u32::MAX),
-<a href=#1261 id=1261 data-nosnippet>1261</a>            },
-<a href=#1262 id=1262 data-nosnippet>1262</a>        );
-<a href=#1263 id=1263 data-nosnippet>1263</a>    }
-<a href=#1264 id=1264 data-nosnippet>1264</a>    dirs
-<a href=#1265 id=1265 data-nosnippet>1265</a>}
-<a href=#1266 id=1266 data-nosnippet>1266</a>
-<a href=#1267 id=1267 data-nosnippet>1267</a><span class="kw">fn </span>parse_sections(
-<a href=#1268 id=1268 data-nosnippet>1268</a>    data: <span class="kw-2">&amp;</span>[u8],
-<a href=#1269 id=1269 data-nosnippet>1269</a>    table: usize,
-<a href=#1270 id=1270 data-nosnippet>1270</a>    declared: u16,
-<a href=#1271 id=1271 data-nosnippet>1271</a>    warnings: <span class="kw-2">&amp;mut </span>Warnings,
-<a href=#1272 id=1272 data-nosnippet>1272</a>) -&gt; Vec&lt;Section&gt; {
-<a href=#1273 id=1273 data-nosnippet>1273</a>    <span class="kw">if </span>usize::from(declared) &gt; MAX_SECTIONS {
-<a href=#1274 id=1274 data-nosnippet>1274</a>        warnings.push(table, WarningKind::TooManySections(declared));
-<a href=#1275 id=1275 data-nosnippet>1275</a>    }
-<a href=#1276 id=1276 data-nosnippet>1276</a>    <span class="comment">// Only allocate for headers that are actually present in the input.
-<a href=#1277 id=1277 data-nosnippet>1277</a>    </span><span class="kw">let </span>available = data.len().saturating_sub(table) / SECTION_HEADER_SIZE;
-<a href=#1278 id=1278 data-nosnippet>1278</a>    <span class="kw">let </span>wanted = usize::from(declared).min(MAX_SECTIONS);
-<a href=#1279 id=1279 data-nosnippet>1279</a>    <span class="kw">let </span>count = wanted.min(available);
-<a href=#1280 id=1280 data-nosnippet>1280</a>    <span class="kw">let </span><span class="kw-2">mut </span>sections = Vec::with_capacity(count);
-<a href=#1281 id=1281 data-nosnippet>1281</a>    <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..count {
-<a href=#1282 id=1282 data-nosnippet>1282</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(at) = i
-<a href=#1283 id=1283 data-nosnippet>1283</a>            .checked_mul(SECTION_HEADER_SIZE)
-<a href=#1284 id=1284 data-nosnippet>1284</a>            .and_then(|o| o.checked_add(table))
-<a href=#1285 id=1285 data-nosnippet>1285</a>        <span class="kw">else </span>{
-<a href=#1286 id=1286 data-nosnippet>1286</a>            <span class="kw">break</span>;
-<a href=#1287 id=1287 data-nosnippet>1287</a>        };
-<a href=#1288 id=1288 data-nosnippet>1288</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(h) = bytes(data, at, SECTION_HEADER_SIZE) <span class="kw">else </span>{
-<a href=#1289 id=1289 data-nosnippet>1289</a>            <span class="kw">break</span>;
-<a href=#1290 id=1290 data-nosnippet>1290</a>        };
-<a href=#1291 id=1291 data-nosnippet>1291</a>        <span class="kw">let </span><span class="kw-2">mut </span>raw_name = [<span class="number">0_u8</span>; <span class="number">8</span>];
-<a href=#1292 id=1292 data-nosnippet>1292</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(name) = bytes(h, <span class="number">0</span>, <span class="number">8</span>) {
-<a href=#1293 id=1293 data-nosnippet>1293</a>            raw_name.copy_from_slice(name);
-<a href=#1294 id=1294 data-nosnippet>1294</a>        }
-<a href=#1295 id=1295 data-nosnippet>1295</a>        <span class="kw">let </span>name_len = raw_name.iter().position(|b| <span class="kw-2">*</span>b == <span class="number">0</span>).unwrap_or(<span class="number">8</span>);
-<a href=#1296 id=1296 data-nosnippet>1296</a>        <span class="kw">let </span>name =
-<a href=#1297 id=1297 data-nosnippet>1297</a>            String::from_utf8_lossy(raw_name.get(..name_len).unwrap_or_default()).into_owned();
-<a href=#1298 id=1298 data-nosnippet>1298</a>        <span class="kw">let </span>f32 = |off| u32_at(h, off).unwrap_or(<span class="number">0</span>);
-<a href=#1299 id=1299 data-nosnippet>1299</a>        sections.push(Section {
-<a href=#1300 id=1300 data-nosnippet>1300</a>            header_offset: to_u64(at),
-<a href=#1301 id=1301 data-nosnippet>1301</a>            name,
-<a href=#1302 id=1302 data-nosnippet>1302</a>            raw_name,
-<a href=#1303 id=1303 data-nosnippet>1303</a>            virtual_size: f32(<span class="number">8</span>),
-<a href=#1304 id=1304 data-nosnippet>1304</a>            virtual_address: f32(<span class="number">12</span>),
-<a href=#1305 id=1305 data-nosnippet>1305</a>            size_of_raw_data: f32(<span class="number">16</span>),
-<a href=#1306 id=1306 data-nosnippet>1306</a>            pointer_to_raw_data: f32(<span class="number">20</span>),
-<a href=#1307 id=1307 data-nosnippet>1307</a>            characteristics: SectionCharacteristics(f32(<span class="number">36</span>)),
-<a href=#1308 id=1308 data-nosnippet>1308</a>            entropy: <span class="prelude-val">None</span>,
-<a href=#1309 id=1309 data-nosnippet>1309</a>        });
-<a href=#1310 id=1310 data-nosnippet>1310</a>    }
-<a href=#1311 id=1311 data-nosnippet>1311</a>    <span class="kw">if </span>sections.len() &lt; wanted {
-<a href=#1312 id=1312 data-nosnippet>1312</a>        warnings.push(
-<a href=#1313 id=1313 data-nosnippet>1313</a>            table,
-<a href=#1314 id=1314 data-nosnippet>1314</a>            WarningKind::SectionTableTruncated {
-<a href=#1315 id=1315 data-nosnippet>1315</a>                declared,
-<a href=#1316 id=1316 data-nosnippet>1316</a>                parsed: u16::try_from(sections.len()).unwrap_or(u16::MAX),
-<a href=#1317 id=1317 data-nosnippet>1317</a>            },
-<a href=#1318 id=1318 data-nosnippet>1318</a>        );
-<a href=#1319 id=1319 data-nosnippet>1319</a>    }
-<a href=#1320 id=1320 data-nosnippet>1320</a>    sections
-<a href=#1321 id=1321 data-nosnippet>1321</a>}
-<a href=#1322 id=1322 data-nosnippet>1322</a>
-<a href=#1323 id=1323 data-nosnippet>1323</a><span class="doccomment">/// The part of a section's raw data that is present in the file, or `None`
-<a href=#1324 id=1324 data-nosnippet>1324</a>/// if there is none. Warns when the declared range runs past the end.
-<a href=#1325 id=1325 data-nosnippet>1325</a></span><span class="kw">fn </span>section_raw_data&lt;<span class="lifetime">'a</span>&gt;(
-<a href=#1326 id=1326 data-nosnippet>1326</a>    data: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>[u8],
-<a href=#1327 id=1327 data-nosnippet>1327</a>    file_len: u64,
-<a href=#1328 id=1328 data-nosnippet>1328</a>    section: <span class="kw-2">&amp;</span>Section,
-<a href=#1329 id=1329 data-nosnippet>1329</a>    file_alignment: u32,
-<a href=#1330 id=1330 data-nosnippet>1330</a>    index: u16,
-<a href=#1331 id=1331 data-nosnippet>1331</a>    warnings: <span class="kw-2">&amp;mut </span>Warnings,
-<a href=#1332 id=1332 data-nosnippet>1332</a>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>[u8]&gt; {
-<a href=#1333 id=1333 data-nosnippet>1333</a>    <span class="kw">let </span>(start, size) = section.file_data(file_alignment)<span class="question-mark">?</span>;
-<a href=#1334 id=1334 data-nosnippet>1334</a>    <span class="kw">if </span>u64::from(start) + u64::from(size) &gt; file_len {
-<a href=#1335 id=1335 data-nosnippet>1335</a>        warnings.push(
-<a href=#1336 id=1336 data-nosnippet>1336</a>            to_usize(start).unwrap_or(usize::MAX),
-<a href=#1337 id=1337 data-nosnippet>1337</a>            WarningKind::SectionDataOutOfFile { index },
-<a href=#1338 id=1338 data-nosnippet>1338</a>        );
-<a href=#1339 id=1339 data-nosnippet>1339</a>    }
-<a href=#1340 id=1340 data-nosnippet>1340</a>    <span class="kw">let </span>start = to_usize(start)<span class="question-mark">?</span>;
-<a href=#1341 id=1341 data-nosnippet>1341</a>    <span class="kw">let </span>end = start.saturating_add(to_usize(size)<span class="question-mark">?</span>);
-<a href=#1342 id=1342 data-nosnippet>1342</a>    data.get(start..end.min(data.len()))
-<a href=#1343 id=1343 data-nosnippet>1343</a>        .filter(|raw| !raw.is_empty())
-<a href=#1344 id=1344 data-nosnippet>1344</a>}
-<a href=#1345 id=1345 data-nosnippet>1345</a>
-<a href=#1346 id=1346 data-nosnippet>1346</a><span class="doccomment">/// The part of a section's file data that is actually in the input, as a
-<a href=#1347 id=1347 data-nosnippet>1347</a>/// `(start, end)` file range, or `None` if none of it is. A section that
-<a href=#1348 id=1348 data-nosnippet>1348</a>/// starts past the end of the input contributes nothing; one that runs past
-<a href=#1349 id=1349 data-nosnippet>1349</a>/// the end is cut there.
-<a href=#1350 id=1350 data-nosnippet>1350</a></span><span class="kw">fn </span>in_file_data(s: <span class="kw-2">&amp;</span>Section, file_alignment: u32, file_len: u64) -&gt; <span class="prelude-ty">Option</span>&lt;(u64, u64)&gt; {
-<a href=#1351 id=1351 data-nosnippet>1351</a>    <span class="kw">let </span>(start, size) = s.file_data(file_alignment)<span class="question-mark">?</span>;
-<a href=#1352 id=1352 data-nosnippet>1352</a>    <span class="kw">let </span>start = u64::from(start);
-<a href=#1353 id=1353 data-nosnippet>1353</a>    (start &lt; file_len).then(|| (start, start.saturating_add(u64::from(size)).min(file_len)))
-<a href=#1354 id=1354 data-nosnippet>1354</a>}
-<a href=#1355 id=1355 data-nosnippet>1355</a>
-<a href=#1356 id=1356 data-nosnippet>1356</a><span class="kw">fn </span>find_overlay(
-<a href=#1357 id=1357 data-nosnippet>1357</a>    file_len: u64,
-<a href=#1358 id=1358 data-nosnippet>1358</a>    headers_end: usize,
-<a href=#1359 id=1359 data-nosnippet>1359</a>    file_alignment: u32,
-<a href=#1360 id=1360 data-nosnippet>1360</a>    sections: <span class="kw-2">&amp;</span>[Section],
-<a href=#1361 id=1361 data-nosnippet>1361</a>    certificate_table: <span class="prelude-ty">Option</span>&lt;FileRange&gt;,
-<a href=#1362 id=1362 data-nosnippet>1362</a>) -&gt; <span class="prelude-ty">Option</span>&lt;FileRange&gt; {
-<a href=#1363 id=1363 data-nosnippet>1363</a>    <span class="kw">let </span>sections_end = sections
-<a href=#1364 id=1364 data-nosnippet>1364</a>        .iter()
-<a href=#1365 id=1365 data-nosnippet>1365</a>        .filter_map(|s| in_file_data(s, file_alignment, file_len))
-<a href=#1366 id=1366 data-nosnippet>1366</a>        .map(|(<span class="kw">_</span>, end)| end)
-<a href=#1367 id=1367 data-nosnippet>1367</a>        .max()
-<a href=#1368 id=1368 data-nosnippet>1368</a>        .unwrap_or(<span class="number">0</span>)
-<a href=#1369 id=1369 data-nosnippet>1369</a>        .max(to_u64(headers_end));
-<a href=#1370 id=1370 data-nosnippet>1370</a>    <span class="kw">let </span>cert_end = certificate_table.map_or(<span class="number">0</span>, |c| c.offset.saturating_add(c.size));
-<a href=#1371 id=1371 data-nosnippet>1371</a>    <span class="kw">let </span>start = sections_end.max(cert_end);
-<a href=#1372 id=1372 data-nosnippet>1372</a>    (start &lt; file_len).then(|| FileRange {
-<a href=#1373 id=1373 data-nosnippet>1373</a>        offset: start,
-<a href=#1374 id=1374 data-nosnippet>1374</a>        size: file_len - start,
-<a href=#1375 id=1375 data-nosnippet>1375</a>    })
-<a href=#1376 id=1376 data-nosnippet>1376</a>}
-<a href=#1377 id=1377 data-nosnippet>1377</a>
-<a href=#1378 id=1378 data-nosnippet>1378</a><span class="kw">fn </span>version_from_resources(
-<a href=#1379 id=1379 data-nosnippet>1379</a>    data: <span class="kw-2">&amp;</span>[u8],
-<a href=#1380 id=1380 data-nosnippet>1380</a>    summary: <span class="kw-2">&amp;</span>ResourceSummary,
-<a href=#1381 id=1381 data-nosnippet>1381</a>    warnings: <span class="kw-2">&amp;mut </span>Warnings,
-<a href=#1382 id=1382 data-nosnippet>1382</a>) -&gt; <span class="prelude-ty">Option</span>&lt;VersionInfo&gt; {
-<a href=#1383 id=1383 data-nosnippet>1383</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(entry) = <span class="kw-2">&amp;</span>summary.version_resource <span class="kw">else </span>{
-<a href=#1384 id=1384 data-nosnippet>1384</a>        <span class="kw">if </span>!summary.version_entries.is_empty() {
-<a href=#1385 id=1385 data-nosnippet>1385</a>            warnings.push(
-<a href=#1386 id=1386 data-nosnippet>1386</a>                usize::try_from(summary.offset).unwrap_or(usize::MAX),
-<a href=#1387 id=1387 data-nosnippet>1387</a>                WarningKind::NoStandardVersionResource,
-<a href=#1388 id=1388 data-nosnippet>1388</a>            );
-<a href=#1389 id=1389 data-nosnippet>1389</a>        }
-<a href=#1390 id=1390 data-nosnippet>1390</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#1391 id=1391 data-nosnippet>1391</a>    };
-<a href=#1392 id=1392 data-nosnippet>1392</a>    <span class="kw">let </span>resource_root = usize::try_from(summary.offset).unwrap_or(usize::MAX);
-<a href=#1393 id=1393 data-nosnippet>1393</a>    <span class="kw">let </span>base = entry
-<a href=#1394 id=1394 data-nosnippet>1394</a>        .file_offset
-<a href=#1395 id=1395 data-nosnippet>1395</a>        .and_then(|o| usize::try_from(o).ok())
-<a href=#1396 id=1396 data-nosnippet>1396</a>        .unwrap_or(resource_root);
-<a href=#1397 id=1397 data-nosnippet>1397</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(raw) = entry.bytes(data) <span class="kw">else </span>{
-<a href=#1398 id=1398 data-nosnippet>1398</a>        warnings.push(base, WarningKind::ResourceOutOfBounds);
-<a href=#1399 id=1399 data-nosnippet>1399</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#1400 id=1400 data-nosnippet>1400</a>    };
-<a href=#1401 id=1401 data-nosnippet>1401</a>    <span class="kw">match </span>version::parse_version_info(raw) {
-<a href=#1402 id=1402 data-nosnippet>1402</a>        <span class="prelude-val">Ok</span>(info) =&gt; {
-<a href=#1403 id=1403 data-nosnippet>1403</a>            <span class="kw">for </span>issue <span class="kw">in </span><span class="kw-2">&amp;</span>info.issues {
-<a href=#1404 id=1404 data-nosnippet>1404</a>                warnings.push(
-<a href=#1405 id=1405 data-nosnippet>1405</a>                    base.saturating_add(usize::try_from(issue.offset).unwrap_or(usize::MAX)),
-<a href=#1406 id=1406 data-nosnippet>1406</a>                    WarningKind::VersionInfo(issue.clone()),
-<a href=#1407 id=1407 data-nosnippet>1407</a>                );
-<a href=#1408 id=1408 data-nosnippet>1408</a>            }
-<a href=#1409 id=1409 data-nosnippet>1409</a>            <span class="prelude-val">Some</span>(info)
-<a href=#1410 id=1410 data-nosnippet>1410</a>        }
-<a href=#1411 id=1411 data-nosnippet>1411</a>        <span class="prelude-val">Err</span>(issue) =&gt; {
-<a href=#1412 id=1412 data-nosnippet>1412</a>            warnings.push(
-<a href=#1413 id=1413 data-nosnippet>1413</a>                base.saturating_add(usize::try_from(issue.offset).unwrap_or(usize::MAX)),
-<a href=#1414 id=1414 data-nosnippet>1414</a>                WarningKind::VersionInfo(issue),
-<a href=#1415 id=1415 data-nosnippet>1415</a>            );
-<a href=#1416 id=1416 data-nosnippet>1416</a>            <span class="prelude-val">None
-<a href=#1417 id=1417 data-nosnippet>1417</a>        </span>}
-<a href=#1418 id=1418 data-nosnippet>1418</a>    }
-<a href=#1419 id=1419 data-nosnippet>1419</a>}
-<a href=#1420 id=1420 data-nosnippet>1420</a>
-<a href=#1421 id=1421 data-nosnippet>1421</a><span class="doccomment">/// The manifest with the lowest standard `RT_MANIFEST` ID present (1, 2 or
-<a href=#1422 id=1422 data-nosnippet>1422</a>/// 3, found by loader-style lookup), and that ID. If it cannot be read or
-<a href=#1423 id=1423 data-nosnippet>1423</a>/// does not parse, no other manifest is used in its place: a decoy at a
-<a href=#1424 id=1424 data-nosnippet>1424</a>/// higher ID must not stand in for the one the OS reads.
-<a href=#1425 id=1425 data-nosnippet>1425</a></span><span class="kw">fn </span>manifest_from_resources(
-<a href=#1426 id=1426 data-nosnippet>1426</a>    data: <span class="kw-2">&amp;</span>[u8],
-<a href=#1427 id=1427 data-nosnippet>1427</a>    summary: <span class="kw-2">&amp;</span>ResourceSummary,
-<a href=#1428 id=1428 data-nosnippet>1428</a>    warnings: <span class="kw-2">&amp;mut </span>Warnings,
-<a href=#1429 id=1429 data-nosnippet>1429</a>) -&gt; (<span class="prelude-ty">Option</span>&lt;Manifest&gt;, <span class="prelude-ty">Option</span>&lt;u16&gt;) {
-<a href=#1430 id=1430 data-nosnippet>1430</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(first) = summary.first_standard_manifest_id <span class="kw">else </span>{
-<a href=#1431 id=1431 data-nosnippet>1431</a>        <span class="kw">return </span>(<span class="prelude-val">None</span>, <span class="prelude-val">None</span>);
-<a href=#1432 id=1432 data-nosnippet>1432</a>    };
-<a href=#1433 id=1433 data-nosnippet>1433</a>    <span class="kw">let </span>id = <span class="prelude-val">Some</span>(first);
-<a href=#1434 id=1434 data-nosnippet>1434</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(entry) = summary
-<a href=#1435 id=1435 data-nosnippet>1435</a>        .standard_manifests
-<a href=#1436 id=1436 data-nosnippet>1436</a>        .iter()
-<a href=#1437 id=1437 data-nosnippet>1437</a>        .find(|e| e.name == ResourceId::Id(first))
-<a href=#1438 id=1438 data-nosnippet>1438</a>    <span class="kw">else </span>{
-<a href=#1439 id=1439 data-nosnippet>1439</a>        <span class="comment">// The ID is there, but no data entry under it can be read.
-<a href=#1440 id=1440 data-nosnippet>1440</a>        </span>warnings.push(
-<a href=#1441 id=1441 data-nosnippet>1441</a>            usize::try_from(summary.offset).unwrap_or(usize::MAX),
-<a href=#1442 id=1442 data-nosnippet>1442</a>            WarningKind::ResourceOutOfBounds,
-<a href=#1443 id=1443 data-nosnippet>1443</a>        );
-<a href=#1444 id=1444 data-nosnippet>1444</a>        <span class="kw">return </span>(<span class="prelude-val">None</span>, id);
-<a href=#1445 id=1445 data-nosnippet>1445</a>    };
-<a href=#1446 id=1446 data-nosnippet>1446</a>    <span class="kw">let </span>at = entry
-<a href=#1447 id=1447 data-nosnippet>1447</a>        .file_offset
-<a href=#1448 id=1448 data-nosnippet>1448</a>        .and_then(|o| usize::try_from(o).ok())
-<a href=#1449 id=1449 data-nosnippet>1449</a>        .unwrap_or_else(|| usize::try_from(summary.offset).unwrap_or(usize::MAX));
-<a href=#1450 id=1450 data-nosnippet>1450</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(raw) = entry.bytes(data) <span class="kw">else </span>{
-<a href=#1451 id=1451 data-nosnippet>1451</a>        warnings.push(at, WarningKind::ResourceOutOfBounds);
-<a href=#1452 id=1452 data-nosnippet>1452</a>        <span class="kw">return </span>(<span class="prelude-val">None</span>, id);
-<a href=#1453 id=1453 data-nosnippet>1453</a>    };
-<a href=#1454 id=1454 data-nosnippet>1454</a>    <span class="kw">match </span>manifest::parse_manifest(raw) {
-<a href=#1455 id=1455 data-nosnippet>1455</a>        <span class="prelude-val">Ok</span>(m) =&gt; (<span class="prelude-val">Some</span>(m), id),
-<a href=#1456 id=1456 data-nosnippet>1456</a>        <span class="prelude-val">Err</span>(e) =&gt; {
-<a href=#1457 id=1457 data-nosnippet>1457</a>            warnings.push(at, WarningKind::Manifest(e));
-<a href=#1458 id=1458 data-nosnippet>1458</a>            (<span class="prelude-val">None</span>, id)
-<a href=#1459 id=1459 data-nosnippet>1459</a>        }
-<a href=#1460 id=1460 data-nosnippet>1460</a>    }
-<a href=#1461 id=1461 data-nosnippet>1461</a>}
-<a href=#1462 id=1462 data-nosnippet>1462</a>
-<a href=#1463 id=1463 data-nosnippet>1463</a><span class="attr">#[cfg(test)]
-<a href=#1464 id=1464 data-nosnippet>1464</a></span><span class="kw">mod </span>tests {
-<a href=#1465 id=1465 data-nosnippet>1465</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
-<a href=#1466 id=1466 data-nosnippet>1466</a>
-<a href=#1467 id=1467 data-nosnippet>1467</a>    <span class="kw">fn </span>put16(b: <span class="kw-2">&amp;mut </span>[u8], at: usize, v: u16) {
-<a href=#1468 id=1468 data-nosnippet>1468</a>        b[at..at + <span class="number">2</span>].copy_from_slice(<span class="kw-2">&amp;</span>v.to_le_bytes());
-<a href=#1469 id=1469 data-nosnippet>1469</a>    }
-<a href=#1470 id=1470 data-nosnippet>1470</a>
-<a href=#1471 id=1471 data-nosnippet>1471</a>    <span class="kw">fn </span>put32(b: <span class="kw-2">&amp;mut </span>[u8], at: usize, v: u32) {
-<a href=#1472 id=1472 data-nosnippet>1472</a>        b[at..at + <span class="number">4</span>].copy_from_slice(<span class="kw-2">&amp;</span>v.to_le_bytes());
-<a href=#1473 id=1473 data-nosnippet>1473</a>    }
-<a href=#1474 id=1474 data-nosnippet>1474</a>
-<a href=#1475 id=1475 data-nosnippet>1475</a>    <span class="doccomment">/// A native PE32+ image with one section holding an import table that
-<a href=#1476 id=1476 data-nosnippet>1476</a>    /// names `ntoskrnl.exe`: a kernel driver to the full parse.
-<a href=#1477 id=1477 data-nosnippet>1477</a>    </span><span class="kw">fn </span>native_driver() -&gt; Vec&lt;u8&gt; {
-<a href=#1478 id=1478 data-nosnippet>1478</a>        <span class="kw">let </span><span class="kw-2">mut </span>b = <span class="macro">vec!</span>[<span class="number">0_u8</span>; <span class="number">0x400</span>];
-<a href=#1479 id=1479 data-nosnippet>1479</a>        b[..<span class="number">2</span>].copy_from_slice(<span class="string">b"MZ"</span>);
-<a href=#1480 id=1480 data-nosnippet>1480</a>        put32(<span class="kw-2">&amp;mut </span>b, <span class="number">0x3c</span>, <span class="number">0x40</span>);
-<a href=#1481 id=1481 data-nosnippet>1481</a>        b[<span class="number">0x40</span>..<span class="number">0x44</span>].copy_from_slice(<span class="string">b"PE\0\0"</span>);
-<a href=#1482 id=1482 data-nosnippet>1482</a>        <span class="kw">let </span>coff = <span class="number">0x44</span>;
-<a href=#1483 id=1483 data-nosnippet>1483</a>        put16(<span class="kw-2">&amp;mut </span>b, coff, <span class="number">0x8664</span>);
-<a href=#1484 id=1484 data-nosnippet>1484</a>        put16(<span class="kw-2">&amp;mut </span>b, coff + <span class="number">2</span>, <span class="number">1</span>);
-<a href=#1485 id=1485 data-nosnippet>1485</a>        put16(<span class="kw-2">&amp;mut </span>b, coff + <span class="number">16</span>, <span class="number">240</span>);
-<a href=#1486 id=1486 data-nosnippet>1486</a>        put16(<span class="kw-2">&amp;mut </span>b, coff + <span class="number">18</span>, <span class="number">0x0022</span>);
-<a href=#1487 id=1487 data-nosnippet>1487</a>        <span class="kw">let </span>o = coff + <span class="number">20</span>;
-<a href=#1488 id=1488 data-nosnippet>1488</a>        put16(<span class="kw-2">&amp;mut </span>b, o, <span class="number">0x20b</span>);
-<a href=#1489 id=1489 data-nosnippet>1489</a>        put32(<span class="kw-2">&amp;mut </span>b, o + <span class="number">16</span>, <span class="number">0x1000</span>);
-<a href=#1490 id=1490 data-nosnippet>1490</a>        put32(<span class="kw-2">&amp;mut </span>b, o + <span class="number">32</span>, <span class="number">0x1000</span>);
-<a href=#1491 id=1491 data-nosnippet>1491</a>        put32(<span class="kw-2">&amp;mut </span>b, o + <span class="number">36</span>, <span class="number">0x200</span>);
-<a href=#1492 id=1492 data-nosnippet>1492</a>        put16(<span class="kw-2">&amp;mut </span>b, o + <span class="number">40</span>, <span class="number">6</span>);
-<a href=#1493 id=1493 data-nosnippet>1493</a>        put16(<span class="kw-2">&amp;mut </span>b, o + <span class="number">48</span>, <span class="number">6</span>);
-<a href=#1494 id=1494 data-nosnippet>1494</a>        put32(<span class="kw-2">&amp;mut </span>b, o + <span class="number">56</span>, <span class="number">0x2000</span>);
-<a href=#1495 id=1495 data-nosnippet>1495</a>        put32(<span class="kw-2">&amp;mut </span>b, o + <span class="number">60</span>, <span class="number">0x200</span>);
-<a href=#1496 id=1496 data-nosnippet>1496</a>        put16(<span class="kw-2">&amp;mut </span>b, o + <span class="number">68</span>, <span class="number">1</span>);
-<a href=#1497 id=1497 data-nosnippet>1497</a>        put32(<span class="kw-2">&amp;mut </span>b, o + <span class="number">108</span>, <span class="number">16</span>);
-<a href=#1498 id=1498 data-nosnippet>1498</a>        <span class="comment">// Import directory: RVA 0x1000, two descriptors.
-<a href=#1499 id=1499 data-nosnippet>1499</a>        </span>put32(<span class="kw-2">&amp;mut </span>b, o + <span class="number">112 </span>+ <span class="number">8</span>, <span class="number">0x1000</span>);
-<a href=#1500 id=1500 data-nosnippet>1500</a>        put32(<span class="kw-2">&amp;mut </span>b, o + <span class="number">112 </span>+ <span class="number">12</span>, <span class="number">40</span>);
-<a href=#1501 id=1501 data-nosnippet>1501</a>        <span class="kw">let </span>s = o + <span class="number">240</span>;
-<a href=#1502 id=1502 data-nosnippet>1502</a>        b[s..s + <span class="number">5</span>].copy_from_slice(<span class="string">b".data"</span>);
-<a href=#1503 id=1503 data-nosnippet>1503</a>        put32(<span class="kw-2">&amp;mut </span>b, s + <span class="number">8</span>, <span class="number">0x200</span>);
-<a href=#1504 id=1504 data-nosnippet>1504</a>        put32(<span class="kw-2">&amp;mut </span>b, s + <span class="number">12</span>, <span class="number">0x1000</span>);
-<a href=#1505 id=1505 data-nosnippet>1505</a>        put32(<span class="kw-2">&amp;mut </span>b, s + <span class="number">16</span>, <span class="number">0x200</span>);
-<a href=#1506 id=1506 data-nosnippet>1506</a>        put32(<span class="kw-2">&amp;mut </span>b, s + <span class="number">20</span>, <span class="number">0x200</span>);
-<a href=#1507 id=1507 data-nosnippet>1507</a>        put32(<span class="kw-2">&amp;mut </span>b, s + <span class="number">36</span>, <span class="number">0x4000_0040</span>);
-<a href=#1508 id=1508 data-nosnippet>1508</a>        <span class="comment">// Section data at 0x200 (RVA 0x1000): descriptor, terminator,
-<a href=#1509 id=1509 data-nosnippet>1509</a>        // thunks at RVA 0x1080, the name at RVA 0x1100.
-<a href=#1510 id=1510 data-nosnippet>1510</a>        </span>put32(<span class="kw-2">&amp;mut </span>b, <span class="number">0x200 </span>+ <span class="number">12</span>, <span class="number">0x1100</span>);
-<a href=#1511 id=1511 data-nosnippet>1511</a>        put32(<span class="kw-2">&amp;mut </span>b, <span class="number">0x200 </span>+ <span class="number">16</span>, <span class="number">0x1080</span>);
-<a href=#1512 id=1512 data-nosnippet>1512</a>        b[<span class="number">0x300</span>..<span class="number">0x30c</span>].copy_from_slice(<span class="string">b"ntoskrnl.exe"</span>);
-<a href=#1513 id=1513 data-nosnippet>1513</a>        b
-<a href=#1514 id=1514 data-nosnippet>1514</a>    }
-<a href=#1515 id=1515 data-nosnippet>1515</a>
-<a href=#1516 id=1516 data-nosnippet>1516</a>    <span class="attr">#[test]
-<a href=#1517 id=1517 data-nosnippet>1517</a>    </span><span class="kw">fn </span>headers_only_never_parses_directories() {
-<a href=#1518 id=1518 data-nosnippet>1518</a>        <span class="kw">let </span>image = native_driver();
-<a href=#1519 id=1519 data-nosnippet>1519</a>        <span class="kw">let </span>len = to_u64(image.len());
-<a href=#1520 id=1520 data-nosnippet>1520</a>        <span class="kw">let </span>full = parse_prefix(<span class="kw-2">&amp;</span>image, len).unwrap();
-<a href=#1521 id=1521 data-nosnippet>1521</a>        <span class="macro">assert!</span>(full.imports.is_some());
-<a href=#1522 id=1522 data-nosnippet>1522</a>        <span class="macro">assert!</span>(full.is_kernel_driver(), <span class="string">"{:?}"</span>, full.driver);
-<a href=#1523 id=1523 data-nosnippet>1523</a>        <span class="comment">// The whole file, but headers only: no directory work at all.
-<a href=#1524 id=1524 data-nosnippet>1524</a>        </span><span class="kw">let </span>headers = parse_headers_only(<span class="kw-2">&amp;</span>image, len).unwrap();
-<a href=#1525 id=1525 data-nosnippet>1525</a>        <span class="macro">assert!</span>(headers.imports.is_none() &amp;&amp; headers.exports.is_none());
-<a href=#1526 id=1526 data-nosnippet>1526</a>        <span class="macro">assert!</span>(headers.resources.is_none() &amp;&amp; headers.manifest.is_none());
-<a href=#1527 id=1527 data-nosnippet>1527</a>        <span class="macro">assert_eq!</span>(headers.driver, DriverClass::default());
-<a href=#1528 id=1528 data-nosnippet>1528</a>        <span class="macro">assert_eq!</span>(headers.sections, full.sections);
-<a href=#1529 id=1529 data-nosnippet>1529</a>        <span class="macro">assert_eq!</span>(headers.data_directories, full.data_directories);
-<a href=#1530 id=1530 data-nosnippet>1530</a>        <span class="comment">// A prefix still needs the whole section table.
-<a href=#1531 id=1531 data-nosnippet>1531</a>        </span><span class="kw">let </span>short = parse_headers_only(<span class="kw-2">&amp;</span>image[..<span class="number">0x150</span>], len).unwrap_err();
-<a href=#1532 id=1532 data-nosnippet>1532</a>        <span class="macro">assert!</span>(<span class="macro">matches!</span>(short.kind, PeErrorKind::PrefixTooShort { .. }));
-<a href=#1533 id=1533 data-nosnippet>1533</a>    }
-<a href=#1534 id=1534 data-nosnippet>1534</a>}
+<a href=#1078 id=1078 data-nosnippet>1078</a>        &amp;&amp; <span class="kw">let </span><span class="prelude-val">Some</span>(summary) = resource::walk(data, layout, <span class="kw-2">*</span>dir, <span class="kw-2">&amp;mut </span>warnings)
+<a href=#1079 id=1079 data-nosnippet>1079</a>    {
+<a href=#1080 id=1080 data-nosnippet>1080</a>        version_info = version_from_resources(data, <span class="kw-2">&amp;</span>summary, <span class="kw-2">&amp;mut </span>warnings);
+<a href=#1081 id=1081 data-nosnippet>1081</a>        (manifest, manifest_id) = manifest_from_resources(data, <span class="kw-2">&amp;</span>summary, <span class="kw-2">&amp;mut </span>warnings);
+<a href=#1082 id=1082 data-nosnippet>1082</a>        resources = <span class="prelude-val">Some</span>(summary);
+<a href=#1083 id=1083 data-nosnippet>1083</a>    }
+<a href=#1084 id=1084 data-nosnippet>1084</a>
+<a href=#1085 id=1085 data-nosnippet>1085</a>    <span class="kw">let </span>directory = |kind: DataDirectoryKind| {
+<a href=#1086 id=1086 data-nosnippet>1086</a>        data_directories
+<a href=#1087 id=1087 data-nosnippet>1087</a>            .get(kind.index())
+<a href=#1088 id=1088 data-nosnippet>1088</a>            .copied()
+<a href=#1089 id=1089 data-nosnippet>1089</a>            .filter(|d| directories &amp;&amp; d.is_present())
+<a href=#1090 id=1090 data-nosnippet>1090</a>    };
+<a href=#1091 id=1091 data-nosnippet>1091</a>    <span class="kw">let </span>imports = directory(DataDirectoryKind::Import)
+<a href=#1092 id=1092 data-nosnippet>1092</a>        .and_then(|d| imports::parse_imports(data, layout, d, optional.format, <span class="kw-2">&amp;mut </span>warnings));
+<a href=#1093 id=1093 data-nosnippet>1093</a>    <span class="kw">let </span>exports = directory(DataDirectoryKind::Export)
+<a href=#1094 id=1094 data-nosnippet>1094</a>        .and_then(|d| imports::parse_exports(data, layout, d, <span class="kw-2">&amp;mut </span>warnings));
+<a href=#1095 id=1095 data-nosnippet>1095</a>    <span class="comment">// Without the import table the verdict would be a guess, so a prefix
+<a href=#1096 id=1096 data-nosnippet>1096</a>    // parse leaves it at its default rather than report a partial one.
+<a href=#1097 id=1097 data-nosnippet>1097</a>    </span><span class="kw">let </span>driver = <span class="kw">if </span>directories {
+<a href=#1098 id=1098 data-nosnippet>1098</a>        driver::classify(
+<a href=#1099 id=1099 data-nosnippet>1099</a>            optional.subsystem,
+<a href=#1100 id=1100 data-nosnippet>1100</a>            coff.characteristics,
+<a href=#1101 id=1101 data-nosnippet>1101</a>            <span class="kw-2">&amp;</span>sections,
+<a href=#1102 id=1102 data-nosnippet>1102</a>            imports.as_ref(),
+<a href=#1103 id=1103 data-nosnippet>1103</a>        )
+<a href=#1104 id=1104 data-nosnippet>1104</a>    } <span class="kw">else </span>{
+<a href=#1105 id=1105 data-nosnippet>1105</a>        DriverClass::default()
+<a href=#1106 id=1106 data-nosnippet>1106</a>    };
+<a href=#1107 id=1107 data-nosnippet>1107</a>
+<a href=#1108 id=1108 data-nosnippet>1108</a>    <span class="prelude-val">Ok</span>(PeInfo {
+<a href=#1109 id=1109 data-nosnippet>1109</a>        file_size: file_len,
+<a href=#1110 id=1110 data-nosnippet>1110</a>        e_lfanew,
+<a href=#1111 id=1111 data-nosnippet>1111</a>        coff,
+<a href=#1112 id=1112 data-nosnippet>1112</a>        optional,
+<a href=#1113 id=1113 data-nosnippet>1113</a>        data_directories,
+<a href=#1114 id=1114 data-nosnippet>1114</a>        sections,
+<a href=#1115 id=1115 data-nosnippet>1115</a>        checksum,
+<a href=#1116 id=1116 data-nosnippet>1116</a>        certificate_table,
+<a href=#1117 id=1117 data-nosnippet>1117</a>        certificate_table_issue,
+<a href=#1118 id=1118 data-nosnippet>1118</a>        overlay,
+<a href=#1119 id=1119 data-nosnippet>1119</a>        debug,
+<a href=#1120 id=1120 data-nosnippet>1120</a>        resources,
+<a href=#1121 id=1121 data-nosnippet>1121</a>        version_info,
+<a href=#1122 id=1122 data-nosnippet>1122</a>        imports,
+<a href=#1123 id=1123 data-nosnippet>1123</a>        exports,
+<a href=#1124 id=1124 data-nosnippet>1124</a>        manifest,
+<a href=#1125 id=1125 data-nosnippet>1125</a>        manifest_id,
+<a href=#1126 id=1126 data-nosnippet>1126</a>        driver,
+<a href=#1127 id=1127 data-nosnippet>1127</a>        parse_warnings: warnings.list,
+<a href=#1128 id=1128 data-nosnippet>1128</a>        parse_warnings_truncated: warnings.truncated,
+<a href=#1129 id=1129 data-nosnippet>1129</a>    })
+<a href=#1130 id=1130 data-nosnippet>1130</a>}
+<a href=#1131 id=1131 data-nosnippet>1131</a>
+<a href=#1132 id=1132 data-nosnippet>1132</a><span class="kw">fn </span>parse_coff(data: <span class="kw-2">&amp;</span>[u8], offset: usize) -&gt; <span class="prelude-ty">Result</span>&lt;CoffHeader, PeError&gt; {
+<a href=#1133 id=1133 data-nosnippet>1133</a>    <span class="kw">let </span>header = bytes(data, offset, COFF_HEADER_SIZE)
+<a href=#1134 id=1134 data-nosnippet>1134</a>        .ok_or_else(|| fatal(offset, PeErrorKind::TruncatedCoffHeader))<span class="question-mark">?</span>;
+<a href=#1135 id=1135 data-nosnippet>1135</a>    <span class="kw">let </span>field16 = |at| u16_at(header, at).unwrap_or(<span class="number">0</span>);
+<a href=#1136 id=1136 data-nosnippet>1136</a>    <span class="kw">let </span>field32 = |at| u32_at(header, at).unwrap_or(<span class="number">0</span>);
+<a href=#1137 id=1137 data-nosnippet>1137</a>    <span class="prelude-val">Ok</span>(CoffHeader {
+<a href=#1138 id=1138 data-nosnippet>1138</a>        offset: to_u64(offset),
+<a href=#1139 id=1139 data-nosnippet>1139</a>        machine: Machine::from_raw(field16(<span class="number">0</span>)),
+<a href=#1140 id=1140 data-nosnippet>1140</a>        number_of_sections: field16(<span class="number">2</span>),
+<a href=#1141 id=1141 data-nosnippet>1141</a>        time_date_stamp: field32(<span class="number">4</span>),
+<a href=#1142 id=1142 data-nosnippet>1142</a>        pointer_to_symbol_table: field32(<span class="number">8</span>),
+<a href=#1143 id=1143 data-nosnippet>1143</a>        number_of_symbols: field32(<span class="number">12</span>),
+<a href=#1144 id=1144 data-nosnippet>1144</a>        size_of_optional_header: field16(<span class="number">16</span>),
+<a href=#1145 id=1145 data-nosnippet>1145</a>        characteristics: FileCharacteristics(field16(<span class="number">18</span>)),
+<a href=#1146 id=1146 data-nosnippet>1146</a>    })
+<a href=#1147 id=1147 data-nosnippet>1147</a>}
+<a href=#1148 id=1148 data-nosnippet>1148</a>
+<a href=#1149 id=1149 data-nosnippet>1149</a><span class="doccomment">/// Parses the fixed optional header fields. Returns the header and the file
+<a href=#1150 id=1150 data-nosnippet>1150</a>/// offset of the first data directory entry.
+<a href=#1151 id=1151 data-nosnippet>1151</a></span><span class="kw">fn </span>parse_optional(
+<a href=#1152 id=1152 data-nosnippet>1152</a>    data: <span class="kw-2">&amp;</span>[u8],
+<a href=#1153 id=1153 data-nosnippet>1153</a>    offset: usize,
+<a href=#1154 id=1154 data-nosnippet>1154</a>    declared_size: u16,
+<a href=#1155 id=1155 data-nosnippet>1155</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(OptionalHeader, usize), PeError&gt; {
+<a href=#1156 id=1156 data-nosnippet>1156</a>    <span class="kw">let </span>magic =
+<a href=#1157 id=1157 data-nosnippet>1157</a>        u16_at(data, offset).ok_or_else(|| fatal(offset, PeErrorKind::TruncatedOptionalHeader))<span class="question-mark">?</span>;
+<a href=#1158 id=1158 data-nosnippet>1158</a>    <span class="kw">let </span>(format, fixed_len) = <span class="kw">match </span>magic {
+<a href=#1159 id=1159 data-nosnippet>1159</a>        <span class="number">0x10b </span>=&gt; (PeFormat::Pe32, <span class="number">96_usize</span>),
+<a href=#1160 id=1160 data-nosnippet>1160</a>        <span class="number">0x20b </span>=&gt; (PeFormat::Pe32Plus, <span class="number">112_usize</span>),
+<a href=#1161 id=1161 data-nosnippet>1161</a>        other =&gt; {
+<a href=#1162 id=1162 data-nosnippet>1162</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(fatal(
+<a href=#1163 id=1163 data-nosnippet>1163</a>                offset,
+<a href=#1164 id=1164 data-nosnippet>1164</a>                PeErrorKind::UnknownOptionalHeaderMagic(other),
+<a href=#1165 id=1165 data-nosnippet>1165</a>            ));
+<a href=#1166 id=1166 data-nosnippet>1166</a>        }
+<a href=#1167 id=1167 data-nosnippet>1167</a>    };
+<a href=#1168 id=1168 data-nosnippet>1168</a>    <span class="kw">if </span>usize::from(declared_size) &lt; fixed_len {
+<a href=#1169 id=1169 data-nosnippet>1169</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(fatal(
+<a href=#1170 id=1170 data-nosnippet>1170</a>            offset,
+<a href=#1171 id=1171 data-nosnippet>1171</a>            PeErrorKind::OptionalHeaderTooSmall(declared_size),
+<a href=#1172 id=1172 data-nosnippet>1172</a>        ));
+<a href=#1173 id=1173 data-nosnippet>1173</a>    }
+<a href=#1174 id=1174 data-nosnippet>1174</a>    <span class="kw">let </span>h = bytes(data, offset, fixed_len)
+<a href=#1175 id=1175 data-nosnippet>1175</a>        .ok_or_else(|| fatal(offset, PeErrorKind::TruncatedOptionalHeader))<span class="question-mark">?</span>;
+<a href=#1176 id=1176 data-nosnippet>1176</a>    <span class="comment">// `h` holds exactly `fixed_len` bytes, so these reads cannot miss; the
+<a href=#1177 id=1177 data-nosnippet>1177</a>    // zero fallbacks only satisfy the type checker.
+<a href=#1178 id=1178 data-nosnippet>1178</a>    </span><span class="kw">let </span>f8 = |at| u8_at(h, at).unwrap_or(<span class="number">0</span>);
+<a href=#1179 id=1179 data-nosnippet>1179</a>    <span class="kw">let </span>f16 = |at| u16_at(h, at).unwrap_or(<span class="number">0</span>);
+<a href=#1180 id=1180 data-nosnippet>1180</a>    <span class="kw">let </span>f32 = |at| u32_at(h, at).unwrap_or(<span class="number">0</span>);
+<a href=#1181 id=1181 data-nosnippet>1181</a>    <span class="kw">let </span>f64 = |at| u64_at(h, at).unwrap_or(<span class="number">0</span>);
+<a href=#1182 id=1182 data-nosnippet>1182</a>    <span class="kw">let </span>pe32 = format == PeFormat::Pe32;
+<a href=#1183 id=1183 data-nosnippet>1183</a>    <span class="kw">let </span>wide = |at32: usize, at64: usize| {
+<a href=#1184 id=1184 data-nosnippet>1184</a>        <span class="kw">if </span>pe32 {
+<a href=#1185 id=1185 data-nosnippet>1185</a>            u64::from(f32(at32))
+<a href=#1186 id=1186 data-nosnippet>1186</a>        } <span class="kw">else </span>{
+<a href=#1187 id=1187 data-nosnippet>1187</a>            f64(at64)
+<a href=#1188 id=1188 data-nosnippet>1188</a>        }
+<a href=#1189 id=1189 data-nosnippet>1189</a>    };
+<a href=#1190 id=1190 data-nosnippet>1190</a>    <span class="kw">let </span>header = OptionalHeader {
+<a href=#1191 id=1191 data-nosnippet>1191</a>        offset: to_u64(offset),
+<a href=#1192 id=1192 data-nosnippet>1192</a>        format,
+<a href=#1193 id=1193 data-nosnippet>1193</a>        linker_version: (f8(<span class="number">2</span>), f8(<span class="number">3</span>)),
+<a href=#1194 id=1194 data-nosnippet>1194</a>        size_of_code: f32(<span class="number">4</span>),
+<a href=#1195 id=1195 data-nosnippet>1195</a>        size_of_initialized_data: f32(<span class="number">8</span>),
+<a href=#1196 id=1196 data-nosnippet>1196</a>        size_of_uninitialized_data: f32(<span class="number">12</span>),
+<a href=#1197 id=1197 data-nosnippet>1197</a>        entry_point: f32(<span class="number">16</span>),
+<a href=#1198 id=1198 data-nosnippet>1198</a>        base_of_code: f32(<span class="number">20</span>),
+<a href=#1199 id=1199 data-nosnippet>1199</a>        image_base: wide(<span class="number">28</span>, <span class="number">24</span>),
+<a href=#1200 id=1200 data-nosnippet>1200</a>        section_alignment: f32(<span class="number">32</span>),
+<a href=#1201 id=1201 data-nosnippet>1201</a>        file_alignment: f32(<span class="number">36</span>),
+<a href=#1202 id=1202 data-nosnippet>1202</a>        os_version: (f16(<span class="number">40</span>), f16(<span class="number">42</span>)),
+<a href=#1203 id=1203 data-nosnippet>1203</a>        image_version: (f16(<span class="number">44</span>), f16(<span class="number">46</span>)),
+<a href=#1204 id=1204 data-nosnippet>1204</a>        subsystem_version: (f16(<span class="number">48</span>), f16(<span class="number">50</span>)),
+<a href=#1205 id=1205 data-nosnippet>1205</a>        win32_version_value: f32(<span class="number">52</span>),
+<a href=#1206 id=1206 data-nosnippet>1206</a>        size_of_image: f32(<span class="number">56</span>),
+<a href=#1207 id=1207 data-nosnippet>1207</a>        size_of_headers: f32(<span class="number">60</span>),
+<a href=#1208 id=1208 data-nosnippet>1208</a>        checksum: f32(<span class="number">64</span>),
+<a href=#1209 id=1209 data-nosnippet>1209</a>        checksum_offset: to_u64(offset.saturating_add(<span class="number">64</span>)),
+<a href=#1210 id=1210 data-nosnippet>1210</a>        subsystem: Subsystem::from_raw(f16(<span class="number">68</span>)),
+<a href=#1211 id=1211 data-nosnippet>1211</a>        dll_characteristics: DllCharacteristics(f16(<span class="number">70</span>)),
+<a href=#1212 id=1212 data-nosnippet>1212</a>        size_of_stack_reserve: wide(<span class="number">72</span>, <span class="number">72</span>),
+<a href=#1213 id=1213 data-nosnippet>1213</a>        size_of_stack_commit: wide(<span class="number">76</span>, <span class="number">80</span>),
+<a href=#1214 id=1214 data-nosnippet>1214</a>        size_of_heap_reserve: wide(<span class="number">80</span>, <span class="number">88</span>),
+<a href=#1215 id=1215 data-nosnippet>1215</a>        size_of_heap_commit: wide(<span class="number">84</span>, <span class="number">96</span>),
+<a href=#1216 id=1216 data-nosnippet>1216</a>        loader_flags: f32(<span class="kw">if </span>pe32 { <span class="number">88 </span>} <span class="kw">else </span>{ <span class="number">104 </span>}),
+<a href=#1217 id=1217 data-nosnippet>1217</a>        number_of_rva_and_sizes: f32(<span class="kw">if </span>pe32 { <span class="number">92 </span>} <span class="kw">else </span>{ <span class="number">108 </span>}),
+<a href=#1218 id=1218 data-nosnippet>1218</a>    };
+<a href=#1219 id=1219 data-nosnippet>1219</a>    <span class="prelude-val">Ok</span>((header, offset.saturating_add(fixed_len)))
+<a href=#1220 id=1220 data-nosnippet>1220</a>}
+<a href=#1221 id=1221 data-nosnippet>1221</a>
+<a href=#1222 id=1222 data-nosnippet>1222</a><span class="kw">fn </span>parse_data_directories(
+<a href=#1223 id=1223 data-nosnippet>1223</a>    data: <span class="kw-2">&amp;</span>[u8],
+<a href=#1224 id=1224 data-nosnippet>1224</a>    start: usize,
+<a href=#1225 id=1225 data-nosnippet>1225</a>    opt_end: usize,
+<a href=#1226 id=1226 data-nosnippet>1226</a>    declared: u32,
+<a href=#1227 id=1227 data-nosnippet>1227</a>    warnings: <span class="kw-2">&amp;mut </span>Warnings,
+<a href=#1228 id=1228 data-nosnippet>1228</a>) -&gt; Vec&lt;DataDirectory&gt; {
+<a href=#1229 id=1229 data-nosnippet>1229</a>    <span class="kw">let </span>wanted = <span class="kw">if </span>declared &gt; <span class="number">16 </span>{
+<a href=#1230 id=1230 data-nosnippet>1230</a>        warnings.push(start, WarningKind::TooManyDataDirectories(declared));
+<a href=#1231 id=1231 data-nosnippet>1231</a>        DATA_DIRECTORY_COUNT
+<a href=#1232 id=1232 data-nosnippet>1232</a>    } <span class="kw">else </span>{
+<a href=#1233 id=1233 data-nosnippet>1233</a>        to_usize(declared).unwrap_or(DATA_DIRECTORY_COUNT)
+<a href=#1234 id=1234 data-nosnippet>1234</a>    };
+<a href=#1235 id=1235 data-nosnippet>1235</a>    <span class="kw">let </span><span class="kw-2">mut </span>dirs = Vec::with_capacity(wanted);
+<a href=#1236 id=1236 data-nosnippet>1236</a>    <span class="kw">for </span>(i, kind) <span class="kw">in </span>DataDirectoryKind::ALL.iter().take(wanted).enumerate() {
+<a href=#1237 id=1237 data-nosnippet>1237</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(at) = i.checked_mul(<span class="number">8</span>).and_then(|o| o.checked_add(start)) <span class="kw">else </span>{
+<a href=#1238 id=1238 data-nosnippet>1238</a>            <span class="kw">break</span>;
+<a href=#1239 id=1239 data-nosnippet>1239</a>        };
+<a href=#1240 id=1240 data-nosnippet>1240</a>        <span class="kw">let </span>in_header = at.checked_add(<span class="number">8</span>).is_some_and(|end| end &lt;= opt_end);
+<a href=#1241 id=1241 data-nosnippet>1241</a>        <span class="kw">let </span>(<span class="prelude-val">Some</span>(virtual_address), <span class="prelude-val">Some</span>(size)) = (u32_at(data, at), u32_at(data, at + <span class="number">4</span>)) <span class="kw">else </span>{
+<a href=#1242 id=1242 data-nosnippet>1242</a>            <span class="kw">break</span>;
+<a href=#1243 id=1243 data-nosnippet>1243</a>        };
+<a href=#1244 id=1244 data-nosnippet>1244</a>        <span class="kw">if </span>!in_header {
+<a href=#1245 id=1245 data-nosnippet>1245</a>            <span class="kw">break</span>;
+<a href=#1246 id=1246 data-nosnippet>1246</a>        }
+<a href=#1247 id=1247 data-nosnippet>1247</a>        dirs.push(DataDirectory {
+<a href=#1248 id=1248 data-nosnippet>1248</a>            kind: <span class="kw-2">*</span>kind,
+<a href=#1249 id=1249 data-nosnippet>1249</a>            virtual_address,
+<a href=#1250 id=1250 data-nosnippet>1250</a>            size,
+<a href=#1251 id=1251 data-nosnippet>1251</a>            entry_offset: to_u64(at),
+<a href=#1252 id=1252 data-nosnippet>1252</a>        });
+<a href=#1253 id=1253 data-nosnippet>1253</a>    }
+<a href=#1254 id=1254 data-nosnippet>1254</a>    <span class="kw">if </span>dirs.len() &lt; wanted {
+<a href=#1255 id=1255 data-nosnippet>1255</a>        warnings.push(
+<a href=#1256 id=1256 data-nosnippet>1256</a>            start,
+<a href=#1257 id=1257 data-nosnippet>1257</a>            WarningKind::DataDirectoriesTruncated {
+<a href=#1258 id=1258 data-nosnippet>1258</a>                declared: u32::try_from(wanted).unwrap_or(u32::MAX),
+<a href=#1259 id=1259 data-nosnippet>1259</a>                parsed: u32::try_from(dirs.len()).unwrap_or(u32::MAX),
+<a href=#1260 id=1260 data-nosnippet>1260</a>            },
+<a href=#1261 id=1261 data-nosnippet>1261</a>        );
+<a href=#1262 id=1262 data-nosnippet>1262</a>    }
+<a href=#1263 id=1263 data-nosnippet>1263</a>    dirs
+<a href=#1264 id=1264 data-nosnippet>1264</a>}
+<a href=#1265 id=1265 data-nosnippet>1265</a>
+<a href=#1266 id=1266 data-nosnippet>1266</a><span class="kw">fn </span>parse_sections(
+<a href=#1267 id=1267 data-nosnippet>1267</a>    data: <span class="kw-2">&amp;</span>[u8],
+<a href=#1268 id=1268 data-nosnippet>1268</a>    table: usize,
+<a href=#1269 id=1269 data-nosnippet>1269</a>    declared: u16,
+<a href=#1270 id=1270 data-nosnippet>1270</a>    warnings: <span class="kw-2">&amp;mut </span>Warnings,
+<a href=#1271 id=1271 data-nosnippet>1271</a>) -&gt; Vec&lt;Section&gt; {
+<a href=#1272 id=1272 data-nosnippet>1272</a>    <span class="kw">if </span>usize::from(declared) &gt; MAX_SECTIONS {
+<a href=#1273 id=1273 data-nosnippet>1273</a>        warnings.push(table, WarningKind::TooManySections(declared));
+<a href=#1274 id=1274 data-nosnippet>1274</a>    }
+<a href=#1275 id=1275 data-nosnippet>1275</a>    <span class="comment">// Only allocate for headers that are actually present in the input.
+<a href=#1276 id=1276 data-nosnippet>1276</a>    </span><span class="kw">let </span>available = data.len().saturating_sub(table) / SECTION_HEADER_SIZE;
+<a href=#1277 id=1277 data-nosnippet>1277</a>    <span class="kw">let </span>wanted = usize::from(declared).min(MAX_SECTIONS);
+<a href=#1278 id=1278 data-nosnippet>1278</a>    <span class="kw">let </span>count = wanted.min(available);
+<a href=#1279 id=1279 data-nosnippet>1279</a>    <span class="kw">let </span><span class="kw-2">mut </span>sections = Vec::with_capacity(count);
+<a href=#1280 id=1280 data-nosnippet>1280</a>    <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..count {
+<a href=#1281 id=1281 data-nosnippet>1281</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(at) = i
+<a href=#1282 id=1282 data-nosnippet>1282</a>            .checked_mul(SECTION_HEADER_SIZE)
+<a href=#1283 id=1283 data-nosnippet>1283</a>            .and_then(|o| o.checked_add(table))
+<a href=#1284 id=1284 data-nosnippet>1284</a>        <span class="kw">else </span>{
+<a href=#1285 id=1285 data-nosnippet>1285</a>            <span class="kw">break</span>;
+<a href=#1286 id=1286 data-nosnippet>1286</a>        };
+<a href=#1287 id=1287 data-nosnippet>1287</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(h) = bytes(data, at, SECTION_HEADER_SIZE) <span class="kw">else </span>{
+<a href=#1288 id=1288 data-nosnippet>1288</a>            <span class="kw">break</span>;
+<a href=#1289 id=1289 data-nosnippet>1289</a>        };
+<a href=#1290 id=1290 data-nosnippet>1290</a>        <span class="kw">let </span><span class="kw-2">mut </span>raw_name = [<span class="number">0_u8</span>; <span class="number">8</span>];
+<a href=#1291 id=1291 data-nosnippet>1291</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(name) = bytes(h, <span class="number">0</span>, <span class="number">8</span>) {
+<a href=#1292 id=1292 data-nosnippet>1292</a>            raw_name.copy_from_slice(name);
+<a href=#1293 id=1293 data-nosnippet>1293</a>        }
+<a href=#1294 id=1294 data-nosnippet>1294</a>        <span class="kw">let </span>name_len = raw_name.iter().position(|b| <span class="kw-2">*</span>b == <span class="number">0</span>).unwrap_or(<span class="number">8</span>);
+<a href=#1295 id=1295 data-nosnippet>1295</a>        <span class="kw">let </span>name =
+<a href=#1296 id=1296 data-nosnippet>1296</a>            String::from_utf8_lossy(raw_name.get(..name_len).unwrap_or_default()).into_owned();
+<a href=#1297 id=1297 data-nosnippet>1297</a>        <span class="kw">let </span>f32 = |off| u32_at(h, off).unwrap_or(<span class="number">0</span>);
+<a href=#1298 id=1298 data-nosnippet>1298</a>        sections.push(Section {
+<a href=#1299 id=1299 data-nosnippet>1299</a>            header_offset: to_u64(at),
+<a href=#1300 id=1300 data-nosnippet>1300</a>            name,
+<a href=#1301 id=1301 data-nosnippet>1301</a>            raw_name,
+<a href=#1302 id=1302 data-nosnippet>1302</a>            virtual_size: f32(<span class="number">8</span>),
+<a href=#1303 id=1303 data-nosnippet>1303</a>            virtual_address: f32(<span class="number">12</span>),
+<a href=#1304 id=1304 data-nosnippet>1304</a>            size_of_raw_data: f32(<span class="number">16</span>),
+<a href=#1305 id=1305 data-nosnippet>1305</a>            pointer_to_raw_data: f32(<span class="number">20</span>),
+<a href=#1306 id=1306 data-nosnippet>1306</a>            characteristics: SectionCharacteristics(f32(<span class="number">36</span>)),
+<a href=#1307 id=1307 data-nosnippet>1307</a>            entropy: <span class="prelude-val">None</span>,
+<a href=#1308 id=1308 data-nosnippet>1308</a>        });
+<a href=#1309 id=1309 data-nosnippet>1309</a>    }
+<a href=#1310 id=1310 data-nosnippet>1310</a>    <span class="kw">if </span>sections.len() &lt; wanted {
+<a href=#1311 id=1311 data-nosnippet>1311</a>        warnings.push(
+<a href=#1312 id=1312 data-nosnippet>1312</a>            table,
+<a href=#1313 id=1313 data-nosnippet>1313</a>            WarningKind::SectionTableTruncated {
+<a href=#1314 id=1314 data-nosnippet>1314</a>                declared,
+<a href=#1315 id=1315 data-nosnippet>1315</a>                parsed: u16::try_from(sections.len()).unwrap_or(u16::MAX),
+<a href=#1316 id=1316 data-nosnippet>1316</a>            },
+<a href=#1317 id=1317 data-nosnippet>1317</a>        );
+<a href=#1318 id=1318 data-nosnippet>1318</a>    }
+<a href=#1319 id=1319 data-nosnippet>1319</a>    sections
+<a href=#1320 id=1320 data-nosnippet>1320</a>}
+<a href=#1321 id=1321 data-nosnippet>1321</a>
+<a href=#1322 id=1322 data-nosnippet>1322</a><span class="doccomment">/// The part of a section's raw data that is present in the file, or `None`
+<a href=#1323 id=1323 data-nosnippet>1323</a>/// if there is none. Warns when the declared range runs past the end.
+<a href=#1324 id=1324 data-nosnippet>1324</a></span><span class="kw">fn </span>section_raw_data&lt;<span class="lifetime">'a</span>&gt;(
+<a href=#1325 id=1325 data-nosnippet>1325</a>    data: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>[u8],
+<a href=#1326 id=1326 data-nosnippet>1326</a>    file_len: u64,
+<a href=#1327 id=1327 data-nosnippet>1327</a>    section: <span class="kw-2">&amp;</span>Section,
+<a href=#1328 id=1328 data-nosnippet>1328</a>    file_alignment: u32,
+<a href=#1329 id=1329 data-nosnippet>1329</a>    index: u16,
+<a href=#1330 id=1330 data-nosnippet>1330</a>    warnings: <span class="kw-2">&amp;mut </span>Warnings,
+<a href=#1331 id=1331 data-nosnippet>1331</a>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>[u8]&gt; {
+<a href=#1332 id=1332 data-nosnippet>1332</a>    <span class="kw">let </span>(start, size) = section.file_data(file_alignment)<span class="question-mark">?</span>;
+<a href=#1333 id=1333 data-nosnippet>1333</a>    <span class="kw">if </span>u64::from(start) + u64::from(size) &gt; file_len {
+<a href=#1334 id=1334 data-nosnippet>1334</a>        warnings.push(
+<a href=#1335 id=1335 data-nosnippet>1335</a>            to_usize(start).unwrap_or(usize::MAX),
+<a href=#1336 id=1336 data-nosnippet>1336</a>            WarningKind::SectionDataOutOfFile { index },
+<a href=#1337 id=1337 data-nosnippet>1337</a>        );
+<a href=#1338 id=1338 data-nosnippet>1338</a>    }
+<a href=#1339 id=1339 data-nosnippet>1339</a>    <span class="kw">let </span>start = to_usize(start)<span class="question-mark">?</span>;
+<a href=#1340 id=1340 data-nosnippet>1340</a>    <span class="kw">let </span>end = start.saturating_add(to_usize(size)<span class="question-mark">?</span>);
+<a href=#1341 id=1341 data-nosnippet>1341</a>    data.get(start..end.min(data.len()))
+<a href=#1342 id=1342 data-nosnippet>1342</a>        .filter(|raw| !raw.is_empty())
+<a href=#1343 id=1343 data-nosnippet>1343</a>}
+<a href=#1344 id=1344 data-nosnippet>1344</a>
+<a href=#1345 id=1345 data-nosnippet>1345</a><span class="doccomment">/// The part of a section's file data that is actually in the input, as a
+<a href=#1346 id=1346 data-nosnippet>1346</a>/// `(start, end)` file range, or `None` if none of it is. A section that
+<a href=#1347 id=1347 data-nosnippet>1347</a>/// starts past the end of the input contributes nothing; one that runs past
+<a href=#1348 id=1348 data-nosnippet>1348</a>/// the end is cut there.
+<a href=#1349 id=1349 data-nosnippet>1349</a></span><span class="kw">fn </span>in_file_data(s: <span class="kw-2">&amp;</span>Section, file_alignment: u32, file_len: u64) -&gt; <span class="prelude-ty">Option</span>&lt;(u64, u64)&gt; {
+<a href=#1350 id=1350 data-nosnippet>1350</a>    <span class="kw">let </span>(start, size) = s.file_data(file_alignment)<span class="question-mark">?</span>;
+<a href=#1351 id=1351 data-nosnippet>1351</a>    <span class="kw">let </span>start = u64::from(start);
+<a href=#1352 id=1352 data-nosnippet>1352</a>    (start &lt; file_len).then(|| (start, start.saturating_add(u64::from(size)).min(file_len)))
+<a href=#1353 id=1353 data-nosnippet>1353</a>}
+<a href=#1354 id=1354 data-nosnippet>1354</a>
+<a href=#1355 id=1355 data-nosnippet>1355</a><span class="kw">fn </span>find_overlay(
+<a href=#1356 id=1356 data-nosnippet>1356</a>    file_len: u64,
+<a href=#1357 id=1357 data-nosnippet>1357</a>    headers_end: usize,
+<a href=#1358 id=1358 data-nosnippet>1358</a>    file_alignment: u32,
+<a href=#1359 id=1359 data-nosnippet>1359</a>    sections: <span class="kw-2">&amp;</span>[Section],
+<a href=#1360 id=1360 data-nosnippet>1360</a>    certificate_table: <span class="prelude-ty">Option</span>&lt;FileRange&gt;,
+<a href=#1361 id=1361 data-nosnippet>1361</a>) -&gt; <span class="prelude-ty">Option</span>&lt;FileRange&gt; {
+<a href=#1362 id=1362 data-nosnippet>1362</a>    <span class="kw">let </span>sections_end = sections
+<a href=#1363 id=1363 data-nosnippet>1363</a>        .iter()
+<a href=#1364 id=1364 data-nosnippet>1364</a>        .filter_map(|s| in_file_data(s, file_alignment, file_len))
+<a href=#1365 id=1365 data-nosnippet>1365</a>        .map(|(<span class="kw">_</span>, end)| end)
+<a href=#1366 id=1366 data-nosnippet>1366</a>        .max()
+<a href=#1367 id=1367 data-nosnippet>1367</a>        .unwrap_or(<span class="number">0</span>)
+<a href=#1368 id=1368 data-nosnippet>1368</a>        .max(to_u64(headers_end));
+<a href=#1369 id=1369 data-nosnippet>1369</a>    <span class="kw">let </span>cert_end = certificate_table.map_or(<span class="number">0</span>, |c| c.offset.saturating_add(c.size));
+<a href=#1370 id=1370 data-nosnippet>1370</a>    <span class="kw">let </span>start = sections_end.max(cert_end);
+<a href=#1371 id=1371 data-nosnippet>1371</a>    (start &lt; file_len).then(|| FileRange {
+<a href=#1372 id=1372 data-nosnippet>1372</a>        offset: start,
+<a href=#1373 id=1373 data-nosnippet>1373</a>        size: file_len - start,
+<a href=#1374 id=1374 data-nosnippet>1374</a>    })
+<a href=#1375 id=1375 data-nosnippet>1375</a>}
+<a href=#1376 id=1376 data-nosnippet>1376</a>
+<a href=#1377 id=1377 data-nosnippet>1377</a><span class="kw">fn </span>version_from_resources(
+<a href=#1378 id=1378 data-nosnippet>1378</a>    data: <span class="kw-2">&amp;</span>[u8],
+<a href=#1379 id=1379 data-nosnippet>1379</a>    summary: <span class="kw-2">&amp;</span>ResourceSummary,
+<a href=#1380 id=1380 data-nosnippet>1380</a>    warnings: <span class="kw-2">&amp;mut </span>Warnings,
+<a href=#1381 id=1381 data-nosnippet>1381</a>) -&gt; <span class="prelude-ty">Option</span>&lt;VersionInfo&gt; {
+<a href=#1382 id=1382 data-nosnippet>1382</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(entry) = <span class="kw-2">&amp;</span>summary.version_resource <span class="kw">else </span>{
+<a href=#1383 id=1383 data-nosnippet>1383</a>        <span class="kw">if </span>!summary.version_entries.is_empty() {
+<a href=#1384 id=1384 data-nosnippet>1384</a>            warnings.push(
+<a href=#1385 id=1385 data-nosnippet>1385</a>                usize::try_from(summary.offset).unwrap_or(usize::MAX),
+<a href=#1386 id=1386 data-nosnippet>1386</a>                WarningKind::NoStandardVersionResource,
+<a href=#1387 id=1387 data-nosnippet>1387</a>            );
+<a href=#1388 id=1388 data-nosnippet>1388</a>        }
+<a href=#1389 id=1389 data-nosnippet>1389</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#1390 id=1390 data-nosnippet>1390</a>    };
+<a href=#1391 id=1391 data-nosnippet>1391</a>    <span class="kw">let </span>resource_root = usize::try_from(summary.offset).unwrap_or(usize::MAX);
+<a href=#1392 id=1392 data-nosnippet>1392</a>    <span class="kw">let </span>base = entry
+<a href=#1393 id=1393 data-nosnippet>1393</a>        .file_offset
+<a href=#1394 id=1394 data-nosnippet>1394</a>        .and_then(|o| usize::try_from(o).ok())
+<a href=#1395 id=1395 data-nosnippet>1395</a>        .unwrap_or(resource_root);
+<a href=#1396 id=1396 data-nosnippet>1396</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(raw) = entry.bytes(data) <span class="kw">else </span>{
+<a href=#1397 id=1397 data-nosnippet>1397</a>        warnings.push(base, WarningKind::ResourceOutOfBounds);
+<a href=#1398 id=1398 data-nosnippet>1398</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#1399 id=1399 data-nosnippet>1399</a>    };
+<a href=#1400 id=1400 data-nosnippet>1400</a>    <span class="kw">match </span>version::parse_version_info(raw) {
+<a href=#1401 id=1401 data-nosnippet>1401</a>        <span class="prelude-val">Ok</span>(info) =&gt; {
+<a href=#1402 id=1402 data-nosnippet>1402</a>            <span class="kw">for </span>issue <span class="kw">in </span><span class="kw-2">&amp;</span>info.issues {
+<a href=#1403 id=1403 data-nosnippet>1403</a>                warnings.push(
+<a href=#1404 id=1404 data-nosnippet>1404</a>                    base.saturating_add(usize::try_from(issue.offset).unwrap_or(usize::MAX)),
+<a href=#1405 id=1405 data-nosnippet>1405</a>                    WarningKind::VersionInfo(issue.clone()),
+<a href=#1406 id=1406 data-nosnippet>1406</a>                );
+<a href=#1407 id=1407 data-nosnippet>1407</a>            }
+<a href=#1408 id=1408 data-nosnippet>1408</a>            <span class="prelude-val">Some</span>(info)
+<a href=#1409 id=1409 data-nosnippet>1409</a>        }
+<a href=#1410 id=1410 data-nosnippet>1410</a>        <span class="prelude-val">Err</span>(issue) =&gt; {
+<a href=#1411 id=1411 data-nosnippet>1411</a>            warnings.push(
+<a href=#1412 id=1412 data-nosnippet>1412</a>                base.saturating_add(usize::try_from(issue.offset).unwrap_or(usize::MAX)),
+<a href=#1413 id=1413 data-nosnippet>1413</a>                WarningKind::VersionInfo(issue),
+<a href=#1414 id=1414 data-nosnippet>1414</a>            );
+<a href=#1415 id=1415 data-nosnippet>1415</a>            <span class="prelude-val">None
+<a href=#1416 id=1416 data-nosnippet>1416</a>        </span>}
+<a href=#1417 id=1417 data-nosnippet>1417</a>    }
+<a href=#1418 id=1418 data-nosnippet>1418</a>}
+<a href=#1419 id=1419 data-nosnippet>1419</a>
+<a href=#1420 id=1420 data-nosnippet>1420</a><span class="doccomment">/// The manifest with the lowest standard `RT_MANIFEST` ID present (1, 2 or
+<a href=#1421 id=1421 data-nosnippet>1421</a>/// 3, found by loader-style lookup), and that ID. If it cannot be read or
+<a href=#1422 id=1422 data-nosnippet>1422</a>/// does not parse, no other manifest is used in its place: a decoy at a
+<a href=#1423 id=1423 data-nosnippet>1423</a>/// higher ID must not stand in for the one the OS reads.
+<a href=#1424 id=1424 data-nosnippet>1424</a></span><span class="kw">fn </span>manifest_from_resources(
+<a href=#1425 id=1425 data-nosnippet>1425</a>    data: <span class="kw-2">&amp;</span>[u8],
+<a href=#1426 id=1426 data-nosnippet>1426</a>    summary: <span class="kw-2">&amp;</span>ResourceSummary,
+<a href=#1427 id=1427 data-nosnippet>1427</a>    warnings: <span class="kw-2">&amp;mut </span>Warnings,
+<a href=#1428 id=1428 data-nosnippet>1428</a>) -&gt; (<span class="prelude-ty">Option</span>&lt;Manifest&gt;, <span class="prelude-ty">Option</span>&lt;u16&gt;) {
+<a href=#1429 id=1429 data-nosnippet>1429</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(first) = summary.first_standard_manifest_id <span class="kw">else </span>{
+<a href=#1430 id=1430 data-nosnippet>1430</a>        <span class="kw">return </span>(<span class="prelude-val">None</span>, <span class="prelude-val">None</span>);
+<a href=#1431 id=1431 data-nosnippet>1431</a>    };
+<a href=#1432 id=1432 data-nosnippet>1432</a>    <span class="kw">let </span>id = <span class="prelude-val">Some</span>(first);
+<a href=#1433 id=1433 data-nosnippet>1433</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(entry) = summary
+<a href=#1434 id=1434 data-nosnippet>1434</a>        .standard_manifests
+<a href=#1435 id=1435 data-nosnippet>1435</a>        .iter()
+<a href=#1436 id=1436 data-nosnippet>1436</a>        .find(|e| e.name == ResourceId::Id(first))
+<a href=#1437 id=1437 data-nosnippet>1437</a>    <span class="kw">else </span>{
+<a href=#1438 id=1438 data-nosnippet>1438</a>        <span class="comment">// The ID is there, but no data entry under it can be read.
+<a href=#1439 id=1439 data-nosnippet>1439</a>        </span>warnings.push(
+<a href=#1440 id=1440 data-nosnippet>1440</a>            usize::try_from(summary.offset).unwrap_or(usize::MAX),
+<a href=#1441 id=1441 data-nosnippet>1441</a>            WarningKind::ResourceOutOfBounds,
+<a href=#1442 id=1442 data-nosnippet>1442</a>        );
+<a href=#1443 id=1443 data-nosnippet>1443</a>        <span class="kw">return </span>(<span class="prelude-val">None</span>, id);
+<a href=#1444 id=1444 data-nosnippet>1444</a>    };
+<a href=#1445 id=1445 data-nosnippet>1445</a>    <span class="kw">let </span>at = entry
+<a href=#1446 id=1446 data-nosnippet>1446</a>        .file_offset
+<a href=#1447 id=1447 data-nosnippet>1447</a>        .and_then(|o| usize::try_from(o).ok())
+<a href=#1448 id=1448 data-nosnippet>1448</a>        .unwrap_or_else(|| usize::try_from(summary.offset).unwrap_or(usize::MAX));
+<a href=#1449 id=1449 data-nosnippet>1449</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(raw) = entry.bytes(data) <span class="kw">else </span>{
+<a href=#1450 id=1450 data-nosnippet>1450</a>        warnings.push(at, WarningKind::ResourceOutOfBounds);
+<a href=#1451 id=1451 data-nosnippet>1451</a>        <span class="kw">return </span>(<span class="prelude-val">None</span>, id);
+<a href=#1452 id=1452 data-nosnippet>1452</a>    };
+<a href=#1453 id=1453 data-nosnippet>1453</a>    <span class="kw">match </span>manifest::parse_manifest(raw) {
+<a href=#1454 id=1454 data-nosnippet>1454</a>        <span class="prelude-val">Ok</span>(m) =&gt; (<span class="prelude-val">Some</span>(m), id),
+<a href=#1455 id=1455 data-nosnippet>1455</a>        <span class="prelude-val">Err</span>(e) =&gt; {
+<a href=#1456 id=1456 data-nosnippet>1456</a>            warnings.push(at, WarningKind::Manifest(e));
+<a href=#1457 id=1457 data-nosnippet>1457</a>            (<span class="prelude-val">None</span>, id)
+<a href=#1458 id=1458 data-nosnippet>1458</a>        }
+<a href=#1459 id=1459 data-nosnippet>1459</a>    }
+<a href=#1460 id=1460 data-nosnippet>1460</a>}
+<a href=#1461 id=1461 data-nosnippet>1461</a>
+<a href=#1462 id=1462 data-nosnippet>1462</a><span class="attr">#[cfg(test)]
+<a href=#1463 id=1463 data-nosnippet>1463</a></span><span class="kw">mod </span>tests {
+<a href=#1464 id=1464 data-nosnippet>1464</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#1465 id=1465 data-nosnippet>1465</a>
+<a href=#1466 id=1466 data-nosnippet>1466</a>    <span class="kw">fn </span>put16(b: <span class="kw-2">&amp;mut </span>[u8], at: usize, v: u16) {
+<a href=#1467 id=1467 data-nosnippet>1467</a>        b[at..at + <span class="number">2</span>].copy_from_slice(<span class="kw-2">&amp;</span>v.to_le_bytes());
+<a href=#1468 id=1468 data-nosnippet>1468</a>    }
+<a href=#1469 id=1469 data-nosnippet>1469</a>
+<a href=#1470 id=1470 data-nosnippet>1470</a>    <span class="kw">fn </span>put32(b: <span class="kw-2">&amp;mut </span>[u8], at: usize, v: u32) {
+<a href=#1471 id=1471 data-nosnippet>1471</a>        b[at..at + <span class="number">4</span>].copy_from_slice(<span class="kw-2">&amp;</span>v.to_le_bytes());
+<a href=#1472 id=1472 data-nosnippet>1472</a>    }
+<a href=#1473 id=1473 data-nosnippet>1473</a>
+<a href=#1474 id=1474 data-nosnippet>1474</a>    <span class="doccomment">/// A native PE32+ image with one section holding an import table that
+<a href=#1475 id=1475 data-nosnippet>1475</a>    /// names `ntoskrnl.exe`: a kernel driver to the full parse.
+<a href=#1476 id=1476 data-nosnippet>1476</a>    </span><span class="kw">fn </span>native_driver() -&gt; Vec&lt;u8&gt; {
+<a href=#1477 id=1477 data-nosnippet>1477</a>        <span class="kw">let </span><span class="kw-2">mut </span>b = <span class="macro">vec!</span>[<span class="number">0_u8</span>; <span class="number">0x400</span>];
+<a href=#1478 id=1478 data-nosnippet>1478</a>        b[..<span class="number">2</span>].copy_from_slice(<span class="string">b"MZ"</span>);
+<a href=#1479 id=1479 data-nosnippet>1479</a>        put32(<span class="kw-2">&amp;mut </span>b, <span class="number">0x3c</span>, <span class="number">0x40</span>);
+<a href=#1480 id=1480 data-nosnippet>1480</a>        b[<span class="number">0x40</span>..<span class="number">0x44</span>].copy_from_slice(<span class="string">b"PE\0\0"</span>);
+<a href=#1481 id=1481 data-nosnippet>1481</a>        <span class="kw">let </span>coff = <span class="number">0x44</span>;
+<a href=#1482 id=1482 data-nosnippet>1482</a>        put16(<span class="kw-2">&amp;mut </span>b, coff, <span class="number">0x8664</span>);
+<a href=#1483 id=1483 data-nosnippet>1483</a>        put16(<span class="kw-2">&amp;mut </span>b, coff + <span class="number">2</span>, <span class="number">1</span>);
+<a href=#1484 id=1484 data-nosnippet>1484</a>        put16(<span class="kw-2">&amp;mut </span>b, coff + <span class="number">16</span>, <span class="number">240</span>);
+<a href=#1485 id=1485 data-nosnippet>1485</a>        put16(<span class="kw-2">&amp;mut </span>b, coff + <span class="number">18</span>, <span class="number">0x0022</span>);
+<a href=#1486 id=1486 data-nosnippet>1486</a>        <span class="kw">let </span>o = coff + <span class="number">20</span>;
+<a href=#1487 id=1487 data-nosnippet>1487</a>        put16(<span class="kw-2">&amp;mut </span>b, o, <span class="number">0x20b</span>);
+<a href=#1488 id=1488 data-nosnippet>1488</a>        put32(<span class="kw-2">&amp;mut </span>b, o + <span class="number">16</span>, <span class="number">0x1000</span>);
+<a href=#1489 id=1489 data-nosnippet>1489</a>        put32(<span class="kw-2">&amp;mut </span>b, o + <span class="number">32</span>, <span class="number">0x1000</span>);
+<a href=#1490 id=1490 data-nosnippet>1490</a>        put32(<span class="kw-2">&amp;mut </span>b, o + <span class="number">36</span>, <span class="number">0x200</span>);
+<a href=#1491 id=1491 data-nosnippet>1491</a>        put16(<span class="kw-2">&amp;mut </span>b, o + <span class="number">40</span>, <span class="number">6</span>);
+<a href=#1492 id=1492 data-nosnippet>1492</a>        put16(<span class="kw-2">&amp;mut </span>b, o + <span class="number">48</span>, <span class="number">6</span>);
+<a href=#1493 id=1493 data-nosnippet>1493</a>        put32(<span class="kw-2">&amp;mut </span>b, o + <span class="number">56</span>, <span class="number">0x2000</span>);
+<a href=#1494 id=1494 data-nosnippet>1494</a>        put32(<span class="kw-2">&amp;mut </span>b, o + <span class="number">60</span>, <span class="number">0x200</span>);
+<a href=#1495 id=1495 data-nosnippet>1495</a>        put16(<span class="kw-2">&amp;mut </span>b, o + <span class="number">68</span>, <span class="number">1</span>);
+<a href=#1496 id=1496 data-nosnippet>1496</a>        put32(<span class="kw-2">&amp;mut </span>b, o + <span class="number">108</span>, <span class="number">16</span>);
+<a href=#1497 id=1497 data-nosnippet>1497</a>        <span class="comment">// Import directory: RVA 0x1000, two descriptors.
+<a href=#1498 id=1498 data-nosnippet>1498</a>        </span>put32(<span class="kw-2">&amp;mut </span>b, o + <span class="number">112 </span>+ <span class="number">8</span>, <span class="number">0x1000</span>);
+<a href=#1499 id=1499 data-nosnippet>1499</a>        put32(<span class="kw-2">&amp;mut </span>b, o + <span class="number">112 </span>+ <span class="number">12</span>, <span class="number">40</span>);
+<a href=#1500 id=1500 data-nosnippet>1500</a>        <span class="kw">let </span>s = o + <span class="number">240</span>;
+<a href=#1501 id=1501 data-nosnippet>1501</a>        b[s..s + <span class="number">5</span>].copy_from_slice(<span class="string">b".data"</span>);
+<a href=#1502 id=1502 data-nosnippet>1502</a>        put32(<span class="kw-2">&amp;mut </span>b, s + <span class="number">8</span>, <span class="number">0x200</span>);
+<a href=#1503 id=1503 data-nosnippet>1503</a>        put32(<span class="kw-2">&amp;mut </span>b, s + <span class="number">12</span>, <span class="number">0x1000</span>);
+<a href=#1504 id=1504 data-nosnippet>1504</a>        put32(<span class="kw-2">&amp;mut </span>b, s + <span class="number">16</span>, <span class="number">0x200</span>);
+<a href=#1505 id=1505 data-nosnippet>1505</a>        put32(<span class="kw-2">&amp;mut </span>b, s + <span class="number">20</span>, <span class="number">0x200</span>);
+<a href=#1506 id=1506 data-nosnippet>1506</a>        put32(<span class="kw-2">&amp;mut </span>b, s + <span class="number">36</span>, <span class="number">0x4000_0040</span>);
+<a href=#1507 id=1507 data-nosnippet>1507</a>        <span class="comment">// Section data at 0x200 (RVA 0x1000): descriptor, terminator,
+<a href=#1508 id=1508 data-nosnippet>1508</a>        // thunks at RVA 0x1080, the name at RVA 0x1100.
+<a href=#1509 id=1509 data-nosnippet>1509</a>        </span>put32(<span class="kw-2">&amp;mut </span>b, <span class="number">0x200 </span>+ <span class="number">12</span>, <span class="number">0x1100</span>);
+<a href=#1510 id=1510 data-nosnippet>1510</a>        put32(<span class="kw-2">&amp;mut </span>b, <span class="number">0x200 </span>+ <span class="number">16</span>, <span class="number">0x1080</span>);
+<a href=#1511 id=1511 data-nosnippet>1511</a>        b[<span class="number">0x300</span>..<span class="number">0x30c</span>].copy_from_slice(<span class="string">b"ntoskrnl.exe"</span>);
+<a href=#1512 id=1512 data-nosnippet>1512</a>        b
+<a href=#1513 id=1513 data-nosnippet>1513</a>    }
+<a href=#1514 id=1514 data-nosnippet>1514</a>
+<a href=#1515 id=1515 data-nosnippet>1515</a>    <span class="attr">#[test]
+<a href=#1516 id=1516 data-nosnippet>1516</a>    </span><span class="kw">fn </span>headers_only_never_parses_directories() {
+<a href=#1517 id=1517 data-nosnippet>1517</a>        <span class="kw">let </span>image = native_driver();
+<a href=#1518 id=1518 data-nosnippet>1518</a>        <span class="kw">let </span>len = to_u64(image.len());
+<a href=#1519 id=1519 data-nosnippet>1519</a>        <span class="kw">let </span>full = parse_prefix(<span class="kw-2">&amp;</span>image, len).unwrap();
+<a href=#1520 id=1520 data-nosnippet>1520</a>        <span class="macro">assert!</span>(full.imports.is_some());
+<a href=#1521 id=1521 data-nosnippet>1521</a>        <span class="macro">assert!</span>(full.is_kernel_driver(), <span class="string">"{:?}"</span>, full.driver);
+<a href=#1522 id=1522 data-nosnippet>1522</a>        <span class="comment">// The whole file, but headers only: no directory work at all.
+<a href=#1523 id=1523 data-nosnippet>1523</a>        </span><span class="kw">let </span>headers = parse_headers_only(<span class="kw-2">&amp;</span>image, len).unwrap();
+<a href=#1524 id=1524 data-nosnippet>1524</a>        <span class="macro">assert!</span>(headers.imports.is_none() &amp;&amp; headers.exports.is_none());
+<a href=#1525 id=1525 data-nosnippet>1525</a>        <span class="macro">assert!</span>(headers.resources.is_none() &amp;&amp; headers.manifest.is_none());
+<a href=#1526 id=1526 data-nosnippet>1526</a>        <span class="macro">assert_eq!</span>(headers.driver, DriverClass::default());
+<a href=#1527 id=1527 data-nosnippet>1527</a>        <span class="macro">assert_eq!</span>(headers.sections, full.sections);
+<a href=#1528 id=1528 data-nosnippet>1528</a>        <span class="macro">assert_eq!</span>(headers.data_directories, full.data_directories);
+<a href=#1529 id=1529 data-nosnippet>1529</a>        <span class="comment">// A prefix still needs the whole section table.
+<a href=#1530 id=1530 data-nosnippet>1530</a>        </span><span class="kw">let </span>short = parse_headers_only(<span class="kw-2">&amp;</span>image[..<span class="number">0x150</span>], len).unwrap_err();
+<a href=#1531 id=1531 data-nosnippet>1531</a>        <span class="macro">assert!</span>(<span class="macro">matches!</span>(short.kind, PeErrorKind::PrefixTooShort { .. }));
+<a href=#1532 id=1532 data-nosnippet>1532</a>    }
+<a href=#1533 id=1533 data-nosnippet>1533</a>}
 </code></pre></div></section></main></body></html>

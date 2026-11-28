@@ -200,10 +200,10 @@
 <a href=#200 id=200 data-nosnippet>200</a>        <span class="kw">if </span>cert.issuer.der != issuer.subject.der {
 <a href=#201 id=201 data-nosnippet>201</a>            <span class="kw">return </span><span class="bool-val">false</span>;
 <a href=#202 id=202 data-nosnippet>202</a>        }
-<a href=#203 id=203 data-nosnippet>203</a>        <span class="kw">if let </span>(<span class="prelude-val">Some</span>(aki), <span class="prelude-val">Some</span>(ski)) = (<span class="kw-2">&amp;</span>cert.authority_key_id, <span class="kw-2">&amp;</span>issuer.subject_key_id) {
-<a href=#204 id=204 data-nosnippet>204</a>            <span class="kw">if </span>aki != ski {
-<a href=#205 id=205 data-nosnippet>205</a>                <span class="kw">return </span><span class="bool-val">false</span>;
-<a href=#206 id=206 data-nosnippet>206</a>            }
+<a href=#203 id=203 data-nosnippet>203</a>        <span class="kw">if let </span>(<span class="prelude-val">Some</span>(aki), <span class="prelude-val">Some</span>(ski)) = (<span class="kw-2">&amp;</span>cert.authority_key_id, <span class="kw-2">&amp;</span>issuer.subject_key_id)
+<a href=#204 id=204 data-nosnippet>204</a>            &amp;&amp; aki != ski
+<a href=#205 id=205 data-nosnippet>205</a>        {
+<a href=#206 id=206 data-nosnippet>206</a>            <span class="kw">return </span><span class="bool-val">false</span>;
 <a href=#207 id=207 data-nosnippet>207</a>        }
 <a href=#208 id=208 data-nosnippet>208</a>        <span class="kw">if </span>!<span class="self">self</span>.serial.eq_ignore_ascii_case(<span class="kw-2">&amp;</span>cert.serial) {
 <a href=#209 id=209 data-nosnippet>209</a>            <span class="kw">return </span><span class="bool-val">false</span>;

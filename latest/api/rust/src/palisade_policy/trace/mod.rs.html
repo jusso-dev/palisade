@@ -868,10 +868,10 @@
 <a href=#868 id=868 data-nosnippet>868</a>        <span class="kw">let </span>decision_ref = decision.as_ref();
 <a href=#869 id=869 data-nosnippet>869</a>
 <a href=#870 id=870 data-nosnippet>870</a>        <span class="comment">// The deciding rule's criteria.
-<a href=#871 id=871 data-nosnippet>871</a>        </span><span class="kw">if let </span>(<span class="prelude-val">Some</span>(d), <span class="prelude-val">Some</span>(r)) = (trace.decisive.as_mut(), decider) {
-<a href=#872 id=872 data-nosnippet>872</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(res) = <span class="self">self</span>.by_id.get(<span class="kw-2">&amp;</span>r.rule.id).and_then(|<span class="kw-2">&amp;</span>i| result(i)) {
-<a href=#873 id=873 data-nosnippet>873</a>                d.criteria = criteria(r, res, subject, privacy, full, <span class="prelude-val">None</span>);
-<a href=#874 id=874 data-nosnippet>874</a>            }
+<a href=#871 id=871 data-nosnippet>871</a>        </span><span class="kw">if let </span>(<span class="prelude-val">Some</span>(d), <span class="prelude-val">Some</span>(r)) = (trace.decisive.as_mut(), decider)
+<a href=#872 id=872 data-nosnippet>872</a>            &amp;&amp; <span class="kw">let </span><span class="prelude-val">Some</span>(res) = <span class="self">self</span>.by_id.get(<span class="kw-2">&amp;</span>r.rule.id).and_then(|<span class="kw-2">&amp;</span>i| result(i))
+<a href=#873 id=873 data-nosnippet>873</a>        {
+<a href=#874 id=874 data-nosnippet>874</a>            d.criteria = criteria(r, res, subject, privacy, full, <span class="prelude-val">None</span>);
 <a href=#875 id=875 data-nosnippet>875</a>        }
 <a href=#876 id=876 data-nosnippet>876</a>
 <a href=#877 id=877 data-nosnippet>877</a>        <span class="comment">// Matched rules, by rule ID.

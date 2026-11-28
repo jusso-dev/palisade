@@ -752,132 +752,131 @@
 <a href=#752 id=752 data-nosnippet>752</a>                                        <span class="kw">if let </span><span class="prelude-val">Ok</span>(i) = <span class="self">self
 <a href=#753 id=753 data-nosnippet>753</a>                                            </span>.principals
 <a href=#754 id=754 data-nosnippet>754</a>                                            .binary_search_by(|p| p.as_str().cmp(canon))
-<a href=#755 id=755 data-nosnippet>755</a>                                        {
-<a href=#756 id=756 data-nosnippet>756</a>                                            <span class="kw">if let </span><span class="prelude-val">Some</span>(word) = held.get_mut(i / <span class="number">64</span>) {
-<a href=#757 id=757 data-nosnippet>757</a>                                                <span class="kw-2">*</span>word |= <span class="number">1 </span>&lt;&lt; (i % <span class="number">64</span>);
-<a href=#758 id=758 data-nosnippet>758</a>                                            }
-<a href=#759 id=759 data-nosnippet>759</a>                                        }
-<a href=#760 id=760 data-nosnippet>760</a>                                    }
-<a href=#761 id=761 data-nosnippet>761</a>                                    (<span class="number">1u8</span>, <span class="kw-2">&amp;*</span>held, malformed).hash(<span class="kw-2">&amp;mut </span>h);
-<a href=#762 id=762 data-nosnippet>762</a>                                });
-<a href=#763 id=763 data-nosnippet>763</a>                            }
-<a href=#764 id=764 data-nosnippet>764</a>                        }
-<a href=#765 id=765 data-nosnippet>765</a>                    }
-<a href=#766 id=766 data-nosnippet>766</a>                }
-<a href=#767 id=767 data-nosnippet>767</a>            }
-<a href=#768 id=768 data-nosnippet>768</a>        });
-<a href=#769 id=769 data-nosnippet>769</a>        h.finish()
-<a href=#770 id=770 data-nosnippet>770</a>    }
-<a href=#771 id=771 data-nosnippet>771</a>
-<a href=#772 id=772 data-nosnippet>772</a>    <span class="doccomment">/// A hash of the context facts the policy reads besides principals.
-<a href=#773 id=773 data-nosnippet>773</a>    /// Does not allocate.
-<a href=#774 id=774 data-nosnippet>774</a>    </span><span class="attr">#[must_use]
-<a href=#775 id=775 data-nosnippet>775</a>    </span><span class="kw">pub fn </span>context_key(<span class="kw-2">&amp;</span><span class="self">self</span>, ctx: <span class="kw-2">&amp;</span><span class="kw">crate</span>::context::EvaluationContext, seed: <span class="kw-2">&amp;</span>KeySeed) -&gt; u64 {
-<a href=#776 id=776 data-nosnippet>776</a>        <span class="kw">use </span><span class="kw">crate</span>::model::Field;
-<a href=#777 id=777 data-nosnippet>777</a>        <span class="kw">let </span><span class="kw-2">mut </span>h = seed.hasher(<span class="number">2</span>);
-<a href=#778 id=778 data-nosnippet>778</a>        <span class="kw">for </span>field <span class="kw">in </span><span class="kw-2">&amp;</span><span class="self">self</span>.fields {
-<a href=#779 id=779 data-nosnippet>779</a>            field.hash(<span class="kw-2">&amp;mut </span>h);
-<a href=#780 id=780 data-nosnippet>780</a>            <span class="kw">match </span>field {
-<a href=#781 id=781 data-nosnippet>781</a>                <span class="comment">// The members the policy names are in the subject key, and
-<a href=#782 id=782 data-nosnippet>782</a>                // whether one is malformed too.
-<a href=#783 id=783 data-nosnippet>783</a>                </span>Field::UserGroups | Field::DeviceGroups =&gt; {}
-<a href=#784 id=784 data-nosnippet>784</a>                <span class="kw">_ </span>=&gt; hash_context_fact(ctx, <span class="kw-2">*</span>field, seed, <span class="kw-2">&amp;mut </span>h),
-<a href=#785 id=785 data-nosnippet>785</a>            }
-<a href=#786 id=786 data-nosnippet>786</a>        }
-<a href=#787 id=787 data-nosnippet>787</a>        h.finish()
-<a href=#788 id=788 data-nosnippet>788</a>    }
-<a href=#789 id=789 data-nosnippet>789</a>}
-<a href=#790 id=790 data-nosnippet>790</a>
-<a href=#791 id=791 data-nosnippet>791</a><span class="kw">fn </span>hash_context_fact(
-<a href=#792 id=792 data-nosnippet>792</a>    ctx: <span class="kw-2">&amp;</span><span class="kw">crate</span>::context::EvaluationContext,
-<a href=#793 id=793 data-nosnippet>793</a>    field: <span class="kw">crate</span>::model::Field,
-<a href=#794 id=794 data-nosnippet>794</a>    seed: <span class="kw-2">&amp;</span>KeySeed,
-<a href=#795 id=795 data-nosnippet>795</a>    h: <span class="kw-2">&amp;mut </span>KeyHasher,
-<a href=#796 id=796 data-nosnippet>796</a>) {
-<a href=#797 id=797 data-nosnippet>797</a>    <span class="kw">use </span><span class="kw">crate</span>::context::ContextFact;
-<a href=#798 id=798 data-nosnippet>798</a>    <span class="kw">match </span>ctx.fact(field) {
-<a href=#799 id=799 data-nosnippet>799</a>        <span class="prelude-val">None </span>=&gt; <span class="number">0u8</span>.hash(h),
-<a href=#800 id=800 data-nosnippet>800</a>        <span class="prelude-val">Some</span>(ContextFact::Text(t)) =&gt; (<span class="number">1u8</span>, t).hash(h),
-<a href=#801 id=801 data-nosnippet>801</a>        <span class="prelude-val">Some</span>(ContextFact::Names(a, b)) =&gt; (<span class="number">2u8</span>, a, b).hash(h),
-<a href=#802 id=802 data-nosnippet>802</a>        <span class="prelude-val">Some</span>(ContextFact::Set(s)) =&gt; {
-<a href=#803 id=803 data-nosnippet>803</a>            <span class="comment">// Order-independent: a commutative sum of the members' hashes.
-<a href=#804 id=804 data-nosnippet>804</a>            </span><span class="kw">let </span>sum = s.iter().fold(<span class="number">0u64</span>, |acc, m| {
-<a href=#805 id=805 data-nosnippet>805</a>                <span class="kw">let </span><span class="kw-2">mut </span>e = seed.hasher(<span class="number">4</span>);
-<a href=#806 id=806 data-nosnippet>806</a>                m.hash(<span class="kw-2">&amp;mut </span>e);
-<a href=#807 id=807 data-nosnippet>807</a>                acc.wrapping_add(e.finish())
-<a href=#808 id=808 data-nosnippet>808</a>            });
-<a href=#809 id=809 data-nosnippet>809</a>            (<span class="number">3u8</span>, sum, s.len()).hash(h);
-<a href=#810 id=810 data-nosnippet>810</a>        }
-<a href=#811 id=811 data-nosnippet>811</a>        <span class="prelude-val">Some</span>(ContextFact::Bool(b)) =&gt; (<span class="number">4u8</span>, b).hash(h),
-<a href=#812 id=812 data-nosnippet>812</a>        <span class="prelude-val">Some</span>(ContextFact::Session(t)) =&gt; (<span class="number">5u8</span>, t).hash(h),
-<a href=#813 id=813 data-nosnippet>813</a>        <span class="comment">// The facts of #33's numeric, network and time criteria (#32).
-<a href=#814 id=814 data-nosnippet>814</a>        </span><span class="prelude-val">Some</span>(ContextFact::Number(n)) =&gt; (<span class="number">6u8</span>, n).hash(h),
-<a href=#815 id=815 data-nosnippet>815</a>        <span class="prelude-val">Some</span>(ContextFact::Level(l)) =&gt; (<span class="number">7u8</span>, l).hash(h),
-<a href=#816 id=816 data-nosnippet>816</a>        <span class="prelude-val">Some</span>(ContextFact::Ip(ip)) =&gt; (<span class="number">8u8</span>, ip).hash(h),
-<a href=#817 id=817 data-nosnippet>817</a>        <span class="prelude-val">Some</span>(ContextFact::Ips(ips)) =&gt; (<span class="number">9u8</span>, ips).hash(h),
-<a href=#818 id=818 data-nosnippet>818</a>        <span class="prelude-val">Some</span>(ContextFact::Macs(macs)) =&gt; (<span class="number">10u8</span>, macs).hash(h),
-<a href=#819 id=819 data-nosnippet>819</a>        <span class="prelude-val">Some</span>(ContextFact::Weekday(d)) =&gt; (<span class="number">11u8</span>, d).hash(h),
-<a href=#820 id=820 data-nosnippet>820</a>        <span class="prelude-val">Some</span>(ContextFact::Minute(m)) =&gt; (<span class="number">12u8</span>, m).hash(h),
-<a href=#821 id=821 data-nosnippet>821</a>        <span class="prelude-val">Some</span>(ContextFact::Date(d)) =&gt; (<span class="number">13u8</span>, d).hash(h),
-<a href=#822 id=822 data-nosnippet>822</a>    }
-<a href=#823 id=823 data-nosnippet>823</a>}
-<a href=#824 id=824 data-nosnippet>824</a>
-<a href=#825 id=825 data-nosnippet>825</a><span class="macro">thread_local!</span> {
-<a href=#826 id=826 data-nosnippet>826</a>    <span class="kw">static </span>BITS: core::cell::RefCell&lt;Vec&lt;u64&gt;&gt; = <span class="kw">const </span>{ core::cell::RefCell::new(Vec::new()) };
-<a href=#827 id=827 data-nosnippet>827</a>}
-<a href=#828 id=828 data-nosnippet>828</a>
-<a href=#829 id=829 data-nosnippet>829</a><span class="doccomment">/// Runs `f` with a zeroed bitset of at least `n` bits from the thread's
-<a href=#830 id=830 data-nosnippet>830</a>/// buffer, so it does not allocate once warm.
-<a href=#831 id=831 data-nosnippet>831</a></span><span class="kw">fn </span>with_bits&lt;R&gt;(n: usize, f: <span class="kw">impl </span>FnOnce(<span class="kw-2">&amp;mut </span>[u64]) -&gt; R) -&gt; R {
-<a href=#832 id=832 data-nosnippet>832</a>    <span class="kw">let </span>words = n.div_ceil(<span class="number">64</span>);
-<a href=#833 id=833 data-nosnippet>833</a>    <span class="kw">let </span><span class="kw-2">mut </span>buf = BITS.try_with(|b| b.take()).unwrap_or_default();
-<a href=#834 id=834 data-nosnippet>834</a>    buf.clear();
-<a href=#835 id=835 data-nosnippet>835</a>    buf.resize(words, <span class="number">0</span>);
-<a href=#836 id=836 data-nosnippet>836</a>    <span class="kw">let </span>out = f(<span class="kw-2">&amp;mut </span>buf);
-<a href=#837 id=837 data-nosnippet>837</a>    <span class="comment">// A huge principal list does not pin memory for the thread's life.
-<a href=#838 id=838 data-nosnippet>838</a>    </span><span class="kw">if </span>buf.capacity() &lt;= <span class="number">8 </span>* <span class="number">1024 </span>{
-<a href=#839 id=839 data-nosnippet>839</a>        <span class="kw">let _ </span>= BITS.try_with(|b| <span class="kw-2">*</span>b.borrow_mut() = buf);
-<a href=#840 id=840 data-nosnippet>840</a>    }
-<a href=#841 id=841 data-nosnippet>841</a>    out
-<a href=#842 id=842 data-nosnippet>842</a>}
-<a href=#843 id=843 data-nosnippet>843</a>
-<a href=#844 id=844 data-nosnippet>844</a><span class="doccomment">/// The secret key of the cache-key hashes: SipHash with a random 128-bit
-<a href=#845 id=845 data-nosnippet>845</a>/// key chosen when the engine starts, so a crafted context cannot be built
-<a href=#846 id=846 data-nosnippet>846</a>/// to collide with another.
-<a href=#847 id=847 data-nosnippet>847</a></span><span class="attr">#[derive(Clone, Debug)]
-<a href=#848 id=848 data-nosnippet>848</a></span><span class="kw">pub struct </span>KeySeed(std::collections::hash_map::RandomState);
-<a href=#849 id=849 data-nosnippet>849</a>
-<a href=#850 id=850 data-nosnippet>850</a><span class="kw">impl </span>KeySeed {
-<a href=#851 id=851 data-nosnippet>851</a>    <span class="doccomment">/// A new random key.
-<a href=#852 id=852 data-nosnippet>852</a>    </span><span class="attr">#[must_use]
-<a href=#853 id=853 data-nosnippet>853</a>    </span><span class="kw">pub fn </span>new() -&gt; <span class="self">Self </span>{
-<a href=#854 id=854 data-nosnippet>854</a>        <span class="self">Self</span>(std::collections::hash_map::RandomState::new())
-<a href=#855 id=855 data-nosnippet>855</a>    }
-<a href=#856 id=856 data-nosnippet>856</a>
-<a href=#857 id=857 data-nosnippet>857</a>    <span class="doccomment">/// A hasher for one part of a key; `domain` keeps the parts apart.
-<a href=#858 id=858 data-nosnippet>858</a>    </span><span class="kw">fn </span>hasher(<span class="kw-2">&amp;</span><span class="self">self</span>, domain: u8) -&gt; KeyHasher {
-<a href=#859 id=859 data-nosnippet>859</a>        <span class="kw">let </span><span class="kw-2">mut </span>h = <span class="self">self</span>.<span class="number">0</span>.build_hasher();
-<a href=#860 id=860 data-nosnippet>860</a>        domain.hash(<span class="kw-2">&amp;mut </span>h);
-<a href=#861 id=861 data-nosnippet>861</a>        KeyHasher(h)
-<a href=#862 id=862 data-nosnippet>862</a>    }
-<a href=#863 id=863 data-nosnippet>863</a>}
-<a href=#864 id=864 data-nosnippet>864</a>
-<a href=#865 id=865 data-nosnippet>865</a><span class="kw">impl </span>Default <span class="kw">for </span>KeySeed {
-<a href=#866 id=866 data-nosnippet>866</a>    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
-<a href=#867 id=867 data-nosnippet>867</a>        <span class="self">Self</span>::new()
-<a href=#868 id=868 data-nosnippet>868</a>    }
-<a href=#869 id=869 data-nosnippet>869</a>}
-<a href=#870 id=870 data-nosnippet>870</a>
-<a href=#871 id=871 data-nosnippet>871</a><span class="doccomment">/// A keyed 64-bit hasher for cache keys.
-<a href=#872 id=872 data-nosnippet>872</a></span><span class="kw">struct </span>KeyHasher(std::collections::hash_map::DefaultHasher);
-<a href=#873 id=873 data-nosnippet>873</a>
-<a href=#874 id=874 data-nosnippet>874</a><span class="kw">impl </span>Hasher <span class="kw">for </span>KeyHasher {
-<a href=#875 id=875 data-nosnippet>875</a>    <span class="kw">fn </span>finish(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
-<a href=#876 id=876 data-nosnippet>876</a>        <span class="self">self</span>.<span class="number">0</span>.finish()
-<a href=#877 id=877 data-nosnippet>877</a>    }
-<a href=#878 id=878 data-nosnippet>878</a>
-<a href=#879 id=879 data-nosnippet>879</a>    <span class="kw">fn </span>write(<span class="kw-2">&amp;mut </span><span class="self">self</span>, bytes: <span class="kw-2">&amp;</span>[u8]) {
-<a href=#880 id=880 data-nosnippet>880</a>        <span class="self">self</span>.<span class="number">0</span>.write(bytes);
-<a href=#881 id=881 data-nosnippet>881</a>    }
-<a href=#882 id=882 data-nosnippet>882</a>}
+<a href=#755 id=755 data-nosnippet>755</a>                                            &amp;&amp; <span class="kw">let </span><span class="prelude-val">Some</span>(word) = held.get_mut(i / <span class="number">64</span>)
+<a href=#756 id=756 data-nosnippet>756</a>                                        {
+<a href=#757 id=757 data-nosnippet>757</a>                                            <span class="kw-2">*</span>word |= <span class="number">1 </span>&lt;&lt; (i % <span class="number">64</span>);
+<a href=#758 id=758 data-nosnippet>758</a>                                        }
+<a href=#759 id=759 data-nosnippet>759</a>                                    }
+<a href=#760 id=760 data-nosnippet>760</a>                                    (<span class="number">1u8</span>, <span class="kw-2">&amp;*</span>held, malformed).hash(<span class="kw-2">&amp;mut </span>h);
+<a href=#761 id=761 data-nosnippet>761</a>                                });
+<a href=#762 id=762 data-nosnippet>762</a>                            }
+<a href=#763 id=763 data-nosnippet>763</a>                        }
+<a href=#764 id=764 data-nosnippet>764</a>                    }
+<a href=#765 id=765 data-nosnippet>765</a>                }
+<a href=#766 id=766 data-nosnippet>766</a>            }
+<a href=#767 id=767 data-nosnippet>767</a>        });
+<a href=#768 id=768 data-nosnippet>768</a>        h.finish()
+<a href=#769 id=769 data-nosnippet>769</a>    }
+<a href=#770 id=770 data-nosnippet>770</a>
+<a href=#771 id=771 data-nosnippet>771</a>    <span class="doccomment">/// A hash of the context facts the policy reads besides principals.
+<a href=#772 id=772 data-nosnippet>772</a>    /// Does not allocate.
+<a href=#773 id=773 data-nosnippet>773</a>    </span><span class="attr">#[must_use]
+<a href=#774 id=774 data-nosnippet>774</a>    </span><span class="kw">pub fn </span>context_key(<span class="kw-2">&amp;</span><span class="self">self</span>, ctx: <span class="kw-2">&amp;</span><span class="kw">crate</span>::context::EvaluationContext, seed: <span class="kw-2">&amp;</span>KeySeed) -&gt; u64 {
+<a href=#775 id=775 data-nosnippet>775</a>        <span class="kw">use </span><span class="kw">crate</span>::model::Field;
+<a href=#776 id=776 data-nosnippet>776</a>        <span class="kw">let </span><span class="kw-2">mut </span>h = seed.hasher(<span class="number">2</span>);
+<a href=#777 id=777 data-nosnippet>777</a>        <span class="kw">for </span>field <span class="kw">in </span><span class="kw-2">&amp;</span><span class="self">self</span>.fields {
+<a href=#778 id=778 data-nosnippet>778</a>            field.hash(<span class="kw-2">&amp;mut </span>h);
+<a href=#779 id=779 data-nosnippet>779</a>            <span class="kw">match </span>field {
+<a href=#780 id=780 data-nosnippet>780</a>                <span class="comment">// The members the policy names are in the subject key, and
+<a href=#781 id=781 data-nosnippet>781</a>                // whether one is malformed too.
+<a href=#782 id=782 data-nosnippet>782</a>                </span>Field::UserGroups | Field::DeviceGroups =&gt; {}
+<a href=#783 id=783 data-nosnippet>783</a>                <span class="kw">_ </span>=&gt; hash_context_fact(ctx, <span class="kw-2">*</span>field, seed, <span class="kw-2">&amp;mut </span>h),
+<a href=#784 id=784 data-nosnippet>784</a>            }
+<a href=#785 id=785 data-nosnippet>785</a>        }
+<a href=#786 id=786 data-nosnippet>786</a>        h.finish()
+<a href=#787 id=787 data-nosnippet>787</a>    }
+<a href=#788 id=788 data-nosnippet>788</a>}
+<a href=#789 id=789 data-nosnippet>789</a>
+<a href=#790 id=790 data-nosnippet>790</a><span class="kw">fn </span>hash_context_fact(
+<a href=#791 id=791 data-nosnippet>791</a>    ctx: <span class="kw-2">&amp;</span><span class="kw">crate</span>::context::EvaluationContext,
+<a href=#792 id=792 data-nosnippet>792</a>    field: <span class="kw">crate</span>::model::Field,
+<a href=#793 id=793 data-nosnippet>793</a>    seed: <span class="kw-2">&amp;</span>KeySeed,
+<a href=#794 id=794 data-nosnippet>794</a>    h: <span class="kw-2">&amp;mut </span>KeyHasher,
+<a href=#795 id=795 data-nosnippet>795</a>) {
+<a href=#796 id=796 data-nosnippet>796</a>    <span class="kw">use </span><span class="kw">crate</span>::context::ContextFact;
+<a href=#797 id=797 data-nosnippet>797</a>    <span class="kw">match </span>ctx.fact(field) {
+<a href=#798 id=798 data-nosnippet>798</a>        <span class="prelude-val">None </span>=&gt; <span class="number">0u8</span>.hash(h),
+<a href=#799 id=799 data-nosnippet>799</a>        <span class="prelude-val">Some</span>(ContextFact::Text(t)) =&gt; (<span class="number">1u8</span>, t).hash(h),
+<a href=#800 id=800 data-nosnippet>800</a>        <span class="prelude-val">Some</span>(ContextFact::Names(a, b)) =&gt; (<span class="number">2u8</span>, a, b).hash(h),
+<a href=#801 id=801 data-nosnippet>801</a>        <span class="prelude-val">Some</span>(ContextFact::Set(s)) =&gt; {
+<a href=#802 id=802 data-nosnippet>802</a>            <span class="comment">// Order-independent: a commutative sum of the members' hashes.
+<a href=#803 id=803 data-nosnippet>803</a>            </span><span class="kw">let </span>sum = s.iter().fold(<span class="number">0u64</span>, |acc, m| {
+<a href=#804 id=804 data-nosnippet>804</a>                <span class="kw">let </span><span class="kw-2">mut </span>e = seed.hasher(<span class="number">4</span>);
+<a href=#805 id=805 data-nosnippet>805</a>                m.hash(<span class="kw-2">&amp;mut </span>e);
+<a href=#806 id=806 data-nosnippet>806</a>                acc.wrapping_add(e.finish())
+<a href=#807 id=807 data-nosnippet>807</a>            });
+<a href=#808 id=808 data-nosnippet>808</a>            (<span class="number">3u8</span>, sum, s.len()).hash(h);
+<a href=#809 id=809 data-nosnippet>809</a>        }
+<a href=#810 id=810 data-nosnippet>810</a>        <span class="prelude-val">Some</span>(ContextFact::Bool(b)) =&gt; (<span class="number">4u8</span>, b).hash(h),
+<a href=#811 id=811 data-nosnippet>811</a>        <span class="prelude-val">Some</span>(ContextFact::Session(t)) =&gt; (<span class="number">5u8</span>, t).hash(h),
+<a href=#812 id=812 data-nosnippet>812</a>        <span class="comment">// The facts of #33's numeric, network and time criteria (#32).
+<a href=#813 id=813 data-nosnippet>813</a>        </span><span class="prelude-val">Some</span>(ContextFact::Number(n)) =&gt; (<span class="number">6u8</span>, n).hash(h),
+<a href=#814 id=814 data-nosnippet>814</a>        <span class="prelude-val">Some</span>(ContextFact::Level(l)) =&gt; (<span class="number">7u8</span>, l).hash(h),
+<a href=#815 id=815 data-nosnippet>815</a>        <span class="prelude-val">Some</span>(ContextFact::Ip(ip)) =&gt; (<span class="number">8u8</span>, ip).hash(h),
+<a href=#816 id=816 data-nosnippet>816</a>        <span class="prelude-val">Some</span>(ContextFact::Ips(ips)) =&gt; (<span class="number">9u8</span>, ips).hash(h),
+<a href=#817 id=817 data-nosnippet>817</a>        <span class="prelude-val">Some</span>(ContextFact::Macs(macs)) =&gt; (<span class="number">10u8</span>, macs).hash(h),
+<a href=#818 id=818 data-nosnippet>818</a>        <span class="prelude-val">Some</span>(ContextFact::Weekday(d)) =&gt; (<span class="number">11u8</span>, d).hash(h),
+<a href=#819 id=819 data-nosnippet>819</a>        <span class="prelude-val">Some</span>(ContextFact::Minute(m)) =&gt; (<span class="number">12u8</span>, m).hash(h),
+<a href=#820 id=820 data-nosnippet>820</a>        <span class="prelude-val">Some</span>(ContextFact::Date(d)) =&gt; (<span class="number">13u8</span>, d).hash(h),
+<a href=#821 id=821 data-nosnippet>821</a>    }
+<a href=#822 id=822 data-nosnippet>822</a>}
+<a href=#823 id=823 data-nosnippet>823</a>
+<a href=#824 id=824 data-nosnippet>824</a><span class="macro">thread_local!</span> {
+<a href=#825 id=825 data-nosnippet>825</a>    <span class="kw">static </span>BITS: core::cell::RefCell&lt;Vec&lt;u64&gt;&gt; = <span class="kw">const </span>{ core::cell::RefCell::new(Vec::new()) };
+<a href=#826 id=826 data-nosnippet>826</a>}
+<a href=#827 id=827 data-nosnippet>827</a>
+<a href=#828 id=828 data-nosnippet>828</a><span class="doccomment">/// Runs `f` with a zeroed bitset of at least `n` bits from the thread's
+<a href=#829 id=829 data-nosnippet>829</a>/// buffer, so it does not allocate once warm.
+<a href=#830 id=830 data-nosnippet>830</a></span><span class="kw">fn </span>with_bits&lt;R&gt;(n: usize, f: <span class="kw">impl </span>FnOnce(<span class="kw-2">&amp;mut </span>[u64]) -&gt; R) -&gt; R {
+<a href=#831 id=831 data-nosnippet>831</a>    <span class="kw">let </span>words = n.div_ceil(<span class="number">64</span>);
+<a href=#832 id=832 data-nosnippet>832</a>    <span class="kw">let </span><span class="kw-2">mut </span>buf = BITS.try_with(|b| b.take()).unwrap_or_default();
+<a href=#833 id=833 data-nosnippet>833</a>    buf.clear();
+<a href=#834 id=834 data-nosnippet>834</a>    buf.resize(words, <span class="number">0</span>);
+<a href=#835 id=835 data-nosnippet>835</a>    <span class="kw">let </span>out = f(<span class="kw-2">&amp;mut </span>buf);
+<a href=#836 id=836 data-nosnippet>836</a>    <span class="comment">// A huge principal list does not pin memory for the thread's life.
+<a href=#837 id=837 data-nosnippet>837</a>    </span><span class="kw">if </span>buf.capacity() &lt;= <span class="number">8 </span>* <span class="number">1024 </span>{
+<a href=#838 id=838 data-nosnippet>838</a>        <span class="kw">let _ </span>= BITS.try_with(|b| <span class="kw-2">*</span>b.borrow_mut() = buf);
+<a href=#839 id=839 data-nosnippet>839</a>    }
+<a href=#840 id=840 data-nosnippet>840</a>    out
+<a href=#841 id=841 data-nosnippet>841</a>}
+<a href=#842 id=842 data-nosnippet>842</a>
+<a href=#843 id=843 data-nosnippet>843</a><span class="doccomment">/// The secret key of the cache-key hashes: SipHash with a random 128-bit
+<a href=#844 id=844 data-nosnippet>844</a>/// key chosen when the engine starts, so a crafted context cannot be built
+<a href=#845 id=845 data-nosnippet>845</a>/// to collide with another.
+<a href=#846 id=846 data-nosnippet>846</a></span><span class="attr">#[derive(Clone, Debug)]
+<a href=#847 id=847 data-nosnippet>847</a></span><span class="kw">pub struct </span>KeySeed(std::collections::hash_map::RandomState);
+<a href=#848 id=848 data-nosnippet>848</a>
+<a href=#849 id=849 data-nosnippet>849</a><span class="kw">impl </span>KeySeed {
+<a href=#850 id=850 data-nosnippet>850</a>    <span class="doccomment">/// A new random key.
+<a href=#851 id=851 data-nosnippet>851</a>    </span><span class="attr">#[must_use]
+<a href=#852 id=852 data-nosnippet>852</a>    </span><span class="kw">pub fn </span>new() -&gt; <span class="self">Self </span>{
+<a href=#853 id=853 data-nosnippet>853</a>        <span class="self">Self</span>(std::collections::hash_map::RandomState::new())
+<a href=#854 id=854 data-nosnippet>854</a>    }
+<a href=#855 id=855 data-nosnippet>855</a>
+<a href=#856 id=856 data-nosnippet>856</a>    <span class="doccomment">/// A hasher for one part of a key; `domain` keeps the parts apart.
+<a href=#857 id=857 data-nosnippet>857</a>    </span><span class="kw">fn </span>hasher(<span class="kw-2">&amp;</span><span class="self">self</span>, domain: u8) -&gt; KeyHasher {
+<a href=#858 id=858 data-nosnippet>858</a>        <span class="kw">let </span><span class="kw-2">mut </span>h = <span class="self">self</span>.<span class="number">0</span>.build_hasher();
+<a href=#859 id=859 data-nosnippet>859</a>        domain.hash(<span class="kw-2">&amp;mut </span>h);
+<a href=#860 id=860 data-nosnippet>860</a>        KeyHasher(h)
+<a href=#861 id=861 data-nosnippet>861</a>    }
+<a href=#862 id=862 data-nosnippet>862</a>}
+<a href=#863 id=863 data-nosnippet>863</a>
+<a href=#864 id=864 data-nosnippet>864</a><span class="kw">impl </span>Default <span class="kw">for </span>KeySeed {
+<a href=#865 id=865 data-nosnippet>865</a>    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
+<a href=#866 id=866 data-nosnippet>866</a>        <span class="self">Self</span>::new()
+<a href=#867 id=867 data-nosnippet>867</a>    }
+<a href=#868 id=868 data-nosnippet>868</a>}
+<a href=#869 id=869 data-nosnippet>869</a>
+<a href=#870 id=870 data-nosnippet>870</a><span class="doccomment">/// A keyed 64-bit hasher for cache keys.
+<a href=#871 id=871 data-nosnippet>871</a></span><span class="kw">struct </span>KeyHasher(std::collections::hash_map::DefaultHasher);
+<a href=#872 id=872 data-nosnippet>872</a>
+<a href=#873 id=873 data-nosnippet>873</a><span class="kw">impl </span>Hasher <span class="kw">for </span>KeyHasher {
+<a href=#874 id=874 data-nosnippet>874</a>    <span class="kw">fn </span>finish(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
+<a href=#875 id=875 data-nosnippet>875</a>        <span class="self">self</span>.<span class="number">0</span>.finish()
+<a href=#876 id=876 data-nosnippet>876</a>    }
+<a href=#877 id=877 data-nosnippet>877</a>
+<a href=#878 id=878 data-nosnippet>878</a>    <span class="kw">fn </span>write(<span class="kw-2">&amp;mut </span><span class="self">self</span>, bytes: <span class="kw-2">&amp;</span>[u8]) {
+<a href=#879 id=879 data-nosnippet>879</a>        <span class="self">self</span>.<span class="number">0</span>.write(bytes);
+<a href=#880 id=880 data-nosnippet>880</a>    }
+<a href=#881 id=881 data-nosnippet>881</a>}
 </code></pre></div></section></main></body></html>
