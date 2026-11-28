@@ -10,6 +10,12 @@
 //!   and an in-memory store.
 //! - [`track`]: changes coalesced per file, applied to the entries, and
 //!   what each needs next (identify, reassess the location).
+//! - [`engine`]: the initial scan with checkpoints and a throttling seam
+//!   (#65), journal polling, and reconciliation when the journal cursor is
+//!   lost.
+//! - [`subsystem`]: the `inventory` subsystem, over the volumes a
+//!   [`subsystem::VolumeProvider`] gives: on Windows every fixed NTFS or
+//!   ReFS volume, read by file ID through `palisade_fileid::win::journal`.
 //!
 //! [`changes_from_journal`] turns change-journal records
 //! (`palisade_fileid::fsctx::ntfs`, read by `palisade_fileid::win::journal`
@@ -17,10 +23,14 @@
 
 #![forbid(unsafe_code)]
 
+pub mod engine;
 pub mod entry;
 pub mod scope;
 pub mod store;
+pub mod subsystem;
 pub mod track;
+#[cfg(windows)]
+mod windows;
 
 use palisade_fileid::fsctx::ntfs::{JournalRecord, reason};
 
