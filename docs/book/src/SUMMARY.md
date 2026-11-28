@@ -140,6 +140,7 @@
 
 - [Security](security/README.md)
     - [Threat model](../../security/threat-model.md)
+    - [Key compromise runbook](../../security/key-compromise-runbook.md)
     - [Hardening guide](security/hardening.md)
     - [Reporting a vulnerability](../../../SECURITY.md)
     - [Responsible use](../../responsible-use.md)
