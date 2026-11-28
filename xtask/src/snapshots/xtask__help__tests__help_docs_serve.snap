@@ -1,0 +1,8 @@
+---
+source: xtask/src/help.rs
+expression: printed
+---
+Usage: cargo xtask docs serve [--port <n>] [--open]
+
+Stage the book and serve it at http://127.0.0.1:3000/ with mdbook serve, until
+interrupted; run it again after editing a page (links are checked by docs build)

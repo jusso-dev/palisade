@@ -990,6 +990,12 @@ fn run_docs(args: &[String]) -> ExitCode {
             v.extend(docs::build(&root, &files, site_url)?);
             Ok(Some(v))
         }
+        [c, rest @ ..] if c == "serve" => {
+            let serve_args = docs::parse_serve_args(rest)?;
+            let (files, mut v) = unsafe_code::repository_files(&root)?;
+            v.extend(docs::serve(&root, &files, &serve_args)?);
+            if v.is_empty() { Ok(None) } else { Ok(Some(v)) }
+        }
         [c, dir, flag, version] if c == "assemble" && flag == "--version" => {
             let versions = docs::assemble::assemble(
                 Path::new(dir),
