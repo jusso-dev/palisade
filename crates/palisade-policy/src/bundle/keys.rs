@@ -568,6 +568,7 @@ pub const KEYS: &[Key] = &[
     k(517, "max_criteria_per_rule"),
     k(518, "max_tree_depth"),
     k(519, "max_values_per_criterion"),
+    k(520, "hash_with_other_criteria"),
     k(-1, "description"),
     k(-2, "hidden"),
     k(-3, "category_path"),

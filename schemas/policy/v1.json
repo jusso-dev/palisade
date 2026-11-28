@@ -1345,7 +1345,8 @@
               "exception_without_expiry",
               "too_many_hash_rules",
               "regex_cost",
-              "future_dated_metadata"
+              "future_dated_metadata",
+              "hash_with_other_criteria"
             ]
           },
           "type": "object"

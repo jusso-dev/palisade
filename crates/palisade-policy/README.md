@@ -348,6 +348,7 @@ Every rule, rule set and policy has `metadata` (#40): `owner`, `justification`, 
 | `too_many_hash_rules` | info | more than 50,000 inline hashes in a rule set |
 | `regex_cost` | warning | a regular expression over half the engine's size limit |
 | `future_dated_metadata` | warning | `approved_at`, `created_at` or `last_reviewed_at` in the future |
+| `hash_with_other_criteria` | info | a rule that requires a SHA-256, SHA-384, SHA-512 or Authenticode SHA-256 hash and another identity criterion: the hash already names the file, so the rest only narrows it (#31) |
 
 `shadowed`, `contradiction` and `ineffective_vs_mandatory` rely on a conservative proof that one tree matches whenever another does (`analysis::subsume::covers`), so a rule reported as never deciding truly never decides; property tests check this against the evaluator. Rules are compared only through an index of their required values, so a 50,000-rule policy is analysed in under 100 ms (benchmarked). `analysis::publish_gate(findings, override)` blocks a bundle with `error` findings unless a tenant administrator overrides it with a reason. The lint output of the example policies is a committed snapshot (`tests/snapshots/lint/examples.txt`).
 

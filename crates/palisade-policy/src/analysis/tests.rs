@@ -713,6 +713,75 @@ fn vulnerable_version_allowed() {
 }
 
 #[test]
+fn hash_with_other_criteria() {
+    let with = |other: serde_json::Value| serde_json::json!({"all": [hash('a'), other]});
+    let found = lint(
+        &mixed(vec![
+            // A hash alone, or with a context criterion: nothing to say.
+            rule(1, hash('a'), "allow"),
+            rule(
+                2,
+                with(crit("user.groups", "member_of", &["S-1-5-32-544"])),
+                "allow",
+            ),
+            // A hash with a path, a publisher or metadata only narrows.
+            rule(
+                3,
+                with(crit("path.directory", "starts_with", &["C:\\Tools"])),
+                "allow",
+            ),
+            rule(
+                4,
+                with(crit("signer.publisher", "equals", &["Example"])),
+                "deny",
+            ),
+            rule(
+                5,
+                serde_json::json!({"all": [crit("meta.product_name", "equals", &["A"]), {"any": [hash('b')]}]}),
+                "allow",
+            ),
+            // A hash on one branch of an `any`, or under `not`, does not
+            // name the file for every match.
+            rule(
+                6,
+                serde_json::json!({"any": [hash('c'), crit("path.file_name", "equals", &["a.exe"])]}),
+                "deny",
+            ),
+            rule(
+                7,
+                serde_json::json!({"all": [crit("path.file_name", "equals", &["a.exe"]), {"not": hash('d')}]}),
+                "deny",
+            ),
+            // A SHA-1 does not name one file (ADR 0008).
+            rule(
+                8,
+                serde_json::json!({"all": [crit("hash.sha1", "equals", &[&"e".repeat(40)]), crit("path.file_name", "equals", &["a.exe"])]}),
+                "deny",
+            ),
+        ]),
+        &Facts::default(),
+    );
+    for n in [3, 4, 5] {
+        assert!(
+            has(&found, FindingCode::HashWithOtherCriteria, n),
+            "{n} {found:?}"
+        );
+    }
+    let flagged: Vec<u32> = (1..=8)
+        .filter(|n| has(&found, FindingCode::HashWithOtherCriteria, *n))
+        .collect();
+    assert_eq!(flagged, [3, 4, 5]);
+    assert_eq!(
+        FindingCode::HashWithOtherCriteria.default_severity(),
+        FindingSeverity::Info
+    );
+    assert_eq!(
+        FindingCode::from_name("hash_with_other_criteria"),
+        Some(FindingCode::HashWithOtherCriteria)
+    );
+}
+
+#[test]
 fn too_many_hash_rules() {
     let rules: Vec<serde_json::Value> = (0..12u32)
         .map(|n| {
