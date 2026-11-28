@@ -6,6 +6,7 @@
 #   cargo +nightly fuzz run trust_set_decode        # from crates/palisade-proto
 #   cargo +nightly fuzz run policy_envelope_decode
 #   cargo +nightly fuzz run policy_at_rest_open
+#   cargo +nightly fuzz run comms_messages
 [package]
 name = "palisade-proto-fuzz"
 version = "0.0.0"
@@ -22,6 +23,7 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4.13"
 palisade-policy = { path = "../../palisade-policy" }
 palisade-proto = { path = ".." }
+serde_json = "1.0.154"
 
 [[bin]]
 name = "trust_set_decode"
@@ -47,6 +49,13 @@ bench = false
 [[bin]]
 name = "policy_at_rest_open"
 path = "fuzz_targets/policy_at_rest_open.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "comms_messages"
+path = "fuzz_targets/comms_messages.rs"
 test = false
 doc = false
 bench = false

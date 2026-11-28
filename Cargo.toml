@@ -46,6 +46,9 @@ aho-corasick = { version = "1.1.5", default-features = false, features = ["std",
 allocation-counter = { version = "0.8.1", default-features = false }
 arc-swap = { version = "1.9.5", default-features = false }
 axum = { version = "0.8.9", default-features = false }
+# Binary fields (DER, envelopes, signatures) in the agent-server JSON
+# messages (#223, #62). Already in the tree through `sqlx` and `boon`.
+base64 = { version = "0.22.1", default-features = false, features = ["std"] }
 boon = { version = "0.6.1" }
 clap = { version = "4.6.9", default-features = false, features = ["std", "derive", "env", "error-context", "help", "usage"] }
 # Benchmarks only (dev-dependency). 0.7 was chosen when the MSRV was 1.85;

@@ -39,6 +39,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d902e3d592a523def97af8f317b08ce16b7ab854c1985a0c671e6f15cebc236"
 
 [[package]]
+name = "base64"
+version = "0.22.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+
+[[package]]
 name = "block-buffer"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -338,6 +344,7 @@ dependencies = [
 name = "palisade-proto"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "palisade-core",
  "palisade-fileid",
  "palisade-policy",
@@ -345,6 +352,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "zeroize",
 ]
 
 [[package]]
@@ -354,6 +362,7 @@ dependencies = [
  "libfuzzer-sys",
  "palisade-policy",
  "palisade-proto",
+ "serde_json",
 ]
 
 [[package]]
@@ -715,6 +724,12 @@ dependencies = [
  "arraydeque",
  "hashlink",
 ]
+
+[[package]]
+name = "zeroize"
+version = "1.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85ccff8a4805aba1eaa4cd4afcd49f7557dd2cf5fd79ffc37f8959466effc5aa"
 
 [[package]]
 name = "zmij"

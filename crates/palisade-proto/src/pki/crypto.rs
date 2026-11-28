@@ -226,6 +226,21 @@ impl fmt::Debug for PrivateKey {
     }
 }
 
+/// Generates a new private key and returns its unencrypted PKCS#8 document,
+/// for a key whose owner stores it (the device key, #223). The caller wipes
+/// it.
+pub(crate) fn generate_pkcs8(alg: SignatureAlgorithm, rng: &Rng) -> Result<Vec<u8>, CryptoError> {
+    const ERR: CryptoError = CryptoError("key generation failed");
+    let doc = match alg {
+        SignatureAlgorithm::EcdsaP384Sha384 => {
+            EcdsaKeyPair::generate_pkcs8(&ring_sig::ECDSA_P384_SHA384_FIXED_SIGNING, &rng.0)
+        }
+        SignatureAlgorithm::Ed25519 => Ed25519KeyPair::generate_pkcs8(&rng.0),
+    }
+    .map_err(|_| ERR)?;
+    Ok(doc.as_ref().to_vec())
+}
+
 impl PrivateKey {
     /// Generates a new private key. The key never leaves process memory: the
     /// PKCS#8 document `ring` produces is parsed straight back and dropped.
@@ -348,7 +363,7 @@ fn short_len(len: usize) -> u8 {
 
 /// Verifies a DER `ECDSA-Sig-Value` P-384 SHA-384 signature over `message`
 /// with a raw (uncompressed) P-384 public key. For tests of the X.509 path.
-#[cfg(all(test, feature = "issuance"))]
+#[cfg(test)]
 pub(crate) fn verify_p384_der(raw_public_key: &[u8], message: &[u8], signature: &[u8]) -> bool {
     UnparsedPublicKey::new(&ring_sig::ECDSA_P384_SHA384_ASN1, raw_public_key)
         .verify(message, signature)

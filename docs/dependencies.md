@@ -125,6 +125,8 @@ note that names the PR. X.509 issuance for the internal CA (#224) added 8 more (
 without its cryptography back end, and `time`, `yasna` and their helpers), behind
 `palisade-proto`'s off-by-default `issuance` feature, exempted with a note that names #224.
 Dependabot's `clap` 4.6.10, `toml` 1.2.3 (#406) and `miniz_oxide` 0.9.1 (#407) moved their exemptions, and those of `clap_builder` and `toml_parser`, to the new versions, with a note that names the PR.
+Enrolment and check-in (#223) made `base64` (already vetted through imported audits) and `zeroize`
+normal dependencies of `palisade-proto`, and so of the agent.
 The exemptions are the backlog.
 Each one is removed when the crate is audited, or when an imported audit covers it
 (`cargo vet prune` removes exemptions that are no longer needed).
