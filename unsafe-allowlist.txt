@@ -15,6 +15,10 @@
 # Process, token, session and local-group queries for the agent's
 # identity and process backends (#29).
 crates/palisade-agent/src/ffi.rs
+# The process monitor's ETW session (#59).
+crates/palisade-agent/src/ffi/etw.rs
+# The process monitor's process list and drive-to-device map (#59).
+crates/palisade-agent/src/ffi/snapshot.rs
 # Security descriptors and the OS access check (#54).
 crates/palisade-fileid/src/win/security.rs
 # File and volume calls for the Windows backend (#46, #54).

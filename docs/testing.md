@@ -236,6 +236,9 @@ them, and only they need a nightly toolchain. There are three projects:
 - `crates/palisade-proto/fuzz`, with three targets: `trust_set_decode`, `policy_envelope_decode`
   (the signed policy bundle envelope, its verification and delta rebuilding, #325) and
   `sntp_reply` (the SNTP reply checker behind the server's clock health check, #224).
+- `crates/palisade-agent/fuzz`, with two targets: `kernel_records` (the kernel process provider's
+  ETW record decoder and the process monitor that consumes it, #59) and `eventlog_records` (the
+  rendered event-log XML decoder and the ingest chain behind it, #58).
 - `crates/palisade-policy/fuzz`, with five targets: `fuzz_policy_json` (the strict JSON reader,
   the migrating and lenient readers, validation and the evaluator build), `fuzz_policy_yaml`
   (the YAML reader),

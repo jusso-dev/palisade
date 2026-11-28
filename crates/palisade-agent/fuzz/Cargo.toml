@@ -1,0 +1,38 @@
+# Coverage-guided fuzz targets for the palisade-agent decoders of untrusted
+# input (cargo-fuzz, libFuzzer). This is a separate workspace, so the main
+# build, tests and lint checks never compile it and nightly is needed only
+# here.
+#
+#   cargo +nightly fuzz run kernel_records      # from crates/palisade-agent
+#   cargo +nightly fuzz run eventlog_records
+[package]
+name = "palisade-agent-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0 OR MIT"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+palisade-agent = { path = ".." }
+palisade-core = { path = "../../palisade-core" }
+palisade-proto = { path = "../../palisade-proto" }
+
+[[bin]]
+name = "kernel_records"
+path = "fuzz_targets/kernel_records.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "eventlog_records"
+path = "fuzz_targets/eventlog_records.rs"
+test = false
+doc = false
+bench = false

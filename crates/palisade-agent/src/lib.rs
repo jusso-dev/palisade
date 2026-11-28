@@ -9,6 +9,7 @@ pub mod cli;
 pub mod clock;
 pub mod config;
 pub mod control;
+pub mod eventlog;
 #[cfg(windows)]
 mod ffi;
 pub mod host;
@@ -23,3 +24,4 @@ pub mod settings;
 pub mod simulate;
 pub mod subsystem;
 pub mod supervisor;
+pub mod telemetry;
