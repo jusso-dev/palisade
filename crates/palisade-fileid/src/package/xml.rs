@@ -130,12 +130,8 @@ impl Namespaces {
     fn get(&mut self, r: &ResolveResult<'_>) -> Result<Arc<str>, XmlError> {
         let text = match r {
             ResolveResult::Unbound => "",
-            ResolveResult::Bound(ns) => {
-                std::str::from_utf8(ns.as_ref()).or_else(|_| err("namespace is not UTF-8"))?
-            }
-            ResolveResult::Unknown(p) => {
-                return err(format!("undeclared prefix {}", String::from_utf8_lossy(p)));
-            }
+            ResolveResult::Bound(ns) => ns.as_ref(),
+            ResolveResult::Unknown(p) => return err(format!("undeclared prefix {p}")),
         };
         if let Some(found) = self.0.get(text) {
             return Ok(Arc::clone(found));
@@ -148,18 +144,14 @@ impl Namespaces {
 
 /// Refuses a namespace declaration whose value a normalising reader would
 /// read differently, or that is too long.
-fn check_namespace_value(raw: &[u8]) -> Result<(), XmlError> {
+fn check_namespace_value(raw: &str) -> Result<(), XmlError> {
     if raw.len() > MAX_NS_LEN {
         return err("namespace URI too long");
     }
-    if raw
-        .iter()
-        .any(|&b| matches!(b, b'&' | b'\t' | b'\n' | b'\r' | b'<'))
-    {
+    if raw.contains(['&', '\t', '\n', '\r', '<']) {
         return err("namespace declaration with a reference or whitespace");
     }
-    let text = std::str::from_utf8(raw).or_else(|_| err("namespace is not UTF-8"))?;
-    check_chars(text)
+    check_chars(raw)
 }
 
 fn is_xml_char(c: char) -> bool {
@@ -182,9 +174,7 @@ fn element(
 ) -> Result<Element, XmlError> {
     let (ns, local) = reader.resolver().resolve_element(e.name());
     let ns = nss.get(&ns)?;
-    let name = std::str::from_utf8(local.as_ref())
-        .or_else(|_| err("name is not UTF-8"))?
-        .to_owned();
+    let name = local.as_ref().to_owned();
     spend(budget, name.len())?;
     let mut attrs: Vec<(Arc<str>, String, String)> = Vec::new();
     let mut count = 0_usize;
@@ -195,15 +185,13 @@ fn element(
             return err("too many attributes");
         }
         let key = a.key;
-        if key.as_ref() == b"xmlns" || key.as_ref().starts_with(b"xmlns:") {
+        if key.as_ref() == "xmlns" || key.as_ref().starts_with("xmlns:") {
             check_namespace_value(&a.value)?;
             continue;
         }
         let (ans, alocal) = reader.resolver().resolve_attribute(key);
         let ans = nss.get(&ans)?;
-        let alocal = std::str::from_utf8(alocal.as_ref())
-            .or_else(|_| err("attribute name is not UTF-8"))?
-            .to_owned();
+        let alocal = alocal.as_ref().to_owned();
         let value = a
             .normalized_value(quick_xml::XmlVersion::Implicit1_0)
             .or_else(|x| err(x.to_string()))?;
@@ -248,23 +236,22 @@ fn push_text(top: &mut Element, piece: &str, budget: &mut usize) -> Result<(), X
 fn check_decl(d: &quick_xml::events::BytesDecl<'_>) -> Result<(), XmlError> {
     let bad = || XmlError("an XML declaration that is not version 1.0 in UTF-8".into());
     // `version` must come first; the accessor checks that.
-    if d.version().map_err(|_| bad())?.as_ref() != b"1.0" {
+    if d.version().map_err(|_| bad())? != "1.0" {
         return Err(bad());
     }
     if let Some(e) = d.encoding()
-        && !e.map_err(|_| bad())?.eq_ignore_ascii_case(b"utf-8")
+        && !e.map_err(|_| bad())?.eq_ignore_ascii_case("utf-8")
     {
         return Err(bad());
     }
     if let Some(sa) = d.standalone()
-        && !matches!(sa.map_err(|_| bad())?.as_ref(), b"yes" | b"no")
+        && !matches!(sa.map_err(|_| bad())?.as_ref(), "yes" | "no")
     {
         return Err(bad());
     }
     // Nothing else, and in order: the names, as written, must be a prefix
     // of `version encoding standalone` with optional ones left out.
-    let raw: &[u8] = d;
-    let text = std::str::from_utf8(raw).map_err(|_| bad())?;
+    let text: &str = d;
     let mut names = Vec::new();
     let mut rest = text.strip_prefix("xml").unwrap_or(text);
     while let Some(eq) = rest.find('=') {
@@ -350,7 +337,7 @@ pub fn parse(data: &[u8]) -> Result<Element, XmlError> {
                 }
             }
             Event::Text(t) => {
-                let raw = t.xml10_content().or_else(|e| err(e.to_string()))?;
+                let raw = t.xml10_content();
                 check_chars(&raw)?;
                 match stack.last_mut() {
                     Some(top) => push_text(top, &raw, &mut budget)?,
@@ -359,7 +346,7 @@ pub fn parse(data: &[u8]) -> Result<Element, XmlError> {
                 }
             }
             Event::CData(t) => {
-                let raw = t.xml10_content().or_else(|e| err(e.to_string()))?;
+                let raw = t.xml10_content();
                 check_chars(&raw)?;
                 match stack.last_mut() {
                     Some(top) => push_text(top, &raw, &mut budget)?,
@@ -371,8 +358,8 @@ pub fn parse(data: &[u8]) -> Result<Element, XmlError> {
                     Ok(Some(c)) if is_xml_char(c) => c.to_string(),
                     Ok(Some(_)) => return err("character reference not allowed in XML"),
                     Ok(None) => {
-                        let name = r.decode().or_else(|e| err(e.to_string()))?;
-                        quick_xml::escape::resolve_predefined_entity(&name)
+                        let name: &str = &r;
+                        quick_xml::escape::resolve_predefined_entity(name)
                             .map(str::to_owned)
                             .ok_or_else(|| XmlError(format!("undefined entity &{name};")))?
                     }

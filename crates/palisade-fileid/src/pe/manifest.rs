@@ -395,11 +395,11 @@ fn attrs<const N: usize>(
     e: &BytesStart<'_>,
     wanted: [&str; N],
 ) -> Result<[Option<Value>; N], ManifestError> {
-    check_tag(e.as_ref())?;
+    check_tag(e.as_bytes())?;
     let mut out: [Option<Value>; N] = std::array::from_fn(|_| None);
     for a in e.attributes() {
         let a = a.map_err(|err| ManifestError::Xml(err.to_string()))?;
-        if !is_xml_name(a.key.as_ref()) {
+        if !is_xml_name(a.key.as_ref().as_bytes()) {
             return Err(ManifestError::Xml("invalid attribute name".into()));
         }
         // Only the five predefined entities resolve; anything else fails.
@@ -414,7 +414,7 @@ fn attrs<const N: usize>(
         }
         if let Some(slot) = wanted
             .iter()
-            .position(|w| a.key.as_ref() == w.as_bytes())
+            .position(|w| a.key.as_ref() == *w)
             .and_then(|i| out.get_mut(i))
         {
             *slot = Some(Value::new(&value));
@@ -580,7 +580,7 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
                     return Err(ManifestError::TooDeep);
                 }
                 bind_prefixes(e, &mut scopes)?;
-                path.0.push(e.local_name().as_ref().to_vec());
+                path.0.push(e.local_name().as_ref().as_bytes().to_vec());
                 element(e, &path, &mut out, &mut seen_execution_level)?;
                 // Text belongs to a setting only directly inside it.
                 text_field = None;
@@ -633,9 +633,7 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
                 }
             }
             Event::Text(t) => {
-                let raw = t
-                    .xml10_content()
-                    .map_err(|e| ManifestError::Xml(e.to_string()))?;
+                let raw = t.xml10_content();
                 check_chars(&raw)?;
                 if raw.contains("]]>") {
                     return Err(ManifestError::Xml("`]]>` in character data".into()));
@@ -650,9 +648,7 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
                 }
             }
             Event::CData(t) => {
-                let raw = t
-                    .xml10_content()
-                    .map_err(|e| ManifestError::Xml(e.to_string()))?;
+                let raw = t.xml10_content();
                 check_chars(&raw)?;
                 if path.0.is_empty() {
                     return Err(ManifestError::Xml("CDATA outside the root element".into()));
@@ -672,8 +668,8 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
                         ));
                     }
                     Ok(None) => {
-                        let name = r.decode().map_err(|e| ManifestError::Xml(e.to_string()))?;
-                        quick_xml::escape::resolve_predefined_entity(&name)
+                        let name: &str = &r;
+                        quick_xml::escape::resolve_predefined_entity(name)
                             .ok_or_else(|| {
                                 ManifestError::Xml(format!("undefined entity &{name};"))
                             })?
@@ -716,24 +712,20 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest, ManifestError> {
                 if seen_anything {
                     return Err(ManifestError::Xml("misplaced XML declaration".into()));
                 }
-                check_decl(d.as_ref())?;
+                check_decl(d.as_bytes())?;
             }
             Event::PI(pi) => {
                 let target = pi.target();
-                if target.eq_ignore_ascii_case(b"xml")
-                    || !is_xml_name(target)
-                    || target.contains(&b':')
+                if target.eq_ignore_ascii_case("xml")
+                    || !is_xml_name(target.as_bytes())
+                    || target.contains(':')
                 {
                     return Err(ManifestError::Xml("bad processing instruction".into()));
                 }
-                let content =
-                    std::str::from_utf8(pi.as_ref()).map_err(|_| ManifestError::NotUtf8)?;
-                check_chars(content)?;
+                check_chars(&pi)?;
             }
             Event::Comment(c) => {
-                let content =
-                    std::str::from_utf8(c.as_ref()).map_err(|_| ManifestError::NotUtf8)?;
-                check_chars(content)?;
+                check_chars(&c)?;
             }
         }
         seen_anything = true;
@@ -788,20 +780,20 @@ fn bind_prefixes(e: &BytesStart<'_>, scopes: &mut Scopes) -> Result<(), Manifest
     for a in e.attributes() {
         let a = a.map_err(|err| ManifestError::Xml(err.to_string()))?;
         let key = a.key.as_ref();
-        if let Some(prefix) = key.strip_prefix(b"xmlns:") {
+        if let Some(prefix) = key.strip_prefix("xmlns:") {
             // Undeclaring a prefix (`xmlns:p=""`) is not allowed in XML
             // Namespaces 1.0, and `xmlns` itself cannot be declared.
-            if a.value.is_empty() || prefix == b"xmlns" {
+            if a.value.is_empty() || prefix == "xmlns" {
                 return bad("bad declaration");
             }
-            declared.push(prefix.to_vec());
+            declared.push(prefix.as_bytes().to_vec());
         } else if let Some(prefix) = a.key.prefix() {
-            used.push(prefix.as_ref().to_vec());
+            used.push(prefix.as_ref().as_bytes().to_vec());
         }
     }
     scopes.push(declared);
     if let Some(prefix) = e.name().prefix() {
-        used.push(prefix.as_ref().to_vec());
+        used.push(prefix.as_ref().as_bytes().to_vec());
     }
     for prefix in used {
         if prefix == b"xmlns" {
