@@ -233,7 +233,7 @@ impl MissingFact {
             V::LocalAppData => Self::LocalAppData,
             V::Public => Self::Public,
             V::Temp => Self::Temp,
-            V::System32 | V::ProgramData | V::OsDrive => return None,
+            V::System32 | V::ProgramData | V::OsDrive | V::Removable | V::Hot => return None,
         })
     }
 

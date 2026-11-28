@@ -621,6 +621,32 @@ pub enum Field {
     /// build of the package.
     #[serde(rename = "msi.package_code")]
     MsiPackageCode,
+    /// The drive type of the file's volume, as the OS reports it (#328):
+    /// `fixed`, `removable`, `network`, `cd_rom` or `ram_disk`. An
+    /// `unknown` drive type is a missing fact.
+    #[serde(rename = "path.drive_type")]
+    PathDriveType,
+    /// The bus of the disk the file's volume is on (#328): `usb`, `sata`,
+    /// `nvme`, `scsi`, `sd`, `virtual`, `file_backed_virtual`, `iscsi` and
+    /// so on. An `unknown` bus is a missing fact.
+    #[serde(rename = "path.bus")]
+    PathBus,
+    /// Whether the file is on a network share: its path, or the other form
+    /// of it (a mapped drive's UNC path), is a UNC path (#328).
+    #[serde(rename = "path.is_unc")]
+    PathIsUnc,
+    /// Whether the object is an alternate data stream of a file (#328).
+    #[serde(rename = "path.is_ads")]
+    PathIsAds,
+    /// The `\\server\share` a file on a network share is under (#328),
+    /// from its UNC path. A file on no share has none, so `equals` does not
+    /// match it.
+    #[serde(rename = "path.share")]
+    PathShare,
+    /// Whether some non-administrator may change the permissions or the
+    /// owner of the file or a directory above it (#328).
+    #[serde(rename = "path.user_can_change_acl")]
+    PathUserCanChangeAcl,
 }
 
 /// The type of a field's value, which decides the operators it accepts and
@@ -719,7 +745,7 @@ pub enum Strength {
 
 impl Field {
     /// Every field, in declaration order.
-    pub const ALL: [Self; 84] = [
+    pub const ALL: [Self; 90] = [
         Self::HashSha256,
         Self::HashSha384,
         Self::HashSha512,
@@ -804,6 +830,12 @@ impl Field {
         Self::MsiManufacturer,
         Self::MsiProductVersion,
         Self::MsiPackageCode,
+        Self::PathDriveType,
+        Self::PathBus,
+        Self::PathIsUnc,
+        Self::PathIsAds,
+        Self::PathShare,
+        Self::PathUserCanChangeAcl,
     ];
 
     /// Whether the field is read from the object's signatures
@@ -822,6 +854,24 @@ impl Field {
                 | Self::SignerTbsHash
                 | Self::SignerEku
                 | Self::SignerSpkiSha256
+        )
+    }
+
+    /// Whether the field describes where the object's path is, and is
+    /// read from [`crate::facts::PathFact`] rather than stored by field
+    /// (#328): the volume's drive type and bus, whether the path is on a
+    /// share or names a stream, the share, and whether users may change its
+    /// permissions. None of them identifies an object.
+    #[must_use]
+    pub const fn is_path_location(self) -> bool {
+        matches!(
+            self,
+            Self::PathDriveType
+                | Self::PathBus
+                | Self::PathIsUnc
+                | Self::PathIsAds
+                | Self::PathShare
+                | Self::PathUserCanChangeAcl
         )
     }
 
@@ -919,6 +969,8 @@ impl Field {
             Self::MetaIsDotnet => FieldClass::Bool,
             Self::MsiProductCode | Self::MsiUpgradeCode | Self::MsiPackageCode => FieldClass::Guid,
             Self::MsiProductVersion => FieldClass::Version,
+            Self::PathDriveType | Self::PathBus | Self::PathShare => FieldClass::Text,
+            Self::PathIsUnc | Self::PathIsAds | Self::PathUserCanChangeAcl => FieldClass::Bool,
             Self::SignerEku => FieldClass::OidSet,
         }
     }
@@ -992,7 +1044,13 @@ impl Field {
             | Self::MsiProductName
             | Self::MsiManufacturer
             | Self::MsiProductVersion
-            | Self::MsiPackageCode => Strength::Weak,
+            | Self::MsiPackageCode
+            | Self::PathDriveType
+            | Self::PathBus
+            | Self::PathIsUnc
+            | Self::PathIsAds
+            | Self::PathShare
+            | Self::PathUserCanChangeAcl => Strength::Weak,
             Self::UserSid
             | Self::UserName
             | Self::UserGroups

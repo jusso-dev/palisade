@@ -379,7 +379,7 @@ fn variable_prefix(value: &str) -> Option<(PathVariable, &str)> {
 /// The depth of a path variable's default location below the root.
 const fn variable_depth(variable: PathVariable) -> u16 {
     match variable {
-        PathVariable::OsDrive => 0,
+        PathVariable::OsDrive | PathVariable::Removable | PathVariable::Hot => 0,
         PathVariable::Windir | PathVariable::ProgramFiles | PathVariable::ProgramData => 1,
         PathVariable::System32 | PathVariable::UserProfile | PathVariable::Public => 2,
         PathVariable::AppData | PathVariable::LocalAppData => 4,

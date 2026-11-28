@@ -231,6 +231,12 @@ matcher.
 | `msi.manufacturer` | A Windows Installer package's `Manufacturer` (#328). Free text the author chooses: never a publisher. |
 | `msi.product_version` | A Windows Installer package's `ProductVersion` (#328). |
 | `msi.package_code` | A Windows Installer package's `PackageCode` (#328): the GUID of one build of the package. |
+| `path.drive_type` | The drive type of the file's volume, as the OS reports it (#328): `fixed`, `removable`, `network`, `cd_rom` or `ram_disk`. An `unknown` drive type is a missing fact. |
+| `path.bus` | The bus of the disk the file's volume is on (#328): `usb`, `sata`, `nvme`, `scsi`, `sd`, `virtual`, `file_backed_virtual`, `iscsi` and so on. An `unknown` bus is a missing fact. |
+| `path.is_unc` | Whether the file is on a network share: its path, or the other form of it (a mapped drive's UNC path), is a UNC path (#328). |
+| `path.is_ads` | Whether the object is an alternate data stream of a file (#328). |
+| `path.share` | The `\\server\share` a file on a network share is under (#328), from its UNC path. A file on no share has none, so `equals` does not match it. |
+| `path.user_can_change_acl` | Whether some non-administrator may change the permissions or the owner of the file or a directory above it (#328). |
 
 ## FindingSeverity
 
