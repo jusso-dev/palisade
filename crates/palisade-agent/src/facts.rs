@@ -36,7 +36,10 @@
 //!   to it, so nothing it names is known.
 //! - **Paths.** The path is the opened file's final path, never the name as
 //!   written (which a link may point elsewhere), and never a claimed name
-//!   hint. Its volume is `fixed` only for fileid's `os_volume` and
+//!   hint. A path in a case-sensitive directory is absent. One on a volume
+//!   whose case folding is not known to be the standard table is kept with
+//!   [`PathFact::fold_unknown`] set (#399), so a path test on it is unknown
+//!   whenever its result would relax a rule. Its volume is `fixed` only for fileid's `os_volume` and
 //!   `other_fixed`; a RAM disk, virtual disk or unknown volume has no
 //!   volume kind, so a path on it is never trusted
 //!   ([`PathFact::acl_proven`]). It counts as user-writable when a
@@ -47,10 +50,14 @@
 //! - **Text facts** that fileid reports as `unknown` (a drive type, or a
 //!   bus it could not name) are absent.
 //!
+//! - **Content types** (`meta.detected_type`, `meta.extension_type`,
+//!   #376) come from fileid's classification. What the name claims, and a
+//!   kind the name helped decide, are used only when the name fileid read
+//!   is the opened file's final name.
+//!
 //! Not filled here: the location classes (the engine derives them from the
-//! path and its volume), the origin (#115, #118), the path's alias (the OS
-//! final path of a network file is already its UNC form) and the
-//! `meta.detected_type` and `meta.extension_type` facts (#376).
+//! path and its volume), the origin (#115, #118) and the path's alias (the
+//! OS final path of a network file is already its UNC form).
 //!
 //! # Where the agent calls it
 //!
@@ -368,6 +375,7 @@ fn metadata(id: &FileIdentity, out: &mut Bridged) {
         .as_ref()
         .and_then(|p| p.path.file_name())
         .map(str::to_owned);
+    content_types(id, on_disk.as_deref(), &mut out.facts);
     let f = &mut out.facts;
     if let Some(size) = id.size.computed() {
         f.set(PolicyField::MetaFileSize, size.to_string());
@@ -508,22 +516,26 @@ fn path(id: &FileIdentity, volumes: &VolumeMap, out: &mut Bridged) {
     if !matches!(id.fs.user_writable, Field::NotRequested) {
         out.computed |= FactSet::PATH_ACL;
     }
-    // The opened file's final path, never a claimed name. Without a rule
-    // key (a component in a case-sensitive directory, or a volume whose
-    // case folding is unknown), names that differ only in case may be
-    // different files, which policy's case-insensitive comparison cannot
-    // tell apart: no path.
-    let Some(final_path) = id
-        .fs
-        .path
-        .computed()
-        .filter(|p| !p.claimed && p.rule_key.is_some())
-        .and_then(|p| p.final_path.as_deref())
-    else {
+    // The opened file's final path, never a claimed name. A component in a
+    // case-sensitive directory leaves no rule key: names that differ only
+    // in case may be different files, which policy's case-insensitive
+    // comparison cannot tell apart, so no path. On a volume whose case
+    // folding is not known to be the standard table (every network share
+    // among them) fileid gives no rule key either; the path is kept,
+    // marked, and policy reads a path test there as unknown whenever its
+    // result would relax a rule (#399).
+    let Some(info) = id.fs.path.computed().filter(|p| {
+        !p.claimed
+            && (p.rule_key.is_some() || (p.final_fold_unknown && p.final_case_sensitive.is_empty()))
+    }) else {
+        return;
+    };
+    let Some(final_path) = info.final_path.as_deref() else {
         return;
     };
     // The OS expands every short name in a final path.
     let mut fact = PathFact::new(final_path, volumes);
+    fact.fold_unknown = info.final_fold_unknown;
     // A stream whose final path lost its stream would read as its host.
     if id.name.stream.is_some() && fact.path.stream().is_none() {
         return;
@@ -544,6 +556,36 @@ fn path(id: &FileIdentity, volumes: &VolumeMap, out: &mut Bridged) {
         fact.bus = known(v.bus_type.as_deref());
     }
     out.facts.path = Some(fact);
+}
+
+/// `meta.detected_type` and `meta.extension_type` (#376) from fileid's
+/// content classification, in its names. `on_disk` is the bridged final
+/// path's file name.
+///
+/// The extension's kind comes from the name fileid classified: the path
+/// as written, or a claimed name hint. It is used only when that name is
+/// the opened file's final name, so neither a link's name nor a claim
+/// decides it; otherwise it is absent. So is a detected type the name
+/// helped decide (`extension_assisted`, such as a `.com` program, which
+/// has no magic). A kind fileid could not tell (`unknown`) is absent too.
+fn content_types(id: &FileIdentity, on_disk: Option<&str>, f: &mut ObjectFacts) {
+    let Some(k) = id.kind.computed() else {
+        return;
+    };
+    let name_is_final = on_disk.is_some() && id.name.file_name.as_deref() == on_disk;
+    let detected = k.content_kind.as_str();
+    if (name_is_final || !k.extension_assisted) && !detected.is_empty() && detected != "unknown" {
+        f.set(PolicyField::MetaDetectedType, detected.to_owned());
+    }
+    // A script extension names its language (`script:power_shell`); the
+    // field compares with the detected type's names, which say `script`.
+    let ext = k
+        .extension_kind
+        .split_once(':')
+        .map_or(k.extension_kind.as_str(), |(kind, _)| kind);
+    if name_is_final && !ext.is_empty() && ext != "unknown" {
+        f.set(PolicyField::MetaExtensionType, ext.to_owned());
+    }
 }
 
 /// A name fileid reports, unless it says the value is unknown (`unknown`,
