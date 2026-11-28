@@ -246,7 +246,7 @@ fn hash_prints_selected_digests() {
             .as_str()
             .is_some_and(|s| s.len() == 64)
     );
-    // Not yet supported: printed, and a non-zero exit.
+    // Not an installer: not available, and a non-zero exit.
     let o = run(&[
         "fileid",
         "hash",
@@ -255,7 +255,44 @@ fn hash_prints_selected_digests() {
         "msi-normalised",
     ]);
     assert_eq!(o.status.code(), Some(1));
-    assert!(stdout(&o).contains("#53"));
+    assert!(stdout(&o).contains("not available"));
+}
+
+/// The normalised hashes of an installer and a script, as the crate's
+/// fixture sets pin them: the installer's by an independent Python
+/// implementation (`fixtures/installer/normalised.py`).
+#[test]
+fn hash_prints_the_normalised_hashes() {
+    let fixtures = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../palisade-fileid/tests/fixtures"
+    );
+    let pinned =
+        std::fs::read_to_string(format!("{fixtures}/installer/product.normalised.txt")).unwrap();
+    for msi in ["product.msi", "product-sha256.msi"] {
+        let path = format!("{fixtures}/installer/{msi}");
+        let o = run(&["fileid", "hash", &path, "--alg", "msi-normalised", "--json"]);
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+        let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
+        assert_eq!(v["msi-normalised"], pinned.trim(), "{msi}");
+    }
+    let path = format!("{fixtures}/script/ps1-utf8bom-crlf.ps1");
+    let o = run(&[
+        "fileid",
+        "hash",
+        &path,
+        "--alg",
+        "script-normalised,msi-normalised",
+        "--json",
+    ]);
+    assert_eq!(o.status.code(), Some(1));
+    let v: Value = serde_json::from_str(&stdout(&o)).unwrap();
+    assert!(
+        v["script-normalised"]
+            .as_str()
+            .is_some_and(|s| s.len() == 64)
+    );
+    assert!(v["msi-normalised"].is_null());
 }
 
 fn hex(bytes: &[u8]) -> String {

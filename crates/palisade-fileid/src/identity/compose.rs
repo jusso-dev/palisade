@@ -19,17 +19,23 @@ use crate::catalog::{CatalogSource, CatalogStore, DigestKind, FileDigests};
 use crate::filetype::{Classification, ContentFlags, FileKind, classify, classify_bytes};
 use crate::fsctx::{KnownFolders, PathForms, path_variables_matched};
 use crate::hash::{AlgorithmSet, Digest, HashAlgorithm, HashError, HashOptions, MultiHasher};
+use crate::installer::{InstallerIdentity, InstallerKind, parse_installer};
+use crate::package::{PackageIdentity, PackageSignatureIssue, parse_package};
 use crate::pe::version::{VersionField, VersionInfo};
 use crate::pe::{self, DataDirectoryKind, FileCharacteristics, PeFormat, PeInfo};
+use crate::script::{
+    ScriptAnchorPolicy, ScriptInvalidReason, ScriptKind, ScriptOptions, ScriptReport,
+    ScriptSigningState, ScriptTrustAnchors, evaluate_script_trust, verify_script,
+};
 
 use super::masquerade;
 use super::protected::ProtectedList;
 use super::record::{
     AuthenticodeSummary, CatalogMatchSummary, CatalogState, CertBrief, ChainSummary, Derived,
     EffectiveName, ElevationSummary, EmbeddedState, ExportSummary, Field, FileIdentity, FsInfo,
-    Hashes, KindSummary, ManifestSummary, MotwSummary, PathInfo, PdbSummary, PeSummary,
-    PublisherProduct, SectionSummary, SignatureSummary, SigningState, SigningStateKind, Timestamps,
-    TrustSource, TrustedSigner, VersionSummary,
+    Hashes, InstallerSummary, KindSummary, ManifestSummary, MotwSummary, PackageSummary, PathInfo,
+    PdbSummary, PeSummary, PublisherProduct, ScriptSummary, SectionSummary, SignatureSummary,
+    SigningState, SigningStateKind, Timestamps, TrustSource, TrustedSigner, VersionSummary,
 };
 use super::strength;
 use super::tier::{Tier, Tiers};
@@ -219,7 +225,9 @@ impl Content {
         ctx: &IdentityContext<'_>,
         id: &mut FileIdentity,
     ) -> Self {
-        let need_bytes = tiers.contains(Tier::Classify) || tiers.contains(Tier::Trust);
+        let need_bytes = tiers.contains(Tier::Classify)
+            || tiers.contains(Tier::Trust)
+            || tiers.contains(Tier::Deep);
         let need_hashes = tiers.contains(Tier::Hash) || tiers.contains(Tier::Trust);
         let mut out = Self {
             bytes: None,
@@ -232,7 +240,7 @@ impl Content {
                     "{len} bytes is over the in-memory limit of {}",
                     ctx.max_in_memory
                 );
-                for tier in [Tier::Classify, Tier::Trust] {
+                for tier in [Tier::Classify, Tier::Trust, Tier::Deep] {
                     if tiers.contains(tier) {
                         id.error(tier, "too_large", msg.clone());
                     }
@@ -258,7 +266,7 @@ impl Content {
                     // Charged to every requested tier that needed the
                     // bytes or would have hashed them; nothing describes a
                     // file that changed under the read.
-                    for tier in [Tier::Classify, Tier::Hash, Tier::Trust] {
+                    for tier in [Tier::Classify, Tier::Hash, Tier::Trust, Tier::Deep] {
                         if tiers.contains(tier) {
                             id.error(tier, code, msg.clone());
                         }
@@ -270,7 +278,12 @@ impl Content {
                 }
             }
         }
-        if tiers.contains(Tier::Classify) {
+        // The trust and deep tiers need the content kind too: which
+        // signature reader runs depends on it.
+        if tiers.contains(Tier::Classify)
+            || tiers.contains(Tier::Trust)
+            || tiers.contains(Tier::Deep)
+        {
             let name = id.name.file_name.as_deref().map(OsStr::new);
             out.kind = match &out.bytes {
                 Some(bytes) => Some(classify_bytes(bytes, name)),
@@ -362,7 +375,17 @@ fn compose(id: &mut FileIdentity, content: Content, tiers: Tiers, ctx: &Identity
                 .is_some_and(|h| h.authenticode.is_some()),
         },
     };
-    let deep_pending = Field::pending(&[52, 53]);
+    // Scripts, installer packages and app packages, chosen by the content
+    // the classifier saw, never by the name alone: a PE named `.ps1` is
+    // judged as a PE, so no script or package signature can vouch for it.
+    let non_pe = if is_pe || !(tiers.contains(Tier::Trust) || tiers.contains(Tier::Deep)) {
+        None
+    } else {
+        content
+            .kind
+            .as_ref()
+            .and_then(|k| NonPe::read(k, content.bytes.as_deref()))
+    };
 
     if tiers.contains(Tier::Classify) {
         match (&info, content.bytes.is_some()) {
@@ -384,18 +407,155 @@ fn compose(id: &mut FileIdentity, content: Content, tiers: Tiers, ctx: &Identity
     // The trust tier computes the digests too; they are reported whenever
     // they exist.
     if let Some(h) = &content.hashes {
-        id.hashes = Field::Computed(hashes(h, is_pe));
+        let mut summary = hashes(h, is_pe);
+        // The normalised hashes need the content parsed, which the hash
+        // tier alone does not read: they are filled in where the reader
+        // ran, and are not applicable to other kinds.
+        let kind = content.kind.as_ref().map(|k| k.content_kind);
+        summary.msi_normalised_sha256 = match (&non_pe, kind) {
+            (Some(NonPe::Installer(Ok(i))), _) => Field::Computed(i.normalised_sha256.to_string()),
+            (Some(NonPe::Installer(Err(e))), _) => Field::Unavailable(e.message.clone()),
+            (_, Some(k)) if is_installer_kind(k) => Field::Unavailable(
+                "the installer was not read (request the trust or deep tier)".to_owned(),
+            ),
+            // The content kind was not determined (the hash tier alone):
+            // it may be an installer, unless it is a PE image.
+            (_, None) if !is_pe => Field::Unavailable(
+                "the file type was not determined (request the classify, trust or deep tier)"
+                    .to_owned(),
+            ),
+            _ => Field::NotApplicable,
+        };
+        summary.script_normalised_sha256 = match (&non_pe, kind) {
+            (Some(NonPe::Script(r)), _) => r.normalised_hash.as_ref().map_or_else(
+                || Field::Unavailable(script_unhashed_reason(r).to_owned()),
+                |d| Field::Computed(d.to_string()),
+            ),
+            (_, Some(FileKind::Script(s))) if script_kind_of(s).is_some() => Field::Unavailable(
+                "the script was not read (request the trust or deep tier)".to_owned(),
+            ),
+            (_, None) if !is_pe => Field::Unavailable(
+                "the file type was not determined (request the classify, trust or deep tier)"
+                    .to_owned(),
+            ),
+            _ => Field::NotApplicable,
+        };
+        id.hashes = Field::Computed(summary);
         id.computed_tiers.insert(Tier::Hash);
     }
 
     if tiers.contains(Tier::Trust) {
-        trust_tier(id, &content, pe_info, ctx);
+        trust_tier(id, &content, pe_info, non_pe.as_ref(), ctx);
     }
 
     if tiers.contains(Tier::Deep) {
-        id.installer = deep_pending.clone();
-        id.package = deep_pending;
-        id.script = Field::pending(&[52]);
+        deep_tier(id, &content, is_pe, non_pe.as_ref(), ctx);
+    }
+}
+
+/// A non-PE format this crate reads signatures and identity from.
+enum NonPe {
+    /// A script whose format has a signature package (#52).
+    Script(Box<ScriptReport>),
+    /// A Windows Installer package (#53), or why it could not be read.
+    Installer(Result<Box<InstallerIdentity>, Unread>),
+    /// An app package or bundle (#53), or why it could not be read.
+    Package(Result<Box<PackageIdentity>, Unread>),
+}
+
+/// Why a container could not be read at all.
+#[derive(Debug, Clone)]
+struct Unread {
+    /// It is over the reader's size limit: not read, so not judged.
+    too_large: bool,
+    /// What went wrong, for reading.
+    message: String,
+}
+
+impl NonPe {
+    /// Reads `bytes` as the format `kind` names. `None` for any other
+    /// content, and when the bytes were not read (a reason is recorded:
+    /// the format's signatures are then not checked).
+    fn read(kind: &Classification, bytes: Option<&[u8]>) -> Option<Self> {
+        let content = kind.content_kind;
+        let script = match content {
+            FileKind::Script(s) => script_kind_of(s).map(|k| {
+                // `.vbe`/`.jse` and components share their content kind
+                // with a plain script; the extension tells them apart, and
+                // the script reader reports those unread.
+                match (k, kind.extension.as_deref()) {
+                    (ScriptKind::VbScript, Some("vbe")) => ScriptKind::EncodedVbScript,
+                    (ScriptKind::JScript, Some("jse")) => ScriptKind::EncodedJScript,
+                    (ScriptKind::PowerShell, Some("ps1xml" | "psc1" | "cdxml")) => {
+                        ScriptKind::PowerShellXml
+                    }
+                    (k, _) => k,
+                }
+            }),
+            _ => None,
+        };
+        let wanted = script.is_some()
+            || is_installer_kind(content)
+            || matches!(
+                content,
+                FileKind::Msix | FileKind::Appx | FileKind::MsixBundle | FileKind::AppxBundle
+            );
+        if !wanted {
+            return None;
+        }
+        // Not read into memory (too large): the trust tier records why.
+        let bytes = bytes?;
+        Some(if let Some(k) = script {
+            Self::Script(Box::new(verify_script(bytes, k, &ScriptOptions::default())))
+        } else if is_installer_kind(content) {
+            Self::Installer(parse_installer(bytes).map(Box::new).map_err(|e| Unread {
+                too_large: matches!(e, crate::installer::InstallerError::TooLarge(_)),
+                message: e.to_string(),
+            }))
+        } else {
+            Self::Package(parse_package(bytes).map(Box::new).map_err(|e| Unread {
+                too_large: matches!(e, crate::package::PackageError::TooLarge(_)),
+                message: e.to_string(),
+            }))
+        })
+    }
+}
+
+const fn is_installer_kind(k: FileKind) -> bool {
+    matches!(
+        k,
+        FileKind::Msi | FileKind::Msp | FileKind::Mst | FileKind::Msm
+    )
+}
+
+/// The script signature format of a classified script kind, for the kinds
+/// that have one.
+const fn script_kind_of(k: crate::filetype::ScriptKind) -> Option<ScriptKind> {
+    use crate::filetype::ScriptKind as F;
+    match k {
+        F::PowerShell => Some(ScriptKind::PowerShell),
+        F::VbScript => Some(ScriptKind::VbScript),
+        F::JScript => Some(ScriptKind::JScript),
+        F::Wsf => Some(ScriptKind::WindowsScriptFile),
+        F::Wsc => Some(ScriptKind::ScriptComponent),
+        _ => None,
+    }
+}
+
+fn script_unhashed_reason(r: &ScriptReport) -> &'static str {
+    if r.empty_text {
+        "the script's text is empty, so its digest identifies nothing"
+    } else if matches!(
+        r.signing_state,
+        ScriptSigningState::TooLargeForSignatureCheck { .. }
+    ) {
+        "the script is over the size limit, so it was not read"
+    } else if r.text_issue.is_some() {
+        "the script's text cannot be decoded without ambiguity"
+    } else if r.kind.signature_supported() {
+        "the script's signature block cannot be read"
+    } else {
+        "this script format is not read"
     }
 }
 
@@ -403,6 +563,7 @@ fn trust_tier(
     id: &mut FileIdentity,
     content: &Content,
     pe_info: Option<&PeInfo>,
+    non_pe: Option<&NonPe>,
     ctx: &IdentityContext<'_>,
 ) {
     let Some(hashes) = &content.hashes else {
@@ -415,7 +576,19 @@ fn trust_tier(
     };
     let version = pe_info.and_then(|p| p.version_info.as_ref());
 
-    let digests = file_digests(hashes);
+    let mut digests = file_digests(hashes);
+    // A script or installer is also revoked, and catalog-listed, by the
+    // digest its signature signs: the script package's digest of the text,
+    // or the installer's content hash.
+    match non_pe {
+        Some(NonPe::Script(r)) => {
+            if let Some(sip) = &r.sip_digests {
+                digests.extend(sip.digests.iter().cloned());
+            }
+        }
+        Some(NonPe::Installer(Ok(i))) => digests.push(i.content_sha256.clone()),
+        _ => {}
+    }
     // Embedded signatures (#48), chains (#49) and validity (#50).
     let mut embedded = EmbeddedState::NotChecked;
     let mut embedded_invalid_reason = None;
@@ -448,10 +621,141 @@ fn trust_tier(
             sigs = Some((report, trust, validity));
         }
     }
+    // Script, installer and package signatures (#52, #53): the same trust
+    // and validity evaluation as a PE file's, over the format's own report.
+    // A format that is not read, a file over its size limit, and a package
+    // the strict reader refuses never read as unsigned.
+    let mut package_publisher = None;
+    if let Some(non_pe) = non_pe {
+        let report = match non_pe {
+            NonPe::Script(r) => match &r.signing_state {
+                ScriptSigningState::TooLargeForSignatureCheck { size, limit } => {
+                    id.error(
+                        Tier::Trust,
+                        "signatures_unread",
+                        format!("{size} bytes is over the script signature limit of {limit}"),
+                    );
+                    None
+                }
+                _ if !r.kind.signature_supported() => None,
+                _ => Some(Ok(r.signatures.clone())),
+            },
+            NonPe::Installer(Ok(i)) => {
+                let mut report = i.signature.clone().unwrap_or_else(unsigned_report);
+                // Bytes after the compound file's last sector are outside
+                // the content hash: a signed package with data appended
+                // (a second file glued on, the CVE-2020-1464 pattern) is
+                // not what its signer signed, so no signature is valid.
+                if installer_trailing_bytes(i).is_some() && i.signature.is_some() {
+                    demote_unsigned_tail(&mut report);
+                }
+                Some(Ok(report))
+            }
+            NonPe::Package(Ok(p)) => {
+                package_publisher = Some(p);
+                Some(Ok(p
+                    .signature
+                    .as_ref()
+                    .map_or_else(unsigned_report, |s| s.report.clone())))
+            }
+            NonPe::Installer(Err(e)) | NonPe::Package(Err(e)) => Some(Err(e.clone())),
+        };
+        match report {
+            // Not read: the state stays unverified.
+            None => {}
+            Some(Err(Unread {
+                too_large: true,
+                message,
+            })) => {
+                id.error(Tier::Trust, "signatures_unread", message);
+            }
+            Some(Err(Unread { message, .. })) => {
+                // Any container the strict reader refuses is an error,
+                // never an unsigned file.
+                embedded = EmbeddedState::Invalid;
+                embedded_invalid_reason = Some(format!("unreadable: {message}"));
+            }
+            Some(Ok(report)) => {
+                let mut trust = match non_pe {
+                    NonPe::Script(r) => {
+                        evaluate_script_trust(
+                            r,
+                            &ScriptTrustAnchors {
+                                policy: ctx.code_trust,
+                                os_root_store: None,
+                            },
+                            ScriptAnchorPolicy::PolicyAnchors,
+                        )
+                        .trust
+                    }
+                    _ => evaluate_trust(&report, ctx.code_trust, None),
+                };
+                let vctx = ValidityContext {
+                    now: ctx.now,
+                    clock_floor: ctx.clock_floor,
+                    policy: ctx.validity,
+                    revocation: ctx.revocation,
+                    tsa_trust: ctx.tsa_trust,
+                    file_digests: &digests,
+                    version: None,
+                };
+                let mut validity = evaluate_validity(&report, &trust, &vctx);
+                // A packaged app's display name, only once its manifest's
+                // publisher is shown to be the signer (#53).
+                if let (Some(p), Some(identity)) = (package_publisher, validity.identity.as_mut()) {
+                    if let Some(name) = p.publisher_display_name.as_deref() {
+                        let _ = identity.attach_package_publisher(&p.publisher_dn, name);
+                    }
+                    if let Some(t) = trust.identity.as_mut() {
+                        t.package_display_name
+                            .clone_from(&identity.package_display_name);
+                    }
+                }
+                embedded = match &report.signing_state {
+                    EmbeddedSigning::Unsigned => EmbeddedState::Unsigned,
+                    EmbeddedSigning::Valid => EmbeddedState::Valid,
+                    EmbeddedSigning::Invalid(reason) => {
+                        embedded_invalid_reason = Some(match non_pe {
+                            NonPe::Script(r) => script_invalid_reason(r),
+                            NonPe::Installer(Ok(i)) => match installer_trailing_bytes(i) {
+                                Some(n) => format!(
+                                    "trailing data is not signed: {n} bytes follow the signed package"
+                                ),
+                                None => invalid_reason(reason),
+                            },
+                            NonPe::Package(Ok(p)) => p
+                                .signature
+                                .as_ref()
+                                .and_then(|s| s.issue.as_ref())
+                                .map_or_else(|| invalid_reason(reason), package_issue_name),
+                            _ => invalid_reason(reason),
+                        });
+                        EmbeddedState::Invalid
+                    }
+                };
+                sigs = Some((report, trust, validity));
+            }
+        }
+    }
 
-    // Catalogs (#51). One lookup serves the summary and the signer.
-    let catalog_digests =
-        FileDigests::from_hashes(hashes.authenticode.as_ref(), Some(&hashes.flat));
+    // Catalogs (#51). One lookup serves the summary and the signer. A
+    // script is listed by its script package digest and an installer by
+    // its content hash; whether those match catalogs made by OS tooling is
+    // not yet checked (#51), so for them a miss proves nothing.
+    let (catalog_digests, miss_proves_nothing) = match non_pe {
+        Some(NonPe::Script(r)) => (r.catalog_digests(), true),
+        Some(NonPe::Installer(Ok(i))) => (
+            FileDigests {
+                flat_sha256: Some(i.content_sha256.clone()),
+                ..FileDigests::default()
+            },
+            true,
+        ),
+        _ => (
+            FileDigests::from_hashes(hashes.authenticode.as_ref(), Some(&hashes.flat)),
+            false,
+        ),
+    };
     // A file revoked by hash is never vouched for, by any signer.
     let file_revoked = ctx.revocation.file_revoked(&digests).is_some();
     let found = ctx.catalogs.map(|store| store.lookup(&catalog_digests));
@@ -527,6 +831,8 @@ fn trust_tier(
                     "the catalog index is incomplete, so a missing match proves nothing",
                 );
                 CatalogState::NotChecked
+            } else if miss_proves_nothing {
+                CatalogState::NotChecked
             } else {
                 CatalogState::NotListed
             }
@@ -560,6 +866,9 @@ fn trust_tier(
                 kind: match sig.kind {
                     SignatureKind::Nested => "nested",
                     SignatureKind::Catalog => "catalog",
+                    SignatureKind::Script => "script",
+                    SignatureKind::Msi => "msi",
+                    SignatureKind::Package => "package",
                     _ => "embedded",
                 },
                 depth: sig.depth,
@@ -624,7 +933,26 @@ fn trust_tier(
                 anchored_to: chain
                     .and_then(|c| c.anchored_to.as_ref())
                     .map(|a| a.label.clone()),
+                package_display_name: identity.package_display_name.clone(),
             });
+        }
+    }
+    // The product of a non-PE file comes from what its signature covers:
+    // a script's signed metadata, an installer's `ProductName` (the
+    // signature covers every stream). A package has none: its family name
+    // is its product identity.
+    if let Some(s) = signer.as_mut() {
+        let product = match non_pe {
+            Some(NonPe::Script(r)) => r
+                .signature()
+                .and_then(|sig| sig.signer.as_ref())
+                .and_then(|a| a.signed_metadata.product.clone()),
+            Some(NonPe::Installer(Ok(i))) => i.properties.product_name.clone(),
+            _ => None,
+        };
+        if non_pe.is_some() {
+            s.product_name =
+                product.filter(|p| !p.trim().is_empty() && !p.chars().any(char::is_control));
         }
     }
     if signer.is_none()
@@ -657,6 +985,7 @@ fn trust_tier(
                 anchored_to: chain
                     .and_then(|c| c.anchored_to.as_ref())
                     .map(|a| a.label.clone()),
+                package_display_name: None,
             });
         }
     }
@@ -696,7 +1025,10 @@ fn trust_tier(
         id.signatures = Field::Unavailable(why.to_owned());
         id.error(Tier::Trust, "signatures_unread", why);
     } else {
-        id.signatures = Field::pending(&[52, 53]);
+        // A format with no signature reader here (a cabinet, a Java
+        // archive, an encoded script): its signatures, if it has any, are
+        // not read, so it stays unverified.
+        id.signatures = Field::Unavailable("this file type's signatures are not read".to_owned());
     }
     id.catalog_matches = match ctx.catalogs {
         Some(_) => Field::Computed(matches),
@@ -1147,6 +1479,231 @@ fn file_digests(h: &ImageHashes) -> Vec<Digest> {
         out.extend(a.digests.iter().cloned());
     }
     out
+}
+
+/// How many bytes follow an installer package's last sector, if any.
+fn installer_trailing_bytes(i: &InstallerIdentity) -> Option<u64> {
+    i.warnings.iter().find_map(|w| match w {
+        crate::installer::InstallerWarning::TrailingData(n) if *n > 0 => Some(*n),
+        _ => None,
+    })
+}
+
+/// Marks every signature of `report` as not covering the file, with no
+/// primary: the file holds bytes no signature signs.
+fn demote_unsigned_tail(report: &mut SignatureReport) {
+    for sig in &mut report.signatures {
+        if sig.status.is_valid() {
+            sig.status = SignatureStatus::DigestMismatch;
+            sig.signer = None;
+            sig.digest_match = Some(false);
+        }
+    }
+    report.primary = None;
+    report.signing_state =
+        EmbeddedSigning::Invalid(InvalidReason::Signature(SignatureStatus::DigestMismatch));
+}
+
+/// The report of a format's file with no signature.
+fn unsigned_report() -> SignatureReport {
+    SignatureReport {
+        entries: Vec::new(),
+        signatures: Vec::new(),
+        primary: None,
+        signing_state: EmbeddedSigning::Unsigned,
+        tolerate_digest_mismatch: false,
+        image_status: crate::authenticode::AuthenticodeStatus::Conformant,
+        warnings: Vec::new(),
+    }
+}
+
+fn script_invalid_reason(r: &ScriptReport) -> String {
+    match &r.signing_state {
+        ScriptSigningState::DigestMismatch => "the script changed after signing".to_owned(),
+        ScriptSigningState::Invalid(ScriptInvalidReason::Text(t)) => {
+            format!("script text: {}", snake(&format!("{t:?}")))
+        }
+        ScriptSigningState::Invalid(ScriptInvalidReason::Block(b)) => {
+            format!("script signature block: {b}")
+        }
+        ScriptSigningState::Invalid(ScriptInvalidReason::Signature(s)) => {
+            format!("signature: {}", status_name(s))
+        }
+        other => format!("{other:?}"),
+    }
+}
+
+fn package_issue_name(issue: &PackageSignatureIssue) -> String {
+    match issue {
+        PackageSignatureIssue::PublisherMismatch { .. } => {
+            "publisher_mismatch: the manifest's publisher is not the signer".to_owned()
+        }
+        PackageSignatureIssue::BlockMap(e) => format!("block_map: {e}"),
+        PackageSignatureIssue::BadContainer => "bad_container".to_owned(),
+        PackageSignatureIssue::NotLast => "not_last: data could follow the signature".to_owned(),
+        PackageSignatureIssue::NoContentTypes => "no_content_types".to_owned(),
+        PackageSignatureIssue::SignerUnreadable => "signer_unreadable".to_owned(),
+        PackageSignatureIssue::NotZip64 => "not_zip64".to_owned(),
+    }
+}
+
+/// The deep tier: the installer, package and script records (#52, #53).
+fn deep_tier(
+    id: &mut FileIdentity,
+    content: &Content,
+    is_pe: bool,
+    non_pe: Option<&NonPe>,
+    ctx: &IdentityContext<'_>,
+) {
+    let _ = ctx;
+    const NOT_READ: &str = "the content could not be read";
+    id.installer = Field::NotApplicable;
+    id.package = Field::NotApplicable;
+    id.script = Field::NotApplicable;
+    if content.bytes.is_none() {
+        // Too large to read, or a read that failed: what it is may still
+        // be one of these, so nothing is "not applicable".
+        let kind = content.kind.as_ref().map(|k| k.content_kind);
+        match kind {
+            Some(k) if is_installer_kind(k) => id.installer = Field::Unavailable(NOT_READ.into()),
+            Some(FileKind::Msix | FileKind::Appx | FileKind::MsixBundle | FileKind::AppxBundle) => {
+                id.package = Field::Unavailable(NOT_READ.into());
+            }
+            Some(FileKind::Script(s)) if script_kind_of(s).is_some() => {
+                id.script = Field::Unavailable(NOT_READ.into());
+            }
+            Some(_) => {}
+            None => {
+                id.installer = Field::Unavailable(NOT_READ.into());
+                id.package = Field::Unavailable(NOT_READ.into());
+                id.script = Field::Unavailable(NOT_READ.into());
+            }
+        }
+        return;
+    }
+    // A PE image has no record here; its deep-tier content tags are not
+    // run yet, so the tier is not marked computed for it.
+    if is_pe {
+        return;
+    }
+    match non_pe {
+        Some(NonPe::Script(r)) => id.script = Field::Computed(script_summary(r)),
+        Some(NonPe::Installer(Ok(i))) => id.installer = Field::Computed(installer_summary(i)),
+        Some(NonPe::Package(Ok(p))) => id.package = Field::Computed(package_summary(p)),
+        Some(NonPe::Installer(Err(e))) => {
+            id.installer = Field::Unavailable(e.message.clone());
+            id.error(Tier::Deep, "installer_unreadable", e.message.clone());
+        }
+        Some(NonPe::Package(Err(e))) => {
+            id.package = Field::Unavailable(e.message.clone());
+            id.error(Tier::Deep, "package_unreadable", e.message.clone());
+        }
+        None => {}
+    }
+    if id.installer.is_computed() || id.package.is_computed() || id.script.is_computed() {
+        id.computed_tiers.insert(Tier::Deep);
+    }
+}
+
+fn script_summary(r: &ScriptReport) -> ScriptSummary {
+    ScriptSummary {
+        kind: r.kind,
+        encoding: r.encoding,
+        text_issue: r.text_issue,
+        signing_state: match r.signing_state {
+            ScriptSigningState::Unsigned => "unsigned",
+            ScriptSigningState::Valid => "valid",
+            ScriptSigningState::DigestMismatch => "digest_mismatch",
+            ScriptSigningState::TooLargeForSignatureCheck { .. } => "too_large",
+            _ => "invalid",
+        },
+        invalid_reason: match r.signing_state {
+            ScriptSigningState::Unsigned
+            | ScriptSigningState::Valid
+            | ScriptSigningState::TooLargeForSignatureCheck { .. } => None,
+            _ => Some(script_invalid_reason(r)),
+        },
+        block: r.block,
+        empty_text: r.empty_text,
+        signed_metadata: r
+            .signature()
+            .filter(|s| !s.untrusted_signer_attrs)
+            .and_then(|s| s.signer.as_ref())
+            .map(|a| a.signed_metadata.clone()),
+        warnings: r.warnings.clone(),
+    }
+}
+
+fn installer_summary(i: &InstallerIdentity) -> InstallerSummary {
+    let guid = |g: &crate::installer::GuidText| g.canonical().unwrap_or_else(|| g.text.clone());
+    let p = &i.properties;
+    InstallerSummary {
+        kind: match i.kind {
+            InstallerKind::Msi => "msi",
+            InstallerKind::Msp => "msp",
+            InstallerKind::Mst => "mst",
+            InstallerKind::Msm => "msm",
+        },
+        product_code: p.product_code.as_ref().map(guid),
+        upgrade_code: p.upgrade_code.as_ref().map(guid),
+        package_code: i.package_code.as_ref().map(guid),
+        product_name: p.product_name.clone(),
+        product_version: p.product_version_text.clone(),
+        product_version_quad: i.product_version().map(|q| q.to_string()),
+        manufacturer: p.manufacturer.clone(),
+        product_language: p.product_language.clone(),
+        platform: i.summary.platform().map(str::to_owned),
+        patch_targets: i.patch_targets().iter().map(guid).collect(),
+        transform_target: i
+            .transform
+            .as_ref()
+            .and_then(|t| t.target_product_code.as_ref())
+            .map(guid),
+        binaries: i.embedded.binaries.len(),
+        custom_actions: i.embedded.custom_actions.len(),
+        executable_actions: i.embedded.has_executable_actions(),
+        elevated_actions: i.embedded.custom_actions.iter().any(|a| a.no_impersonate),
+        cabinets: i.embedded.cabinets.len(),
+        signed: i.signature.is_some(),
+        signature_valid: i.signature_valid() && installer_trailing_bytes(i).is_none(),
+        trailing_bytes: installer_trailing_bytes(i),
+        content_sha256: i.content_sha256.to_string(),
+        warnings: i.warnings.iter().map(|w| format!("{w:?}")).collect(),
+    }
+}
+
+fn package_summary(p: &PackageIdentity) -> PackageSummary {
+    PackageSummary {
+        is_bundle: p.is_bundle,
+        name: p.name.clone(),
+        publisher_dn: p.publisher_dn.clone(),
+        publisher_id: p.publisher_id.clone(),
+        pfn: p.pfn.clone(),
+        full_name: p.full_name.clone(),
+        version: p.version.to_string(),
+        arch: p.arch.clone(),
+        resource_id: p.resource_id.clone(),
+        display_name: p.display_name.clone(),
+        publisher_display_name: p.publisher_display_name.clone(),
+        is_framework: p.is_framework,
+        is_resource_package: p.is_resource_package,
+        runs_full_trust: p.runs_full_trust(),
+        executables: p.apps.iter().filter_map(|a| a.executable.clone()).collect(),
+        aliases: p
+            .extensions
+            .iter()
+            .flat_map(|e| e.aliases.iter().cloned())
+            .collect(),
+        capabilities: p.capabilities.iter().map(|c| c.name.clone()).collect(),
+        members: p.members.iter().map(|m| m.file_name.clone()).collect(),
+        signed: p.signature.is_some(),
+        signature_valid: p.signature_valid(),
+        signature_issue: p
+            .signature
+            .as_ref()
+            .and_then(|s| s.issue.as_ref())
+            .map(package_issue_name),
+    }
 }
 
 fn invalid_reason(r: &InvalidReason) -> String {

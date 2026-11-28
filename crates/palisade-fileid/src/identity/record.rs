@@ -107,8 +107,8 @@ pub struct FileIdentity {
     /// The tiers the caller asked for.
     pub requested_tiers: Tiers,
     /// The tiers whose attributes were computed. A requested tier is
-    /// missing here when it failed, or when nothing in it can be computed
-    /// yet (the deep tier, until #52 and #53).
+    /// missing here when it failed, or when nothing in it applies to the
+    /// file yet (the deep tier of a PE image, until content tags run).
     pub computed_tiers: Tiers,
     /// The file name, from the path or the name hint. Needs no I/O.
     pub name: NameInfo,
@@ -134,12 +134,12 @@ pub struct FileIdentity {
     pub signatures: Field<Vec<SignatureSummary>>,
     /// Every catalog that lists the file (trust tier).
     pub catalog_matches: Field<Vec<CatalogMatchSummary>>,
-    /// Windows Installer identity (#53).
-    pub installer: Field<NotYetDefined>,
-    /// Packaged-app identity (#53).
-    pub package: Field<NotYetDefined>,
-    /// Script signature and identity (#52).
-    pub script: Field<NotYetDefined>,
+    /// Windows Installer identity (#53, deep tier).
+    pub installer: Field<InstallerSummary>,
+    /// Packaged-app identity (#53, deep tier).
+    pub package: Field<PackageSummary>,
+    /// Script signature and identity (#52, deep tier).
+    pub script: Field<ScriptSummary>,
     /// File system context (stat and context tiers).
     pub fs: FsInfo,
     /// Attributes worked out from the groups above.
@@ -577,10 +577,14 @@ pub struct Hashes {
     /// or a non-conformant image, whose Authenticode digest is not
     /// authoritative), `none` for an empty file.
     pub authoritative: &'static str,
-    /// The normalised, timestamp-free MSI hash (#53).
-    pub msi_normalised_sha256: Field<NotYetDefined>,
-    /// The normalised script hash (#52).
-    pub script_normalised_sha256: Field<NotYetDefined>,
+    /// The normalised, timestamp-free installer hash (#53): the same
+    /// across copies of a package that differ only in timestamps. Medium,
+    /// for explicit opt-in rules; the flat hash stays the identity.
+    pub msi_normalised_sha256: Field<String>,
+    /// The normalised script hash (#52): the UTF-8 text without the
+    /// signature block, the byte order mark and line-ending differences.
+    /// Weak to medium, for explicit opt-in rules only.
+    pub script_normalised_sha256: Field<String>,
 }
 
 /// The Authenticode image hashes and page hash values (#47).
@@ -619,9 +623,12 @@ pub enum SigningStateKind {
     /// No embedded signature, and no catalog lists it.
     Unsigned,
     /// No trusted signer vouches for it, and it may still be signed: its
-    /// format's embedded signatures are not read yet (scripts #52,
-    /// installers and packages #53), or it has no embedded signature and
-    /// no catalog store was given to look it up in. Treated as untrusted.
+    /// format's embedded signatures are not read (a cabinet, an encoded
+    /// script, a file over a reader's size limit), or it has no embedded
+    /// signature and no catalog lookup could show it is not listed (no
+    /// store was given, the index was cut short, or the file is a script or
+    /// installer, whose catalog digests are not yet checked against OS
+    /// tooling). Treated as untrusted.
     Unverified,
 }
 
@@ -645,8 +652,8 @@ pub enum EmbeddedState {
     Valid,
     /// It has one or more, and none is valid.
     Invalid,
-    /// The format's embedded signatures are not read yet (non-PE files,
-    /// #52 and #53).
+    /// The format's embedded signatures are not read (no reader for it, or
+    /// over the reader's size limit).
     NotChecked,
 }
 
@@ -718,6 +725,10 @@ pub struct TrustedSigner {
     pub well_known_root_id: Option<u8>,
     /// The trust anchor reached, by label.
     pub anchored_to: Option<String>,
+    /// For a packaged app, its `PublisherDisplayName`, carried only once
+    /// the manifest's publisher is checked to be this signer. Display only:
+    /// rules match the publisher name and DN, never this.
+    pub package_display_name: Option<String>,
 }
 
 /// One embedded signature (#48), with its chain (#49) and validity (#50).
@@ -725,7 +736,7 @@ pub struct TrustedSigner {
 pub struct SignatureSummary {
     /// Its position, depth first.
     pub index: usize,
-    /// `embedded` or `nested`.
+    /// `embedded`, `nested`, `script`, `msi` or `package`.
     pub kind: &'static str,
     /// 0 for embedded, 1 and up for nested.
     pub depth: u8,
@@ -790,6 +801,136 @@ pub struct ChainSummary {
     pub well_known_root_id: Option<u8>,
     /// How many issues chain building found.
     pub issues: usize,
+}
+
+/// A script's signature and identity (#52).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ScriptSummary {
+    /// The format it was read as (`power_shell`, `vb_script` and so on).
+    pub kind: crate::script::ScriptKind,
+    /// The text encoding (`no_bom`, `utf8_bom`, `utf16_le`, `utf16_be`).
+    /// `None` when the file was not read.
+    pub encoding: Option<crate::script::TextEncoding>,
+    /// Why the text cannot be decoded without ambiguity, if it cannot.
+    pub text_issue: Option<crate::script::TextIssue>,
+    /// The signing state: `unsigned`, `valid`, `digest_mismatch`,
+    /// `invalid` or `too_large`.
+    pub signing_state: &'static str,
+    /// Why it is invalid, for reading.
+    pub invalid_reason: Option<String>,
+    /// The signature block's offset and length, when it is well formed.
+    pub block: Option<crate::script::BlockLocation>,
+    /// The text outside the block is empty: its digests identify nothing.
+    pub empty_text: bool,
+    /// The signed metadata (version-like fields) of the signature, when
+    /// it decoded. The signer's claims: trusted only as far as the signer
+    /// is, which is `signing_state`'s verdict.
+    pub signed_metadata: Option<crate::authenticode::SignedMetadata>,
+    /// Anything unusual.
+    pub warnings: Vec<crate::script::ScriptWarning>,
+}
+
+/// A Windows Installer package's identity (#53).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct InstallerSummary {
+    /// `msi`, `msp`, `mst` or `msm`.
+    pub kind: &'static str,
+    /// `ProductCode`, canonical (braced, upper case) when well formed,
+    /// otherwise as written.
+    pub product_code: Option<String>,
+    /// `UpgradeCode`, the same way.
+    pub upgrade_code: Option<String>,
+    /// The `PackageCode` (summary revision number), the same way.
+    pub package_code: Option<String>,
+    /// `ProductName`. Free text the author chooses.
+    pub product_name: Option<String>,
+    /// `ProductVersion`, as written.
+    pub product_version: Option<String>,
+    /// `ProductVersion` as a quad, when it parses.
+    pub product_version_quad: Option<String>,
+    /// `Manufacturer`. Free text the author chooses: never a publisher.
+    pub manufacturer: Option<String>,
+    /// `ProductLanguage`.
+    pub product_language: Option<String>,
+    /// The summary template's platform.
+    pub platform: Option<String>,
+    /// For a patch, the product codes it targets.
+    pub patch_targets: Vec<String>,
+    /// For a transform, the product code it applies to.
+    pub transform_target: Option<String>,
+    /// How many `Binary` table rows, custom actions and embedded cabinets.
+    pub binaries: usize,
+    /// How many custom actions.
+    pub custom_actions: usize,
+    /// Whether any custom action runs executable content.
+    pub executable_actions: bool,
+    /// Whether any custom action runs elevated (no impersonation).
+    pub elevated_actions: bool,
+    /// How many embedded cabinets.
+    pub cabinets: usize,
+    /// The package has a signature stream.
+    pub signed: bool,
+    /// The signature verifies against the content and nothing follows the
+    /// signed package (trust is separate).
+    pub signature_valid: bool,
+    /// Bytes after the compound file's last sector, which no signature or
+    /// hash covers. A signed package with any is invalid.
+    pub trailing_bytes: Option<u64>,
+    /// The content hash the signature signs, hex.
+    pub content_sha256: String,
+    /// What could not be read, for reading.
+    pub warnings: Vec<String>,
+}
+
+/// A packaged app's or bundle's identity (#53).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PackageSummary {
+    /// Whether it is a bundle.
+    pub is_bundle: bool,
+    /// `Identity@Name`.
+    pub name: String,
+    /// `Identity@Publisher`, exactly as written.
+    pub publisher_dn: String,
+    /// The 13-character publisher ID.
+    pub publisher_id: String,
+    /// The package family name. Only as strong as the signature that
+    /// binds `Identity@Publisher`: see [`super::strength`].
+    pub pfn: String,
+    /// The package full name.
+    pub full_name: String,
+    /// `Identity@Version`.
+    pub version: String,
+    /// `Identity@ProcessorArchitecture`.
+    pub arch: String,
+    /// `Identity@ResourceId`.
+    pub resource_id: String,
+    /// `Properties/DisplayName`. Free text.
+    pub display_name: Option<String>,
+    /// `Properties/PublisherDisplayName`. Free text: never a publisher.
+    pub publisher_display_name: Option<String>,
+    /// A framework package.
+    pub is_framework: bool,
+    /// A resource package.
+    pub is_resource_package: bool,
+    /// Declares the restricted `runFullTrust` capability.
+    pub runs_full_trust: bool,
+    /// Application executables, relative to the package root.
+    pub executables: Vec<String>,
+    /// App execution aliases.
+    pub aliases: Vec<String>,
+    /// Capability names.
+    pub capabilities: Vec<String>,
+    /// For a bundle, the member file names.
+    pub members: Vec<String>,
+    /// It has `AppxSignature.p7x`.
+    pub signed: bool,
+    /// The signature is valid for the package: the Authenticode checks,
+    /// the package digest, the block map and the publisher. Trust is
+    /// separate.
+    pub signature_valid: bool,
+    /// Why a sound signature is still not valid for this package
+    /// (`publisher_mismatch`, `block_map` and so on), for reading.
+    pub signature_issue: Option<String>,
 }
 
 /// The rule-relevant attributes of one certificate.

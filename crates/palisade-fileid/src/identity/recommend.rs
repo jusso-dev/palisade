@@ -209,12 +209,21 @@ pub fn recommend(id: &FileIdentity) -> Recommendation {
                     format!("its signatures could not be read: {why}")
                 }
                 Some((EmbeddedState::NotChecked, _)) => {
-                    "this file type's signatures are not read yet (#52, #53)".to_owned()
+                    "this file type's signatures are not read".to_owned()
                 }
                 Some((_, CatalogState::NotChecked))
                     if id.errors.iter().any(|e| e.code == "catalog_index_truncated") =>
                 {
                     "no embedded signature, and the catalog index is incomplete, so it may be catalog-signed"
+                        .to_owned()
+                }
+                // A script or installer whose catalog lookup cannot prove
+                // a miss: the digests its catalogs list are not yet checked
+                // against catalogs made by OS tooling (#51).
+                Some((_, CatalogState::NotChecked))
+                    if ctx_had_catalogs(id) =>
+                {
+                    "no embedded signature, and a catalog lookup of this file type cannot show it is not catalog-signed"
                         .to_owned()
                 }
                 Some((_, CatalogState::NotChecked)) => {
@@ -283,4 +292,10 @@ pub fn recommend(id: &FileIdentity) -> Recommendation {
         ));
     }
     rec
+}
+
+/// Whether a catalog store was given: the record lists the matches it found
+/// (possibly none) only then.
+fn ctx_had_catalogs(id: &FileIdentity) -> bool {
+    id.catalog_matches.is_computed()
 }

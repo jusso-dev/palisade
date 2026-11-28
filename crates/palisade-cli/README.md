@@ -35,8 +35,11 @@ pal fileid explain <path> [--json] [--anchor <cert>]...
   to one. `--catroot` loads every `*.cat` under a directory (such as the OS
   catalog root) and looks files up in it. Revocation is not fetched
   (offline).
-- `hash` prints only the selected digests. `msi-normalised` and
-  `script-normalised` are not computed yet (#53, #52) and exit 1.
+- `hash` prints only the selected digests. `msi-normalised` (an
+  installer's timestamp-free hash) and `script-normalised` (a script's text
+  without its signature block, byte order mark and line-ending
+  differences) parse the file; for any other file they are not available
+  and exit 1.
 - `certs` writes each certificate of a signed PE file, cabinet, catalog or
   other PKCS#7 file (nested signatures included) to
   `<out>/<sha256 thumbprint>.der` (or `.pem`), once each, through

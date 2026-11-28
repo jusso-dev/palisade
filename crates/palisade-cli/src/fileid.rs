@@ -622,7 +622,16 @@ fn hash(path: &Path, algs: &[HashKind], json_out: bool) -> Result<ExitCode, Fail
     })?;
     let mut ctx = trust.context();
     ctx.flat_algorithms = AlgorithmSet::ALL;
-    let id = identify(path, Tiers::only(Tier::Hash), &ctx)
+    // The normalised hashes need the installer or script parsed, which the
+    // deep tier does; nothing is trusted here, so no verdict is printed.
+    let mut tiers = Tiers::only(Tier::Hash);
+    if algs
+        .iter()
+        .any(|a| matches!(a, HashKind::MsiNormalised | HashKind::ScriptNormalised))
+    {
+        tiers.insert(Tier::Deep);
+    }
+    let id = identify(path, tiers, &ctx)
         .map_err(|e| Failure::Runtime(format!("{}: {e}", path.display())))?;
     let h = id.hashes.computed();
     let a = h.and_then(|h| h.authenticode.computed());
@@ -640,8 +649,12 @@ fn hash(path: &Path, algs: &[HashKind], json_out: bool) -> Result<ExitCode, Fail
             HashKind::AuthenticodeSha1 => Ok(a.and_then(|a| a.sha1.clone())),
             HashKind::PageSha256 => Ok(a.and_then(|a| a.page_sha256.clone())),
             HashKind::PageSha1 => Ok(a.and_then(|a| a.page_sha1.clone())),
-            HashKind::MsiNormalised => Err("not yet supported (#53)".to_owned()),
-            HashKind::ScriptNormalised => Err("not yet supported (#52)".to_owned()),
+            HashKind::MsiNormalised => {
+                Ok(h.and_then(|h| h.msi_normalised_sha256.computed().cloned()))
+            }
+            HashKind::ScriptNormalised => {
+                Ok(h.and_then(|h| h.script_normalised_sha256.computed().cloned()))
+            }
         };
         let shown = match value {
             Ok(Some(v)) => {

@@ -620,16 +620,22 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   - Every group is a `Field`: `computed`, `not_requested`,
     `not_applicable`, `unavailable` (with why) or `not_yet_supported` (with
     the issue numbers). `kind` is the content classification of
-    `filetype` (#44). Groups other issues still deliver are in the schema
-    already: `script` (#52), `installer` and `package` (#53),
-    and the owner, writability, streams, reparse points, file ID, volume
-    and provenance (#54).
-  - `signing_state` folds the embedded signatures (#48, #49, #50) and the
-    catalog lookup (#51) into `trusted`, `untrusted`, `invalid`, `unsigned`
-    or `unverified`. It is `trusted` only for an embedded signature that
-    passed every check, or a trusted catalog match that does not rely on
-    SHA-1. It is `unsigned` only when a catalog lookup ran too; a format
-    whose signatures are not read yet is `unverified`.
+    `filetype` (#44). The deep tier fills `script` (#52), `installer` and
+    `package` (#53), chosen by content, never by name. Groups other issues
+    still deliver are in the schema already: the owner, writability,
+    streams, reparse points, file ID, volume and provenance (#54).
+  - `signing_state` folds the embedded signatures (#48, #49, #50) of PE
+    images, scripts, installers and packages, and the catalog lookup (#51),
+    into `trusted`, `untrusted`, `invalid`, `unsigned` or `unverified`. It
+    is `trusted` only for a signature that passed every check, or a trusted
+    catalog match that does not rely on SHA-1. A package whose manifest
+    names another publisher than its signer is `invalid`. It is `unsigned`
+    only when a catalog lookup ran and can prove a miss; a format whose
+    signatures are not read, and a script or installer no catalog lists, is
+    `unverified`.
+  - `hashes.msi_normalised_sha256` (Medium) and
+    `hashes.script_normalised_sha256` (Weak) are the tolerant identities of
+    #53 and #52, for explicit opt-in rules only.
   - `hashes.authoritative` names the identity digest: the Authenticode
     SHA-256 of a conformant image, otherwise the flat SHA-256, `none` for
     an empty file (#47).

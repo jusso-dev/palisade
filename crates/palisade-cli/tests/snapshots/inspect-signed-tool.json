@@ -73,20 +73,10 @@
       "empty": false,
       "md5": "2b1dbf2f2eabe07ae27956687ebfa3bd",
       "msi_normalised_sha256": {
-        "status": "not_yet_supported",
-        "value": {
-          "issues": [
-            53
-          ]
-        }
+        "status": "not_applicable"
       },
       "script_normalised_sha256": {
-        "status": "not_yet_supported",
-        "value": {
-          "issues": [
-            52
-          ]
-        }
+        "status": "not_applicable"
       },
       "sha1": "b6a5c156c7b70a7be18f50aa62bbcbb4cd562178",
       "sha256": "db0e2ef876ba59070a9579a660a88e2ffaa6f4233ea2c4ccd56149017dad9f56",
@@ -301,6 +291,7 @@
           "tbs_hash_alg": "sha256",
           "tbs_hash_sha256": "206ac037f443e26e8acaa9797b49b5d28aaec351eac99b7998d54eae5c6b6664"
         },
+        "package_display_name": null,
         "pca": null,
         "product_name": "Example Suite",
         "publisher_dn": "CN=Palisade Corpus Vendor, O=Palisade Tests",

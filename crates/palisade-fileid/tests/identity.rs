@@ -58,10 +58,17 @@ fn tiers_compute_only_what_was_asked() {
     assert_eq!(trust.pe, Field::NotRequested);
 
     let all = identify_bytes(&image, Some("a.exe"), Tiers::ALL, &ctx());
-    assert!(matches!(all.installer, Field::NotYetSupported(_)));
-    assert!(matches!(all.script, Field::NotYetSupported(p) if p.issues == [52]));
+    // A PE image is no installer, package or script.
+    assert_eq!(all.installer, Field::NotApplicable);
+    assert_eq!(all.package, Field::NotApplicable);
+    assert_eq!(all.script, Field::NotApplicable);
+    let h = all.hashes.computed().unwrap();
+    assert_eq!(h.msi_normalised_sha256, Field::NotApplicable);
+    assert_eq!(h.script_normalised_sha256, Field::NotApplicable);
     // Uploads have no file system context.
     assert_eq!(all.fs.owner, Field::NotApplicable);
+    // Nothing in the deep tier applies to a PE yet (content tags are not
+    // run), so it is not marked computed.
     assert!(!all.computed_tiers.contains(Tier::Deep));
     assert!(all.computed_tiers.contains(Tier::Trust));
 }
