@@ -218,6 +218,19 @@ matcher.
 | `signer.tbs_hash` | The hash of a chain certificate's `tbsCertificate`, under the certificate's own signature digest (40, 64, 96 or 128 hex digits). It identifies that one certificate: the `tbsCertificate` includes the serial number and the validity period (RFC 5280), so a certificate reissued with the same key has another TBS hash, and each issue needs its own rule; `signer.spki_sha256` names the key across every certificate that carries it. `signer.position` says which certificate. A 40-digit (SHA-1) value is compatibility only (ADR 0008). |
 | `signer.eku` | The extended key usages of the leaf certificate, as dotted OIDs, such as `1.3.6.1.5.5.7.3.3` (code signing). A leaf without the extension has none. |
 | `signer.spki_sha256` | The SHA-256 of a chain certificate's DER `SubjectPublicKeyInfo`: its public key (#318). Unlike the TBS hash it stays the same when a certificate is reissued for the same key, so a deny on a stolen key's hash also blocks every reissue. `signer.position` says which certificate. A key above the leaf belongs to a certificate authority, which vouches for everything it signs. |
+| `meta.legal_copyright` | The `LegalCopyright` string from the version resource (#328). |
+| `meta.language` | The language and code page of the version-resource block the other `meta.*` strings were read from, as its key is written: eight hex digits, such as `040904b0` (#328). |
+| `meta.file_name_fallback` | The file's effective name (#328): the first of the original file name, internal name, file description and product name that the version resource has, or the name on disk when it has none. |
+| `meta.file_size` | The file's size in bytes, as a whole number (#328). |
+| `meta.pe_machine` | The PE image's COFF machine, by name: `i386`, `amd64`, `arm64`, `arm64_ec`, `arm64_x`, `arm_nt` and so on (#328). |
+| `meta.pe_subsystem` | The PE image's subsystem, by name: `windows_gui`, `windows_cui`, `native`, `efi_application` and so on (#328). |
+| `meta.is_dotnet` | Whether the PE image is a .NET assembly: it has a CLR runtime header (#328). |
+| `msi.product_code` | A Windows Installer package's `ProductCode` (#328), a GUID. Compared as a GUID: braces and case do not matter. |
+| `msi.upgrade_code` | A Windows Installer package's `UpgradeCode` (#328), a GUID shared by every version of a product. |
+| `msi.product_name` | A Windows Installer package's `ProductName` (#328). Free text the author chooses. |
+| `msi.manufacturer` | A Windows Installer package's `Manufacturer` (#328). Free text the author chooses: never a publisher. |
+| `msi.product_version` | A Windows Installer package's `ProductVersion` (#328). |
+| `msi.package_code` | A Windows Installer package's `PackageCode` (#328): the GUID of one build of the package. |
 
 ## FindingSeverity
 

@@ -568,6 +568,57 @@ pub enum Field {
     /// authority, which vouches for everything it signs.
     #[serde(rename = "signer.spki_sha256")]
     SignerSpkiSha256,
+    /// The `LegalCopyright` string from the version resource (#328).
+    #[serde(rename = "meta.legal_copyright")]
+    MetaLegalCopyright,
+    /// The language and code page of the version-resource block the other
+    /// `meta.*` strings were read from, as its key is written: eight hex
+    /// digits, such as `040904b0` (#328).
+    #[serde(rename = "meta.language")]
+    MetaLanguage,
+    /// The file's effective name (#328): the first of the original file
+    /// name, internal name, file description and product name that the
+    /// version resource has, or the name on disk when it has none.
+    #[serde(rename = "meta.file_name_fallback")]
+    MetaFileNameFallback,
+    /// The file's size in bytes, as a whole number (#328).
+    #[serde(rename = "meta.file_size")]
+    MetaFileSize,
+    /// The PE image's COFF machine, by name: `i386`, `amd64`, `arm64`,
+    /// `arm64_ec`, `arm64_x`, `arm_nt` and so on (#328).
+    #[serde(rename = "meta.pe_machine")]
+    MetaPeMachine,
+    /// The PE image's subsystem, by name: `windows_gui`, `windows_cui`,
+    /// `native`, `efi_application` and so on (#328).
+    #[serde(rename = "meta.pe_subsystem")]
+    MetaPeSubsystem,
+    /// Whether the PE image is a .NET assembly: it has a CLR runtime header
+    /// (#328).
+    #[serde(rename = "meta.is_dotnet")]
+    MetaIsDotnet,
+    /// A Windows Installer package's `ProductCode` (#328), a GUID. Compared
+    /// as a GUID: braces and case do not matter.
+    #[serde(rename = "msi.product_code")]
+    MsiProductCode,
+    /// A Windows Installer package's `UpgradeCode` (#328), a GUID shared by
+    /// every version of a product.
+    #[serde(rename = "msi.upgrade_code")]
+    MsiUpgradeCode,
+    /// A Windows Installer package's `ProductName` (#328). Free text the
+    /// author chooses.
+    #[serde(rename = "msi.product_name")]
+    MsiProductName,
+    /// A Windows Installer package's `Manufacturer` (#328). Free text the
+    /// author chooses: never a publisher.
+    #[serde(rename = "msi.manufacturer")]
+    MsiManufacturer,
+    /// A Windows Installer package's `ProductVersion` (#328).
+    #[serde(rename = "msi.product_version")]
+    MsiProductVersion,
+    /// A Windows Installer package's `PackageCode` (#328): the GUID of one
+    /// build of the package.
+    #[serde(rename = "msi.package_code")]
+    MsiPackageCode,
 }
 
 /// The type of a field's value, which decides the operators it accepts and
@@ -626,6 +677,9 @@ pub enum FieldClass {
     Digest,
     /// A set of object identifiers, in dotted form (#31).
     OidSet,
+    /// A GUID, such as `{12345678-9ABC-DEF0-1234-56789ABCDEF0}`, compared
+    /// with or without braces, in either case (#328).
+    Guid,
 }
 
 impl FieldClass {
@@ -663,7 +717,7 @@ pub enum Strength {
 
 impl Field {
     /// Every field, in declaration order.
-    pub const ALL: [Self; 71] = [
+    pub const ALL: [Self; 84] = [
         Self::HashSha256,
         Self::HashSha384,
         Self::HashSha512,
@@ -735,6 +789,19 @@ impl Field {
         Self::SignerTbsHash,
         Self::SignerEku,
         Self::SignerSpkiSha256,
+        Self::MetaLegalCopyright,
+        Self::MetaLanguage,
+        Self::MetaFileNameFallback,
+        Self::MetaFileSize,
+        Self::MetaPeMachine,
+        Self::MetaPeSubsystem,
+        Self::MetaIsDotnet,
+        Self::MsiProductCode,
+        Self::MsiUpgradeCode,
+        Self::MsiProductName,
+        Self::MsiManufacturer,
+        Self::MsiProductVersion,
+        Self::MsiPackageCode,
     ];
 
     /// Whether the field is read from the object's signatures
@@ -839,6 +906,17 @@ impl Field {
             Self::TimeLocalTime => FieldClass::TimeOfDay,
             Self::TimeDate => FieldClass::Date,
             Self::SignerTbsHash => FieldClass::Digest,
+            Self::MetaLegalCopyright
+            | Self::MetaLanguage
+            | Self::MetaFileNameFallback
+            | Self::MetaPeMachine
+            | Self::MetaPeSubsystem
+            | Self::MsiProductName
+            | Self::MsiManufacturer => FieldClass::Text,
+            Self::MetaFileSize => FieldClass::Number,
+            Self::MetaIsDotnet => FieldClass::Bool,
+            Self::MsiProductCode | Self::MsiUpgradeCode | Self::MsiPackageCode => FieldClass::Guid,
+            Self::MsiProductVersion => FieldClass::Version,
             Self::SignerEku => FieldClass::OidSet,
         }
     }
@@ -899,7 +977,20 @@ impl Field {
             | Self::MetaProductName
             | Self::MetaCompanyName
             | Self::MetaFileVersion
-            | Self::MetaProductVersion => Strength::Weak,
+            | Self::MetaProductVersion
+            | Self::MetaLegalCopyright
+            | Self::MetaLanguage
+            | Self::MetaFileNameFallback
+            | Self::MetaFileSize
+            | Self::MetaPeMachine
+            | Self::MetaPeSubsystem
+            | Self::MetaIsDotnet
+            | Self::MsiProductCode
+            | Self::MsiUpgradeCode
+            | Self::MsiProductName
+            | Self::MsiManufacturer
+            | Self::MsiProductVersion
+            | Self::MsiPackageCode => Strength::Weak,
             Self::UserSid
             | Self::UserName
             | Self::UserGroups
@@ -1157,7 +1248,8 @@ impl Operator {
             FieldClass::Hash { .. }
             | FieldClass::Digest
             | FieldClass::Sid
-            | FieldClass::SessionType => {
+            | FieldClass::SessionType
+            | FieldClass::Guid => {
                 matches!(self, Self::Equals | Self::NotEquals)
             }
             FieldClass::Path | FieldClass::FileName | FieldClass::Text => self.is_text(),

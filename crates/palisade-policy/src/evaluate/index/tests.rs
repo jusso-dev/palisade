@@ -88,6 +88,13 @@ fn pool_value(field: Field, k: usize) -> String {
         FieldClass::Date => ["2026-01-01", "2026-06-01", "2026-12-31"][k % 3].into(),
         // Main's signer fields (#316): the TBS hash and the EKU set.
         FieldClass::Digest => hex(HASH_CHARS[k % 3], 64),
+        // #328's MSI codes: either case, with or without braces.
+        FieldClass::Guid => [
+            "{12345678-9ABC-DEF0-1234-56789ABCDEF0}",
+            "12345678-9abc-def0-1234-56789abcdef0",
+            "{00000000-0000-0000-0000-000000000001}",
+        ][k % 3]
+            .into(),
         FieldClass::OidSet => [
             "1.3.6.1.5.5.7.3.3",
             "1.3.6.1.4.1.311.10.3.6",

@@ -781,7 +781,7 @@ impl CompiledCriterion {
                 raw
             }
             field => match facts.get(field) {
-                Some(fact) => self.eval_value(fact, notes),
+                Some(fact) => self.eval_stored(fact, notes),
                 None => {
                     notes.insert(Note::FactMissing);
                     Tri::Unknown
@@ -913,6 +913,29 @@ impl CompiledCriterion {
                 notes.insert(Note::FactMalformed);
                 Tri::Unknown
             }
+        }
+    }
+
+    /// A fact stored in [`ObjectFacts`] by field: a number, a yes-or-no
+    /// fact or a GUID is read from its text first (#328), and text that is
+    /// not one is malformed, so unknown; anything else is a hash, text or
+    /// version fact.
+    fn eval_stored(&self, fact: &str, notes: &mut Notes) -> Tri {
+        match self.field.class() {
+            FieldClass::Number => match number(fact) {
+                Some(n) => self.ordered(Ordinal::Number(n)),
+                None => malformed(notes),
+            },
+            FieldClass::Bool => match (fact, &self.values) {
+                ("true", Values::Bool(want)) => Tri::from_bool(*want),
+                ("false", Values::Bool(want)) => Tri::from_bool(!*want),
+                _ => malformed(notes),
+            },
+            FieldClass::Guid => match (canonical_guid(fact), &self.values) {
+                (Some(have), Values::Text(want)) => Tri::from_bool(want.contains(&have)),
+                _ => malformed(notes),
+            },
+            _ => self.eval_value(fact, notes),
         }
     }
 
@@ -1317,6 +1340,11 @@ fn compile_values(
                 "expected 40, 64, 96 or 128 hexadecimal digits (a SHA-1 to SHA-512 digest), optionally after `0x`",
             )),
         })?),
+        FieldClass::Guid => Values::Text(each(values, |v| {
+            canonical_guid(v).ok_or_else(|| {
+                invalid("expected a GUID such as `{12345678-9ABC-DEF0-1234-56789ABCDEF0}`, with or without braces")
+            })
+        })?),
         FieldClass::OidSet => Values::Tags(each(values, |v| {
             signer::canonical_oid(v).ok_or_else(|| {
                 invalid("expected an object identifier in dotted form, such as `1.3.6.1.5.5.7.3.3`")
@@ -1624,6 +1652,29 @@ fn variable_syntax(value: &str) -> Option<(&str, &str)> {
 }
 
 /// A whole number in decimal, with no sign and at most 20 digits.
+/// A fact that is not what its field holds: unknown, never a match.
+fn malformed(notes: &mut Notes) -> Tri {
+    notes.insert(Note::FactMalformed);
+    Tri::Unknown
+}
+
+/// A GUID in canonical form: upper case, braced, as
+/// `{12345678-9ABC-DEF0-1234-56789ABCDEF0}`. Accepts either case, with or
+/// without the braces. `None` if it is not one.
+pub(crate) fn canonical_guid(s: &str) -> Option<String> {
+    let bare = s
+        .strip_prefix('{')
+        .and_then(|b| b.strip_suffix('}'))
+        .unwrap_or(s);
+    let groups: Vec<&str> = bare.split('-').collect();
+    let ok = groups.len() == 5
+        && groups
+            .iter()
+            .zip([8, 4, 4, 4, 12])
+            .all(|(g, n)| g.len() == n && g.bytes().all(|b| b.is_ascii_hexdigit()));
+    ok.then(|| format!("{{{}}}", bare.to_ascii_uppercase()))
+}
+
 fn number(s: &str) -> Option<u64> {
     (!s.is_empty() && s.len() <= 20 && s.bytes().all(|b| b.is_ascii_digit()))
         .then(|| s.parse().ok())
