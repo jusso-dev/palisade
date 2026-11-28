@@ -1,8 +1,8 @@
 //! The platform-independent host loop and the console binary.
 
-// Test code: helpers outside `#[test]` functions may unwrap, since a failure
-// there should fail the test loudly.
-#![allow(clippy::unwrap_used)]
+// Test code: helpers outside `#[test]` functions may unwrap or expect, since
+// a failure there should fail the test loudly.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::{process::Command, time::Duration};
 
