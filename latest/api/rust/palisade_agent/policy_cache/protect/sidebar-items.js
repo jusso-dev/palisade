@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["KEYRING_PURPOSE","RECORD_PURPOSE"],"struct":["MemoryProtector"],"trait":["Protector"]};

@@ -180,9 +180,15 @@ file on the handle’s final path (<code>PathForms::canonical</code>, filled fro
 <code>win::fsctx::final_path</code>), not on the normalised name (T-agent-13). It handles <code>\\?\</code>, <code>\??\</code>, <code>\\.\</code>,
 <code>GLOBALROOT</code>, NT device paths, volume GUID paths, UNC, <code>.</code> and <code>..</code>,
 trailing dots and spaces, reserved device names, alternate data stream
-syntax, NTFS-style case folding and paths up to 32,767 UTF-16 units.
+syntax, NTFS case folding (the OS’s upcase table, from
+<code>palisade_core::upcase</code>) and paths up to 32,767 UTF-16 units.
 Possible 8.3 short names must be expanded through the
-<code>ShortNameResolver</code> hook before a path yields a match key.</li>
+<code>ShortNameResolver</code> hook before a path yields a match key, and a path
+marked “unknown fold” (<code>mark_fold_unknown</code>) yields none.</li>
+<li><code>fsctx::upcase</code>: reads the CRC that an NTFS volume records for its
+upcase table (<code>$UpCase:$Info</code>) from the file record the OS returns.
+Only a volume that records the standard table’s CRC folds names as the
+OS table does; any other is “unknown fold” (#332).</li>
 <li><code>fsctx::acl</code>: a hardened self-relative security descriptor parser, and
 the writability decision: which write-type rights any non-administrator
 may hold on a file and on each ancestor folder. Deny ACEs, ACE order,
@@ -230,7 +236,11 @@ with the OS access check, and check the stock system folders too.</li>
 <code>VolumeInfo</code> for the volume an open handle is on (drive type, bus and
 hot-plug state from the storage queries, OS volume by GUID, file
 system and journal support), and <code>is_case_sensitive_dir</code> reads the
-per-directory case-sensitivity flag. A file is a network file if any
+per-directory case-sensitivity flag. <code>folds_as_standard</code> says whether
+a volume’s names fold as the OS table does (NTFS, the standard
+<code>$UpCase:$Info</code> CRC, read once per volume through the volume device,
+which needs administrator rights); final paths on any other volume are
+marked “unknown fold”, so they have no rule key. A file is a network file if any
 of three signs says so (the remote-protocol query, the handle’s NT path
 under a redirector device, the name it was opened by), and a handle with
 no local volume root keeps only its serial, so a share never reads as
@@ -884,7 +894,10 @@ execution alias only when its family, app user model ID, application
 and target executable all check out against an installed package
 (<code>resolve_alias</code>). <code>win::packages</code> fills it for one family and the
 current user from the OS app-model API and the installed manifest,
-kept only when the manifest gives the full name the OS reported.</p>
+kept only when the manifest gives the full name the OS reported. <code>win::package_manager</code> fills it for every user, from the package
+manager’s WinRT interface (<code>FindPackages</code>, <code>FindUsers</code>; administrator
+rights): the stub flag and the SIDs of the users each package is
+installed for. A package it can’t read marks the list incomplete.</p>
 </li>
 </ul>
 <h3 id="handling-untrusted-input"><a class="doc-anchor" href="#handling-untrusted-input">§</a>Handling untrusted input</h3>
@@ -1099,7 +1112,11 @@ separate crate (#19). Because every <code>ring</code> call is in one module, swa
 the provider is a one-module change.</p>
 <p>With the <code>os-trust</code> feature, on Windows only, <code>windows-sys</code> (the Windows API
 bindings, with only the API families <code>win</code> calls) is a direct dependency.
-<code>palisade-policy</code> never enables the feature, so its graph is unchanged.</p>
+So is <code>windows</code> (the WinRT projection), with only <code>ApplicationModel</code> and
+<code>Management_Deployment</code>, for <code>win::package_manager</code> (#333): the flat API
+cannot list other users’ packages. <code>deny.toml</code> lets no other workspace
+crate depend on <code>windows</code> directly. <code>palisade-policy</code> never enables the
+feature, so its graph is unchanged.</p>
 <p>With <code>content-rules</code>, <code>aho-corasick</code> (std and its <code>memchr</code> fast path only)
 for the tagger’s multi-pattern search. It is already a dependency of
 <code>palisade-policy</code> through <code>regex-automata</code>, so it adds no crate to the

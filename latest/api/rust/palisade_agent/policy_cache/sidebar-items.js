@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["STATUS_INTERVAL"],"enum":["ActivateError","Activated"],"fn":["health_of"],"mod":["builtin","store","verify"],"struct":["Active","CacheSetup","PolicyCache","PolicyCacheSubsystem","PolicyStatus","StartupReport","Verdict"]};
+window.SIDEBAR_ITEMS = {"constant":["REVERIFY_INTERVAL","STATUS_INTERVAL"],"enum":["ActivateError","Activated","Reverified"],"fn":["health_of"],"mod":["builtin","events","protect","store","verify"],"struct":["Active","CacheSetup","PolicyCache","PolicyCacheSubsystem","PolicyStatus","StartupReport","Verdict"]};

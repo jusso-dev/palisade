@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-a700fb1e.js";
+            window.path_to_searchindex_js = "../searchindex-7b4dc4d5.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-049dbba3.js"></script>
@@ -226,6 +226,7 @@ type.</p>
 <tr><td><code>workflow-lint</code></td><td>ubuntu-latest</td><td><code>actionlint</code> (checksum-verified release) and <code>zizmor --offline</code></td></tr>
 <tr><td><code>package</code></td><td>windows-latest (x64), windows-11-arm (ARM64, native)</td><td><code>cargo xtask dist --msi --sign none</code>, then the same with <code>--bump-patch</code>, then <code>packaging/wix/smoke-test.ps1</code>: install, upgrade, downgrade, repair and removal of the package on the runner (<a href="packaging.html#tests-in-ci">packaging.md</a>)</td></tr>
 <tr><td><code>sign-test</code></td><td>windows-latest</td><td>Code signing end to end with throwaway certificates made on the runner and deleted: <code>cargo xtask dist --msi --sign test-ca</code>, <code>cargo xtask release verify</code> of every signature including inside the packages, then <code>packaging/sign/ci-test.ps1</code> (the <code>pfx</code> signer with a canary password that must not appear in the output, and a signed package of unsigned executables that verification must reject). No secrets (<a href="releasing.html#dry-run-on-pull-requests">releasing.md</a>)</td></tr>
+<tr><td><code>installed-package</code></td><td>windows-latest</td><td><code>cargo test -p palisade-fileid --features os-trust --test package_installed</code> with <code>PALISADE_INSTALL_TEST_PACKAGE=1</code>: packs and signs a test package with a throwaway self-signed certificate made on the runner, trusts it in the machine's TrustedPeople store, installs it, checks every user's package listing (stub flag and users), executable mapping and app execution alias resolution, then removes the package and the certificate. Then the <code>win::package_manager</code> unit tests. No secrets (#333)</td></tr>
 <tr><td><code>server-image</code></td><td>ubuntu-latest</td><td><code>cargo xtask dist</code> (the Linux server binary), <code>podman build</code> of <code>packaging/server/Containerfile</code>, and <code>palisade-server version</code> in the image</td></tr>
 <tr><td><code>ci-ok</code></td><td>ubuntu-latest</td><td>Passes only if every job above succeeded</td></tr>
 <tr><td><code>snapshot-prepare</code>, <code>snapshot</code>, <code>snapshot-finish</code></td><td>ubuntu-latest; windows-latest and windows-11-arm</td><td>Pushes to <code>main</code> only, after <code>ci-ok</code>: the <a href="#main-snapshot"><code>main-snapshot</code></a> pre-release</td></tr>

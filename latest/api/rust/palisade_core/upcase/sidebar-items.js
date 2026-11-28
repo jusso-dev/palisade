@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["STANDARD_UPCASE_CRC"],"fn":["fold","upcase_char","upcase_unit"]};

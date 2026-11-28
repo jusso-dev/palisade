@@ -36,7 +36,7 @@
             const path_to_root = "../../../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../../../searchindex-a700fb1e.js";
+            window.path_to_searchindex_js = "../../../../../../searchindex-7b4dc4d5.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../../../../../toc-049dbba3.js"></script>
@@ -200,6 +200,7 @@ document and has the default shown in the schema.</p>
 <tr><td><code>advanced</code></td><td>map of <a href="types.html#advancedvalue"><code>AdvancedValue</code></a></td><td>no</td><td></td><td>at most 256 entries; keys: matches <code>^[a-z][a-z0-9_.-]{0,127}$</code></td><td>1.0.0</td><td>Engineering settings, checked against a registry of known keys. The registry is empty in this version, so any key is rejected unless <code>allow_unknown_advanced</code> is set. Keys are added only with the feature that reads them (#330), and never relax a decision.</td></tr>
 <tr><td><code>allow_unknown_advanced</code></td><td>boolean</td><td>no</td><td><code>false</code></td><td></td><td>1.0.0</td><td>Accept keys in <code>advanced</code> that the registry does not know.</td></tr>
 <tr><td><code>capture_command_line</code></td><td>boolean</td><td>no</td><td><code>false</code></td><td></td><td>1.0.0</td><td>Whether the agent records process command lines. Off by default for privacy (#18).</td></tr>
+<tr><td><code>condition_budget_ms</code></td><td>integer</td><td>no</td><td></td><td>1 to 10000; format <code>uint16</code></td><td>1.0.0</td><td>The most time, in milliseconds, the agent spends collecting the warm and cold facts of one rule (#33, #329): 1 to 10000, default 50. A fact not collected in time is unknown, with the trace note <code>condition_timeout</code>. Separate from the per-decision watchdog (#42).</td></tr>
 <tr><td><code>decision_cache_ttl_secs</code></td><td>integer</td><td>no</td><td><code>300</code></td><td>0 to 86400; format <code>uint32</code></td><td>1.0.0</td><td>How long a decision may be cached, in seconds. <code>0</code> disables the cache.</td></tr>
 <tr><td><code>dll_control</code></td><td><a href="types.html#controllevel"><code>ControlLevel</code></a></td><td>no</td><td><code>"enforce"</code></td><td></td><td>1.0.0</td><td>Control level for libraries.</td></tr>
 <tr><td><code>driver_control</code></td><td><a href="types.html#controllevel"><code>ControlLevel</code></a></td><td>no</td><td><code>"enforce"</code></td><td></td><td>1.0.0</td><td>Control level for drivers.</td></tr>

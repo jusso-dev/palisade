@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Detail","Tamper"],"struct":["BoundedSink","PolicyEvent"],"trait":["PolicyEventSink"]};

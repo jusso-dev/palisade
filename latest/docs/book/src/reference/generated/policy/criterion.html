@@ -36,7 +36,7 @@
             const path_to_root = "../../../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../../../searchindex-a700fb1e.js";
+            window.path_to_searchindex_js = "../../../../../../searchindex-7b4dc4d5.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../../../../../toc-049dbba3.js"></script>
@@ -199,13 +199,17 @@ negative ones (#32): <code>not_contains [a, b]</code> means neither <code>a</cod
 </thead>
 <tbody>
 <tr><td><code>anchored</code></td><td>boolean</td><td>no</td><td></td><td></td><td>1.0.0</td><td>Only for <code>regex</code> and <code>not_regex</code>: <code>false</code> lets the pattern match anywhere in the fact instead of the whole fact (#32). Unset means <code>true</code>.</td></tr>
+<tr><td><code>arg_index</code></td><td>integer</td><td>no</td><td></td><td>-255 to 255; format <code>int16</code></td><td>1.0.0</td><td>Only for <code>process.argv</code>: the argument tested, from the start (0 is the program name) or, when negative, from the end (-1 is the last). Unset means any argument after the program name.</td></tr>
 <tr><td><code>case_sensitive</code></td><td>boolean</td><td>no</td><td></td><td></td><td>1.0.0</td><td>Compare strings case-sensitively. Unset means the field's default (#32), which is case-insensitive for every field defined so far. Only text, paths, file names, account names and tags have a case; other fields (hashes, versions, SIDs, group sets, yes-or-no facts and session types) reject this option.</td></tr>
+<tr><td><code>evaluate</code></td><td><a href="types.html#cadence"><code>Cadence</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>When the agent refreshes what this criterion probes (#33, #329). Required on a <code>cold</code> field (<code>fs.*</code>), allowed on a <code>warm</code> one (<code>env.*</code>, <code>reg.*</code>), and not applicable to a <code>hot</code> one. Unset on a warm field means every decision.</td></tr>
 <tr><td><code>field</code></td><td><a href="types.html#field"><code>Field</code></a></td><td>yes</td><td></td><td></td><td>1.0.0</td><td>The fact being tested.</td></tr>
 <tr><td><code>include_sub_ous</code></td><td>boolean</td><td>no</td><td></td><td></td><td>1.0.0</td><td>Only for <code>user.ou</code> and <code>device.ou</code>: <code>true</code> also matches objects in every organisational unit below the named one (#33). Unset means <code>false</code>: the object must be directly in it.</td></tr>
 <tr><td><code>match_ads</code></td><td>boolean</td><td>no</td><td></td><td></td><td>1.0.0</td><td>Only for positive tests of <code>path.full</code>: <code>true</code> lets a value that names no alternate data stream also match a stream of a file it matches, so <code>C:\\Tools\\*</code> matches <code>C:\\Tools\\a.exe:s</code> (#32). Unset means <code>false</code>: a stream is its own object.</td></tr>
 <tr><td><code>operator</code></td><td><a href="types.html#operator"><code>Operator</code></a></td><td>yes</td><td></td><td></td><td>1.0.0</td><td>How it is compared.</td></tr>
 <tr><td><code>safety_critical</code></td><td>boolean</td><td>no</td><td></td><td></td><td>1.0.0</td><td>Only in a mandatory blocklist: when the fact is unknown, this criterion counts towards the deny applying (<code>match</code>, or <code>no_match</code> under an odd number of <code>not</code> nodes), so the shipped blocklists fail closed (#32, #87). Unset means <code>false</code>.</td></tr>
 <tr><td><code>signer</code></td><td><a href="signer-options.html"><code>SignerOptions</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>Only for <code>signer.*</code> fields: which signatures take part, and what each must also satisfy (#31). The options bind to the signature the field is read from, so <code>min_key_bits</code> on a publisher test needs the publisher's own signature to have the key size. Unset means every option's default.</td></tr>
+<tr><td><code>target</code></td><td>string</td><td>no</td><td></td><td>1 to 2048 characters</td><td>1.0.0</td><td>Only for <code>env.*</code>, <code>reg.*</code> and <code>fs.*</code> fields, which need it: what the criterion probes (#329). An environment variable's name; a registry key, starting with its hive (<code>HKLM</code>, <code>HKCU</code>, <code>HKU</code> or <code>HKCR</code>, or the long names); or a drive or UNC path, with no wildcard or stream.</td></tr>
+<tr><td><code>value_name</code></td><td>string</td><td>no</td><td></td><td>1 to 2048 characters</td><td>1.0.0</td><td>Only for <code>reg.value</code>: the name of the value. Unset means the key's default value.</td></tr>
 <tr><td><code>values</code></td><td>array of string</td><td>no</td><td></td><td>at most 25 items</td><td>1.0.0</td><td>1 to 25 values. Each is at most 2048 bytes of UTF-8; the schema can only bound the length in characters, so validation checks the bytes. <code>is_true</code> and <code>is_false</code> take no values, and the key may be left out.</td></tr>
 </tbody>
 </table>

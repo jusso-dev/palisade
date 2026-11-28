@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["STANDARD_UPCASE_CRC"],"enum":["FileRecordError","VolumeUpcase"],"fn":["parse_upcase_info","upcase_unit"]};

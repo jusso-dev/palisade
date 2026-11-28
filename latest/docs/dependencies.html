@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-a700fb1e.js";
+            window.path_to_searchindex_js = "../searchindex-7b4dc4d5.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-049dbba3.js"></script>
@@ -216,7 +216,14 @@ workspace crates are in <a href="workspace.html#dependency-directions">workspace
 <p>Keep the agent's tree small. The agent runs as a privileged service and should pull in much
 less than the server. The dependency report lists each crate's tree size separately. In the
 agent, prefer <code>windows-sys</code> to <code>windows</code>: it is bindings only, so it compiles faster and ships
-less.</p>
+less. The one exception is <code>palisade_fileid::win::package_manager</code> (#333). Listing every user's
+installed packages, the stub flag and each package's users needs the package manager's WinRT
+interface. <code>windows-sys</code> has no WinRT projection, and writing the activation and vtable calls by
+hand would mean more <code>unsafe</code> in this repository than taking the crate. So <code>palisade-fileid</code>'s
+<code>os-trust</code> feature enables <code>windows</code> with only the <code>ApplicationModel</code> and
+<code>Management_Deployment</code> features. <code>deny.toml</code> lets no other workspace crate depend on it
+directly (<code>wrappers</code>), and <code>cargo xtask check-deps</code> keeps it out of <code>palisade-policy</code> and
+<code>palisade-core</code> entirely.</p>
 <h2 id="what-runs-on-every-pull-request"><a class="header" href="#what-runs-on-every-pull-request">What runs on every pull request</a></h2>
 <div class="table-wrapper">
 <table>

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["MAX_REGEXES_PER_POLICY","REGEX_SIZE_LIMIT"],"enum":["CompileErrorKind","Note","Tri"],"fn":["fold","normalize_hex"],"mod":["net","signer"],"struct":["CompileError","CompiledCriterion","EvalContext","Evaluation","Notes","Version"]};
+window.SIDEBAR_ITEMS = {"constant":["MAX_REGEXES_PER_POLICY","REGEX_SIZE_LIMIT"],"enum":["CompileErrorKind","Note","Tri"],"fn":["fold","fold_path","fold_path_value","is_path_name","normalize_hex"],"mod":["net","signer"],"struct":["CompileError","CompiledCriterion","EvalContext","Evaluation","Notes","Version"]};

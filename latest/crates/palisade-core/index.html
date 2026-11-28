@@ -36,7 +36,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-a700fb1e.js";
+            window.path_to_searchindex_js = "../../searchindex-7b4dc4d5.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-049dbba3.js"></script>
@@ -205,6 +205,9 @@
 </li>
 <li>
 <p><code>path</code>: lexical normalisation of Windows paths (#32). Prefixes such as <code>\\?\</code> and <code>\??\</code>, device paths (through a <code>VolumeMap</code>), mixed and repeated separators, <code>.</code> and <code>..</code>, and stream-type suffixes are folded into one canonical form, so the agent's facts and the policy's values compare equal. Normalisation is idempotent.</p>
+</li>
+<li>
+<p><code>upcase</code>: the NTFS upcase table that Windows 7 and later write to every volume they format, and that the OS upper-cases with (#332). Two names NTFS treats as one fold to the same string with <code>upcase::fold</code>. It is not Unicode's upper-case mapping: nothing outside ASCII folds into ASCII.</p>
 </li>
 <li>
 <p><code>platform</code>: the platform abstraction (#29). Traits for everything the agent reads from the OS: <code>Clock</code> (wall and monotonic time), <code>FileSystem</code> (reads, metadata with file ID, volume serial and USN, owner SID, security descriptor, alternate data streams), <code>SignatureVerifier</code> (embedded and catalog signatures), <code>IdentityProvider</code> (tokens, groups, sessions, integrity, elevation, the directory group cache), <code>ProcessInfo</code> (process records keyed by ID and creation time, so a reused process ID is never mistaken for the old process; <code>ancestry</code> walks parents safely), <code>Environment</code> (host, domain, OS version, architecture, addresses, connection type, variables; <code>expand_env_vars</code> expands <code>%NAME%</code>), <code>Registry</code> and <code>EventSink</code>. <code>Platform</code> bundles them for generic code; every trait but <code>FileSystem</code> is also object safe. The traits do no I/O themselves; the agent implements them.</p>

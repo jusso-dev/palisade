@@ -1,0 +1,289 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `crates/palisade-core/src/upcase.rs`."><title>upcase.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="palisade_core" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">palisade_core/</div>upcase.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! The NTFS upcase table (#332).
+<a href=#2 id=2 data-nosnippet>2</a>//!
+<a href=#3 id=3 data-nosnippet>3</a>//! NTFS compares two names by upper-casing each UTF-16 code unit through
+<a href=#4 id=4 data-nosnippet>4</a>//! the volume's upcase table (`$UpCase`), written when the volume is
+<a href=#5 id=5 data-nosnippet>5</a>//! formatted. [`upcase_unit`] is the table that Windows 7 and every later
+<a href=#6 id=6 data-nosnippet>6</a>//! version write, and that the OS itself upper-cases with
+<a href=#7 id=7 data-nosnippet>7</a>//! (`RtlUpcaseUnicodeChar`; `palisade-fileid`'s Windows tests check every
+<a href=#8 id=8 data-nosnippet>8</a>//! unit against it). [`fold`] upper-cases a name with it.
+<a href=#9 id=9 data-nosnippet>9</a>//!
+<a href=#10 id=10 data-nosnippet>10</a>//! It is not Unicode's upper-case mapping. It never maps a character
+<a href=#11 id=11 data-nosnippet>11</a>//! outside ASCII into ASCII (`ı`, `ſ` and the Kelvin sign stay as they
+<a href=#12 id=12 data-nosnippet>12</a>//! are, so `ſetup.exe` and `SETUP.EXE` are two names), it leaves
+<a href=#13 id=13 data-nosnippet>13</a>//! characters outside the Basic Multilingual Plane alone, and it predates
+<a href=#14 id=14 data-nosnippet>14</a>//! case pairs that later Unicode versions added. A volume formatted by an
+<a href=#15 id=15 data-nosnippet>15</a>//! older Windows holds an older table; telling those apart is
+<a href=#16 id=16 data-nosnippet>16</a>//! `palisade-fileid`'s job.
+<a href=#17 id=17 data-nosnippet>17</a>//!
+<a href=#18 id=18 data-nosnippet>18</a>//! Pure and `no_std`.
+<a href=#19 id=19 data-nosnippet>19</a>
+<a href=#20 id=20 data-nosnippet>20</a></span><span class="kw">use </span>alloc::string::String;
+<a href=#21 id=21 data-nosnippet>21</a>
+<a href=#22 id=22 data-nosnippet>22</a><span class="doccomment">/// The CRC-64 that NTFS records in `$UpCase:$Info` for the table
+<a href=#23 id=23 data-nosnippet>23</a>/// [`upcase_unit`] implements: the one Windows 7 and later write when they
+<a href=#24 id=24 data-nosnippet>24</a>/// format a volume.
+<a href=#25 id=25 data-nosnippet>25</a></span><span class="kw">pub const </span>STANDARD_UPCASE_CRC: u64 = <span class="number">0xDADC_7E77_6B1B_690C</span>;
+<a href=#26 id=26 data-nosnippet>26</a>
+<a href=#27 id=27 data-nosnippet>27</a><span class="doccomment">/// The upcase table as runs `(first, last, step, add)`: every unit `u` in
+<a href=#28 id=28 data-nosnippet>28</a>/// `first..=last` with `(u - first) % step == 0` upper-cases to
+<a href=#29 id=29 data-nosnippet>29</a>/// `u + add` (wrapping); every other unit to itself. Sorted, and the runs
+<a href=#30 id=30 data-nosnippet>30</a>/// do not overlap. Generated from the Windows 7 default table that
+<a href=#31 id=31 data-nosnippet>31</a>/// ntfs-3g's `ntfs_upcase_table_build` reproduces; the tests check its
+<a href=#32 id=32 data-nosnippet>32</a>/// CRC against [`STANDARD_UPCASE_CRC`].
+<a href=#33 id=33 data-nosnippet>33</a></span><span class="attr">#[rustfmt::skip]
+<a href=#34 id=34 data-nosnippet>34</a></span><span class="kw">const </span>RUNS: [(u16, u16, u16, u16); <span class="number">134</span>] = [
+<a href=#35 id=35 data-nosnippet>35</a>    (<span class="number">0x0061</span>, <span class="number">0x007A</span>, <span class="number">1</span>, <span class="number">0xFFE0</span>),
+<a href=#36 id=36 data-nosnippet>36</a>    (<span class="number">0x00E0</span>, <span class="number">0x00F6</span>, <span class="number">1</span>, <span class="number">0xFFE0</span>),
+<a href=#37 id=37 data-nosnippet>37</a>    (<span class="number">0x00F8</span>, <span class="number">0x00FE</span>, <span class="number">1</span>, <span class="number">0xFFE0</span>),
+<a href=#38 id=38 data-nosnippet>38</a>    (<span class="number">0x00FF</span>, <span class="number">0x00FF</span>, <span class="number">1</span>, <span class="number">0x0079</span>),
+<a href=#39 id=39 data-nosnippet>39</a>    (<span class="number">0x0101</span>, <span class="number">0x012F</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#40 id=40 data-nosnippet>40</a>    (<span class="number">0x0133</span>, <span class="number">0x0137</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#41 id=41 data-nosnippet>41</a>    (<span class="number">0x013A</span>, <span class="number">0x0148</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#42 id=42 data-nosnippet>42</a>    (<span class="number">0x014B</span>, <span class="number">0x0177</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#43 id=43 data-nosnippet>43</a>    (<span class="number">0x017A</span>, <span class="number">0x017E</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#44 id=44 data-nosnippet>44</a>    (<span class="number">0x0180</span>, <span class="number">0x0180</span>, <span class="number">1</span>, <span class="number">0x00C3</span>),
+<a href=#45 id=45 data-nosnippet>45</a>    (<span class="number">0x0183</span>, <span class="number">0x0185</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#46 id=46 data-nosnippet>46</a>    (<span class="number">0x0188</span>, <span class="number">0x0188</span>, <span class="number">1</span>, <span class="number">0xFFFF</span>),
+<a href=#47 id=47 data-nosnippet>47</a>    (<span class="number">0x018C</span>, <span class="number">0x018C</span>, <span class="number">1</span>, <span class="number">0xFFFF</span>),
+<a href=#48 id=48 data-nosnippet>48</a>    (<span class="number">0x0192</span>, <span class="number">0x0192</span>, <span class="number">1</span>, <span class="number">0xFFFF</span>),
+<a href=#49 id=49 data-nosnippet>49</a>    (<span class="number">0x0195</span>, <span class="number">0x0195</span>, <span class="number">1</span>, <span class="number">0x0061</span>),
+<a href=#50 id=50 data-nosnippet>50</a>    (<span class="number">0x0199</span>, <span class="number">0x0199</span>, <span class="number">1</span>, <span class="number">0xFFFF</span>),
+<a href=#51 id=51 data-nosnippet>51</a>    (<span class="number">0x019A</span>, <span class="number">0x019A</span>, <span class="number">1</span>, <span class="number">0x00A3</span>),
+<a href=#52 id=52 data-nosnippet>52</a>    (<span class="number">0x019E</span>, <span class="number">0x019E</span>, <span class="number">1</span>, <span class="number">0x0082</span>),
+<a href=#53 id=53 data-nosnippet>53</a>    (<span class="number">0x01A1</span>, <span class="number">0x01A5</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#54 id=54 data-nosnippet>54</a>    (<span class="number">0x01A8</span>, <span class="number">0x01A8</span>, <span class="number">1</span>, <span class="number">0xFFFF</span>),
+<a href=#55 id=55 data-nosnippet>55</a>    (<span class="number">0x01AD</span>, <span class="number">0x01AD</span>, <span class="number">1</span>, <span class="number">0xFFFF</span>),
+<a href=#56 id=56 data-nosnippet>56</a>    (<span class="number">0x01B0</span>, <span class="number">0x01B0</span>, <span class="number">1</span>, <span class="number">0xFFFF</span>),
+<a href=#57 id=57 data-nosnippet>57</a>    (<span class="number">0x01B4</span>, <span class="number">0x01B6</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#58 id=58 data-nosnippet>58</a>    (<span class="number">0x01B9</span>, <span class="number">0x01B9</span>, <span class="number">1</span>, <span class="number">0xFFFF</span>),
+<a href=#59 id=59 data-nosnippet>59</a>    (<span class="number">0x01BD</span>, <span class="number">0x01BD</span>, <span class="number">1</span>, <span class="number">0xFFFF</span>),
+<a href=#60 id=60 data-nosnippet>60</a>    (<span class="number">0x01BF</span>, <span class="number">0x01BF</span>, <span class="number">1</span>, <span class="number">0x0038</span>),
+<a href=#61 id=61 data-nosnippet>61</a>    (<span class="number">0x01C6</span>, <span class="number">0x01C6</span>, <span class="number">1</span>, <span class="number">0xFFFE</span>),
+<a href=#62 id=62 data-nosnippet>62</a>    (<span class="number">0x01C9</span>, <span class="number">0x01C9</span>, <span class="number">1</span>, <span class="number">0xFFFE</span>),
+<a href=#63 id=63 data-nosnippet>63</a>    (<span class="number">0x01CC</span>, <span class="number">0x01CC</span>, <span class="number">1</span>, <span class="number">0xFFFE</span>),
+<a href=#64 id=64 data-nosnippet>64</a>    (<span class="number">0x01CE</span>, <span class="number">0x01DC</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#65 id=65 data-nosnippet>65</a>    (<span class="number">0x01DD</span>, <span class="number">0x01DD</span>, <span class="number">1</span>, <span class="number">0xFFB1</span>),
+<a href=#66 id=66 data-nosnippet>66</a>    (<span class="number">0x01DF</span>, <span class="number">0x01EF</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#67 id=67 data-nosnippet>67</a>    (<span class="number">0x01F3</span>, <span class="number">0x01F3</span>, <span class="number">1</span>, <span class="number">0xFFFE</span>),
+<a href=#68 id=68 data-nosnippet>68</a>    (<span class="number">0x01F5</span>, <span class="number">0x01F5</span>, <span class="number">1</span>, <span class="number">0xFFFF</span>),
+<a href=#69 id=69 data-nosnippet>69</a>    (<span class="number">0x01F9</span>, <span class="number">0x021F</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#70 id=70 data-nosnippet>70</a>    (<span class="number">0x0223</span>, <span class="number">0x0233</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#71 id=71 data-nosnippet>71</a>    (<span class="number">0x023C</span>, <span class="number">0x023C</span>, <span class="number">1</span>, <span class="number">0xFFFF</span>),
+<a href=#72 id=72 data-nosnippet>72</a>    (<span class="number">0x0242</span>, <span class="number">0x0242</span>, <span class="number">1</span>, <span class="number">0xFFFF</span>),
+<a href=#73 id=73 data-nosnippet>73</a>    (<span class="number">0x0247</span>, <span class="number">0x024F</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#74 id=74 data-nosnippet>74</a>    (<span class="number">0x0250</span>, <span class="number">0x0250</span>, <span class="number">1</span>, <span class="number">0x2A1F</span>),
+<a href=#75 id=75 data-nosnippet>75</a>    (<span class="number">0x0251</span>, <span class="number">0x0251</span>, <span class="number">1</span>, <span class="number">0x2A1C</span>),
+<a href=#76 id=76 data-nosnippet>76</a>    (<span class="number">0x0253</span>, <span class="number">0x0253</span>, <span class="number">1</span>, <span class="number">0xFF2E</span>),
+<a href=#77 id=77 data-nosnippet>77</a>    (<span class="number">0x0254</span>, <span class="number">0x0254</span>, <span class="number">1</span>, <span class="number">0xFF32</span>),
+<a href=#78 id=78 data-nosnippet>78</a>    (<span class="number">0x0256</span>, <span class="number">0x0257</span>, <span class="number">1</span>, <span class="number">0xFF33</span>),
+<a href=#79 id=79 data-nosnippet>79</a>    (<span class="number">0x0259</span>, <span class="number">0x0259</span>, <span class="number">1</span>, <span class="number">0xFF36</span>),
+<a href=#80 id=80 data-nosnippet>80</a>    (<span class="number">0x025B</span>, <span class="number">0x025B</span>, <span class="number">1</span>, <span class="number">0xFF35</span>),
+<a href=#81 id=81 data-nosnippet>81</a>    (<span class="number">0x0260</span>, <span class="number">0x0260</span>, <span class="number">1</span>, <span class="number">0xFF33</span>),
+<a href=#82 id=82 data-nosnippet>82</a>    (<span class="number">0x0263</span>, <span class="number">0x0263</span>, <span class="number">1</span>, <span class="number">0xFF31</span>),
+<a href=#83 id=83 data-nosnippet>83</a>    (<span class="number">0x0268</span>, <span class="number">0x0268</span>, <span class="number">1</span>, <span class="number">0xFF2F</span>),
+<a href=#84 id=84 data-nosnippet>84</a>    (<span class="number">0x0269</span>, <span class="number">0x0269</span>, <span class="number">1</span>, <span class="number">0xFF2D</span>),
+<a href=#85 id=85 data-nosnippet>85</a>    (<span class="number">0x026B</span>, <span class="number">0x026B</span>, <span class="number">1</span>, <span class="number">0x29F7</span>),
+<a href=#86 id=86 data-nosnippet>86</a>    (<span class="number">0x026F</span>, <span class="number">0x026F</span>, <span class="number">1</span>, <span class="number">0xFF2D</span>),
+<a href=#87 id=87 data-nosnippet>87</a>    (<span class="number">0x0271</span>, <span class="number">0x0271</span>, <span class="number">1</span>, <span class="number">0x29FD</span>),
+<a href=#88 id=88 data-nosnippet>88</a>    (<span class="number">0x0272</span>, <span class="number">0x0272</span>, <span class="number">1</span>, <span class="number">0xFF2B</span>),
+<a href=#89 id=89 data-nosnippet>89</a>    (<span class="number">0x0275</span>, <span class="number">0x0275</span>, <span class="number">1</span>, <span class="number">0xFF2A</span>),
+<a href=#90 id=90 data-nosnippet>90</a>    (<span class="number">0x027D</span>, <span class="number">0x027D</span>, <span class="number">1</span>, <span class="number">0x29E7</span>),
+<a href=#91 id=91 data-nosnippet>91</a>    (<span class="number">0x0280</span>, <span class="number">0x0280</span>, <span class="number">1</span>, <span class="number">0xFF26</span>),
+<a href=#92 id=92 data-nosnippet>92</a>    (<span class="number">0x0283</span>, <span class="number">0x0283</span>, <span class="number">1</span>, <span class="number">0xFF26</span>),
+<a href=#93 id=93 data-nosnippet>93</a>    (<span class="number">0x0288</span>, <span class="number">0x0288</span>, <span class="number">1</span>, <span class="number">0xFF26</span>),
+<a href=#94 id=94 data-nosnippet>94</a>    (<span class="number">0x0289</span>, <span class="number">0x0289</span>, <span class="number">1</span>, <span class="number">0xFFBB</span>),
+<a href=#95 id=95 data-nosnippet>95</a>    (<span class="number">0x028A</span>, <span class="number">0x028B</span>, <span class="number">1</span>, <span class="number">0xFF27</span>),
+<a href=#96 id=96 data-nosnippet>96</a>    (<span class="number">0x028C</span>, <span class="number">0x028C</span>, <span class="number">1</span>, <span class="number">0xFFB9</span>),
+<a href=#97 id=97 data-nosnippet>97</a>    (<span class="number">0x0292</span>, <span class="number">0x0292</span>, <span class="number">1</span>, <span class="number">0xFF25</span>),
+<a href=#98 id=98 data-nosnippet>98</a>    (<span class="number">0x0371</span>, <span class="number">0x0373</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#99 id=99 data-nosnippet>99</a>    (<span class="number">0x0377</span>, <span class="number">0x0377</span>, <span class="number">1</span>, <span class="number">0xFFFF</span>),
+<a href=#100 id=100 data-nosnippet>100</a>    (<span class="number">0x037B</span>, <span class="number">0x037D</span>, <span class="number">1</span>, <span class="number">0x0082</span>),
+<a href=#101 id=101 data-nosnippet>101</a>    (<span class="number">0x03AC</span>, <span class="number">0x03AC</span>, <span class="number">1</span>, <span class="number">0xFFDA</span>),
+<a href=#102 id=102 data-nosnippet>102</a>    (<span class="number">0x03AD</span>, <span class="number">0x03AF</span>, <span class="number">1</span>, <span class="number">0xFFDB</span>),
+<a href=#103 id=103 data-nosnippet>103</a>    (<span class="number">0x03B1</span>, <span class="number">0x03C1</span>, <span class="number">1</span>, <span class="number">0xFFE0</span>),
+<a href=#104 id=104 data-nosnippet>104</a>    (<span class="number">0x03C3</span>, <span class="number">0x03CB</span>, <span class="number">1</span>, <span class="number">0xFFE0</span>),
+<a href=#105 id=105 data-nosnippet>105</a>    (<span class="number">0x03CC</span>, <span class="number">0x03CC</span>, <span class="number">1</span>, <span class="number">0xFFC0</span>),
+<a href=#106 id=106 data-nosnippet>106</a>    (<span class="number">0x03CD</span>, <span class="number">0x03CE</span>, <span class="number">1</span>, <span class="number">0xFFC1</span>),
+<a href=#107 id=107 data-nosnippet>107</a>    (<span class="number">0x03D7</span>, <span class="number">0x03D7</span>, <span class="number">1</span>, <span class="number">0xFFF8</span>),
+<a href=#108 id=108 data-nosnippet>108</a>    (<span class="number">0x03D9</span>, <span class="number">0x03EF</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#109 id=109 data-nosnippet>109</a>    (<span class="number">0x03F2</span>, <span class="number">0x03F2</span>, <span class="number">1</span>, <span class="number">0x0007</span>),
+<a href=#110 id=110 data-nosnippet>110</a>    (<span class="number">0x03F8</span>, <span class="number">0x03F8</span>, <span class="number">1</span>, <span class="number">0xFFFF</span>),
+<a href=#111 id=111 data-nosnippet>111</a>    (<span class="number">0x03FB</span>, <span class="number">0x03FB</span>, <span class="number">1</span>, <span class="number">0xFFFF</span>),
+<a href=#112 id=112 data-nosnippet>112</a>    (<span class="number">0x0430</span>, <span class="number">0x044F</span>, <span class="number">1</span>, <span class="number">0xFFE0</span>),
+<a href=#113 id=113 data-nosnippet>113</a>    (<span class="number">0x0450</span>, <span class="number">0x045F</span>, <span class="number">1</span>, <span class="number">0xFFB0</span>),
+<a href=#114 id=114 data-nosnippet>114</a>    (<span class="number">0x0461</span>, <span class="number">0x0481</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#115 id=115 data-nosnippet>115</a>    (<span class="number">0x048B</span>, <span class="number">0x04BF</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#116 id=116 data-nosnippet>116</a>    (<span class="number">0x04C2</span>, <span class="number">0x04CE</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#117 id=117 data-nosnippet>117</a>    (<span class="number">0x04CF</span>, <span class="number">0x04CF</span>, <span class="number">1</span>, <span class="number">0xFFF1</span>),
+<a href=#118 id=118 data-nosnippet>118</a>    (<span class="number">0x04D1</span>, <span class="number">0x0523</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#119 id=119 data-nosnippet>119</a>    (<span class="number">0x0561</span>, <span class="number">0x0586</span>, <span class="number">1</span>, <span class="number">0xFFD0</span>),
+<a href=#120 id=120 data-nosnippet>120</a>    (<span class="number">0x1D79</span>, <span class="number">0x1D79</span>, <span class="number">1</span>, <span class="number">0x8A04</span>),
+<a href=#121 id=121 data-nosnippet>121</a>    (<span class="number">0x1D7D</span>, <span class="number">0x1D7D</span>, <span class="number">1</span>, <span class="number">0x0EE6</span>),
+<a href=#122 id=122 data-nosnippet>122</a>    (<span class="number">0x1E01</span>, <span class="number">0x1E95</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#123 id=123 data-nosnippet>123</a>    (<span class="number">0x1EA1</span>, <span class="number">0x1EFF</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#124 id=124 data-nosnippet>124</a>    (<span class="number">0x1F00</span>, <span class="number">0x1F07</span>, <span class="number">1</span>, <span class="number">0x0008</span>),
+<a href=#125 id=125 data-nosnippet>125</a>    (<span class="number">0x1F10</span>, <span class="number">0x1F15</span>, <span class="number">1</span>, <span class="number">0x0008</span>),
+<a href=#126 id=126 data-nosnippet>126</a>    (<span class="number">0x1F20</span>, <span class="number">0x1F27</span>, <span class="number">1</span>, <span class="number">0x0008</span>),
+<a href=#127 id=127 data-nosnippet>127</a>    (<span class="number">0x1F30</span>, <span class="number">0x1F37</span>, <span class="number">1</span>, <span class="number">0x0008</span>),
+<a href=#128 id=128 data-nosnippet>128</a>    (<span class="number">0x1F40</span>, <span class="number">0x1F45</span>, <span class="number">1</span>, <span class="number">0x0008</span>),
+<a href=#129 id=129 data-nosnippet>129</a>    (<span class="number">0x1F51</span>, <span class="number">0x1F57</span>, <span class="number">2</span>, <span class="number">0x0008</span>),
+<a href=#130 id=130 data-nosnippet>130</a>    (<span class="number">0x1F60</span>, <span class="number">0x1F67</span>, <span class="number">1</span>, <span class="number">0x0008</span>),
+<a href=#131 id=131 data-nosnippet>131</a>    (<span class="number">0x1F70</span>, <span class="number">0x1F71</span>, <span class="number">1</span>, <span class="number">0x004A</span>),
+<a href=#132 id=132 data-nosnippet>132</a>    (<span class="number">0x1F72</span>, <span class="number">0x1F75</span>, <span class="number">1</span>, <span class="number">0x0056</span>),
+<a href=#133 id=133 data-nosnippet>133</a>    (<span class="number">0x1F76</span>, <span class="number">0x1F77</span>, <span class="number">1</span>, <span class="number">0x0064</span>),
+<a href=#134 id=134 data-nosnippet>134</a>    (<span class="number">0x1F78</span>, <span class="number">0x1F79</span>, <span class="number">1</span>, <span class="number">0x0080</span>),
+<a href=#135 id=135 data-nosnippet>135</a>    (<span class="number">0x1F7A</span>, <span class="number">0x1F7B</span>, <span class="number">1</span>, <span class="number">0x0070</span>),
+<a href=#136 id=136 data-nosnippet>136</a>    (<span class="number">0x1F7C</span>, <span class="number">0x1F7D</span>, <span class="number">1</span>, <span class="number">0x007E</span>),
+<a href=#137 id=137 data-nosnippet>137</a>    (<span class="number">0x1F80</span>, <span class="number">0x1F87</span>, <span class="number">1</span>, <span class="number">0x0008</span>),
+<a href=#138 id=138 data-nosnippet>138</a>    (<span class="number">0x1F90</span>, <span class="number">0x1F97</span>, <span class="number">1</span>, <span class="number">0x0008</span>),
+<a href=#139 id=139 data-nosnippet>139</a>    (<span class="number">0x1FA0</span>, <span class="number">0x1FA7</span>, <span class="number">1</span>, <span class="number">0x0008</span>),
+<a href=#140 id=140 data-nosnippet>140</a>    (<span class="number">0x1FB0</span>, <span class="number">0x1FB1</span>, <span class="number">1</span>, <span class="number">0x0008</span>),
+<a href=#141 id=141 data-nosnippet>141</a>    (<span class="number">0x1FB3</span>, <span class="number">0x1FB3</span>, <span class="number">1</span>, <span class="number">0x0009</span>),
+<a href=#142 id=142 data-nosnippet>142</a>    (<span class="number">0x1FC3</span>, <span class="number">0x1FC3</span>, <span class="number">1</span>, <span class="number">0x0009</span>),
+<a href=#143 id=143 data-nosnippet>143</a>    (<span class="number">0x1FD0</span>, <span class="number">0x1FD1</span>, <span class="number">1</span>, <span class="number">0x0008</span>),
+<a href=#144 id=144 data-nosnippet>144</a>    (<span class="number">0x1FE0</span>, <span class="number">0x1FE1</span>, <span class="number">1</span>, <span class="number">0x0008</span>),
+<a href=#145 id=145 data-nosnippet>145</a>    (<span class="number">0x1FE5</span>, <span class="number">0x1FE5</span>, <span class="number">1</span>, <span class="number">0x0007</span>),
+<a href=#146 id=146 data-nosnippet>146</a>    (<span class="number">0x1FF3</span>, <span class="number">0x1FF3</span>, <span class="number">1</span>, <span class="number">0x0009</span>),
+<a href=#147 id=147 data-nosnippet>147</a>    (<span class="number">0x214E</span>, <span class="number">0x214E</span>, <span class="number">1</span>, <span class="number">0xFFE4</span>),
+<a href=#148 id=148 data-nosnippet>148</a>    (<span class="number">0x2170</span>, <span class="number">0x217F</span>, <span class="number">1</span>, <span class="number">0xFFF0</span>),
+<a href=#149 id=149 data-nosnippet>149</a>    (<span class="number">0x2184</span>, <span class="number">0x2184</span>, <span class="number">1</span>, <span class="number">0xFFFF</span>),
+<a href=#150 id=150 data-nosnippet>150</a>    (<span class="number">0x24D0</span>, <span class="number">0x24E9</span>, <span class="number">1</span>, <span class="number">0xFFE6</span>),
+<a href=#151 id=151 data-nosnippet>151</a>    (<span class="number">0x2C30</span>, <span class="number">0x2C5E</span>, <span class="number">1</span>, <span class="number">0xFFD0</span>),
+<a href=#152 id=152 data-nosnippet>152</a>    (<span class="number">0x2C61</span>, <span class="number">0x2C61</span>, <span class="number">1</span>, <span class="number">0xFFFF</span>),
+<a href=#153 id=153 data-nosnippet>153</a>    (<span class="number">0x2C65</span>, <span class="number">0x2C65</span>, <span class="number">1</span>, <span class="number">0xD5D5</span>),
+<a href=#154 id=154 data-nosnippet>154</a>    (<span class="number">0x2C66</span>, <span class="number">0x2C66</span>, <span class="number">1</span>, <span class="number">0xD5D8</span>),
+<a href=#155 id=155 data-nosnippet>155</a>    (<span class="number">0x2C68</span>, <span class="number">0x2C6C</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#156 id=156 data-nosnippet>156</a>    (<span class="number">0x2C73</span>, <span class="number">0x2C73</span>, <span class="number">1</span>, <span class="number">0xFFFF</span>),
+<a href=#157 id=157 data-nosnippet>157</a>    (<span class="number">0x2C76</span>, <span class="number">0x2C76</span>, <span class="number">1</span>, <span class="number">0xFFFF</span>),
+<a href=#158 id=158 data-nosnippet>158</a>    (<span class="number">0x2C81</span>, <span class="number">0x2CE3</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#159 id=159 data-nosnippet>159</a>    (<span class="number">0x2D00</span>, <span class="number">0x2D25</span>, <span class="number">1</span>, <span class="number">0xE3A0</span>),
+<a href=#160 id=160 data-nosnippet>160</a>    (<span class="number">0xA641</span>, <span class="number">0xA65F</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#161 id=161 data-nosnippet>161</a>    (<span class="number">0xA663</span>, <span class="number">0xA66D</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#162 id=162 data-nosnippet>162</a>    (<span class="number">0xA681</span>, <span class="number">0xA697</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#163 id=163 data-nosnippet>163</a>    (<span class="number">0xA723</span>, <span class="number">0xA72F</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#164 id=164 data-nosnippet>164</a>    (<span class="number">0xA733</span>, <span class="number">0xA76F</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#165 id=165 data-nosnippet>165</a>    (<span class="number">0xA77A</span>, <span class="number">0xA77C</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#166 id=166 data-nosnippet>166</a>    (<span class="number">0xA77F</span>, <span class="number">0xA787</span>, <span class="number">2</span>, <span class="number">0xFFFF</span>),
+<a href=#167 id=167 data-nosnippet>167</a>    (<span class="number">0xA78C</span>, <span class="number">0xA78C</span>, <span class="number">1</span>, <span class="number">0xFFFF</span>),
+<a href=#168 id=168 data-nosnippet>168</a>    (<span class="number">0xFF41</span>, <span class="number">0xFF5A</span>, <span class="number">1</span>, <span class="number">0xFFE0</span>),
+<a href=#169 id=169 data-nosnippet>169</a>];
+<a href=#170 id=170 data-nosnippet>170</a>
+<a href=#171 id=171 data-nosnippet>171</a><span class="doccomment">/// Upper-cases one UTF-16 code unit with the standard NTFS table.
+<a href=#172 id=172 data-nosnippet>172</a></span><span class="attr">#[must_use]
+<a href=#173 id=173 data-nosnippet>173</a></span><span class="kw">pub fn </span>upcase_unit(unit: u16) -&gt; u16 {
+<a href=#174 id=174 data-nosnippet>174</a>    <span class="kw">let </span>i = RUNS.partition_point(|<span class="kw-2">&amp;</span>(first, ..)| first &lt;= unit);
+<a href=#175 id=175 data-nosnippet>175</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>(first, last, step, add)) = i.checked_sub(<span class="number">1</span>).and_then(|i| RUNS.get(i)) <span class="kw">else </span>{
+<a href=#176 id=176 data-nosnippet>176</a>        <span class="kw">return </span>unit;
+<a href=#177 id=177 data-nosnippet>177</a>    };
+<a href=#178 id=178 data-nosnippet>178</a>    <span class="kw">if </span>unit &lt;= last &amp;&amp; (unit - first).is_multiple_of(step) {
+<a href=#179 id=179 data-nosnippet>179</a>        unit.wrapping_add(add)
+<a href=#180 id=180 data-nosnippet>180</a>    } <span class="kw">else </span>{
+<a href=#181 id=181 data-nosnippet>181</a>        unit
+<a href=#182 id=182 data-nosnippet>182</a>    }
+<a href=#183 id=183 data-nosnippet>183</a>}
+<a href=#184 id=184 data-nosnippet>184</a>
+<a href=#185 id=185 data-nosnippet>185</a><span class="doccomment">/// Upper-cases one character with [`upcase_unit`]. A character outside
+<a href=#186 id=186 data-nosnippet>186</a>/// the Basic Multilingual Plane is unchanged, as NTFS leaves each half of
+<a href=#187 id=187 data-nosnippet>187</a>/// its surrogate pair unchanged.
+<a href=#188 id=188 data-nosnippet>188</a></span><span class="attr">#[must_use]
+<a href=#189 id=189 data-nosnippet>189</a></span><span class="kw">pub fn </span>upcase_char(c: char) -&gt; char {
+<a href=#190 id=190 data-nosnippet>190</a>    u16::try_from(u32::from(c))
+<a href=#191 id=191 data-nosnippet>191</a>        .ok()
+<a href=#192 id=192 data-nosnippet>192</a>        .and_then(|u| char::from_u32(u32::from(upcase_unit(u))))
+<a href=#193 id=193 data-nosnippet>193</a>        .unwrap_or(c)
+<a href=#194 id=194 data-nosnippet>194</a>}
+<a href=#195 id=195 data-nosnippet>195</a>
+<a href=#196 id=196 data-nosnippet>196</a><span class="doccomment">/// Upper-cases every character of `s` with [`upcase_char`]: the form two
+<a href=#197 id=197 data-nosnippet>197</a>/// names that NTFS treats as one share.
+<a href=#198 id=198 data-nosnippet>198</a></span><span class="attr">#[must_use]
+<a href=#199 id=199 data-nosnippet>199</a></span><span class="kw">pub fn </span>fold(s: <span class="kw-2">&amp;</span>str) -&gt; String {
+<a href=#200 id=200 data-nosnippet>200</a>    s.chars().map(upcase_char).collect()
+<a href=#201 id=201 data-nosnippet>201</a>}
+<a href=#202 id=202 data-nosnippet>202</a>
+<a href=#203 id=203 data-nosnippet>203</a><span class="attr">#[cfg(test)]
+<a href=#204 id=204 data-nosnippet>204</a></span><span class="kw">mod </span>tests {
+<a href=#205 id=205 data-nosnippet>205</a>    <span class="kw">use </span>alloc::vec::Vec;
+<a href=#206 id=206 data-nosnippet>206</a>
+<a href=#207 id=207 data-nosnippet>207</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#208 id=208 data-nosnippet>208</a>
+<a href=#209 id=209 data-nosnippet>209</a>    <span class="doccomment">/// The CRC-64 NTFS records in `$UpCase:$Info` (`mkntfs`'s `crc64`):
+<a href=#210 id=210 data-nosnippet>210</a>    /// reflected, polynomial `0x9A6C9329AC4BC9B5`, initial value and final
+<a href=#211 id=211 data-nosnippet>211</a>    /// XOR all ones.
+<a href=#212 id=212 data-nosnippet>212</a>    </span><span class="kw">fn </span>crc64(data: <span class="kw-2">&amp;</span>[u8]) -&gt; u64 {
+<a href=#213 id=213 data-nosnippet>213</a>        <span class="kw">let </span><span class="kw-2">mut </span>crc = u64::MAX;
+<a href=#214 id=214 data-nosnippet>214</a>        <span class="kw">for </span><span class="kw-2">&amp;</span>b <span class="kw">in </span>data {
+<a href=#215 id=215 data-nosnippet>215</a>            crc ^= u64::from(b);
+<a href=#216 id=216 data-nosnippet>216</a>            <span class="kw">for _ in </span><span class="number">0</span>..<span class="number">8 </span>{
+<a href=#217 id=217 data-nosnippet>217</a>                crc = <span class="kw">if </span>crc &amp; <span class="number">1 </span>== <span class="number">1 </span>{
+<a href=#218 id=218 data-nosnippet>218</a>                    <span class="number">0x9A6C_9329_AC4B_C9B5 </span>^ (crc &gt;&gt; <span class="number">1</span>)
+<a href=#219 id=219 data-nosnippet>219</a>                } <span class="kw">else </span>{
+<a href=#220 id=220 data-nosnippet>220</a>                    crc &gt;&gt; <span class="number">1
+<a href=#221 id=221 data-nosnippet>221</a>                </span>};
+<a href=#222 id=222 data-nosnippet>222</a>            }
+<a href=#223 id=223 data-nosnippet>223</a>        }
+<a href=#224 id=224 data-nosnippet>224</a>        !crc
+<a href=#225 id=225 data-nosnippet>225</a>    }
+<a href=#226 id=226 data-nosnippet>226</a>
+<a href=#227 id=227 data-nosnippet>227</a>    <span class="kw">fn </span>table() -&gt; Vec&lt;u16&gt; {
+<a href=#228 id=228 data-nosnippet>228</a>        (<span class="number">0</span>..=u16::MAX).map(upcase_unit).collect()
+<a href=#229 id=229 data-nosnippet>229</a>    }
+<a href=#230 id=230 data-nosnippet>230</a>
+<a href=#231 id=231 data-nosnippet>231</a>    <span class="attr">#[test]
+<a href=#232 id=232 data-nosnippet>232</a>    </span><span class="kw">fn </span>the_table_is_the_one_windows_records() {
+<a href=#233 id=233 data-nosnippet>233</a>        <span class="kw">let </span>bytes: Vec&lt;u8&gt; = table().iter().flat_map(|u| u.to_le_bytes()).collect();
+<a href=#234 id=234 data-nosnippet>234</a>        <span class="macro">assert_eq!</span>(crc64(<span class="kw-2">&amp;</span>bytes), STANDARD_UPCASE_CRC);
+<a href=#235 id=235 data-nosnippet>235</a>        <span class="macro">assert_eq!</span>(crc64(<span class="string">b""</span>), <span class="number">0</span>);
+<a href=#236 id=236 data-nosnippet>236</a>    }
+<a href=#237 id=237 data-nosnippet>237</a>
+<a href=#238 id=238 data-nosnippet>238</a>    <span class="attr">#[test]
+<a href=#239 id=239 data-nosnippet>239</a>    </span><span class="kw">fn </span>runs_are_sorted_and_disjoint() {
+<a href=#240 id=240 data-nosnippet>240</a>        <span class="kw">for </span>w <span class="kw">in </span>RUNS.windows(<span class="number">2</span>) {
+<a href=#241 id=241 data-nosnippet>241</a>            <span class="macro">assert!</span>(w[<span class="number">0</span>].<span class="number">1 </span>&lt; w[<span class="number">1</span>].<span class="number">0</span>, <span class="string">"{w:?}"</span>);
+<a href=#242 id=242 data-nosnippet>242</a>        }
+<a href=#243 id=243 data-nosnippet>243</a>        <span class="kw">for </span>(first, last, step, <span class="kw">_</span>) <span class="kw">in </span>RUNS {
+<a href=#244 id=244 data-nosnippet>244</a>            <span class="macro">assert!</span>(first &lt;= last &amp;&amp; step &gt;= <span class="number">1</span>);
+<a href=#245 id=245 data-nosnippet>245</a>        }
+<a href=#246 id=246 data-nosnippet>246</a>    }
+<a href=#247 id=247 data-nosnippet>247</a>
+<a href=#248 id=248 data-nosnippet>248</a>    <span class="attr">#[test]
+<a href=#249 id=249 data-nosnippet>249</a>    </span><span class="kw">fn </span>upcasing_is_stable_and_keeps_ascii_apart() {
+<a href=#250 id=250 data-nosnippet>250</a>        <span class="kw">let </span>t = table();
+<a href=#251 id=251 data-nosnippet>251</a>        <span class="kw">for </span>u <span class="kw">in </span><span class="number">0</span>..=u16::MAX {
+<a href=#252 id=252 data-nosnippet>252</a>            <span class="kw">let </span>up = t[usize::from(u)];
+<a href=#253 id=253 data-nosnippet>253</a>            <span class="comment">// Upper-casing an upper-case unit changes nothing.
+<a href=#254 id=254 data-nosnippet>254</a>            </span><span class="macro">assert_eq!</span>(t[usize::from(up)], up, <span class="string">"{u:04X}"</span>);
+<a href=#255 id=255 data-nosnippet>255</a>            <span class="comment">// ASCII upper-cases as ASCII, and nothing else reaches it.
+<a href=#256 id=256 data-nosnippet>256</a>            </span><span class="kw">match </span>u8::try_from(u) {
+<a href=#257 id=257 data-nosnippet>257</a>                <span class="prelude-val">Ok</span>(b) <span class="kw">if </span>b.is_ascii() =&gt; <span class="macro">assert_eq!</span>(up, u16::from(b.to_ascii_uppercase())),
+<a href=#258 id=258 data-nosnippet>258</a>                <span class="kw">_ </span>=&gt; <span class="macro">assert!</span>(up &gt;= <span class="number">0x80</span>, <span class="string">"{u:04X}"</span>),
+<a href=#259 id=259 data-nosnippet>259</a>            }
+<a href=#260 id=260 data-nosnippet>260</a>            <span class="comment">// Surrogates are left alone.
+<a href=#261 id=261 data-nosnippet>261</a>            </span><span class="kw">if </span>(<span class="number">0xD800</span>..<span class="number">0xE000</span>).contains(<span class="kw-2">&amp;</span>u) {
+<a href=#262 id=262 data-nosnippet>262</a>                <span class="macro">assert_eq!</span>(up, u);
+<a href=#263 id=263 data-nosnippet>263</a>            }
+<a href=#264 id=264 data-nosnippet>264</a>        }
+<a href=#265 id=265 data-nosnippet>265</a>    }
+<a href=#266 id=266 data-nosnippet>266</a>
+<a href=#267 id=267 data-nosnippet>267</a>    <span class="attr">#[test]
+<a href=#268 id=268 data-nosnippet>268</a>    </span><span class="kw">fn </span>examples() {
+<a href=#269 id=269 data-nosnippet>269</a>        <span class="macro">assert_eq!</span>(fold(<span class="string">"Stra\u{df}e.exe"</span>), <span class="string">"STRA\u{df}E.EXE"</span>);
+<a href=#270 id=270 data-nosnippet>270</a>        <span class="macro">assert_eq!</span>(fold(<span class="string">"\u{1c6}"</span>), <span class="string">"\u{1c4}"</span>);
+<a href=#271 id=271 data-nosnippet>271</a>        <span class="macro">assert_eq!</span>(fold(<span class="string">"\u{fb01}"</span>), <span class="string">"\u{fb01}"</span>);
+<a href=#272 id=272 data-nosnippet>272</a>        <span class="macro">assert_eq!</span>(fold(<span class="string">"\u{e9}"</span>), <span class="string">"\u{c9}"</span>);
+<a href=#273 id=273 data-nosnippet>273</a>        <span class="macro">assert_eq!</span>(fold(<span class="string">"\u{ff}"</span>), <span class="string">"\u{178}"</span>);
+<a href=#274 id=274 data-nosnippet>274</a>        <span class="macro">assert_eq!</span>(fold(<span class="string">"\u{ff41}"</span>), <span class="string">"\u{ff21}"</span>);
+<a href=#275 id=275 data-nosnippet>275</a>        <span class="comment">// Greek with a combining iota: NTFS folds these, though Unicode's
+<a href=#276 id=276 data-nosnippet>276</a>        // full upper case is two characters.
+<a href=#277 id=277 data-nosnippet>277</a>        </span><span class="macro">assert_eq!</span>(fold(<span class="string">"\u{1f80}"</span>), <span class="string">"\u{1f88}"</span>);
+<a href=#278 id=278 data-nosnippet>278</a>        <span class="macro">assert_eq!</span>(fold(<span class="string">"\u{1ff3}"</span>), <span class="string">"\u{1ffc}"</span>);
+<a href=#279 id=279 data-nosnippet>279</a>        <span class="comment">// Unicode maps these into ASCII; NTFS does not.
+<a href=#280 id=280 data-nosnippet>280</a>        </span><span class="macro">assert_eq!</span>(fold(<span class="string">"\u{131}\u{17f}\u{212a}"</span>), <span class="string">"\u{131}\u{17f}\u{212a}"</span>);
+<a href=#281 id=281 data-nosnippet>281</a>        <span class="comment">// Outside the Basic Multilingual Plane: unchanged.
+<a href=#282 id=282 data-nosnippet>282</a>        </span><span class="macro">assert_eq!</span>(fold(<span class="string">"\u{10428}"</span>), <span class="string">"\u{10428}"</span>);
+<a href=#283 id=283 data-nosnippet>283</a>        <span class="macro">assert_eq!</span>(upcase_char(<span class="string">'\u{10428}'</span>), <span class="string">'\u{10428}'</span>);
+<a href=#284 id=284 data-nosnippet>284</a>        <span class="macro">assert_eq!</span>(upcase_unit(<span class="number">0</span>), <span class="number">0</span>);
+<a href=#285 id=285 data-nosnippet>285</a>        <span class="macro">assert_eq!</span>(upcase_unit(<span class="number">0xFFFF</span>), <span class="number">0xFFFF</span>);
+<a href=#286 id=286 data-nosnippet>286</a>        <span class="macro">assert_eq!</span>(upcase_unit(<span class="number">0x149</span>), <span class="number">0x149</span>);
+<a href=#287 id=287 data-nosnippet>287</a>    }
+<a href=#288 id=288 data-nosnippet>288</a>}
+</code></pre></div></section></main></body></html>

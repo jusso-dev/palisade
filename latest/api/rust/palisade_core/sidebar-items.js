@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["Mode","ObjectType","ScriptKind","VerificationError"],"mod":["codeintegrity","path","platform","test_util"],"struct":["ParseError","PolicyId","RuleId","RuleSetId","SchemaVersion","Uuid7"]};
+window.SIDEBAR_ITEMS = {"enum":["Mode","ObjectType","ScriptKind","VerificationError"],"mod":["codeintegrity","path","platform","test_util","upcase"],"struct":["ParseError","PolicyId","RuleId","RuleSetId","SchemaVersion","Uuid7"]};

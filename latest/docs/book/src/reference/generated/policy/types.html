@@ -36,7 +36,7 @@
             const path_to_root = "../../../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../../../searchindex-a700fb1e.js";
+            window.path_to_searchindex_js = "../../../../../../searchindex-7b4dc4d5.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../../../../../toc-049dbba3.js"></script>
@@ -214,6 +214,21 @@
 <tbody>
 <tr><td><code>user</code></td><td>Only the user who approved it. The default.</td></tr>
 <tr><td><code>device</code></td><td>Every user of the device.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="cadence"><a class="header" href="#cadence">Cadence</a></h2>
+<p>When the agent refreshes a probed fact (#33, #329). The result is cached
+in the context until then.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>once_per_session</code></td><td>Once in each logon session.</td></tr>
+<tr><td><code>once_per_boot</code></td><td>Once after each boot.</td></tr>
+<tr><td><code>on_policy_change</code></td><td>Each time a new policy is applied.</td></tr>
 </tbody>
 </table>
 </div>
@@ -459,6 +474,13 @@ matcher.</p>
 <tr><td><code>path.user_can_change_acl</code></td><td>Whether some non-administrator may change the permissions or the owner of the file or a directory above it (#328).</td></tr>
 <tr><td><code>meta.detected_type</code></td><td>What the file's content is, from its bytes (#30, #328): <code>pe</code>, <code>msi</code>, <code>script</code>, <code>zip</code>, <code>lnk</code>, <code>text</code> and so on, in <code>palisade-fileid</code>'s names. <code>unknown</code> is a missing fact.</td></tr>
 <tr><td><code>meta.extension_type</code></td><td>What the file's name claims it is, from its extension (#30, #328): one of the <code>Self::MetaDetectedType</code> names, or <code>none</code> (no extension), <code>inert</code> (a document or media extension) or <code>other</code>. A PE renamed to <code>.pdf</code> has <code>meta.detected_type</code> <code>pe</code> and <code>meta.extension_type</code> <code>inert</code>.</td></tr>
+<tr><td><code>env.var</code></td><td>Context (#329): the value of the environment variable <code>target</code> in the process's environment block. User-controlled: a user sets their own environment, so it can only narrow a rule.</td></tr>
+<tr><td><code>reg.key</code></td><td>Context (#329): whether the registry key <code>target</code> exists, such as <code>HKLM\\Software\\Vendor\\App</code>. Keys under <code>HKCU</code>, <code>HKU</code> and <code>HKCR</code> are user-controlled.</td></tr>
+<tr><td><code>reg.value</code></td><td>Context (#329): the registry value <code>value_name</code> (unset: the key's default value) of the key <code>target</code>. A <code>REG_DWORD</code> or <code>REG_QWORD</code> is a number, which <code>eq</code> to <code>between</code> compare; text is compared as text. Values under <code>HKCU</code>, <code>HKU</code> and <code>HKCR</code> are user-controlled.</td></tr>
+<tr><td><code>fs.file</code></td><td>Context (#329): whether the file <code>target</code> exists. User-controlled: whether a user can create or remove a file depends on where it is, which a policy cannot see, so every file-system test is treated as one a user may control (ADR 0018).</td></tr>
+<tr><td><code>fs.folder</code></td><td>Context (#329): whether the folder <code>target</code> exists. User-controlled, as <code>fs.file</code>.</td></tr>
+<tr><td><code>process.command_line</code></td><td>Context (#329): the command line the process was started with, as the agent captured it at creation. Attacker-controlled: whoever starts a process chooses its arguments, so it can only narrow a rule.</td></tr>
+<tr><td><code>process.argv</code></td><td>Context (#329): the process's arguments, split as <code>CommandLineToArgvW</code> splits them. With <code>arg_index</code>, the argument at that position (0 is the program name, -1 the last); without it, any argument after the program name. Attacker-controlled, as <code>process.command_line</code>.</td></tr>
 </tbody>
 </table>
 </div>
@@ -609,6 +631,8 @@ match if no value does, and never match a fact that is unknown.</p>
 <tr><td><code>weekday_in</code></td><td>The day of the week is any of the values, <code>mon</code> to <code>sun</code> (#32).</td></tr>
 <tr><td><code>time_between</code></td><td>The time of day is within <code>[start, end)</code>, both <code>HH:MM</code>. A window whose end is before its start wraps midnight: <code>22:00</code> to <code>06:00</code> (#32).</td></tr>
 <tr><td><code>date_between</code></td><td>The date is within <code>[from, to]</code>, both <code>YYYY-MM-DD</code> and inclusive (#32).</td></tr>
+<tr><td><code>exists</code></td><td>What the criterion's <code>target</code> names exists (#329). Takes no values.</td></tr>
+<tr><td><code>not_exists</code></td><td>What the criterion's <code>target</code> names does not exist (#329). Takes no values. Unknown when the agent did not look, like every negation.</td></tr>
 </tbody>
 </table>
 </div>

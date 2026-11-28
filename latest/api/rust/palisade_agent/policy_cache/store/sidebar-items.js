@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["MAX_FILE_BYTES"],"struct":["FileRecordStore","PolicyStore"],"trait":["RecordStore"]};
+window.SIDEBAR_ITEMS = {"constant":["MAX_FILE_BYTES"],"struct":["FileRecordStore","FileSlot","PolicyStore","ProtectedRecordStore","Sealer"],"trait":["RecordSlot","RecordStore"]};

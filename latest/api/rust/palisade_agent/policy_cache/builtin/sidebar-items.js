@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["Builtin"]};
+window.SIDEBAR_ITEMS = {"enum":["Builtin","Enforcement"],"struct":["AgentFacts","SelfPin"]};

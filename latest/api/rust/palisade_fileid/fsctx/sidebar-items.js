@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["acl","dfs","meta","motw","ntfs","path","reparse","sid","streams","vars","volume","writable"],"struct":["FsContext","PathForms"]};
+window.SIDEBAR_ITEMS = {"constant":["STANDARD_UPCASE_CRC"],"mod":["acl","dfs","meta","motw","ntfs","path","reparse","sid","streams","upcase","vars","volume","writable"],"struct":["FsContext","PathForms"]};
