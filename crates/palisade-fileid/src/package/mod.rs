@@ -227,9 +227,11 @@ pub enum PackageSignatureStatus {
     /// The package was rejected by a package-level check, whatever its
     /// signatures said.
     Rejected(PackageSignatureIssue),
-    /// The package passed the package checks, but no signature is valid
-    /// for it: the per-signature statuses in the report say why (most
-    /// often [`SignatureStatus::DigestMismatch`]: the file changed after
+    /// No signature is valid for the package, and the package checks that
+    /// ran did not reject it. The block map's content check runs only for
+    /// a signature that verifies, so it may not have run. The
+    /// per-signature statuses in the report say why (most often
+    /// [`SignatureStatus::DigestMismatch`]: the file changed after
     /// signing).
     Invalid,
 }
