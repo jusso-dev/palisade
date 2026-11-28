@@ -21,6 +21,15 @@ The channel an administrative action came through.
 | `job` | A scheduled job. |
 | `agent` | An agent's own report. |
 
+## AggregateKind
+
+How an aggregated event came about.
+
+| Value | Meaning |
+|---|---|
+| `summary` | Allowed decisions of a summarisable type, rolled up over a window per user, process, parent, object, decision, rule and policy version. Only with `outcome` `allowed`. The event's other fields are one representative occurrence. |
+| `repeat` | Identical occurrences collapsed into one event by de-duplication or a per-tuple rate limit. The first occurrence is sent in full; this event carries the repeats it stands for. |
+
 ## ApprovalChannel
 
 The channel an approval was requested or decided through.
@@ -355,6 +364,34 @@ How a logon session was created. The names follow the OS logon types
 | `cached_interactive` | 11: with cached credentials. |
 | `cached_remote_interactive` | 12: remote desktop with cached credentials. |
 | `cached_unlock` | 13: an unlock with cached credentials. |
+
+## LossClass
+
+The kind of events a loss hit, in the order the pipeline gives them up
+when it must: diagnostics first, security events never while there is
+room.
+
+| Value | Meaning |
+|---|---|
+| `diagnostic` | Local diagnostics. |
+| `summary` | Allowed-decision summaries. |
+| `allowed` | Allowed decisions sent in full. |
+| `info` | Information events: process creation, inventory, policy state. |
+| `audit` | Audited (would-block) decisions. |
+| `blocked` | Blocked decisions. |
+| `security` | Tamper, security and agent-health events. |
+
+## LossReason
+
+Why events were lost.
+
+| Value | Meaning |
+|---|---|
+| `queue_full` | A producer's queue into the pipeline was full. |
+| `throttled` | The rate quota was exceeded. |
+| `spool_full` | The spool reached its size cap and evicted them. |
+| `expired` | They were older than the spool's age cap. |
+| `corrupt` | Their spool records failed the integrity check on recovery, or could not be written. |
 
 ## ObjectType
 

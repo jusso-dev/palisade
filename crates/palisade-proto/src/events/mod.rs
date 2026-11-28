@@ -58,6 +58,13 @@
 //! - **1.3.0**: `policy.kid`, the key that signed the policy bundle (#325),
 //!   so `policy.applied` names its signing key. It comes after every older
 //!   `policy` field, so the canonical form of an older event is unchanged.
+//! - **1.4.0**: the event pipeline's counts (#63, #197). `aggregate` on the
+//!   envelope: an event that stands for more than one occurrence, either
+//!   an allowed-execution summary or a repeat count of a de-duplicated
+//!   event. `agent.losses`: what was lost, by class and reason, with the
+//!   sequence numbers it spanned, for `agent.dropped`. Both come after
+//!   every older field, so the canonical form of an older event is
+//!   unchanged.
 //!
 //! Readers are strict. They reject unknown fields and unknown enum values,
 //! because events are hash-chained (`seq`, `prev_hash`) and a reader that
@@ -121,7 +128,7 @@ pub use value::{
 };
 
 /// The event schema version this crate writes, and the newest it reads.
-pub const CURRENT: SchemaVersion = SchemaVersion::new(1, 3, 0);
+pub const CURRENT: SchemaVersion = SchemaVersion::new(1, 4, 0);
 
 /// The first version of the current major: every part of the schema that
 /// has no later `since` version is in it.
@@ -138,6 +145,10 @@ pub const V1_2: SchemaVersion = SchemaVersion::new(1, 2, 0);
 
 /// Schema version 1.3: `policy.kid` (#325).
 pub const V1_3: SchemaVersion = SchemaVersion::new(1, 3, 0);
+
+/// Schema version 1.4: `aggregate` and `agent.losses`, the event
+/// pipeline's counts (#63, #197).
+pub const V1_4: SchemaVersion = SchemaVersion::new(1, 4, 0);
 
 /// Most signatures recorded for one file or process image.
 pub const MAX_SIGNERS: usize = 64;
@@ -421,6 +432,8 @@ pub const ADDED: &[(&str, SchemaVersion)] = &[
     ("/probe", V1_1),
     ("/fim", V1_1),
     ("/policy/kid", V1_3),
+    ("/aggregate", V1_4),
+    ("/agent/losses", V1_4),
 ];
 
 /// The schema version that added the field at `pointer`: the newest entry
@@ -690,6 +703,15 @@ pub struct Event {
         deserialize_with = "present"
     )]
     pub fim: Option<Fim>,
+    /// Set when this event stands for more than one occurrence: a summary
+    /// of allowed decisions, or a de-duplicated event with its repeat
+    /// count. Absent for an event that records one occurrence. Since 1.4.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub aggregate: Option<Aggregate>,
 }
 
 /// The device an event is about.
@@ -1884,6 +1906,129 @@ pub struct AgentInfo {
         deserialize_with = "present"
     )]
     pub tamper_attempts: Option<u64>,
+    /// What was lost since the last report, by class and reason, at most
+    /// 16 entries. Every loss the agent knows of is listed, so a gap in
+    /// `seq` is never unexplained. Since 1.4.
+    #[serde(default, skip_serializing_if = "BoundedVec::is_empty")]
+    pub losses: BoundedVec<Loss, 16>,
+}
+
+// ---------------------------------------------------------------------------
+// Pipeline counts (1.4)
+// ---------------------------------------------------------------------------
+
+/// How an aggregated event came about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AggregateKind {
+    /// Allowed decisions of a summarisable type, rolled up over a window
+    /// per user, process, parent, object, decision, rule and policy
+    /// version. Only with `outcome` `allowed`. The event's other fields are
+    /// one representative occurrence.
+    Summary,
+    /// Identical occurrences collapsed into one event by de-duplication or
+    /// a per-tuple rate limit. The first occurrence is sent in full; this
+    /// event carries the repeats it stands for.
+    Repeat,
+}
+
+/// The count an aggregated event carries. Counts are exact: every
+/// occurrence is in exactly one aggregate or one single event.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Aggregate {
+    /// Summary or repeat.
+    pub kind: AggregateKind,
+    /// The occurrences this event stands for, at least 1.
+    pub count: core::num::NonZeroU64,
+    /// When the first of them happened.
+    pub first_seen: Timestamp,
+    /// When the last of them happened.
+    pub last_seen: Timestamp,
+    /// The window it covers, in seconds, for a summary.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub window_secs: Option<u32>,
+    /// A partial summary, written before its window closed so a crash
+    /// loses no counts. A later event for the same window carries the
+    /// counts since.
+    #[serde(default, skip_serializing_if = "is_false", deserialize_with = "flag")]
+    #[schemars(schema_with = "value::flag_schema")]
+    pub partial: bool,
+    /// Up to 3 distinct command lines seen among the occurrences, after
+    /// redaction.
+    #[serde(default, skip_serializing_if = "BoundedVec::is_empty")]
+    pub cmdline_samples: BoundedVec<LongText, 3>,
+}
+
+/// The kind of events a loss hit, in the order the pipeline gives them up
+/// when it must: diagnostics first, security events never while there is
+/// room.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum LossClass {
+    /// Local diagnostics.
+    Diagnostic,
+    /// Allowed-decision summaries.
+    Summary,
+    /// Allowed decisions sent in full.
+    Allowed,
+    /// Information events: process creation, inventory, policy state.
+    Info,
+    /// Audited (would-block) decisions.
+    Audit,
+    /// Blocked decisions.
+    Blocked,
+    /// Tamper, security and agent-health events.
+    Security,
+}
+
+/// Why events were lost.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LossReason {
+    /// A producer's queue into the pipeline was full.
+    QueueFull,
+    /// The rate quota was exceeded.
+    Throttled,
+    /// The spool reached its size cap and evicted them.
+    SpoolFull,
+    /// They were older than the spool's age cap.
+    Expired,
+    /// Their spool records failed the integrity check on recovery, or
+    /// could not be written.
+    Corrupt,
+}
+
+/// One kind of loss.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Loss {
+    /// What was lost.
+    pub class: LossClass,
+    /// Why.
+    pub reason: LossReason,
+    /// How many events, at least 1.
+    pub count: core::num::NonZeroU64,
+    /// The lowest sequence number lost, for events that had one.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub from_seq: Option<u64>,
+    /// The highest sequence number lost, for events that had one.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub to_seq: Option<u64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1987,6 +2132,9 @@ pub enum EventErrorCode {
     /// An admin change does not have exactly the `old` and `new` values its
     /// `op` needs.
     ChangeValues,
+    /// A summary on an event that is not an allowed decision of a
+    /// summarisable type. Since 1.4.
+    SummaryNotAllowed,
 }
 
 impl fmt::Display for EventError {
@@ -2046,6 +2194,11 @@ impl fmt::Display for EventError {
             EventErrorCode::ChangeValues => write!(
                 f,
                 "{}: `add` has `new` only, `remove` `old` only, and `replace` both",
+                self.path
+            ),
+            EventErrorCode::SummaryNotAllowed => write!(
+                f,
+                "{}: only allowed decisions of a summarisable type are summarised",
                 self.path
             ),
         }
@@ -2163,6 +2316,14 @@ impl Event {
         {
             fail(EventErrorCode::ChangeValues, "/admin/changes");
         }
+        if self
+            .aggregate
+            .as_ref()
+            .is_some_and(|a| a.kind == AggregateKind::Summary)
+            && !(self.outcome == Outcome::Allowed && self.event_type.summarisable())
+        {
+            fail(EventErrorCode::SummaryNotAllowed, "/aggregate/kind");
+        }
         if errors.is_empty() {
             Ok(())
         } else {
@@ -2225,6 +2386,12 @@ impl Event {
         }
         if self.policy.as_ref().is_some_and(|p| p.kid.is_some()) {
             need(pointer_since("/policy/kid"));
+        }
+        if self.aggregate.is_some() {
+            need(pointer_since("/aggregate"));
+        }
+        if self.agent.as_ref().is_some_and(|a| !a.losses.is_empty()) {
+            need(pointer_since("/agent/losses"));
         }
         version
     }

@@ -151,7 +151,7 @@ fn schema_and_validate_agree_on_cross_field_rules() {
     let mut v = base();
     v["user"] = serde_json::json!({ "sid": "s-1-5-18" });
     cases.push(("lowercase sid", v));
-    for version in ["0.9.0", "1.4.0", "2.0.0"] {
+    for version in ["0.9.0", "1.5.0", "2.0.0"] {
         let mut v = base();
         v["schema_version"] = version.into();
         cases.push(("unreadable version", v));
@@ -159,6 +159,67 @@ fn schema_and_validate_agree_on_cross_field_rules() {
     for (name, value) in cases {
         assert_eq!(check(&value), (false, false), "{name}");
     }
+}
+
+/// The 1.4 pipeline counts: both sides need a 1.4 label for them, and
+/// agree that only allowed decisions of a summarisable type are
+/// summarised.
+#[test]
+fn schema_and_validate_agree_on_the_pipeline_counts() {
+    let (schemas, index) = compiled();
+    let check = |value: &serde_json::Value| {
+        let by_schema = schemas.validate(value, index).is_ok();
+        let by_rust = serde_json::from_value::<Event>(value.clone())
+            .map(|e| e.validate().is_ok())
+            .unwrap_or(false);
+        (by_schema, by_rust)
+    };
+    let with = |label: &str, kind: &str, outcome: &str| {
+        let mut v = base();
+        v["schema_version"] = label.into();
+        v["outcome"] = outcome.into();
+        v["aggregate"] = serde_json::json!({
+            "kind": kind,
+            "count": 3,
+            "first_seen": "2026-11-24T03:15:22.123456Z",
+            "last_seen": "2026-11-24T03:15:23.123456Z",
+            "cmdline_samples": ["a.exe"]
+        });
+        v
+    };
+    for label in ["1.4.0", "1.4.2"] {
+        assert_eq!(check(&with(label, "summary", "allowed")), (true, true));
+        assert_eq!(check(&with(label, "repeat", "blocked")), (true, true));
+        assert_eq!(check(&with(label, "summary", "blocked")), (false, false));
+    }
+    for label in ["1.0.0", "1.3.0"] {
+        assert_eq!(check(&with(label, "repeat", "blocked")), (false, false));
+    }
+    // A summary of a type that is not summarisable.
+    let mut v = with("1.4.0", "summary", "allowed");
+    v["event_type"] = "process.created".into();
+    v["category"] = "execution".into();
+    v["process"] = serde_json::json!({ "pid": 4 });
+    assert_eq!(check(&v), (false, false));
+    v["aggregate"]["kind"] = "repeat".into();
+    assert_eq!(check(&v), (true, true));
+    // A count of zero.
+    let mut v = with("1.4.0", "repeat", "blocked");
+    v["aggregate"]["count"] = 0.into();
+    assert_eq!(check(&v), (false, false));
+    // Losses.
+    let losses = |label: &str| {
+        let mut v = base();
+        v["schema_version"] = label.into();
+        v["event_type"] = "agent.dropped".into();
+        v["category"] = "agent".into();
+        v["agent"] = serde_json::json!({
+            "losses": [{ "class": "blocked", "reason": "corrupt", "count": 1, "from_seq": 4, "to_seq": 4 }]
+        });
+        v
+    };
+    assert_eq!(check(&losses("1.4.0")), (true, true));
+    assert_eq!(check(&losses("1.3.0")), (false, false));
 }
 
 /// `policy.kid` (1.3): both sides need a 1.3 label for it, and refuse a

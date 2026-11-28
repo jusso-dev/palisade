@@ -2,7 +2,7 @@
 
 <!-- @generated from `registry.yaml`. Do not edit by hand. Regenerate with `PALISADE_BLESS=1 cargo test -p palisade-proto --lib registry`. -->
 
-Registry schema version 1.3.0.
+Registry schema version 1.4.0.
 
 | Type | Category | Default severity | Required field sets | Summarisable | Since | Description |
 |---|---|---|---|---|---|---|

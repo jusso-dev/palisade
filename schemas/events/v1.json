@@ -175,6 +175,14 @@
           "$ref": "#/$defs/HealthStatus",
           "description": "The overall health."
         },
+        "losses": {
+          "description": "What was lost since the last report, by class and reason, at most\n16 entries. Every loss the agent knows of is listed, so a gap in\n`seq` is never unexplained. Since 1.4.",
+          "items": {
+            "$ref": "#/$defs/Loss"
+          },
+          "maxItems": 16,
+          "type": "array"
+        },
         "tamper_attempts": {
           "description": "Tamper attempts since the last report.",
           "format": "uint64",
@@ -189,6 +197,73 @@
         }
       },
       "type": "object"
+    },
+    "Aggregate": {
+      "additionalProperties": false,
+      "description": "The count an aggregated event carries. Counts are exact: every\noccurrence is in exactly one aggregate or one single event.",
+      "properties": {
+        "cmdline_samples": {
+          "description": "Up to 3 distinct command lines seen among the occurrences, after\nredaction.",
+          "items": {
+            "maxLength": 32767,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 3,
+          "type": "array"
+        },
+        "count": {
+          "description": "The occurrences this event stands for, at least 1.",
+          "format": "uint64",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "first_seen": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "When the first of them happened."
+        },
+        "kind": {
+          "$ref": "#/$defs/AggregateKind",
+          "description": "Summary or repeat."
+        },
+        "last_seen": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "When the last of them happened."
+        },
+        "partial": {
+          "const": true,
+          "description": "A partial summary, written before its window closed so a crash\nloses no counts. A later event for the same window carries the\ncounts since.",
+          "type": "boolean"
+        },
+        "window_secs": {
+          "description": "The window it covers, in seconds, for a summary.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "count",
+        "first_seen",
+        "last_seen"
+      ],
+      "type": "object"
+    },
+    "AggregateKind": {
+      "description": "How an aggregated event came about.",
+      "oneOf": [
+        {
+          "const": "summary",
+          "description": "Allowed decisions of a summarisable type, rolled up over a window\nper user, process, parent, object, decision, rule and policy\nversion. Only with `outcome` `allowed`. The event's other fields are\none representative occurrence.",
+          "type": "string"
+        },
+        {
+          "const": "repeat",
+          "description": "Identical occurrences collapsed into one event by de-duplication or\na per-tuple rate limit. The first occurrence is sent in full; this\nevent carries the repeats it stands for.",
+          "type": "string"
+        }
+      ]
     },
     "Approval": {
       "additionalProperties": false,
@@ -1637,6 +1712,114 @@
         {
           "const": "cached_unlock",
           "description": "13: an unlock with cached credentials.",
+          "type": "string"
+        }
+      ]
+    },
+    "Loss": {
+      "additionalProperties": false,
+      "description": "One kind of loss.",
+      "properties": {
+        "class": {
+          "$ref": "#/$defs/LossClass",
+          "description": "What was lost."
+        },
+        "count": {
+          "description": "How many events, at least 1.",
+          "format": "uint64",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "from_seq": {
+          "description": "The lowest sequence number lost, for events that had one.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reason": {
+          "$ref": "#/$defs/LossReason",
+          "description": "Why."
+        },
+        "to_seq": {
+          "description": "The highest sequence number lost, for events that had one.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "class",
+        "reason",
+        "count"
+      ],
+      "type": "object"
+    },
+    "LossClass": {
+      "description": "The kind of events a loss hit, in the order the pipeline gives them up\nwhen it must: diagnostics first, security events never while there is\nroom.",
+      "oneOf": [
+        {
+          "const": "diagnostic",
+          "description": "Local diagnostics.",
+          "type": "string"
+        },
+        {
+          "const": "summary",
+          "description": "Allowed-decision summaries.",
+          "type": "string"
+        },
+        {
+          "const": "allowed",
+          "description": "Allowed decisions sent in full.",
+          "type": "string"
+        },
+        {
+          "const": "info",
+          "description": "Information events: process creation, inventory, policy state.",
+          "type": "string"
+        },
+        {
+          "const": "audit",
+          "description": "Audited (would-block) decisions.",
+          "type": "string"
+        },
+        {
+          "const": "blocked",
+          "description": "Blocked decisions.",
+          "type": "string"
+        },
+        {
+          "const": "security",
+          "description": "Tamper, security and agent-health events.",
+          "type": "string"
+        }
+      ]
+    },
+    "LossReason": {
+      "description": "Why events were lost.",
+      "oneOf": [
+        {
+          "const": "queue_full",
+          "description": "A producer's queue into the pipeline was full.",
+          "type": "string"
+        },
+        {
+          "const": "throttled",
+          "description": "The rate quota was exceeded.",
+          "type": "string"
+        },
+        {
+          "const": "spool_full",
+          "description": "The spool reached its size cap and evicted them.",
+          "type": "string"
+        },
+        {
+          "const": "expired",
+          "description": "They were older than the spool's age cap.",
+          "type": "string"
+        },
+        {
+          "const": "corrupt",
+          "description": "Their spool records failed the integrity check on recovery, or\ncould not be written.",
           "type": "string"
         }
       ]
@@ -4603,6 +4786,48 @@
       "if": {
         "properties": {
           "schema_version": {
+            "pattern": "^1\\.(0|1|2|3)\\.(0|[1-9][0-9]*)$"
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "aggregate"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "pattern": "^1\\.(0|1|2|3)\\.(0|[1-9][0-9]*)$"
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "properties": {
+          "agent": {
+            "not": {
+              "required": [
+                "losses"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
             "pattern": "^1\\.(0)\\.(0|[1-9][0-9]*)$"
           }
         },
@@ -4711,6 +4936,49 @@
       }
     },
     {
+      "if": {
+        "properties": {
+          "aggregate": {
+            "properties": {
+              "kind": {
+                "const": "summary"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        },
+        "required": [
+          "aggregate"
+        ]
+      },
+      "then": {
+        "properties": {
+          "event_type": {
+            "enum": [
+              "exec.decision",
+              "library.decision",
+              "driver.decision",
+              "script.decision",
+              "installer.decision",
+              "packaged_app.decision",
+              "com.decision",
+              "exec.origin_check",
+              "containment.decision",
+              "storage.decision",
+              "network.app.decision",
+              "network.host.decision",
+              "web.decision"
+            ]
+          },
+          "outcome": {
+            "const": "allowed"
+          }
+        }
+      }
+    },
+    {
       "properties": {
         "admin": {
           "properties": {
@@ -4789,6 +5057,10 @@
     "agent": {
       "$ref": "#/$defs/AgentInfo",
       "description": "Agent state, for agent events."
+    },
+    "aggregate": {
+      "$ref": "#/$defs/Aggregate",
+      "description": "Set when this event stands for more than one occurrence: a summary\nof allowed decisions, or a de-duplicated event with its repeat\ncount. Absent for an event that records one occurrence. Since 1.4."
     },
     "approval": {
       "$ref": "#/$defs/Approval",
@@ -4897,7 +5169,7 @@
     "schema_version": {
       "$ref": "#/$defs/SchemaVersion",
       "description": "The schema version of this event.",
-      "pattern": "^1\\.(0|1|2|3)\\.(0|[1-9][0-9]*)$"
+      "pattern": "^1\\.(0|1|2|3|4)\\.(0|[1-9][0-9]*)$"
     },
     "script": {
       "$ref": "#/$defs/Script",
@@ -4953,5 +5225,5 @@
   ],
   "title": "Palisade canonical event",
   "type": "object",
-  "x-schema-version": "1.3.0"
+  "x-schema-version": "1.4.0"
 }
