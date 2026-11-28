@@ -8,6 +8,7 @@ pub mod boot;
 pub mod cli;
 pub mod clock;
 pub mod config;
+pub mod context_facts;
 pub mod control;
 pub mod eventlog;
 pub mod facts;
