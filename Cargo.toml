@@ -72,7 +72,7 @@ md-5 = { version = "0.11.0", default-features = false }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["with-alloc"] }
 proc-macro2 = { version = "1.0.107", default-features = false }
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
-quick-xml = { version = "0.41.0", default-features = false }
+quick-xml = { version = "0.42.0", default-features = false }
 # Test fixture generation only (dev-dependency): a seeded RNG for repeatable
 # test keys.
 rand_core = { version = "0.10.1", default-features = false }
