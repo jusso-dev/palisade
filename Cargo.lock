@@ -1340,6 +1340,7 @@ dependencies = [
 name = "palisade-agent"
 version = "0.1.0"
 dependencies = [
+ "arc-swap",
  "if-addrs",
  "palisade-core",
  "palisade-fileid",
