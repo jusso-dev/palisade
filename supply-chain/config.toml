@@ -220,14 +220,14 @@ criteria = "safe-to-run"
 notes = "Added by #25 (criterion benchmarks, a dev-dependency of palisade-policy and palisade-fileid only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
 
 [[exemptions.clap]]
-version = "4.6.9"
+version = "4.6.10"
 criteria = "safe-to-deploy"
-notes = "Added by #126 (palisade-server process skeleton: HTTP stack, TLS, command line and interface lookup) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+notes = "Added by #126 (palisade-server process skeleton: HTTP stack, TLS, command line and interface lookup) when cargo-vet was already in place. Moved to 4.6.10 for #406 (Dependabot patch bump: parser performance only; forbid(unsafe_code), no build script). Audit, or import an audit, before bumping."
 
 [[exemptions.clap_builder]]
-version = "4.6.7"
+version = "4.6.10"
 criteria = "safe-to-deploy"
-notes = "Added by #126 (palisade-server process skeleton: HTTP stack, TLS, command line and interface lookup) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+notes = "Added by #126 (palisade-server process skeleton: HTTP stack, TLS, command line and interface lookup) when cargo-vet was already in place. Moved to 4.6.10 for #406 (Dependabot patch bump: parser performance only; forbid(unsafe_code), no build script). Audit, or import an audit, before bumping."
 
 [[exemptions.clap_derive]]
 version = "4.6.9"
@@ -730,9 +730,9 @@ criteria = "safe-to-deploy"
 notes = "Added by #126 (palisade-server process skeleton: HTTP stack, TLS, command line and interface lookup) when cargo-vet was already in place. Audit, or import an audit, before bumping."
 
 [[exemptions.miniz_oxide]]
-version = "0.8.9"
+version = "0.9.1"
 criteria = "safe-to-deploy"
-notes = "#53 (app package identity): raw DEFLATE for MSIX/AppX members. forbid(unsafe_code), no default features. Audit, or import an audit, before bumping."
+notes = "#53 (app package identity): raw DEFLATE for MSIX/AppX members. Moved to 0.9.1 for #407 (0.9 makes enums non_exhaustive; 0.9.1 rejects incomplete Huffman trees). forbid(unsafe_code), no build script, no default features. Audit, or import an audit, before bumping."
 
 [[exemptions.mio]]
 version = "1.2.5"
@@ -1255,9 +1255,9 @@ criteria = "safe-to-deploy"
 notes = "Added by #126 (palisade-server process skeleton: HTTP stack, TLS, command line and interface lookup) when cargo-vet was already in place. Audit, or import an audit, before bumping."
 
 [[exemptions.toml]]
-version = "1.2.2+spec-1.1.0"
+version = "1.2.3+spec-1.1.0"
 criteria = "safe-to-deploy"
-notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+notes = "Baseline when cargo-vet was adopted (#23). Moved to 1.2.3 for #406 (Dependabot patch bump: the parser's recursion limit now also applies to keys; forbid(unsafe_code), no build script). Audit, or import an audit, before bumping."
 
 [[exemptions.toml_datetime]]
 version = "1.1.3+spec-1.1.0"
@@ -1265,9 +1265,9 @@ criteria = "safe-to-deploy"
 notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
 
 [[exemptions.toml_parser]]
-version = "1.1.6+spec-1.1.0"
+version = "1.1.7+spec-1.1.0"
 criteria = "safe-to-deploy"
-notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+notes = "Baseline when cargo-vet was adopted (#23). Moved to 1.1.7 for #406 (pulled in by toml 1.2.3; applies the recursion limit to keys). Its unsafe code is behind the off-by-default `unsafe` feature, which nothing here enables, so forbid(unsafe_code) applies; no build script. Audit, or import an audit, before bumping."
 
 [[exemptions.toml_writer]]
 version = "1.2.0+spec-1.1.0"
