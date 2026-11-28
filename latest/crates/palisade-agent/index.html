@@ -36,7 +36,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-7b4dc4d5.js";
+            window.path_to_searchindex_js = "../../searchindex-d35a5177.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-049dbba3.js"></script>
@@ -292,7 +292,7 @@ since the OS does not use it to grant access. A process that has exited is <code
 while a handle keeps its object alive, and a process key whose creation time does not match the
 process now using its ID is <code>NotFound</code> too, so a reused process ID is never read as the process
 it replaced. A local group's members are listed only if the SID names a local group whose name
-resolves back to the same SID: the bare name the OS enumerates by must itself be a local group with that SID, so a local group that only shares a domain group's name is never listed in its place. An account name lookup that fails for any reason other than "no such account" is an error, not <code>None</code>.</p>
+resolves back to the same SID: the bare name the OS enumerates by must itself be a local group with that SID, so a local group that only shares a domain group's name is never listed in its place. The name is checked again after the members are read, and a group renamed meanwhile is an error, not another group's members (#60). A rename and restore inside that window still passes; only an administrator can rename a local group. An account name lookup that fails for any reason other than "no such account" is an error, not <code>None</code>.</p>
 <p>The signature and file-system backends fail closed too. A file that cannot be read, or is larger
 than the size limit (256 MiB by default), is an error, never "unsigned"; so is a file that
 starts like a PE image but does not parse, or whose certificate table cannot be read
