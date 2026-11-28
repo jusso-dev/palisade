@@ -24,6 +24,8 @@ serde_json = { workspace = true }
 [dev-dependencies]
 boon = { workspace = true }
 insta = { workspace = true }
+# Policy builders, to make bundles and deltas for the envelope tests.
+palisade-policy = { workspace = true, features = ["test-util"] }
 proptest = { workspace = true }
 
 [lints]

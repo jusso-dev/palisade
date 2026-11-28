@@ -3,10 +3,11 @@
 //!
 //! This module is pure: no storage, no OS calls, no clock reads. The agent
 //! (#61 policy cache, #220 tamper protection) supplies the bytes it read and
-//! the time, and carries out what the functions here decide. The bundle is
-//! opaque until #43 defines it: this module only sees [`BundleMeta`] (tenant,
-//! target, `policy_version` and content SHA-256) and the result of the
-//! envelope checks the caller ran ([`Examined`]).
+//! the time, and carries out what the functions here decide. The decisions
+//! see only [`BundleMeta`] (tenant, target, `policy_version` and content
+//! SHA-256) and the result of the envelope checks ([`Examined`]), which
+//! [`envelope::verify`] produces from the bundle header (#43) and the
+//! agent's trust set.
 //!
 //! - [`record`]: the anti-rollback record. It holds the **floor** (the
 //!   highest version made `active` for a target) and the **fallback** (the
@@ -21,6 +22,8 @@
 //!   failure table of ADR 0018 (which supersedes ADR 0012) and the activation
 //!   order of ADR 0007.
 //! - [`stale`]: staleness, which is reported but never changes what runs.
+//! - [`envelope`]: the signed bundle envelope (#325): signing, and the
+//!   verification that produces [`Examined`].
 //!
 //! Every rejection maps to exactly one event type ([`Rejection::event_type`],
 //! [`select::Finding::event_type`]). None of these functions can return an
@@ -30,6 +33,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod envelope;
 pub mod record;
 pub mod select;
 pub mod stale;
@@ -62,8 +66,8 @@ pub enum Scope {
     Device(HostId),
 }
 
-/// The facts about a bundle that the decisions need. Everything else in
-/// the bundle is opaque here.
+/// The facts about a bundle that the decisions need, which
+/// [`envelope::verify`] reads from the bundle header.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BundleMeta {
     /// The tenant and target named in the envelope.
@@ -81,9 +85,10 @@ pub fn content_hash(bundle: &[u8]) -> Sha256Hex {
     Sha256Hex::from_bytes(crypto::sha256(bundle))
 }
 
-/// The result of the envelope checks the caller ran on one bundle file,
-/// before this module decides anything (#225 check order, steps 1, 2, 5
-/// and 6). Steps 3 (target) and 4 (version) are applied here.
+/// The result of the envelope checks on one bundle file, before this
+/// module decides anything (#225 check order, steps 1, 2, 5 and 6), as
+/// [`envelope::verify`] returns it. Steps 3 (target) and 4 (version) are
+/// applied here.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Examined {
     /// Step 1 failed: the envelope is over the size limit, does not parse,

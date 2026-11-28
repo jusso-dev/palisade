@@ -324,3 +324,30 @@ fn write_bundle_fuzz_seeds() {
         .unwrap();
     }
 }
+
+/// The golden bundles' delta, from `minimal` to `baseline`, and malformed
+/// variants: truncated, with a trailing byte, and with each hash changed.
+#[test]
+#[ignore = "writes files; run on demand to seed the fuzz corpus"]
+fn write_bundle_delta_fuzz_seeds() {
+    use palisade_policy::bundle::{BundleDelta, BundleLimits, PolicyBundle, diff};
+
+    let dir = seed_dir();
+    let golden = manifest_dir().join("tests/golden/bundles");
+    let limits = BundleLimits::DEFAULT;
+    let read =
+        |name: &str| PolicyBundle::decode(&fs::read(golden.join(name)).unwrap(), &limits).unwrap();
+    let delta = diff(&read("minimal.cbor"), &read("baseline.cbor")).unwrap();
+    let bytes = delta.to_bytes().unwrap();
+    assert_eq!(BundleDelta::from_bytes(&bytes, &limits).unwrap(), delta);
+    fs::write(dir.join("seed-delta"), &bytes).unwrap();
+    fs::write(dir.join("seed-delta-half"), &bytes[..bytes.len() / 2]).unwrap();
+    let mut trailing = bytes.clone();
+    trailing.push(0);
+    fs::write(dir.join("seed-delta-trailing"), &trailing).unwrap();
+    let mut other = delta.clone();
+    other.result_bundle_hash = [0; 32];
+    fs::write(dir.join("seed-delta-result"), other.to_bytes().unwrap()).unwrap();
+    other.base_bundle_hash = [0; 32];
+    fs::write(dir.join("seed-delta-base"), other.to_bytes().unwrap()).unwrap();
+}
