@@ -10,6 +10,7 @@ pub mod clock;
 pub mod config;
 pub mod control;
 pub mod eventlog;
+pub mod facts;
 #[cfg(windows)]
 mod ffi;
 pub mod host;

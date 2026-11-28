@@ -86,6 +86,8 @@ windows-sys = { workspace = true, features = [
 
 [dev-dependencies]
 serde_json = { workspace = true }
+# The facts bridge's property tests (`tests/facts.rs`).
+proptest = { workspace = true }
 palisade-core = { workspace = true, features = ["std", "test-util"] }
 palisade-policy = { workspace = true, features = ["test-util"] }
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
