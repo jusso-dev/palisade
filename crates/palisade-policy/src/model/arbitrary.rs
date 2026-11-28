@@ -134,6 +134,12 @@ fn value_for(class: FieldClass, operator: Operator) -> BoxedStrategy<String> {
         (FieldClass::Digest, _) => {
             prop_oneof!["[0-9a-f]{40}", "[0-9a-f]{64}", "[0-9A-F]{96}"].boxed()
         }
+        (FieldClass::Guid, _) => (
+            any::<bool>(),
+            "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+        )
+            .prop_map(|(braced, g)| if braced { format!("{{{g}}}") } else { g })
+            .boxed(),
         (FieldClass::OidSet, _) => "[0-2](\\.[0-9]{1,5}){1,6}".boxed(),
         (FieldClass::Sid, _) => SID.boxed(),
         (FieldClass::PrincipalSet, _) => prop_oneof![

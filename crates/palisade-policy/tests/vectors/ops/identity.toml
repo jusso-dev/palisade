@@ -1,0 +1,176 @@
+# Version-resource, PE and Windows Installer criteria (#328): text,
+# number, yes-or-no and GUID facts, and malformed or unknown facts, which
+# never match.
+
+[[case]]
+name = "legal_copyright contains, folding case"
+criterion = { field = "meta.legal_copyright", operator = "contains", values = ["example ltd"] }
+fact = "Copyright (C) 2026 Example Ltd"
+expect = "match"
+
+[[case]]
+name = "an unknown legal_copyright is unknown"
+criterion = { field = "meta.legal_copyright", operator = "not_contains", values = ["x"] }
+expect = "unknown"
+
+[[case]]
+name = "language equals its block key, in either case"
+criterion = { field = "meta.language", operator = "equals", values = ["040904B0"] }
+fact = "040904b0"
+expect = "match"
+
+[[case]]
+name = "file_name_fallback ends_with"
+criterion = { field = "meta.file_name_fallback", operator = "ends_with", values = [".exe"] }
+fact = "Setup.EXE"
+expect = "match"
+
+[[case]]
+name = "file_size gt"
+criterion = { field = "meta.file_size", operator = "gt", values = ["1048576"] }
+fact = "2097152"
+expect = "match"
+
+[[case]]
+name = "file_size between, inclusive"
+criterion = { field = "meta.file_size", operator = "between", values = ["0", "4096"] }
+fact = "4096"
+expect = "match"
+
+[[case]]
+name = "file_size lt fails"
+criterion = { field = "meta.file_size", operator = "lt", values = ["100"] }
+fact = "100"
+expect = "no_match"
+
+[[case]]
+name = "a file_size that is not a number is unknown"
+criterion = { field = "meta.file_size", operator = "ge", values = ["0"] }
+fact = "-1"
+expect = "unknown"
+
+[[case]]
+name = "a negated test of a malformed file_size is unknown"
+criterion = { field = "meta.file_size", operator = "ne", values = ["0"] }
+fact = "12kb"
+expect = "unknown"
+
+[[case]]
+name = "file_size takes whole numbers only"
+criterion = { field = "meta.file_size", operator = "gt", values = ["1.5"] }
+error = "invalid_value"
+
+[[case]]
+name = "file_size takes no text operator"
+criterion = { field = "meta.file_size", operator = "equals", values = ["10"] }
+error = "operator_field_mismatch"
+
+[[case]]
+name = "pe_machine equals folds case"
+criterion = { field = "meta.pe_machine", operator = "equals", values = ["ARM64"] }
+fact = "arm64"
+expect = "match"
+
+[[case]]
+name = "pe_machine does not match another machine"
+criterion = { field = "meta.pe_machine", operator = "equals", values = ["amd64"] }
+fact = "i386"
+expect = "no_match"
+
+[[case]]
+name = "pe_subsystem not_equals"
+criterion = { field = "meta.pe_subsystem", operator = "not_equals", values = ["native"] }
+fact = "windows_gui"
+expect = "match"
+
+[[case]]
+name = "is_dotnet is_true"
+criterion = { field = "meta.is_dotnet", operator = "is_true", values = [] }
+fact = "true"
+expect = "match"
+
+[[case]]
+name = "is_dotnet is_false on a .NET image"
+criterion = { field = "meta.is_dotnet", operator = "is_false", values = [] }
+fact = "true"
+expect = "no_match"
+
+[[case]]
+name = "is_dotnet is_false on a native image"
+criterion = { field = "meta.is_dotnet", operator = "is_false", values = [] }
+fact = "false"
+expect = "match"
+
+[[case]]
+name = "an is_dotnet fact that is not true or false is unknown"
+criterion = { field = "meta.is_dotnet", operator = "is_false", values = [] }
+fact = "yes"
+expect = "unknown"
+
+[[case]]
+name = "an unknown is_dotnet is unknown"
+criterion = { field = "meta.is_dotnet", operator = "is_true", values = [] }
+expect = "unknown"
+
+[[case]]
+name = "is_dotnet takes no values"
+criterion = { field = "meta.is_dotnet", operator = "is_true", values = ["true"] }
+error = "value_count"
+
+[[case]]
+name = "product_code ignores braces and case"
+criterion = { field = "msi.product_code", operator = "equals", values = ["12345678-9abc-def0-1234-56789abcdef0"] }
+fact = "{12345678-9ABC-DEF0-1234-56789ABCDEF0}"
+expect = "match"
+
+[[case]]
+name = "upgrade_code does not match another GUID"
+criterion = { field = "msi.upgrade_code", operator = "equals", values = ["{12345678-9ABC-DEF0-1234-56789ABCDEF0}"] }
+fact = "{12345678-9ABC-DEF0-1234-56789ABCDEF1}"
+expect = "no_match"
+
+[[case]]
+name = "package_code not_equals another GUID"
+criterion = { field = "msi.package_code", operator = "not_equals", values = ["{12345678-9ABC-DEF0-1234-56789ABCDEF0}"] }
+fact = "{00000000-0000-0000-0000-000000000001}"
+expect = "match"
+
+[[case]]
+name = "a product_code fact that is not a GUID is unknown"
+criterion = { field = "msi.product_code", operator = "not_equals", values = ["{12345678-9ABC-DEF0-1234-56789ABCDEF0}"] }
+fact = "{12345678-9ABC-DEF0-1234-56789ABCDEF0"
+expect = "unknown"
+
+[[case]]
+name = "product_code values must be GUIDs"
+criterion = { field = "msi.product_code", operator = "equals", values = ["12345678"] }
+error = "invalid_value"
+
+[[case]]
+name = "product_code takes no text operator"
+criterion = { field = "msi.product_code", operator = "contains", values = ["1234"] }
+error = "operator_field_mismatch"
+
+[[case]]
+name = "msi product_name equals"
+criterion = { field = "msi.product_name", operator = "equals", values = ["Example Suite"] }
+fact = "EXAMPLE SUITE"
+expect = "match"
+
+[[case]]
+name = "msi manufacturer wildcard"
+criterion = { field = "msi.manufacturer", operator = "wildcard", values = ["Example*"] }
+fact = "Example Software Ltd"
+expect = "match"
+
+[[case]]
+name = "msi product_version version_ge"
+criterion = { field = "msi.product_version", operator = "version_ge", values = ["2.1"] }
+fact = "2.10.0"
+expect = "match"
+
+[[case]]
+name = "a malformed msi product_version is unknown"
+criterion = { field = "msi.product_version", operator = "version_lt", values = ["2.1"] }
+fact = "two"
+expect = "unknown"

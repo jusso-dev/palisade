@@ -605,7 +605,9 @@ fn context_compatibility_table() {
         }
     }
     // The set, yes-or-no, ordered, network and time operators apply to no
-    // identity field, except the set operators to `signer.eku` (#31).
+    // identity field, except the set operators to `signer.eku` (#31), the
+    // ordered ones to `meta.file_size` and the yes-or-no ones to
+    // `meta.is_dotnet` (#328).
     for field in Field::ALL
         .into_iter()
         .filter(|f| !f.is_context() && *f != Field::SignerEku)
@@ -623,7 +625,12 @@ fn context_compatibility_table() {
                         | Operator::DateBetween
                 )
         }) {
-            assert!(!op.applies_to(field.class()), "{field:?} {op:?}");
+            let expected = match field {
+                Field::MetaFileSize => op.is_ordered(),
+                Field::MetaIsDotnet => matches!(op, Operator::IsTrue | Operator::IsFalse),
+                _ => false,
+            };
+            assert_eq!(op.applies_to(field.class()), expected, "{field:?} {op:?}");
         }
     }
 }

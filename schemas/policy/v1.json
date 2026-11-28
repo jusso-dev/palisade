@@ -1188,6 +1188,71 @@
           "const": "signer.spki_sha256",
           "description": "The SHA-256 of a chain certificate's DER `SubjectPublicKeyInfo`: its\npublic key (#318). Unlike the TBS hash it stays the same when a\ncertificate is reissued for the same key, so a deny on a stolen\nkey's hash also blocks every reissue. `signer.position` says which\ncertificate. A key above the leaf belongs to a certificate\nauthority, which vouches for everything it signs.",
           "type": "string"
+        },
+        {
+          "const": "meta.legal_copyright",
+          "description": "The `LegalCopyright` string from the version resource (#328).",
+          "type": "string"
+        },
+        {
+          "const": "meta.language",
+          "description": "The language and code page of the version-resource block the other\n`meta.*` strings were read from, as its key is written: eight hex\ndigits, such as `040904b0` (#328).",
+          "type": "string"
+        },
+        {
+          "const": "meta.file_name_fallback",
+          "description": "The file's effective name (#328): the first of the original file\nname, internal name, file description and product name that the\nversion resource has, or the name on disk when it has none.",
+          "type": "string"
+        },
+        {
+          "const": "meta.file_size",
+          "description": "The file's size in bytes, as a whole number (#328).",
+          "type": "string"
+        },
+        {
+          "const": "meta.pe_machine",
+          "description": "The PE image's COFF machine, by name: `i386`, `amd64`, `arm64`,\n`arm64_ec`, `arm64_x`, `arm_nt` and so on (#328).",
+          "type": "string"
+        },
+        {
+          "const": "meta.pe_subsystem",
+          "description": "The PE image's subsystem, by name: `windows_gui`, `windows_cui`,\n`native`, `efi_application` and so on (#328).",
+          "type": "string"
+        },
+        {
+          "const": "meta.is_dotnet",
+          "description": "Whether the PE image is a .NET assembly: it has a CLR runtime header\n(#328).",
+          "type": "string"
+        },
+        {
+          "const": "msi.product_code",
+          "description": "A Windows Installer package's `ProductCode` (#328), a GUID. Compared\nas a GUID: braces and case do not matter.",
+          "type": "string"
+        },
+        {
+          "const": "msi.upgrade_code",
+          "description": "A Windows Installer package's `UpgradeCode` (#328), a GUID shared by\nevery version of a product.",
+          "type": "string"
+        },
+        {
+          "const": "msi.product_name",
+          "description": "A Windows Installer package's `ProductName` (#328). Free text the\nauthor chooses.",
+          "type": "string"
+        },
+        {
+          "const": "msi.manufacturer",
+          "description": "A Windows Installer package's `Manufacturer` (#328). Free text the\nauthor chooses: never a publisher.",
+          "type": "string"
+        },
+        {
+          "const": "msi.product_version",
+          "description": "A Windows Installer package's `ProductVersion` (#328).",
+          "type": "string"
+        },
+        {
+          "const": "msi.package_code",
+          "description": "A Windows Installer package's `PackageCode` (#328): the GUID of one\nbuild of the package.",
+          "type": "string"
         }
       ]
     },

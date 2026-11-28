@@ -365,10 +365,13 @@ fn compatibility_table() {
         ] {
             let class = field.class();
             let expected = match class {
-                crate::model::FieldClass::Hash { .. } | crate::model::FieldClass::Digest => {
-                    op == Operator::Equals
-                }
-                crate::model::FieldClass::OidSet => false,
+                crate::model::FieldClass::Hash { .. }
+                | crate::model::FieldClass::Digest
+                | crate::model::FieldClass::Guid => op == Operator::Equals,
+                // #328's file size and .NET flag.
+                crate::model::FieldClass::OidSet
+                | crate::model::FieldClass::Number
+                | crate::model::FieldClass::Bool => false,
                 crate::model::FieldClass::Version => {
                     matches!(
                         op,
@@ -1012,12 +1015,127 @@ fn strength_ratings() {
     ] {
         assert_eq!(field.strength(), Some(expected), "{field:?}");
     }
+    // #328: every version-resource, PE and installer fact is one the file's
+    // author writes, so none identifies an object alone. MSI codes are
+    // GUIDs anyone can copy into another package.
+    for field in [
+        Field::MetaLegalCopyright,
+        Field::MetaLanguage,
+        Field::MetaFileNameFallback,
+        Field::MetaFileSize,
+        Field::MetaPeMachine,
+        Field::MetaPeSubsystem,
+        Field::MetaIsDotnet,
+        Field::MsiProductCode,
+        Field::MsiUpgradeCode,
+        Field::MsiProductName,
+        Field::MsiManufacturer,
+        Field::MsiProductVersion,
+        Field::MsiPackageCode,
+    ] {
+        assert_eq!(field.strength(), Some(Weak), "{field:?}");
+        assert!(!field.is_context() && !field.is_signer(), "{field:?}");
+        assert_eq!(
+            crate::demand::FactSet::of_field(field),
+            crate::demand::FactSet::METADATA,
+            "{field:?}"
+        );
+    }
     assert!(Strong > Medium && Medium > Weak);
     // Every weak hash is also rated weak.
     for field in Field::ALL {
         if field.is_weak_hash() {
             assert_eq!(field.strength(), Some(Weak), "{field:?}");
         }
+    }
+}
+
+#[test]
+fn stored_number_bool_and_guid_facts() {
+    // A number fact compares as a number, not as text.
+    let big = compile(Field::MetaFileSize, Operator::Gt, &["9"]);
+    assert_eq!(eval(&big, &text_facts(Field::MetaFileSize, "10")), Match);
+    assert_eq!(eval(&big, &text_facts(Field::MetaFileSize, "9")), NoMatch);
+    for odd in ["", "x", "-1", "1e3", "99999999999999999999999"] {
+        assert_eq!(
+            eval(&big, &text_facts(Field::MetaFileSize, odd)),
+            Unknown,
+            "{odd:?}"
+        );
+    }
+    assert_eq!(eval(&big, &ObjectFacts::new()), Unknown);
+    // A yes-or-no fact is exactly `true` or `false`.
+    let dotnet = compile(Field::MetaIsDotnet, Operator::IsTrue, &[]);
+    assert_eq!(
+        eval(&dotnet, &text_facts(Field::MetaIsDotnet, "true")),
+        Match
+    );
+    assert_eq!(
+        eval(&dotnet, &text_facts(Field::MetaIsDotnet, "false")),
+        NoMatch
+    );
+    assert_eq!(
+        eval(&dotnet, &text_facts(Field::MetaIsDotnet, "TRUE")),
+        Unknown
+    );
+    // A GUID compares in canonical form.
+    let code = compile(
+        Field::MsiProductCode,
+        Operator::NotEquals,
+        &["{12345678-9abc-DEF0-1234-56789abcdef0}"],
+    );
+    assert_eq!(
+        eval(
+            &code,
+            &text_facts(
+                Field::MsiProductCode,
+                "12345678-9ABC-def0-1234-56789ABCDEF0"
+            )
+        ),
+        NoMatch
+    );
+    assert_eq!(
+        eval(
+            &code,
+            &text_facts(
+                Field::MsiProductCode,
+                "{00000000-0000-0000-0000-000000000000}"
+            )
+        ),
+        Match
+    );
+    // A malformed GUID fact cannot satisfy the negation.
+    assert_eq!(
+        eval(&code, &text_facts(Field::MsiProductCode, "not a guid")),
+        Unknown
+    );
+}
+
+#[test]
+fn guids_are_canonical() {
+    use super::canonical_guid;
+    let canon = Some("{12345678-9ABC-DEF0-1234-56789ABCDEF0}".to_owned());
+    assert_eq!(
+        canonical_guid("{12345678-9abc-def0-1234-56789abcdef0}"),
+        canon
+    );
+    assert_eq!(
+        canonical_guid("12345678-9ABC-DEF0-1234-56789ABCDEF0"),
+        canon
+    );
+    for bad in [
+        "",
+        "{}",
+        "{12345678-9ABC-DEF0-1234-56789ABCDEF0",
+        "12345678-9ABC-DEF0-1234-56789ABCDEF0}",
+        "12345678-9ABC-DEF0-1234",
+        "12345678-9ABC-DEF0-1234-56789ABCDEF0-0",
+        "1234567-89ABC-DEF0-1234-56789ABCDEF0",
+        "1234567G-9ABC-DEF0-1234-56789ABCDEF0",
+        "123456789ABCDEF0123456789ABCDEF0",
+        "{{12345678-9ABC-DEF0-1234-56789ABCDEF0}}",
+    ] {
+        assert_eq!(canonical_guid(bad), None, "{bad:?}");
     }
 }
 
