@@ -1,7 +1,8 @@
 //! Fuzzes the file-system context parsers: path normalisation (Win32 and
 //! NT forms), self-relative security descriptors with the writability
 //! evaluation, `Zone.Identifier` streams, and the stream-list and
-//! change-journal records the OS returns, the storage descriptors the
+//! change-journal records the OS returns (one file's record, the journal
+//! state, and the record lists of a journal read and an MFT enumeration), the storage descriptors the
 //! volume backend reads, and reparse data buffers. No input may panic, and a
 //! normalised path, and each ancestor that is not too long, must normalise
 //! to itself again.
@@ -9,7 +10,10 @@
 
 use libfuzzer_sys::fuzz_target;
 use palisade_fileid::fsctx::acl::{EvaluationOptions, ObjectKind, SecurityDescriptor, evaluate};
-use palisade_fileid::fsctx::ntfs::{MAX_STREAMS, parse_stream_info, parse_usn_record};
+use palisade_fileid::fsctx::ntfs::{
+    MAX_JOURNAL_NAME_UNITS, MAX_STREAMS, parse_enum_usn_data, parse_journal_data,
+    parse_read_journal, parse_stream_info, parse_usn_record,
+};
 use palisade_fileid::fsctx::reparse::{ReparseKind, parse_reparse_point};
 use palisade_fileid::fsctx::{
     normalize_nt, normalize_win32, nt_path_on_network, opened_name_on_network, parse_hotplug_info,
@@ -56,6 +60,16 @@ fuzz_target!(|data: &[u8]| {
     }
     if let Ok(usn) = parse_usn_record(data) {
         assert!(matches!(usn.major_version, 2 | 3));
+    }
+    let _ = parse_journal_data(data);
+    let records = parse_read_journal(data)
+        .map(|(_, r)| r)
+        .into_iter()
+        .chain(parse_enum_usn_data(data).map(|(_, r)| r));
+    for r in records.flatten() {
+        assert!(matches!(r.major_version, 2 | 3));
+        assert!(!r.name.is_empty() && !r.name.contains(['\0', '\\']));
+        assert!(r.name.encode_utf16().count() <= MAX_JOURNAL_NAME_UNITS);
     }
     let _ = parse_storage_device_descriptor(data);
     if let Ok(r) = parse_reparse_point(data) {

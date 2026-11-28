@@ -125,7 +125,7 @@ proptest! {
 /// Writes seed inputs for the `fsctx_parse` fuzz target into the directory
 /// in `PALISADE_FUZZ_SEED_DIR`: Win32 and NT paths, a self-relative
 /// security descriptor, a `Zone.Identifier` stream, a `FILE_STREAM_INFO`
-/// list and a change-journal record.
+/// list, a change-journal record and a journal read.
 ///
 /// ```text
 /// PALISADE_FUZZ_SEED_DIR=fuzz/corpus/fsctx_parse \
@@ -185,7 +185,23 @@ fn write_fsctx_fuzz_seeds() {
     usn[..4].copy_from_slice(&64_u32.to_le_bytes());
     usn[4..6].copy_from_slice(&2_u16.to_le_bytes());
     usn[24..32].copy_from_slice(&12345_i64.to_le_bytes());
-    std::fs::write(dir.join("seed-usn"), usn).unwrap();
+    std::fs::write(dir.join("seed-usn"), &usn).unwrap();
+    // A journal read: the next USN, then one full version-2 record for
+    // `a.exe`.
+    let mut read = 99_i64.to_le_bytes().to_vec();
+    let mut full = vec![0_u8; 64];
+    full[..4].copy_from_slice(&72_u32.to_le_bytes());
+    full[4..6].copy_from_slice(&2_u16.to_le_bytes());
+    full[24..32].copy_from_slice(&12345_i64.to_le_bytes());
+    full[56..58].copy_from_slice(&10_u16.to_le_bytes());
+    full[58..60].copy_from_slice(&60_u16.to_le_bytes());
+    full.truncate(60);
+    for u in "a.exe".encode_utf16() {
+        full.extend_from_slice(&u.to_le_bytes());
+    }
+    full.extend_from_slice(&[0, 0]);
+    read.extend_from_slice(&full);
+    std::fs::write(dir.join("seed-journal-read"), read).unwrap();
     std::fs::write(
         dir.join("seed-zone"),
         "[ZoneTransfer]\r\nZoneId=3\r\nReferrerUrl=https://example.invalid/\r\nHostUrl=https://example.invalid/setup.exe\r\n",

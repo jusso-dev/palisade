@@ -22,18 +22,20 @@ use windows_sys::Win32::Storage::DistributedFileSystem::{
     DFS_INFO_3, DFS_STORAGE_INFO, DFS_STORAGE_STATE_ACTIVE, NetDfsGetClientInfo,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    FILE_BASIC_INFO, FILE_CASE_SENSITIVE_INFO, FILE_ID_INFO, FILE_INFO_BY_HANDLE_CLASS,
-    FILE_REMOTE_PROTOCOL_INFO, FILE_STANDARD_INFO, FILE_TYPE_DISK, FileBasicInfo,
-    FileCaseSensitiveInfo, FileIdInfo, FileRemoteProtocolInfo, FileStandardInfo, FileStreamInfo,
-    FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, FindFirstFileNameW,
-    FindNextFileNameW, GetDriveTypeW, GetFileInformationByHandleEx, GetFileType,
-    GetFinalPathNameByHandleW, GetVolumeInformationByHandleW, WIN32_FIND_DATAW,
+    ExtendedFileIdType, FILE_BASIC_INFO, FILE_CASE_SENSITIVE_INFO, FILE_ID_128, FILE_ID_DESCRIPTOR,
+    FILE_ID_DESCRIPTOR_0, FILE_ID_INFO, FILE_INFO_BY_HANDLE_CLASS, FILE_REMOTE_PROTOCOL_INFO,
+    FILE_STANDARD_INFO, FILE_TYPE_DISK, FileBasicInfo, FileCaseSensitiveInfo, FileIdInfo,
+    FileRemoteProtocolInfo, FileStandardInfo, FileStreamInfo, FindClose, FindExInfoBasic,
+    FindExSearchNameMatch, FindFirstFileExW, FindFirstFileNameW, FindNextFileNameW, GetDriveTypeW,
+    GetFileInformationByHandleEx, GetFileType, GetFinalPathNameByHandleW,
+    GetVolumeInformationByHandleW, OpenFileById, WIN32_FIND_DATAW,
 };
 use windows_sys::Win32::System::IO::{DeviceIoControl, GetOverlappedResult, OVERLAPPED};
 use windows_sys::Win32::System::Ioctl::{
-    FSCTL_GET_REPARSE_POINT, FSCTL_QUERY_USN_JOURNAL, FSCTL_READ_FILE_USN_DATA,
-    IOCTL_STORAGE_GET_HOTPLUG_INFO, IOCTL_STORAGE_QUERY_PROPERTY, PropertyStandardQuery,
-    READ_FILE_USN_DATA, STORAGE_PROPERTY_QUERY, StorageDeviceProperty, USN_JOURNAL_DATA_V0,
+    FSCTL_ENUM_USN_DATA, FSCTL_GET_REPARSE_POINT, FSCTL_QUERY_USN_JOURNAL,
+    FSCTL_READ_FILE_USN_DATA, FSCTL_READ_USN_JOURNAL, IOCTL_STORAGE_GET_HOTPLUG_INFO,
+    IOCTL_STORAGE_QUERY_PROPERTY, MFT_ENUM_DATA_V1, PropertyStandardQuery, READ_FILE_USN_DATA,
+    READ_USN_JOURNAL_DATA_V1, STORAGE_PROPERTY_QUERY, StorageDeviceProperty, USN_JOURNAL_DATA_V0,
 };
 use windows_sys::Win32::System::Memory::{
     CreateFileMappingW, FILE_MAP_READ, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile, PAGE_READONLY,
@@ -433,6 +435,135 @@ pub(crate) fn usn_journal_id(volume: &File) -> io::Result<u64> {
     const _: () = assert!(size_of::<USN_JOURNAL_DATA_V0>() <= 128);
     Ok(id)
 }
+
+/// The raw `USN_JOURNAL_DATA` of the volume (`FSCTL_QUERY_USN_JOURNAL`),
+/// for [`crate::fsctx::ntfs::parse_journal_data`]. `volume` must be a
+/// handle to the volume itself (or a file on it, which the OS also
+/// accepts for this code).
+pub(crate) fn usn_journal_bytes(volume: &File) -> io::Result<Vec<u8>> {
+    // SAFETY: as in `usn_journal_id`: no input, and a `USN_JOURNAL_DATA`
+    // of any version fits in 128 bytes.
+    unsafe { fsctl::<()>(volume, FSCTL_QUERY_USN_JOURNAL, None, 128) }
+}
+
+/// The largest buffer one journal read or enumeration asks for: 64 KiB,
+/// the size the OS documentation uses, so one call returns a bounded batch.
+pub(crate) const JOURNAL_BATCH_BYTES: usize = 64 * 1024;
+
+/// Reads change-journal records from `start_usn` (`FSCTL_READ_USN_JOURNAL`)
+/// for the journal `journal_id`, without waiting for new ones. Returns the
+/// raw output for [`crate::fsctx::ntfs::parse_read_journal`]. `volume` must
+/// be a handle to the volume device, opened with read access (which needs
+/// administrator rights).
+pub(crate) fn read_usn_journal_bytes(
+    volume: &File,
+    journal_id: u64,
+    start_usn: i64,
+    reason_mask: u32,
+) -> io::Result<Vec<u8>> {
+    let input = READ_USN_JOURNAL_DATA_V1 {
+        StartUsn: start_usn,
+        ReasonMask: reason_mask,
+        ReturnOnlyOnClose: 0,
+        Timeout: 0,
+        BytesToWaitFor: 0,
+        UsnJournalID: journal_id,
+        MinMajorVersion: 2,
+        MaxMajorVersion: 3,
+    };
+    // SAFETY: `FSCTL_READ_USN_JOURNAL` (`METHOD_NEITHER`) reads one
+    // `READ_USN_JOURNAL_DATA_V1` from the input buffer and writes the next
+    // USN followed by whole records into the output buffer, never more
+    // than its length. `BytesToWaitFor` of 0 makes it return at once.
+    unsafe {
+        fsctl(
+            volume,
+            FSCTL_READ_USN_JOURNAL,
+            Some(&input),
+            JOURNAL_BATCH_BYTES,
+        )
+    }
+}
+
+/// Lists the files and folders of the volume's master file table from the
+/// file reference `start` (`FSCTL_ENUM_USN_DATA`), one batch per call,
+/// with USNs up to `high_usn`. Returns the raw output for
+/// [`crate::fsctx::ntfs::parse_enum_usn_data`]; `ERROR_HANDLE_EOF` (no more
+/// files) is an empty buffer. `volume` must be a handle to the volume
+/// device opened with read access.
+pub(crate) fn enum_usn_data_bytes(volume: &File, start: u64, high_usn: i64) -> io::Result<Vec<u8>> {
+    let input = MFT_ENUM_DATA_V1 {
+        StartFileReferenceNumber: start,
+        LowUsn: 0,
+        HighUsn: high_usn,
+        MinMajorVersion: 2,
+        MaxMajorVersion: 3,
+    };
+    // SAFETY: `FSCTL_ENUM_USN_DATA` (`METHOD_NEITHER`) reads one
+    // `MFT_ENUM_DATA_V1` from the input buffer and writes the next file
+    // reference followed by whole records, within the output length.
+    match unsafe {
+        fsctl(
+            volume,
+            FSCTL_ENUM_USN_DATA,
+            Some(&input),
+            JOURNAL_BATCH_BYTES,
+        )
+    } {
+        Err(e) if e.raw_os_error() == Some(ERROR_HANDLE_EOF) => Ok(Vec::new()),
+        other => other,
+    }
+}
+
+/// Opens the file with the 128-bit ID `file_id` on the volume `volume`
+/// (`OpenFileById` with `ExtendedFileIdType`), without following a
+/// reparse point. `access` and `flags` are passed through, with
+/// `SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS` added so the handle can
+/// never lend the caller's identity to a pipe server.
+pub(crate) fn open_by_id(
+    volume: &File,
+    file_id: [u8; 16],
+    access: u32,
+    flags: u32,
+) -> io::Result<File> {
+    use std::os::windows::io::FromRawHandle as _;
+    /// `FILE_FLAG_OPEN_REPARSE_POINT`.
+    const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    /// `SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS`.
+    const SQOS_ANONYMOUS: u32 = 0x0010_0000;
+    let descriptor = FILE_ID_DESCRIPTOR {
+        dwSize: size_u32::<FILE_ID_DESCRIPTOR>(),
+        Type: ExtendedFileIdType,
+        Anonymous: FILE_ID_DESCRIPTOR_0 {
+            ExtendedFileId: FILE_ID_128 {
+                Identifier: file_id,
+            },
+        },
+    };
+    // SAFETY: `handle(volume)` is an open handle borrowed for the call, as
+    // the volume hint; `descriptor` is a live, initialised
+    // `FILE_ID_DESCRIPTOR` whose `dwSize` is its own size; a null security
+    // attributes pointer means the default. The OS reads nothing else.
+    let h = unsafe {
+        OpenFileById(
+            handle(volume),
+            &raw const descriptor,
+            access,
+            FILE_SHARE_READ_WRITE_DELETE,
+            std::ptr::null(),
+            flags | OPEN_REPARSE_POINT | SQOS_ANONYMOUS,
+        )
+    };
+    if h == INVALID_HANDLE_VALUE || h.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: `h` is a valid handle `OpenFileById` just returned, owned by
+    // nothing else; the `File` takes ownership and closes it once on drop.
+    Ok(unsafe { File::from_raw_handle(h.cast()) })
+}
+
+/// `FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE`.
+const FILE_SHARE_READ_WRITE_DELETE: u32 = 0x7;
 
 /// The `STORAGE_DEVICE_DESCRIPTOR` of the disk behind `volume`
 /// (`IOCTL_STORAGE_QUERY_PROPERTY`, `StorageDeviceProperty`), for

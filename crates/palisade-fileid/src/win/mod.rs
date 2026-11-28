@@ -7,6 +7,8 @@
 //!   flags, file IDs and USNs, timestamps and attributes, the
 //!   [`crate::hash::FileStamp`] implementation, memory-mapped and buffered
 //!   reads, and alternate data stream hashing.
+//! - [`journal`]: a volume's change journal and master file table, and
+//!   opening a file by its ID, for the file inventory (#60).
 //! - [`links`]: reparse points and hard links of real files (#54).
 //! - [`paths`]: the OS path forms (NT, volume GUID, long, mapped-drive
 //!   UNC, DFS target) and an [`crate::fsctx::FsContext`] with its volume
@@ -31,6 +33,7 @@
 pub mod access;
 pub mod file;
 pub mod fsctx;
+pub mod journal;
 pub mod links;
 pub mod paths;
 pub mod security;
