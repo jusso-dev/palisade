@@ -65,11 +65,17 @@
 //! different files.
 //!
 //! A directory can be marked case-sensitive, and then two names that differ
-//! only in case are two entries. The folded key and
-//! [`NormalizedPath::starts_with`] cannot see that flag, so they treat such
-//! names as one. The Windows backend reads the flag
-//! (`palisade_fileid::win::volume::is_case_sensitive_dir`), so a caller can
-//! tell when a folded key may join two distinct entries.
+//! only in case are two entries. A parsed path cannot know that, so until
+//! [`NormalizedPath::resolve_case_sensitivity`] has read each directory's
+//! flag through a [`CaseSensitivityResolver`] (the Windows backend's is
+//! `palisade_fileid::win::volume::OsCaseSensitivity`, applied to every
+//! final path it reads), every component is folded. Once read, a
+//! component in a case-sensitive directory, or one whose flag could not
+//! be read, gets no [`NormalizedPath::match_key`]
+//! ([`PathError::CaseSensitiveDirectory`]), so a rule about it is unknown
+//! rather than matched by a folded spelling, and
+//! [`NormalizedPath::starts_with`] (and so path-variable matching) compares
+//! it exactly (#332).
 //!
 //! # 8.3 short names
 //!
@@ -187,6 +193,16 @@ enum ShortNames {
     Verified,
 }
 
+/// What is known about per-directory case sensitivity along a path.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum CaseDirs {
+    /// Not read: every component is compared ignoring case.
+    Unchecked,
+    /// Read: the indexes of the components whose containing directory is
+    /// case-sensitive (or whose flag could not be read).
+    Checked(Vec<usize>),
+}
+
 /// A normalised path. See the module documentation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NormalizedPath {
@@ -195,6 +211,7 @@ pub struct NormalizedPath {
     stream: Option<Stream>,
     notes: PathNotes,
     short_names: ShortNames,
+    case_dirs: CaseDirs,
 }
 
 /// Why a path could not be normalised. A caller that cannot normalise a
@@ -231,6 +248,10 @@ pub enum PathError {
     UnsupportedNtPath(String),
     /// A component may be an 8.3 short name that has not been expanded.
     UnresolvedShortName(String),
+    /// A component is in a case-sensitive directory (or one whose flag
+    /// could not be read), so a case-folded key could join it with a
+    /// different entry that differs only in case.
+    CaseSensitiveDirectory(String),
 }
 
 impl fmt::Display for PathError {
@@ -253,11 +274,21 @@ impl fmt::Display for PathError {
                     "component {c:?} may be an 8.3 short name and is not expanded"
                 )
             }
+            Self::CaseSensitiveDirectory(c) => {
+                write!(f, "component {c:?} is in a case-sensitive directory")
+            }
         }
     }
 }
 
 impl std::error::Error for PathError {}
+
+/// The OS hook that reads per-directory case sensitivity.
+pub trait CaseSensitivityResolver {
+    /// Whether the directory `dir` is case-sensitive: `Some(true)` or
+    /// `Some(false)`, or `None` if the flag could not be read.
+    fn is_case_sensitive(&self, dir: &NormalizedPath) -> Option<bool>;
+}
 
 /// The OS hook that expands 8.3 short names.
 pub trait ShortNameResolver {
@@ -885,6 +916,7 @@ fn finish_with(
         } else {
             ShortNames::Candidates(candidates)
         },
+        case_dirs: CaseDirs::Unchecked,
     };
     // The canonical form can be longer than the input (a `\\?\GLOBALROOT`
     // prefix, say). It must itself be a valid path.
@@ -1082,6 +1114,12 @@ impl NormalizedPath {
             }
             ShortNames::Verified => ShortNames::Verified,
         };
+        let case_dirs = match &self.case_dirs {
+            CaseDirs::Checked(c) => {
+                CaseDirs::Checked(c.iter().copied().filter(|i| *i < n).collect())
+            }
+            CaseDirs::Unchecked => CaseDirs::Unchecked,
+        };
         Self {
             root: self.root.clone(),
             components,
@@ -1093,6 +1131,7 @@ impl NormalizedPath {
                 ..self.notes.clone()
             },
             short_names,
+            case_dirs,
         }
     }
 
@@ -1146,6 +1185,51 @@ impl NormalizedPath {
             return Err(e);
         }
         Ok(())
+    }
+
+    /// Reads, through `resolver`, whether each directory on the path is
+    /// case-sensitive: the root's, then each component's but the last.
+    /// A directory whose flag cannot be read counts as case-sensitive, so
+    /// a folded key is never trusted for what may be a distinct entry.
+    ///
+    /// Afterwards [`Self::match_key`] refuses a key for a path with a
+    /// component in a case-sensitive directory, and [`Self::starts_with`]
+    /// compares such components exactly.
+    pub fn resolve_case_sensitivity(&mut self, resolver: &dyn CaseSensitivityResolver) {
+        let sensitive = (0..self.components.len())
+            .filter(|&i| {
+                resolver
+                    .is_case_sensitive(&self.prefix_of(i))
+                    .unwrap_or(true)
+            })
+            .collect();
+        self.case_dirs = CaseDirs::Checked(sensitive);
+    }
+
+    /// Whether [`Self::resolve_case_sensitivity`] has run. If not, every
+    /// component is compared ignoring case, which is right for an ordinary
+    /// directory only.
+    #[must_use]
+    pub fn case_sensitivity_checked(&self) -> bool {
+        matches!(self.case_dirs, CaseDirs::Checked(_))
+    }
+
+    /// Indexes of the components whose containing directory is
+    /// case-sensitive (or unreadable). Empty if not checked.
+    #[must_use]
+    pub fn case_sensitive_components(&self) -> &[usize] {
+        match &self.case_dirs {
+            CaseDirs::Checked(c) => c,
+            CaseDirs::Unchecked => &[],
+        }
+    }
+
+    /// Sets the components in case-sensitive directories, as a caller
+    /// that stored [`Self::case_sensitive_components`] read them. Indexes
+    /// past the last component are ignored.
+    pub fn set_case_sensitive_components(&mut self, sensitive: &[usize]) {
+        let n = self.components.len();
+        self.case_dirs = CaseDirs::Checked(sensitive.iter().copied().filter(|i| *i < n).collect());
     }
 
     /// Marks every component as a long name. Only for paths taken from the
@@ -1271,9 +1355,16 @@ impl NormalizedPath {
     }
 
     /// The key to match path rules against: [`Self::case_folded`], but only
-    /// once every short-name candidate has been expanded.
+    /// once every short-name candidate has been expanded, and only if no
+    /// component is in a directory found to be case-sensitive (see
+    /// [`Self::resolve_case_sensitivity`]): the folded key would join it
+    /// with another entry that differs only in case.
     pub fn match_key(&self) -> Result<String, PathError> {
         self.require_long_names()?;
+        if let Some(i) = self.case_sensitive_components().first() {
+            let name = self.components.get(*i).cloned().unwrap_or_default();
+            return Err(PathError::CaseSensitiveDirectory(name));
+        }
         Ok(self.case_folded())
     }
 
@@ -1317,15 +1408,24 @@ impl NormalizedPath {
             } else {
                 ShortNames::Candidates(candidates)
             },
+            // The rebased components are in other directories now, whose
+            // flags have not been read.
+            case_dirs: CaseDirs::Unchecked,
         };
         Some(path.check_length().map(|()| path))
     }
 
     /// True if `prefix` is this path or a directory above it: same root,
     /// and its components are a leading run of these components, compared
-    /// case-insensitively. A prefix with a stream never matches.
+    /// case-insensitively. A component that either path found to be in a
+    /// case-sensitive directory is compared exactly. A prefix with a
+    /// stream never matches.
     #[must_use]
     pub fn starts_with(&self, prefix: &Self) -> bool {
+        let exact = |i: &usize| {
+            self.case_sensitive_components().contains(i)
+                || prefix.case_sensitive_components().contains(i)
+        };
         prefix.stream.is_none()
             && root_key(&self.root) == root_key(&prefix.root)
             && prefix.components.len() <= self.components.len()
@@ -1333,7 +1433,14 @@ impl NormalizedPath {
                 .components
                 .iter()
                 .zip(&self.components)
-                .all(|(a, b)| fold_case(a) == fold_case(b))
+                .enumerate()
+                .all(|(i, (a, b))| {
+                    if exact(&i) {
+                        a == b
+                    } else {
+                        fold_case(a) == fold_case(b)
+                    }
+                })
     }
 }
 
@@ -1941,6 +2048,89 @@ mod tests {
         assert_eq!(key(r"C:\"), r"C:\");
         assert_eq!(key(r"C:\f.txt:s:$DATA"), r"C:\F.TXT:S");
         assert_eq!(key(r"C:\f.txt:s:$BITMAP"), r"C:\F.TXT:S:$BITMAP");
+    }
+
+    /// Case-sensitive folders by folded path, for the tests.
+    struct CaseTable(&'static [&'static str], Option<&'static str>);
+
+    impl CaseSensitivityResolver for CaseTable {
+        fn is_case_sensitive(&self, dir: &NormalizedPath) -> Option<bool> {
+            let k = dir.case_folded();
+            if self.1 == Some(k.as_str()) {
+                return None;
+            }
+            Some(self.0.contains(&k.as_str()))
+        }
+    }
+
+    #[test]
+    fn case_sensitive_directories_get_no_key() {
+        let mut p = normalize_win32(r"C:\Src\Tool\run.exe").unwrap();
+        assert!(!p.case_sensitivity_checked());
+        assert!(p.case_sensitive_components().is_empty());
+        // Nothing case-sensitive: the key is unchanged.
+        let mut q = p.clone();
+        q.resolve_case_sensitivity(&CaseTable(&[], None));
+        assert!(q.case_sensitivity_checked());
+        assert!(q.case_sensitive_components().is_empty());
+        assert_eq!(q.match_key().unwrap(), r"C:\SRC\TOOL\RUN.EXE");
+
+        // `C:\Src` is case-sensitive: `Tool` (index 1) is in it.
+        p.resolve_case_sensitivity(&CaseTable(&[r"C:\SRC"], None));
+        assert_eq!(p.case_sensitive_components(), [1]);
+        assert_eq!(
+            p.match_key(),
+            Err(PathError::CaseSensitiveDirectory("Tool".to_owned()))
+        );
+        assert!(
+            PathError::CaseSensitiveDirectory("Tool".to_owned())
+                .to_string()
+                .contains("case-sensitive")
+        );
+        // The folded key itself is still available for display.
+        assert_eq!(p.case_folded(), r"C:\SRC\TOOL\RUN.EXE");
+        // The parent keeps the flag for `Tool`; the grandparent has none.
+        let parent = p.parent().unwrap().unwrap();
+        assert_eq!(parent.case_sensitive_components(), [1]);
+        let gp = parent.parent().unwrap().unwrap();
+        assert!(gp.case_sensitivity_checked());
+        assert!(gp.match_key().is_ok());
+
+        // A folder whose flag cannot be read counts as case-sensitive.
+        let mut r = normalize_win32(r"C:\Src\Tool\run.exe").unwrap();
+        r.resolve_case_sensitivity(&CaseTable(&[], Some(r"C:\")));
+        assert_eq!(r.case_sensitive_components(), [0]);
+        assert!(r.match_key().is_err());
+
+        // Setting stored indexes ignores ones past the end.
+        let mut s = normalize_win32(r"C:\Src\Tool\run.exe").unwrap();
+        s.set_case_sensitive_components(&[2, 7]);
+        assert_eq!(s.case_sensitive_components(), [2]);
+
+        // Rebasing moves the names into other folders: unchecked again.
+        let onto = normalize_win32(r"D:\").unwrap();
+        let src = normalize_win32(r"C:\Src").unwrap();
+        let moved = p.rebase(&src, &onto).unwrap().unwrap();
+        assert!(!moved.case_sensitivity_checked());
+    }
+
+    #[test]
+    fn starts_with_compares_case_sensitive_components_exactly() {
+        let mut file = normalize_win32(r"C:\Src\Tool\run.exe").unwrap();
+        file.resolve_case_sensitivity(&CaseTable(&[r"C:\SRC"], None));
+        let same = normalize_win32(r"c:\src\Tool").unwrap();
+        let other_case = normalize_win32(r"C:\SRC\TOOL").unwrap();
+        // `Src` is in `C:\`, which is not case-sensitive, so it still
+        // folds; `Tool` must match exactly.
+        assert!(file.starts_with(&same));
+        assert!(!file.starts_with(&other_case));
+        // The other way round: a checked prefix compares exactly too.
+        let mut prefix = normalize_win32(r"C:\Src\TOOL").unwrap();
+        prefix.resolve_case_sensitivity(&CaseTable(&[r"C:\SRC"], None));
+        let unchecked = normalize_win32(r"C:\Src\tool\x").unwrap();
+        assert!(!unchecked.starts_with(&prefix));
+        let exact = normalize_win32(r"C:\SRC\TOOL\x").unwrap();
+        assert!(exact.starts_with(&prefix));
     }
 
     #[test]

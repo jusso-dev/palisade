@@ -24,7 +24,10 @@
 //! trusted class.
 //!
 //! [`is_case_sensitive_dir`] reads the per-directory case-sensitivity flag,
-//! which the case-folded keys in [`crate::fsctx::path`] cannot see.
+//! and [`OsCaseSensitivity`] feeds it to
+//! [`crate::fsctx::NormalizedPath::resolve_case_sensitivity`], so a
+//! folded key is never produced for a name in a case-sensitive directory
+//! (#332).
 
 #![forbid(unsafe_code)]
 
@@ -182,6 +185,19 @@ pub fn is_case_sensitive_dir(dir: &Path) -> io::Result<bool> {
         // so every folder on it is case-insensitive.
         Err(e) if matches!(e.raw_os_error(), Some(1 | 50 | 87)) => Ok(false),
         Err(e) => Err(e),
+    }
+}
+
+/// Per-directory case sensitivity from the file system, for
+/// [`crate::fsctx::NormalizedPath::resolve_case_sensitivity`]. A directory
+/// whose flag cannot be read is `None`, which the path treats as
+/// case-sensitive.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct OsCaseSensitivity;
+
+impl crate::fsctx::CaseSensitivityResolver for OsCaseSensitivity {
+    fn is_case_sensitive(&self, dir: &crate::fsctx::NormalizedPath) -> Option<bool> {
+        is_case_sensitive_dir(Path::new(&dir.to_win32_string())).ok()
     }
 }
 

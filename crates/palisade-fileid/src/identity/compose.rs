@@ -1517,6 +1517,11 @@ fn path_info(text: &str, claimed: bool, opened: Option<&std::fs::File>) -> PathI
             .map(crate::fsctx::NormalizedPath::to_win32_string),
         lexical_key: forms.lexical_key(),
         rule_key: forms.case_folded(),
+        final_case_sensitive: forms
+            .final_path
+            .as_ref()
+            .map(|p| p.case_sensitive_components().to_vec())
+            .unwrap_or_default(),
     }
 }
 

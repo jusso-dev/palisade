@@ -47,6 +47,7 @@ pub fn final_path(path: &Path) -> io::Result<NormalizedPath> {
     // A normalised final path contains only long names, whatever shape a
     // component has.
     normalized.mark_long_names_verified();
+    normalized.resolve_case_sensitivity(&super::volume::OsCaseSensitivity);
     Ok(normalized)
 }
 

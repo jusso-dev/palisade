@@ -53,8 +53,8 @@ pub use acl::{
 };
 pub use motw::{Motw, MotwWarning, Zone, parse_zone_identifier};
 pub use path::{
-    NormalizedPath, PathError, PathNotes, Prefix, Root, ShortNameResolver, Stream, fold_case,
-    normalize_nt, normalize_win32,
+    CaseSensitivityResolver, NormalizedPath, PathError, PathNotes, Prefix, Root, ShortNameResolver,
+    Stream, fold_case, normalize_nt, normalize_win32,
 };
 pub use sid::{Sid, SidError};
 pub use vars::{KnownFolders, PathVariable, path_variables_matched};

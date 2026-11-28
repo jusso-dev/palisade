@@ -1245,7 +1245,14 @@ pub struct PathInfo {
     /// The case-folded key of the name as written.
     pub lexical_key: Option<String>,
     /// The case-folded key of the final path: what path rules match.
+    /// `None` when a component of the final path is in a case-sensitive
+    /// directory (#332).
     pub rule_key: Option<String>,
+    /// The components of the final path that are in case-sensitive
+    /// directories, as the OS read them, so [`Self::rule_path`] keeps
+    /// them. Not serialised: `rule_key` already reflects it.
+    #[serde(skip)]
+    pub final_case_sensitive: Vec<usize>,
 }
 
 impl PathInfo {
@@ -1254,10 +1261,12 @@ impl PathInfo {
     /// is marked as such), otherwise the normalised path as written.
     pub(crate) fn rule_path(&self) -> Option<crate::fsctx::NormalizedPath> {
         if let Some(fp) = &self.final_path {
-            #[allow(unused_mut)]
             let mut p = crate::fsctx::normalize_win32(fp).ok()?;
             #[cfg(all(windows, feature = "os-trust"))]
             p.mark_long_names_verified();
+            if !self.final_case_sensitive.is_empty() {
+                p.set_case_sensitive_components(&self.final_case_sensitive);
+            }
             return Some(p);
         }
         crate::fsctx::normalize_win32(self.normalized.as_deref()?).ok()
