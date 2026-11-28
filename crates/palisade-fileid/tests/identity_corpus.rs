@@ -378,11 +378,17 @@ fn identify_entry(e: &Entry, contexts: &Contexts) -> Option<FileIdentity> {
         }
         // A file of another committed fixture set, by `set/name`.
         "fixture" => {
-            let (set, file) = e
-                .generator
+            // `set/name`, optionally `+appendN`: the file with N bytes
+            // appended (0x41), as the installer tests append them.
+            let (path, append) = match e.generator.split_once("+append") {
+                Some((p, n)) => (p, n.parse::<usize>().expect("+appendN")),
+                None => (e.generator.as_str(), 0),
+            };
+            let (set, file) = path
                 .split_once('/')
                 .unwrap_or_else(|| panic!("{}: generator is set/name", e.id));
-            let bytes = fixture_set_file(set, file);
+            let mut bytes = fixture_set_file(set, file);
+            bytes.extend(std::iter::repeat_n(0x41, append));
             Some(identify_bytes(&bytes, Some(name), Tiers::ALL, &ctx))
         }
         "os" => {
@@ -1257,4 +1263,102 @@ fn deep_tier_records_merge_like_one_pass() {
         assert_eq!(early, all, "{name}");
         assert!(all.computed_tiers.contains(Tier::Deep), "{name}");
     }
+}
+
+/// #343 review B1: a signed installer with bytes appended after its last
+/// sector (the CVE-2020-1464 pattern: an archive glued onto a vendor-signed
+/// MSI) is not what its signer signed: invalid, with no rule, whatever it
+/// is named. The same for a package: nothing may follow its end-of-archive
+/// record.
+#[test]
+fn appended_data_never_keeps_a_signature() {
+    use palisade_fileid::identity::{RuleLevel, SigningStateKind, recommend};
+    let contexts = Contexts::new();
+    let ctx = contexts.get("fixture_roots");
+
+    let signed = fixture_set_file("installer", "product-sha256.msi");
+    let clean = identify_bytes(&signed, Some("product.msi"), Tiers::ALL, &ctx);
+    assert_eq!(
+        clean.signing_state.computed().unwrap().state,
+        SigningStateKind::Trusted
+    );
+    let mut appended = signed.clone();
+    appended.extend_from_slice(&[0x41; 600]);
+    for name in ["product.msi", "update.jar"] {
+        let id = identify_bytes(&appended, Some(name), Tiers::ALL, &ctx);
+        let s = id.signing_state.computed().unwrap();
+        assert_eq!(s.state, SigningStateKind::Invalid, "{name}: {s:?}");
+        assert!(s.signer.is_none());
+        assert!(
+            s.embedded_invalid_reason
+                .as_deref()
+                .is_some_and(|r| r.starts_with("trailing data is not signed")),
+            "{name}: {s:?}"
+        );
+        assert_eq!(recommend(&id).level, RuleLevel::None, "{name}");
+        let i = id.installer.computed().unwrap();
+        assert_eq!(i.trailing_bytes, Some(600));
+        assert!(!i.signature_valid);
+    }
+    // An unsigned installer with trailing data has no signature to lose.
+    let mut unsigned = fixture_set_file("installer", "product.msi");
+    unsigned.extend_from_slice(&[0x41; 600]);
+    let id = identify_bytes(&unsigned, Some("product.msi"), Tiers::ALL, &ctx);
+    assert_ne!(
+        id.signing_state.computed().unwrap().state,
+        SigningStateKind::Trusted
+    );
+
+    // A signed package with bytes after its end-of-archive record.
+    let msix = fixture_set_file("package", "app-signed.msix");
+    let mut appended = msix.clone();
+    appended.extend_from_slice(b"PK\x03\x04appended");
+    for name in ["app.msix", "update.jar"] {
+        let id = identify_bytes(&appended, Some(name), Tiers::ALL, &ctx);
+        let s = id.signing_state.computed().unwrap();
+        assert!(
+            !matches!(
+                s.state,
+                SigningStateKind::Trusted | SigningStateKind::Unsigned
+            ),
+            "{name}: {s:?}"
+        );
+        assert!(s.signer.is_none());
+        assert!(!matches!(
+            recommend(&id).level,
+            RuleLevel::Publisher | RuleLevel::PublisherProduct | RuleLevel::FilePublisher
+        ));
+    }
+}
+
+/// #343 review (CodeRabbit): with the hash tier alone the file type is not
+/// determined, so an installer's or script's normalised hash is
+/// unavailable, not "not applicable". A PE image, known from its hashes,
+/// has none.
+#[test]
+fn normalised_hashes_are_unavailable_until_the_type_is_known() {
+    let contexts = Contexts::new();
+    let ctx = contexts.get("fixture_roots");
+    let hash_only = Tiers::only(palisade_fileid::identity::Tier::Hash);
+    for (set, file, name) in [
+        ("installer", "product-sha256.msi", "product.msi"),
+        ("script", "ps1-utf8bom-crlf.ps1", "run.ps1"),
+    ] {
+        let id = identify_bytes(&fixture_set_file(set, file), Some(name), hash_only, &ctx);
+        let h = id.hashes.computed().unwrap();
+        assert!(
+            matches!(h.msi_normalised_sha256, Field::Unavailable(_)),
+            "{name}: {:?}",
+            h.msi_normalised_sha256
+        );
+        assert!(
+            matches!(h.script_normalised_sha256, Field::Unavailable(_)),
+            "{name}: {:?}",
+            h.script_normalised_sha256
+        );
+    }
+    let id = identify_bytes(&signed_powershell(), Some("a.exe"), hash_only, &ctx);
+    let h = id.hashes.computed().unwrap();
+    assert_eq!(h.msi_normalised_sha256, Field::NotApplicable);
+    assert_eq!(h.script_normalised_sha256, Field::NotApplicable);
 }

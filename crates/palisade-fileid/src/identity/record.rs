@@ -870,8 +870,12 @@ pub struct InstallerSummary {
     pub cabinets: usize,
     /// The package has a signature stream.
     pub signed: bool,
-    /// The signature verifies against the content (trust is separate).
+    /// The signature verifies against the content and nothing follows the
+    /// signed package (trust is separate).
     pub signature_valid: bool,
+    /// Bytes after the compound file's last sector, which no signature or
+    /// hash covers. A signed package with any is invalid.
+    pub trailing_bytes: Option<u64>,
     /// The content hash the signature signs, hex.
     pub content_sha256: String,
     /// What could not be read, for reading.

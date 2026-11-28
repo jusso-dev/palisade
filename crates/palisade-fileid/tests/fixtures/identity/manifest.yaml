@@ -677,6 +677,20 @@
     strength.product_code: "weak"
     recommended_level: "publisher_product"
 
+- id: "signed-msi-appended"
+  file: "product.jar"
+  source: "fixture"
+  licence: "Apache-2.0 OR MIT"
+  generator: "installer/product-sha256.msi+append600"
+  description: "The signed installer database with 600 bytes appended after its last sector and named as a Java archive (the CVE-2020-1464 pattern). No signature covers the appended bytes, so it is invalid and gets no rule, under its trusted root."
+  context: "fixture_roots"
+  expected:
+    content_kind: "msi"
+    signing_state: "invalid"
+    embedded: "invalid"
+    embedded_invalid_reason: "trailing data is not signed: 600 bytes follow the signed package"
+    recommended_level: "none"
+
 - id: "unsigned-msi"
   file: "product.msi"
   source: "fixture"

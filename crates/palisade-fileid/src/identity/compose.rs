@@ -418,6 +418,12 @@ fn compose(id: &mut FileIdentity, content: Content, tiers: Tiers, ctx: &Identity
             (_, Some(k)) if is_installer_kind(k) => Field::Unavailable(
                 "the installer was not read (request the trust or deep tier)".to_owned(),
             ),
+            // The content kind was not determined (the hash tier alone):
+            // it may be an installer, unless it is a PE image.
+            (_, None) if !is_pe => Field::Unavailable(
+                "the file type was not determined (request the classify, trust or deep tier)"
+                    .to_owned(),
+            ),
             _ => Field::NotApplicable,
         };
         summary.script_normalised_sha256 = match (&non_pe, kind) {
@@ -427,6 +433,10 @@ fn compose(id: &mut FileIdentity, content: Content, tiers: Tiers, ctx: &Identity
             ),
             (_, Some(FileKind::Script(s))) if script_kind_of(s).is_some() => Field::Unavailable(
                 "the script was not read (request the trust or deep tier)".to_owned(),
+            ),
+            (_, None) if !is_pe => Field::Unavailable(
+                "the file type was not determined (request the classify, trust or deep tier)"
+                    .to_owned(),
             ),
             _ => Field::NotApplicable,
         };
@@ -631,7 +641,15 @@ fn trust_tier(
                 _ => Some(Ok(r.signatures.clone())),
             },
             NonPe::Installer(Ok(i)) => {
-                Some(Ok(i.signature.clone().unwrap_or_else(unsigned_report)))
+                let mut report = i.signature.clone().unwrap_or_else(unsigned_report);
+                // Bytes after the compound file's last sector are outside
+                // the content hash: a signed package with data appended
+                // (a second file glued on, the CVE-2020-1464 pattern) is
+                // not what its signer signed, so no signature is valid.
+                if installer_trailing_bytes(i).is_some() && i.signature.is_some() {
+                    demote_unsigned_tail(&mut report);
+                }
+                Some(Ok(report))
             }
             NonPe::Package(Ok(p)) => {
                 package_publisher = Some(p);
@@ -699,6 +717,12 @@ fn trust_tier(
                     EmbeddedSigning::Invalid(reason) => {
                         embedded_invalid_reason = Some(match non_pe {
                             NonPe::Script(r) => script_invalid_reason(r),
+                            NonPe::Installer(Ok(i)) => match installer_trailing_bytes(i) {
+                                Some(n) => format!(
+                                    "trailing data is not signed: {n} bytes follow the signed package"
+                                ),
+                                None => invalid_reason(reason),
+                            },
                             NonPe::Package(Ok(p)) => p
                                 .signature
                                 .as_ref()
@@ -1457,6 +1481,29 @@ fn file_digests(h: &ImageHashes) -> Vec<Digest> {
     out
 }
 
+/// How many bytes follow an installer package's last sector, if any.
+fn installer_trailing_bytes(i: &InstallerIdentity) -> Option<u64> {
+    i.warnings.iter().find_map(|w| match w {
+        crate::installer::InstallerWarning::TrailingData(n) if *n > 0 => Some(*n),
+        _ => None,
+    })
+}
+
+/// Marks every signature of `report` as not covering the file, with no
+/// primary: the file holds bytes no signature signs.
+fn demote_unsigned_tail(report: &mut SignatureReport) {
+    for sig in &mut report.signatures {
+        if sig.status.is_valid() {
+            sig.status = SignatureStatus::DigestMismatch;
+            sig.signer = None;
+            sig.digest_match = Some(false);
+        }
+    }
+    report.primary = None;
+    report.signing_state =
+        EmbeddedSigning::Invalid(InvalidReason::Signature(SignatureStatus::DigestMismatch));
+}
+
 /// The report of a format's file with no signature.
 fn unsigned_report() -> SignatureReport {
     SignatureReport {
@@ -1618,7 +1665,8 @@ fn installer_summary(i: &InstallerIdentity) -> InstallerSummary {
         elevated_actions: i.embedded.custom_actions.iter().any(|a| a.no_impersonate),
         cabinets: i.embedded.cabinets.len(),
         signed: i.signature.is_some(),
-        signature_valid: i.signature_valid(),
+        signature_valid: i.signature_valid() && installer_trailing_bytes(i).is_none(),
+        trailing_bytes: installer_trailing_bytes(i),
         content_sha256: i.content_sha256.to_string(),
         warnings: i.warnings.iter().map(|w| format!("{w:?}")).collect(),
     }
