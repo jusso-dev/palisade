@@ -717,3 +717,33 @@ fn deep_tier_tags_content() {
     let early = identify_bytes(&image, Some("extool.exe"), Tiers::EXECUTION, &ctx());
     assert_eq!(early.content_tags, Field::NotRequested);
 }
+
+/// #345 review m4: `IdentityContext::content_rules` exists whatever the
+/// features, so a context built field by field compiles either way.
+#[test]
+fn a_context_built_field_by_field_compiles_with_any_features() {
+    use palisade_fileid::authenticode::{RevocationSet, TrustConfig, ValidityPolicy};
+    use palisade_fileid::hash::{AlgorithmSet, HashOptions};
+    use palisade_fileid::identity::{MAX_IN_MEMORY, ProtectedList};
+    let trust = TrustConfig::new();
+    let revocation = RevocationSet::new();
+    let validity = ValidityPolicy::default();
+    let protected = ProtectedList::defaults();
+    let c = IdentityContext {
+        code_trust: &trust,
+        tsa_trust: &trust,
+        catalogs: None,
+        revocation: &revocation,
+        validity: &validity,
+        now: NOW,
+        clock_floor: None,
+        protected: &protected,
+        known_folders: None,
+        flat_algorithms: AlgorithmSet::DEFAULT,
+        hash_options: HashOptions::default(),
+        max_in_memory: MAX_IN_MEMORY,
+        content_rules: None,
+    };
+    let id = identify_bytes(&tool_image((1, 0, 0, 0)), Some("a.exe"), Tiers::ALL, &c);
+    assert!(matches!(id.content_tags, Field::Unavailable(_)));
+}

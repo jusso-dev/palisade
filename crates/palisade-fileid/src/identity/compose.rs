@@ -78,10 +78,21 @@ pub struct IdentityContext<'a> {
     pub max_in_memory: u64,
     /// The content tagging rules the deep tier scans with (#44): the
     /// built-in set, plus the organisation's from policy. `None` leaves
-    /// the tags unavailable.
-    #[cfg(feature = "content-rules")]
-    pub content_rules: Option<&'a crate::tags::ContentRules>,
+    /// the tags unavailable. The field exists whatever the features, so a
+    /// context built field by field compiles however a dependency graph
+    /// unifies them; without `content-rules` it can only be `None`.
+    pub content_rules: Option<&'a ContentRules>,
 }
+
+/// The compiled content tagging rules (#44).
+#[cfg(feature = "content-rules")]
+pub use crate::tags::ContentRules;
+
+/// Stands in for the content tagging rules when the `content-rules`
+/// feature is off. It has no values, so a context can only hold `None`.
+#[cfg(not(feature = "content-rules"))]
+#[derive(Debug)]
+pub enum ContentRules {}
 
 impl IdentityContext<'_> {
     /// A context that trusts nothing, looks nothing up and uses the built-in
@@ -107,23 +118,27 @@ impl IdentityContext<'_> {
             flat_algorithms: AlgorithmSet::DEFAULT,
             hash_options: HashOptions::default(),
             max_in_memory: MAX_IN_MEMORY,
-            #[cfg(feature = "content-rules")]
-            content_rules: Some(builtin_content_rules()),
+            content_rules: builtin_content_rules(),
         }
     }
 }
 
 /// The built-in content tagging rules, compiled once.
 #[cfg(feature = "content-rules")]
-fn builtin_content_rules() -> &'static crate::tags::ContentRules {
-    static RULES: std::sync::OnceLock<crate::tags::ContentRules> = std::sync::OnceLock::new();
-    RULES.get_or_init(|| {
+fn builtin_content_rules() -> Option<&'static ContentRules> {
+    static RULES: std::sync::OnceLock<ContentRules> = std::sync::OnceLock::new();
+    Some(RULES.get_or_init(|| {
         #[expect(
             clippy::expect_used,
             reason = "the built-in rules are fixed and compiled by the tags module's own tests"
         )]
-        crate::tags::ContentRules::new(None).expect("the built-in content rules compile")
-    })
+        ContentRules::new(None).expect("the built-in content rules compile")
+    }))
+}
+
+#[cfg(not(feature = "content-rules"))]
+const fn builtin_content_rules() -> Option<&'static ContentRules> {
+    None
 }
 
 /// Why [`identify`] produced no record at all. Anything after the file is
@@ -1972,8 +1987,11 @@ fn content_tags(bytes: Option<&[u8]>, ctx: &IdentityContext<'_>) -> Field<Conten
 }
 
 #[cfg(not(feature = "content-rules"))]
-fn content_tags(_bytes: Option<&[u8]>, _ctx: &IdentityContext<'_>) -> Field<ContentTagsSummary> {
-    Field::Unavailable("built without the content-rules feature".to_owned())
+fn content_tags(_bytes: Option<&[u8]>, ctx: &IdentityContext<'_>) -> Field<ContentTagsSummary> {
+    match ctx.content_rules {
+        Some(never) => match *never {},
+        None => Field::Unavailable("built without the content-rules feature".to_owned()),
+    }
 }
 
 fn script_summary(r: &ScriptReport) -> ScriptSummary {

@@ -92,7 +92,9 @@ mod record;
 pub mod strength;
 mod tier;
 
-pub use compose::{IdentifyError, IdentityContext, MAX_IN_MEMORY, identify, identify_bytes};
+pub use compose::{
+    ContentRules, IdentifyError, IdentityContext, MAX_IN_MEMORY, identify, identify_bytes,
+};
 pub use protected::{
     DEFAULT_LIST_VERSION, ExpectedDir, ExpectedSigner, ProtectedBinary, ProtectedList,
     ProtectedVendor,
@@ -105,8 +107,9 @@ pub use record::{
     ManifestSummary, Masquerade, MasqueradeReason, MotwSummary, NameInfo, NotYetDefined,
     OsComparisonSummary, OsCrossCheckSummary, OwnerSummary, PackageSummary, PathInfo, PdbSummary,
     PeSummary, Pending, PublisherProduct, ReparseSummary, SCHEMA_VERSION, ScriptSummary,
-    SectionSummary, SignatureSummary, SigningState, SigningStateKind, StreamSummary, StreamsSummary, Timestamps,
-    TrustSource, TrustedSigner, VersionSummary, VolumeSummary, WritableSummary,
+    SectionSummary, SignatureSummary, SigningState, SigningStateKind, StreamSummary,
+    StreamsSummary, Timestamps, TrustSource, TrustedSigner, VersionSummary, VolumeSummary,
+    WritableSummary,
 };
 pub use strength::{AttributeStrength, IdentityStrength};
 pub use tier::{Tier, TierParseError, Tiers};
