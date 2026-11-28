@@ -16,7 +16,7 @@ workspace = true
 # OS-backed reads on Windows (`palisade_fileid::win`, ADR 0003). Off by
 # default. The agent enables it on Windows; the CLI turns it on for its
 # Windows builds, for diagnostics.
-os-trust = ["dep:windows-sys"]
+os-trust = ["dep:windows", "dep:windows-sys"]
 # Content tagging (`palisade_fileid::tags`, #44): the built-in tag set and
 # organisation pattern rules. Off by default; the agent runs it off the
 # identity hot path.
@@ -47,6 +47,14 @@ libc = { workspace = true }
 
 # The Windows API, for `palisade_fileid::win` only, so only with `os-trust`.
 [target.'cfg(windows)'.dependencies]
+# The package manager's WinRT interface (`PackageManager.FindPackages`,
+# `FindUsers`), for `win::package_manager` only: every user's packages, the
+# stub flag and each package's users (#333). The flat Win32 API sees only
+# the calling user.
+windows = { workspace = true, optional = true, features = [
+    "ApplicationModel",
+    "Management_Deployment",
+] }
 windows-sys = { workspace = true, optional = true, features = [
     # `RtlUpcaseUnicodeChar`: the OS's upcase table (#332).
     "Wdk_System_SystemServices",

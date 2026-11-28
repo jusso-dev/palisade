@@ -83,6 +83,9 @@ deny = [
     # Use rustls, not a system TLS library.
     { crate = "openssl", reason = "use rustls" },
     { crate = "openssl-sys", reason = "use rustls" },
+    # The WinRT projection is large; only the package manager backend in
+    # `palisade_fileid::win` (behind `os-trust`, ADR 0003) may use it (#333).
+    { crate = "windows", wrappers = ["palisade-fileid"], reason = "only palisade-fileid's os-trust package backend may use the WinRT projection" },
 ]
 # Each skip and skip-tree entry is a table with a `reason`, for example
 # { crate = "syn@2.0.119", reason = "..." }. `cargo xtask check-supply-chain`

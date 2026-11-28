@@ -58,6 +58,11 @@ const BANNED: &[(&str, &[&str], &str)] = &[
         "policy evaluation must stay pure, portable and free of I/O",
     ),
     (
+        "palisade-core",
+        &["tokio", "reqwest", "windows", "windows-sys"],
+        "the shared types must stay pure, portable and no_std",
+    ),
+    (
         "palisade-agent",
         &[
             "palisade-server",

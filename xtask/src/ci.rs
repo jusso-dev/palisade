@@ -288,6 +288,26 @@ pub const STEPS: &[Step] = &[
             "cargo xtask dist --msi --sign test-ca --out target/dist/signed",
         )
     },
+    // Installs a test package: only where the developer opts in, as the
+    // test itself does.
+    Step {
+        slow: true,
+        only_on: Some("windows"),
+        needs_env: Some("PALISADE_INSTALL_TEST_PACKAGE"),
+        env: &[("PALISADE_INSTALL_TEST_PACKAGE", "1")],
+        ..step(
+            "installed-package",
+            "cargo test -p palisade-fileid --features os-trust --locked --test package_installed -- --nocapture",
+        )
+    },
+    Step {
+        slow: true,
+        only_on: Some("windows"),
+        ..step(
+            "installed-package",
+            "cargo test -p palisade-fileid --features os-trust --locked --lib win::package_manager -- --nocapture",
+        )
+    },
     Step {
         slow: true,
         only_on: Some("linux"),
@@ -821,6 +841,8 @@ mod tests {
                 "package",
                 "package",
                 "sign-test",
+                "installed-package",
+                "installed-package",
                 "server-image",
                 "server-image",
                 "server-image"

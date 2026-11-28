@@ -603,6 +603,29 @@ jobs:
         shell: pwsh
         run: ./packaging/sign/sign.ps1 -Action cleanup
 
+  # Installed packages against a package the OS really installed (#333):
+  # `tests/package_installed.rs` packs and signs a small test package with
+  # a throwaway self-signed certificate made on the runner, trusts it in the
+  # machine's TrustedPeople store, installs it, and checks every user's
+  # listing, the stub flag and users, executable mapping and app execution
+  # alias resolution, then removes the package and the certificate. The
+  # `test` job skips that test, so no other runner installs anything.
+  installed-package:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo test -p palisade-fileid --features os-trust --locked --test package_installed -- --nocapture
+        env:
+          PALISADE_INSTALL_TEST_PACKAGE: "1"
+      - run: cargo test -p palisade-fileid --features os-trust --locked --lib win::package_manager -- --nocapture
+
   # The Linux server binary, and its OCI image built with the runner's
   # preinstalled podman. The image is only built, not pushed; signing and
   # publishing it is #18.
@@ -624,7 +647,7 @@ jobs:
   # The single required check from this workflow for branch protection.
   ci-ok:
     if: always()
-    needs: [fmt, clippy, test, postgres, coverage, coverage-gate, snapshots, fixtures, fuzz-locks, fuzz, bench, msrv, docs, docs-book, spelling, banned-terms, deps, supply-chain, feature-powerset, runner-guard, doc-checks, workflow-lint, package, sign-test, server-image]
+    needs: [fmt, clippy, test, postgres, coverage, coverage-gate, snapshots, fixtures, fuzz-locks, fuzz, bench, msrv, docs, docs-book, spelling, banned-terms, deps, supply-chain, feature-powerset, runner-guard, doc-checks, workflow-lint, package, sign-test, installed-package, server-image]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

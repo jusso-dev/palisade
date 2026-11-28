@@ -28,7 +28,14 @@ workspace crates are in [workspace.md](workspace.md#dependency-directions).
 Keep the agent's tree small. The agent runs as a privileged service and should pull in much
 less than the server. The dependency report lists each crate's tree size separately. In the
 agent, prefer `windows-sys` to `windows`: it is bindings only, so it compiles faster and ships
-less.
+less. The one exception is `palisade_fileid::win::package_manager` (#333). Listing every user's
+installed packages, the stub flag and each package's users needs the package manager's WinRT
+interface. `windows-sys` has no WinRT projection, and writing the activation and vtable calls by
+hand would mean more `unsafe` in this repository than taking the crate. So `palisade-fileid`'s
+`os-trust` feature enables `windows` with only the `ApplicationModel` and
+`Management_Deployment` features. `deny.toml` lets no other workspace crate depend on it
+directly (`wrappers`), and `cargo xtask check-deps` keeps it out of `palisade-policy` and
+`palisade-core` entirely.
 
 ## What runs on every pull request
 

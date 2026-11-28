@@ -17,9 +17,8 @@
 //!   does not belong to the package is never believed.
 //!
 //! [`resolve_alias_for_current_user`] checks an app execution alias against
-//! the packages of the family it claims. Enumerating every package for
-//! every user needs the package manager's WinRT interface, which this
-//! module does not use; that is still open in #333.
+//! the packages of the family it claims. Every user's packages, with the
+//! stub flag and each package's users, are in [`super::package_manager`].
 
 #![forbid(unsafe_code)]
 
@@ -75,8 +74,23 @@ pub fn packages_of_family(family: &str) -> io::Result<InstalledPackages> {
 
 fn read_package(full_name: &str, props: u32) -> Option<InstalledPackage> {
     let folder = sys::package_path(full_name).ok()?;
-    let location = super::fsctx::final_path(Path::new(&folder)).ok()?;
-    let manifest_path = Path::new(&folder).join("AppxManifest.xml");
+    let mut p = from_install_folder(full_name, &folder)?;
+    p.signature_kind =
+        sys::package_origin(full_name).map_or(InstalledSignatureKind::Unknown, signature_kind);
+    p.is_framework |= props & PROP_FRAMEWORK != 0;
+    p.is_resource_package |= props & PROP_RESOURCE != 0;
+    p.is_bundle = props & PROP_BUNDLE != 0;
+    Some(p)
+}
+
+/// The record of the package `full_name` installed in `folder`: the
+/// identity and applications from its installed manifest, and the folder
+/// as a final path. `None` if either cannot be read, or the manifest's
+/// identity does not give `full_name`. The flags the OS reports, the
+/// signature kind and the users are left for the caller.
+pub(crate) fn from_install_folder(full_name: &str, folder: &str) -> Option<InstalledPackage> {
+    let location = super::fsctx::final_path(Path::new(folder)).ok()?;
+    let manifest_path = Path::new(folder).join("AppxManifest.xml");
     let bytes = read_bounded(&manifest_path)?;
     let m = parse_package_manifest(&bytes).ok()?;
     let id = &m.identity;
@@ -93,11 +107,8 @@ fn read_package(full_name: &str, props: u32) -> Option<InstalledPackage> {
         return None;
     }
     p.install_location = Some(location);
-    p.signature_kind =
-        sys::package_origin(full_name).map_or(InstalledSignatureKind::Unknown, signature_kind);
-    p.is_framework = props & PROP_FRAMEWORK != 0 || m.is_framework;
-    p.is_resource_package = props & PROP_RESOURCE != 0 || m.is_resource_package;
-    p.is_bundle = props & PROP_BUNDLE != 0;
+    p.is_framework = m.is_framework;
+    p.is_resource_package = m.is_resource_package;
     p.applications = m.applications;
     Some(p)
 }
