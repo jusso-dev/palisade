@@ -1,0 +1,56 @@
+# The dev container, proven in a clean environment (#29): builds
+# .devcontainer/ as a contributor would, with its Postgres service, and runs
+# `cargo xtask ci --fast` inside it. It is the evidence that the image has
+# every tool CI needs at CI's versions and that the checks pass there.
+#
+# Building the image compiles every cargo tool from source, so the job takes
+# a while. It runs weekly, on demand, and on pull requests that change the
+# dev container or this file, never on every pull request. It is separate
+# from ci.yml, whose commands `cargo xtask ci` mirrors.
+name: Dev container
+
+on:
+  pull_request:
+    paths:
+      - ".devcontainer/**"
+      - ".github/workflows/devcontainer.yml"
+  schedule:
+    - cron: "17 4 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  devcontainer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      COMPOSE: docker compose --file .devcontainer/compose.yaml --project-name palisade-dev
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The image's user has UID 1000; the runner's checkout belongs to the
+      # runner user (UID 1001), so make the bind-mounted tree writable for it.
+      - run: chmod -R a+rwX "$GITHUB_WORKSPACE"
+      - name: Build the image and start the services
+        run: |
+          $COMPOSE build dev
+          $COMPOSE up --detach --wait
+      # Git refuses a repository owned by another user, and the checkout is
+      # owned by UID 1001 while the container runs as UID 1000. Trust only
+      # this workspace, for the container user (`check-unsafe` runs git).
+      - name: Trust the workspace for git inside the container
+        run: $COMPOSE exec -T dev git config --global --add safe.directory /workspaces/palisade
+      - name: Fetch the locked dependencies
+        run: $COMPOSE exec -T --workdir /workspaces/palisade dev cargo fetch --locked
+      - name: cargo xtask ci --fast, inside the container
+        run: $COMPOSE exec -T --workdir /workspaces/palisade dev cargo xtask ci --fast
+      - name: Stop the services
+        if: always()
+        run: $COMPOSE down --volumes

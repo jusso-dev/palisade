@@ -23,11 +23,14 @@ ARG ACTIONLINT_SHA256_ARM64=325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7
 
 # System packages: Git, a C toolchain for build scripts, the MinGW-w64 linker
 # for the Windows GNU target, Postgres client tools for the server tests,
-# and ShellCheck for the scripts under .github and .githooks.
+# ShellCheck for the scripts under .github and .githooks, and procps for
+# `kill`, which the agent and server tests run to send real signals (the
+# slim base image has none). Versions come from the Debian release of the
+# base image, which is pinned by digest.
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
         build-essential ca-certificates curl git gcc-mingw-w64-x86-64 \
-        pkg-config postgresql-client shellcheck \
+        pkg-config postgresql-client procps shellcheck \
     && rm -rf /var/lib/apt/lists/*
 
 # The pinned toolchain with its components and targets

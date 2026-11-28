@@ -1,7 +1,7 @@
 //! End-to-end tests of the `palisade-server` binary.
 
-// Test helpers outside `#[test]` functions unwrap freely.
-#![allow(clippy::unwrap_used)]
+// Test helpers outside `#[test]` functions unwrap and expect freely.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod common;
 
@@ -142,7 +142,7 @@ fn send_signal(child: &std::process::Child, sig: &str) {
     let status = Command::new("kill")
         .args([sig, &child.id().to_string()])
         .status()
-        .unwrap();
+        .expect("`kill` must be installed to send the signal (procps on Debian)");
     assert!(status.success());
 }
 
@@ -289,7 +289,7 @@ fn serve_logs_json_and_exits_zero_on_sigterm() {
     let status = Command::new("kill")
         .args(["-TERM", &child.id().to_string()])
         .status()
-        .unwrap();
+        .expect("`kill` must be installed to send the signal (procps on Debian)");
     assert!(status.success());
     let deadline = Instant::now() + Duration::from_secs(10);
     let code = loop {

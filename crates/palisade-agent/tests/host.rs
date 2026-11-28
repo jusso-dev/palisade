@@ -1,8 +1,8 @@
 //! The platform-independent host loop and the console binary.
 
-// Test code: helpers outside `#[test]` functions may unwrap, since a failure
-// there should fail the test loudly.
-#![allow(clippy::unwrap_used)]
+// Test code: helpers outside `#[test]` functions may unwrap or expect, since
+// a failure there should fail the test loudly.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::{process::Command, time::Duration};
 
@@ -172,7 +172,10 @@ fn console_mode_stops_on(signal: &str) {
         }
     }
     let pid = child.id().to_string();
-    let killed = Command::new("kill").args([signal, &pid]).status().unwrap();
+    let killed = Command::new("kill")
+        .args([signal, &pid])
+        .status()
+        .expect("`kill` must be installed to send the signal (procps on Debian)");
     assert!(killed.success());
     seen.extend(lines.map_while(Result::ok));
     let status = child.wait().unwrap();

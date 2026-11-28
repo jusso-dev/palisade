@@ -254,6 +254,18 @@ checkout). Details:
 | `links` | ubuntu-latest | `cargo xtask docs build`, then `lychee` over every link in the built book, external ones included |
 | `report` | ubuntu-latest | On failure, opens an issue titled "Documentation site has broken external links" with the `area:infra` label, or comments on the open one |
 
+### `devcontainer.yml` (weekly on Tuesday at 04:17 UTC, on demand, and on PRs that change `.devcontainer/`)
+
+| Job | Runners | What it runs |
+|---|---|---|
+| `devcontainer` | ubuntu-latest | Builds `.devcontainer/` with `docker compose` (the image and its Postgres service, as a contributor gets them), then `cargo fetch --locked` and `cargo xtask ci --fast` inside the container. No secrets, read-only permissions |
+
+It proves the dev container in a clean environment (#29): every tool `cargo xtask ci` needs is in
+the image at CI's version, and the checks pass there. Building the image compiles every cargo
+tool from source, so it does not run on every PR, only when the dev container or the workflow
+changes. It is a separate file from `ci.yml`, whose commands `cargo xtask ci` mirrors, so it is
+not part of that mirror. See [Developing on Linux](dev/unix.md#the-dev-container).
+
 ### `audit.yml` (daily at 03:17 UTC, and on demand)
 
 Runs `cargo deny check advisories` and `cargo xtask audit` (cargo-audit with the same ignores) against `main`, for the root workspace and every fuzz workspace's lockfile. Both
