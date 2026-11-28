@@ -220,3 +220,256 @@ fn simulate_prints_one_event_per_line() {
         .unwrap();
     assert_eq!(bad.status.code(), Some(2));
 }
+
+mod controls {
+    use std::sync::{Arc, Mutex};
+
+    use palisade_agent::{
+        config::{FailMode, LogLevel},
+        control::{AllowStop, Control, HostEvent, PowerChange, SessionChange, TamperGuard},
+        host::ConfigSubsystem,
+        subsystem::{BoxFuture, Criticality, Subsystem, SubsystemContext, SubsystemError},
+        supervisor::{RestartPolicy, Supervisor},
+    };
+    use tokio::sync::{mpsc, watch};
+
+    use super::*;
+
+    /// Records every host event it sees, and is ready once subscribed.
+    struct Listener {
+        seen: Arc<Mutex<Vec<HostEvent>>>,
+    }
+
+    impl Subsystem for Listener {
+        fn name(&self) -> &'static str {
+            "listener"
+        }
+
+        fn criticality(&self) -> Criticality {
+            Criticality::NonCritical
+        }
+
+        fn run(self: Arc<Self>, ctx: SubsystemContext) -> BoxFuture<Result<(), SubsystemError>> {
+            Box::pin(async move {
+                let mut events = ctx.host_events();
+                ctx.set_ready();
+                loop {
+                    tokio::select! {
+                        _ = ctx.stopped() => return Ok(()),
+                        Ok(event) = events.recv() => self.seen.lock().unwrap().push(event),
+                    }
+                }
+            })
+        }
+    }
+
+    struct Gate(watch::Sender<bool>);
+
+    impl TamperGuard for Gate {
+        fn stop_permission(&self) -> watch::Receiver<bool> {
+            self.0.subscribe()
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn controls_reach_subsystems_and_a_stop_ends_the_run() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let supervisor = Supervisor::new(
+            vec![Arc::new(Listener {
+                seen: Arc::clone(&seen),
+            })],
+            RestartPolicy::default(),
+        )
+        .unwrap();
+        let events = supervisor.host_events();
+        let handle = supervisor.start();
+        handle
+            .subscribe()
+            .wait_for(|s| *s == AgentState::Running)
+            .await
+            .unwrap();
+
+        let (tx, rx) = mpsc::unbounded_channel();
+        let guard = Gate(watch::channel(false).0);
+        let permissions = Arc::new(Mutex::new(Vec::new()));
+        let record = Arc::clone(&permissions);
+        let sent = [
+            HostEvent::Session {
+                change: SessionChange::Logon,
+                session_id: 2,
+            },
+            HostEvent::Power(PowerChange::Resume),
+            HostEvent::TimeChange,
+        ];
+        for event in sent {
+            tx.send(Control::Event(event)).unwrap();
+        }
+        let stopper = {
+            let tx = tx.clone();
+            let flip = guard.0.clone();
+            async move {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                flip.send_replace(true);
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                tx.send(Control::Stop(StopRequest::SYSTEM_SHUTDOWN))
+                    .unwrap();
+            }
+        };
+        let (request, ()) = tokio::join!(
+            host::serve_controls(rx, events, &guard, move |allowed| record
+                .lock()
+                .unwrap()
+                .push(allowed)),
+            stopper
+        );
+        assert_eq!(request, StopRequest::SYSTEM_SHUTDOWN);
+        assert_eq!(*permissions.lock().unwrap(), [false, true]);
+        handle.shutdown(Duration::from_secs(1)).await;
+        assert_eq!(*seen.lock().unwrap(), sent);
+    }
+
+    /// A guard whose sender is already gone.
+    struct Orphan;
+
+    impl TamperGuard for Orphan {
+        fn stop_permission(&self) -> watch::Receiver<bool> {
+            watch::channel(false).1
+        }
+    }
+
+    #[tokio::test]
+    async fn a_closed_channel_is_a_stop_and_a_dropped_guard_keeps_the_permission() {
+        let supervisor = Supervisor::new(Vec::new(), RestartPolicy::default()).unwrap();
+        let (tx, rx) = mpsc::unbounded_channel::<Control>();
+        let permissions = Mutex::new(Vec::new());
+        let serve = host::serve_controls(rx, supervisor.host_events(), &Orphan, |allowed| {
+            permissions.lock().unwrap().push(allowed)
+        });
+        let close = async {
+            tokio::task::yield_now().await;
+            drop(tx);
+        };
+        let (request, ()) = tokio::join!(serve, close);
+        assert_eq!(request.reason, StopReason::ChannelClosed);
+        assert_eq!(request.budget, host::STOP_BUDGET);
+        assert_eq!(*permissions.lock().unwrap(), [false]);
+        // Nothing subscribed: publishing reaches nobody, without an error.
+        assert_eq!(supervisor.host_events().publish(HostEvent::ParamChange), 0);
+        assert!(*AllowStop::default().stop_permission().borrow());
+    }
+
+    struct TempConfig(std::path::PathBuf);
+
+    impl TempConfig {
+        fn new(tag: &str, text: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "palisade-agent-reload-{tag}-{}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("agent.toml");
+            std::fs::write(&path, text).unwrap();
+            Self(path)
+        }
+
+        fn write(&self, text: &str) {
+            std::fs::write(&self.0, text).unwrap();
+        }
+    }
+
+    impl Drop for TempConfig {
+        fn drop(&mut self) {
+            if let Some(dir) = self.0.parent() {
+                let _ = std::fs::remove_dir_all(dir);
+            }
+        }
+    }
+
+    #[test]
+    fn reload_applies_a_valid_file_and_keeps_the_last_good_one() {
+        let file = TempConfig::new("direct", "fail_mode = \"fail_closed\"\n");
+        let config = ConfigSubsystem::new(palisade_agent::config::load(Some(&file.0)).unwrap());
+        let mut changes = config.subscribe();
+        assert_eq!(config.config().fail_mode, FailMode::FailClosed);
+        // Unchanged: no change published.
+        assert!(!config.reload().unwrap());
+        assert!(!changes.has_changed().unwrap());
+
+        file.write("fail_mode = \"fail_closed\"\n[log]\nlevel = \"debug\"\n");
+        assert!(config.reload().unwrap());
+        assert!(changes.has_changed().unwrap());
+        assert_eq!(
+            changes.borrow_and_update().config.log_level,
+            LogLevel::Debug
+        );
+
+        // An invalid file, or a missing one, never falls back to defaults.
+        file.write("fail_mode = \"sometimes\"\n");
+        assert!(config.reload().is_err());
+        std::fs::remove_file(&file.0).unwrap();
+        assert!(config.reload().is_err());
+        assert_eq!(config.config().fail_mode, FailMode::FailClosed);
+        assert_eq!(config.config().log_level, LogLevel::Debug);
+
+        // Runtime sizes are recorded, to apply at the next start.
+        file.write("fail_mode = \"fail_closed\"\n[runtime]\nworker_threads = 2\n");
+        assert!(config.reload().unwrap());
+        assert_eq!(config.config().runtime.worker_threads, Some(2));
+        assert_eq!(config.config().log_level, LogLevel::Info);
+    }
+
+    #[test]
+    fn defaults_reload_as_defaults_off_windows() {
+        let config = ConfigSubsystem::new(LoadedConfig {
+            config: AgentConfig::default(),
+            source: None,
+        });
+        // Off Windows there is no install-time path, so a reload reads the
+        // defaults again. On Windows it reads the install-time file.
+        #[cfg(not(windows))]
+        assert!(!config.reload().unwrap());
+        assert_eq!(config.config().fail_mode, FailMode::FailOpen);
+    }
+
+    #[tokio::test]
+    async fn param_change_reloads_the_running_config_subsystem() {
+        let file = TempConfig::new("event", "");
+        let config = Arc::new(ConfigSubsystem::new(
+            palisade_agent::config::load(Some(&file.0)).unwrap(),
+        ));
+        let mut changes = config.subscribe();
+        let supervisor = Supervisor::new(vec![config.clone()], RestartPolicy::default()).unwrap();
+        let events = supervisor.host_events();
+        let handle = supervisor.start();
+        handle
+            .subscribe()
+            .wait_for(|s| *s == AgentState::Running)
+            .await
+            .unwrap();
+        // Other events are ignored.
+        events.publish(HostEvent::TimeChange);
+        file.write("fail_mode = \"sometimes\"\n");
+        events.publish(HostEvent::ParamChange);
+        file.write("fail_mode = \"fail_closed\"\n");
+        // The bad file may or may not be read before the good one is
+        // written; either way the published change is the good one.
+        events.publish(HostEvent::ParamChange);
+        let loaded = tokio::time::timeout(
+            Duration::from_secs(30),
+            changes.wait_for(|l| l.config.fail_mode == FailMode::FailClosed),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .clone();
+        assert_eq!(loaded.source.as_deref(), Some(file.0.as_path()));
+        let report = handle.shutdown(Duration::from_secs(5)).await;
+        assert!(report.is_clean());
+    }
+
+    #[test]
+    fn set_log_level_needs_the_agent_subscriber() {
+        // Test binaries do not install it, so there is nothing to change.
+        assert!(!host::set_log_level(LogLevel::Debug));
+    }
+}

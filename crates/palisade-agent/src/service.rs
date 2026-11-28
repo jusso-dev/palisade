@@ -6,34 +6,35 @@
 //! does not read the SCM start arguments. Configuration comes from the
 //! service's command line (`ImagePath`), which the installer (#57) sets.
 //!
-//! Handled controls: `STOP` (20 s budget) and `PRESHUTDOWN` (10 s budget; also
-//! `SHUTDOWN`, which the SCM sends instead if pre-shutdown is not accepted).
-//! `INTERROGATE` is answered. The remaining controls listed in #56 (power,
-//! session and device events, `PARAMCHANGE`) arrive with the subsystems that
-//! consume them, and gating `STOP` through the tamper guard is #220.
+//! Handled controls: `STOP` (20 s budget, offered only while the
+//! [`TamperGuard`](crate::control::TamperGuard) allows it) and `PRESHUTDOWN`
+//! (10 s budget; also `SHUTDOWN`, which the SCM sends instead if pre-shutdown
+//! is not accepted). `POWEREVENT`, `SESSIONCHANGE`, `PARAMCHANGE` and
+//! `TIMECHANGE` become [`HostEvent`]s for the subsystems (see
+//! [`crate::control`]). `INTERROGATE` is answered.
 //!
-//! **Note for #220.** The wrapper crate frees the control-handler closure
-//! once a `STOP`, `SHUTDOWN` or `PRESHUTDOWN` handler call returns, whatever
-//! the result. That is sound here only because the handler reports
-//! `StopPending`, with no controls accepted, before it returns, so the SCM
-//! never calls it again. Refusing `STOP` while staying `Running` would let
-//! the SCM call a freed closure. Gating must therefore stop accepting `STOP`
-//! while locked, or use a handler of its own in `palisade_agent::ffi`.
+//! **Stop gating.** The wrapper crate frees the control-handler closure once
+//! a `STOP`, `SHUTDOWN` or `PRESHUTDOWN` handler call returns, whatever the
+//! result. That is sound only because the handler reports `StopPending`,
+//! with no controls accepted, before it returns, so the SCM never calls it
+//! again. A `STOP` is therefore never refused: the guard closes the gate by
+//! no longer offering `STOP`, and every status report goes through one
+//! [`StatusGate`] so nothing is offered again once a stop has begun.
 
 #![forbid(unsafe_code)]
 
 use std::{
     panic::AssertUnwindSafe,
     process::ExitCode,
-    sync::{Mutex, OnceLock, PoisonError},
+    sync::{Arc, Mutex, OnceLock, PoisonError},
     time::Duration,
 };
 
 use tokio::sync::mpsc;
 use windows_service::{
     service::{
-        ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
-        ServiceType,
+        PowerEventParam, ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState,
+        ServiceStatus, ServiceType, SessionChangeReason,
     },
     service_control_handler::{self, ServiceControlHandlerResult, ServiceStatusHandle},
     service_dispatcher,
@@ -41,7 +42,8 @@ use windows_service::{
 
 use crate::{
     cli::Args,
-    host::{self, StopReason, StopRequest},
+    control::{self, AcceptedControls, Control, HostEvent, PowerChange, SessionChange, StatusGate},
+    host::{self, StopRequest},
 };
 
 /// The service name registered with the SCM.
@@ -115,13 +117,27 @@ fn set_exit(code: ExitCode) {
 /// The exit code is stored first, and nothing else runs after `Stopped` is
 /// reported, because the process may exit at any point after that.
 fn service_main() {
+    let guard = control::default_guard();
+    let gate = Arc::new(StatusGate::new(*guard.stop_permission().borrow()));
     let (tx, rx) = mpsc::unbounded_channel();
+    let handler_gate = Arc::clone(&gate);
     let handler = move |control| {
-        let request = match control {
-            ServiceControl::Stop => StopRequest::REQUESTED,
+        let message = match control {
+            ServiceControl::Stop => {
+                if !handler_gate.stop_allowed() {
+                    // Offered before the gate closed, delivered after.
+                    tracing::warn!("STOP arrived after the stop permission was withdrawn");
+                }
+                StopRequest::REQUESTED
+            }
             ServiceControl::Preshutdown | ServiceControl::Shutdown => StopRequest::SYSTEM_SHUTDOWN,
             ServiceControl::Interrogate => return ServiceControlHandlerResult::NoError,
-            _ => return ServiceControlHandlerResult::NotImplemented,
+            other => {
+                if let Some(event) = host_event(&other) {
+                    let _ = tx.send(Control::Event(event));
+                }
+                return ServiceControlHandlerResult::NoError;
+            }
         };
         // The wrapper crate frees this closure after the first stop-type
         // control returns. Reporting `StopPending` with no accepted controls
@@ -129,13 +145,16 @@ fn service_main() {
         // rejects every control while a service is stop-pending), so the
         // freed closure is never called again.
         if let Some(status) = STATUS.get() {
-            Reporter(*status).report(
-                ServiceState::StopPending,
-                request.budget + WAIT_HINT_MARGIN,
-                0,
-            );
+            handler_gate.stopping(|| {
+                Reporter(*status).report(
+                    ServiceState::StopPending,
+                    AcceptedControls::default(),
+                    message.budget + WAIT_HINT_MARGIN,
+                    0,
+                );
+            });
         }
-        let _ = tx.send(request);
+        let _ = tx.send(Control::Stop(message));
         ServiceControlHandlerResult::NoError
     };
     let status = match service_control_handler::register(SERVICE_NAME, handler) {
@@ -149,19 +168,76 @@ fn service_main() {
     // Set before any status is reported, so before any control is accepted.
     let _ = STATUS.set(status);
     let reporter = Reporter(status);
-    reporter.report(ServiceState::StartPending, WAIT_HINT_MARGIN, 0);
-    let exit =
-        std::panic::catch_unwind(AssertUnwindSafe(|| run(&reporter, rx))).unwrap_or(EXIT_PANICKED);
+    reporter.report(
+        ServiceState::StartPending,
+        AcceptedControls::default(),
+        WAIT_HINT_MARGIN,
+        0,
+    );
+    let exit = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        run(&reporter, &gate, guard.as_ref(), rx)
+    }))
+    .unwrap_or(EXIT_PANICKED);
     set_exit(if exit == 0 {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
     });
-    reporter.report(ServiceState::Stopped, Duration::ZERO, exit);
+    // Close the gate so no permission change re-offers a control, then stop.
+    gate.stopping(|| {});
+    reporter.report(
+        ServiceState::Stopped,
+        AcceptedControls::default(),
+        Duration::ZERO,
+        exit,
+    );
+}
+
+/// The [`HostEvent`] for a notification control, if it is one subsystems
+/// act on.
+fn host_event(control: &ServiceControl) -> Option<HostEvent> {
+    match control {
+        ServiceControl::ParamChange => Some(HostEvent::ParamChange),
+        ServiceControl::TimeChange => Some(HostEvent::TimeChange),
+        ServiceControl::PowerEvent(PowerEventParam::Suspend) => {
+            Some(HostEvent::Power(PowerChange::Suspend))
+        }
+        ServiceControl::PowerEvent(
+            PowerEventParam::ResumeSuspend
+            | PowerEventParam::ResumeAutomatic
+            | PowerEventParam::ResumeCritical,
+        ) => Some(HostEvent::Power(PowerChange::Resume)),
+        ServiceControl::SessionChange(param) => Some(HostEvent::Session {
+            change: session_change(param.reason),
+            session_id: param.notification.session_id,
+        }),
+        _ => None,
+    }
+}
+
+fn session_change(reason: SessionChangeReason) -> SessionChange {
+    match reason {
+        SessionChangeReason::ConsoleConnect => SessionChange::ConsoleConnect,
+        SessionChangeReason::ConsoleDisconnect => SessionChange::ConsoleDisconnect,
+        SessionChangeReason::RemoteConnect => SessionChange::RemoteConnect,
+        SessionChangeReason::RemoteDisconnect => SessionChange::RemoteDisconnect,
+        SessionChangeReason::SessionLogon => SessionChange::Logon,
+        SessionChangeReason::SessionLogoff => SessionChange::Logoff,
+        SessionChangeReason::SessionLock => SessionChange::Lock,
+        SessionChangeReason::SessionUnlock => SessionChange::Unlock,
+        SessionChangeReason::SessionRemoteControl => SessionChange::RemoteControl,
+        SessionChangeReason::SessionCreate => SessionChange::Create,
+        SessionChangeReason::SessionTerminate => SessionChange::Terminate,
+    }
 }
 
 /// Runs the agent and returns the service-specific exit code (0 for success).
-fn run(reporter: &Reporter, mut rx: mpsc::UnboundedReceiver<StopRequest>) -> u32 {
+fn run(
+    reporter: &Reporter,
+    gate: &StatusGate,
+    guard: &dyn control::TamperGuard,
+    rx: mpsc::UnboundedReceiver<Control>,
+) -> u32 {
     let Some(args) = ARGS.get() else {
         return EXIT_START_FAILED;
     };
@@ -183,18 +259,13 @@ fn run(reporter: &Reporter, mut rx: mpsc::UnboundedReceiver<StopRequest>) -> u32
             return EXIT_START_FAILED;
         }
     };
-    let stop = async {
-        // `StopPending` was already reported by the control handler.
-        rx.recv().await.unwrap_or(StopRequest {
-            reason: StopReason::ChannelClosed,
-            budget: host::STOP_BUDGET,
-        })
-    };
-    let (_, report) = runtime.block_on(host::run_until(
-        supervisor,
-        || reporter.report(ServiceState::Running, Duration::ZERO, 0),
-        stop,
-    ));
+    let running = |controls| reporter.report(ServiceState::Running, controls, Duration::ZERO, 0);
+    let events = supervisor.host_events();
+    // `StopPending` was already reported by the control handler.
+    let stop = host::serve_controls(rx, events, guard, |allowed| {
+        gate.set_stop_allowed(allowed, running);
+    });
+    let (_, report) = runtime.block_on(host::run_until(supervisor, || gate.running(running), stop));
     host::finish_runtime(runtime);
     if report.is_clean() {
         0
@@ -207,13 +278,31 @@ fn run(reporter: &Reporter, mut rx: mpsc::UnboundedReceiver<StopRequest>) -> u32
 struct Reporter(ServiceStatusHandle);
 
 impl Reporter {
-    /// Reports a state. `exit` is the service-specific exit code; 0 reports
-    /// success.
-    fn report(&self, state: ServiceState, wait_hint: Duration, exit: u32) {
-        let controls_accepted = match state {
-            ServiceState::Running => ServiceControlAccept::STOP | ServiceControlAccept::PRESHUTDOWN,
-            _ => ServiceControlAccept::empty(),
-        };
+    /// Reports a state with the controls it accepts. `exit` is the
+    /// service-specific exit code; 0 reports success.
+    fn report(
+        &self,
+        state: ServiceState,
+        controls: AcceptedControls,
+        wait_hint: Duration,
+        exit: u32,
+    ) {
+        let mut controls_accepted = ServiceControlAccept::empty();
+        for (on, flag) in [
+            (controls.stop, ServiceControlAccept::STOP),
+            (controls.preshutdown, ServiceControlAccept::PRESHUTDOWN),
+            (controls.power_event, ServiceControlAccept::POWER_EVENT),
+            (
+                controls.session_change,
+                ServiceControlAccept::SESSION_CHANGE,
+            ),
+            (controls.param_change, ServiceControlAccept::PARAM_CHANGE),
+            (controls.time_change, ServiceControlAccept::TIME_CHANGE),
+        ] {
+            if on {
+                controls_accepted |= flag;
+            }
+        }
         let exit_code = match exit {
             0 => ServiceExitCode::NO_ERROR,
             code => ServiceExitCode::ServiceSpecific(code),

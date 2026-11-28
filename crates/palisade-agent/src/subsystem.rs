@@ -16,6 +16,10 @@
 //!    step of #56. A subsystem still running at the deadline is aborted at its
 //!    next `.await`.
 //!
+//! While it runs, a subsystem can follow OS notifications (session, power,
+//! parameter and time changes) through [`SubsystemContext::host_events`];
+//! see [`crate::control`].
+//!
 //! Returning before a stop is requested, with or without an error, or
 //! panicking, is a failure: the supervisor restarts the subsystem with
 //! backoff. Subsystems must not block async worker threads; blocking work
@@ -25,7 +29,12 @@
 
 use std::{fmt, future::Future, pin::Pin, sync::Arc, time::Duration};
 
-use tokio::{sync::watch, time::Instant};
+use tokio::{
+    sync::{broadcast, watch},
+    time::Instant,
+};
+
+use crate::control::HostEvent;
 
 /// The default for [`Subsystem::start_timeout`].
 pub const DEFAULT_START_TIMEOUT: Duration = Duration::from_secs(60);
@@ -129,6 +138,7 @@ pub struct SubsystemContext {
     name: &'static str,
     ready: watch::Sender<bool>,
     stop: watch::Receiver<Option<Instant>>,
+    events: broadcast::Sender<HostEvent>,
 }
 
 impl SubsystemContext {
@@ -136,8 +146,24 @@ impl SubsystemContext {
         name: &'static str,
         ready: watch::Sender<bool>,
         stop: watch::Receiver<Option<Instant>>,
+        events: broadcast::Sender<HostEvent>,
     ) -> Self {
-        Self { name, ready, stop }
+        Self {
+            name,
+            ready,
+            stop,
+            events,
+        }
+    }
+
+    /// A receiver for OS notifications published from now on. Subscribe
+    /// before reading the state the events update (for example, list the
+    /// sessions after subscribing), so no change falls in between. A
+    /// receiver that falls more than
+    /// [`HOST_EVENT_CAPACITY`](crate::control::HOST_EVENT_CAPACITY) events
+    /// behind gets `Lagged` and must read the state again.
+    pub fn host_events(&self) -> broadcast::Receiver<HostEvent> {
+        self.events.subscribe()
     }
 
     /// The subsystem's name.

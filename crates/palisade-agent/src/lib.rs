@@ -6,6 +6,7 @@
 
 pub mod cli;
 pub mod config;
+pub mod control;
 #[cfg(windows)]
 mod ffi;
 pub mod host;

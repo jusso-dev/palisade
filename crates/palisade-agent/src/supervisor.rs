@@ -48,12 +48,13 @@ use std::{
 };
 
 use tokio::{
-    sync::watch,
+    sync::{broadcast, watch},
     task::{JoinError, JoinHandle},
     time::{Instant, sleep_until},
 };
 
 use crate::{
+    control::{HOST_EVENT_CAPACITY, HostEvent},
     lifecycle::{AgentState, Lifecycle},
     subsystem::{Criticality, Health, Subsystem, SubsystemContext, wait_stop},
 };
@@ -281,6 +282,7 @@ impl Supervisor {
                 shared: Mutex::new(shared),
                 state: watch::channel(AgentState::Starting).0,
                 draining: watch::channel(false).0,
+                events: broadcast::channel(HOST_EVENT_CAPACITY).0,
             }),
         })
     }
@@ -294,6 +296,13 @@ impl Supervisor {
             .collect()
     }
 
+    /// The publisher of [`HostEvent`]s to every running subsystem. It can be
+    /// cloned and used from any thread, including the service control
+    /// handler, before or after [`Self::start`].
+    pub fn host_events(&self) -> HostEvents {
+        HostEvents(self.inner.events.clone())
+    }
+
     /// Starts supervising. Must be called inside a tokio runtime.
     pub fn start(self) -> SupervisorHandle {
         let inner = self.inner;
@@ -302,6 +311,20 @@ impl Supervisor {
             .map(|i| Some(tokio::spawn(run_slot(Arc::clone(&inner), i))))
             .collect();
         SupervisorHandle { inner, runners }
+    }
+}
+
+/// Publishes [`HostEvent`]s to the running subsystems.
+#[derive(Debug, Clone)]
+pub struct HostEvents(broadcast::Sender<HostEvent>);
+
+impl HostEvents {
+    /// Sends `event` to every subsystem subscribed now. Returns how many
+    /// receivers it reached; with none (nothing subscribed), the event is
+    /// dropped, which is not an error.
+    pub fn publish(&self, event: HostEvent) -> usize {
+        tracing::debug!(?event, "host event");
+        self.0.send(event).unwrap_or(0)
     }
 }
 
@@ -316,6 +339,11 @@ impl SupervisorHandle {
     /// The current agent state.
     pub fn state(&self) -> AgentState {
         self.inner.state.borrow().clone()
+    }
+
+    /// The publisher of [`HostEvent`]s, as [`Supervisor::host_events`].
+    pub fn host_events(&self) -> HostEvents {
+        HostEvents(self.inner.events.clone())
     }
 
     /// A receiver that sees every agent state change.
@@ -451,6 +479,8 @@ struct Inner {
     state: watch::Sender<AgentState>,
     /// Set when shutdown begins: subsystems that are not running stay down.
     draining: watch::Sender<bool>,
+    /// OS notifications for the subsystems.
+    events: broadcast::Sender<HostEvent>,
 }
 
 impl fmt::Debug for Inner {
@@ -778,7 +808,7 @@ async fn run_slot(sup: Arc<Inner>, i: usize) {
         }
         tracing::info!(subsystem = name, "starting subsystem");
         let (ready_tx, mut ready_rx) = watch::channel(false);
-        let ctx = SubsystemContext::new(name, ready_tx, slot.stop.subscribe());
+        let ctx = SubsystemContext::new(name, ready_tx, slot.stop.subscribe(), sup.events.clone());
         let mut task = tokio::spawn(Arc::clone(&slot.subsystem).run(ctx));
         let start_deadline = after(Instant::now(), slot.subsystem.start_timeout());
         let mut ready_open = true;
