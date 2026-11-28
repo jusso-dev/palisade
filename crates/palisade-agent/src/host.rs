@@ -18,9 +18,12 @@ use tokio::{
 use tracing_subscriber::filter::LevelFilter;
 
 use crate::{
+    boot::{self, BootMode},
     cli::Args,
+    clock::ClockMonitor,
     config::{self, AgentConfig, LoadedConfig, LogLevel, RuntimeConfig},
     control::{Control, HostEvent, TamperGuard},
+    platform::SystemClock,
     subsystem::{BoxFuture, Criticality, Subsystem, SubsystemContext, SubsystemError},
     supervisor::{HostEvents, RestartPolicy, ShutdownReport, Supervisor, SupervisorError},
 };
@@ -271,7 +274,8 @@ impl Subsystem for ConfigSubsystem {
 /// push them after the subsystems they depend on.
 pub fn builtin_subsystems(loaded: &LoadedConfig) -> Vec<Arc<dyn Subsystem>> {
     let config = Arc::new(ConfigSubsystem::new(loaded.clone()));
-    vec![config]
+    let clock = Arc::new(ClockMonitor::new(SystemClock));
+    vec![config, clock]
 }
 
 /// Starts `supervisor`, runs until `stop` resolves, then shuts down within the
@@ -347,9 +351,31 @@ pub fn finish_runtime(runtime: Runtime) {
     runtime.shutdown_timeout(RUNTIME_SHUTDOWN_GRACE);
 }
 
-/// The default supervisor for a loaded configuration.
+/// The default supervisor for a loaded configuration, with the boot mode
+/// of the running system ([`boot::current`]).
 pub fn supervisor(loaded: &LoadedConfig) -> Result<Supervisor, SupervisorError> {
-    Supervisor::new(builtin_subsystems(loaded), RestartPolicy::default())
+    supervisor_for(loaded, boot::current())
+}
+
+/// The default supervisor for a loaded configuration and a boot mode. In a
+/// safe-mode boot the agent reports [`AgentState::SafeMode`](crate::lifecycle::AgentState::SafeMode),
+/// and enforcement applies the configured
+/// [`SafeModeBehaviour`](crate::config::SafeModeBehaviour).
+pub fn supervisor_for(
+    loaded: &LoadedConfig,
+    boot_mode: BootMode,
+) -> Result<Supervisor, SupervisorError> {
+    if boot_mode.is_safe() {
+        tracing::warn!(
+            ?boot_mode,
+            behaviour = ?loaded.config.safe_mode_behaviour,
+            "Windows was started in safe mode"
+        );
+    }
+    Ok(
+        Supervisor::new(builtin_subsystems(loaded), RestartPolicy::default())?
+            .safe_mode(boot_mode.is_safe()),
+    )
 }
 
 /// Console stop signals: Ctrl-C everywhere, and `SIGTERM` on Unix.

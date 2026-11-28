@@ -2,7 +2,7 @@
 
 The Windows endpoint agent: a Windows service that collects execution events, caches policy locally and drives enforcement.
 
-**Status:** service host only. The process, component model, supervisor, lifecycle states and configuration loading are in place ([#56](https://github.com/jusso-dev/palisade/issues/56)). The only subsystem so far is `config`. Policy cache (#61), server comms (#62), ETW (#59), the installer (#57) and tamper protection (#220) come later. Parent epic: [#4](https://github.com/jusso-dev/palisade/issues/4).
+**Status:** service host only. The process, component model, supervisor, lifecycle states and configuration loading are in place ([#56](https://github.com/jusso-dev/palisade/issues/56)). The subsystems so far are `config` and `clock`. Policy cache (#61), server comms (#62), ETW (#59), the installer (#57) and tamper protection (#220) come later. Parent epic: [#4](https://github.com/jusso-dev/palisade/issues/4).
 
 ## Running
 
@@ -40,6 +40,8 @@ The policy-delivered and local-override layers come with the policy cache (#61).
 - `supervisor`: starts subsystems in dependency order, which must be acyclic. A subsystem's dependents wait until it is ready. A run that fails is restarted with exponential backoff from 1 s to 5 min. Failure means an error, an early exit, a panic or a start timeout. A panic is contained in that subsystem's task. Three panics within 10 minutes mark the subsystem `Failed`. Shutdown runs in reverse order within a budget, and subsystems that miss their deadline are aborted.
 - `lifecycle`: the agent states (`Starting`, `Running`, `Degraded`, `SafeMode`, `Updating`, `Stopping`, `Stopped`, `FailSafe`) and the legal transitions between them. A permanently failed critical subsystem forces `FailSafe`, and only stopping leaves it.
 - `host`: the tokio runtime (ADR 0009), logging to standard error with a level that can change at run time, the panic hook, the `config` subsystem and the console run loop.
+- `clock`: the `clock` subsystem. It compares the wall clock with the monotonic clock every 30 s and on `TIMECHANGE`, and reports a disagreement of more than 5 minutes as a clock jump (ISM-0988). A suspend and resume starts a new baseline instead.
+- `boot`: safe-mode detection, from `HKLM\SYSTEM\CurrentControlSet\Control\SafeBoot\Option`. In a safe-mode boot the agent reports `SafeMode` instead of `Running` or `Degraded`, and enforcement applies `safe_mode_behaviour`. A registry read that fails counts as a normal boot, since safe mode can only relax enforcement.
 - `control`: OS notifications as `HostEvent`s (session, power, parameter and time changes), which every subsystem can follow through `SubsystemContext::host_events`, and the `TamperGuard` trait that decides whether `STOP` is offered (#220 implements it; until then `STOP` is always allowed).
 - `service` (Windows): the service control manager integration. It handles `STOP` (20 s budget, offered only while the tamper guard allows it), `PRESHUTDOWN`/`SHUTDOWN` (10 s budget), and turns `POWEREVENT`, `SESSIONCHANGE`, `PARAMCHANGE` and `TIMECHANGE` into host events. `PARAMCHANGE` makes the `config` subsystem read the configuration again; a reload that fails keeps the current configuration.
 
