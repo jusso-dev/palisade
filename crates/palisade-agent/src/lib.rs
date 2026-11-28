@@ -17,6 +17,7 @@ pub mod logfile;
 pub mod platform;
 #[cfg(windows)]
 pub mod service;
+pub mod settings;
 #[cfg(feature = "test-util")]
 pub mod simulate;
 pub mod subsystem;

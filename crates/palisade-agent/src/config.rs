@@ -158,62 +158,96 @@ pub struct AgentConfig {
     pub log_files: LogFiles,
 }
 
-/// The file layer. Every field is optional and overrides the default.
-#[derive(Debug, Deserialize)]
+/// One configuration layer: the install-time file, the policy-delivered
+/// agent settings or the local overrides (see [`crate::settings`]). Every
+/// field is optional and, when set, overrides the layers below.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct FileConfig {
-    fail_mode: Option<FailMode>,
-    safe_mode_behaviour: Option<SafeModeBehaviour>,
-    runtime: Option<FileRuntime>,
-    log: Option<FileLog>,
+pub struct ConfigLayer {
+    /// `fail_mode`.
+    pub fail_mode: Option<FailMode>,
+    /// `safe_mode_behaviour`.
+    pub safe_mode_behaviour: Option<SafeModeBehaviour>,
+    /// `[runtime]`.
+    pub runtime: Option<RuntimeLayer>,
+    /// `[log]`.
+    pub log: Option<LogLayer>,
 }
 
-#[derive(Debug, Deserialize)]
+/// The `[runtime]` table of a [`ConfigLayer`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct FileRuntime {
-    worker_threads: Option<usize>,
-    max_blocking_threads: Option<usize>,
+pub struct RuntimeLayer {
+    /// `runtime.worker_threads`.
+    pub worker_threads: Option<usize>,
+    /// `runtime.max_blocking_threads`.
+    pub max_blocking_threads: Option<usize>,
 }
 
-#[derive(Debug, Deserialize)]
+/// The `[log]` table of a [`ConfigLayer`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct FileLog {
-    level: Option<LogLevel>,
-    files: Option<usize>,
-    file_size_mib: Option<u64>,
+pub struct LogLayer {
+    /// `log.level`.
+    pub level: Option<LogLevel>,
+    /// `log.files`.
+    pub files: Option<usize>,
+    /// `log.file_size_mib`.
+    pub file_size_mib: Option<u64>,
+}
+
+impl ConfigLayer {
+    /// Parses a layer from strict TOML: unknown keys and wrong types are
+    /// errors. Ranges are checked once the layer is applied.
+    pub fn from_toml(source: &str) -> Result<Self, ConfigError> {
+        toml::from_str(source)
+            .map_err(|e| ConfigError::new(ConfigErrorKind::Parse(e.message().to_owned())))
+    }
+
+    /// Overlays the fields this layer sets onto `config`, calling `set` with
+    /// the dotted key of each one.
+    pub fn apply(&self, config: &mut AgentConfig, mut set: impl FnMut(&'static str)) {
+        if let Some(v) = self.fail_mode {
+            config.fail_mode = v;
+            set("fail_mode");
+        }
+        if let Some(v) = self.safe_mode_behaviour {
+            config.safe_mode_behaviour = v;
+            set("safe_mode_behaviour");
+        }
+        if let Some(runtime) = &self.runtime {
+            if runtime.worker_threads.is_some() {
+                config.runtime.worker_threads = runtime.worker_threads;
+                set("runtime.worker_threads");
+            }
+            if let Some(v) = runtime.max_blocking_threads {
+                config.runtime.max_blocking_threads = v;
+                set("runtime.max_blocking_threads");
+            }
+        }
+        if let Some(log) = &self.log {
+            if let Some(level) = log.level {
+                config.log_level = level;
+                set("log.level");
+            }
+            if let Some(v) = log.files {
+                config.log_files.files = v;
+                set("log.files");
+            }
+            if let Some(v) = log.file_size_mib {
+                config.log_files.file_size_mib = v;
+                set("log.file_size_mib");
+            }
+        }
+    }
 }
 
 impl AgentConfig {
     /// Built-in defaults overlaid with the TOML document `source`.
     pub fn from_toml(source: &str) -> Result<Self, ConfigError> {
-        let file: FileConfig = toml::from_str(source)
-            .map_err(|e| ConfigError::new(ConfigErrorKind::Parse(e.message().to_owned())))?;
+        let layer = ConfigLayer::from_toml(source)?;
         let mut config = Self::default();
-        if let Some(v) = file.fail_mode {
-            config.fail_mode = v;
-        }
-        if let Some(v) = file.safe_mode_behaviour {
-            config.safe_mode_behaviour = v;
-        }
-        if let Some(runtime) = file.runtime {
-            if runtime.worker_threads.is_some() {
-                config.runtime.worker_threads = runtime.worker_threads;
-            }
-            if let Some(v) = runtime.max_blocking_threads {
-                config.runtime.max_blocking_threads = v;
-            }
-        }
-        if let Some(log) = file.log {
-            if let Some(level) = log.level {
-                config.log_level = level;
-            }
-            if let Some(v) = log.files {
-                config.log_files.files = v;
-            }
-            if let Some(v) = log.file_size_mib {
-                config.log_files.file_size_mib = v;
-            }
-        }
+        layer.apply(&mut config, |_| {});
         config.validate()?;
         Ok(config)
     }
@@ -263,6 +297,14 @@ pub struct LoadedConfig {
 /// [`default_path`].
 pub fn log_dir() -> Result<Option<PathBuf>, ConfigError> {
     Ok(default_path()?.and_then(|p| p.parent().map(|dir| dir.join("logs"))))
+}
+
+/// The local-override file on Windows:
+/// `%ProgramData%\Palisade\overrides.toml`. `None` on other OSes. It is
+/// read only while the policy allows local overrides (see
+/// [`crate::settings`]).
+pub fn overrides_path() -> Result<Option<PathBuf>, ConfigError> {
+    Ok(default_path()?.and_then(|p| p.parent().map(|dir| dir.join("overrides.toml"))))
 }
 
 /// The install-time configuration path on Windows:
@@ -337,7 +379,7 @@ fn defaults() -> LoadedConfig {
 
 /// Reads a UTF-8 file of at most [`MAX_CONFIG_BYTES`]. A missing file is
 /// `Ok(None)`.
-fn read_limited(path: &Path) -> Result<Option<String>, ConfigError> {
+pub(crate) fn read_limited(path: &Path) -> Result<Option<String>, ConfigError> {
     let file = match File::open(path) {
         Ok(file) => file,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -390,11 +432,11 @@ pub enum ConfigErrorKind {
 }
 
 impl ConfigError {
-    fn new(kind: ConfigErrorKind) -> Self {
+    pub(crate) fn new(kind: ConfigErrorKind) -> Self {
         Self { path: None, kind }
     }
 
-    fn at(mut self, path: &Path) -> Self {
+    pub(crate) fn at(mut self, path: &Path) -> Self {
         self.path = Some(path.to_path_buf());
         self
     }
@@ -638,6 +680,7 @@ mod tests {
     fn no_default_path_off_windows() {
         assert_eq!(default_path().unwrap(), None);
         assert_eq!(log_dir().unwrap(), None);
+        assert_eq!(overrides_path().unwrap(), None);
         assert_eq!(load(None).unwrap(), defaults());
     }
 
