@@ -34,11 +34,10 @@ use sqlx::migrate::{MigrateError, Migrator};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions, PgSslMode};
 use sqlx::types::Uuid;
 use sqlx::{Connection as _, PgConnection, PgPool, PgTransaction};
-use zeroize::Zeroizing;
 
 use crate::config::{DatabaseSettings, DbLogin, DbTls};
 use crate::health::{DatabaseHealth, Health};
-use crate::secret::read_secret_file;
+use crate::secret::{Secret, read_secret_file};
 use crate::tls::read_certs;
 
 /// The schema that holds every Palisade object, the migration history
@@ -187,8 +186,8 @@ pub fn connect_options(
 ) -> Result<ConnectOptions, DbError> {
     check_pg_env()?;
     let password = read_secret_file(&login.password_file, MAX_PASSWORD_BYTES).map_err(DbError)?;
-    let password = Zeroizing::new(
-        std::str::from_utf8(&password)
+    let password = Secret::new(
+        std::str::from_utf8(password.expose())
             .map_err(|_| {
                 DbError(format!(
                     "password file {} is not valid UTF-8",
@@ -200,7 +199,7 @@ pub fn connect_options(
             .trim_end_matches(['\r', '\n'])
             .to_owned(),
     );
-    if password.is_empty() {
+    if password.expose().is_empty() {
         return Err(DbError(format!(
             "password file {} is empty",
             login.password_file.display()
@@ -211,7 +210,7 @@ pub fn connect_options(
         .port(settings.port)
         .database(&settings.name)
         .username(&login.user)
-        .password(&password)
+        .password(password.expose())
         .application_name(APPLICATION_NAME)
         .ssl_mode(match settings.tls {
             DbTls::Disable => PgSslMode::Disable,

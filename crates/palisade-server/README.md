@@ -301,7 +301,14 @@ mandatory over it.
 `fields` (including `message`), `span` (the current span) and `spans` (every enclosing span, so
 the request span's fields stay on the line when a handler opens a child span). The level comes
 from `log.level`. No secret value is passed to the logger: the configuration holds only secret
-paths, and the secret reader's errors never contain file contents. Tenant and principal fields
+paths, and the secret reader's errors never contain file contents. Secrets read from files are
+held in `secret::Secret`, which is wiped on drop and prints as `[REDACTED]` in `Debug` and
+`Display`. As a second line of defence, every log line is redacted on its way out
+(`redact`, #227): any field, in the event or in any span, whose name has a segment such as
+`password`, `secret`, `token`, `key`, `authorization`, `cookie` or `code` is replaced by
+`[REDACTED]` (names ending in `file` or `path`, such as `key_file`, are kept, since they hold
+paths), and admin API tokens (`pal_<env>_<id>_` keeps its prefix), `Bearer` and `Basic`
+credentials and PEM private key bodies are masked wherever they appear. Tenant and principal fields
 join the request span with the API work.
 
 ## Shutdown
