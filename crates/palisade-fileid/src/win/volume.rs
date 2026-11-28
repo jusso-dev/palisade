@@ -255,7 +255,13 @@ pub fn folds_as_standard(file: &File) -> bool {
     {
         return *known;
     }
-    let standard = volume_upcase(file).is_ok_and(VolumeUpcase::folds_as_standard);
+    // Only a classification that was read is remembered. A failed read
+    // answers `false` this time but is retried next time, so a passing
+    // error never pins a volume as "unknown fold".
+    let Ok(upcase) = volume_upcase(file) else {
+        return false;
+    };
+    let standard = upcase.folds_as_standard();
     if let Ok(mut cache) = VOLUMES.lock() {
         if cache.len() >= MAX_VOLUMES {
             cache.clear();

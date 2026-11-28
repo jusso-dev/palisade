@@ -179,6 +179,15 @@ impl PathForms {
     /// the UNC form may then be a namespace path whose target is unknown,
     /// and its key would not match the target's rules. A caller treats such
     /// a file as unknown, never as matching no network rule.
+    ///
+    /// The key is folded with the standard table even when the opened
+    /// file's volume is "unknown fold" (as every network share is, #332).
+    /// That is deliberate: the share's own folding is the server's and
+    /// cannot be known, and folding can only make the key match more
+    /// spellings, never fewer. So a deny rule on a share still matches
+    /// (stricter), and a path allow on a share is refused anyway, because
+    /// a path is trusted only on a fixed local volume (#363). Dropping the
+    /// key instead would let a deny rule on a share stop matching.
     #[must_use]
     pub fn network_key(&self) -> Option<String> {
         if self.dfs_unresolved() {
