@@ -81,6 +81,13 @@ pub const MODES: &[&str] = &["disabled", "monitor", "audit", "learning", "enforc
 const SETTINGS_KEY: &str = r"SOFTWARE\Palisade\Agent";
 #[cfg(test)]
 const SERVICE_NAME: &str = "PalisadeAgent";
+/// The watchdog service's name: the owner's decision on #56 and #220.
+#[cfg(test)]
+const WATCHDOG_SERVICE_NAME: &str = "PalisadeWatchdog";
+/// The recovery actions of both services: restart after 1, 5 and 30
+/// seconds (the owner's decision on #56 and #220), reset after a day.
+#[cfg(test)]
+const RECOVERY_ACTIONS: &str = "reset= 86400 actions= restart/1000/restart/5000/restart/30000";
 
 /// One upgrade code per architecture, the same for every version, so a
 /// newer package of the same architecture replaces an older one.
@@ -131,7 +138,26 @@ pub fn defines(root: &Path, inputs: &Inputs<'_>) -> Result<Vec<(String, String)>
             root.join(LICENSE_RTF).display().to_string(),
         ),
         ("RunKey".to_owned(), os_ids::RUN_KEY.to_owned()),
+        (
+            "Watchdog".to_owned(),
+            if ships_watchdog(super::WINDOWS_BINARIES) {
+                "yes"
+            } else {
+                "no"
+            }
+            .to_owned(),
+        ),
     ])
+}
+
+/// The watchdog service's executable (#56, #220), without `.exe`.
+pub const WATCHDOG_BIN: &str = "palisade-watchdog";
+
+/// Whether `binaries` include the watchdog. The package registers the
+/// `PalisadeWatchdog` service only then, so it never registers a service
+/// whose executable it does not install.
+pub fn ships_watchdog(binaries: &[super::Binary]) -> bool {
+    binaries.iter().any(|b| b.bin == WATCHDOG_BIN)
 }
 
 /// Problems with the package sources that WiX would not catch: a public
@@ -403,6 +429,65 @@ mod tests {
             "the service is registered with --service"
         );
         assert!(wxs.contains(r#"Arguments="--service""#));
+    }
+
+    #[test]
+    fn services_restart_after_one_five_and_thirty_seconds() {
+        let wxs = source(SOURCES[0]);
+        for service in [SERVICE_NAME, WATCHDOG_SERVICE_NAME] {
+            assert!(
+                wxs.contains(&format!(
+                    "sc.exe&quot; failure {service} {RECOVERY_ACTIONS}\""
+                )),
+                "{service}: recovery actions"
+            );
+            assert!(
+                wxs.contains(&format!("sc.exe&quot; failureflag {service} 1\"")),
+                "{service}: recovery on non-crash failures"
+            );
+            assert!(wxs.contains(&format!(r#"<ServiceInstall Name="{service}""#)));
+            assert!(wxs.contains(&format!(r#"<ServiceControl Name="{service}""#)));
+        }
+        // Neither service uses a delayed start (#56).
+        assert!(!wxs.contains(r#"DelayedAutoStart="yes""#));
+        assert_eq!(wxs.matches(r#"DelayedAutoStart="no""#).count(), 2);
+        // No other restart timing is left anywhere in the sources.
+        assert_eq!(wxs.matches("actions= ").count(), 2);
+    }
+
+    #[test]
+    fn the_watchdog_is_registered_only_when_it_is_shipped() {
+        let wxs = source(SOURCES[0]);
+        let guarded = wxs
+            .split(r#"<?if $(var.Watchdog) = "yes" ?>"#)
+            .nth(1)
+            .and_then(|rest| rest.split("<?endif?>").next())
+            .unwrap();
+        // Everything about the watchdog is inside the guard.
+        assert_eq!(
+            wxs.matches(WATCHDOG_SERVICE_NAME).count(),
+            guarded.matches(WATCHDOG_SERVICE_NAME).count()
+        );
+        assert!(guarded.contains(&format!(r"$(var.BinDir)\{WATCHDOG_BIN}.exe")));
+        let with = [super::super::Binary {
+            package: WATCHDOG_BIN,
+            bin: WATCHDOG_BIN,
+            description: "watchdog",
+        }];
+        assert!(ships_watchdog(&with));
+        assert!(!ships_watchdog(&[]));
+        let shipped = ships_watchdog(super::super::WINDOWS_BINARIES);
+        let v = Version::parse("0.1.0").unwrap();
+        let inputs = Inputs {
+            target: Target::WindowsX64,
+            version: &v,
+            bin_dir: Path::new("b"),
+            out_dir: Path::new("o"),
+            target_dir: Path::new("t"),
+        };
+        let d = defines(Path::new("r"), &inputs).unwrap();
+        let want = if shipped { "yes" } else { "no" };
+        assert!(d.contains(&("Watchdog".to_owned(), want.to_owned())));
     }
 
     #[test]

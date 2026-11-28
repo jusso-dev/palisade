@@ -4,8 +4,8 @@
   - -msi`, which passes the variables used here; see docs/packaging.md.
 
   Only standard Windows Installer 5 tables are used: no WiX extension, and no
-  custom action code. The custom actions set properties, plus one that runs
-  the operating system's service-control tool (see ConfigureRecovery).
+  custom action code. The custom actions set properties, plus the ones that
+  run the operating system's service-control tool (see ConfigureRecovery).
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package Name="Palisade"
@@ -146,24 +146,65 @@
                       ErrorControl="normal"
                       Arguments="--service"
                       Vital="yes">
-        <ServiceConfig DelayedAutoStart="yes" ServiceSid="unrestricted" OnInstall="yes" OnReinstall="yes" />
+        <!-- No delayed start: an application control agent should be
+             running as early in the boot as the service control manager
+             allows (#56). -->
+        <ServiceConfig DelayedAutoStart="no" ServiceSid="unrestricted" OnInstall="yes" OnReinstall="yes" />
       </ServiceInstall>
       <!-- Stopped before files change, on install, upgrade and removal;
            started again once the new files are in place. -->
       <ServiceControl Name="PalisadeAgent" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
     </Component>
 
-    <!-- Recovery: restart after 0, 5 and 30 seconds; the failure count
-         resets after a day. Windows Installer's own failure-actions table
-         cannot set restart actions (it opens the service without the start
-         right they need, and fails with error 5), so the operating system's
-         service-control tool sets them, as SYSTEM, right after the service
-         is installed. On removal the service, and its settings, go. -->
+    <!-- Recovery: restart after 1, 5 and 30 seconds (the owner's decision
+         on #56 and #220), and the failure count resets after a day. The
+         restarts also apply when the service stops itself with an error
+         exit code, not only when it crashes (the failure-actions flag).
+         Windows Installer's own failure-actions table cannot set restart
+         actions (it opens the service without the start right they need,
+         and fails with error 5), so the operating system's service-control
+         tool sets them, as SYSTEM, right after the service is installed.
+         On removal the service, and its settings, go. -->
     <CustomAction Id="ConfigureRecovery" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="no" Return="check"
-                  ExeCommand="&quot;[System64Folder]sc.exe&quot; failure PalisadeAgent reset= 86400 actions= restart/0/restart/5000/restart/30000" />
+                  ExeCommand="&quot;[System64Folder]sc.exe&quot; failure PalisadeAgent reset= 86400 actions= restart/1000/restart/5000/restart/30000" />
+    <CustomAction Id="ConfigureRecoveryFlag" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="no" Return="check"
+                  ExeCommand="&quot;[System64Folder]sc.exe&quot; failureflag PalisadeAgent 1" />
     <InstallExecuteSequence>
       <Custom Action="ConfigureRecovery" After="InstallServices" Condition="NOT (REMOVE ~= &quot;ALL&quot;)" />
+      <Custom Action="ConfigureRecoveryFlag" After="ConfigureRecovery" Condition="NOT (REMOVE ~= &quot;ALL&quot;)" />
     </InstallExecuteSequence>
+
+    <!-- The watchdog service (#56, #220), registered only
+         when the build has its executable: `cargo xtask dist` sets
+         Watchdog to yes once palisade-watchdog is one of the shipped
+         binaries. Same account, start type and recovery as the agent. -->
+<?if $(var.Watchdog) = "yes" ?>
+    <FeatureRef Id="Main">
+      <ComponentRef Id="Watchdog" />
+    </FeatureRef>
+    <Component Id="Watchdog" Directory="INSTALLFOLDER">
+      <File Id="WatchdogExe" Source="$(var.BinDir)\palisade-watchdog.exe" KeyPath="yes" />
+      <ServiceInstall Name="PalisadeWatchdog"
+                      DisplayName="Palisade Watchdog"
+                      Description="Restarts the Palisade agent service if it stops without authorisation. An educational project; see the licence notice."
+                      Type="ownProcess"
+                      Start="auto"
+                      ErrorControl="normal"
+                      Arguments="--service"
+                      Vital="yes">
+        <ServiceConfig DelayedAutoStart="no" ServiceSid="unrestricted" OnInstall="yes" OnReinstall="yes" />
+      </ServiceInstall>
+      <ServiceControl Name="PalisadeWatchdog" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+    </Component>
+    <CustomAction Id="ConfigureWatchdogRecovery" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="no" Return="check"
+                  ExeCommand="&quot;[System64Folder]sc.exe&quot; failure PalisadeWatchdog reset= 86400 actions= restart/1000/restart/5000/restart/30000" />
+    <CustomAction Id="ConfigureWatchdogRecoveryFlag" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="no" Return="check"
+                  ExeCommand="&quot;[System64Folder]sc.exe&quot; failureflag PalisadeWatchdog 1" />
+    <InstallExecuteSequence>
+      <Custom Action="ConfigureWatchdogRecovery" After="ConfigureRecoveryFlag" Condition="NOT (REMOVE ~= &quot;ALL&quot;)" />
+      <Custom Action="ConfigureWatchdogRecoveryFlag" After="ConfigureWatchdogRecovery" Condition="NOT (REMOVE ~= &quot;ALL&quot;)" />
+    </InstallExecuteSequence>
+<?endif?>
 
     <Component Id="Tray" Directory="INSTALLFOLDER">
       <File Id="TrayExe" Source="$(var.BinDir)\palisade-tray.exe" KeyPath="yes" />

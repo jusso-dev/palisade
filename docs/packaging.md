@@ -125,11 +125,11 @@ package is a stretch goal.
 ## Installer package
 
 The package is built from `packaging/wix/` with WiX and uses only standard Windows Installer 5
-tables: no WiX extension and no custom action code. The custom actions set properties, and one
-runs the operating system's service-control tool, `sc.exe`, to set the service's recovery
-actions: the installer's own failure-actions table opens the service without the right a restart
-action needs and fails with access denied. It runs deferred, as SYSTEM, right after the service
-is installed.
+tables: no WiX extension and no custom action code. The custom actions set properties, and the others run the
+operating system's service-control tool, `sc.exe`, to set each service's recovery actions and
+failure-actions flag: the installer's own failure-actions table opens the service without the
+right a restart action needs and fails with access denied. They run deferred, as SYSTEM, right
+after the services are installed.
 
 - **Per machine only.** Files go to `%ProgramFiles%\Palisade\`.
 - **Upgrades.** One upgrade code per architecture (`xtask/src/dist/msi.rs`) and a new product
@@ -138,10 +138,16 @@ is installed.
   refused with a message. Packages of the same version replace each other, so
   snapshot builds of `main` can be installed in turn. The service is stopped before files change
   and started again afterwards.
-- **Service.** `PalisadeAgent` ("Palisade Agent"), started automatically with a delayed start,
-  as LocalSystem, with the command line `palisade-agent.exe --service`. Recovery restarts it
-  after 0, 5 and 30 seconds, and the failure count resets after a day. Its service SID type is
-  unrestricted. Splitting privileges is evaluated in #18.
+- **Service.** `PalisadeAgent` ("Palisade Agent"), started automatically, without a delayed
+  start (#56), as LocalSystem, with the command line `palisade-agent.exe --service`. Recovery
+  restarts it after 1, 5 and 30 seconds, also when it stops itself with an error rather than
+  crashing (the failure-actions flag), and the failure count resets after a day: the owner's
+  decision on #56 and #220. Its service SID type is unrestricted. Splitting privileges is
+  evaluated in #18.
+- **Watchdog.** `PalisadeWatchdog` ("Palisade Watchdog", #56, #220) is registered the same way,
+  with the same recovery, but only by a build that ships `palisade-watchdog.exe`: `dist` defines
+  the WiX variable `Watchdog` from its list of binaries, so the package never registers a service
+  whose executable it does not install. The watchdog binary does not exist yet (#56).
 - **Data.** `%ProgramData%\Palisade\` with `policy`, `queue` and `logs` below it. Each of the
   four folders gets the same protected DACL and SYSTEM as owner, not only by inheritance: SYSTEM
   and Administrators have full control and nobody else has access, even if a user created one of
@@ -208,13 +214,14 @@ package twice, the second time with `--bump-patch`, and runs `packaging/wix/smok
 the runner, which:
 
 - checks the package tables: shared upgrade code, distinct product codes, both hidden
-  properties, no PDBs, three files, no custom action code, that the only custom actions set
-  properties, stop with an error, or run the `sc.exe` recovery command, that the unelevated
+  properties, no PDBs, exactly the shipped executables, no custom action code, that the only
+  custom actions set properties, stop with an error, or run `sc.exe` on the two services, that the unelevated
   user-interface sequence never reads the settings key or defaults `MODE`, and that the old
   version is removed inside the install transaction;
 - refuses an unknown `MODE` and a plain-HTTP `SERVER_URL`;
 - installs silently with every property set, then checks the service (state, start type,
-  delayed start, account, command line, recovery actions, SID type), every binary's version
+  no delayed start, account, command line, recovery after 1, 5 and 30 seconds and on non-crash
+  failures, SID type), the watchdog service when the package ships it and its absence otherwise, every binary's version
   resource and machine type, that the agent runs natively, the `%ProgramData%\Palisade` and
   settings-key ACLs, the stored settings (and that the token is not among them), the notifier
   entry, and the verbose log for the token;
