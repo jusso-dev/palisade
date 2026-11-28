@@ -8,7 +8,11 @@
 //!   relied on.
 //! - [`assess_file`]: writability of a file and of every folder above it,
 //!   with each distinct descriptor evaluated once through a
-//!   [`WritabilityCache`].
+//!   [`WritabilityCache`]. Each result is the union of the portable
+//!   evaluator and the OS access check ([`os_standard_user_rights`]): the
+//!   OS check can add a right the evaluator missed, never remove one the
+//!   evaluator reports, and a check that fails leaves the evaluator's
+//!   over-reporting result (#332, ADR 0018).
 //! - [`cross_check_writability`]: the portable evaluator's verdict for the
 //!   synthetic standard user compared with the OS access check on the same
 //!   descriptor (#54: "`AuthzAccessCheck` … as the authoritative method on
@@ -166,6 +170,11 @@ fn attributes(file: &File) -> io::Result<u32> {
 ///
 /// Ancestors are read lazily: with [`AssessOptions::stop_at_first_writable`]
 /// nothing is read past the first user-writable folder.
+///
+/// Every descriptor is also put to the OS access check for the synthetic
+/// standard user, and its verdict merged in
+/// ([`crate::fsctx::acl::ObjectWritability::merge_os_check`]); this sets
+/// that check on `cache`, which clears a cache filled without it.
 pub fn assess_file(
     path: &Path,
     options: &EvaluationOptions,
@@ -183,6 +192,7 @@ pub fn assess_file(
             "not a file-system path",
         ));
     }
+    cache.set_os_check(Some(os_standard_user_rights));
     let shown = lexical.to_win32_string();
     let target = open_target(Path::new(&shown))?;
     if !super::sys::is_disk_file(&target) {
@@ -316,6 +326,31 @@ pub fn cross_check_writability(
     let sd = SecurityDescriptor::from_self_relative(descriptor)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     let w = crate::fsctx::acl::evaluate(&sd, kind, options);
+    Ok(AccessCrossCheck {
+        portable: w.standard_user,
+        portable_uncertain: w.standard_user_uncertain,
+        os: os_rights(descriptor, kind, options)?,
+    })
+}
+
+/// The write-type rights the OS access check grants the synthetic
+/// standard user on the self-relative `descriptor` of an object of `kind`,
+/// or `None` if the check failed. This is the
+/// [`crate::fsctx::writable::OsAccessCheck`] [`assess_file`] uses.
+#[must_use]
+pub fn os_standard_user_rights(
+    descriptor: &[u8],
+    kind: ObjectKind,
+    options: &EvaluationOptions,
+) -> Option<WriteRights> {
+    os_rights(descriptor, kind, options).ok()
+}
+
+fn os_rights(
+    descriptor: &[u8],
+    kind: ObjectKind,
+    options: &EvaluationOptions,
+) -> io::Result<WriteRights> {
     // A user SID no ACE names, so only the groups decide.
     let user = crate::fsctx::Sid::new(5, &[21, 0x5041_4c49, 0x5341_4445, 0x5445_5354, 0x7fff_fffe])
         .ok_or_else(|| io::Error::other("bad synthetic SID"))?;
@@ -330,11 +365,7 @@ pub fn cross_check_writability(
             .filter(|s| !options.admins.contains(s)),
     );
     let granted = access_check(descriptor, &sids)?;
-    Ok(AccessCrossCheck {
-        portable: w.standard_user,
-        portable_uncertain: w.standard_user_uncertain,
-        os: WriteRights::from_mask(granted).intersection(WriteRights::relevant(kind)),
-    })
+    Ok(WriteRights::from_mask(granted).intersection(WriteRights::relevant(kind)))
 }
 
 /// A [`DirectorySource`] over real folders.

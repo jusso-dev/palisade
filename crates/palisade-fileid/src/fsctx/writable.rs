@@ -52,6 +52,9 @@ pub struct ReadDescriptor {
     pub descriptor: SecurityDescriptor,
     /// [`descriptor_hash`] of the bytes it was parsed from.
     pub hash: DescriptorHash,
+    /// The self-relative bytes it was parsed from, for the OS access check
+    /// ([`OsAccessCheck`]).
+    pub bytes: Vec<u8>,
 }
 
 impl ReadDescriptor {
@@ -63,21 +66,35 @@ impl ReadDescriptor {
         Some(Self {
             descriptor,
             hash: descriptor_hash(bytes),
+            bytes: bytes.to_vec(),
         })
     }
 }
 
+/// The OS access check for the synthetic standard user: the write-type
+/// rights it grants on the self-relative descriptor `bytes` for an object
+/// of the given kind, or `None` if it could not run. On Windows this is
+/// `palisade_fileid::win::access::os_standard_user_rights`; tests pass a
+/// stub.
+pub type OsAccessCheck = fn(&[u8], ObjectKind, &EvaluationOptions) -> Option<WriteRights>;
+
 /// Evaluation results by descriptor hash and object kind.
 ///
-/// The results depend on the [`EvaluationOptions`] too, so a cache belongs
-/// to one set of options: [`Self::evaluate`] clears it when it is called
-/// with different ones.
+/// The results depend on the [`EvaluationOptions`] and on the OS access
+/// check too, so a cache belongs to one set of options and one check:
+/// [`Self::evaluate`] clears it when it is called with different options,
+/// and [`Self::set_os_check`] when the check changes.
+///
+/// With an OS check set, each result is the portable evaluation with the
+/// OS verdict merged in ([`ObjectWritability::merge_os_check`]): the union
+/// of the two, so the OS check can add rights but never remove them.
 #[derive(Debug, Clone)]
 pub struct WritabilityCache {
     entries: HashMap<(DescriptorHash, ObjectKind), ObjectWritability>,
     order: VecDeque<(DescriptorHash, ObjectKind)>,
     max_entries: usize,
     options: Option<EvaluationOptions>,
+    os_check: Option<OsAccessCheck>,
     hits: u64,
     misses: u64,
 }
@@ -98,12 +115,29 @@ impl WritabilityCache {
             order: VecDeque::new(),
             max_entries: max_entries.max(1),
             options: None,
+            os_check: None,
             hits: 0,
             misses: 0,
         }
     }
 
-    /// [`evaluate`] of `sd` for `kind`, from the cache when possible.
+    /// Sets the OS access check merged into every result (`None` for the
+    /// portable evaluator alone). Changing it clears the cache.
+    pub fn set_os_check(&mut self, check: Option<OsAccessCheck>) {
+        if self.os_check.map(|f| f as usize) != check.map(|f| f as usize) {
+            self.clear();
+            self.os_check = check;
+        }
+    }
+
+    /// Whether an OS access check is set.
+    #[must_use]
+    pub const fn has_os_check(&self) -> bool {
+        self.os_check.is_some()
+    }
+
+    /// [`evaluate`] of `sd` for `kind`, with the OS check merged in if one
+    /// is set, from the cache when possible.
     pub fn evaluate(
         &mut self,
         sd: &ReadDescriptor,
@@ -120,7 +154,10 @@ impl WritabilityCache {
             return w.clone();
         }
         self.misses = self.misses.saturating_add(1);
-        let w = evaluate(&sd.descriptor, kind, options);
+        let mut w = evaluate(&sd.descriptor, kind, options);
+        if let Some(check) = self.os_check {
+            w.merge_os_check(check(&sd.bytes, kind, options));
+        }
         if self.entries.len() >= self.max_entries
             && let Some(old) = self.order.pop_front()
         {
@@ -420,6 +457,127 @@ mod tests {
             Some(wk::ADMINISTRATORS),
             Some(vec![Ace::allow(wk::USERS, MODIFY)]),
         )
+    }
+
+    fn os_grants_write_data(_: &[u8], _: ObjectKind, _: &EvaluationOptions) -> Option<WriteRights> {
+        Some(WriteRights::WRITE_DATA)
+    }
+
+    fn os_grants_nothing(_: &[u8], _: ObjectKind, _: &EvaluationOptions) -> Option<WriteRights> {
+        Some(WriteRights::NONE)
+    }
+
+    fn os_fails(_: &[u8], _: ObjectKind, _: &EvaluationOptions) -> Option<WriteRights> {
+        None
+    }
+
+    #[test]
+    fn the_os_check_adds_rights_but_never_removes_them() {
+        use crate::fsctx::acl::{OsCheck, Principal};
+        let opts = EvaluationOptions::default();
+        let mut cache = WritabilityCache::default();
+        assert!(!cache.has_os_check());
+
+        // The OS grants a right the evaluator missed: it is added, certain,
+        // for an unknown principal, and the locked folder becomes writable.
+        cache.set_os_check(Some(os_grants_write_data));
+        assert!(cache.has_os_check());
+        let w = cache.evaluate(&read(&locked()), ObjectKind::Directory, &opts);
+        assert!(w.user_writable());
+        assert_eq!(w.standard_user, WriteRights::WRITE_DATA);
+        assert!(w.uncertain.is_empty());
+        assert_eq!(
+            w.os_check,
+            OsCheck::Ran {
+                granted: WriteRights::WRITE_DATA,
+                missed: WriteRights::WRITE_DATA,
+            }
+        );
+        assert_eq!(w.principals.last().unwrap().principal, Principal::Unknown);
+
+        // The OS grants nothing where the evaluator reports Users modify:
+        // the evaluator's result stands (the union).
+        cache.set_os_check(Some(os_grants_nothing));
+        let portable = evaluate(&open(), ObjectKind::Directory, &opts);
+        let w = cache.evaluate(&read(&open()), ObjectKind::Directory, &opts);
+        assert_eq!(w.rights, portable.rights);
+        assert_eq!(w.standard_user, portable.standard_user);
+        assert_eq!(
+            w.os_check,
+            OsCheck::Ran {
+                granted: WriteRights::NONE,
+                missed: WriteRights::NONE,
+            }
+        );
+
+        // A failed check leaves the portable result, marked unavailable.
+        cache.set_os_check(Some(os_fails));
+        let w = cache.evaluate(&read(&locked()), ObjectKind::Directory, &opts);
+        assert!(!w.user_writable());
+        assert_eq!(w.os_check, OsCheck::Unavailable);
+
+        // Without a check, nothing is merged.
+        cache.set_os_check(None);
+        let w = cache.evaluate(&read(&locked()), ObjectKind::Directory, &opts);
+        assert_eq!(w.os_check, OsCheck::NotRun);
+    }
+
+    #[test]
+    fn changing_the_os_check_clears_the_cache() {
+        let opts = EvaluationOptions::default();
+        let mut cache = WritabilityCache::default();
+        let d = read(&locked());
+        let w = cache.evaluate(&d, ObjectKind::Directory, &opts);
+        assert!(!w.user_writable());
+        assert_eq!(cache.len(), 1);
+        // Setting the same (absent) check keeps the entries.
+        cache.set_os_check(None);
+        assert_eq!(cache.len(), 1);
+        cache.set_os_check(Some(os_grants_write_data));
+        assert!(cache.is_empty());
+        assert!(
+            cache
+                .evaluate(&d, ObjectKind::Directory, &opts)
+                .user_writable()
+        );
+        // The same check again keeps the entries.
+        cache.set_os_check(Some(os_grants_write_data));
+        assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn a_missed_right_joins_an_existing_unknown_principal() {
+        use crate::fsctx::acl::{OsCheck, Principal};
+        // No owner: the evaluator already reports an unknown principal
+        // (the implicit WRITE_DAC of an unknown owner).
+        let sd = SecurityDescriptor::new(None, Some(vec![Ace::allow(wk::USERS, RX)]));
+        let mut w = evaluate(&sd, ObjectKind::File, &EvaluationOptions::default());
+        let unknowns = |w: &ObjectWritability| {
+            w.principals
+                .iter()
+                .filter(|p| p.principal == Principal::Unknown)
+                .count()
+        };
+        assert_eq!(unknowns(&w), 1);
+        w.merge_os_check(Some(
+            WriteRights::WRITE_DATA.union(WriteRights::DELETE_CHILD),
+        ));
+        assert_eq!(unknowns(&w), 1);
+        let p = w
+            .principals
+            .iter()
+            .find(|p| p.principal == Principal::Unknown)
+            .unwrap();
+        assert!(p.rights.contains(WriteRights::WRITE_DATA));
+        assert!(!p.uncertain.contains(WriteRights::WRITE_DATA));
+        // DELETE_CHILD does not count on a file, so it is dropped.
+        assert_eq!(
+            w.os_check,
+            OsCheck::Ran {
+                granted: WriteRights::WRITE_DATA,
+                missed: WriteRights::WRITE_DATA,
+            }
+        );
     }
 
     #[test]
