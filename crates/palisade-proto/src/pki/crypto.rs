@@ -18,6 +18,10 @@
 //!
 //! MACs are HMAC-SHA-256 (ADR 0008), used for the policy anti-rollback
 //! record (`policy_bundle::record`). Tags are checked in constant time.
+//!
+//! Data at rest is sealed with AES-256-GCM ([`AeadKey`], ADR 0017). The
+//! seal call takes no nonce: each one is drawn here from the OS secure
+//! random source, so no caller can choose or reuse one.
 
 #![forbid(unsafe_code)]
 
@@ -87,6 +91,96 @@ pub(crate) fn verify(
     UnparsedPublicKey::new(ring_alg, raw_public_key)
         .verify(message, signature)
         .is_ok()
+}
+
+/// Fills `out` from the operating system's secure random source.
+pub(crate) fn random(out: &mut [u8]) -> Result<(), CryptoError> {
+    use ring::rand::SecureRandom as _;
+    SystemRandom::new()
+        .fill(out)
+        .map_err(|_| CryptoError("the secure random source failed"))
+}
+
+/// The AES-GCM nonce length.
+pub(crate) const NONCE_LEN: usize = ring::aead::NONCE_LEN;
+/// The AES-GCM tag length.
+pub(crate) const TAG_LEN: usize = 16;
+
+/// An AES-256-GCM key. `Debug` never prints it.
+pub(crate) struct AeadKey(ring::aead::LessSafeKey);
+
+impl AeadKey {
+    pub(crate) fn new(key: &[u8; 32]) -> Result<Self, CryptoError> {
+        ring::aead::UnboundKey::new(&ring::aead::AES_256_GCM, key)
+            .map(|k| Self(ring::aead::LessSafeKey::new(k)))
+            .map_err(|_| CryptoError("not an AES-256 key"))
+    }
+
+    /// Seals `plaintext` with a fresh random nonce, authenticating `aad`
+    /// too. Returns `nonce ‖ ciphertext ‖ tag`.
+    pub(crate) fn seal(&self, aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        let mut nonce = [0u8; NONCE_LEN];
+        random(&mut nonce)?;
+        let mut out = Vec::with_capacity(
+            NONCE_LEN
+                .saturating_add(plaintext.len())
+                .saturating_add(TAG_LEN),
+        );
+        out.extend_from_slice(&nonce);
+        let mut body = plaintext.to_vec();
+        self.0
+            .seal_in_place_append_tag(
+                ring::aead::Nonce::assume_unique_for_key(nonce),
+                ring::aead::Aad::from(aad),
+                &mut body,
+            )
+            .map_err(|_| CryptoError("sealing failed"))?;
+        out.extend_from_slice(&body);
+        Ok(out)
+    }
+
+    /// Opens `nonce ‖ ciphertext ‖ tag`. `None` unless the tag verifies
+    /// over the ciphertext and `aad`.
+    pub(crate) fn open(&self, aad: &[u8], sealed: &[u8]) -> Option<Vec<u8>> {
+        let (nonce, body) = sealed.split_at_checked(NONCE_LEN)?;
+        if body.len() < TAG_LEN {
+            return None;
+        }
+        let nonce = ring::aead::Nonce::try_assume_unique_for_key(nonce).ok()?;
+        let mut body = body.to_vec();
+        let len = self
+            .0
+            .open_in_place(nonce, ring::aead::Aad::from(aad), &mut body)
+            .ok()?
+            .len();
+        body.truncate(len);
+        Some(body)
+    }
+
+    /// Seals with a nonce the caller gives. Only for the known-answer test.
+    #[cfg(test)]
+    pub(crate) fn seal_with_nonce(
+        &self,
+        nonce: [u8; NONCE_LEN],
+        aad: &[u8],
+        plaintext: &[u8],
+    ) -> Vec<u8> {
+        let mut body = plaintext.to_vec();
+        self.0
+            .seal_in_place_append_tag(
+                ring::aead::Nonce::assume_unique_for_key(nonce),
+                ring::aead::Aad::from(aad),
+                &mut body,
+            )
+            .unwrap();
+        body
+    }
+}
+
+impl fmt::Debug for AeadKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("AeadKey(..)")
+    }
 }
 
 /// The secure random source, shared by key generation and ECDSA signing.

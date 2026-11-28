@@ -137,6 +137,10 @@ const POLICY_ENVELOPE_SEEDS: Seed = Seed {
     test: "policy_envelope",
     name: "write_policy_envelope_fuzz_seeds",
 };
+const POLICY_AT_REST_SEEDS: Seed = Seed {
+    test: "policy_at_rest",
+    name: "write_policy_at_rest_fuzz_seeds",
+};
 const POLICY_JSON_SEEDS: Seed = Seed {
     test: "fuzz_seeds",
     name: "write_policy_json_fuzz_seeds",
@@ -286,6 +290,11 @@ pub const PROJECTS: &[Project] = &[
                 name: "policy_envelope_decode",
                 dict: None,
                 seeds: &[POLICY_ENVELOPE_SEEDS],
+            },
+            Target {
+                name: "policy_at_rest_open",
+                dict: None,
+                seeds: &[POLICY_AT_REST_SEEDS],
             },
             Target {
                 name: "sntp_reply",
