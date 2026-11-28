@@ -129,6 +129,10 @@ const TRUST_SET_SEEDS: Seed = Seed {
     test: "trust_set",
     name: "write_trust_set_fuzz_seeds",
 };
+const POLICY_ENVELOPE_SEEDS: Seed = Seed {
+    test: "policy_envelope",
+    name: "write_policy_envelope_fuzz_seeds",
+};
 const POLICY_JSON_SEEDS: Seed = Seed {
     test: "fuzz_seeds",
     name: "write_policy_json_fuzz_seeds",
@@ -144,6 +148,10 @@ const PATTERN_SEEDS: Seed = Seed {
 const BUNDLE_SEEDS: Seed = Seed {
     test: "fuzz_seeds",
     name: "write_bundle_fuzz_seeds",
+};
+const BUNDLE_DELTA_SEEDS: Seed = Seed {
+    test: "fuzz_seeds",
+    name: "write_bundle_delta_fuzz_seeds",
 };
 
 /// Seeds from the generated fixture corpus (#25): PEs, their signatures and
@@ -239,11 +247,18 @@ pub const PROJECTS: &[Project] = &[
     Project {
         dir: "crates/palisade-proto/fuzz",
         package: "palisade-proto",
-        targets: &[Target {
-            name: "trust_set_decode",
-            dict: None,
-            seeds: &[TRUST_SET_SEEDS],
-        }],
+        targets: &[
+            Target {
+                name: "trust_set_decode",
+                dict: None,
+                seeds: &[TRUST_SET_SEEDS],
+            },
+            Target {
+                name: "policy_envelope_decode",
+                dict: None,
+                seeds: &[POLICY_ENVELOPE_SEEDS],
+            },
+        ],
     },
     Project {
         dir: "crates/palisade-policy/fuzz",
@@ -268,6 +283,11 @@ pub const PROJECTS: &[Project] = &[
                 name: "fuzz_bundle_decode",
                 dict: None,
                 seeds: &[BUNDLE_SEEDS],
+            },
+            Target {
+                name: "fuzz_bundle_delta",
+                dict: None,
+                seeds: &[BUNDLE_DELTA_SEEDS],
             },
         ],
     },

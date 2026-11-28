@@ -352,6 +352,7 @@ name = "palisade-proto-fuzz"
 version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
+ "palisade-policy",
  "palisade-proto",
 ]
 
