@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-e237a329.js";
+            window.path_to_searchindex_js = "searchindex-82f4a68f.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-de2a680a.js"></script>
@@ -7115,7 +7115,7 @@ the real implementations:</p>
 <tbody>
 <tr><td><code>Clock</code></td><td><code>SystemClock</code></td><td>Done. The one place that reads the wall clock (<code>clippy.toml</code> bans <code>SystemTime::now</code> elsewhere)</td></tr>
 <tr><td><code>FileSystem</code></td><td><code>StdFileSystem</code>; <code>windows::WindowsFileSystem</code></td><td>Reads, size and times on every OS, opened so other processes can keep writing and deleting. On Windows, <code>WindowsFileSystem</code> adds the file ID, volume serial and USN (from the open handle), the owner SID, the security descriptor and the alternate data streams, through <code>palisade_fileid::win</code>; <code>StdFileSystem</code> reports those <code>Unsupported</code></td></tr>
-<tr><td><code>Environment</code></td><td><code>StdEnvironment</code></td><td>Variables, architecture and interface addresses everywhere; host name, domain and OS version from the OS on Windows. The connection type is <code>Unknown</code> until network location (#38) defines it</td></tr>
+<tr><td><code>Environment</code></td><td><code>StdEnvironment</code></td><td>Variables, architecture and interface addresses everywhere; host name, domain and OS version from the OS on Windows. On Windows, the connection type is that of the interfaces the OS routes internet-bound IPv4 and IPv6 traffic through (<code>GetBestRoute2</code>, then <code>GetIfEntry2</code> by LUID), read on each call: wired, wireless or cellular only for an up, connected hardware interface that is not a tunnel and whose type and physical medium agree; VPN only for a virtual tunnel interface (it means some tunnel, not a trusted network, which is #38's question); offline only when neither family has a route; and <code>Unknown</code> otherwise and on other OSes</td></tr>
 <tr><td><code>Registry</code></td><td><code>windows::WindowsRegistry</code></td><td>Done, on Windows</td></tr>
 <tr><td><code>IdentityProvider</code></td><td><code>windows::WindowsIdentity</code></td><td>On Windows: a process's token (user, groups with deny-only flags, session ID and kind, integrity level, elevation type and state), account names, local group members by SID, and the directory group cache (filled by the directory sync, #38)</td></tr>
 <tr><td><code>ProcessInfo</code></td><td><code>windows::WindowsProcesses</code></td><td>On Windows: process records keyed by process ID and creation time, with parent ID, image path and command line, read through one handle</td></tr>
