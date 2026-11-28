@@ -262,283 +262,355 @@
 <a href=#262 id=262 data-nosnippet>262</a>    out
 <a href=#263 id=263 data-nosnippet>263</a>}
 <a href=#264 id=264 data-nosnippet>264</a>
-<a href=#265 id=265 data-nosnippet>265</a><span class="doccomment">/// The scopes of a rule set's rules, with JSON Pointers relative to the
-<a href=#266 id=266 data-nosnippet>266</a>/// rule set.
-<a href=#267 id=267 data-nosnippet>267</a></span><span class="attr">#[must_use]
-<a href=#268 id=268 data-nosnippet>268</a></span><span class="kw">pub fn </span>rule_set_scopes(set: <span class="kw-2">&amp;</span><span class="kw">crate</span>::model::RuleSet) -&gt; Vec&lt;(String, <span class="kw-2">&amp;</span>Scope)&gt; {
-<a href=#269 id=269 data-nosnippet>269</a>    set.rules
-<a href=#270 id=270 data-nosnippet>270</a>        .iter()
-<a href=#271 id=271 data-nosnippet>271</a>        .enumerate()
-<a href=#272 id=272 data-nosnippet>272</a>        .filter_map(|(i, r)| r.scope.as_deref().map(|s| (<span class="macro">format!</span>(<span class="string">"/rules/{i}/scope"</span>), s)))
-<a href=#273 id=273 data-nosnippet>273</a>        .collect()
-<a href=#274 id=274 data-nosnippet>274</a>}
-<a href=#275 id=275 data-nosnippet>275</a>
-<a href=#276 id=276 data-nosnippet>276</a><span class="doccomment">/// The library catalogue (#37), seen from one tenant or the installation:
-<a href=#277 id=277 data-nosnippet>277</a>/// a set the catalogue does not hold, holds at another version, cannot
-<a href=#278 id=278 data-nosnippet>278</a>/// show from here, or holds as another kind is unresolved.
-<a href=#279 id=279 data-nosnippet>279</a></span><span class="attr">#[derive(Clone, Copy, Debug)]
-<a href=#280 id=280 data-nosnippet>280</a></span><span class="kw">pub struct </span>CatalogueLibrary&lt;<span class="lifetime">'c</span>&gt; {
-<a href=#281 id=281 data-nosnippet>281</a>    <span class="doccomment">/// The catalogue.
-<a href=#282 id=282 data-nosnippet>282</a>    </span><span class="kw">pub </span>catalogue: <span class="kw-2">&amp;</span><span class="lifetime">'c </span><span class="kw">crate</span>::library::Catalogue,
-<a href=#283 id=283 data-nosnippet>283</a>    <span class="doccomment">/// Whose libraries it may use.
-<a href=#284 id=284 data-nosnippet>284</a>    </span><span class="kw">pub </span>from: <span class="kw">crate</span>::library::Visibility,
-<a href=#285 id=285 data-nosnippet>285</a>}
-<a href=#286 id=286 data-nosnippet>286</a>
-<a href=#287 id=287 data-nosnippet>287</a><span class="kw">impl </span>ScopeLibrary <span class="kw">for </span>CatalogueLibrary&lt;<span class="lifetime">'_</span>&gt; {
-<a href=#288 id=288 data-nosnippet>288</a>    <span class="kw">fn </span>principal_set(<span class="kw-2">&amp;</span><span class="self">self</span>, set: <span class="kw-2">&amp;</span>SetRef) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;String&gt;&gt; {
-<a href=#289 id=289 data-nosnippet>289</a>        <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.catalogue.resolve(set, <span class="self">self</span>.from).ok()<span class="question-mark">?</span>.content {
-<a href=#290 id=290 data-nosnippet>290</a>            <span class="kw">crate</span>::library::LibraryContent::PrincipalSet { principals } =&gt; <span class="prelude-val">Some</span>(principals.clone()),
-<a href=#291 id=291 data-nosnippet>291</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
-<a href=#292 id=292 data-nosnippet>292</a>        }
-<a href=#293 id=293 data-nosnippet>293</a>    }
-<a href=#294 id=294 data-nosnippet>294</a>
-<a href=#295 id=295 data-nosnippet>295</a>    <span class="kw">fn </span>network_set(<span class="kw-2">&amp;</span><span class="self">self</span>, set: <span class="kw-2">&amp;</span>SetRef) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;String&gt;&gt; {
-<a href=#296 id=296 data-nosnippet>296</a>        <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.catalogue.resolve(set, <span class="self">self</span>.from).ok()<span class="question-mark">?</span>.content {
-<a href=#297 id=297 data-nosnippet>297</a>            <span class="kw">crate</span>::library::LibraryContent::NetworkSet { entries } =&gt; <span class="prelude-val">Some</span>(entries.clone()),
-<a href=#298 id=298 data-nosnippet>298</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
-<a href=#299 id=299 data-nosnippet>299</a>        }
-<a href=#300 id=300 data-nosnippet>300</a>    }
-<a href=#301 id=301 data-nosnippet>301</a>
-<a href=#302 id=302 data-nosnippet>302</a>    <span class="kw">fn </span>schedule_set(<span class="kw-2">&amp;</span><span class="self">self</span>, set: <span class="kw-2">&amp;</span>SetRef) -&gt; <span class="prelude-ty">Option</span>&lt;Schedule&gt; {
-<a href=#303 id=303 data-nosnippet>303</a>        <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.catalogue.resolve(set, <span class="self">self</span>.from).ok()<span class="question-mark">?</span>.content {
-<a href=#304 id=304 data-nosnippet>304</a>            <span class="comment">// A validated set holds exactly one schedule.
-<a href=#305 id=305 data-nosnippet>305</a>            </span><span class="kw">crate</span>::library::LibraryContent::ScheduleSet { entries } <span class="kw">if </span>entries.len() == <span class="number">1 </span>=&gt; {
-<a href=#306 id=306 data-nosnippet>306</a>                serde_json::from_str(<span class="kw-2">&amp;</span>entries[<span class="number">0</span>]).ok()
-<a href=#307 id=307 data-nosnippet>307</a>            }
-<a href=#308 id=308 data-nosnippet>308</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
-<a href=#309 id=309 data-nosnippet>309</a>        }
-<a href=#310 id=310 data-nosnippet>310</a>    }
-<a href=#311 id=311 data-nosnippet>311</a>}
-<a href=#312 id=312 data-nosnippet>312</a>
-<a href=#313 id=313 data-nosnippet>313</a><span class="doccomment">/// Why an entry of a network set (#37) is not an address block, a range
-<a href=#314 id=314 data-nosnippet>314</a>/// or a DNS suffix, if it is not.
-<a href=#315 id=315 data-nosnippet>315</a></span><span class="attr">#[must_use]
-<a href=#316 id=316 data-nosnippet>316</a></span><span class="kw">pub fn </span>network_entry_problem(entry: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
-<a href=#317 id=317 data-nosnippet>317</a>    (text::IpRange::block_or_range(entry).is_err() &amp;&amp; text::dns_suffix(entry).is_err())
-<a href=#318 id=318 data-nosnippet>318</a>        .then(|| <span class="macro">format!</span>(<span class="string">"`{entry}` is not an address block, an address range or a DNS suffix"</span>))
-<a href=#319 id=319 data-nosnippet>319</a>}
-<a href=#320 id=320 data-nosnippet>320</a>
-<a href=#321 id=321 data-nosnippet>321</a><span class="doccomment">/// The largest schedule-set entry, in bytes: room for 64 windows and two
-<a href=#322 id=322 data-nosnippet>322</a>/// lists of 1000 date ranges, with whitespace.
-<a href=#323 id=323 data-nosnippet>323</a></span><span class="kw">pub const </span>MAX_SCHEDULE_ENTRY_BYTES: usize = <span class="number">1 </span>&lt;&lt; <span class="number">20</span>;
-<a href=#324 id=324 data-nosnippet>324</a>
-<a href=#325 id=325 data-nosnippet>325</a><span class="doccomment">/// Why an entry of a schedule set (#37) is not a well-formed schedule, if
-<a href=#326 id=326 data-nosnippet>326</a>/// it is not: it must be one schedule written as JSON, with the rules a
-<a href=#327 id=327 data-nosnippet>327</a>/// scope's `schedule` follows, and without `on_window_close`, which
-<a href=#328 id=328 data-nosnippet>328</a>/// belongs to the scope that uses it.
-<a href=#329 id=329 data-nosnippet>329</a></span><span class="attr">#[must_use]
-<a href=#330 id=330 data-nosnippet>330</a></span><span class="kw">pub fn </span>schedule_entry_problem(entry: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
-<a href=#331 id=331 data-nosnippet>331</a>    <span class="kw">if </span>entry.len() &gt; MAX_SCHEDULE_ENTRY_BYTES {
-<a href=#332 id=332 data-nosnippet>332</a>        <span class="kw">return </span><span class="prelude-val">Some</span>(<span class="macro">format!</span>(
-<a href=#333 id=333 data-nosnippet>333</a>            <span class="string">"{} bytes; a schedule entry is at most {MAX_SCHEDULE_ENTRY_BYTES}"</span>,
-<a href=#334 id=334 data-nosnippet>334</a>            entry.len()
-<a href=#335 id=335 data-nosnippet>335</a>        ));
-<a href=#336 id=336 data-nosnippet>336</a>    }
-<a href=#337 id=337 data-nosnippet>337</a>    <span class="kw">let </span>schedule: Schedule = <span class="kw">match </span>serde_json::from_str(entry) {
-<a href=#338 id=338 data-nosnippet>338</a>        <span class="prelude-val">Ok</span>(s) =&gt; s,
-<a href=#339 id=339 data-nosnippet>339</a>        <span class="prelude-val">Err</span>(e) =&gt; <span class="kw">return </span><span class="prelude-val">Some</span>(<span class="macro">format!</span>(<span class="string">"not a schedule: {e}"</span>)),
-<a href=#340 id=340 data-nosnippet>340</a>    };
-<a href=#341 id=341 data-nosnippet>341</a>    <span class="kw">if </span>schedule.on_window_close != OnWindowClose::None || schedule.grace_secs.is_some() {
-<a href=#342 id=342 data-nosnippet>342</a>        <span class="kw">return </span><span class="prelude-val">Some</span>(
-<a href=#343 id=343 data-nosnippet>343</a>            <span class="string">"a schedule set cannot set `on_window_close` or `grace_secs`; set them on an inline schedule"
-<a href=#344 id=344 data-nosnippet>344</a>                </span>.to_owned(),
-<a href=#345 id=345 data-nosnippet>345</a>        );
-<a href=#346 id=346 data-nosnippet>346</a>    }
-<a href=#347 id=347 data-nosnippet>347</a>    <span class="kw">if </span>CompiledSchedule::compile(<span class="kw-2">&amp;</span>schedule, <span class="kw">crate</span>::model::TimeZoneBasis::Utc).is_valid() {
-<a href=#348 id=348 data-nosnippet>348</a>        <span class="prelude-val">None
-<a href=#349 id=349 data-nosnippet>349</a>    </span>} <span class="kw">else </span>{
-<a href=#350 id=350 data-nosnippet>350</a>        <span class="prelude-val">Some</span>(<span class="string">"the schedule is not well formed: check its windows (days, start, and one of `end` or `duration_mins`), its date ranges and its limits"</span>.to_owned())
-<a href=#351 id=351 data-nosnippet>351</a>    }
-<a href=#352 id=352 data-nosnippet>352</a>}
-<a href=#353 id=353 data-nosnippet>353</a>
-<a href=#354 id=354 data-nosnippet>354</a><span class="doccomment">/// A library that resolves nothing: every set reference is unknown.
-<a href=#355 id=355 data-nosnippet>355</a></span><span class="attr">#[derive(Clone, Copy, Debug, Default)]
-<a href=#356 id=356 data-nosnippet>356</a></span><span class="kw">pub struct </span>NoLibrary;
-<a href=#357 id=357 data-nosnippet>357</a>
-<a href=#358 id=358 data-nosnippet>358</a><span class="kw">impl </span>ScopeLibrary <span class="kw">for </span>NoLibrary {
-<a href=#359 id=359 data-nosnippet>359</a>    <span class="kw">fn </span>principal_set(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw">_</span>: <span class="kw-2">&amp;</span>SetRef) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;String&gt;&gt; {
-<a href=#360 id=360 data-nosnippet>360</a>        <span class="prelude-val">None
-<a href=#361 id=361 data-nosnippet>361</a>    </span>}
-<a href=#362 id=362 data-nosnippet>362</a>    <span class="kw">fn </span>network_set(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw">_</span>: <span class="kw-2">&amp;</span>SetRef) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;String&gt;&gt; {
-<a href=#363 id=363 data-nosnippet>363</a>        <span class="prelude-val">None
-<a href=#364 id=364 data-nosnippet>364</a>    </span>}
-<a href=#365 id=365 data-nosnippet>365</a>    <span class="kw">fn </span>schedule_set(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw">_</span>: <span class="kw-2">&amp;</span>SetRef) -&gt; <span class="prelude-ty">Option</span>&lt;Schedule&gt; {
-<a href=#366 id=366 data-nosnippet>366</a>        <span class="prelude-val">None
-<a href=#367 id=367 data-nosnippet>367</a>    </span>}
-<a href=#368 id=368 data-nosnippet>368</a>}
-<a href=#369 id=369 data-nosnippet>369</a>
-<a href=#370 id=370 data-nosnippet>370</a><span class="doccomment">/// Something worth recording about a scope evaluation. The `snake_case`
-<a href=#371 id=371 data-nosnippet>371</a>/// name is part of the API.
-<a href=#372 id=372 data-nosnippet>372</a></span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
-<a href=#373 id=373 data-nosnippet>373</a>#[serde(rename_all = <span class="string">"snake_case"</span>)]
-<a href=#374 id=374 data-nosnippet>374</a>#[repr(u8)]
-<a href=#375 id=375 data-nosnippet>375</a></span><span class="kw">pub enum </span>ScopeNote {
-<a href=#376 id=376 data-nosnippet>376</a>    <span class="doccomment">/// A fact a scope needs was not collected.
-<a href=#377 id=377 data-nosnippet>377</a>    </span>FactMissing = <span class="number">0</span>,
-<a href=#378 id=378 data-nosnippet>378</a>    <span class="doccomment">/// A fact was not in the form its test needs.
-<a href=#379 id=379 data-nosnippet>379</a>    </span>FactMalformed = <span class="number">1</span>,
-<a href=#380 id=380 data-nosnippet>380</a>    <span class="doccomment">/// Cached group membership was too old, from the future, or read with
-<a href=#381 id=381 data-nosnippet>381</a>    /// an untrusted clock, so it was unknown.
-<a href=#382 id=382 data-nosnippet>382</a>    </span>ScopeStale = <span class="number">2</span>,
-<a href=#383 id=383 data-nosnippet>383</a>    <span class="doccomment">/// The trusted time was missing or flagged, or a schedule's time zone
-<a href=#384 id=384 data-nosnippet>384</a>    /// was unknown, so schedules took their restrictive reading.
-<a href=#385 id=385 data-nosnippet>385</a>    </span>ClockUntrusted = <span class="number">3</span>,
-<a href=#386 id=386 data-nosnippet>386</a>    <span class="doccomment">/// A deny-only group of a filtered token was read restrictively.
-<a href=#387 id=387 data-nosnippet>387</a>    </span>DenyOnlyGroup = <span class="number">4</span>,
-<a href=#388 id=388 data-nosnippet>388</a>    <span class="doccomment">/// A library set could not be resolved.
-<a href=#389 id=389 data-nosnippet>389</a>    </span>SetUnresolved = <span class="number">5</span>,
-<a href=#390 id=390 data-nosnippet>390</a>    <span class="doccomment">/// A `user_local` schedule used the device's time zone, because the
-<a href=#391 id=391 data-nosnippet>391</a>    /// session's was not known.
-<a href=#392 id=392 data-nosnippet>392</a>    </span>TimezoneFallback = <span class="number">6</span>,
-<a href=#393 id=393 data-nosnippet>393</a>    <span class="doccomment">/// An allow's per-session instance limit blocked the object, or could
-<a href=#394 id=394 data-nosnippet>394</a>    /// not be checked.
-<a href=#395 id=395 data-nosnippet>395</a>    </span>InstanceLimit = <span class="number">7</span>,
-<a href=#396 id=396 data-nosnippet>396</a>}
-<a href=#397 id=397 data-nosnippet>397</a>
-<a href=#398 id=398 data-nosnippet>398</a><span class="kw">impl </span>ScopeNote {
-<a href=#399 id=399 data-nosnippet>399</a>    <span class="doccomment">/// Every note, in code order.
-<a href=#400 id=400 data-nosnippet>400</a>    </span><span class="kw">pub const </span>ALL: [<span class="self">Self</span>; <span class="number">8</span>] = [
-<a href=#401 id=401 data-nosnippet>401</a>        <span class="self">Self</span>::FactMissing,
-<a href=#402 id=402 data-nosnippet>402</a>        <span class="self">Self</span>::FactMalformed,
-<a href=#403 id=403 data-nosnippet>403</a>        <span class="self">Self</span>::ScopeStale,
-<a href=#404 id=404 data-nosnippet>404</a>        <span class="self">Self</span>::ClockUntrusted,
-<a href=#405 id=405 data-nosnippet>405</a>        <span class="self">Self</span>::DenyOnlyGroup,
-<a href=#406 id=406 data-nosnippet>406</a>        <span class="self">Self</span>::SetUnresolved,
-<a href=#407 id=407 data-nosnippet>407</a>        <span class="self">Self</span>::TimezoneFallback,
-<a href=#408 id=408 data-nosnippet>408</a>        <span class="self">Self</span>::InstanceLimit,
-<a href=#409 id=409 data-nosnippet>409</a>    ];
-<a href=#410 id=410 data-nosnippet>410</a>
-<a href=#411 id=411 data-nosnippet>411</a>    <span class="doccomment">/// The stable `snake_case` name.
-<a href=#412 id=412 data-nosnippet>412</a>    </span><span class="attr">#[must_use]
-<a href=#413 id=413 data-nosnippet>413</a>    </span><span class="kw">pub const fn </span>as_str(<span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str {
-<a href=#414 id=414 data-nosnippet>414</a>        <span class="kw">match </span><span class="self">self </span>{
-<a href=#415 id=415 data-nosnippet>415</a>            <span class="self">Self</span>::FactMissing =&gt; <span class="string">"fact_missing"</span>,
-<a href=#416 id=416 data-nosnippet>416</a>            <span class="self">Self</span>::FactMalformed =&gt; <span class="string">"fact_malformed"</span>,
-<a href=#417 id=417 data-nosnippet>417</a>            <span class="self">Self</span>::ScopeStale =&gt; <span class="string">"scope_stale"</span>,
-<a href=#418 id=418 data-nosnippet>418</a>            <span class="self">Self</span>::ClockUntrusted =&gt; <span class="string">"clock_untrusted"</span>,
-<a href=#419 id=419 data-nosnippet>419</a>            <span class="self">Self</span>::DenyOnlyGroup =&gt; <span class="string">"deny_only_group"</span>,
-<a href=#420 id=420 data-nosnippet>420</a>            <span class="self">Self</span>::SetUnresolved =&gt; <span class="string">"set_unresolved"</span>,
-<a href=#421 id=421 data-nosnippet>421</a>            <span class="self">Self</span>::TimezoneFallback =&gt; <span class="string">"timezone_fallback"</span>,
-<a href=#422 id=422 data-nosnippet>422</a>            <span class="self">Self</span>::InstanceLimit =&gt; <span class="string">"instance_limit"</span>,
-<a href=#423 id=423 data-nosnippet>423</a>        }
-<a href=#424 id=424 data-nosnippet>424</a>    }
-<a href=#425 id=425 data-nosnippet>425</a>}
-<a href=#426 id=426 data-nosnippet>426</a>
-<a href=#427 id=427 data-nosnippet>427</a><span class="doccomment">/// A set of [`ScopeNote`]s.
-<a href=#428 id=428 data-nosnippet>428</a></span><span class="attr">#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-<a href=#429 id=429 data-nosnippet>429</a></span><span class="kw">pub struct </span>ScopeNotes(u16);
-<a href=#430 id=430 data-nosnippet>430</a>
-<a href=#431 id=431 data-nosnippet>431</a><span class="kw">impl </span>ScopeNotes {
-<a href=#432 id=432 data-nosnippet>432</a>    <span class="doccomment">/// Adds a note.
-<a href=#433 id=433 data-nosnippet>433</a>    </span><span class="kw">pub fn </span>insert(<span class="kw-2">&amp;mut </span><span class="self">self</span>, note: ScopeNote) {
-<a href=#434 id=434 data-nosnippet>434</a>        <span class="self">self</span>.<span class="number">0 </span>|= <span class="number">1 </span>&lt;&lt; (note <span class="kw">as </span>u8);
-<a href=#435 id=435 data-nosnippet>435</a>    }
-<a href=#436 id=436 data-nosnippet>436</a>
-<a href=#437 id=437 data-nosnippet>437</a>    <span class="doccomment">/// Adds every note in `other`.
-<a href=#438 id=438 data-nosnippet>438</a>    </span><span class="kw">pub fn </span>extend(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="self">Self</span>) {
-<a href=#439 id=439 data-nosnippet>439</a>        <span class="self">self</span>.<span class="number">0 </span>|= other.<span class="number">0</span>;
-<a href=#440 id=440 data-nosnippet>440</a>    }
+<a href=#265 id=265 data-nosnippet>265</a><span class="doccomment">/// The network set references in a policy document's location profiles,
+<a href=#266 id=266 data-nosnippet>266</a>/// with their JSON Pointers. Scopes read them through `location_profile`,
+<a href=#267 id=267 data-nosnippet>267</a>/// so they are library sets the policy uses like any other.
+<a href=#268 id=268 data-nosnippet>268</a></span><span class="kw">fn </span>profile_set_refs(doc: <span class="kw-2">&amp;</span><span class="kw">crate</span>::model::PolicyDocument) -&gt; Vec&lt;(String, SetRef)&gt; {
+<a href=#269 id=269 data-nosnippet>269</a>    <span class="kw">let </span><span class="kw-2">mut </span>out = Vec::new();
+<a href=#270 id=270 data-nosnippet>270</a>    <span class="kw">for </span>(i, p) <span class="kw">in </span>doc.policy.location_profiles.iter().enumerate() {
+<a href=#271 id=271 data-nosnippet>271</a>        <span class="kw">for </span>(j, t) <span class="kw">in </span>p.all.iter().enumerate() {
+<a href=#272 id=272 data-nosnippet>272</a>            <span class="kw">if let </span>NetworkRef::NetworkSet(s) = t {
+<a href=#273 id=273 data-nosnippet>273</a>                out.push((
+<a href=#274 id=274 data-nosnippet>274</a>                    <span class="macro">format!</span>(<span class="string">"/policy/location_profiles/{i}/all/{j}/network_set"</span>),
+<a href=#275 id=275 data-nosnippet>275</a>                    <span class="kw-2">*</span>s,
+<a href=#276 id=276 data-nosnippet>276</a>                ));
+<a href=#277 id=277 data-nosnippet>277</a>            }
+<a href=#278 id=278 data-nosnippet>278</a>        }
+<a href=#279 id=279 data-nosnippet>279</a>    }
+<a href=#280 id=280 data-nosnippet>280</a>    out
+<a href=#281 id=281 data-nosnippet>281</a>}
+<a href=#282 id=282 data-nosnippet>282</a>
+<a href=#283 id=283 data-nosnippet>283</a><span class="doccomment">/// Every library set reference of a policy document, with its JSON
+<a href=#284 id=284 data-nosnippet>284</a>/// Pointer and the kind it must be: those in its scopes
+<a href=#285 id=285 data-nosnippet>285</a>/// ([`document_scopes`]) and those in its location profiles' tests.
+<a href=#286 id=286 data-nosnippet>286</a></span><span class="attr">#[must_use]
+<a href=#287 id=287 data-nosnippet>287</a></span><span class="kw">pub fn </span>document_set_refs(
+<a href=#288 id=288 data-nosnippet>288</a>    doc: <span class="kw-2">&amp;</span><span class="kw">crate</span>::model::PolicyDocument,
+<a href=#289 id=289 data-nosnippet>289</a>) -&gt; Vec&lt;(String, SetRef, <span class="kw">crate</span>::library::LibraryKind)&gt; {
+<a href=#290 id=290 data-nosnippet>290</a>    <span class="kw">let </span><span class="kw-2">mut </span>out: Vec&lt;<span class="kw">_</span>&gt; = document_scopes(doc)
+<a href=#291 id=291 data-nosnippet>291</a>        .into_iter()
+<a href=#292 id=292 data-nosnippet>292</a>        .flat_map(|(at, scope)| {
+<a href=#293 id=293 data-nosnippet>293</a>            set_refs(scope)
+<a href=#294 id=294 data-nosnippet>294</a>                .into_iter()
+<a href=#295 id=295 data-nosnippet>295</a>                .map(<span class="kw">move </span>|(p, r, k)| (<span class="macro">format!</span>(<span class="string">"{at}{p}"</span>), r, k))
+<a href=#296 id=296 data-nosnippet>296</a>        })
+<a href=#297 id=297 data-nosnippet>297</a>        .collect();
+<a href=#298 id=298 data-nosnippet>298</a>    out.extend(
+<a href=#299 id=299 data-nosnippet>299</a>        profile_set_refs(doc)
+<a href=#300 id=300 data-nosnippet>300</a>            .into_iter()
+<a href=#301 id=301 data-nosnippet>301</a>            .map(|(p, r)| (p, r, <span class="kw">crate</span>::library::LibraryKind::NetworkSet)),
+<a href=#302 id=302 data-nosnippet>302</a>    );
+<a href=#303 id=303 data-nosnippet>303</a>    out
+<a href=#304 id=304 data-nosnippet>304</a>}
+<a href=#305 id=305 data-nosnippet>305</a>
+<a href=#306 id=306 data-nosnippet>306</a><span class="doccomment">/// Calls `f` on every library set reference of a policy document, in the
+<a href=#307 id=307 data-nosnippet>307</a>/// order of [`document_set_refs`].
+<a href=#308 id=308 data-nosnippet>308</a></span><span class="kw">pub fn </span>for_each_document_set_ref(
+<a href=#309 id=309 data-nosnippet>309</a>    doc: <span class="kw-2">&amp;mut </span><span class="kw">crate</span>::model::PolicyDocument,
+<a href=#310 id=310 data-nosnippet>310</a>    <span class="kw-2">mut </span>f: <span class="kw">impl </span>FnMut(<span class="kw-2">&amp;mut </span>SetRef),
+<a href=#311 id=311 data-nosnippet>311</a>) {
+<a href=#312 id=312 data-nosnippet>312</a>    <span class="kw">let </span>p = <span class="kw-2">&amp;mut </span>doc.policy;
+<a href=#313 id=313 data-nosnippet>313</a>    <span class="kw">let </span><span class="kw-2">mut </span>scopes: Vec&lt;<span class="kw-2">&amp;mut </span>Scope&gt; = Vec::new();
+<a href=#314 id=314 data-nosnippet>314</a>    scopes.extend(p.scope.as_mut());
+<a href=#315 id=315 data-nosnippet>315</a>    scopes.extend(p.unknown.scopes.iter_mut());
+<a href=#316 id=316 data-nosnippet>316</a>    <span class="kw">for </span>l <span class="kw">in </span><span class="kw-2">&amp;mut </span>p.unknown.scope_limits {
+<a href=#317 id=317 data-nosnippet>317</a>        scopes.extend(l.all_of.iter_mut().chain(l.any_of.iter_mut()));
+<a href=#318 id=318 data-nosnippet>318</a>    }
+<a href=#319 id=319 data-nosnippet>319</a>    <span class="kw">for </span>a <span class="kw">in </span><span class="kw-2">&amp;mut </span>p.rule_set_scopes {
+<a href=#320 id=320 data-nosnippet>320</a>        scopes.extend(a.scopes.iter_mut());
+<a href=#321 id=321 data-nosnippet>321</a>    }
+<a href=#322 id=322 data-nosnippet>322</a>    <span class="kw">for </span>set <span class="kw">in </span><span class="kw-2">&amp;mut </span>doc.rule_sets {
+<a href=#323 id=323 data-nosnippet>323</a>        scopes.extend(set.rules.iter_mut().filter_map(|r| r.scope.as_deref_mut()));
+<a href=#324 id=324 data-nosnippet>324</a>    }
+<a href=#325 id=325 data-nosnippet>325</a>    <span class="kw">for </span>scope <span class="kw">in </span>scopes {
+<a href=#326 id=326 data-nosnippet>326</a>        for_each_set_ref(scope, <span class="kw-2">&amp;mut </span>f);
+<a href=#327 id=327 data-nosnippet>327</a>    }
+<a href=#328 id=328 data-nosnippet>328</a>    <span class="kw">for </span>profile <span class="kw">in </span><span class="kw-2">&amp;mut </span>p.location_profiles {
+<a href=#329 id=329 data-nosnippet>329</a>        <span class="kw">for </span>test <span class="kw">in </span><span class="kw-2">&amp;mut </span>profile.all {
+<a href=#330 id=330 data-nosnippet>330</a>            <span class="kw">if let </span>NetworkRef::NetworkSet(r) = test {
+<a href=#331 id=331 data-nosnippet>331</a>                f(r);
+<a href=#332 id=332 data-nosnippet>332</a>            }
+<a href=#333 id=333 data-nosnippet>333</a>        }
+<a href=#334 id=334 data-nosnippet>334</a>    }
+<a href=#335 id=335 data-nosnippet>335</a>}
+<a href=#336 id=336 data-nosnippet>336</a>
+<a href=#337 id=337 data-nosnippet>337</a><span class="doccomment">/// The scopes of a rule set's rules, with JSON Pointers relative to the
+<a href=#338 id=338 data-nosnippet>338</a>/// rule set.
+<a href=#339 id=339 data-nosnippet>339</a></span><span class="attr">#[must_use]
+<a href=#340 id=340 data-nosnippet>340</a></span><span class="kw">pub fn </span>rule_set_scopes(set: <span class="kw-2">&amp;</span><span class="kw">crate</span>::model::RuleSet) -&gt; Vec&lt;(String, <span class="kw-2">&amp;</span>Scope)&gt; {
+<a href=#341 id=341 data-nosnippet>341</a>    set.rules
+<a href=#342 id=342 data-nosnippet>342</a>        .iter()
+<a href=#343 id=343 data-nosnippet>343</a>        .enumerate()
+<a href=#344 id=344 data-nosnippet>344</a>        .filter_map(|(i, r)| r.scope.as_deref().map(|s| (<span class="macro">format!</span>(<span class="string">"/rules/{i}/scope"</span>), s)))
+<a href=#345 id=345 data-nosnippet>345</a>        .collect()
+<a href=#346 id=346 data-nosnippet>346</a>}
+<a href=#347 id=347 data-nosnippet>347</a>
+<a href=#348 id=348 data-nosnippet>348</a><span class="doccomment">/// The library catalogue (#37), seen from one tenant or the installation:
+<a href=#349 id=349 data-nosnippet>349</a>/// a set the catalogue does not hold, holds at another version, cannot
+<a href=#350 id=350 data-nosnippet>350</a>/// show from here, or holds as another kind is unresolved.
+<a href=#351 id=351 data-nosnippet>351</a></span><span class="attr">#[derive(Clone, Copy, Debug)]
+<a href=#352 id=352 data-nosnippet>352</a></span><span class="kw">pub struct </span>CatalogueLibrary&lt;<span class="lifetime">'c</span>&gt; {
+<a href=#353 id=353 data-nosnippet>353</a>    <span class="doccomment">/// The catalogue.
+<a href=#354 id=354 data-nosnippet>354</a>    </span><span class="kw">pub </span>catalogue: <span class="kw-2">&amp;</span><span class="lifetime">'c </span><span class="kw">crate</span>::library::Catalogue,
+<a href=#355 id=355 data-nosnippet>355</a>    <span class="doccomment">/// Whose libraries it may use.
+<a href=#356 id=356 data-nosnippet>356</a>    </span><span class="kw">pub </span>from: <span class="kw">crate</span>::library::Visibility,
+<a href=#357 id=357 data-nosnippet>357</a>}
+<a href=#358 id=358 data-nosnippet>358</a>
+<a href=#359 id=359 data-nosnippet>359</a><span class="kw">impl </span>ScopeLibrary <span class="kw">for </span>CatalogueLibrary&lt;<span class="lifetime">'_</span>&gt; {
+<a href=#360 id=360 data-nosnippet>360</a>    <span class="kw">fn </span>principal_set(<span class="kw-2">&amp;</span><span class="self">self</span>, set: <span class="kw-2">&amp;</span>SetRef) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;String&gt;&gt; {
+<a href=#361 id=361 data-nosnippet>361</a>        <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.catalogue.resolve(set, <span class="self">self</span>.from).ok()<span class="question-mark">?</span>.content {
+<a href=#362 id=362 data-nosnippet>362</a>            <span class="kw">crate</span>::library::LibraryContent::PrincipalSet { principals } =&gt; <span class="prelude-val">Some</span>(principals.clone()),
+<a href=#363 id=363 data-nosnippet>363</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+<a href=#364 id=364 data-nosnippet>364</a>        }
+<a href=#365 id=365 data-nosnippet>365</a>    }
+<a href=#366 id=366 data-nosnippet>366</a>
+<a href=#367 id=367 data-nosnippet>367</a>    <span class="kw">fn </span>network_set(<span class="kw-2">&amp;</span><span class="self">self</span>, set: <span class="kw-2">&amp;</span>SetRef) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;String&gt;&gt; {
+<a href=#368 id=368 data-nosnippet>368</a>        <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.catalogue.resolve(set, <span class="self">self</span>.from).ok()<span class="question-mark">?</span>.content {
+<a href=#369 id=369 data-nosnippet>369</a>            <span class="kw">crate</span>::library::LibraryContent::NetworkSet { entries } =&gt; <span class="prelude-val">Some</span>(entries.clone()),
+<a href=#370 id=370 data-nosnippet>370</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+<a href=#371 id=371 data-nosnippet>371</a>        }
+<a href=#372 id=372 data-nosnippet>372</a>    }
+<a href=#373 id=373 data-nosnippet>373</a>
+<a href=#374 id=374 data-nosnippet>374</a>    <span class="kw">fn </span>schedule_set(<span class="kw-2">&amp;</span><span class="self">self</span>, set: <span class="kw-2">&amp;</span>SetRef) -&gt; <span class="prelude-ty">Option</span>&lt;Schedule&gt; {
+<a href=#375 id=375 data-nosnippet>375</a>        <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.catalogue.resolve(set, <span class="self">self</span>.from).ok()<span class="question-mark">?</span>.content {
+<a href=#376 id=376 data-nosnippet>376</a>            <span class="comment">// A validated set holds exactly one schedule.
+<a href=#377 id=377 data-nosnippet>377</a>            </span><span class="kw">crate</span>::library::LibraryContent::ScheduleSet { entries } <span class="kw">if </span>entries.len() == <span class="number">1 </span>=&gt; {
+<a href=#378 id=378 data-nosnippet>378</a>                serde_json::from_str(<span class="kw-2">&amp;</span>entries[<span class="number">0</span>]).ok()
+<a href=#379 id=379 data-nosnippet>379</a>            }
+<a href=#380 id=380 data-nosnippet>380</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+<a href=#381 id=381 data-nosnippet>381</a>        }
+<a href=#382 id=382 data-nosnippet>382</a>    }
+<a href=#383 id=383 data-nosnippet>383</a>}
+<a href=#384 id=384 data-nosnippet>384</a>
+<a href=#385 id=385 data-nosnippet>385</a><span class="doccomment">/// Why an entry of a network set (#37) is not an address block, a range
+<a href=#386 id=386 data-nosnippet>386</a>/// or a DNS suffix, if it is not.
+<a href=#387 id=387 data-nosnippet>387</a></span><span class="attr">#[must_use]
+<a href=#388 id=388 data-nosnippet>388</a></span><span class="kw">pub fn </span>network_entry_problem(entry: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
+<a href=#389 id=389 data-nosnippet>389</a>    (text::IpRange::block_or_range(entry).is_err() &amp;&amp; text::dns_suffix(entry).is_err())
+<a href=#390 id=390 data-nosnippet>390</a>        .then(|| <span class="macro">format!</span>(<span class="string">"`{entry}` is not an address block, an address range or a DNS suffix"</span>))
+<a href=#391 id=391 data-nosnippet>391</a>}
+<a href=#392 id=392 data-nosnippet>392</a>
+<a href=#393 id=393 data-nosnippet>393</a><span class="doccomment">/// The largest schedule-set entry, in bytes: room for 64 windows and two
+<a href=#394 id=394 data-nosnippet>394</a>/// lists of 1000 date ranges, with whitespace.
+<a href=#395 id=395 data-nosnippet>395</a></span><span class="kw">pub const </span>MAX_SCHEDULE_ENTRY_BYTES: usize = <span class="number">1 </span>&lt;&lt; <span class="number">20</span>;
+<a href=#396 id=396 data-nosnippet>396</a>
+<a href=#397 id=397 data-nosnippet>397</a><span class="doccomment">/// Why an entry of a schedule set (#37) is not a well-formed schedule, if
+<a href=#398 id=398 data-nosnippet>398</a>/// it is not: it must be one schedule written as JSON, with the rules a
+<a href=#399 id=399 data-nosnippet>399</a>/// scope's `schedule` follows, and without `on_window_close`, which
+<a href=#400 id=400 data-nosnippet>400</a>/// belongs to the scope that uses it.
+<a href=#401 id=401 data-nosnippet>401</a></span><span class="attr">#[must_use]
+<a href=#402 id=402 data-nosnippet>402</a></span><span class="kw">pub fn </span>schedule_entry_problem(entry: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
+<a href=#403 id=403 data-nosnippet>403</a>    <span class="kw">if </span>entry.len() &gt; MAX_SCHEDULE_ENTRY_BYTES {
+<a href=#404 id=404 data-nosnippet>404</a>        <span class="kw">return </span><span class="prelude-val">Some</span>(<span class="macro">format!</span>(
+<a href=#405 id=405 data-nosnippet>405</a>            <span class="string">"{} bytes; a schedule entry is at most {MAX_SCHEDULE_ENTRY_BYTES}"</span>,
+<a href=#406 id=406 data-nosnippet>406</a>            entry.len()
+<a href=#407 id=407 data-nosnippet>407</a>        ));
+<a href=#408 id=408 data-nosnippet>408</a>    }
+<a href=#409 id=409 data-nosnippet>409</a>    <span class="kw">let </span>schedule: Schedule = <span class="kw">match </span>serde_json::from_str(entry) {
+<a href=#410 id=410 data-nosnippet>410</a>        <span class="prelude-val">Ok</span>(s) =&gt; s,
+<a href=#411 id=411 data-nosnippet>411</a>        <span class="prelude-val">Err</span>(e) =&gt; <span class="kw">return </span><span class="prelude-val">Some</span>(<span class="macro">format!</span>(<span class="string">"not a schedule: {e}"</span>)),
+<a href=#412 id=412 data-nosnippet>412</a>    };
+<a href=#413 id=413 data-nosnippet>413</a>    <span class="kw">if </span>schedule.on_window_close != OnWindowClose::None || schedule.grace_secs.is_some() {
+<a href=#414 id=414 data-nosnippet>414</a>        <span class="kw">return </span><span class="prelude-val">Some</span>(
+<a href=#415 id=415 data-nosnippet>415</a>            <span class="string">"a schedule set cannot set `on_window_close` or `grace_secs`; set them on an inline schedule"
+<a href=#416 id=416 data-nosnippet>416</a>                </span>.to_owned(),
+<a href=#417 id=417 data-nosnippet>417</a>        );
+<a href=#418 id=418 data-nosnippet>418</a>    }
+<a href=#419 id=419 data-nosnippet>419</a>    <span class="kw">if </span>CompiledSchedule::compile(<span class="kw-2">&amp;</span>schedule, <span class="kw">crate</span>::model::TimeZoneBasis::Utc).is_valid() {
+<a href=#420 id=420 data-nosnippet>420</a>        <span class="prelude-val">None
+<a href=#421 id=421 data-nosnippet>421</a>    </span>} <span class="kw">else </span>{
+<a href=#422 id=422 data-nosnippet>422</a>        <span class="prelude-val">Some</span>(<span class="string">"the schedule is not well formed: check its windows (days, start, and one of `end` or `duration_mins`), its date ranges and its limits"</span>.to_owned())
+<a href=#423 id=423 data-nosnippet>423</a>    }
+<a href=#424 id=424 data-nosnippet>424</a>}
+<a href=#425 id=425 data-nosnippet>425</a>
+<a href=#426 id=426 data-nosnippet>426</a><span class="doccomment">/// A library that resolves nothing: every set reference is unknown.
+<a href=#427 id=427 data-nosnippet>427</a></span><span class="attr">#[derive(Clone, Copy, Debug, Default)]
+<a href=#428 id=428 data-nosnippet>428</a></span><span class="kw">pub struct </span>NoLibrary;
+<a href=#429 id=429 data-nosnippet>429</a>
+<a href=#430 id=430 data-nosnippet>430</a><span class="kw">impl </span>ScopeLibrary <span class="kw">for </span>NoLibrary {
+<a href=#431 id=431 data-nosnippet>431</a>    <span class="kw">fn </span>principal_set(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw">_</span>: <span class="kw-2">&amp;</span>SetRef) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;String&gt;&gt; {
+<a href=#432 id=432 data-nosnippet>432</a>        <span class="prelude-val">None
+<a href=#433 id=433 data-nosnippet>433</a>    </span>}
+<a href=#434 id=434 data-nosnippet>434</a>    <span class="kw">fn </span>network_set(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw">_</span>: <span class="kw-2">&amp;</span>SetRef) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;String&gt;&gt; {
+<a href=#435 id=435 data-nosnippet>435</a>        <span class="prelude-val">None
+<a href=#436 id=436 data-nosnippet>436</a>    </span>}
+<a href=#437 id=437 data-nosnippet>437</a>    <span class="kw">fn </span>schedule_set(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw">_</span>: <span class="kw-2">&amp;</span>SetRef) -&gt; <span class="prelude-ty">Option</span>&lt;Schedule&gt; {
+<a href=#438 id=438 data-nosnippet>438</a>        <span class="prelude-val">None
+<a href=#439 id=439 data-nosnippet>439</a>    </span>}
+<a href=#440 id=440 data-nosnippet>440</a>}
 <a href=#441 id=441 data-nosnippet>441</a>
-<a href=#442 id=442 data-nosnippet>442</a>    <span class="doccomment">/// Whether the set holds `note`.
-<a href=#443 id=443 data-nosnippet>443</a>    </span><span class="attr">#[must_use]
-<a href=#444 id=444 data-nosnippet>444</a>    </span><span class="kw">pub const fn </span>contains(<span class="self">self</span>, note: ScopeNote) -&gt; bool {
-<a href=#445 id=445 data-nosnippet>445</a>        <span class="self">self</span>.<span class="number">0 </span>&amp; (<span class="number">1 </span>&lt;&lt; (note <span class="kw">as </span>u8)) != <span class="number">0
-<a href=#446 id=446 data-nosnippet>446</a>    </span>}
-<a href=#447 id=447 data-nosnippet>447</a>
-<a href=#448 id=448 data-nosnippet>448</a>    <span class="doccomment">/// Whether the set is empty.
-<a href=#449 id=449 data-nosnippet>449</a>    </span><span class="attr">#[must_use]
-<a href=#450 id=450 data-nosnippet>450</a>    </span><span class="kw">pub const fn </span>is_empty(<span class="self">self</span>) -&gt; bool {
-<a href=#451 id=451 data-nosnippet>451</a>        <span class="self">self</span>.<span class="number">0 </span>== <span class="number">0
-<a href=#452 id=452 data-nosnippet>452</a>    </span>}
-<a href=#453 id=453 data-nosnippet>453</a>
-<a href=#454 id=454 data-nosnippet>454</a>    <span class="doccomment">/// The notes in the set, in code order.
-<a href=#455 id=455 data-nosnippet>455</a>    </span><span class="kw">pub fn </span>iter(<span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = ScopeNote&gt; {
-<a href=#456 id=456 data-nosnippet>456</a>        ScopeNote::ALL
-<a href=#457 id=457 data-nosnippet>457</a>            .into_iter()
-<a href=#458 id=458 data-nosnippet>458</a>            .filter(<span class="kw">move </span>|n| <span class="self">self</span>.contains(<span class="kw-2">*</span>n))
-<a href=#459 id=459 data-nosnippet>459</a>    }
-<a href=#460 id=460 data-nosnippet>460</a>}
-<a href=#461 id=461 data-nosnippet>461</a>
-<a href=#462 id=462 data-nosnippet>462</a><span class="doccomment">/// Where a scope is attached.
-<a href=#463 id=463 data-nosnippet>463</a></span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
-<a href=#464 id=464 data-nosnippet>464</a>#[serde(rename_all = <span class="string">"snake_case"</span>)]
-<a href=#465 id=465 data-nosnippet>465</a></span><span class="kw">pub enum </span>ScopeLevel {
-<a href=#466 id=466 data-nosnippet>466</a>    <span class="doccomment">/// The policy's `scope`.
-<a href=#467 id=467 data-nosnippet>467</a>    </span>Policy,
-<a href=#468 id=468 data-nosnippet>468</a>    <span class="doccomment">/// A scope of the rule set's assignment (`rule_set_scopes`).
-<a href=#469 id=469 data-nosnippet>469</a>    </span>RuleSet,
-<a href=#470 id=470 data-nosnippet>470</a>    <span class="doccomment">/// The rule's own `scope`.
-<a href=#471 id=471 data-nosnippet>471</a>    </span>Rule,
-<a href=#472 id=472 data-nosnippet>472</a>}
-<a href=#473 id=473 data-nosnippet>473</a>
-<a href=#474 id=474 data-nosnippet>474</a><span class="doccomment">/// A dimension of a scope.
-<a href=#475 id=475 data-nosnippet>475</a></span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
-<a href=#476 id=476 data-nosnippet>476</a>#[serde(rename_all = <span class="string">"snake_case"</span>)]
-<a href=#477 id=477 data-nosnippet>477</a></span><span class="kw">pub enum </span>Dimension {
-<a href=#478 id=478 data-nosnippet>478</a>    <span class="doccomment">/// `principals`.
-<a href=#479 id=479 data-nosnippet>479</a>    </span>Principals,
-<a href=#480 id=480 data-nosnippet>480</a>    <span class="doccomment">/// `devices`.
-<a href=#481 id=481 data-nosnippet>481</a>    </span>Devices,
-<a href=#482 id=482 data-nosnippet>482</a>    <span class="doccomment">/// `network`.
-<a href=#483 id=483 data-nosnippet>483</a>    </span>Network,
-<a href=#484 id=484 data-nosnippet>484</a>    <span class="doccomment">/// `sessions`.
-<a href=#485 id=485 data-nosnippet>485</a>    </span>Sessions,
-<a href=#486 id=486 data-nosnippet>486</a>    <span class="doccomment">/// `schedule` or `schedule_set`.
-<a href=#487 id=487 data-nosnippet>487</a>    </span>Schedule,
-<a href=#488 id=488 data-nosnippet>488</a>}
-<a href=#489 id=489 data-nosnippet>489</a>
-<a href=#490 id=490 data-nosnippet>490</a><span class="doccomment">/// Which scope did not match, for the decision trace (#41).
-<a href=#491 id=491 data-nosnippet>491</a></span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
-<a href=#492 id=492 data-nosnippet>492</a></span><span class="kw">pub struct </span>ScopeFailure {
-<a href=#493 id=493 data-nosnippet>493</a>    <span class="doccomment">/// The level of the first scope on the chain that did not match.
-<a href=#494 id=494 data-nosnippet>494</a>    </span><span class="kw">pub </span>level: ScopeLevel,
-<a href=#495 id=495 data-nosnippet>495</a>    <span class="doccomment">/// The dimension that did not match, when one decided alone: a scope
-<a href=#496 id=496 data-nosnippet>496</a>    /// with `combine: all` and no `negate`. Otherwise `None`.
-<a href=#497 id=497 data-nosnippet>497</a>    </span><span class="kw">pub </span>dimension: <span class="prelude-ty">Option</span>&lt;Dimension&gt;,
-<a href=#498 id=498 data-nosnippet>498</a>}
-<a href=#499 id=499 data-nosnippet>499</a>
-<a href=#500 id=500 data-nosnippet>500</a><span class="doccomment">/// The result of evaluating the scopes of one rule.
-<a href=#501 id=501 data-nosnippet>501</a></span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-<a href=#502 id=502 data-nosnippet>502</a></span><span class="kw">pub struct </span>ScopeEvaluation {
-<a href=#503 id=503 data-nosnippet>503</a>    <span class="doccomment">/// The three-valued result: the `AND` of every scope on the chain.
-<a href=#504 id=504 data-nosnippet>504</a>    </span><span class="kw">pub </span>result: Tri,
-<a href=#505 id=505 data-nosnippet>505</a>    <span class="doccomment">/// What the evaluation noticed.
-<a href=#506 id=506 data-nosnippet>506</a>    </span><span class="kw">pub </span>notes: ScopeNotes,
-<a href=#507 id=507 data-nosnippet>507</a>    <span class="doccomment">/// Which scope did not match, if the result is `NoMatch`.
-<a href=#508 id=508 data-nosnippet>508</a>    </span><span class="kw">pub </span>failure: <span class="prelude-ty">Option</span>&lt;ScopeFailure&gt;,
-<a href=#509 id=509 data-nosnippet>509</a>}
-<a href=#510 id=510 data-nosnippet>510</a>
-<a href=#511 id=511 data-nosnippet>511</a><span class="kw">impl </span>ScopeEvaluation {
-<a href=#512 id=512 data-nosnippet>512</a>    <span class="doccomment">/// A chain with no scope: `Match`.
-<a href=#513 id=513 data-nosnippet>513</a>    </span><span class="kw">pub const </span>MATCH: <span class="self">Self </span>= <span class="self">Self </span>{
-<a href=#514 id=514 data-nosnippet>514</a>        result: Tri::Match,
-<a href=#515 id=515 data-nosnippet>515</a>        notes: ScopeNotes(<span class="number">0</span>),
-<a href=#516 id=516 data-nosnippet>516</a>        failure: <span class="prelude-val">None</span>,
-<a href=#517 id=517 data-nosnippet>517</a>    };
-<a href=#518 id=518 data-nosnippet>518</a>}
+<a href=#442 id=442 data-nosnippet>442</a><span class="doccomment">/// Something worth recording about a scope evaluation. The `snake_case`
+<a href=#443 id=443 data-nosnippet>443</a>/// name is part of the API.
+<a href=#444 id=444 data-nosnippet>444</a></span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+<a href=#445 id=445 data-nosnippet>445</a>#[serde(rename_all = <span class="string">"snake_case"</span>)]
+<a href=#446 id=446 data-nosnippet>446</a>#[repr(u8)]
+<a href=#447 id=447 data-nosnippet>447</a></span><span class="kw">pub enum </span>ScopeNote {
+<a href=#448 id=448 data-nosnippet>448</a>    <span class="doccomment">/// A fact a scope needs was not collected.
+<a href=#449 id=449 data-nosnippet>449</a>    </span>FactMissing = <span class="number">0</span>,
+<a href=#450 id=450 data-nosnippet>450</a>    <span class="doccomment">/// A fact was not in the form its test needs.
+<a href=#451 id=451 data-nosnippet>451</a>    </span>FactMalformed = <span class="number">1</span>,
+<a href=#452 id=452 data-nosnippet>452</a>    <span class="doccomment">/// Cached group membership was too old, from the future, or read with
+<a href=#453 id=453 data-nosnippet>453</a>    /// an untrusted clock, so it was unknown.
+<a href=#454 id=454 data-nosnippet>454</a>    </span>ScopeStale = <span class="number">2</span>,
+<a href=#455 id=455 data-nosnippet>455</a>    <span class="doccomment">/// The trusted time was missing or flagged, or a schedule's time zone
+<a href=#456 id=456 data-nosnippet>456</a>    /// was unknown, so schedules took their restrictive reading.
+<a href=#457 id=457 data-nosnippet>457</a>    </span>ClockUntrusted = <span class="number">3</span>,
+<a href=#458 id=458 data-nosnippet>458</a>    <span class="doccomment">/// A deny-only group of a filtered token was read restrictively.
+<a href=#459 id=459 data-nosnippet>459</a>    </span>DenyOnlyGroup = <span class="number">4</span>,
+<a href=#460 id=460 data-nosnippet>460</a>    <span class="doccomment">/// A library set could not be resolved.
+<a href=#461 id=461 data-nosnippet>461</a>    </span>SetUnresolved = <span class="number">5</span>,
+<a href=#462 id=462 data-nosnippet>462</a>    <span class="doccomment">/// A `user_local` schedule used the device's time zone, because the
+<a href=#463 id=463 data-nosnippet>463</a>    /// session's was not known.
+<a href=#464 id=464 data-nosnippet>464</a>    </span>TimezoneFallback = <span class="number">6</span>,
+<a href=#465 id=465 data-nosnippet>465</a>    <span class="doccomment">/// An allow's per-session instance limit blocked the object, or could
+<a href=#466 id=466 data-nosnippet>466</a>    /// not be checked.
+<a href=#467 id=467 data-nosnippet>467</a>    </span>InstanceLimit = <span class="number">7</span>,
+<a href=#468 id=468 data-nosnippet>468</a>}
+<a href=#469 id=469 data-nosnippet>469</a>
+<a href=#470 id=470 data-nosnippet>470</a><span class="kw">impl </span>ScopeNote {
+<a href=#471 id=471 data-nosnippet>471</a>    <span class="doccomment">/// Every note, in code order.
+<a href=#472 id=472 data-nosnippet>472</a>    </span><span class="kw">pub const </span>ALL: [<span class="self">Self</span>; <span class="number">8</span>] = [
+<a href=#473 id=473 data-nosnippet>473</a>        <span class="self">Self</span>::FactMissing,
+<a href=#474 id=474 data-nosnippet>474</a>        <span class="self">Self</span>::FactMalformed,
+<a href=#475 id=475 data-nosnippet>475</a>        <span class="self">Self</span>::ScopeStale,
+<a href=#476 id=476 data-nosnippet>476</a>        <span class="self">Self</span>::ClockUntrusted,
+<a href=#477 id=477 data-nosnippet>477</a>        <span class="self">Self</span>::DenyOnlyGroup,
+<a href=#478 id=478 data-nosnippet>478</a>        <span class="self">Self</span>::SetUnresolved,
+<a href=#479 id=479 data-nosnippet>479</a>        <span class="self">Self</span>::TimezoneFallback,
+<a href=#480 id=480 data-nosnippet>480</a>        <span class="self">Self</span>::InstanceLimit,
+<a href=#481 id=481 data-nosnippet>481</a>    ];
+<a href=#482 id=482 data-nosnippet>482</a>
+<a href=#483 id=483 data-nosnippet>483</a>    <span class="doccomment">/// The stable `snake_case` name.
+<a href=#484 id=484 data-nosnippet>484</a>    </span><span class="attr">#[must_use]
+<a href=#485 id=485 data-nosnippet>485</a>    </span><span class="kw">pub const fn </span>as_str(<span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str {
+<a href=#486 id=486 data-nosnippet>486</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#487 id=487 data-nosnippet>487</a>            <span class="self">Self</span>::FactMissing =&gt; <span class="string">"fact_missing"</span>,
+<a href=#488 id=488 data-nosnippet>488</a>            <span class="self">Self</span>::FactMalformed =&gt; <span class="string">"fact_malformed"</span>,
+<a href=#489 id=489 data-nosnippet>489</a>            <span class="self">Self</span>::ScopeStale =&gt; <span class="string">"scope_stale"</span>,
+<a href=#490 id=490 data-nosnippet>490</a>            <span class="self">Self</span>::ClockUntrusted =&gt; <span class="string">"clock_untrusted"</span>,
+<a href=#491 id=491 data-nosnippet>491</a>            <span class="self">Self</span>::DenyOnlyGroup =&gt; <span class="string">"deny_only_group"</span>,
+<a href=#492 id=492 data-nosnippet>492</a>            <span class="self">Self</span>::SetUnresolved =&gt; <span class="string">"set_unresolved"</span>,
+<a href=#493 id=493 data-nosnippet>493</a>            <span class="self">Self</span>::TimezoneFallback =&gt; <span class="string">"timezone_fallback"</span>,
+<a href=#494 id=494 data-nosnippet>494</a>            <span class="self">Self</span>::InstanceLimit =&gt; <span class="string">"instance_limit"</span>,
+<a href=#495 id=495 data-nosnippet>495</a>        }
+<a href=#496 id=496 data-nosnippet>496</a>    }
+<a href=#497 id=497 data-nosnippet>497</a>}
+<a href=#498 id=498 data-nosnippet>498</a>
+<a href=#499 id=499 data-nosnippet>499</a><span class="doccomment">/// A set of [`ScopeNote`]s.
+<a href=#500 id=500 data-nosnippet>500</a></span><span class="attr">#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+<a href=#501 id=501 data-nosnippet>501</a></span><span class="kw">pub struct </span>ScopeNotes(u16);
+<a href=#502 id=502 data-nosnippet>502</a>
+<a href=#503 id=503 data-nosnippet>503</a><span class="kw">impl </span>ScopeNotes {
+<a href=#504 id=504 data-nosnippet>504</a>    <span class="doccomment">/// Adds a note.
+<a href=#505 id=505 data-nosnippet>505</a>    </span><span class="kw">pub fn </span>insert(<span class="kw-2">&amp;mut </span><span class="self">self</span>, note: ScopeNote) {
+<a href=#506 id=506 data-nosnippet>506</a>        <span class="self">self</span>.<span class="number">0 </span>|= <span class="number">1 </span>&lt;&lt; (note <span class="kw">as </span>u8);
+<a href=#507 id=507 data-nosnippet>507</a>    }
+<a href=#508 id=508 data-nosnippet>508</a>
+<a href=#509 id=509 data-nosnippet>509</a>    <span class="doccomment">/// Adds every note in `other`.
+<a href=#510 id=510 data-nosnippet>510</a>    </span><span class="kw">pub fn </span>extend(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="self">Self</span>) {
+<a href=#511 id=511 data-nosnippet>511</a>        <span class="self">self</span>.<span class="number">0 </span>|= other.<span class="number">0</span>;
+<a href=#512 id=512 data-nosnippet>512</a>    }
+<a href=#513 id=513 data-nosnippet>513</a>
+<a href=#514 id=514 data-nosnippet>514</a>    <span class="doccomment">/// Whether the set holds `note`.
+<a href=#515 id=515 data-nosnippet>515</a>    </span><span class="attr">#[must_use]
+<a href=#516 id=516 data-nosnippet>516</a>    </span><span class="kw">pub const fn </span>contains(<span class="self">self</span>, note: ScopeNote) -&gt; bool {
+<a href=#517 id=517 data-nosnippet>517</a>        <span class="self">self</span>.<span class="number">0 </span>&amp; (<span class="number">1 </span>&lt;&lt; (note <span class="kw">as </span>u8)) != <span class="number">0
+<a href=#518 id=518 data-nosnippet>518</a>    </span>}
 <a href=#519 id=519 data-nosnippet>519</a>
-<a href=#520 id=520 data-nosnippet>520</a><span class="doccomment">/// Truth order: `NoMatch` below `Unknown` below `Match`.
-<a href=#521 id=521 data-nosnippet>521</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const fn </span>rank(t: Tri) -&gt; u8 {
-<a href=#522 id=522 data-nosnippet>522</a>    <span class="kw">match </span>t {
-<a href=#523 id=523 data-nosnippet>523</a>        Tri::NoMatch =&gt; <span class="number">0</span>,
-<a href=#524 id=524 data-nosnippet>524</a>        Tri::Unknown =&gt; <span class="number">1</span>,
-<a href=#525 id=525 data-nosnippet>525</a>        Tri::Match =&gt; <span class="number">2</span>,
-<a href=#526 id=526 data-nosnippet>526</a>    }
-<a href=#527 id=527 data-nosnippet>527</a>}
-<a href=#528 id=528 data-nosnippet>528</a>
-<a href=#529 id=529 data-nosnippet>529</a><span class="kw">impl </span>Bias {
-<a href=#530 id=530 data-nosnippet>530</a>    <span class="doccomment">/// The bias of a rule's action: permitting actions read facts
-<a href=#531 id=531 data-nosnippet>531</a>    /// restrictively against themselves.
-<a href=#532 id=532 data-nosnippet>532</a>    </span><span class="attr">#[must_use]
-<a href=#533 id=533 data-nosnippet>533</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const fn </span>of(kind: ActionKind) -&gt; <span class="self">Self </span>{
-<a href=#534 id=534 data-nosnippet>534</a>        <span class="kw">if </span>kind.needs_identity() {
-<a href=#535 id=535 data-nosnippet>535</a>            <span class="self">Self</span>::Permissive
-<a href=#536 id=536 data-nosnippet>536</a>        } <span class="kw">else </span>{
-<a href=#537 id=537 data-nosnippet>537</a>            <span class="self">Self</span>::Restrictive
-<a href=#538 id=538 data-nosnippet>538</a>        }
-<a href=#539 id=539 data-nosnippet>539</a>    }
-<a href=#540 id=540 data-nosnippet>540</a>}
-<a href=#541 id=541 data-nosnippet>541</a>
-<a href=#542 id=542 data-nosnippet>542</a><span class="attr">#[cfg(test)]
-<a href=#543 id=543 data-nosnippet>543</a></span><span class="kw">mod </span>tests;
+<a href=#520 id=520 data-nosnippet>520</a>    <span class="doccomment">/// Whether the set is empty.
+<a href=#521 id=521 data-nosnippet>521</a>    </span><span class="attr">#[must_use]
+<a href=#522 id=522 data-nosnippet>522</a>    </span><span class="kw">pub const fn </span>is_empty(<span class="self">self</span>) -&gt; bool {
+<a href=#523 id=523 data-nosnippet>523</a>        <span class="self">self</span>.<span class="number">0 </span>== <span class="number">0
+<a href=#524 id=524 data-nosnippet>524</a>    </span>}
+<a href=#525 id=525 data-nosnippet>525</a>
+<a href=#526 id=526 data-nosnippet>526</a>    <span class="doccomment">/// The notes in the set, in code order.
+<a href=#527 id=527 data-nosnippet>527</a>    </span><span class="kw">pub fn </span>iter(<span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = ScopeNote&gt; {
+<a href=#528 id=528 data-nosnippet>528</a>        ScopeNote::ALL
+<a href=#529 id=529 data-nosnippet>529</a>            .into_iter()
+<a href=#530 id=530 data-nosnippet>530</a>            .filter(<span class="kw">move </span>|n| <span class="self">self</span>.contains(<span class="kw-2">*</span>n))
+<a href=#531 id=531 data-nosnippet>531</a>    }
+<a href=#532 id=532 data-nosnippet>532</a>}
+<a href=#533 id=533 data-nosnippet>533</a>
+<a href=#534 id=534 data-nosnippet>534</a><span class="doccomment">/// Where a scope is attached.
+<a href=#535 id=535 data-nosnippet>535</a></span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+<a href=#536 id=536 data-nosnippet>536</a>#[serde(rename_all = <span class="string">"snake_case"</span>)]
+<a href=#537 id=537 data-nosnippet>537</a></span><span class="kw">pub enum </span>ScopeLevel {
+<a href=#538 id=538 data-nosnippet>538</a>    <span class="doccomment">/// The policy's `scope`.
+<a href=#539 id=539 data-nosnippet>539</a>    </span>Policy,
+<a href=#540 id=540 data-nosnippet>540</a>    <span class="doccomment">/// A scope of the rule set's assignment (`rule_set_scopes`).
+<a href=#541 id=541 data-nosnippet>541</a>    </span>RuleSet,
+<a href=#542 id=542 data-nosnippet>542</a>    <span class="doccomment">/// The rule's own `scope`.
+<a href=#543 id=543 data-nosnippet>543</a>    </span>Rule,
+<a href=#544 id=544 data-nosnippet>544</a>}
+<a href=#545 id=545 data-nosnippet>545</a>
+<a href=#546 id=546 data-nosnippet>546</a><span class="doccomment">/// A dimension of a scope.
+<a href=#547 id=547 data-nosnippet>547</a></span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+<a href=#548 id=548 data-nosnippet>548</a>#[serde(rename_all = <span class="string">"snake_case"</span>)]
+<a href=#549 id=549 data-nosnippet>549</a></span><span class="kw">pub enum </span>Dimension {
+<a href=#550 id=550 data-nosnippet>550</a>    <span class="doccomment">/// `principals`.
+<a href=#551 id=551 data-nosnippet>551</a>    </span>Principals,
+<a href=#552 id=552 data-nosnippet>552</a>    <span class="doccomment">/// `devices`.
+<a href=#553 id=553 data-nosnippet>553</a>    </span>Devices,
+<a href=#554 id=554 data-nosnippet>554</a>    <span class="doccomment">/// `network`.
+<a href=#555 id=555 data-nosnippet>555</a>    </span>Network,
+<a href=#556 id=556 data-nosnippet>556</a>    <span class="doccomment">/// `sessions`.
+<a href=#557 id=557 data-nosnippet>557</a>    </span>Sessions,
+<a href=#558 id=558 data-nosnippet>558</a>    <span class="doccomment">/// `schedule` or `schedule_set`.
+<a href=#559 id=559 data-nosnippet>559</a>    </span>Schedule,
+<a href=#560 id=560 data-nosnippet>560</a>}
+<a href=#561 id=561 data-nosnippet>561</a>
+<a href=#562 id=562 data-nosnippet>562</a><span class="doccomment">/// Which scope did not match, for the decision trace (#41).
+<a href=#563 id=563 data-nosnippet>563</a></span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+<a href=#564 id=564 data-nosnippet>564</a></span><span class="kw">pub struct </span>ScopeFailure {
+<a href=#565 id=565 data-nosnippet>565</a>    <span class="doccomment">/// The level of the first scope on the chain that did not match.
+<a href=#566 id=566 data-nosnippet>566</a>    </span><span class="kw">pub </span>level: ScopeLevel,
+<a href=#567 id=567 data-nosnippet>567</a>    <span class="doccomment">/// The dimension that did not match, when one decided alone: a scope
+<a href=#568 id=568 data-nosnippet>568</a>    /// with `combine: all` and no `negate`. Otherwise `None`.
+<a href=#569 id=569 data-nosnippet>569</a>    </span><span class="kw">pub </span>dimension: <span class="prelude-ty">Option</span>&lt;Dimension&gt;,
+<a href=#570 id=570 data-nosnippet>570</a>}
+<a href=#571 id=571 data-nosnippet>571</a>
+<a href=#572 id=572 data-nosnippet>572</a><span class="doccomment">/// The result of evaluating the scopes of one rule.
+<a href=#573 id=573 data-nosnippet>573</a></span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+<a href=#574 id=574 data-nosnippet>574</a></span><span class="kw">pub struct </span>ScopeEvaluation {
+<a href=#575 id=575 data-nosnippet>575</a>    <span class="doccomment">/// The three-valued result: the `AND` of every scope on the chain.
+<a href=#576 id=576 data-nosnippet>576</a>    </span><span class="kw">pub </span>result: Tri,
+<a href=#577 id=577 data-nosnippet>577</a>    <span class="doccomment">/// What the evaluation noticed.
+<a href=#578 id=578 data-nosnippet>578</a>    </span><span class="kw">pub </span>notes: ScopeNotes,
+<a href=#579 id=579 data-nosnippet>579</a>    <span class="doccomment">/// Which scope did not match, if the result is `NoMatch`.
+<a href=#580 id=580 data-nosnippet>580</a>    </span><span class="kw">pub </span>failure: <span class="prelude-ty">Option</span>&lt;ScopeFailure&gt;,
+<a href=#581 id=581 data-nosnippet>581</a>}
+<a href=#582 id=582 data-nosnippet>582</a>
+<a href=#583 id=583 data-nosnippet>583</a><span class="kw">impl </span>ScopeEvaluation {
+<a href=#584 id=584 data-nosnippet>584</a>    <span class="doccomment">/// A chain with no scope: `Match`.
+<a href=#585 id=585 data-nosnippet>585</a>    </span><span class="kw">pub const </span>MATCH: <span class="self">Self </span>= <span class="self">Self </span>{
+<a href=#586 id=586 data-nosnippet>586</a>        result: Tri::Match,
+<a href=#587 id=587 data-nosnippet>587</a>        notes: ScopeNotes(<span class="number">0</span>),
+<a href=#588 id=588 data-nosnippet>588</a>        failure: <span class="prelude-val">None</span>,
+<a href=#589 id=589 data-nosnippet>589</a>    };
+<a href=#590 id=590 data-nosnippet>590</a>}
+<a href=#591 id=591 data-nosnippet>591</a>
+<a href=#592 id=592 data-nosnippet>592</a><span class="doccomment">/// Truth order: `NoMatch` below `Unknown` below `Match`.
+<a href=#593 id=593 data-nosnippet>593</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const fn </span>rank(t: Tri) -&gt; u8 {
+<a href=#594 id=594 data-nosnippet>594</a>    <span class="kw">match </span>t {
+<a href=#595 id=595 data-nosnippet>595</a>        Tri::NoMatch =&gt; <span class="number">0</span>,
+<a href=#596 id=596 data-nosnippet>596</a>        Tri::Unknown =&gt; <span class="number">1</span>,
+<a href=#597 id=597 data-nosnippet>597</a>        Tri::Match =&gt; <span class="number">2</span>,
+<a href=#598 id=598 data-nosnippet>598</a>    }
+<a href=#599 id=599 data-nosnippet>599</a>}
+<a href=#600 id=600 data-nosnippet>600</a>
+<a href=#601 id=601 data-nosnippet>601</a><span class="kw">impl </span>Bias {
+<a href=#602 id=602 data-nosnippet>602</a>    <span class="doccomment">/// The bias of a rule's action: permitting actions read facts
+<a href=#603 id=603 data-nosnippet>603</a>    /// restrictively against themselves.
+<a href=#604 id=604 data-nosnippet>604</a>    </span><span class="attr">#[must_use]
+<a href=#605 id=605 data-nosnippet>605</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const fn </span>of(kind: ActionKind) -&gt; <span class="self">Self </span>{
+<a href=#606 id=606 data-nosnippet>606</a>        <span class="kw">if </span>kind.needs_identity() {
+<a href=#607 id=607 data-nosnippet>607</a>            <span class="self">Self</span>::Permissive
+<a href=#608 id=608 data-nosnippet>608</a>        } <span class="kw">else </span>{
+<a href=#609 id=609 data-nosnippet>609</a>            <span class="self">Self</span>::Restrictive
+<a href=#610 id=610 data-nosnippet>610</a>        }
+<a href=#611 id=611 data-nosnippet>611</a>    }
+<a href=#612 id=612 data-nosnippet>612</a>}
+<a href=#613 id=613 data-nosnippet>613</a>
+<a href=#614 id=614 data-nosnippet>614</a><span class="attr">#[cfg(test)]
+<a href=#615 id=615 data-nosnippet>615</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

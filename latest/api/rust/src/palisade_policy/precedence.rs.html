@@ -258,8 +258,8 @@
 <a href=#258 id=258 data-nosnippet>258</a>}
 <a href=#259 id=259 data-nosnippet>259</a>
 <a href=#260 id=260 data-nosnippet>260</a><span class="doccomment">/// Whether a signer criterion names the signer itself (tiers 2 to 4): the
-<a href=#261 id=261 data-nosnippet>261</a>/// publisher, a leaf thumbprint, or the TBS hash of the leaf certificate
-<a href=#262 id=262 data-nosnippet>262</a>/// (`position: leaf`). A TBS hash at any other position may name a CA
+<a href=#261 id=261 data-nosnippet>261</a>/// publisher, a leaf thumbprint, or the TBS or key hash of the leaf
+<a href=#262 id=262 data-nosnippet>262</a>/// certificate (`position: leaf`). One at any other position may name a CA
 <a href=#263 id=263 data-nosnippet>263</a>/// certificate, and the issuer, the PCA, the root and the EKUs name a
 <a href=#264 id=264 data-nosnippet>264</a>/// certificate authority. Those vouch for every file the CA signs, so they
 <a href=#265 id=265 data-nosnippet>265</a>/// are tier 7: ranking a CA-wide allow with the publisher would let it beat
@@ -269,7 +269,7 @@
 <a href=#269 id=269 data-nosnippet>269</a>        Field::SignerPublisher | Field::SignerLeafThumbprint | Field::SignerLeafThumbprintSha1 =&gt; {
 <a href=#270 id=270 data-nosnippet>270</a>            <span class="bool-val">true
 <a href=#271 id=271 data-nosnippet>271</a>        </span>}
-<a href=#272 id=272 data-nosnippet>272</a>        Field::SignerTbsHash =&gt; {
+<a href=#272 id=272 data-nosnippet>272</a>        Field::SignerTbsHash | Field::SignerSpkiSha256 =&gt; {
 <a href=#273 id=273 data-nosnippet>273</a>            c.signer.as_deref().and_then(|o| o.position) == <span class="prelude-val">Some</span>(<span class="kw">crate</span>::model::TbsPosition::Leaf)
 <a href=#274 id=274 data-nosnippet>274</a>        }
 <a href=#275 id=275 data-nosnippet>275</a>        <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,

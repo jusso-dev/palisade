@@ -36,7 +36,7 @@
             const path_to_root = "../../../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../../../searchindex-50d710d5.js";
+            window.path_to_searchindex_js = "../../../../../../searchindex-39a7b279.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../../../../../toc-de2a680a.js"></script>
@@ -208,7 +208,7 @@ signature's result unknown, never a match.</p>
 <tr><td><code>countersigned</code></td><td>boolean</td><td>no</td><td></td><td></td><td>1.0.0</td><td>The signature must carry an RFC 3161 timestamp that verifies. Unset means <code>false</code>: no requirement.</td></tr>
 <tr><td><code>disallowed_algorithms</code></td><td>array of <a href="types.html#digestalgorithm"><code>DigestAlgorithm</code></a></td><td>no</td><td></td><td>at most 6 items</td><td>1.0.0</td><td>The signature must use none of these digest algorithms, in the file digest, the signer information or any certificate of its chain.</td></tr>
 <tr><td><code>min_key_bits</code></td><td>integer</td><td>no</td><td></td><td>1 to 16384; format <code>uint32</code></td><td>1.0.0</td><td>Every key in the signature's chain must be at least this strong, in RSA-equivalent bits (see <code>crate::facts::KeyFact::rsa_equivalent_bits</code>).</td></tr>
-<tr><td><code>position</code></td><td><a href="types.html#tbsposition"><code>TbsPosition</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>Only for <code>signer.tbs_hash</code>: where in the chain the certificate must be. Unset means <code>any</code>.</td></tr>
+<tr><td><code>position</code></td><td><a href="types.html#tbsposition"><code>TbsPosition</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>Only for <code>signer.tbs_hash</code> and <code>signer.spki_sha256</code>: where in the chain the certificate must be. Unset means <code>any</code>.</td></tr>
 <tr><td><code>signature_index</code></td><td>integer</td><td>no</td><td></td><td>0 to 63; format <code>uint8</code></td><td>1.0.0</td><td>Only the signature at this index, counted from 0 among the signatures of <code>source</code>: 0 is the primary embedded signature, 1 the first nested one. Unset means any signature.</td></tr>
 <tr><td><code>signed_after</code></td><td>string</td><td>no</td><td></td><td>1 to 64 characters</td><td>1.0.0</td><td>A trusted timestamp must show that the signature was made at or after this instant: an RFC 3339 time with an offset, such as <code>2024-01-01T00:00:00Z</code>. A signature with no trusted timestamp is unknown.</td></tr>
 <tr><td><code>source</code></td><td><a href="types.html#signersource"><code>SignerSource</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>Where the signature must come from. Unset means <code>any</code>.</td></tr>

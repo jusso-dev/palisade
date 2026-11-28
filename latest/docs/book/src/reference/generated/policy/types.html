@@ -36,7 +36,7 @@
             const path_to_root = "../../../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../../../searchindex-50d710d5.js";
+            window.path_to_searchindex_js = "../../../../../../searchindex-39a7b279.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../../../../../toc-de2a680a.js"></script>
@@ -435,8 +435,9 @@ matcher.</p>
 <tr><td><code>signer.pca</code></td><td>The subject common name of the highest certificate below the root, as the signature provides it: the PCA.</td></tr>
 <tr><td><code>signer.root_thumbprint</code></td><td>The SHA-256 thumbprint of the chain's root certificate.</td></tr>
 <tr><td><code>signer.root_thumbprint_sha1</code></td><td>The SHA-1 thumbprint of the chain's root certificate. Compatibility only (ADR 0008).</td></tr>
-<tr><td><code>signer.tbs_hash</code></td><td>The hash of a chain certificate's <code>tbsCertificate</code>, under the certificate's own signature digest (40, 64, 96 or 128 hex digits). It identifies that one certificate: the <code>tbsCertificate</code> includes the serial number and the validity period (RFC 5280), so a certificate reissued with the same key has another TBS hash, and each issue needs its own rule. No criterion yet names a key across the certificates that carry it. <code>signer.position</code> says which certificate. A 40-digit (SHA-1) value is compatibility only (ADR 0008).</td></tr>
+<tr><td><code>signer.tbs_hash</code></td><td>The hash of a chain certificate's <code>tbsCertificate</code>, under the certificate's own signature digest (40, 64, 96 or 128 hex digits). It identifies that one certificate: the <code>tbsCertificate</code> includes the serial number and the validity period (RFC 5280), so a certificate reissued with the same key has another TBS hash, and each issue needs its own rule; <code>signer.spki_sha256</code> names the key across every certificate that carries it. <code>signer.position</code> says which certificate. A 40-digit (SHA-1) value is compatibility only (ADR 0008).</td></tr>
 <tr><td><code>signer.eku</code></td><td>The extended key usages of the leaf certificate, as dotted OIDs, such as <code>1.3.6.1.5.5.7.3.3</code> (code signing). A leaf without the extension has none.</td></tr>
+<tr><td><code>signer.spki_sha256</code></td><td>The SHA-256 of a chain certificate's DER <code>SubjectPublicKeyInfo</code>: its public key (#318). Unlike the TBS hash it stays the same when a certificate is reissued for the same key, so a deny on a stolen key's hash also blocks every reissue. <code>signer.position</code> says which certificate. A key above the leaf belongs to a certificate authority, which vouches for everything it signs.</td></tr>
 </tbody>
 </table>
 </div>
@@ -828,7 +829,8 @@ compares (#31).</p>
 </table>
 </div>
 <h2 id="tbsposition"><a class="header" href="#tbsposition">TbsPosition</a></h2>
-<p>Where the certificate of a <code>signer.tbs_hash</code> test must be (#31).</p>
+<p>Where the certificate of a <code>signer.tbs_hash</code> or <code>signer.spki_sha256</code>
+test must be (#31, #318).</p>
 <div class="table-wrapper">
 <table>
 <thead>

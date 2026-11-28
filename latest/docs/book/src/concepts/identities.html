@@ -36,7 +36,7 @@
             const path_to_root = "../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../searchindex-50d710d5.js";
+            window.path_to_searchindex_js = "../../../../searchindex-39a7b279.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../../../toc-de2a680a.js"></script>
@@ -199,6 +199,7 @@ Specified in <a href="https://github.com/jusso-dev/palisade/issues/31">#31</a> (
 <tr><td>Hash (compatibility)</td><td><code>hash.sha1</code>, <code>hash.md5</code>, <code>hash.authenticode_sha1</code>, page hashes</td><td>weak alone (<a href="../../../adr/0008-cryptographic-algorithms.html">ADR 0008</a>)</td></tr>
 <tr><td>Publisher</td><td><code>signer.publisher</code> (CN, O or full DN)</td><td>medium</td></tr>
 <tr><td>Certificate</td><td><code>signer.leaf_thumbprint</code>, <code>signer.tbs_hash</code></td><td>strong: names one certificate (a TBS hash above the leaf names a CA, so it is weak in an allow)</td></tr>
+<tr><td>Key</td><td><code>signer.spki_sha256</code></td><td>strong at <code>position: leaf</code>: names the signing key, in every certificate issued for it (a key above the leaf is a CA's, so it is weak in an allow)</td></tr>
 <tr><td>Certificate authority</td><td><code>signer.issuer</code>, <code>signer.pca</code>, <code>signer.root_thumbprint</code>, <code>signer.eku</code>, SHA-1 thumbprints</td><td>weak alone: a CA vouches for every file it signs</td></tr>
 <tr><td>Path</td><td><code>path.full</code>, <code>path.directory</code>, <code>path.file_name</code>, <code>path.extension</code></td><td>medium, and only where users cannot write</td></tr>
 <tr><td>Metadata</td><td><code>meta.original_filename</code>, <code>meta.product_name</code>, <code>meta.file_version</code>, ...</td><td>weak: easy to copy into another file</td></tr>
@@ -216,10 +217,18 @@ version (ISM-1471: use publisher <em>and</em> product names). The <code>publishe
 criterion only trusts signatures that are valid, valid with an expired but timestamped
 certificate, or catalog-signed; a criterion's <code>signer</code> options can accept other statuses, require
 a timestamp after a date or a minimum key size, reject algorithms, or pick the signature's source
-and index. To block a stolen certificate, deny its <code>signer.tbs_hash</code>. That blocks one
+and index. To block one stolen certificate, deny its <code>signer.tbs_hash</code>. That blocks that
 certificate only: the hashed data includes the serial number and the validity period, so a
-certificate reissued with the same key has a new TBS hash and needs its own rule. No criterion
-yet names a key across all the certificates that carry it. <strong>Path rules</strong> are the easiest to write and
+certificate reissued with the same key has a new TBS hash. To block a stolen <strong>key</strong>, deny its
+<code>signer.spki_sha256</code> (the SHA-256 of the certificate's DER <code>SubjectPublicKeyInfo</code>) with
+<code>position: leaf</code>: it is the same in every certificate issued for the key, so the deny still
+applies after a reissue. Use the TBS hash when one certificate is the problem (a mis-issued
+certificate, say, whose key is still trusted elsewhere), and the key hash when the private key
+is. As an allow, a leaf key hash trusts whoever holds the key whatever certificate they present
+next, as long as the chain is still valid; a key above the leaf belongs to a certificate
+authority, which vouches for everything it signs, so validation warns about it as weak. As
+with every signer criterion, a revoked or otherwise untrusted signature does not take part by
+default, and an unknown key hash never makes a rule match. <strong>Path rules</strong> are the easiest to write and
 the easiest to get wrong.</p>
 <p>A workstation baseline with hash, publisher and path rules (ISM-0955), validated in CI:</p>
 <pre><code class="language-yaml"># yaml-language-server: $schema=https://raw.githubusercontent.com/jusso-dev/palisade/main/schemas/policy/v1.json
