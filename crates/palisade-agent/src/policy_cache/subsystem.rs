@@ -120,7 +120,8 @@ impl Subsystem for PolicyCacheSubsystem {
         Box::pin(async move {
             let mut events = ctx.host_events();
             let cache = Arc::clone(&self.cache);
-            let report = tokio::task::spawn_blocking(move || cache.load_startup())
+            let now = self.now();
+            let report = tokio::task::spawn_blocking(move || cache.load_startup(now))
                 .await
                 .map_err(|e| SubsystemError::new(format!("policy startup did not finish: {e}")))?;
             for error in &report.io_errors {

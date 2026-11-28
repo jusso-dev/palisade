@@ -5,14 +5,14 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
 
 use palisade_core::Uuid7;
 use palisade_policy::{
-    bundle::{Body, BundleLimits, Header, PolicyBundle, SourceRevisions, TargetScope, diff},
+    bundle::{Body, Header, PolicyBundle, SourceRevisions, TargetScope, diff},
     context::EvaluationContext,
     decision::{Outcome as Verdict2, TraceId},
     demand::FactSet,
@@ -25,8 +25,13 @@ use palisade_policy::{
 };
 use palisade_proto::{
     events::{EventType, HostId, TenantId, Timestamp},
+    pki::{
+        KeyPurpose, KeyStatus, Kid, SignatureAlgorithm, Signer as _, SoftwareSigner, TrustSet,
+        TrustedKey, Validity,
+    },
     policy_bundle::{
         EffectiveMode, ModeGate, Rejection, Scope, SignatureMode, Target, content_hash,
+        envelope::Envelope,
         record::{Record, RecordCopies, RecordKey},
         select::{CacheFile, Finding, Load},
         stale::StaleAfter,
@@ -35,6 +40,7 @@ use palisade_proto::{
 
 use super::*;
 use crate::subsystem::Health;
+use arc_swap::ArcSwap;
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -125,58 +131,98 @@ fn bundle(version: u64) -> PolicyBundle {
     )
 }
 
-/// The stand-in for #325's signature in these tests: a SHA-256 tag.
-fn tag(bundle: &[u8]) -> [u8; 32] {
-    let mut m = b"test-signature\0".to_vec();
-    m.extend_from_slice(bundle);
-    *content_hash(&m).as_bytes()
+/// The policy-signing keys: `listed` is in the device's trust set,
+/// `unlisted` is not.
+struct Keys {
+    signer: SoftwareSigner,
+    listed: Kid,
+    unlisted: Kid,
 }
 
-/// A cache file: the bundle bytes, then their tag.
+fn keys() -> &'static Keys {
+    static K: OnceLock<Keys> = OnceLock::new();
+    K.get_or_init(|| {
+        let mut signer = SoftwareSigner::new();
+        let mut generate = || {
+            signer
+                .generate(KeyPurpose::PolicySigning, SignatureAlgorithm::Ed25519)
+                .unwrap()
+        };
+        let (listed, unlisted) = (generate(), generate());
+        Keys {
+            signer,
+            listed,
+            unlisted,
+        }
+    })
+}
+
+/// A year either side of `T0`.
+fn validity() -> Validity {
+    Validity::new(ts(T0 - 365 * DAY), ts(T0 + 365 * DAY)).unwrap()
+}
+
+/// A trust set listing `kid` as a policy key valid during `validity`.
+fn trust_listing(kid: Kid, validity: Validity) -> TrustSet {
+    let k = keys();
+    let mut set = TrustSet::new(1, ts(T0), &[SignatureAlgorithm::Ed25519]).unwrap();
+    set.add_policy_key(
+        TrustedKey::new(
+            k.signer.public_key(&kid).unwrap(),
+            KeyPurpose::PolicySigning,
+            SignatureAlgorithm::Ed25519,
+            KeyStatus::Active,
+            validity,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    set
+}
+
+/// The device's trust set: the listed key, for a year either side of `T0`.
+fn trust() -> SharedTrust {
+    Arc::new(ArcSwap::from_pointee(trust_listing(
+        keys().listed,
+        validity(),
+    )))
+}
+
+/// A bundle envelope signed by `kid`.
+fn sign_with(bundle: &[u8], kid: Kid) -> Vec<u8> {
+    Envelope::sign_bundle(bundle, &keys().signer, &[kid])
+        .unwrap()
+        .encode()
+}
+
+/// A bundle envelope signed by the trusted key.
 fn sign(bundle: &[u8]) -> Vec<u8> {
-    let mut file = bundle.to_vec();
-    file.extend_from_slice(&tag(bundle));
-    file
+    sign_with(bundle, keys().listed)
 }
 
 fn signed(version: u64) -> Vec<u8> {
     sign(&bundle(version).to_bytes().unwrap())
 }
 
-/// Verifies [`sign`]'s envelope.
-#[derive(Debug)]
-struct TestVerifier;
-
-impl EnvelopeVerifier for TestVerifier {
-    fn examine(&self, file: &[u8]) -> Examination {
-        let Some(split) = file.len().checked_sub(32) else {
-            return Examination::UNREADABLE;
-        };
-        let valid = tag(&file[..split]) == file[split..];
-        verify::examine_bundle(
-            file,
-            0..split,
-            valid,
-            &BundleLimits::DEFAULT,
-            verify::agent_version(),
-        )
-    }
-}
-
 const KEY: [u8; 32] = [9; 32];
 
 /// The cache over `dir`, with `records` as the record store.
 fn cache_with(dir: &Path, records: Box<dyn RecordStore>, mode: EffectiveMode) -> PolicyCache {
-    PolicyCache::new(CacheSetup {
+    PolicyCache::new(setup(dir, records, mode))
+}
+
+fn setup(dir: &Path, records: Box<dyn RecordStore>, mode: EffectiveMode) -> CacheSetup {
+    CacheSetup {
         target: target(),
         store: PolicyStore::open(dir.join("policy")).unwrap(),
         records,
         key: RecordKey::from_bytes(&KEY),
-        verifier: Box::new(TestVerifier),
+        verifier: Box::new(SignedEnvelopes::new(trust())),
+        baseline: None,
         mode,
         stale_after: StaleAfter::DEFAULT,
         engine: EngineConfig::default(),
-    })
+    }
 }
 
 fn files(dir: &Path) -> Box<dyn RecordStore> {
@@ -189,7 +235,7 @@ fn cache(dir: &Path) -> PolicyCache {
 
 fn started(dir: &Path) -> (PolicyCache, StartupReport) {
     let c = cache(dir);
-    let report = c.load_startup();
+    let report = c.load_startup(ts(T0));
     (c, report)
 }
 
@@ -257,7 +303,7 @@ fn before_startup_the_emergency_policy_decides() {
 #[test]
 fn an_unenrolled_device_runs_the_first_install_policy_and_refuses_bundles() {
     let c = PolicyCache::unenrolled(EngineConfig::default());
-    let report = c.load_startup();
+    let report = c.load_startup(ts(T0));
     assert_eq!(report.load, Load::FirstInstall);
     assert!(report.findings.is_empty());
     let (outcome, verdict) = decide(&c.current(), 'z');
@@ -437,6 +483,99 @@ fn a_bundle_that_does_not_compile_is_refused_like_an_unsupported_schema() {
 }
 
 #[test]
+fn a_bundle_whose_policy_is_invalid_is_refused_like_an_unsupported_schema() {
+    let dir = TempDir::new("invalid");
+    let (c, _) = started(dir.path());
+    // A body the decoder reads but validation refuses: a rule set the
+    // policy names that it does not hold.
+    let mut d = doc(1);
+    d.policy
+        .rule_sets
+        .push(palisade_policy::test_util::rule_set_id(99));
+    let b = bundle_for(TargetScope::Device(uuid(2)), 1, d);
+    assert!(matches!(
+        c.activate(&sign(&b.to_bytes().unwrap()), ts(T0)),
+        Err(ActivateError::Rejected(Rejection::SchemaUnsupported))
+    ));
+    assert_eq!(c.current().load(), Load::FirstInstall);
+}
+
+#[test]
+fn signatures_are_checked_against_the_trust_set_at_trusted_time() {
+    let dir = TempDir::new("trust");
+    let trust = trust();
+    let c = PolicyCache::new(CacheSetup {
+        verifier: Box::new(SignedEnvelopes::new(Arc::clone(&trust))),
+        ..setup(dir.path(), files(dir.path()), EffectiveMode::ENFORCE)
+    });
+    c.load_startup(ts(T0));
+    // Outside the key's validity window (and the skew tolerance).
+    let late = ts(T0 + 366 * DAY);
+    assert!(matches!(
+        c.activate(&signed(1), late),
+        Err(ActivateError::Rejected(Rejection::SignatureInvalid))
+    ));
+    c.activate(&signed(1), ts(T0)).unwrap();
+
+    // The trust set rotates to the other key: bundles signed by the old one
+    // are refused, and a restart no longer loads the cached one.
+    trust.store(Arc::new(trust_listing(keys().unlisted, validity())));
+    assert!(matches!(
+        c.activate(&signed(2), ts(T0)),
+        Err(ActivateError::Rejected(Rejection::SignatureInvalid))
+    ));
+    let again = PolicyCache::new(CacheSetup {
+        verifier: Box::new(SignedEnvelopes::new(Arc::clone(&trust))),
+        ..setup(dir.path(), files(dir.path()), EffectiveMode::ENFORCE)
+    });
+    assert_eq!(again.load_startup(ts(T0)).load, Load::Emergency);
+    // A bundle signed by the new key is accepted.
+    again
+        .activate(
+            &sign_with(&bundle(2).to_bytes().unwrap(), keys().unlisted),
+            ts(T0),
+        )
+        .unwrap();
+    assert_eq!(version(&again), 2);
+}
+
+#[test]
+fn the_system_baseline_is_added_to_every_bundle_loaded() {
+    let dir = TempDir::new("baseline");
+    let facts = SystemBaseline {
+        publishers: vec!["Operating System Publisher".into()],
+        writable_dirs: Vec::new(),
+    };
+    let c = PolicyCache::new(CacheSetup {
+        baseline: Some(facts.clone()),
+        ..setup(dir.path(), files(dir.path()), EffectiveMode::ENFORCE)
+    });
+    c.load_startup(ts(T0));
+    c.activate(&signed(1), ts(T0)).unwrap();
+    let has_baseline = |c: &PolicyCache| {
+        c.current()
+            .policy()
+            .policy()
+            .document()
+            .rule_sets
+            .iter()
+            .any(palisade_policy::unknown::baseline::is_system_baseline)
+    };
+    assert!(has_baseline(&c));
+    assert!(c.current().profiles().is_some());
+    // And at startup.
+    let again = PolicyCache::new(CacheSetup {
+        baseline: Some(facts),
+        ..setup(dir.path(), files(dir.path()), EffectiveMode::ENFORCE)
+    });
+    again.load_startup(ts(T0));
+    assert!(has_baseline(&again));
+    // Without facts, nothing is added; built-in policies have no profiles.
+    assert!(!has_baseline(&started(dir.path()).0));
+    assert!(cache(dir.path()).current().profiles().is_none());
+}
+
+#[test]
 fn a_leftover_pending_file_is_deleted_at_startup() {
     let dir = TempDir::new("pending");
     let (c, _) = started(dir.path());
@@ -546,23 +685,12 @@ fn rejected_bundles_leave_the_policy_and_the_files_alone() {
 #[test]
 fn the_signature_mode_decides_whether_an_unsigned_bundle_loads() {
     let dir = TempDir::new("mode");
-    // `BareBundles` never verifies a signature: in enforce mode nothing
-    // loads.
-    let bare = |mode| {
-        PolicyCache::new(CacheSetup {
-            target: target(),
-            store: PolicyStore::open(dir.path().join("policy")).unwrap(),
-            records: files(dir.path()),
-            key: RecordKey::from_bytes(&KEY),
-            verifier: Box::new(BareBundles::default()),
-            mode,
-            stale_after: StaleAfter::DEFAULT,
-            engine: EngineConfig::default(),
-        })
-    };
-    let raw = bundle(1).to_bytes().unwrap();
+    // Signed by a key the trust set does not list: in enforce mode it
+    // never loads.
+    let bare = |mode| cache_with(dir.path(), files(dir.path()), mode);
+    let raw = sign_with(&bundle(1).to_bytes().unwrap(), keys().unlisted);
     let c = bare(EffectiveMode::ENFORCE);
-    c.load_startup();
+    c.load_startup(ts(T0));
     assert!(matches!(
         c.activate(&raw, ts(T0)),
         Err(ActivateError::Rejected(Rejection::SignatureInvalid))
@@ -578,7 +706,7 @@ fn the_signature_mode_decides_whether_an_unsigned_bundle_loads() {
         },
     );
     let c = bare(audit);
-    c.load_startup();
+    c.load_startup(ts(T0));
     c.activate(&raw, ts(T0)).unwrap();
     assert_eq!(
         c.current().load(),
@@ -588,7 +716,7 @@ fn the_signature_mode_decides_whether_an_unsigned_bundle_loads() {
         }
     );
     assert_eq!(record_of(dir.path()).floor(), 0);
-    let report = bare(audit).load_startup();
+    let report = bare(audit).load_startup(ts(T0));
     assert!(report.findings.contains(&Finding::LoadedUnsigned));
     // Without the gate, the request for audit mode is ignored.
     let ungated = EffectiveMode::resolve(SignatureMode::Audit, ModeGate::default());
@@ -640,7 +768,7 @@ fn a_failure_before_the_rename_keeps_the_old_policy_on_disk_and_in_memory() {
 
     // Step 3 (the first record write) fails.
     let c = failing(dir.path(), 1);
-    c.load_startup();
+    c.load_startup(ts(T0));
     assert!(matches!(
         c.activate(&signed(3), ts(T0)),
         Err(ActivateError::Io(_))
@@ -669,7 +797,7 @@ fn a_failure_after_the_rename_activates_and_the_next_start_completes_it() {
     // Step 5 (the second record write) fails: the power went after the
     // rename.
     let c = failing(dir.path(), 2);
-    c.load_startup();
+    c.load_startup(ts(T0));
     assert!(matches!(
         c.activate(&signed(3), ts(T0)),
         Ok(Activated::Activated(_))
@@ -744,16 +872,35 @@ fn a_delta_rebuilds_the_full_bundle_from_the_running_one() {
     let (c, _) = started(dir.path());
     // Nothing to apply a delta to on a built-in policy.
     let delta = diff(&bundle(1), &bundle(2)).unwrap();
-    assert!(c.rebuild_from_delta(&delta).is_err());
+    let result = bundle(2).to_bytes().unwrap();
+    let k = keys();
+    let wrapped = |kid| {
+        Envelope::sign_delta(&delta, &result, &k.signer, &[kid])
+            .unwrap()
+            .encode()
+    };
+    assert!(c.rebuild_from_delta(&wrapped(k.listed)).is_err());
 
     c.activate(&signed(1), ts(T0)).unwrap();
-    let rebuilt = c.rebuild_from_delta(&delta).unwrap();
-    assert_eq!(rebuilt, bundle(2).to_bytes().unwrap());
-    // The rebuilt bundle is activated only once it is signed as a whole.
-    c.activate(&sign(&rebuilt), ts(T0)).unwrap();
+    // A full bundle envelope is not a delta.
+    assert!(c.rebuild_from_delta(&signed(2)).is_err());
+    let rebuilt = c.rebuild_from_delta(&wrapped(k.listed)).unwrap();
+    // The rebuilt envelope is the full bundle with the delta's signatures,
+    // so it is what a full download would have been.
+    assert_eq!(rebuilt, signed(2));
+
+    // A delta signed by an untrusted key rebuilds, but never activates.
+    let forged = c.rebuild_from_delta(&wrapped(k.unlisted)).unwrap();
+    assert!(matches!(
+        c.activate(&forged, ts(T0)),
+        Err(ActivateError::Rejected(Rejection::SignatureInvalid))
+    ));
+    assert_eq!(version(&c), 1);
+
+    c.activate(&rebuilt, ts(T0)).unwrap();
     assert_eq!(version(&c), 2);
     // A delta against another base asks for a full bundle.
-    assert!(c.rebuild_from_delta(&delta).is_err());
+    assert!(c.rebuild_from_delta(&wrapped(k.listed)).is_err());
 }
 
 // ---------------------------------------------------------------------------
