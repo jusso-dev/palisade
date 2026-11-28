@@ -76,6 +76,8 @@ fn source<'a>(policy: &'a ValidatedPolicy, catalogue: &'a Catalogue) -> Source<'
             policies: vec![(p.id, p.revision)],
             libraries: Vec::new(),
         },
+        facts: Facts::default(),
+        admin: None,
     }
 }
 
@@ -88,8 +90,10 @@ fn context(addr: &str) -> EvaluationContext {
 #[test]
 fn compiling_twice_gives_the_same_bytes() {
     let (policy, cat) = (policy(json!(2)), catalogue());
-    let (_, a) = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
-    let (_, b) = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
+    let Compiled { bytes: a, .. } =
+        compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
+    let Compiled { bytes: b, .. } =
+        compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
     assert_eq!(a, b);
     assert_eq!(decode_header(&a, &BundleLimits::DEFAULT).unwrap(), header());
 }
@@ -97,7 +101,8 @@ fn compiling_twice_gives_the_same_bytes() {
 #[test]
 fn only_the_pinned_version_of_a_set_is_inlined() {
     let (policy, cat) = (policy(json!(1)), catalogue());
-    let (bundle, _) = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
+    let Compiled { bundle, .. } =
+        compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
     let inlined: Vec<(u32, &SetContent)> = bundle
         .body
         .libraries()
@@ -142,7 +147,8 @@ fn an_oversized_bundle_fails_with_advice() {
 #[test]
 fn the_bundle_resolves_latest_only_when_it_holds_one_version() {
     let (policy, cat) = (policy(serde_json::Value::Null), catalogue());
-    let (bundle, _) = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
+    let Compiled { bundle, .. } =
+        compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
     let sets = BundleSets::new(&bundle);
     let latest = SetRef {
         id: LibraryId(NET.parse().unwrap()),
@@ -168,7 +174,8 @@ fn a_loaded_bundle_decides_as_the_policy_it_was_compiled_from() {
     let cat = catalogue();
     for pin in [json!(1), json!(2), serde_json::Value::Null] {
         let policy = policy(pin);
-        let (_, bytes) = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
+        let Compiled { bytes, .. } =
+            compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
         let loaded = PolicyBundle::decode(&bytes, &BundleLimits::DEFAULT).unwrap();
         let validated = loaded.validate().unwrap();
         let sets = BundleSets::new(&loaded);
@@ -206,7 +213,8 @@ fn a_loaded_bundle_decides_as_the_policy_it_was_compiled_from() {
 fn the_network_set_changes_what_the_bundle_allows() {
     let cat = catalogue();
     let policy = policy(json!(1));
-    let (bundle, _) = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
+    let Compiled { bundle, .. } =
+        compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
     let validated = bundle.validate().unwrap();
     let sets = BundleSets::new(&bundle);
     let agent = Evaluator::with_library(&validated, &sets).unwrap();
@@ -269,7 +277,8 @@ fn active(policy: &ValidatedPolicy, library: &dyn ScopeLibrary, addr: &str) -> V
 fn a_location_profile_network_set_is_not_inlined_and_fails_open() {
     let cat = catalogue();
     let policy = profile_policy();
-    let (bundle, _) = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
+    let Compiled { bundle, .. } =
+        compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
     let server = CatalogueLibrary {
         catalogue: &cat,
         from: Visibility::Global,
@@ -297,7 +306,8 @@ fn latest_and_a_pin_of_one_set_diverge() {
     doc.rule_sets[0].rules.push(latest);
     let policy = doc.validate().unwrap();
     let cat = catalogue();
-    let (bundle, _) = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
+    let Compiled { bundle, .. } =
+        compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
     let validated = bundle.validate().unwrap();
     let sets = BundleSets::new(&bundle);
     let server = Evaluator::with_library(
@@ -336,7 +346,7 @@ fn nfc_on_write_makes_a_valid_policy_invalid_tags() {
     let cat = catalogue();
     match compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT) {
         Err(CompileError::Invalid(_)) => {}
-        Ok((bundle, _)) => {
+        Ok(Compiled { bundle, .. }) => {
             assert!(
                 bundle.validate().is_ok(),
                 "the server shipped a bundle every agent refuses"
@@ -356,7 +366,7 @@ fn nfc_on_write_makes_a_valid_policy_invalid_name_length() {
     let cat = catalogue();
     match compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT) {
         Err(CompileError::Invalid(_)) => {}
-        Ok((bundle, _)) => {
+        Ok(Compiled { bundle, .. }) => {
             assert!(
                 bundle.validate().is_ok(),
                 "the server shipped a bundle every agent refuses"
@@ -384,7 +394,7 @@ fn a_valid_compiled_bundle_exceeds_the_agents_item_limit() {
     };
     match compile(&source(&policy, &cat), header(), &agents) {
         Err(CompileError::Invalid(why)) => assert!(why.contains("too many"), "{why}"),
-        Ok((_, bytes)) => {
+        Ok(Compiled { bytes, .. }) => {
             PolicyBundle::decode(&bytes, &agents)
                 .expect("the server shipped a bundle every agent refuses");
         }
@@ -419,7 +429,8 @@ fn bundles_never_carry_the_system_baseline_and_the_agent_adds_it() {
     );
     // The agent's path: load, validate, then add the baseline from its own
     // facts. The result decides as the server's policy with the baseline.
-    let (bundle, _) = compile(&source(&plain, &cat), header(), &BundleLimits::DEFAULT).unwrap();
+    let Compiled { bundle, .. } =
+        compile(&source(&plain, &cat), header(), &BundleLimits::DEFAULT).unwrap();
     let on_agent = bundle
         .validate()
         .unwrap()
@@ -444,7 +455,8 @@ fn bundles_never_carry_the_system_baseline_and_the_agent_adds_it() {
 fn inlined_sets_are_recorded_as_sources() {
     let cat = catalogue();
     let policy = profile_policy();
-    let (bundle, _) = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
+    let Compiled { bundle, .. } =
+        compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
     assert_eq!(
         bundle.body.source_revisions().libraries,
         [(LibraryId(NET.parse().unwrap()), 1)]
@@ -458,7 +470,8 @@ fn inlined_sets_are_recorded_as_sources() {
 fn a_loaded_bundle_decides_as_the_server_with_location_profiles() {
     let cat = catalogue();
     let policy = profile_policy();
-    let (_, bytes) = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
+    let Compiled { bytes, .. } =
+        compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
     let loaded = PolicyBundle::decode(&bytes, &BundleLimits::DEFAULT).unwrap();
     let validated = loaded.validate().unwrap();
     let sets = BundleSets::new(&loaded);
@@ -542,7 +555,7 @@ mod coverage {
         let src = Source::effective(&e, h.catalogue(), Visibility::Global).unwrap();
         let p = &e.policy().unwrap().document().policy;
         assert_eq!(src.sources.policies, [(p.id, p.revision)]);
-        let (bundle, _) = compile(&src, header(), &BundleLimits::DEFAULT).unwrap();
+        let Compiled { bundle, .. } = compile(&src, header(), &BundleLimits::DEFAULT).unwrap();
         assert_eq!(
             bundle.body.source_revisions().policies,
             [(p.id, p.revision)]
@@ -567,7 +580,7 @@ mod coverage {
             return;
         };
         let cat = catalogue();
-        let (bundle, _) =
+        let Compiled { bundle, .. } =
             compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
         let pins: Vec<Pin> = crate::scope::document_scopes(bundle.body.document())
             .into_iter()
@@ -679,7 +692,8 @@ fn a_set_named_by_many_references_is_inlined_once() {
     }
     let policy = doc.validate().unwrap();
     let cat = catalogue();
-    let (bundle, _) = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
+    let Compiled { bundle, .. } =
+        compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
     let inlined: Vec<(LibraryId, u32)> = bundle
         .body
         .libraries()
@@ -695,4 +709,99 @@ fn a_set_named_by_many_references_is_inlined_once() {
         }
     }
     assert_eq!(pins, 51);
+}
+
+/// A policy whose only allow trusts a whole publisher that the facts
+/// restrict: a `restricted_publisher_broad` error (#40).
+fn broad_publisher() -> (ValidatedPolicy, Facts) {
+    let policy = PolicyBuilder::new()
+        .rule_set(RuleSetBuilder::allowlist(1).rule(RuleBuilder::allow(
+            1,
+            crate::test_util::publisher("OS Publisher"),
+        )))
+        .validate();
+    let facts = Facts {
+        restricted_publishers: vec!["OS Publisher".to_owned()],
+        ..Facts::default()
+    };
+    (policy, facts)
+}
+
+#[test]
+fn an_error_finding_stops_the_compile() {
+    let (policy, facts) = broad_publisher();
+    let cat = catalogue();
+    let src = Source {
+        facts,
+        ..source(&policy, &cat)
+    };
+    let err = compile(&src, header(), &BundleLimits::DEFAULT).unwrap_err();
+    let CompileError::Blocked(findings) = &err else {
+        panic!("{err}");
+    };
+    assert!(
+        findings
+            .iter()
+            .any(|f| f.code == analysis::FindingCode::RestrictedPublisherBroad),
+        "{findings:?}"
+    );
+    assert!(
+        err.to_string().contains("restricted_publisher_broad"),
+        "{err}"
+    );
+    // An override without a reason is no override.
+    let blank = Source {
+        admin: Some(Override {
+            actor: "admin@example.org".to_owned(),
+            reason: "  ".to_owned(),
+        }),
+        ..src.clone()
+    };
+    assert!(matches!(
+        compile(&blank, header(), &BundleLimits::DEFAULT),
+        Err(CompileError::Blocked(_))
+    ));
+}
+
+#[test]
+fn an_override_compiles_and_is_recorded() {
+    let (policy, facts) = broad_publisher();
+    let cat = catalogue();
+    let src = Source {
+        facts,
+        admin: Some(Override {
+            actor: "admin@example.org".to_owned(),
+            reason: "vendor tooling, ticket 42".to_owned(),
+        }),
+        ..source(&policy, &cat)
+    };
+    let compiled = compile(&src, header(), &BundleLimits::DEFAULT).unwrap();
+    match &compiled.gate {
+        Gate::Overridden {
+            actor,
+            reason,
+            findings,
+        } => {
+            assert_eq!(actor, "admin@example.org");
+            assert_eq!(reason, "vendor tooling, ticket 42");
+            assert!(!findings.is_empty());
+        }
+        other => panic!("{other:?}"),
+    }
+    // The override changes nothing in the bundle itself.
+    let plain = compile(&source(&policy, &cat), header(), &BundleLimits::DEFAULT).unwrap();
+    assert_eq!(plain.gate, Gate::Pass);
+    assert_eq!(plain.bytes, compiled.bytes);
+}
+
+#[test]
+fn a_generated_at_the_assistant_cannot_read_fails_the_compile() {
+    let (policy, cat) = (policy(json!(1)), catalogue());
+    let mut h = header();
+    h.generated_at = i64::MAX;
+    let err = compile(&source(&policy, &cat), h, &BundleLimits::DEFAULT).unwrap_err();
+    assert!(
+        matches!(&err, CompileError::Invalid(why) if why.contains("generated_at")),
+        "{err}"
+    );
 }
