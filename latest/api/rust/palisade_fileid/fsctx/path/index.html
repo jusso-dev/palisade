@@ -49,7 +49,7 @@ path, and normalise to <code>dir</code>. Both rewrites are recorded in
 <p>NTFS compares names by upper-casing each UTF-16 code unit with the
 volume’s upcase table. <a href="struct.NormalizedPath.html#method.case_folded" title="method palisade_fileid::fsctx::path::NormalizedPath::case_folded"><code>NormalizedPath::case_folded</code></a> does the same with
 the table that Windows 7 and later write, and that the OS upper-cases
-with ([<code>palisade_core::upcase</code>]; so <code>ß</code> stays <code>ß</code>, and <code>ı</code> never becomes
+with (<a href="../../../palisade_core/upcase/index.html" title="mod palisade_core::upcase"><code>palisade_core::upcase</code></a>; so <code>ß</code> stays <code>ß</code>, and <code>ı</code> never becomes
 <code>I</code>, as on NTFS). Unicode normalisation (NFC/NFD) is not applied,
 because NTFS does not apply it either: the two forms are two different
 files.</p>
@@ -101,7 +101,7 @@ path of the opened handle, or treats the file as unknown.</dd><dt><a class="enum
 supported; <a href="struct.NormalizedPath.html#method.is_long" title="method palisade_fileid::fsctx::path::NormalizedPath::is_long"><code>NormalizedPath::is_long</code></a> reports them.</dd><dt><a class="constant" href="constant.MAX_PATH_UNITS.html" title="constant palisade_fileid::fsctx::path::MAX_PATH_UNITS">MAX_<wbr>PATH_<wbr>UNITS</a></dt><dd>The longest path accepted, in UTF-16 code units: the most a
 <code>UNICODE_STRING</code> can hold.</dd></dl><h2 id="traits" class="section-header">Traits<a href="#traits" class="anchor">§</a></h2><dl class="item-table"><dt><a class="trait" href="trait.CaseSensitivityResolver.html" title="trait palisade_fileid::fsctx::path::CaseSensitivityResolver">Case<wbr>Sensitivity<wbr>Resolver</a></dt><dd>The OS hook that reads per-directory case sensitivity.</dd><dt><a class="trait" href="trait.ShortNameResolver.html" title="trait palisade_fileid::fsctx::path::ShortNameResolver">Short<wbr>Name<wbr>Resolver</a></dt><dd>The OS hook that expands 8.3 short names.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.fold_case.html" title="fn palisade_fileid::fsctx::path::fold_case">fold_<wbr>case</a></dt><dd>Upper-cases a name the way NTFS compares names on a volume formatted
 by Windows 7 or later: each UTF-16 code unit through the standard upcase
-table ([<code>palisade_core::upcase</code>]). See the module documentation.</dd><dt><a class="fn" href="fn.is_short_name_candidate.html" title="fn palisade_fileid::fsctx::path::is_short_name_candidate">is_<wbr>short_<wbr>name_<wbr>candidate</a></dt><dd>True if a component could be an NTFS-generated 8.3 short name: an 8.3
+table (<a href="../../../palisade_core/upcase/index.html" title="mod palisade_core::upcase"><code>palisade_core::upcase</code></a>). See the module documentation.</dd><dt><a class="fn" href="fn.is_short_name_candidate.html" title="fn palisade_fileid::fsctx::path::is_short_name_candidate">is_<wbr>short_<wbr>name_<wbr>candidate</a></dt><dd>True if a component could be an NTFS-generated 8.3 short name: an 8.3
 shape (a base of 1 to 8 characters, an optional extension of up to 3)
 with a <code>~</code> in the base.</dd><dt><a class="fn" href="fn.normalize_nt.html" title="fn palisade_fileid::fsctx::path::normalize_nt">normalize_<wbr>nt</a></dt><dd>Normalises an NT object path, as the kernel reports image paths:
 <code>\Device\HarddiskVolume3\...</code>, <code>\Device\Mup\server\share\...</code>, or

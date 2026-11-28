@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-d35a5177.js";
+            window.path_to_searchindex_js = "../searchindex-2e4743ae.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-049dbba3.js"></script>
@@ -302,8 +302,9 @@ new versions and exempted the 6 crates they added (<code>core_detect</code>, and
 <code>page_size</code> and <code>winapi</code> with its two import-library crates), all dev-only except <code>sha2</code>, with a
 note that names the PR. X.509 issuance for the internal CA (#224) added 8 more (<code>rcgen</code>, used
 without its cryptography back end, and <code>time</code>, <code>yasna</code> and their helpers), behind
-<code>palisade-proto</code>'s off-by-default <code>issuance</code> feature, exempted with a note that names #224. The
-exemptions are the backlog.
+<code>palisade-proto</code>'s off-by-default <code>issuance</code> feature, exempted with a note that names #224.
+Dependabot's <code>clap</code> 4.6.10, <code>toml</code> 1.2.3 (#406) and <code>miniz_oxide</code> 0.9.1 (#407) moved their exemptions, and those of <code>clap_builder</code> and <code>toml_parser</code>, to the new versions, with a note that names the PR.
+The exemptions are the backlog.
 Each one is removed when the crate is audited, or when an imported audit covers it
 (<code>cargo vet prune</code> removes exemptions that are no longer needed).</p>
 <p>A new crate, or a version bump, fails <code>cargo vet</code> until one of these is done:</p>
