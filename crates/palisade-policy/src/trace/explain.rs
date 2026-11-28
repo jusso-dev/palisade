@@ -511,6 +511,7 @@ const fn rule_stage_name(s: RuleStage) -> &'static str {
         RuleStage::Policy => "policy",
         RuleStage::Annotation => "annotation",
         RuleStage::TrustSource => "trust_source",
+        RuleStage::Attribute => "attribute",
     }
 }
 

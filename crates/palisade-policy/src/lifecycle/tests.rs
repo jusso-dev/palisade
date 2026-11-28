@@ -240,6 +240,41 @@ fn convert_to_audit_annotates_after_expiry() {
 }
 
 #[test]
+fn an_expired_attribute_deny_annotates_only_after_an_allow() {
+    // The audit twin of an expired attribute deny (#329) is still a
+    // post-allow rule: it annotates only an object stage 4 allowed.
+    let expired = rule(
+        1,
+        "deny",
+        serde_json::json!({
+            "attribute": true, "expires_at": ts(t(0)), "on_expire": "convert_to_audit",
+        }),
+    );
+    let after = Some(RuleClock::at(t(1)));
+    let allowed = valid(doc_with(
+        serde_json::json!({}),
+        vec![expired.clone(), rule(2, "allow", serde_json::json!({}))],
+    ));
+    let d = decide_at(&allowed, after);
+    assert_eq!(d.outcome(), Outcome::Allowed);
+    assert_eq!(d.annotations().len(), 1);
+    assert_eq!(d.annotations()[0].rule_id.to_string(), rule_id(1));
+    // A stage-4 deny: no allow, so the twin does nothing.
+    let denied = valid(doc_with(
+        serde_json::json!({}),
+        vec![expired.clone(), rule(2, "deny", serde_json::json!({}))],
+    ));
+    let d = decide_at(&denied, after);
+    assert_eq!(d.reason_code(), ReasonCode::ExplicitDeny);
+    assert!(d.annotations().is_empty(), "{:?}", d.annotations());
+    // Nothing decided at stage 4: stage 6 decides, unannotated.
+    let unknown = valid(doc_with(serde_json::json!({}), vec![expired]));
+    let d = decide_at(&unknown, after);
+    assert!(d.matched_rule().is_none());
+    assert!(d.annotations().is_empty(), "{:?}", d.annotations());
+}
+
+#[test]
 fn inactive_rules_are_reported_with_their_reason() {
     let v = valid(doc_with(
         serde_json::json!({}),

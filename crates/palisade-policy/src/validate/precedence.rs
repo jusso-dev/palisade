@@ -80,7 +80,10 @@ impl Validator {
                 }
                 // Mandatory and exclusion rules are decided before the
                 // model, and the other non-terminal rules never decide.
-                let Some(verdict) = Verdict::of(&rule.action).filter(|_| !set.mandatory) else {
+                // Attribute rules are stage 5, after the model (#329).
+                let Some(verdict) =
+                    Verdict::of(&rule.action).filter(|_| !set.mandatory && !rule.attribute)
+                else {
                     continue;
                 };
                 match model {

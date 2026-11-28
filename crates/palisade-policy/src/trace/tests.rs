@@ -931,7 +931,10 @@ fn stage_timing_uses_the_given_clock() {
     );
     for s in &t.stages {
         match s.name {
-            StageName::MandatoryDeny | StageName::Exclusion | StageName::Policy => {
+            StageName::MandatoryDeny
+            | StageName::Exclusion
+            | StageName::Policy
+            | StageName::Attribute => {
                 assert_eq!(s.duration_ns, Some(10));
             }
             _ => assert_eq!(s.duration_ns, None),
@@ -3329,4 +3332,86 @@ fn user_controlled_context_is_marked_only_when_it_was_read() {
         .find(|w| w.code == WarningCode::UserControlledContext)
         .unwrap();
     assert_eq!(w.rules[0].display_id.unwrap().to_string(), "R-000001");
+}
+
+/// An allow of hash `a…` (R-000001) and the attribute rule `attribute`
+/// (#329), in one set.
+fn with_attribute(allow: bool, attribute: serde_json::Value) -> ValidatedPolicy {
+    let mut rules = vec![with(attribute, "attribute", true.into())];
+    if allow {
+        rules.push(rule(
+            1,
+            "Pinned build",
+            crit("hash.sha256", "equals", &[&sha('a')]),
+            serde_json::json!({"type": "allow"}),
+        ));
+    }
+    validated(policy_doc("enforce", vec![(1, "mixed", false, rules)]))
+}
+
+#[test]
+fn attribute_unknowns_are_reported_only_after_an_allow() {
+    // A fail-closed attribute deny reads an unknown fact (no groups). It is
+    // consulted only after a stage-4 allow, so only then does its unknown
+    // have an effect on the decision.
+    let deny = rule(
+        2,
+        "Narrow to admins",
+        { serde_json::json!({"not": crit("user.groups", "member_of", &[IT_ADMINS])}) },
+        serde_json::json!({"type": "deny", "unknown_as": "match"}),
+    );
+    let o = object(
+        'a',
+        "Example Ltd",
+        "Example Tools",
+        "C:\\Apps\\tool.exe",
+        Some(false),
+    );
+    let groups = |t: &Trace| {
+        t.unknown_facts
+            .iter()
+            .find(|u| u.field == Field::UserGroups)
+            .cloned()
+    };
+    let p = with_attribute(false, deny.clone());
+    let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Full);
+    assert!(t.decisive.is_none());
+    assert_eq!(groups(&t), None, "{:?}", t.unknown_facts);
+    let p = with_attribute(true, deny);
+    let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Full);
+    assert_eq!(t.decisive.as_ref().unwrap().stage, RuleStage::Attribute);
+    assert_eq!(
+        groups(&t).unwrap().effects,
+        vec![UnknownEffect::DenyAppliedFailClosed]
+    );
+}
+
+#[test]
+fn the_attribute_stage_passes_after_an_allow_it_does_not_block() {
+    let watch = rule(
+        2,
+        "Watch tool",
+        crit("path.file_name", "equals", &["tool.exe"]),
+        serde_json::json!({"type": "audit"}),
+    );
+    let o = object(
+        'a',
+        "Example Ltd",
+        "Example Tools",
+        "C:\\Apps\\tool.exe",
+        Some(false),
+    );
+    let outcome =
+        |t: &Trace, name: StageName| t.stages.iter().find(|s| s.name == name).unwrap().outcome;
+    let p = with_attribute(true, watch.clone());
+    let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Full);
+    assert_eq!(t.decision.as_ref().unwrap().outcome(), Outcome::Allowed);
+    assert!(t.matched.iter().any(|m| m.role == MatchRole::Annotation));
+    assert_eq!(outcome(&t, StageName::Policy), StageOutcome::Decided);
+    assert_eq!(outcome(&t, StageName::Attribute), StageOutcome::Passed);
+    assert_eq!(outcome(&t, StageName::Unknown), StageOutcome::Skipped);
+    // Without an allow, stage 5 is never reached.
+    let p = with_attribute(false, watch);
+    let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Full);
+    assert_eq!(outcome(&t, StageName::Attribute), StageOutcome::Skipped);
 }

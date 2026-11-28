@@ -559,6 +559,18 @@ impl Decision {
         self
     }
 
+    /// Adds rules to [`annotations`](Self::annotations), keeping it sorted
+    /// and unique.
+    pub(crate) fn with_annotations(mut self, more: impl IntoIterator<Item = RuleRef>) -> Self {
+        for r in more {
+            if !self.annotations.contains(&r) {
+                self.annotations.push(r);
+            }
+        }
+        self.annotations.sort_by_key(|r| r.rule_id);
+        self
+    }
+
     /// Adds scope notes (#38), keeping the list sorted and unique.
     pub(crate) fn with_scope_notes(mut self, notes: ScopeNotes) -> Self {
         let mut all = ScopeNotes::default();

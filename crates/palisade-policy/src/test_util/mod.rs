@@ -148,6 +148,7 @@ impl RuleBuilder {
             object_types: vec![ObjectType::Executable, ObjectType::Installer],
             match_: tree,
             catch_all: false,
+            attribute: false,
             action,
             effects: crate::model::Effects::default(),
             order: None,

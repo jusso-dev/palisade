@@ -21,7 +21,10 @@
 //!    decided over only when nothing above them matched: the managed
 //!    `system_baseline` (#39), and below it the policy's `catch_all` rules
 //!    (#329), its default for every object no other rule matched.
-//! 5. **Attribute.** Not yet: post-allow attribute rules are #33.
+//! 5. **Attribute.** Only after stage 4 allowed: post-allow attribute
+//!    rules (`attribute: true`, #33, #329). A matching attribute `deny`
+//!    blocks the object (the most specific one decides, and the allow is
+//!    listed as overridden); an attribute `audit` annotates it.
 //! 6. **Unknown.** If nothing decided, the policy's unknown-application
 //!    policy decides ([`crate::unknown`], #39). Its default blocks
 //!    (`implicit_deny_unknown`), the implicit deny of ADR 0004.
@@ -206,6 +209,12 @@ enum Role {
     Annotation,
     /// A `trust_source` rule: a grant if the object is allowed.
     Trust,
+    /// A post-allow attribute rule: stage 5, only for an object stage 4
+    /// allowed. `deny` blocks it; otherwise it annotates (#329).
+    Attribute {
+        /// Whether it denies.
+        deny: bool,
+    },
 }
 
 /// The candidates of one stage, kept inline.
@@ -539,6 +548,10 @@ impl<'p> Evaluator<'p> {
             for rule in set.rules.iter().filter(|r| r.enabled) {
                 let role = match &rule.action {
                     _ if set.mandatory => Role::Mandatory,
+                    // Validation allows only `deny` and `audit` here.
+                    Action::Deny(_) if rule.attribute => Role::Attribute { deny: true },
+                    Action::Audit {} if rule.attribute => Role::Attribute { deny: false },
+                    _ if rule.attribute => continue,
                     Action::Ignore {} => Role::Exclusion,
                     Action::Audit {} => Role::Annotation,
                     Action::TrustSource(_) => Role::Trust,
@@ -597,7 +610,13 @@ impl<'p> Evaluator<'p> {
                             rule_id: rule.id,
                             errors,
                         })?,
-                        role: Role::Annotation,
+                        // An attribute rule's twin stays post-allow: it
+                        // annotates only an object stage 4 allowed (#329).
+                        role: if rule.attribute {
+                            Role::Attribute { deny: false }
+                        } else {
+                            Role::Annotation
+                        },
                         spec: compiled.spec,
                         unknown_as: UnknownAs::NoMatch,
                         unparseable: Unparseable::Unknown,
@@ -723,10 +742,12 @@ impl<'p> Evaluator<'p> {
 
     /// The inputs of stages 2 to 6 for one subject.
     fn inputs<'a>(&'a self, subject: &Subject<'a>, matched: &[&Compiled<'p>]) -> Inputs<'a> {
-        // An object is blocklisted when a rule that denies it matched, or a
-        // native `audit` entry of a blocklist set (a blocklist's watch
-        // entry: the user is not asked to allow it, #39). The `audit` twin
-        // of an expired rule never counts: an expired rule only annotates.
+        // An object is blocklisted when a mandatory or stage-4 deny matched
+        // it, or a native `audit` entry of a blocklist set (a blocklist's
+        // watch entry: the user is not asked to allow it, #39). The `audit`
+        // twin of an expired rule never counts: an expired rule only
+        // annotates. Nor does an attribute deny: it acts only after a
+        // stage-4 allow (#329), and stage 6 is never reached after one.
         // `ignore` is valid only in `mixed` sets and never denies.
         let blocklisted = matched.iter().any(|r| {
             !r.twin
@@ -967,7 +988,11 @@ impl<'p> Evaluator<'p> {
             let effective = self.mode_of(t, winner, &base, boot);
             let learning = effective.mode == Mode::Learning && full.unhandled();
             let directives = one.directives();
-            return full.relaxed(effective, directives, learning);
+            // The rerun may reach stage 5 past a deny set aside: its
+            // attribute audits annotate the object that now runs (#329).
+            return full
+                .relaxed(effective, directives, learning)
+                .with_annotations(one.decision.annotations().iter().copied());
         }
         let Some(_) = state.session else {
             return one
@@ -995,6 +1020,7 @@ impl<'p> Evaluator<'p> {
         one.decision
             .with_overridden(one.dropped)
             .relaxed(effective, directives, false)
+            .with_annotations(two.decision.annotations().iter().copied())
     }
 
     /// The effective mode of a decision decided by `rule`, or by stage 6
@@ -1047,7 +1073,11 @@ impl<'p> Evaluator<'p> {
         let mut kept = Rules::new();
         let mut dropped = smallvec::SmallVec::new();
         for &r in rules {
-            if matches!(r.role, Role::Policy(Verdict::Deny)) && !enforces(&decision, Some(r)) {
+            if matches!(
+                r.role,
+                Role::Policy(Verdict::Deny) | Role::Attribute { deny: true }
+            ) && !enforces(&decision, Some(r))
+            {
                 dropped.push(r.reference);
             } else {
                 kept.push(r);
@@ -1107,6 +1137,7 @@ impl<'p> Evaluator<'p> {
             smallvec::SmallVec::new();
         let mut annotations = crate::decision::RuleRefs::new();
         let mut trust = Rules::new();
+        let mut attribute = Rules::new();
         for &rule in matched {
             match rule.role {
                 Role::Mandatory => mandatory.push(rule),
@@ -1114,6 +1145,7 @@ impl<'p> Evaluator<'p> {
                 Role::Policy(v) => policy.push((rule, v)),
                 Role::Annotation => annotations.push(rule.reference),
                 Role::Trust => trust.push(rule),
+                Role::Attribute { .. } => attribute.push(rule),
             }
         }
 
@@ -1178,6 +1210,41 @@ impl<'p> Evaluator<'p> {
             return (d, None);
         };
         let (winner, verdict) = deciding[i];
+        // Stage 5: post-allow attribute rules (#329). Only after an allow;
+        // a matching attribute deny blocks, the most specific deciding,
+        // and every other rule is overridden. Attribute audits annotate an
+        // object that stays allowed.
+        if verdict.allows() {
+            let denies: Rules = attribute
+                .iter()
+                .copied()
+                .filter(|r| r.role == Role::Attribute { deny: true })
+                .collect();
+            let set: Candidates = denies.iter().map(|r| r.candidate(Verdict::Deny)).collect();
+            if let Some(j) = most_specific(&set) {
+                let blocker = denies[j];
+                let overridden = policy
+                    .iter()
+                    .map(|(r, _)| r)
+                    .chain(trust.iter())
+                    .chain(denies.iter())
+                    .filter(|r| r.rule.id != blocker.rule.id)
+                    .map(|r| r.reference)
+                    .collect();
+                let d = self.decide(blocker, trace_id).with_context(
+                    overridden,
+                    annotations,
+                    Vec::new(),
+                );
+                return (d, Some(blocker));
+            }
+            annotations.extend(
+                attribute
+                    .iter()
+                    .filter(|r| r.role == Role::Attribute { deny: false })
+                    .map(|r| r.reference),
+            );
+        }
         let mut overridden: crate::decision::RuleRefs = policy
             .iter()
             .filter(|(r, _)| r.rule.id != winner.rule.id)

@@ -12,6 +12,7 @@ Appears at: `/rule_sets/rules`.
 |---|---|---|---|---|---|---|
 | `action` | [`Action`](action.md) | yes |  |  | 1.0.0 | What happens when it matches (#34). |
 | `activates_at` | [`Timestamp`](types.md#timestamp) | no |  |  | 1.0.0 | The rule is absent before this instant (#40). |
+| `attribute` | boolean | no |  |  | 1.0.0 | A post-allow attribute rule (#33, #35, #329): stage 5. It is evaluated only for an object stage 4 allowed, and only narrows that: a `deny` blocks the object, and an `audit` annotates it. It needs no identity anchor, because it can only take away an allow, such as "PowerShell is allowed, but not with an encoded command". Only `deny` and `audit`, never in a mandatory rule set, never a catch-all. Unset means `false`. |
 | `catch_all` | boolean | no |  |  | 1.0.0 | A catch-all rule (#33, #35, #329): the default of its rule set, which decides only when no other rule of stage 4 matched, under every precedence model. It is the only rule that may have no identity anchor, and the only one whose `match` may be an empty `all`, which matches every object. At most one per rule set; its name starts with `Default` or contains `Catch-all`; it allows, denies or audits; and it is never in a mandatory rule set. Unset means `false`. |
 | `description` | string | no |  | at most 4096 characters | 1.0.0 | Free-text description, at most 4096 characters. |
 | `display_id` | string | no |  | matches `^R-[0-9]{6,12}$` | 1.0.0 | Human short ID from the tenant's sequence, `R-` and 6 to 12 digits. |

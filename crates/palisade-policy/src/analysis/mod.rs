@@ -320,7 +320,8 @@ impl Entry<'_> {
     }
 
     fn verdict(&self) -> Option<Verdict> {
-        Verdict::of(&self.rule.action)
+        // An attribute rule is stage 5, not one the model decides (#329).
+        Verdict::of(&self.rule.action).filter(|_| !self.rule.attribute)
     }
 
     /// The scopes on the way to the rule (#38): its rule set's assignment

@@ -1062,3 +1062,109 @@ fn a_probed_fact_never_relaxes_a_decision_when_it_is_missing() {
     );
     assert_eq!(d.outcome(), Outcome::Allowed);
 }
+
+/// A post-allow attribute rule with ID `n` (#329).
+fn attribute(n: u32, tree: serde_json::Value, action: serde_json::Value) -> serde_json::Value {
+    with(rule(n, tree, action), "attribute", true.into())
+}
+
+#[test]
+fn an_attribute_deny_narrows_an_allow_under_every_model() {
+    // The file is allowed by hash; the attribute rule blocks it by its file
+    // name, a weak attribute that alone could never allow.
+    let narrow = crit("path.file_name", "equals", "tool.exe");
+    for model in MODELS {
+        let doc = document(
+            model,
+            serde_json::json!({}),
+            vec![(
+                1,
+                "mixed",
+                false,
+                false,
+                ordered(vec![
+                    rule(1, hash_a(), allow()),
+                    attribute(2, narrow.clone(), deny()),
+                ]),
+            )],
+        );
+        let d = decide(&validated(doc));
+        assert_eq!(winner(&d), Some(2), "{model}");
+        assert_eq!(d.outcome(), Outcome::Blocked, "{model}");
+        assert_eq!(d.reason_code(), ReasonCode::ExplicitDeny, "{model}");
+        assert_eq!(numbers(d.overridden()), vec![1], "{model}");
+    }
+}
+
+#[test]
+fn an_attribute_rule_never_allows_and_never_acts_without_an_allow() {
+    let narrow = crit("path.file_name", "equals", "tool.exe");
+    // No allow: the attribute deny does not apply, the unknown policy
+    // decides.
+    let doc = document(
+        "deny_wins",
+        serde_json::json!({}),
+        vec![(
+            1,
+            "mixed",
+            false,
+            false,
+            vec![attribute(2, narrow.clone(), deny())],
+        )],
+    );
+    let d = decide(&validated(doc));
+    assert_eq!(winner(&d), None);
+    assert_eq!(d.reason_code(), ReasonCode::ImplicitDenyUnknown);
+    // A deny decided at stage 4: the attribute rule changes nothing.
+    let doc = document(
+        "deny_wins",
+        serde_json::json!({}),
+        vec![(
+            1,
+            "mixed",
+            false,
+            false,
+            vec![
+                rule(1, hash_a(), deny()),
+                attribute(2, narrow.clone(), deny()),
+            ],
+        )],
+    );
+    let d = decide(&validated(doc));
+    assert_eq!(winner(&d), Some(1));
+    // An attribute audit annotates an allowed object, which stays allowed.
+    let doc = document(
+        "deny_wins",
+        serde_json::json!({}),
+        vec![(
+            1,
+            "mixed",
+            false,
+            false,
+            vec![
+                rule(1, hash_a(), allow()),
+                attribute(3, narrow.clone(), audit()),
+            ],
+        )],
+    );
+    let d = decide(&validated(doc));
+    assert_eq!(winner(&d), Some(1));
+    assert_eq!(d.outcome(), Outcome::Allowed);
+    assert_eq!(numbers(d.annotations()), vec![3]);
+    // An attribute rule that does not match leaves the allow alone.
+    let other = crit("path.file_name", "equals", "other.exe");
+    let doc = document(
+        "deny_wins",
+        serde_json::json!({}),
+        vec![(
+            1,
+            "mixed",
+            false,
+            false,
+            vec![rule(1, hash_a(), allow()), attribute(2, other, deny())],
+        )],
+    );
+    let d = decide(&validated(doc));
+    assert_eq!(winner(&d), Some(1));
+    assert!(d.overridden().is_empty());
+}

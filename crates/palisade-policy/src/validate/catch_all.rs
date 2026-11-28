@@ -46,6 +46,9 @@ impl Validator {
         }
         let mut found = false;
         for (i, set) in doc.rule_sets.iter().enumerate() {
+            for (j, rule) in set.rules.iter().enumerate().filter(|(_, r)| r.attribute) {
+                self.attribute_rule(&format!("/rule_sets/{i}/rules/{j}"), set, rule);
+            }
             let mut first: Option<usize> = None;
             for (j, rule) in set.rules.iter().enumerate() {
                 if !rule.catch_all {
@@ -120,6 +123,44 @@ impl Validator {
                 ErrorCode::CatchAllMissing,
                 "/policy/precedence_model",
                 "a `first_match` policy ends with a catch-all rule: add an enabled rule with `catch_all: true`, named `Default…` or containing `Catch-all`, such as a deny whose match is `all: []`",
+            );
+        }
+    }
+}
+
+impl Validator {
+    /// A post-allow attribute rule (#329): it only narrows an allow, so it
+    /// denies or audits, is not in a mandatory rule set and is not a
+    /// catch-all.
+    fn attribute_rule(
+        &mut self,
+        path: &str,
+        set: &crate::model::RuleSet,
+        rule: &crate::model::Rule,
+    ) {
+        use crate::model::Action;
+        if !matches!(rule.action, Action::Deny(_) | Action::Audit {}) {
+            self.push(
+                ErrorCode::InvalidAttributeRule,
+                &format!("{path}/action"),
+                format!(
+                    "an attribute rule only narrows an allow: it denies or audits, not `{}`",
+                    rule.action.kind()
+                ),
+            );
+        }
+        if set.mandatory {
+            self.push(
+                ErrorCode::InvalidAttributeRule,
+                &format!("{path}/attribute"),
+                "a mandatory rule set blocks before any allow; it cannot hold an attribute rule",
+            );
+        }
+        if rule.catch_all {
+            self.push(
+                ErrorCode::InvalidAttributeRule,
+                &format!("{path}/attribute"),
+                "a rule is a catch-all or an attribute rule, not both",
             );
         }
     }

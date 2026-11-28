@@ -328,6 +328,15 @@ pub struct Rule {
     /// and it is never in a mandatory rule set. Unset means `false`.
     #[serde(default, skip_serializing_if = "core::ops::Not::not")]
     pub catch_all: bool,
+    /// A post-allow attribute rule (#33, #35, #329): stage 5. It is
+    /// evaluated only for an object stage 4 allowed, and only narrows that:
+    /// a `deny` blocks the object, and an `audit` annotates it. It needs no
+    /// identity anchor, because it can only take away an allow, such as
+    /// "PowerShell is allowed, but not with an encoded command". Only
+    /// `deny` and `audit`, never in a mandatory rule set, never a
+    /// catch-all. Unset means `false`.
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub attribute: bool,
     /// What happens when it matches (#34).
     pub action: Action,
     /// Logging, upload, notification, severity and tags (#34). Unset
