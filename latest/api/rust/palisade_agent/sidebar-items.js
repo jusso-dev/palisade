@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["cli","config","host","lifecycle","platform","simulate","subsystem","supervisor"]};
+window.SIDEBAR_ITEMS = {"mod":["cli","config","control","host","lifecycle","platform","simulate","subsystem","supervisor"]};

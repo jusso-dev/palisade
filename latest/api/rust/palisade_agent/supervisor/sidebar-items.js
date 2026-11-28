@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["StopOutcome","SubsystemStatus","SupervisorError"],"struct":["HealthReport","RestartPolicy","ShutdownReport","SubsystemReport","Supervisor","SupervisorHandle"]};
+window.SIDEBAR_ITEMS = {"enum":["StopOutcome","SubsystemStatus","SupervisorError"],"struct":["HealthReport","HostEvents","RestartPolicy","ShutdownReport","SubsystemReport","Supervisor","SupervisorHandle"]};

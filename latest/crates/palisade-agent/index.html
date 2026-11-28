@@ -36,7 +36,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-39a7b279.js";
+            window.path_to_searchindex_js = "../../searchindex-6c5136c6.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-de2a680a.js"></script>
@@ -213,9 +213,12 @@ level = "info"                        # "error" | "warn" | "info" | "debug" | "t
 <li><code>subsystem</code>: the <code>Subsystem</code> trait (<code>name</code>, <code>criticality</code>, <code>dependencies</code>, <code>run</code>, <code>health</code>, <code>start_timeout</code>, <code>stop_timeout</code>). A run calls <code>set_ready</code> once initialised, works until <code>stopped()</code> resolves, and returns by the given deadline.</li>
 <li><code>supervisor</code>: starts subsystems in dependency order, which must be acyclic. A subsystem's dependents wait until it is ready. A run that fails is restarted with exponential backoff from 1 s to 5 min. Failure means an error, an early exit, a panic or a start timeout. A panic is contained in that subsystem's task. Three panics within 10 minutes mark the subsystem <code>Failed</code>. Shutdown runs in reverse order within a budget, and subsystems that miss their deadline are aborted.</li>
 <li><code>lifecycle</code>: the agent states (<code>Starting</code>, <code>Running</code>, <code>Degraded</code>, <code>SafeMode</code>, <code>Updating</code>, <code>Stopping</code>, <code>Stopped</code>, <code>FailSafe</code>) and the legal transitions between them. A permanently failed critical subsystem forces <code>FailSafe</code>, and only stopping leaves it.</li>
-<li><code>host</code>: the tokio runtime (ADR 0009), logging to standard error, the panic hook and the console run loop.</li>
-<li><code>service</code> (Windows): the service control manager integration. It handles <code>STOP</code> (20 s budget) and <code>PRESHUTDOWN</code>/<code>SHUTDOWN</code> (10 s budget).</li>
+<li><code>host</code>: the tokio runtime (ADR 0009), logging to standard error with a level that can change at run time, the panic hook, the <code>config</code> subsystem and the console run loop.</li>
+<li><code>control</code>: OS notifications as <code>HostEvent</code>s (session, power, parameter and time changes), which every subsystem can follow through <code>SubsystemContext::host_events</code>, and the <code>TamperGuard</code> trait that decides whether <code>STOP</code> is offered (#220 implements it; until then <code>STOP</code> is always allowed).</li>
+<li><code>service</code> (Windows): the service control manager integration. It handles <code>STOP</code> (20 s budget, offered only while the tamper guard allows it), <code>PRESHUTDOWN</code>/<code>SHUTDOWN</code> (10 s budget), and turns <code>POWEREVENT</code>, <code>SESSIONCHANGE</code>, <code>PARAMCHANGE</code> and <code>TIMECHANGE</code> into host events. <code>PARAMCHANGE</code> makes the <code>config</code> subsystem read the configuration again; a reload that fails keeps the current configuration.</li>
 </ul>
+<h3 id="adding-a-subsystem"><a class="header" href="#adding-a-subsystem">Adding a subsystem</a></h3>
+<p>Implement <code>Subsystem</code>, give it a stable <code>name</code>, choose its <code>criticality</code> and list the names it depends on in <code>dependencies</code> (usually at least <code>config</code>). Construct it in <code>host::builtin_subsystems</code> with what it needs, such as a <code>ConfigSubsystem::subscribe</code> receiver, after the subsystems it depends on. In <code>run</code>, subscribe to <code>ctx.host_events()</code> if it needs OS notifications, call <code>ctx.set_ready()</code> once initialised, and return by the deadline <code>ctx.stopped()</code> gives.</p>
 <h2 id="platform-layer"><a class="header" href="#platform-layer">Platform layer</a></h2>
 <p>The agent reads the OS only through the <code>palisade_core::platform</code> traits (#29), so its logic can be
 tested on any OS against the mocks in <code>palisade_core::test_util</code>. <code>palisade_agent::platform</code> holds

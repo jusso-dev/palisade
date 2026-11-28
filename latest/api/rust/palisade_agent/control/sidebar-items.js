@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["HOST_EVENT_CAPACITY"],"enum":["Control","HostEvent","PowerChange","ServicePhase","SessionChange"],"fn":["default_guard"],"struct":["AcceptedControls","AllowStop","StatusGate"],"trait":["TamperGuard"]};
