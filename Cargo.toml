@@ -118,7 +118,7 @@ windows-service = { version = "0.8.1" }
 # Windows API bindings for `palisade_fileid::win` (ADR 0003, ADR 0011). Each
 # user enables only the API families it calls.
 windows-sys = { version = "0.61.2", default-features = false }
-windows-version = { version = "0.1.7", default-features = false }
+windows-version = { version = "0.100.0", default-features = false }
 yaml-rust2 = { version = "0.13.2", default-features = false }
 zeroize = { version = "1.9.2", default-features = false, features = ["alloc"] }
 
