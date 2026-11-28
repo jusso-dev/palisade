@@ -1,7 +1,7 @@
 //! End-to-end tests of the `palisade-server` binary.
 
-// Test helpers outside `#[test]` functions unwrap freely.
-#![allow(clippy::unwrap_used)]
+// Test helpers outside `#[test]` functions unwrap and expect freely.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod common;
 
