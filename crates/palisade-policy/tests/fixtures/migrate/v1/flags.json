@@ -1,0 +1,58 @@
+{
+  "policy": {
+    "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+    "name": "Draft policy with effect flags",
+    "revision": 7,
+    "mode": "enforce",
+    "rule_sets": [
+      "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60",
+      "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e70"
+    ]
+  },
+  "rule_sets": [
+    {
+      "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60",
+      "name": "Blocked tools",
+      "kind": "blocklist",
+      "rules": [
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e61",
+          "name": "Block a tool",
+          "match": {
+            "criterion": {
+              "field": "hash.sha256",
+              "operator": "equals",
+              "values": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+            }
+          },
+          "action": { "type": "deny" },
+          "effects": {
+            "log": "always",
+            "upload": "immediate",
+            "notify": "default",
+            "severity": "high",
+            "tags": ["lolbin"]
+          }
+        },
+        {
+          "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e62",
+          "name": "Block another tool",
+          "match": {
+            "criterion": {
+              "field": "hash.sha256",
+              "operator": "equals",
+              "values": ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]
+            }
+          },
+          "action": { "type": "deny" }
+        }
+      ]
+    },
+    {
+      "id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e70",
+      "name": "Allowed tools",
+      "kind": "allowlist"
+    }
+  ],
+  "schema_version": "1.0.0"
+}

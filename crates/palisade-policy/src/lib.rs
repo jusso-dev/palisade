@@ -14,6 +14,7 @@ pub mod facts;
 pub mod hierarchy;
 pub mod library;
 pub mod lifecycle;
+pub mod migrate;
 pub mod mode;
 pub mod model;
 pub mod ops;

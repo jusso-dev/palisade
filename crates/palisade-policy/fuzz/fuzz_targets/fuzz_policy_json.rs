@@ -2,7 +2,9 @@
 //! evaluator build (#30, #25): a policy document arrives from the server or
 //! a file, so no input may panic. A document that reads must write back to
 //! JSON that reads as the same document, and a document that validates must
-//! compile and decide objects with and without facts.
+//! compile and decide objects with and without facts. The migrating reader
+//! (#330) reads the same input, and agrees with the strict reader on every
+//! document of the current version.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
@@ -10,6 +12,7 @@ use palisade_core::path::VolumeMap;
 use palisade_policy::context::EvaluationContext;
 use palisade_policy::decision::TraceId;
 use palisade_policy::evaluate::{Evaluator, Subject};
+use palisade_policy::migrate;
 use palisade_policy::facts::{ObjectFacts, PathFact, PathVariable, PathVariables};
 use palisade_policy::model::{Field, ObjectType, PolicyDocument};
 
@@ -17,9 +20,18 @@ fuzz_target!(|data: &[u8]| {
     let Ok(text) = std::str::from_utf8(data) else {
         return;
     };
+    let migrated = migrate::read_json(text);
     let Ok(doc) = PolicyDocument::from_json(text) else {
+        // A document of an older major only reads through a migration, and
+        // the result must read again as itself.
+        if let Ok(m) = migrated {
+            assert!(m.was_migrated());
+            let written = m.document.to_json_pretty().unwrap();
+            assert_eq!(PolicyDocument::from_json(&written).unwrap(), m.document);
+        }
         return;
     };
+    assert_eq!(migrated.unwrap().document, doc);
     let written = doc.to_json_pretty().unwrap();
     assert_eq!(PolicyDocument::from_json(&written).unwrap(), doc);
     if let Ok(validated) = doc.validate() {

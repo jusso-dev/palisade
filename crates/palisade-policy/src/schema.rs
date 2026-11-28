@@ -13,8 +13,8 @@
 //!
 //! [`CURRENT`] is the version this crate writes and the major version it
 //! reads. A minor bump adds optional fields; a major bump is a breaking
-//! change, gets a new file (`v2.json`) and needs a migration (future work in
-//! #30). The schema's `$id` names the major version only, because every
+//! change, gets a new file (`v2.json`) and a migration step
+//! ([`crate::migrate`]). The schema's `$id` names the major version only, because every
 //! minor version of a major is a valid instance of the latest schema for
 //! that major.
 
