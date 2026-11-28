@@ -133,14 +133,7 @@ impl IdentityProvider for WindowsIdentity {
         let (_, name) = ffi::lookup_account_sid(&sid.to_bytes())
             .map_err(|e| os_error(&e, &format!("account name of {sid}")))?
             .ok_or_else(|| not_a_local_group(&sid))?;
-        let (local, kind) = match ffi::lookup_account_name(&name) {
-            Ok(found) => found,
-            Err(e) if e.raw_os_error() == Some(ERROR_NONE_MAPPED_CODE) => {
-                return Err(not_a_local_group(&sid));
-            }
-            Err(e) => return Err(os_error(&e, &name)),
-        };
-        if !nt::is_requested_local_group(&sid, &local, kind) {
+        if !names_requested_group(&sid, &name)? {
             return Err(not_a_local_group(&sid));
         }
         let members = ffi::local_group_members(&name).map_err(|e| match e {
@@ -153,6 +146,19 @@ impl IdentityProvider for WindowsIdentity {
                 _ => os_error(&e, "local group members"),
             },
         })?;
+        // The enumeration took a name, not the SID: if the group was
+        // renamed meanwhile and another took its name, the members read
+        // may be the other group's. Check the name again, and fail rather
+        // than return members that might not be this group's (#60, the
+        // race left open in #322). A rename and a restore both inside the
+        // window still pass; only an administrator can rename a local
+        // group, and an administrator can change its members directly.
+        if !names_requested_group(&sid, &name)? {
+            return Err(PlatformError::new(
+                ErrorKind::Other,
+                format!("{sid} was renamed while its members were read"),
+            ));
+        }
         members
             .iter()
             .map(|bytes| match Sid::from_bytes(bytes) {
@@ -173,5 +179,16 @@ impl IdentityProvider for WindowsIdentity {
             .unwrap_or_else(PoisonError::into_inner)
             .get(&sid)
             .cloned())
+    }
+}
+
+/// Whether the bare `name`, resolved on this computer, is a local group
+/// (an alias) with exactly the SID `sid`. A name that maps to nothing is
+/// `false`; any other lookup failure is an error.
+fn names_requested_group(sid: &Sid, name: &str) -> Result<bool> {
+    match ffi::lookup_account_name(name) {
+        Ok((local, kind)) => Ok(nt::is_requested_local_group(sid, &local, kind)),
+        Err(e) if e.raw_os_error() == Some(ERROR_NONE_MAPPED_CODE) => Ok(false),
+        Err(e) => Err(os_error(&e, name)),
     }
 }

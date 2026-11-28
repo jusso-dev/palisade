@@ -123,7 +123,7 @@ since the OS does not use it to grant access. A process that has exited is `NotF
 while a handle keeps its object alive, and a process key whose creation time does not match the
 process now using its ID is `NotFound` too, so a reused process ID is never read as the process
 it replaced. A local group's members are listed only if the SID names a local group whose name
-resolves back to the same SID: the bare name the OS enumerates by must itself be a local group with that SID, so a local group that only shares a domain group's name is never listed in its place. An account name lookup that fails for any reason other than "no such account" is an error, not `None`.
+resolves back to the same SID: the bare name the OS enumerates by must itself be a local group with that SID, so a local group that only shares a domain group's name is never listed in its place. The name is checked again after the members are read, and a group renamed meanwhile is an error, not another group's members (#60). A rename and restore inside that window still passes; only an administrator can rename a local group. An account name lookup that fails for any reason other than "no such account" is an error, not `None`.
 
 The signature and file-system backends fail closed too. A file that cannot be read, or is larger
 than the size limit (256 MiB by default), is an error, never "unsigned"; so is a file that
