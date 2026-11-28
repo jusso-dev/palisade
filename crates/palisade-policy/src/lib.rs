@@ -30,4 +30,6 @@ pub mod unknown;
 pub mod validate;
 
 #[cfg(test)]
+mod roundtrip_tests;
+#[cfg(test)]
 mod tests;

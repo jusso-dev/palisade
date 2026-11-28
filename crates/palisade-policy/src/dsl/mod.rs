@@ -99,7 +99,7 @@
 //! [`Limits::max_lookahead`]). Text that is not valid JSON is read as YAML.
 
 mod de;
-mod emit;
+pub(crate) mod emit;
 mod parse;
 
 use core::fmt;
