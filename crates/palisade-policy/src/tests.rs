@@ -216,6 +216,43 @@ fn reversed_bounds_are_reported_with_a_misplaced_option() {
 }
 
 #[test]
+fn arg_index_out_of_the_schemas_range_is_rejected() {
+    let at = "/rule_sets/0/rules/0/match/all/1/criterion/arg_index";
+    for (index, ok) in [
+        (256, false),
+        (-256, false),
+        (i16::MAX, false),
+        (i16::MIN, false),
+        (255, true),
+        (-255, true),
+    ] {
+        let mut c = Criterion::new(Field::ProcessArgv, Operator::Equals, ["-s"]);
+        c.arg_index = Some(index);
+        let doc = with_rule(
+            Match::All(vec![
+                leaf(Field::HashSha256, Operator::Equals, &[&sha256('a')]),
+                Match::Criterion(c),
+            ]),
+            Action::deny(),
+        );
+        // `process.argv` is user-controlled, so a warning comes with it.
+        let errors: Vec<_> = doc
+            .validate()
+            .err()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|e| e.severity == Severity::Error)
+            .collect();
+        let expected = if ok {
+            vec![]
+        } else {
+            vec![(ErrorCode::InvalidValue, at)]
+        };
+        assert_eq!(codes(&errors), expected, "{index}");
+    }
+}
+
+#[test]
 fn references_must_resolve_and_ids_must_be_unique() {
     let mut doc = with_rule(
         leaf(Field::HashSha256, Operator::Equals, &[&sha256('a')]),

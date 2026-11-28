@@ -99,3 +99,31 @@ expect = "unknown"
 name = "arg_index only on process.argv"
 criterion = { field = "process.command_line", operator = "contains", arg_index = 1, values = ["x"] }
 error = "option_not_applicable"
+
+[[case]]
+name = "arg_index past 255 is rejected"
+criterion = { field = "process.argv", operator = "equals", arg_index = 256, values = ["x"] }
+error = "invalid_value"
+
+[[case]]
+name = "arg_index before -255 is rejected"
+criterion = { field = "process.argv", operator = "equals", arg_index = -256, values = ["x"] }
+error = "invalid_value"
+
+[[case]]
+name = "arg_index at the bounds is accepted"
+criterion = { field = "process.argv", operator = "equals", arg_index = -255, values = ["x"] }
+context = { "process.command_line" = 'a.exe x' }
+expect = "no_match"
+
+[[case]]
+name = "an argument after a quoted program name with no space"
+criterion = { field = "process.argv", operator = "equals", values = ["--blocked"] }
+context = { "process.command_line" = '"a.exe"--blocked x' }
+expect = "match"
+
+[[case]]
+name = "two quotes inside quotes close them"
+criterion = { field = "process.argv", operator = "equals", values = ["--blocked"] }
+context = { "process.command_line" = 'a.exe "x"" --blocked' }
+expect = "match"

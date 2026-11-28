@@ -673,6 +673,7 @@ impl CompiledCriterion {
         }
         let mut options = option_problems(c);
         options.extend(signer::option_problems(c).into_iter().map(|(_, kind)| kind));
+        options.extend(arg_index_out_of_range(c));
         if !options.is_empty() {
             return Err(options
                 .into_iter()
@@ -1406,6 +1407,20 @@ pub(crate) fn option_problems(c: &Criterion) -> Vec<CompileErrorKind> {
         ));
     }
     out
+}
+
+/// Why a criterion's `arg_index` is out of range, if it is: past
+/// [`MAX_ARG_INDEX`](crate::context::cmdline::MAX_ARG_INDEX) either way.
+/// The schema states the range; this enforces it, so a policy the schema
+/// rejects is never accepted. Validation reports the same.
+pub(crate) fn arg_index_out_of_range(c: &Criterion) -> Option<CompileErrorKind> {
+    use crate::context::cmdline::MAX_ARG_INDEX;
+    let i = c.arg_index?;
+    (!(-MAX_ARG_INDEX..=MAX_ARG_INDEX).contains(&i)).then(|| {
+        CompileErrorKind::InvalidValue(format!(
+            "`arg_index` is {i}; it must be between -{MAX_ARG_INDEX} and {MAX_ARG_INDEX}"
+        ))
+    })
 }
 
 /// Why a criterion value is too long, if it is: more than

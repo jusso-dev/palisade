@@ -13,9 +13,12 @@ fuzz_target!(|data: &[u8]| {
     };
     let args = split_args(line);
     assert!(args.len() <= line.len() + 1, "more arguments than bytes");
-    let n = i16::try_from(args.len()).unwrap_or(i16::MAX);
-    for i in 0..n {
-        assert_eq!(arg_at(&args, i), arg_at(&args, i - n), "index {i}");
+    // Positional checks only when every position is an `i16`; a longer
+    // list is still split and bounded above.
+    if let Ok(n) = i16::try_from(args.len()) {
+        for i in 0..n {
+            assert_eq!(arg_at(&args, i), arg_at(&args, i - n), "index {i}");
+        }
+        assert_eq!(arg_at(&args, n), None);
     }
-    assert_eq!(arg_at(&args, n), None);
 });
