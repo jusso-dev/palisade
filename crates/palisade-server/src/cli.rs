@@ -12,8 +12,9 @@ use tracing::level_filters::LevelFilter;
 
 use crate::config::{self, Config, DatabaseSettings, ENV_CONFIG, Loaded};
 use crate::db::{self, DbError, SchemaVerdict};
+use crate::health::ClockHealth;
 use crate::server::{self, Server, ShutdownOutcome};
-use crate::{net, telemetry};
+use crate::{clock, net, telemetry};
 
 /// Exit code for an invalid configuration or command line.
 const EXIT_CONFIG: u8 = 2;
@@ -226,6 +227,7 @@ async fn serve_async(config: Config) -> ExitCode {
             }
         },
     };
+    let clock_settings = config.clock.clone();
     let mut server = Server::new(config, prepared);
     if database.is_some() {
         server = server.with_database();
@@ -234,10 +236,28 @@ async fn serve_async(config: Config) -> ExitCode {
     let watcher = database
         .clone()
         .map(|db| tokio::spawn(db::watch(db, running.health().clone(), DB_CHECK_INTERVAL)));
+    let clock_watcher = if clock_settings.ntp_servers.is_empty() {
+        tracing::warn!(
+            "no clock.ntp_servers; the clock offset from NTP is not monitored (ISM-0988)"
+        );
+        None
+    } else {
+        // Unknown until the first check answers, so an unmeasured clock is
+        // never reported as good.
+        running.health().set_clock(ClockHealth::Unknown);
+        Some(tokio::spawn(clock::watch(
+            clock_settings,
+            running.health().clone(),
+            clock::system_clock(),
+        )))
+    };
 
     signals.next().await;
     tracing::info!("shutdown signal received");
     if let Some(w) = watcher {
+        w.abort();
+    }
+    if let Some(w) = clock_watcher {
         w.abort();
     }
     tokio::select! {

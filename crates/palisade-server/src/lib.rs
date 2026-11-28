@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod cli;
+pub mod clock;
 pub mod config;
 pub mod db;
 pub mod health;

@@ -1468,6 +1468,7 @@ dependencies = [
  "clap",
  "hyper-util",
  "if-addrs",
+ "palisade-proto",
  "ring",
  "rustls",
  "serde",

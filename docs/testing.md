@@ -233,8 +233,9 @@ them, and only they need a nightly toolchain. There are three projects:
   `fuzz_ctl`, `fuzz_classify`, `fuzz_msi_tables`, `legacy_parse`, `fuzz_tags`, `script_sig`,
   `fuzz_appx_manifest` and `identity_bytes`. The project builds `palisade-fileid` with its
   `content-rules` feature, for `fuzz_tags`.
-- `crates/palisade-proto/fuzz`, with two targets: `trust_set_decode` and `policy_envelope_decode`
-  (the signed policy bundle envelope, its verification and delta rebuilding, #325).
+- `crates/palisade-proto/fuzz`, with three targets: `trust_set_decode`, `policy_envelope_decode`
+  (the signed policy bundle envelope, its verification and delta rebuilding, #325) and
+  `sntp_reply` (the SNTP reply checker behind the server's clock health check, #224).
 - `crates/palisade-policy/fuzz`, with five targets: `fuzz_policy_json` (the strict JSON reader,
   the migrating reader, validation and the evaluator build), `fuzz_policy_yaml` (the YAML reader),
   `fuzz_wildcard_regex_compile` (compiling and matching wildcards, regular expressions and text
