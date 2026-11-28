@@ -210,6 +210,9 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     (`AuthzAccessCheck` with a synthetic token of the standard user's SIDs).
     `cross_check_writability` compares that check with the portable
     evaluator: the evaluator must never miss a right the OS grants.
+    `assess_file` merges the OS verdict into every result, as the union
+    of the two (`acl::OsCheck`): the OS check can only add rights, and a
+    check that fails leaves the evaluator's over-reporting result.
     `OsDirectories` lets `enumerate_user_writable_dirs` walk real folders
     without following junctions or mount points. Windows tests build a
     weak-ACL fixture tree (a user-writable folder under a locked one, an

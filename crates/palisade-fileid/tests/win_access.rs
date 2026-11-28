@@ -201,6 +201,18 @@ fn path_assessment_of_the_fixture() {
     std::fs::write(&inside, b"x").unwrap();
     let w = assess_file(&inside, &opts, AssessOptions::default(), &mut cache).unwrap();
     assert!(w.file_user_writable, "inherits Users modify");
+    // The OS access check ran on every descriptor and was merged in; the
+    // evaluator missed nothing it grants (#332).
+    for o in std::iter::once(&w.target).chain(&w.ancestors) {
+        match o.os_check {
+            palisade_fileid::fsctx::acl::OsCheck::Ran { missed, .. } => {
+                assert!(missed.is_empty(), "{o:?}");
+            }
+            // An ancestor that could not be read has no descriptor to check.
+            _ => assert!(o.unreadable, "{o:?}"),
+        }
+    }
+    assert!(cache.has_os_check());
     assert!(
         w.first_user_writable_ancestor
             .as_deref()

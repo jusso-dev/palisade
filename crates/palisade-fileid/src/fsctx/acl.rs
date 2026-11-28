@@ -70,10 +70,17 @@
 //! - **Mandatory integrity labels** (in the SACL) are ignored. A label can
 //!   only take rights away, so ignoring it only over-reports.
 //!
-//! The Windows access-check API (`AuthzAccessCheck` with a synthetic token)
-//! is the authoritative method on Windows, with this evaluator as the
-//! fallback and cross-check: `palisade_fileid::win::access::cross_check_writability`
-//! compares the two on any descriptor (with the `os-trust` feature).
+//! On Windows the OS access check (`AuthzAccessCheck` with a synthetic
+//! token of the standard user's SIDs) runs beside this evaluator, and a
+//! decision uses the **union** of the two ([`OsCheck`],
+//! [`ObjectWritability::merge_os_check`], #332): the OS check is exact but
+//! covers only the standard user, while this evaluator covers every
+//! non-administrator principal and over-reports. So the OS check can add a
+//! right the evaluator missed, never remove one it reports, and if the OS
+//! check fails the evaluator's result stands (ADR 0018).
+//! `palisade_fileid::win::access::assess_file` merges it in, and
+//! `cross_check_writability` reports both on any descriptor (with the
+//! `os-trust` feature).
 //!
 //! # Owner-based trust needs the DACL too
 //!
@@ -970,6 +977,39 @@ pub struct ObjectWritability {
     pub non_canonical: bool,
     /// True if the descriptor could not be read, so every right was assumed.
     pub unreadable: bool,
+    /// Whether the OS access check was merged in, and what it added.
+    pub os_check: OsCheck,
+}
+
+/// The OS access check's part in an [`ObjectWritability`] (#332).
+///
+/// The portable evaluator and the OS check answer different questions: the
+/// evaluator covers every non-administrator principal and over-reports by
+/// design; the OS check is exact, but only for the synthetic standard
+/// user. So neither replaces the other. A policy decision uses their
+/// **union**: a right counts if either says the standard user may hold
+/// it. A right the OS grants is added (as certain), and a right only the
+/// evaluator reports is kept, so the OS check can only make a result more
+/// writable, never less (ADR 0018). If the check could not run, the
+/// evaluator's result stands, which already over-reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OsCheck {
+    /// No OS check was asked for (any OS other than Windows, or a caller
+    /// that evaluates descriptors only).
+    #[default]
+    NotRun,
+    /// The check was asked for and failed, or the descriptor could not be
+    /// handed to it. The portable result stands.
+    Unavailable,
+    /// The check ran.
+    Ran {
+        /// The write-type rights the OS grants the synthetic standard user.
+        granted: WriteRights,
+        /// The subset the portable evaluator had missed, now added. It
+        /// should always be empty; anything here is an evaluator bug worth
+        /// reporting.
+        missed: WriteRights,
+    },
 }
 
 impl ObjectWritability {
@@ -998,7 +1038,47 @@ impl ObjectWritability {
             }],
             non_canonical: false,
             unreadable: true,
+            os_check: OsCheck::NotRun,
         }
+    }
+
+    /// Merges the OS access check's verdict for the synthetic standard user
+    /// into this result, as [`OsCheck`] describes: `None` if the check
+    /// could not run. Rights the OS grants become part of
+    /// [`Self::standard_user`] and [`Self::rights`], and are certain; any
+    /// the evaluator had missed are reported for an unknown principal, so
+    /// they reach [`Writability::principals_with_write`]. Nothing is ever
+    /// removed.
+    pub fn merge_os_check(&mut self, os: Option<WriteRights>) {
+        let Some(granted) = os else {
+            self.os_check = OsCheck::Unavailable;
+            return;
+        };
+        let granted = granted.intersection(WriteRights::relevant(self.kind));
+        let missed = granted.difference(self.standard_user);
+        self.standard_user = self.standard_user.union(granted);
+        self.standard_user_uncertain = self.standard_user_uncertain.difference(granted);
+        self.rights = self.rights.union(granted);
+        self.uncertain = self.uncertain.difference(granted);
+        if !missed.is_empty() {
+            match self
+                .principals
+                .iter_mut()
+                .find(|p| p.principal == Principal::Unknown)
+            {
+                Some(p) => {
+                    p.rights = p.rights.union(missed);
+                    p.uncertain = p.uncertain.difference(missed);
+                }
+                None => self.principals.push(PrincipalRights {
+                    principal: Principal::Unknown,
+                    rights: missed,
+                    uncertain: WriteRights::NONE,
+                    implicit_owner_rights: false,
+                }),
+            }
+        }
+        self.os_check = OsCheck::Ran { granted, missed };
     }
 }
 
@@ -1198,6 +1278,7 @@ pub fn evaluate(
             }],
             non_canonical: false,
             unreadable: false,
+            os_check: OsCheck::NotRun,
         };
     };
 
@@ -1354,6 +1435,7 @@ pub fn evaluate(
         principals,
         non_canonical: is_non_canonical(aces),
         unreadable: false,
+        os_check: OsCheck::NotRun,
     }
 }
 
