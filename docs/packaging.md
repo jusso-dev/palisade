@@ -125,11 +125,12 @@ package is a stretch goal.
 ## Installer package
 
 The package is built from `packaging/wix/` with WiX and uses only standard Windows Installer 5
-tables: no WiX extension and no custom action code. The custom actions set properties, and the others run the
-operating system's service-control tool, `sc.exe`, to set each service's recovery actions and
-failure-actions flag: the installer's own failure-actions table opens the service without the
-right a restart action needs and fails with access denied. They run deferred, as SYSTEM, right
-after the services are installed.
+tables: no WiX extension and no custom action code. The custom actions set properties, and the
+others run programs: the operating system's service-control tool, `sc.exe`, to set each service's
+recovery actions and failure-actions flag (the installer's own failure-actions table opens the
+service without the right a restart action needs and fails with access denied), and the
+installed agent, to store the enrolment token ([Enrolment token](#enrolment-token)). They run
+deferred, as SYSTEM.
 
 - **Per machine only.** Files go to `%ProgramFiles%\Palisade\`.
 - **Upgrades.** One upgrade code per architecture (`xtask/src/dist/msi.rs`) and a new product
@@ -182,7 +183,7 @@ anything changes. Removal never checks them, so a damaged stored value cannot bl
 | Property | Meaning |
 |---|---|
 | `SERVER_URL` | HTTPS base URL of the management server |
-| `ENROLL_TOKEN` | Enrolment token. Hidden: never written to installer logs or the registry; taken over by enrolment (#57) |
+| `ENROLL_TOKEN` | Enrolment token. Hidden: never written to installer logs or the registry; stored protected for the agent ([Enrolment token](#enrolment-token)) |
 | `GROUP_KEY` | Policy group to join at enrolment |
 | `PROXY` | Proxy for agent traffic |
 | `MODE` | Initial mode: `audit` (default), `monitor`, `learning`, `enforce` or `disabled` |
@@ -198,14 +199,48 @@ msiexec /x Palisade-0.1.0-x64.msi /qn
 ```
 
 `ENROLL_TOKEN` and `ALLOW_UNINSTALL` are hidden properties (`MsiHiddenProperties`), so the
-installer does not log their values. The package also never writes either one anywhere: a
-verbose log records every registry value and command line the installer writes, hidden property
-or not. Taking the token over into the agent's protected store at install (machine-scoped data
-protection) is part of enrolment, #57; until then the property is accepted and validated for
-logging only, and `SKIP_ENROLL=1` installs are unaffected. CI checks that a random token is in
-none of the verbose logs. One exception is outside the package's control: when the machine's
-installer logging policy is set to its most verbose debug level, Windows Installer writes
+installer does not log their values. One exception is outside the package's control: when the
+machine's installer logging policy is set to its most verbose debug level, Windows Installer writes
 command-line properties to the log regardless.
+
+### Enrolment token
+
+A verbose installer log records every registry value, file and command line the package writes,
+hidden property or not, so the package never writes `ENROLL_TOKEN` itself. Instead, a deferred
+custom action, as SYSTEM and with its target hidden from the log (`msidbCustomActionTypeHideTarget`),
+runs the installed agent with `palisade-agent --stash-enroll-token=<token>`, after the data folder's
+ACL is applied and before the service starts. The agent (`palisade_agent::bootstrap`):
+
+1. accepts only a single token of ASCII letters, digits and `-._~+/=:`, at most 4 KiB;
+2. checks that only SYSTEM, Administrators and `TrustedInstaller` can write
+   `%ProgramData%\Palisade`, and refuses otherwise;
+3. protects the token with machine-scope data protection, bound to the purpose
+   `palisade-enroll-token-v1`, and writes it to `%ProgramData%\Palisade\enroll.token.dpapi`,
+   which inherits the folder's SYSTEM- and Administrators-only ACL.
+
+If any step fails, the custom action fails and the install rolls back (ADR 0018): the token is
+never left anywhere it could be read or replaced. Enrolment (#223) reads it through
+`bootstrap::load_token` and deletes it with `bootstrap::consume_token` once the server has
+accepted it, so it does not outlive enrolment. `bootstrap::Bootstrap` is what enrolment starts
+from: the stored settings and whether a token is waiting.
+
+**Handoff file**, for deployment tools that record command lines: leave `ENROLL_TOKEN` off and,
+as an administrator, write the token to `%ProgramData%\Palisade\enroll.token` after the install.
+The file inherits the folder's ACL. At its next start the agent checks that only SYSTEM and
+administrators can write the file and the folder, stores the token as above and deletes the file.
+A file that fails the check, or is not a single token, is deleted and not used, and the reason is
+logged; the token itself is never logged.
+
+```powershell
+msiexec /i Palisade-0.1.0-x64.msi /qn SERVER_URL=https://palisade.example GROUP_KEY=lab
+Set-Content -NoNewline -Encoding ascii "$env:ProgramData\Palisade\enroll.token" $token
+Restart-Service PalisadeAgent
+```
+
+An upgrade or repair keeps a stored token not used yet. Removal leaves it in the SYSTEM-only data
+folder with the agent's other state; removing data on uninstall belongs to #222. CI checks that a
+random token is in none of the verbose logs, is stored, opens with the machine's data protection to
+the same value, and has the folder's ACL.
 
 ## Tests in CI
 
@@ -215,7 +250,8 @@ the runner, which:
 
 - checks the package tables: shared upgrade code, distinct product codes, both hidden
   properties, no PDBs, exactly the shipped executables, no custom action code, that the only
-  custom actions set properties, stop with an error, or run `sc.exe` on the two services, that the unelevated
+  custom actions set properties, stop with an error, run `sc.exe` on the two services, or hand
+  the token to the agent (deferred, as SYSTEM, hidden target), that the unelevated
   user-interface sequence never reads the settings key or defaults `MODE`, and that the old
   version is removed inside the install transaction;
 - refuses an unknown `MODE` and a plain-HTTP `SERVER_URL`;
@@ -223,8 +259,9 @@ the runner, which:
   no delayed start, account, command line, recovery after 1, 5 and 30 seconds and on non-crash
   failures, SID type), the watchdog service when the package ships it and its absence otherwise, every binary's version
   resource and machine type, that the agent runs natively, the `%ProgramData%\Palisade` and
-  settings-key ACLs, the stored settings (and that the token is not among them), the notifier
-  entry, and the verbose log for the token;
+  settings-key ACLs, the stored settings (and that the token is not among them), the stored
+  token (protected, the right value, the right ACL), the notifier entry, and the verbose log for
+  the token;
 - upgrades and checks that agent state in `%ProgramData%\Palisade` and the settings survive and
   the service runs the new binaries;
 - tries a downgrade and checks it is refused and changes nothing;
@@ -293,5 +330,5 @@ hosted image and installing it exceeds job limits, and no other runner type is e
 - Testing on clean x64 and ARM64 virtual machines, including the notifier in a real user
   session: the VM harness (#26).
 - Image signing, uninstall protection and further ACL hardening: #18.
-- Enrolment itself, including storing `ENROLL_TOKEN` protected for the agent, `CONFIGFILE`, tags,
-  relays and the other installer properties of the full installer: #57.
+- Enrolment itself: #223. The remaining installer properties of #57 (`CONFIGFILE`, tags, relays,
+  golden-image mode and the others), and the group-specific bundles: #57.

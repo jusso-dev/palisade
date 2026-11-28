@@ -404,12 +404,31 @@ mod tests {
     /// A verbose installer log records every registry value, file and
     /// command line the package writes, hidden or not, so the secrets must
     /// not be used anywhere but in their declaration.
+    ///
+    /// The one exception is the enrolment token's hand-over to the agent:
+    /// a deferred custom action whose target is hidden from the log, which
+    /// runs the installed agent as SYSTEM and nothing else.
     #[test]
     fn hidden_properties_are_never_written_or_copied() {
         let wxs = source(SOURCES[0]);
+        let stash = r#"<CustomAction Id="StashEnrollToken" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="no" Return="check" HideTarget="yes"
+                  ExeCommand="&quot;[INSTALLFOLDER]palisade-agent.exe&quot; --stash-enroll-token=[ENROLL_TOKEN]" />"#;
+        assert_eq!(wxs.matches(stash).count(), 1, "the token hand-over");
+        // A condition is never logged with the value.
+        let condition = r#"Condition="ENROLL_TOKEN AND NOT (REMOVE ~= &quot;ALL&quot;)""#;
+        assert_eq!(wxs.matches(condition).count(), 1);
+        let rest = wxs.replace(stash, "").replace(condition, "");
         for name in HIDDEN_PROPERTIES {
-            assert_eq!(wxs.matches(name).count(), 1, "{name} must only be declared");
+            assert_eq!(
+                rest.matches(name).count(),
+                1,
+                "{name} must only be declared"
+            );
         }
+        // The flag is the agent's, and only the hand-over hides its target.
+        let agent = source("crates/palisade-agent/src/cli.rs");
+        assert!(agent.contains(r#"const STASH_FLAG: &str = "--stash-enroll-token";"#));
+        assert_eq!(wxs.matches("HideTarget=").count(), 1);
     }
 
     #[test]

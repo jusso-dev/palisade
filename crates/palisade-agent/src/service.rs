@@ -245,6 +245,8 @@ fn run(
         Ok(loaded) => loaded,
         Err(_) => return EXIT_START_FAILED,
     };
+    // An enrolment token placed in the handoff file (#57).
+    crate::bootstrap::on_start();
     let supervisor = match host::agent_supervisor(&loaded) {
         Ok(supervisor) => supervisor,
         Err(e) => {

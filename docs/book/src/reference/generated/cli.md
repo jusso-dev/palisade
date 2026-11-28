@@ -119,6 +119,7 @@ Options:
 ```text
 Usage: palisade-agent (--console | --service) [--config <path>]
        palisade-agent --simulate [--scenario <path>]
+       palisade-agent --stash-enroll-token=<token>
        palisade-agent --help | --version
 
 Modes:
@@ -128,6 +129,10 @@ Modes:
   --simulate         Development only (built with the `test-util` feature):
                      replay a scripted scenario on the mock platform and
                      write its events to standard output as JSON lines.
+  --stash-enroll-token=<token>
+                     Run by the installer, as SYSTEM: protect the
+                     enrolment token for this machine and store it for
+                     the agent's first enrolment. Windows only.
 
 Options:
   --config <path>    Configuration file. Without it, the agent reads

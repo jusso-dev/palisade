@@ -35,7 +35,24 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
         Mode::Simulate => simulate(&args),
+        Mode::StashToken => stash(&args),
     }
+}
+
+/// `--stash-enroll-token=<token>`: the installer stores the token.
+#[cfg(windows)]
+fn stash(args: &cli::Args) -> ExitCode {
+    match &args.enroll_token {
+        Some(token) => palisade_agent::bootstrap::run_stash(token),
+        None => ExitCode::from(2),
+    }
+}
+
+/// `--stash-enroll-token` off Windows.
+#[cfg(not(windows))]
+fn stash(_: &cli::Args) -> ExitCode {
+    eprintln!("palisade-agent: --stash-enroll-token is only available on Windows");
+    ExitCode::FAILURE
 }
 
 /// `--simulate`: replays a scenario and prints its events as JSON lines.

@@ -174,11 +174,12 @@ $ca = MsiQuery $CurrentMsi 'SELECT `Action` FROM `CustomAction`'
 # The service-control custom actions: recovery actions and the
 # failure-actions flag, for the agent and, when it is shipped, the watchdog.
 $serviceActions = @($ca | Where-Object { $_ -like 'Configure*Recovery*' })
-$types = @($ca | Where-Object { $serviceActions -notcontains $_ } | ForEach-Object {
+$types = @($ca | Where-Object { $serviceActions -notcontains $_ -and $_ -ne 'StashEnrollToken' } | ForEach-Object {
   (MsiQuery $CurrentMsi "SELECT ``Type`` FROM ``CustomAction`` WHERE ``Action`` = '$_'")[0]
 })
 # Type 51 sets a property and type 19 shows an error and stops; every custom
-# action but the service-control ones must be one of those.
+# action but the service-control ones and the token hand-over must be one of
+# those.
 Check (@($types | Where-Object { ([int]$_ -band 0x3f) -notin 51, 19 }).Count -eq 0) "custom actions only set properties or stop with an error ($($ca -join ', '))"
 $uiSearch = MsiQuery $CurrentMsi "SELECT ``Action`` FROM ``InstallUISequence`` WHERE ``Action`` = 'AppSearch'"
 Check ($uiSearch.Count -eq 0) 'the unelevated user-interface sequence does not read the protected settings key'
@@ -200,6 +201,15 @@ $targets = @($serviceActions | ForEach-Object {
 $badTargets = @($targets | Where-Object { -not ($_.StartsWith('"[System64Folder]sc.exe" failure PalisadeAgent ') -or $_.StartsWith('"[System64Folder]sc.exe" failureflag PalisadeAgent ') -or $_.StartsWith('"[System64Folder]sc.exe" failure PalisadeWatchdog ') -or $_.StartsWith('"[System64Folder]sc.exe" failureflag PalisadeWatchdog ')) })
 Check ($serviceActions.Count -ge 2 -and $badTargets.Count -eq 0) "the other custom actions only run the system service-control tool on the two services ($($targets -join '; '))"
 Check (($serviceActions.Count -eq 4) -eq $WatchdogShipped) "the watchdog's recovery is set exactly when its executable is packaged ($($serviceActions -join ', '))"
+# The enrolment token's hand-over (#57): the installed agent, deferred, as
+# SYSTEM, with its target hidden from the log (0x2000) and its exit code
+# checked.
+$stash = @(MsiQuery $CurrentMsi 'SELECT `Target` FROM `CustomAction` WHERE `Action` = ''StashEnrollToken''')
+$stashType = @(MsiQuery $CurrentMsi 'SELECT `Type` FROM `CustomAction` WHERE `Action` = ''StashEnrollToken''')
+Check ($stash.Count -eq 1 -and $stash[0] -eq '"[INSTALLFOLDER]palisade-agent.exe" --stash-enroll-token=[ENROLL_TOKEN]') "the token hand-over runs the installed agent ($stash)"
+# 0x2000 hide target, 0x0800 no impersonation, 0x0400 deferred, 0x40
+# ignore exit code must be clear.
+Check ($stashType.Count -eq 1 -and ([int]$stashType[0] -band 0x2c40) -eq 0x2c00) "the token hand-over is deferred, as SYSTEM, checked, with a hidden target (type $stashType)"
 $binaries = MsiQuery $CurrentMsi 'SELECT `Name` FROM `Binary`'
 Check ($binaries.Count -eq 0) "no binary (custom action code) is embedded ($($binaries -join ', '))"
 
@@ -273,7 +283,18 @@ $keyAcl = Get-Acl $SettingsKey
 $keyRules = @($keyAcl.Access | ForEach-Object { "$($_.AccessControlType):$($_.IdentityReference)" } | Sort-Object -Unique)
 Check ($keyAcl.AreAccessRulesProtected -and ($keyRules -join ',') -eq 'Allow:BUILTIN\Administrators,Allow:NT AUTHORITY\SYSTEM') "the settings key is SYSTEM and Administrators only ($($keyRules -join ', '))"
 Check ((Setting 'ServerUrl') -eq 'https://palisade.invalid/') 'SERVER_URL is stored'
-Check ($null -eq (Setting 'EnrollToken')) 'ENROLL_TOKEN is not written to the registry (#57 stores it protected)'
+Check ($null -eq (Setting 'EnrollToken')) 'ENROLL_TOKEN is not written to the registry'
+$protected = Join-Path $DataDir 'enroll.token.dpapi'
+Check (Test-Path $protected) 'the enrolment token is stored for the agent'
+$bytes = [IO.File]::ReadAllBytes($protected)
+Check (-not ([Text.Encoding]::ASCII.GetString($bytes).Contains($Canary)) -and -not ([Text.Encoding]::Unicode.GetString($bytes).Contains($Canary))) 'the stored token is not in clear text'
+Add-Type -AssemblyName System.Security
+$entropy = [Text.Encoding]::ASCII.GetBytes('palisade-enroll-token-v1')
+$opened = [Security.Cryptography.ProtectedData]::Unprotect($bytes, $entropy, 'LocalMachine')
+Check ([Text.Encoding]::ASCII.GetString($opened) -eq $Canary) 'the stored token is the one given, protected for this machine'
+$tokenAcl = Get-Acl $protected
+$tokenRules = @($tokenAcl.Access | ForEach-Object { "$($_.AccessControlType):$($_.IdentityReference)" } | Sort-Object -Unique)
+Check (($tokenRules -join ',') -eq 'Allow:BUILTIN\Administrators,Allow:NT AUTHORITY\SYSTEM') "the stored token is SYSTEM and Administrators only ($($tokenRules -join ', '))"
 Check ((Setting 'GroupKey') -eq 'smoke') 'GROUP_KEY is stored'
 Check ((Setting 'Proxy') -eq 'system') 'PROXY is stored'
 Check ((Setting 'Mode') -eq 'audit') 'MODE defaults to audit'
@@ -295,6 +316,7 @@ $installer = New-Object -ComObject WindowsInstaller.Installer
 $installedVersion = $installer.GetType().InvokeMember('ProductInfo', 'GetProperty', $null, $installer, @($products[0], 'VersionString'))
 Check ($installedVersion -eq $NewVersion) "the upgraded version is installed ($installedVersion)"
 Check ((Get-Content $state) -eq 'kept across upgrades') 'ProgramData state survives the upgrade'
+Check (Test-Path (Join-Path $DataDir 'enroll.token.dpapi')) 'an upgrade keeps a stored enrolment token not used yet'
 Check ((Setting 'ServerUrl') -eq 'https://palisade.invalid/') 'the upgrade keeps SERVER_URL'
 Check ((Setting 'GroupKey') -eq 'smoke' -and (Setting 'Proxy') -eq 'system' -and (Setting 'Mode') -eq 'audit') 'the upgrade keeps GROUP_KEY, PROXY and MODE'
 Check ((Get-Service $Service).Status -eq 'Running') 'the service runs after the upgrade'
