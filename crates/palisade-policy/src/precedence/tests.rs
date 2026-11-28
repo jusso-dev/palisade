@@ -546,3 +546,36 @@ proptest! {
         }
     }
 }
+
+/// #329 asked whether SHA-1 should rank below SHA-256. It does not: every
+/// file hash is tier 1, so under `specificity` a deny of a known-bad SHA-1
+/// still outranks a publisher allow (ADR 0008, ADR 0018).
+#[test]
+fn compatibility_hashes_stay_in_the_hash_tier() {
+    for field in [
+        crate::model::Field::HashSha1,
+        crate::model::Field::HashMd5,
+        crate::model::Field::HashPageSha1,
+        crate::model::Field::HashAuthenticodeSha1,
+        crate::model::Field::HashSha256,
+    ] {
+        let hex = match field.class() {
+            crate::model::FieldClass::Hash { hex_len } => "a".repeat(hex_len),
+            _ => unreachable!(),
+        };
+        let tree = Match::Criterion(Criterion::new(field, crate::model::Operator::Equals, [hex]));
+        assert_eq!(Spec::of(&tree).tier, Tier::Hash, "{field:?}");
+    }
+    let sha1_deny = candidate(1, 1, Verdict::Deny, Tier::Hash);
+    let publisher_allow = candidate(2, 1, Verdict::Allow, Tier::Signer);
+    assert_eq!(
+        winner(
+            &Specificity {
+                same_tier_tiebreak: TierTiebreak::Deny,
+                allow_tiebreak: AllowTiebreak::MostRestrictive,
+            },
+            &[publisher_allow, sha1_deny]
+        ),
+        id(1)
+    );
+}
