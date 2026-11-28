@@ -10,7 +10,7 @@ use std::{
     },
 };
 
-use palisade_core::Uuid7;
+use palisade_core::{Uuid7, path::VolumeMap};
 use palisade_policy::{
     bundle::{Body, Header, PolicyBundle, SourceRevisions, TargetScope, diff},
     context::EvaluationContext,
@@ -18,10 +18,14 @@ use palisade_policy::{
     demand::FactSet,
     engine::{EngineConfig, Outcome, Request, SystemClock},
     evaluate::Subject,
-    facts::{ObjectFacts, PathVariables},
+    facts::{
+        ObjectFacts, PathFact, PathVariable, PathVariables, SignatureSource, SignerFact,
+        SignerStatus,
+    },
     mode::DeviceState,
     model::{Mode, ObjectType, PolicyDocument},
     test_util::{PolicyBuilder, RuleBuilder, RuleSetBuilder, hash},
+    unknown::SystemBaseline,
 };
 use palisade_proto::{
     events::{EventType, HostId, TenantId, Timestamp},
@@ -218,7 +222,8 @@ fn setup(dir: &Path, records: Box<dyn RecordStore>, mode: EffectiveMode) -> Cach
         records,
         key: RecordKey::from_bytes(&KEY),
         verifier: Box::new(SignedEnvelopes::new(trust())),
-        baseline: None,
+        facts: AgentFacts::default(),
+        events: Arc::new(BoundedSink::default()),
         mode,
         stale_after: StaleAfter::DEFAULT,
         engine: EngineConfig::default(),
@@ -258,14 +263,22 @@ fn decide(active: &Active, digit: char) -> (Verdict2, Verdict) {
     let mut facts = ObjectFacts::new();
     let sha: String = std::iter::repeat_n(digit, 64).collect();
     assert!(facts.set(palisade_policy::model::Field::HashSha256, &sha));
-    let vars = PathVariables::new();
+    decide_facts(active, &facts)
+}
+
+/// Decides an object with `facts`, everything else computed.
+fn decide_facts(active: &Active, facts: &ObjectFacts) -> (Verdict2, Verdict) {
+    let vars = PathVariables::new()
+        .with(PathVariable::Windir, &["C:\\Windows"])
+        .with(PathVariable::System32, &["C:\\Windows\\System32"])
+        .with(PathVariable::ProgramFiles, &["C:\\Program Files"]);
     let ctx = EvaluationContext::new();
     let snapshot = active.policy();
     let state = DeviceState::of(&snapshot.policy().document().policy);
     let request = Request {
         subject: Subject {
             object_type: ObjectType::Executable,
-            facts: &facts,
+            facts,
             variables: &vars,
             context: &ctx,
         },
@@ -281,6 +294,38 @@ fn decide(active: &Active, digit: char) -> (Verdict2, Verdict) {
         panic!("not decided: {:?}", verdict.outcome);
     };
     (d.outcome(), verdict)
+}
+
+/// An executable with hash `digit`, signed by `publisher`, at `path`, not
+/// writable by users.
+fn signed_file(digit: char, publisher: &str, path: &str) -> ObjectFacts {
+    let sha: String = std::iter::repeat_n(digit, 64).collect();
+    let mut signer = SignerFact::new(SignerStatus::CatalogSigned, SignatureSource::Catalog);
+    signer.publisher = Some(publisher.into());
+    ObjectFacts::new()
+        .with(palisade_policy::model::Field::HashSha256, sha)
+        .with_signers(vec![signer])
+        .with_path(
+            PathFact::new(path, &VolumeMap::new())
+                .with_user_writable(false)
+                .with_volume(palisade_policy::unknown::VolumeKind::Fixed),
+        )
+}
+
+const OS: &str = "Operating System Publisher";
+
+fn emergency_facts(enforcement: Enforcement) -> AgentFacts {
+    AgentFacts {
+        baseline: Some(SystemBaseline {
+            publishers: vec![OS.into()],
+            writable_dirs: Vec::new(),
+        }),
+        self_pins: vec![SelfPin {
+            sha256: "e".repeat(64),
+            publisher: "Palisade".into(),
+        }],
+        enforcement,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -302,7 +347,7 @@ fn before_startup_the_emergency_policy_decides() {
 
 #[test]
 fn an_unenrolled_device_runs_the_first_install_policy_and_refuses_bundles() {
-    let c = PolicyCache::unenrolled(EngineConfig::default());
+    let c = PolicyCache::unenrolled(EngineConfig::default(), Arc::new(BoundedSink::default()));
     let report = c.load_startup(ts(T0));
     assert_eq!(report.load, Load::FirstInstall);
     assert!(report.findings.is_empty());
@@ -547,7 +592,10 @@ fn the_system_baseline_is_added_to_every_bundle_loaded() {
         writable_dirs: Vec::new(),
     };
     let c = PolicyCache::new(CacheSetup {
-        baseline: Some(facts.clone()),
+        facts: AgentFacts {
+            baseline: Some(facts.clone()),
+            ..AgentFacts::default()
+        },
         ..setup(dir.path(), files(dir.path()), EffectiveMode::ENFORCE)
     });
     c.load_startup(ts(T0));
@@ -565,7 +613,10 @@ fn the_system_baseline_is_added_to_every_bundle_loaded() {
     assert!(c.current().profiles().is_some());
     // And at startup.
     let again = PolicyCache::new(CacheSetup {
-        baseline: Some(facts),
+        facts: AgentFacts {
+            baseline: Some(facts),
+            ..AgentFacts::default()
+        },
         ..setup(dir.path(), files(dir.path()), EffectiveMode::ENFORCE)
     });
     again.load_startup(ts(T0));
@@ -1102,5 +1153,365 @@ async fn the_subsystem_loads_then_reports_health() {
         tokio::task::yield_now().await;
     }
     assert_eq!(sub.health(), Health::Healthy);
+    handle.shutdown(std::time::Duration::from_secs(1)).await;
+}
+
+// ---------------------------------------------------------------------------
+// Emergency policy and events (#326)
+// ---------------------------------------------------------------------------
+
+/// A cache whose two files are corrupt, so it starts on the emergency
+/// policy, built from `facts`.
+fn emergency(dir: &Path, facts: AgentFacts) -> (PolicyCache, Arc<BoundedSink>, StartupReport) {
+    {
+        let (c, _) = started(dir);
+        c.activate(&signed(1), ts(T0)).unwrap();
+        c.activate(&signed(2), ts(T0)).unwrap();
+    }
+    let s = store(dir);
+    s.write(CacheFile::Active, b"garbage").unwrap();
+    s.write(CacheFile::Previous, b"garbage").unwrap();
+    let sink = Arc::new(BoundedSink::default());
+    let c = PolicyCache::new(CacheSetup {
+        facts,
+        events: Arc::clone(&sink) as Arc<dyn PolicyEventSink>,
+        ..setup(dir, files(dir), EffectiveMode::ENFORCE)
+    });
+    let report = c.load_startup(ts(T0));
+    (c, sink, report)
+}
+
+#[test]
+fn the_emergency_policy_allows_the_os_and_palisade_and_blocks_the_rest() {
+    let dir = TempDir::new("emergency");
+    let (c, sink, report) = emergency(dir.path(), emergency_facts(Enforcement::Palisade));
+    assert_eq!(report.load, Load::Emergency);
+    let active = c.current();
+    let os = signed_file('d', OS, "C:\\Windows\\System32\\a.exe");
+    assert_eq!(decide_facts(&active, &os).0, Verdict2::Allowed);
+    // An OS-signed binary outside the OS locations, or in a user-writable
+    // folder inside them, is not allowed.
+    for path in ["D:\\Tools\\a.exe", "C:\\Windows\\Temp\\a.exe"] {
+        let f = signed_file('d', OS, path);
+        assert_eq!(decide_facts(&active, &f).0, Verdict2::Blocked, "{path}");
+    }
+    // Palisade's own image, by hash and publisher.
+    let me = signed_file('e', "Palisade", "C:\\Program Files\\Palisade\\agent.exe");
+    assert_eq!(decide_facts(&active, &me).0, Verdict2::Allowed);
+    // The same hash signed by someone else, or another file signed by
+    // Palisade, is blocked.
+    let copy = signed_file('e', "Someone Else", "D:\\agent.exe");
+    assert_eq!(decide_facts(&active, &copy).0, Verdict2::Blocked);
+    let other = signed_file('f', "Palisade", "D:\\other.exe");
+    assert_eq!(decide_facts(&active, &other).0, Verdict2::Blocked);
+    // Everything else, including what the bundles allowed.
+    assert_eq!(decide(&active, 'a').0, Verdict2::Blocked);
+    assert_eq!(decide(&active, 'z').0, Verdict2::Blocked);
+
+    // A critical event says it is enforced.
+    let events = sink.drain();
+    let emergency: Vec<_> = events
+        .iter()
+        .filter(|e| e.event_type() == EventType::PolicyEmergencyLoaded)
+        .collect();
+    assert_eq!(emergency.len(), 1, "{events:?}");
+    assert_eq!(emergency[0].detail, Detail::Emergency { enforced: true });
+    assert!(emergency[0].critical());
+    assert!(
+        matches!(health_of(&c.status(ts(T0))), Health::Degraded(r) if r.starts_with("PolicyEmergency:"))
+    );
+}
+
+#[test]
+fn under_native_only_the_emergency_policy_is_audited_and_reported_unenforced() {
+    let dir = TempDir::new("native-only");
+    let (c, sink, _) = emergency(dir.path(), emergency_facts(Enforcement::NativeOnly));
+    assert_eq!(
+        decide(&c.current(), 'z').0,
+        Verdict2::AllowedAudit,
+        "nothing in Palisade's layer enforces it"
+    );
+    assert!(sink.drain().contains(&PolicyEvent {
+        detail: Detail::Emergency { enforced: false },
+        load: Load::Emergency
+    }));
+    assert!(
+        matches!(health_of(&c.status(ts(T0))), Health::Degraded(r) if r.starts_with("PolicyEmergencyUnenforced"))
+    );
+}
+
+#[test]
+fn activation_and_rejection_raise_events() {
+    let dir = TempDir::new("events");
+    let sink = Arc::new(BoundedSink::default());
+    let c = PolicyCache::new(CacheSetup {
+        events: Arc::clone(&sink) as Arc<dyn PolicyEventSink>,
+        ..setup(dir.path(), files(dir.path()), EffectiveMode::ENFORCE)
+    });
+    c.load_startup(ts(T0));
+    c.activate(&signed(2), ts(T0)).unwrap();
+    let _ = c.activate(&signed(1), ts(T0));
+    let _ = c.activate(&signed(2), ts(T0));
+    let events = sink.drain();
+    assert_eq!(
+        events
+            .iter()
+            .map(PolicyEvent::event_type)
+            .collect::<Vec<_>>(),
+        [EventType::PolicyApplied, EventType::PolicyRollbackRejected],
+        "AlreadyCurrent raises nothing"
+    );
+    assert_eq!(
+        events[0].detail,
+        Detail::Applied(c.current().bundle().unwrap())
+    );
+    // A corrupt active at startup: the fallback is reported.
+    let s = store(dir.path());
+    c.activate(&signed(3), ts(T0)).unwrap();
+    s.write(CacheFile::Active, b"garbage").unwrap();
+    let c = PolicyCache::new(CacheSetup {
+        events: Arc::clone(&sink) as Arc<dyn PolicyEventSink>,
+        ..setup(dir.path(), files(dir.path()), EffectiveMode::ENFORCE)
+    });
+    sink.drain();
+    c.load_startup(ts(T0));
+    let types: Vec<_> = sink.drain().iter().map(PolicyEvent::event_type).collect();
+    assert!(types.contains(&EventType::PolicyLkgLoaded), "{types:?}");
+}
+
+// ---------------------------------------------------------------------------
+// Re-verification (#326)
+// ---------------------------------------------------------------------------
+
+fn with_sink(dir: &Path) -> (PolicyCache, Arc<BoundedSink>) {
+    let sink = Arc::new(BoundedSink::default());
+    let c = PolicyCache::new(CacheSetup {
+        events: Arc::clone(&sink) as Arc<dyn PolicyEventSink>,
+        ..setup(dir, files(dir), EffectiveMode::ENFORCE)
+    });
+    c.load_startup(ts(T0));
+    (c, sink)
+}
+
+#[test]
+fn reverification_with_nothing_changed_finds_it_intact() {
+    let dir = TempDir::new("reverify-ok");
+    let (c, sink) = with_sink(dir.path());
+    assert_eq!(c.reverify(ts(T0)), Reverified::Builtin);
+    c.activate(&signed(1), ts(T0)).unwrap();
+    sink.drain();
+    assert_eq!(c.reverify(ts(T0)), Reverified::Intact);
+    assert!(sink.drain().is_empty());
+    let unenrolled = PolicyCache::unenrolled(EngineConfig::default(), sink.clone());
+    assert_eq!(unenrolled.reverify(ts(T0)), Reverified::Builtin);
+}
+
+#[test]
+fn a_cache_file_changed_on_disk_is_restored_from_the_verified_copy() {
+    let dir = TempDir::new("reverify-file");
+    let (c, sink) = with_sink(dir.path());
+    c.activate(&signed(1), ts(T0)).unwrap();
+    sink.drain();
+    let s = store(dir.path());
+    for change in [Some(b"garbage".to_vec()), Some(signed(9)), None] {
+        match &change {
+            Some(bytes) => s.write(CacheFile::Active, bytes).unwrap(),
+            None => s.remove(CacheFile::Active).unwrap(),
+        }
+        assert_eq!(
+            c.reverify(ts(T0)),
+            Reverified::FileRestored(CacheFile::Active)
+        );
+        assert_eq!(s.read(CacheFile::Active).unwrap().unwrap(), signed(1));
+        assert_eq!(version(&c), 1);
+        let events = sink.drain();
+        assert_eq!(
+            events,
+            [PolicyEvent {
+                detail: Detail::Tamper(Tamper::File(CacheFile::Active)),
+                load: c.current().load()
+            }]
+        );
+    }
+
+    // Running `previous` after `active` failed: `previous` is the file
+    // checked and restored.
+    c.activate(&signed(2), ts(T0)).unwrap();
+    let mut active = s.read(CacheFile::Active).unwrap().unwrap();
+    let last = active.len() - 1;
+    active[last] ^= 1;
+    s.write(CacheFile::Active, &active).unwrap();
+    let (c, sink) = with_sink(dir.path());
+    assert!(matches!(c.current().load(), Load::Previous(_)));
+    sink.drain();
+    s.write(CacheFile::Previous, b"garbage").unwrap();
+    assert_eq!(
+        c.reverify(ts(T0)),
+        Reverified::FileRestored(CacheFile::Previous)
+    );
+    assert_eq!(s.read(CacheFile::Previous).unwrap().unwrap(), signed(1));
+    assert_eq!(c.reverify(ts(T0)), Reverified::Intact);
+}
+
+#[test]
+fn a_file_that_cannot_be_restored_keeps_the_verified_policy_running() {
+    let dir = TempDir::new("reverify-stuck");
+    let (c, _) = with_sink(dir.path());
+    c.activate(&signed(1), ts(T0)).unwrap();
+    let s = store(dir.path());
+    // A directory where the file was: neither readable nor replaceable.
+    s.remove(CacheFile::Active).unwrap();
+    fs::create_dir(s.path(CacheFile::Active)).unwrap();
+    fs::write(s.path(CacheFile::Active).join("x"), b"x").unwrap();
+    assert_eq!(
+        c.reverify(ts(T0)),
+        Reverified::FileNotRestored(CacheFile::Active)
+    );
+    assert_eq!(version(&c), 1);
+}
+
+#[test]
+fn a_bundle_that_no_longer_verifies_is_reloaded_and_fails_closed() {
+    let dir = TempDir::new("reverify-trust");
+    let trust = trust();
+    let sink = Arc::new(BoundedSink::default());
+    let c = PolicyCache::new(CacheSetup {
+        verifier: Box::new(SignedEnvelopes::new(Arc::clone(&trust))),
+        events: Arc::clone(&sink) as Arc<dyn PolicyEventSink>,
+        ..setup(dir.path(), files(dir.path()), EffectiveMode::ENFORCE)
+    });
+    c.load_startup(ts(T0));
+    c.activate(&signed(1), ts(T0)).unwrap();
+    c.activate(&signed(2), ts(T0)).unwrap();
+    sink.drain();
+    // The signing key leaves the trust set: neither bundle verifies, so
+    // the cache reloads onto the emergency policy, never onto nothing.
+    trust.store(Arc::new(trust_listing(keys().unlisted, validity())));
+    let Reverified::Reloaded(report) = c.reverify(ts(T0)) else {
+        panic!("not reloaded");
+    };
+    assert_eq!(report.load, Load::Emergency);
+    assert_eq!(c.current().load(), Load::Emergency);
+    let types: Vec<_> = sink.drain().iter().map(PolicyEvent::event_type).collect();
+    assert!(
+        types.contains(&EventType::PolicyEmergencyLoaded),
+        "{types:?}"
+    );
+    assert!(!types.contains(&EventType::AgentTamper), "{types:?}");
+
+    // Past the key's validity window, likewise.
+    let dir = TempDir::new("reverify-late");
+    let (c, _) = with_sink(dir.path());
+    c.activate(&signed(1), ts(T0)).unwrap();
+    assert!(matches!(
+        c.reverify(ts(T0 + 400 * DAY)),
+        Reverified::Reloaded(r) if r.load == Load::Emergency
+    ));
+}
+
+/// Verifies with [`SignedEnvelopes`], but once `skew` is set reports the
+/// bundle one byte off: what the cache sees if the bytes it holds no longer
+/// match what was verified.
+#[derive(Debug)]
+struct Shifting {
+    inner: SignedEnvelopes,
+    skew: Arc<AtomicBool>,
+}
+
+impl EnvelopeVerifier for Shifting {
+    fn examine(&self, file: &[u8], now: Timestamp, mode: EffectiveMode) -> Examination {
+        let mut e = self.inner.examine(file, now, mode);
+        if self.skew.load(Ordering::Relaxed) {
+            e.bundle = e.bundle.start + 1..e.bundle.end;
+        }
+        e
+    }
+}
+
+#[test]
+fn a_policy_in_memory_that_no_longer_matches_is_reloaded_as_tamper() {
+    let dir = TempDir::new("reverify-memory");
+    let skew = Arc::new(AtomicBool::new(false));
+    let sink = Arc::new(BoundedSink::default());
+    let c = PolicyCache::new(CacheSetup {
+        verifier: Box::new(Shifting {
+            inner: SignedEnvelopes::new(trust()),
+            skew: Arc::clone(&skew),
+        }),
+        events: Arc::clone(&sink) as Arc<dyn PolicyEventSink>,
+        ..setup(dir.path(), files(dir.path()), EffectiveMode::ENFORCE)
+    });
+    c.load_startup(ts(T0));
+    c.activate(&signed(1), ts(T0)).unwrap();
+    sink.drain();
+    skew.store(true, Ordering::Relaxed);
+    assert!(matches!(c.reverify(ts(T0)), Reverified::Reloaded(_)));
+    let events = sink.drain();
+    assert_eq!(events[0].event_type(), EventType::AgentTamper);
+    assert_eq!(events[0].detail, Detail::Tamper(Tamper::Memory));
+    // The reload could not read the bundle at the wrong place either, so
+    // it fails closed onto the emergency policy.
+    assert_eq!(c.current().load(), Load::Emergency);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_subsystem_reverifies_on_its_interval() {
+    use crate::{
+        subsystem::Subsystem,
+        supervisor::{RestartPolicy, Supervisor},
+    };
+
+    let dir = TempDir::new("subsystem-reverify");
+    {
+        let (c, _) = started(dir.path());
+        c.activate(&signed(1), ts(T0)).unwrap();
+    }
+    #[derive(Debug)]
+    struct At;
+    impl palisade_core::platform::Clock for At {
+        fn now_utc(&self) -> palisade_core::platform::UtcTime {
+            palisade_core::platform::UtcTime(T0)
+        }
+        fn monotonic(&self) -> palisade_core::platform::MonotonicTime {
+            palisade_core::platform::MonotonicTime(0)
+        }
+    }
+    let sub = Arc::new(
+        PolicyCacheSubsystem::new(Arc::new(cache(dir.path())), Arc::new(At))
+            .with_reverify_interval(std::time::Duration::ZERO),
+    );
+    let config = Arc::new(crate::host::ConfigSubsystem::new(
+        crate::config::LoadedConfig {
+            config: crate::config::AgentConfig::default(),
+            source: None,
+        },
+    ));
+    let supervisor = Supervisor::new(
+        vec![config, Arc::clone(&sub) as Arc<dyn Subsystem>],
+        RestartPolicy::default(),
+    )
+    .unwrap();
+    let handle = supervisor.start();
+    let mut rx = handle.subscribe();
+    rx.wait_for(|s| *s != crate::lifecycle::AgentState::Starting)
+        .await
+        .unwrap();
+    // The file changes; within one interval (clamped to a second) it is
+    // put back.
+    store(dir.path())
+        .write(CacheFile::Active, b"garbage")
+        .unwrap();
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        if store(dir.path()).read(CacheFile::Active).unwrap().unwrap() == signed(1) {
+            break;
+        }
+    }
+    assert_eq!(
+        store(dir.path()).read(CacheFile::Active).unwrap().unwrap(),
+        signed(1)
+    );
+    assert_eq!(sub.health(), Health::Healthy);
+    assert_eq!(subsystem::REVERIFY_INTERVAL.as_secs(), 15 * 60);
     handle.shutdown(std::time::Duration::from_secs(1)).await;
 }
