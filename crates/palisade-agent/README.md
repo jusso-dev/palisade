@@ -2,7 +2,7 @@
 
 The Windows endpoint agent: a Windows service that collects execution events, caches policy locally and drives enforcement.
 
-**Status:** service host only. The process, component model, supervisor, lifecycle states and configuration loading are in place ([#56](https://github.com/jusso-dev/palisade/issues/56)). The subsystems so far are `config` and `clock`. Policy cache (#61), server comms (#62), ETW (#59), the installer (#57) and tamper protection (#220) come later. Parent epic: [#4](https://github.com/jusso-dev/palisade/issues/4).
+**Status:** service host only. The process, component model, supervisor, lifecycle states and configuration loading are in place ([#56](https://github.com/jusso-dev/palisade/issues/56)). The subsystems so far are `config`, `clock` and, on Windows, `process-monitor` (#59, see below). Policy cache (#61), server comms (#62), the installer (#57) and tamper protection (#220) come later. Parent epic: [#4](https://github.com/jusso-dev/palisade/issues/4).
 
 ## Running
 
@@ -54,6 +54,19 @@ Advanced settings (`agent.advanced.*`, delivered with policy) are checked agains
 ### Adding a subsystem
 
 Implement `Subsystem`, give it a stable `name`, choose its `criticality` and list the names it depends on in `dependencies` (usually at least `config`). Construct it in `host::builtin_subsystems` with what it needs, such as a `ConfigSubsystem::subscribe` receiver, after the subsystems it depends on. In `run`, subscribe to `ctx.host_events()` if it needs OS notifications, call `ctx.set_ready()` once initialised, and return by the deadline `ctx.stopped()` gives.
+
+## Process monitor (#59)
+
+`telemetry` watches process starts and stops and image loads (executables, libraries and drivers) through a real-time ETW session, `Palisade-Agent-Trace`, with the kernel process provider bound by GUID. Console and service runs register it (`host::agent_supervisor`); `host::supervisor`, which tests use, does not, so tests never touch the machine-wide session.
+
+- `telemetry::kernel` decodes the provider's records: process start versions 0 to 4, stop 0 to 2, image load and unload 0. It is portable and fuzzed (`crates/palisade-agent/fuzz`, target `kernel_records`). An unknown version, a short record, trailing bytes, a string without its terminator or text that is not valid UTF-16 is an error, never a guess.
+- `telemetry::tree` is the process tree, keyed by process ID **and** creation time. A parent is linked only if its sequence number matches, or if it has the recorded parent ID, was created no later than the child and was still running then. A reused process ID is never read as the parent. Exited processes are kept for 10 minutes so late events can be correlated, and the tree holds at most 200,000 processes. When it is full, the process that exited first is evicted; a new process that still finds no room is counted, not recorded.
+- `telemetry::cmdline` captures command lines (`capture_cmdline`, on by default). It redacts them with the decision-trace redactor, with default patterns for `password=`, `-p <x>` and similar that policy can add to but not remove, and then cuts them to 32,767 characters with a `truncated` flag.
+- `telemetry::monitor` is the state machine. It runs a startup snapshot (`observed_start = false`), finds parents, reads command lines and tokens, and emits `ProcessStart`, `ProcessStop`, `ImageLoad` (drivers always; libraries per `dll_events`, where `untrusted_only` emits every library until identity results arrive) and an advisory `ParentSpoof` when the creator is not the recorded parent. A `PostStartAction` hook is off by default.
+- `telemetry::output` is the seam to the event pipeline (#63): a non-blocking `TelemetrySink`, a bounded `ChannelSink`, and `process_fields`, which builds the canonical `process` field set with its parent and grandparent. Until #63 lands, the host wires a `DiscardSink`.
+- On Windows, the ETW callback (`ffi::etw`) only copies records into a bounded queue (50,000). A worker thread decodes them. The subsystem's health reports events the OS lost, records dropped from the queue or not decoded, and events the sink refused, so no loss is silent. A stale session left by a crash is stopped and started again.
+
+Still to come, tracked on #59: identity resolution and audit evaluation of each image (they need the hash cache and policy cache, #61), image-hijack detection, masquerade signals (#55), directory group resolution, the file provider, the NT kernel logger fallback, and the Windows integration and stress tests.
 
 ## Platform layer
 

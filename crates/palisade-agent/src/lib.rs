@@ -22,3 +22,4 @@ pub mod settings;
 pub mod simulate;
 pub mod subsystem;
 pub mod supervisor;
+pub mod telemetry;

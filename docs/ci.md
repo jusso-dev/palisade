@@ -430,6 +430,7 @@ cargo xtask docs check
 cargo xtask docs build             # needs mdbook 0.5.2, mdbook-mermaid-ssr 0.3.0, lychee 0.24.2
 typos                              # needs typos 1.52.2
 cargo deny --locked check          # needs cargo-deny 0.22
+cargo deny --locked --manifest-path crates/palisade-agent/fuzz/Cargo.toml --config deny.toml check
 cargo deny --locked --manifest-path crates/palisade-fileid/fuzz/Cargo.toml --config deny.toml check
 cargo deny --locked --manifest-path crates/palisade-proto/fuzz/Cargo.toml --config deny.toml check
 cargo deny --locked --manifest-path crates/palisade-policy/fuzz/Cargo.toml --config deny.toml check

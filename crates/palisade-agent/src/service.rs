@@ -245,7 +245,7 @@ fn run(
         Ok(loaded) => loaded,
         Err(_) => return EXIT_START_FAILED,
     };
-    let supervisor = match host::supervisor(&loaded) {
+    let supervisor = match host::agent_supervisor(&loaded) {
         Ok(supervisor) => supervisor,
         Err(e) => {
             tracing::error!(error = %e, "invalid subsystem set");

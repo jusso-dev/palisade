@@ -154,6 +154,11 @@ const BUNDLE_DELTA_SEEDS: Seed = Seed {
     name: "write_bundle_delta_fuzz_seeds",
 };
 
+const KERNEL_SEEDS: Seed = Seed {
+    test: "telemetry",
+    name: "write_kernel_fuzz_seeds",
+};
+
 /// Seeds from the generated fixture corpus (#25): PEs, their signatures and
 /// the test PKI's certificates.
 const CORPUS_SEEDS: Seed = Seed {
@@ -243,6 +248,15 @@ pub const PROJECTS: &[Project] = &[
                 seeds: &[PE_SEEDS, IDENTITY_SEEDS],
             },
         ],
+    },
+    Project {
+        dir: "crates/palisade-agent/fuzz",
+        package: "palisade-agent",
+        targets: &[Target {
+            name: "kernel_records",
+            dict: None,
+            seeds: &[KERNEL_SEEDS],
+        }],
     },
     Project {
         dir: "crates/palisade-proto/fuzz",

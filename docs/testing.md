@@ -235,6 +235,8 @@ them, and only they need a nightly toolchain. There are three projects:
   `content-rules` feature, for `fuzz_tags`.
 - `crates/palisade-proto/fuzz`, with two targets: `trust_set_decode` and `policy_envelope_decode`
   (the signed policy bundle envelope, its verification and delta rebuilding, #325).
+- `crates/palisade-agent/fuzz`, with one target: `kernel_records` (the kernel process provider's
+  ETW record decoder and the process monitor that consumes it, #59).
 - `crates/palisade-policy/fuzz`, with five targets: `fuzz_policy_json` (the strict JSON reader,
   validation and the evaluator build), `fuzz_policy_yaml` (the YAML reader),
   `fuzz_wildcard_regex_compile` (compiling and matching wildcards, regular expressions and text
