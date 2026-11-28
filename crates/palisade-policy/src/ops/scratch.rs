@@ -72,6 +72,27 @@ pub(crate) fn with_folded<R>(s: &str, case_sensitive: bool, f: impl FnOnce(&str)
     })
 }
 
+/// Appends `s` folded as [`super::fold_path`] folds it: with the upcase
+/// table, and no NFC.
+pub(crate) fn fold_path_into(out: &mut String, s: &str, case_sensitive: bool) {
+    if case_sensitive {
+        out.push_str(s);
+    } else if s.is_ascii() {
+        out.extend(s.bytes().map(|b| char::from(b.to_ascii_uppercase())));
+    } else {
+        out.extend(s.chars().map(palisade_core::upcase::upcase_char));
+    }
+}
+
+/// Runs `f` with `s` folded as [`super::fold_path`] folds it, without
+/// allocating once the thread's buffers are warm.
+pub(crate) fn with_path_folded<R>(s: &str, case_sensitive: bool, f: impl FnOnce(&str) -> R) -> R {
+    with_buffer(|buf| {
+        fold_path_into(buf, s, case_sensitive);
+        f(buf)
+    })
+}
+
 /// Runs `f` with `s` NFC-normalised.
 pub(crate) fn with_nfc<R>(s: &str, f: impl FnOnce(&str) -> R) -> R {
     if s.is_ascii() {
@@ -108,6 +129,27 @@ mod tests {
             }
             let nfc: String = s.nfc().collect();
             assert_eq!(with_nfc(s, str::to_owned), nfc);
+        }
+    }
+
+    #[test]
+    fn path_folding_matches_fold_path() {
+        for s in [
+            "",
+            "abc",
+            "C:\\Program Files\\x.EXE",
+            "\u{17f}etup.exe",
+            "e\u{301}",
+            "\u{1f80}",
+            "\u{10428}",
+        ] {
+            for cs in [false, true] {
+                assert_eq!(
+                    with_path_folded(s, cs, str::to_owned),
+                    super::super::fold_path(s, cs),
+                    "{s:?} {cs}"
+                );
+            }
         }
     }
 

@@ -6,10 +6,10 @@ Each `*.toml` file here is a table of cases. `tests/ops_vectors.rs` runs every o
 [[case]]
 name = "what it shows"
 criterion = { field = "meta.product_name", operator = "equals", values = ["Editor"] }
-# The fact. Use `fact` for a text, hash or version fact, `path` (with `user_writable`
-# and `volume`: fixed, removable, optical or network) for a path, or `context` for the
-# context fields the case sets. An allow only trusts a path with `user_writable = false`
-# on a `fixed` volume.
+# The fact. Use `fact` for a text, hash or version fact, `path` (with `user_writable`,
+# `volume`: fixed, removable, optical or network, and `fold_unknown` for a volume whose
+# case folding is not known) for a path, or `context` for the context fields the case
+# sets. An allow only trusts a path with `user_writable = false` on a `fixed` volume.
 fact = "editor"
 action = "deny"        # optional: the rule's action; default deny
 expect = "match"       # match | no_match | unknown

@@ -636,6 +636,57 @@ fn a_user_writable_path_warns_and_is_why_not() {
     explained("path-acl-unsafe", &t);
 }
 
+/// #399: on a volume whose case folding is not known, a path allow does
+/// not count, with a `fold_unknown` warning and why-not line; and a draft
+/// allow is never written on such a path.
+#[test]
+fn an_unknown_fold_path_warns_and_is_why_not() {
+    let p = fixture();
+    let mut o = object(
+        'b',
+        "Example Ltd",
+        "Other",
+        "C:\\Tools\\tool.exe",
+        Some(false),
+    );
+    if let Some(path) = o.facts.path.as_mut() {
+        path.volume = Some(crate::unknown::VolumeKind::Fixed);
+        path.fold_unknown = true;
+    }
+    let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Full);
+    assert!(t.decisive.is_none());
+    let w = t
+        .warnings
+        .iter()
+        .find(|w| w.code == WarningCode::FoldUnknown)
+        .unwrap();
+    assert!(
+        w.rules
+            .iter()
+            .any(|r| r.display_id.unwrap().to_string() == "R-000003")
+    );
+    let doc = explain(&t, Verbosity::Normal);
+    let lines: Vec<String> = doc
+        .why_not
+        .iter()
+        .map(|m| Catalog::english().format(m))
+        .collect();
+    assert!(
+        lines.iter().any(|l| l == "Rule 'Tools folder' (R-000003) would allow this file, but the path is on a volume whose case rules are not known."),
+        "{lines:?}"
+    );
+    // The same path on a known volume is allowed by R-000003.
+    if let Some(path) = o.facts.path.as_mut() {
+        path.fold_unknown = false;
+    }
+    let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Full);
+    assert!(
+        t.warnings
+            .iter()
+            .all(|w| w.code != WarningCode::FoldUnknown)
+    );
+}
+
 #[test]
 fn an_override_session_is_traced_with_its_mode_steps() {
     let p = fixture();
@@ -1517,6 +1568,7 @@ fn to_snapshot(i: usize, f: &ObjectFacts, s: &DeviceState, t: ObjectType) -> Fac
                 path: p.path.as_str().to_owned(),
                 alias: None,
                 short_name_unresolved: p.short_name_unresolved,
+                fold_unknown: p.fold_unknown,
                 user_writable: p.user_writable,
                 volume: None,
             }),
@@ -1929,6 +1981,9 @@ fn the_draft_falls_back_when_a_criterion_would_not_validate() {
             .identity,
         DraftIdentity::Path
     );
+    // A path on a volume whose case folding is not known is never a draft
+    // identity: an allow on it would never match (#399).
+    assert!(draft(ObjectFacts::new().with_path(path().with_fold_unknown())).is_none());
     // A redacted version is not used, and a relaxed signature is not
     // offered as a publisher identity.
     let mut options = TraceOptions::at(TraceLevel::Standard);
@@ -2242,6 +2297,7 @@ fn object_keys_identify_one_object_across_spellings() {
             path: p.to_owned(),
             alias: None,
             short_name_unresolved: false,
+            fold_unknown: false,
             user_writable: None,
             volume: None,
         }),
@@ -2479,6 +2535,7 @@ fn an_unexpanded_short_name_is_not_an_object_identity() {
             path: "C:\\PROGRA~1\\Tools\\x.exe".to_owned(),
             alias: None,
             short_name_unresolved: true,
+            fold_unknown: false,
             user_writable: None,
             volume: None,
         }),
@@ -2498,6 +2555,25 @@ fn an_unexpanded_short_name_is_not_an_object_identity() {
     assert_eq!(
         simulate::object_key(&snap(short.clone())).as_deref(),
         Some("publisher:EXAMPLE LTD")
+    );
+    // A path on a volume whose case folding is not known is not an
+    // identity either (#399).
+    let mut odd = short.clone();
+    if let Some(p) = odd.path.as_mut() {
+        p.path = "\\\\srv\\share\\x.exe".to_owned();
+        p.short_name_unresolved = false;
+        p.fold_unknown = true;
+    }
+    assert_eq!(
+        simulate::object_key(&snap(odd.clone())).as_deref(),
+        Some("publisher:EXAMPLE LTD")
+    );
+    if let Some(p) = odd.path.as_mut() {
+        p.fold_unknown = false;
+    }
+    assert_eq!(
+        simulate::object_key(&snap(odd)).as_deref(),
+        Some("path:\\\\SRV\\SHARE\\X.EXE")
     );
     // With no other identity, there is none.
     let bare = SnapshotFacts {

@@ -195,3 +195,79 @@ path = 'E:\Tools\a.exe'
 volume = "removable"
 action = "deny"
 expect = "match"
+
+# Names in a path fold with the NTFS upcase table, and with no NFC (#399).
+
+[[case]]
+name = "the long s is not an S on NTFS"
+criterion = { field = "path.full", operator = "equals", values = ["C:\\Tools\\SETUP.EXE"] }
+path = "C:\\Tools\\\u017Fetup.exe"
+expect = "no_match"
+
+[[case]]
+name = "the dotless i is not an I on NTFS"
+criterion = { field = "path.file_name", operator = "equals", values = ["DIG.EXE"] }
+path = "C:\\Tools\\d\u0131g.exe"
+expect = "no_match"
+
+[[case]]
+name = "Greek with a combining iota folds on NTFS"
+criterion = { field = "path.full", operator = "equals", values = ["C:\\Tools\\\u1F80.exe"] }
+path = "C:\\Tools\\\u1F88.EXE"
+expect = "match"
+
+[[case]]
+name = "NFC and NFD spellings are two names"
+criterion = { field = "path.full", operator = "equals", values = ["C:\\Caf\u00E9\\a.exe"] }
+path = "C:\\Cafe\u0301\\a.exe"
+expect = "no_match"
+
+[[case]]
+name = "a value is read in NFC"
+criterion = { field = "path.full", operator = "equals", values = ["C:\\Cafe\u0301\\a.exe"] }
+path = "C:\\Caf\u00E9\\a.exe"
+expect = "match"
+
+# A volume whose case folding is not known, such as any network share
+# (#399): a path test is unknown whenever its result would relax its rule.
+
+[[case]]
+name = "unknown fold: a deny that misses by key is unknown"
+criterion = { field = "path.full", operator = "equals", values = ["\\\\srv\\share\\setup.exe"] }
+path = "\\\\srv\\share\\\u017Fetup.exe"
+fold_unknown = true
+expect = "unknown"
+
+[[case]]
+name = "unknown fold: a deny that matches by key matches"
+criterion = { field = "path.full", operator = "equals", values = ["\\\\srv\\share\\setup.exe"] }
+path = "\\\\srv\\share\\SETUP.EXE"
+fold_unknown = true
+expect = "match"
+
+[[case]]
+name = "unknown fold: a negated deny test that matches by key is unknown"
+criterion = { field = "path.full", operator = "not_wildcard", values = ["\\\\srv\\share\\**"] }
+path = "\\\\srv\\share\\a.exe"
+fold_unknown = true
+expect = "unknown"
+
+[[case]]
+name = "unknown fold: an allow never matches"
+criterion = { field = "path.full", operator = "equals", values = ["C:\\Tools\\a.exe"] }
+path = "C:\\Tools\\a.exe"
+user_writable = false
+volume = "fixed"
+fold_unknown = true
+action = "allow"
+expect = "unknown"
+
+[[case]]
+name = "unknown fold: an allow that misses is still a miss"
+criterion = { field = "path.full", operator = "equals", values = ["C:\\Tools\\a.exe"] }
+path = "C:\\Tools\\b.exe"
+user_writable = false
+volume = "fixed"
+fold_unknown = true
+action = "allow"
+expect = "no_match"

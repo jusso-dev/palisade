@@ -1328,7 +1328,7 @@ pub struct PathInfo {
     #[serde(skip)]
     pub final_case_sensitive: Vec<usize>,
     /// The final path is on a volume whose upcase table is not known to be
-    /// the standard one (#332), so [`Self::rule_path`] keeps it unfolded.
+    /// the standard one (#332), so the path rules match keeps it unfolded.
     /// Not serialised: `rule_key` already reflects it.
     #[serde(skip)]
     pub final_fold_unknown: bool,

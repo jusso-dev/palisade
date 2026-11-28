@@ -33,6 +33,16 @@
 //! character whose upper case is several characters, such as `ß`, is left
 //! as it is. Hash values are compared as hex digits in either case.
 //!
+//! Names in a path (`path.full`, `path.directory`, `path.file_name`,
+//! `path.extension` and `path.share`) are compared as NTFS compares them
+//! instead (#399, [`fold_path`]): the fact is not NFC-normalised, since
+//! the volume stores names as written and a composed and a decomposed
+//! spelling are two files, and both sides are upper-cased with the NTFS
+//! upcase table ([`palisade_core::upcase`]), which leaves `ı`, `ſ` and the
+//! Kelvin sign apart from ASCII (`ſetup.exe` is not `SETUP.EXE`) and folds
+//! some characters Unicode does not (`ᾀ` is `ᾈ`). A rule's value is read in
+//! NFC, the form a bundle stores text in, before it is upper-cased.
+//!
 //! # Paths
 //!
 //! Path facts and path values pass through the same lexical normalisation
@@ -40,6 +50,17 @@
 //! the path is missing, is not a drive or UNC path, or contains a short
 //! (8.3) name the agent could not expand. A mapped network drive matches in
 //! both its drive form and its UNC form ([`PathFact::alias`]).
+//!
+//! On a volume whose case folding is not known to be the standard NTFS
+//! table ([`PathFact::fold_unknown`], every network share among them), the
+//! folded key is not proof either way: the volume may treat `ſetup.exe`
+//! and `SETUP.EXE` as one name. A path test is then `Unknown`, with
+//! [`Note::FoldUnknown`], whenever its result would relax its rule: a miss
+//! (or, negated, a match) in a `deny` or `audit`, so the decision falls to
+//! `unknown_as` and the implicit deny (ADR 0018); and a match in a rule
+//! that lets the object run, trusts it or excludes it, so a path allow
+//! there never matches. The direction counts the `not` nodes above the
+//! criterion ([`CompiledCriterion::eval_under`]).
 //!
 //! On `path.full` and `path.directory`:
 //!
@@ -333,11 +354,15 @@ pub enum Note {
     /// The agent ran out of the rule's budget before it collected a probed
     /// fact (#33, #329).
     ConditionTimeout = 9,
+    /// The path is on a volume whose case folding is not known to be the
+    /// standard NTFS table, such as any network share (#399): two names
+    /// that fold apart here may be one name there, and the reverse.
+    FoldUnknown = 10,
 }
 
 impl Note {
     /// Every note, in code order.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::FactMissing,
         Self::PathAclUnsafe,
         Self::ShortNameUnresolved,
@@ -348,6 +373,7 @@ impl Note {
         Self::SignerNotTrusted,
         Self::FactMalformed,
         Self::ConditionTimeout,
+        Self::FoldUnknown,
     ];
 
     /// The stable `snake_case` name.
@@ -364,6 +390,7 @@ impl Note {
             Self::SignerNotTrusted => "signer_not_trusted",
             Self::FactMalformed => "fact_malformed",
             Self::ConditionTimeout => "condition_timeout",
+            Self::FoldUnknown => "fold_unknown",
         }
     }
 }
@@ -774,16 +801,55 @@ impl CompiledCriterion {
         self.safety_critical
     }
 
-    /// Evaluates the criterion against one object's facts.
+    /// Evaluates the criterion against one object's facts, as the whole
+    /// match tree of a rule (under no `not`).
     #[must_use]
     pub fn eval(&self, facts: &ObjectFacts, ctx: &EvalContext<'_>) -> Evaluation {
+        self.eval_under(facts, ctx, false)
+    }
+
+    /// Evaluates the criterion against one object's facts, in a match tree
+    /// where it is under an odd number of `not` nodes if `under_not`.
+    ///
+    /// On a path whose volume's case folding is not known
+    /// ([`PathFact::fold_unknown`], #399), a test of a name in the path is
+    /// `Unknown`, with [`Note::FoldUnknown`], whenever its result would make
+    /// the rule less strict: for a rule that lets the object run, trusts it
+    /// or excludes it, a result that pulls the rule towards applying; for
+    /// any other rule (a `deny` or `audit`), one that pulls it away. The
+    /// standard table can fold apart two names the volume treats as one,
+    /// or fold together two it keeps apart, so neither a match nor a miss
+    /// by key is proof there.
+    #[must_use]
+    pub fn eval_under(
+        &self,
+        facts: &ObjectFacts,
+        ctx: &EvalContext<'_>,
+        under_not: bool,
+    ) -> Evaluation {
         let mut notes = Notes::default();
         let positive = self.eval_positive(facts, ctx, &mut notes);
-        let result = if self.negated {
+        let mut result = if self.negated {
             positive.not()
         } else {
             positive
         };
+        if result != Tri::Unknown
+            && is_path_name(self.field)
+            && facts.path.as_ref().is_some_and(|p| p.fold_unknown)
+        {
+            // The leaf result that pulls the rule towards applying.
+            let towards = Tri::from_bool(!under_not);
+            let lenient = if ctx.action.needs_identity() {
+                result == towards
+            } else {
+                result != towards
+            };
+            if lenient {
+                notes.insert(Note::FoldUnknown);
+                result = Tri::Unknown;
+            }
+        }
         Evaluation { result, notes }
     }
 
@@ -1062,6 +1128,17 @@ impl CompiledCriterion {
         }
     }
 
+    /// Runs `f` with `fact` folded as this criterion's field compares it:
+    /// as NTFS compares names on a path field ([`fold_path`]), otherwise
+    /// with NFC and the simple upper-case mapping ([`fold`]).
+    fn with_fact_folded<R>(&self, fact: &str, f: impl FnOnce(&str) -> R) -> R {
+        if is_path_name(self.field) {
+            with_path_folded(fact, self.case_sensitive, f)
+        } else {
+            with_folded(fact, self.case_sensitive, f)
+        }
+    }
+
     /// A hash, text or version fact.
     fn eval_value(&self, fact: &str, notes: &mut Notes) -> Tri {
         match &self.values {
@@ -1094,13 +1171,18 @@ impl CompiledCriterion {
                 Some(have) => Tri::from_bool(*min <= have && have <= *max),
                 None => Tri::Unknown,
             },
+            // A name in a path is matched as the volume stores it, with no
+            // NFC (#399).
+            Values::Regex(patterns) if is_path_name(self.field) => {
+                Tri::from_bool(patterns.iter().any(|p| p.is_match(fact)))
+            }
             Values::Regex(patterns) => with_nfc(fact, |text| {
                 Tri::from_bool(patterns.iter().any(|p| p.is_match(text)))
             }),
-            Values::Wildcard(patterns) => with_folded(fact, self.case_sensitive, |text| {
+            Values::Wildcard(patterns) => self.with_fact_folded(fact, |text| {
                 Tri::from_bool(patterns.iter().any(|p| p.is_match(text)))
             }),
-            Values::Text(values) => with_folded(fact, self.case_sensitive, |fact| {
+            Values::Text(values) => self.with_fact_folded(fact, |fact| {
                 Tri::from_bool(values.iter().any(|v| self.text_op(fact, v)))
             }),
             // Only built for path fields, which `eval_path_form` handles,
@@ -1247,7 +1329,7 @@ impl CompiledCriterion {
         notes: &mut Notes,
     ) -> Tri {
         match &self.values {
-            Values::PathLiteral(values) => with_folded(raw, self.case_sensitive, |fact| {
+            Values::PathLiteral(values) => with_path_folded(raw, self.case_sensitive, |fact| {
                 let mut result = Tri::NoMatch;
                 for value in values {
                     // On `path.full`, a value that names a stream only
@@ -1273,7 +1355,7 @@ impl CompiledCriterion {
                 }
                 result
             }),
-            Values::PathWildcard(values) => with_folded(raw, self.case_sensitive, |fact| {
+            Values::PathWildcard(values) => with_path_folded(raw, self.case_sensitive, |fact| {
                 let mut result = Tri::NoMatch;
                 for value in values {
                     if value.names_stream != fact_stream {
@@ -1300,7 +1382,7 @@ impl CompiledCriterion {
             // stream when the fact is one, and only values that do not when
             // it is not.
             Values::Text(values) if self.field == Field::PathFull => {
-                with_folded(raw, self.case_sensitive, |fact| {
+                with_path_folded(raw, self.case_sensitive, |fact| {
                     Tri::from_bool(
                         values
                             .iter()
@@ -1331,7 +1413,7 @@ impl CompiledCriterion {
             return Tri::Unknown;
         }
         Tri::from_bool(bases.iter().any(|base| {
-            with_folded(
+            with_path_folded(
                 base.as_str().trim_end_matches('\\'),
                 self.case_sensitive,
                 &test,
@@ -1656,7 +1738,7 @@ fn compile_values(
         FieldClass::Path => match operator {
             Operator::Wildcard => Values::PathWildcard(each(values, |v| {
                 let (variable, text, names_stream) = path_value(v, true)?;
-                let rest = wildcard_regex(&fold(&text, case_sensitive), true)?;
+                let rest = wildcard_regex(&fold_path_value(&text, case_sensitive), true)?;
                 Ok(PathValue {
                     variable,
                     rest,
@@ -1667,7 +1749,7 @@ fn compile_values(
                 let (variable, text, names_stream) = path_value(v, false)?;
                 Ok(PathValue {
                     variable,
-                    rest: fold(&text, case_sensitive),
+                    rest: fold_path_value(&text, case_sensitive),
                     names_stream,
                 })
             })?),
@@ -1680,7 +1762,7 @@ fn compile_values(
                         "`%{name}%` is only expanded by `equals`, `starts_with` and `wildcard`"
                     )));
                 }
-                Ok(fold(&v.replace('/', "\\"), case_sensitive))
+                Ok(fold_path_value(&v.replace('/', "\\"), case_sensitive))
             })?),
         },
         FieldClass::FileName
@@ -1697,7 +1779,11 @@ fn compile_values(
                 {
                     return Err(invalid("a file name cannot contain `\\` or `/`"));
                 }
-                Ok(fold(v, case_sensitive))
+                Ok(if is_path_name(field) {
+                    fold_path_value(v, case_sensitive)
+                } else {
+                    fold(v, case_sensitive)
+                })
             };
             match operator {
                 Operator::Wildcard => {
@@ -1808,6 +1894,38 @@ pub fn fold(s: &str, case_sensitive: bool) -> String {
     } else {
         s.nfc().map(simple_upper).collect()
     }
+}
+
+/// Whether `field` tests a name in the object's path, which is compared as
+/// the volume compares names ([`fold_path`], #399): `path.full`,
+/// `path.directory`, `path.file_name`, `path.extension` and `path.share`.
+#[must_use]
+pub const fn is_path_name(field: Field) -> bool {
+    matches!(field.class(), FieldClass::Path | FieldClass::FileName)
+        || matches!(field, Field::PathShare)
+}
+
+/// Folds a path fact, or a name in one, as NTFS compares names (#399):
+/// unless `case_sensitive`, each character is upper-cased with the
+/// volume's upcase table ([`palisade_core::upcase::fold`]). There is no
+/// NFC: NTFS stores names as written, so a composed and a decomposed
+/// spelling are two names.
+#[must_use]
+pub fn fold_path(s: &str, case_sensitive: bool) -> String {
+    if case_sensitive {
+        s.to_owned()
+    } else {
+        palisade_core::upcase::fold(s)
+    }
+}
+
+/// Folds a path value of a rule: NFC, the form a bundle stores text in
+/// ([`crate::bundle`]), so a value means the same whether it was compiled
+/// from a bundle or from the document; then [`fold_path`].
+#[must_use]
+pub fn fold_path_value(s: &str, case_sensitive: bool) -> String {
+    let nfc: String = s.nfc().collect();
+    fold_path(&nfc, case_sensitive)
 }
 
 /// The Unicode simple upper-case mapping: `c` itself when its upper case is
@@ -2154,7 +2272,7 @@ fn wildcard_regex(pattern: &str, path: bool) -> Result<Regex, CompileErrorKind> 
 pub(crate) mod anchor;
 pub(crate) mod scratch;
 
-use scratch::{with_folded, with_nfc};
+use scratch::{with_folded, with_nfc, with_path_folded};
 
 #[cfg(test)]
 mod tests;

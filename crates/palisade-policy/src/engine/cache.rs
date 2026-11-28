@@ -549,8 +549,9 @@ impl DecisionCache {
 }
 
 /// A hash of the facts of an object that its file identity does not fix:
-/// the path, its alias, whether its short name was resolved, its ACL
-/// fact, and the path variables that path criteria expand.
+/// the path, its alias, whether its short name was resolved, whether its
+/// volume's case folding is known, its ACL fact, and the path variables
+/// that path criteria expand.
 #[must_use]
 pub fn object_key(
     facts: &crate::facts::ObjectFacts,
@@ -565,6 +566,7 @@ pub fn object_key(
                 1u8,
                 p.path.as_str(),
                 p.short_name_unresolved,
+                p.fold_unknown,
                 p.user_writable,
             )
                 .hash(&mut h);

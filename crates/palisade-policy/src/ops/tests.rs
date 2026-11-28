@@ -311,8 +311,59 @@ fn unicode_is_compared_after_nfc() {
             "{op:?}"
         );
     }
+}
+
+/// Names in a path fold as NTFS folds them (#399): with the upcase table,
+/// and no NFC, so composed and decomposed spellings are two names.
+#[test]
+fn path_names_fold_with_the_upcase_table() {
     let p = compile(Field::PathFull, Operator::Equals, &["C:\\Caf\u{e9}\\a.exe"]);
-    assert_eq!(eval(&p, &at_path("c:\\CAFE\u{301}\\A.EXE")), Match);
+    assert_eq!(eval(&p, &at_path("c:\\CAF\u{c9}\\A.EXE")), Match);
+    assert_eq!(eval(&p, &at_path("c:\\CAFE\u{301}\\A.EXE")), NoMatch);
+    // A value is read in NFC, the form a bundle stores it in, so a
+    // decomposed value names the composed file.
+    let nfd = compile(
+        Field::PathFull,
+        Operator::Equals,
+        &["C:\\Cafe\u{301}\\a.exe"],
+    );
+    assert_eq!(eval(&nfd, &at_path("C:\\Caf\u{e9}\\a.exe")), Match);
+    assert_eq!(eval(&nfd, &at_path("C:\\Cafe\u{301}\\a.exe")), NoMatch);
+    // Unicode folds these into ASCII; NTFS does not.
+    for (value, fact) in [
+        ("C:\\setup.exe", "C:\\\u{17f}etup.exe"),
+        ("C:\\SETUP.EXE", "C:\\\u{17f}etup.exe"),
+        ("C:\\dig.exe", "C:\\d\u{131}g.exe"),
+        ("C:\\k.exe", "C:\\\u{212a}.exe"),
+    ] {
+        let c = compile(Field::PathFull, Operator::Equals, &[value]);
+        assert_eq!(eval(&c, &at_path(fact)), NoMatch, "{value} / {fact}");
+    }
+    // Greek with a combining iota folds on NTFS, though its full Unicode
+    // upper case is two characters.
+    let greek = compile(Field::PathFull, Operator::Equals, &["C:\\\u{1f80}.exe"]);
+    assert_eq!(eval(&greek, &at_path("C:\\\u{1f88}.EXE")), Match);
+    // The same on the name fields, and in wildcards and text tests.
+    let name = compile(Field::PathFileName, Operator::Equals, &["SETUP.EXE"]);
+    assert_eq!(eval(&name, &at_path("C:\\\u{17f}etup.exe")), NoMatch);
+    assert_eq!(eval(&name, &at_path("C:\\setup.exe")), Match);
+    let name = compile(Field::PathFileName, Operator::Equals, &["\u{1f80}.exe"]);
+    assert_eq!(eval(&name, &at_path("C:\\\u{1f88}.EXE")), Match);
+    let ext = compile(Field::PathExtension, Operator::Equals, &["S"]);
+    assert_eq!(eval(&ext, &at_path("C:\\a.\u{17f}")), NoMatch);
+    let wild = compile(Field::PathFull, Operator::Wildcard, &["C:\\*\\setup.exe"]);
+    assert_eq!(eval(&wild, &at_path("C:\\x\\\u{17f}etup.exe")), NoMatch);
+    assert_eq!(eval(&wild, &at_path("C:\\x\\SETUP.exe")), Match);
+    let ends = compile(Field::PathFull, Operator::EndsWith, &["\\setup.exe"]);
+    assert_eq!(eval(&ends, &at_path("C:\\x\\\u{17f}etup.exe")), NoMatch);
+    let name_wild = compile(Field::PathFileName, Operator::Wildcard, &["s*.exe"]);
+    assert_eq!(eval(&name_wild, &at_path("C:\\\u{17f}x.exe")), NoMatch);
+    // Other text keeps Unicode folding.
+    let text = compile(Field::MetaProductName, Operator::Equals, &["setup"]);
+    assert_eq!(
+        eval(&text, &text_facts(Field::MetaProductName, "\u{17f}etup")),
+        Match
+    );
 }
 
 #[test]
@@ -683,6 +734,87 @@ fn short_names_that_were_not_expanded_are_unknown() {
         &["C:\\Program Files\\**"],
     );
     assert_eq!(eval(&not, &facts), Unknown);
+}
+
+/// A path on a volume whose case folding is not known (#399): a miss by
+/// key is not proof of a miss, nor a match proof of a match. A path test
+/// is `Unknown` whenever its result would make its rule less strict.
+#[test]
+fn unknown_fold_paths_never_relax_a_rule() {
+    let odd = |raw: &str| {
+        ObjectFacts::new().with_path(
+            PathFact::new(raw, &VolumeMap::new())
+                .with_user_writable(false)
+                .with_volume(crate::unknown::VolumeKind::Fixed)
+                .with_fold_unknown(),
+        )
+    };
+    let vars = PathVariables::new();
+    let in_rule = |action: ActionKind| EvalContext {
+        action,
+        variables: &vars,
+        context: &NO_CONTEXT,
+    };
+    let deny = in_rule(ActionKind::Deny);
+    let audit = in_rule(ActionKind::Audit);
+    let allow = in_rule(ActionKind::Allow);
+    let setup = compile(
+        Field::PathFull,
+        Operator::Equals,
+        &["\\\\srv\\share\\setup.exe"],
+    );
+    let long_s = odd("\\\\srv\\share\\\u{17f}etup.exe");
+    let same = odd("\\\\srv\\share\\SETUP.EXE");
+    let other = odd("\\\\srv\\share\\other.exe");
+    // A deny or audit that misses by key is unknown, with the note.
+    for ctx in [&deny, &audit] {
+        for facts in [&long_s, &other] {
+            let e = setup.eval(facts, ctx);
+            assert_eq!(e.result, Unknown);
+            assert!(e.notes.contains(Note::FoldUnknown));
+        }
+        // A match by key holds: the volume folds at least what the
+        // standard table folds for ASCII.
+        let e = setup.eval(&same, ctx);
+        assert_eq!(e.result, Match);
+        assert!(!e.notes.contains(Note::FoldUnknown));
+    }
+    // An allow never matches, and a miss stays a miss.
+    let e = setup.eval(&same, &allow);
+    assert_eq!(e.result, Unknown);
+    assert!(e.notes.contains(Note::FoldUnknown));
+    assert_eq!(setup.eval(&long_s, &allow).result, NoMatch);
+    // A negated test in a deny: a match (a miss by key) is the strict
+    // result and holds; a miss (a match by key) is unknown.
+    let not = compile(
+        Field::PathFull,
+        Operator::NotEquals,
+        &["\\\\srv\\share\\setup.exe"],
+    );
+    assert_eq!(not.eval(&long_s, &deny).result, Match);
+    assert_eq!(not.eval(&same, &deny).result, Unknown);
+    // Under a `not` node the direction flips again. The result is the
+    // criterion's own, before the `not` is applied: a miss under a `not`
+    // pulls the deny towards applying, so it holds.
+    assert_eq!(setup.eval_under(&long_s, &deny, true).result, NoMatch);
+    assert_eq!(setup.eval_under(&same, &deny, true).result, Unknown);
+    assert_eq!(setup.eval_under(&same, &allow, true).result, Match);
+    assert_eq!(setup.eval_under(&long_s, &allow, true).result, Unknown);
+    // Every name field, and only the name fields.
+    let name = compile(Field::PathFileName, Operator::Equals, &["setup.exe"]);
+    assert_eq!(name.eval(&long_s, &deny).result, Unknown);
+    let ext = compile(Field::PathExtension, Operator::Equals, &["dll"]);
+    assert_eq!(ext.eval(&long_s, &deny).result, Unknown);
+    let dir = compile(Field::PathDirectory, Operator::StartsWith, &["C:\\Tools"]);
+    assert_eq!(dir.eval(&long_s, &deny).result, Unknown);
+    let ads = compile(Field::PathIsAds, Operator::IsTrue, &[]);
+    assert_eq!(ads.eval(&long_s, &deny).result, NoMatch);
+    // On a volume whose folding is known, the miss is a miss.
+    let known = ObjectFacts::new().with_path(PathFact::new(
+        "\\\\srv\\share\\\u{17f}etup.exe",
+        &VolumeMap::new(),
+    ));
+    assert_eq!(setup.eval(&known, &deny).result, NoMatch);
 }
 
 #[test]

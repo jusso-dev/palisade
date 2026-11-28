@@ -421,6 +421,9 @@ fn why_not(n: &NearMiss) -> Option<Message> {
     if c.notes.contains(&"short_name_unresolved") {
         return Some(base("why-not-short-name"));
     }
+    if c.notes.contains(&"fold_unknown") {
+        return Some(base("why-not-fold-unknown"));
+    }
     if c.notes.contains(&"signer_not_trusted") {
         return Some(base("why-not-signer-untrusted"));
     }
@@ -527,6 +530,7 @@ const fn warning_id(c: WarningCode) -> (&'static str, &'static str) {
     match c {
         WarningCode::PathAclUnsafe => ("warning-path-acl-unsafe", "warning-path-acl-unsafe-alone"),
         WarningCode::ShortNameUnresolved => ("warning-short-name", "warning-short-name-alone"),
+        WarningCode::FoldUnknown => ("warning-fold-unknown", "warning-fold-unknown-alone"),
         WarningCode::ScopeStale => ("warning-scope-stale", "warning-scope-stale-alone"),
         WarningCode::ConditionTimeout => (
             "warning-condition-timeout",
@@ -562,6 +566,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     (
         "warning-short-name-alone",
         "Warning: the path has a short name that could not be expanded.",
+    ),
+    (
+        "warning-fold-unknown-alone",
+        "Warning: the path is on a volume whose case rules are not known, so a path test could not be decided.",
     ),
     (
         "warning-scope-stale-alone",
@@ -723,6 +731,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
         "Warning: the path has a short name that could not be expanded: { $rules }.",
     ),
     (
+        "warning-fold-unknown",
+        "Warning: the path is on a volume whose case rules are not known, so a path test could not be decided: { $rules }.",
+    ),
+    (
         "warning-scope-stale",
         "Warning: the group membership used by a scope is stale: { $rules }.",
     ),
@@ -777,6 +789,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     (
         "why-not-user-writable",
         "Rule { $rule } would { $verb } this file, but the path may be user-writable or is not on a fixed local disk.",
+    ),
+    (
+        "why-not-fold-unknown",
+        "Rule { $rule } would { $verb } this file, but the path is on a volume whose case rules are not known.",
     ),
     (
         "why-not-short-name",

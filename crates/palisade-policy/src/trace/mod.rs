@@ -595,6 +595,9 @@ pub enum WarningCode {
     PathAclUnsafe,
     /// The path has a short (8.3) name the agent could not expand.
     ShortNameUnresolved,
+    /// The path is on a volume whose case folding is not known, so a path
+    /// test could not be decided by its folded key (#399).
+    FoldUnknown,
     /// Group membership used by a scope is stale (#38).
     ScopeStale,
     /// A condition ran out of time (#33).
@@ -1098,6 +1101,11 @@ impl<'p> Tracer<'p> {
                 }
                 if lr.notes.contains(Note::ShortNameUnresolved) {
                     warn.entry(WarningCode::ShortNameUnresolved)
+                        .or_default()
+                        .insert(r.reference.rule_id, r.reference);
+                }
+                if lr.notes.contains(Note::FoldUnknown) {
+                    warn.entry(WarningCode::FoldUnknown)
                         .or_default()
                         .insert(r.reference.rule_id, r.reference);
                 }
@@ -1688,7 +1696,7 @@ fn suggest(
         let p = facts
             .path
             .as_ref()
-            .filter(|p| p.acl_proven() && !p.short_name_unresolved && p.path.is_resolved())?;
+            .filter(|p| p.acl_proven() && p.keys_reliable())?;
         (
             DraftIdentity::Path,
             criterion(Field::PathFull, Operator::Equals, p.path.as_str())?,

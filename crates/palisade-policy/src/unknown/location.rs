@@ -46,8 +46,9 @@
 //! - **An unknown volume kind**, for `removable`, `optical`, `network` (on
 //!   a drive path), and the classes that need a fixed volume:
 //!   `program_files`, `windows` and `other_fixed`.
-//! - **No usable path** (none, or not a drive or UNC path, or an 8.3 short
-//!   name the agent could not expand): every class the path decides. A
+//! - **No usable path** (none, or not a drive or UNC path, an 8.3 short
+//!   name the agent could not expand, or a volume whose case folding is
+//!   not known, #399): every class the path decides. A
 //!   known removable, optical or network volume still rules out
 //!   `program_files`, `windows` and `other_fixed`, which no path on it can
 //!   be in.
@@ -94,7 +95,7 @@ use palisade_core::path::{NormalizedPath, PathKind};
 use super::{Classes, MissingFact};
 use crate::facts::{PathFact, PathVariable, PathVariables};
 use crate::model::LocationClass;
-use crate::ops::{Tri, fold};
+use crate::ops::{Tri, fold_path};
 
 /// The kind of volume a file is on, as the agent reports it (#4).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -242,7 +243,7 @@ fn classify_one(
     } else {
         volume(VolumeKind::Network, missing)
     };
-    if !p.is_resolved() || path.short_name_unresolved {
+    if !p.is_resolved() || path.short_name_unresolved || path.fold_unknown {
         // Without a usable path nothing the path decides is known, except
         // what the volume rules out: a known removable, optical or network
         // volume can hold no protected folder and no `other_fixed` file.
@@ -330,11 +331,11 @@ fn classify_one(
 /// Whether `path` is `base` or below it, without case, at a component
 /// boundary.
 fn under(path: &str, base: &str) -> bool {
-    let base = fold(base.trim_end_matches('\\'), false);
+    let base = fold_path(base.trim_end_matches('\\'), false);
     if base.is_empty() {
         return false;
     }
-    let path = fold(path, false);
+    let path = fold_path(path, false);
     path.strip_prefix(base.as_str())
         .is_some_and(|rest| rest.is_empty() || rest.starts_with('\\'))
 }
@@ -346,7 +347,8 @@ fn in_users_dir(p: &NormalizedPath) -> bool {
     }
     let body = &p.without_stream()[p.root().len()..];
     let mut parts = body.split('\\').filter(|s| !s.is_empty());
-    matches!(parts.next(), Some(first) if fold(first, false) == "USERS") && parts.next().is_some()
+    matches!(parts.next(), Some(first) if fold_path(first, false) == "USERS")
+        && parts.next().is_some()
 }
 
 /// Whether a directory above the file, below the drive or share root, is
@@ -357,6 +359,9 @@ fn has_cache_component(p: &NormalizedPath) -> bool {
     let mut parts: Vec<&str> = body.split('\\').filter(|s| !s.is_empty()).collect();
     // The last component is the file itself.
     parts.pop();
-    let wanted: Vec<String> = CACHE_COMPONENTS.iter().map(|c| fold(c, false)).collect();
-    parts.iter().any(|c| wanted.contains(&fold(c, false)))
+    let wanted: Vec<String> = CACHE_COMPONENTS
+        .iter()
+        .map(|c| fold_path(c, false))
+        .collect();
+    parts.iter().any(|c| wanted.contains(&fold_path(c, false)))
 }

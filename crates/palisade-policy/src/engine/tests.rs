@@ -524,6 +524,16 @@ fn the_key_covers_principals_context_state_and_path() {
         ..call(&admin)
     };
     assert!(!decide(&engine, &linked, &clock).1);
+    // The same path on a volume whose case folding is not known (#399):
+    // not shared.
+    let mut odd_path = f.path.clone().unwrap();
+    odd_path.fold_unknown = true;
+    let odd = f.clone().with_path(odd_path);
+    let odd_call = Call {
+        facts: &odd,
+        ..call(&admin)
+    };
+    assert!(!decide(&engine, &odd_call, &clock).1);
 }
 
 #[test]

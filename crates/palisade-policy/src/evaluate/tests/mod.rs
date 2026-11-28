@@ -1168,3 +1168,112 @@ fn an_attribute_rule_never_allows_and_never_acts_without_an_allow() {
     assert_eq!(winner(&d), Some(1));
     assert!(d.overridden().is_empty());
 }
+
+/// #399: a deny on `\\srv\share\setup.exe` against `\\srv\share\ſetup.exe`
+/// on a share whose case folding is not known. The standard table keeps
+/// `ſ` apart from `S`, but the server may not: the deny is unknown, not a
+/// miss, so an allow on the publisher does not let the file run past it
+/// under `unknown_as: match`, and no allow on the path matches at all. The
+/// decision rests on an unknown fact, so it is not cached.
+#[test]
+fn a_deny_on_a_share_is_unknown_for_a_spelling_the_share_may_fold() {
+    let doc = |deny_options: serde_json::Value, extra: Vec<serde_json::Value>| {
+        let mut rules = vec![
+            rule(1, publisher(), allow()),
+            rule(
+                2,
+                crit("path.full", "equals", "\\\\srv\\share\\setup.exe"),
+                deny_options,
+            ),
+        ];
+        rules.extend(extra);
+        validated(document(
+            "deny_wins",
+            serde_json::json!({}),
+            vec![(1, "mixed", false, false, rules)],
+        ))
+    };
+    let at = |raw: &str, fold_unknown: bool| {
+        let mut path = PathFact::new(raw, &VolumeMap::new())
+            .with_user_writable(false)
+            .with_volume(crate::unknown::VolumeKind::Network);
+        path.fold_unknown = fold_unknown;
+        let mut f = facts();
+        f.path = Some(path);
+        f
+    };
+    let long_s = at("\\\\srv\\share\\\u{17f}etup.exe", true);
+    let fail_closed = doc(
+        serde_json::json!({"type": "deny", "unknown_as": "match"}),
+        vec![],
+    );
+    let d = decide_with(&fail_closed, &long_s, ObjectType::Executable);
+    assert_eq!(d.outcome(), Outcome::Blocked);
+    assert_eq!(winner(&d), Some(2));
+    // The same spelling on a share whose folding is known is another file.
+    let d = decide_with(
+        &fail_closed,
+        &at("\\\\srv\\share\\\u{17f}etup.exe", false),
+        ObjectType::Executable,
+    );
+    assert_eq!(winner(&d), Some(1));
+    // With the default `unknown_as: no_match` the deny does not apply, but
+    // the decision is not cached: it rests on an unknown fact.
+    let default = doc(deny(), vec![]);
+    let variables = PathVariables::new();
+    let context = EvaluationContext::new();
+    let watched = |policy: &ValidatedPolicy, facts: &ObjectFacts| {
+        Evaluator::new(policy)
+            .unwrap()
+            .evaluate_watched(
+                &Subject {
+                    object_type: ObjectType::Executable,
+                    facts,
+                    variables: &variables,
+                    context: &context,
+                },
+                FactSet::ALL,
+                &crate::mode::DeviceState::of(&policy.document().policy),
+                TRACE,
+                &mut |_| false,
+            )
+            .unwrap()
+            .unwrap()
+    };
+    let (d, unknown) = watched(&default, &long_s);
+    assert_eq!(winner(&d), Some(1));
+    assert!(
+        unknown,
+        "a decision on an unknown-fold path must not be cached"
+    );
+    let (_, unknown) = watched(&default, &at("\\\\srv\\share\\\u{17f}etup.exe", false));
+    assert!(!unknown);
+    // A path allow on an unknown-fold path never matches, even for the
+    // exact spelling.
+    let path_allow = validated(document(
+        "deny_wins",
+        serde_json::json!({}),
+        vec![(
+            1,
+            "allowlist",
+            false,
+            false,
+            vec![rule(
+                3,
+                crit("path.full", "equals", "\\\\srv\\share\\setup.exe"),
+                allow(),
+            )],
+        )],
+    ));
+    let mut exact = at("\\\\srv\\share\\setup.exe", true);
+    if let Some(p) = exact.path.as_mut() {
+        p.volume = Some(crate::unknown::VolumeKind::Fixed);
+    }
+    let d = decide_with(&path_allow, &exact, ObjectType::Executable);
+    assert_ne!(winner(&d), Some(3));
+    if let Some(p) = exact.path.as_mut() {
+        p.fold_unknown = false;
+    }
+    let d = decide_with(&path_allow, &exact, ObjectType::Executable);
+    assert_eq!(winner(&d), Some(3));
+}

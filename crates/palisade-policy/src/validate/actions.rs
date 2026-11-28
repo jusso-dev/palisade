@@ -518,8 +518,8 @@ pub(crate) fn scope_path_problem(path: &str) -> Option<String> {
 
 /// The key two scope paths are compared by: without a trailing `\` (except
 /// on a drive root), with a leading variable written by its canonical name
-/// (`%TMP%` is `%TEMP%`), and folded as the engine folds paths (NFC, then
-/// simple upper case, [`crate::ops::fold`]). Only for paths
+/// (`%TMP%` is `%TEMP%`), and folded as the engine folds path values (NFC,
+/// then the NTFS upcase table, [`crate::ops::fold_path_value`]). Only for paths
 /// [`scope_path_problem`] accepts.
 pub(crate) fn scope_path_key(path: &str) -> String {
     let trimmed = match path.strip_suffix('\\') {
@@ -538,7 +538,7 @@ pub(crate) fn scope_path_key(path: &str) -> String {
             ))
         })
         .unwrap_or_else(|| trimmed.to_owned());
-    crate::ops::fold(&canonical, false)
+    crate::ops::fold_path_value(&canonical, false)
 }
 
 /// The canonical name of a path variable, without the `%` signs.

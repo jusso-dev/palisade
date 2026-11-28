@@ -575,10 +575,11 @@ fn scope_paths_compare_as_the_engine_compares_paths() {
         ("C:\\Apps", "C:\\Apps\\"),
         ("C:\\Apps", "c:\\APPS"),
         ("%PROGRAMFILES%", "%programfiles%\\"),
-        // NFC and NFD spellings of the same name.
+        // Values are read in NFC, as a bundle stores them.
         ("C:\\Caf\u{e9}", "C:\\Cafe\u{301}"),
-        // Dotless i upper-cases to I, as NTFS compares names.
-        ("C:\\a\u{131}", "C:\\aI"),
+        // The upcase table folds these (#399).
+        ("C:\\\u{e9}", "C:\\\u{c9}"),
+        ("C:\\\u{1f80}", "C:\\\u{1f88}"),
         // `TMP` is another name for `TEMP`.
         ("%TMP%\\Installers", "%temp%\\installers\\"),
     ] {
@@ -589,6 +590,9 @@ fn scope_paths_compare_as_the_engine_compares_paths() {
         ("C:\\Apps", "C:\\Apps2"),
         // Sharp s has no single-character upper case, so it is kept.
         ("C:\\\u{df}", "C:\\\u{1e9e}"),
+        // NTFS keeps the dotless i and the long s apart from ASCII (#399).
+        ("C:\\a\u{131}", "C:\\aI"),
+        ("C:\\\u{17f}etup", "C:\\SETUP"),
     ] {
         assert_ne!(scope_path_key(a), scope_path_key(b), "{a} / {b}");
     }

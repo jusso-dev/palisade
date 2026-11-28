@@ -164,7 +164,8 @@ pub fn criterion_covers(a: &Criterion, b: &Criterion) -> bool {
 fn value_key(field: Field, v: &str, case_sensitive: bool) -> String {
     match field.class() {
         FieldClass::Hash { .. } => crate::ops::normalize_hex(v).unwrap_or_else(|| v.to_owned()),
-        FieldClass::Path => fold(&v.replace('/', "\\"), case_sensitive),
+        FieldClass::Path => crate::ops::fold_path_value(&v.replace('/', "\\"), case_sensitive),
+        _ if crate::ops::is_path_name(field) => crate::ops::fold_path_value(v, case_sensitive),
         _ if field.class().has_case() => fold(v, case_sensitive),
         _ => v.to_owned(),
     }

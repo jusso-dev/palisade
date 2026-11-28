@@ -134,6 +134,9 @@ pub struct SnapshotPath {
     /// An 8.3 short name could not be expanded.
     #[serde(default)]
     pub short_name_unresolved: bool,
+    /// The volume's case folding is not known (#399).
+    #[serde(default)]
+    pub fold_unknown: bool,
     /// Whether users can write it: `null` if not determined.
     #[serde(default)]
     pub user_writable: Option<bool>,
@@ -493,6 +496,7 @@ impl FactsSnapshot {
             let mut fact = PathFact::new(&p.path, &volumes);
             fact.alias = p.alias.as_deref().map(|a| PathFact::new(a, &volumes).path);
             fact.short_name_unresolved = p.short_name_unresolved;
+            fact.fold_unknown = p.fold_unknown;
             fact.user_writable = p.user_writable;
             fact.volume = p.volume.map(Into::into);
             facts.path = Some(fact);
@@ -1200,10 +1204,11 @@ fn classify(a: &SimDecision, b: &SimDecision) -> Change {
 /// 1. its SHA-256, if the fact is one the matcher accepts (64 hex digits),
 ///    in lowercase;
 /// 2. otherwise its path, if it is a drive or UNC path whose 8.3 short
-///    names were all expanded, normalised and folded as path criteria
-///    compare it (the matcher treats an unexpanded path as unknown);
+///    names were all expanded, on a volume whose case folding is known,
+///    normalised and folded as path criteria compare it (the matcher treats
+///    the other paths as unknown);
 /// 3. otherwise the publisher of its first trusted signature, if not
-///    empty, folded the same way;
+///    empty, folded as text criteria compare it;
 /// 4. otherwise none.
 pub(crate) fn object_key(s: &FactsSnapshot) -> Option<String> {
     let hash = s
@@ -1218,11 +1223,11 @@ pub(crate) fn object_key(s: &FactsSnapshot) -> Option<String> {
         .facts
         .path
         .as_ref()
-        .filter(|p| !p.short_name_unresolved)
+        .filter(|p| !p.short_name_unresolved && !p.fold_unknown)
         .map(|p| palisade_core::path::normalize(&p.path))
         .filter(palisade_core::path::NormalizedPath::is_resolved);
     if let Some(n) = path {
-        return Some(format!("path:{}", crate::ops::fold(n.as_str(), false)));
+        return Some(format!("path:{}", crate::ops::fold_path(n.as_str(), false)));
     }
     s.facts
         .signers
