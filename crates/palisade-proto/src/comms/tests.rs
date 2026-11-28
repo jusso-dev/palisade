@@ -74,6 +74,28 @@ fn an_enrolment_request_with_a_changed_payload_or_key_is_refused() {
     };
     assert_eq!(junk.open().unwrap_err(), WireError::Malformed);
 
+    // An Ed25519 key, validly encoded: malformed, not a bad proof.
+    let mut signer = crate::pki::SoftwareSigner::new();
+    let kid = signer
+        .generate(
+            crate::pki::KeyPurpose::PolicySigning,
+            crate::pki::SignatureAlgorithm::Ed25519,
+        )
+        .unwrap();
+    let mut ed = payload(&key);
+    ed.public_key = Base64::new(
+        crate::pki::Signer::public_key(&signer, &kid)
+            .unwrap()
+            .spki_der()
+            .to_vec(),
+    )
+    .unwrap();
+    let ed_request = EnrolRequest {
+        payload: Base64::new(serde_json::to_vec(&ed).unwrap()).unwrap(),
+        signature: request.signature.clone(),
+    };
+    assert_eq!(ed_request.open().unwrap_err(), WireError::Malformed);
+
     // A payload whose key is not P-384.
     let mut bad_key = payload(&key);
     bad_key.public_key = Base64::new(vec![0x30, 0x00]).unwrap();
