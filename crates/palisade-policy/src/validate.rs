@@ -500,6 +500,9 @@ struct Validator {
     /// document whose every criterion comes from documents that already
     /// passed validation ([`PolicyDocument::validate_assembled`]).
     compile_values: bool,
+    /// The tree limits the policy sets (#33), within the fixed maximums:
+    /// criteria per rule, depth, and values per criterion.
+    limits: (usize, usize, usize),
 }
 
 impl Default for Validator {
@@ -508,6 +511,11 @@ impl Default for Validator {
             findings: Vec::new(),
             compile_regexes: true,
             compile_values: true,
+            limits: (
+                MAX_CRITERIA_PER_RULE,
+                MAX_TREE_DEPTH,
+                MAX_VALUES_PER_CRITERION,
+            ),
         }
     }
 }
@@ -563,6 +571,15 @@ impl Validator {
         self.text("/policy/description", policy.description.as_deref());
         self.metadata("/policy/metadata", &policy.metadata);
         self.settings(doc);
+        let s = &policy.settings;
+        // Out of range is reported by `settings`; the fixed maximums still
+        // bound what is checked.
+        let tighter = |set: u8, max: usize| usize::from(set).clamp(1, max);
+        self.limits = (
+            tighter(s.max_criteria_per_rule, MAX_CRITERIA_PER_RULE),
+            tighter(s.max_tree_depth, MAX_TREE_DEPTH),
+            tighter(s.max_values_per_criterion, MAX_VALUES_PER_CRITERION),
+        );
         self.modes(doc);
         self.unknown(doc);
         self.lifecycle(doc);
@@ -771,11 +788,12 @@ impl Validator {
 
         let tree = format!("{base}/match");
         let depth = rule.match_.depth();
-        if depth > MAX_TREE_DEPTH {
+        let (max_criteria, max_depth, max_values) = self.limits;
+        if depth > max_depth {
             self.push(
                 ErrorCode::TreeTooDeep,
                 &tree,
-                format!("depth {depth}; at most {MAX_TREE_DEPTH} is allowed"),
+                format!("depth {depth}; at most {max_depth} is allowed"),
             );
         }
         let mut criteria = 0usize;
@@ -819,14 +837,26 @@ impl Validator {
                 }
             }
         }
-        if criteria > MAX_CRITERIA_PER_RULE {
+        if criteria > max_criteria {
             self.push(
                 ErrorCode::TooManyCriteria,
                 &tree,
-                format!("{criteria} criteria; at most {MAX_CRITERIA_PER_RULE} are allowed"),
+                format!("{criteria} criteria; at most {max_criteria} are allowed"),
             );
         }
         for (c, path) in ordered {
+            // The operator's own count is checked in `criterion`, against
+            // the fixed maximum; a policy's tighter limit is checked here.
+            if c.values.len() > max_values && c.values.len() <= MAX_VALUES_PER_CRITERION {
+                self.push(
+                    ErrorCode::InvalidValueCount,
+                    &format!("{path}/values"),
+                    format!(
+                        "{} values; the policy's `max_values_per_criterion` allows at most {max_values}",
+                        c.values.len()
+                    ),
+                );
+            }
             self.criterion(&path, c, mandatory);
             self.signer_options(&path, c, rule.action.kind());
         }
@@ -1088,6 +1118,21 @@ impl Validator {
             ranges::GROUP_CACHE_MAX_AGE_MIN.into(),
             ranges::GROUP_CACHE_MAX_AGE_MAX.into(),
         );
+        for (field, value, max) in [
+            (
+                "max_criteria_per_rule",
+                s.max_criteria_per_rule,
+                ranges::CRITERIA_PER_RULE_MAX,
+            ),
+            ("max_tree_depth", s.max_tree_depth, ranges::TREE_DEPTH_MAX),
+            (
+                "max_values_per_criterion",
+                s.max_values_per_criterion,
+                ranges::VALUES_PER_CRITERION_MAX,
+            ),
+        ] {
+            range(self, field, value.into(), 1, max.into());
+        }
         range(
             self,
             "max_ancestor_depth",

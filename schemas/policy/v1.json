@@ -2485,6 +2485,27 @@
           "minimum": 1,
           "type": "integer"
         },
+        "max_criteria_per_rule": {
+          "description": "Most criteria in one rule's match tree (#33): 1 to 32, the fixed\nmaximum and the default. A policy can tighten the limit, never\nraise it.",
+          "format": "uint8",
+          "maximum": 32,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_tree_depth": {
+          "description": "Deepest match tree (#33), where a single criterion has depth 1: 1 to\n8, the fixed maximum and the default.",
+          "format": "uint8",
+          "maximum": 8,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_values_per_criterion": {
+          "description": "Most values in one criterion (#33): 1 to 25, the fixed maximum and\nthe default.",
+          "format": "uint8",
+          "maximum": 25,
+          "minimum": 1,
+          "type": "integer"
+        },
         "override_durations": {
           "description": "Durations, in minutes, offered for override sessions (#9). At most 5\nslots, each at most 10080. `0` marks a disabled slot.",
           "items": {

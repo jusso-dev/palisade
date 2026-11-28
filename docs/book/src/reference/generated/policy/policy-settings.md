@@ -19,6 +19,9 @@ Appears at: `/policy/settings`.
 | `driver_control` | [`ControlLevel`](types.md#controllevel) | no | `"enforce"` |  | 1.0.0 | Control level for drivers. |
 | `group_cache_max_age_secs` | integer | no | `86400` | 3600 to 86400; format `uint32` | 1.0.0 | How old cached group memberships that are not in the token (cloud-directory groups) may be before scopes treat them as unknown, in seconds (#38). From 3600 to 86400. |
 | `max_ancestor_depth` | integer | no | `8` | 1 to 16; format `uint8` | 1.0.0 | How many ancestors process criteria may inspect (#31). |
+| `max_criteria_per_rule` | integer | no |  | 1 to 32; format `uint8` | 1.0.0 | Most criteria in one rule's match tree (#33): 1 to 32, the fixed maximum and the default. A policy can tighten the limit, never raise it. |
+| `max_tree_depth` | integer | no |  | 1 to 8; format `uint8` | 1.0.0 | Deepest match tree (#33), where a single criterion has depth 1: 1 to 8, the fixed maximum and the default. |
+| `max_values_per_criterion` | integer | no |  | 1 to 25; format `uint8` | 1.0.0 | Most values in one criterion (#33): 1 to 25, the fixed maximum and the default. |
 | `override_durations` | array of integer | no |  | at most 5 items | 1.0.0 | Durations, in minutes, offered for override sessions (#9). At most 5 slots, each at most 10080. `0` marks a disabled slot. |
 | `poll_interval_secs` | integer | no | `900` | 60 to 604800; format `uint32` | 1.0.0 | Agent check-in interval, in seconds. |
 | `script_control` | [`ControlLevel`](types.md#controllevel) | no | `"enforce"` |  | 1.0.0 | Control level for scripts of a kind not listed in `script_control_by_kind`. |

@@ -30,12 +30,22 @@ pub mod ranges {
     pub const GROUP_CACHE_MAX_AGE_MIN: u32 = 3_600;
     /// Longest `group_cache_max_age_secs`, and the default (one day).
     pub const GROUP_CACHE_MAX_AGE_MAX: u32 = 86_400;
+    /// Most criteria per rule a policy may allow, and the default: the
+    /// fixed maximum ([`MAX_CRITERIA_PER_RULE`](crate::model::limits::MAX_CRITERIA_PER_RULE)).
+    pub const CRITERIA_PER_RULE_MAX: u8 = 32;
+    /// Deepest tree a policy may allow, and the default: the fixed maximum
+    /// ([`MAX_TREE_DEPTH`](crate::model::limits::MAX_TREE_DEPTH)).
+    pub const TREE_DEPTH_MAX: u8 = 8;
+    /// Most values per criterion a policy may allow, and the default: the
+    /// fixed maximum ([`MAX_VALUES_PER_CRITERION`](crate::model::limits::MAX_VALUES_PER_CRITERION)).
+    pub const VALUES_PER_CRITERION_MAX: u8 = 25;
 }
 
 use ranges::{
-    ADVANCED_KEYS_MAX, ANCESTOR_DEPTH_MAX, ANCESTOR_DEPTH_MIN, DECISION_CACHE_TTL_MAX,
-    GROUP_CACHE_MAX_AGE_MAX, GROUP_CACHE_MAX_AGE_MIN, OVERRIDE_MINUTES_MAX, OVERRIDE_SLOTS_MAX,
-    POLL_INTERVAL_MAX, POLL_INTERVAL_MIN,
+    ADVANCED_KEYS_MAX, ANCESTOR_DEPTH_MAX, ANCESTOR_DEPTH_MIN, CRITERIA_PER_RULE_MAX,
+    DECISION_CACHE_TTL_MAX, GROUP_CACHE_MAX_AGE_MAX, GROUP_CACHE_MAX_AGE_MIN, OVERRIDE_MINUTES_MAX,
+    OVERRIDE_SLOTS_MAX, POLL_INTERVAL_MAX, POLL_INTERVAL_MIN, TREE_DEPTH_MAX,
+    VALUES_PER_CRITERION_MAX,
 };
 
 /// Settings that apply to the whole policy. Every field is optional in a
@@ -78,6 +88,22 @@ pub struct PolicySettings {
     /// How many ancestors process criteria may inspect (#31).
     #[schemars(range(min = ANCESTOR_DEPTH_MIN, max = ANCESTOR_DEPTH_MAX))]
     pub max_ancestor_depth: u8,
+    /// Most criteria in one rule's match tree (#33): 1 to 32, the fixed
+    /// maximum and the default. A policy can tighten the limit, never
+    /// raise it.
+    #[schemars(range(min = 1, max = CRITERIA_PER_RULE_MAX))]
+    #[serde(skip_serializing_if = "is_max_criteria_per_rule_default")]
+    pub max_criteria_per_rule: u8,
+    /// Deepest match tree (#33), where a single criterion has depth 1: 1 to
+    /// 8, the fixed maximum and the default.
+    #[schemars(range(min = 1, max = TREE_DEPTH_MAX))]
+    #[serde(skip_serializing_if = "is_max_tree_depth_default")]
+    pub max_tree_depth: u8,
+    /// Most values in one criterion (#33): 1 to 25, the fixed maximum and
+    /// the default.
+    #[schemars(range(min = 1, max = VALUES_PER_CRITERION_MAX))]
+    #[serde(skip_serializing_if = "is_max_values_per_criterion_default")]
+    pub max_values_per_criterion: u8,
     /// Engineering settings, checked against a registry of known keys. The
     /// registry is empty in this version, so any key is rejected unless
     /// `allow_unknown_advanced` is set.
@@ -178,6 +204,9 @@ impl Default for PolicySettings {
             time_zone_basis: TimeZoneBasis::DeviceLocal,
             group_cache_max_age_secs: GROUP_CACHE_MAX_AGE_MAX,
             max_ancestor_depth: 8,
+            max_criteria_per_rule: CRITERIA_PER_RULE_MAX,
+            max_tree_depth: TREE_DEPTH_MAX,
+            max_values_per_criterion: VALUES_PER_CRITERION_MAX,
             advanced: BTreeMap::new(),
             allow_unknown_advanced: false,
         }
@@ -219,4 +248,22 @@ pub enum AdvancedValue {
     Int(i64),
     /// A string of at most 2048 bytes, with no control characters.
     Text(#[schemars(length(max = 2048))] String),
+}
+
+/// serde's `skip_serializing_if` passes a reference.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+const fn is_max_criteria_per_rule_default(v: &u8) -> bool {
+    *v == CRITERIA_PER_RULE_MAX
+}
+
+/// serde's `skip_serializing_if` passes a reference.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+const fn is_max_tree_depth_default(v: &u8) -> bool {
+    *v == TREE_DEPTH_MAX
+}
+
+/// serde's `skip_serializing_if` passes a reference.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+const fn is_max_values_per_criterion_default(v: &u8) -> bool {
+    *v == VALUES_PER_CRITERION_MAX
 }
