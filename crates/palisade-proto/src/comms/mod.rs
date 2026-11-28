@@ -58,6 +58,7 @@
 //! the transport (ADR 0015).
 
 pub mod code;
+pub mod http;
 pub mod proxy;
 
 #[cfg(test)]
@@ -282,6 +283,9 @@ impl EnrolRequest {
             serde_json::from_slice(self.payload.as_bytes()).map_err(|_| WireError::Malformed)?;
         let key = crate::pki::PublicKey::from_spki_der(payload.public_key.as_bytes())
             .map_err(|_| WireError::Malformed)?;
+        if key.key_type() != crate::pki::KeyType::P384 {
+            return Err(WireError::Malformed);
+        }
         crate::pki::leaf_key::verify_enrolment(
             &key,
             self.payload.as_bytes(),

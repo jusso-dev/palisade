@@ -13,10 +13,8 @@
 
 use std::fmt;
 
-/// The longest reply head accepted, in bytes.
-pub const MAX_HEAD: usize = 8 * 1024;
-/// Most header lines accepted.
-pub const MAX_HEADERS: usize = 64;
+use super::http::{HeadError, parse_head};
+pub use super::http::{MAX_HEAD, MAX_HEADERS};
 
 /// The `CONNECT` request for `host:port`, with an optional
 /// `Proxy-Authorization` value (for example `Basic <base64>`).
@@ -98,115 +96,21 @@ impl fmt::Display for ProxyError {
 
 impl std::error::Error for ProxyError {}
 
-/// Parses the reply head at the start of `input`. Call again with more
-/// bytes while it returns [`ProxyError::Incomplete`].
+/// Parses the reply head at the start of `input` with
+/// [`super::http::parse_head`]. Call again with more bytes while it returns
+/// [`ProxyError::Incomplete`].
 ///
 /// # Errors
 ///
-/// [`ProxyError::Incomplete`] until a full head is present,
-/// [`ProxyError::TooLarge`] past the limits, and [`ProxyError::Malformed`]
-/// for anything that is not `HTTP/1.0` or `HTTP/1.1`, a three-digit status
-/// and well-formed header lines, each ending in CRLF.
+/// As [`super::http::parse_head`].
 pub fn parse_reply(input: &[u8]) -> Result<ConnectReply, ProxyError> {
-    let window = input.get(..input.len().min(MAX_HEAD)).unwrap_or_default();
-    let Some(end) = window.windows(4).position(|w| w == b"\r\n\r\n") else {
-        return Err(if input.len() >= MAX_HEAD {
-            ProxyError::TooLarge
-        } else {
-            ProxyError::Incomplete
-        });
-    };
-    let head = window.get(..end).ok_or(ProxyError::Malformed)?;
-    let mut lines = CrlfLines(Some(head));
-    let status_line = lines.next().ok_or(ProxyError::Malformed)?;
-    let status = parse_status_line(status_line)?;
-    for (count, line) in lines.enumerate() {
-        if count >= MAX_HEADERS {
-            return Err(ProxyError::TooLarge);
-        }
-        let colon = line
-            .iter()
-            .position(|&b| b == b':')
-            .ok_or(ProxyError::Malformed)?;
-        let name = line.get(..colon).ok_or(ProxyError::Malformed)?;
-        if name.is_empty() || !name.iter().all(|&b| is_token(b)) {
-            return Err(ProxyError::Malformed);
-        }
-        let value = line.get(colon + 1..).unwrap_or_default();
-        if value.iter().any(|&b| b.is_ascii_control() && b != b'\t') {
-            return Err(ProxyError::Malformed);
-        }
+    match parse_head(input) {
+        Ok(head) => Ok(ConnectReply {
+            status: head.status,
+            head_len: head.head_len,
+        }),
+        Err(HeadError::Incomplete) => Err(ProxyError::Incomplete),
+        Err(HeadError::TooLarge) => Err(ProxyError::TooLarge),
+        Err(HeadError::Malformed) => Err(ProxyError::Malformed),
     }
-    Ok(ConnectReply {
-        status,
-        head_len: end + 4,
-    })
-}
-
-/// The lines of a head, split on CRLF. A bare CR or LF inside a line is
-/// left in it, and the line checks then refuse it as a control character.
-struct CrlfLines<'a>(Option<&'a [u8]>);
-
-impl<'a> Iterator for CrlfLines<'a> {
-    type Item = &'a [u8];
-
-    fn next(&mut self) -> Option<&'a [u8]> {
-        let rest = self.0?;
-        match rest.windows(2).position(|w| w == b"\r\n") {
-            Some(i) => {
-                self.0 = rest.get(i + 2..);
-                rest.get(..i)
-            }
-            None => {
-                self.0 = None;
-                Some(rest)
-            }
-        }
-    }
-}
-
-fn parse_status_line(line: &[u8]) -> Result<u16, ProxyError> {
-    let rest = line
-        .strip_prefix(b"HTTP/1.1 ")
-        .or_else(|| line.strip_prefix(b"HTTP/1.0 "))
-        .ok_or(ProxyError::Malformed)?;
-    let (digits, reason) = rest.split_at_checked(3).ok_or(ProxyError::Malformed)?;
-    if !digits.iter().all(u8::is_ascii_digit) {
-        return Err(ProxyError::Malformed);
-    }
-    if !(reason.is_empty() || reason.first() == Some(&b' ')) {
-        return Err(ProxyError::Malformed);
-    }
-    if reason.iter().any(|&b| b.is_ascii_control() && b != b'\t') {
-        return Err(ProxyError::Malformed);
-    }
-    let status = digits
-        .iter()
-        .fold(0u16, |n, &d| n * 10 + u16::from(d - b'0'));
-    if !(100..=599).contains(&status) {
-        return Err(ProxyError::Malformed);
-    }
-    Ok(status)
-}
-
-/// An RFC 9110 `tchar`.
-const fn is_token(b: u8) -> bool {
-    b.is_ascii_alphanumeric()
-        || matches!(
-            b,
-            b'!' | b'#'
-                | b'$'
-                | b'%'
-                | b'&'
-                | b'\''
-                | b'*'
-                | b'+'
-                | b'-'
-                | b'.'
-                | b'^'
-                | b'_'
-                | b'`'
-                | b'|'
-                | b'~'
-        )
 }

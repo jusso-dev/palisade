@@ -74,6 +74,28 @@ fn an_enrolment_request_with_a_changed_payload_or_key_is_refused() {
     };
     assert_eq!(junk.open().unwrap_err(), WireError::Malformed);
 
+    // An Ed25519 key, validly encoded: malformed, not a bad proof.
+    let mut signer = crate::pki::SoftwareSigner::new();
+    let kid = signer
+        .generate(
+            crate::pki::KeyPurpose::PolicySigning,
+            crate::pki::SignatureAlgorithm::Ed25519,
+        )
+        .unwrap();
+    let mut ed = payload(&key);
+    ed.public_key = Base64::new(
+        crate::pki::Signer::public_key(&signer, &kid)
+            .unwrap()
+            .spki_der()
+            .to_vec(),
+    )
+    .unwrap();
+    let ed_request = EnrolRequest {
+        payload: Base64::new(serde_json::to_vec(&ed).unwrap()).unwrap(),
+        signature: request.signature.clone(),
+    };
+    assert_eq!(ed_request.open().unwrap_err(), WireError::Malformed);
+
     // A payload whose key is not P-384.
     let mut bad_key = payload(&key);
     bad_key.public_key = Base64::new(vec![0x30, 0x00]).unwrap();
@@ -307,6 +329,42 @@ fn proxy_replies_parse_strictly() {
         ProxyError::TooLarge,
         ProxyError::Malformed,
         ProxyError::BadTarget,
+    ] {
+        assert!(!e.to_string().is_empty());
+    }
+}
+
+#[test]
+fn response_heads_report_framing_and_retry_after() {
+    use super::http::{HeadError, parse_head};
+    let h =
+        parse_head(b"HTTP/1.1 429 Too Many\r\nRetry-After: 30\r\nContent-Length:  12 \r\n\r\nbody")
+            .unwrap();
+    assert_eq!(h.status, 429);
+    assert_eq!(h.retry_after, Some(30));
+    assert_eq!(h.content_length, Some(12));
+    assert!(!h.transfer_encoding);
+    let h = parse_head(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nRetry-After: Wed, 21 Oct 2026 07:28:00 GMT\r\n\r\n").unwrap();
+    assert!(h.transfer_encoding);
+    assert_eq!(h.retry_after, None);
+    assert_eq!(h.content_length, None);
+    for bad in [
+        &b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nContent-Length: 1\r\n\r\n"[..],
+        b"HTTP/1.1 200 OK\r\nContent-Length: -1\r\n\r\n",
+        b"HTTP/1.1 200 OK\r\nContent-Length: 99999999999999999999\r\n\r\n",
+        b"HTTP/1.1 200 OK\r\nContent-Length: 1 2\r\n\r\n",
+    ] {
+        assert_eq!(
+            parse_head(bad),
+            Err(HeadError::Malformed),
+            "{:?}",
+            String::from_utf8_lossy(bad)
+        );
+    }
+    for e in [
+        HeadError::Incomplete,
+        HeadError::TooLarge,
+        HeadError::Malformed,
     ] {
         assert!(!e.to_string().is_empty());
     }
