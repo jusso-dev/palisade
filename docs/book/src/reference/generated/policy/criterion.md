@@ -15,6 +15,7 @@ Appears at: `/rule_sets/rules/match/all/all/not/criterion`, `/rule_sets/rules/ma
 | Field | Type | Required | Default | Constraints | Since | Description |
 |---|---|---|---|---|---|---|
 | `anchored` | boolean | no |  |  | 1.0.0 | Only for `regex` and `not_regex`: `false` lets the pattern match anywhere in the fact instead of the whole fact (#32). Unset means `true`. |
+| `arg_index` | integer | no |  | -255 to 255; format `int16` | 1.0.0 | Only for `process.argv`: the argument tested, from the start (0 is the program name) or, when negative, from the end (-1 is the last). Unset means any argument after the program name. |
 | `case_sensitive` | boolean | no |  |  | 1.0.0 | Compare strings case-sensitively. Unset means the field's default (#32), which is case-insensitive for every field defined so far. Only text, paths, file names, account names and tags have a case; other fields (hashes, versions, SIDs, group sets, yes-or-no facts and session types) reject this option. |
 | `field` | [`Field`](types.md#field) | yes |  |  | 1.0.0 | The fact being tested. |
 | `include_sub_ous` | boolean | no |  |  | 1.0.0 | Only for `user.ou` and `device.ou`: `true` also matches objects in every organisational unit below the named one (#33). Unset means `false`: the object must be directly in it. |

@@ -161,6 +161,10 @@ const BUNDLE_DELTA_SEEDS: Seed = Seed {
     test: "fuzz_seeds",
     name: "write_bundle_delta_fuzz_seeds",
 };
+const CMDLINE_SEEDS: Seed = Seed {
+    test: "fuzz_seeds",
+    name: "write_cmdline_fuzz_seeds",
+};
 
 const KERNEL_SEEDS: Seed = Seed {
     test: "telemetry",
@@ -331,6 +335,11 @@ pub const PROJECTS: &[Project] = &[
                 name: "fuzz_bundle_delta",
                 dict: None,
                 seeds: &[BUNDLE_DELTA_SEEDS],
+            },
+            Target {
+                name: "fuzz_cmdline_split",
+                dict: None,
+                seeds: &[CMDLINE_SEEDS],
             },
         ],
     },

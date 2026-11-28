@@ -826,6 +826,7 @@ fn hash_context_fact(
         Some(ContextFact::Weekday(d)) => (11u8, d).hash(h),
         Some(ContextFact::Minute(m)) => (12u8, m).hash(h),
         Some(ContextFact::Date(d)) => (13u8, d).hash(h),
+        Some(ContextFact::Args(a)) => (14u8, a).hash(h),
     }
 }
 

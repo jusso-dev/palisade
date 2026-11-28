@@ -244,6 +244,8 @@ matcher.
 | `reg.value` | Context (#329): the registry value `value_name` (unset: the key's default value) of the key `target`. A `REG_DWORD` or `REG_QWORD` is a number, which `eq` to `between` compare; text is compared as text. Values under `HKCU`, `HKU` and `HKCR` are user-controlled. |
 | `fs.file` | Context (#329): whether the file `target` exists. User-controlled: whether a user can create or remove a file depends on where it is, which a policy cannot see, so every file-system test is treated as one a user may control (ADR 0018). |
 | `fs.folder` | Context (#329): whether the folder `target` exists. User-controlled, as `fs.file`. |
+| `process.command_line` | Context (#329): the command line the process was started with, as the agent captured it at creation. Attacker-controlled: whoever starts a process chooses its arguments, so it can only narrow a rule. |
+| `process.argv` | Context (#329): the process's arguments, split as `CommandLineToArgvW` splits them. With `arg_index`, the argument at that position (0 is the program name, -1 the last); without it, any argument after the program name. Attacker-controlled, as `process.command_line`. |
 
 ## FindingSeverity
 

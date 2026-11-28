@@ -563,6 +563,8 @@ pub struct CompiledCriterion {
     /// The [`probe_key`](crate::context::probe::probe_key) of a probed
     /// field's target (#329).
     probe: Option<String>,
+    /// `arg_index`, for `process.argv` (#329).
+    arg_index: Option<i16>,
     values: Values,
 }
 
@@ -671,6 +673,7 @@ impl CompiledCriterion {
         }
         let mut options = option_problems(c);
         options.extend(signer::option_problems(c).into_iter().map(|(_, kind)| kind));
+        options.extend(arg_index_out_of_range(c));
         if !options.is_empty() {
             return Err(options
                 .into_iter()
@@ -725,6 +728,7 @@ impl CompiledCriterion {
             safety_critical: c.safety_critical,
             signer: signer::compile_options(c),
             probe,
+            arg_index: c.arg_index,
             values,
         })
     }
@@ -963,6 +967,20 @@ impl CompiledCriterion {
                 result
             }
             (ContextFact::Text(fact), _) => self.eval_value(fact, notes),
+            (ContextFact::Args(args), _) => match self.arg_index {
+                // A position: no argument there is nothing to compare, so no
+                // comparison holds, and its negation does.
+                Some(i) => match crate::context::cmdline::arg_at(args, i) {
+                    Some(arg) => self.eval_value(arg, notes),
+                    None => Tri::NoMatch,
+                },
+                // Any argument after the program name.
+                None => args
+                    .iter()
+                    .skip(1)
+                    .map(|a| self.eval_value(a, notes))
+                    .fold(Tri::NoMatch, Tri::or),
+            },
             // A fact of another shape than the field's values: the
             // collector produced something this field does not hold.
             _ => {
@@ -1376,6 +1394,12 @@ pub(crate) fn option_problems(c: &Criterion) -> Vec<CompileErrorKind> {
             "`env.var`, `reg.key`, `reg.value`, `fs.file` and `fs.folder`",
         ));
     }
+    if c.arg_index.is_some() && c.field != Field::ProcessArgv {
+        out.push(CompileErrorKind::OptionNotApplicable(
+            "arg_index",
+            "`process.argv`",
+        ));
+    }
     if c.value_name.is_some() && c.field != Field::RegValue {
         out.push(CompileErrorKind::OptionNotApplicable(
             "value_name",
@@ -1383,6 +1407,20 @@ pub(crate) fn option_problems(c: &Criterion) -> Vec<CompileErrorKind> {
         ));
     }
     out
+}
+
+/// Why a criterion's `arg_index` is out of range, if it is: past
+/// [`MAX_ARG_INDEX`](crate::context::cmdline::MAX_ARG_INDEX) either way.
+/// The schema states the range; this enforces it, so a policy the schema
+/// rejects is never accepted. Validation reports the same.
+pub(crate) fn arg_index_out_of_range(c: &Criterion) -> Option<CompileErrorKind> {
+    use crate::context::cmdline::MAX_ARG_INDEX;
+    let i = c.arg_index?;
+    (!(-MAX_ARG_INDEX..=MAX_ARG_INDEX).contains(&i)).then(|| {
+        CompileErrorKind::InvalidValue(format!(
+            "`arg_index` is {i}; it must be between -{MAX_ARG_INDEX} and {MAX_ARG_INDEX}"
+        ))
+    })
 }
 
 /// Why a criterion value is too long, if it is: more than

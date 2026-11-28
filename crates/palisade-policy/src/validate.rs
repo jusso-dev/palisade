@@ -976,11 +976,17 @@ impl Validator {
             );
         }
         let problems = ops::option_problems(c);
-        let options_ok = problems.is_empty() && ops::signer::option_problems(c).is_empty();
+        let options_ok = problems.is_empty()
+            && ops::signer::option_problems(c).is_empty()
+            && ops::arg_index_out_of_range(c).is_none();
         for kind in &problems {
             if let CompileErrorKind::OptionNotApplicable(option, _) = kind {
                 self.compile_error(&format!("{base}/{option}"), kind);
             }
+        }
+        // Out of the schema's range: rejected, never clamped (#329).
+        if let Some(kind) = ops::arg_index_out_of_range(c) {
+            self.compile_error(&format!("{base}/arg_index"), &kind);
         }
         // `safety_critical` makes an unknown fact count towards a deny, which
         // only fails closed in a mandatory blocklist (#32, #87). Anywhere
@@ -1077,6 +1083,7 @@ impl Validator {
                     match_ads: None,
                     include_sub_ous: None,
                     signer: None,
+                    arg_index: None,
                     ..c.clone()
                 };
                 &without_options

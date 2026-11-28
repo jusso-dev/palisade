@@ -8,6 +8,7 @@
 #   cargo +nightly fuzz run fuzz_wildcard_regex_compile
 #   cargo +nightly fuzz run fuzz_bundle_decode
 #   cargo +nightly fuzz run fuzz_bundle_delta
+#   cargo +nightly fuzz run fuzz_cmdline_split
 [package]
 name = "palisade-policy-fuzz"
 version = "0.0.0"
@@ -57,6 +58,13 @@ bench = false
 [[bin]]
 name = "fuzz_bundle_delta"
 path = "fuzz_targets/fuzz_bundle_delta.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_cmdline_split"
+path = "fuzz_targets/fuzz_cmdline_split.rs"
 test = false
 doc = false
 bench = false

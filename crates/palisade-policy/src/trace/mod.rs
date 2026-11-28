@@ -1399,6 +1399,7 @@ fn observe(field: Field, sel: Selector, subject: &Subject<'_>) -> Option<Vec<Str
             ContextFact::Weekday(d) => vec![d.as_str().to_owned()],
             ContextFact::Minute(m) => vec![format!("{:02}:{:02}", m / 60, m % 60)],
             ContextFact::Date(d) => vec![d.to_string()],
+            ContextFact::Args(a) => a.to_vec(),
         });
     }
     match field {

@@ -398,6 +398,16 @@
             "null"
           ]
         },
+        "arg_index": {
+          "description": "Only for `process.argv`: the argument tested, from the start (0 is\nthe program name) or, when negative, from the end (-1 is the last).\nUnset means any argument after the program name.",
+          "format": "int16",
+          "maximum": 255,
+          "minimum": -255,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "case_sensitive": {
           "description": "Compare strings case-sensitively. Unset means the field's default\n(#32), which is case-insensitive for every field defined so far.\nOnly text, paths, file names, account names and tags have a case;\nother fields (hashes, versions, SIDs, group sets, yes-or-no facts and\nsession types) reject this option.",
           "type": [
@@ -1337,6 +1347,16 @@
         {
           "const": "fs.folder",
           "description": "Context (#329): whether the folder `target` exists. User-controlled,\nas `fs.file`.",
+          "type": "string"
+        },
+        {
+          "const": "process.command_line",
+          "description": "Context (#329): the command line the process was started with, as\nthe agent captured it at creation. Attacker-controlled: whoever\nstarts a process chooses its arguments, so it can only narrow a\nrule.",
+          "type": "string"
+        },
+        {
+          "const": "process.argv",
+          "description": "Context (#329): the process's arguments, split as\n`CommandLineToArgvW` splits them. With `arg_index`, the argument at\nthat position (0 is the program name, -1 the last); without it, any\nargument after the program name. Attacker-controlled, as\n`process.command_line`.",
           "type": "string"
         }
       ]
