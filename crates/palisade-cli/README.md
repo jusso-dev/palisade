@@ -35,6 +35,10 @@ pal fileid explain <path> [--json] [--anchor <cert>]...
   to one. `--catroot` loads every `*.cat` under a directory (such as the OS
   catalog root) and looks files up in it. Revocation is not fetched
   (offline).
+- `inspect --include-ads` also identifies each alternate data stream that
+  is not a well-known benign one, as its own record (`file:stream`). The
+  streams are listed from the Windows file system; where they cannot be,
+  the run fails rather than report none.
 - `hash` prints only the selected digests. `msi-normalised` (an
   installer's timestamp-free hash) and `script-normalised` (a script's text
   without its signature block, byte order mark and line-ending

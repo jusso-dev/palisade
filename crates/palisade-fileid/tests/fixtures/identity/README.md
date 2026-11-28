@@ -73,6 +73,7 @@ updated from its output.
   description: ...
   context: default           # default | trusted | trusted_crl (see `Contexts::get`)
   path_as: "C:\\Temp\\y.exe"  # optional: the path it is identified under
+  requires: os-trust         # optional: a crate feature the entry needs
   expected:
     signing_state: unsigned
     ...

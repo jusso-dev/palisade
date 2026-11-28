@@ -340,7 +340,24 @@ fn identify_reads_a_file() {
     assert_eq!(id.pe, from_bytes.pe);
     assert_eq!(id.signing_state, from_bytes.signing_state);
     assert!(id.fs.path.computed().is_some_and(|p| !p.claimed));
-    assert!(matches!(id.fs.owner, Field::NotYetSupported(_)));
+    // The file system context comes from the Windows file system only;
+    // elsewhere it is unavailable, never guessed. The provenance tag has
+    // no reader yet.
+    if cfg!(windows) {
+        assert!(id.fs.file_id.is_computed() || matches!(id.fs.file_id, Field::Unavailable(_)));
+    } else {
+        for f in [
+            matches!(id.fs.owner, Field::Unavailable(_)),
+            matches!(id.fs.user_writable, Field::Unavailable(_)),
+            matches!(id.fs.streams, Field::Unavailable(_)),
+            matches!(id.fs.reparse, Field::Unavailable(_)),
+            matches!(id.fs.file_id, Field::Unavailable(_)),
+            matches!(id.fs.volume, Field::Unavailable(_)),
+        ] {
+            assert!(f, "{:?}", id.fs);
+        }
+    }
+    assert!(matches!(id.fs.provenance, Field::NotYetSupported(_)));
     // A directory and a missing file are errors, not records.
     assert!(identify(&dir, Tiers::ALL, &ctx()).is_err());
     assert!(identify(&dir.join("missing"), Tiers::ALL, &ctx()).is_err());
@@ -517,4 +534,124 @@ fn review_minors_in_the_record() {
         assert!(!id.computed_tiers.contains(Tier::Context));
         std::fs::remove_dir_all(&dir).unwrap();
     }
+}
+
+/// #55 wiring: a path is Medium only when the access check proved that no
+/// non-administrator can write the file or a folder above it, or change
+/// their permissions; anything else, unknown included, is Weak. A path
+/// rule is never recommended.
+#[test]
+fn path_strength_follows_proven_writability() {
+    use palisade_fileid::identity::{IdentityStrength, WritableSummary, strength};
+    let image = tool_image((1, 0, 0, 0));
+    let dir = ScratchDir::new("writable");
+    let path = dir.0.join("extool.exe");
+    std::fs::write(&path, &image).unwrap();
+    let mut id = identify(&path, Tiers::ALL, &ctx()).unwrap();
+    drop(dir);
+    let volume = |location: &str| {
+        Field::Computed(palisade_fileid::identity::VolumeSummary {
+            fs_type: Some("ntfs".to_owned()),
+            location: location.to_owned(),
+            drive_type: None,
+            bus_type: None,
+            is_hotplug: Some(false),
+            is_os_volume: Some(location == "os_volume"),
+            serial: None,
+            supports_owner: true,
+        })
+    };
+    id.fs.volume = volume("os_volume");
+    let path_strength = |id: &palisade_fileid::identity::FileIdentity| {
+        strength::classify(id)
+            .into_iter()
+            .find(|s| s.attribute == "path")
+            .map(|s| s.strength)
+    };
+    let safe = WritableSummary {
+        path_user_writable: false,
+        file_user_writable: false,
+        first_user_writable_ancestor: None,
+        change_perms_by_non_admin: false,
+        principals_with_write: Vec::new(),
+    };
+    for (field, want) in [
+        (
+            Field::Unavailable("not read".to_owned()),
+            IdentityStrength::Weak,
+        ),
+        (Field::Computed(safe.clone()), IdentityStrength::Medium),
+        (
+            Field::Computed(WritableSummary {
+                path_user_writable: true,
+                first_user_writable_ancestor: Some(r"C:\Users\alice".to_owned()),
+                ..safe.clone()
+            }),
+            IdentityStrength::Weak,
+        ),
+        (
+            Field::Computed(WritableSummary {
+                change_perms_by_non_admin: true,
+                ..safe.clone()
+            }),
+            IdentityStrength::Weak,
+        ),
+    ] {
+        id.fs.user_writable = field.clone();
+        assert_eq!(path_strength(&id), Some(want), "{field:?}");
+        let rec = recommend(&id);
+        assert_ne!(rec.level, RuleLevel::Path, "{field:?}");
+        assert!(
+            rec.refused.iter().any(|(l, _)| *l == RuleLevel::Path),
+            "{field:?}"
+        );
+    }
+    // #344 review m2: a proven-safe ACL counts only on a local fixed disk.
+    id.fs.user_writable = Field::Computed(safe);
+    for (location, want) in [
+        ("other_fixed", IdentityStrength::Medium),
+        ("network", IdentityStrength::Weak),
+        ("removable", IdentityStrength::Weak),
+        ("virtual_disk", IdentityStrength::Weak),
+        ("unknown", IdentityStrength::Weak),
+    ] {
+        id.fs.volume = volume(location);
+        assert_eq!(path_strength(&id), Some(want), "{location}");
+    }
+    id.fs.volume = Field::Unavailable("not read".to_owned());
+    assert_eq!(path_strength(&id), Some(IdentityStrength::Weak));
+}
+
+/// #344 review: merge compares each part of the file key on its own. A part
+/// only one record knows (no change journal on one side) does not refuse
+/// the merge; a known part that differs does.
+#[test]
+fn merging_compares_each_part_of_the_file_key() {
+    use palisade_fileid::identity::FileIdSummary;
+    let image = tool_image((1, 0, 0, 0));
+    let key = |usn: Option<i64>, journal: Option<u64>, file_id: &str| {
+        Field::Computed(FileIdSummary {
+            volume_serial: Some(7),
+            file_id: Some(file_id.to_owned()),
+            usn_journal_id: journal,
+            usn,
+            link_count: Some(1),
+            link_names: Vec::new(),
+        })
+    };
+    let with = |k: Field<FileIdSummary>, tiers: Tiers| {
+        let mut id = identify_bytes(&image, Some("extool.exe"), tiers, &ctx());
+        id.fs.file_id = k;
+        id
+    };
+    let early = Tiers::EXECUTION;
+    let late: Tiers = [Tier::Context, Tier::Deep].into_iter().collect();
+    // One side has no change journal: the USN is not compared.
+    let mut a = with(key(None, None, "01"), early);
+    assert!(a.merge(with(key(Some(5), Some(9), "01"), late), &ctx()));
+    // A known USN that differs, or another file ID, refuses.
+    let mut a = with(key(Some(4), Some(9), "01"), early);
+    assert!(!a.merge(with(key(Some(5), Some(9), "01"), late), &ctx()));
+    let mut a = with(key(None, None, "01"), early);
+    assert!(!a.merge(with(key(None, None, "02"), late), &ctx()));
 }

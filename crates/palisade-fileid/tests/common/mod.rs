@@ -577,3 +577,35 @@ pub fn with_version(version: &VersionSpec<'_>) -> PeBuilder {
         ..PeBuilder::default()
     }
 }
+
+/// A folder created for one test, never one left by an earlier run (its
+/// creation fails if the name exists), and removed when dropped, even when
+/// the test fails.
+pub struct ScratchDir(pub std::path::PathBuf);
+
+impl ScratchDir {
+    /// A new, empty folder under the temporary folder, named after `tag`.
+    pub fn new(tag: &str) -> Self {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        loop {
+            let n = NEXT.fetch_add(1, Ordering::Relaxed);
+            let nanos = std::time::SystemTime::UNIX_EPOCH
+                .elapsed()
+                .map_or(0, |d| d.subsec_nanos());
+            let dir = std::env::temp_dir()
+                .join(format!("palisade-{tag}-{}-{n}-{nanos}", std::process::id()));
+            match std::fs::create_dir(&dir) {
+                Ok(()) => return Self(dir),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(e) => panic!("{}: {e}", dir.display()),
+            }
+        }
+    }
+}
+
+impl Drop for ScratchDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}

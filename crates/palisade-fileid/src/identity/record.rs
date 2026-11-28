@@ -803,6 +803,119 @@ pub struct ChainSummary {
     pub issues: usize,
 }
 
+/// The file's identity on its volume (#54).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FileIdSummary {
+    /// The volume serial number.
+    pub volume_serial: Option<u64>,
+    /// The 128-bit file ID, hex.
+    pub file_id: Option<String>,
+    /// The change journal's ID, when the volume keeps a journal.
+    pub usn_journal_id: Option<u64>,
+    /// The file's last update sequence number.
+    pub usn: Option<i64>,
+    /// How many hard links the file has. More than one means other names
+    /// reach the same content.
+    pub link_count: Option<u32>,
+    /// Those names, as far as they could be listed.
+    pub link_names: Vec<String>,
+}
+
+/// The volume a file is on (#54).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct VolumeSummary {
+    /// The file system (`ntfs`, `refs`, `fat`, `ex_fat`, `udf`, `cdfs`,
+    /// `network`, or another name).
+    pub fs_type: Option<String>,
+    /// Where the file lives: `os_volume`, `other_fixed`, `removable`,
+    /// `optical`, `network`, `ram_disk`, `virtual_disk` or `unknown`.
+    pub location: String,
+    /// The drive type, as the OS reports it.
+    pub drive_type: Option<String>,
+    /// The disk's bus.
+    pub bus_type: Option<String>,
+    /// The disk is hot-pluggable.
+    pub is_hotplug: Option<bool>,
+    /// It is the volume the OS runs from.
+    pub is_os_volume: Option<bool>,
+    /// The volume serial number.
+    pub serial: Option<u32>,
+    /// Owners on this volume can be relied on (a local NTFS or ReFS disk).
+    pub supports_owner: bool,
+}
+
+/// A file's owner (#54).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OwnerSummary {
+    /// The owner SID, as `S-1-…`.
+    pub sid: Option<String>,
+    /// The account name, when it resolves. Display only.
+    pub name: Option<String>,
+    /// `admin_equivalent`, `non_admin` or `unknown`.
+    pub trust_class: String,
+    /// Owners on this volume can be relied on. When `false`, the owner is
+    /// not reported and the class is `unknown`.
+    pub supported: bool,
+}
+
+/// Whether non-administrators can change a file or what its path names
+/// (#54, ISM-1392, ISM-1746).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WritableSummary {
+    /// The file, or any folder above it on its real or lexical chain, is
+    /// writable by some non-administrator, or could not be read: a path
+    /// rule for it is unsafe. Fails closed.
+    pub path_user_writable: bool,
+    /// The file itself is writable by some non-administrator.
+    pub file_user_writable: bool,
+    /// The nearest user-writable folder above it.
+    pub first_user_writable_ancestor: Option<String>,
+    /// Some non-administrator may change permissions or the owner on the
+    /// file or a folder above it.
+    pub change_perms_by_non_admin: bool,
+    /// The principals that may hold a write-type right, as SIDs.
+    pub principals_with_write: Vec<String>,
+}
+
+/// A file's alternate data streams (#54).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StreamsSummary {
+    /// The named streams, as far as they were listed.
+    pub streams: Vec<StreamSummary>,
+    /// The OS listing stopped at its limit: more streams exist than are
+    /// listed, so the absence of one proves nothing.
+    pub truncated: bool,
+}
+
+/// One alternate data stream (#54).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StreamSummary {
+    /// The stream's name.
+    pub name: String,
+    /// Its size in bytes.
+    pub size: u64,
+    /// A well-known benign stream (the mark-of-the-web, thumbnails and so
+    /// on), by name.
+    pub benign: Option<String>,
+    /// Its content is executable: code kept in a stream. `None` when it
+    /// was not looked at.
+    pub executable_content: Option<bool>,
+}
+
+/// A reparse point (#54).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReparseSummary {
+    /// `symlink`, `junction`, `mount_point`, `app_exec_link`,
+    /// `cloud_placeholder`, `dedup` or `other`.
+    pub kind: String,
+    /// The tag.
+    pub tag: u32,
+    /// Where a link points, as it prints it.
+    pub target: Option<String>,
+    /// An app execution alias's package family name.
+    pub alias_package_family_name: Option<String>,
+}
+
 /// A script's signature and identity (#52).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ScriptSummary {
@@ -996,19 +1109,22 @@ pub struct CatalogMatchSummary {
 pub struct FsInfo {
     /// The path forms (stat tier).
     pub path: Field<PathInfo>,
-    /// The file ID, change journal stamp and link count (#54).
-    pub file_id: Field<NotYetDefined>,
-    /// The volume (#54).
-    pub volume: Field<NotYetDefined>,
-    /// The owner (#54).
-    pub owner: Field<NotYetDefined>,
-    /// Writability by non-administrators (#54). Until then every path
-    /// counts as user-writable for strength.
-    pub user_writable: Field<NotYetDefined>,
-    /// Alternate data streams (#54).
-    pub streams: Field<NotYetDefined>,
-    /// Reparse points and links (#54).
-    pub reparse: Field<NotYetDefined>,
+    /// The file ID, change journal stamp and hard links (context tier,
+    /// #54).
+    pub file_id: Field<FileIdSummary>,
+    /// The volume (context tier, #54).
+    pub volume: Field<VolumeSummary>,
+    /// The owner (context tier, #54).
+    pub owner: Field<OwnerSummary>,
+    /// Writability by non-administrators of the file and every folder
+    /// above it (context tier, #54). A path counts as user-writable for
+    /// strength unless this is computed and says it is not.
+    pub user_writable: Field<WritableSummary>,
+    /// Alternate data streams (context tier, #54).
+    pub streams: Field<StreamsSummary>,
+    /// The reparse point the path names, if any (context tier, #54).
+    /// `Computed(None)` means it is not a reparse point.
+    pub reparse: Field<Option<ReparseSummary>>,
     /// The mark-of-the-web (context tier). `Computed(None)` means the file
     /// has no `Zone.Identifier` stream.
     pub motw: Field<Option<MotwSummary>>,
