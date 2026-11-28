@@ -1,0 +1,25 @@
+---
+source: crates/palisade-policy/tests/presets.rs
+---
+{
+  "all": [
+    {
+      "criterion": {
+        "field": "path.directory",
+        "operator": "starts_with",
+        "values": [
+          "C:\\Program Files\\Example"
+        ]
+      }
+    },
+    {
+      "criterion": {
+        "field": "signer.publisher",
+        "operator": "equals",
+        "values": [
+          "Example Ltd"
+        ]
+      }
+    }
+  ]
+}

@@ -60,6 +60,9 @@ name = "installer_and_pe_criteria"
 required-features = ["test-util"]
 
 [[test]]
+name = "presets"
+
+[[test]]
 name = "bundle_golden"
 required-features = ["test-util"]
 
