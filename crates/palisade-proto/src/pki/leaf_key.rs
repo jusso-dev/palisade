@@ -56,6 +56,20 @@ impl fmt::Debug for Pkcs8 {
     }
 }
 
+/// Generates a new private key of `algorithm` and returns only its PKCS#8
+/// document, for a key kept outside the process and imported with
+/// [`SoftwareSigner::import_pkcs8`](super::SoftwareSigner::import_pkcs8)
+/// (the development server's CA keys).
+///
+/// # Errors
+///
+/// [`SignerError::Failed`] if the secure random source fails.
+pub fn generate_pkcs8(algorithm: SignatureAlgorithm) -> Result<Pkcs8, SignerError> {
+    crypto::generate_pkcs8(algorithm, &Rng::new())
+        .map(Pkcs8::new)
+        .map_err(|e| SignerError::Failed(e.0))
+}
+
 /// An end-entity private key, in process memory.
 pub struct LeafKey {
     rng: Rng,
@@ -180,6 +194,17 @@ mod tests {
         assert_eq!(format!("{pkcs8:?}"), "Pkcs8([REDACTED])");
         assert!(format!("{key:?}").starts_with("LeafKey(kid "));
         assert_eq!(key.public_key().key_type(), KeyType::P384);
+    }
+
+    #[test]
+    fn exported_keys_import_into_a_signer() {
+        use crate::pki::KeyPurpose;
+        let pkcs8 = generate_pkcs8(ALGORITHM).unwrap();
+        let mut signer = SoftwareSigner::new();
+        let kid = signer
+            .import_pkcs8(KeyPurpose::IssuingCa, ALGORITHM, pkcs8.expose())
+            .unwrap();
+        assert_eq!(signer.purpose(&kid), Some(KeyPurpose::IssuingCa));
     }
 
     #[test]

@@ -23,7 +23,7 @@
 //!   |     signature = device key over                   and the proof of
 //!   |       "palisade-enrol-v1\0" ‖ payload             possession
 //!   |   <------ EnrolResponse { device cert chain, device ID, tenant,
-//!   |                           signed trust set, check-in URL }
+//!   |                           root key, signed trust set, check-in URL }
 //!   | then every request over mTLS with the device certificate
 //! ```
 //!
@@ -32,6 +32,19 @@
 //! received, then parses them. The payload carries a fresh nonce and its
 //! creation time, so a captured request cannot be replayed once the server
 //! has seen its nonce or after [`ENROL_MAX_AGE`].
+//!
+//! # The CA pin
+//!
+//! The agent is installed with one pin: the SHA-256 of the root CA's
+//! `SubjectPublicKeyInfo` (`PALISADE_CA_PIN=sha256/<hex>`). The server's TLS
+//! chain ends in that root, so the agent authenticates the server against
+//! the pin before it sends the registration code; there is no trust on
+//! first use. The same root key signs the trust sets the agent accepts
+//! afterwards, whose server pins then take over for TLS.
+//!
+//! The enrolment endpoint is on the server's admin listener, which asks for
+//! no client certificate. The agent listener stays mTLS only, and the reply
+//! names its URL in `checkin_url`.
 //!
 //! # Check-in
 //!
@@ -292,6 +305,11 @@ pub struct EnrolResponse {
     pub group_id: Uuid7,
     /// The device certificate first, then the issuing CA, DER.
     pub chain: BoundedVec<Base64<MAX_CERT_DER>, MAX_CHAIN>,
+    /// The root CA's DER `SubjectPublicKeyInfo`. The agent checks that its
+    /// SHA-256 is the CA pin it was installed with, then pins it as the key
+    /// that signs trust sets ([`crate::pki::TrustAnchor`]). A key whose hash
+    /// does not match is refused, so the server cannot choose the root.
+    pub root_key: Base64<{ crate::pki::key::MAX_SPKI_LEN }>,
     /// The current signed trust set ([`crate::pki::SignedTrustSet`]).
     pub trust_set: Base64<{ crate::pki::trust_set::MAX_ENVELOPE_LEN }>,
     /// Where to check in, if not the URL enrolment used.
