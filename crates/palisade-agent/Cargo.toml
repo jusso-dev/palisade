@@ -28,13 +28,18 @@ palisade-core = { workspace = true, features = ["std"] }
 # SIDs for the identity backend, and signature verification and catalog
 # lookups for the signature backend (#29).
 palisade-fileid = { workspace = true }
-# Command-line redaction with the decision-trace redactor (#59).
-palisade-policy = { workspace = true }
-# The event schema: the simulator's events and the process monitor's
-# canonical process fields (#59).
+# The event schema: the simulator's events, the process monitor's
+# canonical process fields (#59) and the policy bundle decisions (#304).
 palisade-proto = { workspace = true }
 # Interface addresses for the environment backend, as in the server.
 if-addrs = { workspace = true }
+# The policy cache (#61): the bundle format and engine, the anti-rollback
+# and last-known-good decisions, and the lock-free swap of the running
+# policy (already in the agent's tree through `palisade-policy`).
+arc-swap = { workspace = true }
+# The policy cache (#61), and command-line redaction with the
+# decision-trace redactor (#59).
+palisade-policy = { workspace = true }
 serde = { workspace = true }
 # The simulator's placeholder event chain.
 sha2 = { workspace = true, optional = true }
@@ -63,7 +68,8 @@ windows-sys = { workspace = true, features = [
     "Win32_NetworkManagement_NetManagement",
     "Win32_Networking_WinSock",
     "Win32_Security",
-    # The process monitor's drive-to-device map (#59).
+    # `MoveFileExW`, for the policy cache's durable rename (#61), and the
+    # process monitor's drive-to-device map (#59).
     "Win32_Storage_FileSystem",
     # The process monitor's ETW session (#59).
     "Win32_System_Diagnostics_Etw",
@@ -78,7 +84,7 @@ windows-sys = { workspace = true, features = [
 [dev-dependencies]
 serde_json = { workspace = true }
 palisade-core = { workspace = true, features = ["std", "test-util"] }
-palisade-proto = { workspace = true }
+palisade-policy = { workspace = true, features = ["test-util"] }
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
 
 [lints]

@@ -1,5 +1,6 @@
 //! Thin, safe wrappers over the Windows process, token, session and
-//! local-group calls the agent's platform backends need (#29). This is the
+//! local-group calls the agent's platform backends need (#29), and the
+//! durable rename of the policy cache (#61). This is the
 //! one place in the agent where those calls are made, so every `unsafe`
 //! block is here, each with a `// SAFETY:` comment (ADR 0011).
 //!
@@ -42,6 +43,9 @@ use windows_sys::Win32::Networking::WinSock::{
 use windows_sys::Win32::Security::{
     GetLengthSid, GetTokenInformation, LookupAccountNameW, LookupAccountSidW, SID_NAME_USE,
     TOKEN_INFORMATION_CLASS, TOKEN_QUERY,
+};
+use windows_sys::Win32::Storage::FileSystem::{
+    MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
 };
 use windows_sys::Win32::System::RemoteDesktop::{
     WTS_CURRENT_SERVER_HANDLE, WTSClientProtocolType, WTSFreeMemory, WTSQuerySessionInformationW,
@@ -738,9 +742,59 @@ pub(crate) fn local_group_members(name: &str) -> Result<Vec<Vec<u8>>, MembersErr
     }
 }
 
+/// `path` as a NUL-terminated UTF-16 string.
+fn wide_path(path: &std::path::Path) -> io::Result<Vec<u16>> {
+    use std::os::windows::ffi::OsStrExt;
+    let wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+    if wide.contains(&0) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "path contains a NUL character",
+        ));
+    }
+    Ok(wide.into_iter().chain([0]).collect())
+}
+
+/// Renames `from` over `to`, replacing it, and returns only once the rename
+/// is on disk (`MOVEFILE_WRITE_THROUGH`), for the policy cache's atomic
+/// activation (#61, ADR 0007 step 4).
+pub(crate) fn replace_file_durably(from: &std::path::Path, to: &std::path::Path) -> io::Result<()> {
+    let from = wide_path(from)?;
+    let to = wide_path(to)?;
+    // SAFETY: `from` and `to` are NUL-terminated UTF-16 paths with no
+    // interior NUL, alive for the call. The flags are valid constants.
+    let ok = unsafe {
+        MoveFileExW(
+            from.as_ptr(),
+            to.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if ok == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replace_file_durably_replaces_the_target() {
+        let dir = std::env::temp_dir().join(format!("palisade-ffi-move-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (from, to) = (dir.join("from"), dir.join("to"));
+        std::fs::write(&from, b"new").unwrap();
+        std::fs::write(&to, b"old").unwrap();
+        replace_file_durably(&from, &to).unwrap();
+        assert_eq!(std::fs::read(&to).unwrap(), b"new");
+        assert!(!from.exists());
+        assert!(replace_file_durably(&from, &to).is_err());
+        assert!(wide_path(std::path::Path::new("a\0b")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn the_current_process() {

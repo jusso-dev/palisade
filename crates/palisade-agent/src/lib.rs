@@ -17,6 +17,7 @@ pub mod inventory;
 pub mod lifecycle;
 pub mod logfile;
 pub mod platform;
+pub mod policy_cache;
 #[cfg(windows)]
 pub mod service;
 pub mod settings;

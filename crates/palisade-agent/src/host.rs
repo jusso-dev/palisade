@@ -305,7 +305,15 @@ pub fn builtin_subsystems(loaded: &LoadedConfig) -> Vec<Arc<dyn Subsystem>> {
     let config = Arc::new(ConfigSubsystem::new(loaded.clone()));
     let clock = Arc::new(ClockMonitor::new(SystemClock));
     let inventory = Arc::new(crate::inventory::subsystem::InventorySubsystem::for_platform());
-    vec![config, clock, inventory]
+    // Not enrolled until #62: the first-install policy, and every bundle
+    // refused. Enrolment supplies the target, store and record key.
+    let policy = Arc::new(crate::policy_cache::PolicyCacheSubsystem::new(
+        Arc::new(crate::policy_cache::PolicyCache::unenrolled(
+            palisade_policy::engine::EngineConfig::default(),
+        )),
+        Arc::new(SystemClock),
+    ));
+    vec![config, clock, inventory, policy]
 }
 
 /// Starts `supervisor`, runs until `stop` resolves, then shuts down within the
