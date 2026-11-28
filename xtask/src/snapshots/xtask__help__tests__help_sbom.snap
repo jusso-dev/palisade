@@ -1,7 +1,11 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
+Reserved for the SBOM (#226); prints where it will be written and fails
+
 Usage: cargo xtask sbom
 
-Reserved for the SBOM (#226); prints where it will be written and fails
+Options:
+  -h, --help
+          Print help

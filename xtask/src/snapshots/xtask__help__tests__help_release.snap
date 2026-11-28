@@ -1,7 +1,21 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
-Usage: cargo xtask release <prepare|check-tag|notes|checksums|verify-checksums|provenance|verify> ...
-
 The release pipeline's steps (docs/releasing.md)
+
+Usage: cargo xtask release <COMMAND>
+
+Commands:
+  prepare           Bump the version and write the changelog section (RELEASE_DATE gives the date)
+  check-tag         Check that a tag names the workspace version
+  notes             Print a version's release notes from CHANGELOG.md
+  checksums         Write SHA256SUMS for every file in a directory
+  verify-checksums  Check every file in a directory against its SHA256SUMS
+  provenance        The provenance hook (does nothing until RELEASE_PROVENANCE is on)
+  verify            Verify every signature in a directory, including inside packages
+  help              Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help

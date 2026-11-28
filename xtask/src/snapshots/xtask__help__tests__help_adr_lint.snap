@@ -1,8 +1,11 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
+Check every ADR's file name, number, status, date and sections (Security impact included), supersession links, and that the index is current
+
 Usage: cargo xtask adr lint
 
-Check every ADR's file name, number, status, date and sections (Security
-impact included), supersession links, and that the index is current
+Options:
+  -h, --help
+          Print help

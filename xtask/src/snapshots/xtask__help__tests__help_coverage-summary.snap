@@ -1,8 +1,18 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
-Usage: cargo xtask coverage-summary
-
-<label> <coverage.json>
 Summarise a cargo-llvm-cov JSON summary for the GitHub job page
+
+Usage: cargo xtask coverage-summary <LABEL> <COVERAGE>
+
+Arguments:
+  <LABEL>
+          The label for the summary
+
+  <COVERAGE>
+          The JSON summary
+
+Options:
+  -h, --help
+          Print help

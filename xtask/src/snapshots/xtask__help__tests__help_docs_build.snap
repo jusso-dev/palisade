@@ -1,8 +1,14 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
-Usage: cargo xtask docs build [--site-url <path>]
+Build the book into target/book (warnings are errors), then check every internal link; needs mdbook, mdbook-mermaid-ssr, a headless browser and lychee
 
-Build the book into target/book (warnings are errors), then check every
-internal link; needs mdbook, mdbook-mermaid-ssr, a headless browser and lychee
+Usage: cargo xtask docs build [OPTIONS]
+
+Options:
+      --site-url <path>
+          The published site's path, for absolute links
+
+  -h, --help
+          Print help

@@ -1,7 +1,11 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
+Build the generated test fixture corpus into target/fixtures/
+
 Usage: cargo xtask fixtures
 
-Build the generated test fixture corpus into target/fixtures/
+Options:
+  -h, --help
+          Print help

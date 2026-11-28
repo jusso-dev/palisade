@@ -1,8 +1,14 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
+Run every criterion bench at <commit> and at the working tree, and fail if a median is more than 10% slower outside the noise (bench.yml)
+
 Usage: cargo xtask bench-compare --base <commit>
 
-Run every criterion bench at <commit> and at the working tree, and fail if a
-median is more than 10% slower outside the noise (bench.yml)
+Options:
+      --base <commit>
+          The commit to compare with
+
+  -h, --help
+          Print help

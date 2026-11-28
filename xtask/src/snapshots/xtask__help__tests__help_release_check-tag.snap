@@ -1,0 +1,15 @@
+---
+source: xtask/src/help.rs
+expression: help_for(&path)
+---
+Check that a tag names the workspace version
+
+Usage: cargo xtask release check-tag <TAG>
+
+Arguments:
+  <TAG>
+          The tag
+
+Options:
+  -h, --help
+          Print help

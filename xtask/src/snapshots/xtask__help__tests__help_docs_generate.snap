@@ -1,7 +1,11 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
+Regenerate the reference pages in docs/book/src/reference/generated
+
 Usage: cargo xtask docs generate
 
-Regenerate the reference pages in docs/book/src/reference/generated
+Options:
+  -h, --help
+          Print help

@@ -1,7 +1,15 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
-Usage: cargo xtask adr new "<title>"
-
 Copy docs/adr/0000-template.md to the next ADR number, as `proposed`
+
+Usage: cargo xtask adr new <TITLE>
+
+Arguments:
+  <TITLE>
+          The ADR's title
+
+Options:
+  -h, --help
+          Print help

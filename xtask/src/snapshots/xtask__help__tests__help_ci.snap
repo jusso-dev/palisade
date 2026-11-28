@@ -1,9 +1,14 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
-Usage: cargo xtask ci [--fast]
+Run the checks from .github/workflows/ci.yml locally
 
-Run the checks from .github/workflows/ci.yml locally (--fast skips coverage,
-fuzz, docs, the book build, feature-powerset, msrv, package, sign-test and
-server-image)
+Usage: cargo xtask ci [OPTIONS]
+
+Options:
+      --fast
+          Skip coverage, fuzz, docs, the book build, feature-powerset, msrv, package, sign-test and server-image
+
+  -h, --help
+          Print help

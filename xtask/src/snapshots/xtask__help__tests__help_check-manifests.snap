@@ -1,8 +1,11 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
+Enforce workspace inheritance of package fields, lints and dependency versions, and that every crate README documents its features
+
 Usage: cargo xtask check-manifests
 
-Enforce workspace inheritance of package fields, lints and dependency versions,
-and that every crate README documents its features
+Options:
+  -h, --help
+          Print help

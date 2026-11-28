@@ -1,8 +1,11 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
+Run cargo-audit over the root and fuzz lockfiles, ignoring exactly the advisories deny.toml ignores
+
 Usage: cargo xtask audit
 
-Run cargo-audit over the root and fuzz lockfiles, ignoring exactly the
-advisories deny.toml ignores
+Options:
+  -h, --help
+          Print help

@@ -1,7 +1,15 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
+Print the docs version for a ref: latest for main, vX.Y for tag vX.Y.Z
+
 Usage: cargo xtask docs version-for-ref <git ref>
 
-Print the docs version for a ref: latest for main, vX.Y for tag vX.Y.Z
+Arguments:
+  <git ref>
+          The git ref
+
+Options:
+  -h, --help
+          Print help

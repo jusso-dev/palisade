@@ -1,0 +1,11 @@
+---
+source: xtask/src/help.rs
+expression: help_for(&path)
+---
+The provenance hook (does nothing until RELEASE_PROVENANCE is on)
+
+Usage: cargo xtask release provenance
+
+Options:
+  -h, --help
+          Print help

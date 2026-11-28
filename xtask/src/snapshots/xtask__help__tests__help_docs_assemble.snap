@@ -1,8 +1,18 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
-Usage: cargo xtask docs assemble <dir> --version <latest|vX.Y>
+Assemble the GitHub Pages tree: the book and the Rust API docs under <dir>/<version>/, the version list and the root redirect
 
-Assemble the GitHub Pages tree: the book and the Rust API docs under
-<dir>/<version>/, the version list and the root redirect
+Usage: cargo xtask docs assemble --version <latest|vX.Y> <DIR>
+
+Arguments:
+  <DIR>
+          The output directory
+
+Options:
+      --version <latest|vX.Y>
+          The docs version
+
+  -h, --help
+          Print help

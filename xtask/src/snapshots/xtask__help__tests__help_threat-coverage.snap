@@ -1,8 +1,11 @@
 ---
 source: xtask/src/help.rs
-expression: printed
+expression: help_for(&path)
 ---
+Check the threat model's tables, and that every test, fuzz target and CI check it cites exists (docs/security/threat-model.md)
+
 Usage: cargo xtask threat-coverage
 
-Check the threat model's tables, and that every test, fuzz target and CI
-check it cites exists (docs/security/threat-model.md)
+Options:
+  -h, --help
+          Print help
