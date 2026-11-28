@@ -12,6 +12,7 @@ pub mod control;
 #[cfg(windows)]
 mod ffi;
 pub mod host;
+pub mod inventory;
 pub mod lifecycle;
 pub mod logfile;
 pub mod platform;

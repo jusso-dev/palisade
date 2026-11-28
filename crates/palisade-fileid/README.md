@@ -251,6 +251,16 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     `win::links::read_details` fills them into an `FsContext`. Windows tests
     make a symbolic link, a relative link, a junction, a mount point and an
     app execution alias, 21 hard links and tagged and executable streams.
+  - `win::journal` (Windows, `os-trust` feature), for the file inventory
+    ([#60](https://github.com/jusso-dev/palisade/issues/60)): a volume's
+    change journal state, reading records from a saved cursor
+    (`FSCTL_READ_USN_JOURNAL`), listing every file of the master file table
+    for an initial scan (`FSCTL_ENUM_USN_DATA`), and opening a file by its
+    128-bit ID without following a reparse point. `fsctx::ntfs` parses the
+    journal state and the record lists, failing a whole batch on any
+    malformed record, so a change is never skipped silently.
+    `JournalData::can_resume` says whether a saved `(journal ID, next USN)`
+    cursor is still readable or the volume needs a reconciliation scan.
 - `authenticode` certificate chains, signer trust and identity
   ([#49](https://github.com/jusso-dev/palisade/issues/49)):
   - `CertSummary::from_der` parses an X.509 v1, v2 or v3 certificate. It
