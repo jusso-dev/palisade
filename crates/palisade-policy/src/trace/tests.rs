@@ -3455,3 +3455,37 @@ fn a_condition_timeout_is_unknown_and_traced() {
             .any(|u| u.field == Field::RegKey && u.notes.contains(&"condition_timeout"))
     );
 }
+
+#[test]
+fn a_timeout_in_an_unconsulted_attribute_rule_is_not_warned() {
+    // An attribute deny reads a probe that timed out. Without a stage-4
+    // allow the attribute stage is never consulted (#329), so its timeout
+    // had no effect on the decision and is not reported.
+    let key = serde_json::json!({"criterion": {"field": "reg.key", "operator": "exists", "target": "HKLM\\Software\\Blocked"}});
+    let deny = rule(
+        2,
+        "Block when the key exists",
+        key,
+        serde_json::json!({"type": "deny"}),
+    );
+    let mut o = object('a', "Example Ltd", "Other", "C:\\Apps\\x.exe", Some(false));
+    o.context.probes.insert(
+        Field::RegKey,
+        "HKLM\\Software\\Blocked",
+        None,
+        crate::context::Probe::TimedOut,
+    );
+    let timeout = |t: &Trace| {
+        t.warnings
+            .iter()
+            .any(|w| w.code == WarningCode::ConditionTimeout)
+    };
+    let p = with_attribute(false, deny.clone());
+    let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Full);
+    assert!(t.decisive.is_none());
+    assert!(!timeout(&t), "{:?}", t.warnings);
+    // After an allow the attribute stage runs, so the timeout is reported.
+    let p = with_attribute(true, deny);
+    let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Full);
+    assert!(timeout(&t), "{:?}", t.warnings);
+}
