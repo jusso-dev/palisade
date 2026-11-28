@@ -842,7 +842,10 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   and target executable all check out against an installed package
   (`resolve_alias`). `win::packages` fills it for one family and the
   current user from the OS app-model API and the installed manifest,
-  kept only when the manifest gives the full name the OS reported.
+  kept only when the manifest gives the full name the OS reported. `win::package_manager` fills it for every user, from the package
+  manager's WinRT interface (`FindPackages`, `FindUsers`; administrator
+  rights): the stub flag and the SIDs of the users each package is
+  installed for. A package it can't read marks the list incomplete.
 
 ## Handling untrusted input
 
@@ -1076,7 +1079,11 @@ the provider is a one-module change.
 
 With the `os-trust` feature, on Windows only, `windows-sys` (the Windows API
 bindings, with only the API families `win` calls) is a direct dependency.
-`palisade-policy` never enables the feature, so its graph is unchanged.
+So is `windows` (the WinRT projection), with only `ApplicationModel` and
+`Management_Deployment`, for `win::package_manager` (#333): the flat API
+cannot list other users' packages. `deny.toml` lets no other workspace
+crate depend on `windows` directly. `palisade-policy` never enables the
+feature, so its graph is unchanged.
 
 With `content-rules`, `aho-corasick` (std and its `memchr` fast path only)
 for the tagger's multi-pattern search. It is already a dependency of

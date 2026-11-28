@@ -20,6 +20,9 @@
 //!   check (#54).
 //! - [`packages`]: installed packages of a family for the current user,
 //!   and app execution alias resolution against them (#333).
+//! - [`package_manager`]: every user's installed packages, with the stub
+//!   flag and each package's users, from the package manager's WinRT
+//!   interface (#333).
 //! - [`trust`]: the OS trust-verification cross-check (#48).
 //! - [`volume`]: the volume a file is on (drive, bus, hot-plug, OS volume)
 //!   and the per-directory case-sensitivity flag (#54).
@@ -37,6 +40,7 @@ pub mod file;
 pub mod fsctx;
 pub mod journal;
 pub mod links;
+pub mod package_manager;
 pub mod packages;
 pub mod paths;
 pub mod security;

@@ -1449,10 +1449,45 @@ version = "0.4.0"
 criteria = "safe-to-run"
 notes = "Added by #309 (import-library crate of winapi, through criterion 0.8; dev-dependency only), merged before cargo-vet passed; exempted after the fact in the follow-up. Audit, or import an audit, before bumping."
 
+[[exemptions.windows]]
+version = "0.62.2"
+criteria = "safe-to-deploy"
+notes = "Added by #333 (palisade-fileid os-trust: the package manager's WinRT interface for every user's installed packages; the windows-rs family, published by the OS vendor's crates.io team alongside windows-sys, already exempted; no build scripts, the two proc-macros only generate COM interface boilerplate; no imported audit covers this version). Audit, or import an audit, before bumping."
+
+[[exemptions.windows-collections]]
+version = "0.3.2"
+criteria = "safe-to-deploy"
+notes = "Added by #333 (palisade-fileid os-trust: the package manager's WinRT interface for every user's installed packages; the windows-rs family, published by the OS vendor's crates.io team alongside windows-sys, already exempted; no build scripts, the two proc-macros only generate COM interface boilerplate; no imported audit covers this version). Audit, or import an audit, before bumping."
+
+[[exemptions.windows-core]]
+version = "0.62.2"
+criteria = "safe-to-deploy"
+notes = "Added by #333 (palisade-fileid os-trust: the package manager's WinRT interface for every user's installed packages; the windows-rs family, published by the OS vendor's crates.io team alongside windows-sys, already exempted; no build scripts, the two proc-macros only generate COM interface boilerplate; no imported audit covers this version). Audit, or import an audit, before bumping."
+
+[[exemptions.windows-future]]
+version = "0.3.2"
+criteria = "safe-to-deploy"
+notes = "Added by #333 (palisade-fileid os-trust: the package manager's WinRT interface for every user's installed packages; the windows-rs family, published by the OS vendor's crates.io team alongside windows-sys, already exempted; no build scripts, the two proc-macros only generate COM interface boilerplate; no imported audit covers this version). Audit, or import an audit, before bumping."
+
+[[exemptions.windows-implement]]
+version = "0.60.2"
+criteria = "safe-to-deploy"
+notes = "Added by #333 (palisade-fileid os-trust: the package manager's WinRT interface for every user's installed packages; the windows-rs family, published by the OS vendor's crates.io team alongside windows-sys, already exempted; no build scripts, the two proc-macros only generate COM interface boilerplate; no imported audit covers this version). Audit, or import an audit, before bumping."
+
+[[exemptions.windows-interface]]
+version = "0.59.3"
+criteria = "safe-to-deploy"
+notes = "Added by #333 (palisade-fileid os-trust: the package manager's WinRT interface for every user's installed packages; the windows-rs family, published by the OS vendor's crates.io team alongside windows-sys, already exempted; no build scripts, the two proc-macros only generate COM interface boilerplate; no imported audit covers this version). Audit, or import an audit, before bumping."
+
 [[exemptions.windows-link]]
 version = "0.2.1"
 criteria = "safe-to-deploy"
 notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.windows-numerics]]
+version = "0.3.1"
+criteria = "safe-to-deploy"
+notes = "Added by #333 (palisade-fileid os-trust: the package manager's WinRT interface for every user's installed packages; the windows-rs family, published by the OS vendor's crates.io team alongside windows-sys, already exempted; no build scripts, the two proc-macros only generate COM interface boilerplate; no imported audit covers this version). Audit, or import an audit, before bumping."
 
 [[exemptions.windows-registry]]
 version = "0.6.1"
@@ -1488,6 +1523,11 @@ notes = "Added by #252 (palisade-agent service host: async runtime, logging and 
 version = "0.52.6"
 criteria = "safe-to-deploy"
 notes = "Added by #247 (palisade-fileid Authenticode verification: ring and its build and platform dependencies) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.windows-threading]]
+version = "0.2.1"
+criteria = "safe-to-deploy"
+notes = "Added by #333 (palisade-fileid os-trust: the package manager's WinRT interface for every user's installed packages; the windows-rs family, published by the OS vendor's crates.io team alongside windows-sys, already exempted; no build scripts, the two proc-macros only generate COM interface boilerplate; no imported audit covers this version). Audit, or import an audit, before bumping."
 
 [[exemptions.windows-version]]
 version = "0.1.7"
