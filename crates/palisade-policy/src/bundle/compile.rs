@@ -24,8 +24,7 @@ use super::format::{
 use super::serial;
 use crate::hierarchy::EffectivePolicy;
 use crate::library::{Catalogue, LibraryId, Pin, Visibility};
-use crate::model::PolicyDocument;
-use crate::scope::{NetworkRef, Schedule, Scope, ScopeLibrary, SetRef};
+use crate::scope::{Schedule, ScopeLibrary, SetRef};
 use crate::validate::{Severity, ValidatedPolicy};
 
 /// What a bundle is compiled from.
@@ -113,35 +112,6 @@ impl fmt::Display for CompileError {
 
 impl std::error::Error for CompileError {}
 
-/// Every library set reference in `doc` that the agent resolves: those in
-/// scopes ([`crate::scope::document_scopes`]) and those in location
-/// profiles' tests, which scopes read through `location_profile`.
-fn set_refs_mut(doc: &mut PolicyDocument, mut f: impl FnMut(&mut SetRef)) {
-    let p = &mut doc.policy;
-    let mut scopes: Vec<&mut Scope> = Vec::new();
-    scopes.extend(p.scope.as_mut());
-    scopes.extend(p.unknown.scopes.iter_mut());
-    for l in &mut p.unknown.scope_limits {
-        scopes.extend(l.all_of.iter_mut().chain(l.any_of.iter_mut()));
-    }
-    for a in &mut p.rule_set_scopes {
-        scopes.extend(a.scopes.iter_mut());
-    }
-    for set in &mut doc.rule_sets {
-        scopes.extend(set.rules.iter_mut().filter_map(|r| r.scope.as_deref_mut()));
-    }
-    for scope in scopes {
-        crate::scope::for_each_set_ref(scope, &mut f);
-    }
-    for profile in &mut p.location_profiles {
-        for test in &mut profile.all {
-            if let NetworkRef::NetworkSet(r) = test {
-                f(r);
-            }
-        }
-    }
-}
-
 /// Compiles `source` into a bundle with `header`.
 ///
 /// Every library set a scope or a location profile reads is inlined, at
@@ -199,7 +169,7 @@ pub fn compile(
     // must not be cloned per reference before `Body::new` deduplicates.
     let mut inlined: BTreeSet<(LibraryId, u32)> = BTreeSet::new();
     let mut failed = None;
-    set_refs_mut(&mut doc, |r| {
+    crate::scope::for_each_document_set_ref(&mut doc, |r| {
         let resolved = source
             .catalogue
             .resolve(r, source.from)

@@ -1219,9 +1219,9 @@ fn check_rule_set_libraries(
     out
 }
 
-/// The library set references of every scope in `doc`, resolved from
-/// `from`: each must name a library of the kind its position needs. A
-/// `latest` reference is pinned to the version it resolves to. Every
+/// The library set references of `doc` (its scopes and its location
+/// profiles' tests), resolved from `from`: each must name a library of the
+/// kind its position needs. A `latest` reference is pinned to the version it resolves to. Every
 /// version used goes into `used` and every library into `refs`. Returns
 /// whether all resolved; problems go to `errors` under `base`.
 fn scope_refs(
@@ -1252,53 +1252,36 @@ fn scope_refs(
             r.pin = crate::library::Pin::Version(lib.version);
         }
     };
-    let mut scopes: Vec<&mut crate::scope::Scope> = Vec::new();
-    scopes.extend(doc.policy.scope.as_mut());
-    scopes.extend(doc.policy.unknown.scopes.iter_mut());
-    for l in &mut doc.policy.unknown.scope_limits {
-        scopes.extend(l.all_of.iter_mut());
-        scopes.extend(l.any_of.iter_mut());
-    }
-    for a in &mut doc.policy.rule_set_scopes {
-        scopes.extend(a.scopes.iter_mut());
-    }
-    for set in &mut doc.rule_sets {
-        scopes.extend(set.rules.iter_mut().filter_map(|r| r.scope.as_deref_mut()));
-    }
-    for scope in scopes {
-        crate::scope::for_each_set_ref(scope, |r| pin(r, used, refs));
-    }
+    crate::scope::for_each_document_set_ref(doc, |r| pin(r, used, refs));
     true
 }
 
-/// The scope set references of `doc` that do not resolve to a library of
-/// the right kind, with their JSON Pointers.
+/// The library set references of `doc` (its scopes and its location
+/// profiles' tests) that do not resolve to a library of the right kind,
+/// with their JSON Pointers.
 fn scope_ref_problems(
     doc: &PolicyDocument,
     catalogue: &Catalogue,
     from: Visibility,
 ) -> Vec<(String, LibraryError)> {
     let mut out = Vec::new();
-    for (at, scope) in crate::scope::document_scopes(doc) {
-        for (path, r, kind) in crate::scope::set_refs(scope) {
-            let path = format!("{at}{path}");
-            match catalogue.resolve(&r, from) {
-                Err(e) => out.push((path, e)),
-                Ok(lib) if lib.content.kind() != kind => out.push((
-                    path,
-                    LibraryError {
-                        code: LibraryCode::RefKindNotAllowed,
-                        path: String::new(),
-                        message: format!(
-                            "library `{}` is a `{}`; this position needs a `{}`",
-                            lib.name,
-                            lib.content.kind(),
-                            kind.as_str()
-                        ),
-                    },
-                )),
-                Ok(_) => {}
-            }
+    for (path, r, kind) in crate::scope::document_set_refs(doc) {
+        match catalogue.resolve(&r, from) {
+            Err(e) => out.push((path, e)),
+            Ok(lib) if lib.content.kind() != kind => out.push((
+                path,
+                LibraryError {
+                    code: LibraryCode::RefKindNotAllowed,
+                    path: String::new(),
+                    message: format!(
+                        "library `{}` is a `{}`; this position needs a `{}`",
+                        lib.name,
+                        lib.content.kind(),
+                        kind.as_str()
+                    ),
+                },
+            )),
+            Ok(_) => {}
         }
     }
     out

@@ -2317,6 +2317,119 @@ fn two_pins_of_one_scope_set_conflict() {
     );
 }
 
+/// Policy `n`, whose allow is scoped to location profile `corporate`, a
+/// test of network set 100 at `pin`.
+fn profiled_by_set(n: u32, pin: Value) -> Value {
+    let mut r = rule(70 + n, "allow", 'b');
+    r["scope"] = json!({"network": {"include": [{"location_profile": "corporate"}]}});
+    policy_with(
+        n,
+        "enforce",
+        vec![set(60 + n, "allowlist", false, vec![r])],
+        json!({"location_profiles": [{"name": "corporate",
+               "all": [{"network_set": {"id": id(100), "pin": pin}}]}]}),
+    )
+}
+
+fn network_set_library(version: u32, entry: &str) -> Value {
+    json!({"id": id(100), "version": version, "name": "Corp nets", "realm": "global",
+           "content": {"kind": "network_set", "entries": [entry]}})
+}
+
+#[test]
+fn location_profile_sets_must_exist_and_be_the_right_kind() {
+    let mut nodes = base_nodes();
+    set_node(&mut nodes, 11, json!({"assignments": assign(&[(50, 0)])}));
+    let p = profiled_by_set(50, json!("latest"));
+    let at = "/policy/location_profiles/0/all/0/network_set";
+    let found = errors(&snapshot(nodes.clone(), vec![p.clone()], vec![]));
+    assert!(
+        found
+            .iter()
+            .any(|(c, path)| c == "unknown_library" && path.ends_with(at)),
+        "{found:?}"
+    );
+    let found = errors(&snapshot(
+        nodes,
+        vec![p],
+        vec![principal_set_library(1, "S-1-5-32-544")],
+    ));
+    assert!(
+        found
+            .iter()
+            .any(|(c, path)| c == "ref_kind_not_allowed" && path.ends_with(at)),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn location_profile_sets_are_pinned_counted_and_in_use() {
+    let mut nodes = base_nodes();
+    set_node(&mut nodes, 11, json!({"assignments": assign(&[(50, 0)])}));
+    let p = profiled_by_set(50, json!("latest"));
+    let h = validated(&snapshot(
+        nodes.clone(),
+        vec![p.clone()],
+        vec![network_set_library(1, "10.0.0.0/8")],
+    ));
+    let e = effective(&h, 20);
+    // Pinned to the version used, and listed with it.
+    let doc = e.policy().unwrap().document();
+    let profile = serde_json::to_value(&doc.policy.location_profiles[0]).unwrap();
+    assert_eq!(profile["all"][0]["network_set"]["pin"], json!(1));
+    assert!(
+        e.libraries()
+            .contains(&(LibraryId(id(100).parse().unwrap()), 1))
+    );
+    // A new version of the set changes the content hash.
+    let h2 = validated(&snapshot(
+        nodes,
+        vec![p],
+        vec![
+            network_set_library(1, "10.0.0.0/8"),
+            network_set_library(2, "172.16.0.0/12"),
+        ],
+    ));
+    let e2 = effective(&h2, 20);
+    assert!(
+        e2.libraries()
+            .contains(&(LibraryId(id(100).parse().unwrap()), 2))
+    );
+    assert_ne!(e2.content_hash(), e.content_hash());
+    // And the set cannot be deleted while the policy uses it.
+    let err = h
+        .check_delete(LibraryId(id(100).parse().unwrap()))
+        .unwrap_err();
+    assert_eq!(err.code.as_str(), "in_use");
+}
+
+#[test]
+fn two_pins_of_one_location_profile_set_conflict() {
+    let mut nodes = base_nodes();
+    set_node(&mut nodes, 1, json!({"assignments": assign(&[(50, 0)])}));
+    set_node(&mut nodes, 11, json!({"assignments": assign(&[(51, 0)])}));
+    // The profiles differ, so give the second another name: the conflict
+    // is about the set's version, not the profile's name.
+    let mut second = profiled_by_set(51, json!(2));
+    second["document"]["policy"]["location_profiles"][0]["name"] = json!("office");
+    second["document"]["rule_sets"][0]["rules"][0]["scope"] =
+        json!({"network": {"include": [{"location_profile": "office"}]}});
+    let found = errors(&snapshot(
+        nodes,
+        vec![profiled_by_set(50, json!(1)), second],
+        vec![
+            network_set_library(1, "10.0.0.0/8"),
+            network_set_library(2, "172.16.0.0/12"),
+        ],
+    ));
+    assert!(
+        found
+            .iter()
+            .any(|(c, p)| c == "library_version_conflict" && p.contains("location_profiles")),
+        "{found:?}"
+    );
+}
+
 #[test]
 fn an_effective_assignment_holds_the_policy_scope_too() {
     let console = json!({"sessions": {"types": ["console"]}});

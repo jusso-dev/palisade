@@ -262,6 +262,78 @@ pub fn document_scopes(doc: &crate::model::PolicyDocument) -> Vec<(String, &Scop
     out
 }
 
+/// The network set references in a policy document's location profiles,
+/// with their JSON Pointers. Scopes read them through `location_profile`,
+/// so they are library sets the policy uses like any other.
+fn profile_set_refs(doc: &crate::model::PolicyDocument) -> Vec<(String, SetRef)> {
+    let mut out = Vec::new();
+    for (i, p) in doc.policy.location_profiles.iter().enumerate() {
+        for (j, t) in p.all.iter().enumerate() {
+            if let NetworkRef::NetworkSet(s) = t {
+                out.push((
+                    format!("/policy/location_profiles/{i}/all/{j}/network_set"),
+                    *s,
+                ));
+            }
+        }
+    }
+    out
+}
+
+/// Every library set reference of a policy document, with its JSON
+/// Pointer and the kind it must be: those in its scopes
+/// ([`document_scopes`]) and those in its location profiles' tests.
+#[must_use]
+pub fn document_set_refs(
+    doc: &crate::model::PolicyDocument,
+) -> Vec<(String, SetRef, crate::library::LibraryKind)> {
+    let mut out: Vec<_> = document_scopes(doc)
+        .into_iter()
+        .flat_map(|(at, scope)| {
+            set_refs(scope)
+                .into_iter()
+                .map(move |(p, r, k)| (format!("{at}{p}"), r, k))
+        })
+        .collect();
+    out.extend(
+        profile_set_refs(doc)
+            .into_iter()
+            .map(|(p, r)| (p, r, crate::library::LibraryKind::NetworkSet)),
+    );
+    out
+}
+
+/// Calls `f` on every library set reference of a policy document, in the
+/// order of [`document_set_refs`].
+pub fn for_each_document_set_ref(
+    doc: &mut crate::model::PolicyDocument,
+    mut f: impl FnMut(&mut SetRef),
+) {
+    let p = &mut doc.policy;
+    let mut scopes: Vec<&mut Scope> = Vec::new();
+    scopes.extend(p.scope.as_mut());
+    scopes.extend(p.unknown.scopes.iter_mut());
+    for l in &mut p.unknown.scope_limits {
+        scopes.extend(l.all_of.iter_mut().chain(l.any_of.iter_mut()));
+    }
+    for a in &mut p.rule_set_scopes {
+        scopes.extend(a.scopes.iter_mut());
+    }
+    for set in &mut doc.rule_sets {
+        scopes.extend(set.rules.iter_mut().filter_map(|r| r.scope.as_deref_mut()));
+    }
+    for scope in scopes {
+        for_each_set_ref(scope, &mut f);
+    }
+    for profile in &mut p.location_profiles {
+        for test in &mut profile.all {
+            if let NetworkRef::NetworkSet(r) = test {
+                f(r);
+            }
+        }
+    }
+}
+
 /// The scopes of a rule set's rules, with JSON Pointers relative to the
 /// rule set.
 #[must_use]

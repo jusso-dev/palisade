@@ -802,8 +802,8 @@ impl<'a, 'h> Builder<'a, 'h> {
         })
     }
 
-    /// One version of each library set the scopes use (#38), as of each
-    /// rule set library and policy: two pins of one set would leave a
+    /// One version of each library set the scopes and location profiles
+    /// use (#38), as of each rule set library and policy: two pins of one set would leave a
     /// device-set membership fact, which names the set only, ambiguous.
     fn scope_set_versions(&mut self) {
         let mut seen: BTreeMap<LibraryId, (crate::library::Pin, String)> = BTreeMap::new();
@@ -823,6 +823,17 @@ impl<'a, 'h> Builder<'a, 'h> {
                             r,
                             format!("/effective/policy/unknown/scope_limits ({})", doc.policy.id),
                         ));
+                    }
+                }
+                // Location profiles read network sets too (#324).
+                for p in &doc.policy.location_profiles {
+                    for t in &p.all {
+                        if let crate::scope::NetworkRef::NetworkSet(r) = t {
+                            found.push((
+                                *r,
+                                format!("/effective/policy/location_profiles ({})", doc.policy.id),
+                            ));
+                        }
                     }
                 }
             }
