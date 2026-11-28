@@ -29,3 +29,8 @@ pub const BUNDLE_2013: &str = "http://schemas.microsoft.com/appx/2013/bundle";
 pub const BUNDLE_2016: &str = "http://schemas.microsoft.com/appx/2016/bundle";
 /// The block map namespace.
 pub const BLOCK_MAP: &str = "http://schemas.microsoft.com/appx/2010/blockmap";
+
+/// The folder under `%LOCALAPPDATA%` that holds a user's app execution
+/// alias reparse points, as path components.
+#[cfg(all(windows, feature = "os-trust", test))]
+pub const ALIAS_DIR: [&str; 2] = ["Microsoft", "WindowsApps"];
