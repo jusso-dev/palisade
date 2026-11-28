@@ -14,6 +14,9 @@
 
 #![allow(unsafe_code)]
 
+pub(crate) mod etw;
+pub(crate) mod snapshot;
+
 use std::io;
 
 use windows_sys::Wdk::System::Threading::{

@@ -394,6 +394,14 @@ pub fn supervisor_for(
     loaded: &LoadedConfig,
     boot_mode: BootMode,
 ) -> Result<Supervisor, SupervisorError> {
+    supervisor_with(builtin_subsystems(loaded), loaded, boot_mode)
+}
+
+fn supervisor_with(
+    subsystems: Vec<Arc<dyn Subsystem>>,
+    loaded: &LoadedConfig,
+    boot_mode: BootMode,
+) -> Result<Supervisor, SupervisorError> {
     if boot_mode.is_safe() {
         tracing::warn!(
             ?boot_mode,
@@ -401,10 +409,17 @@ pub fn supervisor_for(
             "Windows was started in safe mode"
         );
     }
-    Ok(
-        Supervisor::new(builtin_subsystems(loaded), RestartPolicy::default())?
-            .safe_mode(boot_mode.is_safe()),
-    )
+    Ok(Supervisor::new(subsystems, RestartPolicy::default())?.safe_mode(boot_mode.is_safe()))
+}
+
+/// The supervisor the console and service runs use: [`supervisor`]'s
+/// subsystems plus the ones that read the OS, such as the process monitor
+/// (#59). Kept apart from [`supervisor`] so tests never start the
+/// machine-wide trace session.
+pub fn agent_supervisor(loaded: &LoadedConfig) -> Result<Supervisor, SupervisorError> {
+    let mut subsystems = builtin_subsystems(loaded);
+    subsystems.extend(crate::telemetry::os_subsystems());
+    supervisor_with(subsystems, loaded, boot::current())
 }
 
 /// Console stop signals: Ctrl-C everywhere, and `SIGTERM` on Unix.
@@ -480,7 +495,7 @@ pub fn run_console(args: &Args) -> ExitCode {
         Ok(loaded) => loaded,
         Err(code) => return code,
     };
-    let supervisor = match supervisor(&loaded) {
+    let supervisor = match agent_supervisor(&loaded) {
         Ok(supervisor) => supervisor,
         Err(e) => {
             tracing::error!(error = %e, "invalid subsystem set");

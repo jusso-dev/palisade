@@ -19,7 +19,6 @@ path = "src/main.rs"
 # release build (#29).
 test-util = [
     "palisade-core/test-util",
-    "dep:palisade-proto",
     "dep:sha2",
 ]
 
@@ -29,8 +28,11 @@ palisade-core = { workspace = true, features = ["std"] }
 # SIDs for the identity backend, and signature verification and catalog
 # lookups for the signature backend (#29).
 palisade-fileid = { workspace = true }
-# The event schema, for the simulator's events.
-palisade-proto = { workspace = true, optional = true }
+# Command-line redaction with the decision-trace redactor (#59).
+palisade-policy = { workspace = true }
+# The event schema: the simulator's events and the process monitor's
+# canonical process fields (#59).
+palisade-proto = { workspace = true }
 # Interface addresses for the environment backend, as in the server.
 if-addrs = { workspace = true }
 serde = { workspace = true }
@@ -61,8 +63,16 @@ windows-sys = { workspace = true, features = [
     "Win32_NetworkManagement_NetManagement",
     "Win32_Networking_WinSock",
     "Win32_Security",
+    # The process monitor's drive-to-device map (#59).
+    "Win32_Storage_FileSystem",
+    # The process monitor's ETW session (#59).
+    "Win32_System_Diagnostics_Etw",
+    # The process monitor's startup snapshot (#59).
+    "Win32_System_ProcessStatus",
     "Win32_System_RemoteDesktop",
     "Win32_System_Threading",
+    # `EVENT_TRACE_LOGFILEW` (#59).
+    "Win32_System_Time",
 ] }
 
 [dev-dependencies]
