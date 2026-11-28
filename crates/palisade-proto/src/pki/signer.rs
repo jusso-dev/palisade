@@ -90,7 +90,37 @@ pub trait Signer {
     /// [`SignerError::WrongPurpose`] if the key's purpose may not sign for
     /// `domain`, and [`SignerError::Failed`] if the back end fails.
     fn sign(&self, kid: &Kid, domain: Domain, payload: &[u8]) -> Result<Signature, SignerError>;
+
+    /// Signs a DER X.509 structure (a `tbsCertificate` or `tbsCertList`)
+    /// with the key `kid`, for the internal CA (#224). Returns the DER
+    /// `ECDSA-Sig-Value` over the SHA-384 of `tbs`, the form X.509 carries.
+    ///
+    /// X.509 structures have no room for a [`Domain`] prefix, so they are
+    /// kept apart in two other ways (threat: T-signer-02):
+    ///
+    /// - Only `root-ca` and `issuing-ca` keys sign them, and those keys
+    ///   sign no other domain but trust sets (root only).
+    /// - `tbs` must start with the DER `SEQUENCE` tag (`0x30`), and every
+    ///   domain prefix starts with `p` (`0x70`), so no message signed here
+    ///   is ever a domain message, and the reverse.
+    ///
+    /// # Errors
+    ///
+    /// [`SignerError::UnknownKey`], [`SignerError::NotACertificateKey`] for
+    /// any other purpose, [`SignerError::NotX509`] if `tbs` is not a DER
+    /// `SEQUENCE`, and [`SignerError::Failed`] if the back end fails.
+    fn sign_x509(&self, kid: &Kid, tbs: &[u8]) -> Result<Vec<u8>, SignerError>;
 }
+
+/// Whether a key of `purpose` may sign X.509 certificates and revocation
+/// lists: the offline root and the online issuing CA, nothing else.
+#[must_use]
+pub const fn signs_x509(purpose: KeyPurpose) -> bool {
+    matches!(purpose, KeyPurpose::RootCa | KeyPurpose::IssuingCa)
+}
+
+/// The DER `SEQUENCE` tag every X.509 structure starts with.
+const DER_SEQUENCE: u8 = 0x30;
 
 struct SoftwareKey {
     private: PrivateKey,
@@ -227,6 +257,19 @@ impl Signer for SoftwareSigner {
             .map_err(|e| SignerError::Failed(e.0))?;
         Signature::new(*kid, key.private.algorithm(), bytes)
     }
+
+    fn sign_x509(&self, kid: &Kid, tbs: &[u8]) -> Result<Vec<u8>, SignerError> {
+        let key = self.keys.get(kid).ok_or(SignerError::UnknownKey(*kid))?;
+        if !signs_x509(key.purpose) {
+            return Err(SignerError::NotACertificateKey(key.purpose));
+        }
+        if tbs.first() != Some(&DER_SEQUENCE) {
+            return Err(SignerError::NotX509);
+        }
+        key.private
+            .sign_x509(&self.rng, tbs)
+            .map_err(|e| SignerError::Failed(e.0))
+    }
 }
 
 /// Software keys are signing keys of an allowed algorithm.
@@ -263,6 +306,10 @@ pub enum SignerError {
     BadKeyEncoding,
     /// The signature is not the algorithm's exact length.
     BadSignatureLength,
+    /// A key of this purpose may not sign X.509 structures.
+    NotACertificateKey(KeyPurpose),
+    /// The message to sign as X.509 is not a DER `SEQUENCE`.
+    NotX509,
     /// The cryptographic back end failed.
     Failed(&'static str),
 }
@@ -280,6 +327,10 @@ impl fmt::Display for SignerError {
                 "not an unencrypted PKCS#8 key of the stated algorithm, or its halves disagree",
             ),
             Self::BadSignatureLength => f.write_str("the signature has the wrong length"),
+            Self::NotACertificateKey(purpose) => {
+                write!(f, "a {purpose} key may not sign certificates")
+            }
+            Self::NotX509 => f.write_str("the message is not a DER X.509 structure"),
             Self::Failed(what) => f.write_str(what),
         }
     }

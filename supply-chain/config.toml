@@ -144,6 +144,11 @@ version = "1.8.3"
 criteria = "safe-to-run"
 notes = "Added by #25 (the test fixture generator: throwaway RSA test-CA keys and signatures, a dev-dependency of palisade-fileid only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
 
+[[exemptions.bit-vec]]
+version = "0.9.1"
+criteria = "safe-to-deploy"
+notes = "Added by #224 (a dependency of rcgen for X.509 issuance, behind palisade-proto's off-by-default `issuance` feature). Audit, or import an audit, before bumping."
+
 [[exemptions.bitflags]]
 version = "2.13.2"
 criteria = "safe-to-deploy"
@@ -328,6 +333,11 @@ notes = "Added by #127 (palisade-server Postgres layer: sqlx with the Postgres d
 version = "0.8.3"
 criteria = "safe-to-run"
 notes = "Added by #25 (the test fixture generator: throwaway RSA test-CA keys and signatures, a dev-dependency of palisade-fileid only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
+[[exemptions.deranged]]
+version = "0.5.9"
+criteria = "safe-to-deploy"
+notes = "Added by #224 (a dependency of rcgen for X.509 issuance, behind palisade-proto's off-by-default `issuance` feature). Audit, or import an audit, before bumping."
 
 [[exemptions.digest]]
 version = "0.11.3"
@@ -729,6 +739,11 @@ version = "1.2.5"
 criteria = "safe-to-deploy"
 notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
 
+[[exemptions.num-conv]]
+version = "0.2.2"
+criteria = "safe-to-deploy"
+notes = "Added by #224 (a dependency of rcgen for X.509 issuance, behind palisade-proto's off-by-default `issuance` feature). Audit, or import an audit, before bumping."
+
 [[exemptions.objc2-core-foundation]]
 version = "0.3.2"
 criteria = "safe-to-deploy"
@@ -819,6 +834,11 @@ version = "0.1.6"
 criteria = "safe-to-deploy"
 notes = "Baseline when cargo-vet was adopted (#23) at safe-to-run; raised to safe-to-deploy because #127 (palisade-server Postgres layer) made it a normal or build dependency of a shipped crate. Audit, or import an audit, before bumping."
 
+[[exemptions.powerfmt]]
+version = "0.2.1"
+criteria = "safe-to-deploy"
+notes = "Added by #224 (a dependency of rcgen for X.509 issuance, behind palisade-proto's off-by-default `issuance` feature). Audit, or import an audit, before bumping."
+
 [[exemptions.ppv-lite86]]
 version = "0.2.21"
 criteria = "safe-to-run"
@@ -878,6 +898,11 @@ notes = "Added by #127 (palisade-server Postgres layer: sqlx with the Postgres d
 version = "0.5.0"
 criteria = "safe-to-run"
 notes = "Bumped by #308 (Dependabot cargo-minor-and-patch group), merged before cargo-vet passed; exempted after the fact in the follow-up. Audit, or import an audit, before bumping."
+
+[[exemptions.rcgen]]
+version = "0.14.10"
+criteria = "safe-to-deploy"
+notes = "Added by #224 (X.509 issuance for the internal CA, behind palisade-proto's off-by-default `issuance` feature; used without its ring or aws-lc-rs back end). Audit, or import an audit, before bumping."
 
 [[exemptions.redox_syscall]]
 version = "0.5.18"
@@ -1178,6 +1203,16 @@ notes = "Added by #127 (palisade-server Postgres layer: sqlx with the Postgres d
 version = "1.1.10"
 criteria = "safe-to-deploy"
 notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
+
+[[exemptions.time]]
+version = "0.3.55"
+criteria = "safe-to-deploy"
+notes = "Added by #224 (a dependency of rcgen for X.509 issuance, behind palisade-proto's off-by-default `issuance` feature). Audit, or import an audit, before bumping."
+
+[[exemptions.time-core]]
+version = "0.1.9"
+criteria = "safe-to-deploy"
+notes = "Added by #224 (a dependency of rcgen for X.509 issuance, behind palisade-proto's off-by-default `issuance` feature). Audit, or import an audit, before bumping."
 
 [[exemptions.tinystr]]
 version = "0.8.5"
@@ -1513,6 +1548,11 @@ notes = "Baseline when cargo-vet was adopted (#23) at safe-to-run; raised to saf
 version = "0.13.2"
 criteria = "safe-to-deploy"
 notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+
+[[exemptions.yasna]]
+version = "0.6.0"
+criteria = "safe-to-deploy"
+notes = "Added by #224 (a dependency of rcgen for X.509 issuance, behind palisade-proto's off-by-default `issuance` feature). Audit, or import an audit, before bumping."
 
 [[exemptions.yoke]]
 version = "0.8.4"

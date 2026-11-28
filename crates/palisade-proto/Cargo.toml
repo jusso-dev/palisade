@@ -17,9 +17,19 @@ palisade-fileid = { workspace = true }
 palisade-policy = { workspace = true }
 # Signatures and SHA-256 for the PKI module, behind its `crypto` module (ADR 0008).
 ring = { workspace = true }
+# X.509 encoding for the internal CA, only with the `issuance` feature.
+rcgen = { workspace = true, optional = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# Certificate times for `rcgen`, only with the `issuance` feature.
+time = { workspace = true, optional = true }
+
+[features]
+# Certificate and CRL issuance for the internal CA (#224): the server and the
+# offline ceremony tool enable it. The agent does not, so it never links the
+# issuance code.
+issuance = ["dep:rcgen", "dep:time"]
 
 [dev-dependencies]
 boon = { workspace = true }
@@ -27,6 +37,9 @@ insta = { workspace = true }
 # Policy builders, to make bundles and deltas for the envelope tests.
 palisade-policy = { workspace = true, features = ["test-util"] }
 proptest = { workspace = true }
+# Verifies issued chains and revocation lists with the TLS stack the server
+# uses (rustls and its WebPKI verifier).
+rustls = { workspace = true }
 
 [lints]
 workspace = true
