@@ -4,6 +4,7 @@
 
 extern crate alloc;
 
+pub mod codeintegrity;
 mod id;
 mod mode;
 mod object;
